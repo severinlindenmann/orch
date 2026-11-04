@@ -276,3 +276,56 @@ details.group>summary .chev{margin-left:4px}
 .opt:not(.rec){background:transparent;color:var(--text-muted);border-color:var(--border)}
 .card{min-height:64px}
 @media(max-width:600px){.legend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.bars .dn{font-size:10px}}
+
+/* ---- UX round 2 (dashboard) ---- */
+:root{--s-done:#6fa88c;--c-pink:#e58fb5}
+.skeleton-page{opacity:0;animation:sk-in var(--dur-std,200ms) var(--ease-out) 300ms forwards}@keyframes sk-in{to{opacity:1}}
+.owner{gap:6px;white-space:nowrap}.owner #updated{color:var(--text-faint)}
+#crumb{display:inline-block;max-width:44vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+/* status bar: one labelled segment per status, number inside */
+.seg{display:flex;flex-wrap:wrap;gap:10px 8px;list-style:none;margin:0;padding:0}
+.seg li{flex:1 1 0;min-width:92px;display:flex;flex-direction:column;gap:8px}
+.seg-bar{display:block;height:12px;border-radius:99px;background:var(--c)}
+.seg li.s-open .seg-bar{background:transparent;border:2px solid var(--text-muted)}
+.seg-text{display:flex;align-items:center;gap:6px;color:var(--c);white-space:nowrap}.seg-text b{font-size:24px;line-height:1;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}.seg-text span{color:var(--text-muted);font-size:13px}
+.seg li.s-open .seg-text{color:var(--text-muted)}
+/* amber = needs you only */
+.arc.noproof{stroke:rgba(47,198,163,.45)}
+.step.noproof .node{border-color:var(--brand)}
+.chip.noproof{border:1px dashed var(--border-strong);color:var(--text-muted)}
+.ring b{font-size:11px}.detail-head .ring b{font-size:15px}
+.avatar.c4{background:var(--c-pink)}.avatar .ic{width:18px;height:18px;fill:none;stroke:currentColor}
+.bars .val,.bars .dn,.bars .future .dn{color:var(--text-muted)}
+/* answer options: plain text, not buttons */
+.pills{gap:6px 16px}
+.opt,.opt:not(.rec){min-height:0;padding:0;border:0;border-radius:0;background:transparent;color:var(--text-muted);font-size:14px;font-weight:400}
+.opt.rec{color:var(--brand);font-weight:600;border-bottom:2px solid var(--brand);background:transparent}
+.opt small{font-size:12px;font-weight:400;color:var(--text-muted);margin-left:2px}
+.ask-hint{display:flex;align-items:center;gap:6px;margin:12px 0 0;font-size:12px;color:var(--text-muted)}.ask-hint .ic{width:14px;height:14px}
+.ask.done .opt.rec{color:var(--success);border-color:var(--success)}
+.tag.need{min-height:0;padding:2px 9px}
+.no-steps p{margin:12px 4px;color:var(--text-muted)}
+.statusline .updated{display:inline-flex;align-items:center;gap:5px;color:var(--text-muted)}.statusline .updated .ic{width:14px;height:14px}
+/* scheduler */
+.range{font-size:13px;color:var(--text-muted);margin:0 2px 10px}
+.sub{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin:20px 2px 8px}
+.none-day{color:var(--text-faint);text-align:center}
+a.sched{display:flex;color:inherit;min-height:56px}a.sched:hover{background:var(--surface-2);color:inherit}a.sched .go{margin-left:auto;color:var(--text-muted);flex:none}
+.sched.hero .sched-time b{font-size:30px}.sched.hero{padding:20px}
+.sched-list.then,.sub:has(+ .then){display:none}
+@media(max-width:600px){
+  .sched-list.then,.sub:has(+ .then){display:block}
+  .strip{grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+  .strip-panel{padding:10px}
+  .day,.day.empty:not(.today),.strip.none .day{display:flex;min-height:84px;padding:8px 2px;gap:6px;align-items:center}
+  .day-head{flex-direction:column;align-items:center;gap:0;font-size:11px}.day-head b{font-size:16px}
+  .run{flex-direction:column;align-items:center;gap:2px;padding:6px 2px;width:100%;min-height:44px;justify-content:center}
+  .run span{display:none}.run time{font-size:11px}
+  .sched-time{width:96px}
+  #crumb{max-width:50vw}
+  .owner #updated{display:none}
+  .tag.need{min-height:0;padding:2px 9px;font-size:12px}
+  .seg li{min-width:calc(50% - 4px)}
+  .detail-grid .context{order:-1}
+}
+@media(max-width:850px){.detail-grid .context{order:-1}}

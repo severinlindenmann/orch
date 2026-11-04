@@ -16,3 +16,10 @@ def test_web_has_icon_sprite_and_no_inline_styles():
     from orch_dashboard.server import web_file
     js, html = web_file("app.js").decode(), web_file("index.html").decode()
     assert 'style="' not in js and "i-check" in html and "i-question" in html
+
+
+def test_web_plain_words_and_no_inline_style_flex():
+    from orch_dashboard.server import web_file
+    js = web_file("app.js").decode()
+    assert "Code updated" in js and "questions" in js and "nextCron" in js and "updates this week" in js
+    assert "Code change" not in js and "No time set" not in js
