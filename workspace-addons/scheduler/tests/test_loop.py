@@ -120,7 +120,6 @@ def test_ticket_cannot_supply_raw_command(ws, tmp_path):
 
 
 def test_invalid_ticket_id_skipped(ws):
-    add_ticket(ws, "t_../../x", wake_at="2026-11-04T08:00:00Z")
     (ws / ".orch/tickets/t_bad.json").write_text(
         json.dumps({"id": "t_../../escape", "status": "open", "wake_at": "2026-11-04T08:00:00Z"}))
     assert Scheduler(ws).tick(T(9)) == []
