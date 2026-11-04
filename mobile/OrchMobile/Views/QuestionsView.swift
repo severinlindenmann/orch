@@ -4,6 +4,10 @@ struct QuestionsView: View {
     @Environment(AppModel.self) private var model
     @State private var retained: [Question] = []
     @State private var sending: Set<String> = []
+    /// question id -> option waiting out the short undo window before it is sent
+    @State private var pending: [String: String] = [:]
+    @State private var timers: [String: Task<Void, Never>] = [:]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var allQuestions: [Question] {
         let currentIDs = Set(model.questions.map(\.id))
@@ -56,11 +60,11 @@ struct QuestionsView: View {
         } else {
             Spacer().frame(height: 22)
         }
-        if !model.hasLoaded {
+        if !model.hasLoaded && model.message == nil {
             ForEach(0..<2, id: \.self) { _ in
                 questionCard(Question(message: QuestionMessage(schema: "", id: "x", from: "x", to: "x", type: "question", createdAt: "", ticket: nil, body: QuestionBody(questionId: "x", title: "Task name", text: "A question for you to answer", options: ["Yes", "No"], recommended: nil)), workspaceName: "Workspace")).padding(.bottom, 12)
             }.skeleton(true).accessibilityHidden(true)
-        } else if visibleQuestions.isEmpty {
+        } else if visibleQuestions.isEmpty && model.hasLoaded {
             VStack(alignment: .leading, spacing: 6) {
                 Text("No questions right now").font(Theme.font(15, .semibold))
                 Text("When your workspace needs a decision, it shows up here and you get a notification.")
@@ -98,28 +102,55 @@ struct QuestionsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Answer sent: \(answer)").font(Theme.font(14))
                 }.foregroundStyle(Theme.brand).padding(.top, 2)
+            } else if let choice = pending[question.id] {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        ProgressView().tint(Theme.brand)
+                        Text("Sending \(choice)…").font(Theme.font(14, .medium))
+                    }
+                    Button("Undo") { undo(question) }.buttonStyle(SecondaryButtonStyle())
+                        .accessibilityIdentifier("undo-\(question.id)")
+                }.padding(.top, 4)
             } else {
                 VStack(spacing: 8) {
                     ForEach(question.message.body.options, id: \.self) { option in
                         let recommended = option == question.message.body.recommended
-                        Button {
-                            sending.insert(question.id)
-                            Task { await model.answer(question, with: option); sending.remove(question.id) }
-                        } label: {
+                        Button { choose(question, option) } label: {
                             HStack(spacing: 8) {
-                                Text(option).font(.system(size: 15, weight: recommended ? .semibold : .regular))
+                                Text(option).font(Theme.font(15))
                                 Spacer(minLength: 0)
-                                if recommended { Text("Recommended").font(Theme.font(11)) }
+                                if recommended {
+                                    Text("Recommended").font(Theme.font(11, .semibold)).foregroundStyle(Theme.brand)
+                                        .padding(.horizontal, 8).padding(.vertical, 3)
+                                        .overlay(Capsule().stroke(Theme.brand.opacity(0.5)))
+                                }
                             }.frame(minHeight: 49).padding(.horizontal, 14)
-                                .foregroundStyle(recommended ? Theme.brand : Theme.text)
-                                .background(recommended ? Theme.brand.opacity(0.07) : Theme.surface2, in: RoundedRectangle(cornerRadius: 8))
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(recommended ? Theme.brand.opacity(0.4) : Theme.border))
-                        }.buttonStyle(.plain).disabled(sending.contains(question.id))
+                                .foregroundStyle(Theme.text)
+                                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 8))
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
+                        }.buttonStyle(PressStyle()).disabled(sending.contains(question.id))
                             .accessibilityIdentifier("answer-\(option)")
+                            .accessibilityLabel(recommended ? "\(option), recommended" : option)
                     }
                 }.padding(.top, 4)
             }
         }.orchCard(border: model.focusedQuestion == question.id ? Theme.brand : Theme.border, padding: 14)
             .accessibilityElement(children: .contain).accessibilityLabel("\(question.workspaceDisplayName): \(question.message.body.text)").accessibilityIdentifier("question-\(question.id)")
+    }
+
+    /// Tap = start a 3 s undo window; the answer is sent when it ends.
+    private func choose(_ question: Question, _ option: String) {
+        pending[question.id] = option
+        timers[question.id] = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            sending.insert(question.id)
+            await model.answer(question, with: option)
+            sending.remove(question.id); pending[question.id] = nil; timers[question.id] = nil
+        }
+    }
+    private func undo(_ question: Question) {
+        timers[question.id]?.cancel(); timers[question.id] = nil
+        pending[question.id] = nil
     }
 }

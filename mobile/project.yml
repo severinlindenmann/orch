@@ -33,7 +33,7 @@ targets:
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_NSMicrophoneUsageDescription: orch listens while you hold the mic so you can dictate a message.
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: orch turns your voice into text on this phone.
-        INFOPLIST_KEY_NSCameraUsageDescription: orch scans the QR code from your relay admin.
+        INFOPLIST_KEY_NSCameraUsageDescription: orch scans the QR code from the person who invited you.
     entitlements:
       path: OrchMobile/OrchMobile.entitlements
       properties:

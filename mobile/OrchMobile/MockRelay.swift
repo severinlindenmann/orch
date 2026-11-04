@@ -10,7 +10,14 @@ actor MockRelay: RelayAPI {
     private var counter = 0
     private let latency: Duration
 
-    init(latency: Duration = .milliseconds(150)) { self.latency = latency }
+    /// Simulator evidence hooks: `-mockLatencyMs N`, `-mockFail YES` (network error), `-mockEmpty YES` (no workspaces or questions).
+    private let fail = UserDefaults.standard.bool(forKey: "mockFail")
+    private let empty = UserDefaults.standard.bool(forKey: "mockEmpty")
+
+    init(latency: Duration? = nil) {
+        let ms = UserDefaults.standard.integer(forKey: "mockLatencyMs")
+        self.latency = latency ?? .milliseconds(ms > 0 ? ms : 150)
+    }
 
     private let names = [pilatus: "Pilatus Workspace", reports: "Reports"]
     private let all: [Question] = [
@@ -29,6 +36,7 @@ actor MockRelay: RelayAPI {
     private func check() async throws {
         try? await Task.sleep(for: latency)
         if signedOut { throw RelayError.unauthorized }
+        if fail { throw URLError(.notConnectedToInternet) }
     }
 
     func pair(code: String, name: String) async throws -> PairResponse {
@@ -42,6 +50,7 @@ actor MockRelay: RelayAPI {
 
     func workspaces() async throws -> [Workspace] {
         try await check()
+        if empty { return [] }
         func open(_ ws: String) -> Int { all.filter { $0.message.from == ws && answered[$0.id] == nil }.count }
         return [
             Workspace(id: Self.pilatus, name: "Pilatus Workspace", description: "Data pipelines for the Pilatus client",
@@ -52,6 +61,7 @@ actor MockRelay: RelayAPI {
     }
     func questions() async throws -> [Question] {
         try await check()
+        if empty { return [] }
         return all.filter { answered[$0.id] == nil }
     }
     func answer(questionMessageId: String, answer: String) async throws -> String {

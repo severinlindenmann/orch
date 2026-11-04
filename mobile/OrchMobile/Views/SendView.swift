@@ -10,6 +10,11 @@ struct SendView: View {
     @State private var sending = false
     @State private var toggling = false
     @State private var pulse = false
+    @State private var showHint = false
+    private var hintText: String {
+        recording ? "Tap the mic to stop first." : transcribing ? "One moment, writing it down." :
+        workspaceID.isEmpty ? "Pick a workspace first." : "Write or say a message first."
+    }
 
     private var recording: Bool { voice?.isRecording == true }
     private var transcribing: Bool { voice?.isTranscribing == true }
@@ -46,7 +51,7 @@ struct SendView: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Eyebrow(text: "SEND TO").padding(.top, 26)
+            Eyebrow(text: "TO WORKSPACE").padding(.top, 26)
             Picker("Send to", selection: $workspaceID) {
                 if model.workspaces.isEmpty { Text("No workspaces").tag("") }
                 ForEach(model.workspaces) { ws in
@@ -110,13 +115,19 @@ struct SendView: View {
             }.frame(maxWidth: .infinity).padding(.top, 5).padding(.bottom, 16)
             let canSend = !(recording || transcribing || toggling || sending || workspaceID.isEmpty || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Button(sending ? "Sending…" : "Send to inbox ↑") {
+                guard canSend else { showHint = true; return }
+                showHint = false
                 sending = true
                 Task {
                     if await model.send(to: workspaceID, text: text) { sent = model.lastSent }
                     sending = false
                 }
             }.buttonStyle(PrimaryButtonStyle(muted: !canSend)).accessibilityIdentifier("send-button")
-                .disabled(!canSend)
+                .disabled(sending)
+            if showHint, !canSend {
+                Text(hintText).font(Theme.font(12)).foregroundStyle(Theme.danger).frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("send-hint")
+            }
             Text("Your workspace will pick it up from here.").font(Theme.font(11))
                 .foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 2)
         }

@@ -37,7 +37,7 @@ struct SettingsView: View {
                         HStack {
                             Text(workspace.displayName)
                             Spacer()
-                            Text(workspace.online ? "Online" : "Asleep").foregroundStyle(workspace.online ? Theme.brand : Theme.muted)
+                            Text(lastSeenText(workspace.lastSeen, online: workspace.online)).foregroundStyle(workspace.online ? Theme.brand : Theme.muted)
                                 .font(Theme.font(12))
                         }.font(Theme.font(14)).padding(.vertical, 15)
                         if workspace.id != model.workspaces.last?.id { Rectangle().fill(Theme.border).frame(height: 1) }

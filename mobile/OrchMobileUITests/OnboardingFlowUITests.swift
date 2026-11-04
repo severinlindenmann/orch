@@ -62,4 +62,46 @@ final class OnboardingFlowUITests: XCTestCase {
         send.tap()
         XCTAssertTrue(app.staticTexts["It's in the inbox."].waitForExistence(timeout: 10))
     }
+
+    /// Answer has a 3 s undo window; undo returns the options and nothing is sent.
+    func testAnswerCanBeUndone() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-startTab", "questions"]
+        app.launch()
+        let answer = app.buttons["answer-TIMESTAMP"]
+        XCTAssertTrue(answer.waitForExistence(timeout: 15))
+        answer.tap()
+        let undo = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'undo-'")).firstMatch
+        XCTAssertTrue(undo.waitForExistence(timeout: 3))
+        undo.tap()
+        XCTAssertTrue(app.buttons["answer-TIMESTAMP"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["Answer sent: TIMESTAMP"].exists)
+    }
+
+    /// VoiceOver label audit: every button on the main screens has a spoken label (no empty or raw-symbol names).
+    func testEveryButtonHasALabel() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Your workspaces."].waitForExistence(timeout: 15))
+        for tab in ["Home", "Questions", "Send", "Settings"] {
+            app.buttons[tab].tap()
+            sleep(1)
+            for b in app.buttons.allElementsBoundByIndex where b.exists && b.isHittable {
+                XCTAssertFalse(b.label.trimmingCharacters(in: .whitespaces).isEmpty, "unlabelled button on \(tab): \(b.identifier)")
+            }
+        }
+    }
+
+    /// Send is never silently disabled: tapping it empty explains what is missing.
+    func testSendExplainsWhyNothingHappens() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-startTab", "send"]
+        app.launch()
+        let send = app.buttons["send-button"]
+        XCTAssertTrue(send.waitForExistence(timeout: 15))
+        if !send.isHittable { app.swipeUp() }
+        send.tap()
+        XCTAssertTrue(app.staticTexts["send-hint"].waitForExistence(timeout: 3))
+    }
 }
