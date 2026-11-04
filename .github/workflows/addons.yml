@@ -12,4 +12,14 @@ jobs:
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run pytest -q
-  # scheduler: add a second job here (same shape, working-directory: workspace-addons/scheduler)
+  scheduler:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workspace-addons/scheduler
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run pytest -q
