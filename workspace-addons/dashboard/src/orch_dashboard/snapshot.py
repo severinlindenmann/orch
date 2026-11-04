@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -33,8 +35,29 @@ def write_snapshot(root: Path, out: Path) -> Path:
     return out
 
 
+def _app_name(root: Path) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", root.name.lower()).strip("-")[:30].strip("-")
+    return f"dashboard-{slug}" if slug else "dashboard"
+
+
+def write_app(root: Path, folder: Path) -> Path:
+    """Write a deployable static app folder (index.html + app.toml, private) per contracts/app.toml.md."""
+    write_snapshot(root, folder / "index.html")
+    (folder / "app.toml").write_text(
+        f'name   = "{_app_name(root)}"\nabout  = "Read-only dashboard snapshot"\nstack  = "static"\n'
+        'store  = "none"\npublic = false\n',
+        encoding="utf-8",
+    )
+    return folder
+
+
 def publish_snapshot(root: Path, run=subprocess.run) -> int:
-    """Write the snapshot into a temp folder and call `orch publish app <folder>` (private, static)."""
+    """Build the static app in a temp folder and call `orch publish app <folder> --private`.
+    The orch CLI prints the private link."""
     with tempfile.TemporaryDirectory(prefix="orch-dash-") as d:
-        write_snapshot(root, Path(d) / "index.html")
-        return run(["orch", "publish", "app", d]).returncode
+        write_app(root, Path(d))
+        try:
+            return run(["orch", "publish", "app", d, "--private"]).returncode
+        except FileNotFoundError:
+            print("The orch command was not found. Install orch first.", file=sys.stderr)
+            return 127

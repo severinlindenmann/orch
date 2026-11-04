@@ -42,3 +42,27 @@ def test_publish_calls_orch_publish_app(ws):
 
     publish_snapshot(ws, run=lambda cmd: calls.append(cmd) or R())
     assert calls[0][:3] == ["orch", "publish", "app"]
+
+
+def test_publish_folder_is_a_deployable_static_app(ws):
+    import tomllib
+
+    seen = {}
+
+    class R:
+        returncode = 0
+
+    def fake(cmd):
+        from pathlib import Path
+
+        folder = Path(cmd[3])
+        seen["cmd"] = cmd
+        seen["toml"] = tomllib.loads((folder / "app.toml").read_text())
+        seen["index"] = (folder / "index.html").is_file()
+        return R()
+
+    assert publish_snapshot(ws, run=fake) == 0
+    assert seen["cmd"][-1] == "--private" and seen["index"]
+    m = seen["toml"]
+    assert m["stack"] == "static" and m["public"] is False and re.fullmatch(r"[a-z0-9-]{2,40}", m["name"])
+    assert "start" not in m and "health" not in m
