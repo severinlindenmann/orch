@@ -12,7 +12,7 @@
 const screens=[['overview','Overview'],['add','Add workspace'],['rules','Pair rules'],['messages','Messages'],['config','Shared config'],['webhooks','Webhooks'],['phones','Phones']];
 const $=s=>document.querySelector(s), app=$('#app'), enc=encodeURIComponent;
 let token='', epoch=0, workspaces=[], toastTimer;
-try{token=decodeURIComponent(document.cookie.split('; ').find(c=>c.startsWith('orch_admin='))?.slice(11)||'')}catch{}
+try{token=sessionStorage.getItem('orch_admin')||''}catch{}
 // All API text goes through text nodes. SVG pairing codes use a restricted SVG parser below.
 function el(tag,attrs={},...children){
  const n=document.createElement(tag);
@@ -34,7 +34,7 @@ function head(k,t,p,action){return [el('div',{class:'eyebrow'},k),el('div',{clas
 function show(...nodes){app.replaceChildren(...nodes.flat().filter(Boolean),el('footer',{class:'footline'},el('span',{},'orch relay / Private connections, shared work.'),el('span',{},'Private network only')))}
 function name(id){return workspaces.find(w=>w.id===id)?.name||id||'—'}
 function time(v){if(v===null||v===undefined||v==='')return 'Not yet';const d=new Date(typeof v==='number'&&v<1e12?v*1000:v);return isNaN(d)?String(v):d.toLocaleString()}
-function persist(){document.cookie='orch_admin='+enc(token)+'; Path=/; SameSite=Strict'+(location.protocol==='https:'?'; Secure':'')}
+function persist(){try{sessionStorage.setItem('orch_admin',token)}catch{}}
 function auth(){
  epoch++;workspaces=[];$('#crumb').textContent='Sign in';
  const f=form(async f=>{token=f.elements.token.value.trim();if(!token)throw Error('Enter your admin token.');persist();await route()},field('Admin token',input('token','',{type:'password',required:true,autocomplete:'current-password'})),submit('Open relay'));
@@ -45,7 +45,7 @@ async function api(path,method='GET',body,raw=false){
  const headers={'X-Orch-Admin':requestToken};if(body!==undefined)headers['Content-Type']=raw?'application/gzip':'application/json';
  const r=await fetch('/admin/api'+path,{method,headers,credentials:'same-origin',cache:'no-store',body:body===undefined?undefined:raw?body:JSON.stringify(body)});
  let data=null;const text=await r.text();try{data=text?JSON.parse(text):null}catch{if(r.ok)throw Error('The relay returned an unreadable response.')}
- if(r.status===401&&token===requestToken){token='';document.cookie='orch_admin=; Path=/; SameSite=Strict; Max-Age=0';auth();toast(data?.message||'Please enter your admin token again.')}
+ if(r.status===401&&token===requestToken){token='';try{sessionStorage.removeItem('orch_admin')}catch{}auth();toast(data?.message||'Please enter your admin token again.')}
  if(!r.ok)throw Error(data?.message||('Request failed ('+r.status+').'));
  if(requestToken!==token)throw new DOMException('Session changed','AbortError');return data;
 }

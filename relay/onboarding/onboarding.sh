@@ -18,7 +18,7 @@ if [ -z "$WORKSPACE" ] || [ -z "$TOKEN" ]; then
 fi
 if ! command -v orch >/dev/null 2>&1; then
   echo "orch is not installed yet. Installing it..."
-  curl -fsSL https://raw.githubusercontent.com/severinlindenmann/orch/main/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/severinlindenmann/orch/__INSTALL_REF__/install.sh | ORCH_REF=__INSTALL_REF__ sh
   PATH="$HOME/.local/bin:$PATH"
   export PATH
 fi

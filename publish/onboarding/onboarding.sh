@@ -19,7 +19,7 @@ if [ -z "$WS" ] || [ -z "$TOKEN" ]; then
 fi
 if ! command -v orch >/dev/null 2>&1; then
   echo "Installing orch ..."
-  curl -fsSL "$INSTALL_URL" | sh
+  curl -fsSL "$INSTALL_URL" | ORCH_REF="__INSTALL_REF__" sh
   PATH="$HOME/.local/bin:$PATH"
   export PATH
 fi

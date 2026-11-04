@@ -15,6 +15,7 @@ pub struct Config {
     pub build_secs: u64,
     pub test_secs: u64,
     pub install_url: String,
+    pub install_ref: String,
 }
 
 /// ORCH_PUBLISH_<k> first, then PUBLISH_<k>.
@@ -45,6 +46,7 @@ impl Config {
             test_secs: 120,
             install_url: "https://raw.githubusercontent.com/severinlindenmann/orch/main/install.sh"
                 .into(),
+            install_ref: "main".into(),
         }
     }
 
@@ -67,6 +69,16 @@ impl Config {
         c.default_days = env_or("DEFAULT_DAYS", c.default_days);
         c.max_days = env_or("MAX_DAYS", c.max_days);
         c.health_secs = env_or("HEALTH_SECS", c.health_secs);
+        // ORCH_INSTALL_REF (git ref of the orch repo the onboarding scripts install from)
+        if let Ok(r) = std::env::var("ORCH_INSTALL_REF") {
+            if !r.is_empty() {
+                c.install_ref = r;
+            }
+        }
+        c.install_url = format!(
+            "https://raw.githubusercontent.com/severinlindenmann/orch/{}/install.sh",
+            c.install_ref
+        );
         c.install_url = var("INSTALL_URL").unwrap_or(c.install_url);
         if let Some(r) = var("APP_PORTS") {
             if let Some((a, b)) = r.split_once('-') {

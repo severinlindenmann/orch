@@ -3,7 +3,7 @@ use common::*;
 use serde_json::json;
 
 #[tokio::test]
-async fn admin_requires_token_and_accepts_cookie() {
+async fn admin_requires_token_and_rejects_cookie_accepts_header() {
     let t = start().await;
     let r = t
         .http
@@ -24,6 +24,14 @@ async fn admin_requires_token_and_accepts_cookie() {
         .http
         .get(format!("{}/admin/api/workspaces", t.admin))
         .header("Cookie", format!("orch_admin={ADMIN}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401);
+    let r = t
+        .http
+        .get(format!("{}/admin/api/workspaces", t.admin))
+        .header("X-Orch-Admin", ADMIN)
         .send()
         .await
         .unwrap();
@@ -238,6 +246,9 @@ async fn admin_onboarding_scripts_are_served() {
         sh.starts_with("#!/bin/sh")
             && sh.contains("https://relay.test")
             && !sh.contains("__RELAY_URL__")
+            && sh.contains("orch/develop/install.sh")
+            && sh.contains("ORCH_REF=develop")
+            && !sh.contains("__INSTALL_REF__")
     );
     let ps = t
         .http
