@@ -26,7 +26,9 @@ if args[:2] == ["relay", "inbox"]:
 elif args[:2] == ["relay", "done"]:
     s = root / "seen.json"
     seen = json.loads(s.read_text()) if s.exists() else []
-    s.write_text(json.dumps(seen + [args[2]])); print("{{}}")
+    s.write_text(json.dumps(seen + [args[2]]))
+    t = root / "done-tickets.json"
+    print(json.dumps({{"ticket": json.loads(t.read_text()).get(args[2])}}) if t.exists() else "{{}}")
 elif args[:2] == ["ticket", "new"]:
     n = len(list(tdir.glob("*.json"))) + 1
     t = {{"id": "t_new%03d" % n, "title": args[2], "type": "task", "status": "open",

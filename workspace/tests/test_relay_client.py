@@ -398,3 +398,13 @@ def test_ticket_wait_clear(proj, run, new_ticket):
     code, out, _ = run("ticket", "wait", tid, "--clear", "--json")
     t = json.loads(out)
     assert code == 0 and t["wake_at"] is None and t["status"] == "active"
+
+
+def test_inbox_keeps_the_relay_order_within_one_second(proj, run, rel):
+    """e2e R4: messages created in the same second must print in the order the relay delivered them."""
+    connect(run, rel)
+    ids = ["m_zzzz000000000001", "m_aaaa000000000002", "m_mmmm000000000003"]
+    for n, mid in enumerate(ids, 1):
+        rel.inbox.append(msg(mid, "text", {"text": f"msg {n}"}))
+    code, out, _ = run("relay", "inbox", "--json")
+    assert [m["id"] for m in json.loads(out)] == ids
