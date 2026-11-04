@@ -82,7 +82,18 @@ final class ClientTests: XCTestCase {
     func testIgnoresUnknownFields() throws {
         let json = #"{"items":[{"id":"ws_a","name":"A","description":null,"tags":[],"online":false,"last_seen":null,"open_questions":0,"new_field":1}],"next":null}"#
         let r = try JSONCoding.decoder.decode(ListResponse<Workspace>.self, from: Data(json.utf8))
-        XCTAssertNil(r.items[0].description); XCTAssertEqual(lastSeenText(nil, online: false), "Offline")
+        XCTAssertNil(r.items[0].description); XCTAssertEqual(lastSeenText(nil, online: false), "Asleep. Questions arrive when it wakes up.")
+    }
+
+    func testDisplayNamesAndDedupe() {
+        XCTAssertEqual(displayName(" Pilatus Workspace "), "Pilatus Workspace")
+        XCTAssertEqual(displayName("Pilatus Workspace"), "Pilatus Workspace"); XCTAssertEqual(displayName("Reports"), "Reports")
+        func q(_ id: String, _ at: String) -> Question {
+            Question(message: QuestionMessage(schema: "orch.msg/1", id: id, from: "ws_a", to: "phones", type: "question", createdAt: at, ticket: "t_1",
+                body: QuestionBody(questionId: "q1", title: "T", text: "Ship it?", options: ["Yes", "No"], recommended: nil)), workspaceName: "a")
+        }
+        let list = [q("m_1", "2026-11-04T10:00:00Z"), q("m_2", "2026-11-04T10:01:00Z"), q("m_2", "2026-11-04T10:01:00Z"), q("m_3", "2026-11-04T10:02:00Z")]
+        XCTAssertEqual(list.deduplicated().map(\.id), ["m_3"])
     }
 
     func testTranscribeSendsAudioAndDecodes() async throws {

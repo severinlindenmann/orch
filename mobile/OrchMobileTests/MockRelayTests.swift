@@ -52,7 +52,7 @@ final class AppModelTests: XCTestCase {
     func testPushTapOpensQuestion() async throws {
         let model = AppModel(useMock: true, voiceMode: .scripted)
         model.openQuestion(messageId: "m_q1date0ts0000001")
-        XCTAssertEqual(model.tab, .questions); XCTAssertEqual(model.highlightedQuestion, "m_q1date0ts0000001")
+        XCTAssertEqual(model.tab, .questions); XCTAssertEqual(model.focusedQuestion, "m_q1date0ts0000001")
     }
 
     func testScriptedRecorderTranscribesViaMock() async throws {

@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         Group {
@@ -23,7 +24,8 @@ struct RootView: View {
                 OnboardingView()
             }
         }
-        .foregroundStyle(Theme.text).tint(Theme.brand)
+        .overlay(alignment: .top) { StatusBarCover().frame(height: 0) }
+        .id(typeSize).foregroundStyle(Theme.text).tint(Theme.brand)
         .background(Theme.bg.ignoresSafeArea()).preferredColorScheme(.dark)
     }
 
@@ -40,22 +42,23 @@ struct RootView: View {
     }
 
     private func tab(_ tab: Tab, _ title: String, _ symbol: String) -> some View {
-        Button { model.tab = tab } label: {
+        Button { if tab != .questions { model.focusedQuestion = nil }; model.tab = tab } label: {
             VStack(spacing: 5) {
-                Image(systemName: symbol).font(.system(size: 21))
+                Image(systemName: symbol).font(Theme.font(21))
                     .overlay(alignment: .topTrailing) {
                         if tab == .questions, model.openQuestionCount > 0 {
-                            Text("\(model.openQuestionCount)").font(.system(size: 9, weight: .bold))
-                                .padding(.horizontal, 4).background(Theme.warn, in: Capsule())
+                            Text("\(model.openQuestionCount)").font(Theme.font(9, .bold))
+                                .padding(.horizontal, 4).background(Theme.brand, in: Capsule())
                                 .foregroundStyle(Theme.onBrand).offset(x: 12, y: -6)
                         }
                     }
-                Text(title).font(.system(size: 10))
+                Text(title).font(Theme.font(10))
             }.frame(maxWidth: .infinity, minHeight: 44)
         }
         .buttonStyle(.plain).foregroundStyle(model.tab == tab ? Theme.brand : Theme.muted)
         .accessibilityLabel(title)
         .accessibilityValue(tab == .questions ? "\(model.openQuestionCount) open questions" : "")
         .accessibilityAddTraits(model.tab == tab ? [.isSelected] : [])
+        .sensoryFeedback(.selection, trigger: model.tab)
     }
 }

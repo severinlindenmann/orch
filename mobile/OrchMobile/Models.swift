@@ -9,6 +9,7 @@ struct ListResponse<T: Decodable & Sendable>: Decodable, Sendable {
 struct WorkspaceRef: Codable, Sendable, Equatable, Identifiable {
     let id: String
     let name: String
+    var displayName: String { OrchMobile.displayName(name) }
 }
 
 struct PairResponse: Decodable, Sendable {
@@ -16,6 +17,9 @@ struct PairResponse: Decodable, Sendable {
     let token: String
     let workspaces: [WorkspaceRef]
 }
+
+/// Workspace names are shown exactly as the relay returns them.
+func displayName(_ raw: String) -> String { raw.trimmingCharacters(in: .whitespacesAndNewlines) }
 
 struct Workspace: Codable, Sendable, Equatable, Identifiable {
     let id: String
@@ -25,6 +29,7 @@ struct Workspace: Codable, Sendable, Equatable, Identifiable {
     let online: Bool
     let lastSeen: String?
     let openQuestions: Int
+    var displayName: String { OrchMobile.displayName(name) }
 }
 
 struct QuestionBody: Codable, Sendable, Equatable {
@@ -50,6 +55,21 @@ struct Question: Codable, Sendable, Equatable, Identifiable {
     let message: QuestionMessage
     let workspaceName: String
     var id: String { message.id }
+    var workspaceDisplayName: String { displayName(workspaceName) }
+    /// Same ticket, same asker, same wording = the same question, even if the relay delivered it more than once.
+    var contentKey: String { [message.from, message.ticket ?? "", message.body.questionId, message.body.text].joined(separator: "\u{1f}") }
+}
+
+extension Array where Element == Question {
+    /// One card per message id and per identical question (newest message wins).
+    func deduplicated() -> [Question] {
+        var seenIDs = Set<String>(), seenContent = Set<String>(), out: [Question] = []
+        for q in sorted(by: { $0.message.createdAt > $1.message.createdAt }) {
+            guard seenIDs.insert(q.id).inserted, seenContent.insert(q.contentKey).inserted else { continue }
+            out.append(q)
+        }
+        return out.sorted { $0.message.createdAt < $1.message.createdAt }
+    }
 }
 
 struct IdResponse: Decodable, Sendable { let id: String }
@@ -74,9 +94,9 @@ enum JSONCoding {
 /// Human wording for "last seen".
 func lastSeenText(_ iso: String?, online: Bool, now: Date = Date()) -> String {
     if online { return "Online" }
-    guard let iso, let date = ISO8601DateFormatter().date(from: iso) else { return "Offline" }
+    guard let iso, let date = ISO8601DateFormatter().date(from: iso) else { return "Asleep. Questions arrive when it wakes up." }
     let f = RelativeDateTimeFormatter(); f.unitsStyle = .full
-    return "Seen " + f.localizedString(for: date, relativeTo: now)
+    return "Asleep, last seen " + f.localizedString(for: date, relativeTo: now)
 }
 
 /// `POST /v1/phone/transcribe` answer.

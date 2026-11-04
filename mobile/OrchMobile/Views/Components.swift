@@ -23,25 +23,26 @@ struct Brand: View {
     var body: some View {
         HStack(spacing: 8) {
             OrbitMark().frame(width: 30, height: 30)
-            Text("orch").font(.system(size: 23, weight: .bold)).tracking(-1)
+            Text("orch").font(Theme.font(23, .bold)).tracking(-1)
         }
     }
 }
 
 struct PrimaryButtonStyle: ButtonStyle {
+    var muted = false
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 14, weight: .semibold))
+        configuration.label.font(Theme.font(14, .semibold))
             .frame(maxWidth: .infinity, minHeight: 48)
-            .foregroundStyle(Theme.onBrand)
-            .background(Theme.brand, in: RoundedRectangle(cornerRadius: 8))
-            .opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.5)
+            .foregroundStyle(muted || !enabled ? Theme.muted : Theme.onBrand)
+            .background(muted || !enabled ? Theme.surface3 : Theme.brand, in: RoundedRectangle(cornerRadius: 8))
+            .opacity(configuration.isPressed ? 0.8 : 1)
     }
 }
 
 struct SecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 14))
+        configuration.label.font(Theme.font(14))
             .frame(maxWidth: .infinity, minHeight: 46)
             .foregroundStyle(Theme.text)
             .background(configuration.isPressed ? Theme.surface3 : Theme.surface2,
@@ -51,6 +52,10 @@ struct SecondaryButtonStyle: ButtonStyle {
 }
 
 extension View {
+    /// Content-shaped loading: placeholder text with the real layout until the first load finishes.
+    func skeleton(_ loading: Bool) -> some View {
+        self.redacted(reason: loading ? .placeholder : []).opacity(loading ? 0.6 : 1)
+    }
     func orchCard(border: Color = Theme.border, padding: CGFloat = 16) -> some View {
         self.padding(padding).frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
@@ -62,7 +67,7 @@ struct Eyebrow: View {
     let text: String
     var color: Color = Theme.muted
     var body: some View {
-        Text(text).font(.system(size: 10, weight: .semibold)).tracking(1.2).foregroundStyle(color)
+        Text(text).font(Theme.font(11, .semibold)).tracking(1.2).foregroundStyle(color)
     }
 }
 
@@ -71,23 +76,19 @@ struct ScreenHeading: View {
     let subtitle: String
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.system(size: 29, weight: .semibold)).tracking(-1.1)
+            Text(title).font(Theme.font(29, .semibold)).tracking(-1.1)
                 .accessibilityAddTraits(.isHeader)
-            Text(subtitle).font(.system(size: 13)).foregroundStyle(Theme.muted)
+            Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted)
         }
     }
 }
 
-struct WorkspaceBackHeader: View {
-    @Environment(AppModel.self) private var model
+/// Scrolling content never shows through the status bar / Dynamic Island area.
+struct StatusBarCover: View {
     var body: some View {
-        HStack {
-            Button { model.tab = .home } label: {
-                Text("‹ Workspaces").font(.system(size: 12)).frame(minHeight: 44)
-            }.foregroundStyle(Theme.muted)
-            Spacer()
-            OrbitMark().frame(width: 27, height: 27)
-        }.padding(.bottom, 28)
+        GeometryReader { proxy in
+            Theme.bg.frame(height: proxy.safeAreaInsets.top).ignoresSafeArea(edges: .top)
+        }.allowsHitTesting(false).accessibilityHidden(true)
     }
 }
 
@@ -95,8 +96,15 @@ struct ModelMessage: View {
     @Environment(AppModel.self) private var model
     var body: some View {
         if let message = model.message {
-            Text(message).font(.caption).foregroundStyle(Theme.danger)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("⚠︎ \(message)").font(Theme.font(13)).foregroundStyle(Theme.danger)
+                if model.phase == .ready {
+                    Button("Try again") { Task { await model.refresh() } }
+                        .font(Theme.font(13, .semibold)).foregroundStyle(Theme.brand).frame(minHeight: 44)
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                .transition(.opacity)
         }
     }
 }
