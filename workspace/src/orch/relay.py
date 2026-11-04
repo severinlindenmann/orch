@@ -246,21 +246,40 @@ def send_question(root: Path, ticket: dict, q: dict) -> dict:
         "options": q["options"],
         "recommended": q["recommended"],
     }
-    return _message(root, "phones", "question", body, ticket["id"])
+    msg = _message(root, "phones", "question", body, ticket["id"])
+    asked = net.read_json(_asked_path(root), {})
+    asked[msg["id"]] = {"ticket": ticket["id"], "question_id": q["id"], "to": "phones"}
+    net.write_json(_asked_path(root), asked, True)
+    return msg
 
 
 # ---- inbox --------------------------------------------------------------------------------------
 
 
+def _asked_path(root: Path) -> Path:
+    return net.secrets_dir(root) / "questions-sent.json"
+
+
 def _apply_answer(root: Path, msg: dict) -> str:
-    b, tid = msg["body"], msg.get("ticket")
-    via = "phone" if str(msg.get("from", "")).startswith("ph_") else "relay"
-    by = b.get("answered_by") or f"human:{msg.get('from')}"
+    """Only for a question this workspace sent; ticket and question come from our own record."""
+    asked = net.read_json(_asked_path(root), {}).get(str(msg.get("reply_to")))
+    frm, b = str(msg.get("from", "")), msg.get("body", {})
+    if not asked:
+        return "ignored: not an answer to a question this workspace sent"
+    if not (frm.startswith("ph_") if asked["to"] == "phones" else frm == asked["to"]):
+        return f"ignored: {frm} was not asked"
+    if b.get("question_id") != asked["question_id"]:
+        return "ignored: answer is for another question"
+    by = b.get("answered_by")
+    ok_prefix = "human:" if frm.startswith("ph_") else ("human:", "agent:")
+    if not (isinstance(by, str) and by.startswith(ok_prefix)):
+        by = f"human:{frm}" if frm.startswith("ph_") else f"agent:{frm}"
+    via = "phone" if frm.startswith("ph_") else "relay"
     try:
-        tickets.answer(root, tid, b["question_id"], b["answer"], by, via)
-    except (Refused, KeyError, TypeError) as e:
-        return f"not applied to {tid}: {e}"
-    return f"answered {b['question_id']} on {tid} (via {via})"
+        tickets.answer(root, asked["ticket"], asked["question_id"], str(b.get("answer")), by, via)
+    except Refused as e:
+        return f"not applied to {asked['ticket']}: {e}"
+    return f"answered {asked['question_id']} on {asked['ticket']} (via {via})"
 
 
 def _store_allow(root: Path, msg: dict) -> str:

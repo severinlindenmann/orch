@@ -327,3 +327,55 @@ def test_refresh_hint_is_shown_not_applied(proj, run, rel):
     connect(run, rel)
     rel.inbox.append(msg("m_refresh000000001", "refresh-hint", {"version": 8}, frm="admin"))
     assert "orch relay refresh" in run("relay", "inbox")[1]
+
+
+def test_answer_rejected_unless_it_matches_a_question_we_sent(proj, run, new_ticket, rel):
+    connect(run, rel)
+    tid = new_ticket()
+    run("ask", tid, "Q?", "--phone")
+    qid = rel.sent[0]["id"]
+    bad = [
+        msg(
+            "m_ans1000000000001",
+            "answer",
+            {"question_id": "q1", "answer": "X", "answered_by": "human:a"},
+            frm="ph_iphone0001",
+            ticket=tid,
+        ),  # no reply_to
+        msg(
+            "m_ans2000000000002",
+            "answer",
+            {"question_id": "q1", "answer": "X", "answered_by": "human:a"},
+            frm="ph_iphone0001",
+            ticket=tid,
+            reply_to="m_unknown00000001",
+        ),
+        msg(
+            "m_ans3000000000003",
+            "answer",
+            {"question_id": "q1", "answer": "X", "answered_by": "human:a"},
+            frm="ws_reports001",
+            ticket=tid,
+            reply_to=qid,
+        ),  # a workspace was not asked
+    ]
+    rel.inbox += bad
+    assert out_count(run("relay", "inbox")[1]) == 3
+    assert json.loads(run("ticket", "show", tid, "--json")[1])["questions"][0]["answer"] is None
+    rel.inbox.append(
+        msg(
+            "m_ans4000000000004",
+            "answer",
+            {"question_id": "q1", "answer": "Y", "answered_by": "agent:evil"},
+            frm="ph_iphone0001",
+            ticket="t_other0",
+            reply_to=qid,
+        )
+    )
+    run("relay", "inbox")
+    q = json.loads(run("ticket", "show", tid, "--json")[1])["questions"][0]
+    assert (q["answer"], q["answered_by"], q["via"]) == ("Y", "human:ph_iphone0001", "phone")
+
+
+def out_count(text):
+    return text.count("ignored:")
