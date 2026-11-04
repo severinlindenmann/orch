@@ -12,29 +12,27 @@ struct OnboardingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Brand().frame(maxWidth: .infinity)
-                OrbitMark().frame(width: 72, height: 72).padding(14)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 28))
-                    .overlay(RoundedRectangle(cornerRadius: 28).stroke(Theme.border))
-                    .frame(maxWidth: .infinity).padding(.top, 28).padding(.bottom, 4)
-                Eyebrow(text: "YOUR WORK, WITH YOU", color: Theme.brand)
-                ScreenHeading(title: "Let's get connected.", subtitle: "Use the invitation from your relay admin to bring your workspaces along.")
+                if model.phase == .notifyStep {
+                    ScreenHeading(title: "You're connected.", subtitle: model.pairedWorkspaces.count == 1 ? "1 workspace is ready." : "\(model.pairedWorkspaces.count) workspaces are ready.")
+                        .padding(.top, 28)
+                } else {
+                    ScreenHeading(title: "Let's get connected.", subtitle: "Use your invitation to bring your workspaces along.").padding(.top, 28)
+                }
                 if model.phase == .notifyStep {
                     notificationStep
                 } else {
                     invitationStep
                 }
                 ModelMessage()
-                Text("One connection. Your workspaces.").font(.system(size: 11))
-                    .foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 28)
             }.padding(.horizontal, 23).padding(.top, 12).padding(.bottom, 20)
         }
         .sheet(isPresented: $showLink) {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Open invitation link").font(.headline)
+                Text("Paste invitation link").font(.headline)
                 TextField("Paste invitation link", text: $link)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .keyboardType(.URL).padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
-                Button("Open invitation link") {
+                Button("Continue") {
                     model.openInvite(link); showLink = false
                 }.buttonStyle(PrimaryButtonStyle()).disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Button("Close") { showLink = false }.frame(maxWidth: .infinity, minHeight: 44)
@@ -49,21 +47,28 @@ struct OnboardingView: View {
         switch model.inviteState {
         case .none:
             VStack(spacing: 10) {
+                Button { showScanner = true } label: { Label("Scan invitation QR code", systemImage: "qrcode.viewfinder") }
+                    .buttonStyle(PrimaryButtonStyle())
                 Button {
-                    if let value = UIPasteboard.general.string, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if let value = UIPasteboard.general.string, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       (try? PairingLink(value)) != nil {
                         model.openInvite(value)
                     } else { showLink = true }
-                } label: { Text("Open invitation link  ↗") }.buttonStyle(PrimaryButtonStyle())
-                Button { showScanner = true } label: { Label("Scan QR code", systemImage: "qrcode.viewfinder") }
-                    .buttonStyle(SecondaryButtonStyle())
-                Button("Use the sample invitation") { model.openSampleInvite() }
-                    .font(.system(size: 11)).foregroundStyle(Theme.muted)
+                } label: { Text("Paste invitation link") }.buttonStyle(SecondaryButtonStyle())
+                Text("Ask the person who invited you for a link or QR code.").font(Theme.font(12))
+                    .foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 4)
+                #if DEBUG
+                Button("Try a demo") { model.openSampleInvite() }
+                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, minHeight: 44).accessibilityIdentifier("sample-invite")
+                #endif
             }
         case .found(let host):
             VStack(alignment: .leading, spacing: 12) {
-                Text("●  \(host)").font(.system(size: 11)).foregroundStyle(Theme.brand)
-                Text("Your relay admin invited this phone.").font(.system(size: 13))
+                Text("Your workspace is ready").font(Theme.font(15, .semibold))
+                Text("You were invited to connect this phone.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                DisclosureGroup("Connection details") { Text(host).font(Theme.font(12)).frame(maxWidth: .infinity, alignment: .leading) }
+                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
             }.orchCard()
             Button("Connect this phone") {
                 Task { await model.connect(phoneName: UIDevice.current.name) }
@@ -76,16 +81,15 @@ struct OnboardingView: View {
     private var notificationStep: some View {
         VStack(spacing: 18) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Know when you're needed.").font(.system(size: 17, weight: .semibold))
-                Text("Get a notification when a workspace has a question for you.")
-                    .font(.system(size: 13)).foregroundStyle(Theme.muted)
+                Text("Know when you're needed.").font(Theme.font(17, .semibold))
+                Text("Get notified when your work needs an answer.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
                 ForEach(model.pairedWorkspaces) { workspace in
-                    HStack { Text(workspace.name); Spacer(); Image(systemName: "checkmark").foregroundStyle(Theme.brand) }
-                        .font(.system(size: 13)).padding(.vertical, 6)
+                    Text(workspace.displayName).font(Theme.font(14)).padding(.vertical, 6)
                 }
             }.orchCard()
             Button("Allow notifications") { finish(true) }.buttonStyle(PrimaryButtonStyle())
-            Button("Not now") { finish(false) }.foregroundStyle(Theme.muted).frame(maxWidth: .infinity, minHeight: 44)
+            Button("Not now") { finish(false) }.font(Theme.font(15)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, minHeight: 44)
             if finishing { ProgressView() }
         }.disabled(finishing)
     }

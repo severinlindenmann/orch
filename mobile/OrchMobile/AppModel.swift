@@ -22,13 +22,19 @@ final class AppModel {
     /// question message id -> the answer this phone sent
     private(set) var answers: [String: String] = [:]
     private(set) var isLoading = false
+    private(set) var hasLoaded = false
+    /// Bumps on each successful answer / send (drives haptics).
+    private(set) var answerTick = 0
+    private(set) var sendTick = 0
+    private(set) var errorTick = 0
     private(set) var lastSent: SentNote?
     var message: String?            // plain error / info line
 
     // Navigation
     var tab: Tab = .home
     var questionFilter: String?     // workspace id, nil = all
-    var highlightedQuestion: String?
+    /// Push tap: the one question to show on its own (nil = the list).
+    var focusedQuestion: String?
     var notificationsEnabled = true
 
     struct SentNote: Equatable { let workspaceName: String; let text: String }
@@ -67,7 +73,7 @@ final class AppModel {
         return URLSessionRelayClient(base: c?.relay ?? invite?.relay ?? URL(string: "https://relay.invalid")!, credentials: c, session: session)
     }
 
-    var relayHost: String { credentials?.relay.host ?? invite?.host ?? "relay" }
+    var relayHost: String { credentials?.relay.host ?? invite?.host ?? "your server" }
     var phoneName: String { credentials?.phoneName ?? "This iPhone" }
     var openQuestionCount: Int { questions.filter { answers[$0.id] == nil }.count }
 
@@ -113,15 +119,15 @@ final class AppModel {
         do {
             async let w = client.workspaces()
             async let q = client.questions()
-            workspaces = try await w; questions = try await q
-            message = nil
+            workspaces = try await w; questions = try await q.deduplicated()
+            message = nil; hasLoaded = true
         } catch { handle(error) }
     }
 
     func answer(_ q: Question, with option: String) async {
         do {
             _ = try await client.answer(questionMessageId: q.id, answer: option)
-            answers[q.id] = option
+            answers[q.id] = option; answerTick += 1
             await refresh()
         } catch let RelayError.api(status, code, text) where status == 409 && code == "already_answered" {
             answers[q.id] = text
@@ -135,8 +141,8 @@ final class AppModel {
         guard !clean.isEmpty else { return false }
         do {
             _ = try await client.send(to: workspaceId, text: clean, ticket: nil)
-            lastSent = SentNote(workspaceName: workspaces.first { $0.id == workspaceId }?.name ?? "workspace", text: clean)
-            message = nil
+            lastSent = SentNote(workspaceName: workspaces.first { $0.id == workspaceId }?.displayName ?? "your workspace", text: clean)
+            message = nil; sendTick += 1
             return true
         } catch { handle(error); return false }
     }
@@ -152,7 +158,7 @@ final class AppModel {
 
     /// Push tap.
     func openQuestion(messageId: String) {
-        highlightedQuestion = messageId; questionFilter = nil; tab = .questions
+        focusedQuestion = messageId; questionFilter = nil; tab = .questions
         Task { await refresh() }
     }
 
@@ -163,13 +169,14 @@ final class AppModel {
     }
 
     private func reset() {
-        credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; answers = [:]
+        credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; answers = [:]; hasLoaded = false
         pairedWorkspaces = []; lastSent = nil; message = nil; tab = .home; phase = .onboarding
     }
 
     private func handle(_ error: Error) {
         if case RelayError.unauthorized = error { Keychain.delete(); reset(); message = error.localizedDescription }
         else { message = error.localizedDescription }
+        errorTick += 1
     }
 
     /// Test and screenshot hook: `-seedPaired YES` skips onboarding against the mock.

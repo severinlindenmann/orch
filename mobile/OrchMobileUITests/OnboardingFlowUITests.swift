@@ -28,7 +28,7 @@ final class OnboardingFlowUITests: XCTestCase {
         let answer = app.buttons["answer-TIMESTAMP"]
         XCTAssertTrue(answer.waitForExistence(timeout: 10))
         answer.tap()
-        XCTAssertTrue(app.staticTexts["Answer sent to workspace"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Answer sent: TIMESTAMP"].waitForExistence(timeout: 10))
 
         // Send: typed text to a workspace inbox
         app.buttons["Send"].tap()
@@ -50,7 +50,7 @@ final class OnboardingFlowUITests: XCTestCase {
         let mic = app.buttons["mic"]
         XCTAssertTrue(mic.waitForExistence(timeout: 15))
         mic.tap()
-        XCTAssertTrue(app.staticTexts["Listening… tap to stop"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Recording your voice… tap to stop"].waitForExistence(timeout: 5))
         sleep(1)
         mic.tap()
         let field = app.textViews["transcript"]

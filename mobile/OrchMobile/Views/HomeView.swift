@@ -4,28 +4,28 @@ struct HomeView: View {
     @Environment(AppModel.self) private var model
     @State private var expandedTags: Set<String> = []
 
+    private var greeting: String {
+        switch Calendar.current.component(.hour, from: Date()) {
+        case 5..<12: "Good morning"
+        case 12..<18: "Good afternoon"
+        default: "Good evening"
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Brand()
-                    Spacer()
-                    Button { model.tab = .settings } label: {
-                        Image(systemName: "person.fill").font(.system(size: 11))
-                            .frame(width: 32, height: 32).background(Theme.surface2, in: Circle())
-                            .overlay(Circle().stroke(Theme.border)).frame(width: 44, height: 44)
-                    }.foregroundStyle(Theme.muted).accessibilityLabel("Open settings")
-                }.padding(.bottom, 28)
-                Eyebrow(text: "GOOD MORNING", color: Theme.brand).padding(.bottom, 12)
-                ScreenHeading(title: "Your workspaces.", subtitle: model.openQuestionCount > 0 ? "Just a few things need your input." : "All clear. Nothing needs you right now.")
+                Brand().padding(.bottom, 28)
+                Eyebrow(text: greeting.uppercased(), color: Theme.brand).padding(.bottom, 12)
+                ScreenHeading(title: "Your workspaces.", subtitle: model.openQuestionCount > 0 ? "\(model.openQuestionCount == 1 ? "One thing needs" : "A few things need") your answer." : "All clear. Nothing needs you right now.")
                 if model.openQuestionCount > 0 {
                     Button { model.questionFilter = nil; model.tab = .questions } label: {
                         HStack(spacing: 12) {
-                            Text("?").font(.system(size: 18)).frame(width: 30, height: 30)
+                            Text("?").font(Theme.font(18)).frame(width: 30, height: 30)
                                 .background(Theme.brand.opacity(0.1), in: Circle()).foregroundStyle(Theme.brand)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("\(model.openQuestionCount) questions for you").font(.system(size: 13, weight: .semibold))
-                                Text("A quick answer keeps things moving.").font(.system(size: 10)).foregroundStyle(Theme.muted)
+                                Text("\(model.openQuestionCount) questions for you").font(Theme.font(13, .semibold))
+                                Text("A quick answer keeps things moving.").font(Theme.font(10)).foregroundStyle(Theme.muted)
                             }
                             Spacer(minLength: 0)
                             Text("↗").foregroundStyle(Theme.brand)
@@ -34,28 +34,25 @@ struct HomeView: View {
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.brand.opacity(0.27)))
                     }.buttonStyle(.plain).padding(.top, 26)
                 }
-                HStack { Eyebrow(text: "CONNECTED WORKSPACES"); Spacer(); Eyebrow(text: "\(model.workspaces.count)") }
+                HStack { Eyebrow(text: "WORKSPACES"); Spacer(); Eyebrow(text: "\(model.workspaces.count)") }
                     .padding(.top, 30).padding(.bottom, 12)
+                if !model.hasLoaded && model.workspaces.isEmpty {
+                    ForEach(0..<2, id: \.self) { _ in
+                        workspaceRow(Workspace(id: "x", name: "Workspace name", description: "What this workspace does", tags: [], online: true, lastSeen: nil, openQuestions: 0))
+                    }.skeleton(true).accessibilityHidden(true)
+                }
                 ForEach(model.workspaces) { workspace in workspaceRow(workspace) }
-                Button { model.tab = .send } label: {
-                    HStack(spacing: 12) {
-                        Text("＋").font(.system(size: 20)).foregroundStyle(Theme.brand)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Something on your mind?").font(.system(size: 12, weight: .semibold))
-                            Text("Send a note to a workspace.").font(.system(size: 11)).foregroundStyle(Theme.muted)
-                        }
-                        Spacer(minLength: 0)
-                        Text("↗").foregroundStyle(Theme.brand)
-                    }.padding(.vertical, 18).padding(.horizontal, 14)
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-                }.buttonStyle(.plain).padding(.top, 30)
-                HStack(spacing: 4) {
-                    Text("●").foregroundStyle(Theme.brand)
-                    Text("Connected to \(model.relayHost)").foregroundStyle(Theme.muted)
-                }.font(.system(size: 10)).frame(maxWidth: .infinity).padding(.top, 25)
+                if model.workspaces.isEmpty && model.hasLoaded {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("No workspaces yet").font(Theme.font(15, .semibold))
+                        Text("Ask the person who invited you to add a workspace. It will show up here.")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }.orchCard()
+                }
                 ModelMessage().padding(.top, 12)
             }.padding(.horizontal, 23).padding(.top, 6).padding(.bottom, 20)
         }.refreshable { await model.refresh() }
+            .animation(.easeOut(duration: 0.25), value: model.workspaces)
     }
 
     private func workspaceRow(_ workspace: Workspace) -> some View {
@@ -65,23 +62,23 @@ struct HomeView: View {
                     model.questionFilter = workspace.id; model.tab = .questions
                 } label: {
                     HStack(spacing: 10) {
-                        Text(String(workspace.name.prefix(1))).font(.system(size: 14))
+                        Text(String(workspace.displayName.prefix(1))).font(Theme.font(14))
                             .frame(width: 35, height: 35).foregroundStyle(Theme.brand)
                             .background(Theme.brand.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(workspace.name).font(.system(size: 13, weight: .medium))
+                            Text(workspace.displayName).font(Theme.font(14, .medium))
                             if let description = workspace.description {
-                                Text(description).font(.system(size: 10)).foregroundStyle(Theme.muted)
+                                Text(description).font(Theme.font(12)).foregroundStyle(Theme.muted)
                             }
                             HStack(spacing: 4) {
                                 Circle().fill(workspace.online ? Theme.brand : Theme.muted).frame(width: 5, height: 5)
                                 Text(lastSeenText(workspace.lastSeen, online: workspace.online)).foregroundStyle(Theme.muted)
-                            }.font(.system(size: 10))
+                            }.font(Theme.font(12))
                         }.frame(maxWidth: .infinity, alignment: .leading)
                         if workspace.openQuestions > 0 {
-                            Text("\(workspace.openQuestions)").font(.system(size: 11)).foregroundStyle(Theme.warn)
+                            Text("\(workspace.openQuestions)").font(Theme.font(11)).foregroundStyle(Theme.brand)
                                 .padding(.horizontal, 7).padding(.vertical, 2)
-                                .background(Theme.warn.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
+                                .background(Theme.brand.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
                         }
                     }.frame(minHeight: 44).contentShape(Rectangle())
                 }.buttonStyle(.plain)
@@ -90,13 +87,13 @@ struct HomeView: View {
                     else { expandedTags.insert(workspace.id) }
                 } label: {
                     Image(systemName: expandedTags.contains(workspace.id) ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 12)).frame(width: 44, height: 44)
-                }.foregroundStyle(Theme.muted).accessibilityLabel("Tags for \(workspace.name)")
+                        .font(Theme.font(12)).frame(width: 44, height: 44)
+                }.foregroundStyle(Theme.muted).accessibilityLabel("Tags for \(workspace.displayName)")
                     .accessibilityValue(expandedTags.contains(workspace.id) ? "Expanded" : "Collapsed")
                     .accessibilityIdentifier("tags-\(workspace.id)")
             }
             if expandedTags.contains(workspace.id) {
-                Text(workspace.tags.joined(separator: " · ")).font(.system(size: 11)).foregroundStyle(Theme.muted)
+                Text(workspace.tags.joined(separator: " · ")).font(Theme.font(11)).foregroundStyle(Theme.muted)
                     .padding(.leading, 45)
             }
         }.padding(.vertical, 17)

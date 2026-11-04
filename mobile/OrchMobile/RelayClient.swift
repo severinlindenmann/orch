@@ -21,7 +21,7 @@ enum RelayError: Error, Equatable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .api(_, _, let m): return m
-        case .unauthorized: return "This phone was signed out by the relay admin."
+        case .unauthorized: return "This phone was signed out. Ask for a new invitation to connect again."
         case .network(let m): return m
         case .badLink: return "That invitation link does not look right."
         }
@@ -59,12 +59,12 @@ struct URLSessionRelayClient: RelayAPI {
         }
         let data: Data, resp: URLResponse
         do { (data, resp) = try await session.data(for: req) }
-        catch { throw RelayError.network("Could not reach the relay. Check your connection.") }
+        catch { throw RelayError.network("Could not reach your workspace server. Check your connection.") }
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if (200..<300).contains(status) { return data }
         if status == 401 && auth { throw RelayError.unauthorized }
         let e = try? JSONCoding.decoder.decode(ErrorBody.self, from: data)
-        throw RelayError.api(status: status, code: e?.error ?? "error", message: e?.message ?? "The relay answered \(status).")
+        throw RelayError.api(status: status, code: e?.error ?? "error", message: e?.message ?? "Something went wrong (\(status)). Try again.")
     }
 
     func pair(code: String, name: String) async throws -> PairResponse {
