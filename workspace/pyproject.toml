@@ -23,6 +23,7 @@ packages = ["src/orch"]
 dev = ["pytest>=8", "ruff>=0.6", "jsonschema>=4", "rfc3339-validator"]
 
 [tool.ruff]
+extend-exclude = ["src/orch/templates"]
 line-length = 110
 target-version = "py311"
 
@@ -31,3 +32,4 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: starts a local server"]

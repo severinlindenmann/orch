@@ -1,0 +1,8 @@
+name = "{{name}}"
+about = "{{about}}"
+stack = "node"
+store = "{{store}}"
+start = "node server.js"
+health = "/health"
+test = "node --test"
+public = false
