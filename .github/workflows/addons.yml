@@ -1,8 +1,15 @@
 name: addons
 on: workflow_call
 jobs:
-  test:
+  dashboard:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workspace-addons/dashboard
     steps:
       - uses: actions/checkout@v4
-      - run: echo "addons: no tests yet (filled in by its lane)"
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+  # scheduler: add a second job here (same shape, working-directory: workspace-addons/scheduler)
