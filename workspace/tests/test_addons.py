@@ -105,3 +105,11 @@ def test_skill_found_in_installed_package(proj, tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "path", [str(tmp_path / "site"), *sys.path])
     monkeypatch.delenv("ORCH_REPO", raising=False)
     assert addons.addon_skill_dir("scheduler") == pkg
+
+
+def test_uv_in_cwd_rejected(tmp_path, monkeypatch):
+    fake = tmp_path / ("uv.exe" if sys.platform == "win32" else "uv")
+    fake.write_text("x", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(addons.shutil, "which", lambda _n: str(fake))
+    assert addons._which_uv() is None

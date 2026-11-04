@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import subprocess
 import sys
 from pathlib import Path
+
+from orch.errors import Refused
 
 BLOCK_FILE = "AGENTS-block.md"
 GITIGNORE_LINES = [
@@ -29,9 +30,21 @@ def packaged_skills_dir() -> Path:
     raise FileNotFoundError("orch skills folder not found")
 
 
+def check_inside(root: Path, dest: Path) -> None:
+    """Refuse when .agents, .agents/skills or dest is a link pointing outside the project."""
+    base = root.resolve()
+    for p in (root / ".agents", root / ".agents" / "skills", dest):
+        if _is_link(p) or p.exists():
+            try:
+                p.resolve().relative_to(base)
+            except ValueError:
+                raise Refused(f"{p} points outside this project; orch will not write there.") from None
+
+
 def install_skill(root: Path, name: str, source: Path) -> None:
     """Copy a skill folder to .agents/skills/<name>/ (replaced whole, minus the AGENTS block file)."""
     dest = root / ".agents" / "skills" / name
+    check_inside(root, dest)
     if dest.exists():
         shutil.rmtree(dest)
     shutil.copytree(source, dest, ignore=shutil.ignore_patterns(BLOCK_FILE))
@@ -39,7 +52,8 @@ def install_skill(root: Path, name: str, source: Path) -> None:
 
 def remove_skill(root: Path, name: str) -> None:
     dest = root / ".agents" / "skills" / name
-    if dest.is_dir() and not dest.is_symlink():
+    check_inside(root, dest)
+    if dest.is_dir() and not _is_link(dest):
         shutil.rmtree(dest)
 
 
@@ -86,13 +100,9 @@ def _link(link: Path, target: Path, rel: str) -> None:
     """Directory link: symlink (macOS/Linux) or junction (Windows, no admin needed)."""
     link.parent.mkdir(parents=True, exist_ok=True)
     if sys.platform == "win32":
-        r = subprocess.run(
-            ["cmd", "/c", "mklink", "/J", str(link), str(target.resolve())],
-            capture_output=True,
-            text=True,
-        )
-        if r.returncode != 0:
-            raise OSError(f"could not create junction {link}: {r.stdout}{r.stderr}")
+        import _winapi
+
+        _winapi.CreateJunction(str(target.resolve()), str(link))
     else:
         os.symlink(rel, link, target_is_directory=True)
 

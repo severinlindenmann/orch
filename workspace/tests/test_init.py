@@ -82,3 +82,13 @@ def test_windows_junction(proj, run):
 def test_unix_symlink_is_relative(proj, run):
     assert run("init")[0] == 0
     assert os.readlink(proj / ".claude/skills") == os.path.join("..", ".agents", "skills")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink setup")
+def test_refuses_skills_dir_pointing_outside(proj, run, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("outside")
+    (proj / ".agents").mkdir()
+    os.symlink(outside, proj / ".agents" / "skills", target_is_directory=True)
+    code, _, err = run("init")
+    assert code == 2 and "outside" in err
+    assert list(outside.iterdir()) == []

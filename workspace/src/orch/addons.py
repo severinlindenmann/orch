@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from orch import skills
@@ -63,9 +64,21 @@ def _save_names(names: list[str]) -> None:
     registry_path().write_text(json.dumps(sorted(set(names))), encoding="utf-8")
 
 
+def _which_uv() -> str | None:
+    """uv from PATH, but never one inside the current folder (a planted uv in the project)."""
+    found = shutil.which("uv")
+    if not found:
+        return None
+    try:
+        Path(found).resolve().relative_to(Path.cwd().resolve())
+    except ValueError:
+        return found
+    return None
+
+
 def run_uv(args: list[str]) -> None:
     """Tests replace this. Real: run uv and show its output."""
-    uv = shutil.which("uv")
+    uv = _which_uv()
     if not uv:
         raise Refused("uv is not installed. Run the orch install script first.")
     r = subprocess.run([uv, *args], text=True, capture_output=True)
@@ -114,12 +127,7 @@ def _apply_project(root: Path, name: str) -> None:
 def reexec(args: list[str]) -> None:
     """Run the freshly installed orch for the project step (this process still runs the old code).
     Tests replace this with an in-process call."""
-    exe = shutil.which("orch")
-    if not exe:
-        raise Refused(
-            "The new orch is not on PATH. Open a new terminal and run the command again with --project-only."
-        )
-    r = subprocess.run([exe, *args], text=True)
+    r = subprocess.run([sys.executable, "-m", "orch", *args], text=True)
     if r.returncode != 0:
         raise Refused("The project step failed (see above).")
 
