@@ -13,6 +13,7 @@ pub struct T {
     pub admin: String,
     pub app: AppState,
     pub push: Arc<FakePusher>,
+    pub dg: Arc<orch_relay::transcribe::FakeTranscriber>,
     pub http: reqwest::Client,
     pub dir: tempfile::TempDir,
 }
@@ -47,7 +48,8 @@ pub async fn start() -> T {
         apns: None,
     };
     let push = Arc::new(FakePusher::default());
-    let app = App::new(cfg, [7u8; 32], push.clone()).unwrap();
+    let dg = Arc::new(orch_relay::transcribe::FakeTranscriber::default());
+    let app = App::with_transcriber(cfg, [7u8; 32], push.clone(), dg.clone()).unwrap();
     tokio::spawn(axum::serve(pl, orch_relay::api::router(app.clone())).into_future());
     tokio::spawn(axum::serve(al, orch_relay::admin::router(app.clone())).into_future());
     T {
@@ -55,6 +57,7 @@ pub async fn start() -> T {
         admin,
         app,
         push,
+        dg,
         http: reqwest::Client::new(),
         dir,
     }

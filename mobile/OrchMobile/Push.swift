@@ -12,6 +12,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         return true
     }
 
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NSLog("orch push registration failed: \(error.localizedDescription)")
+    }
+
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
         Task { await AppDelegate.model?.registerPush(token: hex) }
@@ -29,13 +33,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 }
 
 enum PushPermission {
-    /// Asks the system, then registers with APNs (not on the Simulator, which has no token).
+    /// Asks the system, then registers with APNs (Apple silicon Simulators get a real token too).
     @MainActor static func request() async -> Bool {
         let ok = (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
-        #if !targetEnvironment(simulator)
         if ok { UIApplication.shared.registerForRemoteNotifications() }
-        #endif
         return ok
+    }
+    /// On every launch of a paired phone: if notifications are allowed, ask APNs for the (current) token.
+    @MainActor static func registerIfAuthorized() async {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        if settings.authorizationStatus == .authorized { UIApplication.shared.registerForRemoteNotifications() }
     }
     static var sandbox: Bool {
         #if DEBUG

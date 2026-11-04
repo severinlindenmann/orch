@@ -176,7 +176,10 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
     ticket = load(root, tid)
     if status == "done":
-        bad = [c["id"] for c in ticket["checklist"] if c.get("done") and not c.get("evidence")]
+        open_ = [c["id"] for c in ticket["checklist"] if not c.get("done")]
+        if open_:
+            raise Refused(f"Not done: {', '.join(open_)} is not checked yet.")
+        bad = [c["id"] for c in ticket["checklist"] if not c.get("evidence")]
         if bad:
             raise Refused(f"Not done: {', '.join(bad)} is checked without evidence.")
     if status != "waiting":

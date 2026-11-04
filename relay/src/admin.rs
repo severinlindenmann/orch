@@ -46,6 +46,10 @@ pub fn router(app: AppState) -> Router {
             "/admin/api/shared/:kind/:name",
             put(put_shared).delete(del_shared),
         )
+        .route(
+            "/admin/api/voice",
+            get(get_voice).put(put_voice).delete(del_voice),
+        )
         .route("/admin/api/webhooks", get(webhooks))
         .route("/admin/api/webhooks/:id", delete(del_webhook))
         .route("/admin/api/phones", get(list_phones).post(add_phone))
@@ -563,6 +567,35 @@ async fn assign(
 }
 
 // ---------- webhooks ----------
+
+async fn get_voice(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {
+    guard(&app, &h)?;
+    let c = app.db.lock().unwrap();
+    Ok(Json(
+        json!({"deepgram": crate::transcribe::status(&c, &app.key)}),
+    ))
+}
+
+async fn put_voice(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<Json<Value>> {
+    guard(&app, &h)?;
+    let v = parse_body(&body)?;
+    let k = v["deepgram_key"].as_str().unwrap_or("").trim();
+    if k.len() < 8 || k.len() > 200 || !k.chars().all(|c| c.is_ascii_graphic()) {
+        return Err(invalid("`deepgram_key` must be the Deepgram API key."));
+    }
+    let c = app.db.lock().unwrap();
+    crate::transcribe::set_key(&c, &app.key, k)?;
+    Ok(Json(
+        json!({"deepgram": crate::transcribe::status(&c, &app.key)}),
+    ))
+}
+
+async fn del_voice(State(app): State<AppState>, h: HeaderMap) -> Res<StatusCode> {
+    guard(&app, &h)?;
+    let c = app.db.lock().unwrap();
+    crate::transcribe::remove_key(&c)?;
+    Ok(StatusCode::NO_CONTENT)
+}
 
 async fn webhooks(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {
     guard(&app, &h)?;

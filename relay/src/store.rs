@@ -31,6 +31,7 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS skills(name TEXT PRIMARY KEY, version INTEGER NOT NULL, files BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS mcp(name TEXT PRIMARY KEY, config BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS creds(name TEXT PRIMARY KEY, value BLOB NOT NULL);
+        CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS assign(ws TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(ws,kind,name));",
     )
 }

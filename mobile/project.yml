@@ -33,6 +33,10 @@ targets:
         INFOPLIST_KEY_NSMicrophoneUsageDescription: orch listens while you hold the mic so you can dictate a message.
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: orch turns your voice into text on this phone.
         INFOPLIST_KEY_NSCameraUsageDescription: orch scans the QR code from your relay admin.
+    entitlements:
+      path: OrchMobile/OrchMobile.entitlements
+      properties:
+        aps-environment: development
     info:
       path: OrchMobile/Info.plist
       properties:
@@ -49,6 +53,16 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+  OrchMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - OrchMobileUITests
+    dependencies:
+      - target: OrchMobile
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   OrchMobile:
     build:
@@ -58,3 +72,4 @@ schemes:
     test:
       targets:
         - OrchMobileTests
+        - OrchMobileUITests

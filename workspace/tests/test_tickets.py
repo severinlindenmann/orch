@@ -207,3 +207,12 @@ def test_agent_cannot_answer_a_phone_question(proj, run, new_ticket):
     (d / "questions-sent.json").write_text(json.dumps(sent))
     assert run("answer", tid, "q1", "A", "--by", "agent:claude-code")[0] == 2
     assert read(proj, tid)["questions"][0]["answer"] is None
+
+
+def test_done_refused_while_an_item_is_unchecked(proj, run, new_ticket):
+    tid = new_ticket()
+    assert run("check", "add", tid, "never done")[0] == 0
+    code, _, err = run("ticket", "status", tid, "done")
+    assert code == 2 and "c1" in err and "not checked" in err
+    assert read(proj, tid)["status"] == "open"
+    assert run("ticket", "status", tid, "dropped")[0] == 0  # a dropped ticket is not affected

@@ -16,7 +16,9 @@ jobs:
         run: |
           NAME=$(xcrun simctl list devices available | grep -oE 'iPhone [0-9A-Za-z ]+ \(' | head -1 | sed 's/ ($//')
           echo "SIM_NAME=$NAME" >> "$GITHUB_ENV"
+      # Ad hoc signing (not CODE_SIGNING_ALLOWED=NO): an unsigned app has no Keychain in the Simulator.
       - name: Build and test
         run: |
+          set -o pipefail
           xcodebuild test -scheme OrchMobile -destination "platform=iOS Simulator,name=$SIM_NAME" \
-            CODE_SIGNING_ALLOWED=NO -only-testing:OrchMobileTests | tail -40
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM= CODE_SIGN_STYLE=Manual | tail -60
