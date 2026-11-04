@@ -175,3 +175,43 @@ async fn inbox_retention_purges_after_90_days() {
         orch_relay::store::purge(&c, t.dir.path(), orch_relay::util::now() + 91 * 86400).unwrap();
     assert_eq!(m, 1);
 }
+
+#[tokio::test]
+async fn blob_upload_checks_auth_before_body_and_caps_size_while_streaming() {
+    let t = start().await;
+    let (a, _b) = pair(&t).await;
+    // no credentials: refused (401), body not needed
+    let r = t
+        .http
+        .post(format!("{}/v1/blobs", t.base))
+        .body(vec![0u8; 1024 * 1024])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401);
+    // wrong token: refused
+    let r = t
+        .http
+        .post(format!("{}/v1/blobs", t.base))
+        .header("X-Orch-Workspace", &a.id)
+        .header("Authorization", "Bearer nope")
+        .body(vec![0u8; 16])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401);
+    // chunked (no content-length) body over the cap: 413
+    let chunks = futures_util::stream::iter(
+        (0..105).map(|_| Ok::<_, std::io::Error>(axum::body::Bytes::from(vec![7u8; 1024 * 1024]))),
+    );
+    let r = t
+        .http
+        .post(format!("{}/v1/blobs", t.base))
+        .header("X-Orch-Workspace", &a.id)
+        .header("Authorization", format!("Bearer {}", a.token))
+        .body(reqwest::Body::wrap_stream(chunks))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 413);
+}
