@@ -175,6 +175,7 @@ final class AppModel {
         if let t = d.string(forKey: "startTab"), phase == .ready {
             tab = ["questions": .questions, "send": .send, "settings": .settings][t] ?? .home
         }
-        if phase == .ready { await refresh() }
+        if phase == .ready, let id = d.string(forKey: "openQuestion") { openQuestion(messageId: id) }  // stands in for a push tap in the Simulator
+        if phase == .ready { await refresh(); if !useMock { await PushPermission.registerIfAuthorized() } }
     }
 }

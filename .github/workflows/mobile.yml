@@ -18,5 +18,6 @@ jobs:
           echo "SIM_NAME=$NAME" >> "$GITHUB_ENV"
       - name: Build and test
         run: |
+          set -o pipefail
           xcodebuild test -scheme OrchMobile -destination "platform=iOS Simulator,name=$SIM_NAME" \
-            CODE_SIGNING_ALLOWED=NO -only-testing:OrchMobileTests | tail -40
+            CODE_SIGNING_ALLOWED=NO | tail -60

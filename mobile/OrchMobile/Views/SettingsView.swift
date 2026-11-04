@@ -8,7 +8,7 @@ struct SettingsView: View {
     @State private var requestingPermission = false
 
     var body: some View {
-        ScrollView {
+        ScrollViewReader { proxy in ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Brand().frame(height: 44).padding(.bottom, 28)
                 ScreenHeading(title: "Settings.", subtitle: "Your connection, in one place.")
@@ -72,12 +72,14 @@ struct SettingsView: View {
                             .accessibilityIdentifier("signout-confirm")
                         Button("Cancel") { confirmSignOut = false }
                             .foregroundStyle(Theme.muted).frame(maxWidth: .infinity, minHeight: 44)
-                    }.orchCard().disabled(signingOut).padding(.top, 12)
+                    }.orchCard().disabled(signingOut).padding(.top, 12).id("signout-card")
                 }
                 ModelMessage().padding(.top, 12)
                 Text("orch for iOS").font(.system(size: 11)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity).padding(.top, 12)
             }.padding(.horizontal, 23).padding(.top, 6).padding(.bottom, 20)
+        }
+        .onChange(of: confirmSignOut) { _, shown in if shown { withAnimation { proxy.scrollTo("signout-card", anchor: .bottom) } } }
         }
     }
 }
