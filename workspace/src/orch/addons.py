@@ -127,7 +127,7 @@ def _apply_project(root: Path, name: str) -> None:
 def reexec(args: list[str]) -> None:
     """Run the freshly installed orch for the project step (this process still runs the old code).
     Tests replace this with an in-process call."""
-    r = subprocess.run([sys.executable, "-m", "orch", *args], text=True)
+    r = subprocess.run([sys.executable, "-P", "-m", "orch", *args], text=True)
     if r.returncode != 0:
         raise Refused("The project step failed (see above).")
 
