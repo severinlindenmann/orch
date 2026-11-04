@@ -8,7 +8,8 @@ $ErrorActionPreference = 'Stop'
 $RelayUrl = '__RELAY_URL__'
 if (-not (Get-Command orch -ErrorAction SilentlyContinue)) {
   Write-Host 'orch is not installed yet. Installing it...'
-  irm https://raw.githubusercontent.com/severinlindenmann/orch/main/install.ps1 | iex
+  $env:ORCH_REF = '__INSTALL_REF__'
+  irm https://raw.githubusercontent.com/severinlindenmann/orch/__INSTALL_REF__/install.ps1 | iex
   $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 }
 orch relay connect $RelayUrl --workspace $Workspace --token $Token

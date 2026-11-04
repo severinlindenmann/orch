@@ -246,6 +246,8 @@ async fn admin_onboarding_scripts() {
             && sh.text().contains("orch publish connect")
     );
     assert!(!sh.text().contains("__PUBLISH_URL__"));
+    // test config uses the default ref
+    assert!(sh.text().contains("orch/main/install.sh") && sh.text().contains("ORCH_REF=\"main\""));
     let ps = call(&t.public, "GET", "/onboarding.ps1", &[], vec![]).await;
     assert!(
         ps.text().contains("param(")

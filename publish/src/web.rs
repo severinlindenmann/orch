@@ -35,6 +35,7 @@ pub async fn style_css() -> impl IntoResponse {
 fn script(st: &State, t: &str) -> String {
     t.replace("__PUBLISH_URL__", &st.cfg.public_url)
         .replace("__INSTALL_URL__", &st.cfg.install_url)
+        .replace("__INSTALL_REF__", &st.cfg.install_ref)
 }
 
 pub async fn onboarding_sh(St(st): St<State>) -> impl IntoResponse {
