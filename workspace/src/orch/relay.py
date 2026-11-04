@@ -107,8 +107,9 @@ def allowed(root: Path, msg: dict) -> str | None:
     for g in allows(root)["given"]:
         if g.get("peer") != msg.get("from") or g.get("kind") != kind:
             continue
-        if g.get("mode") == "once" and g.get("message_id") == msg["id"] and not g.get("used"):
-            return "once"
+        if g.get("message_id") == msg["id"] and not g.get("used"):
+            # the message the human just allowed runs once, for --once and --permanent alike
+            return "once" if g.get("mode") == "once" else "permanent"
         if (
             g.get("mode") == "permanent"
             and (kind != "start" or g.get("key") == key)
@@ -148,7 +149,7 @@ def give_allow(root: Path, mid: str, mode: str) -> dict:
 def _use_once(root: Path, msg: dict) -> None:
     a = allows(root)
     for g in a["given"]:
-        if g.get("mode") == "once" and g.get("message_id") == msg["id"]:
+        if g.get("message_id") == msg["id"]:
             g["used"] = True
     _save_allows(root, a)
 
@@ -352,8 +353,7 @@ def done(root: Path, mid: str) -> dict:
     mode = allowed(root, msg) if first else None
     if mode:
         res["ticket"] = _ticket_for(root, msg)
-        if mode == "once":
-            _use_once(root, msg)
+        _use_once(root, msg)
     return res
 
 

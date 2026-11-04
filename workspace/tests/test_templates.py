@@ -102,3 +102,11 @@ def test_static_markdown_has_pages(tmp_path):
     templates.create("static", "markdown", tmp_path / "notes")
     assert (tmp_path / "notes" / "content" / "welcome.md").is_file()
     assert "content/" in (tmp_path / "notes" / "index.html").read_text()
+
+
+def test_python_template_commands_use_python3(tmp_path):
+    # the publish server has `python3` only (no `python`)
+    folder = tmp_path / "py-app"
+    templates.create("python", "sqlite", folder)
+    m = publish.read_manifest(folder)
+    assert m["start"].startswith("python3 ") and m["test"].startswith("python3 ")

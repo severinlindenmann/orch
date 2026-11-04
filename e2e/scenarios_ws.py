@@ -4,7 +4,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import signal
+import subprocess
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -33,17 +35,33 @@ EVID = '{"type":"commit","ref":"abc1234"}'
 
 @scenario("W0")
 def w0(e):
-    """orch is installed and `orch update` refreshes the project skills (local repo, no GitHub)."""
-    rc, out, _ = e.sh(["orch", "--version"])
-    check(rc == 0 and "orch" in out, f"orch --version: {out}")
-    ws = e.ws("Pilatus")
-    skill = ws / ".agents/skills/orch/SKILL.md"
+    """The REAL one-liner from GitHub raw (ref from E2E_INSTALL_REF, default develop) in a bare HOME without uv."""
+    ref = os.environ.get("E2E_INSTALL_REF", "develop")
+    home = e.tmp / "w0home"
+    (home / "proj").mkdir(parents=True)
+    env = {"HOME": str(home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "USER": "e2e", "LANG": "C.UTF-8", "TERM": "dumb",
+           "GIT_TERMINAL_PROMPT": "0", "ORCH_REF": ref}
+    url = f"https://raw.githubusercontent.com/severinlindenmann/orch/{ref}/install.sh"
+
+    def run(cmd, cwd=None, timeout=600):
+        p = subprocess.run(cmd, cwd=cwd or home, env=env, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, p.stdout, p.stderr
+
+    check(shutil.which("uv", path=env["PATH"]) is None, "uv must not be on the bare PATH")
+    rc, out, err = run(["sh", "-c", f"curl -fsSL {url} | sh"])
+    check(rc == 0, f"installer failed rc={rc}: {(err or out)[-300:]}")
+    check((home / ".local/bin/uv").exists() or (home / ".cargo/bin/uv").exists(), "installer did not fetch uv")
+    env["PATH"] = f"{home}/.local/bin:{env['PATH']}"
+    rc, out, err = run(["orch", "--version"])
+    check(rc == 0 and "orch" in out.lower(), f"orch --version: {out!r} {err[-200:]}")
+    proj = home / "proj"
+    rc, out, err = run(["orch", "init"], cwd=proj)
+    check(rc == 0 and (proj / ".orch/tickets").is_dir(), f"orch init: {err[-200:]}")
+    skill = proj / ".agents/skills/orch/SKILL.md"
     skill.write_text("tampered\n")
-    e.orch(ws, "update")
-    check(skill.read_text() != "tampered\n", "orch update did not refresh the skill")
-    return "version + update ok (install.sh from GitHub not tested)"
-
-
+    rc, out, err = run(["orch", "update"], cwd=proj)
+    check(rc == 0 and skill.read_text() != "tampered\n", f"orch update did not refresh the skill: rc={rc} {err[-200:]}")
+    return f"one-liner ({ref}) -> uv fetched, version, init, update ok"
 
 
 @scenario("W1")
@@ -107,11 +125,13 @@ def w4(e):
     d["checklist"][0]["evidence"] = [{"type": "note", "ref": "checked by hand"}]
     p.write_text(json.dumps(d))
     e.orch(ws, "ticket", "status", t, "done")
-    # NOTE: an UNCHECKED item does not block done (code only checks checked items)
+    # an UNCHECKED item blocks done too; a dropped ticket is not affected
     t2 = e.orchj(ws, "ticket", "new", "W4 unchecked")["id"]
     e.orch(ws, "check", "add", t2, "never done")
-    rc, _, _ = e.orch(ws, "ticket", "status", t2, "done", ok=False)
-    return "refusal ok" + ("; unchecked item still allows done (see BUGS)" if rc == 0 else "")
+    rc, _, err = e.orch(ws, "ticket", "status", t2, "done", ok=False)
+    check(rc == 2 and "not checked" in err.lower(), f"unchecked item must refuse done, got rc={rc} {err!r}")
+    e.orch(ws, "ticket", "status", t2, "dropped")
+    return "refusal ok (checked without evidence, and unchecked)"
 
 
 @scenario("W5")
