@@ -25,6 +25,37 @@
     }
   },
   {
+    "_note": "Change my own description and tags. Response = whoami.",
+    "request": {
+      "method": "PATCH",
+      "path": "/v1/me",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+      },
+      "body": {
+        "description": "Ingestion jobs and data pipelines.",
+        "tags": [
+          "data",
+          "work"
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "id": "ws_pilatus001",
+        "name": "Pilatus Workspace",
+        "description": "Ingestion jobs and data pipelines.",
+        "tags": [
+          "data",
+          "work"
+        ],
+        "phones": 1
+      }
+    }
+  },
+  {
     "_note": "Send a message. `from` must be me.",
     "request": {
       "method": "POST",
@@ -1227,6 +1258,104 @@
     "response": {
       "status": 204,
       "body": null
+    }
+  },
+  {
+    "_note": "Admin: set or replace the Deepgram voice key.",
+    "request": {
+      "method": "PUT",
+      "path": "/admin/api/voice",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": {
+        "deepgram_key": "dg_example_key_1234"
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "deepgram": {
+          "set": true,
+          "last4": "1234"
+        }
+      }
+    }
+  },
+  {
+    "_note": "Admin: voice key status (never the full key).",
+    "request": {
+      "method": "GET",
+      "path": "/admin/api/voice",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "deepgram": {
+          "set": true,
+          "last4": "1234"
+        }
+      }
+    }
+  },
+  {
+    "_note": "Admin: remove the voice key.",
+    "request": {
+      "method": "DELETE",
+      "path": "/admin/api/voice",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  },
+  {
+    "_note": "Phone: transcribe audio (body = the audio bytes).",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/transcribe?language=de",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN",
+        "Content-Type": "audio/m4a"
+      },
+      "body": "<binary>"
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "text": "Nimm das Feld event_time.",
+        "language": "de",
+        "duration": 2.4
+      }
+    }
+  },
+  {
+    "_note": "Phone: no Deepgram key set, the app falls back to on-device speech.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/transcribe",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN",
+        "Content-Type": "audio/m4a"
+      },
+      "body": "<binary>"
+    },
+    "response": {
+      "status": 503,
+      "body": {
+        "error": "transcription_off",
+        "message": "Voice transcription is not set up on this relay."
+      }
     }
   }
 ]

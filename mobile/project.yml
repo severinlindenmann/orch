@@ -11,8 +11,8 @@ settings:
     DEVELOPMENT_TEAM: 77D4THRYUN
     CODE_SIGN_STYLE: Automatic
     TARGETED_DEVICE_FAMILY: "1"
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "2.0.0"
+    CURRENT_PROJECT_VERSION: "261104.225314"
 targets:
   OrchMobile:
     type: application
@@ -21,7 +21,8 @@ targets:
       - OrchMobile
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.severin.orch.mobile
+        PRODUCT_BUNDLE_IDENTIFIER: io.severin.orch
+        TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         GENERATE_INFOPLIST_FILE: YES
