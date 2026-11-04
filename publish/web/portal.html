@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="publish-url" content="__PUBLISH_URL__">
   <title>orch publish · Workspaces</title>
   <link rel="stylesheet" href="/admin/style.css">
   <script src="/admin/portal.js" defer></script>
@@ -19,13 +21,14 @@
         <a href="#workspaces"><span aria-hidden="true">▦</span> Workspaces <span class="count" id="count-workspaces"></span></a>
         <a href="#files"><span aria-hidden="true">▤</span> Files <span class="count" id="count-files"></span></a>
         <a href="#apps"><span aria-hidden="true">◫</span> Apps <span class="count" id="count-apps"></span></a>
-        <a href="#api"><span aria-hidden="true">⌘</span> API reference</a>
       </nav>
       <div class="side-footer"><span class="dot" aria-hidden="true"></span>Private network only</div>
     </aside>
     <div>
-      <header class="topbar admin-topbar"><span>Admin <span class="breadcrumb-divider">/</span><strong id="crumb">Workspaces</strong></span><span class="owner"><span class="owner-avatar">A</span> Admin · Private network only</span></header>
-      <main class="content" id="view" tabindex="-1"><p>Loading…</p><noscript>Enable JavaScript to manage your workspaces.</noscript></main>
+      <header class="topbar admin-topbar"><span><strong id="crumb">Workspaces</strong></span><span class="owner"><span class="owner-avatar" aria-hidden="true">A</span> Admin</span></header>
+      <div class="content alert-wrap"><p id="alert" class="alert" role="alert" hidden></p></div>
+      <main class="content" id="view" tabindex="-1"><noscript>Enable JavaScript to manage your workspaces.</noscript></main>
+      <footer class="content page-foot"><a href="#api">For developers: API reference</a></footer>
     </div>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

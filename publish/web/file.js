@@ -46,48 +46,77 @@ if (typeof module !== "undefined" && module.exports) {
 if (typeof document !== "undefined") {
   (function () {
     const $ = (id) => document.getElementById(id);
-    function show(icon, title, msg) {
-      $("icon").textContent = icon;
+    const I = (d) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + d + "</svg>";
+    const ICONS = {
+      link: I('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>'),
+      clock: I('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>'),
+      file: I('<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/>'),
+      lock: I('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
+    };
+    function show(icon, title, msg, ok) {
+      $("icon").innerHTML = ICONS[icon];
       $("title").textContent = title;
       $("msg").textContent = msg;
       $("extra").textContent = "";
+      $("note").hidden = !ok;
+    }
+    function retryButton() {
+      const b = document.createElement("button");
+      b.className = "primary";
+      b.textContent = "Try again";
+      b.addEventListener("click", function () {
+        b.setAttribute("aria-busy", "true");
+        main();
+      });
+      $("extra").appendChild(b);
     }
     function size(n) {
-      return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB";
+      return n < 1024 ? n + (n === 1 ? " byte" : " bytes") : n < 1048576 ? (n / 1024).toFixed(1).replace(/\.0$/, "") + " KB" : (n / 1048576).toFixed(1).replace(/\.0$/, "") + " MB";
+    }
+    function kind(t) {
+      t = String(t || "");
+      if (t.startsWith("text/")) return "Text file";
+      if (t.startsWith("image/")) return "Image";
+      if (t === "application/pdf") return "PDF";
+      if (t.startsWith("video/")) return "Video";
+      if (t.startsWith("audio/")) return "Audio";
+      if (t.indexOf("zip") >= 0) return "Archive";
+      return "File";
     }
     async function main() {
       const m = /^#k=([A-Za-z0-9_-]+)$/.exec(location.hash);
       if (!m) {
-        return show("⌐", "This link is missing its key", "You need the complete sharing link to open this file. Ask the sender to copy it again, including the part after #.");
+        return show("link", "This link is incomplete", "Ask the sender to copy the full link again.");
       }
       if (!globalThis.crypto || !globalThis.crypto.subtle) {
-        return show("⌐", "This browser cannot open the file", "Open the link in a current browser over a secure (https) connection.");
+        return show("lock", "This browser can’t open the file", "Open the link in an up-to-date browser, over a secure (https) address.");
       }
       const id = location.pathname.split("/").filter(Boolean)[1];
       let res;
       try {
         res = await fetch("/f/" + encodeURIComponent(id) + "/blob", { cache: "no-store" });
       } catch (e) {
-        return show("⌐", "Could not load the file", "Check your connection and try again.");
+        show("link", "Couldn’t load the file", "You may be offline. Check your connection and try again.");
+        return retryButton();
       }
-      if (res.status === 410) return show("◷", "This file has expired", "The file is no longer available. Ask the sender to share a new link.");
-      if (!res.ok) return show("⌐", "This file does not exist", "The link may be wrong, or the file was deleted.");
+      if (res.status === 410) return show("clock", "This file has expired", "It is no longer available. Ask the sender to share it again.");
+      if (!res.ok) return show("link", "This page isn’t available", "Check the link or ask the sender for a new one.");
       const blob = new Uint8Array(await res.arrayBuffer());
       let r;
       try {
         r = await decryptBlob(blob, m[1]);
       } catch (e) {
-        return show("⌐", "This key doesn’t open the file", "The link may have been changed or cut short. Ask the sender for the complete link, including the part after #.");
+        return show("link", "This link doesn’t open the file", "It may have been cut short or changed. Ask the sender for a new link.");
       }
-      show("▤", String(r.header.name || "file"), "Decrypted in your browser.");
+      show("file", String(r.header.name || "File"), "Shared with you.", true);
       const meta = document.createElement("div");
       meta.className = "file-meta";
       const a = document.createElement("span");
-      a.textContent = (r.header.type || "file") + " · " + size(r.content.length);
+      a.textContent = kind(r.header.type) + " · " + size(r.content.length);
       meta.appendChild(a);
       const btn = document.createElement("button");
       btn.className = "primary";
-      btn.textContent = "↓ Download file";
+      btn.textContent = "Download file";
       btn.addEventListener("click", function () {
         const url = URL.createObjectURL(new Blob([r.content], { type: "application/octet-stream" }));
         const l = document.createElement("a");

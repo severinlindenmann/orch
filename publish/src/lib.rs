@@ -56,6 +56,7 @@ pub fn public_router(st: State) -> Router {
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/v1/whoami", get(api::whoami))
+        .route("/v1/me", axum::routing::patch(api::me_patch))
         .route(
             "/v1/files",
             post(api::files_post).get(api::files_list).layer(big),
@@ -79,6 +80,7 @@ pub fn public_router(st: State) -> Router {
         .route("/onboarding.ps1", get(web::onboarding_ps1))
         .route("/_/file.js", get(web::file_js))
         .route("/_/style.css", get(web::style_css))
+        .fallback(web::not_found)
         .with_state(st)
 }
 

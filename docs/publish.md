@@ -42,3 +42,7 @@ publish/
 
 ## Not included
 Several admins, custom domains per app, app logs view, file previews, own databases beyond SQLite, Docker.
+
+## Workspace profile
+
+A workspace sets its own description and tags with `PATCH /v1/me` (see contracts/publish-api.md). The admin "connect your agent" text ends with a line asking the agent to do this.
