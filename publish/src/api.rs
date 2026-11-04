@@ -99,8 +99,8 @@ pub async fn me_patch(
         .map_err(ApiError::invalid)?;
     // A proposal identical to what is live is not a change: nothing to review (unless it should replace a pending one).
     if w.pending.is_none()
-        && desc.as_deref().map_or(true, |d| d == w.description)
-        && tags.as_deref().map_or(true, |t| t == w.tags.as_slice())
+        && desc.as_deref().is_none_or(|d| d == w.description)
+        && tags.as_deref().is_none_or(|t| t == w.tags.as_slice())
     {
         let mut out = who_json(&st, &w);
         out["status"] = "unchanged".into();
