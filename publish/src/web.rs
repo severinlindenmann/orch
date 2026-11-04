@@ -198,7 +198,7 @@ pub fn notice(status: u16, icon_name: &str, title: &str, msg: &str, retry: bool)
         ""
     };
     let html = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"dark\"><meta name=\"referrer\" content=\"no-referrer\"><title>{t} · orch</title><link rel=\"stylesheet\" href=\"/_/style.css\"></head><body class=\"public\"><div class=\"shell\"><main class=\"content\"><header class=\"public-brand\"><a class=\"brand\" href=\"/\">{LOGO}orch</a></header><section class=\"card public-card\"><div class=\"file-icon\">{ic}</div><h1>{t}</h1><p>{m}</p>{button}</section></main></div></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"dark\"><meta name=\"referrer\" content=\"no-referrer\"><title>{t} · orch</title><link rel=\"stylesheet\" href=\"/_/style.css\"></head><body class=\"public\"><div class=\"shell\"><main class=\"content\"><header class=\"public-brand\"><a class=\"brand\" href=\"/\">{LOGO}orch</a></header><section class=\"card public-card\"><div class=\"file-icon\">{ic}</div><h1>{t}</h1><p>{m}</p>{button}</section><p class=\"public-note\">Made with orch.</p></main></div></body></html>",
         t = esc(title),
         m = esc(msg),
         ic = icon(icon_name),

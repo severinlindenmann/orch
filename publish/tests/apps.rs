@@ -271,12 +271,9 @@ async fn apps_python_runs_behind_proxy() {
     // stop / restart
     let s = t.api(&ws, "POST", "/v1/apps/pyapp/stop", vec![]).await;
     assert_eq!(s.json()["status"], "stopped");
-    assert_eq!(
-        call(&t.public, "GET", "/a/pyapp/", &[], vec![])
-            .await
-            .status,
-        503
-    );
+    let paused = call(&t.public, "GET", "/a/pyapp/", &[], vec![]).await;
+    assert_eq!(paused.status, 503);
+    assert!(paused.text().contains("This app is paused"));
     let s = t.api(&ws, "POST", "/v1/apps/pyapp/restart", vec![]).await;
     assert_eq!(s.json()["status"], "running");
     assert_eq!(

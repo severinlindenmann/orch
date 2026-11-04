@@ -432,6 +432,16 @@ fn private_page() -> Response {
     )
 }
 
+fn paused_page() -> Response {
+    crate::web::notice(
+        503,
+        "offline",
+        "This app is paused",
+        "The owner stopped it for now. Ask the owner to start it again.",
+        false,
+    )
+}
+
 fn offline_page() -> Response {
     crate::web::notice(
         503,
@@ -556,7 +566,7 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
         }
     }
     if app.status == "stopped" {
-        return offline_page();
+        return paused_page();
     }
     if app.stack == "static" {
         return serve_static(&app, &rest).await;
