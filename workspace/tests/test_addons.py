@@ -64,7 +64,7 @@ def test_add_list_remove(proj, run, fake_repo, uv_calls):
     code, _, err = run("addon", "add", "dashboard")
     assert code == 0, err
     assert uv_calls[0][:3] == ["tool", "install", "--reinstall"]
-    assert "--with" in uv_calls[0] and uv_calls[0][-1].endswith("workspace-addons/dashboard")
+    assert "--with" in uv_calls[0] and uv_calls[0][-1].replace("\\", "/").endswith("workspace-addons/dashboard")
     assert (proj / ".agents/skills/orch-dashboard/SKILL.md").is_file()
     assert "orch:begin orch-dashboard" in (proj / "AGENTS.md").read_text(encoding="utf-8")
     assert json.loads(run("addon", "list", "--json")[1])["dashboard"] == "installed"
@@ -86,7 +86,7 @@ def test_update_reinstalls_and_refreshes(proj, run, fake_repo, uv_calls):
     uv_calls.clear()
     (proj / ".agents/skills/orch/SKILL.md").write_text("stale", encoding="utf-8")
     assert run("update")[0] == 0
-    assert len(uv_calls) == 1 and uv_calls[0][-1].endswith("workspace-addons/dashboard")
+    assert len(uv_calls) == 1 and uv_calls[0][-1].replace("\\", "/").endswith("workspace-addons/dashboard")
     assert "name: orch" in (proj / ".agents/skills/orch/SKILL.md").read_text(encoding="utf-8")
     assert (proj / ".agents/skills/orch-dashboard/SKILL.md").is_file()
 
