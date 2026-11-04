@@ -298,3 +298,10 @@ body.signedout .side-nav,body.signedout .side-label,body.signedout .owner,body.s
  .admin-shell main{padding:24px 16px}
 }
 body.signedout .footline a{display:none}
+
+.review{margin:0 18px 14px;padding:14px 16px;border:1px solid #fbbf24;border-radius:8px;background:#fbbf2414}
+.review h3{font-size:14px;margin-bottom:8px}
+.review-line{margin-bottom:10px;overflow-wrap:anywhere}
+.review-line p{margin:2px 0}
+.review .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+.review-result{margin-top:8px;font-size:13px}

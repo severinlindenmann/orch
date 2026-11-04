@@ -17,8 +17,8 @@ Rights per workspace (set by the admin): `files` (temporary files), `apps` (temp
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| GET | `/v1/whoami` | – | `{id, name, description, tags, rights, max_file_mb, default_days, max_days}` |
-| PATCH | `/v1/me` | `{description?: string ≤ 280, tags?: [string ≤ 24, ≤ 8 items]}` (only given fields change; tags are trimmed, empties dropped) | `200` same body as `whoami`. Too long / too many → `422 invalid` |
+| GET | `/v1/whoami` | – | `{id, name, description, tags, rights, pending, max_file_mb, default_days, max_days}`. `pending` = `{description: string\|null, tags: [..]\|null, at, rev}` or `null` |
+| PATCH | `/v1/me` | `{description?: string ≤ 280, tags?: [string ≤ 24, ≤ 8 items]}` (at least one; tags are trimmed) | `202 {…whoami, status: "pending"}`. Only a proposal: the owner must approve it in the admin panel, until then the old values stay in effect. One pending change per workspace; a new one replaces it. `description`: one line of plain text (Unicode categories L, M, N, P, S, Zs; NFC-normalised; no Default_Ignorable_Code_Point characters or U+2800; at most 2 combining marks in a row); tags lowercase `[a-z0-9-]` 1–24 chars. Admin-set values follow the same rules. Guarded write: only while the calling token is current, else `401`. Bad input → `422 invalid` |
 | POST | `/v1/files?days=7` or `?permanent=1` | body = encrypted blob (`application/octet-stream`, crypto.md) | `201 {id, url, size, expires_at\|null}`. `url` has no key; the CLI adds `#k=<key>`. `days` 1–90, default 7 |
 | GET | `/v1/files` | – | list of `{id, size, created_at, expires_at}` |
 | DELETE | `/v1/files/<id>` | – | `204` |
@@ -66,10 +66,12 @@ Auth: header `X-Orch-Admin: <admin token>` (file `/etc/orch-publish/admin-token`
 | Method | Path | Request | Response |
 |---|---|---|---|
 | GET | `/admin` | – | Portal HTML |
-| GET | `/admin/api/workspaces` | – | list of `{id, name, description, tags, rights, files, apps}` |
+| GET | `/admin/api/workspaces` | – | list of `{id, name, description, tags, description_by, tags_by, pending, rights, files, apps}` (`*_by` = `admin`\|`workspace`) |
 | POST | `/admin/api/workspaces` | `{name, description, tags: [], rights: {files, apps, permanent, public}}` | `201 {id, token, prompt}` (token shown only here) |
-| PATCH | `/admin/api/workspaces/<id>` | `{name?, description?, tags?, rights?}` | `200 {id, name, description, tags, rights}` |
-| POST | `/admin/api/workspaces/<id>/token` | – | `200 {token, prompt}` (new token, old one stops) |
+| PATCH | `/admin/api/workspaces/<id>` | `{name?, description?, tags?, rights?}` | `200 {id, name, description, tags, rights}`. Admin-set description/tags are marked `admin` |
+| POST | `/admin/api/workspaces/<id>/token` | – | `200 {token, prompt}` (new token, old one stops; a pending profile change is dropped) |
+| POST | `/admin/api/workspaces/<id>/profile/approve` | `{rev}` (of the proposal the owner looked at) | `200` the workspace. Pending description/tags become live. `404` nothing pending, `409 conflict` when `rev` no longer matches |
+| POST | `/admin/api/workspaces/<id>/profile/reject` | `{rev}` | `204`. Proposal dropped, old values stay. `404` / `409` as above |
 | DELETE | `/admin/api/workspaces/<id>` | – | `204` (its files and apps are removed) |
 | GET | `/admin/api/files` | – | list of `{id, workspace, size, expires_at}` (content is unreadable) |
 | DELETE | `/admin/api/files/<id>` | – | `204` |

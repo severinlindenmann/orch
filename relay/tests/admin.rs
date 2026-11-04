@@ -1,6 +1,6 @@
 mod common;
 use common::*;
-use serde_json::json;
+use serde_json::{json, Value};
 
 #[tokio::test]
 async fn admin_requires_token_and_rejects_cookie_accepts_header() {
@@ -263,44 +263,144 @@ async fn admin_onboarding_scripts_are_served() {
 }
 
 #[tokio::test]
-async fn me_patch_updates_profile_validates_and_hints() {
+async fn me_patch_is_pending_until_the_owner_approves() {
     let t = start().await;
     let a = t.add_ws("Alpha").await;
     let b = t.add_ws("Beta").await;
     t.rules(json!([rule(&a, &b, [true, false, false, false])]))
         .await;
+    let before = t.inbox(&b).await.len();
     let (s, v) = t
         .call(
             &a,
             "PATCH",
             "/v1/me",
-            Some(json!({"description": "Builds reports.", "tags": ["data", "work"]})),
+            Some(
+                json!({"description": "Builds reports. Größe ✓ 日本語", "tags": ["data", "work"]}),
+            ),
         )
         .await;
-    assert_eq!(s, 200, "{v}");
-    assert_eq!(v["description"], "Builds reports.");
-    assert_eq!(v["tags"], json!(["data", "work"]));
-    assert_eq!(v["id"], json!(a.id));
-    assert!(v.get("phones").is_some());
-    // same body as whoami
+    assert_eq!(s, 202, "{v}");
+    assert_eq!(v["status"], "pending");
+    // old values stay in effect everywhere
+    assert_eq!(
+        (v["description"].clone(), v["tags"].clone()),
+        (json!("d"), json!(["x"]))
+    );
+    assert_eq!(v["pending"]["tags"], json!(["data", "work"]));
     let (_, w) = t.call(&a, "GET", "/v1/whoami", None).await;
-    assert_eq!(v, w);
-    // the partner gets a refresh-hint
+    assert_eq!(w["description"], "d");
+    assert_eq!(
+        w["pending"]["description"],
+        "Builds reports. Größe ✓ 日本語"
+    );
+    assert!(w.get("description_by").is_none());
+    let (_, d) = t.call(&b, "GET", "/v1/refresh", None).await;
+    assert_eq!(d["workspaces"]["workspaces"][0]["description"], "d");
+    assert_eq!(t.inbox(&b).await.len(), before, "no hint while pending");
+    // admin sees it
+    let (_, l) = t.admin_json("GET", "/admin/api/workspaces", None).await;
+    let row = l["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["id"] == json!(a.id))
+        .unwrap();
+    assert_eq!(row["pending"]["tags"], json!(["data", "work"]));
+    // a new proposal replaces the old one (only the given field is proposed)
+    let (s, v) = t
+        .call(&a, "PATCH", "/v1/me", Some(json!({"tags": ["x2"]})))
+        .await;
+    assert_eq!(s, 202);
+    assert_eq!(v["pending"]["description"], Value::Null);
+    assert_eq!(v["pending"]["tags"], json!(["x2"]));
+    // reject keeps the old values
+    let base = format!("/admin/api/workspaces/{}/profile", a.id);
+    let rev0 = v["pending"]["rev"].clone();
+    // bound to the exact proposal: a newer one makes the old rev stale (409)
+    let (_, v2) = t
+        .call(&a, "PATCH", "/v1/me", Some(json!({"tags": ["x3"]})))
+        .await;
+    assert_ne!(v2["pending"]["rev"], rev0);
+    let (s, _) = t
+        .admin_json(
+            "POST",
+            &format!("{base}/approve"),
+            Some(json!({"rev": rev0})),
+        )
+        .await;
+    assert_eq!(s, 409);
+    assert_eq!(
+        t.admin_json("POST", &format!("{base}/reject"), None)
+            .await
+            .0,
+        422
+    );
+    let (s, _) = t
+        .admin_json(
+            "POST",
+            &format!("{base}/reject"),
+            Some(json!({"rev": v2["pending"]["rev"]})),
+        )
+        .await;
+    assert_eq!(s, 204);
+    let (_, w) = t.call(&a, "GET", "/v1/whoami", None).await;
+    assert_eq!(
+        (w["tags"].clone(), w["pending"].clone()),
+        (json!(["x"]), Value::Null)
+    );
+    let r = json!({"rev": "x"});
+    for what in ["reject", "approve"] {
+        let (s, _) = t
+            .admin_json("POST", &format!("{base}/{what}"), Some(r.clone()))
+            .await;
+        assert_eq!(s, 404, "{what}");
+    }
+    // approve: becomes live, marked as written by the workspace, partners get a hint
+    let (_, p) = t
+        .call(
+            &a,
+            "PATCH",
+            "/v1/me",
+            Some(json!({"description": "New text", "tags": ["data"]})),
+        )
+        .await;
+    let (s, c) = t
+        .admin_json(
+            "POST",
+            &format!("{base}/approve"),
+            Some(json!({"rev": p["pending"]["rev"]})),
+        )
+        .await;
+    assert_eq!(s, 200, "{c}");
+    assert_eq!(c["description"], "New text");
+    let (_, w) = t.call(&a, "GET", "/v1/whoami", None).await;
+    assert_eq!(
+        (
+            w["description"].clone(),
+            w["tags"].clone(),
+            w["pending"].clone()
+        ),
+        (json!("New text"), json!(["data"]), Value::Null)
+    );
+    let (_, d) = t.call(&b, "GET", "/v1/refresh", None).await;
+    let ws = &d["workspaces"]["workspaces"][0];
+    assert_eq!(
+        (
+            ws["description"].clone(),
+            ws["description_by"].clone(),
+            ws["tags_by"].clone()
+        ),
+        (json!("New text"), json!("workspace"), json!("workspace"))
+    );
     assert!(t
         .inbox(&b)
         .await
         .iter()
         .any(|m| m["type"] == "refresh-hint"));
-    // partial update keeps the rest
-    let (s, v) = t
-        .call(&a, "PATCH", "/v1/me", Some(json!({"tags": ["x"]})))
-        .await;
-    assert_eq!(
-        (s, v["description"].clone()),
-        (200, json!("Builds reports."))
-    );
-    // limits
+    // limits and auth
     for bad in [
+        json!({}),
         json!({"description": "x".repeat(281)}),
         json!({"tags": ["a","b","c","d","e","f","g","h","i"]}),
         json!({"tags": ["x".repeat(25)]}),
@@ -314,7 +414,26 @@ async fn me_patch_updates_profile_validates_and_hints() {
         token: "nope".into(),
     };
     assert_eq!(
-        t.call(&bad, "PATCH", "/v1/me", Some(json!({}))).await.0,
+        t.call(&bad, "PATCH", "/v1/me", Some(json!({"tags": ["x"]})))
+            .await
+            .0,
+        401
+    );
+    // rotating the token drops a pending proposal
+    t.call(&a, "PATCH", "/v1/me", Some(json!({"tags": ["y"]})))
+        .await;
+    let (_, r) = t
+        .admin_json(
+            "POST",
+            &format!("/admin/api/workspaces/{}/token", a.id),
+            None,
+        )
+        .await;
+    assert!(r["token"].is_string());
+    assert_eq!(
+        t.call(&a, "PATCH", "/v1/me", Some(json!({"tags": ["x"]})))
+            .await
+            .0,
         401
     );
 }
@@ -380,6 +499,11 @@ async fn profile_text_is_validated_for_workspace_and_admin_and_marked() {
         json!({"description": "a\u{202e}b"}),
         json!({"description": "a\u{85}b"}),
         json!({"description": "a\u{200b}b"}),
+        json!({"description": "a\u{fe0f}b"}),
+        json!({"description": "a\u{34f}b"}),
+        json!({"description": "a\u{3164}b"}),
+        json!({"description": "a\u{2800}b"}),
+        json!({"description": "e\u{301}\u{302}\u{303}\u{304}"}),
         json!({"tags": ["Data"]}),
         json!({"tags": ["a b"]}),
         json!({"tags": ["a\nb"]}),
@@ -400,16 +524,25 @@ async fn profile_text_is_validated_for_workspace_and_admin_and_marked() {
     }
     let (_, d) = t.call(&b, "GET", "/v1/refresh", None).await;
     let w = &d["workspaces"]["workspaces"][0];
-    assert_eq!(w["profile_by"], "admin");
-    t.call(
-        &a,
-        "PATCH",
-        "/v1/me",
-        Some(json!({"description": "Reports", "tags": ["data-1"]})),
+    assert_eq!(
+        (w["description_by"].clone(), w["tags_by"].clone()),
+        (json!("admin"), json!("admin"))
+    );
+    // admin edits mark only the edited field
+    let (_, p) = t
+        .call(
+            &a,
+            "PATCH",
+            "/v1/me",
+            Some(json!({"description": "Reports", "tags": ["data-1"]})),
+        )
+        .await;
+    t.admin_json(
+        "POST",
+        &format!("/admin/api/workspaces/{}/profile/approve", a.id),
+        Some(json!({"rev": p["pending"]["rev"]})),
     )
     .await;
-    let (_, d) = t.call(&b, "GET", "/v1/refresh", None).await;
-    assert_eq!(d["workspaces"]["workspaces"][0]["profile_by"], "workspace");
     let (s, _) = t
         .admin_json(
             "PATCH",
@@ -419,8 +552,13 @@ async fn profile_text_is_validated_for_workspace_and_admin_and_marked() {
         .await;
     assert_eq!(s, 200);
     let (_, d) = t.call(&b, "GET", "/v1/refresh", None).await;
-    assert_eq!(d["workspaces"]["workspaces"][0]["profile_by"], "admin");
-    // whoami body stays unchanged (no profile_by)
-    let (_, me) = t.call(&a, "GET", "/v1/whoami", None).await;
-    assert!(me.get("profile_by").is_none());
+    let w = &d["workspaces"]["workspaces"][0];
+    assert_eq!(
+        (
+            w["description"].clone(),
+            w["description_by"].clone(),
+            w["tags_by"].clone()
+        ),
+        (json!("By admin"), json!("admin"), json!("workspace"))
+    );
 }

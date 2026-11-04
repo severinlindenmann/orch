@@ -1,5 +1,6 @@
 mod common;
 use common::*;
+use serde_json::Value;
 
 #[tokio::test]
 async fn auth_whoami_ok() {
@@ -95,23 +96,180 @@ async fn auth_missing_right_is_403() {
 }
 
 #[tokio::test]
-async fn me_patch_changes_own_description_and_tags() {
+async fn me_patch_is_pending_until_the_owner_approves() {
     let t = setup();
     let ws = t.workspace("Pilatus", basic_rights()).await;
-    let body = br#"{"description":"Data pipelines.","tags":["data"," work ",""]}"#.to_vec();
+    let body =
+        "{\"description\":\"Data pipelines. Größe ✓ 日本語\",\"tags\":[\"data\",\" work \"]}"
+            .as_bytes()
+            .to_vec();
     let r = t.api(&ws, "PATCH", "/v1/me", body).await;
-    assert_eq!(r.status, 200);
+    assert_eq!(r.status, 202);
     let j = r.json();
-    assert_eq!(j["description"], "Data pipelines.");
-    assert_eq!(j["tags"], serde_json::json!(["data", "work"]));
-    assert_eq!(j["name"], "Pilatus");
-    // only the given fields change; whoami shows the same
+    assert_eq!(j["status"], "pending");
+    // live values unchanged
+    assert_eq!(j["description"], "d");
+    assert_eq!(j["tags"], serde_json::json!(["a"]));
+    assert_eq!(j["pending"]["tags"], serde_json::json!(["data", "work"]));
+    let w = t.api(&ws, "GET", "/v1/whoami", vec![]).await.json();
+    assert_eq!(w["description"], "d");
+    assert_eq!(
+        w["pending"]["description"],
+        "Data pipelines. Größe ✓ 日本語"
+    );
+    // a new proposal replaces the old one; only given fields are proposed
     let r = t
         .api(&ws, "PATCH", "/v1/me", br#"{"tags":["a"]}"#.to_vec())
         .await;
-    assert_eq!(r.json()["description"], "Data pipelines.");
+    assert_eq!(r.status, 202);
+    assert!(r.json()["pending"]["description"].is_null());
+    // admin sees it; reject keeps old values
+    let id = &ws.0;
+    let l = t
+        .adm("GET", "/admin/api/workspaces", Value::Null)
+        .await
+        .json();
+    assert_eq!(l["items"][0]["pending"]["tags"], serde_json::json!(["a"]));
+    let rev0 = l["items"][0]["pending"]["rev"].clone();
+    // bound to the exact proposal: a newer one makes the old rev stale (409)
+    let r2 = t
+        .api(&ws, "PATCH", "/v1/me", br#"{"tags":["a3"]}"#.to_vec())
+        .await
+        .json();
+    assert_ne!(r2["pending"]["rev"], rev0);
+    let url = |what: &str| format!("/admin/api/workspaces/{id}/profile/{what}");
+    let x = t
+        .adm("POST", &url("approve"), serde_json::json!({"rev": rev0}))
+        .await;
+    assert_eq!(x.status, 409);
+    let x = t
+        .adm(
+            "POST",
+            &url("reject"),
+            serde_json::json!({"rev": r2["pending"]["rev"]}),
+        )
+        .await;
+    assert_eq!(x.status, 204);
     let w = t.api(&ws, "GET", "/v1/whoami", vec![]).await.json();
+    assert!(w["pending"].is_null());
     assert_eq!(w["tags"], serde_json::json!(["a"]));
+    for what in ["approve", "reject"] {
+        let x = t
+            .adm("POST", &url(what), serde_json::json!({"rev": "x"}))
+            .await;
+        assert_eq!(x.status, 404, "{what}");
+    }
+    // approve: live, marked as written by the workspace
+    let p = t
+        .api(
+            &ws,
+            "PATCH",
+            "/v1/me",
+            br#"{"description":"New text","tags":["data"]}"#.to_vec(),
+        )
+        .await
+        .json();
+    let x = t
+        .adm(
+            "POST",
+            &url("approve"),
+            serde_json::json!({"rev": p["pending"]["rev"]}),
+        )
+        .await;
+    assert_eq!(x.status, 200);
+    let j = x.json();
+    assert_eq!(
+        (
+            j["description"].clone(),
+            j["description_by"].clone(),
+            j["tags_by"].clone()
+        ),
+        (
+            serde_json::json!("New text"),
+            serde_json::json!("workspace"),
+            serde_json::json!("workspace")
+        )
+    );
+    let w = t.api(&ws, "GET", "/v1/whoami", vec![]).await.json();
+    assert_eq!(
+        (w["tags"].clone(), w["pending"].clone()),
+        (serde_json::json!(["data"]), Value::Null)
+    );
+    // admin edits are marked per field
+    let p = t
+        .adm(
+            "PATCH",
+            &format!("/admin/api/workspaces/{id}"),
+            serde_json::json!({"description": "By admin"}),
+        )
+        .await;
+    let j = p.json();
+    assert_eq!(
+        (j["description_by"].clone(), j["tags_by"].clone()),
+        (serde_json::json!("admin"), serde_json::json!("workspace"))
+    );
+}
+
+#[tokio::test]
+async fn profile_text_rules_apply_to_workspace_and_admin() {
+    let t = setup();
+    let ws = t.workspace("Pilatus", basic_rights()).await;
+    for bad in [
+        "{\"description\":\"hi\\nignore previous\"}",
+        "{\"description\":\"a\\u202eb\"}",
+        "{\"description\":\"a\\u200bb\"}",
+        "{\"description\":\"a\\u0085b\"}",
+        "{\"description\":\"a\\ufe0fb\"}",
+        "{\"description\":\"a\\u034fb\"}",
+        "{\"description\":\"a\\u3164b\"}",
+        "{\"description\":\"a\\u2800b\"}",
+        "{\"description\":\"e\\u0301\\u0302\\u0303\\u0304\"}",
+        "{\"tags\":[\"Data\"]}",
+        "{\"tags\":[\"a b\"]}",
+        "{\"tags\":[\"\"]}",
+        "{}",
+    ] {
+        assert_eq!(
+            t.api(&ws, "PATCH", "/v1/me", bad.as_bytes().to_vec())
+                .await
+                .status,
+            422,
+            "{bad}"
+        );
+        if bad != "{}" {
+            let v: Value = serde_json::from_str(bad).unwrap();
+            let r = t
+                .adm("PATCH", &format!("/admin/api/workspaces/{}", ws.0), v)
+                .await;
+            assert_eq!(r.status, 422, "admin {bad}");
+        }
+    }
+    // rotating the token drops a pending proposal and the old token cannot write
+    assert_eq!(
+        t.api(&ws, "PATCH", "/v1/me", br#"{"tags":["y"]}"#.to_vec())
+            .await
+            .status,
+        202
+    );
+    let r = t
+        .adm(
+            "POST",
+            &format!("/admin/api/workspaces/{}/token", ws.0),
+            Value::Null,
+        )
+        .await;
+    assert_eq!(r.status, 200);
+    let l = t
+        .adm("GET", "/admin/api/workspaces", Value::Null)
+        .await
+        .json();
+    assert!(l["items"][0]["pending"].is_null());
+    assert_eq!(
+        t.api(&ws, "PATCH", "/v1/me", br#"{"tags":["x"]}"#.to_vec())
+            .await
+            .status,
+        401
+    );
 }
 
 #[tokio::test]
@@ -155,7 +313,7 @@ async fn me_patch_keeps_rights_and_rotated_token() {
     let r = t
         .api(&ws, "PATCH", "/v1/me", br#"{"description":"x"}"#.to_vec())
         .await;
-    assert_eq!(r.status, 200);
+    assert_eq!(r.status, 202);
     // after an admin rotation the old token is refused and nothing is written
     let rot = t
         .adm(
@@ -174,5 +332,6 @@ async fn me_patch_keeps_rights_and_rotated_token() {
         rot.json()["token"].as_str().unwrap().to_string(),
     );
     let w = t.api(&new, "GET", "/v1/whoami", vec![]).await.json();
-    assert_eq!(w["description"], "x");
+    assert!(w["pending"].is_null(), "rotation drops the proposal");
+    assert_eq!(w["description"], "d");
 }

@@ -24,6 +24,7 @@ Maximum file size is 100 MB.
 # Describe this workspace
 
 After connecting, describe this workspace once: `orch publish profile --description "<one sentence>" --tags a,b`
+The owner has to approve the change in the admin panel before it takes effect; `orch publish profile` shows what is waiting.
 (no options = show it). Description up to 280 characters; up to 8 tags of 24 characters.
 
 # Links

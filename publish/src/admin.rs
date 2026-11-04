@@ -23,6 +23,14 @@ pub fn router(st: State) -> Router {
             patch(ws_patch).delete(ws_delete),
         )
         .route("/admin/api/workspaces/:id/token", post(ws_token))
+        .route(
+            "/admin/api/workspaces/:id/profile/approve",
+            post(profile_approve),
+        )
+        .route(
+            "/admin/api/workspaces/:id/profile/reject",
+            post(profile_reject),
+        )
         .route("/admin/api/files", get(files_list))
         .route("/admin/api/files/:id", delete(file_delete))
         .route("/admin/api/apps", get(apps_list))
@@ -87,7 +95,8 @@ pub fn prompt(st: &State, id: &str, token: &str) -> String {
 }
 
 fn ws_json(w: &Workspace) -> Value {
-    json!({"id": w.id, "name": w.name, "description": w.description, "tags": w.tags, "rights": w.rights})
+    json!({"id": w.id, "name": w.name, "description": w.description, "tags": w.tags, "rights": w.rights,
+        "description_by": w.description_by, "tags_by": w.tags_by, "pending": db::Pending::json(&w.pending)})
 }
 
 async fn ws_list(St(st): St<State>, h: HeaderMap, Query(q): Query<Q>) -> ApiResult<Json<Value>> {
@@ -116,11 +125,12 @@ struct NewWs {
     rights: Option<Rights>,
 }
 
-fn clean_tags(t: Vec<String>) -> Vec<String> {
-    t.into_iter()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
+fn clean_tags(t: Vec<String>) -> ApiResult<Vec<String>> {
+    util::valid_tags(&t).map_err(ApiError::invalid)
+}
+
+fn clean_description(d: &str) -> ApiResult<String> {
+    util::valid_description(d).map_err(ApiError::invalid)
 }
 
 async fn ws_create(St(st): St<State>, h: HeaderMap, Json(b): Json<NewWs>) -> ApiResult<Response> {
@@ -132,8 +142,8 @@ async fn ws_create(St(st): St<State>, h: HeaderMap, Json(b): Json<NewWs>) -> Api
     let w = Workspace {
         id: format!("ws_{}", util::rand_id(10)),
         name: b.name.trim().into(),
-        description: b.description,
-        tags: clean_tags(b.tags),
+        description: clean_description(&b.description)?,
+        tags: clean_tags(b.tags)?,
         rights: b.rights.unwrap_or(Rights {
             files: true,
             apps: true,
@@ -141,6 +151,9 @@ async fn ws_create(St(st): St<State>, h: HeaderMap, Json(b): Json<NewWs>) -> Api
             public: false,
         }),
         token_hash: util::sha256_hex(&token),
+        description_by: "admin".into(),
+        tags_by: "admin".into(),
+        pending: None,
     };
     db::insert_workspace(&st.db.lock().unwrap(), &w, &util::now())?;
     let p = prompt(&st, &w.id, &token);
@@ -179,16 +192,61 @@ async fn ws_patch(
         w.name = n.trim().into();
     }
     if let Some(d) = b.description {
-        w.description = d;
+        w.description = clean_description(&d)?;
+        w.description_by = "admin".into();
     }
     if let Some(t) = b.tags {
-        w.tags = clean_tags(t);
+        w.tags = clean_tags(t)?;
+        w.tags_by = "admin".into();
     }
     if let Some(r) = b.rights {
         w.rights = r;
     }
     db::update_workspace(&st.db.lock().unwrap(), &w)?;
     Ok(Json(ws_json(&w)))
+}
+
+/// The `rev` of the proposal the owner looked at; approve/reject only act on exactly that one.
+#[derive(Deserialize)]
+struct Rev {
+    rev: String,
+}
+
+fn stale_or_none(st: &State, id: &str) -> ApiError {
+    match db::get_workspace(&st.db.lock().unwrap(), id) {
+        Ok(Some(w)) if w.pending.is_some() => {
+            ApiError::new(409, "conflict", "This change was replaced, review again.")
+        }
+        _ => ApiError::not_found("There is no change to review."),
+    }
+}
+
+/// Owner approves the workspace's proposed description/tags: they become live.
+async fn profile_approve(
+    St(st): St<State>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    Json(b): Json<Rev>,
+) -> ApiResult<Json<Value>> {
+    check(&st, &h)?;
+    if db::approve_pending(&st.db.lock().unwrap(), &id, &b.rev)? == 0 {
+        return Err(stale_or_none(&st, &id));
+    }
+    Ok(Json(ws_json(&get_ws(&st, &id)?)))
+}
+
+/// Owner rejects it: the old values stay, the proposal is dropped.
+async fn profile_reject(
+    St(st): St<State>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    Json(b): Json<Rev>,
+) -> ApiResult<StatusCode> {
+    check(&st, &h)?;
+    if db::reject_pending(&st.db.lock().unwrap(), &id, &b.rev)? == 0 {
+        return Err(stale_or_none(&st, &id));
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn ws_token(
@@ -200,7 +258,9 @@ async fn ws_token(
     let mut w = get_ws(&st, &id)?;
     let token = util::rand_token("orp_", 32);
     w.token_hash = util::sha256_hex(&token);
-    db::update_workspace(&st.db.lock().unwrap(), &w)?;
+    let c = st.db.lock().unwrap();
+    db::update_workspace(&c, &w)?;
+    db::clear_pending(&c, &id)?;
     Ok(Json(
         json!({"token": token, "prompt": prompt(&st, &id, &token)}),
     ))

@@ -28,12 +28,13 @@
         },
         "max_file_mb": 100,
         "default_days": 7,
-        "max_days": 90
+        "max_days": 90,
+        "pending": null
       }
     }
   },
   {
-    "_note": "A workspace changes its own description and tags (both optional, only the given fields change). Same response as whoami.",
+    "_note": "A workspace proposes a new description and tags (both optional). The owner must approve in the admin panel; until then the old values stay. Response = whoami plus status.",
     "request": {
       "method": "PATCH",
       "path": "/v1/me",
@@ -51,14 +52,13 @@
       }
     },
     "response": {
-      "status": 200,
+      "status": 202,
       "body": {
         "id": "ws_pilatus001",
         "name": "Pilatus Workspace",
-        "description": "Ingestion jobs and data pipelines.",
+        "description": "Ingestion jobs.",
         "tags": [
-          "data",
-          "work"
+          "data"
         ],
         "rights": {
           "files": true,
@@ -68,7 +68,17 @@
         },
         "max_file_mb": 100,
         "default_days": 7,
-        "max_days": 90
+        "max_days": 90,
+        "pending": {
+          "description": "Ingestion jobs and data pipelines.",
+          "tags": [
+            "data",
+            "work"
+          ],
+          "at": "2026-11-04T13:05:00Z",
+          "rev": "k3j9x2v7b1m4"
+        },
+        "status": "pending"
       }
     }
   },

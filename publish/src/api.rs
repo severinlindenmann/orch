@@ -55,6 +55,7 @@ pub fn auth(st: &State, h: &HeaderMap) -> ApiResult<Workspace> {
 fn who_json(st: &State, w: &Workspace) -> Value {
     json!({
         "id": w.id, "name": w.name, "description": w.description, "tags": w.tags, "rights": w.rights,
+        "pending": db::Pending::json(&w.pending),
         "max_file_mb": st.cfg.max_file_mb, "default_days": st.cfg.default_days, "max_days": st.cfg.max_days,
     })
 }
@@ -70,41 +71,50 @@ pub struct MeBody {
     tags: Option<Vec<String>>,
 }
 
-/// PATCH /v1/me: a workspace changes its own description and tags.
-pub async fn me_patch(St(st): St<State>, h: HeaderMap, body: Bytes) -> ApiResult<Json<Value>> {
-    let mut w = auth(&st, &h)?;
+/// PATCH /v1/me: a workspace proposes a new description and/or tags. Nothing changes until the owner approves
+/// in the admin panel; one pending change per workspace, a new one replaces it.
+pub async fn me_patch(
+    St(st): St<State>,
+    h: HeaderMap,
+    body: Bytes,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    let w = auth(&st, &h)?;
     let b: MeBody = serde_json::from_slice(&body).map_err(|_| {
         ApiError::invalid(
             "The body must be JSON like {\"description\": \"...\", \"tags\": [\"a\"]}.",
         )
     })?;
-    if let Some(d) = b.description {
-        if d.chars().count() > 280 {
-            return Err(ApiError::invalid(
-                "The description is at most 280 characters.",
-            ));
-        }
-        w.description = d.trim().to_string();
+    if b.description.is_none() && b.tags.is_none() {
+        return Err(ApiError::invalid("Send a description and/or tags."));
     }
-    if let Some(t) = b.tags {
-        let t: Vec<String> = t
-            .into_iter()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        if t.len() > 8 || t.iter().any(|s| s.chars().count() > 24) {
-            return Err(ApiError::invalid(
-                "Use at most 8 tags, each at most 24 characters.",
-            ));
-        }
-        w.tags = t;
-    }
+    let desc = b
+        .description
+        .map(|d| util::valid_description(&d))
+        .transpose()
+        .map_err(ApiError::invalid)?;
+    let tags = b
+        .tags
+        .map(|t| util::valid_tags(&t))
+        .transpose()
+        .map_err(ApiError::invalid)?;
     let c = st.db.lock().unwrap();
-    if db::update_profile(&c, &w)? == 0 {
+    // Guarded write: only while the token that authenticated this call is still current.
+    if db::set_pending(
+        &c,
+        &w.id,
+        &w.token_hash,
+        desc.as_deref(),
+        tags.as_deref(),
+        &util::now(),
+        &util::rand_id(12),
+    )? == 0
+    {
         return Err(ApiError::unauthorized());
     }
     let fresh = db::get_workspace(&c, &w.id)?.ok_or_else(ApiError::unauthorized)?;
-    Ok(Json(who_json(&st, &fresh)))
+    let mut out = who_json(&st, &fresh);
+    out["status"] = "pending".into();
+    Ok((StatusCode::ACCEPTED, Json(out)))
 }
 
 pub async fn files_post(

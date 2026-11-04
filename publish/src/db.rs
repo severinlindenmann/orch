@@ -22,6 +22,30 @@ pub struct Workspace {
     pub tags: Vec<String>,
     pub rights: Rights,
     pub token_hash: String,
+    /// Who wrote the live description / tags: "admin" or "workspace" (owner-approved).
+    pub description_by: String,
+    pub tags_by: String,
+    /// The change the workspace proposed for itself, waiting for the owner.
+    pub pending: Option<Pending>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pending {
+    pub description: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub at: String,
+    pub rev: String,
+}
+
+impl Pending {
+    pub fn json(p: &Option<Pending>) -> serde_json::Value {
+        match p {
+            Some(p) => {
+                serde_json::json!({"description": p.description, "tags": p.tags, "at": p.at, "rev": p.rev})
+            }
+            None => serde_json::Value::Null,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -57,7 +81,9 @@ pub fn open(path: &std::path::Path) -> rusqlite::Result<Connection> {
          CREATE TABLE IF NOT EXISTS workspaces(
             id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
             tags TEXT NOT NULL DEFAULT '[]', rights TEXT NOT NULL, token_hash TEXT NOT NULL,
-            created_at TEXT NOT NULL);
+            created_at TEXT NOT NULL,
+            description_by TEXT NOT NULL DEFAULT 'workspace', tags_by TEXT NOT NULL DEFAULT 'workspace',
+            pending_description TEXT, pending_tags TEXT, pending_at TEXT, pending_rev TEXT);
          CREATE TABLE IF NOT EXISTS files(
             id TEXT PRIMARY KEY, workspace TEXT NOT NULL, size INTEGER NOT NULL,
             created_at TEXT NOT NULL, expires_at TEXT);
@@ -68,6 +94,17 @@ pub fn open(path: &std::path::Path) -> rusqlite::Result<Connection> {
             code_dir TEXT NOT NULL, view_token_hash TEXT, expires_at TEXT,
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL);",
     )?;
+    // Older databases: add the profile columns (ignore "duplicate column"). Existing rows count as written by the workspace.
+    for col in [
+        "description_by TEXT NOT NULL DEFAULT 'workspace'",
+        "tags_by TEXT NOT NULL DEFAULT 'workspace'",
+        "pending_description TEXT",
+        "pending_tags TEXT",
+        "pending_at TEXT",
+        "pending_rev TEXT",
+    ] {
+        let _ = c.execute(&format!("ALTER TABLE workspaces ADD COLUMN {col}"), []);
+    }
     Ok(c)
 }
 
@@ -81,9 +118,22 @@ fn ws_from(r: &Row) -> rusqlite::Result<Workspace> {
         tags: serde_json::from_str(&tags).unwrap_or_default(),
         rights: serde_json::from_str(&rights).unwrap_or_default(),
         token_hash: r.get(5)?,
+        description_by: r.get(6)?,
+        tags_by: r.get(7)?,
+        pending: match r.get::<_, Option<String>>(10)? {
+            Some(at) => Some(Pending {
+                description: r.get(8)?,
+                tags: r
+                    .get::<_, Option<String>>(9)?
+                    .map(|t| serde_json::from_str(&t).unwrap_or_default()),
+                at,
+                rev: r.get::<_, Option<String>>(11)?.unwrap_or_default(),
+            }),
+            None => None,
+        },
     })
 }
-const WS_COLS: &str = "id,name,description,tags,rights,token_hash";
+const WS_COLS: &str = "id,name,description,tags,rights,token_hash,description_by,tags_by,pending_description,pending_tags,pending_at,pending_rev";
 
 pub fn get_workspace(c: &Connection, id: &str) -> rusqlite::Result<Option<Workspace>> {
     c.query_row(
@@ -96,7 +146,7 @@ pub fn get_workspace(c: &Connection, id: &str) -> rusqlite::Result<Option<Worksp
 
 pub fn insert_workspace(c: &Connection, w: &Workspace, now: &str) -> rusqlite::Result<()> {
     c.execute(
-        "INSERT INTO workspaces(id,name,description,tags,rights,token_hash,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+        "INSERT INTO workspaces(id,name,description,tags,rights,token_hash,created_at,description_by,tags_by) VALUES(?1,?2,?3,?4,?5,?6,?7,'admin','admin')",
         params![
             w.id,
             w.name,
@@ -110,31 +160,73 @@ pub fn insert_workspace(c: &Connection, w: &Workspace, now: &str) -> rusqlite::R
     Ok(())
 }
 
+/// Rotating the token also drops a pending proposal.
+pub fn clear_pending(c: &Connection, id: &str) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE workspaces SET pending_description=NULL,pending_tags=NULL,pending_at=NULL,pending_rev=NULL WHERE id=?1",
+        [id],
+    )?;
+    Ok(())
+}
+
 pub fn update_workspace(c: &Connection, w: &Workspace) -> rusqlite::Result<()> {
     c.execute(
-        "UPDATE workspaces SET name=?2,description=?3,tags=?4,rights=?5,token_hash=?6 WHERE id=?1",
+        "UPDATE workspaces SET name=?2,description=?3,tags=?4,rights=?5,token_hash=?6,description_by=?7,tags_by=?8 WHERE id=?1",
         params![
             w.id,
             w.name,
             w.description,
             serde_json::to_string(&w.tags).unwrap(),
             serde_json::to_string(&w.rights).unwrap(),
-            w.token_hash
+            w.token_hash,
+            w.description_by,
+            w.tags_by
         ],
     )?;
     Ok(())
 }
 
-/// Only description and tags, and only while the token is still the one that authenticated. Returns rows changed.
-pub fn update_profile(c: &Connection, w: &Workspace) -> rusqlite::Result<usize> {
+/// Store a proposed description/tags (replacing an earlier proposal), only while the token is still the one
+/// that authenticated. Returns rows changed. Nothing live changes until the owner approves.
+pub fn set_pending(
+    c: &Connection,
+    id: &str,
+    token_hash: &str,
+    description: Option<&str>,
+    tags: Option<&[String]>,
+    at: &str,
+    rev: &str,
+) -> rusqlite::Result<usize> {
     c.execute(
-        "UPDATE workspaces SET description=?2,tags=?3 WHERE id=?1 AND token_hash=?4",
+        "UPDATE workspaces SET pending_description=?3,pending_tags=?4,pending_at=?5,pending_rev=?6 WHERE id=?1 AND token_hash=?2",
         params![
-            w.id,
-            w.description,
-            serde_json::to_string(&w.tags).unwrap(),
-            w.token_hash
+            id,
+            token_hash,
+            description,
+            tags.map(|t| serde_json::to_string(t).unwrap()),
+            at,
+            rev
         ],
+    )
+}
+
+/// Pending becomes live (marked "workspace"). Returns rows changed (0 = nothing pending).
+pub fn approve_pending(c: &Connection, id: &str, rev: &str) -> rusqlite::Result<usize> {
+    c.execute(
+        "UPDATE workspaces SET
+           description_by=CASE WHEN pending_description IS NULL THEN description_by ELSE 'workspace' END,
+           tags_by=CASE WHEN pending_tags IS NULL THEN tags_by ELSE 'workspace' END,
+           description=COALESCE(pending_description,description), tags=COALESCE(pending_tags,tags),
+           pending_description=NULL, pending_tags=NULL, pending_at=NULL, pending_rev=NULL
+         WHERE id=?1 AND pending_rev=?2",
+        [id, rev],
+    )
+}
+
+pub fn reject_pending(c: &Connection, id: &str, rev: &str) -> rusqlite::Result<usize> {
+    c.execute(
+        "UPDATE workspaces SET pending_description=NULL,pending_tags=NULL,pending_at=NULL,pending_rev=NULL WHERE id=?1 AND pending_rev=?2",
+        [id, rev],
     )
 }
 
@@ -161,9 +253,9 @@ pub fn list_workspaces(
         .query_map(params![after.unwrap_or(i64::MAX), limit + 1], |r| {
             Ok((
                 ws_from(r)?,
-                r.get::<_, i64>(6)?,
-                r.get::<_, i64>(7)?,
-                r.get::<_, i64>(8)?,
+                r.get::<_, i64>(12)?,
+                r.get::<_, i64>(13)?,
+                r.get::<_, i64>(14)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;

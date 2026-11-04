@@ -141,16 +141,51 @@
 
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
+  // The change a workspace proposed for itself: current vs proposed, Approve / Reject (bound to this exact proposal).
+  function reviewCard(w, i) {
+    const p = w.pending, list = t => (t && t.length ? t.join(', ') : 'none');
+    const line = (label, now, next) => `<div class="review-line"><strong>${label}</strong><p class="muted">Now: ${esc(now)}</p><p>Proposed: ${esc(next)}</p></div>`;
+    const special = /[^\x00-\x7f]/.test(p.description || '') ? '<p class="muted">Contains special characters.</p>' : '';
+    return `<section class="review" data-review="${i}" role="group" aria-label="Change to review for ${esc(w.name)}"><h4>${esc(w.name)} wants to change how it is described</h4>${p.description !== null && p.description !== undefined ? line('Description', w.description || 'none', p.description) : ''}${p.tags ? line('Tags', list(w.tags), list(p.tags)) : ''}${special}<p class="muted">The old text stays in use until you approve.</p><div class="actions"><button class="primary" data-act="approve">Approve</button><button data-act="reject">Reject</button></div><p class="review-result" role="status"></p></section>`;
+  }
+
+  function bindReview(box, w) {
+    const result = box.querySelector('.review-result');
+    box.querySelectorAll('[data-act]').forEach(button => button.addEventListener('click', async () => {
+      if (box.dataset.busy) return;
+      box.dataset.busy = '1';
+      const label = button.textContent;
+      button.textContent = button.dataset.act === 'approve' ? 'Approving…' : 'Rejecting…';
+      button.setAttribute('aria-busy', 'true');
+      box.querySelectorAll('button').forEach(b => { b.disabled = true; });
+      result.classList.remove('field-error');
+      try {
+        await api(`${path('workspaces', w.id)}/profile/${button.dataset.act}`, 'POST', { rev: w.pending.rev });
+        box.querySelector('.actions').remove();
+        result.textContent = button.dataset.act === 'approve' ? 'Approved. The new text is now in use.' : 'Rejected. The old text stays.';
+      } catch (error) {
+        if (error === unauthorized) return;
+        result.textContent = error.message;
+        result.classList.add('field-error');
+        button.textContent = label;
+        button.removeAttribute('aria-busy');
+        box.querySelectorAll('button').forEach(b => { b.disabled = false; });
+      } finally { delete box.dataset.busy; }
+    }));
+  }
+
   function showWorkspaces(items) {
     const files = items.reduce((n, w) => n + (Number(w.files) || 0), 0);
     const apps = items.reduce((n, w) => n + (Number(w.apps) || 0), 0);
     view.innerHTML = head('Your workspaces', 'One place for everything your workspaces share.', '<a class="button primary" href="#add">＋ Add workspace</a>') +
+      (items.some(w => w.pending) ? `<p class="notice" role="status">${plural(items.filter(w => w.pending).length, 'change needs', 'changes need')} your review</p>` : '') +
       (items.length ? `<p class="summary-line">${plural(items.length, 'workspace', 'workspaces')} · ${plural(files, 'encrypted file', 'encrypted files')} · ${plural(apps, 'app', 'apps')}</p>` : '') +
       `<div id="editor"></div>${items.length ? `<section class="card">${items.map((w, i) => {
         const rights = w.rights || {};
         const labels = [rights.permanent && 'Permanent files', rights.files && 'Temporary files', rights.apps && 'Apps', rights.public ? 'Public links allowed' : 'Private only'].filter(Boolean);
-        return `<article class="workspace"><div class="avatar">${esc(Array.from(w.name || '?')[0].toUpperCase())}</div><div><h3>${esc(w.name)}</h3>${w.description ? `<p>${esc(w.description)}</p>` : '<p class="muted">No description yet.</p>'}<div class="workspace-tags">${(w.tags || []).map(tag => `<span class="workspace-tag">${esc(tag)}</span>`).join('')}</div><p class="rights">${esc(labels.join(' · '))}</p></div><div class="number">${esc(w.files)}<small>files</small></div><div class="number">${esc(w.apps)}<small>apps</small></div><button class="small" data-edit="${i}" aria-label="Edit ${esc(w.name)}">Edit</button></article>`;
+        return `<article class="workspace"><div class="avatar">${esc(Array.from(w.name || '?')[0].toUpperCase())}</div><div><h3>${esc(w.name)}${w.pending ? ' <span class="badge">Needs your review</span>' : ''}</h3>${w.description ? `<p>${esc(w.description)}</p>` : '<p class="muted">No description yet.</p>'}<div class="workspace-tags">${(w.tags || []).map(tag => `<span class="workspace-tag">${esc(tag)}</span>`).join('')}</div><p class="rights">${esc(labels.join(' · '))}</p>${w.pending ? reviewCard(w, i) : ''}</div><div class="number">${esc(w.files)}<small>files</small></div><div class="number">${esc(w.apps)}<small>apps</small></div><button class="small" data-edit="${i}" aria-label="Edit ${esc(w.name)}">Edit</button></article>`;
       }).join('')}</section>` : '<section class="card empty-card"><h2>No workspaces yet</h2><p>A workspace is one project or person that shares files and apps. Add the first one, then connect your agent to it.</p><a class="button primary" href="#add">＋ Add your first workspace</a></section>'}<div class="helper"><div><b>Private by design.</b> Files are encrypted before they leave your workspace.</div><a href="#files">View files →</a></div>`;
+    view.querySelectorAll('[data-review]').forEach(box => bindReview(box, items[Number(box.dataset.review)]));
     view.querySelectorAll('[data-edit]').forEach(button => button.addEventListener('click', () => edit(items[Number(button.dataset.edit)])));
   }
 
