@@ -314,6 +314,18 @@ async fn me_patch_is_pending_until_the_owner_approves() {
     assert_eq!(s, 202);
     assert_eq!(v["pending"]["description"], Value::Null);
     assert_eq!(v["pending"]["tags"], json!(["x2"]));
+    // a proposal equal to what is in use is a no-op: 200, pending is left alone
+    let (s, v) = t
+        .call(
+            &a,
+            "PATCH",
+            "/v1/me",
+            Some(json!({"description": "d", "tags": ["x"]})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(v["status"], "unchanged");
+    assert_eq!(v["pending"]["tags"], json!(["x2"]));
     // reject keeps the old values
     let base = format!("/admin/api/workspaces/{}/profile", a.id);
     let rev0 = v["pending"]["rev"].clone();

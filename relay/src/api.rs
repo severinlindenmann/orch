@@ -122,6 +122,21 @@ async fn patch_me(
     if desc.is_none() && tags.is_none() {
         return Err(invalid("Send a `description` and/or `tags`."));
     }
+    // A proposal that matches what is already in use changes nothing: answer 200 and store no pending change.
+    let (cur_desc, cur_tags): (String, String) = c.query_row(
+        "SELECT description,tags FROM workspaces WHERE id=?1",
+        [&me],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let same_desc = desc.as_ref().is_none_or(|d| *d == cur_desc);
+    let same_tags = tags
+        .as_ref()
+        .is_none_or(|t| *t == store::parse_list(&cur_tags));
+    if same_desc && same_tags {
+        let mut out = whoami_body(&c, &me)?;
+        out["status"] = "unchanged".into();
+        return Ok((StatusCode::OK, Json(out)));
+    }
     // Only these fields, and only while the token that authenticated this call is still current.
     let cur = auth::bearer(&h).map(token_hash).unwrap_or_default();
     let n = c.execute(

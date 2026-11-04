@@ -314,3 +314,27 @@ body.signedout .footline a{display:none}
 .voice-status{display:flex;gap:8px;align-items:center;margin:0 0 12px;color:var(--muted)}
 .panel-body details>div{padding-top:10px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* UX round 3 */
+:root{--input-border:#5b6572}
+input:not([type=checkbox]),select,textarea{border-color:var(--input-border)}
+.field-error{display:block;margin-top:5px;color:var(--danger);font-size:12px}
+.form-error{flex-wrap:wrap;align-items:center;gap:.4em .8em}
+.form-error[hidden]{display:none}
+.form-error .tech{flex-basis:100%;color:var(--muted)}
+.form-error .tech summary{color:var(--muted)}
+.item-h{font-size:14px;margin:0 0 5px}
+dialog.confirm{background:var(--surface-2);color:var(--text);border:1px solid var(--input-border);border-radius:10px;padding:22px;max-width:min(420px,calc(100vw - 32px))}
+dialog.confirm::backdrop{background:#000a}
+dialog.confirm h2{margin-bottom:8px}
+dialog.confirm .actions{margin-top:18px}
+.danger-btn{background:var(--danger);border-color:var(--danger);color:#1a0505;min-height:44px}
+dialog.confirm button{min-height:44px}
+#toast{max-width:min(90%,520px)}
+@media(max-width:580px){
+ .small{min-height:44px}
+ summary{padding:13px 0;line-height:18px}
+ .quiet-link{display:inline-flex;align-items:center;min-height:44px}
+ .pair-toggle,.checks label,.inline-check{min-height:44px}
+ .menu-btn{min-height:44px}
+}
