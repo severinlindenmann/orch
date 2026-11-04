@@ -56,7 +56,7 @@ def test_connect_wrong_token_is_refused_and_saves_nothing(proj, run, pub):
 
 def test_not_connected(run, proj):
     code, _, err = run("publish", "whoami")
-    assert code == 2 and "Not connected" in err
+    assert code == 2 and "not connected" in err
 
 
 def test_file_share_roundtrip_and_link(proj, run, pub):
@@ -97,7 +97,7 @@ def test_list_and_delete_file(proj, run, pub):
     code, out, _ = run("publish", "list")
     assert fid in out and "key saved" in out
     assert run("publish", "delete", fid)[0] == 0
-    assert run("publish", "list")[1].strip() == "Nothing published."
+    assert run("publish", "list")[1].strip().startswith("Nothing shared yet")
 
 
 def make_app(proj, public="false"):
@@ -210,7 +210,7 @@ def test_net_retries_connection_failures_only(monkeypatch):
         net.call("POST", "http://x.test/a", body={"a": 1})
         raise AssertionError("expected Refused")
     except Refused as e:
-        assert "Cannot reach" in str(e)
+        assert "reach" in str(e)
     assert len(tries) == 4 and sleeps == [1, 2, 4]
 
     tries.clear()

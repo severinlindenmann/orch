@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -72,8 +74,10 @@ def call(
         except (ValueError, AttributeError):
             pass
         raise Refused(msg + (f"\n{out}" if out else "")) from None
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
-        raise Refused(f"Cannot reach {url.split('?')[0]}: {getattr(e, 'reason', e)}") from None
+    except (urllib.error.URLError, TimeoutError, OSError):
+        raise Refused(
+            f"Can't reach {urllib.parse.urlsplit(url).netloc} right now. Check your internet and try again."
+        ) from None
 
 
 def call_json(method: str, url: str, headers: dict | None = None, body=None, timeout: float = 120):
@@ -128,7 +132,12 @@ def read_json(path: Path, default):
 def load_service(root: Path, name: str) -> dict:
     cfg = read_json(secrets_dir(root) / f"{name}.json", None)
     if not isinstance(cfg, dict) or not {"url", "workspace", "token"} <= cfg.keys():
-        raise Refused(f"Not connected. Run: orch {name} connect <url> --workspace ws_... --token ...")
+        what = {"relay": "a relay", "publish": "a publish server"}.get(name, name)
+        raise Refused(
+            f"This folder is not connected to {what} yet. In the admin page, add this workspace and paste "
+            f"the setup prompt it shows into your agent (or run: orch {name} connect <address> "
+            "--workspace <id> --token <token>)."
+        )
     return cfg
 
 
@@ -155,3 +164,55 @@ def connect_service(root: Path, name: str, skill: str, url: str, workspace: str,
     skills.link_claude_skills(root)
     skills.ensure_gitignore(root)
     return who
+
+
+def profile(root: Path, name: str, description: str | None, tags: list[str] | None) -> dict:
+    """Show (no changes given) or change this workspace's own description and tags: PATCH /v1/me."""
+    cfg = load_service(root, name)
+    if description is None and tags is None:
+        return call_json("GET", cfg["url"] + "/v1/whoami", auth_headers(cfg))[1]
+    body: dict = {}
+    if description is not None:
+        description = description.strip()
+        if len(description) > 280:
+            raise Refused("The description can have at most 280 characters.")
+        body["description"] = description
+    if tags is not None:
+        tags = [t.strip() for t in tags if t.strip()]
+        if len(tags) > 8 or any(len(t) > 24 for t in tags):
+            raise Refused("Use at most 8 tags, each up to 24 characters.")
+        body["tags"] = tags
+    return call_json("PATCH", cfg["url"] + "/v1/me", auth_headers(cfg), body, timeout=30)[1]
+
+
+def when(iso: str | None) -> str:
+    """A time in plain words and local time: 'today 21:48', 'tomorrow 21:48', 'Sat 7 Nov 21:48'."""
+    import datetime as dt
+
+    try:
+        t = dt.datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
+    except (ValueError, AttributeError):
+        return str(iso)
+    d = (t.date() - dt.datetime.now().astimezone().date()).days
+    day = {0: "today", 1: "tomorrow", -1: "yesterday"}.get(d) or t.strftime(
+        "%a %-d %b" if sys.platform != "win32" else "%a %d %b"
+    )
+    return f"{day} {t:%H:%M}"
+
+
+def working(text: str):
+    """Show `text` on stderr while a slow step runs (only when a person is watching)."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def _cm():
+        shown = sys.stderr.isatty()
+        if shown:
+            print(text + "...", end="", file=sys.stderr, flush=True)
+        try:
+            yield
+        finally:
+            if shown:
+                print("\r\033[K", end="", file=sys.stderr, flush=True)
+
+    return _cm()

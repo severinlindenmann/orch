@@ -46,6 +46,10 @@ def whoami(root: Path) -> dict:
     return _api(root, "GET", "/v1/whoami")[1]
 
 
+def profile(root: Path, description: str | None, tags: list[str] | None) -> dict:
+    return net.profile(root, "relay", description, tags)
+
+
 # ---- local state --------------------------------------------------------------------------------
 
 
@@ -173,6 +177,15 @@ def resolve(root: Path, target: str) -> str:
         if target.lower() in (w["name"].lower(), w["id"]):
             return w["id"]
     raise Refused(f"No workspace called {target!r}. See .agents/skills/orch-relay/workspaces.json")
+
+
+def name_of(root: Path, ws_id: str) -> str:
+    """A workspace's name from workspaces.json, else the id (phones, admin, unknown)."""
+    wf = root / ".agents" / "skills" / "orch-relay" / "workspaces.json"
+    for w in net.read_json(wf, {}).get("workspaces", []):
+        if w.get("id") == ws_id:
+            return w["name"]
+    return {"phones": "the phones", "admin": "the admin"}.get(ws_id, ws_id)
 
 
 def _message(

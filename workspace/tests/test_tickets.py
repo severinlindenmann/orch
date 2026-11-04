@@ -64,7 +64,7 @@ def test_check_done_needs_evidence(proj, run, new_ticket, validate):
     tid = new_ticket()
     assert run("check", "add", tid, "Implement")[0] == 0
     code, _, err = run("check", "done", tid, "c1")
-    assert code == 2 and "evidence" in err
+    assert code == 2 and "proof" in err
     code, _, err = run("check", "done", tid, "c1", "--evidence", '{"type":"bogus","ref":"x"}')
     assert code == 2
     assert read(proj, tid)["checklist"][0]["done"] is False
@@ -177,7 +177,7 @@ def test_edit_and_show_json(proj, run, new_ticket):
 
 def test_missing_ticket_refused(proj, run):
     code, _, err = run("ticket", "show", "t_abcdef")
-    assert code == 2 and "no ticket" in err
+    assert code == 2 and "doesn't exist" in err
     assert run("ticket", "show", "nope")[0] == 2
 
 

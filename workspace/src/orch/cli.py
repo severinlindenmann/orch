@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from orch import __version__, addons, cli_clients, relay, tickets
+from orch import __version__, addons, cli_clients, net, relay, tickets
 from orch import init as init_mod
 from orch.errors import Refused
 
@@ -29,40 +29,75 @@ def _tid(t: dict) -> str:
     return t["id"]
 
 
-def _line(t: dict) -> str:
+def _progress(t: dict) -> str:
     d, n = tickets.checks_done(t)
-    count = f"  {d}/{n}" if n else ""
-    return f"{t['id']}  {t['status']:<8} {t['title']}{count}"
+    return f"{d} of {n} done" if n else ""
+
+
+def _line(t: dict) -> str:
+    bits = [t["status"]] + ([_progress(t)] if _progress(t) else [])
+    return f"{t['title']}  ({', '.join(bits)})  [{t['id']}]"
 
 
 def _show(t: dict) -> str:
-    d, n = tickets.checks_done(t)
-    open_q = sum(1 for q in t["questions"] if q["answer"] is None)
-    out = [f"{t['id']}  {t['title']}", f"Status: {t['status']} - Checks: {d}/{n} - Open questions: {open_q}"]
+    open_q = [q for q in t["questions"] if q["answer"] is None]
+    head = f"{t['title']}  [{t['id']}]"
+    out = [head, f"Status: {t['status']}" + (f" - {_progress(t)}" if _progress(t) else "")]
     if t.get("wake_at"):
-        out.append(f"Wakes at: {t['wake_at']}")
+        out.append(f"Wakes up: {net.when(t['wake_at'])}")
     if t.get("waiting_on"):
-        out.append(f"Waiting on: {t['waiting_on']['kind']} {t['waiting_on']['ref']}")
-    for c in t["checklist"]:
-        if c["done"]:
-            ev = c["evidence"][0]
-            extra = f" ({ev['text']})" if ev.get("text") else ""
-            out.append(f"  {c['id']} {c['text']} - done - {ev['ref']}{extra}")
-        else:
-            out.append(f"  {c['id']} {c['text']} - not done - no evidence")
-    for q in t["questions"]:
-        ans = f"{q['answer']} ({q['answered_by']} via {q['via']})" if q["answer"] is not None else "open"
-        opts = f" [{' / '.join(q['options'])}]" if q["options"] else ""
-        rec = f" recommended: {q['recommended']}" if q["recommended"] else ""
-        out.append(f"  {q['id']} {q['text']}{opts}{rec} - {ans}")
-    for ln in t["links"]:
-        out.append(f"  link {ln.get('title') or ln['type']}: {ln['url']}")
-    for h in t["history"][-5:]:
-        out.append(f"  {h['at']} {h['by']}: {h['text']}")
+        w = t["waiting_on"]
+        out.append("Waiting for: " + ("an answer" if w["kind"] == "question" else f"{w['kind']} {w['ref']}"))
+    if open_q:
+        out.append("\nNeeds an answer:")
+        for q in open_q:
+            opts = f" ({' / '.join(q['options'])})" if q["options"] else ""
+            rec = f" - suggested: {q['recommended']}" if q["recommended"] else ""
+            out.append(f"  {q['text']}{opts}{rec}  [{q['id']}]")
+    if t["checklist"]:
+        out.append("\nChecklist:")
+        for c in t["checklist"]:
+            if c["done"]:
+                ev = c["evidence"][0]
+                out.append(f"  [x] {c['text']}  [{c['id']}]  - proof: {ev['ref']}")
+            else:
+                out.append(f"  [ ] {c['text']}  [{c['id']}]")
+    answered = [q for q in t["questions"] if q["answer"] is not None]
+    if answered:
+        out.append("\nAnswered:")
+        for q in answered:
+            out.append(f"  {q['text']} - {q['answer']} ({q['answered_by']})")
+    if t["links"]:
+        out.append("\nLinks:")
+        out += [f"  {ln.get('title') or ln['type']}: {ln['url']}" for ln in t["links"]]
+    if t["history"]:
+        out.append("\nRecent:")
+        out += [f"  {net.when(h['at'])}  {h['by']}: {h['text']}" for h in t["history"][-3:]]
     return "\n".join(out)
 
 
-def build_parser() -> argparse.ArgumentParser:
+ADVANCED_TOP = {"update", "wait", "log", "answer", "link", "ext"}
+ADVANCED_SUB = {
+    "relay": {"done", "delegate", "start", "allow", "download", "webhook"},
+    "publish": {"restart", "stop", "delete"},
+}
+
+
+def _hide_advanced(parser: argparse.ArgumentParser) -> None:
+    """Help lists the everyday commands; `orch --help-all` (or `orch <cmd> --help-all`) lists the rest."""
+
+    def hide(sp, names):
+        sp._choices_actions[:] = [a for a in sp._choices_actions if a.dest not in names]
+
+    top = parser._subparsers._group_actions[0]
+    hide(top, ADVANCED_TOP)
+    for name, names in ADVANCED_SUB.items():
+        for a in top.choices[name]._subparsers._group_actions:
+            a.metavar = "<command>"
+            hide(a, names)
+
+
+def build_parser(show_all: bool = False) -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable output")
     common.add_argument("--by", help="actor, agent:<tool> or human:<name> (default: detected)")
@@ -71,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"orch {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
-    sub.add_parser("init", parents=[common], help="set up this project folder (safe to repeat)")
+    sub.add_parser("init", parents=[common], help="set up this folder (safe to repeat)")
     u = sub.add_parser("update", parents=[common], help="install the latest orch and add-ons")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
 
@@ -91,6 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--recurring", metavar="CRON", help="5-field cron, UTC")
     x = t.add_parser("list", parents=[common])
     x.add_argument("--status", choices=tickets.STATUSES)
+    x.add_argument("--all", action="store_true", help="include done and dropped tickets")
     x = t.add_parser("show", parents=[common])
     x.add_argument("id")
     x = t.add_parser("status", parents=[common])
@@ -118,7 +154,9 @@ def build_parser() -> argparse.ArgumentParser:
     x = c.add_parser("done", parents=[common])
     x.add_argument("id")
     x.add_argument("check")
-    x.add_argument("--evidence", action="append", default=[], metavar="JSON")
+    x.add_argument("--evidence", action="append", default=[], metavar="JSON", help=argparse.SUPPRESS)
+    for k in ("command", "note", "pr", "commit", "file", "url"):
+        x.add_argument(f"--{k}", metavar="TEXT", help=f"proof: a {k}")
 
     x = sub.add_parser("log", parents=[common], help="add a history entry")
     x.add_argument("id")
@@ -149,6 +187,9 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("addon")
     x.add_argument("data", help="JSON object")
     cli_clients.add_parsers(sub, common)
+    if not show_all:
+        _hide_advanced(p)
+        p.epilog = "More commands: orch --help-all"
     return p
 
 
@@ -160,16 +201,25 @@ def run(args: argparse.Namespace) -> None:
     if cmd == "init":
         root = Path.cwd()
         lines = init_mod.init(root)
-        _out(args, {"ok": True, "root": str(root)}, "orch is set up in this folder.\n" + "\n".join(lines))
+        _out(args, {"ok": True, "root": str(root), "details": lines}, "orch is ready in this folder.")
     elif cmd == "update":
         done = addons.update(root, args.project_only)
         if args.project_only:
             _out(args, {"ok": True, "refreshed": done}, "Refreshed: " + ", ".join(done or ["nothing"]))
+        elif not args.json:
+            print("orch is up to date.")
     elif cmd == "addon":
         if sub == "list":
             inst = addons.project_addons(root)
             data = {n: ("installed" if n in inst else "not installed") for n in addons.KNOWN}
-            _out(args, data, "\n".join(f"{n:<10} {s}" for n, s in data.items()))
+            _out(
+                args,
+                data,
+                "\n".join(
+                    f"{n:<10} " + ("on" if s == "installed" else f"off (turn on: orch addon add {n})")
+                    for n, s in data.items()
+                ),
+            )
         elif sub == "add":
             addons.add(root, args.name, args.project_only)
             if args.project_only:
@@ -179,10 +229,26 @@ def run(args: argparse.Namespace) -> None:
             _out(args, {"ok": True}, f"{args.name} is removed from this project.")
     elif cmd == "ticket" and sub == "new":
         t = tickets.create(root, args.title, by(), args.recurring)
-        _out(args, t, f"{t['id']}  open  {t['title']}")
+        _out(args, t, f'Created "{t["title"]}" [{t["id"]}]')
     elif cmd == "ticket" and sub == "list":
-        ts = [t for t in tickets.list_all(root) if not args.status or t["status"] == args.status]
-        _out(args, ts, "\n".join(_line(t) for t in ts) or "No tickets.")
+        ts = [
+            t
+            for t in tickets.list_all(root)
+            if (
+                t["status"] == args.status
+                if args.status
+                else args.all or t["status"] not in ("done", "dropped")
+            )
+        ]
+        hidden = (
+            0
+            if args.status or args.all
+            else sum(1 for t in tickets.list_all(root) if t["status"] in ("done", "dropped"))
+        )
+        txt = "\n".join(_line(t) for t in ts) or 'No open tickets. Create one with: orch ticket new "<title>"'
+        if hidden and not args.json:
+            txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
+        _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
         t = tickets.load(root, args.id)
         _out(args, t, _show(t))
@@ -191,7 +257,7 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t, f"{t['title']} - {t['status']}")
     elif cmd == "ticket" and sub == "edit":
         t = tickets.edit(root, args.id, args.title, by())
-        _out(args, t, f"{t['id']}  {t['title']}")
+        _out(args, t, f"Renamed to: {t['title']}")
     elif (cmd == "ticket" and sub == "wait") or cmd == "wait":
         t = tickets.wait(root, args.id, args.until, args.on, by(), args.clear)
         _out(
@@ -203,11 +269,16 @@ def run(args: argparse.Namespace) -> None:
         )
     elif cmd == "check" and sub == "add":
         t, c = tickets.check_add(root, args.id, args.text, by())
-        _out(args, c, f"{c['id']} {c['text']} - not done - no evidence")
+        _out(args, c, f"Added to the checklist: {c['text']}  [{c['id']}]")
     elif cmd == "check":
-        t, c = tickets.check_done(root, args.id, args.check, args.evidence, by())
+        shorthand = [
+            json.dumps({"type": k, "ref": getattr(args, k)})
+            for k in ("command", "note", "pr", "commit", "file", "url")
+            if getattr(args, k)
+        ]
+        t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by())
         ev = c["evidence"][-1]
-        _out(args, c, f"{c['id']} {c['text']} - done - {ev['ref']}")
+        _out(args, c, f"Done: {c['text']} (proof: {ev['ref']})")
     elif cmd == "log":
         t = tickets.log(root, args.id, args.text, by())
         h = t["history"][-1]
@@ -216,13 +287,13 @@ def run(args: argparse.Namespace) -> None:
         t, q = tickets.ask(root, args.id, args.text, args.option, args.recommend, by())
         if args.phone:
             cli_clients.send_phone_question(root, t["id"], q)
-        _out(args, q, f"{q['id']} asked. {t['id']} is waiting on question {q['id']}.")
+        _out(args, q, f"Question asked. {t['title']} is now waiting for an answer.")
     elif cmd == "answer":
         who = by()
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
         t, q = tickets.answer(root, args.id, args.question, args.answer, who, args.via)
-        _out(args, q, f"{q['id']} answered: {q['answer']}")
+        _out(args, q, f"Answered: {q['answer']}")
     elif cmd == "link":
         t = tickets.link_add(root, args.id, args.type, args.url, args.title, by())
         _out(args, t["links"][-1], f"Linked {args.title or args.type}: {args.url}")
@@ -247,7 +318,9 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(s, "reconfigure"):
             s.reconfigure(encoding="utf-8")
     argv = sys.argv[1:] if argv is None else list(argv)
-    parser = build_parser()
+    show_all = "--help-all" in argv
+    argv = ["--help" if a == "--help-all" else a for a in argv]
+    parser = build_parser(show_all)
     if argv and not argv[0].startswith("-") and argv[0] not in parser._subparsers._group_actions[0].choices:
         ep = _addon_command(argv[0])
         if ep is not None:

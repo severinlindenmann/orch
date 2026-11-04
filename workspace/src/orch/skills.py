@@ -11,6 +11,7 @@ from pathlib import Path
 from orch.errors import Refused
 
 BLOCK_FILE = "AGENTS-block.md"
+BLOCK_FILES = (BLOCK_FILE, "agents-block.md")  # add-ons may ship either spelling
 GITIGNORE_LINES = [
     ".orch/secrets/",
     ".orch/inbox/",
@@ -47,7 +48,7 @@ def install_skill(root: Path, name: str, source: Path) -> None:
     check_inside(root, dest)
     if dest.exists():
         shutil.rmtree(dest)
-    shutil.copytree(source, dest, ignore=shutil.ignore_patterns(BLOCK_FILE))
+    shutil.copytree(source, dest, ignore=shutil.ignore_patterns(*BLOCK_FILES))
 
 
 def remove_skill(root: Path, name: str) -> None:
@@ -63,14 +64,22 @@ def _block_re(name: str) -> re.Pattern:
     )
 
 
+_MARKER_RE = re.compile(r"[ \t]*<!-- orch:(?:begin|end) [^>]*-->[ \t]*\n?")
+
+
 def set_block(root: Path, name: str, body: str) -> None:
     """Add or replace the block for `name` in AGENTS.md; text outside the block is untouched."""
     path = root / "AGENTS.md"
     text = path.read_text(encoding="utf-8") if path.exists() else ""
-    block = f"<!-- orch:begin {name} -->\n{body.strip()}\n<!-- orch:end {name} -->\n"
+    body = _MARKER_RE.sub("", body).strip()  # the markers are ours; a body must not bring its own
+    block = f"<!-- orch:begin {name} -->\n{body}\n<!-- orch:end {name} -->\n"
     rx = _block_re(name)
     if rx.search(text):
         text = rx.sub(lambda _m: block, text, count=1)
+        # repair files an older version nested or duplicated: no other marker of this name may stay
+        head, sep, tail = text.partition(block)
+        stray = re.compile(rf"<!-- orch:(?:begin|end) {re.escape(name)} -->\n?")
+        text = stray.sub("", head) + sep + stray.sub("", tail)
     else:
         if text and not text.endswith("\n"):
             text += "\n"
@@ -90,9 +99,10 @@ def remove_block(root: Path, name: str) -> None:
 
 
 def read_block(source: Path, name: str) -> str:
-    f = source / BLOCK_FILE
-    if f.exists():
-        return f.read_text(encoding="utf-8")
+    for fn in BLOCK_FILES:
+        f = source / fn
+        if f.is_file():
+            return f.read_text(encoding="utf-8")
     return f"## {name}\nRead `.agents/skills/{name}/SKILL.md`."
 
 

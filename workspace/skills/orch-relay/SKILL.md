@@ -39,3 +39,11 @@ rewrites `workspaces.json`. An inbox hint alone installs nothing. Credentials la
 # Webhooks
 
 `orch relay webhook new --once|--permanent` makes a URL that turns a call into an inbox message.
+
+# Describe this workspace
+
+After connecting, say in one sentence what this workspace is for and give 2-4 tags, so other workspaces can pick it:
+
+    orch relay profile --description "Builds and tests the customer website" --tags web,frontend
+
+`orch relay profile` alone shows the current text. Description: up to 280 characters; up to 8 tags of 24 characters.

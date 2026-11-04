@@ -43,7 +43,7 @@ def test_refusals(tmp_path):
 
 def test_cli(tmp_path, capsys):
     assert cli.main(["publish", "new", "python", "--store", "json", str(tmp_path / "demo-app")]) == 0
-    assert "Created python app demo-app" in capsys.readouterr().out
+    assert "Created a python app" in capsys.readouterr().out
     assert (tmp_path / "demo-app" / "store.py").is_file()
 
 

@@ -53,14 +53,8 @@ def test_default_source(monkeypatch):
 
 
 def test_add_list_remove(proj, run, fake_repo, uv_calls):
-    assert run("addon", "list")[1].split() == [
-        "dashboard",
-        "not",
-        "installed",
-        "scheduler",
-        "not",
-        "installed",
-    ]
+    out = run("addon", "list")[1].splitlines()
+    assert [ln.split()[:2] for ln in out] == [["dashboard", "off"], ["scheduler", "off"]]
     code, _, err = run("addon", "add", "dashboard")
     assert code == 0, err
     assert uv_calls[0][:3] == ["tool", "install", "--reinstall"]
