@@ -154,6 +154,13 @@ class Scheduler:
             return tid if self.runner.start(tid, outside_prompt(tid, kind, text), self.cfg["agent"],
                                             f"relay {kind} {mid}", now) else None
         tickets = {t["id"]: t for t in read_tickets(self.root)}
+        if kind == "answer" and m.get("applied") is True:
+            # `orch relay inbox` already applied the answer (ticket is active again); resume it once.
+            t = tickets.get(m.get("ticket"))
+            if not t or self.runner.locked(t["id"]):
+                return None
+            return t["id"] if self.runner.start(t["id"], outside_prompt(t["id"], "answer", str(body.get("answer"))),
+                                                pick_agent(self.cfg, t), f"relay answer {mid}", now) else None
         if kind == "answer":
             t = tickets.get(m.get("ticket"))
             if not t or t["status"] != "waiting" or self.runner.locked(t["id"]):

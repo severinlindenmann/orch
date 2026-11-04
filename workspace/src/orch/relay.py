@@ -260,7 +260,14 @@ def _asked_path(root: Path) -> Path:
     return net.secrets_dir(root) / "questions-sent.json"
 
 
-def _apply_answer(root: Path, msg: dict) -> str:
+def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
+    """(note, ticket id when the answer was applied)."""
+    note = _apply_answer_note(root, msg)
+    asked = net.read_json(_asked_path(root), {}).get(str(msg.get("reply_to")))
+    return note, (asked["ticket"] if note.startswith("answered ") and asked else None)
+
+
+def _apply_answer_note(root: Path, msg: dict) -> str:
     """Only for a question this workspace sent; ticket and question come from our own record."""
     asked = net.read_json(_asked_path(root), {}).get(str(msg.get("reply_to")))
     frm, b = str(msg.get("from", "")), msg.get("body", {})
@@ -315,17 +322,19 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
             pending.append(m)
     out = []
     for m in sorted(pending, key=lambda m: (str(m.get("created_at")), m["id"])):
-        note, auto = "", False
+        note, auto, applied = "", False, None
         try:
             if m.get("type") == "answer":
                 mark_seen(root, m["id"])
-                note, auto = _apply_answer(root, m), True
+                (note, applied), auto = _apply_answer(root, m), True
             elif m.get("type") == "allow":
                 mark_seen(root, m["id"])
                 note, auto = _store_allow(root, m), True
         except (KeyError, TypeError) as e:
             note = f"could not read this message: {e}"
-        out.append({"message": m, "note": note, "auto": auto, "allowed": allowed(root, m)})
+        out.append(
+            {"message": m, "note": note, "auto": auto, "applied": applied, "allowed": allowed(root, m)}
+        )
     return out
 
 

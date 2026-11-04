@@ -398,3 +398,28 @@ def test_ticket_wait_clear(proj, run, new_ticket):
     code, out, _ = run("ticket", "wait", tid, "--clear", "--json")
     t = json.loads(out)
     assert code == 0 and t["wake_at"] is None and t["status"] == "active"
+
+
+def test_inbox_json_reports_applied_answer(proj, run, new_ticket, rel):
+    connect(run, rel)
+    tid = new_ticket()
+    run("ask", tid, "A or B?", "--option", "A", "--option", "B", "--phone", "--by", "agent:claude-code")
+    q = rel.sent[0]
+    rel.inbox.append(msg("m_answer0000000002", "answer", {"question_id": "q1", "answer": "A"},
+                         frm="ph_iphone0001", ticket=tid, reply_to=q["id"]))
+    data = json.loads(run("relay", "inbox", "--json")[1])
+    assert data[0]["applied"] is True and data[0]["ticket"] == tid
+
+
+def test_allow_refused_under_agent(proj, run, rel, monkeypatch):
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000010", "delegate", {"title": "A", "text": "x"}))
+    run("relay", "inbox")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    code, _, err = run("relay", "allow", "m_deleg00000000010", "--once")
+    assert code == 2 and "Ask the human" in err
+    assert not [m for m in rel.sent if m["type"] == "allow"]
+    code, _, err = run("answer", "t_x", "q1", "A", "--by", "human:owner")
+    assert code == 2 and "Ask the human" in err
+    monkeypatch.delenv("CLAUDECODE")
+    assert run("relay", "allow", "m_deleg00000000010", "--once")[0] == 0

@@ -151,7 +151,16 @@ def run_relay(args, root: Path, out) -> None:
         out(args, w, f"{w['name']} ({w['id']})\nPhone access: {w['phones']} phone(s)")
     elif sub == "inbox":
         items = relay.inbox(root, args.wait)
-        data = [{**i["message"], "allowed": bool(i["allowed"]), "note": i["note"]} for i in items]
+        data = [
+            {
+                **i["message"],
+                "allowed": bool(i["allowed"]),
+                "note": i["note"],
+                "applied": bool(i["applied"]),
+                **({"ticket": i["applied"]} if i["applied"] else {}),
+            }
+            for i in items
+        ]
         out(args, data, "\n".join(_inbox_line(i) for i in items) or "Inbox is empty.")
     elif sub == "done":
         r = relay.done(root, args.id)
@@ -174,7 +183,14 @@ def run_relay(args, root: Path, out) -> None:
         m = relay.send_start(root, args.workspace, args.key, args.text, t)
         out(args, m, f"Start {args.key} sent ({m['id']}) to {m['to']}.")
     elif sub == "allow":
-        m = relay.give_allow(root, args.id, "once" if args.once else "permanent")
+        msg = relay.load_message(root, args.id)
+        b = msg.get("body", {})
+        task = b.get("title") or b.get("key") or args.id
+        mode = "once" if args.once else "permanent"
+        tickets.require_human(
+            f"Allow {msg.get('from')} to {msg.get('type')} {task}?", f"allowing {msg.get('from')} ({mode})"
+        )
+        m = relay.give_allow(root, args.id, mode)
         out(args, m, f"Allowed {args.id} ({m['body']['mode']}). Answer sent to {m['to']}.")
     elif sub == "refresh":
         line = relay.refresh(root)
@@ -212,7 +228,7 @@ def _inbox_line(i: dict) -> str:
     }.get(m["type"], lambda: "")()
     if m["type"] in ("delegate", "start"):
         al = i["allowed"]
-        hint = f"[not allowed yet - ask the user, then: orch relay allow {m['id']} --once|--permanent]"
+        hint = f"[not allowed yet - ask the human to run: orch relay allow {m['id']} --once|--permanent]"
         detail += f"  [allowed: {al}]" if al else f"  {hint}"
     return f"{head}  {detail}".rstrip()
 
