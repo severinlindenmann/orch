@@ -1,4 +1,4 @@
-"""orch publish new: every template/store combination makes a valid app folder; the servers start and answer."""
+"""orch publish new: each template makes a valid app folder; the servers start and answer."""
 
 import os
 import shutil
