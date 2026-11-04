@@ -116,6 +116,8 @@ class E:
             check(r.status == 201, f"publish admin add {name}: {r}")
             j = r.json()
             self.creds[key] = (j["id"], j["token"])
+            self.prompts = getattr(self, "prompts", {})
+            self.prompts[key] = j.get("prompt", "")
             self.cleanup.append(lambda i=j["id"]: self.pub.admin.call("DELETE", f"/admin/api/workspaces/{i}"))
             self.orch(self.ws(name), "publish", "connect", self.pub.url, "--workspace", j["id"], "--token", j["token"])
         return self.creds[key]
@@ -128,6 +130,8 @@ class E:
             check(r.status == 201, f"relay admin add {name}: {r}")
             j = r.json()
             self.creds[key] = (j["id"], j["token"])
+            self.prompts = getattr(self, "prompts", {})
+            self.prompts[key] = j.get("prompt", "")
             self.cleanup.append(lambda i=j["id"]: self.rel.admin.call("DELETE", f"/admin/api/workspaces/{i}"))
             self.orch(self.ws(name), "relay", "connect", self.rel.url, "--workspace", j["id"], "--token", j["token"])
         return self.creds[key]
