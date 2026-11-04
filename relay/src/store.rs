@@ -16,7 +16,7 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
             tags TEXT NOT NULL, token_hash TEXT NOT NULL, created_at INTEGER NOT NULL, last_seen INTEGER,
             description_by TEXT NOT NULL DEFAULT 'workspace', tags_by TEXT NOT NULL DEFAULT 'workspace',
-            pending_description TEXT, pending_tags TEXT, pending_at INTEGER);
+            pending_description TEXT, pending_tags TEXT, pending_at INTEGER, pending_rev TEXT);
         CREATE TABLE IF NOT EXISTS phones(id TEXT PRIMARY KEY, name TEXT NOT NULL, workspaces TEXT NOT NULL,
             token_hash TEXT, apns_token TEXT, sandbox INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, last_seen INTEGER);
         CREATE TABLE IF NOT EXISTS pair_codes(hash TEXT PRIMARY KEY, phone_id TEXT NOT NULL, expires_at INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0);
@@ -43,6 +43,7 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         "pending_description TEXT",
         "pending_tags TEXT",
         "pending_at INTEGER",
+        "pending_rev TEXT",
     ] {
         let _ = c.execute(&format!("ALTER TABLE workspaces ADD COLUMN {col}"), []);
     }
@@ -257,14 +258,14 @@ pub const WS_CARD_COLS: &str = "id,name,description,tags,last_seen,description_b
 /// The change a workspace proposed for its own profile, or `null`. Only the proposed fields are set.
 pub fn pending(c: &Connection, id: &str) -> Value {
     c.query_row(
-        "SELECT pending_description,pending_tags,pending_at FROM workspaces WHERE id=?1",
+        "SELECT pending_description,pending_tags,pending_at,pending_rev FROM workspaces WHERE id=?1",
         [id],
         |r| {
-            let (d, t, at): (Option<String>, Option<String>, Option<i64>) =
-                (r.get(0)?, r.get(1)?, r.get(2)?);
+            let (d, t, at, rev): (Option<String>, Option<String>, Option<i64>, Option<String>) =
+                (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?);
             Ok(match at {
                 Some(at) => {
-                    json!({"description": d, "tags": t.map(|t| parse_list(&t)), "at": fmt_time(at)})
+                    json!({"description": d, "tags": t.map(|t| parse_list(&t)), "at": fmt_time(at), "rev": rev})
                 }
                 None => Value::Null,
             })
@@ -286,19 +287,52 @@ fn good_char(c: char) -> bool {
             | G::Unassigned
             | G::LineSeparator
             | G::ParagraphSeparator
-    )
+    ) && !default_ignorable(c)
 }
 
-/// Description of a workspace (admin- or self-written): plain one-line text, up to 280 characters.
+/// Default_Ignorable_Code_Point (invisible: variation selectors, fillers, ...) plus the braille blank.
+fn default_ignorable(c: char) -> bool {
+    matches!(c as u32,
+        0x00AD | 0x034F | 0x061C | 0x115F..=0x1160 | 0x17B4..=0x17B5 | 0x180B..=0x180F
+        | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x206F | 0x2800 | 0x3164
+        | 0xFE00..=0xFE0F | 0xFEFF | 0xFFA0 | 0xFFF0..=0xFFF8 | 0x1BCA0..=0x1BCA3
+        | 0x1D173..=0x1D17A | 0xE0000..=0xE0FFF)
+}
+
+/// More than 2 combining marks in a row on one base character ("zalgo").
+fn too_many_marks(d: &str) -> bool {
+    use unicode_general_category::GeneralCategory as G;
+    let mut run = 0;
+    for c in d.chars() {
+        if matches!(
+            unicode_general_category::get_general_category(c),
+            G::NonspacingMark | G::SpacingMark | G::EnclosingMark
+        ) {
+            run += 1;
+            if run > 2 {
+                return true;
+            }
+        } else {
+            run = 0;
+        }
+    }
+    false
+}
+
+/// Description of a workspace (admin- or self-written): plain one-line text (NFC-normalised), up to 280 characters.
 pub fn valid_description(d: &str) -> Result<String, &'static str> {
-    let d = d.trim();
+    use unicode_normalization::UnicodeNormalization;
+    let d: String = d.trim().nfc().collect();
     if d.chars().count() > 280 {
         return Err("The description can be up to 280 characters.");
     }
     if !d.chars().all(good_char) {
         return Err("The description must be plain text on one line (letters, numbers, punctuation and symbols only).");
     }
-    Ok(d.to_string())
+    if too_many_marks(&d) {
+        return Err("The description has too many stacked accents or marks.");
+    }
+    Ok(d)
 }
 
 /// Tag: lowercase letters, digits and hyphens, 1 to 24 characters.

@@ -195,25 +195,44 @@ async fn edit_ws(
     Ok(StatusCode::OK)
 }
 
+/// The `rev` of the proposal the owner looked at; approve/reject only act on exactly that one.
+fn proposal_rev(body: &Bytes) -> Res<String> {
+    let v = parse_body(body)?;
+    v["rev"]
+        .as_str()
+        .map(String::from)
+        .ok_or_else(|| invalid("Send the `rev` of the change you reviewed."))
+}
+
+fn stale_or_none(c: &Connection, id: &str) -> ApiError {
+    if store::pending(c, id).is_null() {
+        not_found("There is no change to review.")
+    } else {
+        conflict("This change was replaced, review again.")
+    }
+}
+
 /// Owner approves the workspace's proposed description/tags: they become live and everyone gets a refresh-hint.
 async fn approve_profile(
     State(app): State<AppState>,
     h: HeaderMap,
     Path(id): Path<String>,
+    body: Bytes,
 ) -> Res<Json<Value>> {
     guard(&app, &h)?;
+    let rev = proposal_rev(&body)?;
     let c = app.db.lock().unwrap();
     let n = c.execute(
         "UPDATE workspaces SET
            description_by=CASE WHEN pending_description IS NULL THEN description_by ELSE 'workspace' END,
            tags_by=CASE WHEN pending_tags IS NULL THEN tags_by ELSE 'workspace' END,
            description=COALESCE(pending_description,description), tags=COALESCE(pending_tags,tags),
-           pending_description=NULL, pending_tags=NULL, pending_at=NULL
-         WHERE id=?1 AND pending_at IS NOT NULL",
-        [&id],
+           pending_description=NULL, pending_tags=NULL, pending_at=NULL, pending_rev=NULL
+         WHERE id=?1 AND pending_rev=?2",
+        params![id, rev],
     )?;
     if n == 0 {
-        return Err(not_found("There is no change to review."));
+        return Err(stale_or_none(&c, &id));
     }
     let rel = store::related(&c, &id);
     store::bump_and_hint(&c, &app.key, &rel)?;
@@ -232,14 +251,17 @@ async fn reject_profile(
     State(app): State<AppState>,
     h: HeaderMap,
     Path(id): Path<String>,
+    body: Bytes,
 ) -> Res<StatusCode> {
     guard(&app, &h)?;
-    let n = app.db.lock().unwrap().execute(
-        "UPDATE workspaces SET pending_description=NULL, pending_tags=NULL, pending_at=NULL WHERE id=?1 AND pending_at IS NOT NULL",
-        [&id],
+    let rev = proposal_rev(&body)?;
+    let c = app.db.lock().unwrap();
+    let n = c.execute(
+        "UPDATE workspaces SET pending_description=NULL, pending_tags=NULL, pending_at=NULL, pending_rev=NULL WHERE id=?1 AND pending_rev=?2",
+        params![id, rev],
     )?;
     if n == 0 {
-        return Err(not_found("There is no change to review."));
+        return Err(stale_or_none(&c, &id));
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -252,7 +274,7 @@ async fn new_token(
     guard(&app, &h)?;
     let token = rand_token("orn_", 32);
     let n = app.db.lock().unwrap().execute(
-        "UPDATE workspaces SET token_hash=?2 WHERE id=?1",
+        "UPDATE workspaces SET token_hash=?2, pending_description=NULL, pending_tags=NULL, pending_at=NULL, pending_rev=NULL WHERE id=?1",
         params![id, token_hash(&token)],
     )?;
     if n == 0 {

@@ -125,13 +125,14 @@ async fn patch_me(
     // Only these fields, and only while the token that authenticated this call is still current.
     let cur = auth::bearer(&h).map(token_hash).unwrap_or_default();
     let n = c.execute(
-        "UPDATE workspaces SET pending_description=?3, pending_tags=?4, pending_at=?5 WHERE id=?1 AND token_hash=?2",
+        "UPDATE workspaces SET pending_description=?3, pending_tags=?4, pending_at=?5, pending_rev=?6 WHERE id=?1 AND token_hash=?2",
         params![
             me,
             cur,
             desc,
             tags.as_ref().map(|t| serde_json::to_string(t).unwrap()),
-            now()
+            now(),
+            rand_id("", 12)
         ],
     )?;
     if n == 0 {

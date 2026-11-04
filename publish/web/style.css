@@ -257,3 +257,12 @@ button[aria-busy=true]::after{content:"";width:1em;height:1em;display:inline-blo
 .skeleton,.progress::after{animation:none}
 }
 .public-brand a.brand{color:var(--text)}
+
+.notice{padding:14px 18px;border:1px solid var(--warning);border-radius:8px;background:#fbbf2414;margin-bottom:18px}
+.badge{font-size:11px;padding:3px 8px;border-radius:5px;color:var(--warning);background:#fbbf2412;font-weight:400;white-space:normal}
+.review{margin-top:12px;padding:14px 16px;border:1px solid var(--warning);border-radius:8px;background:#fbbf2414}
+.review h4{font-size:14px;margin:0 0 8px}
+.review-line{margin-bottom:10px;overflow-wrap:anywhere}
+.review-line p{margin:2px 0}
+.review .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+.review-result{margin-top:8px;font-size:13px}

@@ -38,6 +38,7 @@ jsonwebtoken = "9"
 percent-encoding = "2"
 futures-util = "0.3"
 unicode-general-category = "0.6"
+unicode-normalization = "0.1"
 
 [dev-dependencies]
 tempfile = "3"

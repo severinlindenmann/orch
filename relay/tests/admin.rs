@@ -316,34 +316,62 @@ async fn me_patch_is_pending_until_the_owner_approves() {
     assert_eq!(v["pending"]["tags"], json!(["x2"]));
     // reject keeps the old values
     let base = format!("/admin/api/workspaces/{}/profile", a.id);
-    let (s, _) = t.admin_json("POST", &format!("{base}/reject"), None).await;
+    let rev0 = v["pending"]["rev"].clone();
+    // bound to the exact proposal: a newer one makes the old rev stale (409)
+    let (_, v2) = t
+        .call(&a, "PATCH", "/v1/me", Some(json!({"tags": ["x3"]})))
+        .await;
+    assert_ne!(v2["pending"]["rev"], rev0);
+    let (s, _) = t
+        .admin_json(
+            "POST",
+            &format!("{base}/approve"),
+            Some(json!({"rev": rev0})),
+        )
+        .await;
+    assert_eq!(s, 409);
+    assert_eq!(
+        t.admin_json("POST", &format!("{base}/reject"), None)
+            .await
+            .0,
+        422
+    );
+    let (s, _) = t
+        .admin_json(
+            "POST",
+            &format!("{base}/reject"),
+            Some(json!({"rev": v2["pending"]["rev"]})),
+        )
+        .await;
     assert_eq!(s, 204);
     let (_, w) = t.call(&a, "GET", "/v1/whoami", None).await;
     assert_eq!(
         (w["tags"].clone(), w["pending"].clone()),
         (json!(["x"]), Value::Null)
     );
-    assert_eq!(
-        t.admin_json("POST", &format!("{base}/reject"), None)
-            .await
-            .0,
-        404
-    );
-    assert_eq!(
-        t.admin_json("POST", &format!("{base}/approve"), None)
-            .await
-            .0,
-        404
-    );
+    let r = json!({"rev": "x"});
+    for what in ["reject", "approve"] {
+        let (s, _) = t
+            .admin_json("POST", &format!("{base}/{what}"), Some(r.clone()))
+            .await;
+        assert_eq!(s, 404, "{what}");
+    }
     // approve: becomes live, marked as written by the workspace, partners get a hint
-    t.call(
-        &a,
-        "PATCH",
-        "/v1/me",
-        Some(json!({"description": "New text", "tags": ["data"]})),
-    )
-    .await;
-    let (s, c) = t.admin_json("POST", &format!("{base}/approve"), None).await;
+    let (_, p) = t
+        .call(
+            &a,
+            "PATCH",
+            "/v1/me",
+            Some(json!({"description": "New text", "tags": ["data"]})),
+        )
+        .await;
+    let (s, c) = t
+        .admin_json(
+            "POST",
+            &format!("{base}/approve"),
+            Some(json!({"rev": p["pending"]["rev"]})),
+        )
+        .await;
     assert_eq!(s, 200, "{c}");
     assert_eq!(c["description"], "New text");
     let (_, w) = t.call(&a, "GET", "/v1/whoami", None).await;
@@ -391,7 +419,9 @@ async fn me_patch_is_pending_until_the_owner_approves() {
             .0,
         401
     );
-    // a token that was rotated meanwhile cannot write (guarded UPDATE)
+    // rotating the token drops a pending proposal
+    t.call(&a, "PATCH", "/v1/me", Some(json!({"tags": ["y"]})))
+        .await;
     let (_, r) = t
         .admin_json(
             "POST",
@@ -469,6 +499,11 @@ async fn profile_text_is_validated_for_workspace_and_admin_and_marked() {
         json!({"description": "a\u{202e}b"}),
         json!({"description": "a\u{85}b"}),
         json!({"description": "a\u{200b}b"}),
+        json!({"description": "a\u{fe0f}b"}),
+        json!({"description": "a\u{34f}b"}),
+        json!({"description": "a\u{3164}b"}),
+        json!({"description": "a\u{2800}b"}),
+        json!({"description": "e\u{301}\u{302}\u{303}\u{304}"}),
         json!({"tags": ["Data"]}),
         json!({"tags": ["a b"]}),
         json!({"tags": ["a\nb"]}),
@@ -494,19 +529,18 @@ async fn profile_text_is_validated_for_workspace_and_admin_and_marked() {
         (json!("admin"), json!("admin"))
     );
     // admin edits mark only the edited field
-    t.admin_json("POST", "/admin/api/workspaces/x/profile/approve", None)
+    let (_, p) = t
+        .call(
+            &a,
+            "PATCH",
+            "/v1/me",
+            Some(json!({"description": "Reports", "tags": ["data-1"]})),
+        )
         .await;
-    t.call(
-        &a,
-        "PATCH",
-        "/v1/me",
-        Some(json!({"description": "Reports", "tags": ["data-1"]})),
-    )
-    .await;
     t.admin_json(
         "POST",
         &format!("/admin/api/workspaces/{}/profile/approve", a.id),
-        None,
+        Some(json!({"rev": p["pending"]["rev"]})),
     )
     .await;
     let (s, _) = t
