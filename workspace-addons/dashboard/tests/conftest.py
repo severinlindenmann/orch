@@ -37,6 +37,9 @@ def ws(tmp_path):
     (root / ".orch" / "scheduler").mkdir()
     (root / ".orch" / "scheduler" / "state.json").write_text(
         json.dumps({"t_weekly01": {"last_run": "2026-11-02T08:00:00Z", "next_run": "2026-11-09T08:00:00Z"}}))
+    d = root / ".agents" / "skills" / "orch-relay"
+    d.mkdir(parents=True)
+    (d / "workspaces.json").write_text((CONTRACTS / "workspaces.example.json").read_text())
     (root / ".orch" / "secrets").mkdir()
     (root / ".orch" / "secrets" / "relay.json").write_text('{"token": "orn_SECRET"}')
     return root

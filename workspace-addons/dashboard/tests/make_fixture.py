@@ -24,6 +24,9 @@ def build(root: Path) -> Path:
     for m in json.loads((CONTRACTS / "message.examples.json").read_text()):
         m.pop("_note", None)
         (root / ".orch" / "inbox" / f"{m['id']}.json").write_text(json.dumps(m))
+    d = root / ".agents" / "skills" / "orch-relay"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "workspaces.json").write_text((CONTRACTS / "workspaces.example.json").read_text())
     (root / ".orch" / "scheduler").mkdir(exist_ok=True)
     (root / ".orch" / "scheduler" / "state.json").write_text(
         json.dumps({"t_demo000x": {"last_run": "2026-11-02T08:00:00Z", "next_run": "2026-11-09T08:00:00Z"}}))
