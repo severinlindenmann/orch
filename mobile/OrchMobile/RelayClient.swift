@@ -21,7 +21,7 @@ enum RelayError: Error, Equatable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .api(_, _, let m): return m
-        case .unauthorized: return "This phone was signed out. Ask for a new invitation to connect again."
+        case .unauthorized: return "This phone was signed out. Open the invitation you were sent to connect again."
         case .network(let m): return m
         case .badLink: return "That invitation link does not look right."
         }

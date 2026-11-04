@@ -24,11 +24,11 @@ struct HomeView: View {
                             Text("?").font(Theme.font(18)).frame(width: 30, height: 30)
                                 .background(Theme.brand.opacity(0.1), in: Circle()).foregroundStyle(Theme.brand)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("\(model.openQuestionCount) questions for you").font(Theme.font(13, .semibold))
+                                Text(model.openQuestionCount == 1 ? "1 question for you" : "\(model.openQuestionCount) questions for you").font(Theme.font(13, .semibold))
                                 Text("A quick answer keeps things moving.").font(Theme.font(10)).foregroundStyle(Theme.muted)
                             }
                             Spacer(minLength: 0)
-                            Text("↗").foregroundStyle(Theme.brand)
+                            Image(systemName: "chevron.right").font(Theme.font(13, .semibold)).foregroundStyle(Theme.brand)
                         }.padding(.horizontal, 12).padding(.vertical, 16)
                             .background(Theme.brand.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.brand.opacity(0.27)))
@@ -36,7 +36,7 @@ struct HomeView: View {
                 }
                 HStack { Eyebrow(text: "WORKSPACES"); Spacer(); Eyebrow(text: "\(model.workspaces.count)") }
                     .padding(.top, 30).padding(.bottom, 12)
-                if !model.hasLoaded && model.workspaces.isEmpty {
+                if !model.hasLoaded && model.workspaces.isEmpty && model.message == nil {
                     ForEach(0..<2, id: \.self) { _ in
                         workspaceRow(Workspace(id: "x", name: "Workspace name", description: "What this workspace does", tags: [], online: true, lastSeen: nil, openQuestions: 0))
                     }.skeleton(true).accessibilityHidden(true)

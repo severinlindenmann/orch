@@ -175,7 +175,9 @@ final class AppModel {
 
     private func handle(_ error: Error) {
         if case RelayError.unauthorized = error { Keychain.delete(); reset(); message = error.localizedDescription }
-        else { message = error.localizedDescription }
+        else if error is URLError { message = "Can't reach the server. Check your connection, then try again." }
+        else if error is RelayError { message = error.localizedDescription }
+        else { message = "Something went wrong. Try again in a moment." }
         errorTick += 1
     }
 

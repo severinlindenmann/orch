@@ -65,7 +65,7 @@ struct OnboardingView: View {
             }
         case .found(let host):
             VStack(alignment: .leading, spacing: 12) {
-                Text("Your workspace is ready").font(Theme.font(15, .semibold))
+                Text("Your invitation is ready").font(Theme.font(15, .semibold))
                 Text("You were invited to connect this phone.").font(Theme.font(13)).foregroundStyle(Theme.muted)
                 DisclosureGroup("Connection details") { Text(host).font(Theme.font(12)).frame(maxWidth: .infinity, alignment: .leading) }
                     .font(Theme.font(12)).foregroundStyle(Theme.muted)

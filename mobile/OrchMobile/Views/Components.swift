@@ -24,7 +24,7 @@ struct Brand: View {
         HStack(spacing: 8) {
             OrbitMark().frame(width: 30, height: 30)
             Text("orch").font(Theme.font(23, .bold)).tracking(-1)
-        }
+        }.accessibilityElement(children: .ignore).accessibilityLabel("orch")
     }
 }
 
@@ -34,9 +34,16 @@ struct PrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(Theme.font(14, .semibold))
             .frame(maxWidth: .infinity, minHeight: 48)
-            .foregroundStyle(muted || !enabled ? Theme.muted : Theme.onBrand)
+            .foregroundStyle(muted || !enabled ? Theme.text.opacity(0.75) : Theme.onBrand)
             .background(muted || !enabled ? Theme.surface3 : Theme.brand, in: RoundedRectangle(cornerRadius: 8))
             .opacity(configuration.isPressed ? 0.8 : 1)
+    }
+}
+
+/// Pressed feedback within one frame for custom-drawn rows.
+struct PressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 
