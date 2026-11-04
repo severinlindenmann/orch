@@ -88,7 +88,7 @@ function readable(m){const b=body(m);
 function persist(){try{sessionStorage.setItem('orch_admin',token)}catch{}}
 function auth(msg){
  epoch++;workspaces=[];phoneList=[];$('#crumb').textContent='Sign in';
- const f=form(async f=>{const t=f.elements.token.value.trim();if(!t)throw new FieldError('Enter your access key.','token');token=t;api.quiet=1;try{await api('/workspaces')}catch(e){token='';if(/sign in/i.test(e.message)&&!/ended/.test(e.message))throw new FieldError('That access key didn’t work. Check it and try again.','token');throw e}finally{api.quiet=0}persist();await route()},
+ const f=form(async f=>{const t=f.elements.token.value.trim();if(!t)throw new FieldError('Enter your access key.','token');token=t;api.quiet=1;try{await api('/workspaces')}catch(e){token='';if(e.status===401)throw new FieldError('That access key didn’t work. Check it and try again.','token');throw e}finally{api.quiet=0}persist();await route()},
   field('Access key',chk(input('token','',{type:'password',autocomplete:'current-password'}),needs('Enter your access key.')),'The admin key for this relay.'),submit('Sign in'));
  show(el('section',{class:'panel auth'},el('div',{class:'panel-head'},el('h2',{},'Sign in')),el('div',{class:'panel-body'},el('p',{},'Sign in to manage your workspaces and phones.'),f,details('Where do I find this?',sub('It is the admin key that was shown when the relay was set up. Ask the person who installed it.')))));
  if(msg)showError(f,new FieldError(msg,'token'));else f.elements.token.focus();
@@ -98,7 +98,7 @@ async function api(path,method='GET',body,raw=false){
  const headers={'X-Orch-Admin':requestToken};if(body!==undefined)headers['Content-Type']=raw?'application/gzip':'application/json';
  let r;try{r=await fetch('/admin/api'+path,{method,headers,credentials:'same-origin',cache:'no-store',body:body===undefined?undefined:raw?body:JSON.stringify(body)})}catch{throw Error('Could not reach the relay. Check your connection and try again.')}
  let data=null;const text=await r.text();try{data=text?JSON.parse(text):null}catch{if(r.ok)throw Error('The relay returned an unreadable answer. Try again.')}
- if(r.status===401&&token===requestToken){token='';try{sessionStorage.removeItem('orch_admin')}catch{}if(!api.quiet)auth('Your session ended. Sign in again.');throw Error('Your session ended. Sign in again.')}
+ if(r.status===401&&token===requestToken){token='';try{sessionStorage.removeItem('orch_admin')}catch{}if(!api.quiet)auth('Your session ended. Sign in again.');throw Object.assign(Error('Your session ended. Sign in again.'),{status:401})}
  if(!r.ok){const er=Error(r.status>=500?'Something went wrong on our side. Try again in a moment.':(data?.message||'Something went wrong. Try again.'));er.status=r.status;er.detail=(data?.message?data.message+' ':'')+'(HTTP '+r.status+')';throw er}
  if(requestToken!==token)throw new DOMException('Session changed','AbortError');return data;
 }
