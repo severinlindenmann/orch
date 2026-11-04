@@ -64,7 +64,9 @@ def test_add_list_remove(proj, run, fake_repo, uv_calls):
     code, _, err = run("addon", "add", "dashboard")
     assert code == 0, err
     assert uv_calls[0][:3] == ["tool", "install", "--reinstall"]
-    assert "--with" in uv_calls[0] and uv_calls[0][-1].replace("\\", "/").endswith("workspace-addons/dashboard")
+    assert "--with" in uv_calls[0] and uv_calls[0][-1].replace("\\", "/").endswith(
+        "workspace-addons/dashboard"
+    )
     assert (proj / ".agents/skills/orch-dashboard/SKILL.md").is_file()
     assert "orch:begin orch-dashboard" in (proj / "AGENTS.md").read_text(encoding="utf-8")
     assert json.loads(run("addon", "list", "--json")[1])["dashboard"] == "installed"
