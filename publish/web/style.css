@@ -290,3 +290,4 @@ dialog.confirm h2{margin-bottom:8px}
 .counts-inline{display:block}
 .updated{display:none}
 }
+@media(max-width:600px){.toast{width:calc(100vw - 32px);justify-content:space-between}}
