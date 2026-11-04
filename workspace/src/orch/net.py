@@ -134,9 +134,8 @@ def load_service(root: Path, name: str) -> dict:
     if not isinstance(cfg, dict) or not {"url", "workspace", "token"} <= cfg.keys():
         what = {"relay": "a relay", "publish": "a publish server"}.get(name, name)
         raise Refused(
-            f"This folder is not connected to {what} yet. In the admin page, add this workspace and paste "
-            f"the setup prompt it shows into your agent (or run: orch {name} connect <address> "
-            "--workspace <id> --token <token>)."
+            f"This folder is not connected to {what} yet. Open the {name} admin page, add this workspace, "
+            "and paste the setup prompt it shows into your agent."
         )
     return cfg
 
@@ -180,7 +179,7 @@ def profile(root: Path, name: str, description: str | None, tags: list[str] | No
     if tags is not None:
         tags = [t.strip() for t in tags if t.strip()]
         if len(tags) > 8 or any(len(t) > 24 for t in tags):
-            raise Refused("Use at most 8 tags, each up to 24 characters.")
+            raise Refused("Too many or too long tags: use at most 8 tags, each up to 24 characters.")
         body["tags"] = tags
     return call_json("PATCH", cfg["url"] + "/v1/me", auth_headers(cfg), body, timeout=30)[1]
 

@@ -5,7 +5,7 @@ description: Track work, questions, and evidence with the orch CLI.
 # Working with orch
 
 Every piece of work is tracked as an orch ticket. Before you start, run `orch ticket list`; if none fits,
-run `orch ticket new "<title>"`. Add checklist items and mark each done with evidence before you finish. Read the relay inbox at session
+run `orch ticket new "<title>"`. Then, BEFORE any work, add one checklist item per step (`orch check add <id> "<step>"`): a ticket with 0 items is wrong. Mark each done with proof before you finish. Read the relay inbox at session
 start (`orch relay inbox`) if relay is connected. This applies to every request, even a small one.
 
 Read the relevant ticket at the start of a session and whenever you return to it:
@@ -15,7 +15,7 @@ Read the relevant ticket at the start of a session and whenever you return to it
 Keep the ticket current as work changes.
 
 - Move it to active when starting or resuming: `orch ticket status <id> active`.
-- Add checklist items for the work you discover: `orch check add <id> "<text>"`.
+- Add one checklist item per step before you start, and more when you discover work: `orch check add <id> "<text>"`.
 - Record plan changes with `orch log <id> "<text>"`.
 - Keep useful context with `orch link add <id> --type <tool> --url <url>`.
 
@@ -24,6 +24,10 @@ All commands accept `--json`. Exit code 0 = ok, 2 = refused (the reason is in pl
 # Evidence before done
 
 A checklist item is done only when it has at least one evidence entry:
+
+    orch check done <id> c1 --command "uv run pytest -q"
+
+Use `--command`, `--note`, `--pr`, `--commit`, `--file` or `--url` (one or more). Raw JSON also works:
 
     orch check done <id> c1 --evidence '{"type":"pr","ref":"PR #88"}'
 

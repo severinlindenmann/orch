@@ -83,6 +83,34 @@ ADVANCED_SUB = {
 }
 
 
+_EXAMPLES = {
+    "orch ticket new": 'A ticket needs a title, for example: orch ticket new "Fix the login"',
+    "orch check add": 'A checklist item needs a ticket and text, e.g.: orch check add t_abc "Write the test"',
+    "orch check done": 'Say which ticket and item, for example: orch check done t_abc c1 --command "pytest"',
+    "orch ticket show": "Say which ticket, for example: orch ticket show t_abc. List them: orch ticket list",
+    "orch relay send": 'Say who and what, for example: orch relay send "Design" "The report is ready"',
+}
+
+
+class _Parser(argparse.ArgumentParser):
+    """Plain-words usage errors instead of argparse's own text."""
+
+    def error(self, message):
+        import re
+
+        m = re.search(r"invalid choice: '([^']*)'", message)
+        if m:
+            what = self.prog + " command" if self.prog != "orch" else "orch command"
+            self.exit(2, f'"{m.group(1)}" is not an {what}. Run {self.prog} --help.\n')
+        if self.prog in _EXAMPLES:
+            self.exit(2, _EXAMPLES[self.prog] + "\n")
+        m = re.search(r"required: (.*)", message)
+        if m:
+            usage = self.format_usage().replace("usage: ", "").strip()
+            self.exit(2, f"Missing {m.group(1)}. Usage: {usage}\nMore help: {self.prog} --help\n")
+        self.exit(2, f"{message}. Run {self.prog} --help.\n")
+
+
 def _hide_advanced(parser: argparse.ArgumentParser) -> None:
     """Help lists the everyday commands; `orch --help-all` (or `orch <cmd> --help-all`) lists the rest."""
 
@@ -102,7 +130,7 @@ def build_parser(show_all: bool = False) -> argparse.ArgumentParser:
     common.add_argument("--json", action="store_true", help="machine-readable output")
     common.add_argument("--by", help="actor, agent:<tool> or human:<name> (default: detected)")
 
-    p = argparse.ArgumentParser(prog="orch", description="orch: tickets with evidence for any agent tool")
+    p = _Parser(prog="orch", description="orch: tickets with evidence for any agent tool")
     p.add_argument("--version", action="version", version=f"orch {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
@@ -229,7 +257,12 @@ def run(args: argparse.Namespace) -> None:
             _out(args, {"ok": True}, f"{args.name} is removed from this project.")
     elif cmd == "ticket" and sub == "new":
         t = tickets.create(root, args.title, by(), args.recurring)
-        _out(args, t, f'Created "{t["title"]}" [{t["id"]}]')
+        _out(
+            args,
+            t,
+            f'Created "{t["title"]}" [{t["id"]}]\n'
+            f'Next: add one checklist item per step: orch check add {t["id"]} "<step>"',
+        )
     elif cmd == "ticket" and sub == "list":
         ts = [
             t

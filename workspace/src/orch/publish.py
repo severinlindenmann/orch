@@ -110,6 +110,10 @@ def _keys_path(root: Path) -> Path:
     return net.secrets_dir(root) / "files" / "keys.json"
 
 
+def _names_path(root: Path) -> Path:
+    return _keys_path(root).with_name("file-names.json")
+
+
 def _tokens_path(root: Path) -> Path:
     return net.secrets_dir(root) / "apps" / "view-tokens.json"
 
@@ -127,6 +131,9 @@ def share_file(root: Path, path: Path, days: int | None, permanent: bool) -> dic
     keys = net.read_json(_keys_path(root), {})
     keys[res["id"]] = k
     net.write_json(_keys_path(root), keys, True)
+    names = net.read_json(_names_path(root), {})
+    names[res["id"]] = path.name
+    net.write_json(_names_path(root), names, True)
     res["link"] = f"{res['url']}#k={k}"
     res["name"] = path.name
     return res
@@ -135,9 +142,12 @@ def share_file(root: Path, path: Path, days: int | None, permanent: bool) -> dic
 def list_all(root: Path) -> dict:
     files = net.items(_api(root, "GET", "/v1/files?limit=100"))
     keys = net.read_json(_keys_path(root), {})
+    names = net.read_json(_names_path(root), {})
     for f in files:
         if f["id"] in keys:
             f["key"] = keys[f["id"]]
+        if f["id"] in names:
+            f["name"] = names[f["id"]]
     apps = net.items(_api(root, "GET", "/v1/apps"))
     tokens = net.read_json(_tokens_path(root), {})
     for a in apps:
@@ -152,6 +162,9 @@ def delete(root: Path, ident: str) -> str:
         keys = net.read_json(_keys_path(root), {})
         if keys.pop(ident, None) is not None:
             net.write_json(_keys_path(root), keys, True)
+        names = net.read_json(_names_path(root), {})
+        if names.pop(ident, None) is not None:
+            net.write_json(_names_path(root), names, True)
         return "file"
     _app_name(ident)
     _api(root, "DELETE", f"/v1/apps/{ident}")

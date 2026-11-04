@@ -29,7 +29,7 @@ def _fields(description, tags) -> str:
     """'description [tag, tag]' for the fields that are given."""
     parts = []
     if description is not None:
-        parts.append(description or "(empty)")
+        parts.append(description or "(removes the description)")
     if tags is not None:
         parts.append("tags: " + (", ".join(tags) or "none"))
     return " · ".join(parts)
@@ -58,13 +58,7 @@ def _run_profile(args, mod, out) -> None:
     w = mod.profile(root, args.description, tags)
     changed = args.description is not None or args.tags is not None
     if changed and w.get("pending"):
-        p = w["pending"]
-        cur = _fields(
-            w.get("description") if p.get("description") is not None else None,
-            w.get("tags") if p.get("tags") is not None else None,
-        )
-        new = _fields(p.get("description"), p.get("tags"))
-        head = f"Sent to the owner for approval. Current: {cur} · Proposed: {new}\n"
+        head = "Sent to the owner for approval. Nothing changes until they approve.\n"
         out(args, w, head + _profile_text(w))
     else:
         out(args, w, _profile_text(w))
@@ -78,11 +72,11 @@ def add_parsers(sub, common) -> None:
     pub = sub.add_parser("publish", help="share files and apps by private link").add_subparsers(
         dest="sub", required=True
     )
-    x = pub.add_parser("connect", parents=[common], help="connect this folder to a publish service")
+    x = pub.add_parser("connect", parents=[common], help="connect this folder to a publish server")
     x.add_argument("url")
     x.add_argument("--workspace", required=True)
     x.add_argument("--token", required=True)
-    pub.add_parser("whoami", parents=[common])
+    pub.add_parser("whoami", parents=[common], help="show who you are and what you may share")
     _add_profile(pub)
     life = argparse.ArgumentParser(add_help=False)
     life.add_argument("--days", type=int, help="keep for N days (1-90, default 7)")
@@ -99,7 +93,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("stack", choices=templates.STACKS)
     x.add_argument("folder")
     x.add_argument("--store", choices=templates.STORES, default="none")
-    pub.add_parser("list", parents=[common])
+    pub.add_parser("list", parents=[common], help="list shared files and apps")
     for n in ("restart", "stop"):
         x = pub.add_parser(n, parents=[common])
         x.add_argument("name")
@@ -109,11 +103,11 @@ def add_parsers(sub, common) -> None:
     rel = sub.add_parser("relay", help="messages between workspaces and phones").add_subparsers(
         dest="sub", required=True
     )
-    x = rel.add_parser("connect", parents=[common])
+    x = rel.add_parser("connect", parents=[common], help="connect this folder to a relay")
     x.add_argument("url")
     x.add_argument("--workspace", required=True)
     x.add_argument("--token", required=True)
-    rel.add_parser("whoami", parents=[common])
+    rel.add_parser("whoami", parents=[common], help="show who you are and which phones are paired")
     _add_profile(rel)
     x = rel.add_parser("inbox", parents=[common], help="pull new messages")
     x.add_argument("--wait", type=int, default=0, help="wait up to N seconds (max 30)")
@@ -121,7 +115,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("id")
     t = argparse.ArgumentParser(add_help=False)
     t.add_argument("--ticket")
-    x = rel.add_parser("send", parents=[common, t])
+    x = rel.add_parser("send", parents=[common, t], help="send a message or file to a workspace or phone")
     x.add_argument("workspace")
     x.add_argument("text", nargs="?", default="")
     x.add_argument("--file")
@@ -139,7 +133,7 @@ def add_parsers(sub, common) -> None:
     g = x.add_mutually_exclusive_group(required=True)
     g.add_argument("--once", action="store_true")
     g.add_argument("--permanent", action="store_true")
-    rel.add_parser("refresh", parents=[common], help="fetch skills, MCP, credentials and the workspace list")
+    rel.add_parser("refresh", parents=[common], help="update settings and the workspace list")
     x = rel.add_parser("download", parents=[common], help="save the file of a file message")
     x.add_argument("id")
     w = rel.add_parser("webhook", help="incoming webhooks").add_subparsers(dest="wsub", required=True)
@@ -210,8 +204,8 @@ def run_publish(args, root: Path, out) -> None:
         r = publish.list_all(root)
         lines = []
         for f in r["files"]:
-            key = "  key saved" if f.get("key") else ""
-            lines.append(f"file  {f['id']}  {_size(f['size'])}  {_exp(f['expires_at'])}{key}")
+            nm = f.get("name") or "(unnamed file)"
+            lines.append(f"file  {nm}  {_size(f['size'])}  {_exp(f['expires_at'])}  [{f['id']}]")
         for a in r["apps"]:
             vis = "public" if a["public"] else "private"
             link = a.get("link") or a["url"]
@@ -246,7 +240,11 @@ def run_relay(args, root: Path, out) -> None:
             args,
             w,
             f"{w['name']}\n"
-            + (f"{n} phone{'s' if n != 1 else ''} can reach it." if n else "No phones paired yet."),
+            + (
+                f"{n} phone{'s' if n != 1 else ''} can reach it."
+                if n
+                else "No phones paired yet. Pair one in the admin page."
+            ),
         )
     elif sub == "inbox":
         items = relay.inbox(root, args.wait)
@@ -260,7 +258,14 @@ def run_relay(args, root: Path, out) -> None:
             }
             for i in items
         ]
-        out(args, data, "\n".join(_inbox_line(i, root) for i in items) or "No new messages.")
+        shown, seen_hint = [], False
+        for i in items:
+            if i["message"]["type"] == "refresh-hint":
+                if seen_hint:
+                    continue
+                seen_hint = True
+            shown.append(_inbox_line(i, root))
+        out(args, data, "\n".join(shown) or "No new messages.")
     elif sub == "done":
         r = relay.done(root, args.id)
         txt = "Marked as handled." if r["new"] else "That message was already handled."
@@ -323,7 +328,8 @@ def _inbox_line(i: dict, root: Path) -> str:
         "webhook": "Webhook",
         "answer": "Answer",
     }.get(m["type"], m["type"])
-    head = f"{kind} from {relay.name_of(root, m['from'])}"
+    at = f" ({net.when(m['created_at'])})" if m.get("created_at") else ""
+    head = f"{kind} from {relay.name_of(root, m['from'])}{at}"
     tail = f"  [{m['id']}]"
     if i["note"]:
         return f"{head}: {i['note']}{tail}"
