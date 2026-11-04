@@ -20,6 +20,7 @@ pub struct Spec {
 struct Proc {
     child: Child,
     port: u16,
+    unit: String,
 }
 
 #[derive(Default)]
@@ -27,14 +28,13 @@ pub struct Runner {
     procs: Mutex<HashMap<String, Proc>>,
 }
 
-fn base_env(
-    cmd: &mut Command,
+fn env_list(
     dir: &Path,
     port: u16,
     base_path: &str,
     data_dir: &Path,
     store: &str,
-) {
+) -> Vec<(String, String)> {
     let path = std::env::var("PATH").unwrap_or_default();
     let venv = dir.join(".venv/bin");
     let path = if venv.is_dir() {
@@ -42,15 +42,118 @@ fn base_env(
     } else {
         path
     };
-    cmd.env_clear()
-        .env("PATH", path)
-        .env("HOME", data_dir)
-        .env("LANG", "C.UTF-8")
-        .env("PORT", port.to_string())
-        .env("BASE_PATH", base_path)
-        .env("DATA_DIR", data_dir)
-        .env("STORE", store)
-        .current_dir(dir);
+    vec![
+        ("PATH".into(), path),
+        ("HOME".into(), data_dir.display().to_string()),
+        ("LANG".into(), "C.UTF-8".into()),
+        ("PORT".into(), port.to_string()),
+        ("BASE_PATH".into(), base_path.into()),
+        ("DATA_DIR".into(), data_dir.display().to_string()),
+        ("STORE".into(), store.into()),
+    ]
+}
+
+/// ORCH_PUBLISH_SANDBOX=systemd: apps and their build/test steps run as transient systemd units.
+fn sandboxed() -> bool {
+    std::env::var("ORCH_PUBLISH_SANDBOX").is_ok_and(|v| v == "systemd")
+}
+
+fn unit_name(key: &str) -> String {
+    // hex of the key: injective (a-b and a~b can never share a unit)
+    let hex: String = key.bytes().map(|b| format!("{b:02x}")).collect();
+    format!("orch-app-{hex}")
+}
+
+/// Group-write a freshly extracted bundle so the unit's dynamic user (primary group orch-publish)
+/// can use it. Called once at extraction (the bundle has no links, nobody else writes there yet).
+pub fn prep_perms(p: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(md) = std::fs::symlink_metadata(p) else {
+        return;
+    };
+    if md.file_type().is_symlink() {
+        return;
+    }
+    let mode = md.permissions().mode();
+    if md.is_dir() {
+        let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode | 0o2770));
+        if let Ok(rd) = std::fs::read_dir(p) {
+            for e in rd.flatten() {
+                prep_perms(&e.path());
+            }
+        }
+    } else {
+        let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode | 0o660));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+/// The command for `sh -c <script>` in `dir`: a plain child process, or a sandboxed transient unit.
+fn make_cmd(
+    script: &str,
+    unit: &str,
+    dir: &Path,
+    port: u16,
+    base_path: &str,
+    data_dir: &Path,
+    store: &str,
+    max_secs: Option<u64>,
+) -> Command {
+    let env = env_list(dir, port, base_path, data_dir, store);
+    if sandboxed() {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir_all(data_dir).ok();
+        // only the dir itself; what the unit creates inside has UMask 0002
+        let _ = std::fs::set_permissions(data_dir, std::fs::Permissions::from_mode(0o2770));
+        // the server's own data (db, files, logs, admin token) must be 0700 and invisible to apps
+        let server_data = std::env::var("ORCH_PUBLISH_DATA_DIR")
+            .or_else(|_| std::env::var("PUBLISH_DATA_DIR"))
+            .unwrap_or_else(|_| "/var/lib/orch-publish".into());
+        let server_data = Path::new(&server_data);
+        let _ = std::fs::set_permissions(server_data, std::fs::Permissions::from_mode(0o700));
+        let apps = dir.parent().and_then(|p| p.parent()).unwrap_or(dir);
+        let mut c = Command::new("systemd-run");
+        c.args(["--quiet", "--collect", "--pipe", "--wait", "--unit", unit]);
+        let mut props = vec![
+            "DynamicUser=yes".to_string(),
+            "Group=orch-publish".into(),
+            "UMask=0002".into(),
+            "ProtectSystem=strict".into(),
+            "ProtectHome=yes".into(),
+            "PrivateTmp=yes".into(),
+            "NoNewPrivileges=yes".into(),
+            "MemoryMax=256M".into(),
+            format!("WorkingDirectory={}", dir.display()),
+            // other apps and the server's own data stay invisible; only this app's dirs are bound back in
+            format!("TemporaryFileSystem={}:ro", apps.display()),
+            format!("BindPaths={} {}", dir.display(), data_dir.display()),
+            format!("ReadWritePaths={} {}", dir.display(), data_dir.display()),
+        ];
+        // keep the order: TemporaryFileSystem first, then the bind mounts
+        // (skipped when the apps live inside the data dir: then the tmpfs over `apps` is the only hiding)
+        if !dir.starts_with(server_data) {
+            props.push(format!("InaccessiblePaths={}", server_data.display()));
+        }
+        if let Some(n) = max_secs {
+            props.push(format!("RuntimeMaxSec={n}"));
+        }
+        for p in props.drain(..) {
+            c.arg("-p").arg(p);
+        }
+        for (k, v) in env {
+            c.arg("-E").arg(format!("{k}={v}"));
+        }
+        c.args(["--", "sh", "-c", script]);
+        c
+    } else {
+        let mut c = Command::new("sh");
+        c.arg("-c").arg(script);
+        c.env_clear().current_dir(dir);
+        for (k, v) in env {
+            c.env(k, v);
+        }
+        c
+    }
 }
 
 impl Runner {
@@ -61,15 +164,22 @@ impl Runner {
         std::fs::create_dir_all(&s.data_dir)?;
         let log = std::fs::File::create(&s.log)?;
         let log2 = log.try_clone()?;
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg(format!("exec {}", s.start));
-        base_env(
-            &mut cmd,
+        let unit = unit_name(name);
+        if sandboxed() {
+            // a leftover unit of the same name (after a crash/restart of the server) must go first
+            let _ = std::process::Command::new("systemctl")
+                .args(["stop", &unit])
+                .output();
+        }
+        let mut cmd = make_cmd(
+            &format!("exec {}", s.start),
+            &unit,
             &s.dir,
             s.port,
             &s.base_path,
             &s.data_dir,
             &s.store,
+            None,
         );
         cmd.stdin(Stdio::null())
             .stdout(Stdio::from(log))
@@ -81,6 +191,7 @@ impl Runner {
             Proc {
                 child,
                 port: s.port,
+                unit,
             },
         );
         Ok(())
@@ -90,6 +201,12 @@ impl Runner {
     pub async fn stop(&self, name: &str) {
         let p = self.procs.lock().unwrap().remove(name);
         if let Some(mut p) = p {
+            if sandboxed() {
+                let _ = Command::new("systemctl")
+                    .args(["stop", &p.unit])
+                    .output()
+                    .await;
+            }
             let _ = p.child.kill().await;
         }
     }
@@ -120,6 +237,15 @@ impl Runner {
     }
 }
 
+async fn stop_unit(unit: &str) {
+    if sandboxed() {
+        let _ = Command::new("systemctl")
+            .args(["stop", unit])
+            .output()
+            .await;
+    }
+}
+
 /// Runs `sh -c <cmd>` in `dir` and waits (build and test steps). Returns (success, output).
 pub async fn run_step(
     cmd: &str,
@@ -131,17 +257,85 @@ pub async fn run_step(
     secs: u64,
 ) -> (bool, String) {
     let _ = std::fs::create_dir_all(data_dir);
-    let mut c = Command::new("sh");
-    c.arg("-c").arg(cmd);
-    base_env(&mut c, dir, port, base_path, data_dir, store);
+    let unit = format!("orch-step-{}", crate::util::rand_id(8));
+    let mut c = make_cmd(
+        cmd,
+        &unit,
+        dir,
+        port,
+        base_path,
+        data_dir,
+        store,
+        Some(secs),
+    );
     c.stdin(Stdio::null()).kill_on_drop(true);
     match tokio::time::timeout(Duration::from_secs(secs), c.output()).await {
-        Err(_) => (false, format!("timed out after {secs} s")),
-        Ok(Err(e)) => (false, e.to_string()),
+        Err(_) => {
+            stop_unit(&unit).await;
+            (false, format!("timed out after {secs} s"))
+        }
+        Ok(Err(e)) => {
+            stop_unit(&unit).await;
+            (false, e.to_string())
+        }
         Ok(Ok(o)) => {
             let mut out = String::from_utf8_lossy(&o.stdout).to_string();
             out.push_str(&String::from_utf8_lossy(&o.stderr));
             (o.status.success(), out)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sandbox_env_builds_a_systemd_run_command() {
+        let d = std::env::temp_dir().join(format!("orch-runner-test-{}", std::process::id()));
+        let dir = d.join("apps/demo/v1");
+        let data = d.join("apps/demo/data");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("ORCH_PUBLISH_SANDBOX", "systemd");
+        let c = make_cmd(
+            "exec true",
+            "orch-app-demo",
+            &dir,
+            9100,
+            "/a/demo",
+            &data,
+            "files",
+            Some(60),
+        );
+        std::env::remove_var("ORCH_PUBLISH_SANDBOX");
+        let std_cmd = c.as_std();
+        assert_eq!(std_cmd.get_program(), "systemd-run");
+        let args: Vec<String> = std_cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        for want in [
+            "DynamicUser=yes",
+            "ProtectSystem=strict",
+            "ProtectHome=yes",
+            "PrivateTmp=yes",
+            "NoNewPrivileges=yes",
+            "MemoryMax=256M",
+            "RuntimeMaxSec=60",
+        ] {
+            assert!(args.iter().any(|a| a == want), "missing {want}");
+        }
+        let rw = args
+            .iter()
+            .find(|a| a.starts_with("ReadWritePaths="))
+            .unwrap();
+        assert!(
+            rw.contains(&dir.display().to_string()) && rw.contains(&data.display().to_string())
+        );
+        assert!(args.iter().any(|a| a == "PORT=9100"));
+        let _ = std::fs::remove_dir_all(&d);
+        // default: plain sh
+        let c = make_cmd("true", "u", &dir, 1, "/a/x", &data, "files", None);
+        assert_eq!(c.as_std().get_program(), "sh");
     }
 }

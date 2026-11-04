@@ -1,0 +1,3 @@
+*.xcodeproj
+OrchMobile/Info.plist
+build/

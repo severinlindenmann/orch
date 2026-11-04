@@ -43,6 +43,7 @@ pub async fn start() -> T {
         master_key_file: dir.path().join("master.key"),
         admin_token: ADMIN.into(),
         public_url: "https://relay.test".into(),
+        install_ref: "develop".into(),
         apns: None,
     };
     let push = Arc::new(FakePusher::default());

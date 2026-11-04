@@ -25,6 +25,17 @@ pub fn seal(key: &Key, aad: &str, plain: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Seals `buf` in place (no second copy of the plaintext): result is `nonce | ciphertext+tag`.
+pub fn seal_in_place(key: &Key, aad: &str, buf: &mut Vec<u8>) {
+    use aes_gcm::aead::AeadInPlace;
+    let c = Aes256Gcm::new(key.into());
+    let mut nonce = [0u8; 12];
+    rand::rngs::OsRng.fill_bytes(&mut nonce);
+    c.encrypt_in_place(Nonce::from_slice(&nonce), aad.as_bytes(), buf)
+        .expect("aes-gcm encrypt");
+    buf.splice(0..0, nonce);
+}
+
 pub fn open(key: &Key, aad: &str, blob: &[u8]) -> Option<Vec<u8>> {
     if blob.len() < 12 + 16 {
         return None;

@@ -84,6 +84,9 @@ fn extract(bytes: &[u8], dir: &FsPath) -> ApiResult<PathBuf> {
             return Err(ApiError::invalid("The bundle has an unsafe path."));
         }
     }
+    if std::env::var("ORCH_PUBLISH_SANDBOX").is_ok_and(|v| v == "systemd") {
+        crate::runner::prep_perms(dir);
+    }
     if dir.join("app.toml").is_file() {
         return Ok(dir.to_path_buf());
     }
@@ -536,7 +539,7 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
         return text(503, "This app is stopped.");
     }
     if app.stack == "static" {
-        return serve_static(&app, &rest);
+        return serve_static(&app, &rest).await;
     }
     proxy(&st, &app, &rest, &query, req).await
 }
@@ -618,7 +621,7 @@ fn content_type(p: &FsPath) -> &'static str {
     }
 }
 
-fn serve_static(app: &AppRow, rest: &str) -> Response {
+async fn serve_static(app: &AppRow, rest: &str) -> Response {
     let root = PathBuf::from(&app.code_dir);
     let mut p = root.clone();
     for c in rest.split('/').filter(|c| !c.is_empty()) {
@@ -634,19 +637,27 @@ fn serve_static(app: &AppRow, rest: &str) -> Response {
     if p == root.join("app.toml") || !p.is_file() {
         return text(404, "Not found.");
     }
-    let Ok(bytes) = std::fs::read(&p) else {
-        return text(404, "Not found.");
-    };
     if p.extension().is_some_and(|e| e == "md") {
+        let Ok(bytes) = std::fs::read(&p) else {
+            return text(404, "Not found.");
+        };
         let html = crate::web::markdown_page(&app.name, &String::from_utf8_lossy(&bytes));
         return ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response();
     }
-    (
+    let Ok(file) = tokio::fs::File::open(&p).await else {
+        return text(404, "Not found.");
+    };
+    let len = file.metadata().await.map(|m| m.len()).ok();
+    let mut r = (
         [
             (header::CONTENT_TYPE, content_type(&p)),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         ],
-        bytes,
+        axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(file)),
     )
-        .into_response()
+        .into_response();
+    if let Some(n) = len {
+        r.headers_mut().insert(header::CONTENT_LENGTH, n.into());
+    }
+    r
 }

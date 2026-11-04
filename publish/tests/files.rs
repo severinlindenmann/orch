@@ -24,6 +24,8 @@ async fn files_upload_list_blob_delete() {
     assert_eq!(b.status, 200);
     assert_eq!(b.body, blob);
     assert_eq!(b.headers["content-type"], "application/octet-stream");
+    assert_eq!(b.headers["content-length"], blob.len().to_string().as_str());
+    assert_eq!(b.headers["x-content-type-options"], "nosniff");
 
     let d = t
         .api(&ws, "DELETE", &format!("/v1/files/{id}"), vec![])

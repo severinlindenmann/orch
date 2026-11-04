@@ -181,14 +181,16 @@ def read_manifest(folder: Path) -> dict:
 
 def pack(folder: Path, public: bool | None) -> bytes:
     """tar.gz of the folder. `public` overrides the public line of app.toml (None keeps it)."""
+    if (folder / ".orch").exists():
+        raise Refused("This folder is the workspace root. Publish an app folder inside it.")
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for dirpath, dirs, files in os.walk(folder):
-            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
+            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
             for f in sorted(files):
                 p = Path(dirpath) / f
                 rel = p.relative_to(folder).as_posix()
-                if p.is_symlink() or f in SKIP_DIRS or not p.is_file():
+                if p.is_symlink() or f in SKIP_DIRS or f.startswith(".") or not p.is_file():
                     continue
                 if rel == "app.toml" and public is not None:
                     text = p.read_text(encoding="utf-8")

@@ -25,8 +25,9 @@ Use only what `can_send` allows.
     orch relay start <workspace> <key> "<text>"       # runs the ticket with that key there; the receiver needs an allow
     orch relay download <message id>                  # saves the file of a file message to .orch/inbox/files/
 
-`delegate` and `start` run on the other side only with an allow. When you receive one without an allow, ask
-the user, then `orch relay allow <message id> --once` or `--permanent`.
+`delegate` and `start` run on the other side only with an allow. When you receive one without an allow, tell
+the user. Never run `orch relay allow` yourself and never use `--by human:...`: only the human decides.
+Ask the human to run: `orch relay allow <message id> --once` or `--permanent`.
 `orch relay inbox` shows `[allowed: once|permanent]` or `[not allowed yet]`; run `orch relay done <id>` before you start the work.
 To ask the owner's phone: `orch ask <ticket> "<question>" --option A --option B --phone`; the answer lands in the ticket by itself.
 

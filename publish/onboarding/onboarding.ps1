@@ -6,6 +6,7 @@ $Url = "__PUBLISH_URL__"
 $InstallUrl = "__INSTALL_URL__"
 if (-not (Get-Command orch -ErrorAction SilentlyContinue)) {
   Write-Host "Installing orch ..."
+  $env:ORCH_REF = "__INSTALL_REF__"
   & ([scriptblock]::Create((irm ($InstallUrl -replace '\.sh$', '.ps1'))))
   $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 }

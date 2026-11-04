@@ -4,14 +4,16 @@ use crate::state::AppState;
 use crate::store::{self, msg_from_row, msg_json, MSG_COLS};
 use crate::util::*;
 use crate::{auth, crypto, rules};
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
+use futures_util::StreamExt;
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -190,27 +192,49 @@ async fn ack(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<Stat
 async fn post_blob(
     State(app): State<AppState>,
     h: HeaderMap,
-    body: Bytes,
+    body: Body,
 ) -> Res<(StatusCode, Json<Value>)> {
-    if body.len() > MAX_BLOB {
-        return Err(too_large("Files can be at most 100 MB."));
-    }
+    // Authenticate before reading a single body byte.
     let me = {
         let c = app.db.lock().unwrap();
         auth::workspace(&c, &h)?
     };
+    if let Some(n) = h
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        if n > MAX_BLOB {
+            return Err(too_large("Files can be at most 100 MB."));
+        }
+    }
+    // Stream the body; the cap is enforced while streaming. The buffer is sealed in place.
+    let mut buf: Vec<u8> = Vec::new();
+    let mut hasher = Sha256::new();
+    let mut stream = body.into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| invalid("Upload was interrupted."))?;
+        if buf.len() + chunk.len() > MAX_BLOB {
+            return Err(too_large("Files can be at most 100 MB."));
+        }
+        hasher.update(&chunk);
+        buf.extend_from_slice(&chunk);
+    }
+    let size = buf.len();
+    let sha = hex::encode(hasher.finalize());
     let id = rand_id("b_", 16);
-    let sha = sha256_hex(&body);
-    tokio::fs::write(app.blob_path(&id), crypto::seal(&app.key, &id, &body))
+    crypto::seal_in_place(&app.key, &id, &mut buf);
+    tokio::fs::write(app.blob_path(&id), &buf)
         .await
         .map_err(internal)?;
+    drop(buf);
     app.db.lock().unwrap().execute(
         "INSERT INTO blobs(id,uploader,size,sha256,created_at) VALUES(?1,?2,?3,?4,?5)",
-        params![id, me, body.len() as i64, sha, now()],
+        params![id, me, size as i64, sha, now()],
     )?;
     Ok((
         StatusCode::CREATED,
-        Json(json!({"blob_id": id, "size": body.len(), "sha256": sha})),
+        Json(json!({"blob_id": id, "size": size, "sha256": sha})),
     ))
 }
 

@@ -1,0 +1,60 @@
+name: OrchMobile
+options:
+  minimumXcodeGenVersion: 2.40.0
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    DEVELOPMENT_TEAM: 77D4THRYUN
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: "1"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  OrchMobile:
+    type: application
+    platform: iOS
+    sources:
+      - OrchMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.severin.orch.mobile
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: orch
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: orch listens while you hold the mic so you can dictate a message.
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: orch turns your voice into text on this phone.
+        INFOPLIST_KEY_NSCameraUsageDescription: orch scans the QR code from your relay admin.
+    info:
+      path: OrchMobile/Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: io.severin.orch.pair
+            CFBundleURLSchemes: [orch]
+  OrchMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - OrchMobileTests
+    dependencies:
+      - target: OrchMobile
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  OrchMobile:
+    build:
+      targets:
+        OrchMobile: all
+        OrchMobileTests: [test]
+    test:
+      targets:
+        - OrchMobileTests

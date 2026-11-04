@@ -87,15 +87,21 @@ pub async fn page(St(st): St<State>, Path(id): Path<String>) -> Response {
 /// GET /f/<id>/blob
 pub async fn blob(St(st): St<State>, Path(id): Path<String>) -> ApiResult<Response> {
     state_of(&st, &id)?;
-    let bytes =
-        std::fs::read(blob_path(&st, &id)).map_err(|_| ApiError::not_found("No such file."))?;
-    Ok((
+    let file = tokio::fs::File::open(blob_path(&st, &id))
+        .await
+        .map_err(|_| ApiError::not_found("No such file."))?;
+    let len = file.metadata().await.map(|m| m.len()).ok();
+    let mut r = (
         [
             (header::CONTENT_TYPE, "application/octet-stream"),
             (header::CACHE_CONTROL, "no-store"),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         ],
-        bytes,
+        axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(file)),
     )
-        .into_response())
+        .into_response();
+    if let Some(n) = len {
+        r.headers_mut().insert(header::CONTENT_LENGTH, n.into());
+    }
+    Ok(r)
 }

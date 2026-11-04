@@ -1,0 +1,5 @@
+name = "{{name}}"
+about = "{{about}}"
+stack = "static"
+store = "{{store}}"
+public = false

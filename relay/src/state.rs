@@ -13,6 +13,7 @@ pub struct Config {
     pub master_key_file: PathBuf,
     pub admin_token: String,
     pub public_url: String,
+    pub install_ref: String,
     pub apns: Option<ApnsConfig>,
 }
 
@@ -53,6 +54,7 @@ impl Config {
                 .unwrap_or("https://relay.severin.io".into())
                 .trim_end_matches('/')
                 .to_string(),
+            install_ref: get("ORCH_INSTALL_REF").unwrap_or("main".into()),
             apns,
         })
     }

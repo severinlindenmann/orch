@@ -64,15 +64,9 @@ pub fn phone(c: &Connection, h: &HeaderMap) -> Res<(String, String, Vec<String>)
 }
 
 pub fn admin(app: &App, h: &HeaderMap) -> Res<()> {
-    let supplied = header(h, "x-orch-admin").map(str::to_string).or_else(|| {
-        header(h, "cookie")?
-            .split(';')
-            .filter_map(|p| p.trim().strip_prefix("orch_admin="))
-            .next()
-            .map(str::to_string)
-    });
-    match supplied {
-        Some(t) if ct_eq(&t, &app.cfg.admin_token) => Ok(()),
+    // Only the X-Orch-Admin header (a custom header cannot be sent cross-site, so no CSRF via cookies).
+    match header(h, "x-orch-admin") {
+        Some(t) if ct_eq(t, &app.cfg.admin_token) => Ok(()),
         _ => Err(unauthorized()),
     }
 }
