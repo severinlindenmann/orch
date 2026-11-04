@@ -36,7 +36,7 @@ def ws(tmp_path):
     (root / ".orch" / "inbox-seen.json").write_text(json.dumps({msgs[0]["id"]: "2026-11-04T10:00:00Z"}))
     (root / ".orch" / "scheduler").mkdir()
     (root / ".orch" / "scheduler" / "state.json").write_text(
-        json.dumps({"t_weekly01": {"last_run": "2026-11-02T08:00:00Z", "next_run": "2026-11-09T08:00:00Z"}}))
+        json.dumps({"t_weekly01": {"last_run": "2026-11-02T08:00:00Z", "last_exit": 1, "next_run": "2026-11-09T08:00:00Z"}}))
     d = root / ".agents" / "skills" / "orch-relay"
     d.mkdir(parents=True)
     (d / "workspaces.json").write_text((CONTRACTS / "workspaces.example.json").read_text())

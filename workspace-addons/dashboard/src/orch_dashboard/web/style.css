@@ -333,3 +333,17 @@ a.sched{display:flex;color:inherit;min-height:56px}a.sched:hover{background:var(
 a.card:active,a.mini:active{transform:scale(.98)}
 .copy-req{margin-top:4px;min-height:44px;padding:0 18px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text);font:inherit;font-size:13px;cursor:pointer}.copy-req:hover{border-color:var(--brand);color:var(--brand)}.copy-req:active{transform:scale(.98)}
 @media(max-width:480px){.mini-title{white-space:normal;overflow:visible;text-overflow:clip}}
+/* busy-day: capped lists, compact asks, failed runs */
+.asks-block{margin:0 0 8px}.asks-block .asks{gap:8px;margin:0}
+details.more{margin-top:8px}details.more>summary{color:var(--brand);font-size:13px;font-weight:600}
+details.more .more-close{display:none}details.more[open] .more-open{display:none}details.more[open] .more-close{display:inline}
+details.more[open]>summary .chev{transform:rotate(90deg)}
+details.more>.cards,details.more>.minis,details.more>.asks{margin-top:8px}details.more>.cards{display:grid;gap:8px}
+.panel>details.more{padding:0 16px}.panel>details.more>summary{margin:0}
+.asks-line{display:flex;align-items:center;gap:12px;min-height:48px;padding:10px 16px;margin:0 0 8px;border:1px solid var(--warning);background:var(--warning-soft);border-radius:var(--radius);color:var(--text)}
+.asks-line .ic:first-child{color:var(--warning)}.asks-line b{margin-left:auto;font-size:13px;color:var(--text-muted);font-weight:600}.asks-line .go{color:var(--text-muted)}
+.sender-head .num{color:var(--text-muted);font-weight:400;font-size:12px;background:var(--surface-2);border-radius:99px;padding:0 8px}.sender-head .num.unread{background:var(--brand-soft);color:var(--brand)}
+.tag.fail{background:var(--danger-soft);border-color:var(--danger);color:var(--danger);font-weight:600}
+.sched.failed{box-shadow:inset 3px 0 0 var(--danger)}
+.run.failed{box-shadow:inset 0 -2px 0 var(--danger)}.run.failed .ic{color:var(--danger)}
+.side-nav .count{white-space:nowrap}

@@ -30,6 +30,7 @@ def test_scheduler_rows(ws):
     by = {r["ticket"]: r for r in rows}
     assert by["t_weekly01"]["kind"] == "recurring" and by["t_weekly01"]["cron"] == "0 8 * * 1"
     assert by["t_weekly01"]["next_run"] == "2026-11-09T08:00:00Z"
+    assert by["t_weekly01"]["last_exit"] == 1 and by["t_7k3f9q"]["last_exit"] is None
     assert by["t_7k3f9q"]["kind"] == "once" and by["t_7k3f9q"]["wake_at"] == "2026-11-05T07:00:00Z"
 
 

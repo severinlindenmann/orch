@@ -66,7 +66,7 @@ def load_scheduler(tickets: list[dict], root: Path) -> list[dict]:
             "ticket": t["id"], "title": t["title"], "status": t["status"],
             "kind": "recurring" if recurring else "once",
             "cron": sched.get("cron"), "wake_at": t.get("wake_at"),
-            "last_run": st.get("last_run"), "next_run": st.get("next_run"),
+            "last_run": st.get("last_run"), "last_exit": st.get("last_exit"), "next_run": st.get("next_run"),
         })
     rows.sort(key=lambda r: str(r["next_run"] or r["wake_at"] or "~"))
     return rows
