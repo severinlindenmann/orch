@@ -70,7 +70,6 @@
       if (!candidate) return;
       token = candidate;
       try { sessionStorage.setItem('orch_admin', token); } catch (_) { notify('Session storage is unavailable. You may need to sign in again after reloading.'); }
-      document.cookie = `orch_admin=${encodeURIComponent(token)}; path=/; SameSite=Strict`;
       void render();
     });
   }

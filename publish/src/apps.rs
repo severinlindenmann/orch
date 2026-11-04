@@ -557,13 +557,18 @@ async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) 
     );
     let (parts, body) = req.into_parts();
     let mut b = axum::http::Request::builder().method(parts.method).uri(uri);
-    let cname = cookie_name(&app.name);
     for (k, v) in parts.headers.iter() {
-        if k == header::HOST || k == header::COOKIE {
+        let n = k.as_str();
+        if k == header::HOST
+            || k == header::COOKIE
+            || k == header::AUTHORIZATION
+            || n.starts_with("x-orch-")
+        {
             continue;
         }
         b = b.header(k, v);
     }
+    // keep the app's own cookies; drop orch ones (private-app tokens, admin)
     let others: Vec<String> = parts
         .headers
         .get_all(header::COOKIE)
@@ -575,7 +580,7 @@ async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) 
                 .map(|s| s.trim().to_string())
                 .collect::<Vec<_>>()
         })
-        .filter(|c| !c.is_empty() && !c.starts_with(&format!("{cname}=")))
+        .filter(|c| !c.is_empty() && !c.starts_with("orch_app_") && !c.starts_with("orch_admin="))
         .collect();
     if !others.is_empty() {
         b = b.header(header::COOKIE, others.join("; "));
@@ -584,7 +589,11 @@ async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) 
         return text(400, "Bad request.");
     };
     match st.http.request(r).await {
-        Ok(resp) => resp.map(Body::new),
+        Ok(resp) => {
+            let mut resp = resp.map(Body::new);
+            resp.headers_mut().remove("service-worker-allowed");
+            resp
+        }
         Err(_) => text(502, "The app did not answer."),
     }
 }

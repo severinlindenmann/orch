@@ -395,3 +395,59 @@ async fn apps_sweep_removes_expired() {
     );
     assert!(!t.dir.path().join("apps/site").exists());
 }
+
+const ECHO_APP: &str = r#"import os, json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = json.dumps({k.lower(): v for k, v in self.headers.items()}).encode()
+        self.send_response(200)
+        self.send_header("Service-Worker-Allowed", "/")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a):
+        pass
+HTTPServer(("127.0.0.1", int(os.environ["PORT"])), H).serve_forever()
+"#;
+
+#[tokio::test]
+async fn apps_proxy_strips_orch_credentials() {
+    let t = setup();
+    let ws = t.workspace("A", all_rights()).await;
+    let toml = py_toml("echo", "public = true");
+    assert_eq!(
+        deploy(
+            &t,
+            &ws,
+            "echo",
+            &[("app.toml", &toml), ("main.py", ECHO_APP)],
+            ""
+        )
+        .await
+        .status,
+        200
+    );
+    let r = call(
+        &t.public,
+        "GET",
+        "/a/echo/",
+        &[
+            ("authorization", "Bearer orp_secret"),
+            ("x-orch-workspace", "ws_x"),
+            ("x-orch-admin", "adm"),
+            ("cookie", "orch_admin=a; orch_app_other=tok; mine=1"),
+        ],
+        vec![],
+    )
+    .await;
+    assert_eq!(r.status, 200);
+    assert!(r.headers.get("service-worker-allowed").is_none());
+    let h = r.json();
+    assert!(
+        h.get("authorization").is_none()
+            && h.get("x-orch-workspace").is_none()
+            && h.get("x-orch-admin").is_none()
+    );
+    assert_eq!(h["cookie"], "mine=1");
+}

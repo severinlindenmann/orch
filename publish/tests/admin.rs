@@ -23,6 +23,7 @@ async fn admin_needs_token() {
         .status,
         401
     );
+    // header only: the cookie is not accepted
     assert_eq!(
         call(
             &t.admin,
@@ -33,7 +34,7 @@ async fn admin_needs_token() {
         )
         .await
         .status,
-        200
+        401
     );
     // the portal shell itself loads without a token (it asks for one)
     let p = call(&t.admin, "GET", "/admin", &[], vec![]).await;

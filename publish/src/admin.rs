@@ -68,19 +68,9 @@ async fn js() -> impl IntoResponse {
 }
 
 fn check(st: &State, h: &HeaderMap) -> ApiResult<()> {
-    let from_header = h
-        .get("x-orch-admin")
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string);
-    let from_cookie = || {
-        h.get(header::COOKIE)?
-            .to_str()
-            .ok()?
-            .split(';')
-            .find_map(|p| p.trim().strip_prefix("orch_admin=").map(str::to_string))
-    };
-    match from_header.or_else(from_cookie) {
-        Some(t) if !st.cfg.admin_token.is_empty() && util::ct_eq(&t, &st.cfg.admin_token) => Ok(()),
+    let t = h.get("x-orch-admin").and_then(|v| v.to_str().ok());
+    match t {
+        Some(t) if !st.cfg.admin_token.is_empty() && util::ct_eq(t, &st.cfg.admin_token) => Ok(()),
         _ => Err(ApiError::new(
             401,
             "unauthorized",
