@@ -225,6 +225,10 @@ def test_permanent_allow_start_key_and_token(proj, run, rel):
     )
     assert relay.allowed(proj, again) == "permanent"
     assert not any(relay.allowed(proj, m) for m in (wrong_key, forged, other_peer))
+    # the message that was allowed runs too, once; then it is spent
+    assert relay.allowed(proj, first) == "permanent"
+    run("relay", "done", "m_start00000000001")
+    assert relay.allowed(proj, first) is None
     # rule 4: done on an allowed start finds-or-creates the ticket with that key
     rel.inbox.append(again)
     run("relay", "inbox")

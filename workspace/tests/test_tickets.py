@@ -185,3 +185,12 @@ def test_missing_ticket_refused(proj, run):
 def test_works_without_git(proj, new_ticket):
     assert not (Path(proj) / ".git").exists()
     new_ticket()
+
+
+def test_done_refused_while_an_item_is_unchecked(proj, run, new_ticket):
+    tid = new_ticket()
+    assert run("check", "add", tid, "never done")[0] == 0
+    code, _, err = run("ticket", "status", tid, "done")
+    assert code == 2 and "c1" in err and "not checked" in err
+    assert read(proj, tid)["status"] == "open"
+    assert run("ticket", "status", tid, "dropped")[0] == 0  # a dropped ticket is not affected

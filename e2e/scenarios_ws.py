@@ -107,11 +107,13 @@ def w4(e):
     d["checklist"][0]["evidence"] = [{"type": "note", "ref": "checked by hand"}]
     p.write_text(json.dumps(d))
     e.orch(ws, "ticket", "status", t, "done")
-    # NOTE: an UNCHECKED item does not block done (code only checks checked items)
+    # an UNCHECKED item blocks done too; a dropped ticket is not affected
     t2 = e.orchj(ws, "ticket", "new", "W4 unchecked")["id"]
     e.orch(ws, "check", "add", t2, "never done")
-    rc, _, _ = e.orch(ws, "ticket", "status", t2, "done", ok=False)
-    return "refusal ok" + ("; unchecked item still allows done (see BUGS)" if rc == 0 else "")
+    rc, _, err = e.orch(ws, "ticket", "status", t2, "done", ok=False)
+    check(rc == 2 and "not checked" in err.lower(), f"unchecked item must refuse done, got rc={rc} {err!r}")
+    e.orch(ws, "ticket", "status", t2, "dropped")
+    return "refusal ok (checked without evidence, and unchecked)"
 
 
 @scenario("W5")

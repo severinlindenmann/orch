@@ -187,13 +187,13 @@ def r7(e):
     e.orch("Reports", "relay", "allow", st[-1]["id"], "--permanent")
     inbox(e, "Pilatus")  # stores the received allow token
     _sched_once(e, "Reports")
-    # a permanent allow covers LATER messages (they carry the token); the asking message itself does not run
-    check(_agent_runs(log) == base, "the message that was allowed with --permanent ran without a token")
+    # the message that was just allowed runs right away (like --once) ...
+    check(_agent_runs(log) == base + 1, "the message allowed with --permanent did not run")
     e.orch("Pilatus", "relay", "start", i["Reports"], "weekly-report", "second time")
     st2 = [m for m in inbox(e, "Reports") if m["type"] == "start" and m["body"].get("text") == "second time"]
     check(st2 and st2[-1]["allowed"] is True, f"second start with token must be allowed: {st2}")
     _sched_once(e, "Reports")
-    check(_agent_runs(log) == base + 1, "second start (with token) did not run")
+    check(_agent_runs(log) == base + 2, "second start (with token) did not run")
     keyed = [t for t in tickets(e, "Reports") if (t.get("ext", {}).get("relay") or {}).get("start_key") == "weekly-report"]
     check(len(keyed) == 1, f"second start made another ticket: {len(keyed)}")
     al = e.rel.admin.call("GET", "/admin/api/allows").json()["items"]
