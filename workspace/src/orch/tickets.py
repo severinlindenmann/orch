@@ -321,7 +321,17 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
     return ticket, q
 
 
-def wait(root: Path, tid: str, until: str | None, on: str | None, by: str) -> dict:
+def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear: bool = False) -> dict:
+    if clear:
+        if until or on:
+            raise Refused("--clear cannot be combined with --until or --on.")
+        ticket = load(root, tid)
+        ticket["wake_at"] = ticket["waiting_on"] = None
+        if ticket["status"] == "waiting":
+            ticket["status"] = "active"
+        add_history(ticket, by, "Wait cleared")
+        save(root, ticket)
+        return ticket
     if bool(until) == bool(on):
         raise Refused("Use exactly one of --until <time> or --on <kind>:<ref>.")
     ticket = load(root, tid)

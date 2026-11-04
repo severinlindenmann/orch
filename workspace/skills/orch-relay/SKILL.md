@@ -21,11 +21,14 @@ Read `.agents/skills/orch-relay/workspaces.json` first (next to this file). Pick
 Use only what `can_send` allows.
 
     orch relay send <workspace> "<text>" [--file <path>]
-    orch relay delegate ...   # makes a ticket there; the receiver needs an allow
-    orch relay start ...      # runs a ticket there by key; the receiver needs an allow
+    orch relay delegate <workspace> "<title>" [--text "<text>"] [--check "<item>"]...   # makes a ticket there; the receiver needs an allow
+    orch relay start <workspace> <key> "<text>"       # runs the ticket with that key there; the receiver needs an allow
+    orch relay download <message id>                  # saves the file of a file message to .orch/inbox/files/
 
 `delegate` and `start` run on the other side only with an allow. When you receive one without an allow, ask
 the user, then `orch relay allow <message id> --once` or `--permanent`.
+`orch relay inbox` shows `[allowed: once|permanent]` or `[not allowed yet]`; run `orch relay done <id>` before you start the work.
+To ask the owner's phone: `orch ask <ticket> "<question>" --option A --option B --phone`; the answer lands in the ticket by itself.
 
 # Shared skills, MCP servers and credentials
 

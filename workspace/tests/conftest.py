@@ -53,3 +53,21 @@ def new_ticket(proj, run):
         return json.loads(out)["id"]
 
     return _n
+
+
+@pytest.fixture
+def pub(proj, run):
+    from fakes import make_publish
+
+    srv = make_publish()
+    yield srv
+    srv.stop()
+
+
+@pytest.fixture
+def rel(proj, run):
+    from fakes import make_relay
+
+    srv = make_relay()
+    yield srv
+    srv.stop()

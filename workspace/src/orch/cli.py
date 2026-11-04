@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from orch import __version__, addons, tickets
+from orch import __version__, addons, cli_clients, tickets
 from orch import init as init_mod
 from orch.errors import Refused
 
@@ -103,11 +103,13 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("id")
     x.add_argument("--until")
     x.add_argument("--on", metavar="KIND:REF")
+    x.add_argument("--clear", action="store_true", help="clear wake_at and waiting_on")
 
     x = sub.add_parser("wait", parents=[common], help="same as: ticket wait")
     x.add_argument("id")
     x.add_argument("--until")
     x.add_argument("--on", metavar="KIND:REF")
+    x.add_argument("--clear", action="store_true", help="clear wake_at and waiting_on")
 
     c = sub.add_parser("check", help="checklist").add_subparsers(dest="sub", required=True)
     x = c.add_parser("add", parents=[common])
@@ -127,6 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("text")
     x.add_argument("--option", action="append", default=[])
     x.add_argument("--recommend", "--recommended", dest="recommend")
+    x.add_argument("--phone", action="store_true", help="also send the question to the phones via relay")
     x = sub.add_parser("answer", parents=[common], help="answer a question")
     x.add_argument("id")
     x.add_argument("question")
@@ -145,6 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("id")
     x.add_argument("addon")
     x.add_argument("data", help="JSON object")
+    cli_clients.add_parsers(sub, common)
     return p
 
 
@@ -189,9 +193,13 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.edit(root, args.id, args.title, by())
         _out(args, t, f"{t['id']}  {t['title']}")
     elif (cmd == "ticket" and sub == "wait") or cmd == "wait":
-        t = tickets.wait(root, args.id, args.until, args.on, by())
+        t = tickets.wait(root, args.id, args.until, args.on, by(), args.clear)
         _out(
-            args, t, f"{t['id']} is waiting" + (f" until {t['wake_at']}" if args.until else f" on {args.on}")
+            args,
+            t,
+            f"{t['id']} wait cleared"
+            if args.clear
+            else f"{t['id']} is waiting" + (f" until {t['wake_at']}" if args.until else f" on {args.on}"),
         )
     elif cmd == "check" and sub == "add":
         t, c = tickets.check_add(root, args.id, args.text, by())
@@ -206,6 +214,8 @@ def run(args: argparse.Namespace) -> None:
         _out(args, h, f"{h['at']} {h['by']}: {h['text']}")
     elif cmd == "ask":
         t, q = tickets.ask(root, args.id, args.text, args.option, args.recommend, by())
+        if args.phone:
+            cli_clients.send_phone_question(root, t["id"], q)
         _out(args, q, f"{q['id']} asked. {t['id']} is waiting on question {q['id']}.")
     elif cmd == "answer":
         t, q = tickets.answer(root, args.id, args.question, args.answer, by(), args.via)
@@ -213,16 +223,33 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "link":
         t = tickets.link_add(root, args.id, args.type, args.url, args.title, by())
         _out(args, t["links"][-1], f"Linked {args.title or args.type}: {args.url}")
+    elif cmd == "publish":
+        cli_clients.run_publish(args, root, _out)
+    elif cmd == "relay":
+        cli_clients.run_relay(args, root, _out)
     elif cmd == "ext":
         t = tickets.ext_set(root, args.id, args.addon, args.data, by())
         _out(args, t["ext"][args.addon], f"ext.{args.addon} set on {t['id']}")
+
+
+def _addon_command(name: str):
+    """An installed add-on registers `<name> = module:function` in the entry-point group orch.addons."""
+    from importlib.metadata import entry_points
+
+    return next(iter(entry_points(group="orch.addons", name=name)), None)
 
 
 def main(argv: list[str] | None = None) -> int:
     for s in (sys.stdout, sys.stderr):
         if hasattr(s, "reconfigure"):
             s.reconfigure(encoding="utf-8")
-    args = build_parser().parse_args(argv)
+    argv = sys.argv[1:] if argv is None else list(argv)
+    parser = build_parser()
+    if argv and not argv[0].startswith("-") and argv[0] not in parser._subparsers._group_actions[0].choices:
+        ep = _addon_command(argv[0])
+        if ep is not None:
+            return int(ep.load()(argv[1:]) or 0)
+    args = parser.parse_args(argv)
     try:
         run(args)
     except Refused as e:
