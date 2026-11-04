@@ -34,8 +34,11 @@ if [ "$MODE" = live ] && [ -z "${E2E_PUBLISH_ADMIN_TOKEN:-}" ] && [ -x "$REAL_HO
   . /dev/stdin <<PASS || true
 $("$REAL_HOME/orch-dev/scripts/pass-login.sh" 2>/dev/null)
 PASS
-  E2E_PUBLISH_ADMIN_TOKEN=$(pass-cli item view --vault-name Agents --item-title "orch publish admin token" --field password 2>/dev/null || true)
-  E2E_RELAY_ADMIN_TOKEN=$(pass-cli item view --vault-name Agents --item-title "orch relay admin token" --field password 2>/dev/null || true)
+  LIST=$(pass-cli item list --vault-name Agents 2>/dev/null || true)
+  for T in "publish:E2E_PUBLISH_ADMIN_TOKEN" "relay:E2E_RELAY_ADMIN_TOKEN"; do
+    ID=$(printf '%s\n' "$LIST" | grep "orch ${T%%:*} admin token (state=Active)" | sed 's/^- \[\(.*\)\]:.*/\1/' | head -1)
+    [ -n "$ID" ] && export "${T##*:}=$(pass-cli item view --vault-name Agents --item-id "$ID" --field password 2>/dev/null || true)"
+  done
 fi
 
 # minimal PATH: uv, node, git, claude, codex live in these folders

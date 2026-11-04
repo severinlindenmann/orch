@@ -299,8 +299,10 @@ def live_servers(e: E):
     for u in (pu, rl):
         try:
             if http("GET", u + "/health", timeout=10).status != 200:
+                print(f"live: {u}/health not 200")
                 return None, None
-        except OSError:
+        except OSError as ex:
+            print(f"live: {u}/health failed: {ex!r}")
             return None, None
     host = os.environ.get("E2E_VPS", "ubuntu@179.237.125.155")
     key = os.path.join(os.environ.get("E2E_REAL_HOME", ""), ".ssh", "orch-dev_rsa")

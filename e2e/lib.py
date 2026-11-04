@@ -78,12 +78,17 @@ def http(method: str, url: str, headers: dict | None = None, body=None, timeout:
         h.setdefault("Content-Type", "application/json")
     elif body is not None:
         data = body
-    req = urllib.request.Request(url, data=data, method=method, headers=h)
-    try:
-        with _opener.open(req, timeout=timeout) as r:
-            return Resp(r.status, {k.lower(): v for k, v in r.headers.items()}, r.read())
-    except urllib.error.HTTPError as e:
-        return Resp(e.code, {k.lower(): v for k, v in e.headers.items()}, e.read())
+    for attempt in range(4):  # the public edge has two proxy IPs and one is sometimes down: retry connect errors
+        req = urllib.request.Request(url, data=data, method=method, headers=h)
+        try:
+            with _opener.open(req, timeout=timeout) as r:
+                return Resp(r.status, {k.lower(): v for k, v in r.headers.items()}, r.read())
+        except urllib.error.HTTPError as e:
+            return Resp(e.code, {k.lower(): v for k, v in e.headers.items()}, e.read())
+        except urllib.error.URLError as e:
+            if attempt == 3 or not isinstance(e.reason, ConnectionRefusedError):
+                raise
+            time.sleep(1)
 
 
 def free_port(used: set[int]) -> int:

@@ -90,7 +90,7 @@ def write_app(e, ws: str, name: str, stack: str, **kw) -> Path:
     return d
 
 
-def app_get(e, name: str, token: str | None, path="/", retries=10) -> lib.Resp:
+def app_get(e, name: str, token: str | None, path="/", retries=20) -> lib.Resp:
     """GET /a/<name><path> with the view token (cookie flow). Retries while the app starts."""
     base = f"{e.pub.url}/a/{name}"
     h = {}
@@ -100,7 +100,7 @@ def app_get(e, name: str, token: str | None, path="/", retries=10) -> lib.Resp:
             h["Cookie"] = r.headers["set-cookie"].split(";")[0]
     for _ in range(retries):
         r = http("GET", base + path, h)
-        if r.status != 502:
+        if r.status not in (502, 503):
             return r
         time.sleep(0.5)
     return r
@@ -231,6 +231,7 @@ def p5(e):
         r2 = e.orchj("Pilatus", "publish", "app", str(d2))
         g2 = app_get(e, n, r["view_token"])
         key = "hits=" if stack == "python" else "n="
+        check(key in first and key in g2.text, f"{stack} redeploy status={r2.get('status')} app answer: {g2.status} {first[:80]!r} -> {g2.text[:120]!r}")
         n1 = int(first.split(key)[1].split()[0])
         n2 = int(g2.text.split(key)[1].split()[0])
         check("ver=v2" in g2.text and n2 > n1, f"{stack} data lost on redeploy: {first!r} -> {g2.text!r}")
