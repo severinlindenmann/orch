@@ -8,7 +8,7 @@ use crate::{auth, shared};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
-use axum::response::Html;
+use axum::response::{Html, IntoResponse};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use rusqlite::{params, params_from_iter, Connection};
@@ -57,6 +57,16 @@ pub fn router(app: AppState) -> Router {
             "/admin/api/phones/:id",
             axum::routing::patch(edit_phone).delete(del_phone),
         )
+        .fallback(|uri: axum::http::Uri| async move {
+            if uri.path().starts_with("/admin/api/") {
+                return not_found("No such route.").into_response();
+            }
+            (
+                StatusCode::NOT_FOUND,
+                Html(include_str!("../web/not-available.html")),
+            )
+                .into_response()
+        })
         .layer(DefaultBodyLimit::max(21 * 1024 * 1024))
         .with_state(app)
 }
@@ -82,7 +92,7 @@ fn parse_tags(v: &Value) -> Res<Vec<String>> {
 
 pub fn prompt(public: &str, ws: &str, token: &str) -> String {
     format!(
-        "Connect this workspace to orch-relay. Run in the project folder:\n  orch relay connect {public} --workspace {ws} --token {token}\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL {public}/onboarding.sh | sh -s -- --workspace {ws} --token {token}\n  Windows: & ([scriptblock]::Create((irm {public}/onboarding.ps1))) -Workspace {ws} -Token {token}"
+        "Connect this workspace to orch-relay. Run in the project folder:\n  orch relay connect {public} --workspace {ws} --token {token}\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL {public}/onboarding.sh | sh -s -- --workspace {ws} --token {token}\n  Windows: & ([scriptblock]::Create((irm {public}/onboarding.ps1))) -Workspace {ws} -Token {token}\nThen describe this workspace in one sentence and 2-4 tags: orch relay profile --description \"...\" --tags a,b"
     )
 }
 
@@ -105,7 +115,6 @@ async fn list_ws(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> 
             |r| r.get(0),
         )?;
         w["unread"] = n.into();
-        w.as_object_mut().unwrap().remove("last_seen");
     }
     Ok(Json(json!({"items": items, "next": null})))
 }

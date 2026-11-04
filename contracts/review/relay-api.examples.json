@@ -25,6 +25,37 @@
     }
   },
   {
+    "_note": "Change my own description and tags. Response = whoami.",
+    "request": {
+      "method": "PATCH",
+      "path": "/v1/me",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+      },
+      "body": {
+        "description": "Ingestion jobs and data pipelines.",
+        "tags": [
+          "data",
+          "work"
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "id": "ws_pilatus001",
+        "name": "Pilatus Workspace",
+        "description": "Ingestion jobs and data pipelines.",
+        "tags": [
+          "data",
+          "work"
+        ],
+        "phones": 1
+      }
+    }
+  },
+  {
     "_note": "Send a message. `from` must be me.",
     "request": {
       "method": "POST",

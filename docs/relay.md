@@ -53,3 +53,9 @@ First install: `deploy/install.sh` (user, folders, master key, admin token, Cadd
 ## Not included
 End-to-end encryption between workspaces, key rotation, groups/teams, several admins, message edit/delete by users,
 read receipts, a web client for messages.
+
+## Workspace profile and the portal (UX round 1)
+
+- A workspace can change its own description and tags with `PATCH /v1/me` (see contracts/relay-api.md); the admin "add workspace" prompt ends with a line asking the agent to run `orch relay profile --description "..." --tags a,b`.
+- The admin list shows `last_seen`; the portal says "Online" (called in the last 2 minutes) or "Last seen 5 min ago".
+- Dark only. Unknown public paths and `/` show a branded "This page isn't available" page.

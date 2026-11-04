@@ -29,6 +29,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | Method | Path | Request | Response |
 |---|---|---|---|
 | GET | `/v1/whoami` | – | `{id, name, description, tags, phones: n}` |
+| PATCH | `/v1/me` | `{description?: string ≤ 280, tags?: [string ≤ 24, ≤ 8 items]}` | `200` same body as `/v1/whoami`. A change raises the refresh version and sends refresh-hints to related workspaces. Bad limits → `422 invalid` |
 | POST | `/v1/messages` | one message | `201 {id}` (see rules above) |
 | GET | `/v1/inbox?wait=0..30` | – | `{items: [message…], next: null}` not yet acked, oldest first, max 100. `wait` = long-poll seconds |
 | POST | `/v1/inbox/ack` | `{ids: [m_…]}` | `204`. Acked messages are no longer delivered (the admin can still read them) |
@@ -69,6 +70,7 @@ Phone onboarding link (from the admin portal, also as QR code, valid 24 h, one u
 | GET, POST, PUT | `/webhook/<id>?token=whk_…` | Stored as a `webhook` message to the owning workspace → `202`. A `once` webhook is used up in the same database transaction that stores the message; later calls → `410`. Wrong token `401`. Body max 1 MB, stored as text |
 | GET | `/onboarding.sh`, `/onboarding.ps1` | Small scripts: install orch if missing, then `orch relay connect` |
 | GET | `/health` | `200 ok` |
+| GET | `/`, any unknown non-`/v1` path | Dark HTML page "This page isn't available" (`200` for `/`, `404` otherwise; no product name). Unknown `/v1/…` paths answer JSON `404 not_found` |
 
 "Online" = the workspace or phone called the relay in the last 2 minutes. Offline workspaces get their messages on the next inbox call.
 
@@ -79,7 +81,7 @@ Auth: `X-Orch-Admin: <admin token>` (file `/etc/orch-relay/admin-token`); the po
 | Method | Path | Request | Response |
 |---|---|---|---|
 | GET | `/admin` | – | Portal HTML |
-| GET / POST | `/admin/api/workspaces` | POST: `{name, description, tags: []}` | list of `{id, name, description, tags, online, unread}` / `201 {id, token, prompt}` |
+| GET / POST | `/admin/api/workspaces` | POST: `{name, description, tags: []}` | list of `{id, name, description, tags, online, last_seen, unread}` (`last_seen` null until the workspace first calls) / `201 {id, token, prompt}` |
 | PATCH | `/admin/api/workspaces/<id>` | `{name?, description?, tags?}` | `200` (shows up in the next refresh) |
 | POST | `/admin/api/workspaces/<id>/token` | – | `200 {token, prompt}` |
 | DELETE | `/admin/api/workspaces/<id>` | – | `204` |

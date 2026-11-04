@@ -261,3 +261,108 @@ async fn admin_onboarding_scripts_are_served() {
         .unwrap();
     assert!(ps.contains("orch relay connect") && !ps.contains("__RELAY_URL__"));
 }
+
+#[tokio::test]
+async fn me_patch_updates_profile_validates_and_hints() {
+    let t = start().await;
+    let a = t.add_ws("Alpha").await;
+    let b = t.add_ws("Beta").await;
+    t.rules(json!([rule(&a, &b, [true, false, false, false])]))
+        .await;
+    let (s, v) = t
+        .call(
+            &a,
+            "PATCH",
+            "/v1/me",
+            Some(json!({"description": "Builds reports.", "tags": ["data", "work"]})),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["description"], "Builds reports.");
+    assert_eq!(v["tags"], json!(["data", "work"]));
+    assert_eq!(v["id"], json!(a.id));
+    assert!(v.get("phones").is_some());
+    // same body as whoami
+    let (_, w) = t.call(&a, "GET", "/v1/whoami", None).await;
+    assert_eq!(v, w);
+    // the partner gets a refresh-hint
+    assert!(t
+        .inbox(&b)
+        .await
+        .iter()
+        .any(|m| m["type"] == "refresh-hint"));
+    // partial update keeps the rest
+    let (s, v) = t
+        .call(&a, "PATCH", "/v1/me", Some(json!({"tags": ["x"]})))
+        .await;
+    assert_eq!(
+        (s, v["description"].clone()),
+        (200, json!("Builds reports."))
+    );
+    // limits
+    for bad in [
+        json!({"description": "x".repeat(281)}),
+        json!({"tags": ["a","b","c","d","e","f","g","h","i"]}),
+        json!({"tags": ["x".repeat(25)]}),
+        json!({"tags": [""]}),
+        json!({"tags": "a"}),
+    ] {
+        assert_eq!(t.call(&a, "PATCH", "/v1/me", Some(bad)).await.0, 422);
+    }
+    let bad = Ws {
+        id: a.id.clone(),
+        token: "nope".into(),
+    };
+    assert_eq!(
+        t.call(&bad, "PATCH", "/v1/me", Some(json!({}))).await.0,
+        401
+    );
+}
+
+#[tokio::test]
+async fn admin_list_shows_last_seen_and_prompt_asks_for_profile() {
+    let t = start().await;
+    let w = t.add_ws("Alpha").await;
+    let (_, l) = t.admin_json("GET", "/admin/api/workspaces", None).await;
+    assert_eq!(
+        (
+            l["items"][0]["online"].clone(),
+            l["items"][0]["last_seen"].clone()
+        ),
+        (json!(false), serde_json::Value::Null)
+    );
+    t.inbox(&w).await;
+    let (_, l) = t.admin_json("GET", "/admin/api/workspaces", None).await;
+    assert_eq!(l["items"][0]["online"], json!(true));
+    assert!(l["items"][0]["last_seen"].is_string());
+    let (_, v) = t
+        .admin_json("POST", "/admin/api/workspaces", Some(json!({"name": "B"})))
+        .await;
+    assert!(v["prompt"]
+        .as_str()
+        .unwrap()
+        .contains("orch relay profile --description"));
+}
+
+#[tokio::test]
+async fn public_root_and_unknown_pages_are_branded_dark_pages() {
+    let t = start().await;
+    let r = t.http.get(format!("{}/", t.base)).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    let body = r.text().await.unwrap();
+    assert!(body.contains("This page isn't available") && !body.to_lowercase().contains("relay"));
+    let r = t.http.get(format!("{}/nope", t.base)).send().await.unwrap();
+    assert_eq!(r.status(), 404);
+    assert!(r.text().await.unwrap().contains("isn't available"));
+    let r = t
+        .http
+        .get(format!("{}/v1/nope", t.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 404);
+    assert_eq!(
+        r.json::<serde_json::Value>().await.unwrap()["error"],
+        "not_found"
+    );
+}
