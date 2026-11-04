@@ -239,10 +239,8 @@ def p5(e):
     # the shipped python + sqlite template: deploys (its own test runs on the server) and redeploys
     tok = None
     n = name_for(e, "p5-tpl")
-    d = e.tmp / "apps" / f"Pilatus-{n}"
+    d = e.tmp / "apps" / n
     e.orch("Pilatus", "publish", "new", "python", "--store", "sqlite", str(d))
-    m = d / "app.toml"
-    m.write_text(m.read_text().replace(next(l for l in m.read_text().splitlines() if l.startswith("name =")), f'name = "{n}"'))
     for round_ in (1, 2):
         r = e.orchj("Pilatus", "publish", "app", str(d))
         check(r["status"] == "running", f"template deploy {round_}: {r}")
