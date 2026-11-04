@@ -176,7 +176,13 @@ def resolve(root: Path, target: str) -> str:
     for w in net.read_json(wf, {}).get("workspaces", []):
         if target.lower() in (w["name"].lower(), w["id"]):
             return w["id"]
-    raise Refused(f"No workspace called {target!r}. See .agents/skills/orch-relay/workspaces.json")
+    names = [w["name"] for w in net.read_json(wf, {}).get("workspaces", []) if w.get("name")]
+    known = (
+        "Workspaces you can message: " + ", ".join(names) + "."
+        if names
+        else "No other workspaces are known yet."
+    )
+    raise Refused(f"No workspace called {target!r}. {known} Run: orch relay refresh to update the list.")
 
 
 def name_of(root: Path, ws_id: str) -> str:

@@ -95,7 +95,7 @@ def test_list_and_delete_file(proj, run, pub):
     (proj / "a.txt").write_text("x")
     fid = json.loads(run("publish", "file", "a.txt", "--json")[1])["id"]
     code, out, _ = run("publish", "list")
-    assert fid in out and "key saved" in out
+    assert fid in out and "a.txt" in out and "key saved" not in out
     assert run("publish", "delete", fid)[0] == 0
     assert run("publish", "list")[1].strip().startswith("Nothing shared yet")
 

@@ -3,6 +3,7 @@
 import json
 import re
 
+import pytest
 from fakes import WS
 
 from orch import skills
@@ -19,7 +20,7 @@ def test_relay_profile_show_and_change(proj, run, rel):
     code, out, err = run("relay", "profile", "--description", "Builds sites", "--tags", "web, design")
     assert code == 0, err
     assert "Sent to the owner for approval." in out
-    assert "Current: d · tags: none · Proposed: Builds sites · tags: web, design" in out
+    assert "Nothing changes until they approve" in out and out.count("Builds sites") == 1
     assert "Waiting for the owner to approve" in out
     patch = [c for c in rel.calls if c[0] == "PATCH"][0]
     assert json.loads(patch[3]) == {"description": "Builds sites", "tags": ["web", "design"]}
@@ -124,3 +125,34 @@ def test_help_hides_advanced_until_help_all(run, capsys):
     with pytest.raises(SystemExit):
         run("--help-all")
     assert re.search(r"^\s+answer\s", capsys.readouterr().out, re.M)
+
+
+def _exit(run, capsys, *argv):
+    with pytest.raises(SystemExit) as e:
+        run(*argv)
+    cap = capsys.readouterr()
+    return e.value.code, cap.err + cap.out
+
+
+def test_plain_usage_errors(proj, run, capsys):
+    code, err = _exit(run, capsys, "nonsense")
+    assert code == 2 and '"nonsense" is not an orch command' in err and "invalid choice" not in err
+    code, err = _exit(run, capsys, "ticket", "new")
+    assert code == 2 and 'orch ticket new "Fix the login"' in err and "positional" not in err
+
+
+def test_not_connected_and_unknown_recipient_are_plain(proj, run):
+    code, _, err = run("relay", "inbox")
+    assert code == 2 and "relay admin page" in err and "<token>" not in err and "(" not in err
+    code, _, err = run("relay", "send", "Nobody", "hi")
+    assert code == 2 and "orch relay refresh" in err and ".json" not in err
+
+
+def test_ticket_new_next_step(proj, run):
+    code, out, _ = run("ticket", "new", "Do it")
+    assert code == 0 and "orch check add" in out
+
+
+def test_help_lists_everyday_commands(proj, run, capsys):
+    out = _exit(run, capsys, "relay", "--help")[1]
+    assert all(c in out for c in ("send", "whoami", "connect", "inbox"))
