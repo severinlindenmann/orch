@@ -306,8 +306,19 @@ def live_servers(e: E):
     key = os.path.join(os.environ.get("E2E_REAL_HOME", ""), ".ssh", "orch-dev_rsa")
     base = ["ssh", "-i", key, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
             "-o", f"UserKnownHostsFile={os.environ.get('E2E_REAL_HOME', '')}/.ssh/known_hosts", host]
-    pa = Admin("http://100.71.130.135:8411", None, {"cmd": base, "tokenfile": "/etc/orch-publish/admin-token"})
-    ra = Admin("http://100.71.130.135:8412", None, {"cmd": base, "tokenfile": "/etc/orch-relay/admin-token"})
+    def admin(port, tok_env, tokfile):
+        url = f"http://100.71.130.135:{port}"
+        tok = os.environ.get(tok_env)
+        if tok:  # direct over the private network (token from Proton Pass, passed by run.sh)
+            try:
+                if http("GET", url + "/admin/api/workspaces", {"X-Orch-Admin": tok}, timeout=5).status == 200:
+                    return Admin(url, tok)
+            except OSError:
+                pass
+        return Admin(url, None, {"cmd": base, "tokenfile": tokfile})  # fallback: curl on the VPS over ssh
+
+    pa = admin(8411, "E2E_PUBLISH_ADMIN_TOKEN", "/etc/orch-publish/admin-token")
+    ra = admin(8412, "E2E_RELAY_ADMIN_TOKEN", "/etc/orch-relay/admin-token")
     return lib.Server("publish", pu, pa.base, pa), lib.Server("relay", rl, ra.base, ra)
 
 

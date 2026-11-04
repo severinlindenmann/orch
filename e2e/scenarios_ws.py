@@ -282,12 +282,13 @@ def a5(e):
     try:
         ok = _wait(lambda: log.read_text().count("start") >= 2 and log.read_text().count("end") >= 2, 170, 2)
         check(ok, f"fewer than 2 finished runs in 170 s: {log.read_text()!r}")
+        time.sleep(5)  # let the scheduler reap the finished runs (log footer)
     finally:
         _sched(e, ws, "stop")
     lines = log.read_text().split("\n")
     kinds = [l.split()[0] for l in lines if l.strip()]
     check(all(kinds[i] != kinds[i + 1] for i in range(len(kinds) - 1)), f"runs overlapped: {kinds}")
-    logs = list((ws / ".orch/scheduler/logs").glob(f"{t}-*.log"))
+    logs = sorted((ws / ".orch/scheduler/logs").glob(f"{t}-*.log"))
     check(len(logs) >= 2 and all("# end" in p.read_text() for p in logs[:2]), "run logs missing or unfinished")
     st = json.loads((ws / ".orch/scheduler/state.json").read_text())
     check(st[t].get("next_run"), "state.json has no next_run")

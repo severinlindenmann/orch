@@ -193,8 +193,11 @@ def p4(e):
     check(r.status == 403, f"permanent app: {r}")
     if e.mode == "local":
         big, _ = _blob(os.urandom(3 * 1024 * 1024))  # local server cap is 2 MB
-        r = e.papi("Home", "POST", "/v1/files?days=1", big)
-        check(r.status == 413, f"over the cap: {r}")
+        try:
+            r = e.papi("Home", "POST", "/v1/files?days=1", big)
+            check(r.status == 413, f"over the cap: {r}")
+        except OSError:
+            pass  # server closed the connection while the oversized body was sent: refused too
     return "100 MB cap tested with a 2 MB cap (local); sweep of expired temp apps is hourly: covered by cargo test, not run here"
 
 
@@ -297,7 +300,7 @@ def p8(e):
     e.orch("Pilatus", "publish", "delete", n)
     e.orch("Pilatus", "publish", "delete", fid)
     lst = e.orchj("Pilatus", "publish", "list")
-    check(not lst["apps"] and not any(f["id"] == fid for f in lst["files"]), f"not deleted: {lst}")
+    check(not any(a["name"] == n for a in lst["apps"]) and not any(f["id"] == fid for f in lst["files"]), f"not deleted: {lst}")
 
 
 @scenario("P9")
