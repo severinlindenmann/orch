@@ -147,17 +147,25 @@
     const rects = counts.map(([s, n]) => { const w = n / total * 100, r = `<rect class="s-${s}" x="${x.toFixed(2)}%" width="${w.toFixed(2)}%" y="0" height="100%"/>`; x += w; return r; }).join('');
     return `<section class="overview panel" aria-label="${esc(text)}"><svg class="segbar" width="100%" height="12" aria-hidden="true" preserveAspectRatio="none"><clipPath id="segclip"><rect width="100%" height="100%" rx="6"/></clipPath><g clip-path="url(#segclip)">${rects}</g></svg><ul class="seg">${counts.map(([s, n]) => `<li class="s-${s}"><span class="seg-text">${ic(SM[s].icon)}<b>${n}</b><span>${esc(SM[s].word)}</span></span></li>`).join('')}</ul></section>`;
   }
+  // Show the first `n` items; the rest sit behind a "Show all" disclosure (nothing hidden silently).
+  function capped(key, items, n, render, wrapClass) {
+    const shown = items.slice(0, n), rest = items.slice(n);
+    const wrap = html => wrapClass ? `<div class="${wrapClass}">${html}</div>` : html;
+    return wrap(shown.map(render).join('')) + (rest.length ? `<details class="more" data-key="${esc(key)}"><summary><span class="more-open">Show all ${items.length}</span><span class="more-close">Show fewer</span>${ic('chevron', 'chev')}</summary>${wrap(rest.map(render).join(''))}</details>` : '');
+  }
+  const newest = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
   function list() {
     const tickets = array(state.tickets);
     if (!tickets.length) return heading('Tickets') + `<section class="panel empty"><span class="empty-ic">${ic('list')}</span><h2>Your first ticket starts here.</h2><p>Ask your agent: “Prepare my weekly summary.” Your ticket will appear here.</p><button type="button" class="copy-req" data-copy="Prepare my weekly summary.">Copy this request</button></section>`;
-    const asks = tickets.flatMap(t => openQuestions(t).map(q => askCard(t, q, 'a', true)));
+    const askItems = tickets.flatMap(t => openQuestions(t).map(q => [t, q]));
+    const asks = askItems.length ? `<section class="asks-block"><h2 class="group-title s-waiting">${ic('question')}<span>${plural(askItems.length, 'question')} ${askItems.length === 1 ? 'needs' : 'need'} you</span></h2>${capped('asks', askItems, 5, ([t, q]) => askCard(t, q, 'a', true), 'asks')}</section>` : '';
     const body = statuses.map(status => {
-      const group = tickets.filter(ticket => ticket.status === status);
+      const group = tickets.filter(ticket => ticket.status === status).sort(newest);
       if (!group.length) return '';
       if (status === 'dropped') return `<details class="group" data-key="dropped"><summary>${ic('x')}<span>Dropped</span><span class="num">${group.length}</span>${ic('chevron', 'chev')}</summary><div class="minis">${group.map(t => `<a class="mini s-dropped" href="${esc(ticketHref(t.id))}">${ic('x')}<span class="mini-title">${esc(t.title)}</span></a>`).join('')}</div></details>`;
-      return `<section class="group"><h2 class="group-title s-${status}">${ic(SM[status].icon)}<span>${esc(SM[status].word)}</span><span class="num">${group.length}</span></h2>${status === 'done' ? `<div class="minis">${group.map(mini).join('')}</div>` : `<div class="cards">${group.map(row).join('')}</div>`}</section>`;
+      return `<section class="group"><h2 class="group-title s-${status}">${ic(SM[status].icon)}<span>${esc(SM[status].word)}</span><span class="num">${group.length}</span></h2>${status === 'done' ? capped('g-done', group, 8, mini, 'minis') : capped('g-' + status, group, 8, row, 'cards')}</section>`;
     }).join('');
-    return heading('Tickets') + (asks.length ? `<div class="asks">${asks.join('')}</div>` : '') + `<div class="glance">${statusBar(tickets)}${weekBars(tickets)}</div>` + body;
+    return heading('Tickets') + `<div class="glance">${statusBar(tickets)}${weekBars(tickets)}</div>` + asks + body;
   }
   function detail(ticket) {
     const steps = array(ticket.checklist), open = openQuestions(ticket), qs = array(ticket.questions);
@@ -200,12 +208,13 @@
     const range = `${fmt(days[0], {weekday: 'short', day: 'numeric', month: 'short'})} – ${fmt(days[6], {weekday: 'short', day: 'numeric', month: 'short'})}`;
     const strip = `<ol class="strip">${days.map(d => {
       const runs = rows.filter(r => { const w = parse(r.at); return w && sameDay(w, d); });
-      return `<li class="day${sameDay(d, now) ? ' today' : ''}${runs.length ? ' has' : ' empty'}"><div class="day-head"><span>${esc(fmt(d, {weekday: 'short'}))}</span><b>${d.getDate()}</b></div>${runs.length ? runs.map(r => `<a class="run" href="${esc(ticketHref(r.ticket))}" aria-label="${esc(`${r.title}, ${timeOf(r.at)}`)}" title="${esc(r.title)}">${ic(r.kind === 'recurring' ? 'repeat' : 'clock')}<time>${esc(timeOf(r.at))}</time><span>${esc(r.title)}</span></a>`).join('') : '<span class="none-day" aria-hidden="true">–</span>'}</li>`;
+      return `<li class="day${sameDay(d, now) ? ' today' : ''}${runs.length ? ' has' : ' empty'}"><div class="day-head"><span>${esc(fmt(d, {weekday: 'short'}))}</span><b>${d.getDate()}</b></div>${runs.length ? runs.map(r => `<a class="run${r.last_exit != null && Number(r.last_exit) !== 0 ? ' failed' : ''}" href="${esc(ticketHref(r.ticket))}" aria-label="${esc(`${r.title}, ${timeOf(r.at)}`)}" title="${esc(r.title)}">${ic(r.kind === 'recurring' ? 'repeat' : 'clock')}<time>${esc(timeOf(r.at))}</time><span>${esc(r.title)}</span></a>`).join('') : '<span class="none-day" aria-hidden="true">–</span>'}</li>`;
     }).join('')}</ol>`;
     const sorted = rows.slice().sort((a, b) => String(a.at || '~').localeCompare(String(b.at || '~')));
     const row = (r, hero) => {
-      const every = cronShort(r.cron), w = parse(r.at);
-      return `<a class="sched${hero ? ' hero' : ''}" href="${esc(ticketHref(r.ticket))}"><div class="sched-time">${w ? `<b>${esc(timeOf(r.at))}</b><span class="tag wait">${esc(fmt(w, {weekday: 'short', day: 'numeric', month: 'short'}))}</span>` : `<span class="tag">Not scheduled yet</span>`}</div><div class="sched-main"><h2>${esc(r.title)}</h2>${every ? `<div class="tags">${tag('repeat', 'repeat', every)}</div>` : ''}</div>${ic('chevron', 'go')}</a>`;
+      const every = cronShort(r.cron), w = parse(r.at), failed = r.last_exit != null && Number(r.last_exit) !== 0;
+      const failTag = failed ? tag('fail', 'x', 'Last run failed', r.last_run ? `Failed ${date(r.last_run)}` : '') : '';
+      return `<a class="sched${hero ? ' hero' : ''}${failed ? ' failed' : ''}" href="${esc(ticketHref(r.ticket))}"><div class="sched-time">${w ? `<b>${esc(timeOf(r.at))}</b><span class="tag wait">${esc(fmt(w, {weekday: 'short', day: 'numeric', month: 'short'}))}</span>` : `<span class="tag">Not scheduled yet</span>`}</div><div class="sched-main"><h2>${esc(r.title)}</h2>${every || failed ? `<div class="tags">${failTag}${every ? tag('repeat', 'repeat', every) : ''}</div>` : ''}</div>${ic('chevron', 'go')}</a>`;
     };
     const next = sorted[0], rest = sorted.slice(1);
     return heading('Scheduler') + `<section class="panel strip-panel"><div class="range">${esc(range)}</div>${strip}</section>`
@@ -218,19 +227,23 @@
     const messages = array(state.inbox).filter(m => m.type !== 'refresh-hint');
     const tickets = array(state.tickets);
     const titleOf = id => (tickets.find(t => String(t.id) === String(id)) || {}).title;
-    const asks = tickets.flatMap(t => openQuestions(t).map(q => askCard(t, q)));
+    const askCount = tickets.reduce((n, t) => n + openQuestions(t).length, 0);
+    const asks = askCount ? `<a class="asks-line" href="#tickets">${ic('question')}<span>${plural(askCount, 'question')} waiting for you</span><b>See in Tickets</b>${ic('chevron', 'go')}</a>` : '';
     const groups = [];
     for (const m of messages) { let g = groups.find(x => x.name === m.from); if (!g) groups.push(g = {name: m.from, items: []}); g.items.push(m); }
     const body = groups.map(g => {
       const unread = g.items.filter(m => !m.seen).length;
-      return `<section class="group sender"><h2 class="sender-head"><span class="avatar c${hue(g.name)}" aria-hidden="true">${g.name === 'Your phone' ? ic('phone') : esc(String(g.name).trim().charAt(0).toUpperCase() || '?')}</span><span>${esc(g.name)}</span></h2><div class="panel">${g.items.map(m => {
+      g.items.sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0));
+      const msgHtml = m => {
         const about = m.ticket != null ? titleOf(m.ticket) : '';
         const text = noIds(m.text || m.title) || (m.type === 'file' ? 'A file' : 'New message');
         return `<details class="msg${m.seen ? '' : ' unseen'}" data-key="msg-${esc(m.id)}"><summary><span class="dotmark" aria-label="${m.seen ? 'Seen' : 'New'}"></span>${m.type === 'file' ? ic('file') : ''}<span class="msg-text">${esc(text)}</span><time>${esc(ago(m.created_at))}</time>${ic('chevron', 'chev')}</summary><div class="msg-more"><p class="message-text">${esc(text)}</p>${about ? `<a class="chip" href="${esc(ticketHref(m.ticket))}">${ic('list')}${esc(about)}</a>` : ''}</div></details>`;
-      }).join('')}</div></section>`;
+      };
+      const first = g.items.slice(0, 3), rest = g.items.slice(3);
+      return `<section class="group sender"><h2 class="sender-head"><span class="avatar c${hue(g.name)}" aria-hidden="true">${g.name === 'Your phone' ? ic('phone') : esc(String(g.name).trim().charAt(0).toUpperCase() || '?')}</span><span>${esc(g.name)}</span>${unread ? `<span class="num unread">${unread} new</span>` : ''}<span class="num">${g.items.length}</span></h2><div class="panel">${first.map(msgHtml).join('')}${rest.length ? `<details class="more" data-key="more-${esc(g.name)}"><summary><span class="more-open">Show ${rest.length} earlier</span><span class="more-close">Show fewer</span>${ic('chevron', 'chev')}</summary>${rest.map(msgHtml).join('')}</details>` : ''}</div></section>`;
     }).join('');
-    const empty = !asks.length && !body ? `<section class="panel empty"><span class="empty-ic">${ic('inbox')}</span><h2>No messages yet.</h2><p>Messages from your agent and other workspaces will appear here.</p><button type="button" class="copy-req" data-copy="Ask me a question about my tickets.">Copy this request</button></section>` : '';
-    return heading('Inbox') + (asks.length ? `<div class="asks">${asks.join('')}</div>` : '') + body + empty;
+    const empty = !asks && !body ? `<section class="panel empty"><span class="empty-ic">${ic('inbox')}</span><h2>No messages yet.</h2><p>Messages from your agent and other workspaces will appear here.</p><button type="button" class="copy-req" data-copy="Ask me a question about my tickets.">Copy this request</button></section>` : '';
+    return heading('Inbox') + asks + body + empty;
   }
   function render() {
     if (!state) return;
@@ -253,7 +266,7 @@
     content.classList.remove('fade'); content.innerHTML = banner + (route === 'ticket' ? detail(ticket) : route === 'scheduler' ? scheduler() : route === 'inbox' ? inbox() : list());
     content.querySelectorAll('details').forEach(el => { el.open = openKeys.has(el.dataset.key); if (focusedKey === el.dataset.key) el.querySelector('summary').focus({preventScroll: true}); });
     for (const id of ['workspace-name', 'top-workspace']) document.getElementById(id).textContent = state.workspace ?? 'Workspace';
-    const count = (id, n) => { document.getElementById(id).textContent = n > 0 ? n : ''; };
+    const count = (id, n) => { document.getElementById(id).textContent = n > 99 ? '99+' : n > 0 ? n : ''; };
     count('ticket-count', array(state.tickets).length);
     count('schedule-count', array(state.scheduler).length);
     count('inbox-count', array(state.inbox).filter(m => !m.seen && m.type !== 'refresh-hint').length);
