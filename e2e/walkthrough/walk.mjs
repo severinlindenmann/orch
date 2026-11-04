@@ -76,6 +76,7 @@ async function relayAdd(name, description, tags) {
   await page.goto('about:blank');
   await page.goto(REL_ADMIN + '/admin#add');
   await page.fill('input[name=name]', name);
+  await page.click('details summary:has-text("More options")');
   await page.fill('input[name=description]', description);
   await page.fill('input[name=tags]', tags);
   await page.click('button[type=submit]');
@@ -100,6 +101,7 @@ try {
   page = await (await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: process.env.WALK_SCHEME || 'dark', acceptDownloads: true })).newPage();
 
   // ---------- 1. relay admin ----------
+  page.setDefaultTimeout(10000);
   await step('relay-login', 'Relay admin: open the portal and sign in with the admin token', relayLogin);
   await step('relay-add-pilatus', 'Relay admin: add workspace "Walk Pilatus" (description + tags), see its connect prompt', async () => {
     ws.Pilatus = { relay: await relayAdd('Walk Pilatus', 'Walkthrough workspace that sends', 'walk, sender') };
@@ -113,9 +115,10 @@ try {
   });
   await step('relay-rules', 'Relay admin: set a pair rule Pilatus -> Reports (text, files) and save', async () => {
     await page.goto(REL_ADMIN + '/admin#rules');
-    for (const k of ['Share text', 'Share files'])
-      await page.check(`input[aria-label="${k} from Walk Pilatus to Walk Reports"]`);
-    await page.click('text=Save rules');
+    const pair = page.locator('.pair', { has: page.locator('h3', { hasText: 'Walk Pilatus → Walk Reports' }) });
+    for (const k of ['Send messages', 'Send files'])
+      await pair.locator('label.pair-toggle', { hasText: k }).locator('input').check();
+    await page.click('button:has-text("Save")');
     await page.waitForSelector('#toast:not([hidden])');
   });
 
@@ -124,16 +127,18 @@ try {
     await page.goto(PUB_ADMIN + '/admin#workspaces');
     await page.fill('#admin-token', PT);
     await page.click('#login-form button[type=submit]');
-    await page.waitForSelector('.summary-line');
+    await page.waitForSelector('.summary-line, .empty-card');
   });
   await step('publish-add', 'Publish admin: add "Walk Pilatus" with description, tags and rights; see the prompt', async () => {
     await page.goto(PUB_ADMIN + '/admin#add');
     await page.fill('#name', 'Walk Pilatus');
+    await page.click('details.more summary:has-text("More options")');
     await page.fill('#description', 'Walkthrough workspace that publishes');
     await page.fill('#tags', 'walk, publish');
     await page.click('form button[type=submit]');
-    await page.waitForSelector('pre');
-    ws.Pilatus.pub = parse(await page.textContent('pre'), 'publish');
+    await page.waitForSelector('button.copy-prompt');
+    await page.click('details.more summary:has-text("Show what will be copied")');
+    ws.Pilatus.pub = parse(await page.textContent('details.more pre'), 'publish');
   });
 
   // ---------- 3. workspace side ----------
@@ -161,10 +166,10 @@ try {
     dash = spawn('orch', ['dashboard', 'serve', '--port', String(port)], { cwd: dirs.Pilatus, env, stdio: 'ignore' });
     for (let i = 0; i < 40; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/`)).ok) break; } catch {} await new Promise(r => setTimeout(r, 250)); }
     await page.goto(`http://127.0.0.1:${port}/#tickets`);
-    await page.waitForSelector('a.ticket');
+    await page.waitForSelector('a.card');
   });
   await step('dashboard-detail', 'Dashboard: click the ticket, see checklist, evidence, question, links, history', async () => {
-    await page.click('a.ticket');
+    await page.click('a.card');
     await page.waitForSelector('text=Which format?');
   });
   await step('dashboard-scheduler', 'Dashboard: scheduler view', async () => {
@@ -190,7 +195,7 @@ try {
   await step('file-wrong-key', 'Publish: the same link with a wrong key shows an error page', async () => {
     await page.goto('about:blank');
     await page.goto(fileLink.replace(/#k=.*/, '#k=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'));
-    await page.waitForSelector("text=This key doesn");
+    await page.waitForSelector("text=This link doesn");
   });
   await step('file-no-key', 'Publish: the link without a key shows an error page', async () => {
     await page.goto('about:blank');
@@ -232,7 +237,6 @@ try {
     await page.goto(REL_ADMIN + '/admin#messages');
     const m = page.locator('article.message', { hasText: 'Walk Reports' }).first();
     await m.waitFor();
-    await m.locator('summary').click();
     await page.waitForSelector('text=Hello from the walkthrough');
   });
   await step('relay-phones', 'Relay admin: phones page, create a pairing link/QR for Walk Pilatus', async () => {
@@ -244,7 +248,7 @@ try {
     await page.waitForSelector('.qr, #toast:not([hidden])');
   });
   await step('relay-config', 'Relay admin: shared config page', async () => {
-    await page.goto(REL_ADMIN + '/admin#config'); await page.waitForSelector('text=Shared resources');
+    await page.goto(REL_ADMIN + '/admin#config'); await page.waitForSelector('text=Shared tools');
   });
   await cliStep('webhook-new', 'Relay: Pilatus creates a one-time webhook', async () => {
     return must('orch relay webhook new --once', dirs.Pilatus).split('\n')[0];
@@ -263,20 +267,20 @@ try {
   });
 
   await step('publish-files', 'Publish admin: files page lists the file with no name', async () => {
-    await page.goto(PUB_ADMIN + '/admin#files'); await page.waitForSelector('table');
-    const text = await page.textContent('table');
+    await page.goto(PUB_ADMIN + '/admin#files'); await page.waitForSelector('article.item');
+    const text = await page.textContent('section.card');
     if (text.includes('report.txt')) throw new Error('file name visible in admin');
   });
   await step('publish-apps', 'Publish admin: apps page shows the apps with status', async () => {
-    await page.goto(PUB_ADMIN + '/admin#apps'); await page.waitForSelector('[data-action="restart"]');
+    await page.goto(PUB_ADMIN + '/admin#apps'); await page.waitForSelector('.app-card');
   });
   await step('publish-restart', 'Publish admin: click restart on the app', async () => {
-    await page.click('[data-action="restart"]'); await page.waitForSelector('#toast:not([hidden])');
+    await page.click('.app-card:has-text("Walk Pilatus") details.menu summary'); await page.click('.app-card:has-text("Walk Pilatus") [data-action="restart"]'); await page.waitForSelector('#toast:not([hidden])');
     return await page.textContent('#toast');
   });
   await step('publish-stop', 'Publish admin: click stop on the app', async () => {
-    await page.goto(PUB_ADMIN + '/admin#apps'); await page.waitForSelector('[data-action="stop"]');
-    await page.click('[data-action="stop"]'); await page.waitForFunction(() => /stop/i.test(document.querySelector('#toast')?.textContent || ''));
+    await page.goto(PUB_ADMIN + '/admin#apps'); await page.waitForSelector('.app-card');
+    await page.click('.app-card:has-text("Walk Pilatus") details.menu summary'); await page.click('.app-card:has-text("Walk Pilatus") [data-action="stop"]'); await page.waitForFunction(() => /stop/i.test(document.querySelector('#toast')?.textContent || ''));
     return await page.textContent('#toast');
   });
 
