@@ -35,8 +35,8 @@ def test_allowed_start_creates_ticket_and_runs(ws):
 
 
 def test_start_reuses_ticket_with_key(ws):
-    add_ticket(ws, "t_keyed001", ext={"relay": {"start_key": "weekly-report"}})
-    relay_on(ws, [{"id": "m_2", "type": "start", "allowed": True, "body": {"key": "weekly-report", "text": "go"}}])
+    add_ticket(ws, "t_keyed001", ext={"relay": {"start_key": "weekly-report", "from": "ws_a"}})
+    relay_on(ws, [{"id": "m_2", "type": "start", "from": "ws_a", "allowed": True, "body": {"key": "weekly-report", "text": "go"}}])
     s = Scheduler(ws)
     assert s.tick(T(8)) == ["t_keyed001"]
     s.runner.reap(T(8, 1), wait=True)
@@ -85,3 +85,15 @@ def test_poll_interval(ws):
     s.tick(T(8, 0, ) .replace(second=30))
     s.tick(T(8, 1, ))
     assert sum(a[:2] == ["relay", "inbox"] for a in names(ws)) == 2
+
+
+def test_start_key_other_sender_gets_own_ticket(ws):
+    add_ticket(ws, "t_keyed002", ext={"relay": {"start_key": "weekly-report", "from": "ws_a"}})
+    relay_on(ws, [{"id": "m_8", "type": "start", "from": "ws_evil", "allowed": True,
+                   "body": {"key": "weekly-report", "text": "go"}}])
+    s = Scheduler(ws)
+    (tid,) = s.tick(T(8))
+    s.runner.reap(T(8, 1), wait=True)
+    assert tid != "t_keyed002"
+    assert json.loads((ws / f".orch/tickets/{tid}.json").read_text())["ext"]["relay"] == {
+        "start_key": "weekly-report", "from": "ws_evil"}

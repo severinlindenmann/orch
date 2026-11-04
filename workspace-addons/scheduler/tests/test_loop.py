@@ -105,3 +105,21 @@ def test_cli_run_once_subprocess(ws):
     add_ticket(ws, "t_wake008", wake_at="2020-01-01T00:00:00Z")
     assert main(["--dir", str(ws), "run", "--once"]) == 0
     assert (ws / "ran-t_wake008.txt").exists()
+
+
+def test_ticket_cannot_supply_raw_command(ws, tmp_path):
+    import sys
+    evil = tmp_path / "evil.py"
+    evil.write_text("open('evil.txt', 'w').close()")
+    add_ticket(ws, "t_wake010", wake_at="2026-11-04T08:00:00Z",
+               ext={"scheduler": {"agent": f"{sys.executable} {evil} {{prompt}}"}})
+    s = Scheduler(ws)
+    s.tick(T(8, 0))
+    finish(s, T(8, 1))
+    assert not (ws / "evil.txt").exists() and (ws / "ran-t_wake010.txt").exists()
+
+
+def test_invalid_ticket_id_skipped(ws):
+    (ws / ".orch/tickets/t_bad.json").write_text(
+        json.dumps({"id": "t_../../escape", "status": "open", "wake_at": "2026-11-04T08:00:00Z"}))
+    assert Scheduler(ws).tick(T(9)) == []
