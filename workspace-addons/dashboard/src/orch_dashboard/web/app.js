@@ -45,7 +45,7 @@
   let renderedRoute = '';
   // ---- visual helpers (inline SVG, no libraries) ----
   const ic = (id, cls = '') => `<svg class="ic${cls ? ' ' + cls : ''}" aria-hidden="true" focusable="false"><use href="#i-${id}"/></svg>`;
-  const SM = {active: {icon: 'half', word: 'In progress'}, waiting: {icon: 'clock', word: 'Waiting'}, open: {icon: 'circle', word: 'Open'}, done: {icon: 'check', word: 'Done'}, dropped: {icon: 'x', word: 'Dropped'}};
+  const SM = {active: {icon: 'half', word: 'In progress'}, waiting: {icon: 'hourglass', word: 'Waiting'}, open: {icon: 'circle', word: 'Open'}, done: {icon: 'check', word: 'Done'}, dropped: {icon: 'x', word: 'Dropped'}};
   const stepKind = item => (item.done ? (array(item.evidence).length ? 'ok' : 'noproof') : 'todo');
   const timeOf = value => { const d = parse(value); return d ? fmt(d, {hour: '2-digit', minute: '2-digit'}) : ''; };
   const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -101,9 +101,9 @@
     const opts = array(q.options);
     return opts.length ? `<ul class="pills" aria-label="Options">${opts.map(o => `<li class="opt${o === q.recommended ? ' rec' : ''}">${o === q.recommended ? ic('star') + '<span class="sr">Recommended: </span>' : ''}${esc(o)}</li>`).join('')}</ul>` : '';
   }
-  function askCard(ticket, q, as = 'a') {
+  function askCard(ticket, q, as = 'a', compact = false) {
     const open = as === 'a' ? ` href="${esc(ticketHref(ticket.id))}"` : '';
-    return `<${as} class="ask"${open}><span class="ask-icon">${ic('question')}</span><div class="ask-body"><h2>${esc(q.text)}</h2><div class="ask-ticket">${esc(ticket.title)}</div>${optionPills(q)}</div>${as === 'a' ? ic('chevron', 'go') : ''}</${as}>`;
+    return `<${as} class="ask${compact ? ' compact' : ''}"${open}><span class="ask-icon">${ic('question')}</span><div class="ask-body"><h2>${esc(q.text)}</h2><div class="ask-ticket">${esc(ticket.title)}</div>${compact ? '' : optionPills(q)}</div>${as === 'a' ? ic('chevron', 'go') : ''}</${as}>`;
   }
   function waitTag(ticket) {
     if (ticket.status !== 'waiting' || ticket.type === 'recurring') return '';
@@ -115,9 +115,9 @@
   }
   function row(ticket) {
     const count = openQuestions(ticket).length, needs = count > 0;
-    const chips = [needs ? tag('ask', 'question', count > 1 ? `${count} answers` : 'Your answer') : waitTag(ticket),
+    const chips = [needs ? tag('need', 'question', count > 1 ? `${count} answers` : 'Your answer') : waitTag(ticket),
       ticket.type === 'recurring' || ticket.ext?.scheduler?.cron ? tag('repeat', 'repeat', cronShort(ticket.ext?.scheduler?.cron) || 'Repeats') : ''].filter(Boolean).join('');
-    return `<a class="card s-${esc(ticket.status)}${needs ? ' needs' : ''}" href="${esc(ticketHref(ticket.id))}"><span class="card-icon">${ic(SM[ticket.status]?.icon || 'circle')}</span><div class="card-main"><div class="card-title">${esc(ticket.title)}</div>${chips ? `<div class="tags">${chips}</div>` : ''}</div>${ring(ticket, 44, false)}</a>`;
+    return `<a class="card s-${esc(ticket.status)}${needs ? ' needs' : ''}" href="${esc(ticketHref(ticket.id))}"><div class="card-main"><div class="card-title">${esc(ticket.title)}</div>${chips ? `<div class="tags">${chips}</div>` : ''}</div>${ring(ticket, 44, false)}</a>`;
   }
   const mini = ticket => `<a class="mini s-${esc(ticket.status)}" href="${esc(ticketHref(ticket.id))}">${ic('check')}<span class="mini-title">${esc(ticket.title)}</span><time>${esc(ago(ticket.updated_at))}</time></a>`;
   function weekBars(tickets) {
@@ -128,9 +128,9 @@
     if (!total) return '';
     const cols = days.map((d, i) => {
       const future = d > now && !sameDay(d, now), today = sameDay(d, now), name = fmt(d, {weekday: 'short'});
-      return `<li class="${today ? 'today' : future ? 'future' : ''}" title="${esc(name)}: ${counts[i]}"><span class="val">${future ? '' : counts[i]}</span><span class="bar"><svg width="100%" height="56" aria-hidden="true"><rect x="0" width="100%" y="${100 - Math.max(counts[i] ? 12 : 3, Math.round(counts[i] / max * 100))}%" height="${Math.max(counts[i] ? 12 : 3, Math.round(counts[i] / max * 100))}%" rx="4" ${future ? 'hidden' : ''}/></svg></span><span class="dn"><span class="d-long">${esc(name)}</span><span class="d-short" aria-hidden="true">${esc(name[0])}</span></span></li>`;
+      return `<li class="${today ? 'today' : future ? 'future' : ''}" title="${esc(name)}: ${counts[i]}"><span class="val">${future ? '' : counts[i]}</span><span class="bar"><svg width="100%" height="56" aria-hidden="true"><rect x="0" width="100%" y="${100 - Math.max(counts[i] ? 12 : 3, Math.round(counts[i] / max * 100))}%" height="${Math.max(counts[i] ? 12 : 3, Math.round(counts[i] / max * 100))}%" rx="4" ${future ? 'hidden' : ''}/></svg></span><span class="dn"><span class="d-long">${esc(name)}</span><span class="d-short" aria-hidden="true">${esc(name.slice(0, 2))}</span></span></li>`;
     }).join('');
-    return `<section class="week panel" aria-label="Activity this week: ${total} updates"><div class="week-head">${ic('spark')}<b>${total}</b></div><ul class="bars">${cols}</ul></section>`;
+    return `<section class="week panel" aria-label="Activity this week: ${total} updates"><div class="week-head">${ic('spark')}<b>${total}</b><span>updates</span></div><ul class="bars">${cols}</ul></section>`;
   }
   function statusBar(tickets) {
     const counts = statuses.map(s => [s, tickets.filter(t => t.status === s).length]).filter(([s, n]) => n && s !== 'dropped');
@@ -142,7 +142,7 @@
   function list() {
     const tickets = array(state.tickets);
     if (!tickets.length) return heading('Tickets') + `<section class="panel empty"><span class="empty-ic">${ic('list')}</span><h2>Your first ticket starts here.</h2><p>Ask your agent: “Prepare my weekly summary.” Your ticket will appear here.</p></section>`;
-    const asks = tickets.flatMap(t => openQuestions(t).map(q => askCard(t, q)));
+    const asks = tickets.flatMap(t => openQuestions(t).map(q => askCard(t, q, 'a', true)));
     const body = statuses.map(status => {
       const group = tickets.filter(ticket => ticket.status === status);
       if (!group.length) return '';
