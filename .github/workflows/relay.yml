@@ -3,6 +3,22 @@ on: workflow_call
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: relay
     steps:
       - uses: actions/checkout@v4
-      - run: echo "no tests yet, filled in by its lane"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: relay
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo build --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orch-relay-linux-x86_64
+          path: relay/target/release/orch-relay

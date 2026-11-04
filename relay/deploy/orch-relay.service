@@ -1,0 +1,15 @@
+[Unit]
+Description=orch-relay
+After=network-online.target
+
+[Service]
+User=orch-relay
+EnvironmentFile=/etc/orch-relay/env
+ExecStart=/usr/local/bin/orch-relay
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/orch-relay
+
+[Install]
+WantedBy=multi-user.target
