@@ -21,7 +21,7 @@ mkdir -p "$TMP/home"
 BINS='{}'
 if [ "$MODE" = local ]; then
   case "$WHAT" in
-    all|P*|R*|M*|F*|A3)
+    all|P*|R*|M*|F*|*,P*|*,R*)
       export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
       ( cd "$REPO/publish" && cargo build --release -j 4 -q )
       ( cd "$REPO/relay" && cargo build --release -j 4 -q )

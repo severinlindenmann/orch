@@ -214,8 +214,12 @@ def main() -> int:
     a = ap.parse_args()
     import scenarios_ws, scenarios_pub, scenarios_rel, scenarios_misc  # noqa: F401,E401
 
-    ids = sorted(REGISTRY, key=lambda s: (s[0] if s[0] != "F" else "Z", int(''.join(c for c in s[1:] if c.isdigit()) or 0), s)) \
-        if a.what == "all" else [a.what]
+    if a.what == "all":
+        ids = list(REGISTRY)
+    else:  # comma list; a single letter (W, A, P, R, M, F) selects the group
+        ids = []
+        for w in a.what.split(","):
+            ids += [k for k in REGISTRY if k[0] == w] if len(w) == 1 else [w]
     # run order: W A P R M F  (A0 before A4/A5)
     order = {"W": 0, "A": 1, "P": 2, "R": 3, "M": 4, "F": 5}
     ids = sorted(ids, key=lambda s: (order.get(s[0], 9), int("".join(c for c in s[1:] if c.isdigit()) or 0)))
@@ -240,7 +244,7 @@ def main() -> int:
         if r.returncode:
             print("orch install failed:", r.stderr[-400:])
             return 1
-        needs_servers = any(s[0] in "PRMF" or s == "A3" for s in ids)
+        needs_servers = any(s[0] in "PRMF" for s in ids)
         if needs_servers:
             if a.mode == "local":
                 bins = json.loads(a.bins)
