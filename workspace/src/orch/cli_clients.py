@@ -151,7 +151,8 @@ def run_relay(args, root: Path, out) -> None:
         out(args, w, f"{w['name']} ({w['id']})\nPhone access: {w['phones']} phone(s)")
     elif sub == "inbox":
         items = relay.inbox(root, args.wait)
-        out(args, items, "\n".join(_inbox_line(i) for i in items) or "Inbox is empty.")
+        data = [{**i["message"], "allowed": bool(i["allowed"]), "note": i["note"]} for i in items]
+        out(args, data, "\n".join(_inbox_line(i) for i in items) or "Inbox is empty.")
     elif sub == "done":
         r = relay.done(root, args.id)
         txt = f"{args.id} marked as processed." if r["new"] else f"{args.id} was already processed."

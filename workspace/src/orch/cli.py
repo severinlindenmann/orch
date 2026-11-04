@@ -103,11 +103,13 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("id")
     x.add_argument("--until")
     x.add_argument("--on", metavar="KIND:REF")
+    x.add_argument("--clear", action="store_true", help="clear wake_at and waiting_on")
 
     x = sub.add_parser("wait", parents=[common], help="same as: ticket wait")
     x.add_argument("id")
     x.add_argument("--until")
     x.add_argument("--on", metavar="KIND:REF")
+    x.add_argument("--clear", action="store_true", help="clear wake_at and waiting_on")
 
     c = sub.add_parser("check", help="checklist").add_subparsers(dest="sub", required=True)
     x = c.add_parser("add", parents=[common])
@@ -191,9 +193,13 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.edit(root, args.id, args.title, by())
         _out(args, t, f"{t['id']}  {t['title']}")
     elif (cmd == "ticket" and sub == "wait") or cmd == "wait":
-        t = tickets.wait(root, args.id, args.until, args.on, by())
+        t = tickets.wait(root, args.id, args.until, args.on, by(), args.clear)
         _out(
-            args, t, f"{t['id']} is waiting" + (f" until {t['wake_at']}" if args.until else f" on {args.on}")
+            args,
+            t,
+            f"{t['id']} wait cleared"
+            if args.clear
+            else f"{t['id']} is waiting" + (f" until {t['wake_at']}" if args.until else f" on {args.on}"),
         )
     elif cmd == "check" and sub == "add":
         t, c = tickets.check_add(root, args.id, args.text, by())

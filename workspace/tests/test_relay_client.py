@@ -379,3 +379,22 @@ def test_answer_rejected_unless_it_matches_a_question_we_sent(proj, run, new_tic
 
 def out_count(text):
     return text.count("ignored:")
+
+
+def test_inbox_json_is_message_shaped_with_allowed_bool(proj, run, rel):
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000009", "delegate", {"title": "A", "text": "x"}))
+    data = json.loads(run("relay", "inbox", "--json")[1])
+    assert (
+        data[0]["id"] == "m_deleg00000000009"
+        and data[0]["allowed"] is False
+        and data[0]["body"]["title"] == "A"
+    )
+
+
+def test_ticket_wait_clear(proj, run, new_ticket):
+    tid = new_ticket()
+    run("ticket", "wait", tid, "--until", "2030-01-01T00:00:00Z")
+    code, out, _ = run("ticket", "wait", tid, "--clear", "--json")
+    t = json.loads(out)
+    assert code == 0 and t["wake_at"] is None and t["status"] == "active"
