@@ -18,16 +18,20 @@ def test_relay_profile_show_and_change(proj, run, rel):
     assert code == 0 and "Description: d" in out
     code, out, err = run("relay", "profile", "--description", "Builds sites", "--tags", "web, design")
     assert code == 0, err
-    assert "Saved." in out and "web, design" in out
+    assert "Sent to the owner for approval." in out
+    assert "Current: d · tags: none · Proposed: Builds sites · tags: web, design" in out
+    assert "Waiting for the owner to approve" in out
     patch = [c for c in rel.calls if c[0] == "PATCH"][0]
     assert json.loads(patch[3]) == {"description": "Builds sites", "tags": ["web", "design"]}
-    assert run("relay", "profile")[1].count("Builds sites") == 1
+    # no arguments: current values stay, the proposal is shown as waiting
+    shown = run("relay", "profile")[1]
+    assert "Description: d" in shown and "Waiting for the owner to approve: Builds sites" in shown
 
 
 def test_publish_profile_and_limits(proj, run, pub):
     connect(run, pub, "publish")
     assert run("publish", "profile", "--tags", "a,b")[0] == 0
-    assert pub.me["tags"] == ["a", "b"]
+    assert pub.me["tags"] == [] and pub.me["pending"]["tags"] == ["a", "b"]
     code, _, err = run("publish", "profile", "--description", "x" * 281)
     assert code == 2 and "280" in err
     code, _, err = run("publish", "profile", "--tags", ",".join(f"t{i}" for i in range(9)))

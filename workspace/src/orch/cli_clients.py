@@ -25,9 +25,23 @@ def _host(url: str) -> str:
     return urlsplit(url).netloc or url
 
 
+def _fields(description, tags) -> str:
+    """'description [tag, tag]' for the fields that are given."""
+    parts = []
+    if description is not None:
+        parts.append(description or "(empty)")
+    if tags is not None:
+        parts.append("tags: " + (", ".join(tags) or "none"))
+    return " · ".join(parts)
+
+
 def _profile_text(w: dict) -> str:
     tags = ", ".join(w.get("tags") or []) or "none"
-    return f"{w['name']}\nDescription: {w.get('description') or '(not set)'}\nTags: {tags}"
+    text = f"{w['name']}\nDescription: {w.get('description') or '(not set)'}\nTags: {tags}"
+    p = w.get("pending")
+    if p:
+        text += "\nWaiting for the owner to approve: " + _fields(p.get("description"), p.get("tags"))
+    return text
 
 
 def _add_profile(svc) -> None:
@@ -43,7 +57,17 @@ def _run_profile(args, mod, out) -> None:
     tags = None if args.tags is None else args.tags.split(",")
     w = mod.profile(root, args.description, tags)
     changed = args.description is not None or args.tags is not None
-    out(args, w, ("Saved.\n" if changed else "") + _profile_text(w))
+    if changed and w.get("pending"):
+        p = w["pending"]
+        cur = _fields(
+            w.get("description") if p.get("description") is not None else None,
+            w.get("tags") if p.get("tags") is not None else None,
+        )
+        new = _fields(p.get("description"), p.get("tags"))
+        head = f"Sent to the owner for approval. Current: {cur} · Proposed: {new}\n"
+        out(args, w, head + _profile_text(w))
+    else:
+        out(args, w, _profile_text(w))
 
 
 _COMMON: list = []

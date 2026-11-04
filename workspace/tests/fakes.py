@@ -70,7 +70,7 @@ class Fake:
 
 def add_profile(f: Fake, extra: dict) -> None:
     """GET /v1/whoami and PATCH /v1/me over one shared profile (description, tags)."""
-    f.me = {"id": WS, "name": "Pilatus Workspace", "description": "d", "tags": [], **extra}
+    f.me = {"id": WS, "name": "Pilatus Workspace", "description": "d", "tags": [], "pending": None, **extra}
     f.route("GET", "/v1/whoami", lambda m, q, b: (200, f.me))
 
     def patch_me(m, q, body):
@@ -80,8 +80,11 @@ def add_profile(f: Fake, extra: dict) -> None:
             return 422, {"error": "invalid", "message": "description must be at most 280 characters."}
         if t is not None and (not isinstance(t, list) or len(t) > 8 or any(len(x) > 24 for x in t)):
             return 422, {"error": "invalid", "message": "tags: up to 8, each up to 24 characters."}
-        f.me = {**f.me, **{k: v for k, v in (("description", d), ("tags", t)) if v is not None}}
-        return 200, f.me
+        # Like the real servers: only a proposal; the live values stay until the owner approves.
+        if d is None and t is None:
+            return 422, {"error": "invalid", "message": "Send a description and/or tags."}
+        f.me = {**f.me, "pending": {"description": d, "tags": t, "at": "2026-11-04T13:05:00Z", "rev": "r1"}}
+        return 202, {**f.me, "status": "pending"}
 
     f.route("PATCH", "/v1/me", patch_me)
 
