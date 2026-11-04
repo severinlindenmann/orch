@@ -72,7 +72,29 @@ def load_scheduler(tickets: list[dict], root: Path) -> list[dict]:
     return rows
 
 
-def load_inbox(root: Path) -> list[dict]:
+def load_names(root: Path) -> dict[str, str]:
+    """Workspace id -> display name, from the directory the relay refresh wrote (empty if missing)."""
+    d = _load(root / ".agents" / "skills" / "orch-relay" / "workspaces.json")
+    out: dict[str, str] = {}
+    if isinstance(d, dict) and isinstance(d.get("self"), str):
+        out[d["self"]] = root.name
+    for w in (d.get("workspaces") if isinstance(d, dict) else None) or []:
+        if isinstance(w, dict) and isinstance(w.get("id"), str) and isinstance(w.get("name"), str):
+            out[w["id"]] = w["name"]
+    return out
+
+
+def _who(sender: str, names: dict[str, str]) -> str:
+    if sender in names:
+        return names[sender]
+    if sender.startswith("ph_"):
+        return "Your phone"
+    if sender.startswith("ws_"):
+        return "Another workspace"
+    return "Admin"
+
+
+def load_inbox(root: Path, names: dict[str, str] | None = None) -> list[dict]:
     seen = _load(root / ".orch" / "inbox-seen.json")
     seen = seen if isinstance(seen, dict) else {}
     out = []
@@ -82,7 +104,7 @@ def load_inbox(root: Path) -> list[dict]:
             continue
         body = m.get("body") if isinstance(m.get("body"), dict) else {}
         out.append({
-            "id": m["id"], "from": str(m.get("from", "")), "type": str(m.get("type", "")),
+            "id": m["id"], "from": _who(str(m.get("from", "")), names or {}), "type": str(m.get("type", "")),
             "created_at": m.get("created_at"), "ticket": m.get("ticket"),
             "title": body.get("title") or body.get("name") or "",
             "text": body.get("text") or body.get("answer") or "",
@@ -100,7 +122,8 @@ def load_state(root: Path, include_inbox: bool = True) -> dict:
         "tickets": tickets,
         "skipped": skipped,
         "scheduler": load_scheduler(tickets, root),
-        "inbox": load_inbox(root) if include_inbox else None,
+        "names": load_names(root),
+        "inbox": load_inbox(root, load_names(root)) if include_inbox else None,
         "relay": (root / ".orch" / "secrets" / "relay.json").is_file(),
     }
     state["rev"] = hashlib.sha1(

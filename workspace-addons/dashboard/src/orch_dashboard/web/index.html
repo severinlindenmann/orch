@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>orch · Dashboard</title>
 <link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="style.css">
@@ -10,19 +10,19 @@
 <body>
 <div class="shell">
 <aside>
-<a class="brand" href="#tickets" aria-label="orch dashboard"><img src="logo.svg" alt="orch">orch <span class="addon">dashboard</span></a>
-<div class="workspace"><div class="eyebrow">Workspace</div><strong id="workspace-name">Workspace</strong><small>A little clarity for your work.</small></div>
-<nav class="side-nav" aria-label="Workspace">
+<a class="brand" href="#tickets" aria-label="orch dashboard"><img src="logo.svg" alt="orch">orch</a>
+<div class="workspace"><div class="eyebrow">Workspace</div><strong id="workspace-name">Workspace</strong></div>
+<nav class="side-nav" id="side-nav" aria-label="Workspace">
 <a href="#tickets"><span aria-hidden="true">▤</span>Tickets<span class="count" id="ticket-count"></span></a>
 <a href="#scheduler"><span aria-hidden="true">◷</span>Scheduler<span class="count" id="schedule-count"></span></a>
 <a href="#inbox" id="inbox-nav"><span aria-hidden="true">⇄</span>Inbox<span class="count" id="inbox-count"></span></a>
 </nav>
-<div class="sidebar-foot"><span class="dot"></span><span id="workspace-mode">Local workspace</span><div class="sidebar-help">Your agent does the work.<br>Follow along here.</div></div>
+<div class="sidebar-foot"><span class="dot"></span><span id="workspace-mode">Local workspace</span></div>
 </aside>
 <div class="main-shell">
-<header class="topline"><span><span id="top-workspace">Workspace</span><span class="divider">/</span><span id="crumb">Tickets</span></span><span class="owner">Read only</span></header>
-<p id="connection" role="status" hidden></p>
-<main id="content" aria-label="Dashboard"><p>Loading workspace…</p></main>
+<header class="topline"><span><span id="top-workspace">Workspace</span><span class="divider">/</span><span id="crumb">Tickets</span></span><span class="owner">View only</span></header>
+<p id="connection" role="status" hidden><span id="connection-text"></span> <button type="button" id="retry" class="retry">Try again</button></p>
+<main id="content" aria-label="Dashboard"><div class="skeleton-page" aria-busy="true" aria-label="Loading"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div></div></main>
 </div>
 </div>
 <script src="app.js"></script>

@@ -79,3 +79,11 @@ def test_rejects_foreign_host_header(server):
         c = http.client.HTTPConnection("127.0.0.1", port)
         c.request("GET", "/api/state", headers={"Host": host})
         assert c.getresponse().status == want, host
+
+
+def test_inbox_shows_display_names_not_ids(ws):
+    state = load_state(ws)
+    senders = {m["from"] for m in state["inbox"]}
+    assert "Your phone" in senders and "Another workspace" in senders or "Reports" in senders
+    assert not any(s.startswith(("ws_", "ph_")) for s in senders)
+    assert state["names"]["ws_reports001"] == "Reports"

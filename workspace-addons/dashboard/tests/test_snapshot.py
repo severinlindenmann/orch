@@ -66,3 +66,8 @@ def test_publish_folder_is_a_deployable_static_app(ws):
     m = seen["toml"]
     assert m["stack"] == "static" and m["public"] is False and re.fullmatch(r"[a-z0-9-]{2,40}", m["name"])
     assert "start" not in m and "health" not in m
+
+
+def test_snapshot_logo_is_inline(ws):
+    html = render_snapshot(ws)
+    assert 'src="logo.svg"' not in html and "data:image/svg+xml;base64," in html

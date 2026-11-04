@@ -1,6 +1,7 @@
 """Static single-file snapshot: the same pages with the data embedded. No inbox (private messages stay local)."""
 from __future__ import annotations
 
+import base64
 import json
 import re
 import subprocess
@@ -22,6 +23,8 @@ def render_snapshot(root: Path) -> str:
     html = web_file("index.html").decode()
     css = web_file("tokens.css").decode() + "\n" + web_file("style.css").decode()
     js = web_file("app.js").decode()
+    logo = base64.b64encode(web_file("logo.svg")).decode()
+    html = html.replace('src="logo.svg"', f'src="data:image/svg+xml;base64,{logo}"')
     html = html.replace('<link rel="stylesheet" href="tokens.css">', "")
     html = html.replace('<link rel="stylesheet" href="style.css">', f"<style>{css}</style>")
     html = html.replace('<script src="app.js"></script>',
