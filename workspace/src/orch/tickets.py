@@ -89,7 +89,7 @@ def tickets_dir(root: Path) -> Path:
 
 def ticket_path(root: Path, tid: str) -> Path:
     if not _ID_RE.match(tid):
-        raise Refused(f"'{tid}' is not a ticket id (like t_7k3f9q).")
+        raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
     return tickets_dir(root) / f"{tid}.json"
 
 
@@ -104,7 +104,7 @@ def new_id(root: Path) -> str:
 def load(root: Path, tid: str) -> dict:
     p = ticket_path(root, tid)
     if not p.exists():
-        raise Refused(f"There is no ticket {tid}.")
+        raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
     return json.loads(p.read_text(encoding="utf-8"))
 
 
@@ -237,13 +237,17 @@ def parse_evidence(raw: str) -> dict:
 
 
 def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> tuple[dict, dict]:
+    ticket = load(root, tid)  # a missing ticket is reported before anything else
     if not evidence:
-        raise Refused('Done needs evidence: --evidence \'{"type":"command","ref":"pytest -q"}\'.')
+        raise Refused(
+            "A check is done only with proof. Say what shows it, for example "
+            f'`orch check done {tid} {cid} --command "pytest -q"` or `--note "what you saw"` '
+            "(also --pr, --commit, --file, --url)."
+        )
     evs = [parse_evidence(e) for e in evidence]
-    ticket = load(root, tid)
     item = next((c for c in ticket["checklist"] if c["id"] == cid), None)
     if item is None:
-        raise Refused(f"Ticket {tid} has no check {cid}.")
+        raise Refused(f"Ticket {tid} has no check {cid}. Run `orch ticket show {tid}` to see its checks.")
     item["evidence"].extend(evs)
     item["done"] = True
     add_history(ticket, by, f"Check {cid} done")
@@ -306,6 +310,9 @@ def ask(
     if recommended is not None and options and recommended not in options:
         raise Refused("The recommended answer must be one of the options.")
     ticket = load(root, tid)
+    for old in ticket["questions"]:  # the same open question is not asked twice
+        if old["answer"] is None and old["text"] == text.strip() and old["options"] == list(options):
+            return ticket, old
     q = {
         "id": _next_id(ticket["questions"], "q"),
         "text": text.strip(),

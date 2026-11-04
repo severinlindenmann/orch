@@ -49,9 +49,9 @@ def test_inbox_dedup_and_ack(proj, run, rel):
     assert "Hi there" in run("relay", "inbox")[1]
     assert run("relay", "done", "m_text000000000001")[0] == 0
     rel.acked.clear()
-    assert run("relay", "inbox")[1].strip() == "Inbox is empty."
+    assert run("relay", "inbox")[1].strip() == "No new messages."
     assert "m_text000000000001" in json.loads((proj / ".orch/inbox-seen.json").read_text())
-    assert "already processed" in run("relay", "done", "m_text000000000001")[1]
+    assert "already handled" in run("relay", "done", "m_text000000000001")[1]
 
 
 def test_send_text_and_idempotent_resend(proj, run, rel):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from orch import publish, relay, templates, tickets
+from orch import net, publish, relay, templates, tickets
 from orch.errors import Refused
 
 
@@ -16,10 +16,41 @@ def _size(n: int) -> str:
 
 
 def _exp(v) -> str:
-    return f"expires {v}" if v else "permanent"
+    return f"expires {net.when(v)}" if v else "kept until you delete it"
+
+
+def _host(url: str) -> str:
+    from urllib.parse import urlsplit
+
+    return urlsplit(url).netloc or url
+
+
+def _profile_text(w: dict) -> str:
+    tags = ", ".join(w.get("tags") or []) or "none"
+    return f"{w['name']}\nDescription: {w.get('description') or '(not set)'}\nTags: {tags}"
+
+
+def _add_profile(svc) -> None:
+    x = svc.add_parser(
+        "profile", parents=[_COMMON[0]], help="show or change this workspace's description and tags"
+    )
+    x.add_argument("--description", help="one sentence, up to 280 characters")
+    x.add_argument("--tags", help="comma-separated, up to 8, e.g. design,web")
+
+
+def _run_profile(args, mod, out) -> None:
+    root = args._root
+    tags = None if args.tags is None else args.tags.split(",")
+    w = mod.profile(root, args.description, tags)
+    changed = args.description is not None or args.tags is not None
+    out(args, w, ("Saved.\n" if changed else "") + _profile_text(w))
+
+
+_COMMON: list = []
 
 
 def add_parsers(sub, common) -> None:
+    _COMMON[:] = [common]
     pub = sub.add_parser("publish", help="share files and apps by private link").add_subparsers(
         dest="sub", required=True
     )
@@ -28,6 +59,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--workspace", required=True)
     x.add_argument("--token", required=True)
     pub.add_parser("whoami", parents=[common])
+    _add_profile(pub)
     life = argparse.ArgumentParser(add_help=False)
     life.add_argument("--days", type=int, help="keep for N days (1-90, default 7)")
     life.add_argument("--permanent", action="store_true")
@@ -58,6 +90,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--workspace", required=True)
     x.add_argument("--token", required=True)
     rel.add_parser("whoami", parents=[common])
+    _add_profile(rel)
     x = rel.add_parser("inbox", parents=[common], help="pull new messages")
     x.add_argument("--wait", type=int, default=0, help="wait up to N seconds (max 30)")
     x = rel.add_parser("done", parents=[common], help="mark a message as processed, before acting")
@@ -97,13 +130,16 @@ def add_parsers(sub, common) -> None:
 
 def run_publish(args, root: Path, out) -> None:
     sub = args.sub
+    args._root = root
+    if sub == "profile":
+        return _run_profile(args, publish, out)
     if sub == "connect":
         who = publish.connect(root, args.url, args.workspace, args.token)
         out(
             args,
             who,
-            f"Connected to {args.url} as {who['name']} ({who['id']}).\n"
-            "Skill: .agents/skills/orch-publish/SKILL.md",
+            f"Connected to {_host(args.url)} as {who['name']}.\n"
+            'Next: describe this workspace: orch publish profile --description "..." --tags a,b',
         )
     elif sub == "whoami":
         w = publish.whoami(root)
@@ -111,22 +147,40 @@ def run_publish(args, root: Path, out) -> None:
         out(
             args,
             w,
-            f"{w['name']} ({w['id']})\nRights: {r}\n"
-            f"Files: up to {w['max_file_mb']} MB, {w['default_days']} days by default (max {w['max_days']})",
+            f"{w['name']}\nCan use: {r}\n"
+            f"Files: up to {w['max_file_mb']} MB, kept {w['default_days']} days by default "
+            f"(max {w['max_days']})",
         )
     elif sub == "file":
-        r = publish.share_file(root, Path(args.path), args.days, args.permanent)
-        out(args, r, f"Shared {r['name']} ({_size(r['size'])}), {_exp(r['expires_at'])}\n{r['link']}")
+        with net.working(f"Encrypting and uploading {Path(args.path).name}"):
+            r = publish.share_file(root, Path(args.path), args.days, args.permanent)
+        out(
+            args,
+            r,
+            f"Shared {r['name']} ({_size(r['size'])}), {_exp(r['expires_at'])}. Open this link:\n{r['link']}",
+        )
     elif sub == "app":
         pub = True if args.public else False if args.private else None
-        r = publish.deploy(root, Path(args.folder), args.days, args.permanent, pub, args.new_token)
-        out(args, r, f"Deployed {r['name']} - {r['status']}, {_exp(r['expires_at'])}\n{r['link']}")
+        with net.working(f"Deploying {Path(args.folder).name}"):
+            r = publish.deploy(root, Path(args.folder), args.days, args.permanent, pub, args.new_token)
+        note = ""
+        if r.get("private") and not r.get("view_token"):
+            note = (
+                "\nThis app is private and its view link is not saved here. "
+                "Make a new one with: orch publish app <folder> --new-token"
+            )
+        word = "running" if r["status"] == "running" else r["status"]
+        out(
+            args,
+            r,
+            f"Deployed {r['name']} ({word}), {_exp(r['expires_at'])}. Open this link:\n{r['link']}{note}",
+        )
     elif sub == "new":
         r = templates.create(args.stack, args.store, Path(args.folder))
         out(
             args,
             r,
-            f"Created {r['stack']} app {r['name']} in {args.folder}.\nNext: orch publish app {args.folder}",
+            f"Created a {r['stack']} app in {args.folder}.\nNext: orch publish app {args.folder}",
         )
     elif sub == "list":
         r = publish.list_all(root)
@@ -136,30 +190,40 @@ def run_publish(args, root: Path, out) -> None:
             lines.append(f"file  {f['id']}  {_size(f['size'])}  {_exp(f['expires_at'])}{key}")
         for a in r["apps"]:
             vis = "public" if a["public"] else "private"
-            lines.append(f"app   {a['name']}  {a['status']}  {vis}  {_exp(a['expires_at'])}  {a['url']}")
-        out(args, r, "\n".join(lines) or "Nothing published.")
+            link = a.get("link") or a["url"]
+            lines.append(f"app   {a['name']}  {a['status']}, {vis}, {_exp(a['expires_at'])}\n      {link}")
+        out(args, r, "\n".join(lines) or "Nothing shared yet. Try: orch publish file <path>")
     elif sub in ("restart", "stop"):
         r = publish.app_action(root, args.name, sub)
-        out(args, r, f"{r['name']} - {r['status']}")
+        out(args, r, f"{r['name']} is now {r['status']}.")
     elif sub == "delete":
         kind = publish.delete(root, args.id)
-        out(args, {"ok": True, "deleted": args.id}, f"Deleted {kind} {args.id}.")
+        out(args, {"ok": True, "deleted": args.id}, f"Deleted the {kind} {args.id}.")
 
 
 def run_relay(args, root: Path, out) -> None:
     sub = args.sub
+    args._root = root
+    if sub == "profile":
+        return _run_profile(args, relay, out)
     t = getattr(args, "ticket", None)
     if sub == "connect":
         who, line = relay.connect(root, args.url, args.workspace, args.token)
         out(
             args,
             who,
-            f"Connected to {args.url} as {who['name']} ({who['id']}).\n"
-            f"Skill: .agents/skills/orch-relay/SKILL.md\n{line}",
+            f"Connected to {_host(args.url)} as {who['name']}.\n{line}\n"
+            'Next: describe this workspace: orch relay profile --description "..." --tags a,b',
         )
     elif sub == "whoami":
         w = relay.whoami(root)
-        out(args, w, f"{w['name']} ({w['id']})\nPhone access: {w['phones']} phone(s)")
+        n = w["phones"]
+        out(
+            args,
+            w,
+            f"{w['name']}\n"
+            + (f"{n} phone{'s' if n != 1 else ''} can reach it." if n else "No phones paired yet."),
+        )
     elif sub == "inbox":
         items = relay.inbox(root, args.wait)
         data = [
@@ -172,10 +236,10 @@ def run_relay(args, root: Path, out) -> None:
             }
             for i in items
         ]
-        out(args, data, "\n".join(_inbox_line(i) for i in items) or "Inbox is empty.")
+        out(args, data, "\n".join(_inbox_line(i, root) for i in items) or "No new messages.")
     elif sub == "done":
         r = relay.done(root, args.id)
-        txt = f"{args.id} marked as processed." if r["new"] else f"{args.id} was already processed."
+        txt = "Marked as handled." if r["new"] else "That message was already handled."
         if r["ticket"]:
             txt += f" Ticket: {r['ticket']}"
         out(args, r, txt)
@@ -186,13 +250,13 @@ def run_relay(args, root: Path, out) -> None:
             m = relay.send_text(root, args.workspace, args.text, t)
         else:
             raise Refused("Nothing to send. Give a text or --file.")
-        out(args, m, f"Sent {m['type']} {m['id']} to {m['to']}.")
+        out(args, m, f"Message sent to {relay.name_of(root, m['to'])}.")
     elif sub == "delegate":
         m = relay.send_delegate(root, args.workspace, args.title, args.text, args.check, t)
-        out(args, m, f"Delegated {m['id']} to {m['to']}. It runs there once the receiver allows it.")
+        out(args, m, f"Task handed to {relay.name_of(root, m['to'])}. It starts once they allow it.")
     elif sub == "start":
         m = relay.send_start(root, args.workspace, args.key, args.text, t)
-        out(args, m, f"Start {args.key} sent ({m['id']}) to {m['to']}.")
+        out(args, m, f"Start request sent to {relay.name_of(root, m['to'])}.")
     elif sub == "allow":
         msg = relay.load_message(root, args.id)
         b = msg.get("body", {})
@@ -202,7 +266,7 @@ def run_relay(args, root: Path, out) -> None:
             f"Allow {msg.get('from')} to {msg.get('type')} {task}?", f"allowing {msg.get('from')} ({mode})"
         )
         m = relay.give_allow(root, args.id, mode)
-        out(args, m, f"Allowed {args.id} ({m['body']['mode']}). Answer sent to {m['to']}.")
+        out(args, m, f"Allowed ({m['body']['mode']}). {relay.name_of(root, m['to'])} has been told.")
     elif sub == "refresh":
         line = relay.refresh(root)
         out(args, {"ok": True, "result": line}, line)
@@ -223,29 +287,44 @@ def run_relay(args, root: Path, out) -> None:
             out(args, {"ok": True}, f"Deleted webhook {args.id}.")
 
 
-def _inbox_line(i: dict) -> str:
+def _inbox_line(i: dict, root: Path) -> str:
     m, b = i["message"], i["message"].get("body", {})
-    head = f"{m['id']}  {m['type']:<12} from {m['from']}"
+    kind = {
+        "text": "Message",
+        "file": "File",
+        "question": "Question",
+        "delegate": "Task",
+        "start": "Start request",
+        "refresh-hint": "Update",
+        "webhook": "Webhook",
+        "answer": "Answer",
+    }.get(m["type"], m["type"])
+    head = f"{kind} from {relay.name_of(root, m['from'])}"
+    tail = f"  [{m['id']}]"
     if i["note"]:
-        return f"{head}  - {i['note']}"
+        return f"{head}: {i['note']}{tail}"
     detail = {
         "text": lambda: b.get("text", ""),
-        "file": lambda: f"{b.get('name')} ({b.get('size')} bytes) - orch relay download {m['id']}",
+        "file": lambda: (
+            f"{b.get('name')} ({_size(b.get('size') or 0)}) - save it with: orch relay download {m['id']}"
+        ),
         "question": lambda: b.get("text", ""),
         "delegate": lambda: b.get("title", ""),
         "start": lambda: f"{b.get('key')}: {b.get('text', '')}",
-        "refresh-hint": lambda: "run: orch relay refresh",
+        "refresh-hint": lambda: "new settings are waiting - run: orch relay refresh",
         "webhook": lambda: b.get("payload", "")[:200],
     }.get(m["type"], lambda: "")()
     if m["type"] in ("delegate", "start"):
         al = i["allowed"]
         hint = f"[not allowed yet - ask the human to run: orch relay allow {m['id']} --once|--permanent]"
         detail += f"  [allowed: {al}]" if al else f"  {hint}"
-    return f"{head}  {detail}".rstrip()
+    return f"{head}: {detail}{tail}".replace(": " + tail, tail)
 
 
 def send_phone_question(root: Path, tid: str, q: dict) -> None:
     try:
         relay.send_question(root, tickets.load(root, tid), q)
     except Refused as e:
-        raise Refused(f"{q['id']} is saved on {tid}, but sending it to the phones failed: {e}") from None
+        raise Refused(
+            f"The question is saved on the ticket, but it could not be sent to the phones. {e}"
+        ) from None

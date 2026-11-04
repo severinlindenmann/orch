@@ -20,3 +20,14 @@ name. Edit it, then deploy with `app`. Static apps allow store none or markdown.
 Default lifetime is short; use `--permanent` only when the user asks. Record the link on the ticket:
 `orch link add <ticket> --type publish --url "<link>"`. Never publish secrets or `.orch/secrets/`.
 Maximum file size is 100 MB.
+
+# Describe this workspace
+
+After connecting, describe this workspace once: `orch publish profile --description "<one sentence>" --tags a,b`
+(no options = show it). Description up to 280 characters; up to 8 tags of 24 characters.
+
+# Links
+
+`orch publish file` prints the full working link on its own line (it ends in `#k=<key>`): give the user that whole line.
+A private app's view link is saved in `.orch/secrets/`; deploying again or `orch publish list` shows it. Use
+`orch publish app <folder> --new-token` for a new one.

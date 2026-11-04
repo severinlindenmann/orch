@@ -51,7 +51,7 @@ class Fake:
                 self.end_headers()
                 self.wfile.write(data)
 
-            do_GET = do_POST = do_PUT = do_DELETE = _do
+            do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = _do
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
@@ -68,25 +68,35 @@ class Fake:
         self.server.server_close()
 
 
+def add_profile(f: Fake, extra: dict) -> None:
+    """GET /v1/whoami and PATCH /v1/me over one shared profile (description, tags)."""
+    f.me = {"id": WS, "name": "Pilatus Workspace", "description": "d", "tags": [], **extra}
+    f.route("GET", "/v1/whoami", lambda m, q, b: (200, f.me))
+
+    def patch_me(m, q, body):
+        req = json.loads(body)
+        d, t = req.get("description"), req.get("tags")
+        if d is not None and (not isinstance(d, str) or len(d) > 280):
+            return 422, {"error": "invalid", "message": "description must be at most 280 characters."}
+        if t is not None and (not isinstance(t, list) or len(t) > 8 or any(len(x) > 24 for x in t)):
+            return 422, {"error": "invalid", "message": "tags: up to 8, each up to 24 characters."}
+        f.me = {**f.me, **{k: v for k, v in (("description", d), ("tags", t)) if v is not None}}
+        return 200, f.me
+
+    f.route("PATCH", "/v1/me", patch_me)
+
+
 def make_publish() -> Fake:
     f = Fake()
     f.files, f.apps = {}, {}
-    f.route(
-        "GET",
-        "/v1/whoami",
-        lambda m, q, b: (
-            200,
-            {
-                "id": WS,
-                "name": "Pilatus Workspace",
-                "description": "d",
-                "tags": [],
-                "rights": {"files": True, "apps": True, "permanent": False, "public": False},
-                "max_file_mb": 100,
-                "default_days": 7,
-                "max_days": 90,
-            },
-        ),
+    add_profile(
+        f,
+        {
+            "rights": {"files": True, "apps": True, "permanent": False, "public": False},
+            "max_file_mb": 100,
+            "default_days": 7,
+            "max_days": 90,
+        },
     )
 
     def post_file(m, q, body):
@@ -189,14 +199,7 @@ def make_relay() -> Fake:
             "workspaces": [],
         },
     }
-    f.route(
-        "GET",
-        "/v1/whoami",
-        lambda m, q, b: (
-            200,
-            {"id": WS, "name": "Pilatus Workspace", "description": "d", "tags": [], "phones": 1},
-        ),
-    )
+    add_profile(f, {"phones": 1})
 
     def post_msg(m, q, body):
         msg = json.loads(body)

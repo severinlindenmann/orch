@@ -92,6 +92,10 @@ def whoami(root: Path) -> dict:
     return _api(root, "GET", "/v1/whoami")
 
 
+def profile(root: Path, description: str | None, tags: list[str] | None) -> dict:
+    return net.profile(root, "publish", description, tags)
+
+
 def _life(days: int | None, permanent: bool) -> str:
     if permanent and days is not None:
         raise Refused("Use either --days or --permanent, not both.")
@@ -104,6 +108,10 @@ def _life(days: int | None, permanent: bool) -> str:
 
 def _keys_path(root: Path) -> Path:
     return net.secrets_dir(root) / "files" / "keys.json"
+
+
+def _tokens_path(root: Path) -> Path:
+    return net.secrets_dir(root) / "apps" / "view-tokens.json"
 
 
 def share_file(root: Path, path: Path, days: int | None, permanent: bool) -> dict:
@@ -130,7 +138,12 @@ def list_all(root: Path) -> dict:
     for f in files:
         if f["id"] in keys:
             f["key"] = keys[f["id"]]
-    return {"files": files, "apps": net.items(_api(root, "GET", "/v1/apps"))}
+    apps = net.items(_api(root, "GET", "/v1/apps"))
+    tokens = net.read_json(_tokens_path(root), {})
+    for a in apps:
+        if not a.get("public") and a["name"] in tokens:
+            a["link"] = f"{a['url']}/?token={tokens[a['name']]}"
+    return {"files": files, "apps": apps}
 
 
 def delete(root: Path, ident: str) -> str:
@@ -218,8 +231,17 @@ def deploy(
     m = read_manifest(folder)
     q = [x for x in (_life(days, permanent), "new_token=1" if new_token else "") if x]
     res = _api(root, "PUT", f"/v1/apps/{m['name']}" + (f"?{'&'.join(q)}" if q else ""), pack(folder, public))
+    is_public = public if public is not None else bool(m.get("public", False))
+    res["private"] = not is_public
+    tokens = net.read_json(_tokens_path(root), {})
     if res.get("view_token"):
-        res["link"] = f"{res['url']}/?token={res['view_token']}"
+        tokens[m["name"]] = res["view_token"]
+        net.write_json(_tokens_path(root), tokens, True)
+    if is_public:
+        res["link"] = res["url"]
+    elif tokens.get(m["name"]):
+        res["link"] = f"{res['url']}/?token={tokens[m['name']]}"
+        res["view_token"] = tokens[m["name"]]
     else:
         res["link"] = res["url"]
     return res
