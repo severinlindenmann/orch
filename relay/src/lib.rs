@@ -10,6 +10,7 @@ pub mod rules;
 pub mod shared;
 pub mod state;
 pub mod store;
+pub mod transcribe;
 pub mod util;
 pub mod webhooks;
 

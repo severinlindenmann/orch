@@ -1,6 +1,8 @@
 use crate::crypto::Key;
 use crate::push::{ApnsConfig, Pusher};
+use crate::transcribe::{Deepgram, Transcriber};
 use rusqlite::Connection;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
@@ -66,12 +68,24 @@ pub struct App {
     pub db: Mutex<Connection>,
     pub notify: Notify,
     pub pusher: Arc<dyn Pusher>,
+    pub transcriber: Arc<dyn Transcriber>,
+    /// phone/workspace id -> (window start, calls in window)
+    pub transcribe_rate: Mutex<HashMap<String, (i64, u32)>>,
 }
 
 pub type AppState = Arc<App>;
 
 impl App {
     pub fn new(cfg: Config, key: Key, pusher: Arc<dyn Pusher>) -> Result<AppState, String> {
+        Self::with_transcriber(cfg, key, pusher, Arc::new(Deepgram::default()))
+    }
+
+    pub fn with_transcriber(
+        cfg: Config,
+        key: Key,
+        pusher: Arc<dyn Pusher>,
+        transcriber: Arc<dyn Transcriber>,
+    ) -> Result<AppState, String> {
         std::fs::create_dir_all(cfg.data_dir.join("blobs")).map_err(|e| e.to_string())?;
         let conn = Connection::open(cfg.data_dir.join("relay.db")).map_err(|e| e.to_string())?;
         crate::store::init(&conn).map_err(|e| e.to_string())?;
@@ -81,6 +95,8 @@ impl App {
             db: Mutex::new(conn),
             notify: Notify::new(),
             pusher,
+            transcriber,
+            transcribe_rate: Mutex::new(HashMap::new()),
         }))
     }
 

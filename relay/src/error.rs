@@ -51,6 +51,23 @@ pub fn too_large(m: impl Into<String>) -> ApiError {
 pub fn invalid(m: impl Into<String>) -> ApiError {
     e(StatusCode::UNPROCESSABLE_ENTITY, "invalid", m)
 }
+pub fn transcription_off() -> ApiError {
+    e(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "transcription_off",
+        "Voice transcription is not set up on this relay.",
+    )
+}
+pub fn transcription_failed(m: impl Into<String>) -> ApiError {
+    e(StatusCode::BAD_GATEWAY, "transcription_failed", m)
+}
+pub fn rate_limited() -> ApiError {
+    e(
+        StatusCode::TOO_MANY_REQUESTS,
+        "rate_limited",
+        "Too many transcriptions. Try again in a minute.",
+    )
+}
 pub fn internal(m: impl std::fmt::Display) -> ApiError {
     tracing::error!("internal error: {m}");
     e(

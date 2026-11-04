@@ -36,10 +36,10 @@ Not end to end, on purpose: the admin must be able to read agent communication.
 | Key | Where | Encrypts |
 |---|---|---|
 | TLS certificate | Caddy (Let's Encrypt) | everything on the wire |
-| Master key, 32 random bytes | `/etc/orch-relay/master.key`, mode 0600, owner `orch-relay`; copy in the owner's password manager | every message `body`, every blob, every shared credential and MCP config, in SQLite and on disk |
+| Master key, 32 random bytes | `/etc/orch-relay/master.key`, mode 0600, owner `orch-relay`; copy in the owner's password manager | every message `body`, every blob, every shared credential and MCP config, the Deepgram voice key (AAD `setting:deepgram`), in SQLite and on disk |
 
 - One key, AES-256-GCM, a new random 12-byte nonce per item. Stored as `nonce | ciphertext+tag`.
-  AAD = the item id (message id, blob id, credential name), so items can't be swapped.
+  AAD = the item id (message id, blob id, credential name; `setting:deepgram` for the voice key), so items can't be swapped.
 - Envelope fields (`id, from, to, type, created_at, ticket, reply_to`) stay plain so the relay can route.
 - The relay decrypts when it delivers a message, and when the admin reads it in the portal.
 - What it protects against: a leaked database file or backup. It does not protect against someone who has root on the VPS (they have the key too). That is accepted for the prototype.
