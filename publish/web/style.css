@@ -266,3 +266,28 @@ button[aria-busy=true]::after{content:"";width:1em;height:1em;display:inline-blo
 .review-line p{margin:2px 0}
 .review .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
 .review-result{margin-top:8px;font-size:13px}
+
+/* ---- UX round 2 ---- */
+.pw{display:flex;gap:8px;align-items:stretch}.pw input{flex:1;min-width:0}
+input.invalid,input.invalid:focus-visible,textarea.invalid:focus-visible{border-color:var(--danger);outline-color:var(--danger)}
+.updated{margin-left:auto;margin-right:18px;font-size:12px;color:var(--muted)}
+.review-done{color:var(--success);font-size:13px}
+.counts-inline{display:none;font-size:12px}
+.review{min-width:0;width:100%}
+.review-result:empty{display:none}
+.notice a{text-decoration:underline;text-underline-offset:3px;color:var(--text)}
+.toast{display:flex;gap:14px;align-items:center;bottom:max(16px,env(safe-area-inset-bottom));max-width:min(560px,calc(100vw - 32px))}
+.toast button{min-height:44px;flex:none}
+dialog.confirm{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:24px;max-width:min(420px,calc(100vw - 32px))}
+dialog.confirm::backdrop{background:#000a}
+dialog.confirm h2{margin-bottom:8px}
+.public-card .primary,.public-card .button.primary{min-height:44px}
+.public-card .actions-note{font-size:12px}
+@media(max-width:600px){
+.workspace{grid-template-columns:minmax(0,1fr)!important;gap:8px}
+.workspace .avatar,.workspace .number{display:none!important}
+.workspace>button{grid-column:1!important;justify-self:start}
+.counts-inline{display:block}
+.updated{display:none}
+}
+@media(max-width:600px){.toast{width:calc(100vw - 32px);justify-content:space-between}}

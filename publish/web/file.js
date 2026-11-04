@@ -59,6 +59,7 @@ if (typeof document !== "undefined") {
       $("msg").textContent = msg;
       $("extra").textContent = "";
       $("note").hidden = !ok;
+      clearTimeout(slow);
     }
     function retryButton() {
       const b = document.createElement("button");
@@ -70,6 +71,7 @@ if (typeof document !== "undefined") {
       });
       $("extra").appendChild(b);
     }
+    let slow;
     function size(n) {
       return n < 1024 ? n + (n === 1 ? " byte" : " bytes") : n < 1048576 ? (n / 1024).toFixed(1).replace(/\.0$/, "") + " KB" : (n / 1048576).toFixed(1).replace(/\.0$/, "") + " MB";
     }
@@ -84,6 +86,12 @@ if (typeof document !== "undefined") {
       return "File";
     }
     async function main() {
+      clearTimeout(slow);
+      slow = setTimeout(function () {
+        if ($("title").textContent !== "Opening your file…") return;
+        $("title").textContent = "Preparing your file…";
+        $("msg").textContent = "This is taking longer than usual. Large files can take a minute. You can leave and come back to this link.";
+      }, 10000);
       const m = /^#k=([A-Za-z0-9_-]+)$/.exec(location.hash);
       if (!m) {
         return show("link", "This link is incomplete", "Ask the sender to copy the full link again.");
@@ -100,7 +108,7 @@ if (typeof document !== "undefined") {
         return retryButton();
       }
       if (res.status === 410) return show("clock", "This file has expired", "It is no longer available. Ask the sender to share it again.");
-      if (!res.ok) return show("link", "This page isn’t available", "Check the link or ask the sender for a new one.");
+      if (!res.ok) return show("link", "This file isn’t available", "Check the link or ask the sender for a new one.");
       const blob = new Uint8Array(await res.arrayBuffer());
       let r;
       try {
