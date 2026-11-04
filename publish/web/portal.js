@@ -203,12 +203,25 @@
     }));
   }
 
+  function showApi() {
+    const base = 'https://YOUR-PUBLISH-ADDRESS/v1', auth = '  -H "Authorization: Bearer $ORCH_TOKEN"';
+    const examples = [
+      ['GET', 'List your files', `curl "${base}/files" \\\n${auth}`],
+      ['POST', 'Upload an encrypted file', `curl -X POST "${base}/files?days=7" \\\n${auth} \\\n  --data-binary @encrypted.bin`],
+      ['GET', 'List your apps', `curl "${base}/apps" \\\n${auth}`],
+      ['POST', 'Restart an app', `curl -X POST "${base}/apps/my-app/restart" \\\n${auth}`],
+      ['POST', 'Stop an app', `curl -X POST "${base}/apps/my-app/stop" \\\n${auth}`],
+      ['DELETE', 'Delete a file or app', `curl -X DELETE "${base}/files/FILE_ID" \\\n${auth}\n\n# Or delete an app\ncurl -X DELETE "${base}/apps/my-app" \\\n${auth}`]
+    ];
+    view.innerHTML = head('Workspace API', 'Manage only the files and apps that belong to your workspace.') +
+      `<div class="card pad" style="margin-bottom:20px"><h2>Workspace token</h2><p class="section-note">Send the workspace token in the Authorization header. It identifies the workspace.</p><details style="margin-top:15px"><summary>Set up your terminal</summary><pre>export ORCH_TOKEN='your-workspace-token'</pre><p class="section-note">Use the token from onboarding. Keep it out of source control.</p></details></div><section class="card api">${examples.map(([method, label, code], i) => `<details ${i === 0 ? 'open' : ''}><summary><span class="method">${method}</span>${esc(label)}</summary><pre>${esc(code)}</pre>${i === 1 ? '<p class="section-note">Encrypt in the browser first, then upload only the encrypted bytes. Keep the key in the share link after the #. Expiry: 7 days by default; permanent files need permission.</p>' : ''}</details>`).join('')}</section>`;
+  }
   async function render() {
     const current = ++generation;
     let route = location.hash.slice(1) || 'workspaces';
-    if (!['workspaces', 'add', 'ready', 'files', 'apps'].includes(route)) route = 'workspaces';
+    if (!['workspaces', 'add', 'ready', 'files', 'apps', 'api'].includes(route)) route = 'workspaces';
     if (route !== 'ready') readyData = null;
-    document.querySelector('#crumb').textContent = { workspaces: 'Workspaces', add: 'Add workspace', ready: 'Workspace ready', files: 'Files', apps: 'Apps' }[route];
+    document.querySelector('#crumb').textContent = { workspaces: 'Workspaces', add: 'Add workspace', ready: 'Workspace ready', files: 'Files', apps: 'Apps', api: 'API reference' }[route];
     document.title = `orch publish · ${document.querySelector('#crumb').textContent}`;
     document.querySelectorAll('.side-nav a').forEach(link => {
       const active = link.hash === `#${['add', 'ready'].includes(route) ? 'workspaces' : route}`;
@@ -223,6 +236,11 @@
       const workspaceData = await api('/admin/api/workspaces?limit=100');
       if (current !== generation) return;
       workspaces = workspaceData.items || [];
+      const sum = k => workspaces.reduce((n, w) => n + (Number(w[k]) || 0), 0);
+      document.querySelector('#count-workspaces').textContent = workspaces.length;
+      document.querySelector('#count-files').textContent = sum('files');
+      document.querySelector('#count-apps').textContent = sum('apps');
+      if (route === 'api') showApi();
       if (route === 'workspaces') showWorkspaces(workspaces);
       if (route === 'add') {
         view.innerHTML = head('Add a workspace', 'Choose what this workspace can publish.') + `<form class="card form pad">${fields()}<div class="actions"><button class="primary" type="submit">Create workspace →</button><a class="button quiet" href="#workspaces">Cancel</a></div></form>`;

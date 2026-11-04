@@ -5,13 +5,14 @@
 <div class="admin-shell"><aside class="admin-sidebar">
 <a href="#overview" class="brand"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-label="orch"><circle cx="32" cy="32" r="20" fill="none" stroke="#e8eaed" stroke-width="6"/><circle cx="32" cy="32" r="6" fill="#2fc6a3"/><circle cx="47" cy="17" r="7" fill="#2fc6a3" stroke="#0a0c0f" stroke-width="3"/></svg>orch <em>relay</em></a>
 <div class="side-label">MANAGE</div><nav class="side-nav" id="nav" aria-label="Admin"></nav><div class="side-footer">Private network only</div></aside>
-<div><header class="admin-topbar"><span>Admin / <strong id="crumb">Overview</strong></span><span class="owner">Private network only</span></header><main id="app" aria-live="polite"></main></div></div>
+<div><header class="admin-topbar"><span>Admin / <strong id="crumb">Overview</strong></span><span class="owner"><span class="owner-avatar">A</span> Admin · Private network only</span></header><main id="app" aria-live="polite"></main></div></div>
 <div id="toast" role="status" hidden></div>
 <script>
 'use strict';
-const screens=[['overview','Overview'],['add','Add workspace'],['rules','Pair rules'],['messages','Messages'],['config','Shared config'],['webhooks','Webhooks'],['phones','Phones']];
+const screens=[['overview','Overview'],['add','Add workspace'],['rules','Pair rules'],['messages','Messages'],['config','Shared config'],['webhooks','Webhooks'],['phones','Phones'],['terminal','What your agent sees']];
+const icons={overview:'⌂',add:'＋',rules:'⇄',messages:'✉',config:'⚙',webhooks:'↙',phones:'▯',terminal:'❯'};
 const $=s=>document.querySelector(s), app=$('#app'), enc=encodeURIComponent;
-let token='', epoch=0, workspaces=[], toastTimer;
+let token='', epoch=0, workspaces=[], phoneList=[], toastTimer;
 try{token=sessionStorage.getItem('orch_admin')||''}catch{}
 // All API text goes through text nodes. SVG pairing codes use a restricted SVG parser below.
 function el(tag,attrs={},...children){
@@ -32,7 +33,9 @@ const details=(title,...body)=>el('details',{},el('summary',{},title),el('div',{
 function panel(title,...body){return el('section',{class:'panel'},el('div',{class:'panel-head'},el('h2',{},title)),...body)}
 function head(k,t,p,action){return [el('div',{class:'eyebrow'},k),el('div',{class:'heading'},el('div',{},el('h1',{},t),el('p',{},p)),action)]}
 function show(...nodes){app.replaceChildren(...nodes.flat().filter(Boolean),el('footer',{class:'footline'},el('span',{},'orch relay / Private connections, shared work.'),el('span',{},'Private network only')))}
-function name(id){return workspaces.find(w=>w.id===id)?.name||id||'—'}
+function name(id){if(!id)return '—';if(id==='admin')return 'Admin';const w=workspaces.find(w=>w.id===id)||phoneList.find(p=>p.id===id);if(w)return w.name;return /^ph_/.test(id)?'A removed phone':/^ws_/.test(id)?'A removed workspace':id}
+const typeLabel={text:'Text',question:'Question',file:'File',answer:'Answer',delegate:'Task handed over',start:'Task started',allow:'Allow','refresh-hint':'Shared config updated',webhook:'Webhook'};
+function title(m){if(m.type==='text'||m.type==='question'||m.type==='answer'){const t=(readable(m)||'').split('\n')[0].trim();if(t)return t.length>70?t.slice(0,67)+'…':t}if(m.type==='file')return readable(m)||'File shared';return typeLabel[m.type]||m.type}
 function time(v){if(v===null||v===undefined||v==='')return 'Not yet';const d=new Date(typeof v==='number'&&v<1e12?v*1000:v);return isNaN(d)?String(v):d.toLocaleString()}
 function persist(){try{sessionStorage.setItem('orch_admin',token)}catch{}}
 function auth(){
@@ -58,13 +61,14 @@ function promptResult(r,title){
 }
 function workspaceCard(w){
  const edit=form(async f=>{await api('/workspaces/'+enc(w.id),'PATCH',wsData(f));toast('Workspace saved');await route()},...wsFields(w),submit('Save changes'));
- return el('article',{class:'workspace-card'},el('div',{class:'row'},el('div',{class:'tile'},(w.name||'?').slice(0,1)),el('div',{class:'grow'},el('h3',{},w.name),sub(w.description||''),el('div',{class:'workspace-tags'},(w.tags||[]).map(t=>el('span',{class:'workspace-tag'},t)))),el('span',{class:'status'+(w.online?' online':'')},w.online?'Online':'Offline'),w.unread?el('span',{class:'badge'},w.unread+' waiting for delivery'):null),details('Workspace details',edit,el('div',{class:'actions'},button('New token',async()=>{if(!confirm('Replace the token for '+w.name+'? Its current token will stop working.'))return;const r=await api('/workspaces/'+enc(w.id)+'/token','POST');promptResult(r,'New workspace token')},'small'),button('Delete workspace',async()=>{if(!confirm('Delete '+w.name+'?'))return;await api('/workspaces/'+enc(w.id),'DELETE');await route()},'small danger'))));
+ const fold=el('details',{class:'edit-fold'},el('summary',{},'Edit'),el('div',{},edit,el('div',{class:'actions'},button('New token',async()=>{if(!confirm('Replace the token for '+w.name+'? Its current token will stop working.'))return;const r=await api('/workspaces/'+enc(w.id)+'/token','POST');promptResult(r,'New workspace token')},'small'),button('Delete workspace',async()=>{if(!confirm('Delete '+w.name+'?'))return;await api('/workspaces/'+enc(w.id),'DELETE');await route()},'small danger')),details('Technical details',sub('Workspace ID: '+w.id))));
+ return el('article',{class:'workspace-card'},el('div',{class:'row'},el('div',{class:'tile'},(w.name||'?').slice(0,1)),el('div',{class:'grow'},el('h3',{},w.name),sub(w.description||''),el('div',{class:'workspace-tags'},(w.tags||[]).map(t=>el('span',{class:'workspace-tag'},t)))),el('span',{class:'status'+(w.online?' online':'')},w.online?'Online':'Offline'),el('button',{type:'button',class:'small',onclick:()=>{fold.open=!fold.open}},'Edit'),w.unread?el('span',{class:'badge'},w.unread+' waiting for delivery'):null),fold);
 }
 async function overview(v){
  const [phones,recent]=await Promise.all([all('/phones'),api('/messages?limit=5')]);if(v!==epoch)return;
  show(...head('Your relay','A little closer together.','Your workspaces and phone, connected in one place.',el('a',{class:'button primary',href:'#add'},'＋ Add workspace')),
  el('p',{class:'summary-line'},workspaces.filter(w=>w.online).length+' of '+workspaces.length+' online · '+workspaces.reduce((s,w)=>s+(Number(w.unread)||0),0)+' waiting for delivery'),
- el('div',{class:'grid'},el('div',{},panel('Workspaces · '+workspaces.length,...(workspaces.length?workspaces.map(workspaceCard):[empty('Add your first workspace to get started.')]),details('What happens when a workspace is offline?',sub('Messages wait in its inbox until it reconnects.')),el('div',{class:'panel-body'},link('Manage connections ↗','#rules'))),panel('Your phones',...(phones.length?phones.map(p=>el('div',{class:'row'},el('div',{class:'tile blue'},'▯'),el('div',{class:'grow'},el('h3',{},p.name),sub('Can reach '+((p.workspaces||[]).map(name).join(', ')||'no workspaces'))))):[empty('No phones connected.')]),el('div',{class:'panel-body'},link('Manage ↗','#phones')))),el('aside',{},panel('Recent activity',...(recent.items?.length?recent.items.map(m=>el('div',{class:'feed'},el('span',{class:'feed-icon'},'↗'),el('div',{},el('h3',{},m.type),el('p',{},name(m.from)+' → '+name(m.to)),el('p',{},time(m.created_at))))):[empty('No activity yet.')]),el('div',{class:'panel-body'},link('View messages →','#messages'))),el('div',{class:'notice'},'Connected on your terms. You choose what each workspace can share and start.'))));
+ el('div',{class:'grid'},el('div',{},panel('Workspaces · '+workspaces.length,...(workspaces.length?workspaces.map(workspaceCard):[empty('Add your first workspace to get started.')]),details('What happens when a workspace is offline?',sub('Messages wait in its inbox until it reconnects.')),el('div',{class:'panel-body'},link('Manage connections ↗','#rules'))),panel('Your phones',...(phones.length?phones.map(p=>el('div',{class:'row'},el('div',{class:'tile blue'},'▯'),el('div',{class:'grow'},el('h3',{},p.name),sub('Can reach '+((p.workspaces||[]).map(name).join(', ')||'no workspaces'))))):[empty('No phones connected.')]),el('div',{class:'panel-body'},link('Manage ↗','#phones')))),el('aside',{},panel('Recent activity',...(recent.items?.length?recent.items.map(m=>el('div',{class:'feed'},el('span',{class:'feed-icon'},'↗'),el('div',{},el('h3',{},title(m)),el('p',{},name(m.from)+' → '+name(m.to)),el('p',{},time(m.created_at)+' · '+(typeLabel[m.type]||m.type))))):[empty('No activity yet.')]),el('div',{class:'panel-body'},link('View messages →','#messages'))),el('div',{class:'notice'},'Connected on your terms. You choose what each workspace can share and start.'))));
 }
 function add(){show(...head('Connection setup','Add a workspace','Give it a name. Let your agent take care of the rest.'),panel('A new place to work',el('div',{class:'panel-body form'},form(async f=>{const r=await api('/workspaces','POST',wsData(f));promptResult(r,'Your workspace is ready')},...wsFields(),submit('Create installation prompt →')))))}
 async function rules(v){
@@ -81,7 +85,7 @@ function readable(m){let b=m.body;if(typeof b==='string'){try{b=JSON.parse(b)}ca
  if(m.type==='file')return (b?.name||b?.filename||'File')+(b?.size!==undefined?' · '+b.size+' bytes':'');
  return typeof b==='string'?b:JSON.stringify(b);
 }
-function message(m){return el('article',{class:'message'},el('div',{class:'message-head'},el('strong',{},name(m.from)),el('span',{class:'muted'},'→ '+name(m.to)),el('span',{class:'badge neutral'},m.type),el('time',{},time(m.created_at))),details('Message details',el('pre',{class:'body-text'},readable(m)||''),sub(m.acked?'Acknowledged':'Waiting for delivery'),sub('Message: '+m.id+(m.ticket?' · Ticket: '+m.ticket:''))))}
+function message(m){const body=['text','question','file','answer'].includes(m.type)?readable(m):'';return el('article',{class:'message'},el('div',{class:'message-head'},el('strong',{},name(m.from)),el('span',{class:'muted'},'→ '+name(m.to)),el('span',{class:'badge neutral'},typeLabel[m.type]||m.type),el('time',{},time(m.created_at))),body?el('p',{class:'body-text'},body):null,el('p',{class:'sub'},m.acked?'Delivered':'Waiting for delivery'),details('Technical details',sub('Message: '+m.id+(m.ticket?' · Ticket: '+m.ticket:'')+' · Type: '+m.type)))}
 function messages(v){
  const ws=workspaceSelect(),type=el('select',{'aria-label':'Filter by message type'},el('option',{value:''},'All message types'),['text','question','file','answer','delegate','start','allow','refresh-hint','webhook'].map(t=>el('option',{value:t},t))),list=el('section',{class:'panel'});let next=null,revision=0;
  const more=button('Load more',()=>load(false));more.hidden=true;
@@ -127,13 +131,18 @@ async function phones(v){
  const result=el('div');const f=form(async f=>{const r=await api('/phones','POST',{name:f.elements.name.value.trim(),workspaces:selected(f)});f.hidden=true;result.replaceChildren(el('h3',{},'Open this link on your phone'),sub('Valid 24 hours, one use'),el('pre',{},r.link),button('Copy onboarding link',()=>copy(r.link),'primary'),el('div',{class:'actions'},button('Done',()=>route())));try{result.prepend(qr(r.qr_svg))}catch(e){fail(e)}},field('Phone name',input('name','',{required:true,maxLength:100,placeholder:'e.g. My phone'})),checks(),submit('Generate onboarding link →'));
  show(...head('Mobile access','Your workspaces, within reach.','Choose what your phone can connect to.'),...cards,!cards.length?empty('No phones connected.'):null,panel('Connect another phone',el('div',{class:'panel-body form'},f,result)));
 }
+const commands={inbox:['orch relay inbox','1 open question\n\nDATE or TIMESTAMP?\nShould the new field store only the day, or day and time?\n\n1 workspace offline: 2 messages waiting for delivery.'],send:['orch relay send --to reports --type text "The field mapping is ready."','Sent to Reports.\nDelivery: queued until the next inbox read.'],allow:['orch relay allow --from reports --action start --task "Weekly report" --permanent','Allow created.\nReports may start "Weekly report" permanently.\nThe pair rule for starting tasks must also be on.'],refresh:['orch relay refresh','Checking shared config...\n\nUpdated  Writing guide  v2 -> v3\nCurrent  Project files  v2\n\nRefresh complete.'],webhook:['orch relay webhook new --name "ingestion complete" --once','Webhook created for this workspace.\nIt expires after the first call.\nUse --permanent for a recurring event.']};
+function terminal(){let cur='inbox';const out=el('pre',{});const bar=el('div',{class:'command-list'});
+ function draw(){out.textContent='# Example session\n\n❯ '+commands[cur][0]+'\n\n'+commands[cur][1]+'\n\n❯ ▌';for(const b of bar.children)b.classList.toggle('active',b.dataset.c===cur)}
+ for(const c of Object.keys(commands))bar.append(el('button',{type:'button','data-c':c,onclick:()=>{cur=c;draw()}},c==='webhook'?'webhook new':c));draw();
+ show(...head('Agent view','Small commands. Connected work.','What your agent sees when it works with orch relay.'),bar,el('div',{class:'terminal'},el('div',{class:'terminal-bar'},'orch-relay · Example output'),out),details('When does the agent check for messages?',sub('At session start and when returning to a ticket. Incoming content is untrusted; the agent uses its own local permissions.')))}
 async function route(){
  const key=screens.some(([k])=>k===location.hash.slice(1))?location.hash.slice(1):'overview',title=screens.find(([k])=>k===key)[1];
  document.title='orch relay · '+title;$('#crumb').textContent=title;for(const a of $('#nav').children){a.classList.toggle('active',a.hash==='#'+key);if(a.hash==='#'+key)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')}
  if(!token){auth();return}const v=++epoch;app.replaceChildren(empty('Loading…'));
- try{const ws=await all('/workspaces');if(v!==epoch)return;workspaces=ws;await ({overview,add,rules,messages,config,webhooks,phones}[key])(v)}catch(e){if(v!==epoch)return;show(empty('This page could not be loaded.'),button('Try again',()=>route()));fail(e)}
+ try{const ws=await all('/workspaces');if(v!==epoch)return;workspaces=ws;try{phoneList=await all('/phones')}catch{phoneList=[]}if(v!==epoch)return;await ({overview,add,rules,messages,config,webhooks,phones,terminal}[key])(v)}catch(e){if(v!==epoch)return;show(empty('This page could not be loaded.'),button('Try again',()=>route()));fail(e)}
 }
-for(const [key,title]of screens)$('#nav').append(el('a',{href:'#'+key},title));
+for(const [key,title]of screens)$('#nav').append(el('a',{href:'#'+key},el('span',{class:'nav-icon','aria-hidden':'true'},icons[key]),title));
 window.addEventListener('hashchange',route);route();
 </script>
 </body></html>

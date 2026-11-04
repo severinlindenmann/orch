@@ -180,3 +180,11 @@ button:disabled{opacity:.5;cursor:wait}
 .credential{flex-wrap:wrap}
 .public-brand{gap:12px}
 }
+
+.owner{display:flex;align-items:center;gap:9px}
+.owner-avatar{display:inline-grid;place-items:center;border:1px solid var(--border);border-radius:50%;width:28px;height:28px;background:var(--surface-2);color:var(--text);font-size:12px}
+.method{display:inline-block;min-width:54px;margin-right:12px;font:600 11px ui-monospace,monospace;color:var(--brand)}
+.api details{padding:16px 22px;border-bottom:1px solid var(--border)}
+.api summary{cursor:pointer}
+.api pre{margin:14px 0 0;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;overflow:auto;font-size:12px}
+.count:empty{display:none}
