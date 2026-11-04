@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -10,6 +11,7 @@ from . import orchcli
 from .cron import fmt, is_due, next_after, parse
 from .runner import Runner, load_config, load_state, pick_agent, sdir, update_state
 
+ID_RE = re.compile(r"^t_[a-z0-9]{6,16}$")
 OPEN = ("open", "active", "waiting")
 
 
@@ -29,7 +31,7 @@ def read_tickets(root: Path) -> list[dict]:
             t = json.loads(p.read_text())
         except (OSError, ValueError):
             continue
-        if isinstance(t, dict) and t.get("id") and t.get("status"):
+        if isinstance(t, dict) and isinstance(t.get("id"), str) and ID_RE.match(t["id"]) and t.get("status"):
             out.append(t)
     return out
 
@@ -117,14 +119,15 @@ class Scheduler:
                 started.append(tid)
         return started
 
-    def _find_or_make(self, key: str) -> str | None:
+    def _find_or_make(self, key: str, sender: str) -> str | None:
         for t in read_tickets(self.root):
-            if ((t.get("ext") or {}).get("relay") or {}).get("start_key") == key and t["status"] in OPEN:
+            r = (t.get("ext") or {}).get("relay") or {}
+            if r.get("start_key") == key and r.get("from") == sender and t["status"] in OPEN:
                 return t["id"]
         made = orchcli.call(self.root, "ticket", "new", key)
         tid = made.get("id") if isinstance(made, dict) else None
         if tid:
-            orchcli.call(self.root, "ext", "set", tid, "relay", json.dumps({"start_key": key}))
+            orchcli.call(self.root, "ext", "set", tid, "relay", json.dumps({"start_key": key, "from": sender}))
         return tid
 
     def _handle(self, m: dict, now: datetime) -> str | None:
@@ -133,7 +136,7 @@ class Scheduler:
         text = ""
         if kind in ("start", "delegate") and m.get("allowed") is True:
             if kind == "start":
-                tid = self._find_or_make(str(body.get("key", "")))
+                tid = self._find_or_make(str(body.get("key", "")), str(m.get("from", "")))
                 text = str(body.get("text", ""))
             else:
                 text = str(body.get("text", ""))

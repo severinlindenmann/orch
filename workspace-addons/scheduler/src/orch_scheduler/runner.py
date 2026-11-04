@@ -65,14 +65,11 @@ def update_state(root: Path, tid: str, **kw) -> None:
 
 
 def pick_agent(cfg: dict, ticket: dict | None) -> str:
-    """Per-ticket ext.scheduler.agent: a full command with {prompt}, or a name from [agents] in config."""
+    """ext.scheduler.agent may only NAME an entry of [agents] in the local config; never a command from ticket data."""
     want = ((ticket or {}).get("ext") or {}).get("scheduler", {}).get("agent")
-    if want:
-        if "{prompt}" in want:
-            return want
-        named = (cfg.get("agents") or {}).get(want)
-        if named:
-            return named
+    agents = cfg.get("agents")
+    if isinstance(want, str) and isinstance(agents, dict) and isinstance(agents.get(want), str):
+        return agents[want]
     return cfg["agent"]
 
 
