@@ -12,7 +12,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     TARGETED_DEVICE_FAMILY: "1"
     MARKETING_VERSION: "2.0.0"
-    CURRENT_PROJECT_VERSION: "261104.222440"
+    CURRENT_PROJECT_VERSION: "261104.225314"
 targets:
   OrchMobile:
     type: application

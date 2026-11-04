@@ -53,8 +53,8 @@ final class AppModel {
         if let c = Keychain.load() { credentials = c; phase = .ready }
     }
 
-    /// `-relayMode real` (launch argument or UserDefaults) switches from the mock to the relay named in the invitation.
-    static var configuredMock: Bool { UserDefaults.standard.string(forKey: "relayMode") != "real" }
+    /// `-relayMode mock` (launch argument or UserDefaults, UI tests) uses the in-process mock; every real build talks to the relay named in the invitation.
+    static var configuredMock: Bool { UserDefaults.standard.string(forKey: "relayMode") == "mock" }
     /// `-voiceFile <path>`: an audio file stands in for the microphone (real-relay check in the Simulator).
     static var configuredVoice: VoiceInput.Mode {
         let d = UserDefaults.standard
