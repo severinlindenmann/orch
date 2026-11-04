@@ -12,6 +12,8 @@ struct SendView: View {
     @State private var pulse = false
 
     private var recording: Bool { voice?.isRecording == true }
+    private var transcribing: Bool { voice?.isTranscribing == true }
+    private var micLabel: String { recording ? "Listening… tap to stop" : transcribing ? "Transcribing…" : "Tap to speak" }
 
     var body: some View {
         ScrollView {
@@ -23,7 +25,7 @@ struct SendView: View {
             }.padding(.horizontal, 23).padding(.top, 6).padding(.bottom, 20)
         }
         .task {
-            if voice == nil { voice = VoiceInput(mode: model.voiceMode) }
+            if voice == nil { let m = model; voice = VoiceInput(mode: model.voiceMode, transcribe: { try await m.transcribe($0) }) }
             selectWorkspace()
             if UserDefaults.standard.bool(forKey: "autoMic") { await voice?.toggle(current: text) }
         }
@@ -51,7 +53,7 @@ struct SendView: View {
                 .padding(.horizontal, 10).background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
                 .disabled(sending)
-            Eyebrow(text: "LIVE TRANSCRIPT").padding(.top, 16)
+            Eyebrow(text: recording ? "LISTENING" : transcribing ? "TRANSCRIBING" : "TRANSCRIPT").padding(.top, 16)
             ZStack(alignment: .topLeading) {
                 if text.isEmpty {
                     Text("What would you like to get done?").foregroundStyle(Theme.muted)
@@ -59,16 +61,18 @@ struct SendView: View {
                 }
                 TextEditor(text: $text).scrollContentBackground(.hidden)
                     .accessibilityIdentifier("transcript").accessibilityLabel("Live transcript")
-                    .disabled(recording || sending)
+                    .disabled(recording || transcribing || sending)
             }.font(.system(size: 13)).padding(10).frame(height: 137)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
             VStack(spacing: 12) {
                 HStack(spacing: 16) {
-                    ForEach(Array([4.0, 12, 8, 22, 14, 18, 6, 12, 8, 22, 6, 10].enumerated()), id: \.offset) { _, height in
-                        Capsule().fill(Theme.brand.opacity(0.3)).frame(width: 3, height: height)
+                    ForEach(Array((voice?.levels ?? []).enumerated()), id: \.offset) { _, level in
+                        Capsule().fill(Theme.brand.opacity(recording ? 0.9 : 0.3)).frame(width: 3, height: 4 + 26 * level)
+                            .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: level)
                     }
-                }.frame(height: 32).accessibilityHidden(true)
+                }.frame(height: 32).accessibilityIdentifier("level-meter")
+                    .accessibilityValue(recording ? "recording" : "idle")
                 Button {
                     toggling = true
                     Task {
@@ -90,9 +94,12 @@ struct SendView: View {
                             }
                         }
                 }.buttonStyle(.plain).accessibilityIdentifier("mic")
-                    .accessibilityLabel(recording ? "Listening… tap to stop" : "Tap to speak")
-                    .disabled(voice == nil || toggling || sending)
-                Text(recording ? "Listening… tap to stop" : "Tap to speak").font(.system(size: 12, weight: .medium))
+                    .accessibilityLabel(micLabel)
+                    .disabled(voice == nil || toggling || transcribing || sending)
+                Text(micLabel).font(.system(size: 12, weight: .medium)).accessibilityIdentifier("mic-status")
+                if voice?.usedOnDevice == true, voice?.error == nil, !transcribing {
+                    Text("Transcribed on this phone.").font(.caption).foregroundStyle(Theme.muted)
+                }
                 if let error = voice?.error { Text(error).font(.caption).foregroundStyle(Theme.danger) }
             }.frame(maxWidth: .infinity).padding(.top, 5).padding(.bottom, 16)
             Button("Send to inbox ↑") {
@@ -102,7 +109,7 @@ struct SendView: View {
                     sending = false
                 }
             }.buttonStyle(PrimaryButtonStyle()).accessibilityIdentifier("send-button")
-                .disabled(recording || toggling || sending || workspaceID.isEmpty || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(recording || transcribing || toggling || sending || workspaceID.isEmpty || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Text("Your workspace will pick it up from here.").font(.system(size: 11))
                 .foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 2)
         }

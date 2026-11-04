@@ -55,11 +55,15 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.tab, .questions); XCTAssertEqual(model.highlightedQuestion, "m_q1date0ts0000001")
     }
 
-    func testScriptedVoiceFillsTranscript() async throws {
-        let v = VoiceInput(mode: .scripted)
+    func testScriptedRecorderTranscribesViaMock() async throws {
+        let model = AppModel(useMock: true, voiceMode: .scripted)
+        let v = VoiceInput(mode: .scripted, transcribe: { try await model.transcribe($0) })
         await v.toggle(current: "")
         XCTAssertTrue(v.isRecording)
-        try await Task.sleep(for: .seconds(3))
-        XCTAssertFalse(v.isRecording); XCTAssertTrue(v.transcript.hasSuffix("ingestion job."))
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertTrue(v.levels.contains { $0 > 0 })
+        await v.toggle(current: "")
+        XCTAssertFalse(v.isRecording); XCTAssertFalse(v.isTranscribing)
+        XCTAssertEqual(v.transcript, MockRelay.transcript); XCTAssertNil(v.error)
     }
 }

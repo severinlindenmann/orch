@@ -84,4 +84,74 @@ final class ClientTests: XCTestCase {
         let r = try JSONCoding.decoder.decode(ListResponse<Workspace>.self, from: Data(json.utf8))
         XCTAssertNil(r.items[0].description); XCTAssertEqual(lastSeenText(nil, online: false), "Offline")
     }
+
+    func testTranscribeSendsAudioAndDecodes() async throws {
+        StubProtocol.handler = { _ in (200, Data(#"{"text":"Nimm das Feld event_time.","language":"de","duration":2.4}"#.utf8)) }
+        let c = URLSessionRelayClient(base: base, credentials: creds, session: StubProtocol.session())
+        let t = try await c.transcribe(audio: Data([1, 2, 3]), language: "de")
+        XCTAssertEqual(t, Transcript(text: "Nimm das Feld event_time.", language: "de", duration: 2.4))
+        let req = StubProtocol.seen[0]
+        XCTAssertEqual(req.httpMethod, "POST"); XCTAssertEqual(req.url?.path, "/v1/phone/transcribe")
+        XCTAssertEqual(req.url?.query, "language=de")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "Content-Type"), "audio/m4a")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "X-Orch-Phone"), "ph_iphone0001")
+        XCTAssertEqual(StubProtocol.seenBodies[0], Data([1, 2, 3]))
+    }
+
+    func testTranscribeOffIs503() async throws {
+        StubProtocol.handler = { _ in (503, Data(#"{"error":"transcription_off","message":"Voice transcription is not set up on this relay."}"#.utf8)) }
+        let c = URLSessionRelayClient(base: base, credentials: creds, session: StubProtocol.session())
+        do { _ = try await c.transcribe(audio: Data([1]), language: nil); XCTFail() }
+        catch { XCTAssertTrue(VoiceInput.shouldUseOnDevice(error)) }
+    }
+}
+
+@MainActor
+final class VoiceFallbackTests: XCTestCase {
+    private func tmpAudio() throws -> URL {
+        let u = FileManager.default.temporaryDirectory.appendingPathComponent("t-\(UUID().uuidString).m4a")
+        try Data([9, 9]).write(to: u); return u
+    }
+
+    func testFallbackRules() {
+        XCTAssertTrue(VoiceInput.shouldUseOnDevice(RelayError.api(status: 503, code: "transcription_off", message: "")))
+        XCTAssertTrue(VoiceInput.shouldUseOnDevice(RelayError.network("x")))
+        XCTAssertFalse(VoiceInput.shouldUseOnDevice(RelayError.api(status: 429, code: "rate_limited", message: "")))
+        XCTAssertFalse(VoiceInput.shouldUseOnDevice(RelayError.api(status: 502, code: "transcription_failed", message: "")))
+        XCTAssertEqual(VoiceInput.message(for: RelayError.api(status: 502, code: "transcription_failed", message: "")), "Couldn't transcribe, try again.")
+    }
+
+    func testTranscriptionOffUsesOnDevice() async throws {
+        let file = try tmpAudio(); defer { try? FileManager.default.removeItem(at: file) }
+        let v = VoiceInput(mode: .file(file),
+                           transcribe: { _ in throw RelayError.api(status: 503, code: "transcription_off", message: "off") },
+                           onDevice: { _ in "from this phone" })
+        await v.toggle(current: "Hello"); await v.toggle(current: "")
+        XCTAssertEqual(v.transcript, "Hello from this phone"); XCTAssertTrue(v.usedOnDevice); XCTAssertNil(v.error)
+    }
+
+    func testRelayTextWinsAndOnDeviceNotCalled() async throws {
+        let file = try tmpAudio(); defer { try? FileManager.default.removeItem(at: file) }
+        let v = VoiceInput(mode: .file(file), transcribe: { _ in "from the relay" },
+                           onDevice: { _ in XCTFail("on-device must not run"); return "" })
+        await v.toggle(current: ""); await v.toggle(current: "")
+        XCTAssertEqual(v.transcript, "from the relay"); XCTAssertFalse(v.usedOnDevice)
+    }
+
+    func testRateLimitShowsPlainMessageNoFallback() async throws {
+        let file = try tmpAudio(); defer { try? FileManager.default.removeItem(at: file) }
+        let v = VoiceInput(mode: .file(file),
+                           transcribe: { _ in throw RelayError.api(status: 429, code: "rate_limited", message: "slow") },
+                           onDevice: { _ in XCTFail("no fallback on 429"); return "" })
+        await v.toggle(current: ""); await v.toggle(current: "")
+        XCTAssertEqual(v.error, "Too many recordings in a row. Wait a moment and try again."); XCTAssertEqual(v.transcript, "")
+    }
+
+    func testBothFailShowsTryAgain() async throws {
+        let file = try tmpAudio(); defer { try? FileManager.default.removeItem(at: file) }
+        let v = VoiceInput(mode: .file(file), transcribe: { _ in throw RelayError.network("down") },
+                           onDevice: { _ in throw RelayError.network("no speech") })
+        await v.toggle(current: ""); await v.toggle(current: "")
+        XCTAssertEqual(v.error, "Couldn't transcribe, try again.")
+    }
 }

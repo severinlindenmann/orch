@@ -41,4 +41,25 @@ final class OnboardingFlowUITests: XCTestCase {
         send.tap()
         XCTAssertTrue(app.staticTexts["It's in the inbox."].waitForExistence(timeout: 10))
     }
+
+    /// Mic path against the mock: scripted recorder, tap to record, tap to stop, transcript appears, edit, send.
+    func testVoiceSendFlow() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-startTab", "send"]
+        app.launch()
+        let mic = app.buttons["mic"]
+        XCTAssertTrue(mic.waitForExistence(timeout: 15))
+        mic.tap()
+        XCTAssertTrue(app.staticTexts["Listening… tap to stop"].waitForExistence(timeout: 5))
+        sleep(1)
+        mic.tap()
+        let field = app.textViews["transcript"]
+        let predicate = NSPredicate(format: "value CONTAINS 'weekly report'")
+        let e = XCTNSPredicateExpectation(predicate: predicate, object: field)
+        XCTAssertEqual(XCTWaiter().wait(for: [e], timeout: 10), .completed)
+        let send = app.buttons["send-button"]
+        if !send.isHittable { app.swipeUp() }
+        send.tap()
+        XCTAssertTrue(app.staticTexts["It's in the inbox."].waitForExistence(timeout: 10))
+    }
 }

@@ -8,6 +8,7 @@ protocol RelayAPI: Sendable {
     func questions() async throws -> [Question]
     func answer(questionMessageId: String, answer: String) async throws -> String
     func send(to: String, text: String, ticket: String?) async throws -> String
+    func transcribe(audio: Data, language: String?) async throws -> Transcript
     func signOut() async throws
 }
 
@@ -38,7 +39,8 @@ struct URLSessionRelayClient: RelayAPI {
 
     private struct ErrorBody: Decodable { let error: String?; let message: String? }
 
-    private func request(_ method: String, _ path: String, body: (any Encodable)? = nil, auth: Bool = true) async throws -> Data {
+    private func request(_ method: String, _ path: String, body: (any Encodable)? = nil, auth: Bool = true,
+                         raw: (data: Data, type: String)? = nil) async throws -> Data {
         var req = URLRequest(url: URL(string: path, relativeTo: base)!.absoluteURL)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -49,6 +51,11 @@ struct URLSessionRelayClient: RelayAPI {
         if let body {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONCoding.encoder.encode(AnyEncodable(body))
+        }
+        if let raw {
+            req.setValue(raw.type, forHTTPHeaderField: "Content-Type")
+            req.httpBody = raw.data
+            req.timeoutInterval = 60
         }
         let data: Data, resp: URLResponse
         do { (data, resp) = try await session.data(for: req) }
@@ -84,6 +91,12 @@ struct URLSessionRelayClient: RelayAPI {
         struct Req: Encodable { let to: String; let text: String; let ticket: String? }
         let d = try await request("POST", "/v1/phone/send", body: Req(to: to, text: text, ticket: ticket))
         return try JSONCoding.decoder.decode(IdResponse.self, from: d).id
+    }
+    func transcribe(audio: Data, language: String?) async throws -> Transcript {
+        var path = "/v1/phone/transcribe"
+        if let language { path += "?language=\(language)" }
+        let d = try await request("POST", path, raw: (audio, "audio/m4a"))
+        return try JSONCoding.decoder.decode(Transcript.self, from: d)
     }
     func signOut() async throws { _ = try await request("POST", "/v1/phone/signout") }
 }

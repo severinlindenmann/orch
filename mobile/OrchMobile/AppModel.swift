@@ -49,11 +49,15 @@ final class AppModel {
 
     /// `-relayMode real` (launch argument or UserDefaults) switches from the mock to the relay named in the invitation.
     static var configuredMock: Bool { UserDefaults.standard.string(forKey: "relayMode") != "real" }
+    /// `-voiceFile <path>`: an audio file stands in for the microphone (real-relay check in the Simulator).
     static var configuredVoice: VoiceInput.Mode {
+        let d = UserDefaults.standard
+        if let path = d.string(forKey: "voiceFile") { return .file(URL(fileURLWithPath: path)) }
+        if d.bool(forKey: "fakeVoice") { return .scripted }
         #if targetEnvironment(simulator)
-        .scripted
+        return configuredMock ? .scripted : .live
         #else
-        UserDefaults.standard.bool(forKey: "fakeVoice") ? .scripted : .live
+        return .live
         #endif
     }
 
@@ -135,6 +139,11 @@ final class AppModel {
             message = nil
             return true
         } catch { handle(error); return false }
+    }
+
+    func transcribe(_ audio: Data) async throws -> String {
+        do { return try await client.transcribe(audio: audio, language: nil).text }
+        catch RelayError.unauthorized { handle(RelayError.unauthorized); throw RelayError.unauthorized }
     }
 
     func registerPush(token: String) async {
