@@ -80,6 +80,7 @@ fn whoami_body(c: &rusqlite::Connection, id: &str) -> Res<Value> {
     let o = card.as_object_mut().unwrap();
     o.remove("online");
     o.remove("last_seen");
+    o.remove("profile_by");
     o.insert("phones".into(), n.into());
     Ok(card)
 }
@@ -98,43 +99,31 @@ async fn patch_me(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res
         let me = auth::workspace(&c, &h)?;
         let desc = match v.get("description") {
             None => None,
-            Some(d) => match d.as_str() {
-                Some(d) if d.chars().count() <= 280 => Some(d.trim().to_string()),
-                _ => {
-                    return Err(invalid(
-                        "`description` must be text of up to 280 characters.",
-                    ))
-                }
-            },
+            Some(d) => Some(
+                d.as_str()
+                    .ok_or_else(|| invalid("`description` must be text."))
+                    .and_then(|d| store::valid_description(d).map_err(invalid))?,
+            ),
         };
         let tags = match v.get("tags") {
             None => None,
-            Some(t) => {
-                let a = t
-                    .as_array()
-                    .filter(|a| a.len() <= 8)
-                    .ok_or_else(|| invalid("`tags` must be a list of up to 8 tags."))?;
-                let mut out = vec![];
-                for t in a {
-                    let t = t.as_str().unwrap_or("").trim();
-                    if t.is_empty() || t.chars().count() > 24 {
-                        return Err(invalid("Each tag must be 1 to 24 characters."));
-                    }
-                    out.push(t.to_string());
-                }
-                Some(out)
-            }
+            Some(t) => Some(
+                t.as_array()
+                    .ok_or_else(|| invalid("`tags` must be a list."))
+                    .and_then(|a| store::valid_tags(a).map_err(invalid))?,
+            ),
         };
-        if let Some(d) = &desc {
+        if desc.is_some() || tags.is_some() {
+            // Only these two fields, and only while the token that authenticated this call is still current.
+            let cur = auth::bearer(&h).map(token_hash).unwrap_or_default();
             c.execute(
-                "UPDATE workspaces SET description=?2 WHERE id=?1",
-                params![me, d],
-            )?;
-        }
-        if let Some(t) = &tags {
-            c.execute(
-                "UPDATE workspaces SET tags=?2 WHERE id=?1",
-                params![me, serde_json::to_string(t).unwrap()],
+                "UPDATE workspaces SET description=COALESCE(?3,description), tags=COALESCE(?4,tags), profile_by='workspace' WHERE id=?1 AND token_hash=?2",
+                params![
+                    me,
+                    cur,
+                    desc,
+                    tags.as_ref().map(|t| serde_json::to_string(t).unwrap())
+                ],
             )?;
         }
         if desc.is_some() || tags.is_some() {

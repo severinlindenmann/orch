@@ -88,8 +88,8 @@ async function api(path,method='GET',body,raw=false){
  if(requestToken!==token)throw new DOMException('Session changed','AbortError');return data;
 }
 async function all(path){let items=[],next=null;const seen=new Set();do{const r=await api(path+(next?(path.includes('?')?'&':'?')+'after='+enc(next):''));items.push(...(r.items||[]));next=r.next;if(next&&seen.has(next))throw Error('The relay repeated a page. Try again.');seen.add(next)}while(next);return items}
-function wsData(f){return {name:f.elements.name.value.trim(),description:f.elements.description.value.trim(),tags:f.elements.tags.value.split(',').map(t=>t.trim()).filter(Boolean)}}
-function wsFields(w={},open=true){const name=field('Workspace name',input('name',w.name||'',{maxLength:100,placeholder:'e.g. Studio',autocomplete:'off'}));const more=[field('Description',input('description',w.description||'',{maxLength:280}),'Optional'),field('Tags',input('tags',(w.tags||[]).join(', '),{placeholder:'data, work'}),'Optional, separated by commas')];return [name,open?more:details('More options',...more)]}
+function wsData(f){return {name:f.elements.name.value.trim(),description:f.elements.description.value.trim(),tags:f.elements.tags.value.split(',').map(t=>t.trim().toLowerCase()).filter(Boolean)}}
+function wsFields(w={},open=true){const name=field('Workspace name',input('name',w.name||'',{maxLength:100,placeholder:'e.g. Studio',autocomplete:'off'}));const more=[field('Description',input('description',w.description||'',{maxLength:280}),'Optional'),field('Tags',input('tags',(w.tags||[]).join(', '),{placeholder:'data, work'}),'Optional: lowercase words, separated by commas')];return [name,open?more:details('More options',...more)]}
 function checkName(f){if(!f.elements.name.value.trim())throw new FieldError('Give the workspace a name.','name')}
 async function copy(value){try{await navigator.clipboard.writeText(value)}catch{const t=el('textarea',{value,readOnly:true});document.body.append(t);t.select();const ok=document.execCommand('copy');t.remove();if(!ok)throw Error('Copy is not available here. Select the text and copy it.')}toast('Copied')}
 function promptResult(r,title){

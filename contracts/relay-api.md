@@ -29,7 +29,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | Method | Path | Request | Response |
 |---|---|---|---|
 | GET | `/v1/whoami` | – | `{id, name, description, tags, phones: n}` |
-| PATCH | `/v1/me` | `{description?: string ≤ 280, tags?: [string ≤ 24, ≤ 8 items]}` | `200` same body as `/v1/whoami`. A change raises the refresh version and sends refresh-hints to related workspaces. Bad limits → `422 invalid` |
+| PATCH | `/v1/me` | `{description?: string ≤ 280, tags?: [string ≤ 24, ≤ 8 items]}` | `200` same body as `/v1/whoami`. `description` is one line of plain text (no control, newline, bidi or zero-width characters); tags are lowercase `[a-z0-9-]`. Admin-set values follow the same rules. Writes only these two fields, only while the calling token is still current. The directory (`workspaces.schema.json`) marks who wrote them in `profile_by` (`admin`\|`workspace`). A change raises the refresh version and sends refresh-hints to related workspaces. Bad limits → `422 invalid` |
 | POST | `/v1/messages` | one message | `201 {id}` (see rules above) |
 | GET | `/v1/inbox?wait=0..30` | – | `{items: [message…], next: null}` not yet acked, oldest first, max 100. `wait` = long-poll seconds |
 | POST | `/v1/inbox/ack` | `{ids: [m_…]}` | `204`. Acked messages are no longer delivered (the admin can still read them) |
