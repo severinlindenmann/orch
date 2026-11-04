@@ -52,12 +52,59 @@ pub fn auth(st: &State, h: &HeaderMap) -> ApiResult<Workspace> {
     }
 }
 
-pub async fn whoami(St(st): St<State>, h: HeaderMap) -> ApiResult<Json<Value>> {
-    let w = auth(&st, &h)?;
-    Ok(Json(json!({
+fn who_json(st: &State, w: &Workspace) -> Value {
+    json!({
         "id": w.id, "name": w.name, "description": w.description, "tags": w.tags, "rights": w.rights,
         "max_file_mb": st.cfg.max_file_mb, "default_days": st.cfg.default_days, "max_days": st.cfg.max_days,
-    })))
+    })
+}
+
+pub async fn whoami(St(st): St<State>, h: HeaderMap) -> ApiResult<Json<Value>> {
+    let w = auth(&st, &h)?;
+    Ok(Json(who_json(&st, &w)))
+}
+
+#[derive(Deserialize)]
+pub struct MeBody {
+    description: Option<String>,
+    tags: Option<Vec<String>>,
+}
+
+/// PATCH /v1/me: a workspace changes its own description and tags.
+pub async fn me_patch(St(st): St<State>, h: HeaderMap, body: Bytes) -> ApiResult<Json<Value>> {
+    let mut w = auth(&st, &h)?;
+    let b: MeBody = serde_json::from_slice(&body).map_err(|_| {
+        ApiError::invalid(
+            "The body must be JSON like {\"description\": \"...\", \"tags\": [\"a\"]}.",
+        )
+    })?;
+    if let Some(d) = b.description {
+        if d.chars().count() > 280 {
+            return Err(ApiError::invalid(
+                "The description is at most 280 characters.",
+            ));
+        }
+        w.description = d.trim().to_string();
+    }
+    if let Some(t) = b.tags {
+        let t: Vec<String> = t
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if t.len() > 8 || t.iter().any(|s| s.chars().count() > 24) {
+            return Err(ApiError::invalid(
+                "Use at most 8 tags, each at most 24 characters.",
+            ));
+        }
+        w.tags = t;
+    }
+    let c = st.db.lock().unwrap();
+    if db::update_profile(&c, &w)? == 0 {
+        return Err(ApiError::unauthorized());
+    }
+    let fresh = db::get_workspace(&c, &w.id)?.ok_or_else(ApiError::unauthorized)?;
+    Ok(Json(who_json(&st, &fresh)))
 }
 
 pub async fn files_post(

@@ -45,11 +45,11 @@ fn page_headers(mut r: Response) -> Response {
     r
 }
 
-async fn portal() -> Response {
+async fn portal(St(st): St<State>) -> Response {
     page_headers(
         (
             [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-            web::PORTAL_HTML,
+            web::PORTAL_HTML.replace("__PUBLISH_URL__", &util::esc(&st.cfg.public_url)),
         )
             .into_response(),
     )
@@ -82,7 +82,7 @@ fn check(st: &State, h: &HeaderMap) -> ApiResult<()> {
 pub fn prompt(st: &State, id: &str, token: &str) -> String {
     let u = &st.cfg.public_url;
     format!(
-        "Connect this workspace to orch-publish. Run in the project folder:\n  orch publish connect {u} --workspace {id} --token {token}\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL {u}/onboarding.sh | sh -s -- --workspace {id} --token {token}\n  Windows:     & ([scriptblock]::Create((irm {u}/onboarding.ps1))) -Workspace {id} -Token {token}\n"
+        "Connect this project to orch publish. Run in the project folder:\n  orch publish connect {u} --workspace {id} --token {token}\nIf orch is not installed yet, run this instead:\n  macOS/Linux: curl -fsSL {u}/onboarding.sh | sh -s -- --workspace {id} --token {token}\n  Windows:     & ([scriptblock]::Create((irm {u}/onboarding.ps1))) -Workspace {id} -Token {token}\nThen describe this workspace in one sentence and 2-4 tags:\n  orch publish profile --description \"...\" --tags a,b\n"
     )
 }
 

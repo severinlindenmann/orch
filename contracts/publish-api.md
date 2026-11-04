@@ -18,6 +18,7 @@ Rights per workspace (set by the admin): `files` (temporary files), `apps` (temp
 | Method | Path | Request | Response |
 |---|---|---|---|
 | GET | `/v1/whoami` | – | `{id, name, description, tags, rights, max_file_mb, default_days, max_days}` |
+| PATCH | `/v1/me` | `{description?: string ≤ 280, tags?: [string ≤ 24, ≤ 8 items]}` (only given fields change; tags are trimmed, empties dropped) | `200` same body as `whoami`. Too long / too many → `422 invalid` |
 | POST | `/v1/files?days=7` or `?permanent=1` | body = encrypted blob (`application/octet-stream`, crypto.md) | `201 {id, url, size, expires_at\|null}`. `url` has no key; the CLI adds `#k=<key>`. `days` 1–90, default 7 |
 | GET | `/v1/files` | – | list of `{id, size, created_at, expires_at}` |
 | DELETE | `/v1/files/<id>` | – | `204` |

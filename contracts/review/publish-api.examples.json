@@ -33,6 +33,46 @@
     }
   },
   {
+    "_note": "A workspace changes its own description and tags (both optional, only the given fields change). Same response as whoami.",
+    "request": {
+      "method": "PATCH",
+      "path": "/v1/me",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "description": "Ingestion jobs and data pipelines.",
+        "tags": [
+          "data",
+          "work"
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "id": "ws_pilatus001",
+        "name": "Pilatus Workspace",
+        "description": "Ingestion jobs and data pipelines.",
+        "tags": [
+          "data",
+          "work"
+        ],
+        "rights": {
+          "files": true,
+          "apps": true,
+          "permanent": false,
+          "public": false
+        },
+        "max_file_mb": 100,
+        "default_days": 7,
+        "max_days": 90
+      }
+    }
+  },
+  {
     "_note": "Upload an encrypted file for 7 days. The body is the OPF1 blob; the CLI adds #k=<key> to the url.",
     "request": {
       "method": "POST",

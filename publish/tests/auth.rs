@@ -93,3 +93,86 @@ async fn auth_missing_right_is_403() {
         403
     );
 }
+
+#[tokio::test]
+async fn me_patch_changes_own_description_and_tags() {
+    let t = setup();
+    let ws = t.workspace("Pilatus", basic_rights()).await;
+    let body = br#"{"description":"Data pipelines.","tags":["data"," work ",""]}"#.to_vec();
+    let r = t.api(&ws, "PATCH", "/v1/me", body).await;
+    assert_eq!(r.status, 200);
+    let j = r.json();
+    assert_eq!(j["description"], "Data pipelines.");
+    assert_eq!(j["tags"], serde_json::json!(["data", "work"]));
+    assert_eq!(j["name"], "Pilatus");
+    // only the given fields change; whoami shows the same
+    let r = t
+        .api(&ws, "PATCH", "/v1/me", br#"{"tags":["a"]}"#.to_vec())
+        .await;
+    assert_eq!(r.json()["description"], "Data pipelines.");
+    let w = t.api(&ws, "GET", "/v1/whoami", vec![]).await.json();
+    assert_eq!(w["tags"], serde_json::json!(["a"]));
+}
+
+#[tokio::test]
+async fn me_patch_limits_and_auth() {
+    let t = setup();
+    let ws = t.workspace("Pilatus", basic_rights()).await;
+    let long = format!(r#"{{"description":"{}"}}"#, "x".repeat(281));
+    assert_eq!(
+        t.api(&ws, "PATCH", "/v1/me", long.into_bytes())
+            .await
+            .status,
+        422
+    );
+    let many = r#"{"tags":["1","2","3","4","5","6","7","8","9"]}"#;
+    assert_eq!(t.api(&ws, "PATCH", "/v1/me", many.into()).await.status, 422);
+    let big = format!(r#"{{"tags":["{}"]}}"#, "t".repeat(25));
+    assert_eq!(
+        t.api(&ws, "PATCH", "/v1/me", big.into_bytes()).await.status,
+        422
+    );
+    let r = call(&t.public, "PATCH", "/v1/me", &[], b"{}".to_vec()).await;
+    assert_eq!(r.status, 401);
+}
+
+#[tokio::test]
+async fn public_pages_are_branded_dark_html() {
+    let t = setup();
+    for uri in ["/", "/nope", "/a/missing/"] {
+        let r = call(&t.public, "GET", uri, &[], vec![]).await;
+        assert_eq!(r.status, 404, "{uri}");
+        let h = r.text();
+        assert!(h.contains("isn&#39;t available") || h.contains("isn\u{2019}t available"));
+        assert!(h.contains("color-scheme") && h.contains("<svg") && !h.contains("relay"));
+    }
+}
+
+#[tokio::test]
+async fn me_patch_keeps_rights_and_rotated_token() {
+    let t = setup();
+    let ws = t.workspace("Pilatus", basic_rights()).await;
+    let r = t
+        .api(&ws, "PATCH", "/v1/me", br#"{"description":"x"}"#.to_vec())
+        .await;
+    assert_eq!(r.status, 200);
+    // after an admin rotation the old token is refused and nothing is written
+    let rot = t
+        .adm(
+            "POST",
+            &format!("/admin/api/workspaces/{}/token", ws.0),
+            serde_json::Value::Null,
+        )
+        .await;
+    assert_eq!(rot.status, 200);
+    let r = t
+        .api(&ws, "PATCH", "/v1/me", br#"{"description":"y"}"#.to_vec())
+        .await;
+    assert_eq!(r.status, 401);
+    let new = (
+        ws.0.clone(),
+        rot.json()["token"].as_str().unwrap().to_string(),
+    );
+    let w = t.api(&new, "GET", "/v1/whoami", vec![]).await.json();
+    assert_eq!(w["description"], "x");
+}

@@ -5,7 +5,7 @@ use crate::runner::{run_step, Spec};
 use crate::{util, State};
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Request, State as St};
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -423,17 +423,23 @@ fn text(status: u16, body: &str) -> Response {
 }
 
 fn private_page() -> Response {
-    let mut r = (
-        StatusCode::UNAUTHORIZED,
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        crate::web::PRIVATE_HTML,
+    crate::web::notice(
+        401,
+        "lock",
+        "This app is private",
+        "Ask the owner for a new link.",
+        false,
     )
-        .into_response();
-    r.headers_mut().insert(
-        "content-security-policy",
-        HeaderValue::from_static(crate::files::CSP),
-    );
-    r
+}
+
+fn offline_page() -> Response {
+    crate::web::notice(
+        503,
+        "offline",
+        "This app is offline",
+        "It is not running right now. Try again in a moment, or ask the owner to start it.",
+        true,
+    )
 }
 
 pub async fn serve_root(St(st): St<State>, Path(name): Path<String>, req: Request) -> Response {
@@ -468,7 +474,15 @@ fn cookie_value(req: &Request, cname: &str) -> Option<String> {
 async fn handle(st: State, name: String, rest: String, req: Request) -> Response {
     let app = match db::get_app(&st.db.lock().unwrap(), &name) {
         Ok(Some(a)) => a,
-        _ => return text(404, "No such app."),
+        _ => {
+            return crate::web::notice(
+                404,
+                "link",
+                "This app isn\u{2019}t available",
+                "Check the link or ask the sender for a new one.",
+                false,
+            )
+        }
     };
     let query = req.uri().query().unwrap_or("").to_string();
     if !req.uri().path().ends_with('/') && rest.is_empty() {
@@ -487,7 +501,13 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
         .as_deref()
         .is_some_and(|e| e <= util::now().as_str())
     {
-        return text(410, "This app has expired.");
+        return crate::web::notice(
+            410,
+            "clock",
+            "This app has expired",
+            "It is no longer available. Ask the owner to share it again.",
+            false,
+        );
     }
     if !app.public {
         let ok = |t: &str| {
@@ -536,7 +556,7 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
         }
     }
     if app.status == "stopped" {
-        return text(503, "This app is stopped.");
+        return offline_page();
     }
     if app.stack == "static" {
         return serve_static(&app, &rest).await;
@@ -546,7 +566,7 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
 
 async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) -> Response {
     if !st.runner.is_alive(&app.name) {
-        return text(503, "This app is not running.");
+        return offline_page();
     }
     let uri = format!(
         "http://127.0.0.1:{}/{}{}",
@@ -597,7 +617,7 @@ async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) 
             resp.headers_mut().remove("service-worker-allowed");
             resp
         }
-        Err(_) => text(502, "The app did not answer."),
+        Err(_) => offline_page(),
     }
 }
 

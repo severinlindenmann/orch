@@ -2,11 +2,10 @@
 use crate::util::esc;
 use crate::State;
 use axum::extract::State as St;
-use axum::http::header;
-use axum::response::IntoResponse;
+use axum::http::{header, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 
 pub const FILE_HTML: &str = include_str!("../web/file.html");
-pub const PRIVATE_HTML: &str = include_str!("../web/private.html");
 pub const PORTAL_HTML: &str = include_str!("../web/portal.html");
 pub const PORTAL_JS: &str = include_str!("../web/portal.js");
 const FILE_JS: &str = include_str!("../web/file.js");
@@ -168,5 +167,66 @@ pub fn markdown_page(title: &str, md: &str) -> String {
     format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title><link rel=\"stylesheet\" href=\"/_/style.css\"></head><body class=\"public\"><div class=\"shell\"><main class=\"content\"><article class=\"card pad\">{body}</article></main></div></body></html>",
         esc(title)
+    )
+}
+
+const LOGO: &str = r##"<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="20" fill="none" stroke="#e8eaed" stroke-width="6"/><circle cx="32" cy="32" r="6" fill="#2fc6a3"/><circle cx="47" cy="17" r="7" fill="#2fc6a3" stroke="#0a0c0f" stroke-width="3"/></svg>"##;
+
+/// Icon names: "lock", "offline", "clock", "link". Inline SVG, also used by file.js.
+pub fn icon(name: &str) -> &'static str {
+    match name {
+        "lock" => {
+            r#"<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>"#
+        }
+        "offline" => {
+            r#"<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8"/><path d="M6.3 6.7a8 8 0 1 0 11.4 0"/></svg>"#
+        }
+        "clock" => {
+            r#"<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>"#
+        }
+        _ => {
+            r#"<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>"#
+        }
+    }
+}
+
+/// A small dark card page (errors and states). `retry` adds a "Try again" button that reloads the page.
+pub fn notice(status: u16, icon_name: &str, title: &str, msg: &str, retry: bool) -> Response {
+    let button = if retry {
+        "<a class=\"button primary\" href=\"\">Try again</a>"
+    } else {
+        ""
+    };
+    let html = format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"dark\"><meta name=\"referrer\" content=\"no-referrer\"><title>{t} · orch</title><link rel=\"stylesheet\" href=\"/_/style.css\"></head><body class=\"public\"><div class=\"shell\"><main class=\"content\"><header class=\"public-brand\"><a class=\"brand\" href=\"/\">{LOGO}orch</a></header><section class=\"card public-card\"><div class=\"file-icon\">{ic}</div><h1>{t}</h1><p>{m}</p>{button}</section></main></div></body></html>",
+        t = esc(title),
+        m = esc(msg),
+        ic = icon(icon_name),
+    );
+    let mut r = (
+        StatusCode::from_u16(status).unwrap(),
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        html,
+    )
+        .into_response();
+    let h = r.headers_mut();
+    h.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    h.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
+    h.insert("cache-control", HeaderValue::from_static("no-store"));
+    h.insert(
+        "content-security-policy",
+        HeaderValue::from_static(crate::files::CSP),
+    );
+    r
+}
+
+/// Anything that is not a route: root, wrong links.
+pub async fn not_found() -> Response {
+    notice(
+        404,
+        "link",
+        "This page isn\u{2019}t available",
+        "Check the link or ask the sender for a new one.",
+        false,
     )
 }
