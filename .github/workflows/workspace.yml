@@ -2,7 +2,35 @@ name: workspace
 on: workflow_call
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: workspace
     steps:
       - uses: actions/checkout@v4
-      - run: echo "no tests yet, filled in by its lane"
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q
+      - name: Installed wheel smoke (orch init, junction on Windows)
+        shell: bash
+        run: |
+          uv build --wheel -o "$RUNNER_TEMP/dist"
+          uv tool install --reinstall "$RUNNER_TEMP"/dist/orch_workspace-*.whl
+          d="$RUNNER_TEMP/smoke"; mkdir -p "$d"; cd "$d"
+          orch init
+          orch ticket new "smoke" --json
+          test -f .agents/skills/orch/SKILL.md
+          test -f .claude/skills/orch/SKILL.md
+          orch ticket list
+      - name: Junction check (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $item = Get-Item "$env:RUNNER_TEMP\smoke\.claude\skills" -Force
+          if ($item.LinkType -ne "Junction") { throw "expected a junction, got $($item.LinkType)" }
