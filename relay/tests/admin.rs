@@ -469,10 +469,10 @@ async fn public_root_and_unknown_pages_are_branded_dark_pages() {
     let r = t.http.get(format!("{}/", t.base)).send().await.unwrap();
     assert_eq!(r.status(), 200);
     let body = r.text().await.unwrap();
-    assert!(body.contains("This page isn't available") && !body.to_lowercase().contains("relay"));
+    assert!(body.contains("This page isn’t available") && !body.to_lowercase().contains("relay"));
     let r = t.http.get(format!("{}/nope", t.base)).send().await.unwrap();
     assert_eq!(r.status(), 404);
-    assert!(r.text().await.unwrap().contains("isn't available"));
+    assert!(r.text().await.unwrap().contains("isn’t available"));
     let r = t
         .http
         .get(format!("{}/v1/nope", t.base))
