@@ -78,3 +78,10 @@ func lastSeenText(_ iso: String?, online: Bool, now: Date = Date()) -> String {
     let f = RelativeDateTimeFormatter(); f.unitsStyle = .full
     return "Seen " + f.localizedString(for: date, relativeTo: now)
 }
+
+/// `POST /v1/phone/transcribe` answer.
+struct Transcript: Decodable, Equatable, Sendable {
+    let text: String
+    let language: String?
+    let duration: Double?
+}

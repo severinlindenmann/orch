@@ -71,5 +71,11 @@ actor MockRelay: RelayAPI {
         counter += 1
         return String(format: "m_ph0nesend%06d", counter)
     }
+    /// Fixed transcript, whatever the audio is.
+    static let transcript = "Send the weekly report on Friday."
+    func transcribe(audio: Data, language: String?) async throws -> Transcript {
+        try await check()
+        return Transcript(text: Self.transcript, language: language ?? "en", duration: 3.2)
+    }
     func signOut() async throws { try await check(); signedOut = true }
 }
