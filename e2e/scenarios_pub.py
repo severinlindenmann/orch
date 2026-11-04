@@ -236,7 +236,20 @@ def p5(e):
         n2 = int(g2.text.split(key)[1].split()[0])
         check("ver=v2" in g2.text and n2 > n1, f"{stack} data lost on redeploy: {first!r} -> {g2.text!r}")
         out.append(stack)
-    return "python app uses stdlib http.server (no FastAPI install)"
+    # the shipped python + sqlite template: deploys (its own test runs on the server) and redeploys
+    tok = None
+    n = name_for(e, "p5-tpl")
+    d = e.tmp / "apps" / f"Pilatus-{n}"
+    e.orch("Pilatus", "publish", "new", "python", "--store", "sqlite", str(d))
+    m = d / "app.toml"
+    m.write_text(m.read_text().replace(next(l for l in m.read_text().splitlines() if l.startswith("name =")), f'name = "{n}"'))
+    for round_ in (1, 2):
+        r = e.orchj("Pilatus", "publish", "app", str(d))
+        check(r["status"] == "running", f"template deploy {round_}: {r}")
+        tok = r.get("view_token") or tok
+        g = app_get(e, n, tok)
+        check(g.status == 200, f"template GET after deploy {round_}: {g.status} {g.text[:100]}")
+    return "python app uses stdlib http.server (no FastAPI install); python+sqlite template deploy + redeploy"
 
 
 @scenario("P6")

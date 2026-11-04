@@ -155,6 +155,12 @@ fn make_cmd(
         if let Some(n) = max_secs {
             props.push(format!("RuntimeMaxSec={n}"));
         }
+        // the same app keeps the same user across versions (its data files stay writable);
+        // systemd limits user names to 31 characters, so the name is a short hash
+        if let Some(i) = unit.strip_prefix("orch-app-").and_then(|u| u.rfind('-')) {
+            let h = crate::util::sha256_hex(&unit["orch-app-".len()..][..i]);
+            props.push(format!("User=oa-{}", &h[..16]));
+        }
         for p in props.drain(..) {
             c.arg("-p").arg(p);
         }
@@ -362,7 +368,19 @@ mod tests {
             "files",
             Some(60),
         );
+        let user_of = |u: &str| {
+            let c = make_cmd("true", u, &dir, 1, "/a/x", &data, "files", None);
+            c.as_std()
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .find(|a| a.starts_with("User="))
+        };
+        let (ua, ub) = (
+            user_of(&unit_name("demo", 9100)),
+            user_of(&unit_name("demo~new", 9101)),
+        );
         std::env::remove_var("ORCH_PUBLISH_SANDBOX");
+        assert!(ua.is_some() && ua == ub, "versions of one app share a user");
         let std_cmd = c.as_std();
         assert_eq!(std_cmd.get_program(), "systemd-run");
         let args: Vec<String> = std_cmd
