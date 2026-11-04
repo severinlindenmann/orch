@@ -28,6 +28,10 @@ mobile/
 
 Push tap opens the question. Pull to refresh; no background polling.
 
+## Voice input (app side, later)
+Hold the mic: record m4a, `POST /v1/phone/transcribe` (`Content-Type: audio/m4a`, max 2 min), show the returned `text` in the field so the person can edit it before sending.
+On `503 transcription_off`, `502`, `429` or no network, fall back to on-device speech recognition. The Deepgram key never reaches the phone.
+
 ## Data storage
 Token and phone id in the Keychain. Nothing else is stored; lists come from the relay.
 

@@ -46,6 +46,11 @@ pub fn router(app: AppState) -> Router {
         )
         .route("/v1/webhooks/:id", delete(crate::webhooks::remove))
         .route("/v1/refresh", get(refresh))
+        .route(
+            "/v1/transcribe",
+            post(crate::transcribe::workspace)
+                .layer(DefaultBodyLimit::max(crate::transcribe::MAX_AUDIO + 1024)),
+        )
         .merge(crate::phone::router())
         .layer(DefaultBodyLimit::max(MAX_JSON))
         .with_state(app)

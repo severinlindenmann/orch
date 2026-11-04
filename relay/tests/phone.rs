@@ -276,3 +276,25 @@ async fn phone_send_validates_ticket() {
         201
     );
 }
+
+#[tokio::test]
+async fn phone_dead_apns_token_is_removed() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    t.phone(
+        &p,
+        "POST",
+        "/v1/phone/push",
+        Some(json!({"apns_token": "abcdef0123", "sandbox": false})),
+    )
+    .await;
+    *t.push.fail.lock().unwrap() = Some(orch_relay::push::PushError {
+        message: "apns status=410 apns-id=- reason=Unregistered".into(),
+        dead_token: true,
+    });
+    question(&t, &a, "one?", "q1").await;
+    question(&t, &a, "two?", "q2").await;
+    // first push failed and dropped the token; the second question sends nothing
+    assert_eq!(t.push.sent.lock().unwrap().len(), 1);
+}

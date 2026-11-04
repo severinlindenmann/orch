@@ -6,7 +6,7 @@ use crate::state::AppState;
 use crate::store::{self, msg_from_row, msg_json, MSG_COLS};
 use crate::util::*;
 use axum::body::Bytes;
-use axum::extract::{Query, State};
+use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -23,6 +23,11 @@ pub fn router() -> Router<AppState> {
         .route("/v1/phone/answer", post(answer))
         .route("/v1/phone/send", post(send))
         .route("/v1/phone/signout", post(signout))
+        .route(
+            "/v1/phone/transcribe",
+            post(crate::transcribe::phone)
+                .layer(DefaultBodyLimit::max(crate::transcribe::MAX_AUDIO + 1024)),
+        )
 }
 
 async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json<Value>)> {
@@ -296,7 +301,14 @@ pub async fn push_question(app: &AppState, q: &Value) {
         "message_id": q["id"], "workspace": q["from"]});
     for (sandbox, token) in targets {
         if let Err(e) = app.pusher.send(sandbox, &token, &payload).await {
-            tracing::warn!("push failed: {e}");
+            tracing::warn!("push failed: {}", e.message);
+            if e.dead_token {
+                let c = app.db.lock().unwrap();
+                let _ = c.execute(
+                    "UPDATE phones SET apns_token=NULL WHERE apns_token=?1",
+                    [&token],
+                );
+            }
         }
     }
 }

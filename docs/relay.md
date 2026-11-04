@@ -24,6 +24,12 @@ relay/
 ## Endpoints
 `contracts/relay-api.md`. Messages: `contracts/message.schema.json`. Keys: `contracts/crypto.md`.
 
+## Voice transcription
+The admin stores one Deepgram API key (portal: Shared config > Voice; `PUT /admin/api/voice`). It is sealed with the master key and never returned in full
+(only "set" and the last 4 characters) or sent to phones and workspaces. `POST /v1/phone/transcribe` (phone token) and `POST /v1/transcribe` (workspace token)
+take audio bytes (m4a, wav, webm; 10 MB / 2 min), call Deepgram (`nova-3`, smart format, language detected unless `?language=`) and return `{text, language, duration}`.
+No key = `503 transcription_off`. 30 calls a minute per phone or workspace (in memory). The Deepgram call sits behind the `Transcriber` trait; tests use a fake.
+
 ## How a message flows
 Sender `POST /v1/messages` → relay checks the schema and the pair rule → stores (body encrypted with the master key)
 → receiver gets it on the next `GET /v1/inbox` and acks → receiver stores the id as seen. Offline = it waits on the relay.
@@ -31,7 +37,7 @@ Questions to `phones` also trigger an APNs push.
 
 ## Data storage
 - SQLite `/var/lib/orch-relay/relay.db`: workspaces (name, description, tags, last_seen), phones, rules, messages (envelope plain, body encrypted), acks,
-  webhooks, shared items (encrypted), assignments, `version`.
+  webhooks, shared items (encrypted), assignments, `version`, settings (the Deepgram key, encrypted).
 - Blobs: `/var/lib/orch-relay/blobs/<id>` (encrypted). Messages and blobs are kept 90 days.
 - Secrets: `/etc/orch-relay/master.key`, `/etc/orch-relay/admin-token`, APNs key `/etc/orch-relay/apns.p8` (only on the VPS).
 
