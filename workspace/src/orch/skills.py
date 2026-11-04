@@ -1,0 +1,170 @@
+"""Skill folders and AGENTS.md blocks (contracts/local-files.md)."""
+
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+BLOCK_FILE = "AGENTS-block.md"
+GITIGNORE_LINES = [
+    ".orch/secrets/",
+    ".orch/inbox/",
+    ".orch/inbox-seen.json",
+    ".orch/scheduler/state.json",
+    ".orch/scheduler/logs/",
+]
+GITIGNORE_HEADER = "# orch (local only)"
+
+
+def packaged_skills_dir() -> Path:
+    """Wheel install: orch/skills. Editable/dev checkout: workspace/skills."""
+    here = Path(__file__).resolve().parent
+    for cand in (here / "skills", here.parent.parent / "skills"):
+        if cand.is_dir():
+            return cand
+    raise FileNotFoundError("orch skills folder not found")
+
+
+def install_skill(root: Path, name: str, source: Path) -> None:
+    """Copy a skill folder to .agents/skills/<name>/ (replaced whole, minus the AGENTS block file)."""
+    dest = root / ".agents" / "skills" / name
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(source, dest, ignore=shutil.ignore_patterns(BLOCK_FILE))
+
+
+def remove_skill(root: Path, name: str) -> None:
+    dest = root / ".agents" / "skills" / name
+    if dest.is_dir() and not dest.is_symlink():
+        shutil.rmtree(dest)
+
+
+def _block_re(name: str) -> re.Pattern:
+    return re.compile(
+        rf"<!-- orch:begin {re.escape(name)} -->\n.*?<!-- orch:end {re.escape(name)} -->\n?", re.S
+    )
+
+
+def set_block(root: Path, name: str, body: str) -> None:
+    """Add or replace the block for `name` in AGENTS.md; text outside the block is untouched."""
+    path = root / "AGENTS.md"
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    block = f"<!-- orch:begin {name} -->\n{body.strip()}\n<!-- orch:end {name} -->\n"
+    rx = _block_re(name)
+    if rx.search(text):
+        text = rx.sub(lambda _m: block, text, count=1)
+    else:
+        if text and not text.endswith("\n"):
+            text += "\n"
+        if text:
+            text += "\n"
+        text += block
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def remove_block(root: Path, name: str) -> None:
+    path = root / "AGENTS.md"
+    if not path.exists():
+        return
+    text = path.read_text(encoding="utf-8")
+    new = _block_re(name).sub("", text).rstrip("\n")
+    path.write_text(new + "\n" if new else "", encoding="utf-8", newline="\n")
+
+
+def read_block(source: Path, name: str) -> str:
+    f = source / BLOCK_FILE
+    if f.exists():
+        return f.read_text(encoding="utf-8")
+    return f"## {name}\nRead `.agents/skills/{name}/SKILL.md`."
+
+
+def _link(link: Path, target: Path, rel: str) -> None:
+    """Directory link: symlink (macOS/Linux) or junction (Windows, no admin needed)."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        r = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target.resolve())],
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0:
+            raise OSError(f"could not create junction {link}: {r.stdout}{r.stderr}")
+    else:
+        os.symlink(rel, link, target_is_directory=True)
+
+
+def _is_link(p: Path) -> bool:
+    if p.is_symlink():
+        return True
+    if sys.platform == "win32":
+        try:
+            return bool(os.lstat(p).st_file_attributes & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
+        except (OSError, AttributeError):
+            return False
+    return False
+
+
+def _unlink_dir(p: Path) -> None:
+    if sys.platform == "win32":
+        os.rmdir(p)  # removes a junction without touching its target
+    else:
+        p.unlink()
+
+
+def link_claude_skills(root: Path) -> None:
+    """.claude/skills -> ../.agents/skills. If .claude/skills is a real folder, link each skill inside it."""
+    agents = root / ".agents" / "skills"
+    agents.mkdir(parents=True, exist_ok=True)
+    cl = root / ".claude" / "skills"
+    if _is_link(cl):
+        return
+    if not cl.exists():
+        _link(cl, agents, os.path.join("..", ".agents", "skills"))
+        return
+    for sk in sorted(p for p in agents.iterdir() if p.is_dir()):
+        dest = cl / sk.name
+        if dest.exists() or _is_link(dest):
+            continue
+        _link(dest, sk, os.path.join("..", "..", ".agents", "skills", sk.name))
+
+
+def unlink_skill(root: Path, name: str) -> None:
+    """Remove a per-skill link inside a real .claude/skills folder (the whole-folder link needs no change)."""
+    cl = root / ".claude" / "skills"
+    if _is_link(cl):
+        return
+    dest = cl / name
+    if _is_link(dest):
+        _unlink_dir(dest)
+
+
+def ensure_claude_md(root: Path) -> None:
+    path = root / "CLAUDE.md"
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    if any(line.strip() == "@AGENTS.md" for line in text.splitlines()):
+        return
+    if text and not text.endswith("\n"):
+        text += "\n"
+    path.write_text(text + "@AGENTS.md\n", encoding="utf-8", newline="\n")
+
+
+def ensure_gitignore(root: Path) -> None:
+    path = root / ".gitignore"
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    have = {line.strip() for line in text.splitlines()}
+    missing = [x for x in GITIGNORE_LINES if x not in have]
+    if not missing:
+        return
+    if text and not text.endswith("\n"):
+        text += "\n"
+    if GITIGNORE_HEADER not in have:
+        text += ("\n" if text else "") + GITIGNORE_HEADER + "\n"
+    path.write_text(text + "\n".join(missing) + "\n", encoding="utf-8", newline="\n")
+
+
+def front_matter_name(skill_dir: Path) -> str:
+    return skill_dir.name
