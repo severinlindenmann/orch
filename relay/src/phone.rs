@@ -214,15 +214,19 @@ async fn send(
         return Err(invalid("`text` must be 1 to 20000 characters."));
     }
     let ticket = v["ticket"].as_str();
-    if ticket.is_some_and(|t| !(t.starts_with("t_") && (8..=18).contains(&t.len()))) {
-        return Err(invalid("`ticket` must look like t_7k3f9q."));
-    }
     let id = {
         let c = app.db.lock().unwrap();
         let (pid, _, ws) = auth::phone(&c, &h)?;
         if !ws.iter().any(|w| w == to) || !store::ws_exists(&c, to) {
             return Err(not_allowed("This phone may not send to that workspace."));
         }
+        // Same schema check as workspace messages.
+        let mut cand = json!({"schema": "orch.msg/1", "id": rand_id("m_", 16), "from": pid, "to": to,
+            "type": "text", "created_at": fmt_time(now()), "body": {"text": text}});
+        if let Some(t) = ticket {
+            cand["ticket"] = t.into();
+        }
+        crate::rules::validate_schema(&cand).map_err(invalid)?;
         let m = store::system_message(
             &c,
             &app.key,

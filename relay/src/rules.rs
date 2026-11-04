@@ -75,14 +75,32 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
     match typ.as_str() {
         "answer" => {
             let q = reply_target(c, &msg)?;
-            if q.typ != "question" || q.from != to || !(q.to == sender || q.to == "phones") {
+            // Questions to phones are answered by phones only (POST /v1/phone/answer).
+            if q.typ != "question" || q.from != to || q.to != sender {
                 return Err(not_allowed("That is not a question for you to answer."));
+            }
+            let prev = c
+                .query_row(
+                    "SELECT 1 FROM messages WHERE reply_to=?1 AND type='answer'",
+                    [&q.id],
+                    |_| Ok(()),
+                )
+                .optional()?;
+            if prev.is_some() {
+                return Err(already_answered("This question was already answered."));
             }
             let (qbody, _) = open_payload(key, &q);
             msg["ticket"] = q.ticket.clone().map(Value::from).unwrap_or(Value::Null);
             if let Some(qid) = qbody.get("question_id") {
                 msg["body"]["question_id"] = qid.clone();
             }
+            // Set by the relay, not trusted from the sender.
+            let who: String = store::ws_name(c, sender)
+                .unwrap_or_default()
+                .chars()
+                .take(58)
+                .collect();
+            msg["body"]["answered_by"] = format!("agent:{who}").into();
             Ok(msg)
         }
         "allow" => {

@@ -247,3 +247,32 @@ async fn phone_access_edit_and_remove_by_admin() {
         401
     );
 }
+
+#[tokio::test]
+async fn phone_send_validates_ticket() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    for bad in ["t_x", "T_ABCDEF", "nope", "t_0123456789abcdefg"] {
+        let (s, v) = t
+            .phone(
+                &p,
+                "POST",
+                "/v1/phone/send",
+                Some(json!({"to": a.id, "text": "x", "ticket": bad})),
+            )
+            .await;
+        assert_eq!((s, v["error"].as_str()), (422, Some("invalid")), "{bad}");
+    }
+    assert_eq!(
+        t.phone(
+            &p,
+            "POST",
+            "/v1/phone/send",
+            Some(json!({"to": a.id, "text": "x", "ticket": "t_abc123"}))
+        )
+        .await
+        .0,
+        201
+    );
+}

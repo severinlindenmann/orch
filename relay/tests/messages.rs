@@ -114,6 +114,13 @@ async fn messages_answer_copies_ticket_from_question() {
     let got = t.inbox(&a).await;
     assert_eq!(got[0]["ticket"], "t_aaaaaa");
     assert_eq!(got[0]["body"]["question_id"], "q1");
+    assert_eq!(got[0]["body"]["answered_by"], "agent:B", "set by the relay");
+    // a second answer to the same question is refused
+    let again = json!({"schema": "orch.msg/1", "id": mid(), "from": b.id, "to": a.id, "type": "answer", "ticket": "t_aaaaaa",
+        "reply_to": q["id"], "created_at": "2026-11-04T10:00:00Z",
+        "body": {"question_id": "q1", "answer": "y", "answered_by": "agent:b"}});
+    let (s, v) = t.call(&b, "POST", "/v1/messages", Some(again)).await;
+    assert_eq!((s, v["error"].as_str()), (409, Some("already_answered")));
     // an answer to something that is not a question for you is refused
     let bad = json!({"schema": "orch.msg/1", "id": mid(), "from": a.id, "to": b.id, "type": "answer", "ticket": "t_aaaaaa",
         "reply_to": q["id"], "created_at": "2026-11-04T10:00:00Z",
@@ -149,4 +156,22 @@ async fn messages_ids_with_wrong_shape_refused() {
     let m = json!({"schema": "orch.msg/1", "id": "m_short", "from": a.id, "to": b.id, "type": "text",
         "created_at": "2026-11-04T10:00:00Z", "body": {"text": "x"}});
     assert_eq!(t.call(&a, "POST", "/v1/messages", Some(m)).await.0, 422);
+}
+
+#[tokio::test]
+async fn messages_workspace_cannot_answer_a_question_to_phones() {
+    let t = start().await;
+    let (a, b) = (t.add_ws("A").await, t.add_ws("B").await);
+    t.rules(json!([rule(&a, &b, [true, false, false, false])]))
+        .await;
+    let q = json!({"schema": "orch.msg/1", "id": mid(), "from": a.id, "to": "phones", "type": "question", "ticket": "t_aaaaaa",
+        "created_at": "2026-11-04T10:00:00Z", "body": {"question_id": "q1", "text": "?", "options": []}});
+    assert_eq!(
+        t.call(&a, "POST", "/v1/messages", Some(q.clone())).await.0,
+        201
+    );
+    let ans = json!({"schema": "orch.msg/1", "id": mid(), "from": b.id, "to": a.id, "type": "answer", "ticket": "t_aaaaaa",
+        "reply_to": q["id"], "created_at": "2026-11-04T10:00:00Z",
+        "body": {"question_id": "q1", "answer": "x", "answered_by": "agent:b"}});
+    assert_eq!(t.call(&b, "POST", "/v1/messages", Some(ans)).await.0, 403);
 }
