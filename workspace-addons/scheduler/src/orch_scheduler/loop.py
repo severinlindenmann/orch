@@ -144,10 +144,13 @@ class Scheduler:
                 return None
             if tid and self.runner.locked(tid):
                 return None
-            orchcli.call(self.root, "relay", "done", mid, by=False)
+            done = orchcli.call(self.root, "relay", "done", mid, by=False)
             if kind == "delegate":
-                made = orchcli.call(self.root, "ticket", "new", str(body.get("title", "Delegated task"))[:200])
-                tid = made.get("id") if isinstance(made, dict) else None
+                # `orch relay done` already made the ticket for an allowed delegate: use it, never a second one
+                tid = done.get("ticket") if isinstance(done, dict) else None
+                if not tid:
+                    made = orchcli.call(self.root, "ticket", "new", str(body.get("title", "Delegated task"))[:200])
+                    tid = made.get("id") if isinstance(made, dict) else None
                 if not tid:
                     return None
                 orchcli.log(self.root, tid, f"Delegated by {m.get('from')}: {text[:500]}")

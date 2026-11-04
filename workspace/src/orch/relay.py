@@ -308,6 +308,7 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
     msgs = net.items(resp)
     d = root / ".orch" / "inbox"
     ok = []
+    arrival = {str(m.get("id")): n for n, m in enumerate(msgs) if isinstance(m, dict)}
     for m in msgs:
         if not isinstance(m, dict) or not re.fullmatch(r"m_[a-z0-9]{16}", str(m.get("id", ""))):
             continue
@@ -321,7 +322,12 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
         if isinstance(m, dict) and m.get("id") == f.stem and f.stem not in seen(root):
             pending.append(m)
     out = []
-    for m in sorted(pending, key=lambda m: (str(m.get("created_at")), m["id"])):
+    for m in sorted(
+        pending,
+        # earlier pulls first, then this pull in the relay's order (created_at has 1 s resolution: ties
+        # must not be broken by the random id)
+        key=lambda m: (m["id"] in arrival, arrival.get(m["id"], 0), str(m.get("created_at")), m["id"]),
+    ):
         note, auto, applied = "", False, None
         try:
             if m.get("type") == "answer":

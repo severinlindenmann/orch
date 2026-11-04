@@ -1,0 +1,29 @@
+name: e2e
+# Manual or nightly, never on a PR. Local mode: publish + relay are built and started on localhost.
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "scenario id, comma list, group letter (W A P R M F) or all"
+        default: all
+  schedule:
+    - cron: "17 3 * * *"
+permissions:
+  contents: read
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            publish
+            relay
+      - run: e2e/run.sh "${{ inputs.scenario || 'all' }}" --mode local

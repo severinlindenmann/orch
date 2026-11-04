@@ -59,6 +59,18 @@ def test_delegate_becomes_ticket(ws):
     assert json.loads((ws / f".orch/tickets/{tid}.json").read_text())["title"] == "Check logs"
 
 
+def test_delegate_uses_ticket_made_by_done_no_double(ws):
+    """e2e R6: `orch relay done` already makes the ticket of an allowed delegate; the scheduler must not add one."""
+    add_ticket(ws, "t_made0001", title="Check logs")
+    (ws / "done-tickets.json").write_text(json.dumps({"m_5": "t_made0001"}))
+    relay_on(ws, [{"id": "m_5", "type": "delegate", "from": "ws_b", "allowed": True,
+                   "body": {"title": "Check logs", "text": "look at them"}}])
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == ["t_made0001"]
+    s.runner.reap(T(8, 1), wait=True)
+    assert ["ticket", "new", "Check logs"] not in names(ws)
+
+
 def test_answer_for_waiting_ticket(ws):
     add_ticket(ws, "t_ask00001", status="waiting")
     relay_on(ws, {"items": [{"id": "m_6", "type": "answer", "ticket": "t_ask00001",
