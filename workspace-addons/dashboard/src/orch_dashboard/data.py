@@ -91,7 +91,9 @@ def _who(sender: str, names: dict[str, str]) -> str:
         return "Your phone"
     if sender.startswith("ws_"):
         return "Another workspace"
-    return "Admin"
+    if sender == "admin":
+        return "Admin"
+    return "Unknown sender"
 
 
 def load_inbox(root: Path, names: dict[str, str] | None = None) -> list[dict]:
@@ -116,14 +118,15 @@ def load_inbox(root: Path, names: dict[str, str] | None = None) -> list[dict]:
 
 def load_state(root: Path, include_inbox: bool = True) -> dict:
     tickets, skipped = load_tickets(root)
+    names = load_names(root) if include_inbox else {}
     state = {
         "workspace": root.name,
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "tickets": tickets,
         "skipped": skipped,
         "scheduler": load_scheduler(tickets, root),
-        "names": load_names(root),
-        "inbox": load_inbox(root, load_names(root)) if include_inbox else None,
+        "names": names if include_inbox else {},
+        "inbox": load_inbox(root, names) if include_inbox else None,
         "relay": (root / ".orch" / "secrets" / "relay.json").is_file(),
     }
     state["rev"] = hashlib.sha1(
