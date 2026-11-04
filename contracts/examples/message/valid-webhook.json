@@ -1,0 +1,5 @@
+{ "schema": "orch.msg/1", "id": "m_webhook000000001", "from": "webhook:wh_gh00000001", "to": "ws_pilatus001", "type": "webhook",
+  "created_at": "2026-11-04T14:00:00Z", "ticket": "t_7k3f9q",
+  "body": { "webhook_id": "wh_gh00000001", "method": "POST", "content_type": "application/json",
+            "headers": { "X-GitHub-Event": "pull_request" },
+            "payload": "{\"action\":\"closed\",\"pull_request\":{\"merged\":true,\"number\":17}}" } }

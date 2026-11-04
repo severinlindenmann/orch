@@ -1,0 +1,4 @@
+{ "schema": "orch.msg/1", "id": "m_q000000000000001", "from": "ws_pilatus001", "to": "phones", "type": "question",
+  "created_at": "2026-11-04T10:40:00Z", "ticket": "t_m2p8xz",
+  "body": { "question_id": "q1", "title": "Rename field X to source_id", "text": "Keep X as an input alias for one release?",
+            "options": ["Keep for one release", "Remove now"], "recommended": "Keep for one release" } }

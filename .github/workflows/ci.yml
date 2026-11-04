@@ -1,0 +1,67 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+permissions:
+  contents: read
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      contracts: ${{ steps.f.outputs.contracts }}
+      workspace: ${{ steps.f.outputs.workspace }}
+      addons: ${{ steps.f.outputs.addons }}
+      publish: ${{ steps.f.outputs.publish }}
+      relay: ${{ steps.f.outputs.relay }}
+      mobile: ${{ steps.f.outputs.mobile }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: f
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            contracts: ['contracts/**', '.github/workflows/contracts.yml']
+            workspace: ['workspace/**', 'contracts/**', '.github/workflows/workspace.yml']
+            addons: ['workspace-addons/**', 'workspace/**', 'contracts/**', '.github/workflows/addons.yml']
+            publish: ['publish/**', 'contracts/**', '.github/workflows/publish.yml']
+            relay: ['relay/**', 'contracts/**', '.github/workflows/relay.yml']
+            mobile: ['mobile/**', 'contracts/**', '.github/workflows/mobile.yml']
+  contracts:
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
+    uses: ./.github/workflows/contracts.yml
+  workspace:
+    needs: changes
+    if: needs.changes.outputs.workspace == 'true'
+    uses: ./.github/workflows/workspace.yml
+  addons:
+    needs: changes
+    if: needs.changes.outputs.addons == 'true'
+    uses: ./.github/workflows/addons.yml
+  publish:
+    needs: changes
+    if: needs.changes.outputs.publish == 'true'
+    uses: ./.github/workflows/publish.yml
+  relay:
+    needs: changes
+    if: needs.changes.outputs.relay == 'true'
+    uses: ./.github/workflows/relay.yml
+  mobile:
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    uses: ./.github/workflows/mobile.yml
+  gate:
+    if: always()
+    needs: [changes, contracts, workspace, addons, publish, relay, mobile]
+    runs-on: ubuntu-latest
+    steps:
+      - name: every called job passed or was skipped
+        run: |
+          echo '${{ toJSON(needs) }}' > needs.json
+          python3 - <<'PY'
+          import json, sys
+          bad = {k: v["result"] for k, v in json.load(open("needs.json")).items() if v["result"] not in ("success", "skipped")}
+          print("bad:", bad) if bad else print("gate: ok")
+          sys.exit(1 if bad else 0)
+          PY

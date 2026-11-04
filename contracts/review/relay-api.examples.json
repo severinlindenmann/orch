@@ -1,0 +1,1232 @@
+[
+  {
+    "_note": "Who am I?",
+    "request": {
+      "method": "GET",
+      "path": "/v1/whoami",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "id": "ws_pilatus001",
+        "name": "Pilatus Workspace",
+        "description": "Ingestion jobs and data pipelines.",
+        "tags": [
+          "data",
+          "work"
+        ],
+        "phones": 1
+      }
+    }
+  },
+  {
+    "_note": "Send a message. `from` must be me.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/messages",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+      },
+      "body": {
+        "schema": "orch.msg/1",
+        "id": "m_a1b2c3d4e5f6g7h8",
+        "from": "ws_pilatus001",
+        "to": "ws_reports001",
+        "type": "text",
+        "created_at": "2026-11-04T10:00:00Z",
+        "ticket": "t_7k3f9q",
+        "body": {
+          "text": "Field X is now event_time. Please update the weekly report query."
+        }
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "id": "m_a1b2c3d4e5f6g7h8"
+      }
+    }
+  },
+  {
+    "_note": "Same message again (retry): no-op.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/messages",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+      },
+      "body": {
+        "schema": "orch.msg/1",
+        "id": "m_a1b2c3d4e5f6g7h8",
+        "from": "ws_pilatus001",
+        "to": "ws_reports001",
+        "type": "text",
+        "created_at": "2026-11-04T10:00:00Z",
+        "ticket": "t_7k3f9q",
+        "body": {
+          "text": "Field X is now event_time. Please update the weekly report query."
+        }
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "id": "m_a1b2c3d4e5f6g7h8",
+        "duplicate": true
+      }
+    }
+  },
+  {
+    "_note": "Same id, different text: conflict.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/messages",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+      },
+      "body": {
+        "schema": "orch.msg/1",
+        "id": "m_a1b2c3d4e5f6g7h8",
+        "from": "ws_pilatus001",
+        "to": "ws_reports001",
+        "type": "text",
+        "created_at": "2026-11-04T10:00:00Z",
+        "ticket": "t_7k3f9q",
+        "body": {
+          "text": "something else"
+        }
+      }
+    },
+    "response": {
+      "status": 409,
+      "body": {
+        "error": "conflict",
+        "message": "This message id was already used for another message."
+      }
+    }
+  },
+  {
+    "_note": "No pair rule Reports → Pilatus for text.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/messages",
+      "headers": {
+        "X-Orch-Workspace": "ws_reports001",
+        "Authorization": "Bearer orn_Rp4...(43 chars)"
+      },
+      "body": {
+        "schema": "orch.msg/1",
+        "id": "m_n0rule7q2w9e4r6t",
+        "from": "ws_reports001",
+        "to": "ws_pilatus001",
+        "type": "text",
+        "created_at": "2026-11-04T10:10:00Z",
+        "body": {
+          "text": "Hi"
+        }
+      }
+    },
+    "response": {
+      "status": 403,
+      "body": {
+        "error": "not_allowed",
+        "message": "Reports may not send text to Pilatus Workspace."
+      }
+    }
+  },
+  {
+    "_note": "Read my inbox, waiting up to 30 s for new messages (as Reports).",
+    "request": {
+      "method": "GET",
+      "path": "/v1/inbox?wait=30",
+      "headers": {
+        "X-Orch-Workspace": "ws_reports001",
+        "Authorization": "Bearer orn_Rp4...(43 chars)"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "schema": "orch.msg/1",
+            "id": "m_a1b2c3d4e5f6g7h8",
+            "from": "ws_pilatus001",
+            "to": "ws_reports001",
+            "type": "text",
+            "created_at": "2026-11-04T10:00:00Z",
+            "ticket": "t_7k3f9q",
+            "body": {
+              "text": "Field X is now event_time. Please update the weekly report query."
+            }
+          },
+          {
+            "schema": "orch.msg/1",
+            "id": "m_f1le7q2w9e4r6t1y",
+            "from": "ws_pilatus001",
+            "to": "ws_reports001",
+            "type": "file",
+            "created_at": "2026-11-04T10:02:00Z",
+            "ticket": "t_7k3f9q",
+            "body": {
+              "blob_id": "b_0123456789abcdef",
+              "name": "sample-rows.csv",
+              "size": 2048,
+              "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+              "text": "20 sample rows with event_time"
+            }
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Ack after saving locally; acked messages are not delivered again.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/inbox/ack",
+      "headers": {
+        "X-Orch-Workspace": "ws_reports001",
+        "Authorization": "Bearer orn_Rp4...(43 chars)"
+      },
+      "body": {
+        "ids": [
+          "m_a1b2c3d4e5f6g7h8",
+          "m_f1le7q2w9e4r6t1y"
+        ]
+      }
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  },
+  {
+    "_note": "Upload a file for a file message.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/blobs",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN",
+        "Content-Type": "application/octet-stream"
+      },
+      "body": "<binary>"
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "blob_id": "b_0123456789abcdef",
+        "size": 2048,
+        "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+      }
+    }
+  },
+  {
+    "_note": "Download it (as the receiver Reports).",
+    "request": {
+      "method": "GET",
+      "path": "/v1/blobs/b_0123456789abcdef",
+      "headers": {
+        "X-Orch-Workspace": "ws_reports001",
+        "Authorization": "Bearer orn_Rp4...(43 chars)"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": "<binary>"
+    }
+  },
+  {
+    "_note": "Make a one-time webhook for a ticket. URL with token is shown once.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/webhooks",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+      },
+      "body": {
+        "mode": "once",
+        "ticket": "t_7k3f9q"
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "id": "wh_gh00000001",
+        "url": "https://relay.severin.io/webhook/wh_gh00000001?token=whk_Mn4Bv6Cx8Za1Sd3Fg5Hj7K"
+      }
+    }
+  },
+  {
+    "_note": "List my webhooks.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/webhooks",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "wh_gh00000001",
+            "mode": "once",
+            "ticket": "t_7k3f9q",
+            "created_at": "2026-11-04T13:30:00Z",
+            "last_call_at": null
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Delete a webhook.",
+    "request": {
+      "method": "DELETE",
+      "path": "/v1/webhooks/wh_gh00000001",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  },
+  {
+    "_note": "Refresh: the full snapshot of what the admin assigned to Home, plus the workspace directory.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/refresh",
+      "headers": {
+        "X-Orch-Workspace": "ws_home000001",
+        "Authorization": "Bearer orn_Hm…(43 chars)"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "version": 7,
+        "skills": [
+          {
+            "name": "acme-sql",
+            "version": 3,
+            "files": {
+              "SKILL.md": "LS0tCm5hbWU6IGFjbWUtc3FsCi0tLQo="
+            }
+          }
+        ],
+        "mcp": {
+          "acme-docs": {
+            "command": "npx",
+            "args": [
+              "-y",
+              "@acme/docs-mcp"
+            ],
+            "env": {
+              "ACME_TOKEN": "${ACME_TOKEN}"
+            }
+          }
+        },
+        "credentials": {
+          "ACME_TOKEN": "acme_live_…"
+        },
+        "workspaces": {
+          "schema": "orch.workspaces/1",
+          "self": "ws_home000001",
+          "updated_at": "2026-11-04T13:00:00Z",
+          "workspaces": [
+            {
+              "id": "ws_pilatus001",
+              "name": "Pilatus Workspace",
+              "description": "Ingestion jobs and data pipelines.",
+              "tags": [
+                "data",
+                "work"
+              ],
+              "online": true,
+              "last_seen": "2026-11-04T12:59:50Z",
+              "can_send": {
+                "text": true,
+                "files": false,
+                "delegate": false,
+                "start": false
+              },
+              "accepts_from": {
+                "text": false,
+                "files": false,
+                "delegate": false,
+                "start": false
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "_note": "Phone: pair with the one-time code from the QR / orch://pair link.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/pair",
+      "headers": {},
+      "body": {
+        "code": "pc_Tg5Yh7Uj9Ik2Ol4Pz6Xc8V",
+        "name": "Severin's iPhone"
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "phone_id": "ph_iphone0001",
+        "token": "orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9",
+        "workspaces": [
+          {
+            "id": "ws_pilatus001",
+            "name": "Pilatus Workspace"
+          },
+          {
+            "id": "ws_home000001",
+            "name": "Home"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "_note": "Phone: register for push.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/push",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "apns_token": "a1b2c3…64 hex",
+        "sandbox": true
+      }
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  },
+  {
+    "_note": "Phone: my workspaces with open questions.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/workspaces",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "ws_pilatus001",
+            "name": "Pilatus Workspace",
+            "description": "Ingestion jobs and data pipelines.",
+            "tags": [
+              "data",
+              "work"
+            ],
+            "online": true,
+            "last_seen": "2026-11-04T10:41:00Z",
+            "open_questions": 1
+          },
+          {
+            "id": "ws_home000001",
+            "name": "Home",
+            "description": "Private tasks: household, travel, home automation.",
+            "tags": [
+              "private"
+            ],
+            "online": false,
+            "last_seen": "2026-11-03T21:10:00Z",
+            "open_questions": 0
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Phone: open questions.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/questions",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_q1date0ts0000001",
+              "from": "ws_pilatus001",
+              "to": "phones",
+              "type": "question",
+              "created_at": "2026-11-04T10:41:00Z",
+              "ticket": "t_7k3f9q",
+              "body": {
+                "question_id": "q1",
+                "title": "Rename field X in ingestion job",
+                "text": "DATE or TIMESTAMP?",
+                "options": [
+                  "DATE",
+                  "TIMESTAMP"
+                ],
+                "recommended": "TIMESTAMP"
+              }
+            },
+            "workspace_name": "Pilatus Workspace"
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Phone: answer with one tap. The relay builds the answer message.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/answer",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "question_message_id": "m_q1date0ts0000001",
+        "answer": "TIMESTAMP"
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "id": "m_an5wer7q2w9e4r6t"
+      }
+    }
+  },
+  {
+    "_note": "Phone: a second answer to the same question.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/answer",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "question_message_id": "m_q1date0ts0000001",
+        "answer": "DATE"
+      }
+    },
+    "response": {
+      "status": 409,
+      "body": {
+        "error": "already_answered",
+        "message": "This question was already answered: TIMESTAMP."
+      }
+    }
+  },
+  {
+    "_note": "Phone: send text (typed or spoken) to Home's inbox.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/send",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "to": "ws_home000001",
+        "text": "Book the train to Lucerne for Friday",
+        "ticket": null
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "id": "m_ph0nesend7q2w9e4"
+      }
+    }
+  },
+  {
+    "_note": "Phone: sign out. The token stops working.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/signout",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  },
+  {
+    "_note": "Push payload sent to APNs for a new question (not an HTTP call to the relay).",
+    "request": {
+      "method": "APNS",
+      "path": "-",
+      "headers": {},
+      "body": null
+    },
+    "response": {
+      "status": 0,
+      "body": {
+        "aps": {
+          "alert": {
+            "title": "Pilatus Workspace",
+            "body": "DATE or TIMESTAMP?"
+          },
+          "sound": "default"
+        },
+        "message_id": "m_q1date0ts0000001",
+        "workspace": "ws_pilatus001"
+      }
+    }
+  },
+  {
+    "_note": "Public: GitHub calls the webhook → stored as a webhook message for Pilatus.",
+    "request": {
+      "method": "POST",
+      "path": "/webhook/wh_gh00000001?token=whk_Mn4Bv6Cx8Za1Sd3Fg5Hj7K",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-GitHub-Event": "pull_request"
+      },
+      "body": {
+        "action": "closed",
+        "pull_request": {
+          "merged": true,
+          "number": 17
+        }
+      }
+    },
+    "response": {
+      "status": 202,
+      "body": null
+    }
+  },
+  {
+    "_note": "Public: the one-time webhook called again.",
+    "request": {
+      "method": "POST",
+      "path": "/webhook/wh_gh00000001?token=whk_Mn4Bv6Cx8Za1Sd3Fg5Hj7K",
+      "headers": {},
+      "body": {}
+    },
+    "response": {
+      "status": 410,
+      "body": {
+        "error": "gone",
+        "message": "This webhook was already used."
+      }
+    }
+  },
+  {
+    "_note": "Public: onboarding script (macOS/Linux; /onboarding.ps1 for Windows). Installs orch if missing, then orch relay connect.",
+    "request": {
+      "method": "GET",
+      "path": "/onboarding.sh",
+      "headers": {},
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": "#!/bin/sh …"
+    }
+  },
+  {
+    "_note": "Public: health check.",
+    "request": {
+      "method": "GET",
+      "path": "/health",
+      "headers": {},
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": "ok"
+    }
+  },
+  {
+    "_note": "Admin: list workspaces.",
+    "request": {
+      "method": "GET",
+      "path": "/admin/api/workspaces",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "ws_pilatus001",
+            "name": "Pilatus Workspace",
+            "description": "Ingestion jobs and data pipelines.",
+            "tags": [
+              "data",
+              "work"
+            ],
+            "online": true,
+            "unread": 0
+          },
+          {
+            "id": "ws_reports001",
+            "name": "Reports",
+            "description": "Builds the weekly and monthly reports from ticket and ingestion data.",
+            "tags": [
+              "reports",
+              "data"
+            ],
+            "online": true,
+            "unread": 2
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Admin: add a workspace. Token and prompt shown only here.",
+    "request": {
+      "method": "POST",
+      "path": "/admin/api/workspaces",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": {
+        "name": "Pilatus Workspace",
+        "description": "Ingestion jobs and data pipelines.",
+        "tags": [
+          "data",
+          "work"
+        ]
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "id": "ws_pilatus001",
+        "token": "orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN",
+        "prompt": "Connect this workspace to orch-relay. Run in the project folder:\n  orch relay connect https://relay.severin.io --workspace ws_pilatus001 --token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL https://relay.severin.io/onboarding.sh | sh -s -- --workspace ws_pilatus001 --token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN\n  Windows: & ([scriptblock]::Create((irm https://relay.severin.io/onboarding.ps1))) -Workspace ws_pilatus001 -Token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+      }
+    }
+  },
+  {
+    "_note": "Admin: edit description/tags (shows up in everyone's next refresh).",
+    "request": {
+      "method": "PATCH",
+      "path": "/admin/api/workspaces/ws_reports001",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": {
+        "tags": [
+          "reports",
+          "data",
+          "weekly"
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": null
+    }
+  },
+  {
+    "_note": "Admin: new token.",
+    "request": {
+      "method": "POST",
+      "path": "/admin/api/workspaces/ws_pilatus001/token",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "token": "orn_<new 43 chars>",
+        "prompt": "<same prompt with the new token>"
+      }
+    }
+  },
+  {
+    "_note": "Admin: remove a workspace.",
+    "request": {
+      "method": "DELETE",
+      "path": "/admin/api/workspaces/ws_home000001",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  },
+  {
+    "_note": "Admin: read the pair rules.",
+    "request": {
+      "method": "GET",
+      "path": "/admin/api/rules",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "rules": [
+          {
+            "from": "ws_pilatus001",
+            "to": "ws_reports001",
+            "text": true,
+            "files": true,
+            "delegate": true,
+            "start": true
+          },
+          {
+            "from": "ws_home000001",
+            "to": "ws_pilatus001",
+            "text": true,
+            "files": false,
+            "delegate": false,
+            "start": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "_note": "Admin: replace all pair rules.",
+    "request": {
+      "method": "PUT",
+      "path": "/admin/api/rules",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": {
+        "rules": [
+          {
+            "from": "ws_pilatus001",
+            "to": "ws_reports001",
+            "text": true,
+            "files": true,
+            "delegate": true,
+            "start": true
+          },
+          {
+            "from": "ws_home000001",
+            "to": "ws_pilatus001",
+            "text": true,
+            "files": false,
+            "delegate": false,
+            "start": false
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "rules": [
+          {
+            "from": "ws_pilatus001",
+            "to": "ws_reports001",
+            "text": true,
+            "files": true,
+            "delegate": true,
+            "start": true
+          },
+          {
+            "from": "ws_home000001",
+            "to": "ws_pilatus001",
+            "text": true,
+            "files": false,
+            "delegate": false,
+            "start": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "_note": "Admin: read messages (decrypted with the master key).",
+    "request": {
+      "method": "GET",
+      "path": "/admin/api/messages?workspace=ws_pilatus001&type=question",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "schema": "orch.msg/1",
+            "id": "m_q1date0ts0000001",
+            "from": "ws_pilatus001",
+            "to": "phones",
+            "type": "question",
+            "created_at": "2026-11-04T10:41:00Z",
+            "ticket": "t_7k3f9q",
+            "body": {
+              "question_id": "q1",
+              "title": "Rename field X in ingestion job",
+              "text": "DATE or TIMESTAMP?",
+              "options": [
+                "DATE",
+                "TIMESTAMP"
+              ],
+              "recommended": "TIMESTAMP"
+            },
+            "acked": true
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Admin: allows seen so far (e.g. weekly report).",
+    "request": {
+      "method": "GET",
+      "path": "/admin/api/allows",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "from": "ws_reports001",
+            "to": "ws_pilatus001",
+            "kind": "start",
+            "key": "weekly-report",
+            "mode": "permanent",
+            "created_at": "2026-11-03T08:00:00Z"
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Admin: shared items overview (credential values never shown).",
+    "request": {
+      "method": "GET",
+      "path": "/admin/api/shared",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "version": 7,
+        "skills": [
+          {
+            "name": "acme-sql",
+            "version": 3
+          }
+        ],
+        "mcp": [
+          "acme-docs"
+        ],
+        "credentials": [
+          "ACME_TOKEN"
+        ],
+        "assign": {
+          "ws_home000001": {
+            "skills": [
+              "acme-sql"
+            ],
+            "mcp": [
+              "acme-docs"
+            ],
+            "credentials": [
+              "ACME_TOKEN"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "_note": "Admin: upload a shared skill (.tar.gz).",
+    "request": {
+      "method": "PUT",
+      "path": "/admin/api/shared/skills/acme-sql",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn",
+        "Content-Type": "application/gzip"
+      },
+      "body": "<binary>"
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "name": "acme-sql",
+        "version": 3
+      }
+    }
+  },
+  {
+    "_note": "Admin: set a shared MCP server.",
+    "request": {
+      "method": "PUT",
+      "path": "/admin/api/shared/mcp/acme-docs",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": {
+        "config": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@acme/docs-mcp"
+          ]
+        }
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": null
+    }
+  },
+  {
+    "_note": "Admin: set a shared credential.",
+    "request": {
+      "method": "PUT",
+      "path": "/admin/api/shared/credentials/ACME_TOKEN",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": {
+        "value": "acme_live_…"
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": null
+    }
+  },
+  {
+    "_note": "Admin: delete a shared item (skills|mcp|credentials).",
+    "request": {
+      "method": "DELETE",
+      "path": "/admin/api/shared/mcp/acme-docs",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  },
+  {
+    "_note": "Admin: assign shared items to Home. Home gets a refresh-hint.",
+    "request": {
+      "method": "PUT",
+      "path": "/admin/api/shared/assign/ws_home000001",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": {
+        "skills": [
+          "acme-sql"
+        ],
+        "mcp": [
+          "acme-docs"
+        ],
+        "credentials": [
+          "ACME_TOKEN"
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": null
+    }
+  },
+  {
+    "_note": "Admin: all webhooks.",
+    "request": {
+      "method": "GET",
+      "path": "/admin/api/webhooks",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "wh_gh00000001",
+            "workspace": "ws_pilatus001",
+            "mode": "once",
+            "ticket": "t_7k3f9q",
+            "created_at": "2026-11-04T13:30:00Z",
+            "last_call_at": null
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Admin: delete a webhook.",
+    "request": {
+      "method": "DELETE",
+      "path": "/admin/api/webhooks/wh_gh00000001",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  },
+  {
+    "_note": "Admin: list phones.",
+    "request": {
+      "method": "GET",
+      "path": "/admin/api/phones",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "ph_iphone0001",
+            "name": "Severin's iPhone",
+            "workspaces": [
+              "ws_pilatus001",
+              "ws_home000001"
+            ]
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Admin: add a phone → link + QR (24 h, one use).",
+    "request": {
+      "method": "POST",
+      "path": "/admin/api/phones",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": {
+        "name": "Severin's iPhone",
+        "workspaces": [
+          "ws_pilatus001",
+          "ws_home000001"
+        ]
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "phone_id": "ph_iphone0001",
+        "link": "orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_Tg5Yh7Uj9Ik2Ol4Pz6Xc8V",
+        "qr_svg": "<svg …>"
+      }
+    }
+  },
+  {
+    "_note": "Admin: change which workspaces the phone may reach.",
+    "request": {
+      "method": "PATCH",
+      "path": "/admin/api/phones/ph_iphone0001",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": {
+        "workspaces": [
+          "ws_pilatus001"
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": null
+    }
+  },
+  {
+    "_note": "Admin: remove a phone (same as sign-out).",
+    "request": {
+      "method": "DELETE",
+      "path": "/admin/api/phones/ph_iphone0001",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  }
+]

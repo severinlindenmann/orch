@@ -1,0 +1,4 @@
+{ "schema": "orch.msg/1", "id": "m_f1le000000000001", "from": "ws_pilatus001", "to": "ws_reports001", "type": "file",
+  "created_at": "2026-11-04T11:05:00Z",
+  "body": { "blob_id": "b_0123456789abcdef", "name": "mapping.csv", "size": 2048,
+            "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "text": "New field mapping" } }

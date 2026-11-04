@@ -1,0 +1,75 @@
+{
+  "_note": "Pilatus Workspace after init, publish + relay connect, both add-ons and one refresh. Path → short content.",
+  "files": {
+    "AGENTS.md": "<!-- orch:begin orch -->\n## orch\nTickets live in .orch/tickets/. Read .agents/skills/orch/SKILL.md.\n<!-- orch:end orch -->\n<!-- orch:begin orch-relay -->\n…\n<!-- orch:end orch-relay -->",
+    "CLAUDE.md": "@AGENTS.md",
+    ".gitignore": "# orch (local only)\n.orch/secrets/\n.orch/inbox/\n.orch/inbox-seen.json\n.orch/scheduler/state.json\n.orch/scheduler/logs/",
+    ".agents/skills/orch/SKILL.md": "---\nname: orch\ndescription: Use for orch tickets …\n---\n…",
+    ".agents/skills/orch-publish/SKILL.md": "---\nname: orch-publish\n…",
+    ".agents/skills/orch-relay/SKILL.md": "---\nname: orch-relay\n…  Read workspaces.json before handing work over.",
+    ".agents/skills/orch-relay/workspaces.json": "see workspaces.example.json",
+    ".agents/skills/orch-dashboard/SKILL.md": "(only after `orch addon add dashboard`)",
+    ".agents/skills/orch-scheduler/SKILL.md": "(only after `orch addon add scheduler`)",
+    ".agents/skills/acme-sql/SKILL.md": "shared skill from `orch relay refresh`",
+    ".agents/skills/acme-sql/.orch-shared": "3",
+    ".claude/skills": "-> ../.agents/skills (symlink; junction on Windows)",
+    ".orch/tickets/t_7k3f9q.json": "see ticket.example.json",
+    ".orch/secrets/publish.json": {
+      "url": "https://publish.severin.io",
+      "workspace": "ws_pilatus001",
+      "token": "orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3"
+    },
+    ".orch/secrets/relay.json": {
+      "url": "https://relay.severin.io",
+      "workspace": "ws_pilatus001",
+      "token": "orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+    },
+    ".orch/secrets/allows.json": {
+      "given": [],
+      "received": [
+        {
+          "token": "ora_Q2hhbmdlTWVQbGVhc2UxMg",
+          "peer": "ws_reports001",
+          "kind": "start",
+          "key": "weekly-report"
+        }
+      ]
+    },
+    ".orch/secrets/credentials.json": {
+      "ACME_TOKEN": "acme_live_…"
+    },
+    ".orch/secrets/mcp.json": {
+      "mcpServers": {
+        "acme-docs": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@acme/docs-mcp"
+          ]
+        }
+      }
+    },
+    ".orch/secrets/shared.json": {
+      "version": 7,
+      "skills": [
+        "acme-sql"
+      ]
+    },
+    ".orch/secrets/files/keys.json": {
+      "f_9q2w7e4r1t8y5u3i": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    ".orch/inbox/m_an5wer7q2w9e4r6t.json": "the raw answer message (see message.examples.json)",
+    ".orch/inbox/files/b_0123456789abcdef/sample-rows.csv": "event_time,source_id\n…",
+    ".orch/inbox-seen.json": {
+      "m_an5wer7q2w9e4r6t": "2026-11-04T10:53:10Z"
+    },
+    ".orch/scheduler/config.toml": "agent = \"claude -p {prompt}\"",
+    ".orch/scheduler/state.json": {
+      "t_7k3f9q": {
+        "last_run": "2026-11-04T10:53:20Z",
+        "next_run": "2026-11-05T07:00:00Z"
+      }
+    },
+    ".orch/scheduler/logs/t_7k3f9q-20261104T105320Z.log": "claude output …"
+  }
+}

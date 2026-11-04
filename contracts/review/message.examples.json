@@ -1,0 +1,148 @@
+[
+  {
+    "_note": "Plain text from Pilatus to Reports, about ticket t_7k3f9q.",
+    "schema": "orch.msg/1",
+    "id": "m_a1b2c3d4e5f6g7h8",
+    "from": "ws_pilatus001",
+    "to": "ws_reports001",
+    "type": "text",
+    "created_at": "2026-11-04T10:00:00Z",
+    "ticket": "t_7k3f9q",
+    "body": {
+      "text": "Field X is now event_time. Please update the weekly report query."
+    }
+  },
+  {
+    "_note": "A file. Pilatus uploaded it first (POST /v1/blobs); Reports downloads it with blob_id.",
+    "schema": "orch.msg/1",
+    "id": "m_f1le7q2w9e4r6t1y",
+    "from": "ws_pilatus001",
+    "to": "ws_reports001",
+    "type": "file",
+    "created_at": "2026-11-04T10:02:00Z",
+    "ticket": "t_7k3f9q",
+    "body": {
+      "blob_id": "b_0123456789abcdef",
+      "name": "sample-rows.csv",
+      "size": 2048,
+      "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+      "text": "20 sample rows with event_time"
+    }
+  },
+  {
+    "_note": "A question to the owner's phones. Push goes out; first answer wins.",
+    "schema": "orch.msg/1",
+    "id": "m_q1date0ts0000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "question",
+    "created_at": "2026-11-04T10:41:00Z",
+    "ticket": "t_7k3f9q",
+    "body": {
+      "question_id": "q1",
+      "title": "Rename field X in ingestion job",
+      "text": "DATE or TIMESTAMP?",
+      "options": [
+        "DATE",
+        "TIMESTAMP"
+      ],
+      "recommended": "TIMESTAMP"
+    }
+  },
+  {
+    "_note": "The answer from the iPhone. The relay builds it and copies ticket + question_id from the question (reply_to).",
+    "schema": "orch.msg/1",
+    "id": "m_an5wer7q2w9e4r6t",
+    "from": "ph_iphone0001",
+    "to": "ws_pilatus001",
+    "type": "answer",
+    "created_at": "2026-11-04T10:52:00Z",
+    "ticket": "t_7k3f9q",
+    "reply_to": "m_q1date0ts0000001",
+    "body": {
+      "question_id": "q1",
+      "answer": "TIMESTAMP",
+      "answered_by": "human:severin"
+    }
+  },
+  {
+    "_note": "Pilatus hands a new task to Reports. Reports does nothing until its user allows it.",
+    "schema": "orch.msg/1",
+    "id": "m_de1egate7q2w9e4r",
+    "from": "ws_pilatus001",
+    "to": "ws_reports001",
+    "type": "delegate",
+    "created_at": "2026-11-04T11:00:00Z",
+    "ticket": "t_7k3f9q",
+    "body": {
+      "title": "Use event_time in the weekly report",
+      "text": "Field X was renamed to event_time (TIMESTAMP).",
+      "checklist": [
+        "Change the report query",
+        "Rerun last week's report"
+      ]
+    }
+  },
+  {
+    "_note": "Pilatus starts the Weekly report in Reports now. Runs without asking because it carries a permanent allow token.",
+    "schema": "orch.msg/1",
+    "id": "m_start7q2w9e4r6t1",
+    "from": "ws_pilatus001",
+    "to": "ws_reports001",
+    "type": "start",
+    "created_at": "2026-11-10T06:55:00Z",
+    "body": {
+      "key": "weekly-report",
+      "text": "Build the weekly report for week 46.",
+      "allow_token": "ora_Q2hhbmdlTWVQbGVhc2UxMg"
+    }
+  },
+  {
+    "_note": "Reports' user said 'always allow weekly-report from Pilatus'. Pilatus keeps the token for later starts.",
+    "schema": "orch.msg/1",
+    "id": "m_a11ow7q2w9e4r6t1",
+    "from": "ws_reports001",
+    "to": "ws_pilatus001",
+    "type": "allow",
+    "created_at": "2026-11-03T08:00:00Z",
+    "reply_to": "m_start0first00001",
+    "body": {
+      "mode": "permanent",
+      "kind": "start",
+      "key": "weekly-report",
+      "token": "ora_Q2hhbmdlTWVQbGVhc2UxMg"
+    }
+  },
+  {
+    "_note": "The admin changed shared skills/credentials. Home should run `orch relay refresh`.",
+    "schema": "orch.msg/1",
+    "id": "m_refresh7q2w9e4r6",
+    "from": "admin",
+    "to": "ws_home000001",
+    "type": "refresh-hint",
+    "created_at": "2026-11-04T13:00:00Z",
+    "body": {
+      "version": 7
+    }
+  },
+  {
+    "_note": "GitHub called Pilatus' webhook: PR 17 was merged. The scheduler wakes the waiting ticket.",
+    "schema": "orch.msg/1",
+    "id": "m_webhook7q2w9e4r6",
+    "from": "webhook:wh_gh00000001",
+    "to": "ws_pilatus001",
+    "type": "webhook",
+    "created_at": "2026-11-04T14:00:00Z",
+    "ticket": "t_7k3f9q",
+    "body": {
+      "webhook_id": "wh_gh00000001",
+      "method": "POST",
+      "content_type": "application/json",
+      "headers": {
+        "X-GitHub-Event": "pull_request"
+      },
+      "query": {},
+      "payload": "{\"action\":\"closed\",\"pull_request\":{\"merged\":true,\"number\":17}}"
+    }
+  }
+]

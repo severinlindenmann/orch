@@ -1,0 +1,626 @@
+[
+  {
+    "_note": "Who am I? The CLI calls this in `orch publish connect` to check the token.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/whoami",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "id": "ws_pilatus001",
+        "name": "Pilatus Workspace",
+        "description": "Ingestion jobs and data pipelines.",
+        "tags": [
+          "data",
+          "work"
+        ],
+        "rights": {
+          "files": true,
+          "apps": true,
+          "permanent": false,
+          "public": false
+        },
+        "max_file_mb": 100,
+        "default_days": 7,
+        "max_days": 90
+      }
+    }
+  },
+  {
+    "_note": "Upload an encrypted file for 7 days. The body is the OPF1 blob; the CLI adds #k=<key> to the url.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/files?days=7",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3",
+        "Content-Type": "application/octet-stream"
+      },
+      "body": "<binary>"
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "id": "f_9q2w7e4r1t8y5u3i",
+        "url": "https://publish.severin.io/f/f_9q2w7e4r1t8y5u3i",
+        "size": 2084,
+        "expires_at": "2026-11-11T10:05:00Z"
+      }
+    }
+  },
+  {
+    "_note": "Permanent file without the 'permanent' right is refused.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/files?permanent=1",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3",
+        "Content-Type": "application/octet-stream"
+      },
+      "body": "<binary>"
+    },
+    "response": {
+      "status": 403,
+      "body": {
+        "error": "forbidden",
+        "message": "This workspace may not make permanent files."
+      }
+    }
+  },
+  {
+    "_note": "List my files.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/files?limit=50",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "f_9q2w7e4r1t8y5u3i",
+            "size": 2084,
+            "created_at": "2026-11-04T10:05:00Z",
+            "expires_at": "2026-11-11T10:05:00Z"
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Delete one of my files.",
+    "request": {
+      "method": "DELETE",
+      "path": "/v1/files/f_9q2w7e4r1t8y5u3i",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  },
+  {
+    "_note": "Deploy (or redeploy) an app for 7 days. Body is a .tar.gz with app.toml. Private: a view token comes back.",
+    "request": {
+      "method": "PUT",
+      "path": "/v1/apps/weekly-report?days=7",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3",
+        "Content-Type": "application/gzip"
+      },
+      "body": "<binary>"
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "name": "weekly-report",
+        "url": "https://publish.severin.io/a/weekly-report",
+        "status": "running",
+        "expires_at": "2026-11-11T09:00:00Z",
+        "view_token": "apv_Zx8Cv1Bn3Mq5Wl7Er9Ty2U"
+      }
+    }
+  },
+  {
+    "_note": "Deploy where the app's test fails: the old version keeps running.",
+    "request": {
+      "method": "PUT",
+      "path": "/v1/apps/weekly-report?days=7",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3",
+        "Content-Type": "application/gzip"
+      },
+      "body": "<binary>"
+    },
+    "response": {
+      "status": 422,
+      "body": {
+        "error": "test_failed",
+        "message": "The app's test failed. The old version is still running.",
+        "output": "FAILED tests/test_report.py::test_totals - assert 41 == 42"
+      }
+    }
+  },
+  {
+    "_note": "List my apps.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/apps",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "name": "weekly-report",
+            "stack": "python",
+            "store": "sqlite",
+            "public": false,
+            "status": "running",
+            "url": "https://publish.severin.io/a/weekly-report",
+            "expires_at": "2026-11-11T09:00:00Z",
+            "updated_at": "2026-11-04T09:00:00Z"
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Restart an app.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/apps/weekly-report/restart",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "name": "weekly-report",
+        "status": "running"
+      }
+    }
+  },
+  {
+    "_note": "Stop an app.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/apps/weekly-report/stop",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "name": "weekly-report",
+        "status": "stopped"
+      }
+    }
+  },
+  {
+    "_note": "Delete an app (code and data).",
+    "request": {
+      "method": "DELETE",
+      "path": "/v1/apps/weekly-report",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  },
+  {
+    "_note": "Wrong token.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/files",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orp_wrong"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 401,
+      "body": {
+        "error": "unauthorized",
+        "message": "Workspace ID or token is wrong."
+      }
+    }
+  },
+  {
+    "_note": "Public: file page. Browser JS reads #k=, fetches the blob, decrypts.",
+    "request": {
+      "method": "GET",
+      "path": "/f/f_9q2w7e4r1t8y5u3i",
+      "headers": {},
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": "<html> 'Decrypting in your browser…' page"
+    }
+  },
+  {
+    "_note": "Public: the encrypted blob itself.",
+    "request": {
+      "method": "GET",
+      "path": "/f/f_9q2w7e4r1t8y5u3i/blob",
+      "headers": {},
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": "<binary>"
+    }
+  },
+  {
+    "_note": "Public: expired file.",
+    "request": {
+      "method": "GET",
+      "path": "/f/f_old0000000000001",
+      "headers": {},
+      "body": null
+    },
+    "response": {
+      "status": 410,
+      "body": "<html> 'This link has expired' page"
+    }
+  },
+  {
+    "_note": "Public: private app, first visit with token → cookie set, redirect without token.",
+    "request": {
+      "method": "GET",
+      "path": "/a/weekly-report/?token=apv_Zx8Cv1Bn3Mq5Wl7Er9Ty2U",
+      "headers": {},
+      "body": null
+    },
+    "response": {
+      "status": 302,
+      "body": "Location: /a/weekly-report/  +  Set-Cookie: (HttpOnly; SameSite=Lax; Path=/a/weekly-report/)"
+    }
+  },
+  {
+    "_note": "Public: private app without token.",
+    "request": {
+      "method": "GET",
+      "path": "/a/weekly-report/",
+      "headers": {},
+      "body": null
+    },
+    "response": {
+      "status": 401,
+      "body": "<html> 'This app is private' page"
+    }
+  },
+  {
+    "_note": "Public: onboarding script (macOS/Linux). Installs orch if missing, then runs orch publish connect.",
+    "request": {
+      "method": "GET",
+      "path": "/onboarding.sh",
+      "headers": {},
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": "#!/bin/sh …"
+    }
+  },
+  {
+    "_note": "Public: onboarding script (Windows).",
+    "request": {
+      "method": "GET",
+      "path": "/onboarding.ps1",
+      "headers": {},
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": "param($Workspace, $Token) …"
+    }
+  },
+  {
+    "_note": "Public: health check.",
+    "request": {
+      "method": "GET",
+      "path": "/health",
+      "headers": {},
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": "ok"
+    }
+  },
+  {
+    "_note": "Admin: list workspaces.",
+    "request": {
+      "method": "GET",
+      "path": "/admin/api/workspaces",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "ws_pilatus001",
+            "name": "Pilatus Workspace",
+            "description": "Ingestion jobs and data pipelines.",
+            "tags": [
+              "data",
+              "work"
+            ],
+            "rights": {
+              "files": true,
+              "apps": true,
+              "permanent": false,
+              "public": false
+            },
+            "files": 3,
+            "apps": 1
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Admin: add a workspace. Token and prompt are shown only here.",
+    "request": {
+      "method": "POST",
+      "path": "/admin/api/workspaces",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": {
+        "name": "Pilatus Workspace",
+        "description": "Ingestion jobs and data pipelines.",
+        "tags": [
+          "data",
+          "work"
+        ],
+        "rights": {
+          "files": true,
+          "apps": true,
+          "permanent": false,
+          "public": false
+        }
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "id": "ws_pilatus001",
+        "token": "orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3",
+        "prompt": "Connect this workspace to orch-publish. Run in the project folder:\n  orch publish connect https://publish.severin.io --workspace ws_pilatus001 --token orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL https://publish.severin.io/onboarding.sh | sh -s -- --workspace ws_pilatus001 --token orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3\n  Windows: & ([scriptblock]::Create((irm https://publish.severin.io/onboarding.ps1))) -Workspace ws_pilatus001 -Token orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3"
+      }
+    }
+  },
+  {
+    "_note": "Admin: edit description, tags or rights.",
+    "request": {
+      "method": "PATCH",
+      "path": "/admin/api/workspaces/ws_pilatus001",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": {
+        "tags": [
+          "data",
+          "work",
+          "ingestion"
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "id": "ws_pilatus001",
+        "name": "Pilatus Workspace",
+        "description": "Ingestion jobs and data pipelines.",
+        "tags": [
+          "data",
+          "work",
+          "ingestion"
+        ],
+        "rights": {
+          "files": true,
+          "apps": true,
+          "permanent": false,
+          "public": false
+        }
+      }
+    }
+  },
+  {
+    "_note": "Admin: new token (the old one stops working).",
+    "request": {
+      "method": "POST",
+      "path": "/admin/api/workspaces/ws_pilatus001/token",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "token": "orp_<new 43 chars>",
+        "prompt": "<same prompt with the new token>"
+      }
+    }
+  },
+  {
+    "_note": "Admin: remove a workspace with its files and apps.",
+    "request": {
+      "method": "DELETE",
+      "path": "/admin/api/workspaces/ws_home000001",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  },
+  {
+    "_note": "Admin: all files. Names are encrypted, so only id, size, expiry.",
+    "request": {
+      "method": "GET",
+      "path": "/admin/api/files",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "f_9q2w7e4r1t8y5u3i",
+            "workspace": "ws_pilatus001",
+            "size": 2084,
+            "expires_at": "2026-11-11T10:05:00Z"
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Admin: delete a file.",
+    "request": {
+      "method": "DELETE",
+      "path": "/admin/api/files/f_9q2w7e4r1t8y5u3i",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  },
+  {
+    "_note": "Admin: all apps.",
+    "request": {
+      "method": "GET",
+      "path": "/admin/api/apps",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "name": "weekly-report",
+            "stack": "python",
+            "store": "sqlite",
+            "public": false,
+            "status": "running",
+            "url": "https://publish.severin.io/a/weekly-report",
+            "expires_at": "2026-11-11T09:00:00Z",
+            "updated_at": "2026-11-04T09:00:00Z",
+            "workspace": "ws_pilatus001"
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Admin: restart an app (/stop works the same).",
+    "request": {
+      "method": "POST",
+      "path": "/admin/api/apps/weekly-report/restart",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "name": "weekly-report",
+        "status": "running"
+      }
+    }
+  },
+  {
+    "_note": "Admin: delete an app.",
+    "request": {
+      "method": "DELETE",
+      "path": "/admin/api/apps/weekly-report",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  },
+  {
+    "_note": "Admin without token.",
+    "request": {
+      "method": "GET",
+      "path": "/admin/api/workspaces",
+      "headers": {},
+      "body": null
+    },
+    "response": {
+      "status": 401,
+      "body": {
+        "error": "unauthorized",
+        "message": "Admin token missing."
+      }
+    }
+  }
+]

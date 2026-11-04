@@ -1,0 +1,2 @@
+{ "schema": "orch.msg/1", "id": "m_refresh000000001", "from": "admin", "to": "ws_home000001", "type": "refresh-hint",
+  "created_at": "2026-11-04T13:00:00Z", "body": { "version": 7 } }

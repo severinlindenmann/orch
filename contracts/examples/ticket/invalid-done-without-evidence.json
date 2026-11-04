@@ -1,0 +1,13 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_bad001",
+  "title": "Done without evidence (must fail)",
+  "type": "task",
+  "status": "done",
+  "created_at": "2026-11-04T09:12:00Z",
+  "updated_at": "2026-11-04T09:30:00Z",
+  "checklist": [ { "id": "c1", "text": "Fix it", "done": true, "evidence": [] } ],
+  "links": [],
+  "questions": [],
+  "history": []
+}

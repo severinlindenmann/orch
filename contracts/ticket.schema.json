@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/ticket.schema.json",
+  "title": "orch ticket v1",
+  "description": "One ticket = one file .orch/tickets/<id>.json. Writers must produce valid tickets. Unknown fields are allowed everywhere (top level and nested) and every reader/writer keeps them unchanged. New add-on data should still go under ext.<addon>.",
+  "type": "object",
+  "required": ["schema", "id", "title", "type", "status", "created_at", "updated_at", "checklist", "links", "questions", "history"],
+  "properties": {
+    "schema": { "const": "orch.ticket/1" },
+    "id": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "Random, e.g. t_7k3f9q. Same as the file name." },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "type": { "enum": ["task", "recurring"] },
+    "status": { "enum": ["open", "active", "waiting", "done", "dropped"] },
+    "created_at": { "$ref": "#/$defs/time" },
+    "updated_at": { "$ref": "#/$defs/time" },
+    "checklist": { "type": "array", "items": { "$ref": "#/$defs/check" } },
+    "links": { "type": "array", "items": { "$ref": "#/$defs/link" } },
+    "questions": { "type": "array", "items": { "$ref": "#/$defs/question" } },
+    "history": { "type": "array", "items": { "$ref": "#/$defs/history" } },
+    "wake_at": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }], "description": "The scheduler starts an agent on this ticket at this time (one-time task)." },
+    "waiting_on": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["kind", "ref"],
+          "properties": {
+            "kind": { "enum": ["question", "workspace", "webhook", "person", "other"] },
+            "ref": { "type": "string", "minLength": 1, "description": "e.g. q1, ws_h2k9..., wh_..., or free text" }
+          }
+        }
+      ]
+    },
+    "ext": {
+      "type": "object",
+      "description": "One key per add-on or tool. Each owner decides its own shape. Others never change a key they do not own.",
+      "additionalProperties": { "type": "object" },
+      "properties": {
+        "scheduler": {
+          "type": "object",
+          "properties": {
+            "cron": { "type": "string", "description": "5-field cron (min hour day month weekday), always UTC, e.g. '0 7 * * 1'. Missed runs (machine off): run once on catch-up, never several times." },
+            "agent": { "type": "string", "description": "Optional: which agent command runs it, e.g. 'claude' or 'codex'. Default from .orch/scheduler/config.toml." }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "recurring" } } },
+      "then": {
+        "required": ["ext"],
+        "properties": { "ext": { "required": ["scheduler"], "properties": { "scheduler": { "required": ["cron"] } } } }
+      }
+    }
+  ],
+  "$defs": {
+    "time": { "type": "string", "format": "date-time", "pattern": "Z$", "description": "RFC 3339, UTC, ends with Z." },
+    "who": { "type": "string", "pattern": "^(agent|human):[A-Za-z0-9_.@ -]{1,64}$", "description": "agent:<tool> (agent:claude-code, agent:codex) or human:<name>" },
+    "evidence": {
+      "type": "object",
+      "required": ["type", "ref"],
+      "properties": {
+        "type": { "enum": ["pr", "commit", "file", "url", "command", "note"] },
+        "ref": { "type": "string", "minLength": 1, "description": "PR URL, commit hash, file path, URL, the command line, or the note text" },
+        "text": { "type": "string", "description": "Optional short result, e.g. '42 passed'" }
+      }
+    },
+    "check": {
+      "type": "object",
+      "required": ["id", "text", "done", "evidence"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^c[0-9]{1,4}$" },
+        "text": { "type": "string", "minLength": 1 },
+        "done": { "type": "boolean" },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } }
+      },
+      "if": { "properties": { "done": { "const": true } } },
+      "then": { "properties": { "evidence": { "minItems": 1 } } },
+      "description": "Evidence-based: done=true needs at least one evidence entry."
+    },
+    "link": {
+      "type": "object",
+      "required": ["type", "url"],
+      "properties": {
+        "type": { "type": "string", "pattern": "^[a-z0-9-]{1,32}$", "description": "Any tool: github, jira, teams, file, publish, ticket, ..." },
+        "url": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" }
+      }
+    },
+    "question": {
+      "type": "object",
+      "required": ["id", "text", "options", "recommended", "answer", "answered_by", "via"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^q[0-9]{1,4}$" },
+        "text": { "type": "string", "minLength": 1 },
+        "options": { "type": "array", "items": { "type": "string" }, "description": "Empty = free answer." },
+        "recommended": { "type": ["string", "null"] },
+        "answer": { "type": ["string", "null"] },
+        "answered_by": { "oneOf": [{ "$ref": "#/$defs/who" }, { "type": "null" }] },
+        "via": { "enum": ["cli", "phone", "relay", null] }
+      }
+    },
+    "history": {
+      "type": "object",
+      "required": ["at", "by", "text"],
+      "properties": {
+        "at": { "$ref": "#/$defs/time" },
+        "by": { "$ref": "#/$defs/who" },
+        "text": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

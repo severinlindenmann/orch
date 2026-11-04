@@ -1,0 +1,2 @@
+{ "schema": "orch.workspaces/1", "self": "ws_pilatus001", "updated_at": "2026-11-04T13:00:00Z",
+  "workspaces": [ { "id": "ws_reports001", "name": "Reports", "description": "", "online": true, "last_seen": null } ] }

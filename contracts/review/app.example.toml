@@ -1,0 +1,9 @@
+# The Weekly report app that Reports publishes (orch publish app ./weekly-report --days 7)
+name   = "weekly-report"
+about  = "Weekly ticket report for Reports"
+stack  = "python"                                # static | python | node
+start  = "python main.py"                        # listens on 127.0.0.1:$PORT under $BASE_PATH
+health = "/health"
+test   = "python -m unittest discover -s tests"
+store  = "sqlite"                                # the app keeps $DATA_DIR/app.db
+public = false                                   # link needs ?token=<view token>

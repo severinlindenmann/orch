@@ -1,0 +1,29 @@
+{
+  "_note": "What a published file looks like. The server only ever sees the blob; the key stays in the link after #.",
+  "header_inside_ciphertext": {
+    "name": "sample-rows.csv",
+    "type": "text/csv",
+    "size": 2048
+  },
+  "blob_layout": [
+    "0..4 'OPF1'",
+    "4..16 IV (12 bytes)",
+    "16..-16 ciphertext",
+    "last 16 bytes GCM tag",
+    "AAD = 'OPF1'"
+  ],
+  "link": "https://publish.severin.io/f/f_9q2w7e4r1t8y5u3i#k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "server_sees": {
+    "id": "f_9q2w7e4r1t8y5u3i",
+    "size": 2084,
+    "expires_at": "2026-11-11T10:05:00Z"
+  },
+  "tokens": {
+    "publish workspace": "orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3",
+    "relay workspace": "orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN",
+    "app view": "apv_Zx8Cv1Bn3Mq5Wl7Er9Ty2U",
+    "webhook": "whk_Mn4Bv6Cx8Za1Sd3Fg5Hj7K",
+    "allow": "ora_Q2hhbmdlTWVQbGVhc2UxMg"
+  },
+  "test_vector": "vectors/publish-blob-v1.json (key AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8)"
+}

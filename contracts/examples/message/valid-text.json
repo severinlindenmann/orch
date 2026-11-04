@@ -1,0 +1,3 @@
+{ "schema": "orch.msg/1", "id": "m_a1b2c3d4e5f6g7h8", "from": "ws_pilatus001", "to": "ws_reports001", "type": "text",
+  "created_at": "2026-11-04T11:00:00Z", "ticket": "t_7k3f9q",
+  "body": { "text": "The ingestion field X is now source_id. Please update the report query." } }

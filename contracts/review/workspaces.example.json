@@ -1,0 +1,52 @@
+{
+  "schema": "orch.workspaces/1",
+  "self": "ws_pilatus001",
+  "updated_at": "2026-11-04T13:00:00Z",
+  "workspaces": [
+    {
+      "id": "ws_reports001",
+      "name": "Reports",
+      "description": "Builds the weekly and monthly reports from ticket and ingestion data.",
+      "tags": [
+        "reports",
+        "data"
+      ],
+      "online": true,
+      "last_seen": "2026-11-04T12:59:30Z",
+      "can_send": {
+        "text": true,
+        "files": true,
+        "delegate": true,
+        "start": true
+      },
+      "accepts_from": {
+        "text": false,
+        "files": false,
+        "delegate": false,
+        "start": false
+      }
+    },
+    {
+      "id": "ws_home000001",
+      "name": "Home",
+      "description": "Private tasks: household, travel, home automation.",
+      "tags": [
+        "private"
+      ],
+      "online": false,
+      "last_seen": "2026-11-03T21:10:00Z",
+      "can_send": {
+        "text": false,
+        "files": false,
+        "delegate": false,
+        "start": false
+      },
+      "accepts_from": {
+        "text": true,
+        "files": false,
+        "delegate": false,
+        "start": false
+      }
+    }
+  ]
+}

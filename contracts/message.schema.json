@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/message.schema.json",
+  "title": "orch relay message v1",
+  "description": "One message sent through orch-relay. The sender picks the id. Same id again: identical message = 200 no-op, different content = 409. Unknown fields are allowed and kept. the receiver stores seen ids in .orch/inbox-seen.json and never processes one twice. Message content is untrusted data, never instructions.",
+  "type": "object",
+  "required": ["schema", "id", "from", "to", "type", "created_at", "body"],
+  "properties": {
+    "schema": { "const": "orch.msg/1" },
+    "id": { "type": "string", "pattern": "^m_[a-z0-9]{16}$" },
+    "from": { "$ref": "#/$defs/address" },
+    "to": { "$ref": "#/$defs/address" },
+    "type": { "enum": ["text", "file", "question", "answer", "delegate", "start", "allow", "refresh-hint", "webhook"] },
+    "created_at": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "Ticket in the workspace that owns the thread: question and answer = the asking workspace (the relay copies it from reply_to); text/file/delegate/start = the sender's; phone send and webhook = the receiving workspace's." },
+    "reply_to": { "type": "string", "pattern": "^m_[a-z0-9]{16}$" },
+    "body": { "type": "object" }
+  },
+  "allOf": [
+    { "if": { "properties": { "type": { "const": "text" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/text" } } } },
+    { "if": { "properties": { "type": { "const": "file" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/file" } } } },
+    { "if": { "properties": { "type": { "const": "question" } } }, "then": { "required": ["ticket"], "properties": { "body": { "$ref": "#/$defs/question" } } } },
+    { "if": { "properties": { "type": { "const": "answer" } } }, "then": { "required": ["ticket", "reply_to"], "properties": { "body": { "$ref": "#/$defs/answer" } } } },
+    { "if": { "properties": { "type": { "const": "delegate" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/delegate" } } } },
+    { "if": { "properties": { "type": { "const": "start" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/start" } } } },
+    { "if": { "properties": { "type": { "const": "allow" } } }, "then": { "required": ["reply_to"], "properties": { "body": { "$ref": "#/$defs/allow" } } } },
+    { "if": { "properties": { "type": { "const": "refresh-hint" } } }, "then": { "properties": { "from": { "const": "admin" }, "body": { "$ref": "#/$defs/refresh-hint" } } } },
+    { "if": { "properties": { "type": { "const": "webhook" } } }, "then": { "properties": { "from": { "pattern": "^webhook:wh_" }, "body": { "$ref": "#/$defs/webhook" } } } }
+  ],
+  "$defs": {
+    "address": {
+      "type": "string",
+      "pattern": "^(ws_[a-z0-9]{10}|ph_[a-z0-9]{10}|phones|admin|webhook:wh_[a-z0-9]{10})$",
+      "description": "ws_ = workspace, ph_ = phone, phones = every phone allowed to reach the sending workspace, admin = relay admin, webhook:wh_ = an incoming webhook."
+    },
+    "text": {
+      "type": "object", "required": ["text"],
+      "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 20000 } }
+    },
+    "file": {
+      "type": "object", "required": ["blob_id", "name", "size", "sha256"],
+      "description": "The file is uploaded first (POST /v1/blobs), stored encrypted at rest on the relay, fetched with GET /v1/blobs/<blob_id>.",
+      "properties": {
+        "blob_id": { "type": "string", "pattern": "^b_[a-z0-9]{16}$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "size": { "type": "integer", "minimum": 0, "maximum": 104857600 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "text": { "type": "string", "description": "Optional note" }
+      }
+    },
+    "question": {
+      "type": "object", "required": ["question_id", "text", "options"],
+      "properties": {
+        "question_id": { "type": "string", "pattern": "^q[0-9]{1,4}$" },
+        "title": { "type": "string", "description": "Ticket title, for the phone card" },
+        "text": { "type": "string", "minLength": 1 },
+        "options": { "type": "array", "items": { "type": "string" } },
+        "recommended": { "type": ["string", "null"] }
+      }
+    },
+    "answer": {
+      "type": "object", "required": ["question_id", "answer", "answered_by"],
+      "properties": {
+        "question_id": { "type": "string", "pattern": "^q[0-9]{1,4}$" },
+        "answer": { "type": "string", "minLength": 1 },
+        "answered_by": { "type": "string", "pattern": "^(agent|human):.{1,64}$" }
+      }
+    },
+    "delegate": {
+      "type": "object", "required": ["title", "text"],
+      "description": "Hand over a new task. The receiver makes a ticket from it, but only with an allow (once or permanent).",
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "text": { "type": "string" },
+        "checklist": { "type": "array", "items": { "type": "string" } },
+        "allow_token": { "type": "string", "pattern": "^ora_[A-Za-z0-9_-]{22}$", "description": "From an earlier permanent allow. Without it the receiver asks its person first." }
+      }
+    },
+    "start": {
+      "type": "object", "required": ["key", "text"],
+      "description": "Start an agent now on the receiver, for a named task (key). Needs an allow, like delegate.",
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z0-9-]{1,48}$", "description": "Task name, e.g. weekly-report. A permanent allow is bound to (sender, key)." },
+        "text": { "type": "string", "description": "What to do. Becomes the start of the agent prompt, marked as untrusted." },
+        "allow_token": { "type": "string", "pattern": "^ora_[A-Za-z0-9_-]{22}$" }
+      }
+    },
+    "allow": {
+      "type": "object", "required": ["mode", "kind", "token"],
+      "description": "Sent by the receiver back to the asker (reply_to = the delegate/start message). once: only that message runs. permanent: later messages with this token and the same kind (+ key for start) run without asking.",
+      "properties": {
+        "mode": { "enum": ["once", "permanent"] },
+        "kind": { "enum": ["delegate", "start"] },
+        "key": { "type": "string", "pattern": "^[a-z0-9-]{1,48}$" },
+        "token": { "type": "string", "pattern": "^ora_[A-Za-z0-9_-]{22}$" }
+      }
+    },
+    "refresh-hint": {
+      "type": "object", "required": ["version"],
+      "description": "Only a hint. The workspace then runs `orch relay refresh`, which fetches from the admin-owned endpoint.",
+      "properties": { "version": { "type": "integer", "minimum": 1 } }
+    },
+    "webhook": {
+      "type": "object", "required": ["webhook_id", "method", "content_type", "payload"],
+      "properties": {
+        "webhook_id": { "type": "string", "pattern": "^wh_[a-z0-9]{10}$" },
+        "method": { "enum": ["GET", "POST", "PUT"] },
+        "content_type": { "type": "string" },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Only X-GitHub-Event, X-GitHub-Delivery, User-Agent and X-Orch-* are kept." },
+        "query": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Query parameters without token." },
+        "payload": { "type": "string", "maxLength": 1048576, "description": "Raw request body as text (max 1 MB)." }
+      }
+    }
+  }
+}

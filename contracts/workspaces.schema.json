@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/workspaces.schema.json",
+  "title": "orch workspace directory v1",
+  "description": "Written by `orch relay refresh` to .agents/skills/orch-relay/workspaces.json (from the refresh snapshot). Lists every workspace with a pair rule to or from this one. Agents read it to decide where to hand work over. Phones get the same items for the workspaces they may reach (can_send/accepts_from left out). Unknown fields are allowed and kept.",
+  "type": "object",
+  "required": ["schema", "self", "updated_at", "workspaces"],
+  "properties": {
+    "schema": { "const": "orch.workspaces/1" },
+    "self": { "type": "string", "pattern": "^ws_[a-z0-9]{10}$", "description": "This workspace" },
+    "updated_at": { "$ref": "#/$defs/time" },
+    "workspaces": { "type": "array", "items": { "$ref": "#/$defs/workspace" } }
+  },
+  "$defs": {
+    "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "can": {
+      "type": "object",
+      "required": ["text", "files", "delegate", "start"],
+      "properties": {
+        "text": { "type": "boolean" }, "files": { "type": "boolean" },
+        "delegate": { "type": "boolean" }, "start": { "type": "boolean" }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["id", "name", "description", "tags", "online", "last_seen"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^ws_[a-z0-9]{10}$" },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "description": "Free text by the admin: what this workspace does" },
+        "tags": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 32 } },
+        "online": { "type": "boolean", "description": "Seen by the relay in the last 2 minutes, at refresh time" },
+        "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+        "can_send": { "$ref": "#/$defs/can", "description": "What THIS workspace may send to it (pair rule self → it)" },
+        "accepts_from": { "$ref": "#/$defs/can", "description": "What it may send to THIS workspace (pair rule it → self)" }
+      }
+    }
+  }
+}

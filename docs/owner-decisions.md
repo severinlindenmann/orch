@@ -1,0 +1,22 @@
+# Owner decisions, 4 Nov 2026 (apply on top of plan.md)
+
+- Build in waves, run in parallel where possible. contracts/ (ticket + message JSON schemas + examples) come first.
+- Encryption: publish files truly end-to-end (key in URL #fragment, browser decrypts). network: TLS + encrypted at rest + admin master key can read messages.
+- Shared skills / MCP servers / credentials ARE in the prototype. They arrive only via `orch network refresh` from an admin-owned endpoint; the inbox only carries a "refresh available" hint. Stored in gitignored `.orch/secrets/` (credentials) and `.agents/skills/` (skills).
+- Scheduler: no extra safety limits (prototype). Only the pair rule "start" (+ receiver allow) from the plan applies.
+- publish max file size: 100 MB (env configurable). The workspace (orch CLI) encrypts with AES-256-GCM before upload; the browser decrypts with WebCrypto using the key from the #fragment.
+- Tickets in git: nice to have. Works with no git, local git, or remote git. Nothing depends on git.
+- network in Rust (same stack as publish: axum, tokio, rusqlite, Caddy + systemd on one VPS).
+- History entries keep a timestamp `at` (ordering), but no durations.
+- "Evidence-based": a checklist item counts as done only when it has at least one evidence entry.
+- onboarding scripts: onboarding.sh (mac/Linux) + onboarding.ps1 (Windows).
+- Ticket JSON v1: schema "orch.ticket/1", id (random, e.g. t_7k3f9q), title, type task|recurring, status open|active|waiting|done|dropped, created_at, updated_at, checklist[{id,text,done,evidence[{type pr|commit|file|url|command|note, ref, text?}]}], links[{type,url,title?}], questions[{id,text,options,recommended,answer,answered_by,via}], history[{at,by "agent:<tool>"|"human:<name>",text}], wake_at, waiting_on{kind,ref}, ext{<addon>:{...}}. One file per ticket in .orch/tickets/<id>.json. Unknown fields are preserved.
+- Network message types: text, file, question, answer, delegate, start, allow, refresh-hint, webhook.
+- Public names: publish.severin.io, network.severin.io. Admin portals only on localhost (reach via SSH tunnel). Product text never says "NetBird"; say "private network".
+- Branding: orch-core dashboard look. Tokens: bg #0e1014, sidebar #0a0c0f, surface #15181d, surface-2 #1c2027, surface-3 #242a32, border #2a3038, text #e8eaed, text-muted #9aa3ad, brand teal #2fc6a3 (on-brand #06231c), addon orange #f07a2e, success #4ade80, warning #fbbf24, danger #f87171, info #60a5fa, radius 8px controls / 10px cards, dark theme, system-ui font, mono for code. Logo: a teal ring "orbit" mark.
+- UI rule from the owner: as simple as possible, minimum information, details behind a small click. Users are not technical.
+- RENAME (owner, 4 Nov 18:37): "network" / orch-network is now "relay" / orch-relay everywhere: domain relay.severin.io, folder relay/, CLI `orch relay ...`, webhooks relay.severin.io/webhook/<id>.
+- Owner 4 Nov 18:45: old pilot services on the Infomaniak VPS may be removed (orch-hub, orch-publish, orch-relay). Budget: enough to run for days; use Claude API + Codex for challenges and visual implementation where possible.
+- Owner 04 Nov 18:54: every workspace has a description and tags (set by the admin when adding it, editable later; in publish and relay). `orch relay refresh` writes .agents/skills/orch-relay/workspaces.json: every workspace this one can reach (id, name, description, tags, online, what this workspace may do with it: text/files/delegate/start, and what it accepts from it), so agents know where they can hand work over. The skill tells agents to read it.
+- Owner 04 Nov 18:54: admin portals are reached directly over the private network (VPS private IP, admin ports 8411 publish / 8412 relay), NO SSH tunnel. Admin token still required. Never public.
+- Owner 04 Nov 18:55 (confirmed: repo is PUBLIC): install = one line from GitHub (install.sh / install.ps1 in repo root: installs uv if missing, then `uv tool install git+https://github.com/severinlindenmann/orch#subdirectory=workspace`); `orch init` per project; `orch addon add|list|remove dashboard|scheduler` (installs the add-on package into the orch tool env + its skill + AGENTS.md entry); `orch publish connect <url> --token` / `orch relay connect` from the admin prompts (onboarding.sh/.ps1 only install orch if missing, then run connect); `orch update`.
