@@ -58,10 +58,28 @@ fn sandboxed() -> bool {
     std::env::var("ORCH_PUBLISH_SANDBOX").is_ok_and(|v| v == "systemd")
 }
 
-fn unit_name(key: &str) -> String {
-    // hex of the key: injective (a-b and a~b can never share a unit)
-    let hex: String = key.bytes().map(|b| format!("{b:02x}")).collect();
-    format!("orch-app-{hex}")
+/// Hex of the app name (the `~new` suffix of a version being deployed is dropped): injective.
+fn unit_prefix(key: &str) -> String {
+    let name = key.strip_suffix("~new").unwrap_or(key);
+    let hex: String = name.bytes().map(|b| format!("{b:02x}")).collect();
+    format!("orch-app-{hex}-")
+}
+
+/// One unit per running version: the port is unique among live versions, so a new version never
+/// shares (and never stops) the unit of the version it replaces.
+fn unit_name(key: &str, port: u16) -> String {
+    format!("{}{port}", unit_prefix(key))
+}
+
+/// Unit names in `systemctl list-units` output that start with `prefix` and are not in `live`.
+fn leftover_units(listed: &str, prefix: &str, live: &HashSet<String>) -> Vec<String> {
+    listed
+        .lines()
+        .filter_map(|l| l.split_whitespace().next())
+        .filter_map(|u| u.strip_suffix(".service").or(Some(u)))
+        .filter(|u| u.starts_with(prefix) && !live.contains(*u))
+        .map(String::from)
+        .collect()
 }
 
 /// Group-write a freshly extracted bundle so the unit's dynamic user (primary group orch-publish)
@@ -164,12 +182,34 @@ impl Runner {
         std::fs::create_dir_all(&s.data_dir)?;
         let log = std::fs::File::create(&s.log)?;
         let log2 = log.try_clone()?;
-        let unit = unit_name(name);
+        let unit = unit_name(name, s.port);
         if sandboxed() {
-            // a leftover unit of the same name (after a crash/restart of the server) must go first
-            let _ = std::process::Command::new("systemctl")
-                .args(["stop", &unit])
-                .output();
+            // leftover units of this app (after a crash/restart of the server) must go first,
+            // but never the units of versions this server is running
+            let live: HashSet<String> = self
+                .procs
+                .lock()
+                .unwrap()
+                .values()
+                .map(|p| p.unit.clone())
+                .collect();
+            let prefix = unit_prefix(name);
+            let listed = std::process::Command::new("systemctl")
+                .args([
+                    "list-units",
+                    "--plain",
+                    "--no-legend",
+                    "--all",
+                    &format!("{prefix}*"),
+                ])
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                .unwrap_or_default();
+            for u in leftover_units(&listed, &prefix, &live) {
+                let _ = std::process::Command::new("systemctl")
+                    .args(["stop", &u])
+                    .output();
+            }
         }
         let mut cmd = make_cmd(
             &format!("exec {}", s.start),
@@ -289,6 +329,21 @@ pub async fn run_step(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_version_gets_its_own_unit_and_live_units_are_never_leftovers() {
+        let old = unit_name("demo", 9100);
+        let new = unit_name("demo~new", 9101);
+        assert_ne!(old, new);
+        assert!(new.starts_with(&unit_prefix("demo")));
+        assert_ne!(unit_prefix("a-b"), unit_prefix("a~b"));
+        let listed = format!("{old}.service loaded active running x\n{new}.service loaded active running y\nother.service loaded\n");
+        let live: HashSet<String> = [old.clone()].into();
+        assert_eq!(
+            leftover_units(&listed, &unit_prefix("demo"), &live),
+            vec![new]
+        );
+    }
 
     #[test]
     fn sandbox_env_builds_a_systemd_run_command() {
