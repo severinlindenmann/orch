@@ -87,3 +87,12 @@ def test_inbox_shows_display_names_not_ids(ws):
     assert "Your phone" in senders and "Another workspace" in senders or "Reports" in senders
     assert not any(s.startswith(("ws_", "ph_")) for s in senders)
     assert state["names"]["ws_reports001"] == "Reports"
+
+
+def test_snapshot_state_has_no_names_and_unknown_sender_is_not_admin(tmp_path):
+    from orch_dashboard.data import _who, load_state
+
+    (tmp_path / ".orch" / "tickets").mkdir(parents=True)
+    assert load_state(tmp_path, include_inbox=False)["names"] == {}
+    assert _who("admin", {}) == "Admin"
+    assert _who("someone", {}) == "Unknown sender"
