@@ -25,6 +25,7 @@ struct SendView: View {
         .task {
             if voice == nil { voice = VoiceInput(mode: model.voiceMode) }
             selectWorkspace()
+            if UserDefaults.standard.bool(forKey: "autoMic") { await voice?.toggle(current: text) }
         }
         .onChange(of: model.workspaces) { _, _ in selectWorkspace() }
         .onChange(of: model.tab) { _, tab in

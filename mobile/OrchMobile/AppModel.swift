@@ -170,6 +170,11 @@ final class AppModel {
         if d.bool(forKey: "seedPaired"), credentials == nil, useMock {
             openSampleInvite(); await connect(phoneName: "Severin's iPhone"); await finishSetup(allowNotifications: false)
         }
+        if d.bool(forKey: "seedInvite"), phase == .onboarding { openSampleInvite() }
+        if d.bool(forKey: "seedNotify"), phase == .onboarding, useMock { openSampleInvite(); await connect(phoneName: "Severin's iPhone") }
+        if let t = d.string(forKey: "startTab"), phase == .ready {
+            tab = ["questions": .questions, "send": .send, "settings": .settings][t] ?? .home
+        }
         if phase == .ready { await refresh() }
     }
 }
