@@ -69,3 +69,13 @@ def test_find_workspace_walks_up(ws):
     sub = ws / "a" / "b"
     sub.mkdir(parents=True)
     assert find_workspace(sub) == ws.resolve()
+
+
+def test_rejects_foreign_host_header(server):
+    import http.client
+    port = int(server.rsplit(":", 1)[1])
+    for host, want in (("evil.example.com", 421), (f"evil.example.com:{port}", 421), (f"localhost:{port}", 200),
+                       (f"127.0.0.1:{port}", 200)):
+        c = http.client.HTTPConnection("127.0.0.1", port)
+        c.request("GET", "/api/state", headers={"Host": host})
+        assert c.getresponse().status == want, host

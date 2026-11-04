@@ -36,7 +36,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _host_ok(self) -> bool:
+        host = (self.headers.get("Host") or "").strip().lower()
+        host = host.rsplit("]", 1)[0] + "]" if host.startswith("[") else host.split(":", 1)[0]
+        return host in ("127.0.0.1", "localhost", "[::1]")
+
     def do_GET(self):
+        if not self._host_ok():  # DNS rebinding guard
+            return self._send(421, b"misdirected request", "text/plain")
         path = self.path.split("?", 1)[0]
         if path == "/api/state":
             return self._send(200, json.dumps(load_state(self.root)).encode(), "application/json")
