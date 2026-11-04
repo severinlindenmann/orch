@@ -86,7 +86,7 @@ final class ClientTests: XCTestCase {
     }
 
     func testDisplayNamesAndDedupe() {
-        XCTAssertEqual(displayName("e2e-mob-pilatus"), "Pilatus"); XCTAssertEqual(displayName("e2e-voice"), "Voice")
+        XCTAssertEqual(displayName(" Pilatus Workspace "), "Pilatus Workspace")
         XCTAssertEqual(displayName("Pilatus Workspace"), "Pilatus Workspace"); XCTAssertEqual(displayName("Reports"), "Reports")
         func q(_ id: String, _ at: String) -> Question {
             Question(message: QuestionMessage(schema: "orch.msg/1", id: id, from: "ws_a", to: "phones", type: "question", createdAt: at, ticket: "t_1",

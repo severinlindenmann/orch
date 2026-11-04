@@ -18,17 +18,8 @@ struct PairResponse: Decodable, Sendable {
     let workspaces: [WorkspaceRef]
 }
 
-/// Workspace names are shown as people would write them: a slug like "e2e-mob-pilatus" becomes "Pilatus".
-func displayName(_ raw: String) -> String {
-    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty, !trimmed.contains(" "), trimmed.contains(where: { $0 == "-" || $0 == "_" }) || trimmed == trimmed.lowercased()
-    else { return trimmed }
-    var words = trimmed.split(whereSeparator: { $0 == "-" || $0 == "_" }).map(String.init)
-    let noise: Set<String> = ["e2e", "mob", "test", "dev"]
-    let kept = words.filter { !noise.contains($0.lowercased()) }
-    if !kept.isEmpty { words = kept }
-    return words.map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
-}
+/// Workspace names are shown exactly as the relay returns them.
+func displayName(_ raw: String) -> String { raw.trimmingCharacters(in: .whitespacesAndNewlines) }
 
 struct Workspace: Codable, Sendable, Equatable, Identifiable {
     let id: String

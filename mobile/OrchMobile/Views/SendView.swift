@@ -49,7 +49,11 @@ struct SendView: View {
             Eyebrow(text: "SEND TO").padding(.top, 26)
             Picker("Send to", selection: $workspaceID) {
                 if model.workspaces.isEmpty { Text("No workspaces").tag("") }
-                ForEach(model.workspaces) { Text($0.displayName).tag($0.id) }
+                ForEach(model.workspaces) { ws in
+                    let twins = model.workspaces.filter { $0.displayName == ws.displayName }.count > 1
+                    let hint = ws.description?.split(separator: " ").prefix(3).joined(separator: " ") ?? ""
+                    Text(twins && !hint.isEmpty ? "\(ws.displayName) (\(hint))" : ws.displayName).tag(ws.id)
+                }
             }.pickerStyle(.menu).tint(Theme.text)
                 .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                 .padding(.horizontal, 10).background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
