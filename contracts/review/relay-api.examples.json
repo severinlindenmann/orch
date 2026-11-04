@@ -20,12 +20,13 @@
           "data",
           "work"
         ],
-        "phones": 1
+        "phones": 1,
+        "pending": null
       }
     }
   },
   {
-    "_note": "Change my own description and tags. Response = whoami.",
+    "_note": "Propose a new description and tags. The owner must approve in the admin panel; until then the old values stay in effect everywhere. Response = whoami (approved values) plus status and the pending proposal.",
     "request": {
       "method": "PATCH",
       "path": "/v1/me",
@@ -42,16 +43,24 @@
       }
     },
     "response": {
-      "status": 200,
+      "status": 202,
       "body": {
         "id": "ws_pilatus001",
         "name": "Pilatus Workspace",
-        "description": "Ingestion jobs and data pipelines.",
+        "description": "Ingestion jobs.",
         "tags": [
-          "data",
-          "work"
+          "data"
         ],
-        "phones": 1
+        "phones": 1,
+        "pending": {
+          "description": "Ingestion jobs and data pipelines.",
+          "tags": [
+            "data",
+            "work"
+          ],
+          "at": "2026-11-04T13:05:00Z"
+        },
+        "status": "pending"
       }
     }
   },

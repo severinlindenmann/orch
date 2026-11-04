@@ -15,7 +15,8 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         INSERT OR IGNORE INTO meta(k,v) VALUES('version','1');
         CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
             tags TEXT NOT NULL, token_hash TEXT NOT NULL, created_at INTEGER NOT NULL, last_seen INTEGER,
-            profile_by TEXT NOT NULL DEFAULT 'admin');
+            description_by TEXT NOT NULL DEFAULT 'workspace', tags_by TEXT NOT NULL DEFAULT 'workspace',
+            pending_description TEXT, pending_tags TEXT, pending_at INTEGER);
         CREATE TABLE IF NOT EXISTS phones(id TEXT PRIMARY KEY, name TEXT NOT NULL, workspaces TEXT NOT NULL,
             token_hash TEXT, apns_token TEXT, sandbox INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, last_seen INTEGER);
         CREATE TABLE IF NOT EXISTS pair_codes(hash TEXT PRIMARY KEY, phone_id TEXT NOT NULL, expires_at INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0);
@@ -35,11 +36,16 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS assign(ws TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(ws,kind,name));",
     )?;
-    // Databases created before profile_by existed (ignore "duplicate column").
-    let _ = c.execute(
-        "ALTER TABLE workspaces ADD COLUMN profile_by TEXT NOT NULL DEFAULT 'admin'",
-        [],
-    );
+    // Older databases: add the profile columns (ignore "duplicate column"). Existing rows count as written by the workspace.
+    for col in [
+        "description_by TEXT NOT NULL DEFAULT 'workspace'",
+        "tags_by TEXT NOT NULL DEFAULT 'workspace'",
+        "pending_description TEXT",
+        "pending_tags TEXT",
+        "pending_at INTEGER",
+    ] {
+        let _ = c.execute(&format!("ALTER TABLE workspaces ADD COLUMN {col}"), []);
+    }
     Ok(())
 }
 
@@ -241,17 +247,46 @@ pub fn ws_card(r: &Row) -> rusqlite::Result<Value> {
     Ok(
         json!({"id": r.get::<_, String>(0)?, "name": r.get::<_, String>(1)?,
         "description": r.get::<_, String>(2)?, "tags": parse_list(&r.get::<_, String>(3)?),
-        "online": online(last), "last_seen": last.map(fmt_time), "profile_by": r.get::<_, String>(5)?}),
+        "online": online(last), "last_seen": last.map(fmt_time),
+        "description_by": r.get::<_, String>(5)?, "tags_by": r.get::<_, String>(6)?}),
     )
 }
 
-pub const WS_CARD_COLS: &str = "id,name,description,tags,last_seen,profile_by";
+pub const WS_CARD_COLS: &str = "id,name,description,tags,last_seen,description_by,tags_by";
 
-/// Characters that never belong in a description: control characters (C0, C1, DEL, newlines),
-/// bidi overrides/isolates, zero-width and line/paragraph separators.
-fn bad_char(c: char) -> bool {
-    c.is_control()
-        || matches!(c, '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}')
+/// The change a workspace proposed for its own profile, or `null`. Only the proposed fields are set.
+pub fn pending(c: &Connection, id: &str) -> Value {
+    c.query_row(
+        "SELECT pending_description,pending_tags,pending_at FROM workspaces WHERE id=?1",
+        [id],
+        |r| {
+            let (d, t, at): (Option<String>, Option<String>, Option<i64>) =
+                (r.get(0)?, r.get(1)?, r.get(2)?);
+            Ok(match at {
+                Some(at) => {
+                    json!({"description": d, "tags": t.map(|t| parse_list(&t)), "at": fmt_time(at)})
+                }
+                None => Value::Null,
+            })
+        },
+    )
+    .unwrap_or(Value::Null)
+}
+
+/// Allowed in a description: letters, marks, numbers, punctuation, symbols and ordinary spaces
+/// (Unicode categories L, M, N, P, S, Zs). Control, format (bidi, zero-width), line and paragraph separators are not.
+fn good_char(c: char) -> bool {
+    use unicode_general_category::GeneralCategory as G;
+    !matches!(
+        unicode_general_category::get_general_category(c),
+        G::Control
+            | G::Format
+            | G::Surrogate
+            | G::PrivateUse
+            | G::Unassigned
+            | G::LineSeparator
+            | G::ParagraphSeparator
+    )
 }
 
 /// Description of a workspace (admin- or self-written): plain one-line text, up to 280 characters.
@@ -260,10 +295,8 @@ pub fn valid_description(d: &str) -> Result<String, &'static str> {
     if d.chars().count() > 280 {
         return Err("The description can be up to 280 characters.");
     }
-    if d.chars().any(bad_char) {
-        return Err(
-            "The description must be plain text on one line (no control or direction characters).",
-        );
+    if !d.chars().all(good_char) {
+        return Err("The description must be plain text on one line (letters, numbers, punctuation and symbols only).");
     }
     Ok(d.to_string())
 }

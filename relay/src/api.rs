@@ -80,7 +80,9 @@ fn whoami_body(c: &rusqlite::Connection, id: &str) -> Res<Value> {
     let o = card.as_object_mut().unwrap();
     o.remove("online");
     o.remove("last_seen");
-    o.remove("profile_by");
+    o.remove("description_by");
+    o.remove("tags_by");
+    o.insert("pending".into(), store::pending(c, id));
     o.insert("phones".into(), n.into());
     Ok(card)
 }
@@ -91,49 +93,53 @@ async fn whoami(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {
     Ok(Json(whoami_body(&c, &id)?))
 }
 
-/// `PATCH /v1/me`: a workspace changes its own description and tags.
-async fn patch_me(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<Json<Value>> {
+/// `PATCH /v1/me`: a workspace proposes a new description and/or tags. Nothing changes until the owner approves
+/// in the admin panel; one pending change per workspace, a new one replaces it.
+async fn patch_me(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    body: Bytes,
+) -> Res<(StatusCode, Json<Value>)> {
     let v = parse_body(&body)?;
-    let out = {
-        let c = app.db.lock().unwrap();
-        let me = auth::workspace(&c, &h)?;
-        let desc = match v.get("description") {
-            None => None,
-            Some(d) => Some(
-                d.as_str()
-                    .ok_or_else(|| invalid("`description` must be text."))
-                    .and_then(|d| store::valid_description(d).map_err(invalid))?,
-            ),
-        };
-        let tags = match v.get("tags") {
-            None => None,
-            Some(t) => Some(
-                t.as_array()
-                    .ok_or_else(|| invalid("`tags` must be a list."))
-                    .and_then(|a| store::valid_tags(a).map_err(invalid))?,
-            ),
-        };
-        if desc.is_some() || tags.is_some() {
-            // Only these two fields, and only while the token that authenticated this call is still current.
-            let cur = auth::bearer(&h).map(token_hash).unwrap_or_default();
-            c.execute(
-                "UPDATE workspaces SET description=COALESCE(?3,description), tags=COALESCE(?4,tags), profile_by='workspace' WHERE id=?1 AND token_hash=?2",
-                params![
-                    me,
-                    cur,
-                    desc,
-                    tags.as_ref().map(|t| serde_json::to_string(t).unwrap())
-                ],
-            )?;
-        }
-        if desc.is_some() || tags.is_some() {
-            let rel = store::related(&c, &me);
-            store::bump_and_hint(&c, &app.key, &rel)?;
-        }
-        whoami_body(&c, &me)?
+    let c = app.db.lock().unwrap();
+    let me = auth::workspace(&c, &h)?;
+    let desc = match v.get("description") {
+        None => None,
+        Some(d) => Some(
+            d.as_str()
+                .ok_or_else(|| invalid("`description` must be text."))
+                .and_then(|d| store::valid_description(d).map_err(invalid))?,
+        ),
     };
-    app.notify.notify_waiters();
-    Ok(Json(out))
+    let tags = match v.get("tags") {
+        None => None,
+        Some(t) => Some(
+            t.as_array()
+                .ok_or_else(|| invalid("`tags` must be a list."))
+                .and_then(|a| store::valid_tags(a).map_err(invalid))?,
+        ),
+    };
+    if desc.is_none() && tags.is_none() {
+        return Err(invalid("Send a `description` and/or `tags`."));
+    }
+    // Only these fields, and only while the token that authenticated this call is still current.
+    let cur = auth::bearer(&h).map(token_hash).unwrap_or_default();
+    let n = c.execute(
+        "UPDATE workspaces SET pending_description=?3, pending_tags=?4, pending_at=?5 WHERE id=?1 AND token_hash=?2",
+        params![
+            me,
+            cur,
+            desc,
+            tags.as_ref().map(|t| serde_json::to_string(t).unwrap()),
+            now()
+        ],
+    )?;
+    if n == 0 {
+        return Err(unauthorized());
+    }
+    let mut out = whoami_body(&c, &me)?;
+    out["status"] = "pending".into();
+    Ok((StatusCode::ACCEPTED, Json(out)))
 }
 
 const NOT_AVAILABLE: &str = include_str!("../web/not-available.html");

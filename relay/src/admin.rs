@@ -37,6 +37,14 @@ pub fn router(app: AppState) -> Router {
             axum::routing::patch(edit_ws).delete(del_ws),
         )
         .route("/admin/api/workspaces/:id/token", post(new_token))
+        .route(
+            "/admin/api/workspaces/:id/profile/approve",
+            post(approve_profile),
+        )
+        .route(
+            "/admin/api/workspaces/:id/profile/reject",
+            post(reject_profile),
+        )
         .route("/admin/api/rules", get(get_rules).put(put_rules))
         .route("/admin/api/messages", get(messages))
         .route("/admin/api/allows", get(allows))
@@ -111,6 +119,7 @@ async fn list_ws(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> 
             |r| r.get(0),
         )?;
         w["unread"] = n.into();
+        w["pending"] = store::pending(&c, w["id"].as_str().unwrap());
     }
     Ok(Json(json!({"items": items, "next": null})))
 }
@@ -137,7 +146,7 @@ async fn add_ws(
     let id = rand_id("ws_", 10);
     let token = rand_token("orn_", 32);
     app.db.lock().unwrap().execute(
-        "INSERT INTO workspaces(id,name,description,tags,token_hash,created_at) VALUES(?1,?2,?3,?4,?5,?6)",
+        "INSERT INTO workspaces(id,name,description,tags,token_hash,created_at,description_by,tags_by) VALUES(?1,?2,?3,?4,?5,?6,'admin','admin')",
         params![id, name, desc, serde_json::to_string(&tags).unwrap(), token_hash(&token), now()],
     )?;
     let p = prompt(&app.cfg.public_url, &id, &token);
@@ -168,14 +177,14 @@ async fn edit_ws(
     }
     if let Some(d) = v.get("description") {
         c.execute(
-            "UPDATE workspaces SET description=?2, profile_by='admin' WHERE id=?1",
+            "UPDATE workspaces SET description=?2, description_by='admin' WHERE id=?1",
             params![id, parse_description(d)?],
         )?;
     }
     if let Some(t) = v.get("tags") {
         let t = parse_tags(t)?;
         c.execute(
-            "UPDATE workspaces SET tags=?2, profile_by='admin' WHERE id=?1",
+            "UPDATE workspaces SET tags=?2, tags_by='admin' WHERE id=?1",
             params![id, serde_json::to_string(&t).unwrap()],
         )?;
     }
@@ -184,6 +193,55 @@ async fn edit_ws(
     drop(c);
     app.notify.notify_waiters();
     Ok(StatusCode::OK)
+}
+
+/// Owner approves the workspace's proposed description/tags: they become live and everyone gets a refresh-hint.
+async fn approve_profile(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Res<Json<Value>> {
+    guard(&app, &h)?;
+    let c = app.db.lock().unwrap();
+    let n = c.execute(
+        "UPDATE workspaces SET
+           description_by=CASE WHEN pending_description IS NULL THEN description_by ELSE 'workspace' END,
+           tags_by=CASE WHEN pending_tags IS NULL THEN tags_by ELSE 'workspace' END,
+           description=COALESCE(pending_description,description), tags=COALESCE(pending_tags,tags),
+           pending_description=NULL, pending_tags=NULL, pending_at=NULL
+         WHERE id=?1 AND pending_at IS NOT NULL",
+        [&id],
+    )?;
+    if n == 0 {
+        return Err(not_found("There is no change to review."));
+    }
+    let rel = store::related(&c, &id);
+    store::bump_and_hint(&c, &app.key, &rel)?;
+    let card = c.query_row(
+        &format!("SELECT {} FROM workspaces WHERE id=?1", store::WS_CARD_COLS),
+        [&id],
+        store::ws_card,
+    )?;
+    drop(c);
+    app.notify.notify_waiters();
+    Ok(Json(card))
+}
+
+/// Owner rejects it: the old values stay, the proposal is dropped.
+async fn reject_profile(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Res<StatusCode> {
+    guard(&app, &h)?;
+    let n = app.db.lock().unwrap().execute(
+        "UPDATE workspaces SET pending_description=NULL, pending_tags=NULL, pending_at=NULL WHERE id=?1 AND pending_at IS NOT NULL",
+        [&id],
+    )?;
+    if n == 0 {
+        return Err(not_found("There is no change to review."));
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn new_token(

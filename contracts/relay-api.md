@@ -28,8 +28,8 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| GET | `/v1/whoami` | – | `{id, name, description, tags, phones: n}` |
-| PATCH | `/v1/me` | `{description?: string ≤ 280, tags?: [string ≤ 24, ≤ 8 items]}` | `200` same body as `/v1/whoami`. `description` is one line of plain text (no control, newline, bidi or zero-width characters); tags are lowercase `[a-z0-9-]`. Admin-set values follow the same rules. Writes only these two fields, only while the calling token is still current. The directory (`workspaces.schema.json`) marks who wrote them in `profile_by` (`admin`\|`workspace`). A change raises the refresh version and sends refresh-hints to related workspaces. Bad limits → `422 invalid` |
+| GET | `/v1/whoami` | – | `{id, name, description, tags, phones: n, pending}`: the approved values, plus `pending` = `{description: string\|null, tags: [..]\|null, at}` (only the proposed fields are set) or `null` |
+| PATCH | `/v1/me` | `{description?: string ≤ 280, tags?: [string ≤ 24, ≤ 8 items]}` (at least one) | `202 {…whoami, status: "pending"}`. The change is only a proposal: the owner must approve it in the admin panel, and until then the old values stay in effect everywhere (directory, refresh snapshot, phones). One pending change per workspace; a new one replaces it. `description` is one line of plain text, characters from Unicode categories L, M, N, P, S and Zs only (no control, newline, bidi or zero-width characters); tags are lowercase `[a-z0-9-]`, 1–24 characters. Admin-set values follow the same rules. Writes only the pending fields, only while the calling token is still current (else `401`). Bad input → `422 invalid` |
 | POST | `/v1/messages` | one message | `201 {id}` (see rules above) |
 | GET | `/v1/inbox?wait=0..30` | – | `{items: [message…], next: null}` not yet acked, oldest first, max 100. `wait` = long-poll seconds |
 | POST | `/v1/inbox/ack` | `{ids: [m_…]}` | `204`. Acked messages are no longer delivered (the admin can still read them) |
@@ -81,8 +81,10 @@ Auth: `X-Orch-Admin: <admin token>` (file `/etc/orch-relay/admin-token`); the po
 | Method | Path | Request | Response |
 |---|---|---|---|
 | GET | `/admin` | – | Portal HTML |
-| GET / POST | `/admin/api/workspaces` | POST: `{name, description, tags: []}` | list of `{id, name, description, tags, online, last_seen, unread}` (`last_seen` null until the workspace first calls) / `201 {id, token, prompt}` |
-| PATCH | `/admin/api/workspaces/<id>` | `{name?, description?, tags?}` | `200` (shows up in the next refresh) |
+| GET / POST | `/admin/api/workspaces` | POST: `{name, description, tags: []}` | list of `{id, name, description, tags, description_by, tags_by, online, last_seen, unread, pending}` (`last_seen` null until the workspace first calls; `pending` as in whoami, or `null`) / `201 {id, token, prompt}` |
+| PATCH | `/admin/api/workspaces/<id>` | `{name?, description?, tags?}` | `200` (shows up in the next refresh). Admin-set description/tags are marked `description_by` / `tags_by` = `admin` |
+| POST | `/admin/api/workspaces/<id>/profile/approve` | – | `200` the workspace card. The pending description/tags become live (marked `workspace`), the version is raised and refresh-hints go out. `404` when nothing is pending |
+| POST | `/admin/api/workspaces/<id>/profile/reject` | – | `204`. The pending change is dropped, old values stay. `404` when nothing is pending |
 | POST | `/admin/api/workspaces/<id>/token` | – | `200 {token, prompt}` |
 | DELETE | `/admin/api/workspaces/<id>` | – | `204` |
 | GET / PUT | `/admin/api/rules` | PUT: `{rules: [{from, to, text, files, delegate, start}]}` (full list) | `{rules: […]}` |

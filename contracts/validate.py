@@ -4,8 +4,10 @@ Run: uv run --with jsonschema --with rfc3339-validator --with cryptography pytho
 """
 import base64
 import json
+import re
 import struct
 import sys
+import unicodedata
 from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker
@@ -14,8 +16,44 @@ HERE = Path(__file__).parent
 fails = []
 
 
+_CATS = {}
+
+
+def _class_body(cat):
+    """Python's re has no \\p{..}: expand a Unicode category (L, Zs, ...) to explicit ranges."""
+    if not _CATS:
+        for cp in range(sys.maxunicode + 1):
+            c = unicodedata.category(chr(cp))
+            _CATS.setdefault(c, []).append(cp)
+            _CATS.setdefault(c[0], []).append(cp)
+    out, cps = [], _CATS.get(cat, [])
+    i = 0
+    while i < len(cps):
+        j = i
+        while j + 1 < len(cps) and cps[j + 1] == cps[j] + 1:
+            j += 1
+        a, b = cps[i], cps[j]
+        out.append(re.escape(chr(a)) if a == b else f"{re.escape(chr(a))}-{re.escape(chr(b))}")
+        i = j + 1
+    return "".join(out)
+
+
+def _expand(node):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == "pattern" and isinstance(v, str) and "\\p{" in v:
+                node[k] = re.sub(r"\\p\{(\w+)\}", lambda m: _class_body(m.group(1)), v)
+            else:
+                _expand(v)
+    elif isinstance(node, list):
+        for v in node:
+            _expand(v)
+    return node
+
+
 def validator(name):
-    return Draft202012Validator(json.loads((HERE / f"{name}.schema.json").read_text()), format_checker=FormatChecker())
+    schema = _expand(json.loads((HERE / f"{name}.schema.json").read_text()))
+    return Draft202012Validator(schema, format_checker=FormatChecker())
 
 
 V = {"ticket": validator("ticket"), "message": validator("message"), "workspaces": validator("workspaces")}
