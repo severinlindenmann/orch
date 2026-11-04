@@ -99,8 +99,12 @@ pub async fn me_patch(St(st): St<State>, h: HeaderMap, body: Bytes) -> ApiResult
         }
         w.tags = t;
     }
-    db::update_workspace(&st.db.lock().unwrap(), &w)?;
-    Ok(Json(who_json(&st, &w)))
+    let c = st.db.lock().unwrap();
+    if db::update_profile(&c, &w)? == 0 {
+        return Err(ApiError::unauthorized());
+    }
+    let fresh = db::get_workspace(&c, &w.id)?.ok_or_else(ApiError::unauthorized)?;
+    Ok(Json(who_json(&st, &fresh)))
 }
 
 pub async fn files_post(

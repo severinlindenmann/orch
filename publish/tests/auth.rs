@@ -147,3 +147,32 @@ async fn public_pages_are_branded_dark_html() {
         assert!(h.contains("color-scheme") && h.contains("<svg") && !h.contains("relay"));
     }
 }
+
+#[tokio::test]
+async fn me_patch_keeps_rights_and_rotated_token() {
+    let t = setup();
+    let ws = t.workspace("Pilatus", basic_rights()).await;
+    let r = t
+        .api(&ws, "PATCH", "/v1/me", br#"{"description":"x"}"#.to_vec())
+        .await;
+    assert_eq!(r.status, 200);
+    // after an admin rotation the old token is refused and nothing is written
+    let rot = t
+        .adm(
+            "POST",
+            &format!("/admin/api/workspaces/{}/token", ws.0),
+            serde_json::Value::Null,
+        )
+        .await;
+    assert_eq!(rot.status, 200);
+    let r = t
+        .api(&ws, "PATCH", "/v1/me", br#"{"description":"y"}"#.to_vec())
+        .await;
+    assert_eq!(r.status, 401);
+    let new = (
+        ws.0.clone(),
+        rot.json()["token"].as_str().unwrap().to_string(),
+    );
+    let w = t.api(&new, "GET", "/v1/whoami", vec![]).await.json();
+    assert_eq!(w["description"], "x");
+}

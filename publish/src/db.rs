@@ -125,6 +125,19 @@ pub fn update_workspace(c: &Connection, w: &Workspace) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Only description and tags, and only while the token is still the one that authenticated. Returns rows changed.
+pub fn update_profile(c: &Connection, w: &Workspace) -> rusqlite::Result<usize> {
+    c.execute(
+        "UPDATE workspaces SET description=?2,tags=?3 WHERE id=?1 AND token_hash=?4",
+        params![
+            w.id,
+            w.description,
+            serde_json::to_string(&w.tags).unwrap(),
+            w.token_hash
+        ],
+    )
+}
+
 pub fn delete_workspace(c: &Connection, id: &str) -> rusqlite::Result<()> {
     c.execute("DELETE FROM workspaces WHERE id=?1", [id])?;
     Ok(())
