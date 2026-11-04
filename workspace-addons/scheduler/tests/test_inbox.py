@@ -119,3 +119,19 @@ def test_start_key_other_sender_gets_own_ticket(ws):
     assert tid != "t_keyed002"
     assert json.loads((ws / f".orch/tickets/{tid}.json").read_text())["ext"]["relay"] == {
         "start_key": "weekly-report", "from": "ws_evil"}
+
+
+def test_failed_answer_does_not_start_agent(ws):
+    add_ticket(ws, "t_ask00003", status="waiting", waiting_on={"kind": "question", "ref": "q1"})
+    relay_on(ws, [{"id": "m_10", "type": "answer", "ticket": "t_ask00003", "from": "ws_a",
+                   "body": {"question_id": "q9", "answer": "Yes"}}])
+    (ws / "fail-answer").write_text("1")
+    assert Scheduler(ws).tick(T(8)) == []
+
+
+def test_phone_answer_is_never_recorded_by_scheduler(ws):
+    add_ticket(ws, "t_ask00004", status="waiting", waiting_on={"kind": "question", "ref": "q1"})
+    relay_on(ws, [{"id": "m_11", "type": "answer", "ticket": "t_ask00004", "from": "ph_abc",
+                   "body": {"question_id": "q1", "answer": "monday"}}])
+    assert Scheduler(ws).tick(T(8)) == []
+    assert not any(a[:1] == ["answer"] for a in names(ws))

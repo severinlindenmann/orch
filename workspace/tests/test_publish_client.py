@@ -190,3 +190,64 @@ def test_pack_skips_dot_entries_and_refuses_workspace_root(tmp_path):
     shutil.rmtree(app / ".orch")
     names = tarfile.open(fileobj=io.BytesIO(publish.pack(app, None))).getnames()
     assert sorted(names) == ["app.toml", "index.html"]
+
+
+def test_net_retries_connection_failures_only(monkeypatch):
+    import urllib.error
+
+    from orch import net
+    from orch.errors import Refused
+
+    sleeps, tries = [], []
+    monkeypatch.setattr(net.time, "sleep", sleeps.append)
+
+    def refused(req, timeout):
+        tries.append(1)
+        raise urllib.error.URLError(ConnectionRefusedError("refused"))
+
+    monkeypatch.setattr(net.urllib.request, "urlopen", refused)
+    try:
+        net.call("POST", "http://x.test/a", body={"a": 1})
+        raise AssertionError("expected Refused")
+    except Refused as e:
+        assert "Cannot reach" in str(e)
+    assert len(tries) == 4 and sleeps == [1, 2, 4]
+
+    tries.clear()
+    sleeps.clear()
+
+    def answered(req, timeout):
+        tries.append(1)
+        raise urllib.error.HTTPError("http://x.test/a", 500, "err", {}, None)
+
+    monkeypatch.setattr(net.urllib.request, "urlopen", answered)
+    try:
+        net.call("POST", "http://x.test/a", body={"a": 1})
+    except (Refused, Exception):
+        pass
+    assert len(tries) == 1 and sleeps == []
+
+
+def test_net_does_not_replay_posts_after_send(monkeypatch):
+    from orch import net
+    from orch.errors import Refused
+
+    sleeps, tries = [], []
+    monkeypatch.setattr(net.time, "sleep", sleeps.append)
+
+    def reset(req, timeout):
+        tries.append(1)
+        raise ConnectionResetError("reset")  # raised after the request went out
+
+    monkeypatch.setattr(net.urllib.request, "urlopen", reset)
+    for method, url, n in (
+        ("POST", "http://x.test/v1/files", 1),
+        ("GET", "http://x.test/v1/files", 4),
+        ("POST", "http://x.test/v1/messages", 4),
+    ):
+        tries.clear()
+        try:
+            net.call(method, url, body={"a": 1} if method == "POST" else None)
+        except Refused:
+            pass
+        assert len(tries) == n, (method, url)

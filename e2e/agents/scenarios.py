@@ -98,6 +98,7 @@ def evidence_ok(t: dict, n: int) -> str:
     done = [c for c in t["checklist"] if c.get("done") and c.get("evidence")]
     check(len(t["checklist"]) >= n, f"{t['id']}: {len(t['checklist'])} checklist items, wanted >= {n}")
     check(len(done) >= n, f"{t['id']}: only {len(done)} items done with evidence: {[(c['text'], c.get('done'), len(c.get('evidence') or [])) for c in t['checklist']]}")
+    check(all(c.get("evidence") for c in t["checklist"] if c.get("done")), f"{t['id']}: a done item has no evidence")
     return f"{len(t['checklist'])} items, {len(done)} with evidence"
 
 
@@ -164,24 +165,17 @@ def agent_ticket_task(e, sid: str, ws_name: str, tool: str, git: bool) -> str:
     ws = e.ws(ws_name)
     fixture(e, ws, git)
     before = {t["id"] for t in tickets(ws)}
-    note = ""
-    run = run_agent(e, sid + "-plain", tool, ws, RENAME_PROMPT, timeout=420)
+    run = run_agent(e, sid, tool, ws, RENAME_PROMPT, timeout=420)  # plain request, no nudge
     check(not run.timed_out, f"{tool} ran into the time limit")
     new = new_tickets(ws, before)
-    if not new:  # finding: AGENTS.md / skill alone did not make the agent open a ticket; retry with the nudge a user would give
-        note = "FINDING: plain request made no ticket (retried with 'track as ticket'); "
-        fixture(e, ws, git)  # undo the first run's edits
-        run = run_agent(e, sid, tool, ws, RENAME_PROMPT + " Track this work as an orch ticket.", timeout=420)
-        check(not run.timed_out, f"{tool} ran into the time limit (retry)")
-        new = new_tickets(ws, before)
-    check(len(new) >= 1, f"no ticket was made by the {tool} agent even when asked")
+    check(len(new) >= 1, f"the {tool} agent made no ticket for a plain request")
     t = max(new, key=lambda x: len(x["checklist"]))
     validate(e, t)
-    ev = evidence_ok(t, 2)
+    ev = evidence_ok(t, 1)
     want = "agent:claude-code" if tool == "claude" else "agent:codex"
     check(want in by(t), f"history has no {want}: {sorted(by(t))}")
     work = rename_done(e, ws)
-    return f"{note}{ev}; status {t['status']}; {work}; {run.secs:.0f}s"
+    return f"{ev}; status {t['status']}; {work}; {run.secs:.0f}s"
 
 
 @scenario("AG-W2", slow=True)

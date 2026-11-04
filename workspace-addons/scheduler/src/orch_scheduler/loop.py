@@ -169,8 +169,12 @@ class Scheduler:
             if not t or t["status"] != "waiting" or self.runner.locked(t["id"]):
                 return None
             orchcli.call(self.root, "relay", "done", mid, by=False)
-            orchcli.call(self.root, "answer", t["id"], str(body.get("question_id")), str(body.get("answer")),
-                         "--via", "relay")
+            if str(m.get("from", "")).startswith("ph_"):
+                return None  # a phone answer is applied as the human by `orch relay inbox`, never as the scheduler
+            if orchcli.call(self.root, "answer", t["id"], str(body.get("question_id")), str(body.get("answer")),
+                            "--via", "relay") is None:
+                orchcli.log(self.root, t["id"], "Scheduler could not record an answer from the relay; agent not started")
+                return None
             return t["id"] if self.runner.start(t["id"], outside_prompt(t["id"], "answer", str(body.get("answer"))),
                                                 pick_agent(self.cfg, t), f"relay answer {mid}", now) else None
         if kind == "webhook":

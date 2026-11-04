@@ -4,11 +4,43 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 from orch.errors import Refused
+
+RETRY_DELAYS = (1, 2, 4)  # seconds; connection-level failures only
+
+
+def _safe_to_retry(req, exc) -> bool:
+    """Retry only when the request cannot have been processed. Never replay a POST that may have arrived."""
+    replayable = req.get_method() in ("GET", "HEAD") or req.full_url.split("?")[0].endswith("/v1/messages")
+    reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    if isinstance(reason, (ConnectionRefusedError, socket.gaierror)):
+        return True  # the connection was never established
+    if isinstance(exc, urllib.error.URLError) and isinstance(reason, TimeoutError):
+        return True  # connect timeout (urllib wraps only connect/send errors)
+    return replayable and isinstance(reason, (ConnectionError, TimeoutError, OSError))
+
+
+def _send(req, timeout):
+    """urlopen with up to 3 retries (1/2/4 s) on connection-level failures, never after a response."""
+    delays = list(RETRY_DELAYS)
+    while True:
+        try:
+            r = urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError:
+            raise  # a response arrived: never retry (no duplicate POSTs)
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            if not delays or not _safe_to_retry(req, e):
+                raise
+            time.sleep(delays.pop(0))
+            continue
+        with r:
+            return r.status, r.read()
 
 
 def call(
@@ -29,8 +61,7 @@ def call(
         hdrs.setdefault("Content-Type", "application/octet-stream")
     req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, r.read()
+        return _send(req, timeout)
     except urllib.error.HTTPError as e:
         raw = e.read()
         msg, out = f"The server answered {e.code}.", ""

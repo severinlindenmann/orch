@@ -261,6 +261,15 @@ def _asked_path(root: Path) -> Path:
     return net.secrets_dir(root) / "questions-sent.json"
 
 
+def asked_to_phones(root: Path, tid: str, qid: str) -> bool:
+    """True when this question was also sent to the phones (only a human answers those)."""
+    return any(
+        a.get("ticket") == tid and a.get("question_id") == qid and a.get("to") == "phones"
+        for a in net.read_json(_asked_path(root), {}).values()
+        if isinstance(a, dict)
+    )
+
+
 def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     """(note, ticket id when the answer was applied)."""
     note = _apply_answer_note(root, msg)

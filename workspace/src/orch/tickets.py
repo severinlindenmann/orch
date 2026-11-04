@@ -334,8 +334,11 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
         raise Refused(f"Ticket {tid} has no question {qid}.")
     if q["answer"] is not None:
         raise Refused(f"{qid} is already answered.")
-    if q["options"] and text not in q["options"]:
-        raise Refused(f"Answer must be one of: {', '.join(q['options'])}.")
+    text = text.strip()
+    for opt in q["options"]:  # an option matches case-insensitively: store its spelling; else free text
+        if opt.casefold() == text.casefold():
+            text = opt
+            break
     q["answer"], q["answered_by"], q["via"] = text, by, via
     w = ticket.get("waiting_on")
     if w and w.get("kind") == "question" and w.get("ref") == qid:
