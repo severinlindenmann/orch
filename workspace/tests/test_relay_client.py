@@ -405,8 +405,16 @@ def test_inbox_json_reports_applied_answer(proj, run, new_ticket, rel):
     tid = new_ticket()
     run("ask", tid, "A or B?", "--option", "A", "--option", "B", "--phone", "--by", "agent:claude-code")
     q = rel.sent[0]
-    rel.inbox.append(msg("m_answer0000000002", "answer", {"question_id": "q1", "answer": "A"},
-                         frm="ph_iphone0001", ticket=tid, reply_to=q["id"]))
+    rel.inbox.append(
+        msg(
+            "m_answer0000000002",
+            "answer",
+            {"question_id": "q1", "answer": "A"},
+            frm="ph_iphone0001",
+            ticket=tid,
+            reply_to=q["id"],
+        )
+    )
     data = json.loads(run("relay", "inbox", "--json")[1])
     assert data[0]["applied"] is True and data[0]["ticket"] == tid
 
