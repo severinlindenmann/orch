@@ -226,3 +226,28 @@ def test_net_retries_connection_failures_only(monkeypatch):
     except (Refused, Exception):
         pass
     assert len(tries) == 1 and sleeps == []
+
+
+def test_net_does_not_replay_posts_after_send(monkeypatch):
+    from orch import net
+    from orch.errors import Refused
+
+    sleeps, tries = [], []
+    monkeypatch.setattr(net.time, "sleep", sleeps.append)
+
+    def reset(req, timeout):
+        tries.append(1)
+        raise ConnectionResetError("reset")  # raised after the request went out
+
+    monkeypatch.setattr(net.urllib.request, "urlopen", reset)
+    for method, url, n in (
+        ("POST", "http://x.test/v1/files", 1),
+        ("GET", "http://x.test/v1/files", 4),
+        ("POST", "http://x.test/v1/messages", 4),
+    ):
+        tries.clear()
+        try:
+            net.call(method, url, body={"a": 1} if method == "POST" else None)
+        except Refused:
+            pass
+        assert len(tries) == n, (method, url)
