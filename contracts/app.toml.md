@@ -7,9 +7,9 @@ Apps are temporary (default 7 days, max 90) or permanent, like files; lifetime i
 name   = "weekly-report"          # ^[a-z0-9-]{2,40}$, becomes /a/weekly-report
 about  = "Weekly ticket report"   # one line, shown in the admin portal
 stack  = "python"                 # static | python | node
-start  = "python main.py"         # python/node only: command that starts the server
+start  = "python3 main.py"         # python/node only: command that starts the server
 health = "/health"                # python/node only: GET must answer 200 within 20 s
-test   = "python -m unittest discover -s tests"   # optional: must exit 0 before the switch
+test   = "python3 -m unittest discover -s tests"   # optional: must exit 0 before the switch
 store  = "sqlite"                 # none | json | markdown | sqlite
 public = false                    # false = needs ?token=<view token> (default), true = open link
 ```
