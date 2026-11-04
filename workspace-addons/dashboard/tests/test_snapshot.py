@@ -1,0 +1,44 @@
+import json
+import re
+
+from orch_dashboard import cli
+from orch_dashboard.snapshot import publish_snapshot, render_snapshot, write_snapshot
+
+
+def test_snapshot_single_file(ws):
+    html = render_snapshot(ws)
+    assert "window.ORCH_SNAPSHOT=" in html and "<style>" in html
+    assert 'href="style.css"' not in html and 'src="app.js"' not in html and 'href="tokens.css"' not in html
+    data = json.loads(re.search(r"window\.ORCH_SNAPSHOT=(.*?);</script>", html, re.DOTALL).group(1))
+    assert data["inbox"] is None and any(t["id"] == "t_7k3f9q" for t in data["tickets"])
+    assert "orn_SECRET" not in html and "weekly report query" not in html  # inbox text stays local
+
+
+def test_snapshot_escapes_script_close(ws):
+    p = ws / ".orch" / "tickets" / "t_other000x.json"
+    t = json.loads(p.read_text())
+    t["title"] = "</script><script>alert(1)</script>"
+    p.write_text(json.dumps(t))
+    html = render_snapshot(ws)
+    assert "</script><script>alert(1)" not in html
+
+
+def test_write_and_cli(ws, tmp_path, capsys):
+    out = tmp_path / "s.html"
+    assert write_snapshot(ws, out) == out and out.stat().st_size > 1000
+    assert cli.main(["--dir", str(ws), "snapshot", "--out", str(tmp_path / "c.html")]) == 0
+    assert (tmp_path / "c.html").is_file()
+
+
+def test_cli_without_workspace(tmp_path):
+    assert cli.main(["--dir", str(tmp_path)]) == 2
+
+
+def test_publish_calls_orch_publish_app(ws):
+    calls = []
+
+    class R:
+        returncode = 0
+
+    publish_snapshot(ws, run=lambda cmd: calls.append(cmd) or R())
+    assert calls[0][:3] == ["orch", "publish", "app"]
