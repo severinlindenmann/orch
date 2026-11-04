@@ -103,7 +103,7 @@ def w3(e):
     e.orch(ws, "check", "add", t, "Do the thing")
     rc, out, err = e.orch(ws, "check", "done", t, "c1", ok=False)
     check(rc == 2, f"expected exit 2, got {rc}")
-    check(err.startswith("Refused:") and "evidence" in err.lower(), f"reason not plain: {err!r}")
+    check(err.startswith("Refused:") and ("proof" in err.lower() or "evidence" in err.lower()), f"reason not plain: {err!r}")
     check(not tload(ws, t)["checklist"][0]["done"], "check was marked done anyway")
     e.orch(ws, "check", "done", t, "c1", "--evidence", EVID)
     c = tload(ws, t)["checklist"][0]
@@ -142,9 +142,8 @@ def w5(e):
     e.orch(ws, "ask", t, "Which colour?", "--option", "red", "--option", "blue", "--recommend", "blue", by="agent:claude-code")
     d = tload(ws, t)
     check(d["status"] == "waiting" and d["waiting_on"] == {"kind": "question", "ref": "q1"}, f"not waiting: {d['status']}")
-    rc, _, err = e.orch(ws, "answer", t, "q1", "green", ok=False, by="human:sev")
-    check(rc == 2, "answer outside the options was accepted")
-    e.orch(ws, "answer", t, "q1", "blue", by="human:sev")
+    # an option matches case-insensitively and is stored in its own spelling; other text is a free answer (#21)
+    e.orch(ws, "answer", t, "q1", "BLUE", by="human:sev")
     q = tload(ws, t)["questions"][0]
     check(q["answer"] == "blue" and q["answered_by"] == "human:sev" and q["via"] == "cli", f"answer fields {q}")
     check(tload(ws, t)["status"] == "active", "ticket did not resume")
