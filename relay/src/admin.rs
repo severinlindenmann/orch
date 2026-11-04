@@ -8,7 +8,7 @@ use crate::{auth, shared};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
-use axum::response::Html;
+use axum::response::{Html, IntoResponse};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use rusqlite::{params, params_from_iter, Connection};
@@ -57,6 +57,16 @@ pub fn router(app: AppState) -> Router {
             "/admin/api/phones/:id",
             axum::routing::patch(edit_phone).delete(del_phone),
         )
+        .fallback(|uri: axum::http::Uri| async move {
+            if uri.path().starts_with("/admin/api/") {
+                return not_found("No such route.").into_response();
+            }
+            (
+                StatusCode::NOT_FOUND,
+                Html(include_str!("../web/not-available.html")),
+            )
+                .into_response()
+        })
         .layer(DefaultBodyLimit::max(21 * 1024 * 1024))
         .with_state(app)
 }
@@ -69,20 +79,16 @@ fn parse_tags(v: &Value) -> Res<Vec<String>> {
     let Some(a) = v.as_array() else {
         return Err(invalid("`tags` must be a list."));
     };
-    let mut out = vec![];
-    for t in a {
-        let t = t.as_str().unwrap_or("").trim();
-        if t.is_empty() || t.chars().count() > 32 {
-            return Err(invalid("Each tag must be 1 to 32 characters."));
-        }
-        out.push(t.to_string());
-    }
-    Ok(out)
+    store::valid_tags(a).map_err(invalid)
+}
+
+fn parse_description(v: &Value) -> Res<String> {
+    store::valid_description(v.as_str().unwrap_or("")).map_err(invalid)
 }
 
 pub fn prompt(public: &str, ws: &str, token: &str) -> String {
     format!(
-        "Connect this workspace to orch-relay. Run in the project folder:\n  orch relay connect {public} --workspace {ws} --token {token}\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL {public}/onboarding.sh | sh -s -- --workspace {ws} --token {token}\n  Windows: & ([scriptblock]::Create((irm {public}/onboarding.ps1))) -Workspace {ws} -Token {token}"
+        "Connect this workspace to orch-relay. Run in the project folder:\n  orch relay connect {public} --workspace {ws} --token {token}\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL {public}/onboarding.sh | sh -s -- --workspace {ws} --token {token}\n  Windows: & ([scriptblock]::Create((irm {public}/onboarding.ps1))) -Workspace {ws} -Token {token}\nThen describe this workspace in one sentence and 2-4 tags: orch relay profile --description \"...\" --tags a,b"
     )
 }
 
@@ -105,7 +111,6 @@ async fn list_ws(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> 
             |r| r.get(0),
         )?;
         w["unread"] = n.into();
-        w.as_object_mut().unwrap().remove("last_seen");
     }
     Ok(Json(json!({"items": items, "next": null})))
 }
@@ -128,7 +133,7 @@ async fn add_ws(
             Err(invalid("`tags` must be a list."))
         }
     })?;
-    let desc = v["description"].as_str().unwrap_or("");
+    let desc = parse_description(&v["description"])?;
     let id = rand_id("ws_", 10);
     let token = rand_token("orn_", 32);
     app.db.lock().unwrap().execute(
@@ -163,14 +168,14 @@ async fn edit_ws(
     }
     if let Some(d) = v.get("description") {
         c.execute(
-            "UPDATE workspaces SET description=?2 WHERE id=?1",
-            params![id, d.as_str().unwrap_or("")],
+            "UPDATE workspaces SET description=?2, profile_by='admin' WHERE id=?1",
+            params![id, parse_description(d)?],
         )?;
     }
     if let Some(t) = v.get("tags") {
         let t = parse_tags(t)?;
         c.execute(
-            "UPDATE workspaces SET tags=?2 WHERE id=?1",
+            "UPDATE workspaces SET tags=?2, profile_by='admin' WHERE id=?1",
             params![id, serde_json::to_string(&t).unwrap()],
         )?;
     }

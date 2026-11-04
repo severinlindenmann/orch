@@ -24,7 +24,8 @@
         "files": false,
         "delegate": false,
         "start": false
-      }
+      },
+      "profile_by": "workspace"
     },
     {
       "id": "ws_home000001",
@@ -46,7 +47,8 @@
         "files": false,
         "delegate": false,
         "start": false
-      }
+      },
+      "profile_by": "admin"
     }
   ]
 }

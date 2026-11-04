@@ -31,7 +31,9 @@ pub fn router(app: AppState) -> Router {
                 .post(crate::webhooks::call)
                 .put(crate::webhooks::call),
         )
+        .route("/", get(root_page))
         .route("/v1/whoami", get(whoami))
+        .route("/v1/me", axum::routing::patch(patch_me))
         .route("/v1/messages", post(post_message))
         .route("/v1/inbox", get(inbox))
         .route("/v1/inbox/ack", post(ack))
@@ -52,6 +54,7 @@ pub fn router(app: AppState) -> Router {
                 .layer(DefaultBodyLimit::max(crate::transcribe::MAX_AUDIO + 1024)),
         )
         .merge(crate::phone::router())
+        .fallback(not_found_page)
         .layer(DefaultBodyLimit::max(MAX_JSON))
         .with_state(app)
 }
@@ -60,12 +63,10 @@ pub fn parse_body(b: &Bytes) -> Res<Value> {
     serde_json::from_slice(b).map_err(|e| invalid(format!("Body is not valid JSON: {e}")))
 }
 
-async fn whoami(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {
-    let c = app.db.lock().unwrap();
-    let id = auth::workspace(&c, &h)?;
+fn whoami_body(c: &rusqlite::Connection, id: &str) -> Res<Value> {
     let mut card = c.query_row(
         &format!("SELECT {} FROM workspaces WHERE id=?1", store::WS_CARD_COLS),
-        [&id],
+        [id],
         store::ws_card,
     )?;
     let phones: Vec<String> = c
@@ -74,13 +75,88 @@ async fn whoami(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {
         .collect::<Result<_, _>>()?;
     let n = phones
         .iter()
-        .filter(|w| store::parse_list(w).contains(&id))
+        .filter(|w| store::parse_list(w).contains(&id.to_string()))
         .count();
     let o = card.as_object_mut().unwrap();
     o.remove("online");
     o.remove("last_seen");
+    o.remove("profile_by");
     o.insert("phones".into(), n.into());
-    Ok(Json(card))
+    Ok(card)
+}
+
+async fn whoami(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {
+    let c = app.db.lock().unwrap();
+    let id = auth::workspace(&c, &h)?;
+    Ok(Json(whoami_body(&c, &id)?))
+}
+
+/// `PATCH /v1/me`: a workspace changes its own description and tags.
+async fn patch_me(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<Json<Value>> {
+    let v = parse_body(&body)?;
+    let out = {
+        let c = app.db.lock().unwrap();
+        let me = auth::workspace(&c, &h)?;
+        let desc = match v.get("description") {
+            None => None,
+            Some(d) => Some(
+                d.as_str()
+                    .ok_or_else(|| invalid("`description` must be text."))
+                    .and_then(|d| store::valid_description(d).map_err(invalid))?,
+            ),
+        };
+        let tags = match v.get("tags") {
+            None => None,
+            Some(t) => Some(
+                t.as_array()
+                    .ok_or_else(|| invalid("`tags` must be a list."))
+                    .and_then(|a| store::valid_tags(a).map_err(invalid))?,
+            ),
+        };
+        if desc.is_some() || tags.is_some() {
+            // Only these two fields, and only while the token that authenticated this call is still current.
+            let cur = auth::bearer(&h).map(token_hash).unwrap_or_default();
+            c.execute(
+                "UPDATE workspaces SET description=COALESCE(?3,description), tags=COALESCE(?4,tags), profile_by='workspace' WHERE id=?1 AND token_hash=?2",
+                params![
+                    me,
+                    cur,
+                    desc,
+                    tags.as_ref().map(|t| serde_json::to_string(t).unwrap())
+                ],
+            )?;
+        }
+        if desc.is_some() || tags.is_some() {
+            let rel = store::related(&c, &me);
+            store::bump_and_hint(&c, &app.key, &rel)?;
+        }
+        whoami_body(&c, &me)?
+    };
+    app.notify.notify_waiters();
+    Ok(Json(out))
+}
+
+const NOT_AVAILABLE: &str = include_str!("../web/not-available.html");
+
+fn page(status: StatusCode) -> Response {
+    (
+        status,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        NOT_AVAILABLE,
+    )
+        .into_response()
+}
+
+async fn root_page() -> Response {
+    page(StatusCode::OK)
+}
+
+/// Unknown paths: the API answers JSON, everything else a friendly dark page.
+async fn not_found_page(uri: axum::http::Uri) -> Response {
+    if uri.path().starts_with("/v1/") {
+        return not_found("No such route.").into_response();
+    }
+    page(StatusCode::NOT_FOUND)
 }
 
 async fn post_message(
