@@ -134,8 +134,12 @@ if (typeof document !== "undefined") {
         l.click();
         l.remove();
         setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        done.textContent = "Downloaded. Look in your Downloads folder.";
       });
-      $("extra").append(meta, btn);
+      const done = document.createElement("p");
+      done.className = "download-note";
+      done.setAttribute("role", "status");
+      $("extra").append(meta, btn, done);
     }
     main();
   })();

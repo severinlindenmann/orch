@@ -220,6 +220,17 @@ pub fn notice(status: u16, icon_name: &str, title: &str, msg: &str, retry: bool)
     r
 }
 
+/// The bare address: say what this is instead of "not available".
+pub async fn root() -> Response {
+    notice(
+        404,
+        "link",
+        "This is a private orch server",
+        "Links you were sent open their page directly.",
+        false,
+    )
+}
+
 /// Anything that is not a route: root, wrong links.
 pub async fn not_found() -> Response {
     notice(

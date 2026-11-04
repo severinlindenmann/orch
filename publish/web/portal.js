@@ -14,6 +14,9 @@
   const unauthorized = new Error('Sign in to continue.');
   const path = (kind, id) => `/admin/api/${kind}/${encodeURIComponent(id)}`;
 
+  let verified = false;
+  let afterRender = null;
+  let skTimer;
   let lastUpdated = 0;
   let copied = false;
   let flash = {};
@@ -47,6 +50,7 @@
     });
   }
 
+  const withRetry = m => (/try again/i.test(String(m)) ? String(m).trim() : `${String(m).trim()} Try again.`);
   function ago(ms) {
     const s = Math.round((Date.now() - ms) / 1000);
     return s < 20 ? 'just now' : s < 90 ? 'a minute ago' : s < 3600 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
@@ -67,23 +71,27 @@
       });
     } catch (_) { throw new Error('Could not connect. Check your connection and try again.'); }
     if (response.status === 401) {
+      const expired = verified;
       const hadToken = Boolean(token);
       const failed = token;
+      verified = false;
       token = '';
       readyData = null;
       try { sessionStorage.removeItem('orch_admin'); } catch (_) { /* Storage may be blocked. */ }
       document.cookie = 'orch_admin=; path=/; SameSite=Strict; Max-Age=0';
       generation++;
-      login(hadToken ? 'That access key didn’t work. Check it for typing mistakes and try again.' : '', failed);
+      if (expired) login('Your session ended. Sign in again.');
+      else login(hadToken ? 'That access key didn’t work. Check it for typing mistakes and try again.' : '', failed);
       throw unauthorized;
     }
     const data = response.status === 204 ? null : await response.json().catch(() => null);
-    if (!response.ok) throw Object.assign(new Error(data?.message || 'Something went wrong. Please try again.'), { status: response.status });
+    if (response.status >= 500) throw Object.assign(new Error('Something went wrong on our side. Try again in a moment.'), { status: response.status });
+    if (!response.ok) throw Object.assign(new Error(data?.message || 'Something went wrong. Try again.'), { status: response.status });
     return data;
   }
 
   function head(title, subtitle, action = '') {
-    return `<div class="heading"><div><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div>${action}</div>`;
+    return `<div class="heading"><div><h1 tabindex="-1">${esc(title)}</h1><p>${esc(subtitle)}</p></div>${action}</div>`;
   }
 
   function showAlert(message) {
@@ -100,9 +108,13 @@
     showAlert('');
     const busy = container.contains(document.activeElement) && document.activeElement.tagName === 'BUTTON' ? document.activeElement : container.querySelector('button[type=submit]');
     busy?.setAttribute('aria-busy', 'true');
+    let failed = false;
     try { await action(); } catch (error) {
-      if (error !== unauthorized) onError(error.message);
-    } finally { busy?.removeAttribute('aria-busy'); controls.forEach((el, i) => { el.disabled = disabled[i]; }); }
+      if (error !== unauthorized) { failed = true; onError(error.message); }
+    } finally {
+      busy?.removeAttribute('aria-busy'); controls.forEach((el, i) => { el.disabled = disabled[i]; });
+      if (failed && busy?.isConnected) busy.focus();
+    }
   }
 
   function setSignedIn(on) {
@@ -114,7 +126,7 @@
     setSignedIn(false);
     showAlert('');
     document.querySelector('#crumb').textContent = 'Sign in';
-    view.innerHTML = `<form id="login-form" class="card pad login" novalidate><h1>Sign in</h1><p>Enter your admin access key to manage workspaces, files and apps.</p><div class="field"><label for="admin-token">Admin access key</label><div class="pw"><input id="admin-token" name="token" type="password" autocomplete="current-password" aria-describedby="login-error" ${message ? 'class="invalid" aria-invalid="true"' : ''}><button type="button" class="small quiet" id="pw-toggle" aria-pressed="false">Show</button></div><p class="field-error" id="login-error" role="alert" ${message ? '' : 'hidden'}>${esc(message)}</p></div><button class="primary" type="submit">Continue</button><details class="help"><summary>Where do I find this?</summary><p>It is the admin key that was set when orch publish was installed. Ask the person who set up the server, or look for the file <code>admin-token</code> on the server.</p></details></form>`;
+    view.innerHTML = `<form id="login-form" class="card pad login" novalidate><h1>Sign in</h1><p>Enter your admin access key to manage workspaces, files and apps.</p><div class="field"><label for="admin-token">Admin access key</label><div class="pw"><input id="admin-token" name="token" type="password" autocomplete="current-password" aria-describedby="login-error" ${message ? 'class="invalid" aria-invalid="true"' : ''}><button type="button" class="small quiet" id="pw-toggle" aria-pressed="false">Show</button></div><p class="field-error" id="login-error" role="alert" ${message ? '' : 'hidden'}>${esc(message)}</p></div><button class="primary" type="submit">Sign in</button><details class="help"><summary>Where do I find this?</summary><p>It is the admin key that was set when orch publish was installed. Ask the person who set up the server, or look for the file <code>admin-token</code> on the server.</p></details></form>`;
     const input = document.querySelector('#admin-token');
     input.value = keep;
     input.focus();
@@ -150,8 +162,8 @@
         ['apps', 'Apps', 'Publish websites and small applications.']
       ].map(([key, label, hint]) => `<label class="check"><input name="${key}" type="checkbox" ${rights[key] ? 'checked' : ''}><span>${label}<small>${hint}</small></span></label>`).join('')}</fieldset>
       <div class="field field-spaced"><label for="sharing">Sharing</label><select id="sharing" name="public"><option value="false" ${!rights.public ? 'selected' : ''}>Private only</option><option value="true" ${rights.public ? 'selected' : ''}>Public links allowed</option></select></div>`;
-    const descr = `<div class="field"><label for="description">Description <span class="muted">(optional)</span></label><textarea id="description" name="description" maxlength="280" placeholder="What is this workspace for?">${esc(workspace.description)}</textarea><small class="muted">Your agent can suggest this later. You approve it first.</small></div>
-      <div class="field"><label for="tags">Tags <span class="muted">(optional)</span></label><input id="tags" name="tags" type="text" value="${esc((workspace.tags || []).join(', '))}" placeholder="home, reports"><small class="muted">Separate tags with commas.</small></div>`;
+    const descr = `<div class="field"><label for="description">Description <span class="muted">(optional)</span></label><textarea id="description" name="description" maxlength="280" aria-describedby="description-error" placeholder="What is this workspace for?">${esc(workspace.description)}</textarea><p class="field-error" id="description-error" role="alert" hidden></p><small class="muted">Your agent can suggest this later. You approve it first.</small></div>
+      <div class="field"><label for="tags">Tags <span class="muted">(optional)</span></label><input id="tags" name="tags" type="text" value="${esc((workspace.tags || []).join(', '))}" placeholder="home, reports" aria-describedby="tags-error"><p class="field-error" id="tags-error" role="alert" hidden></p><small class="muted">Separate tags with commas.</small></div>`;
     return `<div class="field"><label for="name">Workspace name</label><input id="name" name="name" type="text" value="${esc(workspace.name)}" placeholder="e.g. Pilatus Workspace" maxlength="60" autocomplete="off" aria-describedby="name-error"><p class="field-error" id="name-error" role="alert" hidden></p></div>
       ${isNew ? `<details class="more"><summary>More options</summary>${descr}${more}</details>` : descr + `<details class="more"><summary>More options</summary>${more}</details>`}
       <p class="field-error form-error" role="alert" hidden></p>`;
@@ -172,14 +184,37 @@
     err.textContent = message || ''; err.hidden = !message;
   }
 
+  const checks = {
+    name: v => (v.trim() ? '' : 'Enter a name for this workspace.'),
+    description: v => (v.length > 280 ? 'Use at most 280 characters.' : /[\r\n]/.test(v) ? 'Keep it on one line.' : ''),
+    tags: v => {
+      const list = v.split(',').map(t => t.trim()).filter(Boolean);
+      if (list.length > 8) return 'Use at most 8 tags.';
+      return list.every(t => /^[a-z0-9-]{1,24}$/.test(t)) ? '' : 'Tags use lowercase letters, numbers and hyphens, up to 24 characters each.';
+    }
+  };
+  function validate(form, name) {
+    const message = checks[name](form.elements[name].value);
+    fieldError(form, name, message);
+    return !message;
+  }
+
   function bindSave(form, save) {
     const formError = form.querySelector('.form-error');
-    form.elements.name.addEventListener('input', () => fieldError(form, 'name', ''));
+    Object.keys(checks).forEach(name => {
+      form.elements[name].addEventListener('input', () => fieldError(form, name, ''));
+      form.elements[name].addEventListener('blur', () => validate(form, name));
+    });
     form.addEventListener('submit', event => {
       event.preventDefault();
       const body = readFields(form);
       formError.hidden = true;
-      if (!body.name) { fieldError(form, 'name', 'Enter a name for this workspace.'); form.elements.name.focus(); return; }
+      const bad = Object.keys(checks).filter(name => !validate(form, name));
+      if (bad.length) {
+        const first = form.elements[bad[0]];
+        const more = first.closest('details.more'); if (more) more.open = true;
+        first.focus(); return;
+      }
       void run(form, () => save(body), message => { formError.textContent = message; formError.hidden = false; });
     });
   }
@@ -192,7 +227,7 @@
     const p = w.pending, list = t => (t && t.length ? t.join(', ') : 'none');
     const line = (label, now, next) => `<div class="review-line"><strong>${label}</strong><p class="muted">Now: ${esc(now)}</p><p>Proposed: ${esc(next)}</p></div>`;
     const special = /[^\x00-\x7f]/.test(p.description || '') ? '<p class="muted">Contains special characters.</p>' : '';
-    return `<section class="review" data-review="${i}" role="group" aria-label="Change to review for ${esc(w.name)}"><h4 tabindex="-1">${esc(w.name)} wants to change how it is described</h4>${p.description !== null && p.description !== undefined ? line('Description', w.description || 'none', p.description) : ''}${p.tags ? line('Tags', list(w.tags), list(p.tags)) : ''}${special}<p class="muted">The old text stays in use until you approve.</p><div class="actions"><button class="primary" data-act="approve">Approve</button><button data-act="reject">Reject</button></div><p class="review-result" role="alert">${esc(flash[w.id] || '')}</p></section>`;
+    return `<section class="review" data-review="${i}" role="group" aria-label="Change to review for ${esc(w.name)}"><h3 tabindex="-1">${esc(w.name)} wants to change how it is described</h3>${p.description !== null && p.description !== undefined && p.description !== (w.description || '') ? line('Description', w.description || 'none', p.description) : ''}${p.tags && list(p.tags) !== list(w.tags) ? line('Tags', list(w.tags), list(p.tags)) : ''}${special}<p class="muted">The old text stays in use until you approve.</p><div class="actions"><button class="primary" data-act="approve">Approve</button><button data-act="reject">Reject</button></div><p class="review-result" role="alert">${esc(flash[w.id] || '')}</p></section>`;
   }
 
   function bindReview(box, w) {
@@ -217,16 +252,20 @@
           await render();
           return;
         }
-        result.textContent = `${error.message} Try again.`;
+        result.textContent = withRetry(error.message);
         result.classList.add('field-error');
         button.textContent = label;
         button.removeAttribute('aria-busy');
         box.querySelectorAll('button').forEach(b => { b.disabled = false; });
+        button.focus();
       } finally { delete box.dataset.busy; }
     }));
   }
 
+  // A proposal equal to the live text is not a change: hide it.
+  const proposalChanges = w => w.pending && ((w.pending.description != null && w.pending.description !== (w.description || '')) || (w.pending.tags && w.pending.tags.join(',') !== (w.tags || []).join(',')));
   function showWorkspaces(items) {
+    items = items.map(w => (w.pending && !proposalChanges(w) ? { ...w, pending: null } : w));
     const files = items.reduce((n, w) => n + (Number(w.files) || 0), 0);
     const apps = items.reduce((n, w) => n + (Number(w.apps) || 0), 0);
     view.innerHTML = head('Your workspaces', 'One place for everything your workspaces share.', items.length ? '<a class="button primary" href="#add">＋ Add workspace</a>' : '') +
@@ -235,29 +274,39 @@
       `<div id="editor"></div>${items.length ? `<section class="card">${items.map((w, i) => {
         const rights = w.rights || {};
         const labels = [rights.permanent && 'Permanent files', rights.files && 'Temporary files', rights.apps && 'Apps', rights.public ? 'Public links allowed' : 'Private only'].filter(Boolean);
-        return `<article class="workspace"><div class="avatar" aria-hidden="true">${esc(initials(w.name))}</div><div><h3>${esc(w.name)}${w.pending ? ' <span class="badge">Needs your review</span>' : ''}</h3>${w.description ? `<p>${esc(w.description)}</p>` : '<p class="muted">No description yet.</p>'}<div class="workspace-tags">${(w.tags || []).map(tag => `<span class="workspace-tag">${esc(tag)}</span>`).join('')}</div><p class="rights">${esc(labels.join(' · '))}</p><p class="counts-inline">${esc(plural(Number(w.files) || 0, 'file', 'files'))} · ${esc(plural(Number(w.apps) || 0, 'app', 'apps'))}</p>${!w.pending && flash[w.id] ? `<p class="review-done" role="status">${esc(flash[w.id])}</p>` : ''}${w.pending ? reviewCard(w, i) : ''}</div><div class="number">${esc(w.files)}<small>${Number(w.files) === 1 ? 'file' : 'files'}</small></div><div class="number">${esc(w.apps)}<small>${Number(w.apps) === 1 ? 'app' : 'apps'}</small></div><button class="small" data-edit="${i}" aria-label="Edit ${esc(w.name)}">Edit</button></article>`;
+        return `<article class="workspace"><div class="avatar" aria-hidden="true">${esc(initials(w.name))}</div><div><h2>${esc(w.name)}${w.pending ? ' <span class="badge">Needs your review</span>' : ''}</h2>${w.description ? `<p>${esc(w.description)}</p>` : '<p class="muted">No description yet.</p>'}<div class="workspace-tags">${(w.tags || []).map(tag => `<span class="workspace-tag">${esc(tag)}</span>`).join('')}</div><p class="rights">${esc(labels.join(' · '))}</p><p class="counts-inline">${esc(plural(Number(w.files) || 0, 'file', 'files'))} · ${esc(plural(Number(w.apps) || 0, 'app', 'apps'))}</p>${!w.pending && flash[w.id] ? `<p class="review-done" role="status" tabindex="-1">${esc(flash[w.id])}</p>` : ''}${w.pending ? reviewCard(w, i) : ''}</div><div class="number">${esc(w.files)}<small>${Number(w.files) === 1 ? 'file' : 'files'}</small></div><div class="number">${esc(w.apps)}<small>${Number(w.apps) === 1 ? 'app' : 'apps'}</small></div><button class="small" data-edit="${i}" data-edit-id="${esc(w.id)}" aria-label="Edit ${esc(w.name)}">Edit</button></article>`;
       }).join('')}</section>` : '<section class="card empty-card"><h2>No workspaces yet</h2><p>A workspace is one project or person that shares files and apps. Add the first one, then connect your agent to it.</p><a class="button primary" href="#add">＋ Add your first workspace</a></section>'}<div class="helper"><div><b>Private by design.</b> Files are encrypted before they leave your workspace.</div><a href="#files">View files →</a></div>`;
     view.querySelectorAll('[data-review]').forEach(box => bindReview(box, items[Number(box.dataset.review)]));
     view.querySelectorAll('[data-edit]').forEach(button => button.addEventListener('click', () => edit(items[Number(button.dataset.edit)])));
     view.querySelector('[data-first-review]')?.addEventListener('click', e => {
       e.preventDefault();
-      const h = view.querySelector('.review h4');
+      const h = view.querySelector('.review h3');
       h?.scrollIntoView({ block: 'center' }); h?.focus();
     });
+    const done = view.querySelector('.review-done');
     const flashed = view.querySelector('.review-result:not(:empty)');
-    if (flashed) { const h = flashed.closest('.review').querySelector('h4'); h.scrollIntoView({ block: 'center' }); h.focus(); }
+    if (done) { done.scrollIntoView({ block: 'center' }); done.focus(); }
+    else if (flashed) { const h = flashed.closest('.review').querySelector('h3'); h.scrollIntoView({ block: 'center' }); h.focus(); }
     flash = {};
   }
 
+  function closeEditor(id) {
+    document.querySelector('#editor')?.replaceChildren();
+    const back = id && [...document.querySelectorAll('[data-edit-id]')].find(b => b.dataset.editId === id);
+    back?.focus();
+  }
+  let editingId = '';
   function edit(workspace) {
     const editor = document.querySelector('#editor');
+    editingId = workspace.id;
     editor.innerHTML = `<form class="card form pad workspace-edit" novalidate><h2>Edit ${esc(workspace.name)}</h2><div class="field-spaced">${fields(workspace)}</div><div class="actions"><button class="primary" type="submit">Save changes</button><button type="button" data-cancel>Cancel</button></div><section class="danger-zone"><h3>Danger zone</h3><p>Make a new access key if the old one leaked, or remove the workspace for good.</p><div class="actions"><button type="button" data-new-token>Make a new access key</button><button class="danger quiet" type="button" data-delete>Delete workspace</button></div></section></form>`;
     const form = editor.querySelector('form');
     form.elements.name.focus();
     form.scrollIntoView({ block: 'nearest' });
-    form.querySelector('[data-cancel]').addEventListener('click', () => { editor.replaceChildren(); });
+    form.querySelector('[data-cancel]').addEventListener('click', () => closeEditor(workspace.id));
     bindSave(form, async body => {
       await api(path('workspaces', workspace.id), 'PATCH', body);
+      afterRender = () => document.querySelector(`[data-edit-id="${CSS.escape(workspace.id)}"]`)?.focus();
       await render(); notify('Workspace saved.');
     });
     form.querySelector('[data-new-token]').addEventListener('click', async () => {
@@ -270,7 +319,7 @@
     });
     form.querySelector('[data-delete]').addEventListener('click', async () => {
       if (!await confirmDialog(`Delete “${workspace.name}”?`, 'Its files and apps are removed. This cannot be undone.', 'Delete workspace')) return;
-      void run(form, async () => { await api(path('workspaces', workspace.id), 'DELETE'); await render(); notify('Workspace deleted.'); });
+      void run(form, async () => { await api(path('workspaces', workspace.id), 'DELETE'); editingId = ''; await render(); notify('Workspace deleted.'); });
     });
   }
 
@@ -328,7 +377,7 @@
 
   function showFiles(items) {
     view.innerHTML = head('Encrypted files', 'You can manage files. Only people with the sharing link can read them.') +
-      (items.length ? `<section class="card">${items.map((file, i) => `<article class="item"><div class="item-main"><h3>Encrypted file · ${esc(size(file.size))} · ${esc(expiry(file.expires_at))}</h3><p>${esc(workspaceName(file.workspace))}</p><details class="more"><summary>Technical details</summary><code>${esc(file.id)}</code></details></div><button class="small danger quiet" data-delete="${i}" aria-label="Delete this file from ${esc(workspaceName(file.workspace))}">Delete</button></article>`).join('')}</section><p class="section-note">File names and contents are encrypted. Not even the admin can read them.</p>` :
+      (items.length ? `<section class="card">${items.map((file, i) => `<article class="item"><div class="item-main"><h2>Encrypted file · ${esc(size(file.size))} · ${esc(expiry(file.expires_at))}</h2><p>${esc(workspaceName(file.workspace))}</p><details class="more"><summary>Technical details</summary><code>${esc(file.id)}</code></details></div><button class="small danger quiet" data-delete="${i}" aria-label="Delete this file from ${esc(workspaceName(file.workspace))}">Delete</button></article>`).join('')}</section><p class="section-note">File names and contents are encrypted. Not even the admin can read them.</p>` :
       '<section class="card empty-card"><h2>No files yet</h2><p>When one of your workspaces shares a file, it shows up here. Ask your agent to share a file to try it.</p></section>');
     view.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', async () => {
       const file = items[Number(button.dataset.delete)];
@@ -347,7 +396,7 @@
         const main = app.status === 'running'
           ? (url ? `<a class="button small" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open ↗</a>` : '')
           : `<button class="small primary" data-app="${i}" data-action="restart">Start</button>`;
-        return `<article class="card app-card"><div class="app-top"><div class="app-name"><h3>${esc(app.name)}</h3><p>${esc(workspaceName(app.workspace))}</p></div><span class="status ${tone}"><span class="dot" aria-hidden="true"></span>${label}</span></div><p class="app-meta">${app.public ? 'Public' : 'Private'} · ${esc(expiry(app.expires_at))}</p><div class="app-actions">${main}<details class="menu"><summary class="button small" aria-label="Manage ${esc(app.name)}">Manage ▾</summary><div class="menu-pop">${app.status === 'stopped' ? '' : `<button data-app="${i}" data-action="restart">Restart</button>`}${app.status === 'running' ? `<button data-app="${i}" data-action="stop">Stop</button>` : ''}<button class="danger" data-app="${i}" data-action="delete">Delete…</button></div></details></div><details class="more"><summary>Technical details</summary><div class="detail-lines">Type: ${esc(app.stack || 'None')}<br>Storage: ${esc(app.store || 'None')}<br>Address: <code>${esc(app.url || '')}</code></div></details></article>`;
+        return `<article class="card app-card"><div class="app-top"><div class="app-name"><h2>${esc(app.name)}</h2><p>${esc(workspaceName(app.workspace))}</p></div><span class="status ${tone}"><span class="dot" aria-hidden="true"></span>${label}</span></div><p class="app-meta">${app.public ? 'Public' : 'Private'} · ${esc(expiry(app.expires_at))}</p><div class="app-actions">${main}<details class="menu"><summary class="button small" aria-label="Manage ${esc(app.name)}">Manage ▾</summary><div class="menu-pop">${app.status === 'stopped' ? '' : `<button data-app="${i}" data-action="restart">Restart</button>`}${app.status === 'running' ? `<button data-app="${i}" data-action="stop">Stop</button>` : ''}<button class="danger" data-app="${i}" data-action="delete">Delete…</button></div></details></div><details class="more"><summary>Technical details</summary><div class="detail-lines">Type: ${esc(app.stack || 'None')}<br>Storage: ${esc(app.store || 'None')}<br>Address: <code>${esc(app.url || '')}</code></div></details></article>`;
       }).join('')}</div>` : '<section class="card empty-card"><h2>No apps yet</h2><p>Apps published by your workspaces show up here. Ask your agent to publish a small page or tool to try it.</p><a class="button" href="#workspaces">See your workspaces</a></section>');
     view.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', async () => {
       const app = items[Number(button.dataset.app)];
@@ -399,11 +448,13 @@
     });
     if (!token) { login(); return; }
     view.setAttribute('aria-busy', 'true');
-    view.innerHTML = '<div class="skeleton-wrap" role="status" aria-label="Loading"><div class="skeleton sk-title"></div><div class="skeleton sk-line"></div><div class="skeleton sk-card"></div><div class="skeleton sk-card"></div></div>';
+    clearTimeout(skTimer);
+    skTimer = setTimeout(() => { if (current === generation) view.innerHTML = '<div class="skeleton-wrap" role="status" aria-label="Loading"><div class="skeleton sk-title"></div><div class="skeleton sk-line"></div><div class="skeleton sk-card"></div><div class="skeleton sk-card"></div></div>'; }, 300);
     try {
       // Validate the token even when opening a form directly after signing in.
       const workspaceData = await api('/admin/api/workspaces?limit=100');
       if (current !== generation) return;
+      verified = true;
       setSignedIn(true);
       workspaces = workspaceData.items || [];
       lastUpdated = Date.now(); tickUpdated();
@@ -434,7 +485,16 @@
       if (current !== generation) return;
       view.innerHTML = `<section class="card pad"><h2>Could not load this page</h2><p class="section-note">${esc(error.message)}${lastUpdated ? ` The page may be out of date (updated ${esc(ago(lastUpdated))}).` : ''}</p><button id="retry">Try again</button></section>`;
       document.querySelector('#retry').addEventListener('click', () => void render());
-    } finally { if (current === generation) view.removeAttribute('aria-busy'); }
+    } finally {
+      if (current === generation) {
+        clearTimeout(skTimer);
+        view.removeAttribute('aria-busy');
+        const cb = afterRender; afterRender = null;
+        const a = document.activeElement;
+        if (cb) cb();
+        else if (!a || a === document.body || a === view || !a.isConnected) view.querySelector('h1')?.focus({ preventScroll: true });
+      }
+    }
   }
 
   document.addEventListener('keydown', e => {
@@ -442,7 +502,7 @@
     const open = document.querySelector('details.menu[open]');
     if (open) { open.open = false; open.querySelector('summary').focus(); return; }
     const editor = document.querySelector('#editor');
-    if (editor?.firstChild && !document.querySelector('dialog[open]')) editor.replaceChildren();
+    if (editor?.firstChild && !document.querySelector('dialog[open]')) { closeEditor(editingId); }
   });
   window.addEventListener('hashchange', () => { void render(); window.scrollTo(0, 0); });
   void render();

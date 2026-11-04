@@ -54,6 +54,7 @@ pub fn new_state(cfg: Config) -> std::io::Result<State> {
 pub fn public_router(st: State) -> Router {
     let big = axum::extract::DefaultBodyLimit::disable();
     Router::new()
+        .route("/", get(web::root))
         .route("/health", get(|| async { "ok" }))
         .route("/v1/whoami", get(api::whoami))
         .route("/v1/me", axum::routing::patch(api::me_patch))

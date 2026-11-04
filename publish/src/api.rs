@@ -97,6 +97,15 @@ pub async fn me_patch(
         .map(|t| util::valid_tags(&t))
         .transpose()
         .map_err(ApiError::invalid)?;
+    // A proposal identical to what is live is not a change: nothing to review (unless it should replace a pending one).
+    if w.pending.is_none()
+        && desc.as_deref().map_or(true, |d| d == w.description)
+        && tags.as_deref().map_or(true, |t| t == w.tags.as_slice())
+    {
+        let mut out = who_json(&st, &w);
+        out["status"] = "unchanged".into();
+        return Ok((StatusCode::OK, Json(out)));
+    }
     let c = st.db.lock().unwrap();
     // Guarded write: only while the token that authenticated this call is still current.
     if db::set_pending(
