@@ -143,11 +143,13 @@
     const total = counts.reduce((a, [, n]) => a + n, 0);
     if (!total) return '';
     const text = counts.map(([s, n]) => `${n} ${SM[s].word.toLowerCase()}`).join(', ');
-    return `<section class="overview panel" aria-label="${esc(text)}"><ul class="seg">${counts.map(([s, n]) => `<li class="s-${s}"><span class="seg-bar"></span><span class="seg-text">${ic(SM[s].icon)}<b>${n}</b><span>${esc(SM[s].word)}</span></span></li>`).join('')}</ul></section>`;
+    let x = 0;
+    const rects = counts.map(([s, n]) => { const w = n / total * 100, r = `<rect class="s-${s}" x="${x.toFixed(2)}%" width="${w.toFixed(2)}%" y="0" height="100%"/>`; x += w; return r; }).join('');
+    return `<section class="overview panel" aria-label="${esc(text)}"><svg class="segbar" width="100%" height="12" aria-hidden="true" preserveAspectRatio="none"><clipPath id="segclip"><rect width="100%" height="100%" rx="6"/></clipPath><g clip-path="url(#segclip)">${rects}</g></svg><ul class="seg">${counts.map(([s, n]) => `<li class="s-${s}"><span class="seg-text">${ic(SM[s].icon)}<b>${n}</b><span>${esc(SM[s].word)}</span></span></li>`).join('')}</ul></section>`;
   }
   function list() {
     const tickets = array(state.tickets);
-    if (!tickets.length) return heading('Tickets') + `<section class="panel empty"><span class="empty-ic">${ic('list')}</span><h2>Your first ticket starts here.</h2><p>Ask your agent: “Prepare my weekly summary.” Your ticket will appear here.</p></section>`;
+    if (!tickets.length) return heading('Tickets') + `<section class="panel empty"><span class="empty-ic">${ic('list')}</span><h2>Your first ticket starts here.</h2><p>Ask your agent: “Prepare my weekly summary.” Your ticket will appear here.</p><button type="button" class="copy-req" data-copy="Prepare my weekly summary.">Copy this request</button></section>`;
     const asks = tickets.flatMap(t => openQuestions(t).map(q => askCard(t, q, 'a', true)));
     const body = statuses.map(status => {
       const group = tickets.filter(ticket => ticket.status === status);
@@ -175,7 +177,7 @@
       + (array(ticket.links).length ? linkBox(ticket.links) : '')
       + disclosure('more', 'More details', more);
     return '<a class="back" href="#tickets">' + ic('chevron', 'flip') + 'All tickets</a>'
-      + `<div class="detail-head">${ring(ticket, 72, true)}<div class="detail-title"><h1>${esc(ticket.title)}</h1><div class="statusline">${statusChip(ticket.status)}${ticket.status === 'waiting' && !wake ? waitTag(ticket) : ''}<span class="updated" title="Last change">${ic('clock')}Updated ${esc(ago(ticket.updated_at))}</span></div></div></div>`
+      + `<div class="detail-head">${ring(ticket, 72, true)}<div class="detail-title"><h1>${esc(ticket.title)}</h1><div class="statusline">${ticket.status === 'waiting' && !wake && waitTag(ticket) ? waitTag(ticket) : statusChip(ticket.status)}<span class="updated" title="Last change">${ic('clock')}Updated ${esc(ago(ticket.updated_at))}</span></div></div></div>`
       + (asks ? `<div class="asks">${asks}</div>` : '')
       + `<div class="detail-grid"><div>${stepper}${history.length ? `<section class="history">${disclosure('history', `History · ${history.length}`, `<ol class="timeline">${history.map(h => `<li>${esc(noIds(h.text))}<small>${esc(date(h.at))} · ${esc(String(h.by).replace(/^(agent|human):/, ''))}</small></li>`).join('')}</ol>`, 'clock')}</section>` : ''}</div>`
       + `<aside class="panel context">${side}</aside></div>`;
@@ -192,7 +194,7 @@
   }
   function scheduler() {
     const rows = array(state.scheduler).map(r => ({...r, at: r.next_run || r.wake_at || nextCron(r.cron)}));
-    if (!rows.length) return heading('Scheduler') + `<section class="panel empty"><span class="empty-ic">${ic('calendar')}</span><h2>Nothing scheduled yet.</h2><p>Ask your agent: “Run this every Monday morning.”</p></section>`;
+    if (!rows.length) return heading('Scheduler') + `<section class="panel empty"><span class="empty-ic">${ic('calendar')}</span><h2>Nothing scheduled yet.</h2><p>Ask your agent: “Run this every Monday morning.”</p><button type="button" class="copy-req" data-copy="Run this every Monday morning.">Copy this request</button></section>`;
     const now = new Date(), start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const days = Array.from({length: 7}, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
     const range = `${fmt(days[0], {weekday: 'short', day: 'numeric', month: 'short'})} – ${fmt(days[6], {weekday: 'short', day: 'numeric', month: 'short'})}`;
@@ -227,7 +229,7 @@
         return `<details class="msg${m.seen ? '' : ' unseen'}" data-key="msg-${esc(m.id)}"><summary><span class="dotmark" aria-label="${m.seen ? 'Seen' : 'New'}"></span>${m.type === 'file' ? ic('file') : ''}<span class="msg-text">${esc(text)}</span><time>${esc(ago(m.created_at))}</time>${ic('chevron', 'chev')}</summary><div class="msg-more"><p class="message-text">${esc(text)}</p>${about ? `<a class="chip" href="${esc(ticketHref(m.ticket))}">${ic('list')}${esc(about)}</a>` : ''}</div></details>`;
       }).join('')}</div></section>`;
     }).join('');
-    const empty = !asks.length && !body ? `<section class="panel empty"><span class="empty-ic">${ic('inbox')}</span><h2>No messages yet.</h2><p>Messages from your agent and other workspaces will appear here.</p></section>` : '';
+    const empty = !asks.length && !body ? `<section class="panel empty"><span class="empty-ic">${ic('inbox')}</span><h2>No messages yet.</h2><p>Messages from your agent and other workspaces will appear here.</p><button type="button" class="copy-req" data-copy="Ask me a question about my tickets.">Copy this request</button></section>` : '';
     return heading('Inbox') + (asks.length ? `<div class="asks">${asks.join('')}</div>` : '') + body + empty;
   }
   function render() {
@@ -284,6 +286,7 @@
     } catch (_) {
       document.getElementById('connection-text').textContent = state ? 'Can’t refresh right now. Showing the last update; trying again shortly.' : 'Can’t load your workspace right now. Trying again shortly.';
       connection.hidden = false;
+      if (!state) content.innerHTML = '<section class="panel empty"><span class="empty-ic">'+ic('clock')+'</span><h2>Waiting for your workspace…</h2><p>This page will fill in as soon as it answers.</p></section>';
     } finally { fetching = false; }
   }
   const retry = document.getElementById('retry');
@@ -296,6 +299,12 @@
     if (event.key !== 'Escape') return;
     const open = document.activeElement?.closest?.('details[open]');
     if (open) { open.open = false; open.querySelector('summary').focus(); }
+  });
+  document.addEventListener('click', async event => {
+    const b = event.target.closest?.('.copy-req');
+    if (!b) return;
+    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copied'; } catch (_) { b.textContent = 'Select and copy the sentence above'; }
+    window.setTimeout(() => { b.textContent = 'Copy this request'; }, 2000);
   });
   window.addEventListener('hashchange', render);
   if (snapshot) { state = window.ORCH_SNAPSHOT || {}; render(); }

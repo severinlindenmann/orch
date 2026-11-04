@@ -23,3 +23,11 @@ def test_web_plain_words_and_no_inline_style_flex():
     js = web_file("app.js").decode()
     assert "Code updated" in js and "questions" in js and "nextCron" in js and "updates this week" in js
     assert "Code change" not in js and "No time set" not in js
+
+
+def test_status_bar_is_proportional_svg_without_inline_style():
+    from pathlib import Path
+    web = Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "web"
+    js = (web / "app.js").read_text()
+    assert 'class="segbar"' in js and "n / total * 100" in js
+    assert 'style="' not in js.split("function statusBar")[1].split("function ")[0]

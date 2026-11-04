@@ -285,8 +285,7 @@ details.group>summary .chev{margin-left:4px}
 /* status bar: one labelled segment per status, number inside */
 .seg{display:flex;flex-wrap:wrap;gap:10px 8px;list-style:none;margin:0;padding:0}
 .seg li{flex:1 1 0;min-width:92px;display:flex;flex-direction:column;gap:8px}
-.seg-bar{display:block;height:12px;border-radius:99px;background:var(--c)}
-.seg li.s-open .seg-bar{background:transparent;border:2px solid var(--text-muted)}
+.segbar{display:block;width:100%;height:12px;margin-bottom:12px}.segbar rect{fill:var(--c)}.segbar .s-open{fill:var(--text-muted);opacity:.6}
 .seg-text{display:flex;align-items:center;gap:6px;color:var(--c);white-space:nowrap}.seg-text b{font-size:24px;line-height:1;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}.seg-text span{color:var(--text-muted);font-size:13px}
 .seg li.s-open .seg-text{color:var(--text-muted)}
 /* amber = needs you only */
@@ -329,3 +328,8 @@ a.sched{display:flex;color:inherit;min-height:56px}a.sched:hover{background:var(
   .detail-grid .context{order:-1}
 }
 @media(max-width:850px){.detail-grid .context{order:-1}}
+
+/* UX round 3 */
+a.card:active,a.mini:active{transform:scale(.98)}
+.copy-req{margin-top:4px;min-height:44px;padding:0 18px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text);font:inherit;font-size:13px;cursor:pointer}.copy-req:hover{border-color:var(--brand);color:var(--brand)}.copy-req:active{transform:scale(.98)}
+@media(max-width:480px){.mini-title{white-space:normal;overflow:visible;text-overflow:clip}}
