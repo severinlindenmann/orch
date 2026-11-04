@@ -1,0 +1,130 @@
+import SwiftUI
+
+struct SendView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var voice: VoiceInput?
+    @State private var text = ""
+    @State private var workspaceID = ""
+    @State private var sent: AppModel.SentNote?
+    @State private var sending = false
+    @State private var toggling = false
+    @State private var pulse = false
+
+    private var recording: Bool { voice?.isRecording == true }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                WorkspaceBackHeader()
+                ScreenHeading(title: "Say it. Send it.", subtitle: "A thought, a request, a next step.")
+                if let sent { sentState(sent) } else { composer }
+                ModelMessage().padding(.top, 12)
+            }.padding(.horizontal, 23).padding(.top, 6).padding(.bottom, 20)
+        }
+        .task {
+            if voice == nil { voice = VoiceInput(mode: model.voiceMode) }
+            selectWorkspace()
+        }
+        .onChange(of: model.workspaces) { _, _ in selectWorkspace() }
+        .onChange(of: model.tab) { _, tab in
+            if tab == .send { selectWorkspace(preferFilter: true) }
+            else { voice?.stop() }
+        }
+        .onChange(of: voice?.transcript) { _, transcript in
+            // A final transcript can arrive in the same update that stops recording.
+            if let transcript { text = transcript }
+        }
+        .onChange(of: recording) { _, active in pulse = active }
+        .onDisappear { voice?.stop() }
+    }
+
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Eyebrow(text: "TO WORKSPACE").padding(.top, 26)
+            Picker("TO WORKSPACE", selection: $workspaceID) {
+                if model.workspaces.isEmpty { Text("No workspaces").tag("") }
+                ForEach(model.workspaces) { Text($0.name).tag($0.id) }
+            }.pickerStyle(.menu).tint(Theme.text)
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .padding(.horizontal, 10).background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
+                .disabled(sending)
+            Eyebrow(text: "LIVE TRANSCRIPT").padding(.top, 16)
+            ZStack(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text("What would you like to get done?").foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 5).padding(.top, 8).allowsHitTesting(false)
+                }
+                TextEditor(text: $text).scrollContentBackground(.hidden)
+                    .accessibilityIdentifier("transcript").accessibilityLabel("Live transcript")
+                    .disabled(recording || sending)
+            }.font(.system(size: 13)).padding(10).frame(height: 137)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
+            VStack(spacing: 12) {
+                HStack(spacing: 16) {
+                    ForEach(Array([4.0, 12, 8, 22, 14, 18, 6, 12, 8, 22, 6, 10].enumerated()), id: \.offset) { _, height in
+                        Capsule().fill(Theme.brand.opacity(0.3)).frame(width: 3, height: height)
+                    }
+                }.frame(height: 32).accessibilityHidden(true)
+                Button {
+                    toggling = true
+                    Task {
+                        await voice?.toggle(current: text)
+                        if model.tab != .send { voice?.stop() }
+                        toggling = false
+                    }
+                } label: {
+                    Image(systemName: "mic.fill").font(.system(size: 27))
+                        .foregroundStyle(recording ? Theme.danger : Theme.brand)
+                        .frame(width: 70, height: 70)
+                        .background((recording ? Theme.danger : Theme.brand).opacity(0.1), in: Circle())
+                        .overlay(Circle().stroke((recording ? Theme.danger : Theme.brand).opacity(0.3)))
+                        .overlay {
+                            if recording {
+                                Circle().stroke(Theme.danger.opacity(pulse ? 0.2 : 0.6), lineWidth: 3)
+                                    .scaleEffect(pulse ? 1.2 : 1)
+                                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulse)
+                            }
+                        }
+                }.buttonStyle(.plain).accessibilityIdentifier("mic")
+                    .accessibilityLabel(recording ? "Listening… tap to stop" : "Tap to speak")
+                    .disabled(voice == nil || toggling || sending)
+                Text(recording ? "Listening… tap to stop" : "Tap to speak").font(.system(size: 12, weight: .medium))
+                if let error = voice?.error { Text(error).font(.caption).foregroundStyle(Theme.danger) }
+            }.frame(maxWidth: .infinity).padding(.top, 5).padding(.bottom, 16)
+            Button("Send to inbox ↑") {
+                sending = true
+                Task {
+                    if await model.send(to: workspaceID, text: text) { sent = model.lastSent }
+                    sending = false
+                }
+            }.buttonStyle(PrimaryButtonStyle()).accessibilityIdentifier("send-button")
+                .disabled(recording || toggling || sending || workspaceID.isEmpty || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Text("Your workspace will pick it up from here.").font(.system(size: 11))
+                .foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 2)
+        }
+    }
+
+    private func sentState(_ note: AppModel.SentNote) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "checkmark").font(.system(size: 28)).foregroundStyle(Theme.brand)
+                .frame(width: 72, height: 72).background(Theme.brand.opacity(0.07), in: Circle())
+                .overlay(Circle().stroke(Theme.brand.opacity(0.33))).padding(.bottom, 13)
+            Text("It's in the inbox.").font(.system(size: 25, weight: .semibold))
+            Text("Sent to \(note.workspaceName)").font(.system(size: 13)).foregroundStyle(Theme.muted)
+            Text(note.text).font(.system(size: 13)).foregroundStyle(Theme.muted)
+                .orchCard().padding(.vertical, 16)
+            Button("Send another message") { sent = nil; text = "" }.buttonStyle(SecondaryButtonStyle())
+            Button("Back to workspaces →") { model.tab = .home }
+                .font(.system(size: 13)).foregroundStyle(Theme.muted).frame(minHeight: 44)
+        }.frame(maxWidth: .infinity).padding(.top, 48)
+    }
+
+    private func selectWorkspace(preferFilter: Bool = false) {
+        if (preferFilter || workspaceID.isEmpty), let filter = model.questionFilter,
+           model.workspaces.contains(where: { $0.id == filter }) { workspaceID = filter }
+        if !model.workspaces.contains(where: { $0.id == workspaceID }) { workspaceID = model.workspaces.first?.id ?? "" }
+    }
+}

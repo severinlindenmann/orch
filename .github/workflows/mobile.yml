@@ -3,6 +3,20 @@ on: workflow_call
 jobs:
   test:
     runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: mobile
     steps:
       - uses: actions/checkout@v4
-      - run: echo "mobile: no tests yet (filled in by its lane)"
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Pick an iPhone simulator
+        run: |
+          NAME=$(xcrun simctl list devices available | grep -oE 'iPhone [0-9A-Za-z ]+ \(' | head -1 | sed 's/ ($//')
+          echo "SIM_NAME=$NAME" >> "$GITHUB_ENV"
+      - name: Build and test
+        run: |
+          xcodebuild test -scheme OrchMobile -destination "platform=iOS Simulator,name=$SIM_NAME" \
+            CODE_SIGNING_ALLOWED=NO -only-testing:OrchMobileTests | tail -40
