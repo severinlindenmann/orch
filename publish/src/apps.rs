@@ -84,6 +84,9 @@ fn extract(bytes: &[u8], dir: &FsPath) -> ApiResult<PathBuf> {
             return Err(ApiError::invalid("The bundle has an unsafe path."));
         }
     }
+    if std::env::var("ORCH_PUBLISH_SANDBOX").is_ok_and(|v| v == "systemd") {
+        crate::runner::prep_perms(dir);
+    }
     if dir.join("app.toml").is_file() {
         return Ok(dir.to_path_buf());
     }
