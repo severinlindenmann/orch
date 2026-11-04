@@ -203,7 +203,7 @@
     const formError = form.querySelector('.form-error');
     Object.keys(checks).forEach(name => {
       form.elements[name].addEventListener('input', () => fieldError(form, name, ''));
-      form.elements[name].addEventListener('blur', () => validate(form, name));
+      form.elements[name].addEventListener('blur', e => { if (e.relatedTarget?.type === 'submit') return; validate(form, name); });
     });
     form.addEventListener('submit', event => {
       event.preventDefault();
@@ -263,6 +263,10 @@
   }
 
   // A proposal equal to the live text is not a change: hide it.
+  function wsDetail(w, labels, compact) {
+    const inner = `${w.description ? `<p>${esc(w.description)}</p>` : '<p class="muted">No description yet.</p>'}<div class="workspace-tags">${(w.tags || []).map(tag => `<span class="workspace-tag">${esc(tag)}</span>`).join('')}</div><p class="rights">${esc(labels.join(' · '))}</p>`;
+    return compact ? `<details class="more ws-more"><summary>Details</summary>${inner}</details>` : inner;
+  }
   const proposalChanges = w => w.pending && ((w.pending.description != null && w.pending.description !== (w.description || '')) || (w.pending.tags && w.pending.tags.join(',') !== (w.tags || []).join(',')));
   function showWorkspaces(items) {
     items = items.map(w => (w.pending && !proposalChanges(w) ? { ...w, pending: null } : w));
@@ -274,7 +278,7 @@
       `<div id="editor"></div>${items.length ? `<section class="card">${items.map((w, i) => {
         const rights = w.rights || {};
         const labels = [rights.permanent && 'Permanent files', rights.files && 'Temporary files', rights.apps && 'Apps', rights.public ? 'Public links allowed' : 'Private only'].filter(Boolean);
-        return `<article class="workspace"><div class="avatar" aria-hidden="true">${esc(initials(w.name))}</div><div><h2>${esc(w.name)}${w.pending ? ' <span class="badge">Needs your review</span>' : ''}</h2>${w.description ? `<p>${esc(w.description)}</p>` : '<p class="muted">No description yet.</p>'}<div class="workspace-tags">${(w.tags || []).map(tag => `<span class="workspace-tag">${esc(tag)}</span>`).join('')}</div><p class="rights">${esc(labels.join(' · '))}</p><p class="counts-inline">${esc(plural(Number(w.files) || 0, 'file', 'files'))} · ${esc(plural(Number(w.apps) || 0, 'app', 'apps'))}</p>${!w.pending && flash[w.id] ? `<p class="review-done" role="status" tabindex="-1">${esc(flash[w.id])}</p>` : ''}${w.pending ? reviewCard(w, i) : ''}</div><div class="number">${esc(w.files)}<small>${Number(w.files) === 1 ? 'file' : 'files'}</small></div><div class="number">${esc(w.apps)}<small>${Number(w.apps) === 1 ? 'app' : 'apps'}</small></div><button class="small" data-edit="${i}" data-edit-id="${esc(w.id)}" aria-label="Edit ${esc(w.name)}">Edit</button></article>`;
+        return `<article class="workspace"><div class="avatar" aria-hidden="true">${esc(initials(w.name))}</div><div><h2>${esc(w.name)}${w.pending ? ' <span class="badge">Needs your review</span>' : ''}</h2>${wsDetail(w, labels, items.length > 6)}<p class="counts-inline">${esc(plural(Number(w.files) || 0, 'file', 'files'))} · ${esc(plural(Number(w.apps) || 0, 'app', 'apps'))}</p>${!w.pending && flash[w.id] ? `<p class="review-done" role="status" tabindex="-1">${esc(flash[w.id])}</p>` : ''}${w.pending ? reviewCard(w, i) : ''}</div><div class="number">${esc(w.files)}<small>${Number(w.files) === 1 ? 'file' : 'files'}</small></div><div class="number">${esc(w.apps)}<small>${Number(w.apps) === 1 ? 'app' : 'apps'}</small></div><button class="small" data-edit="${i}" data-edit-id="${esc(w.id)}" aria-label="Edit ${esc(w.name)}">Edit</button></article>`;
       }).join('')}</section>` : '<section class="card empty-card"><h2>No workspaces yet</h2><p>A workspace is one project or person that shares files and apps. Add the first one, then connect your agent to it.</p><a class="button primary" href="#add">＋ Add your first workspace</a></section>'}<div class="helper"><div><b>Private by design.</b> Files are encrypted before they leave your workspace.</div><a href="#files">View files →</a></div>`;
     view.querySelectorAll('[data-review]').forEach(box => bindReview(box, items[Number(box.dataset.review)]));
     view.querySelectorAll('[data-edit]').forEach(button => button.addEventListener('click', () => edit(items[Number(button.dataset.edit)])));
@@ -375,29 +379,69 @@
     } catch (_) { return ''; }
   }
 
-  function showFiles(items) {
+  // Files are loaded page by page; the portal says how many of the total are shown.
+  const openGroups = new Set();
+  const expMs = f => (f.expires_at == null ? Infinity : new Date(f.expires_at).getTime() || Infinity);
+  function showFiles(items, next, total) {
+    const groups = new Map();
+    items.forEach(f => { if (!groups.has(f.workspace)) groups.set(f.workspace, []); groups.get(f.workspace).push(f); });
+    const list = [...groups].map(([id, rows]) => ({ id, rows: rows.slice().sort((a, b) => expMs(a) - expMs(b)) }));
+    list.sort((a, b) => expMs(a.rows[0]) - expMs(b.rows[0]));
+    const all = !next;
+    const row = f => `<article class="item"><div class="item-main"><h3>${esc(size(f.size))} · ${esc(expiry(f.expires_at))}</h3><details class="more"><summary>Technical details</summary><code>${esc(f.id)}</code></details></div><details class="menu"><summary class="button small quiet" aria-label="Manage this file from ${esc(workspaceName(f.workspace))}">⋯</summary><div class="menu-pop"><button class="danger" data-delete="${esc(f.id)}">Delete…</button></div></details></article>`;
     view.innerHTML = head('Encrypted files', 'You can manage files. Only people with the sharing link can read them.') +
-      (items.length ? `<section class="card">${items.map((file, i) => `<article class="item"><div class="item-main"><h2>Encrypted file · ${esc(size(file.size))} · ${esc(expiry(file.expires_at))}</h2><p>${esc(workspaceName(file.workspace))}</p><details class="more"><summary>Technical details</summary><code>${esc(file.id)}</code></details></div><button class="small danger quiet" data-delete="${i}" aria-label="Delete this file from ${esc(workspaceName(file.workspace))}">Delete</button></article>`).join('')}</section><p class="section-note">File names and contents are encrypted. Not even the admin can read them.</p>` :
+      (items.length ? `<p class="summary-line">${all ? `${plural(items.length, 'file', 'files')}` : `Showing ${items.length} of ${total}`} · soonest to expire first</p><section class="card">${list.map(g => {
+        const count = all ? g.rows.length : Math.max(g.rows.length, Number(workspaces.find(w => w.id === g.id)?.files) || 0);
+        const bytes = g.rows.reduce((n, f) => n + (Number(f.size) || 0), 0);
+        const soon = expiry(g.rows[0].expires_at);
+        return `<details class="file-group" data-ws="${esc(g.id)}" ${openGroups.has(g.id) || list.length === 1 ? 'open' : ''}><summary><span class="fg-name">${esc(workspaceName(g.id))}</span><span class="fg-meta">${plural(count, 'file', 'files')}${all ? ` · ${esc(size(bytes))}` : ''} · ${esc(soon)}</span></summary>${g.rows.map(row).join('')}</details>`;
+      }).join('')}</section>${all ? '' : `<p class="load-more"><button id="more-files">Load more</button></p>`}<p class="section-note">File names and contents are encrypted. Not even the admin can read them.</p>` :
       '<section class="card empty-card"><h2>No files yet</h2><p>When one of your workspaces shares a file, it shows up here. Ask your agent to share a file to try it.</p></section>');
-    view.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', async () => {
-      const file = items[Number(button.dataset.delete)];
-      if (!await confirmDialog('Delete this file?', 'Its sharing link will stop working. This cannot be undone.', 'Delete file')) return;
-      void run(button.parentElement, async () => { await api(path('files', file.id), 'DELETE'); await render(); notify('File deleted.'); });
+    view.querySelectorAll('details.file-group').forEach(d => d.addEventListener('toggle', () => { if (d.open) openGroups.add(d.dataset.ws); else openGroups.delete(d.dataset.ws); }));
+    view.querySelector('#more-files')?.addEventListener('click', e => run(e.currentTarget.parentElement, async () => {
+      const page = await api(`/admin/api/files?limit=100&after=${encodeURIComponent(next)}`);
+      showFiles(items.concat(page.items || []), page.next, total);
+      view.querySelector('#more-files')?.focus();
     }));
+    view.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', async () => {
+      const file = items.find(f => f.id === button.dataset.delete);
+      if (!await confirmDialog('Delete this file?', 'Its sharing link will stop working. This cannot be undone.', 'Delete file')) return;
+      void run(button.closest('.item'), async () => {
+        await api(path('files', file.id), 'DELETE');
+        const left = items.filter(f => f !== file);
+        const c = document.querySelector('#count-files'); if (c) c.textContent = Math.max(0, Number(c.textContent) - 1);
+        showFiles(left, next, Math.max(0, total - 1));
+        notify('File deleted.');
+      });
+    }));
+    document.addEventListener('click', closeMenus, { once: true });
   }
 
   const STATUS = { running: ['green', 'Running'], stopped: ['muted', 'Stopped'], failed: ['danger', 'Not responding'] };
 
-  function showApps(items) {
-    view.innerHTML = head('Apps', 'Small apps, published from your workspaces.') +
-      (items.length ? `<div class="app-list">${items.map((app, i) => {
+  function showApps(items, next) {
+    const rank = a => (a.status === 'failed' ? 0 : a.status === 'running' ? 1 : 2);
+    const order = items.map((app, i) => i).sort((x, y) => rank(items[x]) - rank(items[y]));
+    const stopped = order.filter(i => items[i].status !== 'running' && items[i].status !== 'failed');
+    const active = order.filter(i => !stopped.includes(i));
+    const n = st => items.filter(a => a.status === st).length;
+    const soon = items.filter(a => a.expires_at != null && new Date(a.expires_at).getTime() - Date.now() < 3 * 86400000).length;
+    const summary = [`${n('running')} running`, `${stopped.length} stopped`, n('failed') ? `${n('failed')} not responding` : '', soon ? `${soon} expire within 3 days` : ''].filter(Boolean).join(' · ');
+    const card = i => { const app = items[i];
         const [tone, label] = STATUS[app.status] || ['muted', app.status];
         const url = safeUrl(app.url);
         const main = app.status === 'running'
           ? (url ? `<a class="button small" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open ↗</a>` : '')
-          : `<button class="small primary" data-app="${i}" data-action="restart">Start</button>`;
+          : `<button class="small" data-app="${i}" data-action="restart">Start</button>`;
         return `<article class="card app-card"><div class="app-top"><div class="app-name"><h2>${esc(app.name)}</h2><p>${esc(workspaceName(app.workspace))}</p></div><span class="status ${tone}"><span class="dot" aria-hidden="true"></span>${label}</span></div><p class="app-meta">${app.public ? 'Public' : 'Private'} · ${esc(expiry(app.expires_at))}</p><div class="app-actions">${main}<details class="menu"><summary class="button small" aria-label="Manage ${esc(app.name)}">Manage ▾</summary><div class="menu-pop">${app.status === 'stopped' ? '' : `<button data-app="${i}" data-action="restart">Restart</button>`}${app.status === 'running' ? `<button data-app="${i}" data-action="stop">Stop</button>` : ''}<button class="danger" data-app="${i}" data-action="delete">Delete…</button></div></details></div><details class="more"><summary>Technical details</summary><div class="detail-lines">Type: ${esc(app.stack || 'None')}<br>Storage: ${esc(app.store || 'None')}<br>Address: <code>${esc(app.url || '')}</code></div></details></article>`;
-      }).join('')}</div>` : '<section class="card empty-card"><h2>No apps yet</h2><p>Apps published by your workspaces show up here. Ask your agent to publish a small page or tool to try it.</p><a class="button" href="#workspaces">See your workspaces</a></section>');
+    };
+    view.innerHTML = head('Apps', 'Small apps, published from your workspaces.') +
+      (items.length ? `<p class="summary-line">${esc(summary)}${next ? ' · more apps not shown yet' : ''}</p><div class="app-list">${active.map(card).join('')}</div>${stopped.length ? `<details class="stopped-group"><summary>Stopped (${stopped.length})</summary><div class="app-list">${stopped.map(card).join('')}</div></details>` : ''}${next ? '<p class="load-more"><button id="more-apps">Load more</button></p>' : ''}` : '<section class="card empty-card"><h2>No apps yet</h2><p>Apps published by your workspaces show up here. Ask your agent to publish a small page or tool to try it.</p><a class="button" href="#workspaces">See your workspaces</a></section>');
+    view.querySelector('#more-apps')?.addEventListener('click', e => run(e.currentTarget.parentElement, async () => {
+      const page = await api(`/admin/api/apps?limit=100&after=${encodeURIComponent(next)}`);
+      showApps(items.concat(page.items || []), page.next);
+      view.querySelector('#more-apps')?.focus();
+    }));
     view.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', async () => {
       const app = items[Number(button.dataset.app)];
       const action = button.dataset.action;
@@ -478,7 +522,8 @@
       if (route === 'files' || route === 'apps') {
         const result = await api(`/admin/api/${route}?limit=100`);
         if (current !== generation) return;
-        (route === 'files' ? showFiles : showApps)(result.items || []);
+        if (route === 'files') showFiles(result.items || [], result.next, sum('files'));
+        else showApps(result.items || [], result.next);
       }
     } catch (error) {
       if (error === unauthorized) return;
