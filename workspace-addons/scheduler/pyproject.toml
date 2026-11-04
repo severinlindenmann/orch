@@ -1,0 +1,26 @@
+[project]
+name = "orch-scheduler"
+version = "0.1.0"
+description = "orch scheduler add-on: starts agent runs at wake_at, by cron and from the relay inbox"
+requires-python = ">=3.11"
+dependencies = ["croniter>=2"]
+
+[project.scripts]
+orch-scheduler = "orch_scheduler.cli:main"
+
+# The orch CLI discovers add-on commands in this group: `orch scheduler ...` calls main(argv).
+[project.entry-points."orch.addons"]
+scheduler = "orch_scheduler.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/orch_scheduler"]
+
+[tool.ruff]
+line-length = 110

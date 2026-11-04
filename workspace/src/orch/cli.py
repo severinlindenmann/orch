@@ -1,0 +1,231 @@
+"""orch command line: argument parsing and plain-words output only."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from orch import __version__, addons, tickets
+from orch import init as init_mod
+from orch.errors import Refused
+
+
+def _find_root() -> Path:
+    """The workspace root: nearest folder upwards with .orch/ or .agents/, else the current folder."""
+    cwd = Path.cwd()
+    for p in (cwd, *cwd.parents):
+        if (p / ".orch").is_dir() or (p / ".agents").is_dir():
+            return p
+    return cwd
+
+
+def _out(args, data, text: str) -> None:
+    print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
+
+
+def _tid(t: dict) -> str:
+    return t["id"]
+
+
+def _line(t: dict) -> str:
+    d, n = tickets.checks_done(t)
+    count = f"  {d}/{n}" if n else ""
+    return f"{t['id']}  {t['status']:<8} {t['title']}{count}"
+
+
+def _show(t: dict) -> str:
+    d, n = tickets.checks_done(t)
+    open_q = sum(1 for q in t["questions"] if q["answer"] is None)
+    out = [f"{t['id']}  {t['title']}", f"Status: {t['status']} - Checks: {d}/{n} - Open questions: {open_q}"]
+    if t.get("wake_at"):
+        out.append(f"Wakes at: {t['wake_at']}")
+    if t.get("waiting_on"):
+        out.append(f"Waiting on: {t['waiting_on']['kind']} {t['waiting_on']['ref']}")
+    for c in t["checklist"]:
+        if c["done"]:
+            ev = c["evidence"][0]
+            extra = f" ({ev['text']})" if ev.get("text") else ""
+            out.append(f"  {c['id']} {c['text']} - done - {ev['ref']}{extra}")
+        else:
+            out.append(f"  {c['id']} {c['text']} - not done - no evidence")
+    for q in t["questions"]:
+        ans = f"{q['answer']} ({q['answered_by']} via {q['via']})" if q["answer"] is not None else "open"
+        opts = f" [{' / '.join(q['options'])}]" if q["options"] else ""
+        rec = f" recommended: {q['recommended']}" if q["recommended"] else ""
+        out.append(f"  {q['id']} {q['text']}{opts}{rec} - {ans}")
+    for ln in t["links"]:
+        out.append(f"  link {ln.get('title') or ln['type']}: {ln['url']}")
+    for h in t["history"][-5:]:
+        out.append(f"  {h['at']} {h['by']}: {h['text']}")
+    return "\n".join(out)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--json", action="store_true", help="machine-readable output")
+    common.add_argument("--by", help="actor, agent:<tool> or human:<name> (default: detected)")
+
+    p = argparse.ArgumentParser(prog="orch", description="orch: tickets with evidence for any agent tool")
+    p.add_argument("--version", action="version", version=f"orch {__version__}")
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
+
+    sub.add_parser("init", parents=[common], help="set up this project folder (safe to repeat)")
+    u = sub.add_parser("update", parents=[common], help="install the latest orch and add-ons")
+    u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
+
+    a = sub.add_parser("addon", help="add-ons: dashboard, scheduler").add_subparsers(
+        dest="sub", required=True
+    )
+    for n in ("add", "remove"):
+        x = a.add_parser(n, parents=[common])
+        x.add_argument("name")
+        if n == "add":
+            x.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
+    a.add_parser("list", parents=[common])
+
+    t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
+    x = t.add_parser("new", parents=[common])
+    x.add_argument("title")
+    x.add_argument("--recurring", metavar="CRON", help="5-field cron, UTC")
+    x = t.add_parser("list", parents=[common])
+    x.add_argument("--status", choices=tickets.STATUSES)
+    x = t.add_parser("show", parents=[common])
+    x.add_argument("id")
+    x = t.add_parser("status", parents=[common])
+    x.add_argument("id")
+    x.add_argument("status", choices=tickets.STATUSES)
+    x = t.add_parser("edit", parents=[common])
+    x.add_argument("id")
+    x.add_argument("--title")
+    x = t.add_parser("wait", parents=[common])
+    x.add_argument("id")
+    x.add_argument("--until")
+    x.add_argument("--on", metavar="KIND:REF")
+
+    x = sub.add_parser("wait", parents=[common], help="same as: ticket wait")
+    x.add_argument("id")
+    x.add_argument("--until")
+    x.add_argument("--on", metavar="KIND:REF")
+
+    c = sub.add_parser("check", help="checklist").add_subparsers(dest="sub", required=True)
+    x = c.add_parser("add", parents=[common])
+    x.add_argument("id")
+    x.add_argument("text")
+    x = c.add_parser("done", parents=[common])
+    x.add_argument("id")
+    x.add_argument("check")
+    x.add_argument("--evidence", action="append", default=[], metavar="JSON")
+
+    x = sub.add_parser("log", parents=[common], help="add a history entry")
+    x.add_argument("id")
+    x.add_argument("text")
+
+    x = sub.add_parser("ask", parents=[common], help="ask a question and wait for the answer")
+    x.add_argument("id")
+    x.add_argument("text")
+    x.add_argument("--option", action="append", default=[])
+    x.add_argument("--recommend", "--recommended", dest="recommend")
+    x = sub.add_parser("answer", parents=[common], help="answer a question")
+    x.add_argument("id")
+    x.add_argument("question")
+    x.add_argument("answer")
+    x.add_argument("--via", choices=("cli", "phone", "relay"), default="cli")
+
+    lk = sub.add_parser("link", help="links").add_subparsers(dest="sub", required=True)
+    x = lk.add_parser("add", parents=[common])
+    x.add_argument("id")
+    x.add_argument("--type", required=True)
+    x.add_argument("--url", required=True)
+    x.add_argument("--title")
+
+    e = sub.add_parser("ext", help="add-on data on a ticket").add_subparsers(dest="sub", required=True)
+    x = e.add_parser("set", parents=[common])
+    x.add_argument("id")
+    x.add_argument("addon")
+    x.add_argument("data", help="JSON object")
+    return p
+
+
+def run(args: argparse.Namespace) -> None:
+    root = _find_root()
+    by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
+    cmd, sub = args.cmd, getattr(args, "sub", None)
+
+    if cmd == "init":
+        root = Path.cwd()
+        lines = init_mod.init(root)
+        _out(args, {"ok": True, "root": str(root)}, "orch is set up in this folder.\n" + "\n".join(lines))
+    elif cmd == "update":
+        done = addons.update(root, args.project_only)
+        if args.project_only:
+            _out(args, {"ok": True, "refreshed": done}, "Refreshed: " + ", ".join(done or ["nothing"]))
+    elif cmd == "addon":
+        if sub == "list":
+            inst = addons.project_addons(root)
+            data = {n: ("installed" if n in inst else "not installed") for n in addons.KNOWN}
+            _out(args, data, "\n".join(f"{n:<10} {s}" for n, s in data.items()))
+        elif sub == "add":
+            addons.add(root, args.name, args.project_only)
+            if args.project_only:
+                _out(args, {"ok": True}, f"{args.name} is added to this project.")
+        else:
+            addons.remove(root, args.name)
+            _out(args, {"ok": True}, f"{args.name} is removed from this project.")
+    elif cmd == "ticket" and sub == "new":
+        t = tickets.create(root, args.title, by(), args.recurring)
+        _out(args, t, f"{t['id']}  open  {t['title']}")
+    elif cmd == "ticket" and sub == "list":
+        ts = [t for t in tickets.list_all(root) if not args.status or t["status"] == args.status]
+        _out(args, ts, "\n".join(_line(t) for t in ts) or "No tickets.")
+    elif cmd == "ticket" and sub == "show":
+        t = tickets.load(root, args.id)
+        _out(args, t, _show(t))
+    elif cmd == "ticket" and sub == "status":
+        t = tickets.set_status(root, args.id, args.status, by())
+        _out(args, t, f"{t['title']} - {t['status']}")
+    elif cmd == "ticket" and sub == "edit":
+        t = tickets.edit(root, args.id, args.title, by())
+        _out(args, t, f"{t['id']}  {t['title']}")
+    elif (cmd == "ticket" and sub == "wait") or cmd == "wait":
+        t = tickets.wait(root, args.id, args.until, args.on, by())
+        _out(
+            args, t, f"{t['id']} is waiting" + (f" until {t['wake_at']}" if args.until else f" on {args.on}")
+        )
+    elif cmd == "check" and sub == "add":
+        t, c = tickets.check_add(root, args.id, args.text, by())
+        _out(args, c, f"{c['id']} {c['text']} - not done - no evidence")
+    elif cmd == "check":
+        t, c = tickets.check_done(root, args.id, args.check, args.evidence, by())
+        ev = c["evidence"][-1]
+        _out(args, c, f"{c['id']} {c['text']} - done - {ev['ref']}")
+    elif cmd == "log":
+        t = tickets.log(root, args.id, args.text, by())
+        h = t["history"][-1]
+        _out(args, h, f"{h['at']} {h['by']}: {h['text']}")
+    elif cmd == "ask":
+        t, q = tickets.ask(root, args.id, args.text, args.option, args.recommend, by())
+        _out(args, q, f"{q['id']} asked. {t['id']} is waiting on question {q['id']}.")
+    elif cmd == "answer":
+        t, q = tickets.answer(root, args.id, args.question, args.answer, by(), args.via)
+        _out(args, q, f"{q['id']} answered: {q['answer']}")
+    elif cmd == "link":
+        t = tickets.link_add(root, args.id, args.type, args.url, args.title, by())
+        _out(args, t["links"][-1], f"Linked {args.title or args.type}: {args.url}")
+    elif cmd == "ext":
+        t = tickets.ext_set(root, args.id, args.addon, args.data, by())
+        _out(args, t["ext"][args.addon], f"ext.{args.addon} set on {t['id']}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    for s in (sys.stdout, sys.stderr):
+        if hasattr(s, "reconfigure"):
+            s.reconfigure(encoding="utf-8")
+    args = build_parser().parse_args(argv)
+    try:
+        run(args)
+    except Refused as e:
+        print(f"Refused: {e}", file=sys.stderr)
+        return 2
+    return 0

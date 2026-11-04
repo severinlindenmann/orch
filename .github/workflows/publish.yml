@@ -3,6 +3,26 @@ on: workflow_call
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: publish
     steps:
       - uses: actions/checkout@v4
-      - run: echo "publish: no tests yet (filled in by its lane)"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: publish
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: node --test web/file.test.js
+      - run: cargo build --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orch-publish-linux-x86_64
+          path: publish/target/release/orch-publish

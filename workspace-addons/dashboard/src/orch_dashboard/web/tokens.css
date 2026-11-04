@@ -1,0 +1,80 @@
+/* orch brand tokens (copied from brand/tokens.css, :root only; dark theme only) */
+/* ---------------------------------------------------------------------------
+   Orbit brand tokens. DARK ONLY: there is no light theme and no toggle.
+   Raw values live on :root; Tailwind (@theme inline) and shadcn names map to them.
+   --------------------------------------------------------------------------- */
+:root {
+  color-scheme: dark;
+
+  --bg: #0e1014;
+  --sidebar: #0a0c0f;
+  --surface: #15181d;
+  --surface-2: #1c2027;
+  --surface-3: #242a32;
+  --border: #2a3038;
+  --border-strong: #3a424d;
+  --text: #e8eaed;
+  --text-muted: #9aa3ad;
+  --text-faint: #8b949e; /* 4.5:1 or better on bg, surface, surface-2 and the sidebar */
+
+  /* teal accent: actions */
+  --brand: #2fc6a3;
+  --on-brand: #06231c;
+  --brand-strong: #1fa98a;
+  --brand-soft: rgba(47, 198, 163, 0.14);
+
+  /* addon orange */
+  --addon: #f07a2e;
+  --on-addon: #1a0b02;
+  --addon-soft: rgba(240, 122, 46, 0.12);
+  --addon-border: rgba(240, 122, 46, 0.45);
+
+  /* semantic */
+  --success: #4ade80;
+  --success-soft: rgba(74, 222, 128, 0.14);
+  --warning: #fbbf24;
+  --warning-soft: rgba(251, 191, 36, 0.14);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
+  --info: #60a5fa;
+  --info-soft: rgba(96, 165, 250, 0.14);
+
+  /* motion: short, ease-out, never more than 200 ms (see src/lib/motion.ts) */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --lift-shadow: 0 10px 24px -6px rgb(0 0 0 / 0.55), 0 2px 6px rgb(0 0 0 / 0.4);
+
+  --radius: 0.5rem; /* 8px controls */
+  --radius-card: 10px;
+
+  /* shadcn variable names */
+  --background: var(--bg);
+  --foreground: var(--text);
+  --card: var(--surface);
+  --card-foreground: var(--text);
+  --popover: var(--surface-2);
+  --popover-foreground: var(--text);
+  --primary: var(--brand);
+  --primary-foreground: var(--on-brand);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--text);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--text-muted);
+  --accent: var(--surface-3); /* shadcn "accent" = hover surface, not the brand teal */
+  --accent-foreground: var(--text);
+  --destructive: var(--danger);
+  --input: var(--border-strong);
+  --ring: var(--brand);
+  --chart-1: var(--brand);
+  --chart-2: var(--info);
+  --chart-3: var(--warning);
+  --chart-4: #b392f0; /* violet: charts never use the addon orange */
+  --chart-5: var(--danger);
+  --sidebar-background: var(--sidebar);
+  --sidebar-foreground: var(--text);
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: var(--on-brand);
+  --sidebar-accent: var(--surface-2);
+  --sidebar-accent-foreground: var(--text);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--brand);
+}
