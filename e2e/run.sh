@@ -3,6 +3,7 @@
 # Everything runs in a temp folder under a clean environment (env -i): no ORCH_*/XDG_* from the dev shell.
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
+case "${1:-}" in agents|AG-*) exec sh "$HERE/agents/run.sh" "$@" ;; esac  # scenarios with real agents
 REPO=$(cd "$HERE/.." && pwd)
 WHAT=${1:-all}; [ $# -gt 0 ] && shift
 MODE=local; EXTRA=""
