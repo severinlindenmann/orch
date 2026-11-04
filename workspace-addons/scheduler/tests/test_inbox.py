@@ -69,6 +69,16 @@ def test_answer_for_waiting_ticket(ws):
     assert ["answer", "t_ask00001", "q1", "Yes", "--via", "relay"] in names(ws)
 
 
+def test_applied_answer_resumes_active_ticket(ws):
+    add_ticket(ws, "t_ask00002", status="active")
+    relay_on(ws, [{"id": "m_9", "type": "answer", "ticket": "t_ask00002", "applied": True,
+                   "body": {"question_id": "q1", "answer": "Yes"}}])
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == ["t_ask00002"]
+    s.runner.reap(T(8, 1), wait=True)
+    assert not any(a[:1] == ["answer"] for a in names(ws))  # the CLI applied it already
+
+
 def test_webhook_for_waiting_ticket(ws):
     add_ticket(ws, "t_hook0001", status="waiting", waiting_on={"kind": "webhook", "ref": "wh_abcdefghij"})
     relay_on(ws, [{"id": "m_7", "type": "webhook", "from": "webhook:wh_abcdefghij",

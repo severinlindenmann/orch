@@ -165,3 +165,28 @@ def test_file_too_big_is_refused_locally(proj, run, pub, monkeypatch):
     (proj / "a.txt").write_text("123456")
     assert "100 MB" in run("publish", "file", "a.txt")[2]
     assert not pub.files
+
+
+def test_pack_skips_dot_entries_and_refuses_workspace_root(tmp_path):
+    import io
+    import tarfile
+
+    import pytest
+
+    from orch import publish
+    from orch.errors import Refused
+
+    app = tmp_path / "app"
+    (app / ".orch/secrets").mkdir(parents=True)
+    (app / ".claude").mkdir()
+    (app / "app.toml").write_text('stack = "static"\n')
+    (app / "index.html").write_text("hi")
+    (app / ".env.local").write_text("SECRET=1")
+    (app / ".claude/x").write_text("x")
+    with pytest.raises(Refused, match="workspace root"):
+        publish.pack(app, None)
+    import shutil
+
+    shutil.rmtree(app / ".orch")
+    names = tarfile.open(fileobj=io.BytesIO(publish.pack(app, None))).getnames()
+    assert sorted(names) == ["app.toml", "index.html"]

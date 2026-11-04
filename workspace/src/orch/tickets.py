@@ -10,6 +10,7 @@ import json
 import os
 import re
 import secrets
+import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,14 +42,36 @@ def parse_time(text: str) -> str:
     return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def agent_tool() -> str | None:
+    """The agent tool this process runs under (from the environment), else None."""
+    if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_CODE_ENTRYPOINT"):
+        return "claude-code"
+    if any(k.startswith("CODEX_") for k in os.environ):
+        return "codex"
+    return None
+
+
+def require_human(question: str, what: str) -> None:
+    """Human-only step. Under an agent it needs a yes typed at a terminal; otherwise refused (exit 2)."""
+    if agent_tool() is None:
+        return
+    if sys.stdin.isatty():
+        sys.stderr.write(f"{question} [y/N] ")
+        sys.stderr.flush()
+        if sys.stdin.readline().strip().lower() in ("y", "yes"):
+            return
+        raise Refused(f"Not confirmed. {what} was not done.")
+    raise Refused(f"Only a human can do this ({what}). Ask the human to run it themselves.")
+
+
 def current_actor(explicit: str | None = None) -> str:
     """--by, else the agent tool seen in the environment, else human:<os user>."""
     if explicit:
         who = explicit
-    elif os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_CODE_ENTRYPOINT"):
-        who = "agent:claude-code"
-    elif any(k.startswith("CODEX_") for k in os.environ):
-        who = "agent:codex"
+        if who.startswith("human:"):
+            require_human(f"Record this as done by {who}?", f"acting as {who}")
+    elif agent_tool():
+        who = "agent:" + str(agent_tool())
     else:
         try:
             user = getpass.getuser()
