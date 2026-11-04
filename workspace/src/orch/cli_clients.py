@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from orch import publish, relay, tickets
+from orch import publish, relay, templates, tickets
 from orch.errors import Refused
 
 
@@ -39,6 +39,10 @@ def add_parsers(sub, common) -> None:
     g.add_argument("--public", action="store_true", help="open link (needs the public right)")
     g.add_argument("--private", action="store_true", help="needs a view token (default)")
     x.add_argument("--new-token", action="store_true", help="make a new view token")
+    x = pub.add_parser("new", parents=[common], help="start an app from a template")
+    x.add_argument("stack", choices=templates.STACKS)
+    x.add_argument("folder")
+    x.add_argument("--store", choices=templates.STORES, default="none")
     pub.add_parser("list", parents=[common])
     for n in ("restart", "stop"):
         x = pub.add_parser(n, parents=[common])
@@ -117,6 +121,13 @@ def run_publish(args, root: Path, out) -> None:
         pub = True if args.public else False if args.private else None
         r = publish.deploy(root, Path(args.folder), args.days, args.permanent, pub, args.new_token)
         out(args, r, f"Deployed {r['name']} - {r['status']}, {_exp(r['expires_at'])}\n{r['link']}")
+    elif sub == "new":
+        r = templates.create(args.stack, args.store, Path(args.folder))
+        out(
+            args,
+            r,
+            f"Created {r['stack']} app {r['name']} in {args.folder}.\nNext: orch publish app {args.folder}",
+        )
     elif sub == "list":
         r = publish.list_all(root)
         lines = []

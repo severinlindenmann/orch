@@ -9,9 +9,13 @@ the key is part of the link after `#` and never reaches the server. Share the wh
 
     orch publish whoami
     orch publish file <path> [--days N | --permanent]
+    orch publish new static|python|node [--store none|json|markdown|sqlite] <folder>
     orch publish app <folder> [--days N | --permanent]
     orch publish list
     orch publish restart <id> | stop <id> | delete <id>
+
+`new` copies a working template (app.toml, health path, store) into `<folder>`; the folder name is the app
+name. Edit it, then deploy with `app`. Static apps allow store none or markdown.
 
 Default lifetime is short; use `--permanent` only when the user asks. Record the link on the ticket:
 `orch link add <ticket> --type publish --url "<link>"`. Never publish secrets or `.orch/secrets/`.
