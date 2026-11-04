@@ -297,13 +297,37 @@ async fn me_patch_limits_and_auth() {
 #[tokio::test]
 async fn public_pages_are_branded_dark_html() {
     let t = setup();
-    for uri in ["/", "/nope", "/a/missing/"] {
+    let root = call(&t.public, "GET", "/", &[], vec![]).await;
+    assert_eq!(root.status, 404);
+    assert!(root.text().contains("private orch server"));
+    for uri in ["/nope", "/a/missing/"] {
         let r = call(&t.public, "GET", uri, &[], vec![]).await;
         assert_eq!(r.status, 404, "{uri}");
         let h = r.text();
         assert!(h.contains("isn&#39;t available") || h.contains("isn\u{2019}t available"));
         assert!(h.contains("color-scheme") && h.contains("<svg") && !h.contains("relay"));
     }
+}
+
+#[tokio::test]
+async fn me_patch_identical_to_live_is_a_no_op() {
+    let t = setup();
+    let ws = t.workspace("Pilatus", basic_rights()).await;
+    let r = t
+        .api(
+            &ws,
+            "PATCH",
+            "/v1/me",
+            br#"{"description":"d","tags":["a"]}"#.to_vec(),
+        )
+        .await;
+    assert_eq!(r.status, 200);
+    assert_eq!(r.json()["status"], "unchanged");
+    assert!(r.json()["pending"].is_null());
+    let r = t
+        .api(&ws, "PATCH", "/v1/me", br#"{"description":"new"}"#.to_vec())
+        .await;
+    assert_eq!(r.status, 202);
 }
 
 #[tokio::test]

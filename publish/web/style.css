@@ -42,7 +42,7 @@ p{margin:0 0 15px;color:var(--muted)}
 .avatar{width:40px;height:40px;display:grid;place-items:center;border:1px solid #2fc6a333;background:#2fc6a30c;color:var(--brand);border-radius:10px;font-size:15px}
 .avatar.purple{color:#b5a0e9;background:#b5a0e90b;border-color:#b5a0e930}
 .avatar.orange{color:#f07a2e;background:#f07a2e0b;border-color:#f07a2e30}
-.workspace h3{font-weight:550}
+.workspace h2{font-weight:550;font-size:14px;margin:0 0 5px}
 .workspace p{font-size:12px;margin:3px 0}
 .number{font-size:14px}
 .number small{display:block;color:var(--muted);font-size:11px}
@@ -62,7 +62,7 @@ details[open] summary{margin-bottom:10px}
 .pad{padding:24px}
 .field{display:grid;gap:8px;margin-bottom:23px}
 .field label,legend{font-size:12px;font-weight:600}
-input[type=text],input[type=password],select,textarea{border:1px solid #3a424d;border-radius:8px;background:var(--bg);color:var(--text);padding:10px 12px;width:100%}
+input[type=text],input[type=password],select,textarea{border:1px solid #6b7480;border-radius:8px;background:var(--bg);color:var(--text);padding:10px 12px;width:100%}
 input[type=checkbox]{accent-color:var(--brand);width:17px;height:17px}
 .check{display:flex;gap:12px;align-items:center;padding:14px 0;border-bottom:1px solid var(--border);cursor:pointer}
 .check span{flex:1}
@@ -116,7 +116,7 @@ h1{font-size:25px}
 .card-head{padding:16px}
 .workspace{padding:18px 15px;grid-template-columns:35px 1fr 36px;gap:10px}
 .avatar{width:34px;height:34px;font-size:12px}
-.workspace h3{font-size:13px}
+.workspace h2{font-size:13px}
 .workspace p{font-size:11px}
 .helper{padding:16px;flex-wrap:wrap}
 .helper a{margin-left:28px}
@@ -146,7 +146,7 @@ button:disabled{opacity:.4;cursor:default}
 .summary-line{padding-bottom:22px;margin-bottom:24px;border-bottom:1px solid var(--border)}
 .workspace-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
 .workspace-tag{border:1px solid var(--border);border-radius:99px;padding:3px 8px;background:var(--surface-2);color:var(--muted);font-size:11px}
-.workspace h3,.workspace p,td,.toast{overflow-wrap:anywhere}
+.workspace h2,.workspace p,td,.toast{overflow-wrap:anywhere}
 .workspace-edit{margin-bottom:24px}
 .breadcrumb-divider{margin:0 10px;color:var(--muted)}
 .owner{font-size:12px;color:var(--muted)}
@@ -194,7 +194,7 @@ button:disabled{opacity:.5;cursor:wait}
 button,.button{transition:background var(--dur-micro) var(--ease-out),transform var(--dur-micro) var(--ease-out);min-height:36px}
 button:active,.button:active{transform:scale(.98)}
 input[type=text],input[type=password],select,textarea{font-size:16px;min-height:44px}
-input.invalid,textarea.invalid{border-color:var(--danger)}
+input.invalid,textarea.invalid,select.invalid{border-color:var(--danger)}
 .field-error{display:flex;gap:.4em;margin:6px 0 0;color:var(--danger);font-size:13px}
 .field-error::before{content:"!";font-weight:700}
 .field-error[hidden]{display:none}
@@ -209,7 +209,7 @@ body.signed-out .admin-sidebar nav,body.signed-out .side-label,body.signed-out .
 button.danger{border-color:#f8717155}
 .empty-card{padding:32px;text-align:left}.empty-card p{max-width:46ch}
 .item{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border)}
-.item:last-child{border:0}.item h3{font-weight:550;margin:0 0 3px}.item p{margin:0;font-size:12px}
+.item:last-child{border:0}.item h2{font-weight:550;font-size:14px;margin:0 0 3px}.item p{margin:0;font-size:12px}
 .item-main{min-width:0}.item code{overflow-wrap:anywhere}
 .app-list{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr))}
 .app-card{padding:18px;overflow:visible}
@@ -230,7 +230,7 @@ button[aria-busy=true]::after{content:"";width:1em;height:1em;display:inline-blo
 @keyframes spin{to{transform:rotate(360deg)}}
 .skeleton{background:var(--surface-2);border-radius:8px;background-image:linear-gradient(90deg,transparent,rgb(255 255 255/.06),transparent);background-size:200% 100%;background-repeat:no-repeat;animation:shimmer 1.4s linear infinite}
 @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
-.skeleton-wrap{opacity:0;animation:sk-in var(--dur-std) var(--ease-out) 250ms forwards}
+.skeleton-wrap{opacity:0;animation:sk-in var(--dur-std) var(--ease-out) forwards}
 @keyframes sk-in{to{opacity:1}}
 .sk-title{height:30px;width:40%;margin-bottom:12px}.sk-line{height:14px;width:60%;margin-bottom:28px}.sk-card{height:84px;margin-bottom:16px}
 .toast{animation:toast-in var(--dur-std) var(--ease-out)}
@@ -261,7 +261,7 @@ button[aria-busy=true]::after{content:"";width:1em;height:1em;display:inline-blo
 .notice{padding:14px 18px;border:1px solid var(--warning);border-radius:8px;background:#fbbf2414;margin-bottom:18px}
 .badge{font-size:11px;padding:3px 8px;border-radius:5px;color:var(--warning);background:#fbbf2412;font-weight:400;white-space:normal}
 .review{margin-top:12px;padding:14px 16px;border:1px solid var(--warning);border-radius:8px;background:#fbbf2414}
-.review h4{font-size:14px;margin:0 0 8px}
+.review h3{font-size:14px;margin:0 0 8px}
 .review-line{margin-bottom:10px;overflow-wrap:anywhere}
 .review-line p{margin:2px 0}
 .review .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
@@ -288,6 +288,18 @@ dialog.confirm h2{margin-bottom:8px}
 .workspace .avatar,.workspace .number{display:none!important}
 .workspace>button{grid-column:1!important;justify-self:start}
 .counts-inline{display:block}
-.updated{display:none}
+.updated{margin-right:0;font-size:11px}
 }
 @media(max-width:600px){.toast{width:calc(100vw - 32px);justify-content:space-between}}
+
+/* ---- UX round 3 ---- */
+.app-name h2{font-size:14px;font-weight:550;margin:0 0 3px}
+h1:focus{outline:none}
+.review-done:focus-visible{outline-offset:2px}
+.download-note{margin:12px 0 0;font-size:13px;color:var(--success);text-align:center}
+@media(max-width:580px){
+.brand{min-height:44px}
+.helper a,.page-foot a{display:inline-flex;align-items:center;min-height:44px}
+.more summary{min-height:44px;display:flex;align-items:center}
+input[type=checkbox]{width:24px;height:24px}
+}
