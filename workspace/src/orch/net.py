@@ -4,11 +4,31 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 from orch.errors import Refused
+
+RETRY_DELAYS = (1, 2, 4)  # seconds; connection-level failures only
+
+
+def _send(req, timeout):
+    """urlopen with up to 3 retries when no response arrived (refused/reset/timeout while connecting)."""
+    delays = list(RETRY_DELAYS)
+    while True:
+        try:
+            r = urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError:
+            raise  # a response arrived: never retry (no duplicate POSTs)
+        except (urllib.error.URLError, TimeoutError, OSError):
+            if not delays:
+                raise
+            time.sleep(delays.pop(0))
+            continue
+        with r:
+            return r.status, r.read()
 
 
 def call(
@@ -29,8 +49,7 @@ def call(
         hdrs.setdefault("Content-Type", "application/octet-stream")
     req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, r.read()
+        return _send(req, timeout)
     except urllib.error.HTTPError as e:
         raw = e.read()
         msg, out = f"The server answered {e.code}.", ""

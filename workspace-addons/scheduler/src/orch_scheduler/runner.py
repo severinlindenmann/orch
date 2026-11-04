@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import tomllib
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import orchcli
@@ -166,7 +166,7 @@ class Runner:
             if code is None:
                 continue
             with open(r.log_path, "a") as f:
-                f.write(f"# end {fmt(now)} exit {code}\n")
+                f.write(f"# end {fmt(datetime.now(UTC))} exit {code}\n")
             r.lock.unlink(missing_ok=True)
             st = load_state(self.root)
             e = st.setdefault(tid, {})

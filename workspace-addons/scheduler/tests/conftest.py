@@ -38,6 +38,8 @@ elif args[:2] == ["ticket", "status"]:
     t = load(args[2]); t["status"] = args[3]; save(t); print(json.dumps(t))
 elif args[:2] == ["ext", "set"]:
     t = load(args[2]); t.setdefault("ext", {{}})[args[3]] = json.loads(args[4]); save(t); print("{{}}")
+elif args[0] == "answer" and (root / "fail-answer").exists():
+    sys.exit(2)
 elif args[0] in ("log", "answer"):
     print("{{}}")
 else:

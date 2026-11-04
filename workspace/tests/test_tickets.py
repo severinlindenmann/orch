@@ -137,7 +137,6 @@ def test_ask_answer(proj, run, new_ticket, validate):
     validate(t)
     assert t["status"] == "waiting" and t["waiting_on"] == {"kind": "question", "ref": "q1"}
     assert t["questions"][0]["recommended"] == "DATE"
-    assert run("answer", tid, "q1", "MAYBE")[0] == 2
     assert run("answer", tid, "q1", "TIMESTAMP", "--by", "human:Severin", "--via", "phone")[0] == 0
     t = read(proj, tid)
     validate(t)
@@ -185,3 +184,26 @@ def test_missing_ticket_refused(proj, run):
 def test_works_without_git(proj, new_ticket):
     assert not (Path(proj) / ".git").exists()
     new_ticket()
+
+
+def test_answer_matches_options_case_insensitively_or_free_text(proj, run, new_ticket):
+    tid = new_ticket()
+    run("ask", tid, "Which day?", "--option", "Friday", "--option", "Monday")
+    assert run("answer", tid, "q1", "monday")[0] == 0
+    assert read(proj, tid)["questions"][0]["answer"] == "Monday"
+    run("ask", tid, "Which day?", "--option", "Friday", "--option", "Monday")
+    assert run("answer", tid, "q2", "next Tuesday please", "--via", "phone", "--by", "human:x")[0] == 0
+    assert read(proj, tid)["questions"][1]["answer"] == "next Tuesday please"
+
+
+def test_agent_cannot_answer_a_phone_question(proj, run, new_ticket):
+    import json
+
+    tid = new_ticket()
+    run("ask", tid, "Which?", "--option", "A")
+    d = proj / ".orch" / "secrets"
+    d.mkdir(parents=True, exist_ok=True)
+    sent = {"m1": {"ticket": tid, "question_id": "q1", "to": "phones"}}
+    (d / "questions-sent.json").write_text(json.dumps(sent))
+    assert run("answer", tid, "q1", "A", "--by", "agent:claude-code")[0] == 2
+    assert read(proj, tid)["questions"][0]["answer"] is None

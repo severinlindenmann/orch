@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from orch import __version__, addons, cli_clients, tickets
+from orch import __version__, addons, cli_clients, relay, tickets
 from orch import init as init_mod
 from orch.errors import Refused
 
@@ -218,7 +218,10 @@ def run(args: argparse.Namespace) -> None:
             cli_clients.send_phone_question(root, t["id"], q)
         _out(args, q, f"{q['id']} asked. {t['id']} is waiting on question {q['id']}.")
     elif cmd == "answer":
-        t, q = tickets.answer(root, args.id, args.question, args.answer, by(), args.via)
+        who = by()
+        if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
+            raise Refused("This question was sent to the phones. Only a human answers it.")
+        t, q = tickets.answer(root, args.id, args.question, args.answer, who, args.via)
         _out(args, q, f"{q['id']} answered: {q['answer']}")
     elif cmd == "link":
         t = tickets.link_add(root, args.id, args.type, args.url, args.title, by())

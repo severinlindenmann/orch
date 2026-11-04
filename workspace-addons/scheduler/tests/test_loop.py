@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 
 from conftest import T, add_ticket, calls
 
@@ -35,7 +36,11 @@ def test_log_has_start_end_exit(ws):
     s.tick(T(8, 0))
     finish(s, T(8, 1))
     log = next((ws / ".orch/scheduler/logs").glob("t_wake002-*.log")).read_text()
-    assert "# start 2026-11-04T08:00:00Z" in log and "agent ran" in log and "# end 2026-11-04T08:01:00Z exit 0" in log
+    assert "# start 2026-11-04T08:00:00Z" in log and "agent ran" in log and " exit 0" in log
+    # the footer carries the real end time, not the pass start time passed to reap()
+    end = next(line for line in log.splitlines() if line.startswith("# end "))
+    stamp = datetime.strptime(end.split()[2], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    assert abs((datetime.now(UTC) - stamp).total_seconds()) < 120
 
 
 def test_done_ticket_not_woken(ws):
