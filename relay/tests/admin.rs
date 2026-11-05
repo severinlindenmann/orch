@@ -581,3 +581,9 @@ fn portal_shows_webhook_and_person_senders() {
     let page = include_str!("../web/portal.html");
     assert!(page.contains("/^(webhook|human|agent):/.test(id)"));
 }
+
+#[test]
+fn portal_blur_validation_skips_submit_button() {
+    let page = include_str!("../web/portal.html");
+    assert!(page.contains("e.relatedTarget&&e.relatedTarget.type==='submit'"));
+}
