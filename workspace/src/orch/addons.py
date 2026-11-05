@@ -80,21 +80,52 @@ def spec(subdir: str) -> str:
     return f"git+{r}@{ref()}#subdirectory={subdir}"
 
 
-def home(root: Path | None = None) -> Path:
-    """The user's orch folder. ORCH_HOME counts only when it points outside the workspace (a repo .envrc
-    must not be able to supply its own registry or consent store); otherwise ~/.orch-tool."""
-    real = Path.home() / ".orch-tool"
-    env = os.environ.get("ORCH_HOME")
-    if not env:
-        return real
-    h = Path(env).resolve()
+def real_home() -> Path:
+    """The user's home from the account database on POSIX (not $HOME, which a project .envrc can set)."""
+    try:
+        import pwd
+
+        return Path(pwd.getpwuid(os.getuid()).pw_dir)
+    except (ImportError, KeyError):
+        return Path.home()
+
+
+def _trusted_home(h: Path, root: Path | None = None) -> bool:
+    """ORCH_HOME counts only under the user's real home, outside the current folder and the workspace, and
+    with no .orch, .agents or .git in any folder from it up to home (a repo .envrc could aim it higher)."""
+    top = real_home().resolve()
     for base in (Path.cwd().resolve(), *([root.resolve()] if root else [])):
         try:
             h.relative_to(base)
         except ValueError:
             continue
+        return False  # inside the current folder or the workspace
+    try:
+        h.relative_to(top)
+    except ValueError:
+        return False
+    for p in (h, *h.parents):
+        if p == top:
+            break
+        if any((p / m).exists() for m in (".orch", ".agents", ".git")):
+            return False
+    return True
+
+
+def home(root: Path | None = None) -> Path:
+    """The user's orch folder: ORCH_HOME when trusted (see _trusted_home), else ~/.orch-tool."""
+    real = real_home() / ".orch-tool"
+    env = os.environ.get("ORCH_HOME")
+    if not env:
         return real
-    return h
+    h = Path(env).resolve()
+    if _trusted_home(h, root):
+        return h
+    print(
+        f"Note: ORCH_HOME ({env}) is ignored (not a plain folder under your home); using {real}.",
+        file=sys.stderr,
+    )
+    return real
 
 
 def registry_path() -> Path:
@@ -390,7 +421,8 @@ def folder_hash(folder: Path) -> str:
     skip = {".git", "__pycache__", ".venv", "node_modules", ".pytest_cache", ".ruff_cache", "build", "dist"}
     for p in sorted(folder.rglob("*")):
         rel = p.relative_to(folder)
-        if skip & set(rel.parts) or any(x.endswith(".egg-info") for x in rel.parts) or not p.is_file():
+        top = rel.parts[0]  # build/cache names are skipped only at the top level, never nested
+        if top in skip or top.endswith(".egg-info") or "__pycache__" in rel.parts or not p.is_file():
             continue
         h.update(rel.as_posix().encode() + b"\0")
         try:

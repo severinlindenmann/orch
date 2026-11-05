@@ -622,11 +622,41 @@ def test_agents_block_cannot_forge_markers(tmp_path):
         assert not (root / "AGENTS.md").read_text(encoding="utf-8").strip()
 
 
-def test_consent_store_ignores_orch_home_inside_workspace(proj, monkeypatch):
-    monkeypatch.setenv("ORCH_HOME", str(proj / "shipped"))
-    assert addons.home() == Path.home() / ".orch-tool"
-    monkeypatch.setenv("ORCH_HOME", str(proj.parent / "elsewhere"))
-    assert addons.home() == (proj.parent / "elsewhere").resolve()
+def test_orch_home_must_be_plain_folder_under_home(proj, monkeypatch, capfd):
+    h = addons.real_home()
+    real = h / ".orch-tool"
+    for bad in (
+        proj / "shipped",
+        proj.parent / "elsewhere",
+        h.parent,
+    ):  # in project / outside home / above home
+        monkeypatch.setenv("ORCH_HOME", str(bad))
+        assert addons.home() == real
+    assert "ignored" in capfd.readouterr().err
+    # an ancestor between ORCH_HOME and home holds .git / .orch / .agents (a repo aiming at its parent)
+    for marker in (".git", ".orch", ".agents"):
+        repo = h / f"repo-{marker[1:]}"
+        (repo / marker).mkdir(parents=True)
+        monkeypatch.setenv("ORCH_HOME", str(repo / "sub" / "home"))
+        assert addons.home() == real, marker
+    monkeypatch.setenv("HOME", str(proj / "fakehome"))  # $HOME is not what counts
+    assert addons.real_home() == h
+    ok = h / "cfg" / "orchhome"
+    monkeypatch.setenv("ORCH_HOME", str(ok))
+    assert addons.home() == ok.resolve()
+
+
+def test_folder_hash_skips_build_only_at_top_level(tmp_path):
+    f = tmp_path / "addon"
+    (f / "build").mkdir(parents=True)
+    (f / "src" / "pkg" / "build").mkdir(parents=True)
+    (f / "build" / "junk.py").write_text("1", encoding="utf-8")
+    (f / "src" / "pkg" / "build" / "x.py").write_text("1", encoding="utf-8")
+    h1 = addons.folder_hash(f)
+    (f / "build" / "junk.py").write_text("2", encoding="utf-8")
+    assert addons.folder_hash(f) == h1  # top-level build output is ignored
+    (f / "src" / "pkg" / "build" / "x.py").write_text("2", encoding="utf-8")
+    assert addons.folder_hash(f) != h1  # code in a nested build/ folder counts
 
 
 def test_consent_bound_to_workspace_id(proj, run, hello):
