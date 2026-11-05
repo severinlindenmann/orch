@@ -1,0 +1,8 @@
+schema = "orch.addon/1"
+orch_api = 1
+name = "focus"
+version = "0.0.1"
+description = "Placeholder for the focus add-on."
+run = "orch_focus"
+skill = "skills/orch-focus"
+background = true

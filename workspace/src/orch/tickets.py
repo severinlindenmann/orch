@@ -47,11 +47,9 @@ def parse_time(text: str) -> str:
 
 def agent_tool() -> str | None:
     """The agent tool this process runs under (from the environment), else None."""
-    if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_CODE_ENTRYPOINT"):
-        return "claude-code"
-    if any(k.startswith("CODEX_") for k in os.environ):
-        return "codex"
-    return None
+    from orch import adapters
+
+    return adapters.detect_env(os.environ)
 
 
 def require_human(question: str, what: str) -> None:
