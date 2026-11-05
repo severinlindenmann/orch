@@ -165,20 +165,22 @@ function highlight(text, ext) {
 
 function mdInline(s) {
   const codes = [];
-  let t = String(s).replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return "\u0000" + (codes.length - 1) + "\u0000"; });
+  // \u0000 and \u0001 mark placeholders below: drop them from the input so text can never forge one
+  let t = String(s).replace(/[\u0000\u0001]/g, "").replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return "\u0000" + (codes.length - 1) + "\u0000"; });
   t = esc(t);
   // images and links become placeholders too, so emphasis never runs inside their attributes
   const tags = [];
   const keep = (html) => { tags.push(html); return "\u0001" + (tags.length - 1) + "\u0001"; };
-  t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g, (_, alt, url) =>
+  // url and alt: no placeholder may sit inside an attribute; both are already HTML-escaped (esc above)
+  t = t.replace(/!\[([^\]\u0000\u0001]*)\]\(([^)\s\u0000\u0001]+)[^)]*\)/g, (_, alt, url) =>
     /^https:\/\//i.test(url) ? keep('<img src="' + url + '" alt="' + alt + '" loading="lazy" referrerpolicy="no-referrer">') : "[" + (alt || "image") + "]");
-  t = t.replace(/\[([^\]]+)\]\(([^)\s]+)[^)]*\)/g, (all, label, url) =>
+  t = t.replace(/\[([^\]]+)\]\(([^)\s\u0000\u0001]+)[^)]*\)/g, (all, label, url) =>
     /^(https?:|mailto:)/i.test(url) ? keep('<a href="' + url + '" target="_blank" rel="noopener noreferrer nofollow">') + label + keep("</a>") : label);
   t = t.replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_, a, b) => "<strong>" + (a || b) + "</strong>");
   t = t.replace(/(^|[^*\w])\*([^*\s][^*]*)\*(?!\*)/g, "$1<em>$2</em>").replace(/(^|\W)_([^_\s][^_]*)_(?!\w)/g, "$1<em>$2</em>");
   t = t.replace(/~~([^~]+)~~/g, "<del>$1</del>");
-  t = t.replace(/\u0001(\d+)\u0001/g, (_, i) => tags[+i]);
-  return t.replace(/\u0000(\d+)\u0000/g, (_, i) => "<code>" + esc(codes[+i]) + "</code>");
+  t = t.replace(/\u0001(\d+)\u0001/g, (m, i) => (+i < tags.length ? tags[+i] : ""));
+  return t.replace(/\u0000(\d+)\u0000/g, (m, i) => (+i < codes.length ? "<code>" + esc(codes[+i]) + "</code>" : ""));
 }
 
 // Markdown subset to HTML: headings, paragraphs, lists, task lists, quotes, code fences, tables, rules.

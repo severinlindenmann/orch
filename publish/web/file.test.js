@@ -118,3 +118,28 @@ test("markdown emphasis never lands inside link attributes", () => {
   assert.ok(h.includes('<a href="https://e.example/a_b_c/*x*" target="_blank" rel="noopener noreferrer nofollow">my_file_name</a>'), h);
   assert.ok(h.includes("<em>this</em>"));
 });
+
+// Every tag the markdown renderer emits must be one of ours, with attribute values free of quotes and markup.
+const SAFE_TAG = /^<\/?(a|div|span|h[1-6]|p|ul|ol|li( class="task")?|blockquote|pre( class="code")?|code|strong|em|del|hr|table|thead|tbody|tr|th|td|div class="table-wrap"|span class="tk-[cskpn]"|a href="(https?:|mailto:)[^"<>]*" target="_blank" rel="noopener noreferrer nofollow"|img src="https:\/\/[^"<>]*" alt="[^"<>]*" loading="lazy" referrerpolicy="no-referrer")>$/;
+function assertSafe(h) {
+  for (const tag of h.match(/<[^>]*>/g) || []) assert.ok(SAFE_TAG.test(tag), "unexpected tag " + tag + " in " + JSON.stringify(h));
+  assert.ok(!/[\u0000\u0001]/.test(h), "placeholder left in " + JSON.stringify(h));
+}
+
+test("markdown: forged placeholders and hostile urls/alts cannot break out of attributes", () => {
+  const cases = [
+    "[a](https://x.example/?q=1) ![\u00010\u0001](https://y.example/i.png)",
+    "[a](https://x.example/) ![p](https://y.example/\u00010\u0001\" onerror=alert(1) x=\")",
+    "![a\" onerror=\"alert(1)](https://y.example/i.png)",
+    "![x](https://y.example/a.png\"onerror=alert(1)//)",
+    "`c` [l](https://x.example/\u00000\u0000\") \u00009\u0000 \u00017\u0001",
+    "![`q`](https://y.example/`q`.png) [`b`](https://x.example/`b`)",
+    "**[x_y](https://x.example/a_b)** _![i*j](https://y.example/k*l.png)_",
+    "[![img](https://y.example/i.png)](https://x.example/)",
+  ];
+  for (const c of cases) {
+    const h = P.renderMarkdown(c);
+    assertSafe(h); // SAFE_TAG: quotes inside values can only appear escaped, so no attribute can be added
+  }
+  assert.ok(P.renderMarkdown('![say "hi"](https://y.example/i.png)').includes('alt="say &quot;hi&quot;"'));
+});
