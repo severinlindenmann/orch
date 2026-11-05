@@ -152,10 +152,15 @@ struct QuestionsView: View {
     }
 
     /// Tap = start a 3 s undo window; the answer is sent when it ends.
+    /// 3 s undo window; UI tests may widen it with `-undoSeconds N` so a slow CI simulator cannot outrun the Undo tap.
+    private static var undoSeconds: Double {
+        let v = UserDefaults.standard.double(forKey: "undoSeconds")
+        return v > 0 ? v : 3
+    }
     private func choose(_ question: Question, _ option: String) {
         pending[question.id] = option
         timers[question.id] = Task {
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .seconds(Self.undoSeconds))
             guard !Task.isCancelled else { return }
             sending.insert(question.id)
             await model.answer(question, with: option)
