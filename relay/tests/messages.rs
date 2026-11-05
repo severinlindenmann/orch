@@ -175,3 +175,29 @@ async fn messages_workspace_cannot_answer_a_question_to_phones() {
         "body": {"question_id": "q1", "answer": "x", "answered_by": "agent:b"}});
     assert_eq!(t.call(&b, "POST", "/v1/messages", Some(ans)).await.0, 403);
 }
+
+#[tokio::test]
+async fn not_found_is_the_same_for_unknown_and_unconnected() {
+    let t = start().await;
+    let (a, b, c) = (
+        t.add_ws("Alpha").await,
+        t.add_ws("Secret Beta").await,
+        t.add_ws("Gamma").await,
+    );
+    t.rules(json!([rule(&a, &c, [true, true, false, false])]))
+        .await;
+    let (s1, v1) = t
+        .send(&a, "ws_unknown001", "text", json!({"text": "x"}))
+        .await;
+    let (s2, v2) = t.send(&a, &b.id, "text", json!({"text": "x"})).await;
+    assert_eq!((s1, s2), (404, 404));
+    assert_eq!(v1, v2);
+    assert_eq!(v1["error"], "not_found");
+    assert!(!v2.to_string().contains("Secret Beta"));
+    // connected pair keeps the specific answer
+    let (s3, v3) = t
+        .send(&a, &c.id, "delegate", json!({"title": "t", "text": "x"}))
+        .await;
+    assert_eq!(s3, 403);
+    assert!(v3["message"].as_str().unwrap().contains("Gamma"));
+}

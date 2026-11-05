@@ -62,7 +62,7 @@ const input=(name,value='',extra={})=>el('input',{name,value,...extra});
 const details=(title,...body)=>el('details',{},el('summary',{},title),el('div',{},...body));
 function panel(title,...body){return el('section',{class:'panel'},el('div',{class:'panel-head'},el('h2',{tabindex:'-1'},title)),...body)}
 function head(k,t,p,action){return [el('div',{class:'eyebrow'},k),el('div',{class:'heading'},el('div',{},el('h1',{tabindex:'-1'},t),el('p',{},p)),action)]}
-function show(...nodes){app.replaceChildren(...nodes.flat().filter(Boolean),el('footer',{class:'footline'},el('span',{},'orch relay / Private connections, shared work.'),el('a',{href:'#terminal',class:'quiet-link'},'What does my agent see?')));document.body.classList.toggle('signedout',!token)}
+function show(...nodes){app.replaceChildren(...nodes.flat().filter(Boolean),el('footer',{class:'footline'},el('span',{},'Messages and files sent through the relay are stored encrypted; the relay admin can read them. Only share links are end-to-end encrypted.'),el('a',{href:'#terminal',class:'quiet-link'},'What does my agent see?')));document.body.classList.toggle('signedout',!token)}
 function skeleton(){const row=()=>el('div',{class:'row'},el('div',{class:'tile skeleton'}),el('div',{class:'grow'},el('div',{class:'skeleton skeleton-line',style:'width:40%'}),el('div',{class:'skeleton skeleton-line',style:'width:70%'})));return el('div',{class:'panel','aria-busy':'true','aria-label':'Loading'},row(),row(),row())}
 const isKnown=id=>!id||id==='admin'||id==='phones'||/^(webhook|human|agent):/.test(id)||workspaces.some(w=>w.id===id)||phoneList.some(p=>p.id===id);
 function name(id){if(!id)return '—';if(id==='admin')return 'Admin';if(id==='phones')return 'Your phones';if(/^webhook:/.test(id))return 'Webhook';if(/^human:/.test(id))return id.slice(6)||'A person';const w=workspaces.find(w=>w.id===id)||phoneList.find(p=>p.id===id);if(w)return w.name;return /^ph_/.test(id)?'A removed phone':/^ws_/.test(id)?'A removed workspace':id}
@@ -108,24 +108,25 @@ function wsFields(w={},open=true){const name=field('Workspace name',chk(input('n
 function checkName(f){if(!f.elements.name.value.trim())throw new FieldError('Give the workspace a name.','name')}
 async function copy(value){try{await navigator.clipboard.writeText(value)}catch{const t=el('textarea',{value,readOnly:true});document.body.append(t);t.select();const ok=document.execCommand('copy');t.remove();if(!ok)throw Error('Copy is not available here. Select the text and copy it.')}toast('Copied')}
 function promptResult(r,title){
- show(...head('Connection setup',title,'Paste this into your agent.'),panel('Your installation prompt',el('div',{class:'panel-body'},el('p',{class:'notice'},'This is shown only once. Copy it now and keep it safe.'),el('textarea',{id:'install-prompt',readOnly:true,value:r.prompt||'','aria-label':'Installation prompt'}),el('div',{class:'actions'},button('Copy prompt',()=>copy(r.prompt||''),'primary'),link('Back to overview','#overview')))));
+ const full=r.prompt||'',lines=full.split('\n'),win=lines.filter(l=>/^\s*Windows:/.test(l)),unix=lines.filter(l=>!/^\s*Windows:/.test(l)).join('\n'),winFull=lines.filter(l=>!/^\s*macOS\/Linux:/.test(l)).join('\n');
+ show(...head('Connection setup',title,'Connect it to the agent you already use.'),panel('Connect your agent',el('div',{class:'panel-body'},el('p',{class:'sub'},'Copy this and paste it into your agent, in the project that should use this workspace.'),el('div',{class:'actions'},button('Copy for your agent',()=>copy(unix),'primary')),el('p',{class:'notice'},'This is shown only once. Copy it before you leave this page.'),details('Show what will be copied',el('textarea',{id:'install-prompt',readOnly:true,value:unix,'aria-label':'What will be copied'})),win.length?details('Windows?',el('p',{class:'sub'},'On Windows, copy this version instead.'),el('div',{class:'actions'},button('Copy for Windows',()=>copy(winFull),'small'))):null,el('div',{class:'actions'},link('Done','#overview')))));
 }
 let lastSeenShown='';
 function status(w){let t='Online';if(!w.online){t=w.last_seen?'Last seen '+ago(w.last_seen):'Not connected yet';const full=t;if(t===lastSeenShown)t='Offline';else lastSeenShown=t;return el('span',{class:'status',title:full},t)}return el('span',{class:'status online'},t)}
 function reviewCard(w){
  const p=w.pending,tagText=t=>(t&&t.length)?t.join(', '):'none';
  const line=(label,cur,next)=>el('div',{class:'review-line'},el('strong',{},label),el('p',{class:'sub'},'Now: '+cur),el('p',{},'Proposed: '+next));
- const box=el('section',{class:'review','data-ws':w.id,role:'group','aria-label':'Change to review for '+w.name},el('h3',{tabindex:'-1'},w.name+' wants to change how it is described'),
+ const box=el('section',{class:'review','data-ws':w.id,role:'group','aria-label':'Change waiting for your approval for '+w.name},el('h3',{tabindex:'-1'},w.name+' wants to change how it is described'),
   p.description!==null&&p.description!==w.description?line('Description',w.description||'none (approving removes it)',p.description||'none (approving removes it)'):null,p.tags&&JSON.stringify(p.tags)!==JSON.stringify(w.tags||[])?line('Tags',tagText(w.tags),tagText(p.tags)):null,/[^\x00-\x7f]/.test(p.description||'')?el('p',{class:'sub'},'Contains special characters.'):null,
   el('p',{class:'sub'},'The old text stays in use until you approve. Proposed '+ago(p.at)+'.'));
  const rn=reviewNotes[w.id],result=el('p',{class:'review-note'+(rn&&rn.warn?' warn':''),role:'alert',tabindex:'-1'},rn?rn.text:'');
  const act=(label,busyLabel,path,done,cls)=>{const b=el('button',{type:'button',class:cls,onclick:async()=>{if(box.dataset.busy)return;box.dataset.busy='1';result.className='review-note';result.textContent='';delete reviewNotes[w.id];box.querySelectorAll('.actions button').forEach(x=>{if(x!==b)x.disabled=true});busy(b,true,busyLabel);let handled=false;
   try{await api('/workspaces/'+enc(w.id)+'/profile/'+path,'POST',{rev:p.rev});handled=true;await refreshRow(w.id,done,true)}
   catch(e){
-   if(!handled&&(e.status===409||e.status===404)){try{await refreshRow(w.id,e.status===409?w.name+' sent a newer version while you were looking. Check the text, then approve or reject.':'This change was already handled.',true,true);return}catch{}}
+   if(!handled&&(e.status===409||e.status===404)){try{await refreshRow(w.id,e.status===409?w.name+' sent a newer version while you were looking. Check the text, then approve or keep the current text.':'This change was already handled.',true,true);return}catch{}}
    box.querySelectorAll('.actions button').forEach(x=>{x.disabled=false});result.className='review-note form-error';result.textContent=/try again[.!]?$/i.test(e.message||'')?e.message:(e.message||'Something went wrong.')+' Try again.';busy(b,false);b.focus()}
   finally{delete box.dataset.busy}}},label);return b};
- box.append(result,el('div',{class:'actions'},act('Approve','Approving…','approve','Approved by you. The new text is now in use.','primary'),act('Reject','Rejecting…','reject','Rejected. The old text stays.','small')));
+ box.append(result,el('div',{class:'actions'},act('Approve','Approving…','approve','Approved by you. The new text is now in use.','primary'),act('Keep current','Keeping…','reject','Kept the current text.','small')));
  return box;
 }
 // Re-render one workspace row from fresh data; recompute the banner and the review section.
@@ -142,10 +143,10 @@ async function refreshRow(id,note,focus,warn){
 function renderReviews(){const box=$('#reviews');if(!box)return;
  const items=workspaces.filter(hasChange),done=Object.keys(reviewNotes).filter(id=>!items.some(w=>w.id===id)&&workspaces.some(w=>w.id===id));
  box.hidden=!(items.length||done.length);
- box.replaceChildren(...(box.hidden?[]:[el('div',{class:'panel-head'},el('h2',{tabindex:'-1'},'Needs your review · '+items.length)),
+ box.replaceChildren(...(box.hidden?[]:[el('div',{class:'panel-head'},el('h2',{tabindex:'-1'},'Waiting for your approval · '+items.length)),
   ...items.map(w=>reviewCard(w)),
   ...done.map(id=>el('div',{class:'review-done','data-ws':id},el('p',{class:'review-note'+(reviewNotes[id].warn?' warn':''),role:'status',tabindex:'-1'},name(id)+': '+reviewNotes[id].text)))]))}
-function updateBanner(){const b=$('#review-banner');if(!b)return;const n=workspaces.filter(hasChange).length;b.hidden=!n;b.replaceChildren(el('a',{href:'#reviews',class:'quiet-link',onclick:e=>{e.preventDefault();const h=document.querySelector('#reviews h2');if(h){h.scrollIntoView({block:'start'});h.focus()}}},n+(n===1?' change needs':' changes need')+' your review'))}
+function updateBanner(){const b=$('#review-banner');if(!b)return;const n=workspaces.filter(hasChange).length;b.hidden=!n;b.replaceChildren(el('a',{href:'#reviews',class:'quiet-link',onclick:e=>{e.preventDefault();const h=document.querySelector('#reviews h2');if(h){h.scrollIntoView({block:'start'});h.focus()}}},n+(n===1?' change is':' changes are')+' waiting for your approval'))}
 function hasChange(w){const p=w.pending;if(!p)return false;const dd=p.description!==null&&p.description!==undefined&&p.description!==w.description,tt=p.tags&&JSON.stringify(p.tags)!==JSON.stringify(w.tags||[]);return !!(dd||tt)}
 function workspaceCard(w,note,warn){
  const edit=form(async f=>{checkName(f);await api('/workspaces/'+enc(w.id),'PATCH',wsData(f));toast('Saved');await refreshRow(w.id,'Saved. The new details are in use.',false)},...wsFields(w),submit('Save changes'));
@@ -165,22 +166,33 @@ async function overview(v){
  el('div',{class:'grid'},el('div',{},panel('Workspaces · '+workspaces.length,...(workspaces.length?sorted.map(w=>workspaceCard(w)):[empty('No workspaces yet','Add one so your agents can talk to each other.',el('a',{class:'button primary',href:'#add'},'Add workspace'))]),el('div',{class:'panel-body'},link('Who can do what →','#rules'))),panel('Your phones',...(shownPhones.length?shownPhones.map(p=>el('div',{class:'row'},el('div',{class:'tile blue'},icon('phones')),el('div',{class:'grow'},el('h3',{},p.name),sub(p.paired===false?'Waiting for its first scan':'Can reach '+((p.workspaces||[]).map(name).join(', ')||'no workspaces'))))):[empty('No phones yet','Scan a code to answer questions from anywhere.',el('a',{class:'button primary',href:'#phones'},'Connect a phone'))]),el('div',{class:'panel-body'},link('Manage phones →','#phones')))),el('aside',{},panel('Recent activity',...(feed.length?feed.map(f=>feedRow(f.m,f.n)):[empty('Nothing yet','Messages between your workspaces show up here.')]),el('div',{class:'panel-body'},link('All messages →','#messages'))),el('div',{class:'notice'},'You choose what each workspace can share and start.'))));
  renderReviews();updateBanner();
 }
-function add(){show(...head('Connection setup','Add a workspace','Give it a name. Your agent takes care of the rest.'),panel('A new workspace',el('div',{class:'panel-body form'},form(async f=>{checkName(f);const r=await api('/workspaces','POST',wsData(f));promptResult(r,'Your workspace is ready')},...wsFields({},false),submit('Create setup prompt')))))}
-const flagLabels=[['text','Send messages'],['files','Send files'],['delegate','Hand over tasks'],['start','Start tasks']];
+function add(){show(...head('Connection setup','Add a workspace','Give it a name. You can change everything later.'),panel('A new workspace',el('div',{class:'panel-body form'},form(async f=>{checkName(f);const r=await api('/workspaces','POST',wsData(f));promptResult(r,'Your workspace is ready')},...wsFields({},false),submit('Create workspace →'),link('Cancel','#overview')))))}
+const flagLabels=[['text','Send messages and files'],['files','Send files'],['delegate','Give tasks'],['start','Start work']];
 async function rules(v){
  const [r,allows]=await Promise.all([api('/rules'),all('/allows')]);if(v!==epoch)return;
- const rows=[],top=[],groups=new Map(),shortFlag={text:'Messages',files:'Files',delegate:'Hand over',start:'Start'};
+ drawRules(r,allows);
+}
+function drawRules(r,allows){
+ const rows=[],top=[],groups=new Map(),shortFlag={mf:'Send messages and files',delegate:'Give tasks',start:'Start work'};
  for(const from of workspaces){groups.set(from.id,{from,cards:[]});for(const to of workspaces){if(from.id===to.id)continue;const old=(r.rules||[]).find(x=>x.from===from.id&&x.to===to.id)||{};const row={from:from.id,to:to.id};
-  const toggles=flagLabels.map(([k])=>{const c=input(k,'',{type:'checkbox',class:'toggle',checked:!!old[k],id:'r-'+from.id+'-'+to.id+'-'+k,'aria-label':from.name+' → '+to.name+': '+flagLabels.find(f=>f[0]===k)[1]});row[k]=c;return el('label',{class:'pair-toggle'},c,el('span',{},shortFlag[k]))});
-  rows.push(row);const line=el('div',{class:'pair pair-line'},el('h3',{},from.name+' → '+to.name),el('div',{class:'pair-flags'},toggles));
+  for(const k of ['text','files'])row[k]=input(k,'',{type:'checkbox',checked:!!(old.text||old.files)});
+  for(const k of ['delegate','start'])row[k]=input(k,'',{type:'checkbox',checked:!!old[k]});
+  const lbl=from.name+' → '+to.name;
+  const mf=input('mf','',{type:'checkbox',class:'toggle',checked:!!(old.text||old.files),id:'r-'+from.id+'-'+to.id+'-mf','aria-label':lbl+': Send messages and files'});
+  mf.onchange=()=>{row.text.checked=row.files.checked=mf.checked};row.mf=mf;
+  const sw=(k,c)=>el('label',{class:'pair-toggle'},c,el('span',{},shortFlag[k]));
+  const dl=input('delegate','',{type:'checkbox',class:'toggle',checked:!!old.delegate,id:'r-'+from.id+'-'+to.id+'-delegate','aria-label':lbl+': Give tasks'});dl.onchange=()=>{row.delegate.checked=dl.checked};row.dl=dl;
+  const st=input('start','',{type:'checkbox',class:'toggle',checked:!!old.start,id:'r-'+from.id+'-'+to.id+'-start','aria-label':lbl+': Start work'});st.onchange=()=>{row.start.checked=st.checked};row.st=st;
+  const both=el('button',{type:'button',class:'small',onclick:()=>{const rev=rows.find(x=>x.from===to.id&&x.to===from.id);if(!rev)return;const on=!(mf.checked||dl.checked||st.checked)?{mf:true,dl:false,st:false}:{mf:mf.checked,dl:dl.checked,st:st.checked};for(const x of [row,rev]){x.mf.checked=x.text.checked=x.files.checked=on.mf;x.dl.checked=x.delegate.checked=on.dl;x.st.checked=x.start.checked=on.st}toast('Allowed both ways. Press Save to keep it.')}},'⇄ Allow both ways');
+  rows.push(row);const line=el('div',{class:'pair pair-line'},el('h3',{},lbl),el('div',{class:'pair-flags'},sw('mf',mf),sw('delegate',dl),sw('start',st),both));
   if(flagLabels.some(([k])=>old[k]))top.push(line);else groups.get(from.id).cards.push(line)}}
  const saveErr=el('div',{class:'form-error',role:'alert',hidden:true});
- async function saveRules(){saveErr.hidden=true;clearToast();try{const rules=rows.map(r=>Object.fromEntries(Object.entries(r).map(([k,v])=>[k,flagLabels.some(([f])=>f===k)?v.checked:v]))).filter(r=>flagLabels.some(([k])=>r[k]));await api('/rules','PUT',{rules});toast('Saved')}catch(e){if(e.name==='AbortError')return;const m=e.status>=500||!e.status?'Couldn’t save the permissions. Your choices are kept.':e.message;saveErr.replaceChildren(...errBody({message:m},()=>saveBtn.click()));saveErr.hidden=false;setTimeout(()=>saveBtn.focus(),0)}}
+ async function saveRules(){saveErr.hidden=true;clearToast();try{const rules=rows.map(r=>Object.fromEntries(Object.entries(r).filter(([k])=>!['mf','dl','st'].includes(k)).map(([k,v])=>[k,flagLabels.some(([f])=>f===k)?v.checked:v]))).filter(r=>flagLabels.some(([k])=>r[k]));const res=await api('/rules','PUT',{rules});drawRules(res,allows);toast('Saved')}catch(e){if(e.name==='AbortError')return;const m=e.status>=500||!e.status?'Couldn’t save the permissions. Your choices are kept.':e.message;saveErr.replaceChildren(...errBody({message:m},()=>saveBtn.click()));saveErr.hidden=false;setTimeout(()=>saveBtn.focus(),0)}}
  const saveBtn=button('Save',saveRules,'primary','Saving…'),saveBox=el('div',{class:'sticky-save'},saveErr,el('div',{class:'actions'},saveBtn));
  const folded=[...groups.values()].filter(g=>g.cards.length).map(g=>{const n=g.cards.length,none=n===workspaces.length-1;return el('details',{class:'pair-group'},el('summary',{},g.from.name+': '+(none?'nothing allowed to '+n+(n===1?' workspace':' workspaces'):n+(n===1?' other workspace':' other workspaces')+' not allowed')+' · Edit'),el('div',{},...g.cards))});
  const seen=new Set();const clean=allows.filter(a=>isKnown(a.from)&&isKnown(a.to)).filter(a=>{const k=[a.from,a.to,a.kind,a.key,a.mode].join('|');if(seen.has(k))return false;seen.add(k);return true});
- const kindText={start:'start',delegate:'hand over',files:'send files'};
- show(...head('Permissions','Who can do what','Choose what may travel between each pair of workspaces.'),el('div',{class:'notice'},'Handing over or starting a task also needs a permission from the receiving workspace.'),
+ const kindText={start:'start work',delegate:'give a task',files:'send files'};
+ show(...head('Permissions','Who can do what','Choose what may travel between each pair of workspaces.'),el('div',{class:'notice'},'Giving a task or starting work also needs a permission from the receiving workspace.'),
   panel('Between workspaces'+(top.length?' · '+top.length+' allowed':''),el('div',{class:'panel-body'},...(rows.length?[top.length?el('div',{},...top):el('p',{class:'sub'},'Nothing is allowed yet. Open a workspace below to allow something.'),folded.length?el('h3',{class:'pair-more'},'Not allowed yet'):null,...folded,saveBox]:[empty('Add at least two workspaces','Permissions are set for each pair.',el('a',{class:'button primary',href:'#add'},'Add workspace'))]))),
   panel('Permissions workspaces gave',...(clean.length?clean.map(a=>el('div',{class:'row'},el('div',{class:'grow'},el('h3',{},name(a.to)+' lets '+name(a.from)+' '+(kindText[a.kind]||a.kind||'act')+(a.key?': '+a.key:'')),sub(a.mode==='permanent'?'Always':'One time')),el('span',{class:'badge'},a.mode==='permanent'?'Always':'Once'))):[empty('None yet','When a workspace asks to start a task, the workspace receiving it can allow it. Nothing to do now.')])));
 }
