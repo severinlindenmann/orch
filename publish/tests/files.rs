@@ -469,3 +469,40 @@ async fn files_list_pages() {
     assert_eq!(p2["items"].as_array().unwrap().len(), 1);
     assert!(p2["next"].is_null());
 }
+
+#[tokio::test]
+async fn patch_needs_files_right_and_has_small_body_limit() {
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let id = t.api(&ws, "POST", "/v1/files", vector_blob()).await.json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let uri = format!("/v1/files/{id}");
+    // PATCH keeps axum's default 2 MB body limit
+    let mut big = br#"{"days":5,"x":""#.to_vec();
+    big.resize(3 * 1024 * 1024, b'a');
+    big.extend_from_slice(b"\"}");
+    assert_eq!(t.api(&ws, "PATCH", &uri, big).await.status, 413);
+    // a workspace whose files right was removed may not extend
+    t.st.db
+        .lock()
+        .unwrap()
+        .execute("UPDATE workspaces SET rights=REPLACE(rights,'\"files\":true','\"files\":false')", [])
+        .unwrap();
+    let r = t.api(&ws, "PATCH", &uri, br#"{"days":5}"#.to_vec()).await;
+    assert_eq!(r.status, 403, "{}", r.text());
+}
+
+#[tokio::test]
+async fn replace_leaves_no_temp_files() {
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let id = t.api(&ws, "POST", "/v1/files", vector_blob()).await.json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    t.api(&ws, "PUT", &format!("/v1/files/{id}"), vector_blob()).await;
+    let n = std::fs::read_dir(t.dir.path().join("files")).unwrap().count();
+    assert_eq!(n, 1);
+}

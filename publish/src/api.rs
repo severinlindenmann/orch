@@ -207,6 +207,9 @@ pub async fn files_patch(
     body: Bytes,
 ) -> ApiResult<Json<Value>> {
     let w = auth(&st, &h)?;
+    if !w.rights.files {
+        return Err(ApiError::forbidden("This workspace may not upload files."));
+    }
     let b: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
     let days = b
         .get("days")

@@ -68,13 +68,21 @@ pub fn extend(st: &State, w: &Workspace, id: &str, days: i64) -> ApiResult<Value
 pub fn replace(st: &State, w: &Workspace, id: &str, blob: Bytes) -> ApiResult<Value> {
     check_blob(&blob)?;
     let f = own_live(st, w, id)?;
-    let tmp = blob_path(st, &format!("{id}.tmp"));
+    let tmp = blob_path(st, &format!("{id}.{}.tmp", util::rand_id(12)));
     std::fs::write(&tmp, &blob)?;
     if let Err(e) = std::fs::rename(&tmp, blob_path(st, id)) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e.into());
     }
-    db::update_file_size(&st.db.lock().unwrap(), id, blob.len() as i64)?;
+    // a delete or sweep may have removed the row meanwhile: do not leave an orphan blob
+    {
+        let c = st.db.lock().unwrap();
+        if db::get_file(&c, id)?.is_none() {
+            let _ = std::fs::remove_file(blob_path(st, id));
+            return Err(ApiError::not_found("No such file."));
+        }
+        db::update_file_size(&c, id, blob.len() as i64)?;
+    }
     Ok(json!({
         "id": id,
         "url": format!("{}/f/{}", st.cfg.public_url, id),
