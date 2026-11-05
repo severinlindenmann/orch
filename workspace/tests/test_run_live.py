@@ -467,6 +467,7 @@ def test_wrap_refuses_a_traversal_run_id_without_touching_files(proj, run, lab):
         assert code == 2 and victim.exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="shell script stub")
 def test_start_can_name_the_agent_for_one_run(proj, run, lab, tmp_path, monkeypatch):
     calls, _ = _fake_claude(tmp_path, monkeypatch)
     _generic_live(proj)  # the folder's agent is the generic one
