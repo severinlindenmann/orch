@@ -72,6 +72,26 @@ extension Array where Element == Question {
     }
 }
 
+/// `GET /v1/phone/messages`: a text between this phone and a workspace (either direction).
+struct TextBody: Codable, Sendable, Equatable { let text: String }
+struct TextMessage: Codable, Sendable, Equatable {
+    let id: String
+    let from: String
+    let to: String
+    let type: String
+    let createdAt: String
+    let ticket: String?
+    let body: TextBody
+}
+struct PhoneMessage: Codable, Sendable, Equatable, Identifiable {
+    let message: TextMessage
+    let workspaceName: String
+    var id: String { message.id }
+    var fromPhone: Bool { message.from.hasPrefix("ph_") }
+    /// The workspace on the other side of the conversation.
+    var workspaceId: String { fromPhone ? message.to : message.from }
+}
+
 struct IdResponse: Decodable, Sendable { let id: String }
 
 /// Stored in the Keychain: the one thing the app remembers.

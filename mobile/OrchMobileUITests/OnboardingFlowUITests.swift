@@ -63,6 +63,18 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["It's in the inbox."].waitForExistence(timeout: 10))
     }
 
+    /// A text push tap (stood in by -openTextPush) opens the Send tab on that workspace with the workspace's reply under the composer.
+    func testWorkspaceReplyShowsInMessages() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-openTextPush", "ws_pilatus001"]
+        app.launch()
+        let reply = app.descendants(matching: .any)["message-m_reply0phone00001"]
+        var tries = 0
+        while !reply.waitForExistence(timeout: 3) && tries < 4 { app.swipeUp(); tries += 1 }
+        XCTAssertTrue(reply.exists)
+        XCTAssertTrue(reply.label.contains("The report is ready"))
+    }
+
     /// Answer has a 3 s undo window; undo returns the options and nothing is sent.
     func testAnswerCanBeUndone() {
         let app = XCUIApplication()

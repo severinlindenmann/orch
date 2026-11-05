@@ -33,6 +33,24 @@ actor MockRelay: RelayAPI {
                  workspaceName: "Reports"),
     ]
 
+    /// Texts workspaces sent to this phone (the mock has one reply from Pilatus waiting).
+    private var received: [PhoneMessage] = [
+        PhoneMessage(message: TextMessage(id: "m_reply0phone00001", from: pilatus, to: "ph_iphone0001", type: "text",
+                                          createdAt: "2026-11-04T10:44:00Z", ticket: nil,
+                                          body: TextBody(text: "Yes, I can answer your phone. The report is ready.")),
+                     workspaceName: "Pilatus Workspace"),
+    ]
+    private var sentMessages: [PhoneMessage] = []
+
+    /// Simulator and test hook: a workspace writes to the phone after launch (a text push arrived).
+    func deliverText(from workspace: String, text: String) {
+        counter += 1
+        received.append(PhoneMessage(message: TextMessage(id: String(format: "m_wstext%010d", counter), from: workspace, to: "ph_iphone0001",
+                                                          type: "text", createdAt: ISO8601DateFormatter().string(from: Date()), ticket: nil,
+                                                          body: TextBody(text: text)),
+                                     workspaceName: names[workspace] ?? workspace))
+    }
+
     private func check() async throws {
         try? await Task.sleep(for: latency)
         if signedOut { throw RelayError.unauthorized }
@@ -66,6 +84,11 @@ actor MockRelay: RelayAPI {
         if empty { return [] }
         return all.filter { answered[$0.id] == nil }
     }
+    func messages() async throws -> [PhoneMessage] {
+        try await check()
+        if empty { return [] }
+        return (received + sentMessages).sorted { $0.message.createdAt > $1.message.createdAt }
+    }
     func answer(questionMessageId: String, answer: String) async throws -> String {
         try await check()
         guard all.contains(where: { $0.id == questionMessageId }) else { throw RelayError.api(status: 404, code: "not_found", message: "Question not found.") }
@@ -81,6 +104,9 @@ actor MockRelay: RelayAPI {
         guard names[to] != nil else { throw RelayError.api(status: 403, code: "not_allowed", message: "This phone may not reach that workspace.") }
         sent.append((to, text))
         counter += 1
+        sentMessages.append(PhoneMessage(message: TextMessage(id: String(format: "m_ph0nesend%06d", counter), from: "ph_iphone0001", to: to, type: "text",
+                                                              createdAt: ISO8601DateFormatter().string(from: Date()), ticket: nil, body: TextBody(text: text)),
+                                         workspaceName: names[to] ?? to))
         return String(format: "m_ph0nesend%06d", counter)
     }
     /// Fixed transcript, whatever the audio is.

@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
-/// Push: `{"aps": {...}, "message_id": "m_…", "workspace": "ws_…"}`. Tapping opens that question.
+/// Push: `{"aps": {...}, "message_id": "m_…", "workspace": "ws_…"}` opens that question; `{"type": "text", "text_id": "m_…", "workspace": "ws_…"}` opens that workspace's messages.
 @MainActor
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
@@ -23,9 +23,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     /// UIKit calls this on the main thread; the handler is called exactly once, after the UI state is updated.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping @Sendable () -> Void) {
-        let id = PushPayload.messageId(response.notification.request.content.userInfo)
+        let info = response.notification.request.content.userInfo
+        let id = PushPayload.messageId(info), textWorkspace = PushPayload.textWorkspace(info)
         DispatchQueue.main.async {
-            AppDelegate.handleTap(messageId: id)
+            if let textWorkspace { AppDelegate.handleTap(textWorkspace: textWorkspace) } else { AppDelegate.handleTap(messageId: id) }
             completionHandler()
         }
     }
@@ -40,10 +41,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     /// A tap that arrives before the model exists (app launched from terminated by the tap) waits here.
     static var pendingQuestion: String?
+    static var pendingText: String?
     static weak var model: AppModel? {
         didSet {
             if let m = model, let id = pendingQuestion { pendingQuestion = nil; m.openQuestion(messageId: id) }
+            if let m = model, let ws = pendingText { pendingText = nil; m.openMessages(workspaceId: ws) }
         }
+    }
+
+    @MainActor static func handleTap(textWorkspace: String) {
+        if let model { model.openMessages(workspaceId: textWorkspace) } else { pendingText = textWorkspace }
     }
 
     @MainActor static func handleTap(messageId: String?) {
@@ -53,6 +60,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 }
 
 enum PushPayload {
+    /// `workspace` of a text push (`"type": "text", "text_id": …`, no `message_id`); nil for anything else.
+    static func textWorkspace(_ userInfo: [AnyHashable: Any]) -> String? {
+        guard userInfo["type"] as? String == "text", let ws = userInfo["workspace"] as? String, !ws.isEmpty else { return nil }
+        return ws
+    }
+
     /// `message_id` from a relay payload; nil when missing or not a non-empty string. Never traps.
     static func messageId(_ userInfo: [AnyHashable: Any]) -> String? {
         guard let id = userInfo["message_id"] as? String, !id.isEmpty else { return nil }
