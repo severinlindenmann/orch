@@ -6,12 +6,14 @@ import argparse
 import contextlib
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 from orch import adapters, runs, runs_live, tickets
 from orch.errors import Refused
 
+RUN_ID = re.compile(r"r_[a-z0-9_]{6,32}")
 SUBCOMMANDS = (
     "claim",
     "release",
@@ -46,7 +48,7 @@ def add_parsers(sub, common) -> None:
             x.add_argument("--kind", required=True, choices=runs_live.KINDS)
             x.add_argument("--run", help="the run (the tool's hook passes it)")
             x.add_argument("--session-id", help="the tool's session id")
-        if name in ("claim", "session", "argv"):
+        if name in ("claim", "session", "argv", "start"):
             x.add_argument("--agent", help="which agent (default: the one chosen for this folder)")
         if name == "claim":
             x.add_argument("--session", help="the agent's session id, if known")
@@ -90,10 +92,13 @@ def _wrap_cmd(root: Path, rest: list[str]) -> None:
     p.add_argument("--new-session")
     p.add_argument("--items", default="")
     a = p.parse_args(rest[:i])
+    if not RUN_ID.fullmatch(a.run):
+        raise Refused("orch run _wrap is internal.")  # before any path is built from it
     stdin, env = None, None
     if a.env_file:  # secrets: read and remove first, so no refusal below can leave the file behind
         f = Path(a.env_file)
-        if f.resolve() == (runs.run_dir(root) / f"env-{a.run}.json").resolve():
+        want = runs.run_dir(root).resolve() / f"env-{a.run}.json"
+        if f.resolve().parent == want.parent and f.name == want.name:
             try:
                 env = json.loads(f.read_text(encoding="utf-8"))
             except (OSError, ValueError):
@@ -292,6 +297,7 @@ def dispatch(args, root: Path) -> bool:
             allow=args.allow,
             mode=args.mode,
             text=args.text,
+            agent=args.agent,
         )
         for note in r["notes"]:
             print(note, file=sys.stderr)

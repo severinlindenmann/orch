@@ -454,3 +454,29 @@ def test_a_refused_wrap_leaves_no_env_file(proj, run, lab):
     secret.write_text("{}")
     runs.release(proj, tid, rec["run"])
     assert not secret.exists()
+
+
+def test_wrap_refuses_a_traversal_run_id_without_touching_files(proj, run, lab):
+    _generic_live(proj)
+    tid = _ticket(run)
+    victim = proj / "keep.json"
+    victim.write_text("{}")
+    for bad in ("../../keep", "r_../x", "r_ab", "R_ABCDEFGH"):
+        code, _, _ = run("run", "_wrap", bad, "--ticket", tid, "--agent", "fake", "--live",
+                         "--env-file", str(victim), "--", "true")  # fmt: skip
+        assert code == 2 and victim.exists()
+
+
+def test_start_can_name_the_agent_for_one_run(proj, run, lab, tmp_path, monkeypatch):
+    calls, _ = _fake_claude(tmp_path, monkeypatch)
+    _generic_live(proj)  # the folder's agent is the generic one
+    tid = _ticket(run)
+    code, out, err = run("run", "start", tid, "--agent", "claude", "--mode", "oneshot", "--json")
+    r = json.loads(out)
+    assert code == 0 and r["agent"] == "claude" and runs.read(proj, tid)["agent"] == "claude"
+    _until(lambda: calls.exists() and calls.read_text().strip(), what="claude ran")
+    _until(lambda: runs.read(proj, tid) is None)
+    assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host())
+    assert config.agent_name(proj) == "fake"  # the folder's choice is unchanged
+    code, _, err = run("run", "start", tid, "--agent", "nobody")
+    assert code == 2 and "No agent called 'nobody'" in err

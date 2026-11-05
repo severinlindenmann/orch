@@ -567,12 +567,14 @@ def start(
     allow: list[str] | None = None,
     mode: str | None = None,
     text: str | None = None,
+    agent: str | None = None,
 ) -> dict:
     """Start (or continue) the agent on a ticket. mode None = live in tmux when the agent and the machine can,
-    else one turn at a time (oneshot)."""
+    else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent."""
     from orch import runs_live
 
-    name = adapters.chosen(root)
+    name = agent or adapters.chosen(root)
+    adapters.load(name, root)  # refuses a name nobody knows
     a = adapters.load(name, root)
     notes = []
     live_ok = runs_live.available(a)
