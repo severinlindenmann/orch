@@ -194,6 +194,39 @@ def state(rec: dict, at: float | None = None) -> str:
     return "maybe-stale" if idle > lease_seconds() else "alive"
 
 
+def reap(rec: dict) -> bool:
+    """Stop the agent process of a dead claim, if it still runs (matched by pid and start time)."""
+    pid, was = rec.get("agent_pid"), rec.get("agent_pid_started")
+    if not isinstance(pid, int) or not was or not services.pid_alive(pid) or pid_started(pid) != was:
+        return False
+    kill_tree(pid)
+    return True
+
+
+def kill_tree(pid: int, grace: float = 2.0) -> None:
+    """SIGTERM, then SIGKILL, the process and (when it leads its own group) its group. Windows: taskkill /T."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+        return
+    import signal
+
+    def send(sig):
+        try:
+            if os.getpgid(pid) == pid:
+                os.killpg(pid, sig)
+            else:
+                os.kill(pid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    send(signal.SIGTERM)
+    end = time.monotonic() + grace
+    while time.monotonic() < end and services.pid_alive(pid):
+        time.sleep(0.05)
+    if services.pid_alive(pid):
+        send(signal.SIGKILL)
+
+
 def new_run_id() -> str:
     return "r_" + "".join(secrets.choice(_ALPHA) for _ in range(8))
 
@@ -297,17 +330,21 @@ def pending_add(
         return item
 
 
+def mark_delivered_locked(root: Path, tid: str, ids: list[str]) -> None:
+    items = _pending_read(root, tid)
+    for i in items:
+        if i["id"] in ids and not i.get("delivered_at"):
+            i["delivered_at"] = tickets.now()
+    _pending_write(root, tid, items)
+    rec = read(root, tid)
+    if rec is not None:
+        rec["pending"] = any(not i.get("delivered_at") for i in items)
+        _write(root, rec)
+
+
 def mark_delivered(root: Path, tid: str, ids: list[str]) -> None:
     with locked(root, tid):
-        items = _pending_read(root, tid)
-        for i in items:
-            if i["id"] in ids and not i.get("delivered_at"):
-                i["delivered_at"] = tickets.now()
-        _pending_write(root, tid, items)
-        rec = read(root, tid)
-        if rec is not None:
-            rec["pending"] = any(not i.get("delivered_at") for i in items)
-            _write(root, rec)
+        mark_delivered_locked(root, tid, ids)
 
 
 # ---------------------------------------------------------------- claim, renew, release
@@ -358,6 +395,8 @@ def claim(
                     _write(root, cur)
                 raise _busy(cur, why, queued)
             # dead pid, or maybe-stale with --take-over: the old claim is replaced
+            if st == "dead":
+                reap(cur)  # an agent left running after its wrapper died must not work beside the new run
         rec = _new_record(tid, by, agent, mode, ticket, reason)
         if pid:
             rec["pid"], rec["pid_started"] = pid, pid_started(pid)
@@ -471,6 +510,7 @@ def plan(
     prompt: str | None = None,
     agent: str | None = None,
     items: list[dict] | None = None,
+    hooks_file: str | None = None,
 ) -> dict:
     """Resume or fresh, decided here once: resume only when the adapter can, this ticket has a session for
     this agent on this machine, and --fresh is not set."""
@@ -479,7 +519,7 @@ def plan(
     a = adapters.load(name, root)
     items = undelivered(root, tid) if items is None else items
     sid = None if fresh else tickets.sessions_for(ticket, name, host())
-    v = {"allow": adapters.allow_patterns(allow), "session": sid}
+    v = {"allow": adapters.allow_patterns(allow), "session": sid, "orch_hooks_file": hooks_file}
     argv = None
     resumed = False
     if sid and a["capabilities"]["resume"]:
@@ -512,7 +552,8 @@ def plan(
         "session": sid if resumed else new_session,
         "tmux": None,
         "argv": argv,
-        "stdin": v["prompt"] if a["prompt_via"] == "stdin" else None,
+        "stdin": v["prompt"] if a["prompt_via"] == "stdin" and mode == "oneshot" else None,
+        "prompt": v["prompt"],
         "item_ids": [i["id"] for i in items],
     }
 
@@ -528,14 +569,24 @@ def start(
     fresh: bool = False,
     take_over: bool = False,
     allow: list[str] | None = None,
-    mode: str = "oneshot",
+    mode: str | None = None,
     text: str | None = None,
 ) -> dict:
-    if mode != "oneshot":
-        raise Refused("Only --mode oneshot is available here.")
+    """Start (or continue) the agent on a ticket. mode None = live in tmux when the agent and the machine can,
+    else one turn at a time (oneshot)."""
+    from orch import runs_live
+
     name = adapters.chosen(root)
     a = adapters.load(name, root)
     notes = []
+    live_ok = runs_live.available(a)
+    if mode is None:
+        mode = "live" if live_ok else "oneshot"
+    elif mode == "live" and not live_ok:
+        notes.append(
+            "A live session needs tmux and an agent that can run interactively; working one turn at a time."
+        )
+        mode = "oneshot"
     notice = adapters.command_notice(name, mode, root)
     if notice:
         notes.append(notice)
@@ -543,15 +594,12 @@ def start(
     if allow and not a["capabilities"]["permission_retry"]:
         notes.append(f"{a['label']} cannot be told which tools to allow; --allow was ignored.")
         allow = []
-    rec = claim(
-        root,
-        tid,
-        by,
-        name,
-        mode,
-        take_over=take_over,
-        busy_text=text or f"{by} asked for more work on this ticket.",
-    )
+    busy_text = text or f"{by} asked for more work on this ticket."
+    if mode == "live":
+        r = runs_live.start_live(root, tid, by, name, fresh=fresh, take_over=take_over, busy_text=busy_text)
+        r["notes"] = notes + r.get("notes", [])
+        return r
+    rec = claim(root, tid, by, name, mode, take_over=take_over, busy_text=busy_text)
     try:
         p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name)
         log_rel = f".orch/run/logs/{tid}-{rec['run']}.log"
@@ -599,7 +647,9 @@ def start(
 # ---------------------------------------------------------------- the wrapper (runs detached)
 
 
-def _run_turn(argv: list[str], root: Path, stdin: str | None, log: Path, env: dict, on_started=None):
+def _run_turn(
+    argv: list[str], root: Path, stdin: str | None, log: Path, env: dict, on_started=None, on_proc=None
+):
     """One agent process. Returns (exit code, the output of this turn)."""
     log.parent.mkdir(parents=True, exist_ok=True)
     start = log.stat().st_size if log.exists() else 0
@@ -612,10 +662,13 @@ def _run_turn(argv: list[str], root: Path, stdin: str | None, log: Path, env: di
                 stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
                 stdout=out,
                 stderr=subprocess.STDOUT,
+                start_new_session=os.name != "nt",  # its own group: stop can end it with its helpers
             )
         except OSError as e:
             out.write(f"orch could not start the agent: {e}\n".encode())
             return 127, ""
+        if on_proc:
+            on_proc(proc)
         if on_started:
             on_started()  # the input is with the agent now: only then is it delivered
         if stdin is not None:
@@ -626,6 +679,31 @@ def _run_turn(argv: list[str], root: Path, stdin: str | None, log: Path, env: di
     with open(log, "rb") as f:
         f.seek(start)
         return rc, f.read().decode("utf-8", "replace")
+
+
+def set_process_fields(root: Path, tid: str, run: str, **fields) -> None:
+    with locked(root, tid):
+        rec = read(root, tid)
+        if rec and rec["run"] == run:
+            rec.update(fields)
+            _write(root, rec)
+
+
+def _on_term(root: Path, tid: str, run: str, current: dict) -> None:
+    """SIGTERM (from `orch run stop`): end the agent and its helpers too, then leave the claim."""
+    if os.name == "nt":
+        return
+    import signal
+
+    def handler(signum, frame):
+        proc = current.get("proc")
+        if proc is not None and proc.poll() is None:
+            kill_tree(proc.pid)
+        with contextlib.suppress(Exception):
+            release(root, tid, run)
+        os._exit(143)
+
+    signal.signal(signal.SIGTERM, handler)
 
 
 def wrap(
@@ -650,16 +728,29 @@ def wrap(
     env = {**os.environ, "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
     log = root / (rec.get("log") or f".orch/run/logs/{tid}-{run}.log")
     mode = rec.get("mode") or "oneshot"
+    current: dict = {}
+    _on_term(root, tid, run, current)
+
+    def on_proc(proc):
+        current["proc"] = proc
+        set_process_fields(root, tid, run, agent_pid=proc.pid, agent_pid_started=pid_started(proc.pid))
+
     turns = 0
     while True:
         ids = list(item_ids or [])
         rc, out = _run_turn(
-            argv, root, stdin, log, env, (lambda ids=ids: mark_delivered(root, tid, ids)) if ids else None
+            argv,
+            root,
+            stdin,
+            log,
+            env,
+            (lambda ids=ids: mark_delivered(root, tid, ids)) if ids else None,
+            on_proc,
         )
         if resumed and rc != 0:  # the session is gone: start fresh once and keep the new id
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=[])
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
-            rc, out = _run_turn(argv, root, stdin, log, env)
+            rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc)
         sid = new_session or adapters.parse_session(name, out, root)
         if sid:
             tickets.record_session(root, tid, name, sid, host())
@@ -670,6 +761,36 @@ def wrap(
         argv, stdin, resumed = p["argv"], p["stdin"], p["resumed"]
         new_session = None if p["resumed"] else p["session"]
         item_ids = p["item_ids"]
+
+
+def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_session: str | None) -> int:
+    """The pane process of a live run: the agent runs on the pane's terminal; this waits for it to end."""
+    rec = read(root, tid)
+    if not rec or rec["run"] != run:
+        return 1
+    set_process(root, tid, run, os.getpid())
+    env = {**os.environ, "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
+    current: dict = {}
+    _on_term(root, tid, run, current)
+    if os.name != "nt":
+        import signal
+
+        signal.signal(signal.SIGINT, signal.SIG_IGN)  # Escape/^C belong to the agent, not to this wrapper
+    try:
+        proc = subprocess.Popen(argv, cwd=root, env=env)
+    except OSError as e:
+        print(f"orch could not start the agent: {e}", file=sys.stderr)
+        release(root, tid, run)
+        return 127
+    current["proc"] = proc
+    set_process_fields(root, tid, run, agent_pid=proc.pid, agent_pid_started=pid_started(proc.pid))
+    rc = proc.wait()
+    if new_session and rc == 0:
+        tickets.record_session(root, tid, name, new_session, host())
+    release(root, tid, run)  # input still waiting stays in the pending file for the next start
+    hooks = run_dir(root) / f"hooks-{run}.json"
+    hooks.unlink(missing_ok=True)
+    return rc
 
 
 # ---------------------------------------------------------------- the footer
