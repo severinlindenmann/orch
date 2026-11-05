@@ -115,8 +115,11 @@ try {
   });
   await step('relay-rules', 'Relay admin: set a pair rule Pilatus -> Reports (text, files) and save', async () => {
     await page.goto(REL_ADMIN + '/admin#rules');
+    await page.waitForSelector('.pair-group, .pair');
+    // pairs that allow nothing are folded away: open every fold first
+    await page.evaluate(() => document.querySelectorAll('details.pair-group').forEach(d => { d.open = true; }));
     const pair = page.locator('.pair', { has: page.locator('h3', { hasText: 'Walk Pilatus → Walk Reports' }) });
-    for (const k of ['Send messages', 'Send files'])
+    for (const k of ['Messages', 'Files'])
       await pair.locator('label.pair-toggle', { hasText: k }).locator('input').check();
     await page.click('button:has-text("Save")');
     await page.waitForSelector('#toast:not([hidden])');
@@ -235,8 +238,9 @@ try {
   });
   await step('relay-messages', 'Relay admin: messages page shows the message', async () => {
     await page.goto(REL_ADMIN + '/admin#messages');
-    const m = page.locator('article.message', { hasText: 'Walk Reports' }).first();
+    const m = page.locator('details.msg', { hasText: 'Walk Reports' }).first();
     await m.waitFor();
+    await m.locator('summary').first().click();   // rows are one line; open it to read the full text
     await page.waitForSelector('text=Hello from the walkthrough');
   });
   await step('relay-phones', 'Relay admin: phones page, create a pairing link/QR for Walk Pilatus', async () => {
