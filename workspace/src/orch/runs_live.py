@@ -16,6 +16,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -123,14 +124,14 @@ def start_live(
         cmd = [sys.executable, "-m", "orch", "run", "_wrap", run, "--ticket", tid, "--agent", name, "--live"]
         if p["session"] and not p["resumed"]:
             cmd += ["--new-session", p["session"]]
-        cmd += ["--"] + p["argv"]
-        envs = []
-        for k, v in os.environ.items():
-            if k.startswith("ORCH_") or k in ("PATH", "HOME"):
-                envs += ["-e", f"{k}={v}"]
+        # The agent gets the environment of whoever starts this run, not of whoever started the tmux server.
+        # It travels in a private file (never in argv, where `ps` shows it); the wrapper reads and removes it.
+        env_file = runs.run_dir(root) / f"env-{run}.json"
+        runs._atomic(env_file, json.dumps(dict(os.environ)), 0o600)
+        cmd += ["--env-file", str(env_file), "--"] + p["argv"]
         r = tmux(
             root, "new-session", "-d", "-P", "-F", "#{pane_pid}", "-x", "200", "-y", "50",
-            "-s", tid, "-c", str(root), *envs, "--", *cmd,
+            "-s", tid, "-c", str(root), "--", *cmd,
         )  # fmt: skip
         if r.returncode != 0:
             raise Refused(f"tmux could not start the session: {r.stderr.strip() or 'unknown error'}")
@@ -142,6 +143,7 @@ def start_live(
     except BaseException:
         runs.release(root, tid, run)
         hooks_path.unlink(missing_ok=True)
+        (runs.run_dir(root) / f"env-{run}.json").unlink(missing_ok=True)
         with contextlib.suppress(Exception):
             tmux(root, "kill-session", "-t", target(tid))
         raise
@@ -156,10 +158,19 @@ def start_live(
 # ---------------------------------------------------------------- input and idle
 
 
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")  # keeps \n and \t only
+
+
+def clean(text: str) -> str:
+    """Pasted text is data: no escape sequences or other control characters reach the agent's terminal
+    (an old tmux may pass `ESC[201~` through and end the bracketed paste early)."""
+    return _CONTROL.sub("", text)
+
+
 def _format(items: list[dict], flat: bool) -> str:
     parts = []
     for i in items:
-        t = i["text"] if i.get("via") == "start" else f"From {i['by']}: {i['text']}"
+        t = clean(i["text"] if i.get("via") == "start" else f"From {i['by']}: {i['text']}")
         parts.append(t)
     text = "\n".join(parts)
     return " ".join(text.split()) if flat else text
@@ -267,6 +278,9 @@ def attach(root: Path, tid: str, watch: bool) -> None:
 def _close(root: Path, rec: dict, interrupt: bool) -> None:
     """End the agent, its tmux session and the claim. The work done stays; so does the session id."""
     tid, run = rec["ticket"], rec["run"]
+    now = runs.read(root, tid)
+    if now and now["run"] != run:
+        return  # a new run took over meanwhile: it is not ours to stop
     if rec.get("mode") == "live" and session_exists(root, tid):
         if interrupt:
             for k in adapters.load(rec["agent"], root).get("live", {}).get("interrupt_keys") or []:
@@ -277,6 +291,9 @@ def _close(root: Path, rec: dict, interrupt: bool) -> None:
         (rec.get("pid"), rec.get("pid_started")),
         (rec.get("agent_pid"), rec.get("agent_pid_started")),
     ):
+        now = runs.read(root, tid)
+        if now and now["run"] != run:
+            return
         if runs._running(pid, started):
             runs.kill_tree(pid)
     runs.release(root, tid, run)
@@ -284,17 +301,16 @@ def _close(root: Path, rec: dict, interrupt: bool) -> None:
 
 
 def stop(root: Path, tid: str) -> bool:
-    rec = runs.read(root, tid)
+    with runs.locked(root, tid):  # the run we stop is the one that holds the claim now
+        rec = runs.read(root, tid)
+        if rec:
+            rec["stop_requested"] = tickets.now()
+            runs._write(root, rec)
     if not rec:
         if session_exists(root, tid):  # a session without a claim: nothing may be left running
             tmux(root, "kill-session", "-t", target(tid))
             return True
         return False
-    with runs.locked(root, tid):
-        cur = runs.read(root, tid)
-        if cur and cur["run"] == rec["run"]:
-            cur["stop_requested"] = tickets.now()
-            runs._write(root, cur)
     _close(root, rec, interrupt=True)
     start_waiting(root)
     return True

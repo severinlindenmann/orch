@@ -26,8 +26,9 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, services, tickets
+from orch import adapters, procs, services, tickets
 from orch.errors import Refused
+from orch.procs import pid_started
 
 LEASE_SECONDS = 30 * 60
 LOCK_STALE_SECONDS = 30
@@ -82,67 +83,32 @@ def _iso(ts: float) -> str:
     return datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def pid_started(pid: int) -> str | None:
-    """Start time of a process as the OS reports it (guards against pid reuse), else None."""
-    if not isinstance(pid, int) or pid <= 1:
-        return None
-    try:
-        if os.name == "nt":
-            import ctypes
-            from ctypes import wintypes
-
-            k = ctypes.windll.kernel32
-            k.OpenProcess.restype = wintypes.HANDLE
-            h = k.OpenProcess(0x1000, False, pid)
-            if not h:
-                return None
-            try:
-                c, e, kt, ut = (wintypes.FILETIME() for _ in range(4))
-                if not k.GetProcessTimes(h, *(ctypes.byref(x) for x in (c, e, kt, ut))):
-                    return None
-                ticks = (c.dwHighDateTime << 32) | c.dwLowDateTime
-                return _iso(ticks / 1e7 - 11644473600)
-            finally:
-                k.CloseHandle(h)
-        r = subprocess.run(
-            ["ps", "-o", "lstart=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
-        )
-        text = " ".join(r.stdout.split())
-        if not text:
-            return None
-        return _iso(time.mktime(time.strptime(text, "%a %b %d %H:%M:%S %Y")))
-    except Exception:
-        return None
-
-
 # ---------------------------------------------------------------- the lock and the record
 
 
-def _lock_owner_dead(lock: Path) -> bool:
-    """The lock names its holder's pid; a holder that died (killed by `stop`, a crash) leaves it behind."""
+def _lock_text(lock: Path) -> str | None:
     try:
-        pid = int(lock.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        return False  # empty = still being written; the 30 s age rule covers a creator that died there
-    return not services.pid_alive(pid)
+        return lock.read_text(encoding="utf-8")
+    except OSError:
+        return None
 
 
 def _break_dead(lock: Path) -> bool:
-    """Take a dead holder's lock away (rename: only one waiter wins), after checking what we took."""
+    """Take away the lock of a holder that is verifiably dead (rename: only one waiter wins). What we took
+    must be exactly what we checked; else it is put back, and if that fails we do NOT go on (one holder)."""
+    seen = _lock_text(lock)
+    if not seen or not procs.owner_dead(seen):
+        return False
     mine = lock.with_name(f"{lock.name}.{secrets.token_hex(4)}")
     try:
         os.replace(lock, mine)
     except OSError:
         return False
     try:
-        if _lock_owner_dead(mine):
+        if _lock_text(mine) == seen:
             return True
         with contextlib.suppress(OSError):
-            os.link(mine, lock)  # it was a live holder's new lock: put it back
+            os.link(mine, lock)  # it was a live holder's newer lock: put it back, no clobber
         return False
     finally:
         with contextlib.suppress(OSError):
@@ -151,7 +117,7 @@ def _break_dead(lock: Path) -> bool:
 
 @contextlib.contextmanager
 def locked(root: Path, tid: str):
-    """The per-ticket run lock. Free when its holder is dead, or after 30 s (holders do only quick work)."""
+    """The per-ticket run lock. Free when its holder is verifiably dead, or old with no holder named."""
     lock = run_dir(root) / "tickets" / f"{tid}.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
     end = time.monotonic() + 10
@@ -159,17 +125,17 @@ def locked(root: Path, tid: str):
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             with os.fdopen(fd, "w") as f:
-                f.write(str(os.getpid()))
+                f.write(procs.own_token())
             break
         except FileExistsError:
+            if _break_dead(lock):
+                continue
             try:
                 stale = time.time() - lock.stat().st_mtime > LOCK_STALE_SECONDS
             except OSError:
                 continue
-            if stale and tickets._break_stale(lock):
-                continue
-            if _lock_owner_dead(lock) and _break_dead(lock):
-                continue
+            if stale and not _lock_text(lock) and tickets._break_stale(lock):
+                continue  # nobody is named in it (its writer died before writing): the age rule
             if time.monotonic() > end:
                 raise Refused(f"Ticket {tid} is busy (retried for 10 s). Try again.") from None
             time.sleep(0.01)

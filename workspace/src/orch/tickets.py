@@ -129,7 +129,14 @@ def _break_stale(lock: Path) -> bool:
     except OSError:
         return False
     try:
-        if time.time() - mine.stat().st_mtime > 30:
+        from orch import procs
+
+        try:
+            holder = mine.read_text(encoding="utf-8")
+        except OSError:
+            holder = ""
+        # old enough, and its holder (if it named itself) is gone: a live or unverifiable holder keeps it
+        if time.time() - mine.stat().st_mtime > 30 and (not holder.strip() or procs.owner_dead(holder)):
             return True
         with contextlib.suppress(OSError):
             os.link(mine, lock)  # no-clobber put-back
@@ -147,7 +154,11 @@ def _locked(root: Path, tid: str):
     end = time.monotonic() + 5
     while True:
         try:
-            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w") as f:
+                from orch import procs
+
+                f.write(procs.own_token())
             break
         except FileExistsError:
             try:

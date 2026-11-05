@@ -15,7 +15,7 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch import config, runs, runs_live, tickets
+from orch import config, procs, runs, runs_live, tickets
 
 AGENT = Path(__file__).resolve().parents[2] / "e2e" / "fixtures" / "generic-agent" / "agent.py"
 SID = "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
@@ -332,3 +332,94 @@ def test_stop_kills_an_agent_left_behind_by_a_killed_wrapper(proj, run, lab):
     assert run("run", "stop", tid)[0] == 0
     _until(lambda: not runs._running(rec["agent_pid"], rec["agent_pid_started"]), what="orphan ended")
     assert runs.read(proj, tid) is None
+
+
+# ---------------------------------------------------------------- review fixes (Opus, #86)
+
+
+@needs_tmux
+def test_each_live_run_gets_the_environment_of_its_own_starter(proj, run, lab, tmp_path, monkeypatch):
+    d = tmp_path / "clbin"
+    d.mkdir()
+    marks = tmp_path / "marks.txt"
+    f = d / "claude"
+    f.write_text(
+        f'#!/bin/sh\necho "$MARKER $ORCH_TICKET" >> {shlex.quote(str(marks))}\nexec cat > /dev/null\n'
+    )
+    f.chmod(f.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ["PATH"])
+    _claude_live(proj)
+    a, b = _ticket(run, "A"), _ticket(run, "B")
+    monkeypatch.setenv("MARKER", "token-A")
+    assert run("run", "start", a)[0] == 0  # this start also starts the workspace's tmux server
+    _until(lambda: marks.exists() and marks.read_text().strip(), what="first agent")
+    monkeypatch.setenv("MARKER", "token-B")  # a rotated key, for example
+    assert run("run", "start", b)[0] == 0
+    _until(lambda: len(marks.read_text().split("\n")) > 2, what="second agent")
+    seen = dict(line.split()[::-1] for line in marks.read_text().strip().splitlines())
+    assert seen == {a: "token-A", b: "token-B"}
+    assert not list((proj / ".orch" / "run").glob("env-*.json"))  # read once, removed
+    ps = subprocess.run(["ps", "-axww", "-o", "command="], capture_output=True, text=True).stdout
+    hit = [ln[:150] for ln in ps.splitlines() if "token-B" in ln and "pytest" not in ln]
+    assert not hit, hit  # never on a command line
+
+
+def test_wrap_reads_only_its_own_env_file(proj, run, lab):
+    _generic_live(proj)
+    tid = _ticket(run)
+    rec = runs.claim(proj, tid, "x", "fake", "live")
+    other = proj / ".orch" / "run" / "env-other.json"
+    other.write_text("{}")
+    code, _, _ = run("run", "_wrap", rec["run"], "--ticket", tid, "--agent", "fake", "--live",
+                     "--env-file", str(other), "--", "true")  # fmt: skip
+    assert code == 2 and other.exists()
+
+
+def test_pasted_text_has_no_control_characters():
+    dirty = "ok\x1b[201~ rm -rf\x07 \x00done\x7f\x9b\tkeep\nline2"
+    assert runs_live.clean(dirty) == "ok[201~ rm -rf done\tkeep\nline2"
+    out = runs_live._format([{"by": "human:x\x1b", "text": dirty}], flat=False)
+    assert "\x1b" not in out and "\x07" not in out and "keep\nline2" in out
+
+
+def test_lock_holder_checks_never_assume_dead_without_proof(proj, new_ticket):
+    me = procs.own_token()
+    assert not procs.owner_dead(me) and not procs.owner_dead("") and not procs.owner_dead("garbage here")
+    assert procs.owner_dead(f"{os.getpid()} 2001-01-01T00:00:00Z")  # the pid now has another start time
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    assert procs.owner_dead(f"{dead.pid} 2001-01-01T00:00:00Z")
+    tid = new_ticket()
+    lock = proj / ".orch" / "run" / "tickets" / f"{tid}.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(me)  # a live holder: not taken, however long we wait
+    assert runs._break_dead(lock) is False and lock.read_text() == me
+    lock.write_text("not-a-pid")  # unverifiable: counts as alive
+    assert runs._break_dead(lock) is False and lock.exists()
+    lock.write_text(f"{dead.pid} -")  # a dead holder is released at once
+    with runs.locked(proj, tid):
+        assert lock.read_text() == me
+    assert not lock.exists()
+
+
+def test_ticket_lock_is_not_broken_from_a_live_holder_even_when_old(proj, new_ticket):
+    tid = new_ticket()
+    lock = proj / ".orch" / "tickets" / f".lock-{tid}"
+    lock.write_text(procs.own_token())
+    old = lock.stat().st_mtime - 120
+    os.utime(lock, (old, old))
+    assert tickets._break_stale(lock) is False and lock.exists()
+    lock.write_text("999999 -")  # named, and gone
+    os.utime(lock, (old, old))
+    assert tickets._break_stale(lock) is True
+
+
+@needs_tmux
+def test_stop_leaves_a_run_that_took_over_alone(proj, run, lab):
+    _generic_live(proj)
+    tid = _ticket(run)
+    old = runs.claim(proj, tid, "x", "fake", "live", pid=os.getpid())
+    runs.release(proj, tid, old["run"])
+    new = runs.claim(proj, tid, "y", "fake", "live", pid=os.getpid())
+    runs_live._close(proj, old, interrupt=False)  # a stale stop for the earlier run
+    assert runs.read(proj, tid)["run"] == new["run"]
