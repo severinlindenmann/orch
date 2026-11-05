@@ -49,7 +49,7 @@ class Listener:
             return PAUSE_OFF
         cursor = read(self.root).get("cursor")
         r = orchcli.relay_since(self.root, cursor if isinstance(cursor, int) else 0, self.wait)
-        if r is None:
+        if r is None or r.get("warning"):  # unreachable relay: the CLI answers at once with the saved list
             _write(self.root, listening=False, note="Not listening: the relay could not be reached just now", at=time.time())
             return 10
         nxt = r.get("next")

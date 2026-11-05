@@ -99,3 +99,11 @@ def test_needs_cli_json_validates(ws, capsys):
         assert main(["--dir", str(ws), "needs", "--json"]) == 0
     rows = json.loads(capsys.readouterr().out)
     assert rows and re.fullmatch(r"[a-z][a-z0-9-]{1,31}:[A-Za-z0-9_.:-]{1,200}", rows[0]["id"])
+
+
+def test_unreachable_relay_pauses_instead_of_spinning(ws):
+    relay_on(ws)
+    (ws / "since.json").write_text(json.dumps({"next": 3, "items": [], "warning": "No connection"}))
+    ev = threading.Event()
+    assert Listener(ws, ev).step() >= 10  # a pause, not an instant retry
+    assert listen.read(ws)["listening"] is False and not ev.is_set()
