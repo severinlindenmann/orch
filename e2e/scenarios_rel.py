@@ -323,3 +323,36 @@ def r13(e):
         check(b"acme-secret-value" not in blob, "credential value found in the database")
         for p in (e.rel.data / "blobs").glob("*"):
             check(b"pilatus-only bytes" not in p.read_bytes(), "plain blob on disk")
+
+
+@scenario("R15")
+def r15(e):
+    """Phone paired with Pilatus writes; Pilatus answers it (relay send ph_ + ask --phone), refresh lists the phone;
+    Home (not paired with that phone) cannot reach it and is told what to do."""
+    from scenarios_misc import pair, phone
+
+    i, ph = pair(e, ["Pilatus"], label="R15 iPhone")
+    r = phone(e, ph, "POST", "/v1/phone/send", {"to": i["Pilatus"], "text": "can you answer my phone"})
+    check(r.status == 201, f"phone send: {r}")
+    _, out, _ = e.orch("Pilatus", "relay", "refresh")
+    check("phone" in out and "0 phones" not in out, f"refresh: {out}")
+    d = json.loads((e.ws("Pilatus") / ".agents/skills/orch-relay/workspaces.json").read_text())
+    check(ph[0] in [p["id"] for p in d.get("phones", [])], f"workspaces.json phones: {d.get('phones')}")
+    _, out, _ = e.orch("Pilatus", "relay", "inbox")
+    check("can you answer my phone" in out and f"orch relay send {ph[0]}" in out, f"inbox: {out}")
+    e.orch("Pilatus", "relay", "send", ph[0], "yes, I can answer your phone")
+    e.orch("Pilatus", "relay", "send", "R15 iPhone", "by name too")
+    t = e.orchj("Pilatus", "ticket", "new", "R15 phone question")["id"]
+    e.orch("Pilatus", "ask", t, "Ship it?", "--option", "yes", "--option", "no", "--phone")
+    got = [x["message"]["body"]["text"] for x in phone(e, ph, "GET", "/v1/phone/messages").json()["items"]]
+    check(got[:3] == ["by name too", "yes, I can answer your phone", "can you answer my phone"], f"phone messages: {got}")
+    qs = [q for q in phone(e, ph, "GET", "/v1/phone/questions").json()["items"] if q["message"].get("ticket") == t]
+    check(len(qs) == 1, f"phone questions: {qs}")
+    # Home is not on this phone's list: refused with what to do, and its directory lists no such phone
+    rc, out, err = e.orch("Home", "relay", "send", ph[0], "hi", ok=False)
+    check(rc != 0 and "Phones" in (out + err) and "admin" in (out + err), f"Home -> phone: {rc} {out} {err}")
+    e.orch("Home", "relay", "refresh")
+    d = json.loads((e.ws("Home") / ".agents/skills/orch-relay/workspaces.json").read_text())
+    check(ph[0] not in [p["id"] for p in d.get("phones", [])], "Home lists a phone it may not reach")
+    check(not [x for x in phone(e, ph, "GET", "/v1/phone/messages").json()["items"] if x["message"]["body"]["text"] == "hi"], "Home reached the phone")
+    return "showing the reply in the iPhone app: mobile lane (GET /v1/phone/messages, text push)"

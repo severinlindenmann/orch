@@ -187,7 +187,9 @@ def resolve(root: Path, target: str) -> str:
         if names
         else "No other workspaces or phones are known yet."
     )
-    raise Refused(f"No workspace or phone called {target!r}. {known} Run: orch relay refresh to update the list.")
+    raise Refused(
+        f"No workspace or phone called {target!r}. {known} Run: orch relay refresh to update the list."
+    )
 
 
 def name_of(root: Path, ws_id: str) -> str:
