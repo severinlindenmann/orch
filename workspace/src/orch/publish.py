@@ -122,7 +122,7 @@ BUNDLE_TYPE = "application/vnd.orch.bundle"
 
 
 def bundle(folder: Path) -> bytes:
-    """Folder -> bundle bytes (crypto.md "Folder bundle"): u32 BE index length | index JSON | files in order."""
+    """Folder -> bundle bytes (crypto.md "Folder bundle"): u32 BE index length, index JSON, files."""
     if (folder / ".orch").exists():
         raise Refused("This folder is the workspace root. Share a folder inside it.")
     files = []
@@ -146,7 +146,7 @@ def bundle(folder: Path) -> bytes:
         "entry": "index.html",
         "files": [
             {"path": r, "type": mimetypes.guess_type(r)[0] or "application/octet-stream", "size": len(d)}
-            for (r, _), d in zip(files, datas)
+            for (r, _), d in zip(files, datas, strict=True)
         ],
     }
     raw = json.dumps(index, ensure_ascii=False, separators=(",", ":")).encode()

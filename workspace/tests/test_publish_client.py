@@ -9,7 +9,8 @@ from fakes import WS
 from orch import publish
 from orch.errors import Refused
 
-VEC = json.loads((Path(__file__).resolve().parents[2] / "contracts/vectors/publish-blob-v1.json").read_text())
+VEC_DIR = Path(__file__).resolve().parents[2] / "contracts/vectors"
+VEC = json.loads((VEC_DIR / "publish-blob-v1.json").read_text())
 
 
 def connect(run, srv):
@@ -78,7 +79,7 @@ def test_file_share_roundtrip_and_link(proj, run, pub):
     assert json.loads((proj / ".orch/secrets/files/keys.json").read_text())[res["id"]]
 
 
-BVEC = json.loads((Path(__file__).resolve().parents[2] / "contracts/vectors/publish-bundle-v1.json").read_text())
+BVEC = json.loads((VEC_DIR / "publish-bundle-v1.json").read_text())
 
 
 def _unbundle(raw: bytes) -> dict:
@@ -117,6 +118,7 @@ def test_folder_without_index_html_is_refused(proj, run, pub):
     (proj / "notes/a.txt").write_text("a")
     assert "index.html" in run("publish", "file", "notes")[2]
     assert not pub.files
+
 
 def test_file_permanent_refused_without_right(proj, run, pub):
     connect(run, pub)
