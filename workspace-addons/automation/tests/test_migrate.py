@@ -66,3 +66,28 @@ def test_scheduler_alias_prints_one_line_and_runs_automation(ws):
                        env={"PATH": "", "ORCH_BIN": __import__("os").environ["ORCH_BIN"], "ORCH_ROOT": str(ws)})
     assert r.stdout.splitlines()[0].startswith("The scheduler is now called automation: orch automation")
     assert r.returncode == 0 and "Nothing scheduled." in r.stdout
+
+
+def test_symlinked_addons_folder_moves_and_writes_nothing(ws, tmp_path, capsys):
+    outside = tmp_path / "outside"
+    (outside / "scheduler").mkdir(parents=True)
+    (outside / "scheduler" / "state.json").write_text("{}")
+    import shutil
+    shutil.rmtree(ws / ".orch/addons")
+    (ws / ".orch/addons").symlink_to(outside, target_is_directory=True)
+    (ws / ".orch/config.toml").write_text("[scheduler]\ninterval = 5\n")
+    add_ticket(ws, "t_sym00001", ext={"scheduler": {"cron": "0 7 * * 1"}})
+    res = migrate.run(ws)
+    assert res["tickets"] == 0 and res["files"] == 0 and res["config"] is False and "symbolic link" in res["note"]
+    assert sorted(p.name for p in outside.rglob("*")) == ["scheduler", "state.json"]  # nothing created outside
+    assert "[scheduler]" in (ws / ".orch/config.toml").read_text()
+    assert "automation" not in tk(ws, "t_sym00001").get("ext", {})
+    assert main(["--dir", str(ws), "migrate"]) == 0 and "symbolic link" in capsys.readouterr().out
+
+
+def test_config_temp_file_is_private_and_left_no_trace(ws):
+    cfg = ws / ".orch/config.toml"
+    cfg.write_text("[scheduler]\ninterval = 5\n")
+    (ws / ".orch/.config.toml.migrate").symlink_to(ws / "victim.txt")  # the old fixed temp name is not used
+    assert migrate.config(ws) and not (ws / "victim.txt").exists()
+    assert [p.name for p in (ws / ".orch").iterdir() if p.name.startswith(".config-")] == []

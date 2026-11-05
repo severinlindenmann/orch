@@ -163,7 +163,8 @@ def _run(args, root: Path) -> int:
         from . import migrate
 
         res = migrate.run(root)
-        out(res, f"Moved {res['tickets']} ticket(s), {res['files']} file(s)." + (" Settings moved." if res["config"] else ""))
+        out(res, f"Moved {res['tickets']} ticket(s), {res['files']} file(s)." + (" Settings moved." if res["config"] else "")
+            + (f" {res['note']}" if res.get("note") else ""))
     elif args.cmd == "needs":
         from . import needs
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 from pathlib import Path
 
 from . import orchcli
@@ -37,9 +38,14 @@ def config(root: Path) -> bool:
     text = p.read_text()
     if not OLD_TABLE.search(text) or re.search(r"^\[automation\]", text, re.MULTILINE):
         return False
-    tmp = p.with_name(".config.toml.migrate")
-    tmp.write_text(OLD_TABLE.sub("[automation]", text, count=1))
-    os.replace(tmp, p)
+    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".config-")  # private, never an existing file or link
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(OLD_TABLE.sub("[automation]", text, count=1))
+        os.replace(tmp, p)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
     return True
 
 
@@ -58,5 +64,18 @@ def files(root: Path) -> int:
     return n
 
 
+def unsafe(root: Path) -> Path | None:
+    """The first of .orch, .orch/addons, the old or the new folder that is a symbolic link (a repo could aim it outside)."""
+    o = root / ".orch"
+    for p in (o, o / "addons", o / "addons" / "scheduler", o / "addons" / "automation", o / "config.toml"):
+        if p.is_symlink():
+            return p
+    return None
+
+
 def run(root: Path) -> dict:
+    bad = unsafe(root)
+    if bad is not None:
+        return {"tickets": 0, "config": False, "files": 0,
+                "note": f"{bad} is a symbolic link; nothing was moved. Remove it and run: orch automation migrate"}
     return {"tickets": tickets(root), "config": config(root), "files": files(root)}
