@@ -9,14 +9,14 @@ from pathlib import Path
 from . import orchcli
 from .cron import fmt
 from .loop import KIND, OPEN
-from .runner import load_state, sdir
+from .runner import load_state
 
 LOOP_WARN = 10
 
 
 def _failed_runs(root: Path) -> list[dict]:
     try:
-        lines = (sdir(root) / "runs.jsonl").read_text().splitlines()
+        lines = (root / ".orch" / "addons" / "scheduler" / "runs.jsonl").read_text().splitlines()
     except OSError:
         return []
     out = []

@@ -54,21 +54,28 @@ def is_active(root: Path) -> bool | None:
     return addon_on(root, "scheduler")
 
 
-def set_ext(root: Path, t: dict, **changes) -> bool:
+def set_ext(root: Path, t: dict, remove: tuple = (), **changes) -> bool:
     """Write ext.scheduler (merged with what is there); checked against the ticket revision when it has one."""
     cur = dict((t.get("ext") or {}).get("scheduler") or {})
     cur.update(changes)
+    for k in remove:
+        cur.pop(k, None)
     args = ["ext", "set", t["id"], "scheduler", json.dumps(cur)]
     if isinstance(t.get("revision"), int):
         args += ["--if-revision", str(t["revision"])]
     return call(root, *args) is not None
 
 
-def run_start(root: Path, tid: str, text: str | None = None) -> dict:
+AGENT_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+
+
+def run_start(root: Path, tid: str, text: str | None = None, agent: str | None = None) -> dict:
     """`orch run start <tid> --by agent:scheduler`: all of resume / fresh / busy is decided inside core.
     Returns {"result": "started", "run", "log"} | {"result": "pending"} (ticket busy, text queued)
     | {"result": "failed", "reason": plain words}."""
-    cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--json", "--by", BY]
+    cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--mode", "oneshot", "--json", "--by", BY]
+    if agent and AGENT_RE.match(agent):  # only a name; core refuses one it does not know
+        cmd += ["--agent", agent]
     if text:
         cmd += ["--text", text]
     try:

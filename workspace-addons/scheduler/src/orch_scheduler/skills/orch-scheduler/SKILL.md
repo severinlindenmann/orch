@@ -12,9 +12,11 @@ two agents on one ticket. If a run stops within 10 seconds without doing anythin
 
 ## Set things up (tickets)
 - Once, later: `orch wait <id> --until 2026-11-05T08:00:00+01:00`. At that time the wait is cleared and a run starts.
-- Repeating: `orch scheduler repeat <id> "0 7 * * 1"` (five fields, always UTC: minute hour day month weekday).
-  `--agent <name>` is stored on the ticket (core `orch run start --agent` will use it). Stop repeating: `orch scheduler repeat <id> --off`.
-  If the computer was off, one catch-up run happens, not several.
+- Repeating, in plain words: `orch scheduler repeat <id> "every monday 08:00"`. The five phrases: `every <day> HH:MM`,
+  `daily HH:MM`, `every N minutes|hours`, `monthly D HH:MM` (day 1-28), `today|tomorrow HH:MM` (once; this is a plain wait).
+  Times are read in this computer's time zone; `--tz Europe/Zurich` changes it. Stop: `orch scheduler repeat <id> --off`.
+  `--agent <name>` makes this repeat use that agent. `--each-run sub-ticket` (daily or slower) gives every run its own sub-ticket.
+  If the computer was off, one catch-up run happens, not several. If the scheduler is not running it says so: start it with `orch start`.
 - A run for the same ticket never starts twice at the same time.
 
 ## Commands (the user runs them)

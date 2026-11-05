@@ -53,7 +53,11 @@ class Listener:
             _write(self.root, listening=False, note="Not listening: the relay could not be reached just now", at=time.time())
             return 10
         nxt = r.get("next")
-        _write(self.root, listening=True, note="", at=time.time(), **({"cursor": nxt} if isinstance(nxt, int) else {}))
+        recent = [i for i in r.get("items") or [] if isinstance(i, dict)]
+        keep = (read(self.root).get("recent") or []) + [
+            {k: i.get(k) for k in ("id", "type", "at", "seen", "applied", "allowed")} for i in recent]
+        _write(self.root, listening=True, note="", at=time.time(), recent=keep[-20:],
+               **({"cursor": nxt} if isinstance(nxt, int) else {}))
         if any(isinstance(i, dict) and i.get("seen") is False for i in r.get("items") or []):
             self.wake.set()
         return 0

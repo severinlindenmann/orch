@@ -4,17 +4,17 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import signal
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import orchcli, service
+from . import orchcli, plain, service
 from .cron import fmt, next_after, valid
 from .listen import NOT_LISTENING
 from .loop import OPEN, Scheduler
 from .runner import load_state
+from .view import cron_human
 
 
 class Refused(Exception):
@@ -41,27 +41,46 @@ def describe(root: Path) -> list[dict]:
             rows.append({"ticket": t["id"], "title": t["title"], "kind": "wake", "at": w["until"]})
         s = (t.get("ext") or {}).get("scheduler") or {}
         if s.get("recurring") is True and s.get("cron"):
-            nxt = next_after(s["cron"], datetime.now(UTC))
+            nxt = next_after(s["cron"], datetime.now(UTC), plain.zone(s.get("tz")))
             rows.append({"ticket": t["id"], "title": t["title"], "kind": "repeat", "cron": s["cron"],
                          "at": fmt(nxt) if nxt else state.get(t["id"], {}).get("next_run")})
     return sorted(rows, key=lambda r: r["at"] or "")
 
 
-def repeat(root: Path, tid: str, cron: str | None, off: bool, agent: str | None = None) -> dict:
+def repeat(root: Path, tid: str, phrase: str | None, off: bool, agent: str | None = None, tz: str | None = None,
+           each_run: bool = False) -> dict:
     t = next((x for x in orchcli.tickets(root) if x["id"] == tid), None)
     if t is None:
         raise Refused(f"There is no ticket {tid}.")
     if off:
-        changes = {"recurring": False}
-    else:
-        if not cron or not valid(cron):
-            raise Refused("Give five cron fields, e.g. \"0 7 * * 1\" (minute hour day month weekday, UTC).")
-        changes = {"recurring": True, "cron": cron}
-        if agent:
-            if not re.fullmatch(r"[a-z0-9-]{1,32}", agent):
-                raise Refused("The agent name may only have a-z, 0-9 and -. It names an agent.")
-            changes["agent"] = agent
-    if not orchcli.set_ext(root, t, **changes):
+        if not orchcli.set_ext(root, t, remove=("each_run",), recurring=False):
+            raise Refused("The ticket changed or the change was not accepted. Try again.")
+        return {"ticket": tid, "recurring": False}
+    if not phrase:
+        raise Refused(f"Say when. For example: {plain.EXAMPLES}.")
+    zone_name = tz or plain.workspace_tz(root) or plain.local_tz_name()
+    try:
+        plan = plain.Plan(cron=phrase) if valid(phrase) else plain.parse(phrase, zone_name)
+    except plain.Plain as e:
+        raise Refused(str(e)) from None
+    if plan.until:  # a one-off is a core wait
+        if each_run:
+            raise Refused("Each run as its own ticket is only for repeats.")
+        if orchcli.call(root, "wait", tid, "--until", plan.until) is None:
+            raise Refused("The wait was not accepted. Try again.")
+        return {"ticket": tid, "recurring": False, "until": plan.until}
+    if plain.zone(zone_name) is None:
+        raise Refused(f"'{zone_name}' is not a time zone. Use a name like Europe/Zurich.")
+    changes = {"recurring": True, "cron": plan.cron, "tz": zone_name}
+    if each_run and not plain.daily_or_slower(plan.cron):
+        raise Refused("Each run as its own ticket needs a repeat daily or slower, like \"daily 07:30\".")
+    if agent:
+        if not orchcli.AGENT_RE.match(agent):
+            raise Refused("The agent name may only have a-z, 0-9 and -. It names an agent (orch agents).")
+        changes["agent"] = agent
+    if each_run:
+        changes["each_run"] = "sub-ticket"
+    if not orchcli.set_ext(root, t, remove=() if each_run else ("each_run",), **changes):
         raise Refused("The ticket changed or the change was not accepted. Try again.")
     return {"ticket": tid, **changes}
 
@@ -80,11 +99,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("list", parents=[common], help="next wake-ups and repeats")
     sub.add_parser("needs", parents=[common], help="rows for `orch needs`")
     sub.add_parser("view", parents=[common], help="dashboard tab data")
-    rp = sub.add_parser("repeat", parents=[common], help="repeat a ticket by cron (UTC), or --off")
+    rp = sub.add_parser("repeat", parents=[common], help="repeat a ticket, or wake it once; say when in plain words")
     rp.add_argument("ticket")
-    rp.add_argument("cron_pos", nargs="?", metavar="cron")
-    rp.add_argument("--cron")
+    rp.add_argument("when", nargs="?", help=f"for example: {plain.EXAMPLES}")
     rp.add_argument("--agent", help="name of the agent for this repeat")
+    rp.add_argument("--tz", help="time zone of the times (default: this computer's, e.g. Europe/Zurich)")
+    rp.add_argument("--each-run", choices=("sub-ticket",), help="give every run its own sub-ticket (daily or slower)")
     rp.add_argument("--off", action="store_true")
     args = ap.parse_args(argv)
     try:
@@ -150,8 +170,18 @@ def _run(args, root: Path) -> int:
         from .view import build
         print(json.dumps(build(root)))
     elif args.cmd == "repeat":
-        res = repeat(root, args.ticket, args.cron or args.cron_pos, args.off, args.agent)
-        out(res, f"{args.ticket} repeats ({res['cron']} UTC)." if res["recurring"] else f"{args.ticket} no longer repeats.")
+        res = repeat(root, args.ticket, args.when, args.off, args.agent, args.tz, bool(args.each_run))
+        if res.get("until"):
+            text = f"{args.ticket} wakes once at {res['until']}."
+        elif res["recurring"]:
+            text = f"{args.ticket} repeats: {cron_human(res['cron'], plain.zone(res['tz']))} ({res['tz']})."
+        else:
+            text = f"{args.ticket} no longer repeats."
+        running = bool(service.running_pid(root))
+        res["running"] = running
+        if not running and not args.off:
+            text += "\nRepeating work isn't running here. Start it: orch start"
+        out(res, text)
     return 0
 
 
