@@ -16,7 +16,7 @@ from . import orchcli
 from .cron import fmt
 
 DEFAULT_AGENT = 'claude -p "{prompt}"'
-GITIGNORE = "scheduler.pid\nscheduler.log\nlocks/\n"
+GITIGNORE = "scheduler.pid\nscheduler.log\nlocks/\nlogs/\nstate.json\nruns.jsonl\n"
 
 
 def sdir(root: Path) -> Path:
