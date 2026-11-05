@@ -3,6 +3,7 @@
 The scheduler never runs an agent itself: every run is `orch run start` (core decides resume / fresh / busy)."""
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -83,14 +84,10 @@ class Scheduler:
         for c in kids:
             if ((c.get("ext") or {}).get("automation") or {}).get("occurrence") == occ:
                 return c["id"]
-        for c in kids:  # made, but the crash came before its mark was written
-            if c["title"] == title and not ((c.get("ext") or {}).get("automation") or {}).get("occurrence"):
-                orchcli.set_ext(self.root, c, **mark)
-                return c["id"]
-        made = orchcli.call(self.root, "ticket", "new", title, "--parent", t["id"])
+        made = orchcli.call(self.root, "ticket", "new", title, "--parent", t["id"], "--ext",
+                            "automation=" + json.dumps(mark))  # one write: never a child without its occurrence id
         if not isinstance(made, dict) or not made.get("id"):
             return None
-        orchcli.set_ext(self.root, made, **mark)
         orchcli.log(self.root, made["id"], f"One run of the repeat {t['id']} ({t['title']}). Do what that ticket says.")
         return made["id"]
 
@@ -149,6 +146,23 @@ class Scheduler:
                             orchcli.call(self.root, "ticket", "status", t["id"], "active")
         return started
 
+    def phone_tickets(self, now: datetime) -> list[str]:
+        """SA-01 a: a text from the phone made a ticket (ext.relay.origin = phone): one run for it, ever.
+        The mark is saved before the run starts, so a crash or a restart never starts it twice."""
+        started = []
+        for t in read_tickets(self.root):
+            relay = (t.get("ext") or {}).get("relay") or {}
+            mine = (t.get("ext") or {}).get("automation") or {}
+            made = parse(t.get("created_at"))
+            if (relay.get("origin") != "phone" or mine.get("phone_started") or t["status"] not in OPEN
+                    or made is None or now - made > timedelta(days=1)):
+                continue
+            if not orchcli.set_ext(self.root, t, phone_started=True):
+                continue  # the ticket changed: look again next pass
+            if self.start_run(t["id"], "a text from your phone", now) == "started":
+                started.append(t["id"])
+        return started
+
     # -- pass ---------------------------------------------------------------
     def tick(self, now: datetime) -> list[str]:
         """One pass. Returns the ticket ids a run was started for."""
@@ -158,6 +172,7 @@ class Scheduler:
             migrate.run(self.root)
         self.check_watch()
         started: list[str] = self.act_on_answers(now)
+        started += self.phone_tickets(now)
         state = load_state(self.root)
         for t in read_tickets(self.root):
             tid = t["id"]
@@ -244,6 +259,12 @@ class Scheduler:
                    for q in (asked or {}).get("questions") or []):
                 return None  # act_on_answers handles our own failure question
             return tid if self.start_run(tid, f"relay answer {mid}", now) == "started" else None
+        if kind == "text" and str(m.get("from", "")).startswith("ph_") and isinstance(m.get("ticket"), str):
+            # a follow-up text: the relay queued it for the running agent; only an idle ticket needs a run
+            tid = m["ticket"]
+            if not str(m.get("note", "")).startswith("added to") or orchcli.run_running(self.root, tid) is not False:
+                return None
+            return tid if self.start_run(tid, f"phone text {mid}", now) == "started" else None
         if kind == "webhook":
             wid = body.get("webhook_id")
             for t in read_tickets(self.root):

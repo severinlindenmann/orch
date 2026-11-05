@@ -131,7 +131,7 @@ def setup_automation(e, name: str, tool: str, interval: int = 10) -> Path:
     ws = e.ws(name)
     if not (ws / ".agents/skills/orch-automation").exists():
         rc, out, err = e.addon_add(ws, "automation")
-        check(rc == 0, f"addon add scheduler: {(err or out)[-200:]}")
+        check(rc == 0, f"addon add automation: {(err or out)[-200:]}")
     e.sched_config(ws, scheduler_agent_line(e, tool), interval, 5)
     return ws
 

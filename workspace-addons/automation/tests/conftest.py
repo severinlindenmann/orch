@@ -47,6 +47,8 @@ elif args[:2] == ["ticket", "new"]:
     t = {{"id": "t_new%03d" % n, "title": args[2], "status": "open",
          "created_at": "2026-11-01T00:00:00Z", "history": []}}
     if "--parent" in args: t["parent"] = args[args.index("--parent") + 1]
+    for i, a in enumerate(args):
+        if a == "--ext": k, _, v = args[i + 1].partition("="); t.setdefault("ext", {{}})[k] = json.loads(v)
     save(t); print(json.dumps(t))
 elif args[:2] == ["ticket", "status"]:
     t = load(args[2]); t["status"] = args[3]; note(t, "Status"); save(t); print(json.dumps(t))
