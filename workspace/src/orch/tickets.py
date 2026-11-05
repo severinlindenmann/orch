@@ -28,7 +28,14 @@ KIND_RE = re.compile(r"^(plain|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$")
 DOING_STALE_SECONDS = 2 * 3600
 MAX_PROOF_BYTES = 25 * 1024 * 1024
 ROLES = ("result", "check", "support")
-_WIN_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+_WIN_RESERVED = {
+    "con",
+    "prn",
+    "aux",
+    "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
 _ID_RE = re.compile(r"^t_[a-z0-9]{6,16}$")
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
@@ -293,7 +300,9 @@ def create(root: Path, title: str, by: str, parent: str | None = None) -> dict:
         "checklist": [],
         "links": [],
         "questions": [],
-        "history": [{"at": t, "by": by, "via": "cli", "text": "Created" + (f" under {parent}" if parent else "")}],
+        "history": [
+            {"at": t, "by": by, "via": "cli", "text": "Created" + (f" under {parent}" if parent else "")}
+        ],
     }
     if parent is not None:
         ticket["parent"] = parent
@@ -454,6 +463,8 @@ def parse_evidence(raw: str) -> dict:
         raise Refused(f"Evidence type must be one of: {', '.join(EVIDENCE_TYPES)}.")
     if not isinstance(ev.get("ref"), str) or not ev["ref"].strip():
         raise Refused("Evidence needs a ref (PR, commit, file, URL, command or note text).")
+    if "role" in ev and ev["role"] not in ROLES:
+        raise Refused(f"A proof role is one of: {', '.join(ROLES)}.")
     if "text" in ev and not isinstance(ev["text"], str):
         raise Refused("Evidence text must be a string.")
     return ev
@@ -918,20 +929,41 @@ def attach_file(root: Path, tid: str, path: str, title: str | None, role: str | 
         raise Refused(f"{path} doesn't exist.")
     if not cur.is_file():
         raise Refused(f"{path} is not a file.")
-    size = cur.stat().st_size
+    cur_src = cur
+    size = cur_src.stat().st_size
     if size > MAX_PROOF_BYTES:
         raise Refused(
-            f"{cur.name} is {_size_text(size)}. A proof file can be at most 25 MB. Use --url or --note."
+            f"{cur_src.name} is {_size_text(size)}. A proof file can be at most 25 MB. Use --url or --note."
         )
-    dest_dir = tickets_dir(root) / tid / "evidence"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    name = _proof_name(cur.name)
+    dest_dir = base / ".orch" / "tickets" / tid / "evidence"
+    cur = base
+    for part in (".orch", "tickets", tid, "evidence"):
+        cur = cur / part
+        if cur.is_symlink():
+            raise Refused("The proof folder of this ticket is a link. orch will not copy into it.")
+        if not cur.exists():
+            cur.mkdir()
+    real_dir = Path(os.path.realpath(dest_dir))
+    if real_dir != dest_dir or not str(real_dir).startswith(str(base / ".orch" / "tickets") + os.sep):
+        raise Refused("The proof folder of this ticket is not inside this workspace.")
+    name = _proof_name(cur_src.name)
     dest, n = dest_dir / name, 1
-    while dest.exists():
-        n += 1
-        stem, dot, ext = name.rpartition(".")
-        dest = dest_dir / (f"{stem}-{n}.{ext}" if dot and stem else f"{name}-{n}")
-    shutil.copyfile(cur, dest)
+    while True:
+        try:
+            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o644)
+            break
+        except FileExistsError:
+            n += 1
+            stem, dot, ext = name.rpartition(".")
+            dest = dest_dir / (f"{stem}-{n}.{ext}" if dot and stem else f"{name}-{n}")
+    try:
+        src_fd = os.open(cur_src, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        os.close(fd)
+        os.unlink(dest)
+        raise Refused("proof files cannot be links. Give the real file.") from None
+    with os.fdopen(src_fd, "rb") as src, os.fdopen(fd, "wb") as out:
+        shutil.copyfileobj(src, out)
     ev = {"type": "file", "ref": dest.relative_to(base).as_posix(), "text": _size_text(size)}
     if title:
         ev["title"] = title.strip()

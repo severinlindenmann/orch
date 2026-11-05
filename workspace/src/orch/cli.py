@@ -281,6 +281,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
     x.add_argument("title")
+    x.add_argument("--parent", metavar="ID", help="make it a sub-ticket of this ticket")
+    x = t.add_parser("tree", parents=[common], help="a ticket and its sub-tickets")
+    x.add_argument("id")
     x = t.add_parser("list", parents=[common])
     x.add_argument("--status", choices=tickets.STATUSES)
     x.add_argument("--all", action="store_true", help="include done and dropped tickets")
@@ -347,6 +350,8 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--evidence", action="append", default=[], metavar="JSON", help=argparse.SUPPRESS)
     for k in ("command", "note", "pr", "commit", "file", "url"):
         x.add_argument(f"--{k}", metavar="TEXT", help=f"proof: a {k}")
+    x.add_argument("--title", help="short name of the proof")
+    x.add_argument("--role", help="result, check or support")
 
     x = sub.add_parser("log", parents=[common], help="add a history entry")
     x.add_argument("id")
@@ -412,6 +417,18 @@ def _addon_note(root: Path, q: dict) -> str | None:
     return f"Recorded. The {owner} acts on it when it runs."
 
 
+def _child_warning(root: Path, t: dict) -> list[str]:
+    """Closing a parent with open sub-tickets is saved anyway: a warning on stderr and in --json."""
+    if t["status"] != "done":
+        return []
+    kids = tickets.open_children(root, t["id"])
+    if not kids:
+        return []
+    names = ", ".join(k["title"] for k in kids)
+    print(f"Warning: {len(kids)} sub-tickets are still open ({names}). Closed anyway.", file=sys.stderr)
+    return [f"{len(kids)} sub-tickets are still open: " + ", ".join(k["id"] for k in kids)]
+
+
 def run(args: argparse.Namespace) -> None:
     root = _find_root()
     by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
@@ -432,13 +449,18 @@ def run(args: argparse.Namespace) -> None:
     elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
         pass
     elif cmd == "ticket" and sub == "new":
-        t = tickets.create(root, args.title, by())
+        t = tickets.create(root, args.title, by(), args.parent)
+        part = f" (part of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
             args,
             t,
-            f'Created "{t["title"]}" [{t["id"]}]\n'
+            f'Created "{t["title"]}" [{t["id"]}]{part}\n'
             f'Next: add one checklist item per step: orch check add {t["id"]} "<step>"',
         )
+    elif cmd == "ticket" and sub == "tree":
+        top = _visible(root, tickets.load(root, args.id))
+        everything = tickets.list_all(root)
+        _out(args, top, "\n".join([top["title"], *_tree(everything, top)]))
     elif cmd == "ticket" and sub == "list":
         all_ = [_visible(root, t) for t in tickets.list_all(root)]
         ts = [
@@ -451,7 +473,17 @@ def run(args: argparse.Namespace) -> None:
             )
         ]
         hidden = 0 if args.status or args.all else sum(1 for t in all_ if t["status"] in ("done", "dropped"))
-        txt = "\n".join(_line(t) for t in ts) or 'No open tickets. Create one with: orch ticket new "<title>"'
+        everything = tickets.list_all(root)
+        ids = {x["id"] for x in everything}
+        for t in ts:
+            t["children"] = tickets.children_counts(everything, t["id"])
+        txt = (
+            "\n".join(
+                _line(t) + (" - parent missing" if t.get("parent") and t["parent"] not in ids else "")
+                for t in ts
+            )
+            or 'No open tickets. Create one with: orch ticket new "<title>"'
+        )
         if hidden and not args.json:
             txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
         _out(args, ts, txt)
@@ -460,7 +492,8 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t, _show(t, root))
     elif cmd == "ticket" and sub == "status":
         t = tickets.set_status(root, args.id, args.status, by())
-        _out(args, t, f"{t['title']} - {t['status']}")
+        warn = _child_warning(root, t)
+        _out(args, {**t, "warnings": warn} if warn else t, f"{t['title']} - {t['status']}")
     elif cmd == "ticket" and sub == "edit":
         fields = {k: getattr(args, k) for k in ("owner", "due", "note") if getattr(args, k) is not None}
         if args.title is None and not fields:
@@ -472,7 +505,8 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t, "Summary saved.")
     elif cmd == "ticket" and sub == "patch":
         t = tickets.patch(root, args.id, args.if_revision, args.data, by())
-        _out(args, t, f"{t['id']} changed (revision {t['revision']})")
+        warn = _child_warning(root, t)
+        _out(args, {**t, "warnings": warn} if warn else t, f"{t['id']} changed (revision {t['revision']})")
     elif (cmd == "ticket" and sub == "wait") or cmd == "wait":
         t = tickets.wait(root, args.id, args.until, args.on, by(), args.clear)
         _out(
@@ -508,14 +542,24 @@ def run(args: argparse.Namespace) -> None:
             msg = f"{c['id']}: no longer marked as being worked on."
         _out(args, c, msg)
     elif cmd == "check":
+        extra = {k: getattr(args, k) for k in ("title", "role") if getattr(args, k)}
         shorthand = [
-            json.dumps({"type": k, "ref": getattr(args, k)})
-            for k in ("command", "note", "pr", "commit", "file", "url")
+            json.dumps({"type": k, "ref": getattr(args, k), **extra})
+            for k in ("command", "note", "pr", "commit", "url")
             if getattr(args, k)
         ]
+        if args.file:
+            tickets.load(root, args.id)
+            shorthand.append(json.dumps(tickets.attach_file(root, args.id, args.file, args.title, args.role)))
         t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by())
         ev = c["evidence"][-1]
-        _out(args, c, f"Done: {c['text']} (proof: {ev['ref']})")
+        copied = args.file and tickets.proof_present(root, ev)
+        _out(
+            args,
+            c,
+            f"Done: {c['text']} (proof: {ev['ref']})"
+            + (f"\nProof copied: {ev['ref']} ({ev['text']})" if copied else ""),
+        )
     elif cmd == "log":
         t = tickets.log(root, args.id, args.text, by())
         h = t["history"][-1]
