@@ -229,29 +229,36 @@ for case in bvec["must_fail"]:
         pass
 
 # clean_untrusted (SA-14): reference rules of vectors/clean-untrusted-v1.json;
-# workspace/src/orch/text.py must give the same outputs.
+# workspace/src/orch/text.py must give the same outputs. Order matters: drop invisible characters FIRST (so they
+# cannot split a comment marker), then remove comments until nothing changes, then an unterminated "<!--" tail.
 _COMMENT = re.compile(r"<!--.*?-->", re.S)
-_DROP = set(range(0xE0000, 0xE0080)) | {0x2800, 0x034F, 0x3164, 0x115F, 0x1160, 0xFEFF}
+_OPEN_TAIL = re.compile(r"<!--.*\Z", re.S)
+_DROP = (
+    set(range(0xE0000, 0xE0080))  # tag characters
+    | set(range(0xE0100, 0xE01F0))  # variation selectors supplement
+    | set(range(0xFE00, 0xFE10))  # variation selectors
+    | {0x2800, 0x034F, 0x3164, 0x115F, 0x1160, 0xFEFF, 0xFFA0}
+)
 
 
 def clean_untrusted(text, limit=2000):
-    text = _COMMENT.sub("", unicodedata.normalize("NFC", text))
-    keep = [
+    text = unicodedata.normalize("NFC", text).replace("\u2028", "\n").replace("\u2029", "\n")
+    text = "".join(
         ch
         for ch in text
-        if ch in "\n\t"
-        or (
-            unicodedata.category(ch) not in ("Cc", "Cf")
-            and ord(ch) not in _DROP
-            and not 0xFE00 <= ord(ch) <= 0xFE0F
-        )
-    ]
-    return "".join(keep)[:limit]
+        if ch in "\n\t" or (unicodedata.category(ch) not in ("Cc", "Cf") and ord(ch) not in _DROP)
+    )
+    while True:
+        cut = _COMMENT.sub("", text)
+        if cut == text:
+            break
+        text = cut
+    return _OPEN_TAIL.sub("", text)[:limit]
 
 
 cvec = json.loads((HERE / "vectors" / "clean-untrusted-v1.json").read_text())
 if len(cvec["cases"]) < 3:
-    fails.append("clean-untrusted vector: needs three cases")
+    fails.append("clean-untrusted vector: needs at least three cases")
 for case in cvec["cases"]:
     if clean_untrusted(case["in"]) != case["out"]:
         fails.append(f"clean-untrusted vector {case['name']}: output differs")
