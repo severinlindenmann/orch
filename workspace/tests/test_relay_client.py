@@ -1231,3 +1231,65 @@ def test_start_allowed_joins_open_ticket_without_a_second_one(proj, run, rel):
     run("relay", "allow", "m_start00000000012", "--once")
     second = json.loads(run("relay", "done", "m_start00000000012", "--json")[1])["ticket"]
     assert second == first and len(_tickets(run)) == 1
+
+
+def _live(run):
+    return [t for t in _tickets(run) if t["status"] not in ("done", "dropped")]
+
+
+def _crash_on_final_ext(monkeypatch, relay):
+    real = relay.tickets.ext_set
+
+    def boom(root, tid, addon, data, by, *a, **k):
+        if "message" in json.loads(data):  # the last write of _ticket_for
+            raise RuntimeError("crash")
+        return real(root, tid, addon, data, by, *a, **k)
+
+    monkeypatch.setattr(relay.tickets, "ext_set", boom)
+    return lambda: monkeypatch.setattr(relay.tickets, "ext_set", real)
+
+
+def test_start_join_crash_leaves_one_live_ticket(proj, run, rel, monkeypatch):
+    from orch import relay
+
+    connect(run, rel)
+    rel.inbox.append(msg("m_start00000000021", "start", {"key": "weekly", "text": "go"}))
+    run("relay", "inbox")
+    run("relay", "allow", "m_start00000000021", "--once")
+    first = json.loads(run("relay", "done", "m_start00000000021", "--json")[1])["ticket"]
+    rel.inbox.append(msg("m_start00000000022", "start", {"key": "weekly", "text": "again"}))
+    run("relay", "inbox")
+    run("relay", "allow", "m_start00000000022", "--once")
+    real = relay._merge_allow
+
+    def boom(*a, **k):
+        raise RuntimeError("crash")
+
+    monkeypatch.setattr(relay, "_merge_allow", boom)
+    with pytest.raises(RuntimeError):
+        relay.done(proj, "m_start00000000022")
+    monkeypatch.setattr(relay, "_merge_allow", real)
+    second = json.loads(run("relay", "done", "m_start00000000022", "--json")[1])["ticket"]
+    assert second == first and [t["id"] for t in _live(run)] == [first]
+
+
+def test_permanent_allow_crash_after_create_leaves_one_live_ticket(proj, run, rel, monkeypatch):
+    from orch import relay
+
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000031", "delegate", {"title": "A", "text": "x"}))
+    run("relay", "inbox")
+    run("relay", "allow", "m_deleg00000000031", "--permanent")
+    run("relay", "done", "m_deleg00000000031")
+    tok = rel.sent[0]["body"]["token"]
+    mid = "m_deleg00000000032"
+    rel.inbox.append(msg(mid, "delegate", {"title": "B", "text": "x", "allow_token": tok}))
+    run("relay", "inbox")  # allowed by the token: no question ticket
+    restore = _crash_on_final_ext(monkeypatch, relay)
+    with pytest.raises(RuntimeError):
+        relay.done(proj, mid)
+    restore()
+    tid = json.loads(run("relay", "done", mid, "--json")[1])["ticket"]
+    live = [t for t in _live(run) if t["title"].endswith(": B")]
+    assert len(live) == 1 and live[0]["id"] == tid
+    assert len(json.loads(run("ticket", "show", tid, "--json")[1])["history"]) >= 1

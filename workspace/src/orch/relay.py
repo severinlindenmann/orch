@@ -991,10 +991,10 @@ def _ticket_for(root: Path, msg: dict) -> str:
                 and r.get("from") == msg["from"]
                 and t.get("status") in ("open", "active", "waiting")
             ):  # remember this message too, so a second `done` finds the same ticket
+                if (atid := _allow_ticket(root, msg["id"])) is not None and atid != t["id"]:
+                    _merge_allow(root, atid, t["id"], by)  # before the record below: safe to run twice
                 more = [*r.get("messages", []), msg["id"]]
                 tickets.ext_set(root, t["id"], "relay", json.dumps({"messages": more[-20:]}), by)
-                if (atid := _allow_ticket(root, msg["id"])) is not None and atid != t["id"]:
-                    _merge_allow(root, atid, t["id"], by)
                 return t["id"]
         title = f"Relay task {b['key']}"
     else:
@@ -1015,6 +1015,9 @@ def _ticket_for(root: Path, msg: dict) -> str:
         tickets.apply_op(root, tid, retitle)
     else:
         tid = tickets.create(root, title, by)["id"]
+        # a re-run after a crash finds this ticket (allow_message) and reuses it, never makes a second
+        first = {"allow_message": msg["id"], "from": msg["from"]}
+        tickets.ext_set(root, tid, "relay", json.dumps(first), by)
         if line := _allow_history(root, msg):
             tickets.apply_op(root, tid, lambda tk: tickets.add_history(tk, by, line, "relay"))
     if not tickets.load(root, tid)["checklist"]:
