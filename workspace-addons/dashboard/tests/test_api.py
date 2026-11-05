@@ -127,6 +127,15 @@ def test_tickets_come_from_the_orch_command_when_there_is_one(ws, fake_orch):
     assert [x["title"] for x in s["tickets"]] == ["From the command"]
 
 
+def test_ticket_list_asks_for_finished_tickets_too(ws, fake_orch):
+    """`orch ticket list` hides done/dropped unless --all: without it they vanished from the dashboard (found by e2e A12)."""
+    calls = fake_orch.parent / "calls.txt"
+    fake_orch.write_text(fake_orch.read_text().replace(
+        "mode = (d", f'open({str(calls)!r}, "a").write(" ".join(a) + "\\n")\nmode = (d', 1))
+    load_state(ws, orch_bin=str(fake_orch))
+    assert "ticket list --all --json" in calls.read_text()
+
+
 def test_foreign_origin_never_triggers_a_pull(ws, fake_orch):
     import http.client
     import threading
