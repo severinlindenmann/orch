@@ -11,6 +11,8 @@ from test_addons import install, make_addon, uv_calls  # noqa: F401  (fixture)
 
 from orch import addons, services
 
+NO_WIN_LINKS = pytest.mark.skipif(os.name == "nt", reason="file symlinks need admin rights on Windows")
+
 SVC_MAIN = """\
 import json, os, sys
 from pathlib import Path
@@ -229,3 +231,39 @@ def test_add_on_error_text_has_no_escape_sequences(svc, proj, run):
 def test_start_keeps_runtime_files_out_of_git(svc, proj, run):
     run("start")
     assert ".orch/run/" in (proj / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+
+@NO_WIN_LINKS
+@pytest.mark.parametrize("name", [".gitignore", "AGENTS.md", "CLAUDE.md"])
+def test_project_files_never_written_through_a_link_outside(proj, tmp_path, name):
+    from orch import skills
+    from orch.errors import Refused
+
+    victim = tmp_path.parent / f"{tmp_path.name}-victim.txt"
+    victim.write_text("keep me", encoding="utf-8")
+    (proj / name).symlink_to(victim)
+    with pytest.raises(Refused, match="outside this project"):
+        {".gitignore": skills.ensure_gitignore, "CLAUDE.md": skills.ensure_claude_md}.get(
+            name, lambda r: skills.set_block(r, "x", "body")
+        )(proj)
+    assert victim.read_text(encoding="utf-8") == "keep me"
+
+
+@NO_WIN_LINKS
+def test_start_refuses_a_gitignore_link_outside(svc, proj, run, tmp_path):
+    victim = tmp_path.parent / f"{tmp_path.name}-victim2.txt"
+    victim.write_text("keep me", encoding="utf-8")
+    (proj / ".gitignore").unlink()
+    (proj / ".gitignore").symlink_to(victim)
+    code, _, err = run("start")
+    assert code == 2 and "outside this project" in err and victim.read_text(encoding="utf-8") == "keep me"
+
+
+@NO_WIN_LINKS
+def test_claude_md_linked_to_agents_md_inside_still_works(proj, run):
+    (proj / "AGENTS.md").write_text("# mine\n", encoding="utf-8")
+    (proj / "CLAUDE.md").symlink_to("AGENTS.md")
+    assert run("init")[0] == 0
+    assert (proj / "CLAUDE.md").is_symlink() and "@AGENTS.md" in (proj / "AGENTS.md").read_text(
+        encoding="utf-8"
+    )

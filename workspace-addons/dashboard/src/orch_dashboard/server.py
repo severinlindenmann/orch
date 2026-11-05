@@ -1,8 +1,11 @@
 """Stdlib HTTP server on 127.0.0.1. GET only; every other method is refused."""
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
+import re
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -59,8 +62,12 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path.startswith("/api/") and not self._same_origin():  # a foreign page must not trigger pulls
             return self._send(403, b"forbidden", "text/plain")
-        if path == "/ready" and self.nonce:  # background start/stop check they reach their own server
-            return self._send(200, json.dumps({"nonce": self.nonce, "pid": os.getpid()}).encode(), "application/json")
+        if path == "/ready" and self.nonce:  # challenge-response for start/stop; the nonce itself is never sent
+            c = self.path.partition("?c=")[2]
+            if not re.fullmatch(r"[0-9a-f]{32,64}", c):
+                return self._send(404, b"not found", "text/plain")
+            m = hmac.new(self.nonce.encode(), c.encode(), hashlib.sha256).hexdigest()
+            return self._send(200, json.dumps({"pid": os.getpid(), "mac": m}).encode(), "application/json")
         if path == "/api/state":
             return self._send(200, json.dumps(load_state(self.root, orch_bin=self.orch_bin)).encode(),
                               "application/json")

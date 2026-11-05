@@ -2,6 +2,7 @@ import json
 import os
 import socket
 import time
+import urllib.error
 import urllib.request
 
 import pytest
@@ -80,7 +81,7 @@ def test_planted_module_in_the_workspace_is_not_run(ws):
 
 
 def test_start_refuses_when_the_port_answers_with_another_nonce(ws, monkeypatch):
-    monkeypatch.setattr(service, "ident", lambda port: {"nonce": "someone-else", "pid": 4242})
+    monkeypatch.setattr(service, "ident", lambda port, c: {"mac": "0" * 64, "pid": 4242})
     with pytest.raises(RuntimeError, match="Something else answers"):
         service.start(ws, port=_free_port())
     monkeypatch.undo()
@@ -96,7 +97,7 @@ def test_busy_port_falls_back_to_a_free_one(ws, monkeypatch):
         cur = service.start(ws)
         try:
             assert cur["port"] != busy
-            assert service.ident(cur["port"])["pid"] == cur["pid"]
+            assert service.ident(cur["port"], "ab" * 16)["pid"] == cur["pid"]
         finally:
             service.stop(ws)
 
@@ -105,7 +106,7 @@ def test_busy_port_falls_back_to_a_free_one(ws, monkeypatch):
 def test_committed_pid_file_is_never_signalled(ws, kills, capsys, pid):
     """A repo can force-add .orch/run/dashboard/server.json (or an old .orch/addons/dashboard/server.json)."""
     pid = {"parent": os.getppid(), "self": os.getpid()}.get(pid, pid)
-    rec = {"pid": pid, "port": _free_port(), "nonce": "0" * 32}
+    rec = {"pid": pid, "port": _free_port(), "nonce": "0" * 32, "started": "x"}
     _rundir(ws).mkdir(parents=True)
     (_rundir(ws) / "server.json").write_text(json.dumps(rec))
     (ws / ".orch/addons/dashboard").mkdir(parents=True)
@@ -117,12 +118,55 @@ def test_committed_pid_file_is_never_signalled(ws, kills, capsys, pid):
     assert main(["--dir", str(ws), "status", "--json"]) == 1  # status is not fooled either
 
 
-def test_live_pid_with_the_wrong_server_is_not_signalled(ws, kills, monkeypatch):
-    rec = {"pid": os.getpid(), "port": 1, "nonce": "a" * 32}
-    _rundir(ws).mkdir(parents=True)
-    (_rundir(ws) / "server.json").write_text(json.dumps(rec))
-    monkeypatch.setattr(service, "ident", lambda port: {"nonce": "a" * 32, "pid": 999999})  # pid differs
-    assert service.stop(ws) == "not verified" and kills == []
+def _echo_server(answer):
+    """A local listener that answers /ready like a dashboard would, with whatever it wants."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps(answer(self.path)).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+@pytest.mark.parametrize("who", ["parent", "self"])
+def test_a_listener_that_echoes_another_pid_gets_nothing_signalled(ws, kills, who):
+    """It even knows the nonce (it can read .orch/run/) and answers the challenge correctly: the pid is not a
+    dashboard of this folder (start time / command line), so nothing is signalled."""
+    pid = {"parent": os.getppid(), "self": os.getpid()}[who]
+    nonce = "a" * 32
+    srv = _echo_server(lambda path: {"pid": pid, "mac": service.mac(nonce, path.partition("?c=")[2])})
+    try:
+        rec = {"pid": pid, "port": srv.server_address[1], "nonce": nonce,
+               "started": service.runfiles.proc_start(pid) or "x"}
+        _rundir(ws).mkdir(parents=True)
+        (_rundir(ws) / "server.json").write_text(json.dumps(rec))
+        assert service.stop(ws) == "not verified" and kills == []
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_ready_never_serves_the_nonce(ws):
+    cur = service.start(ws, port=_free_port())
+    try:
+        nonce = json.loads((_rundir(ws) / "server.json").read_text())["nonce"]
+        with pytest.raises(urllib.error.HTTPError):
+            urllib.request.urlopen(service.url(cur["port"]) + "/ready", timeout=5)
+        got = service.ident(cur["port"], "cd" * 16)
+        assert nonce not in json.dumps(got) and got["mac"] == service.mac(nonce, "cd" * 16)
+    finally:
+        service.stop(ws)
 
 
 def test_symlinks_are_never_followed(ws, tmp_path):

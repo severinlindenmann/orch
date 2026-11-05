@@ -50,7 +50,7 @@ of consent lives on this machine under `~/.orch-tool/` (`contracts/addon-manifes
 |---|---|
 | `orch start` / `orch stop` / `orch status` (core) | Starts / stops every active add-on's background process in this workspace (dashboard + scheduler); `stop` outside a workspace asks which one. `contracts/addon-manifest.md`, Background |
 | `orch dashboard` | Serves `127.0.0.1:8420`: Tickets, Inbox (relay set up), add-on tabs. Reads tickets via `orch ticket list --json`, add-ons via `orch addon list --json`, tab content via `orch <name> view --json` (2 s timeout, last good result kept, "as of HH:MM") |
-| `orch dashboard start` / `stop` / `status` | Serves in the background (8420, or a free port when another workspace has it); pid, port and nonce in `.orch/run/dashboard/server.json` (gitignored); `stop` signals only a server that answers `/ready` with that nonce and pid; `start --json` gives the `url` |
+| `orch dashboard start` / `stop` / `status` | Serves in the background (8420, or a free port when another workspace has it); pid, port and nonce in `.orch/run/dashboard/server.json` (gitignored); `stop` signals only a verified server (start time, command line, `/ready` challenge answered with HMAC of the nonce and the same pid); `start --json` gives the `url` |
 | `orch dashboard snapshot --publish [--with-addons]` | Static HTML of the same pages → `orch publish app` (static, private) |
 | `orch scheduler run` / `--once` | Loop every 60 s (below) / one pass |
 | `orch scheduler start` / `stop` / `status` | Background process; `stop` also runs on `orch addon remove scheduler` |

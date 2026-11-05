@@ -102,8 +102,9 @@ An active add-on with `background = true` runs one process per workspace, starte
 - Runtime files of the background process (pid, port, nonce, log) live in `.orch/run/<name>/` (gitignored, 0700). A repo can
   still force-add files there, so an add-on never trusts them alone: no symlinks are followed (`.orch/run` or the folder being a
   symlink is refused; reads with `O_NOFOLLOW`, writes as a new file + rename), a pid counts only when it is > 1, and before any
-  signal the add-on checks the process is its own (dashboard: `GET /ready` answers the nonce and the pid from the record;
-  scheduler: the start time of that pid and, on POSIX, its command line `orch_scheduler --dir <root>`). Not verified → nothing is
+  signal the add-on checks the process is its own: the start time of that pid equals the recorded one and, on POSIX, its
+  command line is `-m orch_<name> … --dir <root>`; the dashboard also asks `GET /ready?c=<challenge>` and needs the pid and
+  HMAC-SHA256(nonce, challenge) back (the nonce itself is never served). Not verified → nothing is
   signalled; `stop` says so (`{"stopped": false, "note"}`), and the stale file is replaced on the next `start`.
 - The core prints or opens only `url`s of the form `http://127.0.0.1:<port>` / `http://localhost:<port>`, ignores pids ≤ 1, and
   strips control characters from add-on errors.

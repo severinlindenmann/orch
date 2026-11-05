@@ -1,8 +1,11 @@
 """Background run: `orch dashboard start|stop|status`. Runtime files in .orch/run/dashboard/ (gitignored):
-server.json {pid, port, nonce}, the ready file, server.log. A pid from there is used only after the server on that port
-answers /ready with the same nonce AND the same pid; otherwise nothing is signalled."""
+server.json {pid, port, nonce, started}, the ready file, server.log. A pid from there is signalled only when that
+process started at the recorded moment, runs `-m orch_dashboard --dir <root>` (POSIX), and the server on the recorded
+port proves it knows the nonce (HMAC of a fresh challenge; the nonce itself is never served) and names that pid."""
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -29,22 +32,35 @@ def url(port: int) -> str:
     return f"http://127.0.0.1:{port}"
 
 
-def ident(port: int) -> dict | None:
-    """What the server on this port says it is: {"nonce", "pid"} from GET /ready, or None."""
+def mac(nonce: str, challenge: str) -> str:
+    return hmac.new(nonce.encode(), challenge.encode(), hashlib.sha256).hexdigest()
+
+
+def ident(port: int, challenge: str) -> dict | None:
+    """The server's answer to a challenge: {"pid", "mac"} from GET /ready?c=<challenge>, or None."""
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/ready", timeout=2) as r:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/ready?c={challenge}", timeout=2) as r:
             data = json.loads(r.read(1024))
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
 
 
-def _matches(port: int, pid: int, nonce: str) -> bool:
-    got = ident(port)
-    if not got or not isinstance(got.get("nonce"), str) or got.get("pid") != pid:
+def _is_ours(root: Path, pid: int, port: int, nonce: str, started: str | None) -> bool:
+    """pid > 1, alive, started when recorded, our command for this folder (POSIX), and the server on `port`
+    answers a fresh challenge with HMAC(nonce) and this pid."""
+    if not (valid_pid(pid) and alive(pid) and started and runfiles.proc_start(pid) == started):
+        return False
+    if os.name != "nt":
+        cmd = runfiles.command(pid)
+        if "orch_dashboard" not in cmd or f"--dir {root.resolve()}" not in cmd:
+            return False
+    c = secrets.token_hex(16)
+    got = ident(port, c)
+    if not got or got.get("pid") != pid or not isinstance(got.get("mac"), str):
         return False
     try:
-        return secrets.compare_digest(got["nonce"], nonce)
+        return hmac.compare_digest(got["mac"], mac(nonce, c))
     except TypeError:
         return False
 
@@ -53,17 +69,17 @@ def _record(root: Path) -> dict | None:
     d = runfiles.read_json(_dir(root) / "server.json")
     if not d:
         return None
-    pid, port, nonce = d.get("pid"), d.get("port"), d.get("nonce")
+    pid, port, nonce, started = d.get("pid"), d.get("port"), d.get("nonce"), d.get("started")
     if not (valid_pid(pid) and isinstance(port, int) and 0 < port < 65536 and isinstance(nonce, str)
-            and NONCE_RE.match(nonce)):
+            and NONCE_RE.match(nonce) and isinstance(started, str)):
         return None
-    return {"pid": pid, "port": port, "nonce": nonce}
+    return {"pid": pid, "port": port, "nonce": nonce, "started": started}
 
 
 def running(root: Path) -> dict | None:
-    """{pid, port} of THIS workspace's background dashboard, checked by nonce + pid; else None (the file is dropped)."""
+    """{pid, port} of THIS workspace's background dashboard, verified (see module doc); else None (file dropped)."""
     rec = _record(root)
-    if rec and alive(rec["pid"]) and _matches(rec["port"], rec["pid"], rec["nonce"]):
+    if rec and _is_ours(root, rec["pid"], rec["port"], rec["nonce"], rec["started"]):
         return {"pid": rec["pid"], "port": rec["port"]}
     runfiles.remove(_dir(root) / "server.json")  # stale or not ours: ignored, rewritten on the next start
     return None
@@ -85,6 +101,7 @@ def start(root: Path, port: int | None = None) -> dict:
     ready = d / f"ready-{nonce[:12]}.json"
     kw = {"creationflags": 0x00000208} if os.name == "nt" else {"start_new_session": True}
     # -P: the workspace folder is never on the import path (a planted orch_dashboard.py there is not run)
+    root = root.resolve()
     cmd = [sys.executable, "-P", "-m", "orch_dashboard", "--dir", str(root), "serve", "--ready-file", str(ready),
            *(["--port", str(port)] if port else ["--port", str(DEFAULT_PORT), "--auto-port"])]
     with runfiles.open_append(d / "server.log") as out:
@@ -102,7 +119,8 @@ def start(root: Path, port: int | None = None) -> dict:
                     raise RuntimeError("The dashboard did not start within 15 seconds.")
                 time.sleep(0.1)
         pid, bound = info.get("pid"), info.get("port")
-        if not (valid_pid(pid) and isinstance(bound, int)) or not _matches(bound, pid, nonce):
+        started = runfiles.proc_start(pid) if valid_pid(pid) else None
+        if not isinstance(bound, int) or not _is_ours(root, pid, bound, nonce, started):
             raise RuntimeError(f"Something else answers on port {bound}; the dashboard was not started.")
     except RuntimeError:
         if proc.poll() is None:
@@ -110,7 +128,7 @@ def start(root: Path, port: int | None = None) -> dict:
         raise
     finally:
         runfiles.remove(ready)
-    runfiles.write_json(d / "server.json", {"pid": pid, "port": bound, "nonce": nonce})
+    runfiles.write_json(d / "server.json", {"pid": pid, "port": bound, "nonce": nonce, "started": started})
     return {"pid": pid, "port": bound}
 
 

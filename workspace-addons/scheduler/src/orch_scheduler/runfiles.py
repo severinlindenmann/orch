@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -101,3 +102,44 @@ def alive(pid: object) -> bool:
     except OSError:
         return False
     return True
+
+
+def proc_start(pid: int) -> str | None:
+    """When the process started (a stable id with the pid: a reused pid has another start time)."""
+    if not valid_pid(pid):
+        return None
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        k = ctypes.windll.kernel32
+        k.OpenProcess.restype = ctypes.c_void_p
+        k.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong)
+        k.GetProcessTimes.argtypes = (ctypes.c_void_p, *([ctypes.POINTER(wintypes.FILETIME)] * 4))
+        k.CloseHandle.argtypes = (ctypes.c_void_p,)
+        h = k.OpenProcess(0x1000, False, pid)
+        if not h:
+            return None
+        try:
+            t = [wintypes.FILETIME() for _ in range(4)]
+            if not k.GetProcessTimes(h, *[ctypes.byref(x) for x in t]):
+                return None
+            return str((t[0].dwHighDateTime << 32) | t[0].dwLowDateTime)
+        finally:
+            k.CloseHandle(h)
+    try:
+        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout.strip() or None
+
+
+def command(pid: int) -> str:
+    """The command line of pid (POSIX, from ps); '' on Windows or when unknown."""
+    if os.name == "nt":
+        return ""
+    try:
+        r = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return r.stdout.strip()
