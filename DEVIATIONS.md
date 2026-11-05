@@ -1,5 +1,42 @@
-# Deviations from the owner plan
+# Deviations (collected during the build; copied into the repo at the end)
 
-Every place where the build differs from docs/owner-plan.md + docs/owner-decisions.md + docs/*.md.
-Format: `- <date time> [<lane>] <what differs> - <why>`. Reported to the owner at the end.
-
+- 19:06 [manager] main branch not created: the sandbox forbids pushing main; develop is the default branch. The install one-liner points at main, so it works once the owner creates main from develop (e2e uses ORCH_REF=develop) - sandbox rule
+- 19:16 [L-MOB] bundle id io.severin.orch.mobile (existing io.severin.orch belongs to the retired orch-core app) - new id per brief; ASC/App Group registration is a later step
+- 19:16 [L-MOB] app runs against the in-process MockRelay by default (relayMode=mock); `-relayMode real` uses the relay from the pairing link - real relay verified in a later wave
+- 19:16 [L-MOB] onboarding shows the relay host before connecting, the reachable workspaces after (pair endpoint only returns them after pairing); draft showed them before
+- 19:16 [L-MOB] deployment target iOS 18 (brief) instead of iOS 17 in docs/mobile.md; question cards show body.text as headline and body.title small (contract has no plain_language field)
+- 19:18 [L-WS] CLI syntax follows the draft (orch ticket new|list|show|status|edit|wait, orch check, orch log, orch ask/answer, orch link add, orch ext set); docs/workspace.md's "orch wait" also works as alias - draft is the later source
+- 19:18 [L-WS] Skills live in workspace/skills/<name>/ with an extra AGENTS-block.md (AGENTS.md entry text, not copied to projects); shipped in the wheel via hatch force-include - so init/addon share one block mechanism
+- 19:18 [L-WS] No jsonschema/cryptography runtime deps in this lane (jsonschema only as dev dep for tests; cryptography arrives with the publish lane); ticket rules (evidence, enums) checked in code
+- 19:18 [L-WS] Add-on skills are found in the installed package (orch_<name>/skills/orch-<name>/ with optional AGENTS-block.md) or in a local ORCH_REPO checkout (workspace-addons/<name>/skills/...) - addon lane must ship them that way; installed add-on list kept in ORCH_HOME (default ~/.orch-tool/addons.json); orch addon remove drops the project part, the package leaves the tool env on next orch update
+- 19:18 [L-WS] orch ask has no --phone yet (needs relay client, later lane)
+- 19:23 [L-DASH] no dependency on orch-workspace; CLI hook = entry-point group `orch.addons` (name dashboard -> orch_dashboard.cli:main(argv)) plus standalone `orch-dashboard` script - spec says "entry point" but names no group; CLI core not built yet
+- 19:23 [L-DASH] snapshot omits the inbox (private messages) and `snapshot --publish` runs `orch publish app <tmpdir>` - snapshot is shared via a link; publish client comes later
+- 19:23 [L-DASH] skill text lives at src/orch_dashboard/skills/orch-dashboard/{SKILL.md,agents-block.md} (inside the package, as shipped data) - spec folder layout put it at dashboard/skills/
+- 19:57 [L-PUB] Env names: ORCH_PUBLISH_{LISTEN,ADMIN_LISTEN,DATA_DIR,APPS_DIR,PUBLIC_ORIGIN,ADMIN_TOKEN} per manager (PUBLISH_* still accepted as fallback); admin token also from file /etc/orch-publish/admin-token - manager message
+- 19:57 [L-PUB] Proxy strips /a/<name> before forwarding (app sees /health, /x), BASE_PATH still set for generating links - spec unclear, health path must work at app root
+- 19:57 [L-PUB] Redeploy keeps the view token but returns view_token=null (only the hash is stored per crypto.md); ?new_token=1 returns a fresh one - spec says "keeps" but token is hash-only
+- 19:57 [L-PUB] Name already owned by another workspace on PUT /v1/apps/<name> -> 409 conflict (spec: unique, first wins, code unspecified)
+- 19:57 [L-PUB] Apps run as plain child processes of orch-publish (no systemd unit), env cleared except PATH/HOME/PORT/BASE_PATH/DATA_DIR/STORE; runner.rs is the seam - manager message
+- 19:58 [relay] env var names ORCH_RELAY_* as the manager asked (ORCH_RELAY_LISTEN, _ADMIN_LISTEN, _DATA_DIR, _MASTER_KEY_FILE, _PUBLIC_ORIGIN, _ADMIN_TOKEN[_FILE], _APNS_*); APNs on only when ORCH_RELAY_APNS_KEY_FILE is set - manager request
+- 19:58 [relay] relay-built and stored messages omit `ticket` when there is none (message.schema.json has no null ticket) instead of common.md's "null, never left out" - schema wins
+- 19:58 [relay] refresh-hints replace an older unread hint to the same workspace (one hint carrying the newest version); admin phones list adds paired/online fields; phone name from /v1/phone/pair replaces the admin's name - simplicity
+- 20:08 [L-WSC] cryptography>=42 added as runtime dependency of orch-workspace (AES-GCM for OPF1) - zero-deps rule relaxed as lane brief allows
+- 20:08 [L-WSC] publish file keys kept in .orch/secrets/files/keys.json ({file id: key}) - local-files.md only says files/ holds {"<file id>": "<key>"}
+- 20:08 [L-WSC] relay CLI syntax follows docs/workspace.md (send <ws> "<text>", allow <m> --once|--permanent, + download/delegate/start subcommands), not the draft's --to/--type flags; send accepts ws_ id, phones, or a name from workspaces.json
+- 20:08 [L-WSC] orch relay done on an allowed delegate/start creates (or finds, by ext.relay.start_key) the ticket; inbox shows all saved-but-unseen messages, answer/allow messages are applied automatically and marked seen first
+- 20:08 [L-WSC] orch publish new (templates) not implemented - needs orch core templates that are not in the repo yet
+- 20:10 [L-SCHED] agent config is .orch/scheduler/config.toml (per contracts/local-files.md), not config.json as in the brief - the contract wins; keys: agent, interval, inbox_every, [agents] name table
+- 20:10 [L-SCHED] start/stop/status = pidfile background process (.orch/scheduler/scheduler.pid), not launchd/systemd autostart as in docs/workspace-addons.md - owner said keep simple, no autostart
+- 20:10 [L-SCHED] extra files under .orch/scheduler/: locks/<ticket>.lock, scheduler.pid, scheduler.log, .gitignore (ignores them); state.json gains last_exit, last_log, last_wake - contract lists only last_run/next_run; docs/workspace-addons.md says "lock" without a file
+- 20:10 [L-SCHED] no CLI command clears wake_at: scheduler sets status active via 'orch ticket status' and clears wake_at with one atomic field write to the ticket file - suggest 'orch ticket wait --clear' or auto-clear on status active
+- 20:10 [L-SCHED] assumed 'orch relay inbox --json' shape: list of messages (or {"items": [...]}) in message.schema.json shape plus top-level "ticket" for answers and a boolean "allowed" set by the CLI on start/delegate that have a valid allow; no 'allowed' = left alone. Scheduler calls 'orch relay done <id>' before acting and 'orch answer <t> <q> <text> --via relay' for answers - ws/clients lane should match or tell me
+- 20:10 [L-SCHED] added 'orch scheduler list' as in docs; 'start' no longer means start-at-login
+- 20:21 [L-DEPLOY] sandbox: orch-publish gets polkit manage-units (root-equivalent for orch-publish itself); UnitName hex; InaccessiblePaths skipped if apps dir is inside data dir
+- 20:32 [L-MOB2] deviation: Simulator apsd cannot reach APNs courier (token never issued, Keychain -25300 in apsd); fake-token relay->APNs gives 400; push shown via simctl push; tap-on-banner not automatable (lock screen), question opening checked with -openQuestion launch arg hook
+- 21:01 [L-DG] relay transcribe: contract change (new endpoints, error codes 429/502/503 in common.md)
+- 22:04 [UXF-PUB] added PATCH /v1/me + admin prompt ends with 'orch publish profile' line (CLI side belongs to cli lane); private/404/offline pages now server-rendered (web/private.html removed) - UX round 1
+- 22:04 [UXF-RELAY] contract: PATCH /v1/me added to relay-api.md + example; GET / and unknown paths now dark HTML page; admin workspace list exposes last_seen - UX round 1
+- 22:09 [UXF-RELAY] contract: workspaces.schema description pattern/maxLength, tags [a-z0-9-]{1,24}<=8, optional profile_by (admin|workspace) - security review of PATCH /v1/me
+- 22:27 [profile-review] approve/reject bind to a random `rev` of the proposal (not pending_at: second resolution can collide); `pending` carries {description,tags,at,rev}; workspaces.schema.json pattern is the L/M/N/P/S/Zs allowlist, the stricter rules (NFC, default-ignorables, <=2 marks) are enforced by the servers and documented in the schema description - JSON Schema regex cannot express them; whoami gains `pending`; publish also gets per-field provenance (description_by/tags_by); workspaces.schema.json replaces profile_by by description_by/tags_by (contract change); validate.py expands \p{..} for Python re
+- 22:51 [mobile-testflight] AppModel defaulted to the MOCK relay unless -relayMode real (any real/TestFlight build would have been a mock); flipped: mock only with -relayMode mock (UI tests already pass it) - found in release smoke
