@@ -21,6 +21,21 @@ struct Ticket: Identifiable, Equatable, Sendable {
     let at: String
     let question: Question?
 
+    /// One plain line under the title, from the update kind.
+    var stateLine: String {
+        let first = text.split(separator: " ").prefix(6).joined(separator: " ")
+        switch status {
+        case .needsYou: return "Waiting for your answer"
+        case .working: return "Working on it"
+        case .done:
+            switch kind {
+            case "failure": return first.isEmpty ? "Did not work" : "Did not work — \(first)"
+            case "stopped": return "Stopped"
+            default: return first.isEmpty ? "Done" : "Done — \(first)"
+            }
+        }
+    }
+
     var symbol: String {
         switch status {
         case .needsYou: "exclamationmark.circle.fill"
