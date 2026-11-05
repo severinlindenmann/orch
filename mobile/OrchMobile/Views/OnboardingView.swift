@@ -6,6 +6,7 @@ struct OnboardingView: View {
     @State private var showLink = false
     @State private var showScanner = false
     @State private var link = ""
+    @State private var linkError: String?
     @State private var finishing = false
 
     var body: some View {
@@ -27,16 +28,30 @@ struct OnboardingView: View {
             }.padding(.horizontal, 23).padding(.top, 12).padding(.bottom, 20)
         }
         .sheet(isPresented: $showLink) {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Paste invitation link").font(.headline)
-                TextField("Paste invitation link", text: $link)
+                Text("Invitation link").font(Theme.font(12)).foregroundStyle(Theme.muted)
+                TextField("orch://pair?…", text: $link)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .keyboardType(.URL).padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
+                    .keyboardType(.URL).textContentType(.URL).padding(14).frame(minHeight: 48)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(linkError == nil ? Theme.borderStrong : Theme.danger))
+                    .accessibilityLabel("Invitation link").accessibilityIdentifier("invite-field")
+                    .onChange(of: link) { _, _ in linkError = nil }
+                if let linkError {
+                    Text("⚠︎ \(linkError)").font(Theme.font(13)).foregroundStyle(Theme.danger).accessibilityIdentifier("invite-error")
+                }
                 Button("Continue") {
-                    model.openInvite(link); showLink = false
-                }.buttonStyle(PrimaryButtonStyle()).disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button("Close") { showLink = false }.frame(maxWidth: .infinity, minHeight: 44)
-            }.padding(23).presentationDetents([.medium]).presentationBackground(Theme.bg)
+                    let clean = link.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if clean.isEmpty { linkError = "Paste the link you were sent first. It starts with orch://."; return }
+                    if (try? PairingLink(clean)) == nil {
+                        linkError = "That link does not look right. Check you copied the whole link, or ask the person who invited you for a new one."
+                        return
+                    }
+                    model.openInvite(clean); showLink = false
+                }.buttonStyle(PrimaryButtonStyle()).accessibilityIdentifier("invite-continue")
+                Button { showLink = false } label: { Text("Close") }.buttonStyle(WideButtonStyle(color: Theme.muted))
+            }.padding(23).presentationDetents([.medium, .large]).presentationBackground(Theme.bg)
         }
         .sheet(isPresented: $showScanner) {
             QRScannerView { code in model.openInvite(code); showScanner = false }
@@ -58,16 +73,18 @@ struct OnboardingView: View {
                 Text("Ask the person who invited you for a link or QR code.").font(Theme.font(12))
                     .foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 4)
                 #if DEBUG
-                Button("Try a demo") { model.openSampleInvite() }
-                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
-                    .frame(maxWidth: .infinity, minHeight: 44).accessibilityIdentifier("sample-invite")
+                Button { model.openSampleInvite() } label: { Text("Try a demo") }
+                    .buttonStyle(WideButtonStyle(color: Theme.muted)).font(Theme.font(12))
+                    .accessibilityIdentifier("sample-invite")
                 #endif
             }
         case .found(let host):
             VStack(alignment: .leading, spacing: 12) {
                 Text("Your invitation is ready").font(Theme.font(15, .semibold))
                 Text("You were invited to connect this phone.").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                DisclosureGroup("Connection details") { Text(host).font(Theme.font(12)).frame(maxWidth: .infinity, alignment: .leading) }
+                DisclosureGroup { Text(host).font(Theme.font(12)).frame(maxWidth: .infinity, alignment: .leading) } label: {
+                    Text("Connection details").frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                }
                     .font(Theme.font(12)).foregroundStyle(Theme.muted)
             }.orchCard()
             Button("Connect this phone") {
@@ -89,7 +106,7 @@ struct OnboardingView: View {
                 }
             }.orchCard()
             Button("Allow notifications") { finish(true) }.buttonStyle(PrimaryButtonStyle())
-            Button("Not now") { finish(false) }.font(Theme.font(15)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, minHeight: 44)
+            Button { finish(false) } label: { Text("Not now") }.buttonStyle(WideButtonStyle(color: Theme.muted)).font(Theme.font(15))
             if finishing { ProgressView() }
         }.disabled(finishing)
     }

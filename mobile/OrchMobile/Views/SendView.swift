@@ -11,6 +11,9 @@ struct SendView: View {
     @State private var toggling = false
     @State private var pulse = false
     @State private var showHint = false
+    @FocusState private var editing: Bool
+    @Environment(\.dynamicTypeSize) private var typeSize
+    private var editorHeight: CGFloat { editing ? 88 : (typeSize.isAccessibilitySize ? 240 : 137) }
     private var hintText: String {
         recording ? "Tap the mic to stop first." : transcribing ? "One moment, writing it down." :
         workspaceID.isEmpty ? "Pick a workspace first." : "Write or say a message first."
@@ -23,11 +26,15 @@ struct SendView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                ScreenHeading(title: "Say it. Send it.", subtitle: "A thought, a request, a next step.").padding(.top, 14)
-                if let sent { sentState(sent) } else { composer }
+                if !editing || sent != nil { ScreenHeading(title: "Say it. Send it.", subtitle: "A thought, a request, a next step.").padding(.top, 14) }
+                if let sent { sentState(sent) }
+                else if model.workspaces.isEmpty && model.hasLoaded { emptyState }
+                else { composer }
                 ModelMessage().padding(.top, 12)
             }.padding(.horizontal, 23).padding(.top, 6).padding(.bottom, 20)
         }
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar { ToolbarItemGroup(placement: .keyboard) { Spacer(); Button("Done") { editing = false }.accessibilityIdentifier("keyboard-done") } }
         .task {
             if voice == nil { let m = model; voice = VoiceInput(mode: model.voiceMode, transcribe: { try await m.transcribe($0) }) }
             selectWorkspace()
@@ -36,7 +43,7 @@ struct SendView: View {
         .onChange(of: model.workspaces) { _, _ in selectWorkspace() }
         .onChange(of: model.tab) { _, tab in
             if tab == .send { selectWorkspace(preferFilter: true) }
-            else { voice?.stop() }
+            else { voice?.stop(); editing = false }
         }
         .onChange(of: voice?.transcript) { _, transcript in
             // A final transcript can arrive in the same update that stops recording.
@@ -49,20 +56,39 @@ struct SendView: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: sent)
     }
 
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("No workspaces yet").font(Theme.font(15, .semibold))
+            Text("There is nowhere to send a message yet. Ask the person who invited you to add a workspace.")
+                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Button { Task { await model.refresh() } } label: {
+                Text(model.isLoading ? "Checking…" : "Check again").font(Theme.font(13, .semibold)).foregroundStyle(Theme.brand)
+                    .frame(minWidth: 120, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(PressStyle()).disabled(model.isLoading)
+        }.orchCard().padding(.top, 26)
+    }
+
     private var composer: some View {
         VStack(alignment: .leading, spacing: 10) {
             Eyebrow(text: "TO WORKSPACE").padding(.top, 26)
-            Picker("Send to", selection: $workspaceID) {
-                if model.workspaces.isEmpty { Text("No workspaces").tag("") }
-                ForEach(model.workspaces) { ws in
-                    let twins = model.workspaces.filter { $0.displayName == ws.displayName }.count > 1
-                    let hint = ws.description?.split(separator: " ").prefix(3).joined(separator: " ") ?? ""
-                    Text(twins && !hint.isEmpty ? "\(ws.displayName) (\(hint))" : ws.displayName).tag(ws.id)
+            Menu {
+                Picker("Send to", selection: $workspaceID) {
+                    ForEach(model.workspaces) { ws in Text(optionTitle(ws)).tag(ws.id) }
                 }
-            }.pickerStyle(.menu).tint(Theme.text)
-                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                .padding(.horizontal, 10).background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
+            } label: {
+                HStack(spacing: 8) {
+                    Text(model.workspaces.first { $0.id == workspaceID }.map(optionTitle) ?? "No workspaces")
+                        .font(Theme.font(15)).foregroundStyle(Theme.text).multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.up.chevron.down").font(Theme.font(12)).foregroundStyle(Theme.muted)
+                }.padding(.horizontal, 12).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.borderStrong))
+                    .contentShape(Rectangle())
+            }.accessibilityLabel("Send to").accessibilityValue(model.workspaces.first { $0.id == workspaceID }.map(optionTitle) ?? "No workspaces")
+                .accessibilityIdentifier("workspace-picker")
                 .disabled(sending || recording || transcribing)
             Eyebrow(text: "YOUR MESSAGE").padding(.top, 16)
             ZStack(alignment: .topLeading) {
@@ -70,20 +96,20 @@ struct SendView: View {
                     Text(recording ? "Recording your voice…" : transcribing ? "Writing it down…" : "Speak, or type what you would like to get done.").foregroundStyle(Theme.muted)
                         .padding(.horizontal, 5).padding(.top, 8).allowsHitTesting(false)
                 }
-                TextEditor(text: $text).scrollContentBackground(.hidden)
+                TextEditor(text: $text).scrollContentBackground(.hidden).focused($editing)
                     .accessibilityIdentifier("transcript").accessibilityLabel("Your message")
                     .disabled(recording || transcribing || sending)
-            }.font(Theme.font(13)).padding(10).frame(height: 137)
+            }.font(Theme.font(13)).padding(10).frame(minHeight: editorHeight, maxHeight: editorHeight)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.borderStrong))
             VStack(spacing: 12) {
-                HStack(spacing: 16) {
+                if !editing { HStack(spacing: 16) {
                     ForEach(Array((voice?.levels ?? []).enumerated()), id: \.offset) { _, level in
                         Capsule().fill(Theme.brand.opacity(recording ? 0.9 : 0.3)).frame(width: 3, height: 4 + 26 * level)
                             .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: level)
                     }
                 }.frame(height: 32).accessibilityIdentifier("level-meter")
-                    .accessibilityValue(recording ? "recording" : "idle")
+                    .accessibilityValue(recording ? "recording" : "idle") }
                 Button {
                     toggling = true
                     Task {
@@ -92,15 +118,15 @@ struct SendView: View {
                         toggling = false
                     }
                 } label: {
-                    Image(systemName: recording ? "stop.fill" : "mic.fill").font(Theme.font(27))
+                    Image(systemName: recording ? "stop.fill" : "mic.fill").font(Theme.font(editing ? 21 : 27))
                         .foregroundStyle(recording ? Theme.danger : Theme.brand)
-                        .frame(width: 70, height: 70)
+                        .frame(width: editing ? 52 : 70, height: editing ? 52 : 70)
                         .background((recording ? Theme.danger : Theme.brand).opacity(0.1), in: Circle())
                         .overlay(Circle().stroke((recording ? Theme.danger : Theme.brand).opacity(0.3)))
                         .overlay {
                             if recording {
-                                Circle().stroke(Theme.danger.opacity(pulse ? 0.2 : 0.6), lineWidth: 3)
-                                    .scaleEffect(pulse ? 1.2 : 1)
+                                Circle().stroke(Theme.danger.opacity(reduceMotion ? 0.8 : (pulse ? 0.2 : 0.6)), lineWidth: 3)
+                                    .scaleEffect(reduceMotion ? 1.1 : (pulse ? 1.2 : 1))
                                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulse)
                             }
                         }
@@ -108,11 +134,11 @@ struct SendView: View {
                     .accessibilityLabel(micLabel)
                     .disabled(voice == nil || toggling || transcribing || sending)
                 Text(micLabel).font(Theme.font(12, .medium)).accessibilityIdentifier("mic-status")
-                if !text.isEmpty, !recording, !transcribing, voice?.error == nil {
+                if !editing, !text.isEmpty, !recording, !transcribing, voice?.error == nil {
                     Text("Tap the text to fix anything before you send.").font(.caption).foregroundStyle(Theme.muted)
                 }
                 if let error = voice?.error { Text(error).font(.caption).foregroundStyle(Theme.danger) }
-            }.frame(maxWidth: .infinity).padding(.top, 5).padding(.bottom, 16)
+            }.frame(maxWidth: .infinity).padding(.top, 5).padding(.bottom, editing ? 6 : 16)
             let canSend = !(recording || transcribing || toggling || sending || workspaceID.isEmpty || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Button(sending ? "Sending…" : "Send to inbox ↑") {
                 guard canSend else { showHint = true; return }
@@ -150,6 +176,12 @@ struct SendView: View {
             Button("Back to home →") { model.tab = .home }
                 .font(Theme.font(13)).foregroundStyle(Theme.muted).frame(minHeight: 44)
         }.frame(maxWidth: .infinity).padding(.top, 48)
+    }
+
+    private func optionTitle(_ ws: Workspace) -> String {
+        let twins = model.workspaces.filter { $0.displayName == ws.displayName }.count > 1
+        let hint = ws.description?.split(separator: " ").prefix(3).joined(separator: " ") ?? ""
+        return twins && !hint.isEmpty ? "\(ws.displayName) (\(hint))" : ws.displayName
     }
 
     private func selectWorkspace(preferFilter: Bool = false) {

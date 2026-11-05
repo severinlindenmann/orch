@@ -10,7 +10,7 @@ final class OnboardingFlowUITests: XCTestCase {
         app.launch()
 
         // Onboarding: sample invitation, connect, skip notifications
-        XCTAssertTrue(app.staticTexts["Let's get connected."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Let's get connected"].waitForExistence(timeout: 10))
         app.buttons["sample-invite"].tap()
         let connect = app.buttons["Connect this phone"]
         XCTAssertTrue(connect.waitForExistence(timeout: 5))
@@ -20,7 +20,7 @@ final class OnboardingFlowUITests: XCTestCase {
         notNow.tap()
 
         // Home: both mock workspaces, open questions banner
-        XCTAssertTrue(app.staticTexts["Your workspaces."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Your workspaces"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Data pipelines for the Pilatus client"].waitForExistence(timeout: 10))
 
         // Questions: answer with one tap
@@ -83,7 +83,7 @@ final class OnboardingFlowUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["Your workspaces."].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Your workspaces"].waitForExistence(timeout: 15))
         for tab in ["Home", "Questions", "Send", "Settings"] {
             app.buttons[tab].tap()
             sleep(1)
@@ -103,5 +103,58 @@ final class OnboardingFlowUITests: XCTestCase {
         if !send.isHittable { app.swipeUp() }
         send.tap()
         XCTAssertTrue(app.staticTexts["send-hint"].waitForExistence(timeout: 3))
+    }
+
+    /// A bad invitation link keeps the sheet open and the typed text, and says what to do next.
+    func testBadInviteLinkKeepsInputAndExplains() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock"]
+        app.launch()
+        app.buttons["Paste invitation link"].tap()
+        let field = app.textFields["invite-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.tap()
+        field.typeText("https://example.com/nope")
+        app.buttons["invite-continue"].tap()
+        XCTAssertTrue(app.staticTexts["invite-error"].waitForExistence(timeout: 3))
+        XCTAssertTrue((app.staticTexts["invite-error"].label).contains("ask the person who invited you"))
+        XCTAssertEqual(app.textFields["invite-field"].value as? String, "https://example.com/nope")
+    }
+
+    /// Server unreachable: no "All clear", no "Connected", a plain way to retry.
+    func testUnreachableServerIsHonest() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-mockFail", "YES"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Can't reach your workspaces."].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts["All clear. Nothing needs you right now."].exists)
+        XCTAssertTrue(app.buttons["Try again"].exists || app.buttons["Trying again…"].exists)
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.staticTexts["●  Can't reach the server"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["●  Connected"].exists)
+    }
+
+    /// The whole Sign out box is a tap target (left edge, not only the label).
+    func testSignOutBoxIsFullyTappable() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-startTab", "settings"]
+        app.launch()
+        let box = app.buttons["Sign out"]
+        XCTAssertTrue(box.waitForExistence(timeout: 15))
+        XCTAssertGreaterThanOrEqual(box.frame.height, 44)
+        box.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.5)).tap()
+        XCTAssertTrue(app.buttons["signout-confirm"].waitForExistence(timeout: 3))
+    }
+
+    /// The tab bar column is tappable outside the icon and label.
+    func testTabsAreFullHeightTargets() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES"]
+        app.launch()
+        let tab = app.buttons["Send"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 15))
+        XCTAssertGreaterThanOrEqual(tab.frame.height, 44)
+        tab.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.1)).tap()
+        XCTAssertTrue(app.staticTexts["Say it. Send it"].waitForExistence(timeout: 3))
     }
 }
