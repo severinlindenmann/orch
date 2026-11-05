@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import signal
-import socket
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 from .server import DEFAULT_PORT
@@ -55,53 +56,59 @@ def running(root: Path) -> dict | None:
     return None
 
 
-def _free(port: int) -> bool:
-    with socket.socket() as s:
-        try:
-            s.bind(("127.0.0.1", port))
-        except OSError:
-            return False
-    return True
+def write_ready(f: Path, port: int) -> None:
+    """Child side: after bind, tell the starter which port this process holds (atomic write)."""
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"pid": os.getpid(), "port": port}), encoding="utf-8")
+    os.replace(tmp, f)
 
 
-def _pick_port() -> int:
-    if _free(DEFAULT_PORT):
-        return DEFAULT_PORT
-    with socket.socket() as s:  # another workspace has 8420: let the system pick one
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def _listening(port: int) -> bool:
+def _nonce_of(port: int) -> str:
     try:
-        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-            return True
-    except OSError:
-        return False
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/ready", timeout=2) as r:
+            return r.read().decode("utf-8", "replace")
+    except (OSError, ValueError):
+        return ""
 
 
 def start(root: Path, port: int | None = None) -> dict:
+    """The child binds the port itself (8420, else any free one) and writes the bound port to a ready file;
+    the start counts only when that port answers with this start's nonce (no other process can pose as it)."""
     cur = running(root)
     if cur:
         return cur
-    port = port or _pick_port()
-    _file(root).parent.mkdir(parents=True, exist_ok=True)
+    d = _file(root).parent
+    d.mkdir(parents=True, exist_ok=True)
+    nonce = secrets.token_hex(16)
+    ready = d / f"ready-{nonce[:12]}.json"
     kw = {"creationflags": 0x00000208} if os.name == "nt" else {"start_new_session": True}
-    with open(_file(root).parent / "server.log", "a") as out:
-        proc = subprocess.Popen([sys.executable, "-m", "orch_dashboard", "--dir", str(root), "serve", "--port", str(port)],
-                                cwd=root, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **kw)
-    end = time.time() + 15
-    while time.time() < end:
-        if proc.poll() is not None:
-            raise RuntimeError(f"The dashboard did not start (port {port} busy?). See .orch/addons/dashboard/server.log")
-        if _listening(port):
-            break
-        time.sleep(0.1)
-    else:
-        proc.terminate()
-        raise RuntimeError("The dashboard did not start within 15 seconds.")
-    _file(root).write_text(json.dumps({"pid": proc.pid, "port": port}), encoding="utf-8")
-    return {"pid": proc.pid, "port": port}
+    # -P: the workspace folder is never on the import path (a planted orch_dashboard.py there is not run)
+    cmd = [sys.executable, "-P", "-m", "orch_dashboard", "--dir", str(root), "serve", "--ready-file", str(ready),
+           *(["--port", str(port)] if port else ["--port", str(DEFAULT_PORT), "--auto-port"])]
+    with open(d / "server.log", "a") as out:
+        proc = subprocess.Popen(cmd, cwd=root, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                env={**os.environ, "ORCH_DASHBOARD_NONCE": nonce}, **kw)
+    try:
+        end = time.time() + 15
+        while not ready.exists():
+            if proc.poll() is not None:
+                raise RuntimeError("The dashboard did not start. See .orch/addons/dashboard/server.log")
+            if time.time() > end:
+                raise RuntimeError("The dashboard did not start within 15 seconds.")
+            time.sleep(0.1)
+        info = json.loads(ready.read_text(encoding="utf-8"))
+        bound = int(info["port"])
+        pid = int(info["pid"])  # the server itself (on Windows a venv launcher may sit in between)
+        if not secrets.compare_digest(_nonce_of(bound), nonce):
+            raise RuntimeError(f"Something else answers on port {bound}; the dashboard was not started.")
+    except (RuntimeError, OSError, ValueError, KeyError, TypeError) as e:
+        if proc.poll() is None:
+            proc.terminate()
+        raise RuntimeError(str(e)) from None
+    finally:
+        ready.unlink(missing_ok=True)
+    _file(root).write_text(json.dumps({"pid": pid, "port": bound}), encoding="utf-8")
+    return {"pid": pid, "port": bound}
 
 
 def stop(root: Path) -> bool:

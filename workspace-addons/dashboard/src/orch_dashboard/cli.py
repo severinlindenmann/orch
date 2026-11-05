@@ -18,6 +18,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd")
     sv = sub.add_parser("serve", help="serve on 127.0.0.1 (default command)")
     sv.add_argument("--port", type=int, default=DEFAULT_PORT)
+    sv.add_argument("--auto-port", action="store_true", help=argparse.SUPPRESS)  # 8420, else any free port
+    sv.add_argument("--ready-file", help=argparse.SUPPRESS)  # background run: bound port written here after bind
     for name, text in (("start", "serve in the background"), ("stop", "stop the background dashboard"),
                        ("status", "is it running, and where?")):
         sub.add_parser(name, help=text).add_argument("--json", action="store_true")
@@ -38,7 +40,14 @@ def main(argv: list[str] | None = None) -> int:
         print(write_snapshot(root, Path(args.out), args.with_addons))
         return 0
     port = getattr(args, "port", DEFAULT_PORT)
-    srv = make_server(root, port)
+    try:
+        srv = make_server(root, port)
+    except OSError:
+        if not getattr(args, "auto_port", False):
+            raise
+        srv = make_server(root, 0)  # another workspace has 8420
+    if getattr(args, "ready_file", None):
+        service.write_ready(Path(args.ready_file), srv.server_address[1])
     print(f"orch dashboard for {root.name}: http://127.0.0.1:{srv.server_address[1]}  (Ctrl+C to stop)")
     try:
         srv.serve_forever()

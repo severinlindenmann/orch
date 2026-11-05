@@ -23,6 +23,7 @@ def web_file(name: str) -> bytes:
 class Handler(BaseHTTPRequestHandler):
     def __init__(self, *a, root: Path, orch_bin: str | None, puller: ViewPuller, **kw):
         self.root, self.orch_bin, self.puller = root, orch_bin, puller
+        self.nonce = os.environ.get("ORCH_DASHBOARD_NONCE", "")
         super().__init__(*a, **kw)
 
     def log_message(self, *a):  # quiet
@@ -58,6 +59,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path.startswith("/api/") and not self._same_origin():  # a foreign page must not trigger pulls
             return self._send(403, b"forbidden", "text/plain")
+        if path == "/ready" and self.nonce:  # background start checks it reached its own child
+            return self._send(200, self.nonce.encode(), "text/plain")
         if path == "/api/state":
             return self._send(200, json.dumps(load_state(self.root, orch_bin=self.orch_bin)).encode(),
                               "application/json")

@@ -44,3 +44,18 @@ def test_repeat_refuses_plainly(ws, capsys):
     assert "cron" in json.loads(capsys.readouterr().out)["error"]
     assert main(["--dir", str(ws), "repeat", "t_nothere1", "0 7 * * 1"]) == 2
     assert capsys.readouterr().err.startswith("Refused: ")
+
+
+def test_planted_module_in_the_workspace_is_not_run(ws):
+    (ws / "orch_scheduler.py").write_text("open('PLANTED', 'w').write('x')\n")
+    (ws / "json.py").write_text("open('PLANTED', 'w').write('x')\n")
+    pid = service.start(ws)
+    try:
+        for _ in range(30):  # give the child time to import
+            if (ws / ".orch/addons/scheduler/scheduler.log").read_text().strip():
+                break
+            time.sleep(0.1)
+        assert service.running_pid(ws) == pid
+    finally:
+        service.stop(ws)
+    assert not (ws / "PLANTED").exists()

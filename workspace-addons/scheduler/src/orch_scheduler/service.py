@@ -32,9 +32,10 @@ def start(root: Path) -> int:
     if pid:
         return pid
     sdir(root)
+    # -P: the workspace folder is never on the import path (a planted orch_scheduler.py there is not run)
     kw = {"creationflags": 0x00000208} if os.name == "nt" else {"start_new_session": True}
     with open(sdir(root) / "scheduler.log", "a") as out:
-        proc = subprocess.Popen([sys.executable, "-m", "orch_scheduler", "--dir", str(root), "run"], cwd=root,
+        proc = subprocess.Popen([sys.executable, "-P", "-m", "orch_scheduler", "--dir", str(root), "run"], cwd=root,
                                 stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **kw)
     _pidfile(root).write_text(str(proc.pid))
     return proc.pid
