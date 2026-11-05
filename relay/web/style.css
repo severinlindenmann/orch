@@ -382,3 +382,9 @@ dialog.confirm button{min-height:44px}
  .day-group>.day{padding:12px 14px}
  .msg>.msg-body{padding:6px 14px 14px}
 }
+
+/* U4-R4: text links get a 44px target */
+.quiet-link,.link-btn,.footline a,.panel-body a:not(.button),.summary-line summary,.form-error .tech summary{display:inline-flex;align-items:center;min-height:44px}
+.footline a{padding:0 4px}
+@media(max-width:580px){.admin-sidebar .side-nav a{min-height:44px;display:flex;align-items:center}}
+details>summary{display:flex;align-items:center;min-height:44px}
