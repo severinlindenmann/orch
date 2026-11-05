@@ -48,7 +48,7 @@ Several admins, custom domains per app, app logs view, own databases beyond SQLi
 
 ## Workspace profile
 
-A workspace proposes its own description and tags with `PATCH /v1/me` (see contracts/publish-api.md); the owner approves or rejects the change in the admin portal (overview banner, "Needs your review" badge, a card with current vs proposed text), and the old values stay in effect until then. Approve/reject are bound to the exact proposal (`rev`); a new access key drops a pending change. Same text rules as the relay. The admin "connect your agent" text ends with a line asking the agent to do this.
+A workspace proposes its own description and tags with `PATCH /v1/me` (see contracts/publish-api.md); the owner approves it or keeps the current text (Approve / Keep current) in the admin portal (overview banner, "Waiting for your approval" badge, a card with current vs proposed text), and the old values stay in effect until then. Approve / Keep current are bound to the exact proposal (`rev`); a new access key drops a pending change. Same text rules as the relay. The admin "connect your agent" text ends with a line asking the agent to do this.
 
 ## Previews
 

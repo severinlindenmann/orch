@@ -263,3 +263,39 @@ async fn admin_onboarding_scripts() {
         "ok"
     );
 }
+
+#[tokio::test]
+async fn portal_prompt_skips_describe_line_when_admin_described() {
+    let t = setup();
+    let r = t
+        .adm(
+            "POST",
+            "/admin/api/workspaces",
+            json!({"name": "A", "description": "Jobs", "tags": []}),
+        )
+        .await;
+    let j = r.json();
+    assert!(!j["prompt"]
+        .as_str()
+        .unwrap()
+        .contains("describe this workspace"));
+    let id = j["id"].as_str().unwrap().to_string();
+    let r = t
+        .adm("POST", "/admin/api/workspaces", json!({"name": "B"}))
+        .await;
+    assert!(r.json()["prompt"]
+        .as_str()
+        .unwrap()
+        .contains("describe this workspace"));
+    let r = t
+        .adm(
+            "POST",
+            &format!("/admin/api/workspaces/{id}/token"),
+            Value::Null,
+        )
+        .await;
+    assert!(!r.json()["prompt"]
+        .as_str()
+        .unwrap()
+        .contains("describe this workspace"));
+}

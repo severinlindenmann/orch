@@ -81,6 +81,7 @@ async function relayAdd(name, description, tags) {
   await page.fill('input[name=description]', description);
   await page.fill('input[name=tags]', tags);
   await page.click('button[type=submit]');
+  await page.click('summary:has-text("Show what will be copied")');
   await page.waitForSelector('#install-prompt');
   return parse(await page.inputValue('#install-prompt'), 'relay');
 }
@@ -120,8 +121,7 @@ try {
     // pairs that allow nothing are folded away: open every fold first
     await page.evaluate(() => document.querySelectorAll('details.pair-group').forEach(d => { d.open = true; }));
     const pair = page.locator('.pair', { has: page.locator('h3', { hasText: 'Walk Pilatus → Walk Reports' }) });
-    for (const k of ['Messages', 'Files'])
-      await pair.locator('label.pair-toggle', { hasText: k }).locator('input').check();
+    await pair.locator('label.pair-toggle', { hasText: 'Send messages and files' }).locator('input').check();
     await page.click('button:has-text("Save")');
     await page.waitForSelector('#toast:not([hidden])');
   });

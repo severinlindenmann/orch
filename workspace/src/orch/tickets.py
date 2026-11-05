@@ -500,6 +500,10 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
     return apply_op(root, tid, op)
 
 
+def check_exists(root: Path, tid: str, cid: str) -> None:
+    _item(load(root, tid), cid)
+
+
 def check_edit(
     root: Path, tid: str, cid: str, text: str, by: str, if_revision: int | None = None, was: str | None = None
 ) -> tuple[dict, dict]:
@@ -896,11 +900,13 @@ def _size_text(n: int) -> str:
     return f"{max(round(n / 1024), 1)} KB"
 
 
+def _too_big(name: str) -> str:
+    return f"{name} is too big. A proof file can be at most 25 MB. Use --url or --note."
+
+
 def attach_file(root: Path, tid: str, path: str, title: str | None, role: str | None) -> dict:
     """Copy a workspace file into .orch/tickets/<tid>/evidence/ and return the evidence entry for it.
     Only regular files inside the workspace, no link followed anywhere on the way, at most 25 MB."""
-    import shutil
-
     load(root, tid)
     if role is not None and role not in ROLES:
         raise Refused(f"A proof role is one of: {', '.join(ROLES)}.")
@@ -923,7 +929,8 @@ def attach_file(root: Path, tid: str, path: str, title: str | None, role: str | 
         cur = cur / part
         if cur.is_symlink():
             raise Refused("proof files cannot be links. Give the real file.")
-    if rel.parts[:2] == (".orch", "secrets") or ".git" in rel.parts:
+    low = tuple(x.lower() for x in rel.parts)
+    if low[:2] == (".orch", "secrets") or ".git" in low:
         raise inside
     if not cur.exists():
         raise Refused(f"{path} doesn't exist.")
@@ -962,8 +969,18 @@ def attach_file(root: Path, tid: str, path: str, title: str | None, role: str | 
         os.close(fd)
         os.unlink(dest)
         raise Refused("proof files cannot be links. Give the real file.") from None
-    with os.fdopen(src_fd, "rb") as src, os.fdopen(fd, "wb") as out:
-        shutil.copyfileobj(src, out)
+    try:
+        with os.fdopen(src_fd, "rb") as src, os.fdopen(fd, "wb") as out:
+            if os.fstat(src.fileno()).st_size > MAX_PROOF_BYTES:
+                raise Refused(_too_big(cur_src.name))
+            data = src.read(MAX_PROOF_BYTES + 1)  # bounded: a file that grows while we copy is refused too
+            if len(data) > MAX_PROOF_BYTES:
+                raise Refused(_too_big(cur_src.name))
+            out.write(data)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(dest)
+        raise
     ev = {"type": "file", "ref": dest.relative_to(base).as_posix(), "text": _size_text(size)}
     if title:
         ev["title"] = title.strip()

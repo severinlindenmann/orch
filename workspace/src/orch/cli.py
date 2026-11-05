@@ -47,7 +47,7 @@ def _progress(t: dict) -> str:
     return f"{d} of {n} done" if n else ""
 
 
-def _line(t: dict, all_: list[dict] | None = None) -> str:
+def _line(t: dict) -> str:
     bits = [t["status"]] + ([_progress(t)] if _progress(t) else [])
     return f"{t['title']}  ({', '.join(bits)})  [{t['id']}]"
 
@@ -549,7 +549,7 @@ def run(args: argparse.Namespace) -> None:
             if getattr(args, k)
         ]
         if args.file:
-            tickets.load(root, args.id)
+            tickets.check_exists(root, args.id, args.check)  # no orphan copy for a wrong id
             shorthand.append(json.dumps(tickets.attach_file(root, args.id, args.file, args.title, args.role)))
         t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by())
         ev = c["evidence"][-1]

@@ -170,3 +170,20 @@ def test_symlinked_tickets_dir_component_refused(proj, run, tid, tmp_path):
     (proj / "f.txt").write_text("x")
     assert run("check", "done", tid, "c1", "--file", "f.txt")[0] == 2
     assert list(target.iterdir()) == []
+
+
+def test_case_variants_of_git_and_secrets_refused(proj, run, tid):
+    (proj / ".Git").mkdir()
+    (proj / ".Git" / "config").write_text("x")
+    (proj / ".orch" / "Secrets").mkdir(parents=True, exist_ok=True)
+    (proj / ".orch" / "Secrets" / "k").write_text("k")
+    assert run("check", "done", tid, "c1", "--file", ".Git/config")[0] == 2
+    assert run("check", "done", tid, "c1", "--file", ".orch/Secrets/k")[0] == 2
+    assert not (proj / ".orch" / "tickets" / tid / "evidence").exists()
+
+
+def test_wrong_check_id_leaves_no_copy(proj, run, tid):
+    (proj / "f.txt").write_text("x")
+    code, _, err = run("check", "done", tid, "c9", "--file", "f.txt")
+    assert code == 2 and "no check c9" in err
+    assert not (proj / ".orch" / "tickets" / tid / "evidence").exists()
