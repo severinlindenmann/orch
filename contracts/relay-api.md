@@ -10,12 +10,14 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 ## Rules the relay checks on every message
 
 1. **Sender = caller.** `from` must equal the authenticated workspace, else `403`. Phones never post raw messages; the relay builds them.
-2. **Pair rule** (one-way: Pilatus → Reports does not imply Reports → Pilatus):
+2. **Pair rule** (one-way: Pilatus → Reports does not imply Reports → Pilatus). Phones need no pair rule: pairing a phone with
+   workspaces (admin "Add phone", or editing its list) is the rule both ways. The phone may send to those workspaces, and they may
+   send it text and questions:
 
 | Type | Allowed when |
 |---|---|
-| text, question | pair rule `text` from → to. `to: "phones"` = every phone allowed to reach the sender |
-| answer | `reply_to` is a `question` that `to` sent to `from` (or to `phones`). `ticket` and `question_id` are copied from that question, not trusted from the sender |
+| text, question | to a workspace: pair rule `text` from → to. `to: "ph_…"`: that phone is paired (signed in) and the sender is on its list, else `403 not_allowed` ("That phone is not paired with <name>. In the relay admin, open Phones and tick <name> …"). `to: "phones"` = every paired phone with the sender on its list (none = stored, reaches nobody). Only text and questions go to phones |
+| answer | `reply_to` is a `question` that `to` sent to `from` (questions to `phones` / `ph_…` are answered by phones only, `POST /v1/phone/answer`). `ticket` and `question_id` are copied from that question, not trusted from the sender |
 | file | pair rule `files`, and the blob was uploaded by the sender; `size` and `sha256` must match the stored blob |
 | delegate / start | pair rule `delegate` / `start`. The relay does **not** check the allow; the receiver does (local-files.md) |
 | allow | `reply_to` is a delegate/start that `to` sent to `from` |
@@ -39,7 +41,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | GET | `/v1/webhooks` | – | list of `{id, mode, ticket, created_at, last_call_at}` (own only) |
 | DELETE | `/v1/webhooks/<id>` | – | `204` |
 | POST | `/v1/transcribe` | Same as `/v1/phone/transcribe`, with workspace auth (agents transcribe audio files) | Same as `/v1/phone/transcribe` |
-| GET | `/v1/refresh` | – | Full snapshot of everything assigned to this workspace now: `{version, skills: [{name, version, files: {"<relative path>": "<base64>"}}], mcp: {"<name>": {…server config…}}, credentials: {"<NAME>": "<value>"}, workspaces: <workspaces.schema.json>}`. What is missing was unassigned and gets removed locally (local-files.md) |
+| GET | `/v1/refresh` | – | Full snapshot of everything assigned to this workspace now: `{version, skills: [{name, version, files: {"<relative path>": "<base64>"}}], mcp: {"<name>": {…server config…}}, credentials: {"<NAME>": "<value>"}, workspaces: <workspaces.schema.json>}` (its `phones` = the paired phones that may reach this workspace). What is missing was unassigned and gets removed locally (local-files.md) |
 
 ## Phone API
 
@@ -48,13 +50,16 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | POST | `/v1/phone/pair` | `{code, name}` (no auth; one-time code from the link) | `201 {phone_id, token, workspaces: [{id, name}]}` |
 | POST | `/v1/phone/push` | `{apns_token, sandbox: bool}` | `204` |
 | GET | `/v1/phone/workspaces` | – | list of `{id, name, description, tags, online, last_seen, open_questions}` (only workspaces this phone may reach) |
-| GET | `/v1/phone/questions` | – | list of `{message, workspace_name}`, open questions only |
+| GET | `/v1/phone/questions` | – | list of `{message, workspace_name}`, open questions only (sent to `phones` or to this phone by a workspace on its list) |
+| GET | `/v1/phone/messages?after=&limit=` | – | list of `{message, workspace_name}`, newest first: `text` messages that workspaces on its list sent to this phone or to `phones`, and the texts this phone sent to them (`workspace_name` = the other side) |
 | POST | `/v1/phone/answer` | `{question_message_id, answer}` | `201 {id}`. The relay builds the `answer` message (`from: ph_…`, `answered_by: human:<phone name>`, routed as above). First answer wins; later answers from any phone → `409 already_answered` |
 | POST | `/v1/phone/send` | `{to: ws_…, text, ticket?}` | `201 {id}`. A `text` message from the phone (voice becomes text on the phone). `to` must be on the phone's list |
 | POST | `/v1/phone/transcribe` | Body = the audio bytes, `Content-Type: audio/m4a` (also `audio/wav`, `audio/webm`), max 10 MB / 2 min, optional `?language=de` (else the language is detected) | `200 {text, language, duration}` (`duration` in seconds). `503 transcription_off` when the admin set no Deepgram key (the app then uses on-device speech), `502 transcription_failed` when Deepgram fails or is unreachable, `429 rate_limited` after 30 calls a minute per phone, `413 too_large`, `422 invalid` (type, empty, language) |
 | POST | `/v1/phone/signout` | – | `204`. Deletes the token and the push registration; the old token gets `401` from now on |
 
 Push for a new question (APNs): `{"aps": {"alert": {"title": "<workspace name>", "body": "<question text, max 120 chars>"}, "sound": "default"}, "message_id": "m_…", "workspace": "ws_…"}`. Tapping opens that question.
+Push for a new text to a phone (`ph_…` or `phones`): same `aps`, plus `"type": "text", "text_id": "m_…", "workspace": "ws_…"` (no `message_id`); tapping opens the messages with that workspace.
+Pushes go to the phones the message is for: `phones` = every paired phone with the sender on its list, `ph_…` = that phone.
 
 Admin prompt for a workspace (shown once): `orch addon add relay --yes` then `orch relay connect https://relay.severin.io --workspace ws_… --token orn_…`
 (+ the `onboarding.sh/.ps1` line for machines without orch). `connect` runs `orch init` if needed, checks `/v1/whoami`,
@@ -100,7 +105,8 @@ Auth: `X-Orch-Admin: <admin token>` (file `/etc/orch-relay/admin-token`); the po
 | GET | `/admin/api/webhooks` | – | list of all webhooks with workspace |
 | DELETE | `/admin/api/webhooks/<id>` | – | `204` |
 | GET / POST | `/admin/api/phones` | POST: `{name, workspaces: [ws…]}` | list / `201 {phone_id, link, qr_svg}` |
-| PATCH | `/admin/api/phones/<id>` | `{workspaces: [ws…]}` | `200` |
-| DELETE | `/admin/api/phones/<id>` | – | `204` (same effect as sign-out) |
+| PATCH | `/admin/api/phones/<id>` | `{workspaces: [ws…]}` | `200`. Workspaces added or removed get a refresh-hint |
+| DELETE | `/admin/api/phones/<id>` | – | `204` (same effect as sign-out). Its workspaces get a refresh-hint |
 
 Every change under `/admin/api/shared/`, to a workspace's name/description/tags, or to the rules raises `version` by 1 and sends a `refresh-hint` to each affected workspace.
+So do pairing a phone (`POST /v1/phone/pair`), signing it out, and editing or deleting it: its workspaces refresh their `phones` list.

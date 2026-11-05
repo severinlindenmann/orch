@@ -11,5 +11,8 @@
       "tags": ["private"], "online": false, "last_seen": "2026-11-03T21:10:00Z",
       "can_send": { "text": false, "files": false, "delegate": false, "start": false },
       "accepts_from": { "text": true, "files": false, "delegate": false, "start": false } }
+  ],
+  "phones": [
+    { "id": "ph_iphone0001", "name": "Severin's iPhone", "online": true, "last_seen": "2026-11-04T12:58:00Z" }
   ]
 }

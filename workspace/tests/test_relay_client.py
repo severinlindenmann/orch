@@ -72,6 +72,23 @@ def test_send_by_name_from_directory(proj, run, rel):
     assert run("relay", "send", "nobody", "x")[0] == 2
 
 
+def test_reply_to_paired_phone(proj, run, rel):
+    """A text from a phone shows how to answer it; refresh lists the paired phones; send by phone name."""
+    phone = "ph_iphone0001"
+    rel.snapshot["workspaces"]["phones"] = [
+        {"id": phone, "name": "Severin's iPhone", "online": True, "last_seen": None}
+    ]
+    connect(run, rel)
+    assert "1 phone you can reach" in run("relay", "refresh")[1]
+    rel.inbox.append(msg("m_phone00000000001", "text", {"text": "can you answer my phone"}, frm=phone))
+    out = run("relay", "inbox")[1]
+    assert "Message from Severin's iPhone" in out and f"reply: orch relay send {phone}" in out
+    code, out, _ = run("relay", "send", phone, "yes")
+    assert code == 0 and rel.sent[-1]["to"] == phone and "Severin's iPhone" in out
+    run("relay", "send", "severin's iphone", "by name")
+    assert rel.sent[-1]["to"] == phone
+
+
 def test_send_file_and_receive_download(proj, run, rel):
     connect(run, rel)
     (proj / "rows.csv").write_bytes(b"a,b\n1,2\n")

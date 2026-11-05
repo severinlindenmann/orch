@@ -168,27 +168,33 @@ def _received_token(root: Path, peer: str, kind: str, key: str | None) -> str | 
 # ---- sending ------------------------------------------------------------------------------------
 
 
+def _directory(root: Path) -> list[dict]:
+    """Workspaces and paired phones from workspaces.json (refresh writes it)."""
+    d = net.read_json(root / ".agents" / "skills" / "orch-relay" / "workspaces.json", {})
+    return [*d.get("workspaces", []), *d.get("phones", [])]
+
+
 def resolve(root: Path, target: str) -> str:
-    """ws_ id, 'phones', or a name/tag from workspaces.json."""
+    """ws_/ph_ id, 'phones', or a workspace or phone name from workspaces.json."""
     if re.fullmatch(r"ws_[a-z0-9]{10}|phones|ph_[a-z0-9]{10}", target):
         return target
-    wf = root / ".agents" / "skills" / "orch-relay" / "workspaces.json"
-    for w in net.read_json(wf, {}).get("workspaces", []):
-        if target.lower() in (w["name"].lower(), w["id"]):
+    for w in _directory(root):
+        if target.lower() in (str(w.get("name", "")).lower(), w.get("id")):
             return w["id"]
-    names = [w["name"] for w in net.read_json(wf, {}).get("workspaces", []) if w.get("name")]
+    names = [w["name"] for w in _directory(root) if w.get("name")]
     known = (
-        "Workspaces you can message: " + ", ".join(names) + "."
+        "Workspaces and phones you can message: " + ", ".join(names) + "."
         if names
-        else "No other workspaces are known yet."
+        else "No other workspaces or phones are known yet."
     )
-    raise Refused(f"No workspace called {target!r}. {known} Run: orch relay refresh to update the list.")
+    raise Refused(
+        f"No workspace or phone called {target!r}. {known} Run: orch relay refresh to update the list."
+    )
 
 
 def name_of(root: Path, ws_id: str) -> str:
-    """A workspace's name from workspaces.json, else the id (phones, admin, unknown)."""
-    wf = root / ".agents" / "skills" / "orch-relay" / "workspaces.json"
-    for w in net.read_json(wf, {}).get("workspaces", []):
+    """A workspace's or phone's name from workspaces.json, else the id (phones, admin, unknown)."""
+    for w in _directory(root):
         if w.get("id") == ws_id:
             return w["name"]
     return {"phones": "the phones", "admin": "the admin"}.get(ws_id, ws_id)
@@ -462,7 +468,11 @@ def refresh(root: Path) -> str:
     finally:
         shutil.rmtree(stage, ignore_errors=True)
     n = len(snap.get("workspaces", {}).get("workspaces", []))
-    msg = f"Updated workspaces.json ({n} workspace{'s' if n != 1 else ''} you can reach)"
+    p = len(snap.get("workspaces", {}).get("phones", []))
+    msg = (
+        f"Updated workspaces.json ({n} workspace{'s' if n != 1 else ''}"
+        f" and {p} phone{'s' if p != 1 else ''} you can reach)"
+    )
     if names:
         msg += f", shared skills: {', '.join(names)}"
     if skipped:

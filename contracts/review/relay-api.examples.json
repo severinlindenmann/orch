@@ -560,6 +560,55 @@
     }
   },
   {
+    "_note": "Phone: text messages with the workspaces on its list (sent to this phone or to phones, and what the phone sent), newest first.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/messages",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_reply0phone00001",
+              "from": "ws_pilatus001",
+              "to": "ph_iphone0001",
+              "type": "text",
+              "created_at": "2026-11-04T10:44:00Z",
+              "ticket": "t_7k3f9q",
+              "body": {
+                "text": "Yes, I can answer your phone. The report is ready."
+              }
+            },
+            "workspace_name": "Pilatus Workspace"
+          },
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_phone0send000001",
+              "from": "ph_iphone0001",
+              "to": "ws_pilatus001",
+              "type": "text",
+              "created_at": "2026-11-04T10:43:00Z",
+              "body": {
+                "text": "Can you answer my phone?"
+              }
+            },
+            "workspace_name": "Pilatus Workspace"
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
     "_note": "Phone: answer with one tap. The relay builds the answer message.",
     "request": {
       "method": "POST",

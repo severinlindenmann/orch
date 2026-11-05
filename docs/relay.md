@@ -33,7 +33,10 @@ No key = `503 transcription_off`. 30 calls a minute per phone or workspace (in m
 ## How a message flows
 Sender `POST /v1/messages` → relay checks the schema and the pair rule → stores (body encrypted with the master key)
 → receiver gets it on the next `GET /v1/inbox` and acks → receiver stores the id as seen. Offline = it waits on the relay.
-Questions to `phones` also trigger an APNs push.
+Questions and texts to `phones` or to one phone (`ph_…`) also trigger an APNs push.
+Phones: pairing a phone with workspaces (admin "Add phone" → pick workspaces → QR) is the rule both ways, no pair rule needed.
+Those workspaces can send the phone text and questions (`orch relay send ph_… "…"`, `orch ask --phone`), the phone reads texts with
+`GET /v1/phone/messages`, and `orch relay refresh` lists the phone under `phones` in `workspaces.json`.
 
 ## Data storage
 - SQLite `/var/lib/orch-relay/relay.db`: workspaces (name, description, tags, last_seen), phones, rules, messages (envelope plain, body encrypted), acks,

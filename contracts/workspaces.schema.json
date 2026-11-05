@@ -2,14 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://orch.severin.io/contracts/workspaces.schema.json",
   "title": "orch workspace directory v1",
-  "description": "Written by `orch relay refresh` to .agents/skills/orch-relay/workspaces.json (from the refresh snapshot). Lists every workspace with a pair rule to or from this one. Agents read it to decide where to hand work over. Phones get the same items for the workspaces they may reach (can_send/accepts_from left out). Unknown fields are allowed and kept.",
+  "description": "Written by `orch relay refresh` to .agents/skills/orch-relay/workspaces.json (from the refresh snapshot). Lists every workspace with a pair rule to or from this one, and the paired phones that may reach it. Agents read it to decide where to hand work over. Phones get the same items for the workspaces they may reach (can_send/accepts_from left out). Unknown fields are allowed and kept.",
   "type": "object",
   "required": ["schema", "self", "updated_at", "workspaces"],
   "properties": {
     "schema": { "const": "orch.workspaces/1" },
     "self": { "type": "string", "pattern": "^ws_[a-z0-9]{10}$", "description": "This workspace" },
     "updated_at": { "$ref": "#/$defs/time" },
-    "workspaces": { "type": "array", "items": { "$ref": "#/$defs/workspace" } }
+    "workspaces": { "type": "array", "items": { "$ref": "#/$defs/workspace" } },
+    "phones": { "type": "array", "items": { "$ref": "#/$defs/phone" }, "description": "Paired phones the admin gave access to this workspace (relay admin > Phones). This workspace may send them text and questions (`orch relay send ph_…`, `phones` = all of them) without a pair rule. Missing in older snapshots = none" }
   },
   "$defs": {
     "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
@@ -19,6 +20,16 @@
       "properties": {
         "text": { "type": "boolean" }, "files": { "type": "boolean" },
         "delegate": { "type": "boolean" }, "start": { "type": "boolean" }
+      }
+    },
+    "phone": {
+      "type": "object",
+      "required": ["id", "name", "online", "last_seen"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^ph_[a-z0-9]{10}$" },
+        "name": { "type": "string", "minLength": 1, "description": "Name given at pairing (the phone's own name or the admin's label)" },
+        "online": { "type": "boolean", "description": "Called the relay in the last 2 minutes, at refresh time" },
+        "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] }
       }
     },
     "workspace": {

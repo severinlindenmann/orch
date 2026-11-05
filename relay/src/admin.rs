@@ -31,6 +31,7 @@ pub fn router(app: AppState) -> Router {
                 )
             }),
         )
+        .merge(crate::api::icon_routes())
         .route("/admin/api/workspaces", get(list_ws).post(add_ws))
         .route(
             "/admin/api/workspaces/:id",
@@ -793,12 +794,23 @@ async fn edit_phone(
     let v = parse_body(&body)?;
     let c = app.db.lock().unwrap();
     let ws = check_ws_list(&c, &v["workspaces"])?;
+    let old = store::phone_workspaces(&c, &id);
     let n = c.execute(
         "UPDATE phones SET workspaces=?2 WHERE id=?1",
         params![id, serde_json::to_string(&ws).unwrap()],
     )?;
     if n == 0 {
         return Err(not_found("No such phone."));
+    }
+    // Workspaces that gained or lost the phone refresh their phone list.
+    let changed: Vec<String> = old
+        .iter()
+        .filter(|w| !ws.contains(w))
+        .chain(ws.iter().filter(|w| !old.contains(w)))
+        .cloned()
+        .collect();
+    if !changed.is_empty() {
+        store::bump_and_hint(&c, &app.key, &changed)?;
     }
     Ok(StatusCode::OK)
 }
@@ -810,10 +822,12 @@ async fn del_phone(
 ) -> Res<StatusCode> {
     guard(&app, &h)?;
     let c = app.db.lock().unwrap();
+    let old = store::phone_workspaces(&c, &id);
     let n = c.execute("DELETE FROM phones WHERE id=?1", [&id])?;
     c.execute("DELETE FROM pair_codes WHERE phone_id=?1", [&id])?;
     if n == 0 {
         return Err(not_found("No such phone."));
     }
+    store::bump_and_hint(&c, &app.key, &old)?;
     Ok(StatusCode::NO_CONTENT)
 }
