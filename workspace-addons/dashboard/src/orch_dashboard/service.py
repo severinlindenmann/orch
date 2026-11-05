@@ -23,6 +23,10 @@ def alive(pid: int) -> bool:
         import ctypes
 
         k = ctypes.windll.kernel32
+        k.OpenProcess.restype = ctypes.c_void_p
+        k.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong)
+        k.GetExitCodeProcess.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong))
+        k.CloseHandle.argtypes = (ctypes.c_void_p,)
         h = k.OpenProcess(0x1000, False, pid)
         if not h:
             return False

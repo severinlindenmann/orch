@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import subprocess
 import sys
 
@@ -20,7 +21,7 @@ if cmd == "start":
         print("Refused: port is busy", file=sys.stderr)
         sys.exit(2)
     f.write_text("on", encoding="utf-8")
-    print(json.dumps({"running": True, "pid": os.getppid(), "url": "http://127.0.0.1:18420"}))
+    print(json.dumps({"running": True, "pid": int(os.environ["TEST_ALIVE_PID"]), "url": "http://127.0.0.1:18420"}))
 elif cmd == "stop":
     was = f.exists()
     f.unlink(missing_ok=True)
@@ -34,6 +35,9 @@ elif cmd == "status":
 def svc(proj, run, tmp_path, monkeypatch, request):
     """Add-on 'hello' with a background service, plus 'quiet' without one; both on in proj."""
     request.getfixturevalue("uv_calls")
+    monkeypatch.setenv(
+        "TEST_ALIVE_PID", str(os.getpid())
+    )  # a pid that stays alive (getppid is a launcher on Windows)
     folder = make_addon(tmp_path / "s", bg=True)
     (folder / "src/orch_hello/__main__.py").write_text(SVC_MAIN, encoding="utf-8")
     quiet = make_addon(tmp_path / "q", name="quiet")
