@@ -81,7 +81,10 @@ final class AppModel {
     var connection: Connection { message != nil ? .unreachable : (hasLoaded ? .ok : .checking) }
     var lastUpdatedText: String? {
         guard let lastUpdated else { return nil }
-        return "Last updated \(RelativeDateTimeFormatter().localizedString(for: lastUpdated, relativeTo: Date()))"
+        let now = Date()
+        if now.timeIntervalSince(lastUpdated) < 60 { return "Last updated just now" }
+        let f = RelativeDateTimeFormatter(); f.unitsStyle = .full
+        return "Last updated \(f.localizedString(for: min(lastUpdated, now), relativeTo: now))"
     }
 
     var relayHost: String { credentials?.relay.host ?? invite?.host ?? "your server" }
@@ -112,7 +115,7 @@ final class AppModel {
             phase = .notifyStep
         } catch {
             inviteState = .found(host: invite.host)
-            if case RelayError.api(let status, _, _) = error, status == 404 || status == 410 {
+            if case RelayError.api(let status, _, _) = error, status == 401 || status == 404 || status == 410 {
                 message = "This invitation has expired or was already used. Ask the person who invited you for a new one."
             } else if error is URLError {
                 message = "Can't reach the server. Check your connection, then tap Connect this phone again."

@@ -121,6 +121,50 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertEqual(app.textFields["invite-field"].value as? String, "https://example.com/nope")
     }
 
+    /// Return submits the invitation sheet; an expired code gets the friendly text and keeps the input.
+    func testExpiredInviteViaReturnKeepsInput() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock"]
+        app.launch()
+        app.buttons["Paste invitation link"].tap()
+        let field = app.textFields["invite-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.tap()
+        field.typeText("orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_expired0000000000000000\n")
+        let connect = app.buttons["Connect this phone"]
+        XCTAssertTrue(connect.waitForExistence(timeout: 5))
+        connect.tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'expired or was already used'")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Connect this phone"].exists)
+    }
+
+    /// Offline before any load: Send says the connection is the problem, not "Pick a workspace".
+    func testOfflineSendTabExplainsConnection() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-mockFail", "YES", "-startTab", "send"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Can't load your workspaces"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["send-retry"].exists)
+        XCTAssertFalse(app.staticTexts["Pick a workspace first."].exists)
+    }
+
+    /// The sent screen's "Back to home" is a full-size target.
+    func testBackToHomeTargetIsLargeEnough() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-startTab", "send"]
+        app.launch()
+        let field = app.textViews["transcript"]
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        field.tap(); field.typeText("Hello")
+        app.buttons["keyboard-done"].tap()
+        let send = app.buttons["send-button"]
+        if !send.isHittable { app.swipeUp() }
+        send.tap()
+        let back = app.buttons["Back to home →"]
+        XCTAssertTrue(back.waitForExistence(timeout: 10))
+        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
+    }
+
     /// Server unreachable: no "All clear", no "Connected", a plain way to retry.
     func testUnreachableServerIsHonest() {
         let app = XCUIApplication()

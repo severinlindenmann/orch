@@ -42,6 +42,8 @@ actor MockRelay: RelayAPI {
     func pair(code: String, name: String) async throws -> PairResponse {
         try? await Task.sleep(for: latency)
         guard code.hasPrefix("pc_") else { throw RelayError.api(status: 404, code: "not_found", message: "This invitation is not valid any more.") }
+        // The live relay answers 401 (not 404) for an unknown or used pair code.
+        if code.hasPrefix("pc_expired") { throw RelayError.api(status: 401, code: "unauthorized", message: "Missing or wrong token.") }
         signedOut = false
         return PairResponse(phoneId: "ph_iphone0001", token: "orn_mock", workspaces: [
             WorkspaceRef(id: Self.pilatus, name: "Pilatus Workspace"), WorkspaceRef(id: Self.reports, name: "Reports")])

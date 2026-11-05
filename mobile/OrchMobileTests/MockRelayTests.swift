@@ -49,6 +49,21 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.phase, .onboarding); XCTAssertNil(Keychain.load()); XCTAssertTrue(model.workspaces.isEmpty)
     }
 
+    func testExpiredInvitationGivesFriendlyMessage() async throws {
+        let model = AppModel(useMock: true, voiceMode: .scripted)
+        model.openInvite("orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_expired0000000000000000")
+        await model.connect(phoneName: "Test phone")
+        XCTAssertEqual(model.message, "This invitation has expired or was already used. Ask the person who invited you for a new one.")
+        XCTAssertEqual(model.inviteState, .found(host: "relay.severin.io"))
+        XCTAssertEqual(model.phase, .onboarding)
+    }
+
+    func testLastUpdatedSaysJustNow() async throws {
+        let model = AppModel(useMock: true, voiceMode: .scripted)
+        model.openSampleInvite(); await model.connect(phoneName: "T"); await model.finishSetup(allowNotifications: false)
+        XCTAssertEqual(model.lastUpdatedText, "Last updated just now")
+    }
+
     func testPushTapOpensQuestion() async throws {
         let model = AppModel(useMock: true, voiceMode: .scripted)
         model.openQuestion(messageId: "m_q1date0ts0000001")

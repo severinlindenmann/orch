@@ -9,7 +9,9 @@ struct OnboardingView: View {
     @State private var linkError: String?
     @State private var finishing = false
 
+    @Environment(\.dynamicTypeSize) private var dynamicType  // re-evaluate fonts when text size changes (no view-identity reset)
     var body: some View {
+        let _ = dynamicType
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Brand().frame(maxWidth: .infinity)
@@ -33,7 +35,7 @@ struct OnboardingView: View {
                 Text("Invitation link").font(Theme.font(12)).foregroundStyle(Theme.muted)
                 TextField("orch://pair?…", text: $link)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .keyboardType(.URL).textContentType(.URL).padding(14).frame(minHeight: 48)
+                    .keyboardType(.URL).textContentType(.URL).submitLabel(.continue).onSubmit { submitLink() }.padding(14).frame(minHeight: 48)
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(linkError == nil ? Theme.borderStrong : Theme.danger))
                     .accessibilityLabel("Invitation link").accessibilityIdentifier("invite-field")
@@ -41,7 +43,16 @@ struct OnboardingView: View {
                 if let linkError {
                     Text("⚠︎ \(linkError)").font(Theme.font(13)).foregroundStyle(Theme.danger).accessibilityIdentifier("invite-error")
                 }
-                Button("Continue") {
+                Button("Continue") { submitLink() }.buttonStyle(PrimaryButtonStyle()).accessibilityIdentifier("invite-continue")
+                Button { showLink = false } label: { Text("Close") }.buttonStyle(WideButtonStyle(color: Theme.muted))
+            }.padding(23).presentationDetents([.medium, .large]).presentationBackground(Theme.bg)
+        }
+        .sheet(isPresented: $showScanner) {
+            QRScannerView { code in model.openInvite(code); showScanner = false }
+        }
+    }
+
+    private func submitLink() {
                     let clean = link.trimmingCharacters(in: .whitespacesAndNewlines)
                     if clean.isEmpty { linkError = "Paste the link you were sent first. It starts with orch://."; return }
                     if (try? PairingLink(clean)) == nil {
@@ -49,13 +60,6 @@ struct OnboardingView: View {
                         return
                     }
                     model.openInvite(clean); showLink = false
-                }.buttonStyle(PrimaryButtonStyle()).accessibilityIdentifier("invite-continue")
-                Button { showLink = false } label: { Text("Close") }.buttonStyle(WideButtonStyle(color: Theme.muted))
-            }.padding(23).presentationDetents([.medium, .large]).presentationBackground(Theme.bg)
-        }
-        .sheet(isPresented: $showScanner) {
-            QRScannerView { code in model.openInvite(code); showScanner = false }
-        }
     }
 
     @ViewBuilder private var invitationStep: some View {

@@ -85,7 +85,7 @@ struct QuestionsView: View {
     private func chip(_ title: String, id: String?) -> some View {
         let selected = model.questionFilter == id
         return Button { model.questionFilter = id } label: {
-            Text(title).font(Theme.font(12)).padding(.horizontal, 10).frame(minHeight: 44)
+            Text(title).font(Theme.font(12)).padding(.horizontal, 10).frame(minWidth: 44, minHeight: 44)
                 .foregroundStyle(selected ? Theme.brand : Theme.muted)
                 .background(selected ? Theme.brand.opacity(0.09) : Theme.bg, in: RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(selected ? Theme.brand : Theme.borderStrong))

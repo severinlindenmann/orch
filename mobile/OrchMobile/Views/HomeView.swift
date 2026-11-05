@@ -22,7 +22,9 @@ struct HomeView: View {
         }
     }
 
+    @Environment(\.dynamicTypeSize) private var dynamicType  // re-evaluate fonts when text size changes (no view-identity reset)
     var body: some View {
+        let _ = dynamicType
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Brand().padding(.bottom, 28)

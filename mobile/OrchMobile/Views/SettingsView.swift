@@ -19,7 +19,9 @@ struct SettingsView: View {
         switch model.connection { case .ok: Theme.brand; case .unreachable: Theme.danger; case .checking: Theme.muted }
     }
 
+    @Environment(\.dynamicTypeSize) private var dynamicType  // re-evaluate fonts when text size changes (no view-identity reset)
     var body: some View {
+        let _ = dynamicType
         ScrollViewReader { proxy in ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 ScreenHeading(title: "Settings.", subtitle: "Your connection, in one place.").padding(.top, 14)
@@ -70,6 +72,7 @@ struct SettingsView: View {
                     }
                 })).font(Theme.font(14)).tint(Theme.brand).frame(minHeight: 44).padding(.vertical, 15)
                     .disabled(requestingPermission)
+                    .accessibilityElement(children: .combine)
                     .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
                     .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
                     .padding(.vertical, 26)
