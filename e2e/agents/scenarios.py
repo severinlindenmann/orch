@@ -294,6 +294,10 @@ def ag_r6(e):
     validate(e, t)
     logs = sorted((wsr / ".orch/run/logs").glob(f"{t['id']}-*.log"))
     check(logs and logs[-1].read_text().strip(), f"no scheduler run log for {t['id']}")
+    rc, out, err = e.sh(["orch", "run", "status", t["id"], "--json"], cwd=wsr)
+    check(rc == 0 and not json.loads(out).get("running"), f"the run on {t['id']} did not finish: {out or err}")
+    worked = {b for b in by(t) if not b.startswith(("agent:scheduler", "agent:relay"))}
+    check(worked, f"the agent wrote nothing on {t['id']}: {sorted(by(t))}")
     allow_back = [m for m in e.orchj("Pilatus", "relay", "inbox") if m["type"] == "allow"]
     check(allow_back, "no allow message back to Pilatus")
     ran = "agent:claude-code" in by(t)
@@ -316,41 +320,35 @@ def ag_a45(e):
     e.orch(ws, "scheduler", "repeat", t5, "*/2 * * * *")
     rc, out, err = e.sh(["orch", "scheduler", "start"], cwd=ws)
     check(rc == 0, f"scheduler start: {err or out}")
+    def started(t):  # the scheduler writes one history entry per run it started
+        return [h for h in tload(ws, t)["history"] if h["by"] == "agent:scheduler" and "started an agent run" in h["text"]]
+
+    def running(t):
+        rc, out, err = e.sh(["orch", "run", "status", t, "--json"], cwd=ws)
+        return rc != 0 or json.loads(out).get("running")
+
     try:
-        def logs(t):
-            return sorted((ws / ".orch/run/logs").glob(f"{t}-*.log"))
         end = time.time() + 600
         while time.time() < end:
-            l4, l5 = logs(t4), logs(t5)
-            if any("# end" in p.read_text() for p in l4) and sum("# end" in p.read_text() for p in l5) >= 2:
+            if started(t4) and not running(t4) and len(started(t5)) >= 2 and not running(t5):
                 break
             time.sleep(10)
         time.sleep(5)
     finally:
         e.sh(["orch", "scheduler", "stop"], cwd=ws)
-        # keep the scheduler logs in the transcript
+        # keep the run logs (written by core) in the transcript
         body = "".join(f"\n### {p.name}\n{p.read_text(errors='replace')[-4000:]}\n" for p in sorted((ws / ".orch/run/logs").glob("*.log")))
         save_transcript(e, "AG-A45", f"# codex runs started by the scheduler in Reports\n{body}")
     d4, d5 = tload(ws, t4), tload(ws, t5)
-    l4, l5 = logs(t4), logs(t5)
-    check(l4 and all("exit 0" in p.read_text() for p in l4 if "# end" in p.read_text()) and any("# end" in p.read_text() for p in l4), "A4: no finished run log")
+    check(started(t4) and not running(t4), "A4: no finished run")
     check(not d4.get("waiting_on"), f"A4: waiting_on not cleared: {d4.get('waiting_on')}")
-    check(any(h["by"] == "agent:scheduler" for h in d4["history"]), "A4: no scheduler history entry")
     check((ws / "wake-proof.txt").exists() and "awake" in (ws / "wake-proof.txt").read_text().lower(), "A4: wake-proof.txt missing")
-    done5 = [p for p in l5 if "# end" in p.read_text()]
-    check(len(done5) >= 2, f"A5: {len(done5)} finished runs in 10 min, wanted 2")
+    n5 = len(started(t5))
+    check(n5 >= 2 and not running(t5), f"A5: {n5} runs started in 10 min, wanted 2")
     runs = [ln for ln in (ws / "runs.log").read_text().splitlines() if ln.strip()] if (ws / "runs.log").exists() else []
-    check(len(runs) >= 2, f"A5: runs.log has {len(runs)} lines")
-    spans = []
-    for p in done5:
-        txt = p.read_text()
-        s = re.search(r"# start (\S+)", txt).group(1)
-        en = re.search(r"# end (\S+)", txt).group(1)
-        spans.append((s, en))
-    spans.sort()
-    check(all(spans[i][1] <= spans[i + 1][0] for i in range(len(spans) - 1)), f"A5: runs overlapped {spans}")
+    check(len(runs) >= 2, f"A5: runs.log has {len(runs)} lines")  # core's claim keeps runs from overlapping (run-lifecycle tests)
     validate(e, d5)
-    return (f"A4 done ({d4['status']}, by {sorted(by(d4))}); A5 {len(done5)} runs, runs.log {len(runs)} lines, "
+    return (f"A4 done ({d4['status']}, by {sorted(by(d4))}); A5 {n5} runs, runs.log {len(runs)} lines, "
             f"ticket status {d5['status']}")
 
 

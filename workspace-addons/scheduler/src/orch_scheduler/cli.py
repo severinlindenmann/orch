@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import orchcli, service
 from .cron import fmt, next_after, valid
+from .listen import NOT_LISTENING
 from .loop import OPEN, Scheduler
 from .runner import load_state
 
@@ -77,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("stop", parents=[common], help="stop the background run")
     sub.add_parser("status", parents=[common], help="is it running?")
     sub.add_parser("list", parents=[common], help="next wake-ups and repeats")
+    sub.add_parser("needs", parents=[common], help="rows for `orch needs`")
     sub.add_parser("view", parents=[common], help="dashboard tab data")
     rp = sub.add_parser("repeat", parents=[common], help="repeat a ticket by cron (UTC), or --off")
     rp.add_argument("ticket")
@@ -127,9 +129,20 @@ def _run(args, root: Path) -> int:
                     if res == "not verified" else res)
             out({"stopped": False, "note": note}, note)
     elif args.cmd == "status":
+        from . import listen
+
         pid = service.running_pid(root)
-        out({"running": bool(pid), "pid": pid}, f"Scheduler running (pid {pid})." if pid else "Scheduler is not running.")
+        ls = listen.read(root) if pid else {}
+        listening = bool(pid and ls.get("listening"))
+        heard = "Listening for the phone and other workspaces." if listening else (ls.get("note") or NOT_LISTENING)
+        line = f"Scheduler running (pid {pid}). {heard}" if pid else "Scheduler is not running."
+        out({"running": bool(pid), "pid": pid, "listening": listening}, line)
         return 0 if pid else 1
+    elif args.cmd == "needs":
+        from . import needs
+
+        rs = needs.rows(root)
+        out(rs, "\n".join(f"{r['title']}: {r['text']}" for r in rs) or "Nothing needs you here.")
     elif args.cmd == "list":
         rows = describe(root)
         out(rows, "\n".join(f"{x['ticket']}  {x['kind']} {x.get('cron', '')} {x['at']}  {x['title']}" for x in rows) or "Nothing scheduled.")

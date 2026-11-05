@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import runfiles
 
-GITIGNORE = "state.json\nruns.jsonl\n"
+GITIGNORE = "state.json\nruns.jsonl\nlisten.json\n"
 
 
 def sdir(root: Path) -> Path:

@@ -63,7 +63,7 @@ Scheduler pass (only while active in this workspace; exits when turned off):
 2. `ext.scheduler.recurring` with `cron` due (5-field, UTC) → run agent. Missed runs (machine off) → one catch-up run.
 3. `orch relay inbox --json` (only if the relay add-on is on here and set up; otherwise no inbox pass). Run agent for an allowed `start`/`delegate`, or an `answer`/`webhook` for a ticket waiting on it.
 4. Run = `[scheduler] agent` from `.orch/config.toml` with prompt `Continue orch ticket <id>. Read .agents/skills/orch/SKILL.md first.`;
-   one run per ticket at a time; logs in `.orch/addons/scheduler/logs/`; `orch log … --by agent:scheduler`; `ext.scheduler.last_run`.
+   runs start through `orch run start` (one run per ticket at a time); logs in `.orch/run/logs/`; `orch log … --by agent:scheduler`; `ext.scheduler.last_run`.
 
 ## Data storage
 Each add-on writes only `ext.<name>` (through the CLI) and `.orch/addons/<name>/`. Config: its `[<name>]` table in `.orch/config.toml`.

@@ -1,0 +1,153 @@
+import json
+import threading
+
+from conftest import T, add_ticket, calls
+
+from orch_scheduler import listen, needs
+from orch_scheduler.cli import main
+from orch_scheduler.listen import Listener
+from orch_scheduler.loop import Scheduler
+from orch_scheduler.runner import update_state
+
+
+def relay_on(ws):
+    (ws / ".orch/secrets").mkdir(parents=True, exist_ok=True)
+    (ws / ".orch/secrets/relay.json").write_text("{}")
+
+
+def test_not_listening_when_relay_is_not_set_up(ws):
+    ev = threading.Event()
+    assert Listener(ws, ev).step() == listen.PAUSE_OFF  # sleeps 60 s
+    st = listen.read(ws)
+    assert st["listening"] is False and st["note"] == "Not listening: the relay is not set up here"
+    assert not ev.is_set() and not any(c["args"][:2] == ["relay", "inbox"] for c in calls(ws))
+
+
+def test_long_poll_keeps_cursor_and_wakes_on_new_item(ws):
+    relay_on(ws)
+    ev = threading.Event()
+    lst = Listener(ws, ev)
+    (ws / "since.json").write_text(json.dumps({"next": 4, "items": [{"seq": 4, "id": "m_1", "seen": True}]}))
+    assert lst.step() == 0 and not ev.is_set()
+    assert listen.read(ws)["cursor"] == 4 and listen.read(ws)["listening"] is True
+    (ws / "since.json").write_text(json.dumps({"next": 5, "items": [{"seq": 5, "id": "m_2", "seen": False}]}))
+    lst.step()
+    assert ev.is_set()
+    polls = [c["args"] for c in calls(ws) if "--since" in c["args"]]
+    assert polls[0][2:4] == ["--since", "0"] and polls[1][2:4] == ["--since", "4"] and "--wait" in polls[1]
+
+
+def test_wake_forces_an_inbox_pass_between_intervals(ws):
+    relay_on(ws)
+    (ws / "inbox.json").write_text("[]")
+    s = Scheduler(ws)
+    s.tick(T(8, 0))
+    s.tick(T(8, 0).replace(second=5))
+    assert sum(c["args"][:2] == ["relay", "inbox"] for c in calls(ws)) == 1
+    s.wake.set()
+    s.tick(T(8, 0).replace(second=10))
+    assert sum(c["args"][:2] == ["relay", "inbox"] for c in calls(ws)) == 2
+
+
+def test_status_says_listening_or_not(ws, capsys, monkeypatch):
+    from orch_scheduler import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=True: 123)
+    listen._write(ws, listening=False, note=listen.NOT_LISTENING)
+    assert main(["--dir", str(ws), "status"]) == 0
+    assert "Not listening: the relay is not set up here" in capsys.readouterr().out
+    listen._write(ws, listening=True, note="")
+    main(["--dir", str(ws), "status", "--json"])
+    assert json.loads(capsys.readouterr().out)["listening"] is True
+
+
+def test_needs_ten_runs_today_warns_and_a_person_resets_it(ws):
+    add_ticket(ws, "t_loop0001", title="Loopy", history=[])
+    update_state(ws, "t_loop0001", starts=[f"2026-11-05T0{h}:00:00Z" for h in range(10)])
+    (r,) = needs.rows(ws, T(12, 0, d=5))
+    assert r["text"] == "Ran 10× today without you" and r["tone"] == "warn" and r["ticket"] == "t_loop0001"
+    t = json.loads((ws / ".orch/tickets/t_loop0001.json").read_text())
+    t["history"] = [{"at": "2026-11-05T05:30:00Z", "by": "human:s", "text": "hi"}]
+    (ws / ".orch/tickets/t_loop0001.json").write_text(json.dumps(t))
+    assert needs.rows(ws, T(12, 0, d=5)) == []  # only 4 runs since the person; nothing is blocked either way
+
+
+def test_nine_runs_do_not_warn(ws):
+    add_ticket(ws, "t_loop0002")
+    update_state(ws, "t_loop0002", starts=[f"2026-11-05T0{h}:00:00Z" for h in range(9)])
+    assert needs.rows(ws, T(12, 0, d=5)) == []
+
+
+def test_needs_failed_run_without_question(ws):
+    add_ticket(ws, "t_nf000001", title="X")
+    add_ticket(ws, "t_nf000002", title="Y", questions=[{"id": "q1", "kind": "scheduler:failure", "answer": None}])
+    d = ws / ".orch/addons/scheduler"
+    (d / "runs.jsonl").write_text("".join(json.dumps({"ticket": t, "at": "2026-11-05T07:00:00Z", "took": 1, "exit": 1}) + "\n"
+                                         for t in ("t_nf000001", "t_nf000002")))
+    (r,) = needs.rows(ws, T(8, 0, d=5))
+    assert r["ticket"] == "t_nf000001" and r["tone"] == "bad" and r["kind"] == "scheduler:failed-run"
+
+
+def test_needs_cli_json_validates(ws, capsys):
+    import re
+    add_ticket(ws, "t_loop0003")
+    update_state(ws, "t_loop0003", starts=[f"2026-11-0{5}T0{h}:00:00Z" for h in range(10)])
+    from datetime import UTC, datetime
+    from unittest import mock
+    with mock.patch("orch_scheduler.needs.datetime") as dt:
+        dt.now.return_value = datetime(2026, 11, 5, 12, tzinfo=UTC)
+        assert main(["--dir", str(ws), "needs", "--json"]) == 0
+    rows = json.loads(capsys.readouterr().out)
+    assert rows and re.fullmatch(r"[a-z][a-z0-9-]{1,31}:[A-Za-z0-9_.:-]{1,200}", rows[0]["id"])
+
+
+def test_unreachable_relay_pauses_instead_of_spinning(ws):
+    relay_on(ws)
+    (ws / "since.json").write_text(json.dumps({"next": 3, "items": [], "warning": "No connection"}))
+    ev = threading.Event()
+    assert Listener(ws, ev).step() >= 10  # a pause, not an instant retry
+    assert listen.read(ws)["listening"] is False and not ev.is_set()
+
+
+def phone_ticket(ws, tid, **kw):
+    return add_ticket(ws, tid, created_at="2026-11-04T07:50:00Z", ext={"relay": {"origin": "phone", "from": "ph_abc", "message": "m_1"}}, **kw)
+
+
+def test_phone_text_ticket_starts_one_run_only(ws):
+    from conftest import runs_started
+
+    phone_ticket(ws, "t_ph000001")
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == ["t_ph000001"]
+    assert s.tick(T(8, 1)) == [] and Scheduler(ws).tick(T(8, 2)) == []  # also not after a restart
+    assert runs_started(ws) == ["t_ph000001"]
+    assert json.loads((ws / ".orch/tickets/t_ph000001.json").read_text())["ext"]["scheduler"]["phone_started"] is True
+
+
+def test_old_or_closed_phone_tickets_are_left_alone(ws):
+    from conftest import runs_started
+
+    add_ticket(ws, "t_ph000002", created_at="2026-10-01T00:00:00Z", ext={"relay": {"origin": "phone"}})
+    phone_ticket(ws, "t_ph000003", status="done")
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+
+
+def test_follow_up_text_on_a_running_ticket_starts_nothing(ws):
+    from conftest import runs_started
+
+    add_ticket(ws, "t_ph000004", status="active")
+    relay_on(ws)
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_5", "type": "text", "from": "ph_abc", "ticket": "t_ph000004",
+                                                 "applied": True, "note": "added to t_ph000004", "body": {"text": "and also"}}]))
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []  # the run is going: the relay queued the text
+
+
+def test_follow_up_text_on_an_idle_ticket_starts_a_run(ws):
+    from conftest import runs_started
+
+    add_ticket(ws, "t_ph000005", status="open")
+    (ws / "ended-t_ph000005").write_text("")
+    relay_on(ws)
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_6", "type": "text", "from": "ph_abc", "ticket": "t_ph000005",
+                                                 "applied": True, "note": "added to t_ph000005", "body": {"text": "more"}}]))
+    assert Scheduler(ws).tick(T(8)) == ["t_ph000005"] and runs_started(ws) == ["t_ph000005"]

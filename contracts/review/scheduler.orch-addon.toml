@@ -8,6 +8,7 @@ run = "orch_scheduler"                     # orch scheduler <args>  ->  python -
 skill = "skills/orch-scheduler"
 agents_block = "skills/orch-scheduler/AGENTS-block.md"
 ticket_ext = "ext.schema.json"             # byte-identical copy of contracts/addons/scheduler.ext.schema.json
+needs = true                               # orch scheduler needs --json
 background = true                          # has `orch scheduler start|stop`
 
 [dashboard]
