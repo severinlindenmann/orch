@@ -574,3 +574,10 @@ async fn profile_text_is_validated_for_workspace_and_admin_and_marked() {
         (json!("By admin"), json!("admin"), json!("workspace"))
     );
 }
+
+#[test]
+fn portal_shows_webhook_and_person_senders() {
+    // B1: messages from webhooks and people must never be hidden as "past connections"
+    let page = include_str!("../web/portal.html");
+    assert!(page.contains("/^(webhook|human|agent):/.test(id)"));
+}
