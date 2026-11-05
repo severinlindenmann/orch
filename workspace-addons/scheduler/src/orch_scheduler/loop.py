@@ -4,6 +4,7 @@ The scheduler never runs an agent itself: every run is `orch run start` (core de
 from __future__ import annotations
 
 import os
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -36,6 +37,7 @@ class Scheduler:
         self.root = root
         self.cfg = load_config(root)
         self.last_inbox: datetime | None = None
+        self.wake = threading.Event()  # the listener sets it when something arrived
         self.watch: dict[str, dict] = {}  # tid -> {t0, at, log, hist} for runs started in the last moments
         sdir(root)
 
@@ -48,6 +50,8 @@ class Scheduler:
         res = orchcli.run_start(self.root, tid, BUSY_TEXT if note else f"The scheduler asked for another run ({reason}).")
         if res["result"] == "started":
             orchcli.log(self.root, tid, f"Scheduler started an agent run ({reason}).")
+            starts = (load_state(self.root).get(tid, {}).get("starts") or [])[-49:]
+            update_state(self.root, tid, starts=[*starts, fmt(datetime.now(UTC))])
             self.watch[tid] = {"t0": time.time(), "at": fmt(now), "log": res.get("log"),
                                "hist": others(t)}
         elif res["result"] == "failed":
@@ -101,7 +105,9 @@ class Scheduler:
                 if (q["answer"] == TRY_AGAIN and t["status"] in OPEN
                         and self.start_run(t["id"], "you chose Try again", now) != "failed"):
                     started.append(t["id"])
-                    if t.get("waiting_on"):  # the wait that stayed after the failed start is over now
+                    w = t.get("waiting_on") or {}
+                    until = parse(w.get("until")) if w.get("kind") == "time" else None
+                    if until and until <= now:  # the time wait that stayed after the failed start is over
                         orchcli.call(self.root, "wait", t["id"], "--clear")
                         if t["status"] != "active":
                             orchcli.call(self.root, "ticket", "status", t["id"], "active")
@@ -145,15 +151,17 @@ class Scheduler:
                 nxt = next_after(cron, now)
                 upd["next_run"] = fmt(nxt) if nxt else None
                 update_state(self.root, tid, **upd)
-        if self._inbox_due(now):
+        force = self.wake.is_set()
+        self.wake.clear()
+        if self._inbox_due(now, force):
             started += self.inbox(now)
         return started
 
     # -- relay inbox --------------------------------------------------------
-    def _inbox_due(self, now: datetime) -> bool:
+    def _inbox_due(self, now: datetime, force: bool = False) -> bool:
         if not (self.root / ".orch" / "secrets" / "relay.json").is_file():
             return False
-        if self.last_inbox and now - self.last_inbox < timedelta(seconds=self.cfg["inbox_every"]):
+        if not force and self.last_inbox and now - self.last_inbox < timedelta(seconds=self.cfg["inbox_every"]):
             return False
         self.last_inbox = now
         return bool(orchcli.addon_on(self.root, "relay"))  # the relay add-on is off here: no inbox pass
@@ -205,12 +213,24 @@ class Scheduler:
         return None
 
     # -- loop ---------------------------------------------------------------
-    def run_forever(self, once: bool = False, sleep=time.sleep) -> None:
-        while True:
-            if orchcli.is_active(self.root) is False:
-                return  # turned off in this workspace: stop by ourselves
-            now = datetime.now(UTC)
-            self.tick(now)
-            if once:
-                return
-            sleep(min(self.cfg["interval"], 5) if self.watch else self.cfg["interval"])
+    def run_forever(self, once: bool = False, sleep=None) -> None:
+        stop = threading.Event()
+        if not once and sleep is None:
+            from .listen import Listener  # LS-09: a long poll wakes the loop when something arrives
+
+            threading.Thread(target=Listener(self.root, self.wake).run, args=(stop,), daemon=True).start()
+        try:
+            while True:
+                if orchcli.is_active(self.root) is False:
+                    return  # turned off in this workspace: stop by ourselves
+                now = datetime.now(UTC)
+                self.tick(now)
+                if once:
+                    return
+                secs = min(self.cfg["interval"], 5) if self.watch else self.cfg["interval"]
+                if sleep is not None:
+                    sleep(secs)
+                else:
+                    self.wake.wait(secs)
+        finally:
+            stop.set()

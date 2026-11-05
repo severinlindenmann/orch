@@ -27,6 +27,9 @@ elif args[:2] == ["addon", "list"]:
                       {{"name": "relay", "active": not (root / "relay-off").exists()}}]))
 elif args[0] == "wait" and "--clear" in args:
     t = load(args[1]); t["waiting_on"] = None; note(t, "Wait cleared"); save(t); print("{{}}")
+elif args[:2] == ["relay", "inbox"] and "--since" in args:
+    p = root / "since.json"
+    print(p.read_text() if p.exists() else json.dumps({{"next": int(args[args.index("--since") + 1]), "items": []}}))
 elif args[:2] == ["relay", "inbox"]:
     p = root / "inbox.json"
     print(p.read_text() if p.exists() else "[]")

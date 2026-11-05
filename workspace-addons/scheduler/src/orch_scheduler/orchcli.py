@@ -97,3 +97,13 @@ def run_running(root: Path, tid: str) -> bool | None:
 
 def ticket(root: Path, tid: str) -> dict | None:
     return next((t for t in tickets(root) if t["id"] == tid), None)
+
+
+def relay_since(root: Path, cursor: int, wait: int = 30):
+    """`orch relay inbox --since <cursor> --wait N --json` (marks nothing seen). None on failure."""
+    data = call(root, "relay", "inbox", "--since", str(cursor), "--wait", str(wait), by=False)
+    return data if isinstance(data, dict) else None
+
+
+def relay_ready(root: Path) -> bool:
+    return (root / ".orch" / "secrets" / "relay.json").is_file() and bool(addon_on(root, "relay"))
