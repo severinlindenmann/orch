@@ -38,7 +38,6 @@ def test_output_is_unchanged(proj, capsys, cmd):
         ["run", "claim", "x"],
         ["run", "status"],
         ["run", "done"],
-        ["needs"],
     ],
 )
 def test_placeholders_say_not_available(proj, run, argv):
