@@ -2,8 +2,6 @@ import json
 import urllib.error
 import urllib.request
 
-import pytest
-
 from orch_dashboard.data import find_workspace, load_state
 
 
@@ -27,14 +25,9 @@ def test_state_reads_contract_ticket(ws):
     assert len(t["checklist"]) == 3 and t["questions"][0]["answer"] is None
 
 
-@pytest.mark.xfail(reason='contract changed in PR #52; rewritten in lane B (dashboard: scheduler is an add-on view now)', strict=True)
-def test_scheduler_rows(ws):
-    rows = load_state(ws)["scheduler"]
-    by = {r["ticket"]: r for r in rows}
-    assert by["t_weekly01"]["kind"] == "recurring" and by["t_weekly01"]["cron"] == "0 8 * * 1"
-    assert by["t_weekly01"]["next_run"] == "2026-11-09T08:00:00Z"
-    assert by["t_weekly01"]["last_exit"] == 1 and by["t_7k3f9q"]["last_exit"] is None
-    assert by["t_7k3f9q"]["kind"] == "once" and by["t_7k3f9q"]["wake_at"] == "2026-11-05T07:00:00Z"
+def test_scheduler_is_not_a_dashboard_concept(ws):
+    s = load_state(ws)
+    assert "scheduler" not in s and s["addons"] == []  # no orch command, no add-ons: no trace of any add-on
 
 
 def test_inbox_seen_flag_and_no_secrets(ws):
@@ -100,3 +93,35 @@ def test_snapshot_state_has_no_names_and_unknown_sender_is_not_admin(tmp_path):
     assert load_state(tmp_path, include_inbox=False)["names"] == {}
     assert _who("admin", {}) == "Admin"
     assert _who("someone", {}) == "Unknown sender"
+
+
+def test_addon_endpoint_serves_only_active_tabs(ws, fake_orch):
+    import threading
+
+    from orch_dashboard.server import make_server
+    srv = make_server(ws, 0, orch_bin=str(fake_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        st = json.loads(get(base + "/api/state")[1])
+        assert [a["name"] for a in st["addons"]] == ["scheduler"]
+        code, body, _ = get(base + "/api/addon/scheduler")
+        assert code == 200 and json.loads(body)["state"] == "ok"
+        assert get(base + "/api/addon/wiki")[0] == 404  # installed, not active
+        assert get(base + "/api/addon/..%2F..%2Fx")[0] == 404
+        assert get(base + "/api/addon/scheduler", "POST")[0] == 405
+        assert get(base + "/blocks.js")[0] == 200
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_tickets_come_from_the_orch_command_when_there_is_one(ws, fake_orch):
+    t = json.loads((ws / ".orch" / "tickets" / "t_7k3f9q.json").read_text())
+    t["title"] = "From the command"
+    (fake_orch.parent / "tickets.json").write_text(json.dumps([t]))
+    src = fake_orch.read_text().replace('elif a[1:] == ["view", "--json"]:',
+                                        'elif a[:2] == ["ticket", "list"]:\n    print((d / "tickets.json").read_text())\nelif a[1:] == ["view", "--json"]:')
+    fake_orch.write_text(src)
+    s = load_state(ws, orch_bin=str(fake_orch))
+    assert [x["title"] for x in s["tickets"]] == ["From the command"]

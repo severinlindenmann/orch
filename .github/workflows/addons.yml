@@ -11,6 +11,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
       - run: uv run ruff check .
+      - run: node --check src/orch_dashboard/web/app.js && node --check src/orch_dashboard/web/blocks.js
       - run: uv run pytest -q
   scheduler:
     runs-on: ubuntu-latest

@@ -111,18 +111,18 @@
     const hint = compact || snapshot ? '' : `<p class="ask-hint">${ic('chat')}Answer in your agent or on your phone.</p>`;
     return `<${as} class="ask${compact ? ' compact' : ''}"${open}><span class="ask-icon">${ic('question')}</span><div class="ask-body"><h2>${esc(q.text)}</h2><div class="ask-ticket">${esc(ticket.title)}</div>${compact ? '' : optionPills(q) + hint}</div>${as === 'a' && !snapshot ? ic('chevron', 'go') : ''}</${as}>`;
   }
+  const wakeOf = ticket => ticket.waiting_on?.kind === 'time' ? ticket.waiting_on.until : null;
   function waitTag(ticket) {
-    if (ticket.status !== 'waiting' || ticket.type === 'recurring') return '';
-    const w = ticket.waiting_on, wake = ticket.wake_at;
-    if (w && w.kind === 'workspace') return tag('wait', 'chat', `Reply from ${names()[w.ref] || 'another workspace'}`);
-    if (w && w.kind === 'webhook') return tag('wait', 'hourglass', 'Outside event');
+    if (ticket.status !== 'waiting') return '';
+    const w = ticket.waiting_on, wake = wakeOf(ticket);
+    if (w && w.kind === 'ticket') return tag('wait', 'hourglass', 'Waiting for another ticket');
+    if (w && w.kind === 'external') return tag('wait', 'hourglass', 'Outside event');
     if (wake) return tag('wait', 'clock', shortWhen(wake));
     return tag('wait', 'hourglass', w && w.kind === 'question' ? 'Waiting for an answer' : 'Waiting');
   }
   function row(ticket) {
     const count = openQuestions(ticket).length, needs = count > 0;
-    const chips = [needs ? tag('need', 'question', count > 1 ? `${count} questions` : 'Your answer') : waitTag(ticket),
-      ticket.type === 'recurring' || ticket.ext?.scheduler?.cron ? tag('repeat', 'repeat', cronShort(ticket.ext?.scheduler?.cron) || 'Repeats') : ''].filter(Boolean).join('');
+    const chips = (needs ? tag('need', 'question', count > 1 ? `${count} questions` : 'Your answer') : waitTag(ticket));
     return `<a class="card s-${esc(ticket.status)}${needs ? ' needs' : ''}" href="${esc(ticketHref(ticket.id))}"><div class="card-main"><div class="card-title">${esc(ticket.title)}</div>${chips ? `<div class="tags">${chips}</div>` : ''}</div>${ring(ticket, 44, true)}</a>`;
   }
   const mini = ticket => `<a class="mini s-${esc(ticket.status)}" href="${esc(ticketHref(ticket.id))}">${ic('check')}<span class="mini-title">${esc(ticket.title)}</span><time>${esc(ago(ticket.updated_at))}</time></a>`;
@@ -167,6 +167,74 @@
     }).join('');
     return heading('Tickets') + `<div class="glance">${statusBar(tickets)}${weekBars(tickets)}</div>` + asks + body;
   }
+  // ---- add-ons: ticket-detail rows (from the manifest's ticket_view over ext.<name>) and tabs ----
+  const addons = () => array(state.addons);
+  const cronHuman = cron => cronShort(cron) || String(cron);
+  function addonValue(row, value) {
+    if (value == null || value === '' || (Array.isArray(value) && !value.length)) return '';
+    if (row.format === 'time') return esc(date(value));
+    if (row.format === 'cron-human') return esc(cronHuman(value));
+    if (row.format === 'yes-no') return value === true ? 'Yes' : value === false ? 'No' : '';
+    if (row.format === 'chips') return `<div class="chips">${array(value).map(v => `<span class="chip">${esc(v)}</span>`).join('')}</div>`;
+    return typeof value === 'object' ? '' : esc(value);
+  }
+  function addonRows(ticket) {
+    const rows = addons().flatMap(a => array(a.ticket_view).map(r => [r, (ticket.ext || {})[a.name]]))
+      .map(([r, ext]) => [r, ext && typeof ext === 'object' ? addonValue(r, ext[r.field]) : ''])
+      .filter(([, v]) => v);
+    return rows.length ? `<dl class="addon-rows">${rows.map(([r, v]) => `<dt>${esc(r.label)}</dt><dd>${v}</dd>`).join('')}</dl>` : '';
+  }
+  const addonViews = {};   // name -> {state, view, as_of, message} (last answer shown)
+  let addonTimer = null, addonSkelTimer = null, addonBusy = false;
+  function addonTab(name) {
+    const a = addons().find(x => x.name === name && x.dashboard);
+    if (!a) return '';
+    return heading(a.dashboard.label) + `<div id="addon-body" data-name="${esc(name)}"></div>`;
+  }
+  function addonBody(a, res) {
+    if (!res) return '<div class="skeleton-page" aria-busy="true" aria-label="Loading"><div class="skeleton skeleton-row addon-skel hide"></div><div class="skeleton skeleton-row addon-skel hide"></div></div>';
+    const retry = '<button type="button" class="retry addon-retry">Try again</button>';
+    if (res.state === 'error') return `<section class="panel empty"><span class="empty-ic">${ic(a.dashboard.icon === 'clock' ? 'clock' : 'x')}</span><h2>Can’t show ${esc(a.dashboard.label)} right now.</h2><p>${esc(res.message || '')} Nothing here was changed.</p>${retry}</section>`;
+    const v = res.view, asOf = timeOf(res.as_of);
+    const stale = res.state === 'stale' ? `<p class="addon-stale" role="status">${ic('clock')}<span>Not up to date. Showing the last answer from ${esc(asOf)}.</span>${retry}</p>` : '';
+    const notice = v.notice ? `<p class="addon-notice t-${esc(v.notice_tone || 'neutral')}">${esc(v.notice)}</p>` : '';
+    return `<p class="asof">As of ${esc(asOf)}</p>` + stale + notice + '<div id="addon-blocks"></div>';
+  }
+  // Fill #addon-body: chrome as text, blocks as DOM (textContent only).
+  function paintAddon(name) {
+    const a = addons().find(x => x.name === name), el = document.getElementById('addon-body');
+    if (!a || !el) return;
+    const res = addonViews[name];
+    el.innerHTML = addonBody(a, res);
+    const host = document.getElementById('addon-blocks');
+    if (!host || !res.view) return;
+    const frag = OrchBlocks.render(res.view.blocks);
+    if (frag.childNodes.length) host.append(frag);
+    else host.innerHTML = `<section class="panel empty"><span class="empty-ic">${ic('list')}</span><h2>Nothing to show yet.</h2><p>This page fills in as soon as there is something to see.</p></section>`;
+  }
+  async function loadAddon(name, manual) {
+    if (addonBusy) return;
+    addonBusy = true;
+    const btn = content.querySelector('.addon-retry');
+    if (manual && btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); btn.textContent = 'Trying…'; }
+    try {
+      if (snapshot) { addonViews[name] = (state.views || {})[name]; }
+      else {
+        const r = await fetch('/api/addon/' + encodeURIComponent(name), {cache: 'no-store'});
+        if (!r.ok) throw new Error('addon');
+        addonViews[name] = await r.json();
+      }
+    } catch (_) {
+      addonViews[name] = addonViews[name] ? {...addonViews[name], state: 'stale', message: 'No answer.'} : {state: 'error', message: 'No answer.', view: null};
+    } finally { addonBusy = false; }
+    if (location.hash === '#addon/' + name) paintAddon(name);
+  }
+  function startAddon(name) {
+    window.clearTimeout(addonSkelTimer); window.clearInterval(addonTimer);
+    addonSkelTimer = window.setTimeout(() => document.querySelectorAll('.addon-skel').forEach(el => el.classList.remove('hide')), 300);
+    loadAddon(name);
+    if (!snapshot) addonTimer = window.setInterval(() => loadAddon(name), 15000);
+  }
   function detail(ticket) {
     const steps = array(ticket.checklist), open = openQuestions(ticket), qs = array(ticket.questions);
     const blocker = open.length ? steps.findIndex(s => !s.done) : -1;
@@ -176,12 +244,12 @@
       return `<li class="step ${kind}${i === blocker ? ' blocked' : ''}"><span class="node" role="img" aria-label="${item.done ? 'Done' : i === blocker ? 'Needs your answer' : 'Not done'}">${node}</span><div class="step-body"><span class="check-text">${esc(item.text)}</span>${item.done ? `<div class="chips">${evidence.length ? evidence.map(evidenceChip).join('') : `<span class="chip noproof">${ic('question')}No proof yet</span>`}</div>` : ''}</div></li>`;
     }).join('')}</ol></section>` : `<section class="panel steps-panel no-steps"><p>No steps yet. Your agent adds them as it plans the work.</p></section>`;
     const history = array(ticket.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
-    const cron = cronShort(ticket.ext?.scheduler?.cron), wake = parse(ticket.wake_at);
+    const wake = parse(wakeOf(ticket));
     const more = `<dl><dt>Type</dt><dd>${esc(label(ticket.type))}</dd><dt>Created</dt><dd>${esc(date(ticket.created_at))}</dd></dl>`;
     const asks = qs.map(q => q.answer == null ? askCard(ticket, q, 'div')
       : `<div class="ask done"><span class="ask-icon">${ic('check')}</span><div class="ask-body"><h2>${esc(q.text)}</h2><div class="pills"><span class="opt rec">${esc(q.answer)}</span></div>${q.answered_by ? `<div class="ask-ticket">${esc(String(q.answered_by).replace(/^(agent|human):/, ''))}${q.via ? ` · ${esc(q.via)}` : ''}</div>` : ''}</div></div>`).join('');
-    const side = (wake ? `<div class="side-item">${ic('calendar')}<div class="cal"><b>${esc(fmt(wake, {weekday: 'short'}))}</b><span>${wake.getDate()}</span></div><div class="cal-time">${esc(timeOf(ticket.wake_at))}<small>${esc(fmt(wake, {month: 'long'}))}</small></div></div>` : '')
-      + (cron ? `<div class="side-item">${tag('repeat', 'repeat', cron)}</div>` : '')
+    const side = (wake ? `<div class="side-item">${ic('calendar')}<div class="cal"><b>${esc(fmt(wake, {weekday: 'short'}))}</b><span>${wake.getDate()}</span></div><div class="cal-time">${esc(timeOf(wakeOf(ticket)))}<small>${esc(fmt(wake, {month: 'long'}))}</small></div></div>` : '')
+      + addonRows(ticket)
       + (array(ticket.links).length ? linkBox(ticket.links) : '')
       + disclosure('more', 'More details', more);
     return '<a class="back" href="#tickets">' + ic('chevron', 'flip') + 'All tickets</a>'
@@ -189,37 +257,6 @@
       + (asks ? `<div class="asks">${asks}</div>` : '')
       + `<div class="detail-grid"><div>${stepper}${history.length ? `<section class="history">${disclosure('history', `History · ${history.length}`, `<ol class="timeline">${history.map(h => `<li>${esc(noIds(h.text))}<small>${esc(date(h.at))} · ${esc(String(h.by).replace(/^(agent|human):/, ''))}</small></li>`).join('')}</ol>`, 'clock')}</section>` : ''}</div>`
       + `<aside class="panel context">${side}</aside></div>`;
-  }
-  function nextCron(cron) {
-    const m = /^(\d{1,2}) (\d{1,2}) \* \* (\*|\d)$/.exec(String(cron || '').trim());
-    if (!m) return null;
-    const now = new Date();
-    for (let i = 0; i < 8; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, Number(m[2]), Number(m[1]));
-      if (d > now && (m[3] === '*' || d.getDay() === Number(m[3]) % 7)) return d.toISOString();
-    }
-    return null;
-  }
-  function scheduler() {
-    const rows = array(state.scheduler).map(r => ({...r, at: r.next_run || r.wake_at || nextCron(r.cron)}));
-    if (!rows.length) return heading('Scheduler') + `<section class="panel empty"><span class="empty-ic">${ic('calendar')}</span><h2>Nothing scheduled yet.</h2><p>Ask your agent: “Run this every Monday morning.”</p><button type="button" class="copy-req" data-copy="Run this every Monday morning.">Copy this request</button></section>`;
-    const now = new Date(), start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const days = Array.from({length: 7}, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
-    const range = `${fmt(days[0], {weekday: 'short', day: 'numeric', month: 'short'})} – ${fmt(days[6], {weekday: 'short', day: 'numeric', month: 'short'})}`;
-    const strip = `<ol class="strip">${days.map(d => {
-      const runs = rows.filter(r => { const w = parse(r.at); return w && sameDay(w, d); });
-      return `<li class="day${sameDay(d, now) ? ' today' : ''}${runs.length ? ' has' : ' empty'}"><div class="day-head"><span>${esc(fmt(d, {weekday: 'short'}))}</span><b>${d.getDate()}</b></div>${runs.length ? runs.map(r => `<a class="run${r.last_exit != null && Number(r.last_exit) !== 0 ? ' failed' : ''}" href="${esc(ticketHref(r.ticket))}" aria-label="${esc(`${r.title}, ${timeOf(r.at)}`)}" title="${esc(r.title)}">${ic(r.kind === 'recurring' ? 'repeat' : 'clock')}<time>${esc(timeOf(r.at))}</time><span>${esc(r.title)}</span></a>`).join('') : '<span class="none-day" aria-hidden="true">–</span>'}</li>`;
-    }).join('')}</ol>`;
-    const sorted = rows.slice().sort((a, b) => String(a.at || '~').localeCompare(String(b.at || '~')));
-    const row = (r, hero) => {
-      const every = cronShort(r.cron), w = parse(r.at), failed = r.last_exit != null && Number(r.last_exit) !== 0;
-      const failTag = failed ? tag('fail', 'x', 'Last run failed', r.last_run ? `Failed ${date(r.last_run)}` : '') : '';
-      return `<a class="sched${hero ? ' hero' : ''}${failed ? ' failed' : ''}" href="${esc(ticketHref(r.ticket))}"><div class="sched-time">${w ? `<b>${esc(timeOf(r.at))}</b><span class="tag wait">${esc(fmt(w, {weekday: 'short', day: 'numeric', month: 'short'}))}</span>` : `<span class="tag">Not scheduled yet</span>`}</div><div class="sched-main"><h2>${esc(r.title)}</h2>${every || failed ? `<div class="tags">${failTag}${every ? tag('repeat', 'repeat', every) : ''}</div>` : ''}</div>${ic('chevron', 'go')}</a>`;
-    };
-    const next = sorted[0], rest = sorted.slice(1);
-    return heading('Scheduler') + `<section class="panel strip-panel"><div class="range">${esc(range)}</div>${strip}</section>`
-      + `<h2 class="sub">Next</h2><section class="panel sched-list">${row(next, true)}</section>`
-      + (rest.length ? `<h2 class="sub">Then</h2><section class="panel sched-list then">${rest.map(r => row(r, false)).join('')}</section>` : '');
   }
   const kindIcon = {text: 'chat', file: 'file', question: 'question', answer: 'test'};
   const hue = name => { let h = 0; for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) % 5; return h + 1; };
@@ -260,28 +297,40 @@
       ticket = array(state.tickets).find(item => String(item.id) === id);
       route = ticket ? 'ticket' : 'tickets';
     }
-    if (!['tickets', 'ticket', 'scheduler', 'inbox'].includes(route) || (route === 'inbox' && (snapshot || state.inbox == null)) || (snapshot && route === 'scheduler')) route = 'tickets';
+    let addonName = '';
+    if (route.startsWith('addon/')) { addonName = route.slice(6); route = addons().some(x => x.name === addonName && x.dashboard) ? 'addon' : 'tickets'; }
+    if (!['tickets', 'ticket', 'addon', 'inbox'].includes(route) || (route === 'inbox' && (snapshot || !state.relay))) route = 'tickets';
+    window.clearInterval(addonTimer); window.clearTimeout(addonSkelTimer);
     if (route === 'tickets' && currentRoute !== '#tickets') history.replaceState(null, '', '#tickets');
     const banner = snapshot ? `<div class="snapshot-banner">Shared copy · ${esc(date(state.now))}</div>` : '';
-    content.classList.remove('fade'); content.innerHTML = banner + (route === 'ticket' ? detail(ticket) : route === 'scheduler' ? scheduler() : route === 'inbox' ? inbox() : list());
+    content.classList.remove('fade'); content.innerHTML = banner + (route === 'ticket' ? detail(ticket) : route === 'addon' ? addonTab(addonName) : route === 'inbox' ? inbox() : list());
     content.querySelectorAll('details').forEach(el => { el.open = openKeys.has(el.dataset.key); if (focusedKey === el.dataset.key) el.querySelector('summary').focus({preventScroll: true}); });
     for (const id of ['workspace-name', 'top-workspace']) document.getElementById(id).textContent = state.workspace ?? 'Workspace';
     const count = (id, n) => { document.getElementById(id).textContent = n > 99 ? '99+' : n > 0 ? n : ''; };
     count('ticket-count', array(state.tickets).length);
-    count('schedule-count', array(state.scheduler).length);
     count('inbox-count', array(state.inbox).filter(m => !m.seen && m.type !== 'refresh-hint').length);
-    document.getElementById('inbox-nav').hidden = snapshot || state.inbox == null;
-    document.getElementById('side-nav').hidden = snapshot;
+    document.getElementById('inbox-nav').hidden = snapshot || !state.relay;
+    document.querySelectorAll('.addon-nav').forEach(el => el.remove());
+    const nav = document.getElementById('side-nav');
+    for (const a of addons().filter(x => x.dashboard)) {
+      const link = document.createElement('a');
+      link.className = 'addon-nav'; link.href = '#addon/' + a.name;
+      link.insertAdjacentHTML('beforeend', ic(a.dashboard.icon));
+      link.append(a.dashboard.label);
+      nav.append(link);
+    }
+    document.getElementById('side-nav').hidden = snapshot && !addons().some(x => x.dashboard);
     document.getElementById('workspace-mode').textContent = snapshot ? 'Shared copy' : 'Local workspace';
-    document.getElementById('crumb').textContent = route === 'ticket' ? ticket.title : label(route);
+    document.getElementById('crumb').textContent = route === 'ticket' ? ticket.title : route === 'addon' ? addons().find(x => x.name === addonName).dashboard.label : label(route);
     document.getElementById('updated').textContent = snapshot ? '' : ` · Updated ${timeOf(new Date().toISOString())}`;
     document.querySelectorAll('nav.side-nav a').forEach(a => {
-      const selected = a.hash === '#' + (route === 'ticket' ? 'tickets' : route);
+      const selected = a.hash === (route === 'addon' ? '#addon/' + addonName : '#' + (route === 'ticket' ? 'tickets' : route));
       a.classList.toggle('active', selected);
       if (selected) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
     if (!sameRoute) { void content.offsetWidth; content.classList.add('fade'); }
     renderedRoute = location.hash || '#tickets';
+    if (route === 'addon') { paintAddon(addonName); startAddon(addonName); }
     window.scrollTo(...(sameRoute ? scroll : [0, 0]));
   }
   let fetching = false;
@@ -312,6 +361,10 @@
     if (event.key !== 'Escape') return;
     const open = document.activeElement?.closest?.('details[open]');
     if (open) { open.open = false; open.querySelector('summary').focus(); }
+  });
+  document.addEventListener('click', event => {
+    const r = event.target.closest?.('.addon-retry'), body = document.getElementById('addon-body');
+    if (r && body) loadAddon(body.dataset.name, true);
   });
   document.addEventListener('click', async event => {
     const b = event.target.closest?.('.copy-req');

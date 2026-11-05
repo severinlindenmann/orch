@@ -1,19 +1,19 @@
 [project]
 name = "orch-dashboard"
-version = "0.1.0"
-description = "orch dashboard add-on: read-only web view of the workspace tickets"
+version = "0.2.0"
+description = "orch dashboard add-on: read-only web view of the workspace tickets and add-on tabs"
 requires-python = ">=3.11"
 dependencies = []
 
 [project.scripts]
 orch-dashboard = "orch_dashboard.cli:main"
 
-# The orch CLI discovers add-on commands in this group: `orch dashboard ...` calls main(argv).
+# The orch CLI finds the manifest (orch-addon.toml) of this module without importing it.
 [project.entry-points."orch.addons"]
-dashboard = "orch_dashboard.cli:main"
+dashboard = "orch_dashboard"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6", "jsonschema>=4.20", "rfc3339-validator>=0.1.4"]
 
 [build-system]
 requires = ["hatchling"]

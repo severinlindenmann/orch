@@ -5,12 +5,14 @@ description: Use when the user wants to see their orch tickets in a browser, or 
 
 # orch dashboard
 
-A light, read-only web page that shows the tickets in `.orch/tickets/` (active, waiting, open, done), the ticket details,
-the scheduler (wake-ups and recurring tickets) and the relay inbox.
+A light, read-only web page that shows the tickets (active, waiting, open, done), the ticket details, the relay inbox
+(only when the relay is set up) and one tab for every add-on that is turned on in this workspace and has a page
+(for example Schedule). Add-on tabs and ticket rows appear when the add-on is turned on and go when it is turned off.
 
 ## Commands
 - `orch dashboard` starts it on http://127.0.0.1:8420 (this computer only). Tell the user the link. It follows changes by itself.
-- `orch dashboard snapshot` writes one static HTML file `dashboard-snapshot.html` (no inbox).
+- `orch dashboard snapshot` writes one static HTML file `dashboard-snapshot.html` (no inbox, no add-on tabs).
+- Add `--with-addons` to a snapshot only when the user asks to include add-on tabs and their ticket rows.
 - `orch dashboard snapshot --publish` publishes that snapshot as a private publish app and prints the link.
 
 ## Rules
