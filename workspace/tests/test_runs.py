@@ -287,3 +287,25 @@ def test_bad_input_is_refused(proj, new_ticket):
         runs.pending_add(proj, tid, "x", "bogus", "t")
     with pytest.raises(Refused):
         runs.pending_add(proj, tid, "x", "text", "")
+
+
+def test_release_needs_the_run_when_a_process_holds_the_claim(proj, new_ticket, run, monkeypatch):
+    tid = new_ticket()
+    rec = runs.claim(proj, tid, "a", "claude", pid=os.getpid())
+    code, _, err = run("run", "release", tid)
+    assert code == 2 and rec["run"] in err and runs.read(proj, tid)
+    monkeypatch.setenv("ORCH_RUN", rec["run"])
+    assert run("run", "release", tid)[0] == 0 and runs.read(proj, tid) is None
+    monkeypatch.delenv("ORCH_RUN")
+    runs.claim(proj, tid, "agent:hand", "claude")  # a hand-started claim has no pid
+    assert run("run", "release", tid)[0] == 0 and runs.read(proj, tid) is None
+
+
+def test_orch_writes_of_a_hand_started_agent_renew_its_claim(proj, new_ticket, run):
+    tid = new_ticket()
+    runs.claim(proj, tid, "agent:hand", "claude")
+    _edit(proj, tid, renewed_at=_ago(40))
+    run("log", tid, "other agent", "--by", "agent:other")
+    assert runs.state(runs.read(proj, tid)) == "maybe-stale"
+    run("log", tid, "mine", "--by", "agent:hand")
+    assert runs.state(runs.read(proj, tid)) == "alive"

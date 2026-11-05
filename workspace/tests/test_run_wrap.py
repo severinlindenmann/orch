@@ -91,18 +91,29 @@ def test_second_start_gets_exit_2_and_the_event_goes_in_after_exactly_once(proj,
     assert len(items) == 1 and items[0]["delivered_at"]
 
 
-def test_killed_wrapper_loses_no_input_and_it_is_delivered_once_after_restart(proj, run, gen):
+def test_killed_wrapper_with_a_live_agent_still_holds_the_ticket(proj, run, gen):
     log = gen("--silent 1.5")
     tid = _ticket_with_check(proj, run)
     run("run", "start", tid)
     _wait(proj, tid, gone=False)
-    pid = runs.read(proj, tid)["pid"]
+    rec = runs.read(proj, tid)
+    end = time.monotonic() + 10
+    while not runs.read(proj, tid).get("agent_pid") and time.monotonic() < end:
+        time.sleep(0.05)
+    rec = runs.read(proj, tid)
+    assert rec["agent_pid"] and rec["agent_pid_started"]
     runs.pending_add(proj, tid, "phone", "message", "Use CHF")
-    os.kill(pid, signal.SIGKILL)  # the wrapper we started
-    os.waitpid(pid, 0)  # this test is its parent (a real `orch run start` exits and init reaps it)
+    os.kill(rec["pid"], signal.SIGKILL)  # the wrapper we started
+    os.waitpid(rec["pid"], 0)  # this test is its parent (a real `orch run start` exits and init reaps it)
+    assert runs.state(runs.read(proj, tid)) == "alive"  # the agent still works: never two agents
+    code, out, _ = run("run", "start", tid, "--json")
+    assert code == 2 and json.loads(out)["pending"] is True
+    end = time.monotonic() + 15
+    while runs.state(runs.read(proj, tid)) != "dead" and time.monotonic() < end:
+        time.sleep(0.1)
     assert runs.state(runs.read(proj, tid)) == "dead"
-    assert [i["text"] for i in runs.undelivered(proj, tid)] == ["Use CHF"]
-    code, out, _ = run("run", "start", tid, "--json")  # a dead claim is taken over without asking
+    assert "Use CHF" in " ".join(i["text"] for i in runs.undelivered(proj, tid))
+    code, out, _ = run("run", "start", tid, "--json")  # now the dead claim is taken over without asking
     assert code == 0
     _wait(proj, tid)
     told = [p for p in _lines(log, "prompt") if "Use CHF" in p]
@@ -117,7 +128,12 @@ def _fake_claude(tmp_path, monkeypatch, resume_works):
     f.write_text(
         "#!/bin/sh\n"
         f'echo "$*" | tr "\\n" " " >> {shlex.quote(str(out))}; echo >> {shlex.quote(str(out))}\n'
-        + ("" if resume_works else 'for a in "$@"; do [ "$a" = "--resume" ] && exit 1; done\n')
+        + (
+            ""
+            if resume_works
+            else 'for a in "$@"; do [ "$a" = "--resume" ] && '
+            '{ echo "No conversation found with session ID: x"; exit 1; }; done\n'
+        )
         + "exit 0\n"
     )
     f.chmod(f.stat().st_mode | stat.S_IEXEC)
@@ -197,3 +213,53 @@ def test_wrap_refuses_a_stdin_file_outside_the_run_folder(proj, run, gen):
     code, _, err = run("run", "_wrap", rec["run"], "--ticket", tid, "--agent", "fake",
                        "--stdin-file", str(victim), "--", "true")  # fmt: skip
     assert code == 2 and victim.exists()
+
+
+def test_a_plain_failure_does_not_fall_back_to_fresh(proj, run, tmp_path, monkeypatch):
+    d = tmp_path / "clbin"
+    d.mkdir()
+    out = tmp_path / "calls.txt"
+    f = d / "claude"
+    f.write_text(f"#!/bin/sh\necho x >> {shlex.quote(str(out))}\necho 'rate limit reached'\nexit 1\n")
+    f.chmod(f.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ["PATH"])
+    config.set_key(proj, "workspace", "agent", "claude")
+    tid = _ticket_with_check(proj, run)
+    old = "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
+    tickets.record_session(proj, tid, "claude", old, runs.host())
+    assert run("run", "start", tid)[0] == 0
+    _wait(proj, tid)
+    assert len(out.read_text().splitlines()) == 1  # one try, no second run
+    assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) == old
+
+
+def test_the_fresh_fallback_carries_the_pending_input(proj, run, tmp_path, monkeypatch):
+    calls = _fake_claude(tmp_path, monkeypatch, resume_works=False)
+    config.set_key(proj, "workspace", "agent", "claude")
+    tid = _ticket_with_check(proj, run)
+    tickets.record_session(proj, tid, "claude", "f88ec2ca-0930-42dd-9d5e-00fbbd59067d", runs.host())
+    runs.pending_add(proj, tid, "phone", "message", "Also add October")
+    assert run("run", "start", tid)[0] == 0
+    _wait(proj, tid)
+    lines = calls.read_text(encoding="utf-8").splitlines()
+    assert "Also add October" in lines[0] and "Also add October" in lines[1]
+    assert runs.undelivered(proj, tid) == []
+
+
+def test_wrap_needs_the_exact_prompt_file_of_a_live_claim(proj, run, gen):
+    gen()
+    tid = _ticket_with_check(proj, run)
+    rec = runs.claim(proj, tid, "x", "fake")
+    other = proj / ".orch" / "run" / "other.txt"
+    other.write_text("keep")
+    code, _, err = run("run", "_wrap", rec["run"], "--ticket", tid, "--agent", "fake",
+                       "--stdin-file", str(other), "--", "true")  # fmt: skip
+    assert code == 2 and other.exists()
+    code, _, _ = run("run", "_wrap", "r_nosuchrun", "--ticket", tid, "--agent", "fake", "--", "true")
+    assert code == 2 and runs.read(proj, tid)["run"] == rec["run"]
+
+
+def test_prompt_file_is_private_from_the_start(proj):
+    p = proj / ".orch" / "run" / "x.txt"
+    runs._atomic(p, "secret", 0o600)
+    assert stat.S_IMODE(p.stat().st_mode) == 0o600

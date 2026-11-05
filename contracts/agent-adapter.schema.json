@@ -86,7 +86,8 @@
           "properties": {
             "id": { "enum": ["chosen-by-orch", "from-output", "none"], "description": "chosen-by-orch = orch passes {new_session}; from-output = read from the run's output; none = no sessions." },
             "hand_started": { "oneOf": [{ "$ref": "#/$defs/signal" }, { "type": "null" }], "description": "How a session started by hand reports its id, or null." },
-            "parse": { "type": "string", "pattern": "^[a-z0-9:-]{1,40}/[0-9]{1,3}$", "description": "For from-output: name of the output parser." }
+            "parse": { "type": "string", "pattern": "^[a-z0-9:-]{1,40}/[0-9]{1,3}$", "description": "For from-output: name of the output parser." },
+            "missing": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Optional. Case-insensitive regex for the tool's output when a resumed session does not exist. Only then does orch start fresh; any other failure is a failure. Absent = never falls back." }
           }
         },
         "capabilities": {

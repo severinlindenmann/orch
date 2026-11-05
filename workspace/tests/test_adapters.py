@@ -258,3 +258,10 @@ def test_shadow_warning_prints_once(proj, capsys):
     adapters.load("codex", proj)
     adapters.load("codex", proj)
     assert capsys.readouterr().err.count("pick another name") == 1
+
+
+def test_session_missing_is_per_adapter_and_never_for_generic():
+    assert adapters.session_missing("claude", "No conversation found with session ID: abc")
+    assert not adapters.session_missing("claude", "rate limit reached")
+    assert adapters.session_missing("codex", "Error: no rollout found for thread id 1 (code -32600)")
+    assert not adapters.session_missing("generic", "No conversation found with session ID")

@@ -80,10 +80,13 @@ def _wrap_cmd(root: Path, rest: list[str]) -> None:
     p.add_argument("--items", default="")
     a = p.parse_args(rest[:i])
     stdin = None
+    rec = runs.read(root, a.ticket)
+    if not rec or rec["run"] != a.run:
+        raise Refused("orch run _wrap is internal.")
     if a.stdin_file:
-        f = Path(a.stdin_file).resolve()
-        if runs.run_dir(root).resolve() not in f.parents:
-            raise Refused("orch run _wrap is internal.")  # never read or delete a file outside .orch/run/
+        f = Path(a.stdin_file)
+        if f.resolve() != (runs.run_dir(root) / f"prompt-{a.run}.txt").resolve():
+            raise Refused("orch run _wrap is internal.")  # never read or delete any other file
         stdin = f.read_text(encoding="utf-8")
         f.unlink(missing_ok=True)
     code = runs.wrap(
@@ -169,7 +172,13 @@ def dispatch(args, root: Path) -> bool:
             tickets.record_session(root, tid, name, args.session, runs.host())
         _out(args, {"claimed": True, "run": rec["run"]}, f"Claimed {tid} (run {rec['run']}).")
     elif sub == "release":
-        res = runs.release(root, tid, args.run)
+        run_id = args.run or os.environ.get("ORCH_RUN")
+        rec = runs.read(root, tid)
+        if rec and not run_id and isinstance(rec.get("pid"), int) and runs.state(rec) == "alive":
+            raise Refused(
+                f"An agent process is working on {tid}. Only that run can release it (--run {rec['run']})."
+            )
+        res = runs.release(root, tid, run_id)
         _out(args, res, "Released." if res["released"] else "Nothing to release.")
     elif sub == "status":
         _status(args, root)
@@ -209,7 +218,7 @@ def after_command(args, root: Path, stdout_is_json: bool) -> None:
     if getattr(args, "cmd", None) == "run":
         return
     try:
-        line = runs.footer(root, getattr(args, "by", None))
+        line = runs.footer(root, getattr(args, "by", None), getattr(args, "id", None))
     except Exception:  # a footer must never break the command it follows
         return
     if line:
