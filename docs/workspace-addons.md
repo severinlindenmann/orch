@@ -1,50 +1,69 @@
-# orch-workspace-addons (dashboard, scheduler)
+# orch-workspace-addons (dashboard, scheduler, your own)
 
-## What it does
-**Dashboard:** a light, read-only web page on the laptop that shows the ticket files. No buttons that change data.
-Optional: a read-only snapshot published as a private publish app.
-**Scheduler:** starts agent runs: once at `wake_at`, recurring by cron, and when the relay inbox brings work.
+Add-ons are split from the core but feel like one product once turned on. The core knows no add-on by name; everything
+goes through the add-on contract: `contracts/addon-manifest.md` (manifest, activation, CLI rules, views, skills, ticket data).
+
+## What they do
+**Dashboard** (optional host): a light, read-only web page on the laptop. Built-in tabs: Tickets, and Inbox when the relay is
+set up in this workspace (configured, not "online right now"). Plus one tab per active add-on with `[dashboard]`, rendered from
+`orch <name> view --json` blocks, and add-on rows in the ticket detail from `[[ticket_view]]`. No buttons that change data.
+Optional: a read-only snapshot published as a private publish app (add-on content left out by default).
+**Scheduler:** starts agent runs: wakes tickets that wait until a time (`waiting_on.kind = time`), repeats by cron
+(`ext.scheduler`), and starts work the relay inbox brings.
 
 ## Tech stack
-Python 3.12, uv, depends on `orch-workspace` (ticket code). Dashboard: stdlib `http.server` + plain HTML/CSS/JS
-(orch core `tokens.css` and orbit logo copied; no React, no build step). Scheduler: `croniter`, `subprocess`.
+Python 3.12, uv. Add-ons talk to the core only through the `orch` CLI (`--json`), never by importing it. Dashboard: stdlib
+`http.server` + plain HTML/CSS/JS (orch `tokens.css`, orbit logo, fixed icon set; no React, no build step). Scheduler: `croniter`, `subprocess`.
 
 ## Folder layout
 ```
 workspace-addons/
-  dashboard/  pyproject.toml (adds `orch dashboard` via entry point)  src/orch_dashboard/{server.py, snapshot.py, web/}  skills/orch-dashboard/  tests/
-  scheduler/  pyproject.toml (adds `orch scheduler` via entry point)  src/orch_scheduler/{loop.py, runner.py, service.py}  skills/orch-scheduler/  tests/
+  dashboard/  pyproject.toml  src/orch_dashboard/{orch-addon.toml, __main__.py, server.py, blocks.js, snapshot.py, skills/orch-dashboard/}  tests/
+  scheduler/  pyproject.toml  src/orch_scheduler/{orch-addon.toml, ext.schema.json, __main__.py, loop.py, runner.py, view.py, service.py, skills/orch-scheduler/}  tests/
 ```
-`orch addon add dashboard|scheduler` installs the package from `workspace-addons/<name>` into the orch tool env and adds its skill + AGENTS.md block to the project.
+`pyproject.toml` registers `[project.entry-points."orch.addons"] <name> = "<module>"`. `orch addon add dashboard|scheduler`
+installs (if needed) and turns the add-on on in this workspace.
 
 ## Commands
 | Command | Does |
 |---|---|
-| `orch dashboard` | Serves `127.0.0.1:8420`: ticket list (active, waiting, open, done), ticket detail, scheduler view, inbox view. Reads `.orch/` on every request |
-| `orch dashboard snapshot --publish` | Renders the same pages as static HTML and runs `orch publish app` (static, private) → link with view token |
-| `orch scheduler run` | Loop every 60 s (below). `--once` for one pass |
-| `orch scheduler start` / `stop` | Starts at login: launchd (macOS), systemd user unit (Linux), Task Scheduler at logon (Windows) |
-| `orch scheduler list` | Next wake-ups and recurring runs, in plain words |
+| `orch dashboard` | Serves `127.0.0.1:8420`: Tickets, Inbox (relay set up), add-on tabs. Reads tickets via `orch ticket list --json`, add-ons via `orch addon list --json`, tab content via `orch <name> view --json` (2 s timeout, last good result kept, "as of HH:MM") |
+| `orch dashboard snapshot --publish [--with-addons]` | Static HTML of the same pages → `orch publish app` (static, private) |
+| `orch scheduler run` / `--once` | Loop every 60 s (below) / one pass |
+| `orch scheduler start` / `stop` / `status` | Background process; `stop` also runs on `orch addon remove scheduler` |
+| `orch scheduler repeat <id> "<cron>" [--agent codex]` / `--off` | Sets `ext.scheduler {recurring, cron, agent}` via `orch ext set` |
+| `orch scheduler list` | Next wake-ups and repeats, in plain words |
+| `orch scheduler view --json` | Dashboard tab: next run, runs today, failed runs, a calendar strip, repeating list, recent runs |
 
-Scheduler pass:
-1. Ticket with `wake_at <= now` and status not done/dropped → run agent, clear `wake_at`.
-2. `type: recurring` with `ext.scheduler.cron` due (5-field, UTC) → run agent. Runs missed while the machine was off → one catch-up run, not several.
-3. `orch relay inbox --json` (if relay is set up). Run agent for: `start`/`delegate` with a valid allow (delegate first becomes a new ticket);
-   `answer` or `webhook` for a ticket that is `waiting` on it. Everything else waits for the next agent session.
-4. Run = `config.toml` agent command with prompt `Continue orch ticket <id>. Read .agents/skills/orch/SKILL.md first.`;
-   one run per ticket at a time; output to `.orch/scheduler/logs/`; history entry `by: agent:scheduler`.
-An agent that is already working runs `orch relay inbox` itself; the seen-list stops double work.
+Scheduler pass (only while active in this workspace; exits when turned off):
+1. Ticket waiting with `waiting_on.kind = time` and `until <= now`, status not done/dropped → `orch wait <id> --clear`, run agent.
+2. `ext.scheduler.recurring` with `cron` due (5-field, UTC) → run agent. Missed runs (machine off) → one catch-up run.
+3. `orch relay inbox --json` (if the relay is set up). Run agent for an allowed `start`/`delegate`, or an `answer`/`webhook` for a ticket waiting on it.
+4. Run = `[scheduler] agent` from `.orch/config.toml` with prompt `Continue orch ticket <id>. Read .agents/skills/orch/SKILL.md first.`;
+   one run per ticket at a time; logs in `.orch/addons/scheduler/logs/`; `orch log … --by agent:scheduler`; `ext.scheduler.last_run`.
 
 ## Data storage
-Reads `.orch/tickets/`, `.orch/inbox/`. Writes only `.orch/scheduler/` and the ticket fields above. Dashboard writes nothing.
+Each add-on writes only `ext.<name>` (through the CLI) and `.orch/addons/<name>/`. Config: its `[<name>]` table in `.orch/config.toml`.
+Dashboard writes nothing.
+
+## Write your own add-on
+1. A Python package with `orch-addon.toml` next to `__init__.py` (`contracts/addon-manifest.md`; minimal example
+   `contracts/examples/addon-manifest/valid-minimal.toml`) and a `__main__.py` that parses argv. Name `[a-z0-9-]`, not a core command.
+2. Entry point `[project.entry-points."orch.addons"] <name> = "<module>"`. Try it: `orch addon add ./my-addon`.
+3. Commands: `orch <name> …`; every command takes `--json`; exit 0 ok, 2 refused (`Refused: …` / `{"error": …}`).
+   Use only the public CLI (`$ORCH_BIN ticket list --json`, `ext set`, `ticket patch --if-revision`, `log`, `wait`), never the ticket files.
+4. Your space: `.orch/addons/<name>/`, ticket key `ext.<name>` (with a `ticket_ext` JSON Schema), config table `[<name>]`.
+5. Dashboard tab: `[dashboard]` label + icon from the fixed set, and `orch <name> view --json` returning
+   `contracts/addon-view.schema.json` blocks (stat, list, calendar, timeline, chips, table). Ticket detail rows: `[[ticket_view]]`.
+6. Skill `skills/orch-<name>/SKILL.md` + `AGENTS-block.md`, short, plain words, same tone as the core skills.
+7. Background process? `background = true` and a `stop` command; check that you are still active on each pass.
+**Security:** no HTML, CSS or JS reaches the dashboard: only the declared blocks, shown as plain text; links only to tickets or
+`https://`. No actions from the dashboard. A local add-on runs code on this computer with your rights — install only what you trust.
 
 ## Tests
-- T0: `uv run pytest tests/test_loop.py -k cron -x -q` (scheduler), `uv run pytest tests/test_pages.py -x -q` (dashboard).
-- Scheduler tests use a fake clock, a fake relay and a fake agent command (`python -c …` that writes a file).
-- Dashboard: page tests on HTML; Playwright click-through in e2e. CI: `workspace-addons/**`, `workspace/**`, `contracts/**`.
-
-## Install
-`orch addon add dashboard` / `orch addon add scheduler` in the project (needs orch installed, see workspace.md). `orch update` updates them too.
+- T0: `uv run pytest tests/test_loop.py -k cron -x -q` (scheduler), `uv run pytest tests/test_blocks.py -x -q` (dashboard).
+- Scheduler: fake clock, fake relay, fake agent command; `view --json` output validated against `contracts/addon-view.schema.json`.
+- Dashboard: page tests per block type and for loading/stale/error states; Playwright click-through in e2e. CI: `workspace-addons/**`, `workspace/**`, `contracts/**`.
 
 ## Not included
-Editing in the dashboard, login, multi-workspace dashboard, run limits or budgets, retries beyond the next pass.
+Editing or actions in the dashboard, add-on HTML/JS, git-URL installs, login, multi-workspace dashboard, run limits or budgets.

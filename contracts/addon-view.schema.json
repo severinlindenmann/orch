@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/addon-view.schema.json",
+  "title": "orch add-on view v1 (stdout of `orch <name> view --json`)",
+  "description": "Pulled by the dashboard (timeout 2 s, max 256 KB). Declarative blocks only, no actions; every string is plain text (rendered with textContent, never as HTML). Unknown block types are skipped. See addon-manifest.md, Views.",
+  "type": "object",
+  "required": ["schema", "generated_at", "blocks"],
+  "properties": {
+    "schema": { "const": "orch.addon-view/1" },
+    "generated_at": { "$ref": "#/$defs/time", "description": "When the add-on computed this view. The dashboard shows it as 'as of HH:MM'." },
+    "notice": { "$ref": "#/$defs/text", "description": "Optional one-line state, e.g. 'The scheduler is stopped: nothing starts by itself.'" },
+    "notice_tone": { "$ref": "#/$defs/tone" },
+    "blocks": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/block" } }
+  },
+  "$defs": {
+    "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "text": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^<>]*$" },
+    "tone": { "enum": ["neutral", "good", "warn", "needs-you", "bad"], "default": "neutral" },
+    "link": {
+      "type": "string", "maxLength": 500,
+      "pattern": "^(t_[a-z0-9]{6,16}|https://[^\\s<>\"'`]+)$",
+      "description": "A ticket id (opens the ticket detail) or an https URL (opens in a new tab, rel=noopener noreferrer). Nothing else."
+    },
+    "chip": {
+      "type": "object", "required": ["label"], "additionalProperties": false,
+      "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 40 }, "tone": { "$ref": "#/$defs/tone" } }
+    },
+    "block": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "enum": ["stat", "list", "calendar", "timeline", "chips", "table"] } },
+      "oneOf": [
+        { "$ref": "#/$defs/stat" }, { "$ref": "#/$defs/list" }, { "$ref": "#/$defs/calendar" },
+        { "$ref": "#/$defs/timeline" }, { "$ref": "#/$defs/chips" }, { "$ref": "#/$defs/table" }
+      ]
+    },
+    "stat": {
+      "type": "object", "required": ["type", "label", "value"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "stat" },
+        "label": { "$ref": "#/$defs/text", "maxLength": 40 },
+        "value": { "oneOf": [{ "type": "number" }, { "$ref": "#/$defs/text", "maxLength": 24 }] },
+        "tone": { "$ref": "#/$defs/tone" }
+      }
+    },
+    "list": {
+      "type": "object", "required": ["type", "title", "items"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "list" },
+        "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "items": {
+          "type": "array", "maxItems": 50,
+          "items": {
+            "type": "object", "required": ["title"], "additionalProperties": false,
+            "properties": {
+              "title": { "$ref": "#/$defs/text" },
+              "subtitle": { "$ref": "#/$defs/text" },
+              "chips": { "type": "array", "maxItems": 6, "items": { "$ref": "#/$defs/chip" } },
+              "tone": { "$ref": "#/$defs/tone" },
+              "link": { "$ref": "#/$defs/link" }
+            }
+          }
+        },
+        "more": { "type": "integer", "minimum": 0, "description": "How many items were left out (shown as '+N more')." }
+      }
+    },
+    "calendar": {
+      "type": "object", "required": ["type", "days"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "calendar" },
+        "days": {
+          "type": "array", "maxItems": 14,
+          "items": {
+            "type": "object", "required": ["date", "items"], "additionalProperties": false,
+            "properties": {
+              "date": { "type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              "items": {
+                "type": "array", "maxItems": 20,
+                "items": {
+                  "type": "object", "required": ["title"], "additionalProperties": false,
+                  "properties": {
+                    "time": { "type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$", "description": "HH:MM, already in the user's local time." },
+                    "title": { "$ref": "#/$defs/text", "maxLength": 80 },
+                    "tone": { "$ref": "#/$defs/tone" },
+                    "link": { "$ref": "#/$defs/link" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "timeline": {
+      "type": "object", "required": ["type", "items"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "timeline" },
+        "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "items": {
+          "type": "array", "maxItems": 50,
+          "items": {
+            "type": "object", "required": ["at", "text"], "additionalProperties": false,
+            "properties": {
+              "at": { "$ref": "#/$defs/time" },
+              "text": { "$ref": "#/$defs/text" },
+              "tone": { "$ref": "#/$defs/tone" },
+              "link": { "$ref": "#/$defs/link" }
+            }
+          }
+        }
+      }
+    },
+    "chips": {
+      "type": "object", "required": ["type", "items"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "chips" },
+        "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "items": { "type": "array", "maxItems": 30, "items": { "$ref": "#/$defs/chip" } }
+      }
+    },
+    "table": {
+      "type": "object", "required": ["type", "columns", "rows"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "table" },
+        "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "columns": {
+          "type": "array", "minItems": 1, "maxItems": 6,
+          "items": {
+            "type": "object", "required": ["key", "label", "type"], "additionalProperties": false,
+            "properties": {
+              "key": { "type": "string", "pattern": "^[a-z_][a-z0-9_]{0,31}$" },
+              "label": { "$ref": "#/$defs/text", "maxLength": 24 },
+              "type": { "enum": ["text", "number", "duration", "date", "tone"], "description": "duration = seconds (number); date = RFC 3339 UTC or YYYY-MM-DD; tone = a tone value shown as a dot" }
+            }
+          }
+        },
+        "rows": {
+          "type": "array", "maxItems": 100,
+          "items": {
+            "type": "object", "required": ["cells"], "additionalProperties": false,
+            "properties": {
+              "cells": { "type": "object", "propertyNames": { "pattern": "^[a-z_][a-z0-9_]{0,31}$" }, "additionalProperties": { "oneOf": [{ "type": "number" }, { "type": "string", "maxLength": 200, "pattern": "^[^<>]*$" }, { "type": "null" }] } },
+              "link": { "$ref": "#/$defs/link" }
+            }
+          }
+        },
+        "more": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

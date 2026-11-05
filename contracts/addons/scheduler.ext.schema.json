@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/addons/scheduler.ext.schema.json",
+  "title": "orch scheduler ticket data: ext.scheduler",
+  "description": "Owned by the scheduler add-on (its ticket_ext; the add-on ships a byte-identical copy). The core never reads it. One-time waits are core: waiting_on {kind: time, until}; the scheduler is one waker of those. Recurrence and launch policy live here.",
+  "type": "object",
+  "properties": {
+    "recurring": { "type": "boolean", "description": "true = run again and again by cron." },
+    "cron": { "type": "string", "pattern": "^\\S+ \\S+ \\S+ \\S+ \\S+$", "description": "5-field cron (min hour day month weekday), always UTC, e.g. '0 7 * * 1'. Missed runs (machine off): one catch-up run, never several." },
+    "agent": { "type": "string", "pattern": "^[a-z0-9-]{1,32}$", "description": "Agent command name from [scheduler.agents] in .orch/config.toml. Default: [scheduler] agent." },
+    "last_run": { "oneOf": [{ "type": "string", "format": "date-time", "pattern": "Z$" }, { "type": "null" }], "description": "Written by the scheduler after each run." }
+  },
+  "if": { "properties": { "recurring": { "const": true } }, "required": ["recurring"] },
+  "then": { "required": ["cron"] }
+}

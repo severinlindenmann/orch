@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/addon-manifest.schema.json",
+  "title": "orch add-on manifest v1 (orch-addon.toml, parsed)",
+  "description": "See addon-manifest.md. Paths are relative to the folder that holds orch-addon.toml and must stay inside it (no '..', no absolute paths, no symlinks out).",
+  "type": "object",
+  "required": ["schema", "orch_api", "name", "version", "description", "run", "skill"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "orch.addon/1" },
+    "orch_api": { "const": 1, "description": "Version of the add-on contract (CLI, view, ext rules) this add-on was written for." },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,31}$",
+      "not": { "enum": ["orch", "core", "ticket", "check", "log", "ask", "answer", "link", "ext", "wait", "addon", "addons", "update", "init", "publish", "relay", "config", "help", "version", "view"] },
+      "description": "Command `orch <name>`, ext key ext.<name>, folder .orch/addons/<name>/, config table [<name>], skill folder orch-<name>, AGENTS markers orch:addon:<name>."
+    },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "description": { "$ref": "#/$defs/text", "maxLength": 120, "description": "One plain sentence for `orch addon list` and `orch --help`." },
+    "run": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$", "description": "Top-level Python module. `orch <name> <args>` runs `<orch's python> -m <run> <args>` as a subprocess (addon-manifest.md, CLI contract)." },
+    "skill": { "$ref": "#/$defs/path", "description": "Folder with SKILL.md (frontmatter name: orch-<name>). Copied to .agents/skills/orch-<name>/." },
+    "agents_block": { "$ref": "#/$defs/path", "description": "Markdown body of the AGENTS.md block. Default: <skill>/AGENTS-block.md." },
+    "ticket_ext": { "$ref": "#/$defs/path", "description": "Local JSON Schema (no remote $ref, max 32 KB) for ticket ext.<name>. Without it the add-on writes no ticket data." },
+    "background": { "type": "boolean", "default": false, "description": "true = the add-on has a long-running process. It must implement `orch <name> stop`; deactivation calls it." },
+    "dashboard": {
+      "type": "object",
+      "required": ["label", "icon"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "$ref": "#/$defs/text", "maxLength": 16, "description": "Nav label, one or two words." },
+        "icon": { "enum": ["clock", "calendar", "inbox", "list", "chart", "bell", "book", "globe", "link", "check", "star", "box", "chat", "folder", "user", "bolt"] },
+        "order": { "type": "integer", "minimum": 0, "maximum": 99, "default": 50, "description": "Position in the nav after the built-in tabs." }
+      },
+      "description": "The add-on has a dashboard tab, filled by `orch <name> view --json` (addon-view.schema.json)."
+    },
+    "ticket_view": {
+      "type": "array",
+      "maxItems": 8,
+      "description": "Rows in the ticket detail slot, from ext.<name>. A row whose value is missing/null/empty is hidden.",
+      "items": {
+        "type": "object",
+        "required": ["field", "label", "format"],
+        "additionalProperties": false,
+        "properties": {
+          "field": { "type": "string", "pattern": "^[a-z_][a-z0-9_]{0,31}$", "description": "Top-level key in ext.<name>." },
+          "label": { "$ref": "#/$defs/text", "maxLength": 24 },
+          "format": { "enum": ["text", "time", "cron-human", "chips", "yes-no"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "text": { "type": "string", "minLength": 1, "pattern": "^[^<>]*$", "description": "Plain text, no HTML." },
+    "path": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9_./-]{1,200}$" }
+  }
+}

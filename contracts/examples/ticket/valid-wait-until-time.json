@@ -1,0 +1,12 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_sl33p1",
+  "title": "Check the nightly import again on Monday",
+  "status": "waiting",
+  "revision": 3,
+  "created_at": "2026-11-05T09:00:00Z",
+  "updated_at": "2026-11-05T09:05:00Z",
+  "checklist": [], "links": [], "questions": [],
+  "history": [ { "at": "2026-11-05T09:05:00Z", "by": "agent:claude-code", "text": "Waiting until Monday 08:00" } ],
+  "waiting_on": { "kind": "time", "until": "2026-11-09T07:00:00Z" }
+}

@@ -1,0 +1,10 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_bad003",
+  "title": "Waits on time but says not until when (must fail)",
+  "status": "waiting",
+  "created_at": "2026-11-05T09:00:00Z",
+  "updated_at": "2026-11-05T09:00:00Z",
+  "checklist": [], "links": [], "questions": [], "history": [],
+  "waiting_on": { "kind": "time", "ref": "monday" }
+}

@@ -1,0 +1,13 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_0ldf1d",
+  "title": "Old ticket that still has type and wake_at (unknown fields are kept, never read)",
+  "type": "task",
+  "status": "open",
+  "created_at": "2026-11-04T09:12:00Z",
+  "updated_at": "2026-11-04T09:12:00Z",
+  "checklist": [], "links": [], "questions": [], "history": [],
+  "wake_at": null,
+  "waiting_on": null,
+  "ext": { "unknown-addon": { "anything": [1, 2] } }
+}

@@ -1,15 +1,15 @@
 {
   "_note": "Pilatus Workspace after init, publish + relay connect, both add-ons and one refresh. Path → short content.",
   "files": {
-    "AGENTS.md": "<!-- orch:begin orch -->\n## orch\nTickets live in .orch/tickets/. Read .agents/skills/orch/SKILL.md.\n<!-- orch:end orch -->\n<!-- orch:begin orch-relay -->\n…\n<!-- orch:end orch-relay -->",
+    "AGENTS.md": "<!-- orch:begin orch -->\n## orch\nTickets live in .orch/tickets/. Read .agents/skills/orch/SKILL.md.\n<!-- orch:end orch -->\n<!-- orch:begin orch-relay -->\n…\n<!-- orch:end orch-relay -->\n<!-- orch:addon:scheduler -->\n## orch-scheduler\n…\n<!-- /orch:addon:scheduler -->",
     "CLAUDE.md": "@AGENTS.md",
-    ".gitignore": "# orch (local only)\n.orch/secrets/\n.orch/inbox/\n.orch/inbox-seen.json\n.orch/scheduler/state.json\n.orch/scheduler/logs/",
+    ".gitignore": "# orch (local only)\n.orch/secrets/\n.orch/inbox/\n.orch/inbox-seen.json\n.orch/addons/",
     ".agents/skills/orch/SKILL.md": "---\nname: orch\ndescription: Use for orch tickets …\n---\n…",
     ".agents/skills/orch-publish/SKILL.md": "---\nname: orch-publish\n…",
     ".agents/skills/orch-relay/SKILL.md": "---\nname: orch-relay\n…  Read workspaces.json before handing work over.",
     ".agents/skills/orch-relay/workspaces.json": "see workspaces.example.json",
-    ".agents/skills/orch-dashboard/SKILL.md": "(only after `orch addon add dashboard`)",
-    ".agents/skills/orch-scheduler/SKILL.md": "(only after `orch addon add scheduler`)",
+    ".agents/skills/orch-dashboard/SKILL.md": "(only while the dashboard add-on is active)",
+    ".agents/skills/orch-scheduler/SKILL.md": "(only while the scheduler add-on is active)",
     ".agents/skills/acme-sql/SKILL.md": "shared skill from `orch relay refresh`",
     ".agents/skills/acme-sql/.orch-shared": "3",
     ".claude/skills": "-> ../.agents/skills (symlink; junction on Windows)",
@@ -63,13 +63,14 @@
     ".orch/inbox-seen.json": {
       "m_an5wer7q2w9e4r6t": "2026-11-04T10:53:10Z"
     },
-    ".orch/scheduler/config.toml": "agent = \"claude -p {prompt}\"",
-    ".orch/scheduler/state.json": {
+    ".orch/config.toml": "[scheduler]\nagent = \"claude -p {prompt}\"",
+    ".orch/addons.json": { "active": { "dashboard": { "version": "0.2.0", "activated_at": "2026-11-04T08:00:00Z" }, "scheduler": { "version": "0.2.0", "activated_at": "2026-11-04T08:00:10Z" } } },
+    ".orch/addons/scheduler/state.json": {
       "t_7k3f9q": {
         "last_run": "2026-11-04T10:53:20Z",
         "next_run": "2026-11-05T07:00:00Z"
       }
     },
-    ".orch/scheduler/logs/t_7k3f9q-20261104T105320Z.log": "claude output …"
+    ".orch/addons/scheduler/logs/t_7k3f9q-20261104T105320Z.log": "claude output …"
   }
 }

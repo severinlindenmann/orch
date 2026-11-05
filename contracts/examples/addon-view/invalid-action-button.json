@@ -1,0 +1,2 @@
+{ "schema": "orch.addon-view/1", "generated_at": "2026-11-05T08:00:03Z",
+  "blocks": [ { "type": "button", "label": "Run now", "command": "orch scheduler run --once" } ] }

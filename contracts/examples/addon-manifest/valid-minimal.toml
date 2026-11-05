@@ -1,0 +1,7 @@
+schema = "orch.addon/1"
+orch_api = 1
+name = "hello-world"
+version = "0.1.0"
+description = "Says hello. A command and a skill, no dashboard tab, no ticket data."
+run = "orch_hello"
+skill = "skills/orch-hello-world"
