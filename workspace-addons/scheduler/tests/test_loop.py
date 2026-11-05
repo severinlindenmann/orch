@@ -1,51 +1,66 @@
 import json
-from datetime import UTC, datetime
+import os
+import time
 
-from conftest import T, add_ticket, calls
+from conftest import T, add_ticket, calls, runs_started
 
 from orch_scheduler.loop import Scheduler
 from orch_scheduler.runner import load_state
 
 
-def finish(s, now):
-    s.runner.reap(now, wait=True)
+def tk(ws, tid):
+    return json.loads((ws / f".orch/tickets/{tid}.json").read_text())
 
 
-def test_wake_runs_agent_once(ws):
+def end_run(ws, tid, age=60):
+    """The run is over; its log was last written `age` seconds after the start (os.utime)."""
+    (ws / f"ended-{tid}").write_text("")
+    log = ws / f".orch/run/logs/{tid}-r1.log"
+    t = time.time() + age
+    os.utime(log, (t, t))
+
+
+def test_wake_starts_run_through_core_once(ws):
     add_ticket(ws, "t_wake001", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
     s = Scheduler(ws)
     assert s.tick(T(7, 59)) == []
     assert s.tick(T(8, 1)) == ["t_wake001"]
-    finish(s, T(8, 2))
-    ran = (ws / "ran-t_wake001.txt").read_text()
-    assert "Continue orch ticket t_wake001" in ran and ".agents/skills/orch/SKILL.md" in ran
-    t = json.loads((ws / ".orch/tickets/t_wake001.json").read_text())
-    assert t["waiting_on"] is None and t["status"] == "active"
     cs = calls(ws)
-    assert ["ticket", "status", "t_wake001", "active"] in [c["args"] for c in cs]
-    assert [c["args"][0] for c in cs].count("log") == 2  # started + finished
-    assert all(c["by"] == "agent:scheduler" for c in cs if c["args"][0] == "log")
-    assert s.tick(T(8, 5)) == []  # not again
-    st = load_state(ws)["t_wake001"]
-    assert st["last_exit"] == 0 and st["last_log"].startswith("t_wake001-")
+    start = next(c for c in cs if c["args"][:2] == ["run", "start"])
+    assert start["by"] == "agent:scheduler" and start["args"][:3] == ["run", "start", "t_wake001"]
+    t = tk(ws, "t_wake001")
+    assert t["waiting_on"] is None and t["status"] == "active"
+    assert s.tick(T(8, 5)) == [] and runs_started(ws) == ["t_wake001"]
+    assert load_state(ws)["t_wake001"]["last_wake"] == "2026-11-04T08:00:00Z"
 
 
-def test_log_has_start_end_exit(ws):
-    add_ticket(ws, "t_wake002", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+def test_wait_cleared_only_after_run_start_worked(ws):
+    """SA-15: a refused start leaves the wait in place."""
+    (ws / "noagent").write_text("")
+    add_ticket(ws, "t_wake002", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
     s = Scheduler(ws)
-    s.tick(T(8, 0))
-    finish(s, T(8, 1))
-    log = next((ws / ".orch/addons/scheduler/logs").glob("t_wake002-*.log")).read_text()
-    assert "# start 2026-11-04T08:00:00Z" in log and "agent ran" in log and " exit 0" in log
-    # the footer carries the real end time, not the pass start time passed to reap()
-    end = next(line for line in log.splitlines() if line.startswith("# end "))
-    stamp = datetime.strptime(end.split()[2], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
-    assert abs((datetime.now(UTC) - stamp).total_seconds()) < 120
+    assert s.tick(T(8)) == []
+    t = tk(ws, "t_wake002")
+    assert t["waiting_on"] is not None
+    (q,) = t["questions"]
+    assert q["kind"] == "scheduler:failure" and "orch config set workspace.agent <name>" in q["text"]
+    assert q["options"] == ["Try again", "Leave it"]
+    s.tick(T(8, 1))  # asked once, not again
+    assert len(tk(ws, "t_wake002")["questions"]) == 1
+
+
+def test_busy_ticket_is_pending_not_second_agent(ws):
+    add_ticket(ws, "t_wake003", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    (ws / "busy-t_wake003").write_text("")
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == []  # no new run was started
+    assert tk(ws, "t_wake003")["waiting_on"] is None  # the wait is over; the running agent has it
+    assert s.watch == {} and s.tick(T(8, 5)) == []
 
 
 def test_done_ticket_not_woken(ws):
-    add_ticket(ws, "t_wake003", status="done", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
-    assert Scheduler(ws).tick(T(9)) == []
+    add_ticket(ws, "t_wake004", status="done", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    assert Scheduler(ws).tick(T(9)) == [] and runs_started(ws) == []
 
 
 def test_recurring_cron_and_catch_up(ws):
@@ -53,92 +68,87 @@ def test_recurring_cron_and_catch_up(ws):
                ext={"scheduler": {"recurring": True, "cron": "0 7 * * *"}})
     s = Scheduler(ws)
     assert s.tick(T(8, 0, d=4)) == ["t_rec00001"]  # 3 missed days -> one run
-    finish(s, T(8, 1, d=4))
     assert s.tick(T(8, 2, d=4)) == []
     assert load_state(ws)["t_rec00001"]["next_run"] == "2026-11-05T07:00:00Z"
     assert s.tick(T(7, 1, d=5)) == ["t_rec00001"]
-    finish(s, T(7, 2, d=5))
+    t = tk(ws, "t_rec00001")
+    assert t["ext"]["scheduler"]["last_run"] == "2026-11-05T07:01:00Z"
 
 
-def test_one_run_per_ticket(ws, tmp_path):
-    slow = tmp_path / "slow.py"
-    slow.write_text("import time; time.sleep(1.5)")
-    import sys
-    (ws / ".orch/config.toml").write_text(f"[scheduler]\nagent = '{sys.executable} {slow} {{prompt}}'\n")
+def test_cron_busy_sets_last_run_no_pile_up(ws):
     add_ticket(ws, "t_rec00002", ext={"scheduler": {"recurring": True, "cron": "* * * * *"}})
-    s = Scheduler(ws)
-    assert s.tick(T(8, 0)) == ["t_rec00002"]
-    assert s.tick(T(8, 1)) == []  # recurring is due again but still running
-    finish(s, T(8, 2))
-    assert s.tick(T(8, 3)) == ["t_rec00002"]
-    finish(s, T(8, 4))
-
-
-def test_stale_lock_is_ignored(ws):
-    add_ticket(ws, "t_wake005", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
-    (ws / ".orch/addons/scheduler/locks").mkdir(parents=True)
-    (ws / ".orch/addons/scheduler/locks/t_wake005.lock").write_text("999999")
-    s = Scheduler(ws)
-    assert s.tick(T(8, 0)) == ["t_wake005"]
-    finish(s, T(8, 1))
-
-
-def test_agent_exit_code_and_missing_command(ws):
-    (ws / ".orch/config.toml").write_text("[scheduler]\nagent = 'no-such-agent-xyz {prompt}'\n")
-    add_ticket(ws, "t_wake006", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    (ws / "busy-t_rec00002").write_text("")
     s = Scheduler(ws)
     assert s.tick(T(8, 0)) == []
-    assert load_state(ws)["t_wake006"]["last_exit"] == 127
-    assert not (ws / ".orch/addons/scheduler/locks/t_wake006.lock").exists()
+    assert tk(ws, "t_rec00002")["ext"]["scheduler"]["last_run"] == "2026-11-04T08:00:00Z"
 
 
-def test_ticket_agent_override_by_name(ws, tmp_path):
-    import sys
-    other = tmp_path / "other.py"
-    other.write_text("open('other.txt', 'w').close()")
-    cfg = ws / ".orch/config.toml"
-    cfg.write_text(cfg.read_text() + f"[scheduler.agents]\nother = '{sys.executable} {other} {{prompt}}'\n")
-    add_ticket(ws, "t_wake007", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"}, ext={"scheduler": {"agent": "other"}})
+def test_fast_fail_asks_and_is_not_retried(ws):
+    add_ticket(ws, "t_fail0001", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
     s = Scheduler(ws)
-    s.tick(T(8, 0))
-    finish(s, T(8, 1))
-    assert (ws / "other.txt").exists()
+    assert s.tick(T(8)) == ["t_fail0001"]
+    end_run(ws, "t_fail0001", age=2)  # ended after 2 s, wrote nothing on the ticket
+    s.tick(T(8, 1))
+    (q,) = tk(ws, "t_fail0001")["questions"]
+    assert q["kind"] == "scheduler:failure" and "10 seconds" in q["text"]
+    s.tick(T(8, 2))
+    assert runs_started(ws) == ["t_fail0001"]  # not retried
+    row = json.loads((ws / ".orch/addons/scheduler/runs.jsonl").read_text().splitlines()[0])
+    assert row["exit"] == 1
 
 
-def test_cli_run_once_subprocess(ws):
-    from orch_scheduler.cli import main
-    add_ticket(ws, "t_wake008", waiting_on={"kind": "time", "until": "2020-01-01T00:00:00Z"})
-    assert main(["--dir", str(ws), "run", "--once"]) == 0
-    assert (ws / "ran-t_wake008.txt").exists()
+def test_slow_or_busy_run_is_not_a_failure(ws):
+    add_ticket(ws, "t_fail0002", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    s = Scheduler(ws)
+    s.tick(T(8))
+    end_run(ws, "t_fail0002", age=60)
+    s.tick(T(8, 1))
+    assert tk(ws, "t_fail0002").get("questions") == []
 
 
-def test_ticket_cannot_supply_raw_command(ws, tmp_path):
-    import sys
-    evil = tmp_path / "evil.py"
-    evil.write_text("open('evil.txt', 'w').close()")
+def test_try_again_runs_once_even_after_restart(ws):
+    q = {"id": "q1", "text": "x", "options": ["Try again", "Leave it"], "kind": "scheduler:failure",
+         "answer": "Try again", "answered_by": "human:s", "via": "web"}
+    add_ticket(ws, "t_again001", questions=[q])
+    assert Scheduler(ws).tick(T(8)) == ["t_again001"]
+    assert tk(ws, "t_again001")["ext"]["scheduler"]["acted"] == ["q1"]
+    assert Scheduler(ws).tick(T(8, 1)) == []  # a restart (new object) does not run it again
+    assert runs_started(ws) == ["t_again001"]
+
+
+def test_leave_it_runs_nothing_but_is_recorded(ws):
+    q = {"id": "q1", "text": "x", "options": [], "kind": "scheduler:failure", "answer": "Leave it"}
+    add_ticket(ws, "t_leave001", questions=[q])
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+    assert tk(ws, "t_leave001")["ext"]["scheduler"]["acted"] == ["q1"]
+
+
+def test_one_answer_leads_to_exactly_one_run(ws):
+    """review-49-50 F1: an answer from the relay is applied by the CLI; the loop starts one run, then not again."""
+    add_ticket(ws, "t_ask00001", status="active")
+    (ws / ".orch/secrets").mkdir(parents=True)
+    (ws / ".orch/secrets/relay.json").write_text("{}")
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_1", "type": "answer", "ticket": "t_ask00001", "applied": True,
+                                                 "body": {"question_id": "q1", "answer": "Yes"}}]))
+    s = Scheduler(ws)
+    assert s.tick(T(8, 0)) == ["t_ask00001"]
+    (ws / "inbox.json").write_text("[]")  # the CLI marks it seen: it does not come again
+    assert s.tick(T(8, 2)) == []
+    assert runs_started(ws) == ["t_ask00001"]
+
+
+def test_ticket_cannot_supply_a_command(ws):
     add_ticket(ws, "t_wake010", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"},
-               ext={"scheduler": {"agent": f"{sys.executable} {evil} {{prompt}}"}})
-    s = Scheduler(ws)
-    s.tick(T(8, 0))
-    finish(s, T(8, 1))
-    assert not (ws / "evil.txt").exists() and (ws / "ran-t_wake010.txt").exists()
+               ext={"scheduler": {"agent": "rm -rf / {prompt}"}})
+    Scheduler(ws).tick(T(8))
+    assert runs_started(ws) == ["t_wake010"]
+    assert all("rm" not in " ".join(c["args"]) for c in calls(ws))
 
 
 def test_invalid_ticket_id_skipped(ws):
     (ws / ".orch/tickets/t_bad.json").write_text(
         json.dumps({"id": "t_../../escape", "status": "open", "waiting_on": "2026-11-04T08:00:00Z"}))
     assert Scheduler(ws).tick(T(9)) == []
-
-
-def test_cron_writes_last_run_to_ext_and_not_again(ws):
-    add_ticket(ws, "t_rec00003", ext={"scheduler": {"recurring": True, "cron": "0 7 * * *"}},
-               created_at="2026-11-04T00:00:00Z")
-    s = Scheduler(ws)
-    assert s.tick(T(7, 1)) == ["t_rec00003"]
-    finish(s, T(7, 2))
-    t = json.loads((ws / ".orch/tickets/t_rec00003.json").read_text())
-    assert t["ext"]["scheduler"]["last_run"] == "2026-11-04T07:01:00Z" and t["ext"]["scheduler"]["cron"] == "0 7 * * *"
-    assert s.tick(T(9, 0)) == []
 
 
 def test_not_recurring_flag_means_no_cron_run(ws):
@@ -152,8 +162,15 @@ def test_other_waits_are_not_woken(ws):
     assert Scheduler(ws).tick(T(8)) == []
 
 
+def test_cli_run_once(ws):
+    from orch_scheduler.cli import main
+    add_ticket(ws, "t_wake008", waiting_on={"kind": "time", "until": "2020-01-01T00:00:00Z"})
+    assert main(["--dir", str(ws), "run", "--once"]) == 0
+    assert runs_started(ws) == ["t_wake008"]
+
+
 def test_loop_exits_when_not_active(ws):
     (ws / "inactive").write_text("1")
     add_ticket(ws, "t_wake011", waiting_on={"kind": "time", "until": "2020-01-01T00:00:00Z"})
     Scheduler(ws).run_forever(sleep=lambda _: (_ for _ in ()).throw(AssertionError("kept running")))
-    assert not (ws / "ran-t_wake011.txt").exists()
+    assert runs_started(ws) == []

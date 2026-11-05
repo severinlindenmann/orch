@@ -47,21 +47,32 @@ elif args[:2] == ["ext", "set"]:
     if "--if-revision" in args and t.get("revision") != int(args[args.index("--if-revision") + 1]):
         sys.exit(2)
     t.setdefault("ext", {{}})[args[3]] = json.loads(args[4]); save(t); print("{{}}")
+elif args[:2] == ["run", "start"]:
+    tid = args[2]
+    if (root / "noagent").exists():
+        print(json.dumps({{"error": "No agent found; set one later: orch config set workspace.agent <name>"}})); sys.exit(2)
+    if (root / ("busy-" + tid)).exists():
+        print(json.dumps({{"error": "An agent is already working on this ticket.", "pending": "--text" in args}})); sys.exit(2)
+    log = ".orch/run/logs/" + tid + "-r1.log"
+    (root / log).parent.mkdir(parents=True, exist_ok=True)
+    (root / log).write_text("x")
+    print(json.dumps({{"run": "r_1", "agent": "fake", "resumed": False, "log": log}}))
+elif args[:2] == ["run", "status"]:
+    print(json.dumps({{"ticket": args[2], "running": not (root / ("ended-" + args[2])).exists()}}))
+elif args[0] == "ask":
+    t = load(args[1]); qs = t.setdefault("questions", [])
+    q = {{"id": "q%d" % (len(qs) + 1), "text": args[2], "answer": None,
+         "kind": args[args.index("--kind") + 1], "options": [args[i + 1] for i, a in enumerate(args) if a == "--option"]}}
+    qs.append(q); t["status"] = "waiting"; save(t); print(json.dumps(q))
+elif args[0] == "log":
+    t = load(args[1]); t.setdefault("history", []).append({{"by": by, "text": args[2]}}); save(t); print("{{}}")
 elif args[0] == "answer" and (root / "fail-answer").exists():
     sys.exit(2)
-elif args[0] in ("log", "answer"):
+elif args[0] == "answer":
     print("{{}}")
 else:
     sys.exit(2)
 '''
-
-FAKE_AGENT = '''import sys, time
-from pathlib import Path
-Path("ran-" + sys.argv[1].split()[3].rstrip(".") + ".txt").write_text(sys.argv[1])
-print("agent ran")
-sys.exit(int(sys.argv[2]) if len(sys.argv) > 2 else 0)
-'''
-
 
 def T(h=0, m=0, d=4):
     return datetime(2026, 11, d, h, m, tzinfo=UTC)
@@ -77,10 +88,7 @@ def ws(tmp_path, monkeypatch):
     orch = bin_ / "orch"
     orch.write_text(FAKE_ORCH.format(py=sys.executable))
     orch.chmod(orch.stat().st_mode | stat.S_IXUSR)
-    agent = tmp_path / "agent.py"
-    agent.write_text(FAKE_AGENT)
     monkeypatch.setenv("ORCH_BIN", str(orch))
-    (root / ".orch" / "config.toml").write_text(f"[scheduler]\nagent = '{sys.executable} {agent} {{prompt}}'\n")
     return root
 
 
@@ -96,3 +104,8 @@ def add_ticket(root: Path, tid: str, **kw):
 def calls(root: Path):
     p = root / "calls.jsonl"
     return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+
+
+def runs_started(root: Path):
+    """Ticket ids `orch run start` was called for, in order."""
+    return [c["args"][2] for c in calls(root) if c["args"][:2] == ["run", "start"]]

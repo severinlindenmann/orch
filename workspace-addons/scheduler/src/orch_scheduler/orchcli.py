@@ -62,3 +62,38 @@ def set_ext(root: Path, t: dict, **changes) -> bool:
     if isinstance(t.get("revision"), int):
         args += ["--if-revision", str(t["revision"])]
     return call(root, *args) is not None
+
+
+def run_start(root: Path, tid: str, text: str | None = None) -> dict:
+    """`orch run start <tid> --by agent:scheduler`: all of resume / fresh / busy is decided inside core.
+    Returns {"result": "started", "run", "log"} | {"result": "pending"} (ticket busy, text queued)
+    | {"result": "failed", "reason": plain words}."""
+    cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--json", "--by", BY]
+    if text:
+        cmd += ["--text", text]
+    try:
+        p = subprocess.run(cmd, check=False, cwd=root, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"result": "failed", "reason": f"orch could not be run ({e.__class__.__name__})"}
+    try:
+        data = json.loads(p.stdout)
+    except ValueError:
+        data = None
+    if p.returncode == 0 and isinstance(data, dict):
+        return {"result": "started", "run": data.get("run"), "log": data.get("log")}
+    if isinstance(data, dict) and data.get("pending") is True:
+        return {"result": "pending"}
+    reason = str(data.get("error")) if isinstance(data, dict) and data.get("error") else (p.stderr.strip() or "unknown")
+    if "No agent found" in reason:
+        reason = "No agent set: orch config set workspace.agent <name>"
+    return {"result": "failed", "reason": reason[:300]}
+
+
+def run_running(root: Path, tid: str) -> bool | None:
+    """Is a run holding the ticket right now? None = could not find out."""
+    data = call(root, "run", "status", tid, by=False)
+    return bool(data.get("running")) if isinstance(data, dict) else None
+
+
+def ticket(root: Path, tid: str) -> dict | None:
+    return next((t for t in tickets(root) if t["id"] == tid), None)
