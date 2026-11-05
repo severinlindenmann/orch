@@ -107,7 +107,9 @@ class E:
         """Write the [scheduler] table of .orch/config.toml (agent_line is a TOML line `agent = ...`)."""
         p = self.path_of(ws) / ".orch" / "config.toml"
         extra = f"inbox_every = {inbox_every}\n" if inbox_every else ""
-        p.write_text(f"[scheduler]\n{agent_line}\ninterval = {interval}\n{extra}")
+        cmd = agent_line.split("=", 1)[1].strip()  # the agent is core's [workspace] agent now (generic adapter)
+        p.write_text(f'[workspace]\nagent = "e2eagent"\n\n[agents.e2eagent]\nadapter = "generic"\ncommand = {cmd}\n\n'
+                     f"[scheduler]\ninterval = {interval}\n{extra}")
 
     def ensure_addons(self):
         if not self._addons:
