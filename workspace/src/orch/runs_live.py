@@ -1,0 +1,374 @@
+"""Live runs: the agent runs interactively in its own tmux session, one per ticket.
+
+  tmux -L orch-<hash8(workspace)> new-session -d -s <ticket id> -- orch run _wrap <run> --live -- <agent argv>
+
+orch owns that tmux server (own socket), so a person's own tmux is never touched. The claim's pid is the pane
+process (the wrapper). Input waits in the pending file and is pasted (bracketed paste, then Enter) only when
+the agent says it is idle: the tool's own hooks call `orch run event --kind idle`, a generic agent calls
+`orch run done`. At most 4 live sessions per workspace. A session idle for an hour is closed on the next
+`orch run` call (there is no daemon); its session id stays on the ticket, so the next start continues it.
+Nothing here reads the screen to decide anything.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from orch import adapters, runs, tickets
+from orch.errors import Refused
+
+MAX_LIVE = 4
+IDLE_SECONDS = 60 * 60
+PASTE_DELAY = 0.3
+KINDS = ("session", "idle", "attention")
+
+
+def idle_seconds() -> float:
+    try:
+        return float(os.environ.get("ORCH_RUN_IDLE_SECONDS", IDLE_SECONDS))
+    except ValueError:
+        return IDLE_SECONDS
+
+
+def available(adapter: dict) -> bool:
+    """A live run needs a machine with tmux (not Windows) and an agent that can run interactively."""
+    return bool(
+        os.name != "nt"
+        and shutil.which("tmux")
+        and adapter.get("live")
+        and adapter["capabilities"].get("interactive_tmux")
+    )
+
+
+def socket_name(root: Path) -> str:
+    return "orch-" + hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()[:8]
+
+
+def target(tid: str) -> str:
+    return f"={tid}:"  # exact session name, its only pane
+
+
+def tmux(root: Path, *args: str, input: str | None = None) -> subprocess.CompletedProcess:
+    env = {k: v for k, v in os.environ.items() if k != "TMUX"}  # never nest in the person's own tmux
+    return subprocess.run(
+        ["tmux", "-L", socket_name(root), *args],
+        input=input,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        env=env,
+    )
+
+
+def session_exists(root: Path, tid: str) -> bool:
+    return shutil.which("tmux") is not None and tmux(root, "has-session", "-t", target(tid)).returncode == 0
+
+
+def records(root: Path) -> list[dict]:
+    out = []
+    d = runs.run_dir(root) / "tickets"
+    for f in sorted(d.glob("t_*.json")) if d.is_dir() else []:
+        rec = runs.read(root, f.stem)
+        if rec:
+            out.append(rec)
+    return out
+
+
+def live_alive(root: Path) -> list[dict]:
+    return [r for r in records(root) if r.get("mode") == "live" and runs.state(r) == "alive"]
+
+
+# ---------------------------------------------------------------- start
+
+
+def _queue_for_slot(root: Path, tid: str, by: str, text: str) -> None:
+    with runs.locked(root, tid):
+        runs._pending_add_locked(root, tid, by, "event", text, "slots", None)
+
+
+def start_live(
+    root: Path, tid: str, by: str, name: str, *, fresh: bool, take_over: bool, busy_text: str
+) -> dict:
+    cur = runs.read(root, tid)
+    mine = cur is not None and runs.state(cur) == "alive"
+    if not mine and len(live_alive(root)) >= MAX_LIVE:
+        _queue_for_slot(root, tid, by, busy_text)
+        raise runs.Busy(
+            f"{MAX_LIVE} live sessions are open here, the most at once. Your request for {tid} is saved and "
+            f"starts when one closes. To close one: orch run stop <ticket>",
+            {"pending": True, "limit": MAX_LIVE},
+        )
+    if not mine and session_exists(root, tid):
+        tmux(root, "kill-session", "-t", target(tid))  # left over from a crash: the claim is gone
+    rec = runs.claim(root, tid, by, name, "live", take_over=take_over, busy_text=busy_text)
+    run = rec["run"]
+    hooks_path = runs.run_dir(root) / f"hooks-{run}.json"
+    try:
+        hooks = adapters.hooks_doc(name, run, root)
+        if hooks:
+            runs._atomic(hooks_path, json.dumps(hooks, indent=2) + "\n", 0o600)
+        p = runs.plan(root, tid, fresh=fresh, mode="live", agent=name, hooks_file=str(hooks_path))
+        # the first input is the prompt: queued like any other input, pasted when the agent is ready
+        with runs.locked(root, tid):
+            runs._pending_add_locked(root, tid, by, "text", p["prompt"], "start", None)
+            runs.mark_delivered_locked(root, tid, p["item_ids"])  # those are inside the prompt now
+        cmd = [sys.executable, "-m", "orch", "run", "_wrap", run, "--ticket", tid, "--agent", name, "--live"]
+        if p["session"] and not p["resumed"]:
+            cmd += ["--new-session", p["session"]]
+        # The agent gets the environment of whoever starts this run, not of whoever started the tmux server.
+        # It travels in a private file (never in argv, where `ps` shows it); the wrapper reads and removes it.
+        env_file = runs.run_dir(root) / f"env-{run}.json"
+        runs._atomic(env_file, json.dumps(dict(os.environ)), 0o600)
+        cmd += ["--env-file", str(env_file), "--"] + p["argv"]
+        r = tmux(
+            root, "new-session", "-d", "-P", "-F", "#{pane_pid}", "-x", "200", "-y", "50",
+            "-s", tid, "-c", str(root), "--", *cmd,
+        )  # fmt: skip
+        if r.returncode != 0:
+            raise Refused(f"tmux could not start the session: {r.stderr.strip() or 'unknown error'}")
+        runs.set_process(
+            root, tid, run, int(r.stdout.strip()),
+            tmux={"socket": socket_name(root), "session": tid},
+            live={"state": "starting", "since": tickets.now()},
+        )  # fmt: skip
+    except BaseException:
+        runs.release(root, tid, run)
+        hooks_path.unlink(missing_ok=True)
+        (runs.run_dir(root) / f"env-{run}.json").unlink(missing_ok=True)
+        with contextlib.suppress(Exception):
+            tmux(root, "kill-session", "-t", target(tid))
+        raise
+    return {
+        **{k: p[k] for k in ("agent", "adapter", "mode", "resumed", "session")},
+        "tmux": {"socket": socket_name(root), "session": tid},
+        "run": run,
+        "log": None,
+    }
+
+
+# ---------------------------------------------------------------- input and idle
+
+
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")  # keeps \n and \t only
+
+
+def clean(text: str) -> str:
+    """Pasted text is data: no escape sequences or other control characters reach the agent's terminal
+    (an old tmux may pass `ESC[201~` through and end the bracketed paste early)."""
+    return _CONTROL.sub("", text)
+
+
+def _format(items: list[dict], flat: bool) -> str:
+    parts = []
+    for i in items:
+        t = clean(i["text"] if i.get("via") == "start" else f"From {i['by']}: {i['text']}")
+        parts.append(t)
+    text = "\n".join(parts)
+    return " ".join(text.split()) if flat else text
+
+
+def deliver(root: Path, tid: str) -> int:
+    """Paste what waits, once, if (and only if) the agent said it is idle. Returns how many items went in."""
+    with runs.locked(root, tid):
+        rec = runs.read(root, tid)
+        if not rec or rec.get("mode") != "live" or (rec.get("live") or {}).get("state") != "idle":
+            return 0
+        items = runs.undelivered(root, tid)
+        if not items or not session_exists(root, tid):
+            return 0
+        flat = not adapters.caps(rec["agent"], root)["hooks"]  # no bracketed paste to rely on: one line
+        buf = f"orch-{rec['run']}"
+        if tmux(root, "load-buffer", "-b", buf, "-", input=_format(items, flat)).returncode != 0:
+            return 0
+        if tmux(root, "paste-buffer", "-p", "-d", "-b", buf, "-t", target(tid)).returncode != 0:
+            return 0
+        time.sleep(PASTE_DELAY)  # let the paste land before Enter
+        if tmux(root, "send-keys", "-t", target(tid), "Enter").returncode != 0:
+            return 0
+        runs.mark_delivered_locked(root, tid, [i["id"] for i in items])
+        rec = runs.read(root, tid) or rec
+        rec["live"] = {"state": "working", "since": tickets.now()}
+        rec["renewed_at"] = tickets.now()
+        runs._write(root, rec)
+        return len(items)
+
+
+def _set_state(root: Path, tid: str, run: str, state: str) -> bool:
+    with runs.locked(root, tid):
+        rec = runs.read(root, tid)
+        if not rec or rec["run"] != run:
+            return False
+        rec["live"] = {"state": state, "since": tickets.now()}
+        rec["renewed_at"] = tickets.now()
+        rec.pop("maybe_stale_since", None)
+        runs._write(root, rec)
+        return True
+
+
+def find_run(root: Path, run: str | None, tid: str | None) -> dict | None:
+    if tid:
+        rec = runs.read(root, tid)
+        return rec if rec and (not run or rec["run"] == run) else None
+    for rec in records(root):
+        if rec["run"] == run:
+            return rec
+    return None
+
+
+def event(root: Path, kind: str, run: str | None, tid: str | None, session_id: str | None) -> int:
+    """From a tool hook (session | idle | attention). Quiet when nothing matches: a hook must never fail."""
+    if kind not in KINDS:
+        raise Refused(f"The event kind must be one of: {', '.join(KINDS)}.")
+    rec = find_run(root, run, tid)
+    if not rec or rec.get("mode") != "live":
+        return 0
+    tid, run = rec["ticket"], rec["run"]
+    if kind == "session":
+        if session_id and adapters.SESSION_RE.match(session_id):
+            tickets.record_session(root, tid, rec["agent"], session_id, runs.host())
+        _set_state(root, tid, run, "idle")  # the tool is up and waiting for its first input
+    elif kind == "idle":
+        _set_state(root, tid, run, "idle")
+    else:
+        _set_state(root, tid, run, "attention")
+        return 0
+    return deliver(root, tid)
+
+
+def send(root: Path, tid: str, by: str, text: str, kind: str = "message") -> dict:
+    tickets.load(root, tid)
+    item = runs.pending_add(root, tid, by, kind, text)
+    rec = runs.read(root, tid)
+    if not rec or runs.state(rec) != "alive":
+        return {"id": item["id"], "delivered": 0, "state": "none"}
+    n = deliver(root, tid) if rec.get("mode") == "live" else 0
+    rec = runs.read(root, tid) or rec
+    return {"id": item["id"], "delivered": n, "state": (rec.get("live") or {}).get("state", rec["mode"])}
+
+
+def send_text(result: dict, tid: str) -> str:
+    if result["delivered"]:
+        return "Sent."
+    if result["state"] == "none":
+        return f"Saved. Nothing is working on {tid} now; it goes in when you start it: orch run start {tid}"
+    return "Saved. It goes in when the agent is done with this step."
+
+
+# ---------------------------------------------------------------- attach, stop, cleanup
+
+
+def attach(root: Path, tid: str, watch: bool) -> None:
+    rec = runs.read(root, tid)
+    if not rec or rec.get("mode") != "live" or not session_exists(root, tid):
+        raise Refused(f"No live session on {tid}. Start one: orch run start {tid}")
+    env = {k: v for k, v in os.environ.items() if k != "TMUX"}
+    argv = ["tmux", "-L", socket_name(root), "attach", "-t", target(tid)] + (["-r"] if watch else [])
+    os.execvpe("tmux", argv, env)
+
+
+def _close(root: Path, rec: dict, interrupt: bool) -> None:
+    """End the agent, its tmux session and the claim. The work done stays; so does the session id."""
+    tid, run = rec["ticket"], rec["run"]
+    now = runs.read(root, tid)
+    if now and now["run"] != run:
+        return  # a new run took over meanwhile: it is not ours to stop
+    if rec.get("mode") == "live" and session_exists(root, tid):
+        if interrupt:
+            for k in adapters.load(rec["agent"], root).get("live", {}).get("interrupt_keys") or []:
+                tmux(root, "send-keys", "-t", target(tid), k)
+            time.sleep(PASTE_DELAY)
+        tmux(root, "kill-session", "-t", target(tid))
+    for pid, started in (
+        (rec.get("pid"), rec.get("pid_started")),
+        (rec.get("agent_pid"), rec.get("agent_pid_started")),
+    ):
+        now = runs.read(root, tid)
+        if now and now["run"] != run:
+            return
+        if runs._running(pid, started):
+            runs.kill_tree(pid)
+    runs.release(root, tid, run)
+    (runs.run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
+
+
+def stop(root: Path, tid: str) -> bool:
+    with runs.locked(root, tid):  # the run we stop is the one that holds the claim now
+        rec = runs.read(root, tid)
+        if rec:
+            rec["stop_requested"] = tickets.now()
+            runs._write(root, rec)
+    if not rec:
+        if session_exists(root, tid):  # a session without a claim: nothing may be left running
+            tmux(root, "kill-session", "-t", target(tid))
+            return True
+        return False
+    _close(root, rec, interrupt=True)
+    start_waiting(root)
+    return True
+
+
+def cleanup(root: Path) -> list[str]:
+    """Close live sessions idle for more than an hour (no daemon: this runs on every `orch run` call), and
+    remove tmux sessions whose claim is gone."""
+    closed = []
+    for rec in records(root):
+        if rec.get("mode") != "live":
+            continue
+        live = rec.get("live") or {}
+        tid = rec["ticket"]
+        st = runs.state(rec)
+        if st == "dead":
+            if session_exists(root, tid):
+                tmux(root, "kill-session", "-t", target(tid))
+            continue
+        if st != "alive" or live.get("state") != "idle" or runs.undelivered(root, tid):
+            continue
+        try:
+            idle = time.time() - runs._parse(live["since"])
+        except (KeyError, ValueError):
+            continue
+        if idle > idle_seconds():
+            _close(root, rec, interrupt=False)
+            closed.append(tid)
+    if closed:
+        start_waiting(root)
+    return closed
+
+
+def start_waiting(root: Path) -> None:
+    """A slot opened: start the oldest ticket whose live start was queued for lack of one."""
+    if len(live_alive(root)) >= MAX_LIVE:
+        return
+    d = runs.run_dir(root) / "pending"
+    waiting = []
+    for f in sorted(d.glob("t_*.jsonl")) if d.is_dir() else []:
+        tid = f.stem
+        if runs.read(root, tid):
+            continue
+        items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
+        if items:
+            waiting.append((items[0]["at"], tid, items[0]["by"]))
+    for _, tid, by in sorted(waiting)[:1]:
+        with contextlib.suppress(Exception):
+            runs.start(root, tid, by, mode="live")
+
+
+def line(rec: dict) -> str:
+    """One plain sentence about a live run, for `orch run status`."""
+    state = (rec.get("live") or {}).get("state", "starting")
+    words = {
+        "starting": "starting up",
+        "idle": "waiting for input",
+        "working": "working",
+        "attention": "waiting for your OK",
+    }
+    return f"In a live session ({words.get(state, state)}). See it: orch run attach {rec['ticket']}"

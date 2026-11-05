@@ -32,17 +32,6 @@ def test_output_is_unchanged(proj, capsys, cmd):
     assert code == 0 and cap.out == GOLDEN[cmd] and cap.err == ""
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["run", "done"],
-    ],
-)
-def test_placeholders_say_not_available(proj, run, argv):
-    code, out, err = run(*argv)
-    assert code == 2 and "not available yet" in err and out == ""
-
-
 def test_provenance_unchanged(proj, monkeypatch):
     monkeypatch.delenv("ORCH_AGENT", raising=False)
     assert tickets.agent_tool() is None
