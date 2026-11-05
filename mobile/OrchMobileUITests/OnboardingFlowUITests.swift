@@ -6,7 +6,7 @@ final class OnboardingFlowUITests: XCTestCase {
 
     func testOnboardingToAnswerToTypedSend() {
         let app = XCUIApplication()
-        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock"]
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-undoSeconds", "1"]
         app.launch()
 
         // Onboarding: sample invitation, connect, skip notifications
@@ -19,19 +19,19 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(notNow.waitForExistence(timeout: 10))
         notNow.tap()
 
-        // Home: both mock workspaces, open questions banner
-        XCTAssertTrue(app.staticTexts["Your workspaces"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Data pipelines for the Pilatus client"].waitForExistence(timeout: 10))
+        // Home: Your tickets (Needs you, Working on, Done)
+        XCTAssertTrue(app.staticTexts["Your tickets"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Invoice CSV export"].waitForExistence(timeout: 10))
 
         // Questions: answer with one tap
         app.buttons["Questions"].tap()
         let answer = app.buttons["answer-TIMESTAMP"]
         XCTAssertTrue(answer.waitForExistence(timeout: 10))
         answer.tap()
-        XCTAssertTrue(app.staticTexts["Answer sent: TIMESTAMP"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Answered TIMESTAMP'")).firstMatch.waitForExistence(timeout: 10))
 
         // Send: typed text to a workspace inbox
-        app.buttons["Send"].tap()
+        app.buttons["Ask"].tap()
         let field = app.textViews["transcript"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
@@ -39,7 +39,7 @@ final class OnboardingFlowUITests: XCTestCase {
         let send = app.buttons["send-button"]
         if !send.isHittable { app.swipeUp() }
         send.tap()
-        XCTAssertTrue(app.staticTexts["It's in the inbox."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["On its way."].waitForExistence(timeout: 10))
     }
 
     /// Mic path against the mock: scripted recorder, tap to record, tap to stop, transcript appears, edit, send.
@@ -60,7 +60,7 @@ final class OnboardingFlowUITests: XCTestCase {
         let send = app.buttons["send-button"]
         if !send.isHittable { app.swipeUp() }
         send.tap()
-        XCTAssertTrue(app.staticTexts["It's in the inbox."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["On its way."].waitForExistence(timeout: 10))
     }
 
     /// A text push tap (stood in by -openTextPush) opens the Send tab on that workspace with the workspace's reply under the composer.
@@ -75,7 +75,7 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(reply.label.contains("The report is ready"))
     }
 
-    /// Answer has a 3 s undo window; undo returns the options and nothing is sent.
+    /// Answer has a 5 s undo window; undo returns the options and nothing is sent.
     func testAnswerCanBeUndone() {
         let app = XCUIApplication()
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-startTab", "questions", "-undoSeconds", "30"]
@@ -87,7 +87,7 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(undo.waitForExistence(timeout: 10))
         undo.tap()
         XCTAssertTrue(app.buttons["answer-TIMESTAMP"].waitForExistence(timeout: 3))
-        XCTAssertFalse(app.staticTexts["Answer sent: TIMESTAMP"].exists)
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Answered TIMESTAMP'")).firstMatch.exists)
     }
 
     /// VoiceOver label audit: every button on the main screens has a spoken label (no empty or raw-symbol names).
@@ -95,8 +95,8 @@ final class OnboardingFlowUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["Your workspaces"].waitForExistence(timeout: 15))
-        for tab in ["Home", "Questions", "Send", "Settings"] {
+        XCTAssertTrue(app.staticTexts["Your tickets"].waitForExistence(timeout: 15))
+        for tab in ["Home", "Questions", "Ask", "Settings"] {
             app.buttons[tab].tap()
             sleep(1)
             for b in app.buttons.allElementsBoundByIndex where b.exists && b.isHittable {
@@ -172,7 +172,7 @@ final class OnboardingFlowUITests: XCTestCase {
         let send = app.buttons["send-button"]
         if !send.isHittable { app.swipeUp() }
         send.tap()
-        let back = app.buttons["Back to home →"]
+        let back = app.buttons["See your tickets →"]
         XCTAssertTrue(back.waitForExistence(timeout: 10))
         XCTAssertGreaterThanOrEqual(back.frame.height, 44)
     }
@@ -207,10 +207,10 @@ final class OnboardingFlowUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES"]
         app.launch()
-        let tab = app.buttons["Send"]
+        let tab = app.buttons["Ask"]
         XCTAssertTrue(tab.waitForExistence(timeout: 15))
         XCTAssertGreaterThanOrEqual(tab.frame.height, 44)
         tab.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2)).tap()
-        XCTAssertTrue(app.staticTexts["Say it. Send it"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Ask for something"].waitForExistence(timeout: 3))
     }
 }
