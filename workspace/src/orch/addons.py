@@ -92,7 +92,7 @@ def real_home() -> Path:
 
 def _trusted_home(h: Path, root: Path | None = None) -> bool:
     """ORCH_HOME counts only under the user's real home, outside the current folder and the workspace, and
-    with no .orch, .agents or .git in any folder from it up to home (a repo .envrc could aim it at its parent)."""
+    with no .orch, .agents or .git in any folder from it up to home (a repo .envrc could aim it higher)."""
     top = real_home().resolve()
     for base in (Path.cwd().resolve(), *([root.resolve()] if root else [])):
         try:
