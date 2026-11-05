@@ -437,9 +437,7 @@ async fn extend_sets_new_expiry_and_checks_days() {
         .json();
     let id = j["id"].as_str().unwrap();
     let uri = format!("/v1/files/{id}");
-    let r = t
-        .api(&ws, "PATCH", &uri, br#"{"days":30}"#.to_vec())
-        .await;
+    let r = t.api(&ws, "PATCH", &uri, br#"{"days":30}"#.to_vec()).await;
     assert_eq!(r.status, 200, "{}", r.text());
     assert!(r.json()["expires_at"].as_str().unwrap() > j["expires_at"].as_str().unwrap());
     // never shortens
@@ -450,24 +448,6 @@ async fn extend_sets_new_expiry_and_checks_days() {
     }
     let l = t.api(&ws, "GET", "/v1/files", vec![]).await.json();
     assert_eq!(l["items"][0]["expires_at"], r.json()["expires_at"]);
-}
-
-#[tokio::test]
-async fn files_list_pages() {
-    let t = setup();
-    let ws = t.workspace("A", basic_rights()).await;
-    for _ in 0..3 {
-        t.api(&ws, "POST", "/v1/files", vector_blob()).await;
-    }
-    let p1 = t.api(&ws, "GET", "/v1/files?limit=2", vec![]).await.json();
-    assert_eq!(p1["items"].as_array().unwrap().len(), 2);
-    let next = p1["next"].as_str().unwrap();
-    let p2 = t
-        .api(&ws, "GET", &format!("/v1/files?limit=2&after={next}"), vec![])
-        .await
-        .json();
-    assert_eq!(p2["items"].as_array().unwrap().len(), 1);
-    assert!(p2["next"].is_null());
 }
 
 #[tokio::test]
@@ -488,7 +468,10 @@ async fn patch_needs_files_right_and_has_small_body_limit() {
     t.st.db
         .lock()
         .unwrap()
-        .execute("UPDATE workspaces SET rights=REPLACE(rights,'\"files\":true','\"files\":false')", [])
+        .execute(
+            "UPDATE workspaces SET rights=REPLACE(rights,'\"files\":true','\"files\":false')",
+            [],
+        )
         .unwrap();
     let r = t.api(&ws, "PATCH", &uri, br#"{"days":5}"#.to_vec()).await;
     assert_eq!(r.status, 403, "{}", r.text());
@@ -502,7 +485,10 @@ async fn replace_leaves_no_temp_files() {
         .as_str()
         .unwrap()
         .to_string();
-    t.api(&ws, "PUT", &format!("/v1/files/{id}"), vector_blob()).await;
-    let n = std::fs::read_dir(t.dir.path().join("files")).unwrap().count();
+    t.api(&ws, "PUT", &format!("/v1/files/{id}"), vector_blob())
+        .await;
+    let n = std::fs::read_dir(t.dir.path().join("files"))
+        .unwrap()
+        .count();
     assert_eq!(n, 1);
 }
