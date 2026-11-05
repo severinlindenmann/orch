@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import secrets
 import tomllib
 from pathlib import Path
 
@@ -42,12 +44,50 @@ def agent_entries(root: Path) -> dict[str, dict]:
     out = {}
     for name, e in (read(root).get("agents") or {}).items():
         if isinstance(e, dict) and NAME_RE.match(name) and isinstance(e.get("adapter"), str):
-            out[name] = {k: e[k] for k in ("adapter", "command", "interactive") if isinstance(e.get(k), str)}
+            out[name] = {
+                k: e[k] for k in ("adapter", "command", "interactive", "prompt") if isinstance(e.get(k), str)
+            }
     return out
 
 
 def _value(v: str) -> str:
-    return json.dumps(v, ensure_ascii=False)  # a JSON string is a valid TOML basic string
+    # a JSON string is a valid TOML basic string, except that TOML forbids a raw DEL
+    return json.dumps(v, ensure_ascii=False).replace("\x7f", "\\u007f")
+
+
+def _headers(lines: list[str]) -> list[tuple[int, str]]:
+    """(line index, table name) of every real table header: not a `[1, 2]` line inside an array, and not
+    text inside a multi-line string."""
+    out, depth, ml = [], 0, None
+    for i, line in enumerate(lines):
+        if ml is None and depth == 0:
+            h = _HEADER.match(line)
+            if h:
+                out.append((i, h.group(1).strip()))
+                continue
+        j, n = 0, len(line)
+        while j < n:
+            if ml:
+                k = line.find(ml, j)
+                if k < 0:
+                    break
+                j, ml = k + 3, None
+                continue
+            c = line[j]
+            if c == "#":
+                break
+            if line.startswith('"""', j) or line.startswith("'''", j):
+                ml, j = line[j : j + 3], j + 3
+            elif c in "\"'":
+                j += 1
+                while j < n and line[j] != c:
+                    j += 2 if (c == '"' and line[j] == "\\") else 1
+                j += 1
+            else:
+                depth += (c in "[{") - (c in "]}")
+                j += 1
+        depth = max(depth, 0)
+    return out
 
 
 def set_key(root: Path, table: str, key: str, value: str) -> None:
@@ -57,13 +97,11 @@ def set_key(root: Path, table: str, key: str, value: str) -> None:
     lines = p.read_text(encoding="utf-8").splitlines(keepends=True) if p.is_file() else []
     new = f"{key} = {_value(value)}\n"
     start = end = None
-    for i, line in enumerate(lines):
-        h = _HEADER.match(line)
-        if h:
-            if start is not None and end is None:
-                end = i
-            if h.group(1).strip() == table:
-                start = i
+    for i, name in _headers(lines):
+        if start is not None and end is None:
+            end = i
+        if name == table:
+            start = i
     if start is None:
         if lines and not lines[-1].endswith("\n"):
             lines[-1] += "\n"
@@ -82,11 +120,27 @@ def set_key(root: Path, table: str, key: str, value: str) -> None:
             if at > 0 and not lines[at - 1].endswith("\n"):
                 lines[at - 1] += "\n"
             lines.insert(at, new)
-    p.write_text("".join(lines), encoding="utf-8", newline="\n")
-    read(root)  # never leave a file orch cannot read
+    text = "".join(lines)
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise Refused(f"orch could not change {p} safely ({e}). Nothing was written.") from None
+    tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8", newline="\n")
+        os.replace(tmp, p)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
-def add_agent(root: Path, name: str, command: str, interactive: str | None = None, adapter: str = "generic"):
+def add_agent(
+    root: Path,
+    name: str,
+    command: str,
+    interactive: str | None = None,
+    adapter: str = "generic",
+    prompt: str | None = None,
+):
     if not NAME_RE.match(name):
         raise Refused(f"'{name}' is not a name orch can use. Use lowercase letters, digits and '-'.")
     for k, v in (("command", command), ("interactive", interactive)):
@@ -96,6 +150,10 @@ def add_agent(root: Path, name: str, command: str, interactive: str | None = Non
     set_key(root, f"agents.{name}", "command", command)
     if interactive:
         set_key(root, f"agents.{name}", "interactive", interactive)
+    if prompt:
+        if prompt not in ("arg", "stdin"):
+            raise Refused("The prompt goes in with 'arg' or 'stdin'.")
+        set_key(root, f"agents.{name}", "prompt", prompt)
 
 
 # ---- the one notice for a command that comes from a folder's settings

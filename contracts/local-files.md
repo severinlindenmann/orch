@@ -65,11 +65,12 @@ agent = "my-agent"          # who does the work here: a built-in adapter (agents
 
 [agents.my-agent]
 adapter = "generic"         # whose rules apply (agent-adapter.schema.json)
-command = "my-agent --prompt {prompt}"   # oneshot command; {prompt} is appended when missing
+command = "my-agent --prompt {prompt}"   # oneshot command; {prompt} is appended after `--` when missing
 interactive = "my-agent"    # optional: start it interactively, so runs can be live in tmux
+prompt = "stdin"            # optional: the task goes on stdin instead of the command line (default "arg")
 ```
 
-- Shape: `agent-adapter.schema.json` `$defs/user_config`. Only `adapter`, `command` and `interactive`; nothing else.
+- Shape: `agent-adapter.schema.json` `$defs/user_config`. Only `adapter`, `command`, `interactive` and `prompt`; nothing else.
 - `orch init` asks once which agent works here (found adapters + Other). Add-ons never ask.
 - A command from a folder's `.orch/config.toml` is used **without confirmation**. Its first use on a machine prints one
   notice line: `Using agent command from this folder's settings: <command>` (remembered per machine in the user's orch folder).

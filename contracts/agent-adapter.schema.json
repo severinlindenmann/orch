@@ -131,7 +131,8 @@
             "properties": {
               "adapter": { "$ref": "#/$defs/name", "description": "Built-in adapter whose rules apply, e.g. generic." },
               "command": { "type": "string", "minLength": 1, "maxLength": 500, "description": "Oneshot command line ({prompt} optional; appended when missing). Used without confirmation; the first use on a machine prints one notice line." },
-              "interactive": { "type": "string", "minLength": 1, "maxLength": 500, "description": "Optional command that starts the tool interactively (live runs in tmux)." }
+              "interactive": { "type": "string", "minLength": 1, "maxLength": 500, "description": "Optional command that starts the tool interactively (live runs in tmux)." },
+              "prompt": { "enum": ["arg", "stdin"], "description": "Optional. How the command takes the task: arg (default; {prompt}, or appended after '--' when missing) or stdin." }
             }
           }
         }

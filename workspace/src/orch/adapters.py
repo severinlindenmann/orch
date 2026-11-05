@@ -58,6 +58,9 @@ def _registry() -> dict:
     return doc["adapters"]
 
 
+_warned: set[str] = set()
+
+
 def builtin_names() -> list[str]:
     return list(_registry())
 
@@ -67,11 +70,13 @@ def load(name: str, root: Path | None = None) -> dict:
     user's command and interactive command added."""
     entry = config.agent_entries(root).get(name) if root is not None else None
     if entry and name in _registry():
-        print(
-            f"This folder's settings define an agent called '{name}'; pick another name. "
-            "Using the built-in one.",
-            file=sys.stderr,
-        )
+        if name not in _warned:
+            _warned.add(name)
+            print(
+                f"This folder's settings define an agent called '{name}'; pick another name. "
+                "Using the built-in one.",
+                file=sys.stderr,
+            )
         entry = None
     base = entry["adapter"] if entry else name
     reg = _registry()
@@ -82,6 +87,8 @@ def load(name: str, root: Path | None = None) -> dict:
     a["label"] = a["label"].replace("{name}", name)
     a["command"] = (entry or {}).get("command")
     a["interactive"] = (entry or {}).get("interactive")
+    if (entry or {}).get("prompt") in ("arg", "stdin") and base == "generic":
+        a["prompt_via"] = entry["prompt"]
     a["from_settings"] = bool(entry and (entry.get("command") or entry.get("interactive")))
     if base == "generic":
         a["capabilities"]["interactive_tmux"] = bool(a["interactive"])
@@ -179,7 +186,7 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
         at = out.index("--") if "--" in out else len(out)
         out[at:at] = extra
     if mode == "oneshot" and not has_prompt and a["prompt_via"] == "arg" and v.get("prompt") is not None:
-        if not user and "--" not in out:
+        if "--" not in out:
             out.append("--")
         out.append(str(v["prompt"]))
     return out

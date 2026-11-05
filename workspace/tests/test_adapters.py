@@ -94,7 +94,12 @@ def test_generic_command_and_floor(proj):
 
 def test_generic_prompt_is_appended_and_live_needs_interactive(proj):
     _agent(proj, "plain", command="plain-agent -q", interactive="plain-agent --live")
-    assert adapters.render("plain", "fresh", "oneshot", {"prompt": "hi"}, proj) == ["plain-agent", "-q", "hi"]
+    assert adapters.render("plain", "fresh", "oneshot", {"prompt": "hi"}, proj) == [
+        "plain-agent",
+        "-q",
+        "--",
+        "hi",
+    ]
     assert adapters.render("plain", "fresh", "live", {"prompt": "hi"}, proj) == ["plain-agent", "--live"]
     assert adapters.caps("plain", proj)["interactive_tmux"] is True
     assert adapters.describe("plain", proj) == "fresh each run, live session"
@@ -236,3 +241,20 @@ def test_session_parsing_against_real_recorded_output():
     assert adapters.parse_session("codex", codex) == "01a1ad41-d898-7323-a687-0b497c12a830"
     claude = json.loads((fx / "claude-print-json.json").read_text(encoding="utf-8"))  # claude 2.1.318
     assert adapters.SESSION_RE.match(claude["session_id"])  # the id orch passed with --session-id comes back
+
+
+def test_user_agent_can_take_the_task_on_stdin(proj):
+    config.add_agent(proj, "reader", "reader-agent -q", prompt="stdin")
+    assert adapters.render("reader", "fresh", "oneshot", {"prompt": "hi"}, proj) == ["reader-agent", "-q"]
+    assert adapters.prompt_via_stdin("reader", proj)
+    assert not adapters.prompt_via_stdin("claude")
+
+
+def test_shadow_warning_prints_once(proj, capsys):
+    adapters._warned.clear()
+    p = proj / ".orch" / "config.toml"
+    p.parent.mkdir(exist_ok=True)
+    p.write_text('[agents.codex]\nadapter = "generic"\ncommand = "x"\n')
+    adapters.load("codex", proj)
+    adapters.load("codex", proj)
+    assert capsys.readouterr().err.count("pick another name") == 1

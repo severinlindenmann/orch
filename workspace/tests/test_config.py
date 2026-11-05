@@ -125,7 +125,7 @@ def test_init_nothing_found(proj, run, fake_path):
 def test_init_asks_found_agents_and_other(proj, run, fake_path, monkeypatch):
     _stub(fake_path, "claude", "2.1.318")
     monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
-    answers = iter(["2", "my-agent --prompt {prompt}"])
+    answers = iter(["2", "", "my-agent --prompt {prompt}"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
     code, out, _ = run("init")
     assert code == 0
@@ -147,3 +147,24 @@ def test_command_from_settings_prints_its_notice_once(proj, run):
 def test_cannot_add_an_agent_named_like_a_builtin(proj, run):
     code, _, err = run("config", "agent", "add", "claude", "--command", "x {prompt}")
     assert code == 2 and "built-in" in err and not (proj / ".orch" / "config.toml").exists()
+
+
+def test_array_lines_are_not_tables_and_del_is_escaped(proj):
+    p = proj / ".orch" / "config.toml"
+    p.parent.mkdir()
+    p.write_text('[x]\nlist = [\n  [1, 2]\n]\ntext = """\n[workspace]\n"""\n[workspace]\nagent = "a"\n')
+    config.set_key(proj, "workspace", "agent", "b\x7fc")
+    t = p.read_text(encoding="utf-8")
+    assert "\x7f" not in t and config.read(proj)["workspace"]["agent"] == "b\x7fc"
+    assert config.read(proj)["x"]["list"] == [[1, 2]] and config.read(proj)["x"]["text"] == "[workspace]\n"
+    assert not list(p.parent.glob("*.tmp"))
+
+
+def test_init_other_asks_a_name_and_keeps_existing(proj, run, monkeypatch):
+    config.add_agent(proj, "my-agent", "old {prompt}")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+    answers = iter(["", "new {prompt}"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    code, _, err = run("init")
+    assert code == 2 and "already an agent called 'my-agent'" in err
+    assert config.agent_entries(proj)["my-agent"]["command"] == "old {prompt}"

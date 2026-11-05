@@ -24,6 +24,7 @@ def add_parsers(sub, common) -> None:
     a.add_argument("name_or_add", metavar="add|NAME")
     a.add_argument("name", nargs="?")
     a.add_argument("--command", help="the command that does the work; {prompt} is where the task goes")
+    a.add_argument("--prompt-via", choices=("arg", "stdin"), help="how the task reaches the command")
     a.add_argument("--interactive", help="optional: the command that starts it for a live session")
 
 
@@ -111,7 +112,7 @@ def _config(args, root: Path) -> None:
                 )
             if args.name in adapters.builtin_names():
                 raise Refused(f"'{args.name}' is a built-in agent; pick another name.")
-            config.add_agent(root, args.name, args.command, args.interactive)
+            config.add_agent(root, args.name, args.command, args.interactive, prompt=args.prompt_via)
             tail = (
                 "starts fresh each run; no live steps"
                 if not args.interactive
