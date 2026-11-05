@@ -291,7 +291,7 @@ def a4(e):
         check(any("Scheduler started an agent run" in h["text"] for h in d["history"]), "no scheduler history entry")
         check(any(h["by"] == "agent:scheduler" for h in d["history"]), "history not by agent:scheduler")
         check(t in log.read_text(), "prompt did not name the ticket")
-        check(len(list((ws / ".orch/addons/scheduler/logs").glob(f"{t}-*.log"))) == 1, "run log missing")
+        check(len(list((ws / ".orch/run/logs").glob(f"{t}-*.log"))) == 1, "run log missing")
     finally:
         _sched(e, ws, "stop")
     check(_sched(e, ws, "status")[0] == 1, "scheduler did not stop")
@@ -321,10 +321,11 @@ def a5(e):
         # scenarios (R6-R8 assert exact agent runs there)
         e.orch(ws, "ticket", "status", t, "dropped")
     lines = log.read_text().split("\n")
-    kinds = [l.split()[0] for l in lines if l.strip()]
+    kinds = [l.split()[0] for l in lines if l.startswith("start ") or (l.startswith("end ") and l[4:].isdigit())]  # the prompt spans lines
     check(all(kinds[i] != kinds[i + 1] for i in range(len(kinds) - 1)), f"runs overlapped: {kinds}")
-    logs = sorted((ws / ".orch/addons/scheduler/logs").glob(f"{t}-*.log"))
-    check(len(logs) >= 2 and all("# end" in p.read_text() for p in logs[:2]), "run logs missing or unfinished")
+    logs = sorted((ws / ".orch/run/logs").glob(f"{t}-*.log"))
+    ends = [l for l in lines if l.startswith("end ")]  # the fake agent writes one end line per finished run
+    check(len(logs) >= 2 and len(ends) >= 2, f"run logs missing or unfinished: {len(logs)} logs, {len(ends)} ends")
     st = json.loads((ws / ".orch/addons/scheduler/state.json").read_text())
     check(st[t].get("next_run"), "state.json has no next_run")
 

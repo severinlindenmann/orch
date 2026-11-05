@@ -59,9 +59,10 @@ def test_next_runs_calendar_and_list(ws):
 
 def test_recent_runs_and_failed_stat(ws):
     add_ticket(ws, "t_wake002", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
-    (ws / ".orch/config.toml").write_text("[scheduler]\nagent = 'no-such-agent-xyz {prompt}'\n")
     s = Scheduler(ws)
-    s.tick(T(8))  # cannot start: exit 127 recorded
+    s.tick(T(8))
+    (ws / "ended-t_wake002").write_text("")  # ended at once, wrote nothing: a fast fail
+    s.tick(T(8, 1))
     v = build(ws, T(9))
     check(v)
     stats = {b["label"]: b for b in blocks(v, "stat")}
@@ -74,7 +75,11 @@ def test_good_run_has_duration_and_no_failed_stat(ws):
     add_ticket(ws, "t_wake003", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
     s = Scheduler(ws)
     s.tick(T(8))
-    s.runner.reap(T(8, 1), wait=True)
+    import os
+    import time
+    (ws / 'ended-t_wake003').write_text('')
+    os.utime(ws / '.orch/run/logs/t_wake003-r1.log', (time.time() + 60, time.time() + 60))
+    s.tick(T(8, 1))
     v = build(ws, T(9))
     check(v)
     assert "Last run failed" not in {b["label"] for b in blocks(v, "stat")}

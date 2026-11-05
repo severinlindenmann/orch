@@ -58,7 +58,7 @@ def repeat(root: Path, tid: str, cron: str | None, off: bool, agent: str | None 
         changes = {"recurring": True, "cron": cron}
         if agent:
             if not re.fullmatch(r"[a-z0-9-]{1,32}", agent):
-                raise Refused("The agent name may only have a-z, 0-9 and -. It names an entry of [scheduler.agents] in .orch/config.toml.")
+                raise Refused("The agent name may only have a-z, 0-9 and -. It names an agent.")
             changes["agent"] = agent
     if not orchcli.set_ext(root, t, **changes):
         raise Refused("The ticket changed or the change was not accepted. Try again.")
@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("ticket")
     rp.add_argument("cron_pos", nargs="?", metavar="cron")
     rp.add_argument("--cron")
-    rp.add_argument("--agent", help="name of an agent in [scheduler.agents]")
+    rp.add_argument("--agent", help="name of the agent for this repeat")
     rp.add_argument("--off", action="store_true")
     args = ap.parse_args(argv)
     try:

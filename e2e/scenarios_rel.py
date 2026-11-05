@@ -140,7 +140,8 @@ def r5(e):
 
 
 def _agent_runs(log: Path) -> int:
-    return log.read_text().count("start ") if log.exists() else 0
+    import re
+    return len(re.findall(r"^end \d+$", log.read_text(), re.M)) if log.exists() else 0  # one end line per finished run
 
 
 def _scheduler_on(e, ws):
@@ -151,6 +152,10 @@ def _scheduler_on(e, ws):
 def _sched_once(e, ws):
     rc, out, err = e.sh(["orch", "scheduler", "run", "--once"], cwd=e.ws(ws), timeout=120)
     check(rc == 0, f"scheduler run --once: {err or out}")
+    for _ in range(40):  # core starts the agent detached: wait until no run holds a ticket any more
+        if not list((e.ws(ws) / ".orch/run/tickets").glob("*.json")):
+            break
+        time.sleep(0.5)
 
 
 @scenario("R6")
