@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from orch import net, publish, relay, templates, tickets
@@ -112,6 +113,9 @@ def add_parsers(sub, common) -> None:
     _add_profile(rel)
     x = rel.add_parser("inbox", parents=[common], help="pull new messages")
     x.add_argument("--wait", type=int, default=0, help="wait up to N seconds (max 30)")
+    x.add_argument("--since", type=int, help="add-ons: list every arrival after this number (marks nothing)")
+    x = rel.add_parser("outbox", parents=[common], help="messages saved but not sent yet")
+    x.add_argument("--resend", action="store_true", help="try to send them now")
     x = rel.add_parser("done", parents=[common], help="mark a message as processed, before acting")
     x.add_argument("id")
     t = argparse.ArgumentParser(add_help=False)
@@ -228,6 +232,8 @@ def run_relay(args, root: Path, out) -> None:
     if sub == "profile":
         return _run_profile(args, relay, out)
     t = getattr(args, "ticket", None)
+    if sub not in ("connect", "status", "outbox"):
+        _resend_waiting(root)
     if sub == "connect":
         who, line = relay.connect(root, args.url, args.workspace, args.token)
         out(
@@ -260,6 +266,23 @@ def run_relay(args, root: Path, out) -> None:
                 else "No phones paired yet. Pair one in the admin page."
             ),
         )
+    elif sub == "outbox":
+        res = relay.resend_outbox(root) if args.resend else None
+        left = relay.outbox_list(root)
+        lines = [f"{m['id']}  to {relay.name_of(root, m['to'])}  {m['type']}" for m in left]
+        for d in (res or {}).get("dropped", []):
+            lines.append(f"Not sent, the relay refused {d['id']}: {d['reason']}")
+        if res and res["sent"]:
+            lines.insert(0, f"Sent {len(res['sent'])} waiting message{'s' if len(res['sent']) != 1 else ''}.")
+        if left:
+            lines.append("These go out with the next orch relay command.")
+        out(args, {"waiting": left, **(res or {})}, "\n".join(lines) or "Nothing is waiting to be sent.")
+    elif sub == "inbox" and args.since is not None:
+        r = relay.since(root, args.since, args.wait)
+        lines = [
+            f"{i['seq']}  {i['type']} from {relay.name_of(root, i['from'])}  [{i['id']}]" for i in r["items"]
+        ]
+        out(args, r, "\n".join(lines) or "Nothing new since then.")
     elif sub == "inbox":
         items = relay.inbox(root, args.wait)
         data = [
@@ -293,13 +316,13 @@ def run_relay(args, root: Path, out) -> None:
             m = relay.send_text(root, args.workspace, args.text, t)
         else:
             raise Refused("Nothing to send. Give a text or --file.")
-        out(args, m, f"Message sent to {relay.name_of(root, m['to'])}.")
+        out(args, m, _sent_line(root, m, "Message sent to {}."))
     elif sub == "delegate":
         m = relay.send_delegate(root, args.workspace, args.title, args.text, args.check, t)
-        out(args, m, f"Task handed to {relay.name_of(root, m['to'])}. It starts once they allow it.")
+        out(args, m, _sent_line(root, m, "Task handed to {}. It starts once they allow it."))
     elif sub == "start":
         m = relay.send_start(root, args.workspace, args.key, args.text, t)
-        out(args, m, f"Start request sent to {relay.name_of(root, m['to'])}.")
+        out(args, m, _sent_line(root, m, "Start request sent to {}."))
     elif sub == "allow":
         msg = relay.load_message(root, args.id)
         b = msg.get("body", {})
@@ -328,6 +351,26 @@ def run_relay(args, root: Path, out) -> None:
         else:
             relay.webhook_delete(root, args.id)
             out(args, {"ok": True}, f"Deleted webhook {args.id}.")
+
+
+NOT_SENT = "Not sent yet - the relay can't be reached. It goes out with the next orch relay command."
+
+
+def _sent_line(root: Path, m: dict, ok: str) -> str:
+    return NOT_SENT if m.get("sent") is False else ok.format(relay.name_of(root, m["to"]))
+
+
+def _resend_waiting(root: Path) -> None:
+    """Every orch relay command first sends what waits in .orch/outbox/ (never fails the command)."""
+    try:
+        net.load_service(root, "relay")
+        res = relay.resend_outbox(root)
+    except (Refused, OSError):
+        return
+    for d in res["dropped"]:
+        print(
+            f"A saved message could not be sent and was removed: {d['reason']} [{d['id']}]", file=sys.stderr
+        )
 
 
 def _inbox_line(i: dict, root: Path) -> str:
@@ -368,7 +411,8 @@ def _inbox_line(i: dict, root: Path) -> str:
 
 def send_phone_question(root: Path, tid: str, q: dict) -> None:
     try:
-        relay.send_question(root, tickets.load(root, tid), q)
+        if relay.send_question(root, tickets.load(root, tid), q).get("sent") is False:
+            raise Refused(NOT_SENT)
     except Refused as e:
         raise Refused(
             f"The question is saved on the ticket, but it could not be sent to the phones. {e}"
