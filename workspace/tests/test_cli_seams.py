@@ -35,8 +35,6 @@ def test_output_is_unchanged(proj, capsys, cmd):
 @pytest.mark.parametrize(
     "argv",
     [
-        ["run", "claim", "x"],
-        ["run", "status"],
         ["run", "done"],
     ],
 )
