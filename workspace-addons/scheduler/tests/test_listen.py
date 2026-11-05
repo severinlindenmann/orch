@@ -107,3 +107,47 @@ def test_unreachable_relay_pauses_instead_of_spinning(ws):
     ev = threading.Event()
     assert Listener(ws, ev).step() >= 10  # a pause, not an instant retry
     assert listen.read(ws)["listening"] is False and not ev.is_set()
+
+
+def phone_ticket(ws, tid, **kw):
+    return add_ticket(ws, tid, created_at="2026-11-04T07:50:00Z", ext={"relay": {"origin": "phone", "from": "ph_abc", "message": "m_1"}}, **kw)
+
+
+def test_phone_text_ticket_starts_one_run_only(ws):
+    from conftest import runs_started
+
+    phone_ticket(ws, "t_ph000001")
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == ["t_ph000001"]
+    assert s.tick(T(8, 1)) == [] and Scheduler(ws).tick(T(8, 2)) == []  # also not after a restart
+    assert runs_started(ws) == ["t_ph000001"]
+    assert json.loads((ws / ".orch/tickets/t_ph000001.json").read_text())["ext"]["scheduler"]["phone_started"] is True
+
+
+def test_old_or_closed_phone_tickets_are_left_alone(ws):
+    from conftest import runs_started
+
+    add_ticket(ws, "t_ph000002", created_at="2026-10-01T00:00:00Z", ext={"relay": {"origin": "phone"}})
+    phone_ticket(ws, "t_ph000003", status="done")
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+
+
+def test_follow_up_text_on_a_running_ticket_starts_nothing(ws):
+    from conftest import runs_started
+
+    add_ticket(ws, "t_ph000004", status="active")
+    relay_on(ws)
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_5", "type": "text", "from": "ph_abc", "ticket": "t_ph000004",
+                                                 "applied": True, "note": "added to t_ph000004", "body": {"text": "and also"}}]))
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []  # the run is going: the relay queued the text
+
+
+def test_follow_up_text_on_an_idle_ticket_starts_a_run(ws):
+    from conftest import runs_started
+
+    add_ticket(ws, "t_ph000005", status="open")
+    (ws / "ended-t_ph000005").write_text("")
+    relay_on(ws)
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_6", "type": "text", "from": "ph_abc", "ticket": "t_ph000005",
+                                                 "applied": True, "note": "added to t_ph000005", "body": {"text": "more"}}]))
+    assert Scheduler(ws).tick(T(8)) == ["t_ph000005"] and runs_started(ws) == ["t_ph000005"]
