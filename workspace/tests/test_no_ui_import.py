@@ -10,7 +10,7 @@ IMPORT = re.compile(r"^\s*(from\s+orch_ui\b|import\s+orch_ui\b)", re.M)
 
 
 def test_core_source_never_names_orch_ui():
-    bad = [str(p) for p in (SRC / "orch").rglob("*.py") if IMPORT.search(p.read_text())]
+    bad = [str(p) for p in (SRC / "orch").rglob("*.py") if IMPORT.search(p.read_text(encoding="utf-8"))]
     assert not bad, f"orch core imports orch_ui: {bad}"
 
 
