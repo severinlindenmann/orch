@@ -99,14 +99,15 @@ struct HomeView: View {
                     .frame(width: 28)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(t.title).themeFont(14, .medium).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
-                    Text(t.workspaceName).themeFont(12).foregroundStyle(Theme.muted)
+                    Text("\(t.workspaceName) · \(t.stateLine)").themeFont(12).foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 Image(systemName: "chevron.right").themeFont(12).foregroundStyle(Theme.muted)
             }.frame(minHeight: 44).padding(.vertical, 12).contentShape(Rectangle())
         }.buttonStyle(PressStyle())
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(t.status.title): \(t.title), \(t.workspaceName)")
+            .accessibilityLabel("\(t.status.title): \(t.title), \(t.workspaceName), \(t.stateLine)")
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("ticket-\(t.id)")
     }

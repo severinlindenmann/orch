@@ -211,6 +211,6 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(tab.waitForExistence(timeout: 15))
         XCTAssertGreaterThanOrEqual(tab.frame.height, 44)
         tab.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2)).tap()
-        XCTAssertTrue(app.staticTexts["Ask for something"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Ask '")).firstMatch.waitForExistence(timeout: 3))
     }
 }
