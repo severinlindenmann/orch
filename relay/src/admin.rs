@@ -31,6 +31,7 @@ pub fn router(app: AppState) -> Router {
                 )
             }),
         )
+        .merge(crate::api::icon_routes())
         .route("/admin/api/workspaces", get(list_ws).post(add_ws))
         .route(
             "/admin/api/workspaces/:id",

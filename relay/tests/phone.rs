@@ -347,7 +347,10 @@ async fn phone_reply_paired_workspace_can_send_to_its_phone() {
         "newest first, both directions"
     );
     assert_eq!(m["items"][0]["workspace_name"], "A");
-    assert_eq!(m["items"][2]["workspace_name"], "A", "own message names its workspace");
+    assert_eq!(
+        m["items"][2]["workspace_name"], "A",
+        "own message names its workspace"
+    );
     // both texts were pushed, as text pushes (no question message_id)
     let sent = t.push.sent.lock().unwrap().clone();
     assert_eq!(sent.len(), 2, "{sent:?}");
@@ -406,15 +409,29 @@ async fn phone_reply_question_to_one_phone() {
     assert_eq!(s, 201, "{v}");
     let qid = v["id"].as_str().unwrap().to_string();
     let (_, q2) = t.phone(&p2, "GET", "/v1/phone/questions", None).await;
-    assert_eq!(q2["items"].as_array().unwrap().len(), 0, "other phone sees it");
+    assert_eq!(
+        q2["items"].as_array().unwrap().len(),
+        0,
+        "other phone sees it"
+    );
     let (_, q1) = t.phone(&p1, "GET", "/v1/phone/questions", None).await;
     assert_eq!(q1["items"][0]["message"]["id"], json!(qid));
     let (s, _) = t
-        .phone(&p2, "POST", "/v1/phone/answer", Some(json!({"question_message_id": qid, "answer": "no"})))
+        .phone(
+            &p2,
+            "POST",
+            "/v1/phone/answer",
+            Some(json!({"question_message_id": qid, "answer": "no"})),
+        )
         .await;
     assert_eq!(s, 404);
     let (s, _) = t
-        .phone(&p1, "POST", "/v1/phone/answer", Some(json!({"question_message_id": qid, "answer": "yes"})))
+        .phone(
+            &p1,
+            "POST",
+            "/v1/phone/answer",
+            Some(json!({"question_message_id": qid, "answer": "yes"})),
+        )
         .await;
     assert_eq!(s, 201);
 }
@@ -425,7 +442,11 @@ async fn phone_reply_refresh_lists_reachable_phones() {
     let (a, b) = (t.add_ws("A").await, t.add_ws("B").await);
     let p = t.pair_phone(&[&a]).await;
     // pairing tells A to refresh
-    assert!(t.inbox(&a).await.iter().any(|m| m["type"] == "refresh-hint"));
+    assert!(t
+        .inbox(&a)
+        .await
+        .iter()
+        .any(|m| m["type"] == "refresh-hint"));
     let (_, snap) = t.call(&a, "GET", "/v1/refresh", None).await;
     let phones = snap["workspaces"]["phones"].as_array().unwrap();
     assert_eq!(phones.len(), 1, "{snap}");
@@ -436,10 +457,18 @@ async fn phone_reply_refresh_lists_reachable_phones() {
     assert_eq!(snap["workspaces"]["phones"], json!([]));
     // admin moves the phone to B: both get a hint, lists swap
     let (s, _) = t
-        .admin_json("PATCH", &format!("/admin/api/phones/{}", p.0), Some(json!({"workspaces": [b.id]})))
+        .admin_json(
+            "PATCH",
+            &format!("/admin/api/phones/{}", p.0),
+            Some(json!({"workspaces": [b.id]})),
+        )
         .await;
     assert_eq!(s, 200);
-    assert!(t.inbox(&b).await.iter().any(|m| m["type"] == "refresh-hint"));
+    assert!(t
+        .inbox(&b)
+        .await
+        .iter()
+        .any(|m| m["type"] == "refresh-hint"));
     let (_, snap) = t.call(&a, "GET", "/v1/refresh", None).await;
     assert_eq!(snap["workspaces"]["phones"], json!([]));
     let (s, _) = ws_text(&t, &a, &p.0, "gone?").await;
