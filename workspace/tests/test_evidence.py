@@ -187,3 +187,12 @@ def test_wrong_check_id_leaves_no_copy(proj, run, tid):
     code, _, err = run("check", "done", tid, "c9", "--file", "f.txt")
     assert code == 2 and "no check c9" in err
     assert not (proj / ".orch" / "tickets" / tid / "evidence").exists()
+
+
+def test_evidence_path_that_is_a_file_gets_plain_refusal(proj, run, tid):
+    d = proj / ".orch" / "tickets" / tid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "evidence").write_text("in the way")
+    (proj / "f.txt").write_text("x")
+    code, _, err = run("check", "done", tid, "c1", "--file", "f.txt")
+    assert code == 2 and "blocked by a file" in err

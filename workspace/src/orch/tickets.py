@@ -948,6 +948,8 @@ def attach_file(root: Path, tid: str, path: str, title: str | None, role: str | 
         cur = cur / part
         if cur.is_symlink():
             raise Refused("The proof folder of this ticket is a link. orch will not copy into it.")
+        if cur.exists() and not cur.is_dir():
+            raise Refused("The proof folder of this ticket is blocked by a file. Move that file away.")
         if not cur.exists():
             cur.mkdir()
     real_dir = Path(os.path.realpath(dest_dir))
