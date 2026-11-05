@@ -176,6 +176,7 @@ def start(root: Path) -> list[dict]:
                 }
             )
     _save(entries)
+    workspace_rows(root)  # notes when each was last seen running
     return rows
 
 
@@ -183,6 +184,7 @@ def stop(root: Path) -> list[dict]:
     """Stop every background process of this workspace. An add-on that is no longer on here is not run:
     its process sees that and ends by itself."""
     root = root.resolve()
+    workspace_rows(root)  # notes that they were running now
     rows = []
     for name, m in _services(root).items():
         res = _call(root, name, m, "stop")
@@ -218,3 +220,84 @@ def find(target: str) -> Path:
             f"More than one running workspace is called {target}. Give the folder: " + ", ".join(hits)
         )
     raise Refused(f"No running workspace is called {target}. See what runs: orch status")
+
+
+# ---------------------------------------------------------------- per-workspace rows
+
+
+def _seen_path(root: Path) -> Path:
+    return root / ".orch" / "run" / "last-seen.json"
+
+
+def _seen(root: Path) -> dict[str, str]:
+    try:
+        data = json.loads(_seen_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return (
+        {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
+        if isinstance(data, dict)
+        else {}
+    )
+
+
+def _now() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def workspace_rows(root: Path) -> list[dict]:
+    """One row per active background add-on here: {addon, name, running, since, last_seen, pid?, url?}.
+    `last_seen` is the last time it was seen running (kept in .orch/run/last-seen.json)."""
+    root = root.resolve()
+    svc = _services(root)
+    if not svc:
+        return []
+    mine = {e["addon"]: e for e in running() if e["workspace"] == str(root)}
+    seen = _seen(root)
+    rows, changed = [], False
+    for name in svc:
+        e = mine.get(name)
+        if e is not None:
+            seen[name] = _now()
+            changed = True
+        row = {
+            "addon": name,
+            "name": name,
+            "running": e is not None,
+            "since": e.get("started_at") if e else None,
+            "last_seen": seen.get(name),
+        }
+        if e is not None:
+            row.update({k: e[k] for k in ("pid", "url") if k in e})
+        rows.append(row)
+    if changed:
+        p = _seen_path(root)
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(seen, f)
+            os.replace(tmp, p)
+        except OSError:
+            pass
+    return rows
+
+
+def ago(iso: str | None) -> str:
+    """'3 h ago' style, for a time like 2026-11-05T09:00:00Z."""
+    if not iso:
+        return "never seen"
+    try:
+        secs = (
+            datetime.now(UTC) - datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        ).total_seconds()
+    except ValueError:
+        return "a while ago"
+    secs = max(0, int(secs))
+    if secs < 90:
+        return "just now"
+    if secs < 5400:
+        return f"{round(secs / 60)} min ago"
+    if secs < 129600:
+        return f"{round(secs / 3600)} h ago"
+    return f"{round(secs / 86400)} d ago"
