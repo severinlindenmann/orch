@@ -292,8 +292,8 @@ def ag_r6(e):
     check(len(new) == 1, f"expected one new ticket in Reports, got {[t['title'] for t in new]}")
     t = new[0]
     validate(e, t)
-    logs = sorted((wsr / ".orch/addons/scheduler/logs").glob(f"{t['id']}-*.log"))
-    check(logs and "exit 0" in logs[-1].read_text(), f"no finished scheduler run for {t['id']}")
+    logs = sorted((wsr / ".orch/run/logs").glob(f"{t['id']}-*.log"))
+    check(logs and logs[-1].read_text().strip(), f"no scheduler run log for {t['id']}")
     allow_back = [m for m in e.orchj("Pilatus", "relay", "inbox") if m["type"] == "allow"]
     check(allow_back, "no allow message back to Pilatus")
     ran = "agent:claude-code" in by(t)

@@ -45,7 +45,7 @@ def codex_cmd(ws: Path, prompt: str) -> list[str]:
 
 
 def scheduler_agent_line(e, tool: str) -> str:
-    """The `agent = ...` line for the [scheduler] table of .orch/config.toml (same restrictions as the direct runs)."""
+    """The agent command line (`agent = <command>`; sched_config turns it into [workspace] agent + [agents.e2eagent]; same restrictions as the direct runs)."""
     if tool == "claude":
         tools = " ".join(shlex.quote(t) for t in CLAUDE_TOOLS)
         return f"""agent = '''claude -p "{{prompt}}" --permission-mode acceptEdits --max-turns 40 --allowedTools {tools}'''"""
@@ -142,11 +142,14 @@ def save_transcript(e, name: str, text: str, append: bool = False) -> None:
 
 
 def scheduler_once(e, ws: Path, name: str, timeout: int = 400, env_over: dict | None = None) -> str:
-    """`orch scheduler run --once` (starts due agents and waits for them). Log files are added to the transcript."""
+    """`orch scheduler run --once` (starts due agents; then waits for their runs to end). Log files are added to the transcript."""
     env = {**agent_env(e), **(env_over or {})}
     p = subprocess.run(["orch", "scheduler", "run", "--once"], cwd=ws, env=env, capture_output=True, timeout=timeout)
     out = (p.stdout + p.stderr).decode("utf-8", "replace")
-    logs = sorted((ws / ".orch/addons/scheduler/logs").glob("*.log"))
+    end = time.time() + timeout  # core starts the agents detached: wait until no run holds a ticket
+    while list((ws / ".orch/run/tickets").glob("*.json")) and time.time() < end:
+        time.sleep(1)
+    logs = sorted((ws / ".orch/run/logs").glob("*.log"))
     body = f"\n## scheduler run --once in {ws.name}: rc={p.returncode}\n{out}\n"
     for lg in logs:
         body += f"\n### {lg.name}\n{lg.read_text(errors='replace')[-6000:]}\n"

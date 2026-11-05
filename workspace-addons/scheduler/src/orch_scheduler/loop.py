@@ -26,6 +26,11 @@ def outside_prompt(what: str, text: str) -> str:
             f"ask the user before anything that can't be undone.\n---\n{text[:1500]}\n---")
 
 
+def others(t: dict | None) -> int:
+    """History entries on a ticket not written by the scheduler itself (only those show real work)."""
+    return sum(h.get("by") != orchcli.BY for h in (t or {}).get("history") or [])
+
+
 class Scheduler:
     def __init__(self, root: Path):
         self.root = root
@@ -44,7 +49,7 @@ class Scheduler:
         if res["result"] == "started":
             orchcli.log(self.root, tid, f"Scheduler started an agent run ({reason}).")
             self.watch[tid] = {"t0": time.time(), "at": fmt(now), "log": res.get("log"),
-                               "hist": len((t or {}).get("history") or []) + 1}
+                               "hist": others(t)}
         elif res["result"] == "failed":
             self.fail(tid, res["reason"])
         return res["result"]
@@ -74,7 +79,7 @@ class Scheduler:
             except OSError:
                 pass
             t = orchcli.ticket(self.root, tid)
-            quiet = t is not None and len(t.get("history") or []) <= w["hist"]
+            quiet = t is not None and others(t) <= w["hist"]
             failed = took < FAST_FAIL_SECONDS and quiet
             history(self.root, tid, w["at"], took, 1 if failed else 0)
             if failed:
@@ -96,6 +101,10 @@ class Scheduler:
                 if (q["answer"] == TRY_AGAIN and t["status"] in OPEN
                         and self.start_run(t["id"], "you chose Try again", now) != "failed"):
                     started.append(t["id"])
+                    if t.get("waiting_on"):  # the wait that stayed after the failed start is over now
+                        orchcli.call(self.root, "wait", t["id"], "--clear")
+                        if t["status"] != "active":
+                            orchcli.call(self.root, "ticket", "status", t["id"], "active")
         return started
 
     # -- pass ---------------------------------------------------------------
@@ -113,11 +122,11 @@ class Scheduler:
             until = parse(w.get("until")) if w.get("kind") == "time" else None
             if until and until <= now and state.get(tid, {}).get("last_wake") != w.get("until"):
                 res = self.start_run(tid, "wait time reached", now)
+                update_state(self.root, tid, last_wake=w.get("until"))  # also after a failure: only "Try again" retries
                 if res != "failed":  # clear the wait only after core took the run (SA-15)
                     orchcli.call(self.root, "wait", tid, "--clear")
                     if t["status"] != "active":
                         orchcli.call(self.root, "ticket", "status", tid, "active")
-                    update_state(self.root, tid, last_wake=w.get("until"))
                     if res == "started":
                         started.append(tid)
                 continue
@@ -129,11 +138,10 @@ class Scheduler:
                 upd: dict = {}
                 if is_due(cron, since, now):
                     res = self.start_run(tid, f"cron {cron}", now)
-                    if res != "failed":
-                        upd["last_run"] = fmt(now)
-                        orchcli.set_ext(self.root, t, last_run=fmt(now))
-                        if res == "started":
-                            started.append(tid)
+                    upd["last_run"] = fmt(now)  # also after a failure: the next planned time retries, not every pass
+                    orchcli.set_ext(self.root, t, last_run=fmt(now))
+                    if res == "started":
+                        started.append(tid)
                 nxt = next_after(cron, now)
                 upd["next_run"] = fmt(nxt) if nxt else None
                 update_state(self.root, tid, **upd)
@@ -179,13 +187,19 @@ class Scheduler:
             tid = m.get("ticket")
             if not isinstance(tid, str):
                 return None
+            asked = orchcli.ticket(self.root, tid)
+            if any(q.get("id") == body.get("question_id") and q.get("kind") == KIND
+                   for q in (asked or {}).get("questions") or []):
+                return None  # act_on_answers handles our own failure question
             return tid if self.start_run(tid, f"relay answer {mid}", now) == "started" else None
         if kind == "webhook":
             wid = body.get("webhook_id")
             for t in read_tickets(self.root):
                 w = t.get("waiting_on") or {}
                 if t["status"] == "waiting" and w.get("kind") == "external" and w.get("ref") in (wid, m.get("from")):
-                    orchcli.call(self.root, "relay", "done", mid, by=False)
+                    done = orchcli.call(self.root, "relay", "done", mid, by=False)
+                    if not isinstance(done, dict):
+                        return None
                     note = outside_prompt("webhook", str(body.get("payload", "")))
                     return t["id"] if self.start_run(t["id"], f"relay webhook {mid}", now, note) == "started" else None
         return None

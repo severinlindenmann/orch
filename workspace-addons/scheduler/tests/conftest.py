@@ -19,13 +19,14 @@ with open(root / "calls.jsonl", "a") as f:
 tdir = root / ".orch" / "tickets"
 def load(i): return json.loads((tdir / (i + ".json")).read_text())
 def save(t): (tdir / (t["id"] + ".json")).write_text(json.dumps(t))
+def note(t, text): t.setdefault("history", []).append({{"by": by, "text": text}})
 if args[:2] == ["ticket", "list"]:
     print(json.dumps([json.loads(p.read_text()) for p in sorted(tdir.glob("t_*.json"))]))
 elif args[:2] == ["addon", "list"]:
     print(json.dumps([{{"name": "scheduler", "active": not (root / "inactive").exists()}},
                       {{"name": "relay", "active": not (root / "relay-off").exists()}}]))
 elif args[0] == "wait" and "--clear" in args:
-    t = load(args[1]); t["waiting_on"] = None; save(t); print("{{}}")
+    t = load(args[1]); t["waiting_on"] = None; note(t, "Wait cleared"); save(t); print("{{}}")
 elif args[:2] == ["relay", "inbox"]:
     p = root / "inbox.json"
     print(p.read_text() if p.exists() else "[]")
@@ -41,12 +42,12 @@ elif args[:2] == ["ticket", "new"]:
          "created_at": "2026-11-01T00:00:00Z", "history": []}}
     save(t); print(json.dumps(t))
 elif args[:2] == ["ticket", "status"]:
-    t = load(args[2]); t["status"] = args[3]; save(t); print(json.dumps(t))
+    t = load(args[2]); t["status"] = args[3]; note(t, "Status"); save(t); print(json.dumps(t))
 elif args[:2] == ["ext", "set"]:
     t = load(args[2])
     if "--if-revision" in args and t.get("revision") != int(args[args.index("--if-revision") + 1]):
         sys.exit(2)
-    t.setdefault("ext", {{}})[args[3]] = json.loads(args[4]); save(t); print("{{}}")
+    t.setdefault("ext", {{}})[args[3]] = json.loads(args[4]); note(t, "Set ext"); save(t); print("{{}}")
 elif args[:2] == ["run", "start"]:
     tid = args[2]
     if (root / "noagent").exists():

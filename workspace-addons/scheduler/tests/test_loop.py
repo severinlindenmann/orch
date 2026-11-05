@@ -174,3 +174,77 @@ def test_loop_exits_when_not_active(ws):
     add_ticket(ws, "t_wake011", waiting_on={"kind": "time", "until": "2020-01-01T00:00:00Z"})
     Scheduler(ws).run_forever(sleep=lambda _: (_ for _ in ()).throw(AssertionError("kept running")))
     assert runs_started(ws) == []
+
+
+def test_own_history_entries_do_not_hide_a_fast_fail(ws):
+    """H1: the scheduler's own notes (wait cleared, status, run started) never count as work on the ticket."""
+    add_ticket(ws, "t_fail0003", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    s = Scheduler(ws)
+    s.tick(T(8))
+    end_run(ws, "t_fail0003", age=2)
+    s.tick(T(8, 1))
+    assert len(tk(ws, "t_fail0003")["questions"]) == 1
+
+
+def test_agent_note_makes_a_quick_run_fine(ws):
+    add_ticket(ws, "t_fail0004", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    s = Scheduler(ws)
+    s.tick(T(8))
+    t = tk(ws, "t_fail0004")
+    t["history"].append({"by": "agent:claude", "text": "done"})
+    (ws / ".orch/tickets/t_fail0004.json").write_text(json.dumps(t))
+    end_run(ws, "t_fail0004", age=2)
+    s.tick(T(8, 1))
+    assert tk(ws, "t_fail0004")["questions"] == []
+
+
+def test_failed_start_is_not_retried_every_pass(ws):
+    """H2: the wait stays (SA-15) but the wake is recorded, so only 'Try again' retries."""
+    (ws / "noagent").write_text("")
+    add_ticket(ws, "t_wake020", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    s = Scheduler(ws)
+    s.tick(T(8))
+    s.tick(T(8, 1))
+    assert runs_started(ws).count("t_wake020") == 1
+    assert tk(ws, "t_wake020")["waiting_on"] is not None
+
+
+def test_failed_cron_start_is_not_retried_every_pass(ws):
+    (ws / "noagent").write_text("")
+    add_ticket(ws, "t_rec00020", ext={"scheduler": {"recurring": True, "cron": "* * * * *"}})
+    s = Scheduler(ws)
+    s.tick(T(8))
+    s.tick(T(8, 0).replace(second=50))
+    assert runs_started(ws).count("t_rec00020") == 1
+
+
+def test_leave_it_never_reasks_and_try_again_clears_the_wait(ws):
+    (ws / "noagent").write_text("")
+    add_ticket(ws, "t_wake021", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    s = Scheduler(ws)
+    s.tick(T(8))
+    t = tk(ws, "t_wake021")
+    t["questions"][0]["answer"] = "Leave it"
+    (ws / ".orch/tickets/t_wake021.json").write_text(json.dumps(t))
+    s.tick(T(8, 1))
+    s.tick(T(8, 2))
+    assert len(tk(ws, "t_wake021")["questions"]) == 1 and runs_started(ws).count("t_wake021") == 1
+    # a second ticket: Try again with a working agent
+    (ws / "noagent").unlink()
+    add_ticket(ws, "t_wake022", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"},
+               questions=[{"id": "q1", "text": "x", "options": [], "kind": "scheduler:failure", "answer": "Try again"}],
+               ext={"scheduler": {}})
+    s.tick(T(8, 3))
+    t = tk(ws, "t_wake022")
+    assert t["waiting_on"] is None and t["status"] == "active"
+
+
+def test_phone_answer_to_own_failure_question_starts_once(ws):
+    add_ticket(ws, "t_ask00030", status="active",
+               questions=[{"id": "q1", "text": "x", "options": [], "kind": "scheduler:failure", "answer": "Try again"}])
+    (ws / ".orch/secrets").mkdir(parents=True)
+    (ws / ".orch/secrets/relay.json").write_text("{}")
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_1", "type": "answer", "ticket": "t_ask00030", "applied": True,
+                                                 "body": {"question_id": "q1", "answer": "Try again"}}]))
+    Scheduler(ws).tick(T(8))
+    assert runs_started(ws) == ["t_ask00030"]

@@ -7,7 +7,7 @@
   "properties": {
     "recurring": { "type": "boolean", "description": "true = run again and again by cron." },
     "cron": { "type": "string", "pattern": "^\\S+ \\S+ \\S+ \\S+ \\S+$", "description": "5-field cron (min hour day month weekday), always UTC, e.g. '0 7 * * 1'. Missed runs (machine off): one catch-up run, never several." },
-    "agent": { "type": "string", "pattern": "^[a-z0-9-]{1,32}$", "description": "Agent command name from [scheduler.agents] in .orch/config.toml. Default: [scheduler] agent." },
+    "agent": { "type": "string", "pattern": "^[a-z0-9-]{1,32}$", "description": "Names an agent (stored; core `orch run start --agent` will use it). The agent that runs is [workspace] agent of .orch/config.toml." },
     "last_run": { "oneOf": [{ "type": "string", "format": "date-time", "pattern": "Z$" }, { "type": "null" }], "description": "Written by the scheduler after each run." }
   },
   "if": { "properties": { "recurring": { "const": true } }, "required": ["recurring"] },
