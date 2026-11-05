@@ -20,12 +20,13 @@
           "data",
           "work"
         ],
-        "phones": 1
+        "phones": 1,
+        "pending": null
       }
     }
   },
   {
-    "_note": "Change my own description and tags. Response = whoami.",
+    "_note": "Propose a new description and tags. The owner must approve in the admin panel; until then the old values stay in effect everywhere. Response = whoami (approved values) plus status and the pending proposal.",
     "request": {
       "method": "PATCH",
       "path": "/v1/me",
@@ -42,16 +43,25 @@
       }
     },
     "response": {
-      "status": 200,
+      "status": 202,
       "body": {
         "id": "ws_pilatus001",
         "name": "Pilatus Workspace",
-        "description": "Ingestion jobs and data pipelines.",
+        "description": "Ingestion jobs.",
         "tags": [
-          "data",
-          "work"
+          "data"
         ],
-        "phones": 1
+        "phones": 1,
+        "pending": {
+          "description": "Ingestion jobs and data pipelines.",
+          "tags": [
+            "data",
+            "work"
+          ],
+          "at": "2026-11-04T13:05:00Z",
+          "rev": "k3j9x2v7b1m4"
+        },
+        "status": "pending"
       }
     }
   },
@@ -550,6 +560,55 @@
     }
   },
   {
+    "_note": "Phone: text messages with the workspaces on its list (sent to this phone or to phones, and what the phone sent), newest first.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/messages",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_reply0phone00001",
+              "from": "ws_pilatus001",
+              "to": "ph_iphone0001",
+              "type": "text",
+              "created_at": "2026-11-04T10:44:00Z",
+              "ticket": "t_7k3f9q",
+              "body": {
+                "text": "Yes, I can answer your phone. The report is ready."
+              }
+            },
+            "workspace_name": "Pilatus Workspace"
+          },
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_phone0send000001",
+              "from": "ph_iphone0001",
+              "to": "ws_pilatus001",
+              "type": "text",
+              "created_at": "2026-11-04T10:43:00Z",
+              "body": {
+                "text": "Can you answer my phone?"
+              }
+            },
+            "workspace_name": "Pilatus Workspace"
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
     "_note": "Phone: answer with one tap. The relay builds the answer message.",
     "request": {
       "method": "POST",
@@ -692,7 +751,7 @@
     }
   },
   {
-    "_note": "Public: onboarding script (macOS/Linux; /onboarding.ps1 for Windows). Installs orch if missing, then orch relay connect.",
+    "_note": "Public: onboarding script (macOS/Linux; /onboarding.ps1 for Windows). Installs orch if missing, then orch addon add relay --yes and orch relay connect.",
     "request": {
       "method": "GET",
       "path": "/onboarding.sh",
@@ -780,7 +839,7 @@
       "body": {
         "id": "ws_pilatus001",
         "token": "orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN",
-        "prompt": "Connect this workspace to orch-relay. Run in the project folder:\n  orch relay connect https://relay.severin.io --workspace ws_pilatus001 --token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL https://relay.severin.io/onboarding.sh | sh -s -- --workspace ws_pilatus001 --token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN\n  Windows: & ([scriptblock]::Create((irm https://relay.severin.io/onboarding.ps1))) -Workspace ws_pilatus001 -Token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+        "prompt": "Connect this workspace to orch-relay. Run in the project folder:\n  orch addon add relay --yes\n  orch relay connect https://relay.severin.io --workspace ws_pilatus001 --token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL https://relay.severin.io/onboarding.sh | sh -s -- --workspace ws_pilatus001 --token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN\n  Windows: & ([scriptblock]::Create((irm https://relay.severin.io/onboarding.ps1))) -Workspace ws_pilatus001 -Token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
       }
     }
   },

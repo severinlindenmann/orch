@@ -13,6 +13,18 @@ final class MockRelayTests: XCTestCase {
         catch let RelayError.api(status, code, _) { XCTAssertEqual(status, 409); XCTAssertEqual(code, "already_answered") }
         let left = try await m.questions(); XCTAssertEqual(left.count, 1)
     }
+    func testMessagesShowReplyAndWhatThePhoneSent() async throws {
+        let relay = MockRelay(latency: .milliseconds(1))
+        var ms = try await relay.messages()
+        XCTAssertEqual(ms.map(\.message.from), [MockRelay.pilatus])
+        _ = try await relay.send(to: MockRelay.pilatus, text: "hello", ticket: nil)
+        await relay.deliverText(from: MockRelay.reports, text: "done")
+        ms = try await relay.messages()
+        XCTAssertEqual(ms.count, 3)
+        XCTAssertEqual(Set(ms.map(\.workspaceId)), [MockRelay.pilatus, MockRelay.reports])
+        XCTAssertTrue(ms.contains { $0.fromPhone && $0.message.body.text == "hello" })
+    }
+
     func testSendOnlyToReachable() async throws {
         let m = MockRelay(latency: .zero)
         _ = try await m.send(to: MockRelay.reports, text: "hi", ticket: nil)

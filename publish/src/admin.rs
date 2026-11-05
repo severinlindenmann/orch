@@ -17,6 +17,8 @@ pub fn router(st: State) -> Router {
         .route("/admin/", get(portal))
         .route("/admin/style.css", get(css))
         .route("/admin/portal.js", get(js))
+        .route("/_/favicon.svg", get(web::favicon_svg))
+        .route("/_/apple-touch-icon.png", get(web::touch_icon))
         .route("/admin/api/workspaces", get(ws_list).post(ws_create))
         .route(
             "/admin/api/workspaces/:id",
@@ -90,7 +92,7 @@ fn check(st: &State, h: &HeaderMap) -> ApiResult<()> {
 pub fn prompt(st: &State, id: &str, token: &str) -> String {
     let u = &st.cfg.public_url;
     format!(
-        "Connect this project to orch publish. Run in the project folder:\n  orch publish connect {u} --workspace {id} --token {token}\nIf orch is not installed yet, run this instead:\n  macOS/Linux: curl -fsSL {u}/onboarding.sh | sh -s -- --workspace {id} --token {token}\n  Windows:     & ([scriptblock]::Create((irm {u}/onboarding.ps1))) -Workspace {id} -Token {token}\nThen describe this workspace in one sentence and 2-4 tags:\n  orch publish profile --description \"...\" --tags a,b\n"
+        "Connect this project to orch publish. Run in the project folder:\n  orch addon add publish --yes\n  orch publish connect {u} --workspace {id} --token {token}\nIf orch is not installed yet, run this instead:\n  macOS/Linux: curl -fsSL {u}/onboarding.sh | sh -s -- --workspace {id} --token {token}\n  Windows:     & ([scriptblock]::Create((irm {u}/onboarding.ps1))) -Workspace {id} -Token {token}\nThen describe this workspace in one sentence and 2-4 tags:\n  orch publish profile --description \"...\" --tags a,b\n"
     )
 }
 
@@ -300,7 +302,7 @@ async fn files_list(St(st): St<State>, h: HeaderMap, Query(q): Query<Q>) -> ApiR
     let (rows, next) = db::list_files(&st.db.lock().unwrap(), None, limit, after)?;
     let items: Vec<Value> = rows
         .iter()
-        .map(|f| json!({"id": f.id, "workspace": f.workspace, "size": f.size, "expires_at": f.expires_at}))
+        .map(|f| json!({"id": f.id, "workspace": f.workspace, "size": f.size, "created_at": f.created_at, "expires_at": f.expires_at}))
         .collect();
     Ok(Json(json!({"items": items, "next": next})))
 }

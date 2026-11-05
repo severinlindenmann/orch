@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 from conftest import CONTRACTS
 
+from orch.errors import Refused
+
 
 def read(proj, tid):
     return json.loads((proj / ".orch" / "tickets" / f"{tid}.json").read_text(encoding="utf-8"))
@@ -24,14 +26,6 @@ def test_new_is_valid_and_listed(proj, run, validate, new_ticket):
 
 def test_ids_are_random(proj, new_ticket):
     assert len({new_ticket() for _ in range(5)}) == 5
-
-
-def test_recurring_needs_cron_and_validates(proj, run, validate):
-    code, out, _ = run("ticket", "new", "Weekly", "--recurring", "0 7 * * 1", "--json")
-    assert code == 0
-    t = read(proj, json.loads(out)["id"])
-    validate(t)
-    assert t["type"] == "recurring" and t["ext"]["scheduler"]["cron"] == "0 7 * * 1"
 
 
 def test_unknown_fields_preserved(proj, run, validate, new_ticket):
@@ -156,14 +150,99 @@ def test_wait_until_and_on(proj, run, new_ticket, validate):
     assert run("wait", tid, "--until", "2026-11-05T08:00:00+01:00")[0] == 0
     t = read(proj, tid)
     validate(t)
-    assert t["status"] == "waiting" and t["wake_at"] == "2026-11-05T07:00:00Z"
-    assert run("ticket", "wait", tid, "--on", "webhook:wh_1")[0] == 0
-    t = read(proj, tid)
-    validate(t)
-    assert t["waiting_on"] == {"kind": "webhook", "ref": "wh_1"}
+    assert t["status"] == "waiting"
+    assert t["waiting_on"] == {"kind": "time", "until": "2026-11-05T07:00:00Z"}
+    assert "wake_at" not in t and "type" not in t
+    for on, want in (
+        ("ticket:t_other1", {"kind": "ticket", "ref": "t_other1"}),
+        ("question:q1", {"kind": "question", "ref": "q1"}),
+        ("external:wh_1", {"kind": "external", "ref": "wh_1"}),
+    ):
+        assert run("ticket", "wait", tid, "--on", on)[0] == 0
+        t = read(proj, tid)
+        validate(t)
+        assert t["waiting_on"] == want and t["status"] == "waiting"
     assert run("wait", tid, "--until", "garbage")[0] == 2
     assert run("wait", tid, "--on", "nokind:x")[0] == 2
+    assert run("wait", tid, "--on", "time:2026-11-05T08:00:00Z")[0] == 2  # a time is --until
+    assert run("wait", tid, "--on", "webhook:wh_1")[0] == 2  # old kinds are gone
     assert run("wait", tid)[0] == 2
+    assert run("wait", tid, "--clear")[0] == 0
+    t = read(proj, tid)
+    assert t["waiting_on"] is None and t["status"] == "active"
+
+
+def test_core_ticket_has_no_type_or_recurring(proj, run, validate):
+    with pytest.raises(SystemExit):
+        run("ticket", "new", "Weekly", "--recurring", "0 7 * * 1")
+    code, out, _ = run("ticket", "new", "Plain", "--json")
+    t = json.loads(out)
+    validate(t)
+    assert "type" not in t and "wake_at" not in t and t["revision"] == 1
+
+
+def test_revision_goes_up_on_every_write(proj, run, new_ticket):
+    tid = new_ticket()
+    assert read(proj, tid)["revision"] == 1
+    run("log", tid, "x")
+    run("ticket", "status", tid, "active")
+    assert read(proj, tid)["revision"] == 3
+
+
+def test_patch_with_revision_check(proj, run, new_ticket, validate):
+    tid = new_ticket()
+    code, out, _ = run("ticket", "patch", tid, "--if-revision", "1", '{"title": "Renamed"}', "--json")
+    assert code == 0 and json.loads(out)["revision"] == 2
+    validate(read(proj, tid))
+    code, out, err = run("ticket", "patch", tid, "--if-revision", "1", '{"title": "Late"}', "--json")
+    assert code == 2 and "revision" in json.loads(out)["error"] and "Refused:" in err
+    assert read(proj, tid)["title"] == "Renamed"
+    w = '{"status": "waiting", "waiting_on": {"kind": "time", "until": "2030-01-01T00:00:00Z"}}'
+    assert run("ticket", "patch", tid, "--if-revision", "2", w)[0] == 0
+    t = read(proj, tid)
+    validate(t)
+    assert t["status"] == "waiting" and t["waiting_on"]["kind"] == "time"
+    assert run("ticket", "patch", tid, "--if-revision", "3", '{"status": "active"}')[0] == 0
+    assert read(proj, tid)["waiting_on"] is None
+
+
+def test_patch_only_allowed_fields(proj, run, new_ticket):
+    tid = new_ticket()
+    for bad in ('{"id": "t_x"}', '{"history": []}', '{"revision": 9}', '{"ext": {}}', "[]", "{}", "nope"):
+        assert run("ticket", "patch", tid, "--if-revision", "1", bad)[0] == 2, bad
+    assert run("ticket", "patch", tid, "--if-revision", "1", '{"status": "bogus"}')[0] == 2
+    assert run("ticket", "patch", tid, "--if-revision", "1", '{"waiting_on": {"kind": "time"}}')[0] == 2
+    assert run("ticket", "patch", tid, "--if-revision", "1", '{"waiting_on": {"kind": "ticket"}}')[0] == 2
+    assert read(proj, tid)["revision"] == 1
+    run("check", "add", tid, "step")
+    assert (
+        run("ticket", "patch", tid, "--if-revision", "2", '{"status": "done"}')[0] == 2
+    )  # same rule as status
+
+
+def test_concurrent_write_is_refused_not_lost(proj, new_ticket):
+    from orch import tickets
+
+    tid = new_ticket()
+    a = tickets.load(proj, tid)
+    b = tickets.load(proj, tid)
+    a["title"] = "A"
+    tickets.save(proj, a)
+    b["title"] = "B"
+    with pytest.raises(Refused):
+        tickets.save(proj, b)
+    assert tickets.load(proj, tid)["title"] == "A"
+
+
+def test_stale_lock_does_not_block(proj, run, new_ticket):
+    import os
+
+    tid = new_ticket()
+    lock = proj / ".orch" / "tickets" / f".lock-{tid}"
+    lock.write_text("", encoding="utf-8")
+    old = lock.stat().st_mtime - 120
+    os.utime(lock, (old, old))
+    assert run("log", tid, "x")[0] == 0 and not lock.exists()
 
 
 def test_edit_and_show_json(proj, run, new_ticket):

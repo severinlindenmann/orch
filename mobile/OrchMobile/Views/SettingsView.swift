@@ -28,10 +28,10 @@ struct SettingsView: View {
                 Eyebrow(text: "CONNECTION").padding(.top, 26).padding(.bottom, 12)
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 12) {
-                        Text("◎").font(Theme.font(29)).foregroundStyle(Theme.brand)
+                        Text("◎").themeFont(29).foregroundStyle(Theme.brand)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Your workspace server").font(Theme.font(14, .semibold))
-                            Text(statusText).font(Theme.font(12)).foregroundStyle(statusColor)
+                            Text("Your workspace server").themeFont(14, .semibold)
+                            Text(statusText).themeFont(12).foregroundStyle(statusColor)
                         }
                     }
                     Rectangle().fill(Theme.border).frame(height: 1)
@@ -40,8 +40,8 @@ struct SettingsView: View {
                             Text("Server: \(model.relayHost)")
                             Text("This phone: \(model.phoneName)")
                             Text("Access is managed by whoever invited you.")
-                        }.font(Theme.font(11)).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 10)
-                    } label: { Text("Details").font(Theme.font(13)).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle()) }
+                        }.themeFont(11).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 10)
+                    } label: { Text("Details").themeFont(13).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle()) }
                     .foregroundStyle(Theme.muted)
                 }.orchCard()
                 if !model.workspaces.isEmpty {
@@ -53,14 +53,14 @@ struct SettingsView: View {
                             Text(workspace.displayName)
                             Spacer()
                             Text(lastSeenText(workspace.lastSeen, online: workspace.online)).foregroundStyle(workspace.online ? Theme.brand : Theme.muted)
-                                .font(Theme.font(12))
-                        }.font(Theme.font(14)).padding(.vertical, 15)
+                                .themeFont(12)
+                        }.themeFont(14).padding(.vertical, 15)
                         if workspace.id != model.workspaces.last?.id { Rectangle().fill(Theme.border).frame(height: 1) }
                     }
                 }.orchCard(padding: 16)
                 }
                 Text("Need another workspace? Ask the person who invited you.")
-                    .font(Theme.font(11)).foregroundStyle(Theme.muted).padding(.top, 12)
+                    .themeFont(11).foregroundStyle(Theme.muted).padding(.top, 12)
                 Toggle("Notify me when I'm needed", isOn: Binding(get: { model.notificationsEnabled }, set: { enabled in
                     model.notificationsEnabled = enabled
                     if enabled {
@@ -70,7 +70,7 @@ struct SettingsView: View {
                             requestingPermission = false
                         }
                     }
-                })).font(Theme.font(14)).tint(Theme.brand).frame(minHeight: 44).padding(.vertical, 15)
+                })).themeFont(14).tint(Theme.brand).frame(minHeight: 44).padding(.vertical, 15)
                     .disabled(requestingPermission)
                     .accessibilityElement(children: .combine)
                     .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
@@ -80,7 +80,7 @@ struct SettingsView: View {
                     .buttonStyle(WideButtonStyle(color: Theme.danger, bordered: true))
                 if confirmSignOut {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Disconnect this phone? You will need a new invitation to connect again.").font(Theme.font(13))
+                        Text("Disconnect this phone? You will need a new invitation to connect again.").themeFont(13)
                         Button {
                             signingOut = true
                             Task { await model.signOut(); signingOut = false }
@@ -93,7 +93,7 @@ struct SettingsView: View {
                     }.orchCard().disabled(signingOut).padding(.top, 12).id("signout-card")
                 }
                 ModelMessage().padding(.top, 12)
-                Text("orch for iOS · \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"))").font(Theme.font(11)).foregroundStyle(Theme.muted)
+                Text("orch for iOS · \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"))").themeFont(11).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity).padding(.top, 12)
             }.padding(.horizontal, 23).padding(.top, 6).padding(.bottom, 20)
         }

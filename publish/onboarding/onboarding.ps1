@@ -10,4 +10,6 @@ if (-not (Get-Command orch -ErrorAction SilentlyContinue)) {
   & ([scriptblock]::Create((irm ($InstallUrl -replace '\.sh$', '.ps1'))))
   $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 }
+orch addon add publish --yes
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 orch publish connect $Url --workspace $Workspace --token $Token

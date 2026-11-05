@@ -34,6 +34,15 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(req.value(forHTTPHeaderField: "Authorization"), "Bearer \(creds.token)")
     }
 
+    func testMessagesDecodeBothDirections() async throws {
+        let ms = try await client(Example.find("GET", "/v1/phone/messages")).messages()
+        XCTAssertEqual(ms.count, 2)
+        XCTAssertEqual(ms[0].message.body.text, "Yes, I can answer your phone. The report is ready.")
+        XCTAssertFalse(ms[0].fromPhone); XCTAssertEqual(ms[0].workspaceId, "ws_pilatus001")
+        XCTAssertTrue(ms[1].fromPhone); XCTAssertEqual(ms[1].workspaceId, "ws_pilatus001")
+        XCTAssertEqual(StubProtocol.seen[0].url?.path, "/v1/phone/messages")
+    }
+
     func testQuestionsDecode() async throws {
         let qs = try await client(Example.find("GET", "/v1/phone/questions")).questions()
         XCTAssertEqual(qs.count, 1)

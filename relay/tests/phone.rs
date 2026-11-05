@@ -94,7 +94,10 @@ async fn phone_pair_once_workspaces_and_signout() {
         )
         .await;
     assert_eq!(s, 201, "{v}");
-    let m = &t.inbox(&a).await[0];
+    let items = t.inbox(&a).await;
+    // pairing sent A a refresh-hint (its phone list changed), then the phone's text
+    assert_eq!(items[0]["type"], "refresh-hint");
+    let m = &items[1];
     assert_eq!(
         (
             m["from"].as_str(),
@@ -297,4 +300,405 @@ async fn phone_dead_apns_token_is_removed() {
     question(&t, &a, "two?", "q2").await;
     // first push failed and dropped the token; the second question sends nothing
     assert_eq!(t.push.sent.lock().unwrap().len(), 1);
+}
+
+async fn ws_text(t: &T, from: &Ws, to: &str, text: &str) -> (u16, serde_json::Value) {
+    t.send(from, to, "text", json!({"text": text})).await
+}
+
+#[tokio::test]
+async fn phone_reply_paired_workspace_can_send_to_its_phone() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    t.phone(
+        &p,
+        "POST",
+        "/v1/phone/push",
+        Some(json!({"apns_token": "abcdef0123", "sandbox": true})),
+    )
+    .await;
+    let (s, _) = t
+        .phone(
+            &p,
+            "POST",
+            "/v1/phone/send",
+            Some(json!({"to": a.id, "text": "can you answer my phone"})),
+        )
+        .await;
+    assert_eq!(s, 201);
+    // A answers the phone directly (no admin rule needed: the pairing is the rule)
+    let (s, v) = ws_text(&t, &a, &p.0, "yes, I can").await;
+    assert_eq!(s, 201, "{v}");
+    // and to all its phones
+    let (s, v) = ws_text(&t, &a, "phones", "to every phone").await;
+    assert_eq!(s, 201, "{v}");
+    let (s, m) = t.phone(&p, "GET", "/v1/phone/messages", None).await;
+    assert_eq!(s, 200, "{m}");
+    let texts: Vec<&str> = m["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["message"]["body"]["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        texts,
+        ["to every phone", "yes, I can", "can you answer my phone"],
+        "newest first, both directions"
+    );
+    assert_eq!(m["items"][0]["workspace_name"], "A");
+    assert_eq!(
+        m["items"][2]["workspace_name"], "A",
+        "own message names its workspace"
+    );
+    // the first text was pushed as a text push (no question message_id); the second came within 10 s
+    // of it, so it is stored and readable (above) but not pushed (L2)
+    let sent = t.push.sent.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0].2["type"], "text");
+    assert_eq!(sent[0].2["aps"]["alert"]["body"], "yes, I can");
+    assert!(sent[0].2.get("message_id").is_none());
+    assert_eq!(sent[0].2["workspace"], json!(a.id));
+}
+
+#[tokio::test]
+async fn phone_reply_unpaired_workspace_or_phone_is_refused_plainly() {
+    let t = start().await;
+    let (a, b) = (t.add_ws("A").await, t.add_ws("B").await);
+    let p = t.pair_phone(&[&a]).await;
+    // B is not on the phone's list
+    let (s, v) = ws_text(&t, &b, &p.0, "hi").await;
+    assert_eq!(s, 403, "{v}");
+    let msg = v["message"].as_str().unwrap();
+    assert!(msg.contains("Phones") && msg.contains("B"), "{msg}");
+    // B's "phones" message reaches no phone of A's
+    ws_text(&t, &b, "phones", "b broadcast").await;
+    let (_, m) = t.phone(&p, "GET", "/v1/phone/messages", None).await;
+    assert_eq!(m["items"].as_array().unwrap().len(), 0, "{m}");
+    // unknown phone
+    let (s, _) = ws_text(&t, &a, "ph_zzzzzzzzzz", "hi").await;
+    assert_eq!(s, 403);
+    // only text and questions to a phone
+    let (s, v) = t
+        .send(&a, &p.0, "delegate", json!({"title": "x", "text": "y"}))
+        .await;
+    assert_eq!(s, 403, "{v}");
+    // added but never paired (QR not scanned yet): unreachable
+    let (_, v) = t
+        .admin_json(
+            "POST",
+            "/admin/api/phones",
+            Some(json!({"name": "Unscanned", "workspaces": [a.id]})),
+        )
+        .await;
+    let (s, _) = ws_text(&t, &a, v["phone_id"].as_str().unwrap(), "hi").await;
+    assert_eq!(s, 403);
+    // signed out: unreachable
+    t.phone(&p, "POST", "/v1/phone/signout", None).await;
+    let (s, _) = ws_text(&t, &a, &p.0, "still there?").await;
+    assert_eq!(s, 403);
+}
+
+#[tokio::test]
+async fn phone_reply_question_to_one_phone() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let (p1, p2) = (t.pair_phone(&[&a]).await, t.pair_phone(&[&a]).await);
+    let m = json!({"schema": "orch.msg/1", "id": mid(), "from": a.id, "to": p1.0, "type": "question", "ticket": "t_7k3f9q",
+        "created_at": "2026-11-04T10:00:00Z", "body": {"question_id": "q1", "text": "ok?", "options": ["yes", "no"], "recommended": null}});
+    let (s, v) = t.call(&a, "POST", "/v1/messages", Some(m)).await;
+    assert_eq!(s, 201, "{v}");
+    let qid = v["id"].as_str().unwrap().to_string();
+    let (_, q2) = t.phone(&p2, "GET", "/v1/phone/questions", None).await;
+    assert_eq!(
+        q2["items"].as_array().unwrap().len(),
+        0,
+        "other phone sees it"
+    );
+    let (_, q1) = t.phone(&p1, "GET", "/v1/phone/questions", None).await;
+    assert_eq!(q1["items"][0]["message"]["id"], json!(qid));
+    let (s, _) = t
+        .phone(
+            &p2,
+            "POST",
+            "/v1/phone/answer",
+            Some(json!({"question_message_id": qid, "answer": "no"})),
+        )
+        .await;
+    assert_eq!(s, 404);
+    let (s, _) = t
+        .phone(
+            &p1,
+            "POST",
+            "/v1/phone/answer",
+            Some(json!({"question_message_id": qid, "answer": "yes"})),
+        )
+        .await;
+    assert_eq!(s, 201);
+}
+
+#[tokio::test]
+async fn phone_reply_refresh_lists_reachable_phones() {
+    let t = start().await;
+    let (a, b) = (t.add_ws("A").await, t.add_ws("B").await);
+    let p = t.pair_phone(&[&a]).await;
+    // pairing tells A to refresh
+    assert!(t
+        .inbox(&a)
+        .await
+        .iter()
+        .any(|m| m["type"] == "refresh-hint"));
+    let (_, snap) = t.call(&a, "GET", "/v1/refresh", None).await;
+    let phones = snap["workspaces"]["phones"].as_array().unwrap();
+    assert_eq!(phones.len(), 1, "{snap}");
+    assert_eq!(phones[0]["id"], json!(p.0));
+    assert_eq!(phones[0]["name"], "Test iPhone");
+    assert_eq!(phones[0]["online"], true);
+    let (_, snap) = t.call(&b, "GET", "/v1/refresh", None).await;
+    assert_eq!(snap["workspaces"]["phones"], json!([]));
+    // admin moves the phone to B: both get a hint, lists swap
+    let (s, _) = t
+        .admin_json(
+            "PATCH",
+            &format!("/admin/api/phones/{}", p.0),
+            Some(json!({"workspaces": [b.id]})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert!(t
+        .inbox(&b)
+        .await
+        .iter()
+        .any(|m| m["type"] == "refresh-hint"));
+    let (_, snap) = t.call(&a, "GET", "/v1/refresh", None).await;
+    assert_eq!(snap["workspaces"]["phones"], json!([]));
+    let (s, _) = ws_text(&t, &a, &p.0, "gone?").await;
+    assert_eq!(s, 403);
+    let (_, snap) = t.call(&b, "GET", "/v1/refresh", None).await;
+    assert_eq!(snap["workspaces"]["phones"][0]["id"], json!(p.0));
+}
+
+#[tokio::test]
+async fn phone_text_push_budget_skips_extra_pushes_but_keeps_texts() {
+    let t = start().await;
+    let (a, b) = (t.add_ws("A").await, t.add_ws("B").await);
+    let p = t.pair_phone(&[&a, &b]).await;
+    t.phone(
+        &p,
+        "POST",
+        "/v1/phone/push",
+        Some(json!({"apns_token": "abcdef0123", "sandbox": true})),
+    )
+    .await;
+    for i in 0..5 {
+        assert_eq!(ws_text(&t, &a, &p.0, &format!("a{i}")).await.0, 201);
+    }
+    // another workspace has its own budget; questions are never limited
+    assert_eq!(ws_text(&t, &b, &p.0, "b0").await.0, 201);
+    question(&t, &a, "q?", "q1").await;
+    assert_eq!(
+        t.push.sent.lock().unwrap().len(),
+        3,
+        "1 text from A, 1 from B, 1 question"
+    );
+    let (_, m) = t.phone(&p, "GET", "/v1/phone/messages", None).await;
+    assert_eq!(
+        m["items"].as_array().unwrap().len(),
+        6,
+        "every text is stored and readable"
+    );
+}
+
+#[tokio::test]
+async fn phone_name_at_pairing_is_cleaned() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let pair = |name: String| {
+        let t = &t;
+        let a = &a;
+        async move {
+            let (_, v) = t
+                .admin_json(
+                    "POST",
+                    "/admin/api/phones",
+                    Some(json!({"name": "Label", "workspaces": [a.id]})),
+                )
+                .await;
+            let code = v["link"]
+                .as_str()
+                .unwrap()
+                .split("code=")
+                .nth(1)
+                .unwrap()
+                .to_string();
+            let r = t
+                .http
+                .post(format!("{}/v1/phone/pair", t.base))
+                .json(&json!({"code": code, "name": name}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(r.status(), 201);
+            let (_, w) = t.call(a, "GET", "/v1/refresh", None).await;
+            w["workspaces"]["phones"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| p["name"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        }
+    };
+    let names = pair(format!("  {}\n\u{202e}x\u{200b}  ", "n".repeat(100_000))).await;
+    let n = names
+        .iter()
+        .find(|n| n.starts_with('n'))
+        .expect("cleaned name listed");
+    assert_eq!(n.chars().count(), 60);
+    assert!(
+        n.chars().all(|c| c == 'n'),
+        "control and invisible characters dropped: {n:?}"
+    );
+    let names = pair("\u{200b}\n".into()).await;
+    assert!(
+        names.contains(&"Label".to_string()),
+        "nothing left: the admin's label stays: {names:?}"
+    );
+}
+
+#[tokio::test]
+async fn phone_broadcast_history_starts_at_pairing_and_filters_in_sql() {
+    let t = start().await;
+    let (a, b) = (t.add_ws("A").await, t.add_ws("B").await);
+    // a broadcast from before any phone existed
+    assert_eq!(ws_text(&t, &a, "phones", "old broadcast").await.0, 201);
+    // stored_at has second resolution: make the old one strictly older
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute("UPDATE messages SET stored_at=stored_at-5", [])
+        .unwrap();
+    let p = t.pair_phone(&[&a]).await;
+    assert_eq!(ws_text(&t, &a, "phones", "new broadcast").await.0, 201);
+    assert_eq!(ws_text(&t, &a, &p.0, "direct").await.0, 201);
+    assert_eq!(
+        ws_text(&t, &b, "phones", "from a workspace not on the list")
+            .await
+            .0,
+        201
+    );
+    let (_, m) = t.phone(&p, "GET", "/v1/phone/messages", None).await;
+    let texts: Vec<&str> = m["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["message"]["body"]["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(texts, ["direct", "new broadcast"]);
+    // paging by cursor still works with the SQL limit
+    let (_, m) = t.phone(&p, "GET", "/v1/phone/messages?limit=1", None).await;
+    assert_eq!(m["items"].as_array().unwrap().len(), 1);
+    assert!(m["next"].is_string());
+}
+
+#[tokio::test]
+async fn phone_message_queries_use_the_indexes() {
+    let t = start().await;
+    let c = t.app.db.lock().unwrap();
+    let plan_of = |sql: &str, n: usize| -> String {
+        let mut st = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let all: Vec<rusqlite::types::Value> = vec![
+            rusqlite::types::Value::Text("ph_x".into()),
+            if n == 5 {
+                i64::MAX.into()
+            } else {
+                rusqlite::types::Value::Text("[]".into())
+            },
+            rusqlite::types::Value::Text("[]".into()),
+            0i64.into(),
+            50i64.into(),
+        ];
+        let rows = st
+            .query_map(rusqlite::params_from_iter(all.into_iter().take(n)), |r| {
+                r.get::<_, String>(3)
+            })
+            .unwrap();
+        rows.map(|r| r.unwrap()).collect::<Vec<_>>().join("\n")
+    };
+    for (name, plan) in [
+        ("messages", plan_of(orch_relay::phone::MESSAGES_SQL, 5)),
+        (
+            "questions",
+            plan_of(orch_relay::phone::OPEN_QUESTIONS_SQL, 2),
+        ),
+    ] {
+        assert!(
+            !plan.contains("SCAN m") && !plan.contains("SCAN messages"),
+            "{name}: {plan}"
+        );
+        for line in plan.lines().filter(|l| l.contains("messages")) {
+            assert!(
+                line.contains("INDEX msg_type_") || line.contains("INDEX msg_reply"),
+                "{name}: messages must be read through an index: {line}\n{plan}"
+            );
+            assert!(
+                line.contains("from_addr=")
+                    || line.contains("to_addr=")
+                    || line.contains("reply_to="),
+                "{name}: not just (type=?): {line}\n{plan}"
+            );
+        }
+        // any sort is of the (small) matched rows, never of the main table
+    }
+}
+
+#[tokio::test]
+async fn phone_list_with_a_workspace_twice_shows_everything_once() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    // the admin saves the same workspace twice: stored once
+    let (s, v) = t
+        .admin_json(
+            "PATCH",
+            &format!("/admin/api/phones/{}", p.0),
+            Some(json!({"workspaces": [a.id, a.id]})),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    let (_, l) = t.admin_json("GET", "/admin/api/phones", None).await;
+    assert_eq!(l["items"][0]["workspaces"], json!([a.id]));
+    // an old row with a repeat (saved before the fix) is read once too
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE phones SET workspaces=?2 WHERE id=?1",
+            rusqlite::params![p.0, json!([a.id, a.id]).to_string()],
+        )
+        .unwrap();
+    question(&t, &a, "q?", "q1").await;
+    assert_eq!(ws_text(&t, &a, &p.0, "hi").await.0, 201);
+    assert_eq!(
+        t.phone(&p, "GET", "/v1/phone/questions", None).await.1["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        t.phone(&p, "GET", "/v1/phone/messages", None).await.1["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        t.phone(&p, "GET", "/v1/phone/workspaces", None).await.1["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 }

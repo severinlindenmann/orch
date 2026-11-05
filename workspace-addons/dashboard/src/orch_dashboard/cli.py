@@ -18,6 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--port", type=int, default=DEFAULT_PORT)
     sn = sub.add_parser("snapshot", help="write a static read-only HTML snapshot")
     sn.add_argument("--out", default="dashboard-snapshot.html")
+    sn.add_argument("--with-addons", action="store_true", help="include add-on tabs and ticket rows (left out by default)")
     sn.add_argument("--publish", action="store_true", help="publish it as a private publish app")
     args = ap.parse_args(argv)
     root = find_workspace(Path(args.dir))
@@ -26,8 +27,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.cmd == "snapshot":
         if args.publish:
-            return publish_snapshot(root)
-        print(write_snapshot(root, Path(args.out)))
+            return publish_snapshot(root, with_addons=args.with_addons)
+        print(write_snapshot(root, Path(args.out), args.with_addons))
         return 0
     port = getattr(args, "port", DEFAULT_PORT)
     srv = make_server(root, port)

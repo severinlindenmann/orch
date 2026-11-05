@@ -15,8 +15,11 @@ while [ $# -gt 0 ]; do
   esac
 done
 REAL_HOME=$HOME
+mkdir -p "$REAL_HOME/orch-dev"
 TMP=$(mktemp -d "$REAL_HOME/orch-dev/.tf-e2e-XXXX")
-trap 'rm -rf "$TMP"' EXIT INT TERM
+# ORCH_HOME is only trusted under the REAL home with no .git/.orch/.agents above it: ~/orch-dev has a .git, so use a sibling folder
+OHOME=$(mktemp -d "$REAL_HOME/.orch-e2e-XXXX")
+trap 'rm -rf "$TMP" "$OHOME"' EXIT INT TERM
 mkdir -p "$TMP/home"
 
 BINS='{}'
@@ -52,6 +55,6 @@ EXTRA_PATH=${EXTRA_PATH#:}
 
 env -i HOME="$TMP/home" PATH="$(dirname "$(command -v uv)"):/usr/bin:/bin" USER=e2e LANG=en_US.UTF-8 TERM=dumb \
   E2E_PUBLISH_ADMIN_TOKEN="${E2E_PUBLISH_ADMIN_TOKEN:-}" E2E_RELAY_ADMIN_TOKEN="${E2E_RELAY_ADMIN_TOKEN:-}" \
-  E2E_PATH_EXTRA="$EXTRA_PATH" E2E_REAL_HOME="$REAL_HOME" UV_CACHE_DIR="${UV_CACHE_DIR:-$REAL_HOME/.cache/uv}" \
+  E2E_PATH_EXTRA="$EXTRA_PATH" E2E_ORCH_HOME="$OHOME" E2E_REAL_HOME="$REAL_HOME" UV_CACHE_DIR="${UV_CACHE_DIR:-$REAL_HOME/.cache/uv}" \
   uv run --no-project --quiet --with cryptography python "$HERE/main.py" "$WHAT" --mode "$MODE" \
   --tmp "$TMP" --repo "$REPO" --bins "$BINS" $EXTRA

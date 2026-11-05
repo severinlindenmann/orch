@@ -57,7 +57,7 @@ pub fn phone(c: &Connection, h: &HeaderMap) -> Res<(String, String, Vec<String>)
                 "UPDATE phones SET last_seen=?2 WHERE id=?1",
                 rusqlite::params![id, now()],
             )?;
-            Ok((id.to_string(), name, store::parse_list(&ws)))
+            Ok((id.to_string(), name, store::parse_ws_list(&ws)))
         }
         _ => Err(unauthorized()),
     }

@@ -70,4 +70,24 @@ def test_publish_folder_is_a_deployable_static_app(ws):
 
 def test_snapshot_logo_is_inline(ws):
     html = render_snapshot(ws)
+    assert 'href="favicon.svg"' not in html and "apple-touch-icon" not in html
     assert 'src="logo.svg"' not in html and "data:image/svg+xml;base64," in html
+
+
+def _has_ext_and_addons(ws, fake_orch, with_addons):
+    html = render_snapshot(ws, with_addons=with_addons, orch_bin=str(fake_orch))
+    return json.loads(re.search(r"window\.ORCH_SNAPSHOT=(.*?);</script>", html, re.DOTALL).group(1)), html
+
+
+def test_snapshot_leaves_add_ons_out_by_default(ws, fake_orch):
+    data, html = _has_ext_and_addons(ws, fake_orch, False)
+    assert data["addons"] == [] and "views" not in data
+    assert all("ext" not in t for t in data["tickets"]) and "Schedule" not in html.split("<script>")[1]
+
+
+def test_snapshot_with_addons_includes_tab_rows_and_one_view(ws, fake_orch):
+    data, _ = _has_ext_and_addons(ws, fake_orch, True)
+    assert [a["name"] for a in data["addons"]] == ["scheduler"]
+    assert data["views"]["scheduler"]["state"] == "ok"
+    assert any("ext" in t for t in data["tickets"])
+    assert cli.main(["--dir", str(ws), "snapshot", "--with-addons", "--out", str(ws / "s.html")]) == 0

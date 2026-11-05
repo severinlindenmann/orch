@@ -1,5 +1,4 @@
 import json
-import os
 import stat
 import sys
 from datetime import UTC, datetime
@@ -20,7 +19,14 @@ with open(root / "calls.jsonl", "a") as f:
 tdir = root / ".orch" / "tickets"
 def load(i): return json.loads((tdir / (i + ".json")).read_text())
 def save(t): (tdir / (t["id"] + ".json")).write_text(json.dumps(t))
-if args[:2] == ["relay", "inbox"]:
+if args[:2] == ["ticket", "list"]:
+    print(json.dumps([json.loads(p.read_text()) for p in sorted(tdir.glob("t_*.json"))]))
+elif args[:2] == ["addon", "list"]:
+    print(json.dumps([{{"name": "scheduler", "active": not (root / "inactive").exists()}},
+                      {{"name": "relay", "active": not (root / "relay-off").exists()}}]))
+elif args[0] == "wait" and "--clear" in args:
+    t = load(args[1]); t["waiting_on"] = None; save(t); print("{{}}")
+elif args[:2] == ["relay", "inbox"]:
     p = root / "inbox.json"
     print(p.read_text() if p.exists() else "[]")
 elif args[:2] == ["relay", "done"]:
@@ -31,13 +37,16 @@ elif args[:2] == ["relay", "done"]:
     print(json.dumps({{"ticket": json.loads(t.read_text()).get(args[2])}}) if t.exists() else "{{}}")
 elif args[:2] == ["ticket", "new"]:
     n = len(list(tdir.glob("*.json"))) + 1
-    t = {{"id": "t_new%03d" % n, "title": args[2], "type": "task", "status": "open",
+    t = {{"id": "t_new%03d" % n, "title": args[2], "status": "open",
          "created_at": "2026-11-01T00:00:00Z", "history": []}}
     save(t); print(json.dumps(t))
 elif args[:2] == ["ticket", "status"]:
     t = load(args[2]); t["status"] = args[3]; save(t); print(json.dumps(t))
 elif args[:2] == ["ext", "set"]:
-    t = load(args[2]); t.setdefault("ext", {{}})[args[3]] = json.loads(args[4]); save(t); print("{{}}")
+    t = load(args[2])
+    if "--if-revision" in args and t.get("revision") != int(args[args.index("--if-revision") + 1]):
+        sys.exit(2)
+    t.setdefault("ext", {{}})[args[3]] = json.loads(args[4]); save(t); print("{{}}")
 elif args[0] == "answer" and (root / "fail-answer").exists():
     sys.exit(2)
 elif args[0] in ("log", "answer"):
@@ -62,7 +71,7 @@ def T(h=0, m=0, d=4):
 def ws(tmp_path, monkeypatch):
     root = tmp_path / "ws"
     (root / ".orch" / "tickets").mkdir(parents=True)
-    (root / ".orch" / "scheduler").mkdir()
+    (root / ".orch" / "addons" / "scheduler").mkdir(parents=True)
     bin_ = tmp_path / "bin"
     bin_.mkdir()
     orch = bin_ / "orch"
@@ -70,13 +79,13 @@ def ws(tmp_path, monkeypatch):
     orch.chmod(orch.stat().st_mode | stat.S_IXUSR)
     agent = tmp_path / "agent.py"
     agent.write_text(FAKE_AGENT)
-    monkeypatch.setenv("PATH", f"{bin_}{os.pathsep}{os.environ['PATH']}")
-    (root / ".orch" / "scheduler" / "config.toml").write_text(f"agent = '{sys.executable} {agent} {{prompt}}'\n")
+    monkeypatch.setenv("ORCH_BIN", str(orch))
+    (root / ".orch" / "config.toml").write_text(f"[scheduler]\nagent = '{sys.executable} {agent} {{prompt}}'\n")
     return root
 
 
 def add_ticket(root: Path, tid: str, **kw):
-    t = {"schema": "orch.ticket/1", "id": tid, "title": "T " + tid, "type": "task", "status": "open",
+    t = {"schema": "orch.ticket/1", "id": tid, "title": "T " + tid, "status": "open", "revision": 1,
          "created_at": "2026-11-01T00:00:00Z", "updated_at": "2026-11-01T00:00:00Z",
          "checklist": [], "links": [], "questions": [], "history": []}
     t.update(kw)

@@ -22,6 +22,7 @@ pub fn router() -> Router<AppState> {
         .route("/v1/phone/questions", get(questions))
         .route("/v1/phone/answer", post(answer))
         .route("/v1/phone/send", post(send))
+        .route("/v1/phone/messages", get(messages))
         .route("/v1/phone/signout", post(signout))
         .route(
             "/v1/phone/transcribe",
@@ -54,20 +55,19 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
         [token_hash(code)],
     )?;
     tx.execute(
-        "UPDATE phones SET token_hash=?2, last_seen=?3 WHERE id=?1",
+        "UPDATE phones SET token_hash=?2, last_seen=?3, paired_at=?3 WHERE id=?1",
         params![pid, token_hash(&token), now()],
     )?;
-    if let Some(n) = v["name"].as_str().filter(|n| !n.trim().is_empty()) {
-        tx.execute(
-            "UPDATE phones SET name=?2 WHERE id=?1",
-            params![pid, n.trim()],
-        )?;
+    if let Some(n) = v["name"].as_str().and_then(store::clean_phone_name) {
+        tx.execute("UPDATE phones SET name=?2 WHERE id=?1", params![pid, n])?;
     }
     tx.commit()?;
     let list: String = c.query_row("SELECT workspaces FROM phones WHERE id=?1", [&pid], |r| {
         r.get(0)
     })?;
-    let ws: Vec<Value> = store::parse_list(&list)
+    // Its workspaces now list this phone (refresh) and may send to it.
+    store::bump_and_hint(&c, &app.key, &store::parse_ws_list(&list))?;
+    let ws: Vec<Value> = store::parse_ws_list(&list)
         .iter()
         .filter_map(|w| store::ws_name(&c, w).map(|n| json!({"id": w, "name": n})))
         .collect();
@@ -92,21 +92,46 @@ async fn register_push(State(app): State<AppState>, h: HeaderMap, body: Bytes) -
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn open_questions(c: &rusqlite::Connection, ws: &[String]) -> rusqlite::Result<Vec<store::Msg>> {
-    let mut st = c.prepare(&format!(
-        "SELECT {MSG_COLS} FROM messages m WHERE type='question' AND to_addr='phones'
-         AND NOT EXISTS (SELECT 1 FROM messages a WHERE a.reply_to=m.id AND a.type='answer') ORDER BY seq DESC"
-    ))?;
+/// Open questions for phone `pid`: sent to `phones` or to this phone, by a workspace on its list.
+fn open_questions(
+    c: &rusqlite::Connection,
+    pid: &str,
+    ws: &[String],
+) -> rusqlite::Result<Vec<store::Msg>> {
+    let list = serde_json::to_string(ws).unwrap_or("[]".into());
+    let mut st = c.prepare(OPEN_QUESTIONS_SQL)?;
     let rows = st
-        .query_map([], msg_from_row)?
+        .query_map(params![pid, list], msg_from_row)?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows.into_iter().filter(|m| ws.contains(&m.from)).collect())
+    Ok(rows)
 }
+
+/// Open questions to `phones` or to one phone (?1) from the workspaces in the JSON list (?2). One index-driven
+/// branch per case, joined from `json_each`: no scan of the whole messages table.
+pub const OPEN_QUESTIONS_SQL: &str = "SELECT seq,id,from_addr,to_addr,type,created_at,ticket,reply_to,payload,acked_at FROM (
+        SELECT m.* FROM json_each(?2) j CROSS JOIN messages m
+          WHERE m.type='question' AND m.to_addr='phones' AND m.from_addr=j.value
+        UNION ALL
+        SELECT m.* FROM json_each(?2) j CROSS JOIN messages m
+          WHERE m.type='question' AND m.to_addr=?1 AND m.from_addr=j.value
+     ) m WHERE NOT EXISTS (SELECT 1 FROM messages a WHERE a.reply_to=m.id AND a.type='answer') ORDER BY seq DESC";
+
+/// Texts for a phone: ?1 phone id, ?2 cursor, ?3 JSON workspace list, ?4 paired-at, ?5 limit.
+pub const MESSAGES_SQL: &str = "SELECT seq,id,from_addr,to_addr,type,created_at,ticket,reply_to,payload,acked_at FROM (
+        SELECT m.* FROM json_each(?3) j CROSS JOIN messages m
+          WHERE m.type='text' AND m.to_addr='phones' AND m.from_addr=j.value AND m.stored_at>=?4 AND m.seq<?2
+        UNION ALL
+        SELECT m.* FROM json_each(?3) j CROSS JOIN messages m
+          WHERE m.type='text' AND m.to_addr=?1 AND m.from_addr=j.value AND m.seq<?2
+        UNION ALL
+        SELECT m.* FROM json_each(?3) j CROSS JOIN messages m
+          WHERE m.type='text' AND m.from_addr=?1 AND m.to_addr=j.value AND m.seq<?2
+     ) ORDER BY seq DESC LIMIT ?5";
 
 async fn workspaces(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {
     let c = app.db.lock().unwrap();
-    let (_, _, ws) = auth::phone(&c, &h)?;
-    let open = open_questions(&c, &ws)?;
+    let (pid, _, ws) = auth::phone(&c, &h)?;
+    let open = open_questions(&c, &pid, &ws)?;
     let mut items = vec![];
     for w in &ws {
         let card = c
@@ -139,8 +164,8 @@ async fn questions(
         .and_then(|c| decode_cursor(c))
         .unwrap_or(i64::MAX);
     let c = app.db.lock().unwrap();
-    let (_, _, ws) = auth::phone(&c, &h)?;
-    let rows: Vec<store::Msg> = open_questions(&c, &ws)?
+    let (pid, _, ws) = auth::phone(&c, &h)?;
+    let rows: Vec<store::Msg> = open_questions(&c, &pid, &ws)?
         .into_iter()
         .filter(|m| m.seq < after)
         .collect();
@@ -149,6 +174,55 @@ async fn questions(
     let items: Vec<Value> = rows
         .iter()
         .map(|m| json!({"message": msg_json(&app.key, m), "workspace_name": store::ws_name(&c, &m.from)}))
+        .collect();
+    let next = if more {
+        rows.last().map(|m| encode_cursor(m.seq))
+    } else {
+        None
+    };
+    Ok(Json(json!({"items": items, "next": next})))
+}
+
+/// `GET /v1/phone/messages`: text messages between this phone and the workspaces on its list, newest first:
+/// what workspaces sent to this phone or to `phones`, and what this phone sent.
+async fn messages(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+) -> Res<Json<Value>> {
+    let limit = q
+        .get("limit")
+        .and_then(|l| l.parse::<usize>().ok())
+        .unwrap_or(50)
+        .clamp(1, 100);
+    let after = q
+        .get("after")
+        .and_then(|c| decode_cursor(c))
+        .unwrap_or(i64::MAX);
+    let c = app.db.lock().unwrap();
+    let (pid, _, ws) = auth::phone(&c, &h)?;
+    // Filter by sender/peer and time in SQL (indexed); broadcasts only from after this phone paired (L3).
+    let since: i64 = c.query_row(
+        "SELECT COALESCE(paired_at, created_at) FROM phones WHERE id=?1",
+        [&pid],
+        |r| r.get(0),
+    )?;
+    let list = serde_json::to_string(&ws).unwrap_or("[]".into());
+    let mut st = c.prepare(MESSAGES_SQL)?;
+    let mut rows: Vec<crate::store::Msg> = st
+        .query_map(
+            params![pid, after, list, since, limit as i64 + 1],
+            msg_from_row,
+        )?
+        .collect::<Result<_, _>>()?;
+    let more = rows.len() > limit;
+    rows.truncate(limit);
+    let items: Vec<Value> = rows
+        .iter()
+        .map(|m| {
+            let peer = if m.from == pid { &m.to } else { &m.from };
+            json!({"message": msg_json(&app.key, m), "workspace_name": store::ws_name(&c, peer)})
+        })
         .collect();
     let next = if more {
         rows.last().map(|m| encode_cursor(m.seq))
@@ -173,7 +247,9 @@ async fn answer(
         let c = app.db.lock().unwrap();
         let (pid, name, ws) = auth::phone(&c, &h)?;
         let q = store::get_msg(&c, qid)?
-            .filter(|q| q.typ == "question" && q.to == "phones" && ws.contains(&q.from))
+            .filter(|q| {
+                q.typ == "question" && (q.to == "phones" || q.to == pid) && ws.contains(&q.from)
+            })
             .ok_or_else(|| not_found("No such question."))?;
         // The database lock makes check + insert one step: the first answer wins.
         let prev = c
@@ -250,20 +326,27 @@ async fn send(
 
 async fn signout(State(app): State<AppState>, h: HeaderMap) -> Res<StatusCode> {
     let c = app.db.lock().unwrap();
-    let (pid, ..) = auth::phone(&c, &h)?;
+    let (pid, _, ws) = auth::phone(&c, &h)?;
     c.execute(
         "UPDATE phones SET token_hash=NULL, apns_token=NULL WHERE id=?1",
         [pid],
     )?;
+    // Its workspaces no longer list this phone.
+    store::bump_and_hint(&c, &app.key, &ws)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Push a new question to every phone that may reach the asking workspace.
-pub async fn push_question(app: &AppState, q: &Value) {
+/// Push a new question or text to the phones it is for: every phone that may reach the sending workspace
+/// (`to: phones`) or that one phone (`to: ph_…`). Question pushes carry `message_id` (tap opens the question);
+/// text pushes carry `type: "text"` and `text_id` instead.
+pub async fn push_message(app: &AppState, q: &Value) {
+    let to = q["to"].as_str().unwrap_or("").to_string();
+    let from = q["from"].as_str().unwrap_or("").to_string();
+    let is_text = q["type"] == "text";
     let targets: Vec<(bool, String)> = {
         let c = app.db.lock().unwrap();
         let mut st = match c.prepare(
-            "SELECT sandbox,apns_token,workspaces FROM phones WHERE apns_token IS NOT NULL AND token_hash IS NOT NULL",
+            "SELECT sandbox,apns_token,workspaces,id FROM phones WHERE apns_token IS NOT NULL AND token_hash IS NOT NULL",
         ) {
             Ok(s) => s,
             Err(_) => return,
@@ -274,14 +357,25 @@ pub async fn push_question(app: &AppState, q: &Value) {
                     r.get::<_, i64>(0)? != 0,
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
                 ))
             })
             .map(|r| r.flatten().collect::<Vec<_>>())
             .unwrap_or_default();
-        let from = q["from"].as_str().unwrap_or("").to_string();
+        let mut budget = app.push_budget.lock().unwrap();
         rows.into_iter()
-            .filter(|(_, _, w)| store::parse_list(w).contains(&from))
-            .map(|(s, t, _)| (s, t))
+            .filter(|(_, _, w, id)| {
+                store::parse_ws_list(w).contains(&from) && (to == "phones" || &to == id)
+            })
+            // L2: texts are always stored; only the push is skipped when the budget is used up.
+            .filter(|(.., id)| {
+                !is_text
+                    || budget
+                        .entry(format!("{from}|{id}"))
+                        .or_default()
+                        .allow(crate::util::now())
+            })
+            .map(|(s, t, ..)| (s, t))
             .collect()
     };
     if targets.is_empty() {
@@ -297,8 +391,14 @@ pub async fn push_question(app: &AppState, q: &Value) {
         .chars()
         .take(120)
         .collect();
-    let payload = json!({"aps": {"alert": {"title": name, "body": text}, "sound": "default"},
-        "message_id": q["id"], "workspace": q["from"]});
+    let mut payload = json!({"aps": {"alert": {"title": name, "body": text}, "sound": "default"},
+        "workspace": q["from"]});
+    if q["type"] == "question" {
+        payload["message_id"] = q["id"].clone();
+    } else {
+        payload["type"] = "text".into();
+        payload["text_id"] = q["id"].clone();
+    }
     for (sandbox, token) in targets {
         if let Err(e) = app.pusher.send(sandbox, &token, &payload).await {
             tracing::warn!("push failed: {}", e.message);

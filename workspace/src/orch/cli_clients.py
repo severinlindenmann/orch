@@ -81,7 +81,7 @@ def add_parsers(sub, common) -> None:
     life = argparse.ArgumentParser(add_help=False)
     life.add_argument("--days", type=int, help="keep for N days (1-90, default 7)")
     life.add_argument("--permanent", action="store_true")
-    x = pub.add_parser("file", parents=[common, life], help="encrypt and share a file")
+    x = pub.add_parser("file", parents=[common, life], help="encrypt and share a file or a page folder")
     x.add_argument("path")
     x = pub.add_parser("app", parents=[common, life], help="deploy a folder that has app.toml")
     x.add_argument("folder")
@@ -108,6 +108,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--workspace", required=True)
     x.add_argument("--token", required=True)
     rel.add_parser("whoami", parents=[common], help="show who you are and which phones are paired")
+    rel.add_parser("status", parents=[common], help="is this folder connected to a relay (no network)")
     _add_profile(rel)
     x = rel.add_parser("inbox", parents=[common], help="pull new messages")
     x.add_argument("--wait", type=int, default=0, help="wait up to N seconds (max 30)")
@@ -175,7 +176,9 @@ def run_publish(args, root: Path, out) -> None:
         out(
             args,
             r,
-            f"Shared {r['name']} ({_size(r['size'])}), {_exp(r['expires_at'])}. Open this link:\n{r['link']}",
+            f"Shared {r['name']} ({_size(r['size'])}), {_exp(r['expires_at'])}. Open this link:\n{r['link']}"
+            + (f"\nFiles: {', '.join(r['files'])}" if r.get("files") else "")
+            + (f"\nLeft out (look like secrets): {', '.join(r['skipped'])}" if r.get("skipped") else ""),
         )
     elif sub == "app":
         pub = True if args.public else False if args.private else None
@@ -232,6 +235,17 @@ def run_relay(args, root: Path, out) -> None:
             who,
             f"Connected to {_host(args.url)} as {who['name']}.\n{line}\n"
             'Next: describe this workspace: orch relay profile --description "..." --tags a,b',
+        )
+    elif sub == "status":
+        try:
+            c = net.load_service(root, "relay")
+            st = {"configured": True, "url": c["url"], "workspace": c["workspace"]}
+        except Refused:
+            st = {"configured": False}
+        out(
+            args,
+            st,
+            f"Connected to {_host(st['url'])}." if st["configured"] else "Not connected to a relay.",
         )
     elif sub == "whoami":
         w = relay.whoami(root)
@@ -333,8 +347,9 @@ def _inbox_line(i: dict, root: Path) -> str:
     tail = f"  [{m['id']}]"
     if i["note"]:
         return f"{head}: {i['note']}{tail}"
+    reply = f' - reply: orch relay send {m["from"]} "<text>"' if m["from"].startswith("ph_") else ""
     detail = {
-        "text": lambda: b.get("text", ""),
+        "text": lambda: b.get("text", "") + reply,
         "file": lambda: (
             f"{b.get('name')} ({_size(b.get('size') or 0)}) - save it with: orch relay download {m['id']}"
         ),

@@ -23,6 +23,7 @@ const toolBin = path.join(TMP, '.local/bin');
 const env = {
   HOME: TMP, PATH: `${toolBin}:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
   UV_CACHE_DIR: path.join(process.env.HOME, '.cache/uv'), ORCH_REPO: REPO, LANG: 'en_US.UTF-8',
+  ORCH_HOME: process.env.WALK_ORCH_HOME || '', // only trusted under the real home (see run.sh)
 };
 function sh(cmd, cwd = TMP, input) {
   const r = spawnSync('sh', ['-c', cmd], { cwd, env, encoding: 'utf8', timeout: 180000, input });
@@ -95,7 +96,7 @@ try {
   // ---------- setup (not screenshotted) ----------
   must(`uv tool install ${REPO}/workspace`);
   for (const [k, d] of Object.entries(dirs)) { fs.mkdirSync(d, { recursive: true }); must('orch init', d); }
-  must('orch addon add dashboard', dirs.Pilatus);
+  must('orch addon add dashboard --yes', dirs.Pilatus);
 
   const browser = await chromium.launch();
   page = await (await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: process.env.WALK_SCHEME || 'dark', acceptDownloads: true })).newPage();
@@ -175,8 +176,15 @@ try {
     await page.click('a.card');
     await page.waitForSelector('text=Which format?');
   });
-  await step('dashboard-scheduler', 'Dashboard: scheduler view', async () => {
-    await page.click('a[href="#scheduler"]'); await page.waitForTimeout(500);
+  await step('dashboard-no-tab', 'Dashboard: no Schedule tab while the scheduler add-on is off', async () => {
+    if (await page.locator('a[href="#addon/scheduler"]').count()) throw new Error('scheduler tab without the add-on');
+  });
+  await step('dashboard-scheduler', 'Dashboard: turn the scheduler on (orch addon add scheduler), repeat the ticket, open the Schedule tab', async () => {
+    must('orch addon add scheduler --yes', dirs.Pilatus);
+    must(`orch scheduler repeat ${tid} "0 7 * * 1"`, dirs.Pilatus);
+    await page.reload(); await page.waitForSelector('a[href="#addon/scheduler"]');
+    await page.click('a[href="#addon/scheduler"]');
+    await page.waitForSelector('text=Next runs');
   });
   await step('dashboard-inbox', 'Dashboard: inbox view', async () => {
     await page.click('a[href="#inbox"]'); await page.waitForTimeout(500);

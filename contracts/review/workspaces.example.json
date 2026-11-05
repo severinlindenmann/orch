@@ -52,5 +52,13 @@
       "description_by": "admin",
       "tags_by": "admin"
     }
+  ],
+  "phones": [
+    {
+      "id": "ph_iphone0001",
+      "name": "Severin's iPhone",
+      "online": true,
+      "last_seen": "2026-11-04T12:58:00Z"
+    }
   ]
 }

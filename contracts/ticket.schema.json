@@ -2,14 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://orch.severin.io/contracts/ticket.schema.json",
   "title": "orch ticket v1",
-  "description": "One ticket = one file .orch/tickets/<id>.json. Writers must produce valid tickets. Unknown fields are allowed everywhere (top level and nested) and every reader/writer keeps them unchanged. New add-on data should still go under ext.<addon>.",
+  "description": "One ticket = one file .orch/tickets/<id>.json. Writers must produce valid tickets. Unknown fields are allowed everywhere (top level and nested) and every reader/writer keeps them unchanged. The core knows no add-on: add-on data lives only under ext.<add-on name> and is checked by that add-on's own schema (addon-manifest.md, ticket_ext). type and wake_at are gone: wait until a time with waiting_on {kind: time, until}; recurrence is ext.scheduler (addons/scheduler.ext.schema.json).",
   "type": "object",
-  "required": ["schema", "id", "title", "type", "status", "created_at", "updated_at", "checklist", "links", "questions", "history"],
+  "required": ["schema", "id", "title", "status", "created_at", "updated_at", "checklist", "links", "questions", "history"],
   "properties": {
     "schema": { "const": "orch.ticket/1" },
     "id": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "Random, e.g. t_7k3f9q. Same as the file name." },
     "title": { "type": "string", "minLength": 1, "maxLength": 200 },
-    "type": { "enum": ["task", "recurring"] },
     "status": { "enum": ["open", "active", "waiting", "done", "dropped"] },
     "created_at": { "$ref": "#/$defs/time" },
     "updated_at": { "$ref": "#/$defs/time" },
@@ -17,44 +16,32 @@
     "links": { "type": "array", "items": { "$ref": "#/$defs/link" } },
     "questions": { "type": "array", "items": { "$ref": "#/$defs/question" } },
     "history": { "type": "array", "items": { "$ref": "#/$defs/history" } },
-    "wake_at": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }], "description": "The scheduler starts an agent on this ticket at this time (one-time task)." },
+    "revision": { "type": "integer", "minimum": 0, "description": "+1 on every write. `orch ticket patch --if-revision N` is refused when it changed (no lost updates between agents and add-ons). Missing = 0." },
     "waiting_on": {
+      "description": "Generic waiting. The core records it and never promises that something wakes the ticket (an add-on such as the scheduler may). kind time needs until; the other kinds need ref.",
       "oneOf": [
         { "type": "null" },
         {
           "type": "object",
-          "required": ["kind", "ref"],
+          "required": ["kind"],
           "properties": {
-            "kind": { "enum": ["question", "workspace", "webhook", "person", "other"] },
-            "ref": { "type": "string", "minLength": 1, "description": "e.g. q1, ws_h2k9..., wh_..., or free text" }
-          }
+            "kind": { "enum": ["time", "ticket", "question", "external"] },
+            "until": { "$ref": "#/$defs/time" },
+            "ref": { "type": "string", "minLength": 1, "maxLength": 200, "description": "question: q1 · ticket: t_… · external: ws_…, wh_…, a person, a PR URL, free text" }
+          },
+          "if": { "properties": { "kind": { "const": "time" } } },
+          "then": { "required": ["until"] },
+          "else": { "required": ["ref"] }
         }
       ]
     },
     "ext": {
       "type": "object",
-      "description": "One key per add-on or tool. Each owner decides its own shape. Others never change a key they do not own.",
-      "additionalProperties": { "type": "object" },
-      "properties": {
-        "scheduler": {
-          "type": "object",
-          "properties": {
-            "cron": { "type": "string", "description": "5-field cron (min hour day month weekday), always UTC, e.g. '0 7 * * 1'. Missed runs (machine off): run once on catch-up, never several times." },
-            "agent": { "type": "string", "description": "Optional: which agent command runs it, e.g. 'claude' or 'codex'. Default from .orch/scheduler/config.toml." }
-          }
-        }
-      }
+      "description": "One key per add-on (its manifest name) or tool. Each owner decides its own shape; an installed add-on's ticket_ext schema checks its key on every write. Others never change a key they do not own.",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+      "additionalProperties": { "type": "object" }
     }
   },
-  "allOf": [
-    {
-      "if": { "properties": { "type": { "const": "recurring" } } },
-      "then": {
-        "required": ["ext"],
-        "properties": { "ext": { "required": ["scheduler"], "properties": { "scheduler": { "required": ["cron"] } } } }
-      }
-    }
-  ],
   "$defs": {
     "time": { "type": "string", "format": "date-time", "pattern": "Z$", "description": "RFC 3339, UTC, ends with Z." },
     "who": { "type": "string", "pattern": "^(agent|human):[A-Za-z0-9_.@ -]{1,64}$", "description": "agent:<tool> (agent:claude-code, agent:codex) or human:<name>" },

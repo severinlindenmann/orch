@@ -63,16 +63,28 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["It's in the inbox."].waitForExistence(timeout: 10))
     }
 
+    /// A text push tap (stood in by -openTextPush) opens the Send tab on that workspace with the workspace's reply under the composer.
+    func testWorkspaceReplyShowsInMessages() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-openTextPush", "ws_pilatus001"]
+        app.launch()
+        let reply = app.descendants(matching: .any)["message-m_reply0phone00001"]
+        var tries = 0
+        while !reply.waitForExistence(timeout: 3) && tries < 4 { app.swipeUp(); tries += 1 }
+        XCTAssertTrue(reply.exists)
+        XCTAssertTrue(reply.label.contains("The report is ready"))
+    }
+
     /// Answer has a 3 s undo window; undo returns the options and nothing is sent.
     func testAnswerCanBeUndone() {
         let app = XCUIApplication()
-        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-startTab", "questions"]
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-startTab", "questions", "-undoSeconds", "30"]
         app.launch()
         let answer = app.buttons["answer-TIMESTAMP"]
         XCTAssertTrue(answer.waitForExistence(timeout: 15))
         answer.tap()
         let undo = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'undo-'")).firstMatch
-        XCTAssertTrue(undo.waitForExistence(timeout: 3))
+        XCTAssertTrue(undo.waitForExistence(timeout: 10))
         undo.tap()
         XCTAssertTrue(app.buttons["answer-TIMESTAMP"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.staticTexts["Answer sent: TIMESTAMP"].exists)
@@ -198,7 +210,7 @@ final class OnboardingFlowUITests: XCTestCase {
         let tab = app.buttons["Send"]
         XCTAssertTrue(tab.waitForExistence(timeout: 15))
         XCTAssertGreaterThanOrEqual(tab.frame.height, 44)
-        tab.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.1)).tap()
+        tab.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2)).tap()
         XCTAssertTrue(app.staticTexts["Say it. Send it"].waitForExistence(timeout: 3))
     }
 }

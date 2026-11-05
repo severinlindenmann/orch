@@ -27,6 +27,10 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
             digest TEXT NOT NULL, payload BLOB NOT NULL, stored_at INTEGER NOT NULL, acked_at INTEGER);
         CREATE INDEX IF NOT EXISTS msg_to ON messages(to_addr, acked_at);
         CREATE INDEX IF NOT EXISTS msg_reply ON messages(reply_to);
+        DROP INDEX IF EXISTS msg_text_to;
+        DROP INDEX IF EXISTS msg_text_from;
+        CREATE INDEX IF NOT EXISTS msg_type_to_from ON messages(type, to_addr, from_addr, seq);
+        CREATE INDEX IF NOT EXISTS msg_type_from_to ON messages(type, from_addr, to_addr, seq);
         CREATE TABLE IF NOT EXISTS blobs(id TEXT PRIMARY KEY, uploader TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, created_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS webhooks(id TEXT PRIMARY KEY, workspace TEXT NOT NULL, mode TEXT NOT NULL, ticket TEXT,
             token_hash TEXT NOT NULL, created_at INTEGER NOT NULL, last_call_at INTEGER, used INTEGER NOT NULL DEFAULT 0);
@@ -47,6 +51,8 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
     ] {
         let _ = c.execute(&format!("ALTER TABLE workspaces ADD COLUMN {col}"), []);
     }
+    // When the phone paired (L3): broadcasts to `phones` from before are not shown to it.
+    let _ = c.execute("ALTER TABLE phones ADD COLUMN paired_at INTEGER", []);
     Ok(())
 }
 
@@ -238,6 +244,14 @@ pub fn ws_exists(c: &Connection, id: &str) -> bool {
     ws_name(c, id).is_some()
 }
 
+/// A phone's workspace list without repeats (first one wins), also for rows saved before the admin API deduped.
+pub fn parse_ws_list(s: &str) -> Vec<String> {
+    let mut l = parse_list(s);
+    let mut seen = std::collections::HashSet::new();
+    l.retain(|w| seen.insert(w.clone()));
+    l
+}
+
 pub fn parse_list(s: &str) -> Vec<String> {
     serde_json::from_str(s).unwrap_or_default()
 }
@@ -335,6 +349,16 @@ pub fn valid_description(d: &str) -> Result<String, &'static str> {
     Ok(d)
 }
 
+/// Display name a phone gives at pairing: NFC, trimmed, characters outside the description allowlist dropped,
+/// at most 60 characters. `None` when nothing is left (the admin's label stays).
+pub fn clean_phone_name(n: &str) -> Option<String> {
+    use unicode_normalization::UnicodeNormalization;
+    let n: String = n.nfc().filter(|c| good_char(*c)).collect();
+    let n: String = n.trim().chars().take(60).collect();
+    let n = n.trim().to_string();
+    (!n.is_empty()).then_some(n)
+}
+
 /// Tag: lowercase letters, digits and hyphens, 1 to 24 characters.
 pub fn valid_tag(t: &str) -> bool {
     (1..=24).contains(&t.len())
@@ -388,8 +412,50 @@ pub fn directory(c: &Connection, me: &str) -> rusqlite::Result<Value> {
         })
         .collect();
     Ok(
-        json!({"schema": "orch.workspaces/1", "self": me, "updated_at": fmt_time(now()), "workspaces": items}),
+        json!({"schema": "orch.workspaces/1", "self": me, "updated_at": fmt_time(now()), "workspaces": items,
+            "phones": phones_of(c, me)?}),
     )
+}
+
+/// Paired phones (signed in) whose list holds workspace `ws`: `[{id, name, online, last_seen}]` by name.
+/// The admin's phone pairing is the rule: these phones may reach `ws` and `ws` may send text/questions to them.
+pub fn phones_of(c: &Connection, ws: &str) -> rusqlite::Result<Vec<Value>> {
+    let mut st = c.prepare(
+        "SELECT id,name,workspaces,last_seen FROM phones WHERE token_hash IS NOT NULL ORDER BY name, id",
+    )?;
+    let rows = st.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, Option<i64>>(3)?,
+        ))
+    })?;
+    let mut out = vec![];
+    for row in rows {
+        let (id, name, list, last) = row?;
+        if parse_list(&list).iter().any(|w| w == ws) {
+            out.push(json!({"id": id, "name": name, "online": online(last), "last_seen": last.map(fmt_time)}));
+        }
+    }
+    Ok(out)
+}
+
+/// True when phone `pid` is paired (signed in) and may reach workspace `ws`.
+pub fn phone_reaches(c: &Connection, pid: &str, ws: &str) -> bool {
+    phones_of(c, ws).is_ok_and(|p| p.iter().any(|x| x["id"] == pid))
+}
+
+/// The workspaces in a phone's list (empty when there is no such phone).
+pub fn phone_workspaces(c: &Connection, pid: &str) -> Vec<String> {
+    c.query_row("SELECT workspaces FROM phones WHERE id=?1", [pid], |r| {
+        r.get::<_, String>(0)
+    })
+    .optional()
+    .ok()
+    .flatten()
+    .map(|l| parse_list(&l))
+    .unwrap_or_default()
 }
 
 /// `me` plus every workspace connected to it by a pair rule.

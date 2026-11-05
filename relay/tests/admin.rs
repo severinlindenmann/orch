@@ -83,6 +83,7 @@ async fn admin_add_workspace_prompt_token_stored_hashed() {
     let (id, token) = (v["id"].as_str().unwrap(), v["token"].as_str().unwrap());
     assert!(token.starts_with("orn_") && token.len() == 47);
     let p = v["prompt"].as_str().unwrap();
+    assert!(p.contains("orch addon add relay --yes\n  orch relay connect"));
     assert!(p.contains(&format!(
         "orch relay connect https://relay.test --workspace {id} --token {token}"
     )));
@@ -260,6 +261,7 @@ async fn admin_onboarding_scripts_are_served() {
         .await
         .unwrap();
     assert!(ps.contains("orch relay connect") && !ps.contains("__RELAY_URL__"));
+    assert!(ps.contains("orch addon add relay --yes"));
 }
 
 #[tokio::test]
@@ -586,4 +588,49 @@ fn portal_shows_webhook_and_person_senders() {
 fn portal_blur_validation_skips_submit_button() {
     let page = include_str!("../web/portal.html");
     assert!(page.contains("e.relatedTarget&&e.relatedTarget.type==='submit'"));
+}
+
+#[test]
+fn portal_has_no_technical_details_fold() {
+    let page = include_str!("../web/portal.html");
+    assert!(!page.to_lowercase().contains("technical details"));
+}
+
+#[tokio::test]
+async fn relay_icons_on_public_and_admin() {
+    let t = start().await;
+    for base in [&t.base, &t.admin] {
+        let r = t
+            .http
+            .get(format!("{base}/favicon.svg"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200);
+        assert_eq!(r.headers()["content-type"], "image/svg+xml");
+        assert!(r.text().await.unwrap().contains("#a78bfa"), "violet logo");
+        let r = t
+            .http
+            .get(format!("{base}/apple-touch-icon.png"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.headers()["content-type"], "image/png");
+        assert_eq!(&r.bytes().await.unwrap()[1..4], b"PNG");
+    }
+    let page = t
+        .http
+        .get(format!("{}/admin", t.admin))
+        .send()
+        .await
+        .unwrap();
+    let page = page.text().await.unwrap();
+    assert!(page.contains(r#"rel="icon" href="/favicon.svg""#));
+    assert!(page.contains(r#"rel="apple-touch-icon""#));
+    let page = t.http.get(format!("{}/", t.base)).send().await.unwrap();
+    assert!(page
+        .text()
+        .await
+        .unwrap()
+        .contains(r#"href="/favicon.svg""#));
 }

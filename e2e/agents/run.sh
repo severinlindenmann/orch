@@ -15,8 +15,11 @@ while [ $# -gt 0 ]; do
 done
 [ "$MODE" = live ] || { echo "agent scenarios run in live mode only"; exit 2; }
 REAL_HOME=$HOME
+mkdir -p "$REAL_HOME/orch-dev"
 TMP=$(mktemp -d "$REAL_HOME/orch-dev/.tf-agents-XXXX")
 trap 'rm -rf "$TMP/codex"; rm -rf "$TMP"' EXIT INT TERM
+OHOME=$(mktemp -d "$REAL_HOME/.orch-e2e-XXXX")  # ORCH_HOME is only trusted under the real home without a .git above
+trap 'rm -rf "$TMP/codex"; rm -rf "$TMP" "$OHOME"' EXIT INT TERM
 mkdir -p "$TMP/home" "$TMP/tools"
 
 if [ -z "${E2E_PUBLISH_ADMIN_TOKEN:-}" ] && [ -x "$REAL_HOME/orch-dev/scripts/pass-login.sh" ]; then
@@ -48,6 +51,6 @@ done
 env -i HOME="$TMP/home" PATH="$(dirname "$(command -v uv)"):/usr/bin:/bin" USER=e2e LANG=en_US.UTF-8 TERM=dumb \
   E2E_PUBLISH_ADMIN_TOKEN="${E2E_PUBLISH_ADMIN_TOKEN:-}" E2E_RELAY_ADMIN_TOKEN="${E2E_RELAY_ADMIN_TOKEN:-}" \
   E2E_CLAUDE_TOKEN="${E2E_CLAUDE_TOKEN:-}" E2E_AGENT_RUNS="${E2E_AGENT_RUNS:-$REAL_HOME/orch-dev/state/fresh-start-2026-11-04/agent-runs}" \
-  E2E_PATH_EXTRA="$EXTRA_PATH" E2E_REAL_HOME="$REAL_HOME" UV_CACHE_DIR="${UV_CACHE_DIR:-$REAL_HOME/.cache/uv}" \
+  E2E_PATH_EXTRA="$EXTRA_PATH" E2E_ORCH_HOME="$OHOME" E2E_REAL_HOME="$REAL_HOME" UV_CACHE_DIR="${UV_CACHE_DIR:-$REAL_HOME/.cache/uv}" \
   uv run --no-project --quiet --with cryptography --with jsonschema --with rfc3339-validator \
   python "$HERE/main.py" "$WHAT" --mode "$MODE" --tmp "$TMP" --repo "$REPO"

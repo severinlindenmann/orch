@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import cli
+from orch import addons, cli
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 
@@ -17,7 +17,10 @@ def proj(tmp_path, monkeypatch):
     for k in list(os.environ):
         if k.startswith("CODEX_"):
             monkeypatch.delenv(k)
-    monkeypatch.setenv("ORCH_HOME", str(tmp_path / "_orchhome"))
+    fake_home = tmp_path.parent / f"{tmp_path.name}_home"
+    fake_home.mkdir(exist_ok=True)
+    monkeypatch.setattr(addons, "real_home", lambda: fake_home)
+    monkeypatch.setenv("ORCH_HOME", str(fake_home / "orchhome"))
     return tmp_path
 
 
@@ -55,10 +58,20 @@ def new_ticket(proj, run):
     return _n
 
 
+def turn_on(root, name):
+    """`orch addon add <name> --yes` for the built-in publish/relay add-ons, output swallowed."""
+    import contextlib
+    import io
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        addons.add(root, name, yes=True)
+
+
 @pytest.fixture
 def pub(proj, run):
     from fakes import make_publish
 
+    turn_on(proj, "publish")
     srv = make_publish()
     yield srv
     srv.stop()
@@ -68,6 +81,7 @@ def pub(proj, run):
 def rel(proj, run):
     from fakes import make_relay
 
+    turn_on(proj, "relay")
     srv = make_relay()
     yield srv
     srv.stop()

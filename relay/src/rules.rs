@@ -49,9 +49,16 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
     let typ = msg["type"].as_str().unwrap_or("").to_string();
     let to = msg["to"].as_str().unwrap_or("").to_string();
     if let Some((idx, label)) = kind_of(&typ) {
-        if to == "phones" {
+        if to == "phones" || valid_id(&to, "ph_", 10) {
             if idx != 0 {
-                return Err(not_allowed("Only text and questions can go to phones."));
+                return Err(not_allowed("Only text and questions can go to a phone."));
+            }
+            // A phone is reachable when the admin paired it with the sender (relay admin > Phones).
+            if to != "phones" && !store::phone_reaches(c, &to, sender) {
+                let from_name = store::ws_name(c, sender).unwrap_or_default();
+                return Err(not_allowed(format!(
+                    "That phone is not paired with {from_name}. In the relay admin, open Phones and tick {from_name} for this phone (or add the phone there), then run `orch relay refresh`."
+                )));
             }
         } else if valid_id(&to, "ws_", 10) {
             let Some(to_name) = store::ws_name(c, &to) else {
@@ -65,7 +72,9 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
                 )));
             }
         } else {
-            return Err(not_allowed("Workspaces can send to workspaces or phones."));
+            return Err(not_allowed(
+                "Send to a workspace (ws_…), a paired phone (ph_…) or `phones` (every phone paired with you).",
+            ));
         }
         if typ == "file" {
             check_blob(c, sender, &msg)?;

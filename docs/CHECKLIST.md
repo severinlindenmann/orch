@@ -11,19 +11,20 @@ Done = ticked here, tests green, and the e2e scenario (docs/e2e-scenarios.md) pa
 ## workspace
 - [ ] install.sh / install.ps1, `orch update`
 - [ ] `orch init`: skill, AGENTS.md, .claude/skills link (symlink / junction), .gitignore
-- [ ] tickets new/list/show/status/edit/wait, one JSON per ticket, unknown fields kept
+- [ ] tickets new/list/show/status/edit/wait, one JSON per ticket, unknown fields kept; `waiting_on {kind: time|ticket|question|external}`, `revision` per write, `--if-revision`
 - [ ] checklist + evidence, done needs evidence
 - [ ] history log, links, ext
 - [ ] ask / answer
-- [ ] `orch addon add|list|remove`
+- [ ] `orch addon add|list|remove|uninstall`: core knows no add-on by name; built-in or local folder; consent (`--yes`) bound to this machine + workspace (`.orch/.local-id`, hash for local folders); `.orch/addons.json` alone activates nothing; skill `orch-<name>` + `<!-- orch:addon:<name> -->` block; remove keeps ticket `ext` (hidden), `--purge` deletes add-on data
 - [ ] publish client: connect, whoami, file share (encrypt), app deploy/list/restart/stop/delete
 - [ ] relay client: connect, inbox (dedup), send, allow, refresh (+ workspaces.json, shared skills/MCP/creds), webhook
 - [ ] works with no git / local git / remote git
 - [ ] Windows CI smoke
 
 ## workspace-addons
-- [ ] dashboard: list, detail, scheduler view, inbox view, empty state, snapshot to publish
-- [ ] scheduler: wake_at, cron, runs claude/codex/any CLI, inbox start, start/stop
+- [ ] dashboard: list, detail, Inbox (relay set up), one tab per active add-on from `view --json` (stale / error states, "as of"), ticket rows from `ticket_view`, empty state, snapshot to publish without add-on content
+- [ ] scheduler: `orch wait --until` wakes, `orch scheduler repeat` (cron in `ext.scheduler`), runs claude/codex/any CLI, inbox start, start/stop, tab via `view --json`
+- [ ] no add-on on → no trace of scheduler/dashboard in `--help`, skills, AGENTS.md (e2e A12)
 
 ## publish
 - [ ] files E2E (/f/ page decrypts), temp/permanent, sweep, 100 MB
@@ -44,4 +45,4 @@ Done = ticked here, tests green, and the e2e scenario (docs/e2e-scenarios.md) pa
 - [ ] onboarding link/QR, workspaces, questions + answer, push, send with voice, settings
 
 ## e2e
-- [ ] all scenarios in docs/e2e-scenarios.md green, walkthrough with screenshots
+- [ ] all scenarios in docs/e2e-scenarios.md green (`e2e/run.sh all --mode local`, `e2e/run.sh agents`), walkthrough with screenshots (`e2e/walkthrough/run.sh`)

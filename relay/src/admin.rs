@@ -31,6 +31,7 @@ pub fn router(app: AppState) -> Router {
                 )
             }),
         )
+        .merge(crate::api::icon_routes())
         .route("/admin/api/workspaces", get(list_ws).post(add_ws))
         .route(
             "/admin/api/workspaces/:id",
@@ -96,7 +97,7 @@ fn parse_description(v: &Value) -> Res<String> {
 
 pub fn prompt(public: &str, ws: &str, token: &str) -> String {
     format!(
-        "Connect this workspace to orch-relay. Run in the project folder:\n  orch relay connect {public} --workspace {ws} --token {token}\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL {public}/onboarding.sh | sh -s -- --workspace {ws} --token {token}\n  Windows: & ([scriptblock]::Create((irm {public}/onboarding.ps1))) -Workspace {ws} -Token {token}\nThen describe this workspace in one sentence and 2-4 tags: orch relay profile --description \"...\" --tags a,b"
+        "Connect this workspace to orch-relay. Run in the project folder:\n  orch addon add relay --yes\n  orch relay connect {public} --workspace {ws} --token {token}\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL {public}/onboarding.sh | sh -s -- --workspace {ws} --token {token}\n  Windows: & ([scriptblock]::Create((irm {public}/onboarding.ps1))) -Workspace {ws} -Token {token}\nThen describe this workspace in one sentence and 2-4 tags: orch relay profile --description \"...\" --tags a,b"
     )
 }
 
@@ -724,7 +725,9 @@ fn check_ws_list(c: &Connection, v: &Value) -> Res<Vec<String>> {
         if !store::ws_exists(c, w) {
             return Err(invalid(format!("{w} is not a workspace.")));
         }
-        out.push(w.to_string());
+        if !out.iter().any(|o| o == w) {
+            out.push(w.to_string());
+        }
     }
     Ok(out)
 }
@@ -737,7 +740,7 @@ async fn list_phones(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Valu
         .query_map([], |r| {
             let last: Option<i64> = r.get(4)?;
             Ok(json!({"id": r.get::<_, String>(0)?, "name": r.get::<_, String>(1)?,
-                "workspaces": store::parse_list(&r.get::<_, String>(2)?), "paired": r.get::<_, bool>(3)?,
+                "workspaces": store::parse_ws_list(&r.get::<_, String>(2)?), "paired": r.get::<_, bool>(3)?,
                 "online": store::online(last)}))
         })?
         .collect::<Result<_, _>>()?;
@@ -793,12 +796,23 @@ async fn edit_phone(
     let v = parse_body(&body)?;
     let c = app.db.lock().unwrap();
     let ws = check_ws_list(&c, &v["workspaces"])?;
+    let old = store::phone_workspaces(&c, &id);
     let n = c.execute(
         "UPDATE phones SET workspaces=?2 WHERE id=?1",
         params![id, serde_json::to_string(&ws).unwrap()],
     )?;
     if n == 0 {
         return Err(not_found("No such phone."));
+    }
+    // Workspaces that gained or lost the phone refresh their phone list.
+    let changed: Vec<String> = old
+        .iter()
+        .filter(|w| !ws.contains(w))
+        .chain(ws.iter().filter(|w| !old.contains(w)))
+        .cloned()
+        .collect();
+    if !changed.is_empty() {
+        store::bump_and_hint(&c, &app.key, &changed)?;
     }
     Ok(StatusCode::OK)
 }
@@ -810,10 +824,12 @@ async fn del_phone(
 ) -> Res<StatusCode> {
     guard(&app, &h)?;
     let c = app.db.lock().unwrap();
+    let old = store::phone_workspaces(&c, &id);
     let n = c.execute("DELETE FROM phones WHERE id=?1", [&id])?;
     c.execute("DELETE FROM pair_codes WHERE phone_id=?1", [&id])?;
     if n == 0 {
         return Err(not_found("No such phone."));
     }
+    store::bump_and_hint(&c, &app.key, &old)?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,12 +21,12 @@ def ws(tmp_path):
     tdir.mkdir(parents=True)
     ex = json.loads((CONTRACTS / "ticket.example.json").read_text())
     (tdir / f"{ex['id']}.json").write_text(json.dumps(ex))
-    rec = _ticket("t_weekly01", "Weekly report", "waiting", type="recurring", wake_at=None, checklist=[],
+    rec = _ticket("t_weekly01", "Weekly report", "waiting", checklist=[],
                   questions=[], waiting_on=None, ext={"scheduler": {"cron": "0 8 * * 1"}})
     (tdir / "t_weekly01.json").write_text(json.dumps(rec))
     for i, (title, st) in enumerate([("Open one", "open"), ("Done one", "done"), ("Dropped one", "dropped"),
                                      ("Active one", "active")]):
-        t = _ticket(f"t_other{i:03d}x", title, st, wake_at=None, waiting_on=None, checklist=[], questions=[], ext={})
+        t = _ticket(f"t_other{i:03d}x", title, st, waiting_on=None, checklist=[], questions=[], ext={})
         (tdir / f"{t['id']}.json").write_text(json.dumps(t))
     (tdir / "t_broken0001.json").write_text("{not json")
     (root / ".orch" / "inbox").mkdir()
@@ -34,9 +35,6 @@ def ws(tmp_path):
         m.pop("_note", None)
         (root / ".orch" / "inbox" / f"{m['id']}.json").write_text(json.dumps(m))
     (root / ".orch" / "inbox-seen.json").write_text(json.dumps({msgs[0]["id"]: "2026-11-04T10:00:00Z"}))
-    (root / ".orch" / "scheduler").mkdir()
-    (root / ".orch" / "scheduler" / "state.json").write_text(
-        json.dumps({"t_weekly01": {"last_run": "2026-11-02T08:00:00Z", "last_exit": 1, "next_run": "2026-11-09T08:00:00Z"}}))
     d = root / ".agents" / "skills" / "orch-relay"
     d.mkdir(parents=True)
     (d / "workspaces.json").write_text((CONTRACTS / "workspaces.example.json").read_text())
@@ -57,3 +55,44 @@ def server(ws):
     srv.server_close()
 
 
+
+
+VIEW = CONTRACTS / "scheduler.view.example.json"
+
+
+@pytest.fixture
+def fake_orch(tmp_path):
+    """A fake `orch` command. Behaviour per file in its folder: addons.json (list), view.json (stdout of
+    `scheduler view --json`), mode.txt (ok | slow | fail | junk | big)."""
+    d = tmp_path / "fakeorch"
+    d.mkdir()
+    (d / "addons.json").write_text(json.dumps([
+        {"name": "scheduler", "version": "0.2.0", "description": "x", "source": "built-in", "active": True,
+         "dashboard": {"label": "Schedule", "icon": "clock", "order": 10}, "background": True,
+         "ticket_view": [{"field": "cron", "label": "Repeats", "format": "cron-human"},
+                         {"field": "agents", "label": "Agents", "format": "chips"}]},
+        {"name": "wiki", "version": "0.1.0", "description": "y", "source": "built-in", "active": False,
+         "dashboard": {"label": "Wiki", "icon": "book", "order": 20}, "background": False, "ticket_view": []},
+        {"name": "relay", "version": "0.1.0", "description": "z", "source": "built-in", "active": True,
+         "dashboard": None, "background": False, "ticket_view": []}]))
+    (d / "view.json").write_text(VIEW.read_text())
+    (d / "mode.txt").write_text("ok")
+    script = d / "orch"
+    script.write_text(f"""#!{sys.executable}
+import sys, time, pathlib
+d = pathlib.Path(__file__).parent
+a = sys.argv[1:]
+mode = (d / "mode.txt").read_text().strip()
+if a[:2] == ["addon", "list"]:
+    print((d / "addons.json").read_text())
+elif a[1:] == ["view", "--json"]:
+    if mode == "slow": time.sleep(5)
+    if mode == "fail": print('{{"error": "x"}}'); sys.exit(2)
+    if mode == "junk": print("not json")
+    elif mode == "big": print('{{"x": "' + "a" * 300000 + '"}}')
+    else: print((d / "view.json").read_text())
+else:
+    sys.exit(2)
+""")
+    script.chmod(0o755)
+    return script

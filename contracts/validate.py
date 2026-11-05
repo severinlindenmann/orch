@@ -1,4 +1,5 @@
-"""Check every contract example and the publish crypto vector.
+"""Check every contract example (tickets incl. ext.scheduler, messages, workspaces, add-on manifests and views)
+and the publish crypto vector.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py
 """
@@ -7,6 +8,7 @@ import json
 import re
 import struct
 import sys
+import tomllib
 import unicodedata
 from pathlib import Path
 
@@ -56,22 +58,45 @@ def validator(name):
     return Draft202012Validator(schema, format_checker=FormatChecker())
 
 
-V = {"ticket": validator("ticket"), "message": validator("message"), "workspaces": validator("workspaces")}
+V = {
+    "ticket": validator("ticket"),
+    "message": validator("message"),
+    "workspaces": validator("workspaces"),
+    "addon-manifest": validator("addon-manifest"),
+    "addon-view": validator("addon-view"),
+}
+# Add-on ext schemas, keyed by ext name. A ticket's ext.<name> is checked with it (as the CLI does for installed add-ons).
+EXT = {"scheduler": validator("addons/scheduler.ext")}
+
+
+def errors(kind, doc):
+    errs = list(V[kind].iter_errors(doc))
+    if kind == "ticket" and isinstance(doc.get("ext"), dict):
+        for name, data in doc["ext"].items():
+            if name in EXT:
+                errs += list(EXT[name].iter_errors(data))
+    return errs
+
+
+def load(f):
+    return tomllib.loads(f.read_text()) if f.suffix == ".toml" else json.loads(f.read_text())
 
 
 def check(kind, doc, want_ok, label):
-    errs = list(V[kind].iter_errors(doc))
+    errs = errors(kind, doc)
     if bool(errs) == want_ok:
         fails.append(f"{label}: expected {'valid' if want_ok else 'invalid'}, got {errs[0].message if errs else 'valid'}")
 
 
 for kind in V:
-    for f in sorted((HERE / "examples" / kind).glob("*.json")):
-        check(kind, json.loads(f.read_text()), f.name.startswith("valid-"), f"examples/{kind}/{f.name}")
+    for f in sorted((HERE / "examples" / kind).glob("*.*")):
+        check(kind, load(f), f.name.startswith("valid-"), f"examples/{kind}/{f.name}")
 
 review = HERE / "review"
 check("ticket", json.loads((review / "ticket.example.json").read_text()), True, "review/ticket")
 check("workspaces", json.loads((review / "workspaces.example.json").read_text()), True, "review/workspaces")
+check("addon-manifest", load(review / "scheduler.orch-addon.toml"), True, "review/scheduler.orch-addon")
+check("addon-view", load(review / "scheduler.view.example.json"), True, "review/scheduler.view")
 for i, m in enumerate(json.loads((review / "message.examples.json").read_text())):
     check("message", m, True, f"review/message[{i}]")
 
@@ -105,6 +130,47 @@ for case in vec["must_fail"]:
     try:
         decrypt(case["key_b64url"], bytes.fromhex(case["blob_hex"]))
         fails.append(f"vector {case['name']}: decrypted but must fail")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def unbundle(raw):
+    """Reader rules of crypto.md "Folder bundle". Returns {path: bytes}."""
+    (m,) = struct.unpack(">I", raw[:4])
+    if not 1 <= m <= 1 << 20 or 4 + m > len(raw):
+        raise ValueError("bad index length")
+    idx = json.loads(raw[4 : 4 + m].decode())
+    files, out, pos = idx["files"], {}, 4 + m
+    if idx.get("v") != 1 or not 1 <= len(files) <= 2000 or not str(idx.get("entry", "")).lower().endswith((".html", ".htm")):
+        raise ValueError("bad index")
+    for f in files:
+        p, n = f["path"], f["size"]
+        segs = p.split("/")
+        bad = not 1 <= len(p) <= 255 or "\\" in p or "\0" in p or any(x in ("", ".", "..") for x in segs)
+        if bad or p in out or not isinstance(n, int) or n < 0:
+            raise ValueError("bad path or size: " + p)
+        out[p] = raw[pos : pos + n]
+        pos += n
+    if pos != len(raw) or idx["entry"] not in out:
+        raise ValueError("sizes do not add up")
+    return out
+
+
+bvec = json.loads((HERE / "vectors" / "publish-bundle-v1.json").read_text())
+for gname in ("good", "good_no_index"):
+    try:
+        raw = bytes.fromhex(bvec[gname]["bundle_hex"])
+        got = unbundle(raw)
+        want = {f["path"]: f["content_utf8"].encode() for f in bvec[gname]["files"]}
+        (m,) = struct.unpack(">I", raw[:4])
+        if got != want or json.loads(raw[4 : 4 + m])["entry"] != bvec[gname]["entry"]:
+            fails.append(f"bundle vector {gname}: files or entry differ")
+    except Exception as e:  # noqa: BLE001
+        fails.append(f"bundle vector {gname}: {e!r}")
+for case in bvec["must_fail"]:
+    try:
+        unbundle(bytes.fromhex(case["bundle_hex"]))
+        fails.append(f"bundle vector {case['name']}: unpacked but must fail")
     except Exception:  # noqa: BLE001
         pass
 

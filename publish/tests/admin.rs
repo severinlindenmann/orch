@@ -79,6 +79,7 @@ async fn admin_create_shows_prompt_and_edit() {
         j["prompt"].as_str().unwrap(),
     );
     assert!(id.starts_with("ws_") && id.len() == 13);
+    assert!(prompt.contains("orch addon add publish --yes\n  orch publish connect"));
     assert!(prompt.contains(&format!(
         "orch publish connect https://publish.test --workspace {id} --token {tok}"
     )));
@@ -157,6 +158,7 @@ async fn admin_files_apps_and_delete_workspace() {
     assert_eq!(f["items"][0]["id"], id.as_str());
     assert_eq!(f["items"][0]["workspace"], ws.0.as_str());
     assert!(f["items"][0].get("name").is_none());
+    assert!(f["items"][0]["created_at"].as_str().unwrap().ends_with('Z'));
     let a = t.adm("GET", "/admin/api/apps", Value::Null).await.json();
     assert_eq!(a["items"][0]["workspace"], ws.0.as_str());
     let l = t
@@ -243,7 +245,9 @@ async fn admin_onboarding_scripts() {
     assert!(
         sh.text().starts_with("#!/bin/sh")
             && sh.text().contains("https://publish.test")
-            && sh.text().contains("orch publish connect")
+            && sh
+                .text()
+                .contains("orch addon add publish --yes\nexec orch publish connect")
     );
     assert!(!sh.text().contains("__PUBLISH_URL__"));
     // test config uses the default ref

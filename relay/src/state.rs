@@ -71,6 +71,34 @@ pub struct App {
     pub transcriber: Arc<dyn Transcriber>,
     /// phone/workspace id -> (window start, calls in window)
     pub transcribe_rate: Mutex<HashMap<String, (i64, u32)>>,
+    /// "workspace|phone" -> text-push budget state
+    pub push_budget: Mutex<HashMap<String, PushBudget>>,
+}
+
+/// Text pushes per (workspace, phone): at most 1 per 10 s and 30 per hour. Extra texts are stored, not pushed.
+#[derive(Default)]
+pub struct PushBudget {
+    last: i64,
+    hour_start: i64,
+    in_hour: u32,
+}
+
+impl PushBudget {
+    pub fn allow(&mut self, now: i64) -> bool {
+        if now - self.last < 10 {
+            return false;
+        }
+        if now - self.hour_start >= 3600 {
+            self.hour_start = now;
+            self.in_hour = 0;
+        }
+        if self.in_hour >= 30 {
+            return false;
+        }
+        self.in_hour += 1;
+        self.last = now;
+        true
+    }
 }
 
 pub type AppState = Arc<App>;
@@ -97,10 +125,30 @@ impl App {
             pusher,
             transcriber,
             transcribe_rate: Mutex::new(HashMap::new()),
+            push_budget: Mutex::new(HashMap::new()),
         }))
     }
 
     pub fn blob_path(&self, id: &str) -> PathBuf {
         self.cfg.data_dir.join("blobs").join(id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PushBudget;
+
+    #[test]
+    fn push_budget_10s_and_30_per_hour() {
+        let mut b = PushBudget::default();
+        assert!(b.allow(1000));
+        assert!(!b.allow(1005), "within 10 s");
+        let mut t = 1000;
+        for _ in 0..29 {
+            t += 10;
+            assert!(b.allow(t));
+        }
+        assert!(!b.allow(t + 10), "31st in the hour");
+        assert!(b.allow(1000 + 3600), "new hour");
     }
 }

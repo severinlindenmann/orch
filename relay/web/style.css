@@ -1,4 +1,4 @@
-:root{color-scheme:dark;--dur-micro:120ms;--dur-std:220ms;--ease-out:cubic-bezier(0,0,.2,1);--danger:#f87171;--bg:#0e1014;--sidebar:#0a0c0f;--surface:#15181d;--surface-2:#1c2027;--surface-3:#242a32;--border:#2a3038;--text:#e8eaed;--muted:#9aa3ad;--brand:#2fc6a3;--on-brand:#06231c}
+:root{color-scheme:dark;--dur-micro:120ms;--dur-std:220ms;--ease-out:cubic-bezier(0,0,.2,1);--danger:#f87171;--bg:#0e1014;--sidebar:#0a0c0f;--surface:#15181d;--surface-2:#1c2027;--surface-3:#242a32;--border:#2a3038;--text:#e8eaed;--muted:#9aa3ad;--brand:#2fc6a3;--on-brand:#06231c;--relay:#a78bfa}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 button,input,select,textarea{font:inherit}
@@ -321,8 +321,6 @@ input:not([type=checkbox]),select,textarea{border-color:var(--input-border)}
 .field-error{display:block;margin-top:5px;color:var(--danger);font-size:12px}
 .form-error{flex-wrap:wrap;align-items:center;gap:.4em .8em}
 .form-error[hidden]{display:none}
-.form-error .tech{flex-basis:100%;color:var(--muted)}
-.form-error .tech summary{color:var(--muted)}
 .item-h{font-size:14px;margin:0 0 5px}
 dialog.confirm{background:var(--surface-2);color:var(--text);border:1px solid var(--input-border);border-radius:10px;padding:22px;max-width:min(420px,calc(100vw - 32px))}
 dialog.confirm::backdrop{background:#000a}
@@ -384,7 +382,12 @@ dialog.confirm button{min-height:44px}
 }
 
 /* U4-R4: text links get a 44px target */
-.quiet-link,.link-btn,.footline a,.panel-body a:not(.button),.summary-line summary,.form-error .tech summary{display:inline-flex;align-items:center;min-height:44px}
+.quiet-link,.link-btn,.footline a,.panel-body a:not(.button),.summary-line summary{display:inline-flex;align-items:center;min-height:44px}
 .footline a{padding:0 4px}
 @media(max-width:580px){.admin-sidebar .side-nav a{min-height:44px;display:flex;align-items:center}}
 details>summary{display:flex;align-items:center;min-height:44px}
+
+/* Relay accent: violet logo, "relay" mark and a thin top line, so the admin is told apart from the workspace dashboard (green) and publish (blue). */
+.brand svg circle:not(:first-child){fill:var(--relay)}
+.brand em{color:var(--relay)}
+.admin-topbar{box-shadow:inset 0 2px 0 #a78bfa40}

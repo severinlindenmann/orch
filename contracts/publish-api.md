@@ -35,10 +35,12 @@ Expired apps are stopped and removed by the hourly sweep, like files.
 
 | Method | Path | What |
 |---|---|---|
-| GET | `/f/<id>` | Small HTML page. Its JS reads `#k=` from the URL, fetches the blob, decrypts in the browser, offers the download. States: decrypting, ready, expired (`410`), missing key, wrong key. Headers: `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'` |
+| GET | `/f/<id>` | Small HTML page. Its JS reads `#k=` from the URL, fetches the blob, decrypts in the browser, shows a preview by type (docs/publish.md "Previews") and offers the download. States: decrypting, ready, expired (`410`), missing key, wrong key. Headers: `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob: https:; media-src blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` |
+| GET | `/_/frame.html` | The sandboxed preview frame for HTML files and folder pages (loaded by the file page in `<iframe sandbox="allow-scripts">`, gets the decrypted files by `postMessage`). Own CSP: see docs/publish.md "Previews" |
+| GET | `/_/favicon.svg`, `/_/apple-touch-icon.png` | The blue orch publish icon (also on the admin listener) |
 | GET | `/f/<id>/blob` | The encrypted blob (`application/octet-stream`). `404` / `410` when gone |
 | ANY | `/a/<name>/...` | The app. Private apps need `?token=<view_token>` once; the server sets a cookie (HttpOnly, SameSite=Lax, path `/a/<name>/`) and redirects without the token. No token → small "This app is private" page (`401`) |
-| GET | `/onboarding.sh`, `/onboarding.ps1` | Small scripts: install orch if missing, then `orch publish connect` (below) |
+| GET | `/onboarding.sh`, `/onboarding.ps1` | Small scripts: install orch if missing, then `orch addon add publish --yes` and `orch publish connect` (below) |
 | GET | `/health` | `200 ok` |
 
 Known prototype risk: apps run on the same origin as `/f/` pages and each other. A hostile app could read another app's pages in the browser. Only the owner's workspaces deploy apps.
@@ -49,13 +51,14 @@ The admin creates a workspace. The portal shows the prompt once:
 
 ```
 Connect this workspace to orch-publish. Run in the project folder:
+  orch addon add publish --yes
   orch publish connect https://publish.severin.io --workspace ws_pilatus001 --token orp_...
 If orch is not installed yet:
   macOS/Linux: curl -fsSL https://publish.severin.io/onboarding.sh | sh -s -- --workspace ws_pilatus001 --token orp_...
   Windows:     & ([scriptblock]::Create((irm https://publish.severin.io/onboarding.ps1))) -Workspace ws_pilatus001 -Token orp_...
 ```
 
-`onboarding.sh/.ps1` only install orch if missing (they run the GitHub `install.sh/.ps1`) and then run `orch publish connect`.
+`onboarding.sh/.ps1` only install orch if missing (they run the GitHub `install.sh/.ps1`) and then run `orch addon add publish --yes` and `orch publish connect`.
 `connect` (in the CLI): runs `orch init` if needed, checks the token with `/v1/whoami`, writes `.orch/secrets/publish.json`,
 copies the `orch-publish` skill (shipped inside the CLI) to `.agents/skills/`, adds the AGENTS.md block. Layout: local-files.md.
 
@@ -73,7 +76,7 @@ Auth: header `X-Orch-Admin: <admin token>` (file `/etc/orch-publish/admin-token`
 | POST | `/admin/api/workspaces/<id>/profile/approve` | `{rev}` (of the proposal the owner looked at) | `200` the workspace. Pending description/tags become live. `404` nothing pending, `409 conflict` when `rev` no longer matches |
 | POST | `/admin/api/workspaces/<id>/profile/reject` | `{rev}` | `204`. Proposal dropped, old values stay. `404` / `409` as above |
 | DELETE | `/admin/api/workspaces/<id>` | – | `204` (its files and apps are removed) |
-| GET | `/admin/api/files` | – | list of `{id, workspace, size, expires_at}` (content is unreadable) |
+| GET | `/admin/api/files` | – | list of `{id, workspace, size, created_at, expires_at}` (content is unreadable) |
 | DELETE | `/admin/api/files/<id>` | – | `204` |
 | GET | `/admin/api/apps` | – | same as `/v1/apps` plus `workspace` |
 | POST | `/admin/api/apps/<name>/restart` \| `/stop` | – | `200 {name, status}` |

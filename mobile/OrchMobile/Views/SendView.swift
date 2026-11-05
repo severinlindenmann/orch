@@ -31,6 +31,7 @@ struct SendView: View {
                 else if model.workspaces.isEmpty && model.message != nil { offlineState }
                 else if model.workspaces.isEmpty && model.hasLoaded { emptyState }
                 else { composer }
+                if !model.workspaces.isEmpty { conversation }
                 ModelMessage().padding(.top, 12)
             }.padding(.horizontal, 23).padding(.top, 6).padding(.bottom, 20)
         }
@@ -59,11 +60,11 @@ struct SendView: View {
 
     private var offlineState: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Can't load your workspaces").font(Theme.font(15, .semibold))
+            Text("Can't load your workspaces").themeFont(15, .semibold)
             Text("Check your connection, then try again. You can send a message once they load.")
-                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                .themeFont(13).foregroundStyle(Theme.muted)
             Button { Task { await model.refresh() } } label: {
-                Text(model.isLoading ? "Trying…" : "Try again").font(Theme.font(13, .semibold)).foregroundStyle(Theme.brand)
+                Text(model.isLoading ? "Trying…" : "Try again").themeFont(13, .semibold).foregroundStyle(Theme.brand)
                     .frame(minWidth: 120, minHeight: 44, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(PressStyle()).disabled(model.isLoading).accessibilityIdentifier("send-retry")
         }.orchCard().padding(.top, 26)
@@ -71,11 +72,11 @@ struct SendView: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("No workspaces yet").font(Theme.font(15, .semibold))
+            Text("No workspaces yet").themeFont(15, .semibold)
             Text("There is nowhere to send a message yet. Ask the person who invited you to add a workspace.")
-                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                .themeFont(13).foregroundStyle(Theme.muted)
             Button { Task { await model.refresh() } } label: {
-                Text(model.isLoading ? "Checking…" : "Check again").font(Theme.font(13, .semibold)).foregroundStyle(Theme.brand)
+                Text(model.isLoading ? "Checking…" : "Check again").themeFont(13, .semibold).foregroundStyle(Theme.brand)
                     .frame(minWidth: 120, minHeight: 44, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(PressStyle()).disabled(model.isLoading)
         }.orchCard().padding(.top, 26)
@@ -91,10 +92,10 @@ struct SendView: View {
             } label: {
                 HStack(spacing: 8) {
                     Text(model.workspaces.first { $0.id == workspaceID }.map(optionTitle) ?? "No workspaces")
-                        .font(Theme.font(15)).foregroundStyle(Theme.text).multilineTextAlignment(.leading)
+                        .themeFont(15).foregroundStyle(Theme.text).multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
-                    Image(systemName: "chevron.up.chevron.down").font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    Image(systemName: "chevron.up.chevron.down").themeFont(12).foregroundStyle(Theme.muted)
                 }.padding(.horizontal, 12).padding(.vertical, 8)
                     .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
@@ -112,7 +113,7 @@ struct SendView: View {
                 TextEditor(text: $text).scrollContentBackground(.hidden).focused($editing)
                     .accessibilityIdentifier("transcript").accessibilityLabel("Your message")
                     .disabled(recording || transcribing || sending)
-            }.font(Theme.font(13)).padding(10).frame(minHeight: editorHeight, maxHeight: editorHeight)
+            }.themeFont(13).padding(10).frame(minHeight: editorHeight, maxHeight: editorHeight)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.borderStrong))
             VStack(spacing: 12) {
@@ -131,7 +132,7 @@ struct SendView: View {
                         toggling = false
                     }
                 } label: {
-                    Image(systemName: recording ? "stop.fill" : "mic.fill").font(Theme.font(editing ? 21 : 27))
+                    Image(systemName: recording ? "stop.fill" : "mic.fill").themeFont(editing ? 21 : 27)
                         .foregroundStyle(recording ? Theme.danger : Theme.brand)
                         .frame(width: editing ? 52 : 70, height: editing ? 52 : 70)
                         .background((recording ? Theme.danger : Theme.brand).opacity(0.1), in: Circle())
@@ -146,7 +147,7 @@ struct SendView: View {
                 }.buttonStyle(.plain).accessibilityIdentifier("mic")
                     .accessibilityLabel(micLabel)
                     .disabled(voice == nil || toggling || transcribing || sending)
-                Text(micLabel).font(Theme.font(12, .medium)).accessibilityIdentifier("mic-status")
+                Text(micLabel).themeFont(12, .medium).accessibilityIdentifier("mic-status")
                 if !editing, !text.isEmpty, !recording, !transcribing, voice?.error == nil {
                     Text("Tap the text to fix anything before you send.").font(.caption).foregroundStyle(Theme.muted)
                 }
@@ -164,30 +165,50 @@ struct SendView: View {
             }.buttonStyle(PrimaryButtonStyle(muted: !canSend)).accessibilityIdentifier("send-button")
                 .disabled(sending)
             if showHint, !canSend {
-                Text(hintText).font(Theme.font(12)).foregroundStyle(Theme.danger).frame(maxWidth: .infinity)
+                Text(hintText).themeFont(12).foregroundStyle(Theme.danger).frame(maxWidth: .infinity)
                     .accessibilityIdentifier("send-hint")
             }
-            Text("Your workspace will pick it up from here.").font(Theme.font(11))
+            Text("Your workspace will pick it up from here.").themeFont(11)
                 .foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 2)
+        }
+    }
+
+    /// What this phone and the picked workspace wrote to each other, newest first.
+    @ViewBuilder private var conversation: some View {
+        let items = model.messages.filter { $0.workspaceId == workspaceID }.prefix(10)
+        if !items.isEmpty {
+            let name = model.workspaces.first { $0.id == workspaceID }?.displayName ?? "workspace"
+            Eyebrow(text: "MESSAGES WITH \(name.uppercased())").padding(.top, 30).padding(.bottom, 8)
+            ForEach(items) { m in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(m.fromPhone ? "You" : name).themeFont(11, .semibold).foregroundStyle(m.fromPhone ? Theme.muted : Theme.brand)
+                    Text(m.message.body.text).themeFont(13).foregroundStyle(Theme.text)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                    .background(m.fromPhone ? Theme.surface : Theme.brand.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(m.fromPhone ? Theme.border : Theme.brand.opacity(0.27)))
+                    .padding(.bottom, 8)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("message-\(m.id)")
+            }
         }
     }
 
     private func sentState(_ note: AppModel.SentNote) -> some View {
         VStack(spacing: 12) {
-            Image(systemName: "checkmark").font(Theme.font(28)).foregroundStyle(Theme.brand)
+            Image(systemName: "checkmark").themeFont(28).foregroundStyle(Theme.brand)
                 .frame(width: 72, height: 72).background(Theme.brand.opacity(0.07), in: Circle())
                 .overlay(Circle().stroke(Theme.brand.opacity(0.33))).padding(.bottom, 13)
-            Text("It's in the inbox.").font(Theme.font(25, .semibold))
-            Text("Sent to \(note.workspaceName)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Text("It's in the inbox.").themeFont(25, .semibold)
+            Text("Sent to \(note.workspaceName)").themeFont(13).foregroundStyle(Theme.muted)
             VStack(alignment: .leading, spacing: 4) {
-                Text("You sent:").font(Theme.font(11)).foregroundStyle(Theme.muted)
-                Text(note.text).font(Theme.font(14)).foregroundStyle(Theme.text)
+                Text("You sent:").themeFont(11).foregroundStyle(Theme.muted)
+                Text(note.text).themeFont(14).foregroundStyle(Theme.text)
             }.padding(.leading, 12).frame(maxWidth: .infinity, alignment: .leading)
                 .overlay(alignment: .leading) { Rectangle().fill(Theme.brand).frame(width: 3) }
                 .padding(.vertical, 16)
             Button("Send another message") { sent = nil; text = "" }.buttonStyle(SecondaryButtonStyle())
             Button("Back to home →") { model.tab = .home }
-                .buttonStyle(WideButtonStyle(color: Theme.muted)).font(Theme.font(13))
+                .buttonStyle(WideButtonStyle(color: Theme.muted)).themeFont(13)
         }.frame(maxWidth: .infinity).padding(.top, 48)
     }
 

@@ -145,7 +145,7 @@ def auth_headers(cfg: dict) -> dict:
 
 
 def connect_service(root: Path, name: str, skill: str, url: str, workspace: str, token: str, prefix: str):
-    """Shared part of `orch publish|relay connect`: init if needed, check token, save, install skill."""
+    """Shared part of `orch publish|relay connect`: init if needed, check token, save."""
     from orch import init as init_mod
     from orch import skills
 
@@ -157,11 +157,7 @@ def connect_service(root: Path, name: str, skill: str, url: str, workspace: str,
     hdrs = {"X-Orch-Workspace": workspace, "Authorization": f"Bearer {token}"}
     _, who = call_json("GET", url + "/v1/whoami", hdrs, timeout=30)
     write_json(secrets_dir(root) / f"{name}.json", {"url": url, "workspace": workspace, "token": token}, True)
-    src = skills.packaged_skills_dir() / skill
-    skills.install_skill(root, skill, src)
-    skills.set_block(root, skill, skills.read_block(src, skill))
-    skills.link_claude_skills(root)
-    skills.ensure_gitignore(root)
+    skills.ensure_gitignore(root)  # the skill and AGENTS block come from `orch addon add <name>`
     return who
 
 

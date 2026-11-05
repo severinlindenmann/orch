@@ -348,7 +348,7 @@
     }
     const name = readyData.name || 'Your workspace';
     view.innerHTML = head(readyData.renewed ? 'New access key ready' : 'Your workspace is ready', 'Connect it to the agent you already use.') +
-      `<section class="card form pad"><div class="success-icon" aria-hidden="true">✓</div><h2>Connect your agent</h2><p class="section-note">Copy this and paste it into your agent, in the project that should use “${esc(name)}”. The agent connects itself and then describes the workspace.</p><button class="primary copy-prompt" data-copy="prompt">Copy for your agent</button><p class="section-note">This is shown only once. Copy it before you leave this page.</p><details class="more"><summary>Show what will be copied</summary><pre>${esc(readyData.prompt)}</pre></details><details class="more"><summary>Technical details</summary><div class="credential"><div><small>Workspace ID</small><code>${esc(readyData.id)}</code></div><button class="small" data-copy="id" aria-label="Copy workspace ID">Copy</button></div></details><div class="actions"><a class="button quiet" href="#workspaces">Done</a></div></section>`;
+      `<section class="card form pad"><div class="success-icon" aria-hidden="true">✓</div><h2>Connect your agent</h2><p class="section-note">Copy this and paste it into your agent, in the project that should use “${esc(name)}”. The agent connects itself and then describes the workspace.</p><button class="primary copy-prompt" data-copy="prompt">Copy for your agent</button><p class="section-note">This is shown only once. Copy it before you leave this page.</p><details class="more"><summary>Show what will be copied</summary><pre>${esc(readyData.prompt)}</pre></details><p class="fact">Workspace ID <code>${esc(readyData.id)}</code> <button class="small quiet" data-copy="id" aria-label="Copy workspace ID">Copy</button></p><div class="actions"><a class="button quiet" href="#workspaces">Done</a></div></section>`;
     copied = false;
     view.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', () => { copied = true; void copy(readyData[button.dataset.copy]); }));
     view.querySelector('a[href="#workspaces"].quiet')?.addEventListener('click', async e => {
@@ -364,6 +364,13 @@
     if (Number.isNaN(date.getTime())) return '';
     const days = Math.ceil((date.getTime() - Date.now()) / 86400000);
     return days <= 0 ? 'Expired' : `${days} ${days === 1 ? 'day' : 'days'} left`;
+  }
+  const STACK = { static: 'Web page', python: 'Python app', node: 'Node app' };
+  const STORE = { json: 'Saves data', markdown: 'Saves notes', sqlite: 'Saves data' };
+  function shared(value) {
+    const date = new Date(value);
+    if (!value || Number.isNaN(date.getTime())) return '';
+    return 'Shared ' + date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   }
   function size(bytes) {
     const value = Number(bytes);
@@ -388,7 +395,7 @@
     const list = [...groups].map(([id, rows]) => ({ id, rows: rows.slice().sort((a, b) => expMs(a) - expMs(b)) }));
     list.sort((a, b) => expMs(a.rows[0]) - expMs(b.rows[0]));
     const all = !next;
-    const row = f => `<article class="item"><div class="item-main"><h3>${esc(size(f.size))} · ${esc(expiry(f.expires_at))}</h3><details class="more"><summary>Technical details</summary><code>${esc(f.id)}</code></details></div><details class="menu"><summary class="button small quiet" aria-label="Manage this file from ${esc(workspaceName(f.workspace))}">⋯</summary><div class="menu-pop"><button class="danger" data-delete="${esc(f.id)}">Delete…</button></div></details></article>`;
+    const row = f => `<article class="item"><div class="item-main"><h3>${esc(size(f.size))} · ${esc(expiry(f.expires_at))}</h3>${shared(f.created_at) ? `<span class="fact">${esc(shared(f.created_at))}</span>` : ''}</div><details class="menu"><summary class="button small quiet" aria-label="Manage this file from ${esc(workspaceName(f.workspace))}">⋯</summary><div class="menu-pop"><button class="danger" data-delete="${esc(f.id)}">Delete…</button></div></details></article>`;
     view.innerHTML = head('Encrypted files', 'You can manage files. Only people with the sharing link can read them.') +
       (items.length ? `<p class="summary-line">${all ? `${plural(items.length, 'file', 'files')}` : `Showing ${items.length} of ${total}`} · soonest to expire first</p><section class="card">${list.map(g => {
         const count = all ? g.rows.length : Math.max(g.rows.length, Number(workspaces.find(w => w.id === g.id)?.files) || 0);
@@ -433,7 +440,7 @@
         const main = app.status === 'running'
           ? (url ? `<a class="button small" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open ↗</a>` : '')
           : `<button class="small" data-app="${i}" data-action="restart">Start</button>`;
-        return `<article class="card app-card"><div class="app-top"><div class="app-name"><h2>${esc(app.name)}</h2><p>${esc(workspaceName(app.workspace))}</p></div><span class="status ${tone}"><span class="dot" aria-hidden="true"></span>${label}</span></div><p class="app-meta">${app.public ? 'Public' : 'Private'} · ${esc(expiry(app.expires_at))}</p><div class="app-actions">${main}<details class="menu"><summary class="button small" aria-label="Manage ${esc(app.name)}">Manage ▾</summary><div class="menu-pop">${app.status === 'stopped' ? '' : `<button data-app="${i}" data-action="restart">Restart</button>`}${app.status === 'running' ? `<button data-app="${i}" data-action="stop">Stop</button>` : ''}<button class="danger" data-app="${i}" data-action="delete">Delete…</button></div></details></div><details class="more"><summary>Technical details</summary><div class="detail-lines">Type: ${esc(app.stack || 'None')}<br>Storage: ${esc(app.store || 'None')}<br>Address: <code>${esc(app.url || '')}</code></div></details></article>`;
+        return `<article class="card app-card"><div class="app-top"><div class="app-name"><h2>${esc(app.name)}</h2><p>${esc(workspaceName(app.workspace))}</p></div><span class="status ${tone}"><span class="dot" aria-hidden="true"></span>${label}</span></div><p class="app-meta">${esc([app.public ? 'Public' : 'Private', STACK[app.stack], STORE[app.store], expiry(app.expires_at)].filter(Boolean).join(' · '))}</p><div class="app-actions">${main}<details class="menu"><summary class="button small" aria-label="Manage ${esc(app.name)}">Manage ▾</summary><div class="menu-pop">${app.status === 'stopped' ? '' : `<button data-app="${i}" data-action="restart">Restart</button>`}${app.status === 'running' ? `<button data-app="${i}" data-action="stop">Stop</button>` : ''}<button class="danger" data-app="${i}" data-action="delete">Delete…</button></div></details></div></article>`;
     };
     view.innerHTML = head('Apps', 'Small apps, published from your workspaces.') +
       (items.length ? `<p class="summary-line">${esc(summary)}${next ? ' · more apps not shown yet' : ''}</p><div class="app-list">${active.map(card).join('')}</div>${stopped.length ? `<details class="stopped-group"><summary>Stopped (${stopped.length})</summary><div class="app-list">${stopped.map(card).join('')}</div></details>` : ''}${next ? '<p class="load-more"><button id="more-apps">Load more</button></p>' : ''}` : '<section class="card empty-card"><h2>No apps yet</h2><p>Apps published by your workspaces show up here. Ask your agent to publish a small page or tool to try it.</p><a class="button" href="#workspaces">See your workspaces</a></section>');

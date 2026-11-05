@@ -34,7 +34,7 @@ def test_connect(proj, run, rel):
     assert json.loads((proj / ".orch/secrets/relay.json").read_text())["token"] == rel.token
     assert (proj / ".agents/skills/orch-relay/SKILL.md").is_file()
     assert (proj / ".agents/skills/orch-relay/workspaces.json").is_file()
-    assert "orch:begin orch-relay" in (proj / "AGENTS.md").read_text()
+    assert "<!-- orch:addon:relay -->" in (proj / "AGENTS.md").read_text()
     assert run("relay", "whoami")[0] == 0
 
 
@@ -70,6 +70,36 @@ def test_send_by_name_from_directory(proj, run, rel):
     run("relay", "send", "reports", "hello")
     assert rel.sent[0]["to"] == PEER
     assert run("relay", "send", "nobody", "x")[0] == 2
+
+
+def test_reply_to_paired_phone(proj, run, rel):
+    """A text from a phone shows how to answer it; refresh lists the paired phones; send by phone name."""
+    phone = "ph_iphone0001"
+    rel.snapshot["workspaces"]["phones"] = [
+        {"id": phone, "name": "Severin's iPhone", "online": True, "last_seen": None}
+    ]
+    connect(run, rel)
+    assert "1 phone you can reach" in run("relay", "refresh")[1]
+    rel.inbox.append(msg("m_phone00000000001", "text", {"text": "can you answer my phone"}, frm=phone))
+    out = run("relay", "inbox")[1]
+    assert "Message from Severin's iPhone" in out and f"reply: orch relay send {phone}" in out
+    code, out, _ = run("relay", "send", phone, "yes")
+    assert code == 0 and rel.sent[-1]["to"] == phone and "Severin's iPhone" in out
+    run("relay", "send", "severin's iphone", "by name")
+    assert rel.sent[-1]["to"] == phone
+
+
+def test_send_by_name_with_two_matching_phones_is_refused(proj, run, rel):
+    rel.snapshot["workspaces"]["phones"] = [
+        {"id": "ph_aaaaaaaaaa", "name": "Owner iPhone", "online": True, "last_seen": None},
+        {"id": "ph_bbbbbbbbbb", "name": "owner iphone", "online": True, "last_seen": None},
+    ]
+    connect(run, rel)
+    run("relay", "refresh")
+    code, _, err = run("relay", "send", "Owner iPhone", "secret")
+    assert code != 0 and not rel.sent
+    assert "Two phones are called Owner iPhone: ph_aaaaaaaaaa, ph_bbbbbbbbbb. Send to the id." in err
+    assert run("relay", "send", "ph_bbbbbbbbbb", "ok")[0] == 0 and rel.sent[-1]["to"] == "ph_bbbbbbbbbb"
 
 
 def test_send_file_and_receive_download(proj, run, rel):
@@ -401,7 +431,7 @@ def test_ticket_wait_clear(proj, run, new_ticket):
     run("ticket", "wait", tid, "--until", "2030-01-01T00:00:00Z")
     code, out, _ = run("ticket", "wait", tid, "--clear", "--json")
     t = json.loads(out)
-    assert code == 0 and t["wake_at"] is None and t["status"] == "active"
+    assert code == 0 and t["waiting_on"] is None and t["status"] == "active"
 
 
 def test_inbox_keeps_the_relay_order_within_one_second(proj, run, rel):

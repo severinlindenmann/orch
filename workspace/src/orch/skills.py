@@ -13,11 +13,11 @@ from orch.errors import Refused
 BLOCK_FILE = "AGENTS-block.md"
 BLOCK_FILES = (BLOCK_FILE, "agents-block.md")  # add-ons may ship either spelling
 GITIGNORE_LINES = [
+    ".orch/.local-id",
     ".orch/secrets/",
     ".orch/inbox/",
     ".orch/inbox-seen.json",
-    ".orch/scheduler/state.json",
-    ".orch/scheduler/logs/",
+    ".orch/addons/",
 ]
 GITIGNORE_HEADER = "# orch (local only)"
 
@@ -58,27 +58,42 @@ def remove_skill(root: Path, name: str) -> None:
         shutil.rmtree(dest)
 
 
-def _block_re(name: str) -> re.Pattern:
-    return re.compile(
-        rf"<!-- orch:begin {re.escape(name)} -->\n.*?<!-- orch:end {re.escape(name)} -->\n?", re.S
-    )
+def _markers(name: str, addon: bool) -> tuple[str, str]:
+    if addon:
+        return f"<!-- orch:addon:{name} -->", f"<!-- /orch:addon:{name} -->"
+    return f"<!-- orch:begin {name} -->", f"<!-- orch:end {name} -->"
 
 
-_MARKER_RE = re.compile(r"[ \t]*<!-- orch:(?:begin|end) [^>]*-->[ \t]*\n?")
+def _block_re(name: str, addon: bool = False) -> re.Pattern:
+    b, e = _markers(name, addon)
+    return re.compile(rf"{re.escape(b)}\n.*?{re.escape(e)}\n?", re.S)
 
 
-def set_block(root: Path, name: str, body: str) -> None:
-    """Add or replace the block for `name` in AGENTS.md; text outside the block is untouched."""
+_MARKER_RE = re.compile(r"[ \t]*<!--\s*/?orch:[^>]*-->[ \t]*\n?")
+_MARKER_START = re.compile(r"<!--\s*/?orch:")
+
+
+def set_block(root: Path, name: str, body: str, addon: bool = False) -> None:
+    """Add or replace the block for `name` in AGENTS.md; text outside the block is untouched.
+    addon=True uses the add-on markers <!-- orch:addon:<name> --> ... <!-- /orch:addon:<name> -->."""
     path = root / "AGENTS.md"
     text = path.read_text(encoding="utf-8") if path.exists() else ""
-    body = _MARKER_RE.sub("", body).strip()  # the markers are ours; a body must not bring its own
-    block = f"<!-- orch:begin {name} -->\n{body}\n<!-- orch:end {name} -->\n"
-    rx = _block_re(name)
+    while True:  # the markers are ours; strip until stable so pieces cannot join into a marker
+        new = _MARKER_RE.sub("", body)
+        if new == body:
+            break
+        body = new
+    if _MARKER_START.search(body):
+        raise Refused("An AGENTS.md block cannot contain orch markers (<!-- orch:... -->).")
+    body = body.strip()
+    b, e = _markers(name, addon)
+    block = f"{b}\n{body}\n{e}\n"
+    rx = _block_re(name, addon)
     if rx.search(text):
         text = rx.sub(lambda _m: block, text, count=1)
         # repair files an older version nested or duplicated: no other marker of this name may stay
         head, sep, tail = text.partition(block)
-        stray = re.compile(rf"<!-- orch:(?:begin|end) {re.escape(name)} -->\n?")
+        stray = re.compile(rf"(?:{re.escape(b)}|{re.escape(e)})\n?")
         text = stray.sub("", head) + sep + stray.sub("", tail)
     else:
         if text and not text.endswith("\n"):
@@ -89,16 +104,18 @@ def set_block(root: Path, name: str, body: str) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
-def remove_block(root: Path, name: str) -> None:
+def remove_block(root: Path, name: str, addon: bool = False) -> None:
     path = root / "AGENTS.md"
     if not path.exists():
         return
     text = path.read_text(encoding="utf-8")
-    new = _block_re(name).sub("", text).rstrip("\n")
+    new = _block_re(name, addon).sub("", text).rstrip("\n")
     path.write_text(new + "\n" if new else "", encoding="utf-8", newline="\n")
 
 
-def read_block(source: Path, name: str) -> str:
+def read_block(source: Path, name: str, block_file: Path | None = None) -> str:
+    if block_file is not None and block_file.is_file():
+        return block_file.read_text(encoding="utf-8")
     for fn in BLOCK_FILES:
         f = source / fn
         if f.is_file():

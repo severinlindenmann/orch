@@ -20,6 +20,19 @@ extension Theme {
     }
 }
 
+/// Scales with the live Dynamic Type setting (ScaledMetric reads the environment), so a text-size change
+/// re-lays out the open screen without resetting view identity (drafts, sheets and confirmations survive).
+struct ThemeFont: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    let weight: Font.Weight
+    init(_ size: CGFloat, _ weight: Font.Weight) { _size = ScaledMetric(wrappedValue: size); self.weight = weight }
+    func body(content: Content) -> some View { content.font(.system(size: size, weight: weight)) }
+}
+
+extension View {
+    func themeFont(_ size: CGFloat, _ weight: Font.Weight = .regular) -> some View { modifier(ThemeFont(size, weight)) }
+}
+
 extension Color {
     init(hex: UInt32) {
         self.init(red: Double((hex >> 16) & 0xff) / 255, green: Double((hex >> 8) & 0xff) / 255, blue: Double(hex & 0xff) / 255)

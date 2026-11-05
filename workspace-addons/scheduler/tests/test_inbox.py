@@ -20,6 +20,13 @@ def test_no_relay_no_poll(ws):
     assert not any(a[:2] == ["relay", "inbox"] for a in names(ws))
 
 
+def test_relay_addon_off_no_poll(ws):
+    relay_on(ws, [{"id": "m_1", "type": "start", "from": "ws_a", "allowed": True, "body": {"key": "k", "text": "x"}}])
+    (ws / "relay-off").write_text("")
+    assert Scheduler(ws).tick(T(8)) == []
+    assert not any(a[0] == "relay" for a in names(ws))
+
+
 def test_allowed_start_creates_ticket_and_runs(ws):
     relay_on(ws, [{"id": "m_1", "type": "start", "from": "ws_a", "allowed": True,
                    "body": {"key": "weekly-report", "text": "Do the report"}}])
@@ -92,7 +99,7 @@ def test_applied_answer_resumes_active_ticket(ws):
 
 
 def test_webhook_for_waiting_ticket(ws):
-    add_ticket(ws, "t_hook0001", status="waiting", waiting_on={"kind": "webhook", "ref": "wh_abcdefghij"})
+    add_ticket(ws, "t_hook0001", status="waiting", waiting_on={"kind": "external", "ref": "wh_abcdefghij"})
     relay_on(ws, [{"id": "m_7", "type": "webhook", "from": "webhook:wh_abcdefghij",
                    "body": {"webhook_id": "wh_abcdefghij", "payload": "{}"}}])
     s = Scheduler(ws)

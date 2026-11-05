@@ -11,7 +11,7 @@ struct QRScannerView: View {
         VStack(spacing: 20) {
             if unavailable {
                 Text("No camera here. Use the invitation link.")
-                    .font(Theme.font(17)).multilineTextAlignment(.center)
+                    .themeFont(17).multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScannerCamera(onCode: onCode, onUnavailable: { unavailable = true })

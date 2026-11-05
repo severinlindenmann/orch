@@ -54,6 +54,7 @@ pub fn router(app: AppState) -> Router {
                 .layer(DefaultBodyLimit::max(crate::transcribe::MAX_AUDIO + 1024)),
         )
         .merge(crate::phone::router())
+        .merge(icon_routes())
         .fallback(not_found_page)
         .layer(DefaultBodyLimit::max(MAX_JSON))
         .with_state(app)
@@ -160,6 +161,33 @@ async fn patch_me(
 
 const NOT_AVAILABLE: &str = include_str!("../web/not-available.html");
 
+/// The relay's orch logo (violet: dashboard green, publish blue, relay violet) as tab icon and iOS home-screen icon.
+/// Served on the public and the admin listener.
+pub fn icon_routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
+    let svg = || async {
+        (
+            [
+                (header::CONTENT_TYPE, "image/svg+xml"),
+                (header::CACHE_CONTROL, "public, max-age=86400"),
+            ],
+            include_str!("../web/favicon.svg"),
+        )
+    };
+    let png = || async {
+        (
+            [
+                (header::CONTENT_TYPE, "image/png"),
+                (header::CACHE_CONTROL, "public, max-age=86400"),
+            ],
+            &include_bytes!("../web/apple-touch-icon.png")[..],
+        )
+    };
+    Router::new()
+        .route("/favicon.svg", get(svg))
+        .route("/favicon.ico", get(svg))
+        .route("/apple-touch-icon.png", get(png))
+}
+
 fn page(status: StatusCode) -> Response {
     (
         status,
@@ -213,12 +241,14 @@ async fn post_message(
         }
         let stored = rules::authorize(&c, &app.key, &me, msg)?;
         store::insert_message(&c, &app.key, &stored, &digest)?;
-        let push = stored["type"] == "question" && stored["to"] == "phones";
+        let to = stored["to"].as_str().unwrap_or("");
+        let push = matches!(stored["type"].as_str(), Some("question" | "text"))
+            && (to == "phones" || to.starts_with("ph_"));
         (stored, push)
     };
     app.notify.notify_waiters();
     if push {
-        crate::phone::push_question(&app, &stored).await;
+        crate::phone::push_message(&app, &stored).await;
     }
     Ok((StatusCode::CREATED, Json(json!({"id": stored["id"]}))))
 }

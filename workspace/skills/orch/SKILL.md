@@ -5,8 +5,7 @@ description: Track work, questions, and evidence with the orch CLI.
 # Working with orch
 
 Every piece of work is tracked as an orch ticket. Before you start, run `orch ticket list`; if none fits,
-run `orch ticket new "<title>"`. Then, BEFORE any work, add one checklist item per step (`orch check add <id> "<step>"`): a ticket with 0 items is wrong. Mark each done with proof before you finish. Read the relay inbox at session
-start (`orch relay inbox`) if relay is connected. This applies to every request, even a small one.
+run `orch ticket new "<title>"`. Then, BEFORE any work, add one checklist item per step (`orch check add <id> "<step>"`): a ticket with 0 items is wrong. Mark each done with proof before you finish. This applies to every request, even a small one.
 
 Read the relevant ticket at the start of a session and whenever you return to it:
 

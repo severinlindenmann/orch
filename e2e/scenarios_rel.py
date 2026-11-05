@@ -31,11 +31,11 @@ def r1(e):
     i = ids(e)
     for n in i:
         prompt = e.prompts[("rel", n)]
-        check("orch relay connect" in prompt and i[n] in prompt, f"{n} prompt: {prompt[:80]}")
+        check("orch addon add relay --yes" in prompt and "orch relay connect" in prompt and i[n] in prompt, f"{n} prompt: {prompt[:80]}")
         who = e.orchj(n, "relay", "whoami")
         check(who["id"] == i[n], f"whoami {who}")
         check((e.ws(n) / ".agents/skills/orch-relay/SKILL.md").is_file(), f"{n}: skill missing")
-        check("orch:begin orch-relay" in (e.ws(n) / "AGENTS.md").read_text(), f"{n}: AGENTS block")
+        check("<!-- orch:addon:relay -->" in (e.ws(n) / "AGENTS.md").read_text(), f"{n}: AGENTS block")
     rules = e.rel.admin.call("GET", "/admin/api/rules").json()["rules"]
     mine = [r for r in rules if r["from"] == i["Pilatus"] and r["to"] == i["Reports"]]
     check(mine and all(mine[0][k] for k in ("text", "files", "delegate", "start")), f"rules {rules}")
@@ -143,6 +143,11 @@ def _agent_runs(log: Path) -> int:
     return log.read_text().count("start ") if log.exists() else 0
 
 
+def _scheduler_on(e, ws):
+    """R6-R8 need the scheduler add-on in this workspace; A5 turns it on too, but the R group runs alone as well."""
+    e.sh(["orch", "addon", "add", "scheduler", "--yes"], cwd=e.ws(ws), check_rc=True, timeout=600)
+
+
 def _sched_once(e, ws):
     rc, out, err = e.sh(["orch", "scheduler", "run", "--once"], cwd=e.ws(ws), timeout=120)
     check(rc == 0, f"scheduler run --once: {err or out}")
@@ -152,6 +157,7 @@ def _sched_once(e, ws):
 def r6(e):
     """delegate: nothing runs until the human allows once; then one ticket (no double) and the agent starts."""
     e.ensure_addons()
+    _scheduler_on(e, "Reports")
     i = ids(e)
     log = _fake_agent(e, e.ws("Reports"))
     before = len(tickets(e, "Reports"))
@@ -178,6 +184,7 @@ def r6(e):
 def r7(e):
     """start weekly-report: allow --permanent; next start with the token runs without asking; admin allows list."""
     e.ensure_addons()
+    _scheduler_on(e, "Reports")
     i = ids(e)
     log = _fake_agent(e, e.ws("Reports"))
     base = _agent_runs(log)
@@ -204,9 +211,14 @@ def r7(e):
 def r8(e):
     """start with a wrong token, or with another key's token: not run, waits for the human."""
     e.ensure_addons()
+    _scheduler_on(e, "Reports")
     i = ids(e)
     if not (e.ws("Pilatus") / ".orch/secrets/allows.json").exists():
         r7(e)
+    # nothing else may be due in Reports, so any agent start below comes from the bad-token messages
+    due = [t["id"] for t in tickets(e, "Reports") if t["status"] in ("open", "active", "waiting")
+           and (((t.get("ext") or {}).get("scheduler") or {}).get("recurring") or (t.get("waiting_on") or {}).get("kind") == "time")]
+    check(not due, f"Reports has scheduled tickets left from earlier scenarios: {due}")
     log = _fake_agent(e, e.ws("Reports"))
     allows = json.loads((e.ws("Pilatus") / ".orch/secrets/allows.json").read_text())
     tok = allows["received"][0]["token"]
@@ -216,7 +228,9 @@ def r8(e):
         items = [x for x in inbox(e, "Reports") if x["id"] == m["id"]]
         check(items and items[0]["allowed"] is False, f"{key} with bad token must not be allowed: {items}")
     _sched_once(e, "Reports")
-    check(_agent_runs(log) == 0, "agent ran for a message with a bad token")
+    ran = log.read_text()
+    runs = sorted(p.name for p in (e.ws("Reports") / ".orch/addons/scheduler/logs").glob("*.log"))
+    check(_agent_runs(log) == 0, f"agent ran for a message with a bad token: fake agent log {ran!r}; run logs {runs}")
 
 
 @scenario("R9")
@@ -230,7 +244,7 @@ def r9(e):
     w = e.orchj("Pilatus", "relay", "webhook", "new", "--once", "--ticket", t)
     check(w["url"].startswith(e.rel.url + "/webhook/") or "/webhook/" in w["url"], f"url {w}")
     url = w["url"].replace("https://relay.severin.io", e.rel.url) if e.mode == "local" else w["url"]
-    e.orch("Pilatus", "wait", t, "--on", f"webhook:{w['id']}")
+    e.orch("Pilatus", "wait", t, "--on", f"external:{w['id']}")
     r = http("POST", url, {"Content-Type": "application/json"}, b'{"hello":"world"}')
     check(r.status == 202, f"webhook call {r}")
     check(http("POST", url, None, b"x").status == 410, "second call must be 410")
@@ -309,3 +323,36 @@ def r13(e):
         check(b"acme-secret-value" not in blob, "credential value found in the database")
         for p in (e.rel.data / "blobs").glob("*"):
             check(b"pilatus-only bytes" not in p.read_bytes(), "plain blob on disk")
+
+
+@scenario("R15")
+def r15(e):
+    """Phone paired with Pilatus writes; Pilatus answers it (relay send ph_ + ask --phone), refresh lists the phone;
+    Home (not paired with that phone) cannot reach it and is told what to do."""
+    from scenarios_misc import pair, phone
+
+    i, ph = pair(e, ["Pilatus"], label="R15 iPhone")
+    r = phone(e, ph, "POST", "/v1/phone/send", {"to": i["Pilatus"], "text": "can you answer my phone"})
+    check(r.status == 201, f"phone send: {r}")
+    _, out, _ = e.orch("Pilatus", "relay", "refresh")
+    check("phone" in out and "0 phones" not in out, f"refresh: {out}")
+    d = json.loads((e.ws("Pilatus") / ".agents/skills/orch-relay/workspaces.json").read_text())
+    check(ph[0] in [p["id"] for p in d.get("phones", [])], f"workspaces.json phones: {d.get('phones')}")
+    _, out, _ = e.orch("Pilatus", "relay", "inbox")
+    check("can you answer my phone" in out and f"orch relay send {ph[0]}" in out, f"inbox: {out}")
+    e.orch("Pilatus", "relay", "send", ph[0], "yes, I can answer your phone")
+    e.orch("Pilatus", "relay", "send", "R15 iPhone", "by name too")
+    t = e.orchj("Pilatus", "ticket", "new", "R15 phone question")["id"]
+    e.orch("Pilatus", "ask", t, "Ship it?", "--option", "yes", "--option", "no", "--phone")
+    got = [x["message"]["body"]["text"] for x in phone(e, ph, "GET", "/v1/phone/messages").json()["items"]]
+    check(got[:3] == ["by name too", "yes, I can answer your phone", "can you answer my phone"], f"phone messages: {got}")
+    qs = [q for q in phone(e, ph, "GET", "/v1/phone/questions").json()["items"] if q["message"].get("ticket") == t]
+    check(len(qs) == 1, f"phone questions: {qs}")
+    # Home is not on this phone's list: refused with what to do, and its directory lists no such phone
+    rc, out, err = e.orch("Home", "relay", "send", ph[0], "hi", ok=False)
+    check(rc != 0 and "Phones" in (out + err) and "admin" in (out + err), f"Home -> phone: {rc} {out} {err}")
+    e.orch("Home", "relay", "refresh")
+    d = json.loads((e.ws("Home") / ".agents/skills/orch-relay/workspaces.json").read_text())
+    check(ph[0] not in [p["id"] for p in d.get("phones", [])], "Home lists a phone it may not reach")
+    check(not [x for x in phone(e, ph, "GET", "/v1/phone/messages").json()["items"] if x["message"]["body"]["text"] == "hi"], "Home reached the phone")
+    return "showing the reply in the iPhone app: mobile lane (GET /v1/phone/messages, text push)"

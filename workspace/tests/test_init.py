@@ -16,7 +16,7 @@ def test_init_creates_everything(proj, run):
     assert "<!-- orch:begin orch -->" in agents and "<!-- orch:end orch -->" in agents
     assert (proj / "CLAUDE.md").read_text(encoding="utf-8").splitlines() == ["@AGENTS.md"]
     gi = (proj / ".gitignore").read_text(encoding="utf-8")
-    assert ".orch/secrets/" in gi and ".orch/scheduler/logs/" in gi
+    assert ".orch/secrets/" in gi and ".orch/addons/" in gi and ".orch/.local-id" in gi
     assert (proj / ".claude/skills/orch/SKILL.md").is_file()  # through the link
     assert (proj / ".orch/tickets").is_dir()
 
@@ -61,12 +61,15 @@ def test_existing_claude_skills_folder_gets_per_skill_links(proj, run):
 
 def test_all_packaged_skills_have_front_matter():
     root = skills.packaged_skills_dir()
-    names = sorted(p.name for p in root.iterdir() if p.is_dir())
-    assert names == ["orch", "orch-publish", "orch-relay"]
-    for n in names:
-        text = (root / n / "SKILL.md").read_text(encoding="utf-8")
+    assert sorted(p.name for p in root.iterdir() if p.is_dir()) == ["orch"]
+    builtin = Path(skills.__file__).parent / "builtin"  # publish and relay: built-in add-ons
+    dirs = {"orch": root / "orch"} | {
+        f"orch-{n}": builtin / n / "skills" / f"orch-{n}" for n in ("publish", "relay")
+    }
+    for n, d in dirs.items():
+        text = (d / "SKILL.md").read_text(encoding="utf-8")
         assert text.startswith(f"---\nname: {n}\ndescription: ")
-        assert (root / n / "AGENTS-block.md").is_file()
+        assert (d / "AGENTS-block.md").is_file()
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows junction")

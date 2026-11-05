@@ -79,7 +79,7 @@ def w1(e):
     check(os.readlink(d / ".claude/skills") == "../.agents/skills", f"link target {os.readlink(d / '.claude/skills')}")
     check("@AGENTS.md" in (d / "CLAUDE.md").read_text(), "CLAUDE.md lacks @AGENTS.md")
     gi = (d / ".gitignore").read_text()
-    for line in (".orch/secrets/", ".orch/inbox/", ".orch/inbox-seen.json", ".orch/scheduler/state.json", ".orch/scheduler/logs/"):
+    for line in (".orch/.local-id", ".orch/secrets/", ".orch/inbox/", ".orch/inbox-seen.json", ".orch/addons/"):
         check(line in gi.splitlines(), f".gitignore lacks {line}")
     before = snapshot(d)
     rc, _, err = e.sh(["orch", "init"], cwd=d)
@@ -199,21 +199,32 @@ def w7(e):
 
 @scenario("A0")
 def a0(e):
-    """addon add dashboard + scheduler, list, remove scheduler."""
+    """addon add dashboard + scheduler (--yes), list --json shape, skills + AGENTS blocks, remove scheduler, add again."""
     ws = e.ws("Pilatus")
     for a in ("dashboard", "scheduler"):
-        rc, out, err = e.sh(["orch", "addon", "add", a], cwd=ws, timeout=600)
+        rc, out, err = e.addon_add(ws, a)
         check(rc == 0, f"addon add {a}: {(err or out)[-200:]}")
-    lst = e.orchj(ws, "addon", "list")
-    check(lst.get("dashboard") == "installed" and lst.get("scheduler") == "installed", f"list: {lst}")
+    lst = {x["name"]: x for x in e.orchj(ws, "addon", "list")}
+    check(set(lst) >= {"dashboard", "scheduler"}, f"list: {list(lst)}")
     for a in ("dashboard", "scheduler"):
+        x = lst[a]
+        check(x["active"] is True and x["source"] == "built-in", f"{a}: {x}")
+        check(set(x) >= {"name", "version", "description", "source", "active", "dashboard", "ticket_view", "background"}, f"keys {sorted(x)}")
         check((ws / f".agents/skills/orch-{a}/SKILL.md").is_file(), f"skill orch-{a} missing")
-        check(f"<!-- orch:begin orch-{a}" in (ws / "AGENTS.md").read_text(), f"AGENTS.md block orch-{a} missing")
+        check(f"<!-- orch:addon:{a} -->" in (ws / "AGENTS.md").read_text(), f"AGENTS.md block {a} missing")
+    check(lst["scheduler"]["background"] is True and lst["scheduler"]["dashboard"]["label"], f"scheduler entry {lst['scheduler']}")
+    act = json.loads((ws / ".orch/addons.json").read_text())["active"]
+    check({"dashboard", "scheduler"} <= set(act) and act["scheduler"]["version"], f"addons.json {act}")
+    check((ws / ".orch/.local-id").is_file(), ".orch/.local-id missing")
+    reg = {x["name"] for x in json.loads((e.orch_home / "addons.json").read_text())}
+    check({"dashboard", "scheduler"} <= reg, f"install registry {reg}")
+    check((e.orch_home / "consent.json").is_file(), "consent record missing under ORCH_HOME")
     e.orch(ws, "addon", "remove", "scheduler")
     check(not (ws / ".agents/skills/orch-scheduler").exists(), "scheduler skill still there")
-    check("orch:begin orch-scheduler" not in (ws / "AGENTS.md").read_text(), "scheduler block still there")
-    check("orch:begin orch-dashboard" in (ws / "AGENTS.md").read_text(), "dashboard block was removed too")
-    e.orch(ws, "addon", "add", "scheduler")  # back for A4/A5
+    check("orch:addon:scheduler" not in (ws / "AGENTS.md").read_text(), "scheduler block still there")
+    check("<!-- orch:addon:dashboard -->" in (ws / "AGENTS.md").read_text(), "dashboard block was removed too")
+    rc, out, err = e.addon_add(ws, "scheduler")  # back for A4/A5
+    check(rc == 0, f"addon add scheduler again: {(err or out)[-200:]}")
     e._addons = True
 
 
@@ -238,9 +249,7 @@ def _fake_agent(e, ws: Path, interval: int = 2) -> Path:
     script = e.tmp / f"fake-agent-{ws.name}.sh"
     script.write_text(f'#!/bin/sh\necho "start $(date +%s) $*" >> "{log}"\nsleep 3\necho "end $(date +%s)" >> "{log}"\n')
     script.chmod(0o755)
-    cfg = ws / ".orch/scheduler"
-    cfg.mkdir(parents=True, exist_ok=True)
-    (cfg / "config.toml").write_text(f'agent = "sh {script} {{prompt}}"\ninterval = {interval}\n')
+    e.sched_config(ws, f'agent = "sh {script} {{prompt}}"', interval)
     log.write_text("")
     return log
 
@@ -261,14 +270,15 @@ def _wait(fn, secs: float, step: float = 1.0):
 
 @scenario("A4")
 def a4(e):
-    """orch wait --until: the scheduler starts the (fake) agent at that time; history entry; wake_at cleared."""
+    """orch wait --until: the scheduler starts the (fake) agent at that time; history entry; waiting_on cleared."""
     e.ensure_addons()
     ws = e.ws("Pilatus")
     log = _fake_agent(e, ws)
     t = e.orchj(ws, "ticket", "new", "A4 wake")["id"]
     until = (datetime.now(UTC) + timedelta(seconds=8)).strftime("%Y-%m-%dT%H:%M:%SZ")
     e.orch(ws, "wait", t, "--until", until)
-    check(tload(ws, t)["wake_at"] == until, "wake_at not set")
+    check(tload(ws, t)["waiting_on"] == {"kind": "time", "until": until}, f"waiting_on: {tload(ws, t).get('waiting_on')}")
+    check("wake_at" not in tload(ws, t), "legacy wake_at written")
     rc, out, err = _sched(e, ws, "start")
     check(rc == 0, f"scheduler start: {err or out}")
     try:
@@ -277,11 +287,11 @@ def a4(e):
         check(started, "agent was not started within 40 s")
         _wait(lambda: "end" in log.read_text(), 15)
         d = tload(ws, t)
-        check(d["wake_at"] is None, f"wake_at not cleared: {d['wake_at']}")
+        check(not d.get("waiting_on"), f"waiting_on not cleared: {d.get('waiting_on')}")
         check(any("Scheduler started an agent run" in h["text"] for h in d["history"]), "no scheduler history entry")
         check(any(h["by"] == "agent:scheduler" for h in d["history"]), "history not by agent:scheduler")
         check(t in log.read_text(), "prompt did not name the ticket")
-        check(len(list((ws / ".orch/scheduler/logs").glob(f"{t}-*.log"))) == 1, "run log missing")
+        check(len(list((ws / ".orch/addons/scheduler/logs").glob(f"{t}-*.log"))) == 1, "run log missing")
     finally:
         _sched(e, ws, "stop")
     check(_sched(e, ws, "status")[0] == 1, "scheduler did not stop")
@@ -293,9 +303,12 @@ def a5(e):
     e.ensure_addons()
     ws = e.ws("Reports")
     for a in ("scheduler",):
-        e.sh(["orch", "addon", "add", a], cwd=ws, check_rc=True, timeout=600)
+        e.sh(["orch", "addon", "add", a, "--yes"], cwd=ws, check_rc=True, timeout=600)
     log = _fake_agent(e, ws)
-    t = e.orchj(ws, "ticket", "new", "A5 weekly report", "--recurring", "* * * * *")["id"]
+    t = e.orchj(ws, "ticket", "new", "A5 weekly report")["id"]
+    rep = e.orchj(ws, "scheduler", "repeat", t, "* * * * *")
+    check(rep["recurring"] is True and rep["cron"] == "* * * * *", f"repeat: {rep}")
+    check(tload(ws, t)["ext"]["scheduler"]["cron"] == "* * * * *" and "recurring" not in tload(ws, t), "ext.scheduler not set / legacy field")
     rc, out, err = _sched(e, ws, "start")
     check(rc == 0, f"scheduler start: {err or out}")
     try:
@@ -304,12 +317,15 @@ def a5(e):
         time.sleep(5)  # let the scheduler reap the finished runs (log footer)
     finally:
         _sched(e, ws, "stop")
+        # end the recurrence: an open every-minute ticket left in Reports would start the agent in later
+        # scenarios (R6-R8 assert exact agent runs there)
+        e.orch(ws, "ticket", "status", t, "dropped")
     lines = log.read_text().split("\n")
     kinds = [l.split()[0] for l in lines if l.strip()]
     check(all(kinds[i] != kinds[i + 1] for i in range(len(kinds) - 1)), f"runs overlapped: {kinds}")
-    logs = sorted((ws / ".orch/scheduler/logs").glob(f"{t}-*.log"))
+    logs = sorted((ws / ".orch/addons/scheduler/logs").glob(f"{t}-*.log"))
     check(len(logs) >= 2 and all("# end" in p.read_text() for p in logs[:2]), "run logs missing or unfinished")
-    st = json.loads((ws / ".orch/scheduler/state.json").read_text())
+    st = json.loads((ws / ".orch/addons/scheduler/state.json").read_text())
     check(st[t].get("next_run"), "state.json has no next_run")
 
 

@@ -1,0 +1,10 @@
+# workspace-addons/dashboard/src/orch_dashboard/orch-addon.toml
+# The dashboard is the host for other add-ons' tabs, so it has no [dashboard] tab of its own.
+schema = "orch.addon/1"
+orch_api = 1
+name = "dashboard"
+version = "0.2.0"
+description = "Shows your tickets in a web page, with a tab for each add-on that is turned on."
+run = "orch_dashboard"
+skill = "skills/orch-dashboard"
+agents_block = "skills/orch-dashboard/AGENTS-block.md"
