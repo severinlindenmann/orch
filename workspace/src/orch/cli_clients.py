@@ -279,6 +279,11 @@ def run_relay(args, root: Path, out) -> None:
         out(args, {"waiting": left, **(res or {})}, "\n".join(lines) or "Nothing is waiting to be sent.")
     elif sub == "inbox" and args.since is not None:
         r = relay.since(root, args.since, args.wait)
+        if r.get("warning"):
+            print(
+                f"Could not check the relay just now, showing what is saved here. {r['warning']}",
+                file=sys.stderr,
+            )
         lines = [
             f"{i['seq']}  {i['type']} from {relay.name_of(root, i['from'])}  [{i['id']}]" for i in r["items"]
         ]

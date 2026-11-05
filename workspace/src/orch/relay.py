@@ -269,9 +269,10 @@ def name_of(root: Path, ws_id: str) -> str:
 
 
 def _unreachable(e: Refused) -> bool:
-    """The relay could not be reached or failed on its side (net.py words), so the message may be retried."""
-    t = str(e)
-    return t.startswith("Can't reach") or t.startswith("The server answered 5")
+    """No answer, a server error (5xx), too many requests (429) or a timeout (408): keep and retry.
+    Only a clear 4xx from the relay means it will never take this message."""
+    status = getattr(e, "status", None)
+    return status is None or status >= 500 or status in (408, 429)
 
 
 def _post_message(root: Path, raw: bytes) -> None:
@@ -627,10 +628,11 @@ def since(root: Path, seq: int, wait: int = 0) -> dict:
     """Every arrival after `seq`, seen or not: {"next", "items": [{seq, id, type, from, at, seen, applied,
     allowed}]}. Pulls (waiting up to `wait` s when nothing newer is journaled) but marks nothing seen.
     The journal is a hint: the flags come from the saved message file and the local state."""
-    if not [e for e in _read_arrivals(root) if e["seq"] > seq]:
-        _pull(root, wait)
-    else:
-        _pull(root, 0)
+    warning = None
+    try:
+        _pull(root, 0 if [e for e in _read_arrivals(root) if e["seq"] > seq] else wait)
+    except Refused as e:  # best effort: the journal on disk is still true
+        warning = str(e)
     have = _read_arrivals(root)
     if have and seq < have[0]["seq"] - 1:
         seq = have[0]["seq"] - 1  # the cursor is older than what was kept: start from the oldest kept
@@ -654,7 +656,10 @@ def since(root: Path, seq: int, wait: int = 0) -> dict:
                 "allowed": bool(_allowed_or_made(root, m)),
             }
         )
-    return {"next": have[-1]["seq"] if have else seq, "items": items}
+    out = {"next": have[-1]["seq"] if have else seq, "items": items}
+    if warning:
+        out["warning"] = warning
+    return out
 
 
 def _ticket_by_message(root: Path, mid: str) -> str | None:

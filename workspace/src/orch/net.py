@@ -73,11 +73,15 @@ def call(
             out = obj.get("output") or ""
         except (ValueError, AttributeError):
             pass
-        raise Refused(msg + (f"\n{out}" if out else "")) from None
+        err = Refused(msg + (f"\n{out}" if out else ""))
+        err.status = e.code  # callers decide what is worth a retry
+        raise err from None
     except (urllib.error.URLError, TimeoutError, OSError):
-        raise Refused(
+        err = Refused(
             f"Can't reach {urllib.parse.urlsplit(url).netloc} right now. Check your internet and try again."
-        ) from None
+        )
+        err.status = None  # no answer at all
+        raise err from None
 
 
 def call_json(method: str, url: str, headers: dict | None = None, body=None, timeout: float = 120):
