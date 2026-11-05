@@ -143,6 +143,11 @@ def _agent_runs(log: Path) -> int:
     return log.read_text().count("start ") if log.exists() else 0
 
 
+def _scheduler_on(e, ws):
+    """R6-R8 need the scheduler add-on in this workspace; A5 turns it on too, but the R group runs alone as well."""
+    e.sh(["orch", "addon", "add", "scheduler", "--yes"], cwd=e.ws(ws), check_rc=True, timeout=600)
+
+
 def _sched_once(e, ws):
     rc, out, err = e.sh(["orch", "scheduler", "run", "--once"], cwd=e.ws(ws), timeout=120)
     check(rc == 0, f"scheduler run --once: {err or out}")
@@ -152,6 +157,7 @@ def _sched_once(e, ws):
 def r6(e):
     """delegate: nothing runs until the human allows once; then one ticket (no double) and the agent starts."""
     e.ensure_addons()
+    _scheduler_on(e, "Reports")
     i = ids(e)
     log = _fake_agent(e, e.ws("Reports"))
     before = len(tickets(e, "Reports"))
@@ -178,6 +184,7 @@ def r6(e):
 def r7(e):
     """start weekly-report: allow --permanent; next start with the token runs without asking; admin allows list."""
     e.ensure_addons()
+    _scheduler_on(e, "Reports")
     i = ids(e)
     log = _fake_agent(e, e.ws("Reports"))
     base = _agent_runs(log)
@@ -204,9 +211,14 @@ def r7(e):
 def r8(e):
     """start with a wrong token, or with another key's token: not run, waits for the human."""
     e.ensure_addons()
+    _scheduler_on(e, "Reports")
     i = ids(e)
     if not (e.ws("Pilatus") / ".orch/secrets/allows.json").exists():
         r7(e)
+    # nothing else may be due in Reports, so any agent start below comes from the bad-token messages
+    due = [t["id"] for t in tickets(e, "Reports") if t["status"] in ("open", "active", "waiting")
+           and (((t.get("ext") or {}).get("scheduler") or {}).get("recurring") or (t.get("waiting_on") or {}).get("kind") == "time")]
+    check(not due, f"Reports has scheduled tickets left from earlier scenarios: {due}")
     log = _fake_agent(e, e.ws("Reports"))
     allows = json.loads((e.ws("Pilatus") / ".orch/secrets/allows.json").read_text())
     tok = allows["received"][0]["token"]
@@ -216,7 +228,9 @@ def r8(e):
         items = [x for x in inbox(e, "Reports") if x["id"] == m["id"]]
         check(items and items[0]["allowed"] is False, f"{key} with bad token must not be allowed: {items}")
     _sched_once(e, "Reports")
-    check(_agent_runs(log) == 0, "agent ran for a message with a bad token")
+    ran = log.read_text()
+    runs = sorted(p.name for p in (e.ws("Reports") / ".orch/addons/scheduler/logs").glob("*.log"))
+    check(_agent_runs(log) == 0, f"agent ran for a message with a bad token: fake agent log {ran!r}; run logs {runs}")
 
 
 @scenario("R9")
