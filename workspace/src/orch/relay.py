@@ -373,15 +373,24 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
     return out
 
 
-def done(root: Path, mid: str) -> dict:
-    """Mark seen first. An allowed delegate/start then gets its ticket (inbox rule 4)."""
+def done(root: Path, mid: str, wake: str | None = None) -> dict:
+    """Do the work, mark seen LAST: a crash before that re-delivers the message instead of losing it.
+
+    Everything here is idempotent by message id. An allowed delegate/start gets its ticket (inbox rule 4);
+    `wake` records the message on that ticket and wakes it now."""
     msg = load_message(root, mid)
-    first = mark_seen(root, mid)
+    first = mid not in seen(root)
     res: dict = {"id": mid, "new": first, "ticket": None}
-    mode = allowed(root, msg) if first else None
-    if mode:
-        res["ticket"] = _ticket_for(root, msg)
-        _use_once(root, msg)
+    if first:
+        mode = allowed(root, msg)
+        if mode:
+            res["ticket"] = _ticket_for(root, msg)
+        if wake:
+            tickets.wake_now(root, wake, mid, tickets.current_actor())
+            res["woke"] = wake
+        if mode:
+            _use_once(root, msg)
+        mark_seen(root, mid)
     return res
 
 

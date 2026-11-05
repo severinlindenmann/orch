@@ -14,6 +14,7 @@ def proj(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CLAUDECODE", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_ENTRYPOINT", raising=False)
+    monkeypatch.delenv("ORCH_AGENT", raising=False)
     for k in list(os.environ):
         if k.startswith("CODEX_"):
             monkeypatch.delenv(k)

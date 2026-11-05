@@ -216,3 +216,55 @@ def test_done_refused_while_an_item_is_unchecked(proj, run, new_ticket):
     assert code == 2 and "c1" in err and "not checked" in err
     assert read(proj, tid)["status"] == "open"
     assert run("ticket", "status", tid, "dropped")[0] == 0  # a dropped ticket is not affected
+
+
+def test_answer_sets_wake_at_now(proj, run, new_ticket):
+    tid = new_ticket()
+    run("ask", tid, "Which?", "--option", "A")
+    assert read(proj, tid).get("wake_at") is None
+    assert run("answer", tid, "q1", "A", "--by", "human:x", "--via", "phone")[0] == 0
+    assert read(proj, tid).get("wake_at")
+
+
+def test_answer_via_relay_inbox_sets_wake_at(proj, run, new_ticket):
+    from orch import tickets
+
+    tid = new_ticket()
+    run("ask", tid, "Which?", "--option", "A")
+    tickets.answer(proj, tid, "q1", "A", "human:ph_x", "relay")
+    assert read(proj, tid).get("wake_at")
+
+
+def test_ask_refuses_over_300_chars(proj, run, new_ticket):
+    tid = new_ticket()
+    code, _, err = run("ask", tid, "x" * 301)
+    assert code == 2 and "300" in err
+    assert read(proj, tid)["questions"] == []
+    assert run("ask", tid, "x" * 300)[0] == 0
+
+
+def test_orch_agent_env_counts_as_agent(proj, run, new_ticket, monkeypatch):
+    from orch import tickets
+
+    tid = new_ticket()
+    monkeypatch.setenv("ORCH_AGENT", "1")
+    assert tickets.agent_tool() == "orch-agent"
+    assert tickets.current_actor().startswith("agent:")
+    code, _, err = run("answer", tid, "q1", "x", "--by", "human:Sev")
+    assert code == 2 and "Only a human" in err
+
+
+def test_orch_agent_refuses_interactive_yes(proj, monkeypatch):
+    import io
+
+    import pytest
+
+    from orch import tickets
+    from orch.errors import Refused
+
+    monkeypatch.setenv("ORCH_AGENT", "1")
+    stdin = io.StringIO("y\n")
+    stdin.isatty = lambda: True
+    monkeypatch.setattr("sys.stdin", stdin)
+    with pytest.raises(Refused, match="Only a human"):
+        tickets.require_human("ok?", "x")

@@ -111,8 +111,9 @@ def add_parsers(sub, common) -> None:
     _add_profile(rel)
     x = rel.add_parser("inbox", parents=[common], help="pull new messages")
     x.add_argument("--wait", type=int, default=0, help="wait up to N seconds (max 30)")
-    x = rel.add_parser("done", parents=[common], help="mark a message as processed, before acting")
+    x = rel.add_parser("done", parents=[common], help="mark a message as processed")
     x.add_argument("id")
+    x.add_argument("--wake", metavar="TICKET", help="record the message on this ticket and wake it now")
     t = argparse.ArgumentParser(add_help=False)
     t.add_argument("--ticket")
     x = rel.add_parser("send", parents=[common, t], help="send a message or file to a workspace or phone")
@@ -267,7 +268,7 @@ def run_relay(args, root: Path, out) -> None:
             shown.append(_inbox_line(i, root))
         out(args, data, "\n".join(shown) or "No new messages.")
     elif sub == "done":
-        r = relay.done(root, args.id)
+        r = relay.done(root, args.id, args.wake)
         txt = "Marked as handled." if r["new"] else "That message was already handled."
         if r["ticket"]:
             txt += f" Ticket: {r['ticket']}"

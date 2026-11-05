@@ -42,8 +42,18 @@ def parse_time(text: str) -> str:
     return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+MAX_QUESTION_CHARS = 300
+
+
 def agent_tool() -> str | None:
-    """The agent tool this process runs under (from the environment), else None."""
+    """The agent tool this process runs under (from the environment), else None.
+
+    A guardrail, not a security boundary: a process that clears its environment is not caught.
+    ORCH_AGENT=1 is set by the scheduler on every run it starts, so a run is an agent even when the
+    tool's own variables are missing.
+    """
+    if os.environ.get("ORCH_AGENT") == "1":
+        return "orch-agent"
     if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_CODE_ENTRYPOINT"):
         return "claude-code"
     if any(k.startswith("CODEX_") for k in os.environ):
@@ -55,7 +65,7 @@ def require_human(question: str, what: str) -> None:
     """Human-only step. Under an agent it needs a yes typed at a terminal; otherwise refused (exit 2)."""
     if agent_tool() is None:
         return
-    if sys.stdin.isatty():
+    if sys.stdin.isatty() and os.environ.get("ORCH_AGENT") != "1":
         sys.stderr.write(f"{question} [y/N] ")
         sys.stderr.flush()
         if sys.stdin.readline().strip().lower() in ("y", "yes"):
@@ -307,6 +317,11 @@ def ask(
 ) -> tuple[dict, dict]:
     if not text.strip():
         raise Refused("A question needs text.")
+    if len(text.strip()) > MAX_QUESTION_CHARS:
+        raise Refused(
+            f"A question is at most {MAX_QUESTION_CHARS} characters ({len(text.strip())} given). "
+            "Shorten it and put the detail in a ticket note or link."
+        )
     if recommended is not None and options and recommended not in options:
         raise Refused("The recommended answer must be one of the options.")
     ticket = load(root, tid)
@@ -352,9 +367,24 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
         ticket["waiting_on"] = None
         if ticket["status"] == "waiting":
             ticket["status"] = "active"
+    ticket["wake_at"] = now()  # the scheduler resumes it even if a run held the lock just now
     add_history(ticket, by, f"Answered {qid}: {text}")
     save(root, ticket)
     return ticket, q
+
+
+def wake_now(root: Path, tid: str, message: str, by: str) -> dict:
+    """Relay `done --wake`: record the message on the ticket (once per message id) and wake it now."""
+    ticket = load(root, tid)
+    cur = ticket.setdefault("ext", {}).get("relay")
+    if isinstance(cur, dict) and cur.get("message") == message:
+        return ticket
+    ticket["wake_at"] = now()
+    ext = ticket["ext"]
+    ext["relay"] = {**cur, "message": message} if isinstance(cur, dict) else {"message": message}
+    add_history(ticket, by, f"Woken by relay message {message}")
+    save(root, ticket)
+    return ticket
 
 
 def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear: bool = False) -> dict:

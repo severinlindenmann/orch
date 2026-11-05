@@ -54,3 +54,5 @@ Keep credentials in `.orch/secrets/`, ignored by git.
 
 Review the checklist and its evidence, record the outcome, then set the ticket status to done:
 `orch ticket status <id> done`. If work remains, leave its actual state visible.
+
+Human-only steps (approve, allow, record as a human) are refused when orch sees an agent: a tool's own variables or `ORCH_AGENT=1`, which the scheduler sets on every run. This is a guardrail, not a security boundary: a process that clears its environment gets past it.

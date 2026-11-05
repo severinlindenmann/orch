@@ -74,7 +74,7 @@ Reject absolute paths, `..`, drive letters, and symlinks or hard links in archiv
 ## Inbox rules (all clients)
 
 1. `orch relay inbox` downloads new messages, saves each to `.orch/inbox/<id>.json`, acks them on the relay, prints those not in `inbox-seen.json`.
-2. Before acting on a message, the agent (or scheduler) runs `orch relay done <id>`: the id goes into `inbox-seen.json` first, then the work starts.
+2. When a message is handled, the agent (or scheduler) runs `orch relay done <id> [--wake <ticket>]`. It is idempotent by message id and marks the id in `inbox-seen.json` LAST: a crash before that re-delivers the message instead of losing it. `--wake` records `ext.relay.message` on the ticket (once per message id) and sets its `wake_at` to now.
    A seen id is never processed again. If the run crashes, the work is not redone by itself; the user sees it in the ticket history. There is no exactly-once guarantee.
 3. `delegate` / `start` run only with an allow in `allows.json → given` for the same peer and kind (and key for start):
    - **once**: made by `orch relay allow <id> --once`; bound to that one message id, marked `used: true` when it runs, never valid again.

@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 
+import pytest
 from fakes import WS
 
 PEER = "ws_reports001"
@@ -445,3 +446,47 @@ def test_allow_refused_under_agent(proj, run, rel, monkeypatch):
     assert code == 2 and "Ask the human" in err
     monkeypatch.delenv("CLAUDECODE")
     assert run("relay", "allow", "m_deleg00000000010", "--once")[0] == 0
+
+
+def _ticket(proj, tid):
+    return json.loads((proj / f".orch/tickets/{tid}.json").read_text())
+
+
+def test_done_wake_records_message_wakes_ticket_and_is_idempotent(proj, run, new_ticket, rel):
+    connect(run, rel)
+    tid = new_ticket()
+    run("wait", tid, "--until", "2030-01-01T00:00:00Z")
+    rel.inbox.append(msg("m_text000000000001", "text", {"text": "Hi"}))
+    run("relay", "inbox")
+    code, out, _ = run("relay", "done", "m_text000000000001", "--wake", tid)
+    assert code == 0
+    t = _ticket(proj, tid)
+    assert t["ext"]["relay"]["message"] == "m_text000000000001"
+    assert t["wake_at"] and t["wake_at"] < "2030"
+    hist = len(t["history"])
+    assert "m_text000000000001" in json.loads((proj / ".orch/inbox-seen.json").read_text())
+    assert run("relay", "done", "m_text000000000001", "--wake", tid)[0] == 0
+    assert len(_ticket(proj, tid)["history"]) == hist
+
+
+def test_done_wake_marks_seen_last(proj, run, new_ticket, rel, monkeypatch):
+    from orch import relay
+
+    connect(run, rel)
+    tid = new_ticket()
+    rel.inbox.append(msg("m_text000000000001", "text", {"text": "Hi"}))
+    run("relay", "inbox")
+
+    def boom(root, mid):
+        raise RuntimeError("crash")
+
+    with monkeypatch.context() as m:
+        m.setattr(relay, "mark_seen", boom)
+        with pytest.raises(RuntimeError):
+            run("relay", "done", "m_text000000000001", "--wake", tid)
+    assert _ticket(proj, tid)["ext"]["relay"]["message"] == "m_text000000000001"
+    assert "m_text000000000001" not in relay.seen(proj)  # redelivered, not lost
+    rel.acked.clear()
+    assert "Hi" in run("relay", "inbox")[1]
+    assert run("relay", "done", "m_text000000000001", "--wake", tid)[0] == 0
+    assert "m_text000000000001" in relay.seen(proj)
