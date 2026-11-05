@@ -130,3 +130,31 @@ def test_run_record_without_live_pid_is_stale(proj, run, new_ticket):
 
     rec.write_text(json.dumps({"pid": os.getpid()}))
     assert "is on it" in run("ticket", "show", tid)[1]
+
+
+def test_stale_check_uses_services_pid_alive_and_never_signals(proj, run, new_ticket, monkeypatch):
+    import os
+
+    from orch import services
+
+    tid = with_checks(proj, run, new_ticket)
+    _doing(proj, tid, _iso(60))
+    rec = proj / ".orch" / "run" / "tickets" / f"{tid}.json"
+    rec.parent.mkdir(parents=True)
+    rec.write_text(json.dumps({"pid": 4242}))
+    seen = []
+    monkeypatch.setattr(services, "pid_alive", lambda pid: seen.append(pid) or True)
+    monkeypatch.setattr(os, "kill", lambda *a: (_ for _ in ()).throw(AssertionError("os.kill called")))
+    t = tickets.load(proj, tid)
+    assert tickets.doing_stale(proj, t, t["checklist"][0]) is False and seen == [4242]
+
+
+def test_bad_ticket_id_reads_no_run_file(proj, run, new_ticket, monkeypatch):
+    tid = with_checks(proj, run, new_ticket)
+    _doing(proj, tid, _iso(60))
+    t = tickets.load(proj, tid)
+    t["id"] = "../../x"
+    opened = []
+    monkeypatch.setattr(tickets.Path, "is_file", lambda self: opened.append(str(self)) or False)
+    assert tickets.doing_stale(proj, t, t["checklist"][0]) is False
+    assert opened == []
