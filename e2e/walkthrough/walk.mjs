@@ -184,7 +184,7 @@ try {
     must(`orch scheduler repeat ${tid} "0 7 * * 1"`, dirs.Pilatus);
     await page.reload(); await page.waitForSelector('a[href="#addon/scheduler"]');
     await page.click('a[href="#addon/scheduler"]');
-    await page.waitForSelector('text=Repeating');
+    await page.waitForSelector('text=Next runs');
   });
   await step('dashboard-inbox', 'Dashboard: inbox view', async () => {
     await page.click('a[href="#inbox"]'); await page.waitForTimeout(500);
