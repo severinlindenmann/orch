@@ -39,20 +39,34 @@ Two steps, one command for the user:
    AGENTS text, ext key, dashboard tab, background process) and asks; `--yes` skips the question.
    Installed list: `~/.orch-tool/addons.json` `[{"name", "source", "version"}]`.
 2. **Activate** (per workspace) — **the single switch**: `.orch/addons.json`
-   `{"active": {"<name>": {"version": "0.2.0", "activated_at": "…Z"}}}`, written only by `orch addon add|remove`.
+   `{"active": {"<name>": {"version": "0.2.0", "activated_at": "…Z"}}}`, written only by `orch addon add|remove`, **and** the
+   consent record of this machine (below). A listing in `addons.json` alone (it arrives with a git clone) is only a wish.
    Only an active add-on gets: its `orch <name>` command in this workspace, its skill + AGENTS block, its dashboard tab and
-   ticket-detail rows, its background process. Leftover files, `.orch/addons/<name>/` or `ext.<name>` data **never** activate anything.
+   ticket-detail rows, its background process. Leftover files, `.orch/addons/<name>/` or `ext.<name>` data **never** activate anything. A command of an add-on that is
+only listed answers `Add-on <name> is listed for this workspace but not turned on here. Turn it on: orch addon add <name>`.
+
+**Consent record.** `orch addon add` writes `consent.json` in the user's orch folder (`~/.orch-tool/`, from the account
+database, not `$HOME`): `[{"workspace_id", "workspace", "name", "source": "built-in"|"local", "path"?, "hash"?}]`. A local folder
+is bound by a content hash: change one byte of it and the add-on is inactive ("changed on disk": `orch update` says so) until the
+user runs `orch addon add <folder>` again. `workspace_id` is a random id in the gitignored `.orch/.local-id` (created by the first
+`add`); a clone or a copy has none, so it has no consent. `ORCH_HOME` moves the orch folder only when it is a plain folder under
+the real home, outside the current folder and the workspace, with no `.orch`, `.agents` or `.git` in it or above it up to home;
+otherwise it is ignored with a note on stderr (a repo's `.envrc` cannot aim consent at a place it controls). `remove` drops the
+record. The installed list (`addons.json` in the same folder) is the registry of what the machine installed through orch.
 
 `orch addon add <name|path>` = install (if needed) + activate. `orch addon remove <name>` (this workspace):
 1. `orch <name> stop` if `background = true` (the process also exits by itself when it sees it is no longer active);
-2. removes `.agents/skills/orch-<name>/` (+ `orch-<name>-*`), the AGENTS.md block, the `.claude/skills` links;
+2. removes `.agents/skills/orch-<name>/` (exactly that folder, never `orch-<name>-x`, which may belong to another add-on or the
+   user), the AGENTS.md block, the `.claude/skills` links;
 3. drops it from `.orch/addons.json` → tab and ticket rows disappear;
 4. keeps `ext.<name>` in tickets (hidden, never validated, never blocks ticket access) and `.orch/addons/<name>/`;
    `--purge` also deletes `.orch/addons/<name>/` and the `[<name>]` table of `.orch/config.toml`.
 The package stays in the tool env (other workspaces may use it); `orch addon uninstall <name>` removes it from the machine.
 
-`orch addon list [--json]`: `[{"name", "version", "description", "source": "built-in"|"local", "active": bool,
-"dashboard": {label, icon, order} | null, "ticket_view": [...], "background": bool}]` — the one source the dashboard uses.
+`orch addon list --json`: a JSON list with one entry per installed add-on (active or not), sorted by name:
+`[{"name", "version", "description", "source": "built-in"|"local", "active": bool,
+"dashboard": {label, icon, order} | null, "ticket_view": [{field, label, format}], "background": bool}]` — the one source the
+dashboard uses (it shows the entries with `active: true`).
 
 `orch update` updates orch **and every installed add-on together** (one `uv tool install --reinstall` with all of them),
 then refreshes skills and AGENTS blocks of the active add-ons in this workspace. Add-ons never update on their own.
@@ -71,6 +85,14 @@ then refreshes skills and AGENTS blocks of the active add-ons in this workspace.
 - Config: one file `.orch/config.toml`; the add-on reads only its own table `[<name>]` (and `[<name>.*]`). Defaults live in the add-on.
 - Required subcommands: `view --json` if `[dashboard]`; `stop` if `background`. Optional: `status --json`.
 
+## Core commands an add-on may rely on (`--json`)
+
+- `orch ticket list --json`: a plain JSON list of ticket objects (`ticket.schema.json`, with `revision` and `ext`); done and dropped tickets only with `--all` (or `--status <s>`).
+  `orch ticket show <id> --json`: one ticket; `ext.<name>` is left out for add-ons that are not active.
+- `orch addon list --json`: above. `orch relay status --json`: `{"configured": false}` or
+  `{"configured": true, "url", "workspace"}`; it never touches the network (the dashboard shows Inbox when `configured`).
+- Errors with `--json` on stdout: `{"error": "<plain words>"}`, exit 2.
+
 ## Views (dashboard tab)
 
 The dashboard (itself an optional add-on, the host) never imports add-on code. For each active add-on with `[dashboard]` it
@@ -88,7 +110,8 @@ Published dashboard snapshots leave add-on tabs and ticket rows out unless the u
 
 ## Skill and AGENTS block
 
-Skill folder `orch-<name>` (`SKILL.md` front matter `name: orch-<name>`), written like the core skills: plain words, commands first,
+Skill folder is exactly `orch-<name>` (`SKILL.md` front matter `name: orch-<name>`; a manifest `skill` path may have any folder name,
+the copy in `.agents/skills/` is always `orch-<name>`), written like the core skills: plain words, commands first,
 "ask the user before anything that can't be undone". The AGENTS block sits between `<!-- orch:addon:<name> -->` and
 `<!-- /orch:addon:<name> -->` and is replaced as a whole; text outside the markers is never touched. The block: a heading
 `## orch-<name>`, one line what it is, `Read .agents/skills/orch-<name>/SKILL.md`, at most 4 lines more.

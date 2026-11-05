@@ -58,8 +58,8 @@ def _valid_ticket(t, stem: str | None = None) -> bool:
 
 def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int]:
     """Valid-looking tickets (schema orch.ticket/1, id, title, status). Returns (tickets, skipped).
-    Read through `$ORCH_BIN ticket list --json`; without the orch command (standalone use) from .orch/tickets."""
-    raw = run_orch(orch_bin, ["ticket", "list", "--json"], root)
+    Read through `$ORCH_BIN ticket list --all --json` (without --all, done and dropped tickets would vanish); without the orch command (standalone use) from .orch/tickets."""
+    raw = run_orch(orch_bin, ["ticket", "list", "--all", "--json"], root)
     if isinstance(raw, dict):
         raw = raw.get("tickets")
     if isinstance(raw, list):

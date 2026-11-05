@@ -9,6 +9,8 @@ E2E_PUBLISH_ADMIN_TOKEN=$(pass-cli item view --vault-name Agents --item-title "o
 E2E_RELAY_ADMIN_TOKEN=$(pass-cli item view --vault-name Agents --item-title "orch relay admin token" --field password)
 export E2E_PUBLISH_ADMIN_TOKEN E2E_RELAY_ADMIN_TOKEN
 WALK_TMP=$(mktemp -d "$HOME/orch-dev/.tf-walk-XXXX")
-export WALK_TMP
+# ORCH_HOME is only trusted under the real home with no .git above it (~/orch-dev has one): sibling folder
+WALK_ORCH_HOME=$(mktemp -d "$HOME/.orch-e2e-XXXX")
+export WALK_TMP WALK_ORCH_HOME
 node walk.mjs || true
-rm -rf "$WALK_TMP"   # exact path made above
+rm -rf "$WALK_TMP" "$WALK_ORCH_HOME"   # exact paths made above

@@ -130,10 +130,9 @@ def tree_hash(ws: Path) -> dict:
 def setup_scheduler(e, name: str, tool: str, interval: int = 10) -> Path:
     ws = e.ws(name)
     if not (ws / ".agents/skills/orch-scheduler").exists():
-        e.sh(["orch", "addon", "add", "scheduler"], cwd=ws, check_rc=True, timeout=600)
-    cfg = ws / ".orch/scheduler"
-    cfg.mkdir(parents=True, exist_ok=True)
-    (cfg / "config.toml").write_text(f"{scheduler_agent_line(e, tool)}\ninterval = {interval}\ninbox_every = 5\n")
+        rc, out, err = e.addon_add(ws, "scheduler")
+        check(rc == 0, f"addon add scheduler: {(err or out)[-200:]}")
+    e.sched_config(ws, scheduler_agent_line(e, tool), interval, 5)
     return ws
 
 
@@ -293,7 +292,7 @@ def ag_r6(e):
     check(len(new) == 1, f"expected one new ticket in Reports, got {[t['title'] for t in new]}")
     t = new[0]
     validate(e, t)
-    logs = sorted((wsr / ".orch/scheduler/logs").glob(f"{t['id']}-*.log"))
+    logs = sorted((wsr / ".orch/addons/scheduler/logs").glob(f"{t['id']}-*.log"))
     check(logs and "exit 0" in logs[-1].read_text(), f"no finished scheduler run for {t['id']}")
     allow_back = [m for m in e.orchj("Pilatus", "relay", "inbox") if m["type"] == "allow"]
     check(allow_back, "no allow message back to Pilatus")
@@ -307,18 +306,19 @@ def ag_r6(e):
 
 @scenario("AG-A45", slow=True)
 def ag_a45(e):
-    """A4 + A5: wake_at in 2 min and a cron every 2 min, both started by the scheduler with codex in Reports."""
+    """A4 + A5: orch wait --until in 2 min and a cron every 2 min, both started by the scheduler with codex in Reports."""
     ws = setup_scheduler(e, "Reports", "codex", interval=10)
     t4 = e.orchj(ws, "ticket", "new", "A4: create the file wake-proof.txt in the project root containing the word awake, then set this ticket to done")["id"]
     until = (datetime.now(UTC) + timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     e.orch(ws, "wait", t4, "--until", until)
     t5 = e.orchj(ws, "ticket", "new", "A5: append one line to runs.log in the project root: the word run and the current UTC time from `date -u`. "
-                 "Do nothing else. This ticket repeats, so leave its status as it is",  "--recurring", "*/2 * * * *")["id"]
+                 "Do nothing else. This ticket repeats, so leave its status as it is")["id"]
+    e.orch(ws, "scheduler", "repeat", t5, "*/2 * * * *")
     rc, out, err = e.sh(["orch", "scheduler", "start"], cwd=ws)
     check(rc == 0, f"scheduler start: {err or out}")
     try:
         def logs(t):
-            return sorted((ws / ".orch/scheduler/logs").glob(f"{t}-*.log"))
+            return sorted((ws / ".orch/addons/scheduler/logs").glob(f"{t}-*.log"))
         end = time.time() + 600
         while time.time() < end:
             l4, l5 = logs(t4), logs(t5)
@@ -329,12 +329,12 @@ def ag_a45(e):
     finally:
         e.sh(["orch", "scheduler", "stop"], cwd=ws)
         # keep the scheduler logs in the transcript
-        body = "".join(f"\n### {p.name}\n{p.read_text(errors='replace')[-4000:]}\n" for p in sorted((ws / ".orch/scheduler/logs").glob("*.log")))
+        body = "".join(f"\n### {p.name}\n{p.read_text(errors='replace')[-4000:]}\n" for p in sorted((ws / ".orch/addons/scheduler/logs").glob("*.log")))
         save_transcript(e, "AG-A45", f"# codex runs started by the scheduler in Reports\n{body}")
     d4, d5 = tload(ws, t4), tload(ws, t5)
     l4, l5 = logs(t4), logs(t5)
     check(l4 and all("exit 0" in p.read_text() for p in l4 if "# end" in p.read_text()) and any("# end" in p.read_text() for p in l4), "A4: no finished run log")
-    check(d4["wake_at"] is None, f"A4: wake_at not cleared: {d4['wake_at']}")
+    check(not d4.get("waiting_on"), f"A4: waiting_on not cleared: {d4.get('waiting_on')}")
     check(any(h["by"] == "agent:scheduler" for h in d4["history"]), "A4: no scheduler history entry")
     check((ws / "wake-proof.txt").exists() and "awake" in (ws / "wake-proof.txt").read_text().lower(), "A4: wake-proof.txt missing")
     done5 = [p for p in l5 if "# end" in p.read_text()]
@@ -362,7 +362,7 @@ def ag_f1(e):
     """F1: fresh HOME: install from checkout -> init -> connect from admin prompts -> agent ticket -> phone answer -> report + app published -> link opens."""
     t0 = time.time()
     h = e.tmp / "f1"
-    env = {"HOME": str(h / "home"), "UV_TOOL_DIR": str(h / "uvtools"), "UV_TOOL_BIN_DIR": str(h / "bin"), "ORCH_HOME": str(h / "orch-tool"),
+    env = {"HOME": str(h / "home"), "UV_TOOL_DIR": str(h / "uvtools"), "UV_TOOL_BIN_DIR": str(h / "bin"), "ORCH_HOME": str(e.orch_home / "f1"),
            "GIT_CONFIG_GLOBAL": str(h / "home/.gitconfig"), "PATH": f"{h / 'bin'}:{e.path}"}
     (h / "home").mkdir(parents=True)
     (h / "home/.gitconfig").write_text("[init]\n\tdefaultBranch = main\n")
@@ -392,9 +392,8 @@ def ag_f1(e):
     e.cleanup.append(publish_cleanup_dir(e, ws, env))
     e.creds[("rel", "Fresh")] = (rj["id"], rj["token"])
     e.creds[("pub", "Fresh")] = (pj["id"], pj["token"])
-    sh("orch", "addon", "add", "scheduler", timeout=600)
-    (ws / ".orch/scheduler").mkdir(parents=True, exist_ok=True)
-    (ws / ".orch/scheduler/config.toml").write_text(f"{scheduler_agent_line(e, 'claude')}\ninterval = 10\ninbox_every = 5\n")
+    sh("orch", "addon", "add", "scheduler", "--yes", timeout=600)
+    (ws / ".orch/config.toml").write_text(f"[scheduler]\n{scheduler_agent_line(e, 'claude')}\ninterval = 10\ninbox_every = 5\n")
     ph = pair_phone(e, [rj["id"]])
     # agent phase 1
     prompt = ("I need the weekly status report published. Track the work as a ticket. Write report.md (title, three short bullet "

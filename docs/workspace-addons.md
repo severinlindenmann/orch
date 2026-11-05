@@ -24,6 +24,22 @@ workspace-addons/
 `pyproject.toml` registers `[project.entry-points."orch.addons"] <name> = "<module>"`. `orch addon add dashboard|scheduler`
 installs (if needed) and turns the add-on on in this workspace.
 
+## Turn on, turn off
+| You run | Result |
+|---|---|
+| `orch addon add scheduler` | Shows what it brings (command, skill + AGENTS.md entry, ticket data key, dashboard tab, background process) and asks; `--yes` skips the question. Installs it on this computer if needed, then turns it on **in this workspace only** |
+| `orch addon add ./my-addon` | Same for a local folder, labelled "local (not checked by orch)". Change anything in the folder later and it is off until you add it again (`orch update` tells you: "changed on disk") |
+| `orch addon list [--json]` | What is installed and what is on here |
+| `orch addon remove scheduler [--purge]` | Off in this workspace: stops its process, removes its skill and AGENTS.md entry, tab and ticket rows. Ticket data (`ext.scheduler`) stays in the files, hidden; `--purge` also deletes `.orch/addons/scheduler/` and the `[scheduler]` settings |
+| `orch addon uninstall scheduler` | Removes it from this computer (only when it is off here) |
+
+With no add-on on, orch shows no trace of them: not in `orch --help`, skills, AGENTS.md or the dashboard. Only the user turns one on:
+a `.orch/addons.json` that arrives with a git clone activates nothing (the command answers with `orch addon add <name>`); the proof
+of consent lives on this machine under `~/.orch-tool/` (`contracts/addon-manifest.md`). `ORCH_HOME` is honoured only for a plain folder under the real home.
+
+![No add-ons](images/addons-none.png)
+![Scheduler on: the Schedule tab](images/addons-scheduler.png)
+
 ## Commands
 | Command | Does |
 |---|---|
@@ -59,6 +75,11 @@ Dashboard writes nothing.
 7. Background process? `background = true` and a `stop` command; check that you are still active on each pass.
 **Security:** no HTML, CSS or JS reaches the dashboard: only the declared blocks, shown as plain text; links only to tickets or
 `https://`. No actions from the dashboard. A local add-on runs code on this computer with your rights — install only what you trust.
+
+## End-to-end
+`e2e/run.sh A` (local mode, no live servers needed) covers A0-A15: add/remove, no trace without add-ons, the clone case, consent for local
+folders, stale views, snapshots (`docs/e2e-scenarios.md`). The fixture add-on is `e2e/fixtures/hello-world`; it is the smallest working example
+of the steps above. `e2e/run.sh agents` runs the real-agent scenarios (claude, codex) with the scheduler on; `e2e/walkthrough/run.sh` takes the screenshots.
 
 ## Tests
 - T0: `uv run pytest tests/test_loop.py -k cron -x -q` (scheduler), `uv run pytest tests/test_blocks.py -x -q` (dashboard).

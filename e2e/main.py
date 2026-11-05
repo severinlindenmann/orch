@@ -43,13 +43,14 @@ class E:
             "HOME": str(self.home), "PATH": self.path, "USER": "e2e", "LANG": os.environ.get("LANG", "en_US.UTF-8"),
             "TERM": "dumb", "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR", ""),
             "UV_TOOL_DIR": str(tmp / "uvtools"), "UV_TOOL_BIN_DIR": str(self.bin),
-            "ORCH_REPO": str(repo), "ORCH_HOME": str(tmp / "orch-tool"),
+            "ORCH_REPO": str(repo), "ORCH_HOME": os.environ.get("E2E_ORCH_HOME") or str(tmp / "orch-tool"),
             "GIT_AUTHOR_NAME": "e2e", "GIT_AUTHOR_EMAIL": "e2e@example.invalid",
             "GIT_COMMITTER_NAME": "e2e", "GIT_COMMITTER_EMAIL": "e2e@example.invalid",
             "GIT_CONFIG_GLOBAL": str(self.home / ".gitconfig"), "GIT_TERMINAL_PROMPT": "0",
         }
         self.env = {k: v for k, v in self.env.items() if v != ""}
         self.ws_dir = tmp / "ws"
+        self.orch_home = Path(self.env["ORCH_HOME"])
 
     # -- running things --
     def sh(self, cmd, cwd=None, input=None, env=None, timeout=300, check_rc=False):
@@ -98,10 +99,22 @@ class E:
             self._inited.add(name)
         return d
 
+    def addon_add(self, ws, name: str, *flags: str):
+        """`orch addon add <name|folder> --yes` (the consent text is printed, not asked)."""
+        return self.sh(["orch", "addon", "add", str(name), "--yes", *flags], cwd=self.path_of(ws), timeout=600)
+
+    def sched_config(self, ws, agent_line: str, interval: int = 2, inbox_every: int | None = None):
+        """Write the [scheduler] table of .orch/config.toml (agent_line is a TOML line `agent = ...`)."""
+        p = self.path_of(ws) / ".orch" / "config.toml"
+        extra = f"inbox_every = {inbox_every}\n" if inbox_every else ""
+        p.write_text(f"[scheduler]\n{agent_line}\ninterval = {interval}\n{extra}")
+
     def ensure_addons(self):
         if not self._addons:
             for a in ("dashboard", "scheduler"):
-                self.sh(["orch", "addon", "add", a], cwd=self.ws("Pilatus"), check_rc=True, timeout=600)
+                rc, out, err = self.addon_add(self.ws("Pilatus"), a)
+                if rc != 0:
+                    raise Fail(f"addon add {a}: {(err or out)[-200:]}")
             self._addons = True
 
     def label(self, name: str) -> str:
@@ -212,7 +225,7 @@ def main() -> int:
     ap.add_argument("--repo", required=True)
     ap.add_argument("--bins", default="")
     a = ap.parse_args()
-    import scenarios_ws, scenarios_pub, scenarios_rel, scenarios_misc  # noqa: F401,E401
+    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc  # noqa: F401,E401
 
     if a.what == "all":
         ids = list(REGISTRY)
@@ -286,7 +299,7 @@ def main() -> int:
 
 def stop_scheduler(e: E) -> None:
     for wsd in (e.ws_dir.glob("*") if e.ws_dir.exists() else []):
-        pidf = wsd / ".orch" / "scheduler" / "scheduler.pid"
+        pidf = wsd / ".orch" / "addons" / "scheduler" / "scheduler.pid"
         if pidf.exists():
             try:
                 os.kill(int(pidf.read_text().strip()), signal.SIGTERM)

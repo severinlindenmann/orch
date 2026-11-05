@@ -230,7 +230,7 @@ def r9(e):
     w = e.orchj("Pilatus", "relay", "webhook", "new", "--once", "--ticket", t)
     check(w["url"].startswith(e.rel.url + "/webhook/") or "/webhook/" in w["url"], f"url {w}")
     url = w["url"].replace("https://relay.severin.io", e.rel.url) if e.mode == "local" else w["url"]
-    e.orch("Pilatus", "wait", t, "--on", f"webhook:{w['id']}")
+    e.orch("Pilatus", "wait", t, "--on", f"external:{w['id']}")
     r = http("POST", url, {"Content-Type": "application/json"}, b'{"hello":"world"}')
     check(r.status == 202, f"webhook call {r}")
     check(http("POST", url, None, b"x").status == 410, "second call must be 410")
