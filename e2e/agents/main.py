@@ -61,7 +61,7 @@ def main() -> int:
                 fn()
             except Exception:  # noqa: BLE001
                 pass
-        base.stop_scheduler(e)
+        base.stop_automation(e)
         for pid in e.pids:
             try:
                 os.killpg(pid, signal.SIGTERM)

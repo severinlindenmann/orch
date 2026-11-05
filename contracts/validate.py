@@ -1,4 +1,4 @@
-"""Check every contract example (tickets incl. ext.scheduler, run records, pending input, Needs you rows,
+"""Check every contract example (tickets incl. ext.automation, run records, pending input, Needs you rows,
 agent adapters and their config entries, messages, workspaces, add-on manifests and views) and the publish
 crypto vectors. Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
@@ -83,7 +83,7 @@ V["agent-config"] = Draft202012Validator(
 CORE_CLEAN = ["ticket", "run", "run-pending", "needs", "agent-adapter"]
 TOOL_NAMES = re.compile(r"scheduler|automation|focus|relay|dashboard|publish|claude|codex", re.I)
 # Add-on ext schemas, keyed by ext name. A ticket's ext.<name> is checked with it (as the CLI does for installed add-ons).
-EXT = {"scheduler": validator("addons/scheduler.ext"), "automation": V["automation-ext"]}
+EXT = {"automation": V["automation-ext"]}
 
 
 SESSION_ARG = re.compile(r"^(\{session\}|--[a-z][a-z0-9-]*=\{session\})$")
@@ -149,7 +149,7 @@ for name in CORE_CLEAN:
 review = HERE / "review"
 check("ticket", json.loads((review / "ticket.example.json").read_text()), True, "review/ticket")
 check("workspaces", json.loads((review / "workspaces.example.json").read_text()), True, "review/workspaces")
-check("addon-manifest", load(review / "scheduler.orch-addon.toml"), True, "review/scheduler.orch-addon")
+check("addon-manifest", load(review / "automation.orch-addon.toml"), True, "review/automation.orch-addon")
 check("addon-view", load(review / "scheduler.view.example.json"), True, "review/scheduler.view")
 for i, m in enumerate(json.loads((review / "message.examples.json").read_text())):
     check("message", m, True, f"review/message[{i}]")

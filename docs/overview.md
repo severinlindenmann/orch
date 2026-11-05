@@ -15,7 +15,7 @@
 ```
 
 - **workspace** works alone: tickets, checklists with evidence, questions, history. No server needed.
-- **workspace-addons**: optional add-ons, turned on per workspace: dashboard (read-only view, hosts add-on tabs) and scheduler (starts agent runs).
+- **workspace-addons**: optional add-ons, turned on per workspace: dashboard (read-only view, hosts add-on tabs) and automation (starts agent runs).
   The core knows no add-on by name; contract in `contracts/addon-manifest.md`. Once on, an add-on feels like part of orch (same CLI rules, design, skills).
 - **publish**: shares files (end-to-end encrypted) and small apps under a public link.
 - **relay**: workspaces talk to each other and to the phone; webhooks; shared skills, MCP servers, credentials.
@@ -50,7 +50,7 @@
 contracts/          schemas, examples, vectors, API docs (this folder's contracts/)
 install.sh install.ps1   one-line installers (raw.githubusercontent.com)
 workspace/          Python/uv: orch CLI (tickets, addon, update, publish/relay clients) + skills orch, orch-publish, orch-relay
-workspace-addons/   dashboard/, scheduler/  (Python/uv; each has orch-addon.toml)
+workspace-addons/   dashboard/, automation/ (Python/uv; each has orch-addon.toml)
 publish/            Rust: server, portal, file page, onboarding scripts, deploy/
 relay/              Rust: server, portal, onboarding scripts, deploy/
 mobile/             Swift: OrchMobile.xcodeproj

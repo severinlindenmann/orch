@@ -104,16 +104,16 @@ class E:
         return self.sh(["orch", "addon", "add", str(name), "--yes", *flags], cwd=self.path_of(ws), timeout=600)
 
     def sched_config(self, ws, agent_line: str, interval: int = 2, inbox_every: int | None = None):
-        """Write the [scheduler] table of .orch/config.toml (agent_line is a TOML line `agent = ...`)."""
+        """Write the [automation] table of .orch/config.toml (agent_line is a TOML line `agent = ...`)."""
         p = self.path_of(ws) / ".orch" / "config.toml"
         extra = f"inbox_every = {inbox_every}\n" if inbox_every else ""
         cmd = agent_line.split("=", 1)[1].strip()  # the agent is core's [workspace] agent now (generic adapter)
         p.write_text(f'[workspace]\nagent = "e2eagent"\n\n[agents.e2eagent]\nadapter = "generic"\ncommand = {cmd}\n\n'
-                     f"[scheduler]\ninterval = {interval}\n{extra}")
+                     f"[automation]\ninterval = {interval}\n{extra}")
 
     def ensure_addons(self):
         if not self._addons:
-            for a in ("dashboard", "scheduler"):
+            for a in ("dashboard", "automation"):
                 rc, out, err = self.addon_add(self.ws("Pilatus"), a)
                 if rc != 0:
                     raise Fail(f"addon add {a}: {(err or out)[-200:]}")
@@ -280,7 +280,7 @@ def main() -> int:
                 fn()
             except Exception:  # noqa: BLE001
                 pass
-        stop_scheduler(e)
+        stop_automation(e)
         for pid in e.pids:
             try:
                 os.kill(pid, signal.SIGTERM)
@@ -301,9 +301,9 @@ def main() -> int:
     return 1 if n["FAIL"] else 0
 
 
-def stop_scheduler(e: E) -> None:
+def stop_automation(e: E) -> None:
     for wsd in (e.ws_dir.glob("*") if e.ws_dir.exists() else []):
-        pidf = wsd / ".orch" / "addons" / "scheduler" / "scheduler.pid"
+        pidf = wsd / ".orch" / "addons" / "automation" / "automation.pid"
         if pidf.exists():
             try:
                 os.kill(int(pidf.read_text().strip()), signal.SIGTERM)

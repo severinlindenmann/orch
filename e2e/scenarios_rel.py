@@ -144,14 +144,14 @@ def _agent_runs(log: Path) -> int:
     return len(re.findall(r"^end \d+$", log.read_text(), re.M)) if log.exists() else 0  # one end line per finished run
 
 
-def _scheduler_on(e, ws):
-    """R6-R8 need the scheduler add-on in this workspace; A5 turns it on too, but the R group runs alone as well."""
-    e.sh(["orch", "addon", "add", "scheduler", "--yes"], cwd=e.ws(ws), check_rc=True, timeout=600)
+def _automation_on(e, ws):
+    """R6-R8 need the automation add-on in this workspace; A5 turns it on too, but the R group runs alone as well."""
+    e.sh(["orch", "addon", "add", "automation", "--yes"], cwd=e.ws(ws), check_rc=True, timeout=600)
 
 
 def _sched_once(e, ws):
-    rc, out, err = e.sh(["orch", "scheduler", "run", "--once"], cwd=e.ws(ws), timeout=120)
-    check(rc == 0, f"scheduler run --once: {err or out}")
+    rc, out, err = e.sh(["orch", "automation", "run", "--once"], cwd=e.ws(ws), timeout=120)
+    check(rc == 0, f"automation run --once: {err or out}")
     for _ in range(40):  # core starts the agent detached: wait until no run holds a ticket any more
         if not list((e.ws(ws) / ".orch/run/tickets").glob("*.json")):
             break
@@ -162,7 +162,7 @@ def _sched_once(e, ws):
 def r6(e):
     """delegate: nothing runs until the human allows once; then one ticket (no double) and the agent starts."""
     e.ensure_addons()
-    _scheduler_on(e, "Reports")
+    _automation_on(e, "Reports")
     i = ids(e)
     log = _fake_agent(e, e.ws("Reports"))
     before = len(tickets(e, "Reports"))
@@ -171,7 +171,7 @@ def r6(e):
     check(it and it[-1]["allowed"] is False, f"delegate should wait for the human: {it}")
     mid = it[-1]["id"]
     _sched_once(e, "Reports")
-    check(_agent_runs(log) == 0 and len(tickets(e, "Reports")) == before, "scheduler acted before the human allowed")
+    check(_agent_runs(log) == 0 and len(tickets(e, "Reports")) == before, "automation acted before the human allowed")
     e.orch("Reports", "relay", "allow", mid, "--once")
     allow = [m for m in inbox(e, "Pilatus") if m["type"] == "allow"]
     check(allow and allow[-1]["reply_to"] == mid, f"allow message back to Pilatus: {allow}")
@@ -189,7 +189,7 @@ def r6(e):
 def r7(e):
     """start weekly-report: allow --permanent; next start with the token runs without asking; admin allows list."""
     e.ensure_addons()
-    _scheduler_on(e, "Reports")
+    _automation_on(e, "Reports")
     i = ids(e)
     log = _fake_agent(e, e.ws("Reports"))
     base = _agent_runs(log)
@@ -216,13 +216,13 @@ def r7(e):
 def r8(e):
     """start with a wrong token, or with another key's token: not run, waits for the human."""
     e.ensure_addons()
-    _scheduler_on(e, "Reports")
+    _automation_on(e, "Reports")
     i = ids(e)
     if not (e.ws("Pilatus") / ".orch/secrets/allows.json").exists():
         r7(e)
     # nothing else may be due in Reports, so any agent start below comes from the bad-token messages
     due = [t["id"] for t in tickets(e, "Reports") if t["status"] in ("open", "active", "waiting")
-           and (((t.get("ext") or {}).get("scheduler") or {}).get("recurring") or (t.get("waiting_on") or {}).get("kind") == "time")]
+           and (((t.get("ext") or {}).get("automation") or {}).get("recurring") or (t.get("waiting_on") or {}).get("kind") == "time")]
     check(not due, f"Reports has scheduled tickets left from earlier scenarios: {due}")
     log = _fake_agent(e, e.ws("Reports"))
     allows = json.loads((e.ws("Pilatus") / ".orch/secrets/allows.json").read_text())
@@ -240,7 +240,7 @@ def r8(e):
 
 @scenario("R9")
 def r9(e):
-    """Webhook once: ticket waits on it, curl wakes the scheduler's agent; second call -> 410."""
+    """Webhook once: ticket waits on it, curl wakes the automation's agent; second call -> 410."""
     e.ensure_addons()
     ids(e)
     ws = e.ws("Pilatus")
@@ -254,9 +254,9 @@ def r9(e):
     check(r.status == 202, f"webhook call {r}")
     check(http("POST", url, None, b"x").status == 410, "second call must be 410")
     _sched_once(e, "Pilatus")
-    check(_agent_runs(log) == 1, f"scheduler did not wake the agent: {_agent_runs(log)}")
+    check(_agent_runs(log) == 1, f"automation did not wake the agent: {_agent_runs(log)}")
     d = tload(ws, t)
-    check(any("Scheduler started" in h["text"] for h in d["history"]), "no history entry")
+    check(any("Automation started" in h["text"] for h in d["history"]), "no history entry")
 
 
 @scenario("R10")
