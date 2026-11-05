@@ -70,6 +70,7 @@ def test_publish_folder_is_a_deployable_static_app(ws):
 
 def test_snapshot_logo_is_inline(ws):
     html = render_snapshot(ws)
+    assert 'href="favicon.svg"' not in html and "apple-touch-icon" not in html
     assert 'src="logo.svg"' not in html and "data:image/svg+xml;base64," in html
 
 

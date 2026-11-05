@@ -13,7 +13,7 @@ from .views import ViewPuller
 
 DEFAULT_PORT = 8420
 TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
-         ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml"}
+         ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png"}
 
 
 def web_file(name: str) -> bytes:
@@ -67,7 +67,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, b"not found", "text/plain")
             return self._send(200, json.dumps(self.puller.pull(name)).encode(), "application/json")
         name = {"/": "index.html"}.get(path, path.lstrip("/"))
-        if name in ("index.html", "app.js", "blocks.js", "style.css", "tokens.css", "logo.svg"):
+        if name in ("index.html", "app.js", "blocks.js", "style.css", "tokens.css", "logo.svg", "favicon.svg",
+                    "apple-touch-icon.png"):
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         self._send(404, b"not found", "text/plain")
 

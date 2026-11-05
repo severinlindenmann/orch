@@ -81,7 +81,7 @@ def add_parsers(sub, common) -> None:
     life = argparse.ArgumentParser(add_help=False)
     life.add_argument("--days", type=int, help="keep for N days (1-90, default 7)")
     life.add_argument("--permanent", action="store_true")
-    x = pub.add_parser("file", parents=[common, life], help="encrypt and share a file")
+    x = pub.add_parser("file", parents=[common, life], help="encrypt and share a file or a page folder")
     x.add_argument("path")
     x = pub.add_parser("app", parents=[common, life], help="deploy a folder that has app.toml")
     x.add_argument("folder")
@@ -176,7 +176,9 @@ def run_publish(args, root: Path, out) -> None:
         out(
             args,
             r,
-            f"Shared {r['name']} ({_size(r['size'])}), {_exp(r['expires_at'])}. Open this link:\n{r['link']}",
+            f"Shared {r['name']} ({_size(r['size'])}), {_exp(r['expires_at'])}. Open this link:\n{r['link']}"
+            + (f"\nFiles: {', '.join(r['files'])}" if r.get("files") else "")
+            + (f"\nLeft out (look like secrets): {', '.join(r['skipped'])}" if r.get("skipped") else ""),
         )
     elif sub == "app":
         pub = True if args.public else False if args.private else None

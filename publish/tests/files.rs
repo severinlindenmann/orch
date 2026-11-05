@@ -26,6 +26,10 @@ async fn files_upload_list_blob_delete() {
     assert_eq!(b.headers["content-type"], "application/octet-stream");
     assert_eq!(b.headers["content-length"], blob.len().to_string().as_str());
     assert_eq!(b.headers["x-content-type-options"], "nosniff");
+    assert_eq!(
+        b.headers["x-orch-expires-at"],
+        j["expires_at"].as_str().unwrap()
+    );
 
     let d = t
         .api(&ws, "DELETE", &format!("/v1/files/{id}"), vec![])
@@ -263,4 +267,79 @@ fn files_vector_decrypts_with_rust_aes_gcm() {
             }
         )
         .is_err());
+}
+
+#[tokio::test]
+async fn files_page_csp_allows_previews_but_no_inline_or_eval() {
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let id = t.api(&ws, "POST", "/v1/files", vector_blob()).await.json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let p = call(&t.public, "GET", &format!("/f/{id}"), &[], vec![]).await;
+    let csp = p.headers["content-security-policy"].to_str().unwrap();
+    for part in [
+        "script-src 'self';",
+        "img-src 'self' data: blob: https:",
+        "media-src blob:",
+        "frame-src 'self' blob:",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "frame-ancestors 'none'",
+    ] {
+        assert!(csp.contains(part), "{part} missing in {csp}");
+    }
+    assert!(!csp.contains("unsafe-inline") && !csp.contains("unsafe-eval"));
+    assert!(p.text().contains("href=\"/_/favicon.svg\""));
+}
+
+#[tokio::test]
+async fn preview_frame_is_sandboxed_and_has_its_own_csp() {
+    let t = setup();
+    let f = call(&t.public, "GET", "/_/frame.html", &[], vec![]).await;
+    assert_eq!(f.status, 200);
+    assert!(f.text().contains("<script src=\"/_/frame.js\">"));
+    let csp = f.headers["content-security-policy"].to_str().unwrap();
+    assert!(csp.starts_with("default-src 'none';"));
+    assert!(csp.contains("frame-ancestors 'self'") && csp.contains("form-action 'none'"));
+    // opaque origin even if someone frames or opens it without the iframe sandbox attribute
+    assert!(csp.ends_with("; sandbox allow-scripts"));
+    // the frame is framed by the file page only, so no X-Frame-Options: DENY here
+    assert!(f.headers.get("x-frame-options").is_none());
+    assert_eq!(f.headers["referrer-policy"], "no-referrer");
+    let js = call(&t.public, "GET", "/_/file.js", &[], vec![])
+        .await
+        .text();
+    // HTML previews: scripts yes, same origin / top navigation / popups never
+    assert!(js.contains(r#"f.setAttribute("sandbox", "allow-scripts")"#));
+    for bad in [
+        "allow-same-origin",
+        "allow-top-navigation",
+        "allow-popups",
+        "allow-forms",
+    ] {
+        assert!(!js.contains(bad), "{bad} in file.js");
+    }
+    let fj = call(&t.public, "GET", "/_/frame.js", &[], vec![]).await;
+    assert_eq!(fj.status, 200);
+    assert!(fj.text().contains("e.source !== window.parent"));
+}
+
+#[tokio::test]
+async fn favicons_on_public_and_admin() {
+    let t = setup();
+    for r in [&t.public, &t.admin] {
+        let s = call(r, "GET", "/_/favicon.svg", &[], vec![]).await;
+        assert_eq!(s.status, 200);
+        assert_eq!(s.headers["content-type"], "image/svg+xml");
+        assert!(s.text().contains("#60a5fa"), "publish icon is blue");
+        let p = call(r, "GET", "/_/apple-touch-icon.png", &[], vec![]).await;
+        assert_eq!(p.status, 200);
+        assert_eq!(&p.body[1..4], b"PNG");
+    }
+    let portal = call(&t.admin, "GET", "/admin", &[], vec![]).await.text();
+    assert!(portal.contains("rel=\"icon\" href=\"/_/favicon.svg\""));
+    let nf = call(&t.public, "GET", "/nope", &[], vec![]).await.text();
+    assert!(nf.contains("rel=\"apple-touch-icon\""));
 }

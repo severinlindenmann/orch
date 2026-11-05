@@ -81,6 +81,10 @@ pub fn public_router(st: State) -> Router {
         .route("/onboarding.ps1", get(web::onboarding_ps1))
         .route("/_/file.js", get(web::file_js))
         .route("/_/style.css", get(web::style_css))
+        .route("/_/frame.html", get(web::frame_html))
+        .route("/_/frame.js", get(web::frame_js))
+        .route("/_/favicon.svg", get(web::favicon_svg))
+        .route("/_/apple-touch-icon.png", get(web::touch_icon))
         .fallback(web::not_found)
         .with_state(st)
 }

@@ -9,6 +9,16 @@ pub const FILE_HTML: &str = include_str!("../web/file.html");
 pub const PORTAL_HTML: &str = include_str!("../web/portal.html");
 pub const PORTAL_JS: &str = include_str!("../web/portal.js");
 const FILE_JS: &str = include_str!("../web/file.js");
+const FRAME_HTML: &str = include_str!("../web/frame.html");
+const FRAME_JS: &str = include_str!("../web/frame.js");
+const FAVICON_SVG: &str = include_str!("../web/favicon.svg");
+const TOUCH_ICON: &[u8] = include_bytes!("../web/apple-touch-icon.png");
+/// The two icon lines every orch publish page has (public and admin pages, same blue icon).
+pub const ICON_LINKS: &str = "<link rel=\"icon\" href=\"/_/favicon.svg\" type=\"image/svg+xml\"><link rel=\"apple-touch-icon\" href=\"/_/apple-touch-icon.png\">";
+/// CSP of the sandboxed preview frame (docs/publish.md "Previews"). The frame has an opaque origin
+/// (sandbox="allow-scripts" without allow-same-origin), so the page's own scripts run but cannot reach the file
+/// page, its #k= key, cookies or storage. https: is allowed so pages that use a CDN script, style or font work.
+pub const FRAME_CSP: &str = "default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https:; style-src 'unsafe-inline' blob: https:; img-src blob: data: https:; font-src blob: data: https:; media-src blob: data:; connect-src blob: data: https:; form-action 'none'; base-uri 'self'; frame-ancestors 'self'; sandbox allow-scripts";
 const STYLE_CSS: &str = include_str!("../web/style.css");
 const ONBOARDING_SH: &str = include_str!("../onboarding/onboarding.sh");
 const ONBOARDING_PS1: &str = include_str!("../onboarding/onboarding.ps1");
@@ -21,6 +31,53 @@ pub async fn file_js() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         FILE_JS,
+    )
+}
+
+pub async fn frame_html() -> Response {
+    let mut r = (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        FRAME_HTML,
+    )
+        .into_response();
+    let h = r.headers_mut();
+    h.insert(
+        "content-security-policy",
+        HeaderValue::from_static(FRAME_CSP),
+    );
+    h.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
+    h.insert("cache-control", HeaderValue::from_static("no-store"));
+    h.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    r
+}
+
+pub async fn frame_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        FRAME_JS,
+    )
+}
+
+pub async fn favicon_svg() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "image/svg+xml"),
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        FAVICON_SVG,
+    )
+}
+
+pub async fn touch_icon() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        TOUCH_ICON,
     )
 }
 
@@ -198,7 +255,7 @@ pub fn notice(status: u16, icon_name: &str, title: &str, msg: &str, retry: bool)
         ""
     };
     let html = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"dark\"><meta name=\"referrer\" content=\"no-referrer\"><title>{t} · orch</title><link rel=\"stylesheet\" href=\"/_/style.css\"></head><body class=\"public\"><div class=\"shell\"><main class=\"content\"><header class=\"public-brand\"><a class=\"brand\" href=\"/\">{LOGO}orch</a></header><section class=\"card public-card\"><div class=\"file-icon\">{ic}</div><h1>{t}</h1><p>{m}</p>{button}</section><p class=\"public-note\">Made with orch.</p></main></div></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"dark\"><meta name=\"referrer\" content=\"no-referrer\"><title>{t} · orch</title>{ICON_LINKS}<link rel=\"stylesheet\" href=\"/_/style.css\"></head><body class=\"public\"><div class=\"shell\"><main class=\"content\"><header class=\"public-brand\"><a class=\"brand\" href=\"/\">{LOGO}orch</a></header><section class=\"card public-card\"><div class=\"file-icon\">{ic}</div><h1>{t}</h1><p>{m}</p>{button}</section><p class=\"public-note\">Made with orch.</p></main></div></body></html>",
         t = esc(title),
         m = esc(msg),
         ic = icon(icon_name),

@@ -31,6 +31,9 @@ def render_snapshot(root: Path, with_addons: bool = False, orch_bin: str | None 
     js = web_file("blocks.js").decode() + "\n" + web_file("app.js").decode()
     logo = base64.b64encode(web_file("logo.svg")).decode()
     html = html.replace('src="logo.svg"', f'src="data:image/svg+xml;base64,{logo}"')
+    icon = base64.b64encode(web_file("favicon.svg")).decode()
+    html = html.replace('href="favicon.svg"', f'href="data:image/svg+xml;base64,{icon}"')
+    html = html.replace('<link rel="apple-touch-icon" href="apple-touch-icon.png">\n', "")
     html = html.replace('<link rel="stylesheet" href="tokens.css">', "")
     html = html.replace('<link rel="stylesheet" href="style.css">', f"<style>{css}</style>")
     html = html.replace('<script src="blocks.js"></script>\n<script src="app.js"></script>',

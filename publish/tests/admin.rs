@@ -158,6 +158,7 @@ async fn admin_files_apps_and_delete_workspace() {
     assert_eq!(f["items"][0]["id"], id.as_str());
     assert_eq!(f["items"][0]["workspace"], ws.0.as_str());
     assert!(f["items"][0].get("name").is_none());
+    assert!(f["items"][0]["created_at"].as_str().unwrap().ends_with('Z'));
     let a = t.adm("GET", "/admin/api/apps", Value::Null).await.json();
     assert_eq!(a["items"][0]["workspace"], ws.0.as_str());
     let l = t

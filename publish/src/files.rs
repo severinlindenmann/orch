@@ -8,7 +8,9 @@ use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::{json, Value};
 
-pub const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'";
+/// File page: no inline script or eval; previews use blob: URLs made by file.js (img, media, the PDF frame) and the
+/// sandboxed /_/frame.html for HTML pages.
+pub const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob: https:; media-src blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 fn blob_path(st: &State, id: &str) -> std::path::PathBuf {
     st.cfg.blobs_dir().join(id)
@@ -86,7 +88,7 @@ pub async fn page(St(st): St<State>, Path(id): Path<String>) -> Response {
 
 /// GET /f/<id>/blob
 pub async fn blob(St(st): St<State>, Path(id): Path<String>) -> ApiResult<Response> {
-    state_of(&st, &id)?;
+    let row = state_of(&st, &id)?;
     let file = tokio::fs::File::open(blob_path(&st, &id))
         .await
         .map_err(|_| ApiError::not_found("No such file."))?;
@@ -102,6 +104,10 @@ pub async fn blob(St(st): St<State>, Path(id): Path<String>) -> ApiResult<Respon
         .into_response();
     if let Some(n) = len {
         r.headers_mut().insert(header::CONTENT_LENGTH, n.into());
+    }
+    // the page shows "N days left"; absent = permanent
+    if let Some(v) = row.expires_at.and_then(|e| HeaderValue::from_str(&e).ok()) {
+        r.headers_mut().insert("x-orch-expires-at", v);
     }
     Ok(r)
 }

@@ -8,7 +8,7 @@ Publish shares a file or a small app by a private link. Files are encrypted on t
 the key is part of the link after `#` and never reaches the server. Share the whole link, keep it private.
 
     orch publish whoami
-    orch publish file <path> [--days N | --permanent]
+    orch publish file <path or page folder> [--days N | --permanent]   (a folder needs index.html; it opens as a website)
     orch publish new static|python|node [--store none|json|markdown|sqlite] <folder>
     orch publish app <folder> [--days N | --permanent]
     orch publish list
