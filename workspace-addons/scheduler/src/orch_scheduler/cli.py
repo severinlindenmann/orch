@@ -102,16 +102,30 @@ def _run(args, root: Path) -> int:
     if args.cmd == "run":
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         print(f"orch scheduler for {root.name} started {datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ}", flush=True)
+        nonce = service.announce(root)  # background run: record pid + start time in .orch/run/scheduler/
         try:
             Scheduler(root).run_forever(once=args.once)
         except KeyboardInterrupt:
             pass
+        finally:
+            service.forget(root, nonce)
     elif args.cmd == "start":
-        pid = service.start(root)
+        try:
+            pid = service.start(root)
+        except RuntimeError as e:
+            raise Refused(str(e)) from None
         out({"running": True, "pid": pid}, f"Scheduler running (pid {pid}).")
     elif args.cmd == "stop":
-        stopped = service.stop(root)
-        out({"stopped": stopped}, "Scheduler stopped." if stopped else "Scheduler was not running.")
+        try:
+            res = service.stop(root)
+        except RuntimeError as e:
+            res = str(e)
+        if res in ("stopped", "not running"):
+            out({"stopped": res == "stopped"}, "Scheduler stopped." if res == "stopped" else "Scheduler was not running.")
+        else:
+            note = ("A file in .orch/run/scheduler/ names a process that is not this scheduler; nothing was stopped."
+                    if res == "not verified" else res)
+            out({"stopped": False, "note": note}, note)
     elif args.cmd == "status":
         pid = service.running_pid(root)
         out({"running": bool(pid), "pid": pid}, f"Scheduler running (pid {pid})." if pid else "Scheduler is not running.")

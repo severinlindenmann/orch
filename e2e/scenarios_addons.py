@@ -160,7 +160,8 @@ def a9(e):
     check(not lst.get("scheduler", {}).get("active"), f"list says active: {lst.get('scheduler')}")
     check("scheduler" not in [a["name"] for a in _dash_tabs(e, ws)], "tab from a file alone")
     # an empty background run does nothing either: no process, no log
-    check(not list((ws / ".orch/addons/scheduler").glob("*.pid")), "a process was started")
+    check(not list((ws / ".orch/addons/scheduler").glob("*.pid")) and not (ws / ".orch/run/scheduler").exists(),
+          "a process was started")
     # turning it on is the user's action
     check(e.addon_add(ws, "scheduler")[0] == 0, "addon add scheduler in the clone")
     check(e.sh(["orch", "scheduler", "list"], cwd=ws)[0] == 0, "command not available after the user turned it on")
@@ -418,3 +419,49 @@ def a16(e):
     check("publish" not in _help(e, ws), "publish appeared with relay")
     e.orch(ws, "addon", "remove", "relay")
     check("orch-relay" not in _tree_text(ws), "relay left a trace after remove")
+
+
+@scenario("A17")
+def a17(e):
+    """`orch start` / `stop` / `status` across two workspaces with dashboard + scheduler on."""
+    one, two = e.ws("Start1"), e.ws("Start2")
+    for ws in (one, two):
+        for a in ("dashboard", "scheduler"):
+            check(e.addon_add(ws, a)[0] == 0, f"addon add {a} in {ws.name}")
+    try:
+        urls = {}
+        for ws in (one, two):
+            rc, out, err = e.sh(["orch", "start", "--json"], cwd=ws, timeout=60)
+            check(rc == 0, f"start in {ws.name}: {(err or out)[-300:]}")
+            rows = {r["addon"]: r for r in json.loads(out)["addons"]}
+            check(set(rows) == {"dashboard", "scheduler"} and all(r["running"] for r in rows.values()), f"start rows: {rows}")
+            e.pids += [r["pid"] for r in rows.values()]
+            urls[ws.name] = rows["dashboard"]["url"]
+            check(http("GET", urls[ws.name] + "/", timeout=5).status == 200, f"dashboard of {ws.name} does not answer")
+        check(urls["Start1"] != urls["Start2"], f"two dashboards on one port: {urls}")
+        rc, out, _ = e.sh(["orch", "start"], cwd=one)  # again: same processes, plain lines
+        check(rc == 0 and "Started in Start1:" in out and urls["Start1"] in out and "scheduler" in out, f"start text: {out}")
+        check(".orch/run/" in (one / ".gitignore").read_text().splitlines(), "runtime files not gitignored")
+        check((one / ".orch/run/dashboard/server.json").is_file() and (one / ".orch/run/scheduler/scheduler.json").is_file(),
+              "runtime files not in .orch/run/")
+        st = e.orchj(e.tmp, "status")
+        check(sorted(w["name"] for w in st) == ["Start1", "Start2"], f"status: {st}")
+        check(all(len(w["addons"]) == 2 for w in st), f"status add-ons: {st}")
+        rc, out, _ = e.sh(["orch", "stop"], cwd=one)
+        check(rc == 0 and "Stopped in Start1:" in out, f"stop inside: {out}")
+        check([w["name"] for w in e.orchj(e.tmp, "status")] == ["Start2"], "stop inside stopped more than its workspace")
+        rc, _, err = e.sh(["orch", "stop"], cwd=e.tmp)  # outside, no terminal: never guesses
+        check(rc == 2 and "orch stop --all" in err, f"stop outside without a terminal: {rc} {err[-200:]}")
+        rc, out, _ = e.sh(["orch", "stop", "Start2"], cwd=e.tmp)
+        check(rc == 0 and "Stopped in Start2:" in out, f"stop by name: {out}")
+        check(e.orchj(e.tmp, "status") == [], "status not empty after stop")
+        for u in urls.values():
+            try:
+                http("GET", u + "/", timeout=2)
+                gone = False
+            except OSError:
+                gone = True
+            check(gone, f"dashboard still answers at {u}")
+    finally:
+        e.sh(["orch", "stop", "--all"], cwd=e.tmp)
+    return "start in two workspaces (two ports), status, stop inside / by name, refused outside without a terminal"

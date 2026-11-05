@@ -24,6 +24,8 @@ CLAUDE.md                         gets the line "@AGENTS.md" if it lacks it (Cla
   inbox-seen.json                 {"m_…": "2026-11-04T11:00:00Z"} ids already processed. GITIGNORED
   config.toml                     one config file; one table per add-on, e.g. [scheduler] agent = "claude -p {prompt}"
   addons.json                     {"active": {"<name>": {"version", "activated_at"}}}: the ONE switch for an add-on here (addon-manifest.md)
+  run/<name>/                     runtime files of an add-on's background process (pid, port, nonce, log). GITIGNORED.
+                                  Never trusted alone: a pid is used only when > 1 and its identity is checked (addon-manifest.md, Background)
   addons/<name>/                  the add-on's own folder; only it writes here. GITIGNORED. Kept on remove, deleted with --purge
     (scheduler: state.json {"t_…": {"last_run", "next_run"}}, logs/<ticket>-<time>.log)
 ```
@@ -36,6 +38,7 @@ CLAUDE.md                         gets the line "@AGENTS.md" if it lacks it (Cla
 .orch/inbox/
 .orch/inbox-seen.json
 .orch/addons/
+.orch/run/
 ```
 
 ## AGENTS.md block

@@ -16,7 +16,8 @@ A small process on this computer starts an agent run for a ticket when it is due
 - A run for the same ticket never starts twice at the same time.
 
 ## Commands (the user runs them)
-- `orch scheduler start` / `stop` / `status`: background process (stays on until stopped; not started at login).
+- `orch start` / `orch stop` start and stop it together with the other add-ons; `orch scheduler start` / `stop` / `status` only this one
+  (stays on until stopped; not started at login).
 - `orch scheduler run`: same in the foreground; `--once` does a single pass.
 - `orch scheduler list`: next wake-ups and repeats. Every command takes `--json`.
 

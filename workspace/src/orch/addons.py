@@ -37,7 +37,7 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 # Names an add-on may never take: core commands (same list as contracts/addon-manifest.schema.json).
 RESERVED = frozenset(
     "orch core ticket check log ask answer link ext wait addon addons update init publish relay config help "
-    "version view".split()
+    "version view start stop status".split()
 )
 ICONS = frozenset(
     "clock calendar inbox list chart bell book globe link check star box chat folder user bolt".split()

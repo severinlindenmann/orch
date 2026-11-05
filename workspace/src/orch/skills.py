@@ -18,8 +18,53 @@ GITIGNORE_LINES = [
     ".orch/inbox/",
     ".orch/inbox-seen.json",
     ".orch/addons/",
+    ".orch/run/",
 ]
 GITIGNORE_HEADER = "# orch (local only)"
+
+
+def _project_file(root: Path, path: Path) -> Path:
+    """The file behind AGENTS.md, CLAUDE.md or .gitignore. A link is followed only from AGENTS.md or
+    CLAUDE.md and only to exactly the project's AGENTS.md or CLAUDE.md (CLAUDE.md -> AGENTS.md is common).
+    Any other link (to .git/config, a git hook, ...) is refused; .gitignore never follows a link."""
+    if path.is_symlink():
+        top = root.resolve()
+        target = path.resolve()
+        if path.name not in ("AGENTS.md", "CLAUDE.md") or target not in (
+            top / "AGENTS.md",
+            top / "CLAUDE.md",
+        ):
+            raise Refused(
+                f"{path} is a link orch does not write through. Make it a plain file and try again."
+            )
+        path = target
+    if path.exists() and not path.is_file():
+        raise Refused(f"{path} is not a regular file; orch will not write there.")
+    return path
+
+
+def _read_project_file(root: Path, path: Path) -> str:
+    p = _project_file(root, path)
+    return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+def _write_project_file(root: Path, path: Path, text: str) -> None:
+    """Atomic write: a new file next to it, then rename (never writes through a link)."""
+    import tempfile
+
+    p = _project_file(root, path)
+    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=f".{p.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        if p.exists():
+            shutil.copymode(p, tmp)
+        else:
+            os.chmod(tmp, 0o644)
+        os.replace(tmp, p)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def packaged_skills_dir() -> Path:
@@ -77,7 +122,7 @@ def set_block(root: Path, name: str, body: str, addon: bool = False) -> None:
     """Add or replace the block for `name` in AGENTS.md; text outside the block is untouched.
     addon=True uses the add-on markers <!-- orch:addon:<name> --> ... <!-- /orch:addon:<name> -->."""
     path = root / "AGENTS.md"
-    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    text = _read_project_file(root, path)
     while True:  # the markers are ours; strip until stable so pieces cannot join into a marker
         new = _MARKER_RE.sub("", body)
         if new == body:
@@ -101,16 +146,16 @@ def set_block(root: Path, name: str, body: str, addon: bool = False) -> None:
         if text:
             text += "\n"
         text += block
-    path.write_text(text, encoding="utf-8", newline="\n")
+    _write_project_file(root, path, text)
 
 
 def remove_block(root: Path, name: str, addon: bool = False) -> None:
     path = root / "AGENTS.md"
     if not path.exists():
         return
-    text = path.read_text(encoding="utf-8")
+    text = _read_project_file(root, path)
     new = _block_re(name, addon).sub("", text).rstrip("\n")
-    path.write_text(new + "\n" if new else "", encoding="utf-8", newline="\n")
+    _write_project_file(root, path, new + "\n" if new else "")
 
 
 def read_block(source: Path, name: str, block_file: Path | None = None) -> str:
@@ -181,17 +226,17 @@ def unlink_skill(root: Path, name: str) -> None:
 
 def ensure_claude_md(root: Path) -> None:
     path = root / "CLAUDE.md"
-    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    text = _read_project_file(root, path)
     if any(line.strip() == "@AGENTS.md" for line in text.splitlines()):
         return
     if text and not text.endswith("\n"):
         text += "\n"
-    path.write_text(text + "@AGENTS.md\n", encoding="utf-8", newline="\n")
+    _write_project_file(root, path, text + "@AGENTS.md\n")
 
 
 def ensure_gitignore(root: Path) -> None:
     path = root / ".gitignore"
-    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    text = _read_project_file(root, path)
     have = {line.strip() for line in text.splitlines()}
     missing = [x for x in GITIGNORE_LINES if x not in have]
     if not missing:
@@ -200,7 +245,7 @@ def ensure_gitignore(root: Path) -> None:
         text += "\n"
     if GITIGNORE_HEADER not in have:
         text += ("\n" if text else "") + GITIGNORE_HEADER + "\n"
-    path.write_text(text + "\n".join(missing) + "\n", encoding="utf-8", newline="\n")
+    _write_project_file(root, path, text + "\n".join(missing) + "\n")
 
 
 def front_matter_name(skill_dir: Path) -> str:

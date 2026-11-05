@@ -32,6 +32,7 @@ Format: steps → expected result.
 - A13 Add scheduler: `--help` group Add-ons below the core commands, `Refused:` / `{"error"}` style, skill `orch-scheduler` (front matter, commands first), AGENTS block between add-on markers (≤ 6 lines), `.claude/skills` shows it, dashboard tab "Schedule" with a valid view.
 - A14 Edit the local add-on folder after consent → command refused ("not turned on"), gone from `--help`, `orch update` says "changed on disk" and does not re-activate; `orch addon add <folder> --yes` turns it on again.
 - A15 Reserved names (`ticket`, `addon`, `relay`, `init`), a manifest with a core name and a manifest whose skill path leaves its folder are refused, workspace unchanged; a second folder with the same add-on name never creates a second entry.
+- A17 Two workspaces with dashboard + scheduler: `orch start` in each → runtime files in `.orch/run/` (gitignored), one line per add-on, the dashboard link answers (second workspace gets a free port, not 8420 twice); `orch status --json` lists both; `orch stop` inside one stops only that one; `orch stop` outside without a terminal is refused with the `--all` hint; `orch stop <name>` and `--all` stop the rest; pids gone, `status` empty.
 
 ## Publish (P)
 - P1 Admin (private network, admin token) adds Pilatus with description + tags, with rights files + apps (not permanent, not public) → prompt shown once; agent runs `orch publish connect` → skill, AGENTS.md, token in `.orch/secrets/`, gitignored.
