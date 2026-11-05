@@ -11,6 +11,7 @@ AGENTS block, tab and background process. Leftover files or ext data never activ
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -320,8 +321,75 @@ def activation_path(root: Path) -> Path:
     return root / ".orch" / "addons.json"
 
 
-def active(root: Path) -> dict[str, dict]:
-    """The one switch. Only this file says what is on here; anything else is ignored."""
+def consent_path() -> Path:
+    return home() / "consent.json"
+
+
+def _consents() -> list[dict]:
+    try:
+        data = json.loads(consent_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [e for e in data if isinstance(e, dict)] if isinstance(data, list) else []
+
+
+def folder_hash(folder: Path) -> str:
+    """Content hash of a local add-on folder (paths + bytes; no .git, caches, virtual envs)."""
+    h = hashlib.sha256()
+    skip = {".git", "__pycache__", ".venv", "node_modules", ".pytest_cache", ".ruff_cache"}
+    for p in sorted(folder.rglob("*")):
+        rel = p.relative_to(folder)
+        if skip & set(rel.parts) or not p.is_file():
+            continue
+        h.update(rel.as_posix().encode() + b"\0")
+        try:
+            h.update(p.read_bytes())
+        except OSError:
+            h.update(b"?")
+    return h.hexdigest()
+
+
+def _record_for(root: Path, name: str) -> dict:
+    src = next((e["source"] for e in registry() if e["name"] == name), "built-in")
+    rec = {
+        "workspace": str(root.resolve()),
+        "name": name,
+        "source": "built-in" if src == "built-in" else "local",
+    }
+    if src != "built-in":
+        rec["path"] = str(Path(src).resolve())
+        rec["hash"] = folder_hash(Path(src))
+    return rec
+
+
+def record_consent(root: Path, name: str) -> None:
+    """The user turned `name` on in this workspace, on THIS machine (not from a file that arrived by git)."""
+    rec = _record_for(root, name)
+    keep = [e for e in _consents() if not (e.get("workspace") == rec["workspace"] and e.get("name") == name)]
+    consent_path().parent.mkdir(parents=True, exist_ok=True)
+    consent_path().write_text(json.dumps([*keep, rec], indent=2), encoding="utf-8")
+
+
+def drop_consent(root: Path, name: str) -> None:
+    ws = str(root.resolve())
+    keep = [e for e in _consents() if not (e.get("workspace") == ws and e.get("name") == name)]
+    consent_path().parent.mkdir(parents=True, exist_ok=True)
+    consent_path().write_text(json.dumps(keep, indent=2), encoding="utf-8")
+
+
+def consented(root: Path, name: str) -> bool:
+    ws = str(root.resolve())
+    rec = next((e for e in _consents() if e.get("workspace") == ws and e.get("name") == name), None)
+    if rec is None:
+        return False
+    try:
+        return rec == _record_for(root, name)
+    except OSError:
+        return False
+
+
+def listed(root: Path) -> dict[str, dict]:
+    """What .orch/addons.json says (it may have come with a git clone: a wish, not a switch)."""
     try:
         data = json.loads(activation_path(root).read_text(encoding="utf-8"))
         a = data["active"]
@@ -330,6 +398,11 @@ def active(root: Path) -> dict[str, dict]:
     if not isinstance(a, dict):
         return {}
     return {k: v for k, v in a.items() if isinstance(k, str) and NAME_RE.match(k) and isinstance(v, dict)}
+
+
+def active(root: Path) -> dict[str, dict]:
+    """The switch: listed in .orch/addons.json AND turned on by the user on this machine (consent record)."""
+    return {k: v for k, v in listed(root).items() if consented(root, k)}
 
 
 def _save_active(root: Path, a: dict[str, dict]) -> None:
@@ -348,7 +421,12 @@ def active_manifests(root: Path) -> dict[str, dict]:
     return {n: found[n] for n in active(root) if n in found}
 
 
-def not_on_message(name: str) -> str:
+def not_on_message(root: Path, name: str) -> str:
+    if name in listed(root):
+        return (
+            f"Add-on {name} is listed for this workspace but not turned on here. "
+            f"Turn it on: orch addon add {name}"
+        )
     return f"The {name} add-on is not turned on in this workspace. Turn it on: orch addon add {name}"
 
 
@@ -395,7 +473,7 @@ def orch_bin() -> str:
 def dispatch(root: Path, name: str, argv: list[str]) -> int:
     """`orch <name> <args>`: refused unless active here, then `python -m <run> <args>` in a subprocess."""
     if name not in active(root):
-        raise Refused(not_on_message(name))
+        raise Refused(not_on_message(root, name))
     m = discover().get(name)
     if m is None:
         raise Refused(f"The {name} add-on is turned on here but is not installed. Run: orch addon add {name}")
@@ -454,6 +532,8 @@ def reexec(args: list[str]) -> None:
 def add(root: Path, source: str, yes: bool = False, project_only: bool = False) -> None:
     """Install (if needed) and turn on in this workspace. `source` = built-in name or ./folder."""
     if project_only:
+        if not consented(root, source):
+            raise Refused(not_on_message(root, source))
         _activate(root, source)
         return
     reg = registry()
@@ -487,6 +567,7 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
     if entry not in reg:
         _install_tool([e for e in reg if e["name"] != entry["name"]] + [entry])
         _save_registry([e for e in reg if e["name"] != entry["name"]] + [entry])
+    record_consent(root, entry["name"])
     reexec(["addon", "add", entry["name"], "--project-only"])
 
 
@@ -495,7 +576,7 @@ def _activate(root: Path, name: str) -> None:
     if m is None:
         raise Refused(f"The add-on '{name}' is not installed or its {MANIFEST} is not valid.")
     _apply_project(root, m)
-    a = active(root)
+    a = listed(root)
     prev = a.get(name, {})
     a[name] = {"version": m["version"], "activated_at": prev.get("activated_at") or _now()}
     _save_active(root, a)
@@ -527,10 +608,12 @@ def _remove_skill_folders(root: Path, name: str) -> None:
 def remove(root: Path, name: str, purge: bool = False) -> None:
     if not NAME_RE.match(name):
         raise Refused(f"'{name}' is not an add-on name.")
-    a = active(root)
+    a = listed(root)
     if name not in a:
         raise Refused(f"The {name} add-on is not turned on in this workspace.")
-    m = discover().get(name)
+    if purge:
+        _purge_check(root, name)  # refuse before anything is changed
+    m = discover().get(name) if consented(root, name) else None  # never run a package nobody turned on here
     if m is not None and m["background"]:
         env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin()}
         r = subprocess.run([sys.executable, "-P", "-m", m["run"], "stop"], cwd=root, env=env)
@@ -540,19 +623,49 @@ def remove(root: Path, name: str, purge: bool = False) -> None:
     skills.remove_block(root, name, addon=True)
     del a[name]
     _save_active(root, a)
+    drop_consent(root, name)
     if purge:
         _purge(root, name)
 
 
-def _purge(root: Path, name: str) -> None:
-    d = root / ".orch" / "addons" / name
-    if d.is_symlink():
-        d.unlink()
-    elif d.is_dir():
+def _safe_addons_dir(root: Path) -> Path:
+    """.orch and .orch/addons must be real folders inside the workspace (never links out)."""
+    base = root.resolve()
+    orch, ad = root / ".orch", root / ".orch" / "addons"
+    for p in (orch, ad):
+        if p.is_symlink() or skills._is_link(p):
+            raise Refused(f"{p} is a link; orch will not delete anything through it.")
+        if p.exists():
+            try:
+                p.resolve().relative_to(base)
+            except ValueError:
+                raise Refused(f"{p} points outside this workspace; orch will not delete there.") from None
+    return ad
+
+
+def _purge_check(root: Path, name: str) -> Path:
+    """Everything that could make a purge unsafe, checked before anything is changed. Returns the folder."""
+    ad = _safe_addons_dir(root)
+    d = ad / name
+    if d.is_symlink() or skills._is_link(d):
+        raise Refused(f"{d} is a link; orch will not delete it or what it points to.")
+    if d.is_dir():
         try:
-            d.resolve().relative_to((root / ".orch" / "addons").resolve())
+            d.resolve().relative_to(ad.resolve())
         except ValueError:
-            raise Refused(f"{d} points outside this project; orch will not delete it.") from None
+            raise Refused(f"{d} points outside .orch/addons; orch will not delete it.") from None
+        for p in d.rglob("*"):
+            if p.is_symlink() or skills._is_link(p):
+                try:
+                    p.resolve().relative_to(d.resolve())
+                except (ValueError, OSError):
+                    raise Refused(f"{p} is a link that leaves the folder; orch will not delete it.") from None
+    return d
+
+
+def _purge(root: Path, name: str) -> None:
+    d = _purge_check(root, name)
+    if d.is_dir():
         shutil.rmtree(d)
     drop_config_table(root, name)
 
@@ -604,8 +717,11 @@ def update(root: Path, project_only: bool = False) -> list[str]:
         init(root)
         done.append("orch")
     found = discover()
-    a = active(root)
-    for n in sorted(a):
+    a = listed(root)
+    on = sorted(active(root))
+    for n in on:
+        record_consent(root, n)  # `orch update` by the user: same source, new content is accepted
+    for n in on:
         m = found.get(n)
         if m is None:
             continue

@@ -252,7 +252,7 @@ def test_leftovers_never_activate(proj, run, hello):
         (proj / ".orch" / "addons.json").write_text("not json", encoding="utf-8")
         assert addons.active(proj) == {}
         (proj / ".orch" / "addons.json").write_text('{"active": {"../x": {}, "ok": 5, "hello": {}}}')
-        assert list(addons.active(proj)) == ["hello"]
+        assert list(addons.listed(proj)) == ["hello"] and addons.active(proj) == {}  # listed is not on
     finally:
         sys.path.remove(str(hello / "src"))
 
@@ -260,6 +260,7 @@ def test_leftovers_never_activate(proj, run, hello):
 def test_active_but_not_installed_is_refused(proj, run):
     (proj / ".orch").mkdir()
     (proj / ".orch" / "addons.json").write_text('{"active": {"ghost": {"version": "1.0.0"}}}')
+    addons.record_consent(proj, "ghost")
     code, _, err = run("ghost")
     assert code == 2 and "not installed" in err
 
@@ -373,16 +374,99 @@ def test_purge_deletes_data_and_config_table_only(proj, run, hello):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
-def test_purge_never_follows_a_link_out(proj, run, hello, tmp_path):
+def test_purge_refuses_links(proj, run, hello, tmp_path):
     install(run, hello)
     outside = tmp_path / "precious"
     outside.mkdir()
     (outside / "f.txt").write_text("keep", encoding="utf-8")
-    (proj / ".orch/addons").mkdir(parents=True, exist_ok=True)
-    (proj / ".orch/addons/hello").symlink_to(outside, target_is_directory=True)
-    assert run("addon", "remove", "hello", "--purge")[0] == 0
+    ad = proj / ".orch/addons"
+    ad.mkdir(parents=True, exist_ok=True)
+    # 1. the add-on folder is a link out
+    (ad / "hello").symlink_to(outside, target_is_directory=True)
+    assert run("addon", "remove", "hello", "--purge")[0] == 2
     assert (outside / "f.txt").read_text(encoding="utf-8") == "keep"
-    assert not (proj / ".orch/addons/hello").exists()
+    assert "hello" in addons.listed(proj)  # nothing was changed
+    (ad / "hello").unlink()
+    # 2. a link inside the folder points out
+    (ad / "hello").mkdir()
+    (ad / "hello" / "leak").symlink_to(outside, target_is_directory=True)
+    assert run("addon", "remove", "hello", "--purge")[0] == 2
+    assert (outside / "f.txt").is_file() and (ad / "hello").is_dir()
+    (ad / "hello" / "leak").unlink()
+    # 3. .orch/addons is a link out
+    (ad / "hello").rmdir()
+    ad.rmdir()
+    ad.symlink_to(outside, target_is_directory=True)
+    assert run("addon", "remove", "hello", "--purge")[0] == 2
+    assert (outside / "f.txt").is_file()
+    ad.unlink()
+    # 4. .orch itself is a link out
+    moved = tmp_path / "moved-orch"
+    (proj / ".orch").rename(moved)
+    (proj / ".orch").symlink_to(moved, target_is_directory=True)
+    (outside / "addons").mkdir()
+    assert run("addon", "remove", "hello", "--purge")[0] == 2
+    assert (outside / "f.txt").is_file()
+
+
+# ---- consent on this machine ------------------------------------------------------------------------
+
+
+def test_addons_json_from_git_alone_never_activates(proj, run, hello, tmp_path):
+    install(run, hello)
+    listing = (proj / ".orch/addons.json").read_text(encoding="utf-8")
+    # a fresh machine: same workspace files arrive by git clone, but there is no consent record here
+    Path(os.environ["ORCH_HOME"], "consent.json").unlink()
+    assert (proj / ".orch/addons.json").read_text(encoding="utf-8") == listing
+    assert addons.active(proj) == {} and list(addons.listed(proj)) == ["hello"]
+    code, _, err = run("hello", "greet")
+    assert (
+        code == 2
+        and "listed for this workspace but not turned on here. Turn it on: orch addon add hello" in err
+    )
+    assert (
+        run("addon", "list", "--json")[1]
+        and json.loads(run("addon", "list", "--json")[1])[0]["active"] is False
+    )
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    # nothing is refreshed or started by update, and the project step alone cannot turn it on
+    (proj / ".agents/skills/orch-hello/SKILL.md").write_text("mine", encoding="utf-8")
+    assert run("update")[0] == 0
+    assert (proj / ".agents/skills/orch-hello/SKILL.md").read_text(encoding="utf-8") == "mine"
+    assert run("addon", "add", "hello", "--project-only")[0] == 2
+    # the user turns it on here: now it works
+    assert run("addon", "add", str(hello), "--yes")[0] == 0
+    assert run("hello", "greet")[0] == 0
+
+
+def test_consent_is_tied_to_workspace_and_folder_content(proj, run, hello, tmp_path):
+    install(run, hello)
+    rec = json.loads(Path(os.environ["ORCH_HOME"], "consent.json").read_text(encoding="utf-8"))[0]
+    assert rec["workspace"] == str(proj.resolve()) and rec["name"] == "hello"
+    assert rec["path"] == str(hello.resolve()) and len(rec["hash"]) == 64
+    assert run("hello", "greet")[0] == 0
+    # the local folder changed after the user agreed: not on until they agree again
+    (hello / "src/orch_hello/__main__.py").write_text("print('evil')\n", encoding="utf-8")
+    code, _, err = run("hello", "greet")
+    assert code == 2 and "not turned on" in err
+    assert run("addon", "add", str(hello), "--yes")[0] == 0
+    assert run("hello", "greet")[0] == 0
+    # a copy of the workspace somewhere else has no consent
+    other = tmp_path / "copy"
+    other.mkdir()
+    (other / ".orch").mkdir()
+    (other / ".orch/addons.json").write_text((proj / ".orch/addons.json").read_text(encoding="utf-8"))
+    assert addons.active(other) == {}
+
+
+def test_builtin_also_needs_local_record(proj, run, tmp_path, monkeypatch):
+    (proj / ".orch").mkdir()
+    (proj / ".orch/addons.json").write_text('{"active": {"scheduler": {"version": "0.2.0"}}}')
+    monkeypatch.setattr(addons, "_entry_points", lambda: {})
+    assert addons.active(proj) == {}
+    addons.record_consent(proj, "scheduler")  # built-in: no registry entry = built-in
+    assert list(addons.active(proj)) == ["scheduler"]
 
 
 def test_remove_rejects_path_names(proj, run):
