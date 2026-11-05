@@ -38,10 +38,13 @@ index  = {"v": 1, "entry": "index.html", "files": [{"path": "index.html", "type"
 
   Reader rules (any failure = "broken file"): `1 <= M <= 1 MiB`; `v` is 1; 1 to 2000 files; each `path` is
   1 to 255 chars, `/`-separated, no leading `/`, no `\`, no NUL, no empty, `.` or `..` segment, unique; `size` is an
-  integer >= 0; the sizes add up to exactly the bytes left after the index; `entry` is `index.html` and is in `files`.
-  Writer: files sorted by path, compact JSON (`,` `:`), skips dot files and folders (`.env`, `.git`), `node_modules`,
+  integer >= 0; the sizes add up to exactly the bytes left after the index; `entry` is the path of an `.html`/`.htm` file in `files` (the page shown first).
+  Writer: refuses paths the reader rejects; `entry` = `index.html` when the folder has one at the top, else the first `.html`/`.htm` file by path
+  (a folder without any is refused); files sorted by path, compact JSON (`,` `:`), skips dot files and folders (`.env`, `.git`), `node_modules`,
   `__pycache__` and symlinks. The whole bundle counts against the same 100 MB cap.
-  Vector: `vectors/publish-bundle-v1.json` (the bundle bytes, not encrypted; plus `must_fail` cases).
+  Paths in pages resolve like on a web server rooted at the folder (`../`, subfolders); the viewer lists every page.
+  Vector: `vectors/publish-bundle-v1.json` (the bundle bytes, not encrypted: `good` with index.html, `good_no_index`
+  with nested folders and no index.html; plus `must_fail` cases).
 
 ## 2. Relay: TLS + encrypted at rest + admin can read
 

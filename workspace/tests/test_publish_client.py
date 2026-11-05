@@ -90,7 +90,7 @@ def _unbundle(raw: bytes) -> dict:
     for f in idx["files"]:
         out[f["path"]] = raw[pos : pos + f["size"]]
         pos += f["size"]
-    assert pos == len(raw) and idx["entry"] == "index.html" and idx["v"] == 1
+    assert pos == len(raw) and idx["entry"] in out and idx["v"] == 1
     return out
 
 
@@ -112,11 +112,62 @@ def test_folder_share_packs_a_bundle_matching_the_vector(proj, run, pub):
     assert _unbundle(content) == want
 
 
+def test_folder_without_index_html_opens_first_page(proj, run, pub):
+    connect(run, pub)
+    g = BVEC["good_no_index"]
+    for f in g["files"]:
+        (proj / "nest" / f["path"]).parent.mkdir(parents=True, exist_ok=True)
+        (proj / "nest" / f["path"]).write_text(f["content_utf8"])
+    res = json.loads(run("publish", "file", "nest", "--json")[1])
+    _, content = publish.decrypt(pub.files[res["id"]], publish.b64u_decode(res["link"].split("#k=")[1]))
+    (m,) = __import__("struct").unpack(">I", content[:4])
+    assert json.loads(content[4 : 4 + m])["entry"] == g["entry"] == "webpage/about.html"
+    assert _unbundle(content) == _unbundle(bytes.fromhex(g["bundle_hex"]))
+
+
+def test_folder_share_leaves_out_secret_looking_files_and_lists_names(proj, run, pub):
+    connect(run, pub)
+    site = proj / "site"
+    (site / "keys").mkdir(parents=True)
+    (site / "index.html").write_text("<h1>hi</h1>")
+    for n in (
+        "keys/server.pem",
+        "id_rsa",
+        "id_ed25519.pub",
+        "credentials-prod.json",
+        "api.key",
+        "secrets.toml",
+    ):
+        (site / n).write_text("SECRET")
+    code, out, _ = run("publish", "file", "site")
+    assert code == 0, out
+    assert "Files: index.html" in out and "Left out (look like secrets):" in out and "keys/server.pem" in out
+    res = json.loads(run("publish", "file", "site", "--json")[1])
+    assert res["files"] == ["index.html"] and len(res["skipped"]) == 6
+    _, content = publish.decrypt(pub.files[res["id"]], publish.b64u_decode(res["link"].split("#k=")[1]))
+    assert b"SECRET" not in content
+
+
+def test_folder_names_the_viewer_rejects_are_refused_before_upload(proj, run, pub):
+    connect(run, pub)
+    site = proj / "site"
+    site.mkdir()
+    (site / "index.html").write_text("<h1>hi</h1>")
+    (site / "a\\b.css").write_text("x")
+    assert "Rename" in run("publish", "file", "site")[2]
+    (site / "a\\b.css").unlink()
+    deep = site / "/".join(["d" * 60] * 4)
+    deep.mkdir(parents=True)
+    (deep / "long-name.css").write_text("x")
+    assert "255 characters" in run("publish", "file", "site")[2]
+    assert not pub.files
+
+
 def test_folder_without_index_html_is_refused(proj, run, pub):
     connect(run, pub)
     (proj / "notes").mkdir()
     (proj / "notes/a.txt").write_text("a")
-    assert "index.html" in run("publish", "file", "notes")[2]
+    assert ".html page" in run("publish", "file", "notes")[2]
     assert not pub.files
 
 

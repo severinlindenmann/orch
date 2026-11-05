@@ -83,16 +83,36 @@ try {
   fs.writeFileSync(path.join(site, 'data/items.json'), '{"items":["plan","build","ship"]}');
   fs.writeFileSync(path.join(site, 'data/dot.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="#60a5fa"/></svg>');
   fs.writeFileSync(path.join(site, '.env'), 'SECRET=never');
-  const py = spawnSync('uv', ['run', '--project', path.join(REPO, 'workspace'), 'python', '-c',
-    'import sys,pathlib;from orch.publish import bundle;sys.stdout.buffer.write(bundle(pathlib.Path(sys.argv[1])))', site], { maxBuffer: 1 << 26 });
-  if (py.status) throw new Error('bundle: ' + py.stderr);
+  const bundle = (dir) => {
+    const r = spawnSync('uv', ['run', '--project', path.join(REPO, 'workspace'), 'python', '-c',
+      'import sys,pathlib;from orch.publish import bundle;sys.stdout.buffer.write(bundle(pathlib.Path(sys.argv[1])))', dir], { maxBuffer: 1 << 26 });
+    if (r.status) throw new Error('bundle: ' + r.stderr);
+    return r.stdout;
+  };
+  const py = { stdout: bundle(site) };
+  // no index.html, nested folders, ../ references, two pages
+  const web = path.join(TMP, 'web');
+  const put = (rel, text) => { fs.mkdirSync(path.dirname(path.join(web, rel)), { recursive: true }); fs.writeFileSync(path.join(web, rel), text); };
+  put('webpage/page.html', '<!doctype html><html><head><link rel="stylesheet" href="page.css"><link rel="stylesheet" href="assets/css/theme.css"></head><body><h1 id="t">Field page</h1><img id="pic" src="assets/img/dot.svg" width="48" alt="dot"><p id="data">loading…</p><p><a id="go" href="about.html">About</a></p><script src="../shared/app.js"></script></body></html>');
+  put('webpage/about.html', '<!doctype html><link rel="stylesheet" href="page.css"><h1 id="about">About this site</h1><p><a href="page.html">Back to the page</a></p>');
+  put('webpage/page.css', 'body{font:16px system-ui;margin:32px;color:#1f2937}h1{color:rgb(22, 101, 52)}');
+  put('webpage/assets/css/theme.css', 'body{background:#f0fdf4 url(../img/dot.svg) no-repeat right 24px top 24px / 64px}');
+  put('webpage/assets/img/dot.svg', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="#16a34a"/></svg>');
+  put('shared/app.js', 'fetch("../shared/data.json").then(r=>r.json()).then(d=>{document.getElementById("data").textContent="data: "+d.items.join(", ")});');
+  put('shared/data.json', '{"items":["north","south"]}');
+  put('webpage/server.pem', 'SECRET');
+  // internet libraries: a chart lib from a CDN, a Google Font, an https JSON API
+  const cdn = '<!doctype html><html><head><link rel="preconnect" href="https://fonts.gstatic.com"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600&display=swap"><script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script><style>body{margin:32px;background:#fff;font:15px system-ui}h1{font-family:Fraunces,serif;font-size:34px}</style></head><body><h1>Visitors by month</h1><p id="lib">lib missing</p><p id="font">font missing</p><p id="api">api missing</p><div style="width:640px;height:300px"><canvas id="c"></canvas></div><script>document.getElementById("lib").textContent=window.Chart?"chart lib "+Chart.version:"lib missing";new Chart(document.getElementById("c"),{type:"bar",data:{labels:["Jan","Feb","Mar","Apr","May","Jun"],datasets:[{label:"Visitors",data:[12,19,8,15,22,30],backgroundColor:"#60a5fa"}]},options:{animation:false,maintainAspectRatio:false}});document.fonts.load("600 20px Fraunces").then(f=>{document.getElementById("font").textContent=f.length?"font loaded":"font missing"});fetch("https://jsonplaceholder.typicode.com/todos/1").then(r=>r.json()).then(d=>{document.getElementById("api").textContent="api id "+d.id}).catch(e=>{document.getElementById("api").textContent="api failed "+e})</script></body></html>';
   const html = '<!doctype html><html><head><style>body{font:16px system-ui;margin:40px;background:#fff8e7}h1{color:#b45309}</style></head><body><h1>Single page report</h1><p id="js">script did not run</p><p id="parent"></p><p id="store"></p><script>document.getElementById("js").textContent="inline script ran";try{parent.location.href;document.getElementById("parent").textContent="parent readable"}catch(e){document.getElementById("parent").textContent="parent blocked"}try{localStorage.length;document.getElementById("store").textContent="storage open"}catch(e){document.getElementById("store").textContent="storage blocked"}</script></body></html>';
-  const md = '# Release notes\n\nThis week we shipped **file previews** for `orch publish`.\n\n## What changed\n\n- Images, PDFs, video and audio open in the page\n- [x] Markdown is rendered\n- [ ] Office files still download\n\n> Raw HTML like <script>alert(1)</script> is shown as text.\n\n| Format | Preview |\n|---|---|\n| png | image |\n| md | rendered |\n\n```py\ndef hello(name):\n    return f"hi {name}"\n```\n';
+  const md = '# Release notes\n\n![orch logo](https://raw.githubusercontent.com/severinlindenmann/orch/develop/brand/logo.svg)\n\nThis week we shipped **file previews** for `orch publish`.\n\n## What changed\n\n- Images, PDFs, video and audio open in the page\n- [x] Markdown is rendered\n- [ ] Office files still download\n\n> Raw HTML like <script>alert(1)</script> is shown as text.\n\n| Format | Preview |\n|---|---|\n| png | image |\n| md | rendered |\n\n```py\ndef hello(name):\n    return f"hi {name}"\n```\n';
   const code = '"""Small example."""\nimport json\n\n\ndef total(items: list[dict]) -> float:\n    # add up the prices\n    return sum(i["price"] * i.get("qty", 1) for i in items)\n\n\nif __name__ == "__main__":\n    print(json.dumps({"total": total([{"price": 9.5, "qty": 2}])}))\n';
   const csv = 'name,team,score\n"Ada, L.",core,98\nGrace,relay,95\nLinus,publish,91\n';
   const links = {
     html: await share(Buffer.from(html), 'report.html', 'text/html'),
     folder: await share(py.stdout, 'site', 'application/vnd.orch.bundle'),
+    nested: await share(bundle(web), 'web', 'application/vnd.orch.bundle'),
+    cdn: await share(Buffer.from(cdn), 'visitors.html', 'text/html'),
+    fakepdf: await share(Buffer.from('<html><script>alert(1)</script></html>'), 'not-really.pdf', 'application/pdf'),
     png: await share(png, 'chart.png', 'image/png'),
     pdf: await share(pdf('Invoice 2026-11'), 'invoice.pdf', 'application/pdf'),
     md: await share(Buffer.from(md), 'NOTES.md', 'text/markdown'),
@@ -135,6 +155,36 @@ try {
   await ff.locator('#about').waitFor({ timeout: 5000 });
   check(true, 'folder: link to another page of the folder opens it');
 
+  await open('nested');
+  const nf = page.frameLocator('#preview iframe');
+  await nf.locator('#about').waitFor({ timeout: 10000 });
+  check(true, 'nested: no index.html, first page by name (webpage/about.html) shown');
+  check(JSON.stringify(await page.$$eval('#page-pick option', (o) => o.map((x) => x.value))) === '["webpage/about.html","webpage/page.html"]', 'nested: page switcher lists both pages');
+  check((await page.textContent('#preview .chip')) === 'Website · 7 files', 'nested: server.pem left out (7 files)');
+  await page.selectOption('#page-pick', 'webpage/page.html');
+  const pf = page.frameLocator('#preview iframe');
+  await pf.locator('#data').filter({ hasText: 'data: north, south' }).waitFor({ timeout: 10000 });
+  check(true, 'nested: ../shared/app.js runs and fetch ../shared/data.json works');
+  check((await pf.locator('h1').evaluate((e) => getComputedStyle(e).color)) === 'rgb(22, 101, 52)', 'nested: page.css applied');
+  check((await pf.locator('body').evaluate((e) => getComputedStyle(e).backgroundImage)).startsWith('url("blob:'), 'nested: assets/css/theme.css url(../img/dot.svg) resolved');
+  check(await pf.locator('#pic').evaluate((e) => e.complete && e.naturalWidth > 0), 'nested: img in a subfolder loads');
+  await save('nested');
+  await pf.locator('#go').click();
+  await pf.locator('#about').waitFor({ timeout: 5000 });
+  check(true, 'nested: link between pages in a subfolder works');
+
+  await open('cdn');
+  const cf = page.frameLocator('#preview iframe');
+  await cf.locator('#api').filter({ hasText: /api / }).filter({ hasNotText: 'missing' }).waitFor({ timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+  check((await cf.locator('#lib').textContent()).startsWith('chart lib 4'), 'cdn: chart library from https loads (' + await cf.locator('#lib').textContent() + ')');
+  check((await cf.locator('#font').textContent()) === 'font loaded', 'cdn: Google Font loads');
+  check((await cf.locator('#api').textContent()) === 'api id 1', 'cdn: fetch() of an https JSON API works (' + await cf.locator('#api').textContent() + ')');
+  await save('cdn');
+
+  await open('fakepdf');
+  check(await page.$('#preview') === null && await page.$('.other-card') !== null, 'pdf: bytes not starting with %PDF- get the download card');
+
   await open('png');
   await page.waitForSelector('#preview .viewer-bar >> text=900 × 520');
   check(await page.$eval('#preview img', (e) => e.complete && e.naturalWidth === 900), 'png: image shown with its size');
@@ -150,6 +200,8 @@ try {
   check(await page.isVisible('#preview .md h1'), 'md: rendered');
   check((await page.textContent('#preview .md blockquote')).includes('<script>'), 'md: raw html shown as text');
   check(await page.$('#preview .md script') === null, 'md: no script element');
+  await page.waitForTimeout(1000);
+  check(await page.$eval('#preview .md img', (e) => e.complete && e.naturalWidth > 0), 'md: https image shown');
   await save('md');
 
   await open('py');
@@ -167,7 +219,7 @@ try {
   await save('docx');
 
   await page.setViewportSize({ width: 390, height: 800 });
-  for (const k of ['md', 'png', 'folder', 'docx']) { await open(k); await page.waitForTimeout(400); await save(k + '-phone'); }
+  for (const k of ['md', 'png', 'folder', 'nested', 'docx']) { await open(k); await page.waitForTimeout(400); await save(k + '-phone'); }
 
   check(errors.length === 0, 'no page errors ' + errors.join(' | '));
   console.log(fails.length ? `${fails.length} FAILED` : 'ALL OK', '- screenshots in', OUT);

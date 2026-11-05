@@ -100,3 +100,21 @@ test("csv: quotes, newlines in cells, row cap", () => {
 test("crc32 matches the zip reference value", () => {
   assert.strictEqual(P.crc32(new TextEncoder().encode("123456789")), 0xcbf43926);
 });
+
+test("bundle without index.html opens its first page by name", () => {
+  const b = P.unbundle(hex(bv.good_no_index.bundle_hex));
+  assert.strictEqual(b.entry, bv.good_no_index.entry);
+  assert.deepStrictEqual(b.files.map((f) => f.path), bv.good_no_index.files.map((f) => f.path));
+});
+
+test("markdown shows https images only, escaped", () => {
+  const h = P.renderMarkdown('![chart "q"](https://e.example/c.png) ![x](http://e.example/a.png) ![y](javascript:alert(1))');
+  assert.ok(h.includes('<img src="https://e.example/c.png" alt="chart &quot;q&quot;" loading="lazy" referrerpolicy="no-referrer">'), h);
+  assert.ok(h.includes("[x]") && h.includes("[y]") && !h.includes("javascript:alert"));
+});
+
+test("markdown emphasis never lands inside link attributes", () => {
+  const h = P.renderMarkdown("see [my_file_name](https://e.example/a_b_c/*x*) and _this_");
+  assert.ok(h.includes('<a href="https://e.example/a_b_c/*x*" target="_blank" rel="noopener noreferrer nofollow">my_file_name</a>'), h);
+  assert.ok(h.includes("<em>this</em>"));
+});

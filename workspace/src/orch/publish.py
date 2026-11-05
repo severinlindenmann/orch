@@ -121,21 +121,46 @@ def _tokens_path(root: Path) -> Path:
 BUNDLE_TYPE = "application/vnd.orch.bundle"
 
 
-def bundle(folder: Path) -> bytes:
-    """Folder -> bundle bytes (crypto.md "Folder bundle"): u32 BE index length, index JSON, files."""
+SECRET_NAMES = re.compile(
+    r"(?i)^(id_rsa|id_ed25519|id_ecdsa|id_dsa).*|.*\.(pem|key|p8|p12|pfx|keystore|jks)$|^credentials.*\.json$"
+    r"|^secrets?\..*|^service-account.*\.json$"
+)
+
+
+def _bundle_path(rel: str) -> str:
+    """Refuses names the viewer would reject (crypto.md reader rules)."""
+    try:
+        rel.encode("utf-8")
+    except UnicodeEncodeError:
+        raise Refused(f"Rename {rel!r}: its name is not valid text.") from None
+    if "\\" in rel or "\0" in rel or len(rel) > 255 or any(s in ("", ".", "..") for s in rel.split("/")):
+        raise Refused(f"Rename {rel!r}: names with \\ or paths over 255 characters can't be shared.")
+    return rel
+
+
+def bundle(folder: Path, report: dict | None = None) -> bytes:
+    """Folder -> bundle bytes (crypto.md "Folder bundle"): u32 BE index length, index JSON, files.
+    `report` gets "files" (bundled paths) and "skipped" (secret-looking files left out)."""
     if (folder / ".orch").exists():
         raise Refused("This folder is the workspace root. Share a folder inside it.")
-    files = []
+    files, skipped = [], []
     for dirpath, dirs, names in os.walk(folder):
         dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
         for f in sorted(names):
             p = Path(dirpath) / f
             if p.is_symlink() or f in SKIP_DIRS or f.startswith(".") or not p.is_file():
                 continue
-            files.append((p.relative_to(folder).as_posix(), p))
+            rel = p.relative_to(folder).as_posix()
+            if SECRET_NAMES.match(f):
+                skipped.append(rel)
+                continue
+            files.append((_bundle_path(rel), p))
     files.sort()
-    if "index.html" not in [r for r, _ in files]:
-        raise Refused("The folder needs an index.html to be shared as a page.")
+    if report is not None:
+        report["files"], report["skipped"] = [r for r, _ in files], sorted(skipped)
+    pages = [r for r, _ in files if r.lower().endswith((".html", ".htm"))]
+    if not pages:
+        raise Refused("The folder needs at least one .html page to be shared.")
     if len(files) > 2000:
         raise Refused("The folder has more than 2000 files.")
     if sum(p.stat().st_size for _, p in files) > MAX_FILE:
@@ -143,7 +168,7 @@ def bundle(folder: Path) -> bytes:
     datas = [p.read_bytes() for _, p in files]
     index = {
         "v": 1,
-        "entry": "index.html",
+        "entry": "index.html" if "index.html" in pages else pages[0],
         "files": [
             {"path": r, "type": mimetypes.guess_type(r)[0] or "application/octet-stream", "size": len(d)}
             for (r, _), d in zip(files, datas, strict=True)
@@ -155,7 +180,8 @@ def bundle(folder: Path) -> bytes:
 
 def share_file(root: Path, path: Path, days: int | None, permanent: bool) -> dict:
     if path.is_dir():
-        content, mime = bundle(path), BUNDLE_TYPE
+        shown: dict = {}
+        content, mime = bundle(path, shown), BUNDLE_TYPE
         if len(content) > MAX_FILE:
             raise Refused("The folder is bigger than 100 MB.")
     elif not path.is_file():
@@ -178,6 +204,8 @@ def share_file(root: Path, path: Path, days: int | None, permanent: bool) -> dic
     net.write_json(_names_path(root), names, True)
     res["link"] = f"{res['url']}#k={k}"
     res["name"] = name
+    if path.is_dir():
+        res["files"], res["skipped"] = shown["files"], shown["skipped"]
     return res
 
 

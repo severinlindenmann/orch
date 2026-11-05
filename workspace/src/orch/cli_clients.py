@@ -176,7 +176,9 @@ def run_publish(args, root: Path, out) -> None:
         out(
             args,
             r,
-            f"Shared {r['name']} ({_size(r['size'])}), {_exp(r['expires_at'])}. Open this link:\n{r['link']}",
+            f"Shared {r['name']} ({_size(r['size'])}), {_exp(r['expires_at'])}. Open this link:\n{r['link']}"
+            + (f"\nFiles: {', '.join(r['files'])}" if r.get("files") else "")
+            + (f"\nLeft out (look like secrets): {', '.join(r['skipped'])}" if r.get("skipped") else ""),
         )
     elif sub == "app":
         pub = True if args.public else False if args.private else None

@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 
 /// File page: no inline script or eval; previews use blob: URLs made by file.js (img, media, the PDF frame) and the
 /// sandboxed /_/frame.html for HTML pages.
-pub const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+pub const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob: https:; media-src blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 fn blob_path(st: &State, id: &str) -> std::path::PathBuf {
     st.cfg.blobs_dir().join(id)

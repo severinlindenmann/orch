@@ -62,18 +62,20 @@ header of `/f/<id>/blob`), Download and Copy link. Footer: "Only people with thi
 | svg | image, only as `<img>` (scripts in the SVG never run) |
 | pdf | the browser's own PDF viewer in a frame (blob URL), page count, full screen |
 | mp4, webm, mov, m4v / mp3, m4a, wav, ogg, oga, flac, aac, opus | native video / audio player, length |
-| md, markdown | rendered (headings, lists, task lists, quotes, code, tables, links); raw HTML is shown as text; only http(s) and mailto links; images become their alt text |
+| md, markdown | rendered (headings, lists, task lists, quotes, code, tables, links); raw HTML is shown as text; only http(s) and mailto links; https images are shown (no referrer), other images become their alt text |
 | txt, log, py, js, ts, tsx, jsx, json (pretty-printed), yaml, toml, sh, swift, rs, go, sql, css, xml, ini, .env files, Dockerfile, Makefile, c, java, kt, rb, php, lua, … | monospace with line numbers and light highlighting (own ~40-line highlighter, no library); first 1 MB |
 | csv, tsv | table, first 500 rows, column count |
 | html, htm | rendered in a sandboxed frame ("Runs in a safe frame"), full screen |
-| folder (`orch publish file <folder>` with an `index.html`) | the same frame; the folder's css, js, json, images and fonts are served to the page; links between its .html pages work; "Website · N files"; Download gives a .zip |
+| folder (`orch publish file <folder>` with at least one .html page) | the same frame, opening `index.html` or else the first page by name; with several pages a page switcher; paths resolve like on a web server rooted at the folder (subfolders, `../`, css `url()`, img/script src, `fetch()`, links between pages); CDN scripts, Google Fonts and https APIs work; "Website · N files"; Download gives a .zip |
 | everything else (Word, Excel, PowerPoint, zip and other archives, programs) | card with the file name, kind and size, "No preview … yet", Download file |
 
 Folder format: `contracts/crypto.md` "Folder bundle" (vector `contracts/vectors/publish-bundle-v1.json`). The CLI
-leaves out dot files and folders (`.env`, `.git`), `node_modules`, `__pycache__` and symlinks.
+leaves out dot files and folders (`.env`, `.git`), `node_modules`, `__pycache__`, symlinks and secret-looking files
+(`*.pem`, `*.key`, `*.p8`, `*.p12`, `*.pfx`, `id_rsa*`, `id_ed25519*`, `credentials*.json`, `secrets.*`, ...), refuses
+names the viewer can't read (`\`, over 255 characters, not valid text), and prints the shared and left-out file names.
 
 How HTML stays safe (for security review):
-- The file page itself keeps a strict CSP: `script-src 'self'` (no inline, no eval), `img-src 'self' data: blob:`,
+- The file page itself keeps a strict CSP: `script-src 'self'` (no inline, no eval), `img-src 'self' data: blob: https:` (https for images in markdown),
   `media-src blob:`, `frame-src 'self' blob:`, `object-src 'none'`, `base-uri 'none'`, `form-action 'none'`,
   `frame-ancestors 'none'`. All markdown, code and table output is built from escaped text; no file byte becomes markup.
 - HTML runs only in `<iframe sandbox="allow-scripts" src="/_/frame.html">`: no `allow-same-origin` (opaque origin:
@@ -82,14 +84,16 @@ How HTML stays safe (for security review):
   and it accepts one message, only from its parent.
 - `/_/frame.html` has its own CSP: `default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https:;
   style-src 'unsafe-inline' blob: https:; img-src blob: data: https:; font-src blob: data: https:; media-src blob: data:;
-  connect-src blob: data: https:; form-action 'none'; frame-ancestors 'self'`. Inline scripts and eval are allowed there
+  connect-src blob: data: https:; form-action 'none'; base-uri 'self'; frame-ancestors 'self'; sandbox allow-scripts`
+  (the `sandbox` directive keeps the opaque origin even if some page frames or opens it without the attribute). Inline scripts and eval are allowed there
   because shared pages need them; https: lets pages that load a CDN script, style or font work (the page can then
   reach the internet, like any web page the user opens, but it holds nothing but its own content).
 - Inside the frame, `frame.js` writes the page with `document.write` and serves the folder's files: relative `src`,
   `href`, CSS `url()` and `@import` become blob: URLs, and `fetch()` / `XMLHttpRequest` of a relative path answer
   from the folder. Not supported: ES module imports between files (`import "./x.js"`), service workers.
-- The PDF frame is not sandboxed (Chrome's viewer refuses sandboxed frames); its blob is always typed
-  `application/pdf` by the page, never by the sender, so it cannot become an HTML document. Same for images and media.
+- The PDF frame is not sandboxed (Chrome's viewer refuses sandboxed frames). It is shown only when the bytes start
+  with `%PDF-` (else the download card), and its blob is always typed `application/pdf` by the page, never by the
+  sender, so it cannot become an HTML document. Same for images and media.
 
 ## Icons
 

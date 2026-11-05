@@ -402,3 +402,6 @@ table.sheet .rownum{color:#566579;width:45px}
 .preview-pane iframe{height:70vh}
 .privacy{font-size:11px}
 }
+.md img{max-width:100%;height:auto;border-radius:6px}
+.page-pick{background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:12px;max-width:220px}
+@media(max-width:640px){.bar-actions{flex-wrap:wrap;justify-content:flex-end;min-width:0;max-width:100%}.page-pick{max-width:150px}.page-pick~.chip{display:none}}

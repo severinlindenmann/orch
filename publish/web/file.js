@@ -52,7 +52,7 @@ function unbundle(bytes) {
     const m = new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, false);
     if (m < 1 || m > 1048576 || 4 + m > bytes.length) throw new Error("index length");
     const idx = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(4, 4 + m)));
-    if (!idx || idx.v !== 1 || idx.entry !== "index.html" || !Array.isArray(idx.files)) throw new Error("index");
+    if (!idx || idx.v !== 1 || typeof idx.entry !== "string" || !/\.html?$/i.test(idx.entry) || !Array.isArray(idx.files)) throw new Error("index");
     if (idx.files.length < 1 || idx.files.length > 2000) throw new Error("count");
     const seen = new Set();
     const files = [];
@@ -66,8 +66,8 @@ function unbundle(bytes) {
       files.push({ path: p, type: String(f.type || ""), bytes: bytes.subarray(pos, pos + f.size) });
       pos += f.size;
     }
-    if (pos !== bytes.length || !seen.has("index.html")) throw new Error("sizes");
-    return { entry: "index.html", files };
+    if (pos !== bytes.length || !seen.has(idx.entry)) throw new Error("sizes");
+    return { entry: idx.entry, files };
   } catch (e) {
     throw new Error(BROKEN);
   }
@@ -167,12 +167,17 @@ function mdInline(s) {
   const codes = [];
   let t = String(s).replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return "\u0000" + (codes.length - 1) + "\u0000"; });
   t = esc(t);
-  t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g, (_, alt) => "[" + (alt || "image") + "]");
+  // images and links become placeholders too, so emphasis never runs inside their attributes
+  const tags = [];
+  const keep = (html) => { tags.push(html); return "\u0001" + (tags.length - 1) + "\u0001"; };
+  t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g, (_, alt, url) =>
+    /^https:\/\//i.test(url) ? keep('<img src="' + url + '" alt="' + alt + '" loading="lazy" referrerpolicy="no-referrer">') : "[" + (alt || "image") + "]");
   t = t.replace(/\[([^\]]+)\]\(([^)\s]+)[^)]*\)/g, (all, label, url) =>
-    /^(https?:|mailto:)/i.test(url) ? '<a href="' + url + '" target="_blank" rel="noopener noreferrer nofollow">' + label + "</a>" : label);
+    /^(https?:|mailto:)/i.test(url) ? keep('<a href="' + url + '" target="_blank" rel="noopener noreferrer nofollow">') + label + keep("</a>") : label);
   t = t.replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_, a, b) => "<strong>" + (a || b) + "</strong>");
   t = t.replace(/(^|[^*\w])\*([^*\s][^*]*)\*(?!\*)/g, "$1<em>$2</em>").replace(/(^|\W)_([^_\s][^_]*)_(?!\w)/g, "$1<em>$2</em>");
   t = t.replace(/~~([^~]+)~~/g, "<del>$1</del>");
+  t = t.replace(/\u0001(\d+)\u0001/g, (_, i) => tags[+i]);
   return t.replace(/\u0000(\d+)\u0000/g, (_, i) => "<code>" + esc(codes[+i]) + "</code>");
 }
 
@@ -464,7 +469,7 @@ if (typeof document !== "undefined") {
         });
         pane.classList.add("media");
         pane.append(box, foot);
-      } else if (k.kind === "pdf") {
+      } else if (k.kind === "pdf" && String.fromCharCode.apply(null, c.subarray(0, 5)) === "%PDF-") { // else: download card
         const f = document.createElement("iframe");
         f.title = name;
         f.src = blobUrl(c, "application/pdf");
@@ -523,12 +528,32 @@ if (typeof document !== "undefined") {
       } else if (k.kind === "html" || k.kind === "bundle") {
         const pkg = k.kind === "html" ? { entry: "index.html", files: [{ path: "index.html", type: "text/html", bytes: c }] } : r.bundle;
         const chip = el("span", "chip", k.kind === "html" ? "Web page" : "Website · " + pkg.files.length + (pkg.files.length === 1 ? " file" : " files"));
-        const head = bar("head safe", "", "", [chip, fullButton(pane)]);
+        const pages = pkg.files.map((x) => x.path).filter((p) => /\.html?$/i.test(p));
+        const tools = [chip, fullButton(pane)];
+        let frame = htmlFrame(pkg, name);
+        if (pages.length > 1) { // several pages: a small switcher, the first page by name (or index.html) is shown
+          const pick = el("select", "page-pick");
+          pick.id = "page-pick";
+          pick.setAttribute("aria-label", "Page");
+          pages.forEach((p) => {
+            const o = el("option", "", p);
+            o.value = p;
+            o.selected = p === pkg.entry;
+            pick.appendChild(o);
+          });
+          pick.addEventListener("change", function () {
+            const next = htmlFrame({ entry: pick.value, files: pkg.files }, name);
+            frame.replaceWith(next);
+            frame = next;
+          });
+          tools.unshift(pick);
+        }
+        const head = bar("head safe", "", "", tools);
         const t = head.querySelector(".bar-text");
         t.innerHTML = ICONS.lock;
         t.appendChild(document.createTextNode("Runs in a safe frame"));
         pane.classList.add("doc");
-        pane.append(head, htmlFrame(pkg, name));
+        pane.append(head, frame);
       } else {
         return null;
       }

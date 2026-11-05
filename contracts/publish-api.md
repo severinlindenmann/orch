@@ -35,7 +35,7 @@ Expired apps are stopped and removed by the hourly sweep, like files.
 
 | Method | Path | What |
 |---|---|---|
-| GET | `/f/<id>` | Small HTML page. Its JS reads `#k=` from the URL, fetches the blob, decrypts in the browser, shows a preview by type (docs/publish.md "Previews") and offers the download. States: decrypting, ready, expired (`410`), missing key, wrong key. Headers: `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` |
+| GET | `/f/<id>` | Small HTML page. Its JS reads `#k=` from the URL, fetches the blob, decrypts in the browser, shows a preview by type (docs/publish.md "Previews") and offers the download. States: decrypting, ready, expired (`410`), missing key, wrong key. Headers: `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob: https:; media-src blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` |
 | GET | `/_/frame.html` | The sandboxed preview frame for HTML files and folder pages (loaded by the file page in `<iframe sandbox="allow-scripts">`, gets the decrypted files by `postMessage`). Own CSP: see docs/publish.md "Previews" |
 | GET | `/_/favicon.svg`, `/_/apple-touch-icon.png` | The blue orch publish icon (also on the admin listener) |
 | GET | `/f/<id>/blob` | The encrypted blob (`application/octet-stream`). `404` / `410` when gone |

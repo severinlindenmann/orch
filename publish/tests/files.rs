@@ -281,7 +281,7 @@ async fn files_page_csp_allows_previews_but_no_inline_or_eval() {
     let csp = p.headers["content-security-policy"].to_str().unwrap();
     for part in [
         "script-src 'self';",
-        "img-src 'self' data: blob:",
+        "img-src 'self' data: blob: https:",
         "media-src blob:",
         "frame-src 'self' blob:",
         "object-src 'none'",
@@ -303,6 +303,8 @@ async fn preview_frame_is_sandboxed_and_has_its_own_csp() {
     let csp = f.headers["content-security-policy"].to_str().unwrap();
     assert!(csp.starts_with("default-src 'none';"));
     assert!(csp.contains("frame-ancestors 'self'") && csp.contains("form-action 'none'"));
+    // opaque origin even if someone frames or opens it without the iframe sandbox attribute
+    assert!(csp.ends_with("; sandbox allow-scripts"));
     // the frame is framed by the file page only, so no X-Frame-Options: DENY here
     assert!(f.headers.get("x-frame-options").is_none());
     assert_eq!(f.headers["referrer-policy"], "no-referrer");
