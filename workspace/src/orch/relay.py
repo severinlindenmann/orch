@@ -17,7 +17,7 @@ import unicodedata
 import urllib.parse
 from pathlib import Path
 
-from orch import net, skills, tickets
+from orch import net, runs, skills, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -181,7 +181,7 @@ def allowed(root: Path, msg: dict) -> str | None:
     return None
 
 
-def give_allow(root: Path, mid: str, mode: str) -> dict:
+def give_allow(root: Path, mid: str, mode: str, by: str | None = None, via: str | None = None) -> dict:
     msg = load_message(root, mid)
     if msg.get("type") not in ("delegate", "start"):
         raise Refused("Only a delegate or start message can be allowed.")
@@ -197,13 +197,31 @@ def give_allow(root: Path, mid: str, mode: str) -> dict:
         "message_id": mid,
         "used": False,
     }
+    if by:
+        entry["by"], entry["via"] = by, via
     body = {"mode": mode, "kind": kind, "token": token}
     if key:
         body["key"] = key
-    out = _message(root, msg["from"], "allow", body, reply_to=mid)
+    # save the allow first: a second attempt (slow relay, stale lock) must see it and not give another
     a = allows(root)
     a["given"].append(entry)
     _save_allows(root, a)
+    try:
+        out = _message(root, msg["from"], "allow", body, reply_to=mid)
+    except Refused:  # the relay said no: nothing was given
+        a = allows(root)
+        a["given"] = [g for g in a["given"] if g.get("token") != token]
+        _save_allows(root, a)
+        raise
+    if (atid := _allow_ticket(root, mid)) is not None:  # allowed from any surface: the question is settled
+        who = by if by else "someone"
+
+        def close(tk):
+            if tk["status"] not in ("done", "dropped"):
+                tk["status"], tk["waiting_on"] = "done", None
+                tickets.add_history(tk, "agent:relay", f"Allowed by {who} ({via or 'cli'})", "relay")
+
+        tickets.apply_op(root, atid, close)
     return out
 
 
@@ -351,6 +369,8 @@ def resend_outbox(root: Path) -> dict:
     """Post what is left in .orch/outbox/, byte for byte (same id: the relay never makes a second message).
     Returns {"sent": [ids], "waiting": [ids], "dropped": [{id, reason}]}. Stops at the first unreachable."""
     res: dict = {"sent": [], "waiting": [], "dropped": []}
+    with contextlib.suppress(Refused):
+        apply_allow_answers(root)  # the next orch relay command applies an answered allow question
     items = outbox_list(root)
     for n, m in enumerate(items):
         p = _outbox(root) / f"{m['id']}.json"
@@ -618,8 +638,211 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
     return ok, arrival
 
 
+# ---- phone texts and the allow question (SA-01, SA-12, UX-02) -----------------------------------
+
+ALLOW_OPTIONS = ("Allow once", "Always", "Ignore")
+_ALLOW_WORDS = {
+    "allow once": "once",
+    "once": "once",
+    "always": "permanent",
+    "ignore": "ignore",
+    "no": "ignore",
+}
+
+
+def _by_relay(frm: str) -> str:
+    return f"agent:relay from {frm}"
+
+
+def _ticket_exists(root: Path, tid) -> bool:
+    try:
+        tickets.load(root, str(tid))
+    except (Refused, ValueError, OSError):
+        return False
+    return True
+
+
+def _relay_ext(root: Path, tid: str) -> dict:
+    r = tickets.load(root, tid).get("ext", {}).get("relay", {})
+    return r if isinstance(r, dict) else {}
+
+
+def _phone_title(root: Path, text: str, frm: str) -> str:
+    line = " ".join(clean_untrusted(text, 400).split())[:120].strip()
+    return line or f"Message from {name_of(root, frm)}"
+
+
+def _phone_text(root: Path, msg: dict) -> tuple[str, str]:
+    """Act on a text from a phone (under relay.lock). A text naming a local ticket continues it, any other
+    makes a new ticket. Idempotent by message id. Returns (note, ticket id)."""
+    mid, frm = msg["id"], msg["from"]
+    who = clean_untrusted(name_of(root, frm), 100) or frm
+    text = clean_untrusted(str(msg.get("body", {}).get("text", "")), 2000)
+    by = _by_relay(frm)
+    tid = _ticket_by_message(root, mid)
+    if tid is not None and _relay_ext(root, tid).get("message") != mid:
+        return f"added to {tid}", tid  # a re-run of a text that continued a ticket: nothing more to do
+    if tid is None and msg.get("ticket") and _ticket_exists(root, msg["ticket"]):
+        tid = msg["ticket"]
+        # queue it for the running agent first (same id twice = once), then record it on the ticket
+        runs.pending_add(root, tid, who, "message", text or "(empty)", "phone", "p_" + mid[2:])
+
+        def op(t):
+            r = t.setdefault("ext", {}).setdefault("relay", {})
+            if mid in r.get("messages", []):
+                return
+            r["messages"] = [*r.get("messages", []), mid][-50:]
+            tickets.add_history(t, by, f"From {who}: {text}", "phone")
+            t["waiting_on"] = None
+            if t["status"] in ("done", "dropped"):
+                t["status"] = "open"
+                tickets.add_history(t, by, "Reopened by a text from the phone", "phone")
+            elif t["status"] == "waiting":
+                t["status"] = "active"
+
+        tickets.apply_op(root, tid, op)
+        return f"added to {tid}", tid
+    if tid is None:
+        t = tickets.create(root, _phone_title(root, text, frm), by)
+        tid = t["id"]
+        tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
+
+        def op2(t):
+            tickets.add_history(t, by, f"From {who}: {text}", "phone")
+
+        tickets.apply_op(root, tid, op2)
+    ack = _relay_ext(root, tid).get("acked")
+    if not ack:
+        # mark first: the outbox keeps the message until the relay takes it, so it is never sent twice
+        tickets.ext_set(root, tid, "relay", json.dumps({"acked": True}), by)
+        try:
+            title = tickets.load(root, tid)["title"]
+            send_text(root, frm, f"Got it: {title}"[:300], tid, "ack", mid)
+        except Refused:
+            pass  # the phone is not reachable right now: the ticket exists, nobody is blocked
+    return f"new ticket {tid}", tid
+
+
+def _task_of(msg: dict) -> str:
+    b = msg.get("body", {})
+    return clean_untrusted(str(b.get("title") or b.get("key") or "a task"), 120)
+
+
+def _allow_ticket(root: Path, mid: str) -> str | None:
+    for t in tickets.list_all(root):
+        r = t.get("ext", {}).get("relay", {})
+        if isinstance(r, dict) and r.get("allow_message") == mid:
+            return t["id"]
+    return None
+
+
+def _ensure_allow_question(root: Path, msg: dict) -> str:
+    """A delegate/start without an allow becomes a waiting ticket with the relay:allow question, once."""
+    if (tid := _allow_ticket(root, msg["id"])) is not None:
+        return tid
+    peer = clean_untrusted(name_of(root, msg["from"]), 100) or msg["from"]
+    me = clean_untrusted(name_of(root, _cfg(root)["workspace"]), 100)
+    task, by = _task_of(msg), _by_relay(msg["from"])
+    t = tickets.create(root, f"{peer} wants to: {task}"[:200], by)
+    tid = t["id"]
+    b = msg.get("body", {})
+    ext = {"origin": "workspace", "from": msg["from"], "allow_message": msg["id"]}
+    tickets.ext_set(root, tid, "relay", json.dumps(ext), by)
+    action = {
+        "message": msg["id"],
+        "peer": msg["from"],
+        "kind": msg["type"],
+        "key": b.get("key") if msg["type"] == "start" else None,
+    }
+    text = f"{peer} wants {me or 'this workspace'} to: {task}. Allow it?"
+    tickets.ask(root, tid, text, list(ALLOW_OPTIONS), None, by, kind="relay:allow", action=json.dumps(action))
+    return tid
+
+
+def _drop_note(root: Path, mid: str, note: str) -> None:
+    p = root / ".orch" / "inbox-notes.json"
+    notes = net.read_json(p, {})
+    notes[mid] = {"at": tickets.now(), "note": note}
+    net.write_json(p, notes)
+
+
+def _person(answered_by) -> str:
+    s = str(answered_by or "someone")
+    return s[6:] if s.startswith("human:") else s
+
+
+def apply_allow_answers(root: Path) -> list[str]:
+    """Apply each answered relay:allow question once (any surface answered it). Returns notes."""
+    notes = []
+    with locked(root):
+        for t in tickets.list_all(root):
+            r = t.get("ext", {}).get("relay", {})
+            mid = r.get("allow_message") if isinstance(r, dict) else None
+            if not mid or t.get("status") in ("done", "dropped"):
+                continue
+            q = next(
+                (x for x in t["questions"] if x.get("kind") == "relay:allow" and x.get("answer") is not None),
+                None,
+            )
+            if q is None or r.get("allow_applied") == q["id"]:
+                continue
+            choice = _ALLOW_WORDS.get(str(q["answer"]).strip().casefold())
+            if choice is None:
+                if r.get("allow_note") != q["id"]:
+                    ans = clean_untrusted(str(q["answer"]), 100)
+
+                    def note(tk, qid=q["id"], ans=ans):
+                        tk["ext"]["relay"]["allow_note"] = qid
+                        tickets.add_history(
+                            tk,
+                            "agent:relay",
+                            f"Answer not understood: {ans} - reply Allow once, Always or Ignore",
+                            "relay",
+                        )
+
+                    tickets.apply_op(root, t["id"], note)
+                continue
+            who, via, by = (
+                _person(q.get("answered_by")),
+                q.get("via") or "cli",
+                q.get("answered_by") or "unknown",
+            )
+            if choice == "ignore":
+                _drop_note(root, mid, f"ignored by {who} ({via})")
+                if mid not in seen(root):
+                    _mark_seen(root, mid)
+                label, status = f"Ignored by {who} ({via})", "dropped"
+            else:
+                try:
+                    if not any(g.get("message_id") == mid for g in allows(root)["given"]):
+                        give_allow(root, mid, choice, who, via)
+                except Refused as e:
+                    notes.append(f"could not allow {mid}: {e}")
+                    continue
+                label, status = f"Allowed by {who} ({via})", "done"
+
+            def op(tk, qid=q["id"], label=label, status=status, by=by):
+                tk["ext"]["relay"]["allow_applied"] = qid
+                if tk["status"] not in ("done", "dropped"):  # give_allow already closed an allowed one
+                    tickets.add_history(tk, by, label, "relay")
+                    tk["status"], tk["waiting_on"] = status, None
+
+            tickets.apply_op(root, t["id"], op)
+            notes.append(label)
+    return notes
+
+
+def _allow_history(root: Path, msg: dict) -> str | None:
+    for g in allows(root)["given"]:
+        if g.get("message_id") == msg["id"] and g.get("by"):
+            return f"Allowed by {g['by']} ({g.get('via') or 'cli'})"
+    return None
+
+
 def inbox(root: Path, wait: int = 0) -> list[dict]:
     """Pull, save, journal, ack, then handle the ones not seen. Returns [{message, note, allowed}]."""
+    with contextlib.suppress(Refused):
+        apply_allow_answers(root)
     _, arrival = _pull(root, wait)
     d = root / ".orch" / "inbox"
     pending = []
@@ -636,17 +859,31 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
     ):
         note, auto, applied = "", False, None
         try:
-            if m.get("type") in ("answer", "allow"):
+            typ = m.get("type")
+            if typ in ("answer", "allow"):
                 with locked(root):
                     if m["id"] not in seen(root):  # another reader may have handled it meanwhile
-                        if m["type"] == "answer":
+                        if typ == "answer":
                             note, applied = _apply_answer(root, m)
                         else:
                             note = _store_allow(root, m)
                         auto = True
                         _mark_seen(root, m["id"])  # last
-                if not auto:
-                    continue
+            elif typ == "text" and str(m.get("from", "")).startswith("ph_"):
+                with locked(root):
+                    if m["id"] not in seen(root):
+                        note, applied = _phone_text(root, m)
+                        auto = True
+                        _mark_seen(root, m["id"])  # last
+            elif typ in ("delegate", "start") and not _allowed_or_made(root, m):
+                with locked(root):
+                    applied = _ensure_allow_question(root, m)
+                note = f"waiting for your answer on {applied}"
+                auto = True
+            if not auto and (
+                typ in ("answer", "allow") or typ == "text" and str(m.get("from", "")).startswith("ph_")
+            ):
+                continue  # another reader handled it meanwhile
         except (KeyError, TypeError) as e:
             note = f"could not read this message: {e}"
         out.append(
@@ -666,6 +903,8 @@ def since(root: Path, seq: int, wait: int = 0) -> dict:
     allowed}]}. Pulls (waiting up to `wait` s when nothing newer is journaled) but marks nothing seen.
     The journal is a hint: the flags come from the saved message file and the local state."""
     warning = None
+    with contextlib.suppress(Refused):
+        apply_allow_answers(root)
     try:
         _pull(root, 0 if [e for e in _read_arrivals(root) if e["seq"] > seq] else wait)
     except Refused as e:  # best effort: the journal on disk is still true
@@ -719,6 +958,8 @@ def done(root: Path, mid: str) -> dict:
     """Under the lock: an allowed delegate/start gets its ticket (the one for this message if it exists),
     then the id is written to seen LAST. Running it twice gives the same ticket (inbox rule 2)."""
     msg = load_message(root, mid)
+    with contextlib.suppress(Refused):
+        apply_allow_answers(root)
     with locked(root):
         res: dict = {"id": mid, "new": mid not in seen(root), "ticket": None}
         if msg.get("type") in ("delegate", "start"):
@@ -753,6 +994,8 @@ def _ticket_for(root: Path, msg: dict) -> str:
     if msg["type"] == "start":
         ext["start_key"] = b["key"]
     tickets.ext_set(root, t["id"], "relay", json.dumps(ext), by)
+    if line := _allow_history(root, msg):
+        tickets.apply_op(root, t["id"], lambda tk: tickets.add_history(tk, by, line, "relay"))
     for item in b.get("checklist", []) if msg["type"] == "delegate" else []:
         tickets.check_add(root, t["id"], clean_untrusted(str(item), 200) or "(empty)", by)
     return t["id"]
