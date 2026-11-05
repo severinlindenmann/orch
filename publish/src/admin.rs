@@ -89,10 +89,16 @@ fn check(st: &State, h: &HeaderMap) -> ApiResult<()> {
     }
 }
 
-pub fn prompt(st: &State, id: &str, token: &str) -> String {
-    let u = &st.cfg.public_url;
+pub fn prompt(st: &State, w: &Workspace, token: &str) -> String {
+    let (u, id) = (&st.cfg.public_url, &w.id);
+    // The admin already typed a description: do not ask the agent to describe itself.
+    let describe = if w.description_by == "admin" && !w.description.is_empty() {
+        ""
+    } else {
+        "Then describe this workspace in one sentence and 2-4 tags:\n  orch publish profile --description \"...\" --tags a,b\n"
+    };
     format!(
-        "Connect this project to orch publish. Run in the project folder:\n  orch addon add publish --yes\n  orch publish connect {u} --workspace {id} --token {token}\nIf orch is not installed yet, run this instead:\n  macOS/Linux: curl -fsSL {u}/onboarding.sh | sh -s -- --workspace {id} --token {token}\n  Windows:     & ([scriptblock]::Create((irm {u}/onboarding.ps1))) -Workspace {id} -Token {token}\nThen describe this workspace in one sentence and 2-4 tags:\n  orch publish profile --description \"...\" --tags a,b\n"
+        "Connect this project to orch publish. Run in the project folder:\n  orch addon add publish --yes\n  orch publish connect {u} --workspace {id} --token {token}\nIf orch is not installed yet, run this instead:\n  macOS/Linux: curl -fsSL {u}/onboarding.sh | sh -s -- --workspace {id} --token {token}\n  Windows:     & ([scriptblock]::Create((irm {u}/onboarding.ps1))) -Workspace {id} -Token {token}\n{describe}"
     )
 }
 
@@ -158,7 +164,7 @@ async fn ws_create(St(st): St<State>, h: HeaderMap, Json(b): Json<NewWs>) -> Api
         pending: None,
     };
     db::insert_workspace(&st.db.lock().unwrap(), &w, &util::now())?;
-    let p = prompt(&st, &w.id, &token);
+    let p = prompt(&st, &w, &token);
     Ok((
         StatusCode::CREATED,
         Json(json!({"id": w.id, "token": token, "prompt": p})),
@@ -264,7 +270,7 @@ async fn ws_token(
     db::update_workspace(&c, &w)?;
     db::clear_pending(&c, &id)?;
     Ok(Json(
-        json!({"token": token, "prompt": prompt(&st, &id, &token)}),
+        json!({"token": token, "prompt": prompt(&st, &w, &token)}),
     ))
 }
 

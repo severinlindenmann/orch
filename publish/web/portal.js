@@ -222,12 +222,12 @@
   const initials = n => String(n || '?').trim().split(/\s+/).slice(0, 2).map(x => Array.from(x)[0] || '').join('').toUpperCase() || '?';
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-  // The change a workspace proposed for itself: current vs proposed, Approve / Reject (bound to this exact proposal).
+  // The change a workspace proposed for itself: current vs proposed, Approve / Keep current (bound to this exact proposal).
   function reviewCard(w, i) {
     const p = w.pending, list = t => (t && t.length ? t.join(', ') : 'none');
     const line = (label, now, next) => `<div class="review-line"><strong>${label}</strong><p class="muted">Now: ${esc(now)}</p><p>Proposed: ${esc(next)}</p></div>`;
     const special = /[^\x00-\x7f]/.test(p.description || '') ? '<p class="muted">Contains special characters.</p>' : '';
-    return `<section class="review" data-review="${i}" role="group" aria-label="Change to review for ${esc(w.name)}"><h3 tabindex="-1">${esc(w.name)} wants to change how it is described</h3>${p.description !== null && p.description !== undefined && p.description !== (w.description || '') ? line('Description', w.description || 'none', p.description) : ''}${p.tags && list(p.tags) !== list(w.tags) ? line('Tags', list(w.tags), list(p.tags)) : ''}${special}<p class="muted">The old text stays in use until you approve.</p><div class="actions"><button class="primary" data-act="approve">Approve</button><button data-act="reject">Reject</button></div><p class="review-result" role="alert">${esc(flash[w.id] || '')}</p></section>`;
+    return `<section class="review" data-review="${i}" role="group" aria-label="Change waiting for your approval for ${esc(w.name)}"><h3 tabindex="-1">${esc(w.name)} wants to change how it is described</h3>${p.description !== null && p.description !== undefined && p.description !== (w.description || '') ? line('Description', w.description || 'none', p.description) : ''}${p.tags && list(p.tags) !== list(w.tags) ? line('Tags', list(w.tags), list(p.tags)) : ''}${special}<p class="muted">The old text stays in use until you approve.</p><div class="actions"><button class="primary" data-act="approve">Approve</button><button data-act="reject">Keep current</button></div><p class="review-result" role="alert">${esc(flash[w.id] || '')}</p></section>`;
   }
 
   function bindReview(box, w) {
@@ -236,13 +236,13 @@
       if (box.dataset.busy) return;
       box.dataset.busy = '1';
       const label = button.textContent;
-      button.textContent = button.dataset.act === 'approve' ? 'Approving…' : 'Rejecting…';
+      button.textContent = button.dataset.act === 'approve' ? 'Approving…' : 'Keeping…';
       button.setAttribute('aria-busy', 'true');
       box.querySelectorAll('button').forEach(b => { b.disabled = true; });
       result.classList.remove('field-error');
       try {
         await api(`${path('workspaces', w.id)}/profile/${button.dataset.act}`, 'POST', { rev: w.pending.rev });
-        flash[w.id] = button.dataset.act === 'approve' ? 'Approved by you. The new text is now in use.' : 'Rejected. The old text stays.';
+        flash[w.id] = button.dataset.act === 'approve' ? 'Approved by you. The new text is now in use.' : 'Kept the current text.';
         await render();
         return;
       } catch (error) {
@@ -273,12 +273,12 @@
     const files = items.reduce((n, w) => n + (Number(w.files) || 0), 0);
     const apps = items.reduce((n, w) => n + (Number(w.apps) || 0), 0);
     view.innerHTML = head('Your workspaces', 'One place for everything your workspaces share.', items.length ? '<a class="button primary" href="#add">＋ Add workspace</a>' : '') +
-      (items.some(w => w.pending) ? `<p class="notice" role="status"><a href="#review-first" data-first-review>${plural(items.filter(w => w.pending).length, 'change needs', 'changes need')} your review</a></p>` : '') +
+      (items.some(w => w.pending) ? `<p class="notice" role="status"><a href="#review-first" data-first-review>${plural(items.filter(w => w.pending).length, 'change is', 'changes are')} waiting for your approval</a></p>` : '') +
       (items.length ? `<p class="summary-line">${plural(items.length, 'workspace', 'workspaces')} · ${plural(files, 'encrypted file', 'encrypted files')} · ${plural(apps, 'app', 'apps')}</p>` : '') +
       `<div id="editor"></div>${items.length ? `<section class="card">${items.map((w, i) => {
         const rights = w.rights || {};
         const labels = [rights.permanent && 'Permanent files', rights.files && 'Temporary files', rights.apps && 'Apps', rights.public ? 'Public links allowed' : 'Private only'].filter(Boolean);
-        return `<article class="workspace"><div class="avatar" aria-hidden="true">${esc(initials(w.name))}</div><div><h2>${esc(w.name)}${w.pending ? ' <span class="badge">Needs your review</span>' : ''}</h2>${wsDetail(w, labels, items.length > 6)}<p class="counts-inline">${esc(plural(Number(w.files) || 0, 'file', 'files'))} · ${esc(plural(Number(w.apps) || 0, 'app', 'apps'))}</p>${!w.pending && flash[w.id] ? `<p class="review-done" role="status" tabindex="-1">${esc(flash[w.id])}</p>` : ''}${w.pending ? reviewCard(w, i) : ''}</div><div class="number">${esc(w.files)}<small>${Number(w.files) === 1 ? 'file' : 'files'}</small></div><div class="number">${esc(w.apps)}<small>${Number(w.apps) === 1 ? 'app' : 'apps'}</small></div><button class="small" data-edit="${i}" data-edit-id="${esc(w.id)}" aria-label="Edit ${esc(w.name)}">Edit</button></article>`;
+        return `<article class="workspace"><div class="avatar" aria-hidden="true">${esc(initials(w.name))}</div><div><h2>${esc(w.name)}${w.pending ? ' <span class="badge">Waiting for your approval</span>' : ''}</h2>${wsDetail(w, labels, items.length > 6)}<p class="counts-inline">${esc(plural(Number(w.files) || 0, 'file', 'files'))} · ${esc(plural(Number(w.apps) || 0, 'app', 'apps'))}</p>${!w.pending && flash[w.id] ? `<p class="review-done" role="status" tabindex="-1">${esc(flash[w.id])}</p>` : ''}${w.pending ? reviewCard(w, i) : ''}</div><div class="number">${esc(w.files)}<small>${Number(w.files) === 1 ? 'file' : 'files'}</small></div><div class="number">${esc(w.apps)}<small>${Number(w.apps) === 1 ? 'app' : 'apps'}</small></div><button class="small" data-edit="${i}" data-edit-id="${esc(w.id)}" aria-label="Edit ${esc(w.name)}">Edit</button></article>`;
       }).join('')}</section>` : '<section class="card empty-card"><h2>No workspaces yet</h2><p>A workspace is one project or person that shares files and apps. Add the first one, then connect your agent to it.</p><a class="button primary" href="#add">＋ Add your first workspace</a></section>'}<div class="helper"><div><b>Private by design.</b> Files are encrypted before they leave your workspace.</div><a href="#files">View files →</a></div>`;
     view.querySelectorAll('[data-review]').forEach(box => bindReview(box, items[Number(box.dataset.review)]));
     view.querySelectorAll('[data-edit]').forEach(button => button.addEventListener('click', () => edit(items[Number(button.dataset.edit)])));
@@ -347,8 +347,13 @@
       return;
     }
     const name = readyData.name || 'Your workspace';
+    const lines = String(readyData.prompt || '').split('\n');
+    const win = lines.some(l => /^\s*Windows:/.test(l));
+    const unix = lines.filter(l => !/^\s*Windows:/.test(l)).join('\n');
+    readyData.unixPrompt = unix;
+    readyData.winPrompt = lines.filter(l => !/^\s*macOS\/Linux:/.test(l)).join('\n');
     view.innerHTML = head(readyData.renewed ? 'New access key ready' : 'Your workspace is ready', 'Connect it to the agent you already use.') +
-      `<section class="card form pad"><div class="success-icon" aria-hidden="true">✓</div><h2>Connect your agent</h2><p class="section-note">Copy this and paste it into your agent, in the project that should use “${esc(name)}”. The agent connects itself and then describes the workspace.</p><button class="primary copy-prompt" data-copy="prompt">Copy for your agent</button><p class="section-note">This is shown only once. Copy it before you leave this page.</p><details class="more"><summary>Show what will be copied</summary><pre>${esc(readyData.prompt)}</pre></details><p class="fact">Workspace ID <code>${esc(readyData.id)}</code> <button class="small quiet" data-copy="id" aria-label="Copy workspace ID">Copy</button></p><div class="actions"><a class="button quiet" href="#workspaces">Done</a></div></section>`;
+      `<section class="card form pad"><div class="success-icon" aria-hidden="true">✓</div><h2>Connect your agent</h2><p class="section-note">Copy this and paste it into your agent, in the project that should use “${esc(name)}”. The agent connects itself.</p><button class="primary copy-prompt" data-copy="unixPrompt">Copy for your agent</button><p class="section-note">This is shown only once. Copy it before you leave this page.</p><details class="more"><summary>Show what will be copied</summary><pre>${esc(unix)}</pre></details>${win ? `<details class="more"><summary>Windows?</summary><p class="section-note">On Windows, copy this version instead.</p><button class="small" data-copy="winPrompt">Copy for Windows</button></details>` : ''}<p class="fact">Workspace ID <code>${esc(readyData.id)}</code> <button class="small quiet" data-copy="id" aria-label="Copy workspace ID">Copy</button></p><div class="actions"><a class="button quiet" href="#workspaces">Done</a></div></section>`;
     copied = false;
     view.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', () => { copied = true; void copy(readyData[button.dataset.copy]); }));
     view.querySelector('a[href="#workspaces"].quiet')?.addEventListener('click', async e => {
