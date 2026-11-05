@@ -423,3 +423,34 @@ def test_stop_leaves_a_run_that_took_over_alone(proj, run, lab):
     new = runs.claim(proj, tid, "y", "fake", "live", pid=os.getpid())
     runs_live._close(proj, old, interrupt=False)  # a stale stop for the earlier run
     assert runs.read(proj, tid)["run"] == new["run"]
+
+
+def test_a_refused_wrap_leaves_no_env_file(proj, run, lab):
+    _generic_live(proj)
+    tid = _ticket(run)
+    rec = runs.claim(proj, tid, "x", "fake", "live")
+    secret = proj / ".orch" / "run" / f"env-{rec['run']}.json"
+    secret.write_text(json.dumps({"MARKER": "secret"}))
+    code, _, _ = run(
+        "run",
+        "_wrap",
+        rec["run"],
+        "--ticket",
+        tid,
+        "--agent",
+        "fake",
+        "--env-file",
+        str(secret),
+        "--",
+        "true",
+    )  # fmt: skip  (not --live: refused)
+    assert code == 2 and not secret.exists()
+    secret.write_text(json.dumps({"MARKER": "secret"}))
+    other = str(proj / ".orch" / "run" / "env-r_nosuchrun.json")
+    code, _, _ = run("run", "_wrap", "r_nosuchrun", "--ticket", tid, "--agent", "fake", "--live",
+                     "--env-file", other, "--", "true")  # fmt: skip
+    assert code == 2
+    # a release sweeps what was made for the run
+    secret.write_text("{}")
+    runs.release(proj, tid, rec["run"])
+    assert not secret.exists()

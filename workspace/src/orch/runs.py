@@ -436,6 +436,8 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
         if keep_if_pending and waiting:
             return {"released": False, "pending": True}
         _delete(root, tid)
+        for leftover in (f"env-{rec['run']}.json", f"prompt-{rec['run']}.txt", f"hooks-{rec['run']}.json"):
+            (run_dir(root) / leftover).unlink(missing_ok=True)  # files made for this run only
         return {"released": True, "pending": waiting}
 
 

@@ -90,9 +90,18 @@ def _wrap_cmd(root: Path, rest: list[str]) -> None:
     p.add_argument("--new-session")
     p.add_argument("--items", default="")
     a = p.parse_args(rest[:i])
-    stdin = None
+    stdin, env = None, None
+    if a.env_file:  # secrets: read and remove first, so no refusal below can leave the file behind
+        f = Path(a.env_file)
+        if f.resolve() == (runs.run_dir(root) / f"env-{a.run}.json").resolve():
+            try:
+                env = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                env = None
+            finally:
+                f.unlink(missing_ok=True)
     rec = runs.read(root, a.ticket)
-    if not rec or rec["run"] != a.run:
+    if not rec or rec["run"] != a.run or (a.env_file and (not a.live or env is None)):
         raise Refused("orch run _wrap is internal.")
     if a.stdin_file:
         f = Path(a.stdin_file)
@@ -100,17 +109,9 @@ def _wrap_cmd(root: Path, rest: list[str]) -> None:
             raise Refused("orch run _wrap is internal.")  # never read or delete any other file
         stdin = f.read_text(encoding="utf-8")
         f.unlink(missing_ok=True)
-    if a.env_file:
-        f = Path(a.env_file)
-        if not a.live or f.resolve() != (runs.run_dir(root) / f"env-{a.run}.json").resolve():
-            raise Refused("orch run _wrap is internal.")
-        try:
-            env = json.loads(f.read_text(encoding="utf-8"))
-        finally:
-            f.unlink(missing_ok=True)
-        if isinstance(env, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
-            os.environ.clear()  # from here on this process, and the agent, run in the starter's environment
-            os.environ.update(env)
+    if isinstance(env, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
+        os.environ.clear()  # from here on this process, and the agent, run in the starter's environment
+        os.environ.update(env)
     if a.live:
         sys.exit(runs.wrap_live(root, a.run, a.ticket, a.agent, rest[i + 1 :], a.new_session))
     code = runs.wrap(
