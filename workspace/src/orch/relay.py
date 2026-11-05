@@ -202,10 +202,17 @@ def give_allow(root: Path, mid: str, mode: str, by: str | None = None, via: str 
     body = {"mode": mode, "kind": kind, "token": token}
     if key:
         body["key"] = key
-    out = _message(root, msg["from"], "allow", body, reply_to=mid)
+    # save the allow first: a second attempt (slow relay, stale lock) must see it and not give another
     a = allows(root)
     a["given"].append(entry)
     _save_allows(root, a)
+    try:
+        out = _message(root, msg["from"], "allow", body, reply_to=mid)
+    except Refused:  # the relay said no: nothing was given
+        a = allows(root)
+        a["given"] = [g for g in a["given"] if g.get("token") != token]
+        _save_allows(root, a)
+        raise
     if (atid := _allow_ticket(root, mid)) is not None:  # allowed from any surface: the question is settled
         who = by if by else "someone"
 
@@ -673,6 +680,8 @@ def _phone_text(root: Path, msg: dict) -> tuple[str, str]:
     text = clean_untrusted(str(msg.get("body", {}).get("text", "")), 2000)
     by = _by_relay(frm)
     tid = _ticket_by_message(root, mid)
+    if tid is not None and _relay_ext(root, tid).get("message") != mid:
+        return f"added to {tid}", tid  # a re-run of a text that continued a ticket: nothing more to do
     if tid is None and msg.get("ticket") and _ticket_exists(root, msg["ticket"]):
         tid = msg["ticket"]
         # queue it for the running agent first (same id twice = once), then record it on the ticket
@@ -704,12 +713,13 @@ def _phone_text(root: Path, msg: dict) -> tuple[str, str]:
         tickets.apply_op(root, tid, op2)
     ack = _relay_ext(root, tid).get("acked")
     if not ack:
+        # mark first: the outbox keeps the message until the relay takes it, so it is never sent twice
+        tickets.ext_set(root, tid, "relay", json.dumps({"acked": True}), by)
         try:
             title = tickets.load(root, tid)["title"]
             send_text(root, frm, f"Got it: {title}"[:300], tid, "ack", mid)
         except Refused:
             pass  # the phone is not reachable right now: the ticket exists, nobody is blocked
-        tickets.ext_set(root, tid, "relay", json.dumps({"acked": True}), by)
     return f"new ticket {tid}", tid
 
 
@@ -778,6 +788,19 @@ def apply_allow_answers(root: Path) -> list[str]:
                 continue
             choice = _ALLOW_WORDS.get(str(q["answer"]).strip().casefold())
             if choice is None:
+                if r.get("allow_note") != q["id"]:
+                    ans = clean_untrusted(str(q["answer"]), 100)
+
+                    def note(tk, qid=q["id"], ans=ans):
+                        tk["ext"]["relay"]["allow_note"] = qid
+                        tickets.add_history(
+                            tk,
+                            "agent:relay",
+                            f"Answer not understood: {ans} - reply Allow once, Always or Ignore",
+                            "relay",
+                        )
+
+                    tickets.apply_op(root, t["id"], note)
                 continue
             who, via, by = (
                 _person(q.get("answered_by")),
@@ -800,8 +823,9 @@ def apply_allow_answers(root: Path) -> list[str]:
 
             def op(tk, qid=q["id"], label=label, status=status, by=by):
                 tk["ext"]["relay"]["allow_applied"] = qid
-                tickets.add_history(tk, by, label, "relay")
-                tk["status"], tk["waiting_on"] = status, None
+                if tk["status"] not in ("done", "dropped"):  # give_allow already closed an allowed one
+                    tickets.add_history(tk, by, label, "relay")
+                    tk["status"], tk["waiting_on"] = status, None
 
             tickets.apply_op(root, t["id"], op)
             notes.append(label)

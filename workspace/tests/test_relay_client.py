@@ -1086,3 +1086,85 @@ def test_allow_question_always_and_ignore(proj, run, rel):
     assert "m_deleg00000000002" in notes
     rel.acked.clear()
     assert "Spam" not in run("relay", "inbox")[1], "an ignored message does not come back"
+
+
+def test_phone_text_added_to_a_ticket_is_not_acked_on_rerun(proj, run, rel, new_ticket, monkeypatch):
+    from orch import relay
+
+    _phone_setup(rel, run)
+    tid = new_ticket("Weekly report")
+    rel.inbox.append(msg("m_phone00000000005", "text", {"text": "More"}, frm=PHONE, ticket=tid))
+
+    def boom(root, mid):
+        raise RuntimeError("crash")
+
+    real = relay._mark_seen
+    monkeypatch.setattr(relay, "_mark_seen", boom)
+    with pytest.raises(RuntimeError):
+        relay.inbox(proj)
+    monkeypatch.setattr(relay, "_mark_seen", real)
+    out = run("relay", "inbox")[1]
+    assert f"added to {tid}" in out and "new ticket" not in out
+    assert not rel.sent, "no Got it for a text that continued a ticket"
+
+
+def test_phone_ack_is_marked_before_it_is_sent(proj, run, rel, monkeypatch):
+    from orch import relay
+
+    _phone_setup(rel, run)
+    rel.inbox.append(msg("m_phone00000000006", "text", {"text": "Do Y"}, frm=PHONE))
+    seen_flag = []
+    real = relay.send_text
+
+    def spy(root, *a, **k):
+        seen_flag.append([t["ext"]["relay"].get("acked") for t in relay.tickets.list_all(root)])
+        raise RuntimeError("slow relay died")
+
+    monkeypatch.setattr(relay, "send_text", spy)
+    with pytest.raises(RuntimeError):
+        relay.inbox(proj)
+    monkeypatch.setattr(relay, "send_text", real)
+    assert seen_flag == [[True]]
+    run("relay", "inbox")
+    assert not [m for m in rel.sent if m["type"] == "text"], "the marker was written first: no second Got it"
+
+
+def test_allow_entry_saved_before_the_message_and_history_once(proj, run, rel, monkeypatch):
+    from orch import relay
+
+    connect(run, rel)
+    mid = "m_deleg00000000003"
+    rel.inbox.append(msg(mid, "delegate", {"title": "T", "text": "x"}))
+    run("relay", "inbox")
+    t = _allow_ticket_of(run)
+    run("answer", t["id"], "q1", "Always", "--via", "dashboard", "--by", "human:Marco")
+    real = relay._message
+    states = []
+
+    def spy(root, *a, **k):
+        states.append(len(relay.allows(root)["given"]))
+        raise RuntimeError("died while sending")
+
+    monkeypatch.setattr(relay, "_message", spy)
+    with pytest.raises(RuntimeError):
+        run("relay", "inbox")  # died while sending; the entry stays, so a retry cannot give a second allow
+    monkeypatch.setattr(relay, "_message", real)
+    assert states == [1]
+    run("relay", "inbox")
+    assert len(relay.allows(proj)["given"]) == 1
+
+
+def test_allow_history_line_once_and_unknown_answer_gets_a_note(proj, run, rel):
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000004", "delegate", {"title": "T", "text": "x"}))
+    rel.inbox.append(msg("m_deleg00000000005", "delegate", {"title": "U", "text": "x"}))
+    run("relay", "inbox")
+    a, b = sorted(_tickets(run), key=lambda t: t["ext"]["relay"]["allow_message"])
+    run("answer", a["id"], "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+    run("answer", b["id"], "q1", "maybe later", "--via", "cli")
+    run("relay", "inbox")
+    run("relay", "inbox")
+    ha = [h["text"] for h in json.loads(run("ticket", "show", a["id"], "--json")[1])["history"]]
+    assert sum(x.startswith("Allowed by") for x in ha) == 1
+    hb = [h["text"] for h in json.loads(run("ticket", "show", b["id"], "--json")[1])["history"]]
+    assert sum(x.startswith("Answer not understood: maybe later") for x in hb) == 1
