@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import hashlib
 import hmac
 import json
@@ -11,6 +12,7 @@ import os
 import re
 import secrets
 import shutil
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -61,8 +63,45 @@ def seen(root: Path) -> dict:
     return net.read_json(_seen_path(root), {})
 
 
+LOCK_WAIT = 10.0  # seconds to wait for the relay lock
+LOCK_STALE = 60.0  # a lock older than this is left over from a crash
+
+
+@contextlib.contextmanager
+def _locked(root: Path):
+    """Exclusive lock file (.orch/relay.lock, O_EXCL) around read-modify-write of messages and tickets."""
+    p = root / ".orch" / "relay.lock"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + LOCK_WAIT
+    while True:
+        try:
+            os.close(os.open(p, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except FileExistsError:
+            try:
+                if time.time() - p.stat().st_mtime > LOCK_STALE:
+                    p.unlink(missing_ok=True)
+                    continue
+            except FileNotFoundError:
+                continue
+            if time.monotonic() > deadline:
+                raise Refused(
+                    "Another orch command is handling relay messages (busy). Try again in a moment."
+                ) from None
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        p.unlink(missing_ok=True)
+
+
 def mark_seen(root: Path, mid: str) -> bool:
-    """Returns True when the id was new. Written before anyone acts on the message."""
+    """Returns True when the id was new. Done() calls it LAST, after the work for the message."""
+    with _locked(root):
+        return _mark_seen_nolock(root, mid)
+
+
+def _mark_seen_nolock(root: Path, mid: str) -> bool:
     s = seen(root)
     if mid in s:
         return False
@@ -376,31 +415,40 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
 def done(root: Path, mid: str, wake: str | None = None) -> dict:
     """Do the work, mark seen LAST: a crash before that re-delivers the message instead of losing it.
 
-    Everything here is idempotent by message id. An allowed delegate/start gets its ticket (inbox rule 4);
-    `wake` records the message on that ticket and wakes it now."""
+    Under one lock, idempotent by message id: a ticket already made for this message is reused (also when
+    its once-allow is already used); otherwise an allowed delegate/start gets its ticket (inbox rule 4).
+    `wake` records the message on that ticket (`woken_by`) and wakes it now."""
     msg = load_message(root, mid)
     if wake:
         tickets.load(root, wake)  # a wrong ticket id fails before anything is created or used
-    first = mid not in seen(root)
-    res: dict = {"id": mid, "new": first, "ticket": None}
-    if first:
-        mode = allowed(root, msg)
-        if mode:
-            res["ticket"] = _ticket_for(root, msg)
-        if wake:
-            tickets.wake_now(root, wake, mid, tickets.current_actor())
-            res["woke"] = wake
-        if mode:
-            _use_once(root, msg)
-        mark_seen(root, mid)
+    with _locked(root):
+        first = mid not in seen(root)
+        res: dict = {"id": mid, "new": first, "ticket": None}
+        if first:
+            res["ticket"] = _ticket_by_message(root, mid)
+            mode = allowed(root, msg)  # None once a once-allow is used
+            if mode and not res["ticket"]:
+                res["ticket"] = _ticket_for(root, msg)
+            if wake:
+                tickets.wake_now(root, wake, mid, tickets.current_actor())
+                res["woke"] = wake
+            if mode:
+                _use_once(root, msg)
+            _mark_seen_nolock(root, mid)
     return res
+
+
+def _ticket_by_message(root: Path, mid: str) -> str | None:
+    for t in tickets.list_all(root):
+        if t.get("ext", {}).get("relay", {}).get("message") == mid:
+            return t["id"]
+    return None
 
 
 def _ticket_for(root: Path, msg: dict) -> str:
     b, by = msg["body"], f"agent:relay from {msg['from']}"
-    for t in tickets.list_all(root):  # idempotent by message id: a re-delivery after a crash reuses it
-        if t.get("ext", {}).get("relay", {}).get("message") == msg["id"]:
-            return t["id"]
+    if (found := _ticket_by_message(root, msg["id"])) is not None:
+        return found
     if msg["type"] == "start":
         for t in tickets.list_all(root):
             if t.get("ext", {}).get("relay", {}).get("start_key") == b["key"]:

@@ -461,7 +461,7 @@ def test_done_wake_records_message_wakes_ticket_and_is_idempotent(proj, run, new
     code, out, _ = run("relay", "done", "m_text000000000001", "--wake", tid)
     assert code == 0
     t = _ticket(proj, tid)
-    assert t["ext"]["relay"]["message"] == "m_text000000000001"
+    assert t["woken_by"] == "m_text000000000001"
     assert t["wake_at"] and t["wake_at"] < "2030"
     hist = len(t["history"])
     assert "m_text000000000001" in json.loads((proj / ".orch/inbox-seen.json").read_text())
@@ -481,10 +481,10 @@ def test_done_wake_marks_seen_last(proj, run, new_ticket, rel, monkeypatch):
         raise RuntimeError("crash")
 
     with monkeypatch.context() as m:
-        m.setattr(relay, "mark_seen", boom)
+        m.setattr(relay, "_mark_seen_nolock", boom)
         with pytest.raises(RuntimeError):
             run("relay", "done", "m_text000000000001", "--wake", tid)
-    assert _ticket(proj, tid)["ext"]["relay"]["message"] == "m_text000000000001"
+    assert _ticket(proj, tid)["woken_by"] == "m_text000000000001"
     assert "m_text000000000001" not in relay.seen(proj)  # redelivered, not lost
     rel.acked.clear()
     assert "Hi" in run("relay", "inbox")[1]
@@ -531,3 +531,78 @@ def test_done_wake_unknown_ticket_creates_no_ticket(proj, run, rel):
     run("relay", "allow", "m_deleg00000000001", "--once")
     assert run("relay", "done", "m_deleg00000000001", "--wake", "t_nope00")[0] == 2
     assert json.loads(run("ticket", "list", "--json")[1]) == []
+
+
+def test_done_wake_keeps_creation_message_id(proj, run, rel):
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000001", "delegate", {"title": "A", "text": "x"}))
+    rel.inbox.append(msg("m_text000000000002", "text", {"text": "more"}))
+    run("relay", "inbox")
+    run("relay", "allow", "m_deleg00000000001", "--once")
+    tid = json.loads(run("relay", "done", "m_deleg00000000001", "--json")[1])["ticket"]
+    assert run("relay", "done", "m_text000000000002", "--wake", tid)[0] == 0
+    t = _ticket(proj, tid)
+    assert t["ext"]["relay"]["message"] == "m_deleg00000000001" and t["woken_by"] == "m_text000000000002"
+
+
+def test_done_after_crash_post_use_once_returns_existing_ticket_and_wakes(proj, run, rel, monkeypatch):
+    from orch import relay
+
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000001", "delegate", {"title": "A", "text": "x"}))
+    run("relay", "inbox")
+    run("relay", "allow", "m_deleg00000000001", "--once")
+
+    def boom(root, mid):
+        raise RuntimeError("crash")
+
+    with monkeypatch.context() as m:
+        m.setattr(relay, "_mark_seen_nolock", boom)
+        with pytest.raises(RuntimeError):
+            run("relay", "done", "m_deleg00000000001")
+    tid = json.loads(run("ticket", "list", "--json")[1])[0]["id"]
+    out = json.loads(run("relay", "done", "m_deleg00000000001", "--wake", tid, "--json")[1])
+    assert out["ticket"] == tid and out["new"] is True
+    assert _ticket(proj, tid)["woken_by"] == "m_deleg00000000001"
+    assert "m_deleg00000000001" in relay.seen(proj)
+    assert len(json.loads(run("ticket", "list", "--json")[1])) == 1
+
+
+def test_done_lock_busy_refused_and_stale_lock_ignored(proj, run, rel, monkeypatch):
+    import os
+
+    from orch import relay
+
+    connect(run, rel)
+    rel.inbox.append(msg("m_text000000000001", "text", {"text": "Hi"}))
+    run("relay", "inbox")
+    lock = proj / ".orch" / "relay.lock"
+    lock.write_text("x")
+    monkeypatch.setattr(relay, "LOCK_WAIT", 0.2)
+    code, _, err = run("relay", "done", "m_text000000000001")
+    assert code == 2 and "busy" in err
+    old = lock.stat().st_mtime - 120
+    os.utime(lock, (old, old))
+    assert run("relay", "done", "m_text000000000001")[0] == 0
+    assert not lock.exists()
+
+
+def test_inbox_under_orch_agent_still_applies_phone_answer(proj, run, new_ticket, rel, monkeypatch):
+    connect(run, rel)
+    tid = new_ticket()
+    run("ask", tid, "DATE or TS?", "--option", "DATE", "--phone", "--by", "agent:claude-code")
+    q = rel.sent[0]
+    rel.inbox.append(
+        msg(
+            "m_answer0000000002",
+            "answer",
+            {"question_id": "q1", "answer": "DATE", "answered_by": "human:Sev"},
+            frm="ph_iphone0001",
+            ticket=tid,
+            reply_to=q["id"],
+        )
+    )
+    monkeypatch.setenv("ORCH_AGENT", "1")
+    assert run("relay", "inbox")[0] == 0
+    t = _ticket(proj, tid)
+    assert t["questions"][0]["answer"] == "DATE" and t["questions"][0]["via"] == "phone"

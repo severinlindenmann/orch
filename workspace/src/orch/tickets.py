@@ -374,14 +374,14 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
 
 
 def wake_now(root: Path, tid: str, message: str, by: str) -> dict:
-    """Relay `done --wake`: record the message on the ticket (once per message id) and wake it now."""
+    """Relay `done --wake`: record the message in `woken_by` (once per message id) and wake the ticket now.
+
+    Kept apart from ext.relay.message, which is the id of the message that created the ticket."""
     ticket = load(root, tid)
-    cur = ticket.setdefault("ext", {}).get("relay")
-    if isinstance(cur, dict) and cur.get("message") == message:
+    if ticket.get("woken_by") == message:
         return ticket
     ticket["wake_at"] = now()
-    ext = ticket["ext"]
-    ext["relay"] = {**cur, "message": message} if isinstance(cur, dict) else {"message": message}
+    ticket["woken_by"] = message
     add_history(ticket, by, f"Woken by relay message {message}")
     save(root, ticket)
     return ticket
