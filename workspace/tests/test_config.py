@@ -160,7 +160,7 @@ def test_array_lines_are_not_tables_and_del_is_escaped(proj):
     assert not list(p.parent.glob("*.tmp"))
 
 
-def test_init_other_asks_a_name_and_keeps_existing(proj, run, monkeypatch):
+def test_init_other_asks_a_name_and_keeps_existing(proj, run, fake_path, monkeypatch):
     config.add_agent(proj, "my-agent", "old {prompt}")
     monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
     answers = iter(["", "new {prompt}"])
