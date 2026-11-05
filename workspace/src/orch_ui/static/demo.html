@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>orch UI kit</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="components.css">
+  <script src="icons.js" defer></script>
+  <script src="question-card-state.js" defer></script>
+  <script src="question-card.js" defer></script>
+  <script src="evidence.js" defer></script>
+  <script src="demo.js" defer></script>
+</head>
+<body>
+  <main class="demo">
+    <header class="demo-head">
+      <div><h1>orch UI kit</h1><p class="muted">Clear choices. Proof you can inspect.</p></div>
+      <span class="badge dashed">Local demo · nothing is sent</span>
+    </header>
+    <section aria-labelledby="questions-title">
+      <div class="section-head"><h2 id="questions-title">Question card</h2><span class="muted">Choose an answer. You have 5 seconds to undo.</span></div>
+      <div class="demo-grid" id="questions"></div>
+    </section>
+    <section aria-labelledby="proof-title">
+      <div class="section-head"><h2 id="proof-title">Proof</h2><span class="muted">Ticket · Invoice CSV export</span></div>
+      <div class="evs" id="proof-chips" aria-label="Proof previews"></div>
+      <div class="demo-grid proof-grid" id="proof-views"></div>
+    </section>
+  </main>
+</body>
+</html>
