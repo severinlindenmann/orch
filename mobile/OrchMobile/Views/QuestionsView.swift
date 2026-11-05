@@ -28,7 +28,7 @@ struct QuestionsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if let focused {
                     Button { model.focusedQuestion = nil } label: {
-                        Text("‹ All questions").font(Theme.font(13)).frame(minWidth: 140, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                        Text("‹ All questions").themeFont(13).frame(minWidth: 140, minHeight: 44, alignment: .leading).contentShape(Rectangle())
                     }.buttonStyle(PressStyle()).foregroundStyle(Theme.brand).accessibilityIdentifier("all-questions").padding(.bottom, 8)
                     questionCard(focused)
                 } else {
@@ -68,11 +68,11 @@ struct QuestionsView: View {
             }.skeleton(true).accessibilityHidden(true)
         } else if visibleQuestions.isEmpty && model.hasLoaded {
             VStack(alignment: .leading, spacing: 6) {
-                Text("No questions right now").font(Theme.font(15, .semibold))
+                Text("No questions right now").themeFont(15, .semibold)
                 Text("When your workspace needs a decision, it shows up here and you get a notification.")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .themeFont(13).foregroundStyle(Theme.muted)
                 Button { Task { await model.refresh() } } label: {
-                    Text(model.isLoading ? "Checking…" : "Check again").font(Theme.font(13, .semibold)).foregroundStyle(Theme.brand)
+                    Text(model.isLoading ? "Checking…" : "Check again").themeFont(13, .semibold).foregroundStyle(Theme.brand)
                         .frame(minWidth: 120, minHeight: 44, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(PressStyle()).disabled(model.isLoading)
             }.orchCard()
@@ -85,7 +85,7 @@ struct QuestionsView: View {
     private func chip(_ title: String, id: String?) -> some View {
         let selected = model.questionFilter == id
         return Button { model.questionFilter = id } label: {
-            Text(title).font(Theme.font(12)).padding(.horizontal, 10).frame(minWidth: 44, minHeight: 44)
+            Text(title).themeFont(12).padding(.horizontal, 10).frame(minWidth: 44, minHeight: 44)
                 .foregroundStyle(selected ? Theme.brand : Theme.muted)
                 .background(selected ? Theme.brand.opacity(0.09) : Theme.bg, in: RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(selected ? Theme.brand : Theme.borderStrong))
@@ -100,20 +100,20 @@ struct QuestionsView: View {
                 Text(question.workspaceDisplayName).foregroundStyle(Theme.muted)
                 Spacer()
                 Text(answer == nil ? "Needs you" : "✓ Answered").foregroundStyle(Theme.brand)
-            }.font(Theme.font(12))
-            Text(question.message.body.text).font(Theme.font(18, .semibold)).tracking(-0.35)
+            }.themeFont(12)
+            Text(question.message.body.text).themeFont(18, .semibold).tracking(-0.35)
             if let title = question.message.body.title {
-                Text("Task: \(title)").font(Theme.font(12)).foregroundStyle(Theme.muted)
+                Text("Task: \(title)").themeFont(12).foregroundStyle(Theme.muted)
             }
             if let answer {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Answer sent: \(answer)").font(Theme.font(14))
+                    Text("Answer sent: \(answer)").themeFont(14)
                 }.foregroundStyle(Theme.brand).padding(.top, 2)
             } else if let choice = pending[question.id] {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
                         ProgressView().tint(Theme.brand)
-                        Text(sending.contains(question.id) ? "Sending \(choice)…" : "Sending \(choice) in 3 s…").font(Theme.font(14, .medium))
+                        Text(sending.contains(question.id) ? "Sending \(choice)…" : "Sending \(choice) in 3 s…").themeFont(14, .medium)
                     }
                     if !sending.contains(question.id) {
                         Button("Undo") { undo(question) }.buttonStyle(SecondaryButtonStyle())
@@ -125,11 +125,11 @@ struct QuestionsView: View {
                     ForEach(question.message.body.options, id: \.self) { option in
                         let recommended = option == question.message.body.recommended
                         Button { choose(question, option) } label: {
-                            let tag = Text("Recommended").font(Theme.font(11, .semibold)).foregroundStyle(Theme.brand)
+                            let tag = Text("Recommended").themeFont(11, .semibold).foregroundStyle(Theme.brand)
                                 .lineLimit(1).fixedSize()
                                 .padding(.horizontal, 8).padding(.vertical, 3)
                                 .overlay(Capsule().stroke(Theme.brand.opacity(0.7)))
-                            let label = Text(option).font(Theme.font(15)).lineLimit(3).minimumScaleFactor(0.6)
+                            let label = Text(option).themeFont(15).lineLimit(3).minimumScaleFactor(0.6)
                             Group {
                                 if typeSize.isAccessibilitySize {
                                     VStack(alignment: .leading, spacing: 6) { label; if recommended { tag } }

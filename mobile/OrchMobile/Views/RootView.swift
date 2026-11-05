@@ -54,15 +54,15 @@ struct RootView: View {
     private func tab(_ tab: Tab, _ title: String, _ symbol: String) -> some View {
         Button { if tab != .questions { model.focusedQuestion = nil }; model.tab = tab } label: {
             VStack(spacing: 5) {
-                Image(systemName: symbol).font(.system(size: 21))
+                Image(systemName: symbol).themeFont(21)
                     .overlay(alignment: .topTrailing) {
                         if tab == .questions, model.openQuestionCount > 0 {
-                            Text("\(model.openQuestionCount)").font(.system(size: 10, weight: .bold))
+                            Text("\(model.openQuestionCount)").themeFont(10, .bold)
                                 .padding(.horizontal, 4).background(Theme.brand, in: Capsule())
                                 .foregroundStyle(Theme.onBrand).offset(x: 12, y: -6)
                         }
                     }
-                Text(title).font(.system(size: 11)).lineLimit(1).minimumScaleFactor(0.7)
+                Text(title).themeFont(11).lineLimit(1).minimumScaleFactor(0.7)
             }.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
         }
         .buttonStyle(PressStyle()).foregroundStyle(model.tab == tab ? Theme.brand : Theme.muted)

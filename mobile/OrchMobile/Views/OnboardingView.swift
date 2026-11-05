@@ -32,7 +32,7 @@ struct OnboardingView: View {
         .sheet(isPresented: $showLink) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Paste invitation link").font(.headline)
-                Text("Invitation link").font(Theme.font(12)).foregroundStyle(Theme.muted)
+                Text("Invitation link").themeFont(12).foregroundStyle(Theme.muted)
                 TextField("orch://pair?…", text: $link)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .keyboardType(.URL).textContentType(.URL).submitLabel(.continue).onSubmit { submitLink() }.padding(14).frame(minHeight: 48)
@@ -41,7 +41,7 @@ struct OnboardingView: View {
                     .accessibilityLabel("Invitation link").accessibilityIdentifier("invite-field")
                     .onChange(of: link) { _, _ in linkError = nil }
                 if let linkError {
-                    Text("⚠︎ \(linkError)").font(Theme.font(13)).foregroundStyle(Theme.danger).accessibilityIdentifier("invite-error")
+                    Text("⚠︎ \(linkError)").themeFont(13).foregroundStyle(Theme.danger).accessibilityIdentifier("invite-error")
                 }
                 Button("Continue") { submitLink() }.buttonStyle(PrimaryButtonStyle()).accessibilityIdentifier("invite-continue")
                 Button { showLink = false } label: { Text("Close") }.buttonStyle(WideButtonStyle(color: Theme.muted))
@@ -74,22 +74,22 @@ struct OnboardingView: View {
                         model.openInvite(value)
                     } else { showLink = true }
                 } label: { Text("Paste invitation link") }.buttonStyle(SecondaryButtonStyle())
-                Text("Ask the person who invited you for a link or QR code.").font(Theme.font(12))
+                Text("Ask the person who invited you for a link or QR code.").themeFont(12)
                     .foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 4)
                 #if DEBUG
                 Button { model.openSampleInvite() } label: { Text("Try a demo") }
-                    .buttonStyle(WideButtonStyle(color: Theme.muted)).font(Theme.font(12))
+                    .buttonStyle(WideButtonStyle(color: Theme.muted)).themeFont(12)
                     .accessibilityIdentifier("sample-invite")
                 #endif
             }
         case .found(let host):
             VStack(alignment: .leading, spacing: 12) {
-                Text("Your invitation is ready").font(Theme.font(15, .semibold))
-                Text("You were invited to connect this phone.").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                DisclosureGroup { Text(host).font(Theme.font(12)).frame(maxWidth: .infinity, alignment: .leading) } label: {
+                Text("Your invitation is ready").themeFont(15, .semibold)
+                Text("You were invited to connect this phone.").themeFont(13).foregroundStyle(Theme.muted)
+                DisclosureGroup { Text(host).themeFont(12).frame(maxWidth: .infinity, alignment: .leading) } label: {
                     Text("Connection details").frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
                 }
-                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    .themeFont(12).foregroundStyle(Theme.muted)
             }.orchCard()
             Button("Connect this phone") {
                 Task { await model.connect(phoneName: UIDevice.current.name) }
@@ -102,15 +102,15 @@ struct OnboardingView: View {
     private var notificationStep: some View {
         VStack(spacing: 18) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Know when you're needed.").font(Theme.font(17, .semibold))
+                Text("Know when you're needed.").themeFont(17, .semibold)
                 Text("Get notified when your work needs an answer.")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .themeFont(13).foregroundStyle(Theme.muted)
                 ForEach(model.pairedWorkspaces) { workspace in
-                    Text(workspace.displayName).font(Theme.font(14)).padding(.vertical, 6)
+                    Text(workspace.displayName).themeFont(14).padding(.vertical, 6)
                 }
             }.orchCard()
             Button("Allow notifications") { finish(true) }.buttonStyle(PrimaryButtonStyle())
-            Button { finish(false) } label: { Text("Not now") }.buttonStyle(WideButtonStyle(color: Theme.muted)).font(Theme.font(15))
+            Button { finish(false) } label: { Text("Not now") }.buttonStyle(WideButtonStyle(color: Theme.muted)).themeFont(15)
             if finishing { ProgressView() }
         }.disabled(finishing)
     }

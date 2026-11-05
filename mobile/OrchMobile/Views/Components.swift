@@ -25,7 +25,7 @@ struct Brand: View {
         let _ = dynamicType
         HStack(spacing: 8) {
             OrbitMark().frame(width: 30, height: 30)
-            Text("orch").font(Theme.font(23, .bold)).tracking(-1)
+            Text("orch").themeFont(23, .bold).tracking(-1)
         }.accessibilityElement(children: .ignore).accessibilityLabel("orch")
     }
 }
@@ -34,7 +34,7 @@ struct PrimaryButtonStyle: ButtonStyle {
     var muted = false
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(Theme.font(14, .semibold))
+        configuration.label.themeFont(14, .semibold)
             .frame(maxWidth: .infinity, minHeight: 48)
             .foregroundStyle(muted || !enabled ? Theme.text.opacity(0.75) : Theme.onBrand)
             .background(muted || !enabled ? Theme.surface3 : Theme.brand, in: RoundedRectangle(cornerRadius: 8))
@@ -52,7 +52,7 @@ struct PressStyle: ButtonStyle {
 
 struct SecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(Theme.font(14))
+        configuration.label.themeFont(14)
             .frame(maxWidth: .infinity, minHeight: 46)
             .foregroundStyle(Theme.text)
             .background(configuration.isPressed ? Theme.surface3 : Theme.surface2,
@@ -107,7 +107,7 @@ struct Eyebrow: View {
     @Environment(\.dynamicTypeSize) private var dynamicType
     var body: some View {
         let _ = dynamicType
-        Text(text).font(Theme.font(11, .semibold)).tracking(1.2).foregroundStyle(color).lineLimit(2).minimumScaleFactor(0.7)
+        Text(text).themeFont(11, .semibold).tracking(1.2).foregroundStyle(color).lineLimit(2).minimumScaleFactor(0.7)
     }
 }
 
@@ -118,11 +118,11 @@ struct ScreenHeading: View {
     var body: some View {
         let _ = dynamicType
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(Theme.font(29, .semibold)).tracking(-1.1)
+            Text(title).themeFont(29, .semibold).tracking(-1.1)
                 .lineLimit(4).minimumScaleFactor(0.6)
                 .accessibilityLabel(title.hasSuffix(".") ? String(title.dropLast()) : title)
                 .accessibilityAddTraits(.isHeader)
-            Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Text(subtitle).themeFont(13).foregroundStyle(Theme.muted)
         }
     }
 }
@@ -143,16 +143,16 @@ struct ModelMessage: View {
         let _ = dynamicType
         if let message = model.message {
             VStack(alignment: .leading, spacing: 6) {
-                Text("⚠︎ \(message)").font(Theme.font(13)).foregroundStyle(Theme.danger)
+                Text("⚠︎ \(message)").themeFont(13).foregroundStyle(Theme.danger)
                 if let when = model.lastUpdatedText {
-                    Text(when).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    Text(when).themeFont(12).foregroundStyle(Theme.muted)
                 }
                 if model.phase == .ready {
                     Button { Task { await model.refresh() } } label: {
                         HStack(spacing: 8) {
                             if model.isLoading { ProgressView().tint(Theme.brand) }
                             Text(model.isLoading ? "Trying again…" : "Try again")
-                        }.font(Theme.font(13, .semibold)).foregroundStyle(Theme.brand)
+                        }.themeFont(13, .semibold).foregroundStyle(Theme.brand)
                             .frame(minWidth: 120, minHeight: 44, alignment: .leading).contentShape(Rectangle())
                     }.buttonStyle(PressStyle()).disabled(model.isLoading)
                 }
