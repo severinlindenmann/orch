@@ -244,6 +244,14 @@ pub fn ws_exists(c: &Connection, id: &str) -> bool {
     ws_name(c, id).is_some()
 }
 
+/// A phone's workspace list without repeats (first one wins), also for rows saved before the admin API deduped.
+pub fn parse_ws_list(s: &str) -> Vec<String> {
+    let mut l = parse_list(s);
+    let mut seen = std::collections::HashSet::new();
+    l.retain(|w| seen.insert(w.clone()));
+    l
+}
+
 pub fn parse_list(s: &str) -> Vec<String> {
     serde_json::from_str(s).unwrap_or_default()
 }
