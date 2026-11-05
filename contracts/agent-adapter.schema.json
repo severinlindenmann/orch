@@ -20,7 +20,12 @@
     "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
     "path": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9_./-]{1,200}$" },
     "arg": { "type": "string", "pattern": "^([^{}]|\\{(prompt|session|new_session|orch_hooks_file|allow)\\})*$" },
-    "argv": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/arg" } },
+    "argv": {
+      "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/arg" },
+      "if": { "contains": { "type": "string", "pattern": "\\{prompt\\}" } },
+      "then": { "contains": { "const": "--" } },
+      "description": "Argument safety (prevents bugs, not agents): {prompt} is its own item AFTER a '--' item, so text starting with '-' is never read as an option (or the prompt goes on stdin: prompt_via stdin and no {prompt}). {session} is bound as --flag={session}, follows its flag, or is a positional before '--'; session ids never start with '-' (ticket.schema.json sessions[].id). The order is checked by validate.py and by adapters.py at load."
+    },
     "signal": { "type": "string", "pattern": "^(hook:[A-Za-z]{1,32}|orch:run-done)$", "description": "hook:<Event> = the tool's own hook calls `orch run event`; orch:run-done = the agent runs `orch run done` itself." },
     "adapter": {
       "type": "object",

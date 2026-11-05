@@ -73,6 +73,11 @@ interactive = "my-agent"    # optional: start it interactively, so runs can be l
 - `orch init` asks once which agent works here (found adapters + Other). Add-ons never ask.
 - A command from a folder's `.orch/config.toml` is used **without confirmation**. Its first use on a machine prints one
   notice line: `Using agent command from this folder's settings: <command>` (remembered per machine in the user's orch folder).
+  This is a known trade-off (owner decision Q5, easy over secure): a cloned folder can name the command orch runs; the notice
+  line is the only guard.
+- Built-in adapter argv (agents.json) passes `{prompt}` as a whole item after `--` (or on stdin) and `{session}` as a whole
+  item or `--flag={session}`; session ids never start with `-` (agent-adapter.schema.json `$defs/argv`, checked by
+  validate.py and adapters.py). A user `command` is split with shlex and `{prompt}` replaced as one item; its options are the user's.
 - A ticket's sessions live in the ticket (`ticket.sessions[] {agent, id, host, last_used}`), keyed by this agent name and the
   host; the run record (`.orch/run/tickets/`) holds only the claim.
 

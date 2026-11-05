@@ -31,8 +31,8 @@
       "detect": { "binary": "codex", "env_prefix": "CODEX_" },
       "prompt_via": "arg",
       "oneshot": {
-        "fresh": ["codex", "exec", "--json", "{prompt}"],
-        "resume": ["codex", "exec", "resume", "--json", "{session}", "{prompt}"]
+        "fresh": ["codex", "exec", "--json", "--", "{prompt}"],
+        "resume": ["codex", "exec", "resume", "--json", "{session}", "--", "{prompt}"]
       },
       "live": null,
       "hooks": null,

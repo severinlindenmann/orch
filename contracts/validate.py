@@ -10,6 +10,7 @@ import re
 import struct
 import sys
 import tomllib
+import types
 import unicodedata
 from pathlib import Path
 
@@ -83,8 +84,31 @@ TOOL_NAMES = re.compile(r"scheduler|automation|focus|relay|dashboard|publish|cla
 EXT = {"scheduler": validator("addons/scheduler.ext")}
 
 
+SESSION_ARG = re.compile(r"^(\{session\}|--[a-z][a-z0-9-]*=\{session\})$")
+
+
+def argv_errors(doc):
+    """Order rules of agent-adapter.schema.json $defs/argv that JSON Schema cannot express (adapters.py checks the same):
+    {prompt} is a whole item after a '--' item; {session} is a whole item or --flag={session}."""
+    out = []
+    for name, a in (doc.get("adapters") or {}).items():
+        for mode in ("oneshot", "live"):
+            for key, argv in (a.get(mode) or {}).items():
+                if not isinstance(argv, list):
+                    continue
+                for i, item in enumerate(argv):
+                    where = f"{name}.{mode}.{key}[{i}]"
+                    if "{prompt}" in item and (item != "{prompt}" or "--" not in argv[:i]):
+                        out.append(f"{where}: {{prompt}} must be a whole item after '--'")
+                    if "{session}" in item and not SESSION_ARG.match(item):
+                        out.append(f"{where}: {{session}} must be a whole item or --flag={{session}}")
+    return [types.SimpleNamespace(message=m) for m in out]
+
+
 def errors(kind, doc):
     errs = list(V[kind].iter_errors(doc))
+    if kind == "agent-adapter" and not errs:
+        errs += argv_errors(doc)
     if kind == "ticket" and isinstance(doc.get("ext"), dict):
         for name, data in doc["ext"].items():
             if name in EXT:

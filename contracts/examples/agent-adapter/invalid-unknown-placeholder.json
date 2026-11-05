@@ -107,6 +107,7 @@
         "fresh": [
           "codex",
           "exec",
+          "--",
           "{prompt_text}"
         ],
         "resume": [
@@ -115,6 +116,7 @@
           "resume",
           "--json",
           "{session}",
+          "--",
           "{prompt}"
         ]
       },

@@ -124,8 +124,8 @@
       "required": ["agent", "id", "host", "last_used"],
       "properties": {
         "agent": { "$ref": "#/$defs/agent_name" },
-        "id": { "type": "string", "minLength": 1, "maxLength": 200, "description": "The agent tool's own session id." },
-        "host": { "type": "string", "minLength": 1, "maxLength": 255, "description": "Machine name where the session lives; resume only on the same host." },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$", "description": "The agent tool's own session id. Never starts with '-' (it is passed as a command argument)." },
+        "host": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$", "description": "Host name of the machine where the session lives; resume only on the same host." },
         "last_used": { "$ref": "#/$defs/time" }
       }
     }
