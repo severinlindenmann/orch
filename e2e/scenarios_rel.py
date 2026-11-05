@@ -216,7 +216,9 @@ def r8(e):
         items = [x for x in inbox(e, "Reports") if x["id"] == m["id"]]
         check(items and items[0]["allowed"] is False, f"{key} with bad token must not be allowed: {items}")
     _sched_once(e, "Reports")
-    check(_agent_runs(log) == 0, "agent ran for a message with a bad token")
+    ran = log.read_text()
+    runs = sorted(p.name for p in (e.ws("Reports") / ".orch/addons/scheduler/logs").glob("*.log"))
+    check(_agent_runs(log) == 0, f"agent ran for a message with a bad token: fake agent log {ran!r}; run logs {runs}")
 
 
 @scenario("R9")
