@@ -23,7 +23,7 @@ enum RelayError: Error, Equatable, LocalizedError {
         case .api(_, _, let m): return m
         case .unauthorized: return "This phone was signed out. Open the invitation you were sent to connect again."
         case .network(let m): return m
-        case .badLink: return "That invitation link does not look right."
+        case .badLink: return "That invitation link does not look right. Check you copied the whole link, or ask the person who invited you for a new one."
         }
     }
 }

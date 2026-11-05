@@ -37,6 +37,7 @@ struct PrimaryButtonStyle: ButtonStyle {
             .foregroundStyle(muted || !enabled ? Theme.text.opacity(0.75) : Theme.onBrand)
             .background(muted || !enabled ? Theme.surface3 : Theme.brand, in: RoundedRectangle(cornerRadius: 8))
             .opacity(configuration.isPressed ? 0.8 : 1)
+            .contentShape(Rectangle())
     }
 }
 
@@ -54,15 +55,43 @@ struct SecondaryButtonStyle: ButtonStyle {
             .foregroundStyle(Theme.text)
             .background(configuration.isPressed ? Theme.surface3 : Theme.surface2,
                         in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.borderStrong))
+            .contentShape(Rectangle())
+    }
+}
+
+/// Placeholder only shows after 300 ms (fast loads never flash it); the space is reserved from the start, so nothing shifts.
+struct DelayedSkeleton: ViewModifier {
+    let loading: Bool
+    @State private var visible = false
+    func body(content: Content) -> some View {
+        content.redacted(reason: loading ? .placeholder : [])
+            .opacity(loading ? (visible ? 0.6 : 0) : 1)
+            .task(id: loading) {
+                visible = false
+                guard loading else { return }
+                try? await Task.sleep(for: .milliseconds(300))
+                visible = true
+            }
+    }
+}
+
+/// Full-width touch target: size and shape live inside the label, so the whole box is tappable.
+struct WideButtonStyle: ButtonStyle {
+    var color: Color = Theme.text
+    var bordered = false
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.foregroundStyle(color)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .overlay { if bordered { RoundedRectangle(cornerRadius: 8).stroke(Theme.borderStrong) } }
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.6 : 1)
     }
 }
 
 extension View {
     /// Content-shaped loading: placeholder text with the real layout until the first load finishes.
-    func skeleton(_ loading: Bool) -> some View {
-        self.redacted(reason: loading ? .placeholder : []).opacity(loading ? 0.6 : 1)
-    }
+    func skeleton(_ loading: Bool) -> some View { modifier(DelayedSkeleton(loading: loading)) }
     func orchCard(border: Color = Theme.border, padding: CGFloat = 16) -> some View {
         self.padding(padding).frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
@@ -74,7 +103,7 @@ struct Eyebrow: View {
     let text: String
     var color: Color = Theme.muted
     var body: some View {
-        Text(text).font(Theme.font(11, .semibold)).tracking(1.2).foregroundStyle(color)
+        Text(text).font(Theme.font(11, .semibold)).tracking(1.2).foregroundStyle(color).lineLimit(2).minimumScaleFactor(0.7)
     }
 }
 
@@ -84,6 +113,8 @@ struct ScreenHeading: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(Theme.font(29, .semibold)).tracking(-1.1)
+                .lineLimit(4).minimumScaleFactor(0.6)
+                .accessibilityLabel(title.hasSuffix(".") ? String(title.dropLast()) : title)
                 .accessibilityAddTraits(.isHeader)
             Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted)
         }
@@ -105,9 +136,17 @@ struct ModelMessage: View {
         if let message = model.message {
             VStack(alignment: .leading, spacing: 6) {
                 Text("⚠︎ \(message)").font(Theme.font(13)).foregroundStyle(Theme.danger)
+                if let when = model.lastUpdatedText {
+                    Text(when).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                }
                 if model.phase == .ready {
-                    Button("Try again") { Task { await model.refresh() } }
-                        .font(Theme.font(13, .semibold)).foregroundStyle(Theme.brand).frame(minHeight: 44)
+                    Button { Task { await model.refresh() } } label: {
+                        HStack(spacing: 8) {
+                            if model.isLoading { ProgressView().tint(Theme.brand) }
+                            Text(model.isLoading ? "Trying again…" : "Try again")
+                        }.font(Theme.font(13, .semibold)).foregroundStyle(Theme.brand)
+                            .frame(minWidth: 120, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                    }.buttonStyle(PressStyle()).disabled(model.isLoading)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .combine)

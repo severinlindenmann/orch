@@ -2,10 +2,22 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var details = false
     @State private var confirmSignOut = false
     @State private var signingOut = false
     @State private var requestingPermission = false
+
+    private var statusText: String {
+        switch model.connection {
+        case .ok: "●  Connected" + (model.lastUpdatedText.map { " · " + $0.lowercased() } ?? "")
+        case .unreachable: "●  Can't reach the server" + (model.lastUpdatedText.map { " · " + $0.lowercased() } ?? "")
+        case .checking: "●  Checking…"
+        }
+    }
+    private var statusColor: Color {
+        switch model.connection { case .ok: Theme.brand; case .unreachable: Theme.danger; case .checking: Theme.muted }
+    }
 
     var body: some View {
         ScrollViewReader { proxy in ScrollView {
@@ -17,7 +29,7 @@ struct SettingsView: View {
                         Text("◎").font(Theme.font(29)).foregroundStyle(Theme.brand)
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Your workspace server").font(Theme.font(14, .semibold))
-                            Text("●  Connected").font(Theme.font(11)).foregroundStyle(Theme.brand)
+                            Text(statusText).font(Theme.font(12)).foregroundStyle(statusColor)
                         }
                     }
                     Rectangle().fill(Theme.border).frame(height: 1)
@@ -27,9 +39,10 @@ struct SettingsView: View {
                             Text("This phone: \(model.phoneName)")
                             Text("Access is managed by whoever invited you.")
                         }.font(Theme.font(11)).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 10)
-                    } label: { Text("Details").font(Theme.font(13)).frame(minHeight: 44) }
+                    } label: { Text("Details").font(Theme.font(13)).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle()) }
                     .foregroundStyle(Theme.muted)
                 }.orchCard()
+                if !model.workspaces.isEmpty {
                 HStack { Eyebrow(text: "YOUR WORKSPACES"); Spacer(); Eyebrow(text: "\(model.workspaces.count)") }
                     .padding(.top, 26).padding(.bottom, 12)
                 VStack(spacing: 0) {
@@ -43,6 +56,7 @@ struct SettingsView: View {
                         if workspace.id != model.workspaces.last?.id { Rectangle().fill(Theme.border).frame(height: 1) }
                     }
                 }.orchCard(padding: 16)
+                }
                 Text("Need another workspace? Ask the person who invited you.")
                     .font(Theme.font(11)).foregroundStyle(Theme.muted).padding(.top, 12)
                 Toggle("Notify me when I'm needed", isOn: Binding(get: { model.notificationsEnabled }, set: { enabled in
@@ -59,19 +73,20 @@ struct SettingsView: View {
                     .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
                     .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
                     .padding(.vertical, 26)
-                Button("Sign out") { confirmSignOut = true }
-                    .foregroundStyle(Theme.danger).frame(maxWidth: .infinity, minHeight: 48)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
+                Button { confirmSignOut = true } label: { Text("Sign out") }
+                    .buttonStyle(WideButtonStyle(color: Theme.danger, bordered: true))
                 if confirmSignOut {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Disconnect this phone? You will need a new invitation to connect again.").font(Theme.font(13))
-                        Button("Sign out of this phone") {
+                        Button {
                             signingOut = true
                             Task { await model.signOut(); signingOut = false }
-                        }.foregroundStyle(Theme.danger).frame(maxWidth: .infinity, minHeight: 44)
+                        } label: {
+                            HStack(spacing: 8) { if signingOut { ProgressView().tint(Theme.danger) }; Text(signingOut ? "Signing out…" : "Sign out of this phone") }
+                        }.buttonStyle(WideButtonStyle(color: Theme.danger))
                             .accessibilityIdentifier("signout-confirm")
-                        Button("Cancel") { confirmSignOut = false }
-                            .foregroundStyle(Theme.muted).frame(maxWidth: .infinity, minHeight: 44)
+                        Button { confirmSignOut = false } label: { Text("Cancel") }
+                            .buttonStyle(WideButtonStyle(color: Theme.muted))
                     }.orchCard().disabled(signingOut).padding(.top, 12).id("signout-card")
                 }
                 ModelMessage().padding(.top, 12)
@@ -79,7 +94,7 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity).padding(.top, 12)
             }.padding(.horizontal, 23).padding(.top, 6).padding(.bottom, 20)
         }
-        .onChange(of: confirmSignOut) { _, shown in if shown { withAnimation { proxy.scrollTo("signout-card", anchor: .bottom) } } }
+        .onChange(of: confirmSignOut) { _, shown in if shown { if reduceMotion { proxy.scrollTo("signout-card", anchor: .bottom) } else { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("signout-card", anchor: .bottom) } } } }
         }
     }
 }

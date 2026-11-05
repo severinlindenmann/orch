@@ -1,9 +1,11 @@
 import SwiftUI
+import UIKit
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
+    @State private var keyboardUp = false
 
     var body: some View {
         Group {
@@ -19,7 +21,15 @@ struct RootView: View {
                         .allowsHitTesting(model.tab == .settings).accessibilityHidden(model.tab != .settings)
                 }
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: model.tab)
-                .safeAreaInset(edge: .bottom, spacing: 0) { tabs }
+                .safeAreaInset(edge: .bottom, spacing: 0) { if !keyboardUp { tabs } }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
+                .onChange(of: model.tab) { _, _ in
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+                .onChange(of: model.answerTick + model.sendTick + model.errorTick) { _, _ in
+                    if let text = model.announcement { AccessibilityNotification.Announcement(text).post() }
+                }
             } else {
                 OnboardingView()
             }
@@ -36,7 +46,7 @@ struct RootView: View {
             tab(.send, "Send", "plus")
             tab(.settings, "Settings", "gearshape")
         }
-        .padding(.horizontal, 8).padding(.top, 11).padding(.bottom, 8)
+        .padding(.horizontal, 8).padding(.top, 4).padding(.bottom, 4)
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .background(Theme.sidebar)
         .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
@@ -54,9 +64,9 @@ struct RootView: View {
                         }
                     }
                 Text(title).font(.system(size: 11)).lineLimit(1).minimumScaleFactor(0.7)
-            }.frame(maxWidth: .infinity, minHeight: 44)
+            }.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).foregroundStyle(model.tab == tab ? Theme.brand : Theme.muted)
+        .buttonStyle(PressStyle()).foregroundStyle(model.tab == tab ? Theme.brand : Theme.muted)
         .accessibilityLabel(title)
         .accessibilityValue(tab == .questions ? "\(model.openQuestionCount) open questions" : "")
         .accessibilityAddTraits(model.tab == tab ? [.isSelected] : [])

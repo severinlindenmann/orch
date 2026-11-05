@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HomeView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expandedTags: Set<String> = []
 
     private var greeting: String {
@@ -12,12 +13,22 @@ struct HomeView: View {
         }
     }
 
+    private var subtitle: String {
+        if model.openQuestionCount > 0 { return "\(model.openQuestionCount == 1 ? "One thing needs" : "A few things need") your answer." }
+        switch model.connection {
+        case .ok: return "All clear. Nothing needs you right now."
+        case .unreachable: return "Can't reach your workspaces."
+        case .checking: return "Checking for questions…"
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Brand().padding(.bottom, 28)
                 Eyebrow(text: greeting.uppercased(), color: Theme.brand).padding(.bottom, 12)
-                ScreenHeading(title: "Your workspaces.", subtitle: model.openQuestionCount > 0 ? "\(model.openQuestionCount == 1 ? "One thing needs" : "A few things need") your answer." : "All clear. Nothing needs you right now.")
+                ScreenHeading(title: "Your workspaces.", subtitle: subtitle)
+                if let when = model.lastUpdatedText { Text(when).font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 6) }
                 if model.openQuestionCount > 0 {
                     Button { model.questionFilter = nil; model.tab = .questions } label: {
                         HStack(spacing: 12) {
@@ -32,9 +43,9 @@ struct HomeView: View {
                         }.padding(.horizontal, 12).padding(.vertical, 16)
                             .background(Theme.brand.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.brand.opacity(0.27)))
-                    }.buttonStyle(.plain).padding(.top, 26)
+                    }.buttonStyle(PressStyle()).padding(.top, 26)
                 }
-                HStack { Eyebrow(text: "WORKSPACES"); Spacer(); Eyebrow(text: "\(model.workspaces.count)") }
+                HStack { Eyebrow(text: "WORKSPACES"); Spacer(); if model.hasLoaded { Eyebrow(text: "\(model.workspaces.count)") } }
                     .padding(.top, 30).padding(.bottom, 12)
                 if !model.hasLoaded && model.workspaces.isEmpty && model.message == nil {
                     ForEach(0..<2, id: \.self) { _ in
@@ -47,12 +58,20 @@ struct HomeView: View {
                         Text("No workspaces yet").font(Theme.font(15, .semibold))
                         Text("Ask the person who invited you to add a workspace. It will show up here.")
                             .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        checkAgain
                     }.orchCard()
                 }
                 ModelMessage().padding(.top, 12)
             }.padding(.horizontal, 23).padding(.top, 6).padding(.bottom, 20)
         }.refreshable { await model.refresh() }
-            .animation(.easeOut(duration: 0.25), value: model.workspaces)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: model.workspaces)
+    }
+
+    private var checkAgain: some View {
+        Button { Task { await model.refresh() } } label: {
+            Text(model.isLoading ? "Checking…" : "Check again").font(Theme.font(13, .semibold)).foregroundStyle(Theme.brand)
+                .frame(minWidth: 120, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+        }.buttonStyle(PressStyle()).disabled(model.isLoading)
     }
 
     private func workspaceRow(_ workspace: Workspace) -> some View {
@@ -66,7 +85,7 @@ struct HomeView: View {
                             .frame(width: 35, height: 35).foregroundStyle(Theme.brand)
                             .background(Theme.brand.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(workspace.displayName).font(Theme.font(14, .medium))
+                            Text(workspace.displayName).font(Theme.font(14, .medium)).fixedSize(horizontal: false, vertical: true)
                             if let description = workspace.description {
                                 Text(description).font(Theme.font(12)).foregroundStyle(Theme.muted)
                             }
@@ -81,7 +100,7 @@ struct HomeView: View {
                                 .background(Theme.brand.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
                         }
                     }.frame(minHeight: 44).contentShape(Rectangle())
-                }.buttonStyle(.plain)
+                }.buttonStyle(PressStyle())
                 Button {
                     if expandedTags.contains(workspace.id) { expandedTags.remove(workspace.id) }
                     else { expandedTags.insert(workspace.id) }

@@ -8,6 +8,7 @@ struct QuestionsView: View {
     @State private var pending: [String: String] = [:]
     @State private var timers: [String: Task<Void, Never>] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var allQuestions: [Question] {
         let currentIDs = Set(model.questions.map(\.id))
@@ -27,8 +28,8 @@ struct QuestionsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if let focused {
                     Button { model.focusedQuestion = nil } label: {
-                        Text("‹ All questions").font(Theme.font(13)).frame(minHeight: 44)
-                    }.foregroundStyle(Theme.brand).accessibilityIdentifier("all-questions").padding(.bottom, 8)
+                        Text("‹ All questions").font(Theme.font(13)).frame(minWidth: 140, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                    }.buttonStyle(PressStyle()).foregroundStyle(Theme.brand).accessibilityIdentifier("all-questions").padding(.bottom, 8)
                     questionCard(focused)
                 } else {
                     list
@@ -39,7 +40,8 @@ struct QuestionsView: View {
         .refreshable { await model.refresh() }
         .sensoryFeedback(.success, trigger: model.answerTick)
         .sensoryFeedback(.error, trigger: model.errorTick)
-        .animation(.easeOut(duration: 0.25), value: model.answers)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: model.answers)
+        .scrollDismissesKeyboard(.interactively)
         .onChange(of: model.questions, initial: true) { _, questions in
             for question in questions where !retained.contains(where: { $0.id == question.id }) { retained.append(question) }
         }
@@ -69,6 +71,10 @@ struct QuestionsView: View {
                 Text("No questions right now").font(Theme.font(15, .semibold))
                 Text("When your workspace needs a decision, it shows up here and you get a notification.")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                Button { Task { await model.refresh() } } label: {
+                    Text(model.isLoading ? "Checking…" : "Check again").font(Theme.font(13, .semibold)).foregroundStyle(Theme.brand)
+                        .frame(minWidth: 120, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(PressStyle()).disabled(model.isLoading)
             }.orchCard()
         }
         ForEach(visibleQuestions) { question in
@@ -82,8 +88,9 @@ struct QuestionsView: View {
             Text(title).font(Theme.font(12)).padding(.horizontal, 10).frame(minHeight: 44)
                 .foregroundStyle(selected ? Theme.brand : Theme.muted)
                 .background(selected ? Theme.brand.opacity(0.09) : Theme.bg, in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(selected ? Theme.brand.opacity(0.33) : Theme.border))
-        }.buttonStyle(.plain).accessibilityAddTraits(selected ? [.isSelected] : [])
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(selected ? Theme.brand : Theme.borderStrong))
+                .contentShape(Rectangle())
+        }.buttonStyle(PressStyle()).accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
     private func questionCard(_ question: Question) -> some View {
@@ -106,28 +113,34 @@ struct QuestionsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
                         ProgressView().tint(Theme.brand)
-                        Text("Sending \(choice)…").font(Theme.font(14, .medium))
+                        Text(sending.contains(question.id) ? "Sending \(choice)…" : "Sending \(choice) in 3 s…").font(Theme.font(14, .medium))
                     }
-                    Button("Undo") { undo(question) }.buttonStyle(SecondaryButtonStyle())
-                        .accessibilityIdentifier("undo-\(question.id)")
+                    if !sending.contains(question.id) {
+                        Button("Undo") { undo(question) }.buttonStyle(SecondaryButtonStyle())
+                            .accessibilityIdentifier("undo-\(question.id)")
+                    }
                 }.padding(.top, 4)
             } else {
                 VStack(spacing: 8) {
                     ForEach(question.message.body.options, id: \.self) { option in
                         let recommended = option == question.message.body.recommended
                         Button { choose(question, option) } label: {
-                            HStack(spacing: 8) {
-                                Text(option).font(Theme.font(15))
-                                Spacer(minLength: 0)
-                                if recommended {
-                                    Text("Recommended").font(Theme.font(11, .semibold)).foregroundStyle(Theme.brand)
-                                        .padding(.horizontal, 8).padding(.vertical, 3)
-                                        .overlay(Capsule().stroke(Theme.brand.opacity(0.5)))
+                            let tag = Text("Recommended").font(Theme.font(11, .semibold)).foregroundStyle(Theme.brand)
+                                .lineLimit(1).fixedSize()
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .overlay(Capsule().stroke(Theme.brand.opacity(0.7)))
+                            let label = Text(option).font(Theme.font(15)).lineLimit(3).minimumScaleFactor(0.6)
+                            Group {
+                                if typeSize.isAccessibilitySize {
+                                    VStack(alignment: .leading, spacing: 6) { label; if recommended { tag } }
+                                } else {
+                                    HStack(spacing: 8) { label; Spacer(minLength: 0); if recommended { tag } }
                                 }
-                            }.frame(minHeight: 49).padding(.horizontal, 14)
+                            }.frame(maxWidth: .infinity, minHeight: 49, alignment: .leading).padding(.horizontal, 14)
                                 .foregroundStyle(Theme.text)
                                 .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 8))
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.borderStrong))
+                                .contentShape(Rectangle())
                         }.buttonStyle(PressStyle()).disabled(sending.contains(question.id))
                             .accessibilityIdentifier("answer-\(option)")
                             .accessibilityLabel(recommended ? "\(option), recommended" : option)

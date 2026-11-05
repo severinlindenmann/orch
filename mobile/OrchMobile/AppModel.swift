@@ -23,6 +23,10 @@ final class AppModel {
     private(set) var answers: [String: String] = [:]
     private(set) var isLoading = false
     private(set) var hasLoaded = false
+    /// When the last refresh succeeded (drives "Last updated ...").
+    private(set) var lastUpdated: Date?
+    /// Spoken to VoiceOver by the views (answer sent, message sent, errors).
+    private(set) var announcement: String?
     /// Bumps on each successful answer / send (drives haptics).
     private(set) var answerTick = 0
     private(set) var sendTick = 0
@@ -73,6 +77,13 @@ final class AppModel {
         return URLSessionRelayClient(base: c?.relay ?? invite?.relay ?? URL(string: "https://relay.invalid")!, credentials: c, session: session)
     }
 
+    enum Connection { case checking, ok, unreachable }
+    var connection: Connection { message != nil ? .unreachable : (hasLoaded ? .ok : .checking) }
+    var lastUpdatedText: String? {
+        guard let lastUpdated else { return nil }
+        return "Last updated \(RelativeDateTimeFormatter().localizedString(for: lastUpdated, relativeTo: Date()))"
+    }
+
     var relayHost: String { credentials?.relay.host ?? invite?.host ?? "your server" }
     var phoneName: String { credentials?.phoneName ?? "This iPhone" }
     var openQuestionCount: Int { questions.filter { answers[$0.id] == nil }.count }
@@ -100,7 +111,12 @@ final class AppModel {
             inviteState = .none
             phase = .notifyStep
         } catch {
-            inviteState = .found(host: invite.host); message = error.localizedDescription
+            inviteState = .found(host: invite.host)
+            if case RelayError.api(let status, _, _) = error, status == 404 || status == 410 {
+                message = "This invitation has expired or was already used. Ask the person who invited you for a new one."
+            } else if error is URLError {
+                message = "Can't reach the server. Check your connection, then tap Connect this phone again."
+            } else { message = error.localizedDescription }
         }
     }
 
@@ -120,14 +136,14 @@ final class AppModel {
             async let w = client.workspaces()
             async let q = client.questions()
             workspaces = try await w; questions = try await q.deduplicated()
-            message = nil; hasLoaded = true
+            message = nil; hasLoaded = true; lastUpdated = Date()
         } catch { handle(error) }
     }
 
     func answer(_ q: Question, with option: String) async {
         do {
             _ = try await client.answer(questionMessageId: q.id, answer: option)
-            answers[q.id] = option; answerTick += 1
+            answers[q.id] = option; answerTick += 1; announcement = "Answer sent: \(option)"
             await refresh()
         } catch let RelayError.api(status, code, text) where status == 409 && code == "already_answered" {
             answers[q.id] = text
@@ -142,7 +158,7 @@ final class AppModel {
         do {
             _ = try await client.send(to: workspaceId, text: clean, ticket: nil)
             lastSent = SentNote(workspaceName: workspaces.first { $0.id == workspaceId }?.displayName ?? "your workspace", text: clean)
-            message = nil; sendTick += 1
+            message = nil; sendTick += 1; announcement = "Message sent to \(lastSent?.workspaceName ?? "your workspace")"
             return true
         } catch { handle(error); return false }
     }
@@ -170,7 +186,7 @@ final class AppModel {
 
     private func reset() {
         credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; answers = [:]; hasLoaded = false
-        pairedWorkspaces = []; lastSent = nil; message = nil; tab = .home; phase = .onboarding
+        pairedWorkspaces = []; lastSent = nil; lastUpdated = nil; message = nil; tab = .home; phase = .onboarding
     }
 
     private func handle(_ error: Error) {
@@ -178,7 +194,7 @@ final class AppModel {
         else if error is URLError { message = "Can't reach the server. Check your connection, then try again." }
         else if error is RelayError { message = error.localizedDescription }
         else { message = "Something went wrong. Try again in a moment." }
-        errorTick += 1
+        errorTick += 1; announcement = message
     }
 
     /// Test and screenshot hook: `-seedPaired YES` skips onboarding against the mock.
