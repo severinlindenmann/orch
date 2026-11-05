@@ -1,0 +1,5 @@
+{
+  "schema": "orch.msg/1", "id": "m_a7c2k9q3x1b8d4f6", "from": "ws_pilatus001", "to": "ph_iphone0001", "type": "text",
+  "created_at": "2026-11-05T09:02:04Z", "ticket": "t_q3sum1", "reply_to": "m_p3q7x2k9a1b4c8d0",
+  "body": { "text": "Got it: Q3 summary", "update": { "kind": "ack", "title": "Q3 summary" } }
+}

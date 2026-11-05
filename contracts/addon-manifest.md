@@ -3,7 +3,8 @@
 The core knows no add-on by name. An add-on is a Python package with an `orch-addon.toml`. Once it is turned on in a
 workspace it looks and works like part of orch: same commands style, same `--json` and errors, same config file,
 same skill tone, a dashboard tab that cannot be told apart from a built-in one.
-Schemas: `addon-manifest.schema.json`, `addon-view.schema.json`, add-on ext schemas in `addons/` (e.g. `addons/scheduler.ext.schema.json`).
+Schemas: `addon-manifest.schema.json`, `addon-view.schema.json`, add-on schemas in `addons/` (`addons/scheduler.ext.schema.json`,
+`addons/automation/ext.schema.json`, `addons/focus/run-event.schema.json`); add-on question kinds: `addons/question-kinds.md`.
 Examples: `review/scheduler.orch-addon.toml`, `review/scheduler.view.example.json`, `examples/addon-*/`.
 
 ## Manifest `orch-addon.toml`

@@ -1,0 +1,1 @@
+{ "recurring": true, "cron": "0 8 * * 1", "tz": "Europe/Zurich", "agent": "my-agent", "last_run": "2026-11-03T07:00:12Z" }
