@@ -17,6 +17,8 @@ pub fn router(st: State) -> Router {
         .route("/admin/", get(portal))
         .route("/admin/style.css", get(css))
         .route("/admin/portal.js", get(js))
+        .route("/_/favicon.svg", get(web::favicon_svg))
+        .route("/_/apple-touch-icon.png", get(web::touch_icon))
         .route("/admin/api/workspaces", get(ws_list).post(ws_create))
         .route(
             "/admin/api/workspaces/:id",
@@ -300,7 +302,7 @@ async fn files_list(St(st): St<State>, h: HeaderMap, Query(q): Query<Q>) -> ApiR
     let (rows, next) = db::list_files(&st.db.lock().unwrap(), None, limit, after)?;
     let items: Vec<Value> = rows
         .iter()
-        .map(|f| json!({"id": f.id, "workspace": f.workspace, "size": f.size, "expires_at": f.expires_at}))
+        .map(|f| json!({"id": f.id, "workspace": f.workspace, "size": f.size, "created_at": f.created_at, "expires_at": f.expires_at}))
         .collect();
     Ok(Json(json!({"items": items, "next": next})))
 }
