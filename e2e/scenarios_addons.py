@@ -384,7 +384,7 @@ def i1(e):
     finally:
         os.close(slave)
         os.close(master)
-    check(rc == 0 and "Add it? [y/N]" in err and "dashboard tab" in err, f"add dashboard (tty): {rc} {(err or out)[-300:]}")
+    check(rc == 0 and "Add it? [y/N]" in err and "Adds the command: orch dashboard" in err, f"add dashboard (tty): {rc} {(err or out)[-300:]}")
     rc, out, err = run("addon", "add", "scheduler", stdin=subprocess.DEVNULL)  # no terminal, no --yes: hint
     check(rc == 2 and "--yes" in err, f"scheduler without --yes: {rc} {(err or out)[-200:]}")
     rc, out, err = run("addon", "add", "scheduler", "--yes")
