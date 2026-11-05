@@ -244,7 +244,9 @@ async fn admin_onboarding_scripts() {
     assert!(
         sh.text().starts_with("#!/bin/sh")
             && sh.text().contains("https://publish.test")
-            && sh.text().contains("orch addon add publish --yes\nexec orch publish connect")
+            && sh
+                .text()
+                .contains("orch addon add publish --yes\nexec orch publish connect")
     );
     assert!(!sh.text().contains("__PUBLISH_URL__"));
     // test config uses the default ref
