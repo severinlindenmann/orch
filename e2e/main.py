@@ -51,6 +51,7 @@ class E:
         self.env = {k: v for k, v in self.env.items() if v != ""}
         self.ws_dir = tmp / "ws"
         self.orch_home = Path(self.env["ORCH_HOME"])
+        self.bins: dict = {}
 
     # -- running things --
     def sh(self, cmd, cwd=None, input=None, env=None, timeout=300, check_rc=False):
@@ -229,17 +230,20 @@ def main() -> int:
     ap.add_argument("--repo", required=True)
     ap.add_argument("--bins", default="")
     a = ap.parse_args()
-    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc  # noqa: F401,E401
+    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2  # noqa: F401,E401
 
     if a.what == "all":
         ids = list(REGISTRY)
     else:  # comma list; a single letter (W, A, P, R, M, F) selects the group
         ids = []
         for w in a.what.split(","):
-            ids += [k for k in REGISTRY if k[0] == w] if len(w) == 1 else [w]
+            if w == "V2":  # every v2 scenario (V2-*)
+                ids += [k for k in REGISTRY if k.startswith("V2-")]
+            else:
+                ids += [k for k in REGISTRY if k[0] == w] if len(w) == 1 else [w]
     # run order: W A P R M F  (A0 before A4/A5)
     order = {"W": 0, "A": 1, "P": 2, "R": 3, "M": 4, "F": 5}
-    ids = sorted(ids, key=lambda s: (order.get(s[0], 9), int("".join(c for c in s[1:] if c.isdigit()) or 0)))
+    ids = sorted(ids, key=lambda s: (order.get(s[0], 9), int("".join(c for c in s[1:] if c.isdigit()) or 0), s))
     for s in ids:
         if s not in REGISTRY:
             print(f"unknown scenario {s}; known: {', '.join(sorted(REGISTRY))}")
@@ -249,6 +253,7 @@ def main() -> int:
     tmp, repo = Path(a.tmp), Path(a.repo)
     run_id = tmp.name.rsplit("-", 1)[-1].lower()
     e = E(a.mode, tmp, repo, run_id)
+    e.bins = json.loads(a.bins) if a.bins else {}
     out_dir = repo / "e2e" / "out" / time.strftime("%Y%m%d-%H%M%S")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_md = out_dir / "results.md"
@@ -261,7 +266,7 @@ def main() -> int:
         if r.returncode:
             print("orch install failed:", r.stderr[-400:])
             return 1
-        needs_servers = any(s[0] in "PRMF" for s in ids)
+        needs_servers = any(s[0] in "PRMF" or s in lib.V2_NEEDS_SERVERS for s in ids)
         if needs_servers:
             if a.mode == "local":
                 bins = json.loads(a.bins)
@@ -270,9 +275,9 @@ def main() -> int:
                 e.pub, e.rel = live_servers(e)
                 if e.pub is None:
                     for s in ids:
-                        if s[0] in "PRMF":
+                        if s[0] in "PRMF" or s in lib.V2_NEEDS_SERVERS:
                             print(f"{s:<5} SKIP  live servers are not up")
-                    ids = [s for s in ids if s[0] not in "PRMF"]
+                    ids = [s for s in ids if not (s[0] in "PRMF" or s in lib.V2_NEEDS_SERVERS)]
         res = run_scenarios(e, ids, out_md)
     finally:
         for fn in reversed(e.cleanup):
