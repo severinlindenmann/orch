@@ -7,7 +7,19 @@ import json
 import sys
 from pathlib import Path
 
-from orch import __version__, addons, cli_clients, net, relay, services, tickets
+from orch import (
+    __version__,
+    addons,
+    cli_addons,
+    cli_clients,
+    cli_config,
+    cli_needs,
+    cli_run,
+    cli_status,
+    net,
+    relay,
+    tickets,
+)
 from orch import init as init_mod
 from orch.errors import Refused
 
@@ -91,6 +103,7 @@ def _visible(root: Path, t: dict) -> dict:
     return {**t, "ext": {k: v for k, v in ext.items() if k in on}}
 
 
+_PLACEHOLDERS = {"run", "needs", "agents", "config"}  # hidden until built
 ADVANCED_TOP = {"update", "wait", "log", "answer", "link", "ext"}
 ADVANCED_SUB = {
     "relay": {"done", "delegate", "start", "allow", "download", "webhook"},
@@ -153,27 +166,8 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
 
-    x = sub.add_parser("start", parents=[common], help="start the add-ons that run in the background here")
-    x.add_argument("--no-open", action="store_true", help="do not open the dashboard in the browser")
-    x = sub.add_parser(
-        "stop", parents=[common], help="stop them (asks which workspace when you are outside one)"
-    )
-    x.add_argument("workspace", nargs="?", metavar="PATH|NAME", help="the workspace to stop")
-    x.add_argument("--all", action="store_true", help="stop every running workspace")
-    x.add_argument("--pick", action="store_true", help="choose from the running workspaces")
-    sub.add_parser("status", parents=[common], help="what runs in the background, and where")
-
-    a = sub.add_parser("addon", help="add-ons: add, remove, list").add_subparsers(dest="sub", required=True)
-    x = a.add_parser("add", parents=[common], help="install an add-on and turn it on here")
-    x.add_argument("name", metavar="NAME|./FOLDER", help="a built-in add-on name or a local folder")
-    x.add_argument("--yes", action="store_true", help="do not ask")
-    x.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
-    x = a.add_parser("remove", parents=[common], help="turn an add-on off in this workspace")
-    x.add_argument("name")
-    x.add_argument("--purge", action="store_true", help="also delete its data folder and settings")
-    x = a.add_parser("uninstall", parents=[common], help="remove an add-on from this computer")
-    x.add_argument("name")
-    a.add_parser("list", parents=[common])
+    cli_status.add_parsers(sub, common)
+    cli_addons.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
@@ -246,6 +240,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("data", help="JSON object")
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     cli_clients.add_parsers(sub, common)
+    cli_run.add_parsers(sub, common)
+    cli_needs.add_parsers(sub, common)
+    cli_config.add_parsers(sub, common)
     p.formatter_class = argparse.RawDescriptionHelpFormatter
     notes = []
     if addon_lines:
@@ -256,93 +253,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     p.epilog = "\n\n".join(notes) or None
     # publish and relay are built-in add-ons: listed under "Add-ons" only when on (never as core commands)
     top = p._subparsers._group_actions[0]
-    top._choices_actions[:] = [a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS]
+    top._choices_actions[:] = [
+        a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
+    ]
     return p
-
-
-def _home_path(p: str) -> str:
-    try:
-        return "~/" + Path(p).relative_to(Path.home()).as_posix()
-    except ValueError:
-        return p
-
-
-def _service_line(r: dict) -> str:
-    if r.get("error"):
-        return f"  {r['addon']:<12}did not start: {r['error']}"
-    url = services.local_url(r.get("url"))
-    return f"  {r['addon']:<12}" + (url or f"running (pid {r.get('pid')})")
-
-
-def _pick(running: list[dict]) -> list[Path]:
-    if not running:
-        return []
-    if not sys.stdin.isatty():
-        raise Refused(
-            "Say which workspace to stop: orch stop <folder|name>, or orch stop --all. "
-            "See what runs: orch status"
-        )
-    print("Running workspaces:")
-    for i, w in enumerate(running, 1):
-        names = ", ".join(a["addon"] for a in w["addons"])
-        print(f"  {i}  {w['name']:<20}{_home_path(w['workspace'])}  ({names})")
-    ans = input('Which one to stop? Number, "all", or Enter for none: ').strip().lower()
-    if not ans:
-        return []
-    if ans == "all":
-        return [Path(w["workspace"]) for w in running]
-    if ans.isdigit() and 1 <= int(ans) <= len(running):
-        return [Path(running[int(ans) - 1]["workspace"])]
-    raise Refused(f"'{ans}' is not on the list. Nothing was stopped.")
-
-
-def _services_cmd(args, root: Path) -> None:
-    if args.cmd == "start":
-        rows = services.start(root)
-        if args.json:
-            print(json.dumps({"workspace": str(root.resolve()), "addons": rows}, indent=2))
-        elif not rows:
-            print("No add-on that is on here runs in the background. Nothing to start.")
-        else:
-            print(f"Started in {root.name}:")
-            print("\n".join(_service_line(r) for r in rows))
-            print("Stop: orch stop")
-        url = next((services.local_url(r.get("url")) for r in rows if services.local_url(r.get("url"))), None)
-        if url and not args.no_open and not args.json and sys.stdout.isatty():
-            import webbrowser
-
-            webbrowser.open(url)
-        bad = [r for r in rows if r.get("error")]
-        if bad:
-            raise Refused(", ".join(r["addon"] for r in bad) + " did not start (see above).")
-    elif args.cmd == "status":
-        ws = services.status()
-        lines = []
-        for w in ws:
-            lines.append(f"{w['name']}  ({_home_path(w['workspace'])})")
-            lines += [_service_line(a) for a in w["addons"]]
-        _out(
-            args,
-            ws,
-            "\n".join(lines) or "Nothing runs in the background. Start it in a workspace: orch start",
-        )
-    else:
-        if args.all:
-            targets = [Path(w["workspace"]) for w in services.status()]
-        elif args.workspace:
-            targets = [services.find(args.workspace)]
-        elif (root / ".orch").is_dir() and not args.pick:
-            targets = [root.resolve()]
-        else:
-            targets = _pick(services.status())
-        done = [{"workspace": str(t), "addons": services.stop(t)} for t in targets]
-        lines = []
-        for d in done:
-            names = [r["addon"] for r in d["addons"] if r["stopped"]]
-            lines.append(
-                f"Stopped in {Path(d['workspace']).name}: " + (", ".join(names) or "nothing was running")
-            )
-        _out(args, done, "\n".join(lines) or "Nothing was stopped.")
 
 
 def run(args: argparse.Namespace) -> None:
@@ -360,31 +274,10 @@ def run(args: argparse.Namespace) -> None:
             _out(args, {"ok": True, "refreshed": done}, "Refreshed: " + ", ".join(done or ["nothing"]))
         elif not args.json:
             print("orch is up to date.")
-    elif cmd in ("start", "stop", "status"):
-        _services_cmd(args, root)
-    elif cmd == "addon":
-        if sub == "list":
-            rows = addons.listing(root)
-            _out(
-                args,
-                rows,
-                "\n".join(
-                    f"{r['name']:<12}{'on ' if r['active'] else 'off'}  {r['description']}"
-                    + ("" if r["active"] else f"  (turn on: orch addon add {r['name']})")
-                    for r in rows
-                )
-                or "No add-ons are installed. Turn one on with: orch addon add <name>",
-            )
-        elif sub == "add":
-            addons.add(root, args.name, args.yes, args.project_only)
-            if args.project_only:
-                _out(args, {"ok": True}, f"{args.name} is turned on in this workspace.")
-        elif sub == "remove":
-            addons.remove(root, args.name, args.purge)
-            _out(args, {"ok": True}, f"{args.name} is turned off in this workspace.")
-        else:
-            addons.uninstall(root, args.name)
-            _out(args, {"ok": True}, f"{args.name} is removed from this computer.")
+    elif cli_status.dispatch(args, root) or cli_addons.dispatch(args, root):
+        pass
+    elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
+        pass
     elif cmd == "ticket" and sub == "new":
         t = tickets.create(root, args.title, by())
         _out(
@@ -510,6 +403,7 @@ def main(argv: list[str] | None = None) -> int:
                 return addons.dispatch(root, argv[0], argv[1:])
         args = parser.parse_args(argv)
         run(args)
+        cli_run.after_command(args, root, want_json)
     except Refused as e:
         return refuse(e)
     return 0
