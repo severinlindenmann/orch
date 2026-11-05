@@ -571,6 +571,10 @@ def test_relay_status(proj, run, rel):
 # ---- security review 3 ------------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows cannot create a folder named https:, so the attack is impossible there",
+)
 def test_default_repo_is_never_a_folder(proj, monkeypatch):
     monkeypatch.delenv("ORCH_REPO", raising=False)
     planted = proj / "https:" / "github.com" / "severinlindenmann" / "orch"
