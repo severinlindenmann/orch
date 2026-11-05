@@ -122,15 +122,44 @@ def pid_started(pid: int) -> str | None:
 # ---------------------------------------------------------------- the lock and the record
 
 
+def _lock_owner_dead(lock: Path) -> bool:
+    """The lock names its holder's pid; a holder that died (killed by `stop`, a crash) leaves it behind."""
+    try:
+        pid = int(lock.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False  # empty = still being written; the 30 s age rule covers a creator that died there
+    return not services.pid_alive(pid)
+
+
+def _break_dead(lock: Path) -> bool:
+    """Take a dead holder's lock away (rename: only one waiter wins), after checking what we took."""
+    mine = lock.with_name(f"{lock.name}.{secrets.token_hex(4)}")
+    try:
+        os.replace(lock, mine)
+    except OSError:
+        return False
+    try:
+        if _lock_owner_dead(mine):
+            return True
+        with contextlib.suppress(OSError):
+            os.link(mine, lock)  # it was a live holder's new lock: put it back
+        return False
+    finally:
+        with contextlib.suppress(OSError):
+            mine.unlink()
+
+
 @contextlib.contextmanager
 def locked(root: Path, tid: str):
-    """The per-ticket run lock. Stale after 30 s (a holder does only quick file work)."""
+    """The per-ticket run lock. Free when its holder is dead, or after 30 s (holders do only quick work)."""
     lock = run_dir(root) / "tickets" / f"{tid}.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
     end = time.monotonic() + 10
     while True:
         try:
-            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w") as f:
+                f.write(str(os.getpid()))
             break
         except FileExistsError:
             try:
@@ -138,6 +167,8 @@ def locked(root: Path, tid: str):
             except OSError:
                 continue
             if stale and tickets._break_stale(lock):
+                continue
+            if _lock_owner_dead(lock) and _break_dead(lock):
                 continue
             if time.monotonic() > end:
                 raise Refused(f"Ticket {tid} is busy (retried for 10 s). Try again.") from None
@@ -149,11 +180,13 @@ def locked(root: Path, tid: str):
             lock.unlink()
 
 
-def _atomic(path: Path, text: str) -> None:
+def _atomic(path: Path, text: str, mode: int = 0o666) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
     try:
-        tmp.write_text(text, encoding="utf-8", newline="\n")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)  # private from the first byte
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
@@ -175,18 +208,24 @@ def _delete(root: Path, tid: str) -> None:
     record_path(root, tid).unlink(missing_ok=True)
 
 
+def _running(pid, started) -> bool:
+    if not isinstance(pid, int) or not services.pid_alive(pid):
+        return False
+    now_started = pid_started(pid) if started else None
+    return not (started and now_started and now_started != started)  # else the pid was reused
+
+
 def state(rec: dict, at: float | None = None) -> str:
     """alive | dead | maybe-stale for a claim record."""
     at = time.time() if at is None else at
     pid = rec.get("pid")
     if isinstance(pid, int):
-        if not services.pid_alive(pid):
-            return "dead"
-        was = rec.get("pid_started")
-        now_started = pid_started(pid) if was else None
-        if was and now_started and now_started != was:
-            return "dead"  # the pid now belongs to another process
-        return "alive"
+        # alive while the wrapper OR its agent still runs (a killed wrapper must not free a working agent)
+        if _running(pid, rec.get("pid_started")) or _running(
+            rec.get("agent_pid"), rec.get("agent_pid_started")
+        ):
+            return "alive"
+        return "dead"
     try:
         idle = at - _parse(rec["renewed_at"])
     except (KeyError, ValueError):
@@ -194,17 +233,8 @@ def state(rec: dict, at: float | None = None) -> str:
     return "maybe-stale" if idle > lease_seconds() else "alive"
 
 
-def reap(rec: dict) -> bool:
-    """Stop the agent process of a dead claim, if it still runs (matched by pid and start time)."""
-    pid, was = rec.get("agent_pid"), rec.get("agent_pid_started")
-    if not isinstance(pid, int) or not was or not services.pid_alive(pid) or pid_started(pid) != was:
-        return False
-    kill_tree(pid)
-    return True
-
-
 def kill_tree(pid: int, grace: float = 2.0) -> None:
-    """SIGTERM, then SIGKILL, the process and (when it leads its own group) its group. Windows: taskkill /T."""
+    """SIGTERM, then SIGKILL, a process and (when it leads its own group) the group. Windows: taskkill /T."""
     if os.name == "nt":
         subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
         return
@@ -395,8 +425,6 @@ def claim(
                     _write(root, cur)
                 raise _busy(cur, why, queued)
             # dead pid, or maybe-stale with --take-over: the old claim is replaced
-            if st == "dead":
-                reap(cur)  # an agent left running after its wrapper died must not work beside the new run
         rec = _new_record(tid, by, agent, mode, ticket, reason)
         if pid:
             rec["pid"], rec["pid_started"] = pid, pid_started(pid)
@@ -587,6 +615,19 @@ def start(
             "A live session needs tmux and an agent that can run interactively; working one turn at a time."
         )
         mode = "oneshot"
+    if mode == "live":
+        notice = adapters.command_notice(name, mode, root)
+        r = runs_live.start_live(
+            root,
+            tid,
+            by,
+            name,
+            fresh=fresh,
+            take_over=take_over,
+            busy_text=text or f"{by} asked for more work on this ticket.",
+        )
+        r["notes"] = notes + ([notice] if notice else [])
+        return r
     notice = adapters.command_notice(name, mode, root)
     if notice:
         notes.append(notice)
@@ -594,12 +635,15 @@ def start(
     if allow and not a["capabilities"]["permission_retry"]:
         notes.append(f"{a['label']} cannot be told which tools to allow; --allow was ignored.")
         allow = []
-    busy_text = text or f"{by} asked for more work on this ticket."
-    if mode == "live":
-        r = runs_live.start_live(root, tid, by, name, fresh=fresh, take_over=take_over, busy_text=busy_text)
-        r["notes"] = notes + r.get("notes", [])
-        return r
-    rec = claim(root, tid, by, name, mode, take_over=take_over, busy_text=busy_text)
+    rec = claim(
+        root,
+        tid,
+        by,
+        name,
+        mode,
+        take_over=take_over,
+        busy_text=text or f"{by} asked for more work on this ticket.",
+    )
     try:
         p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name)
         log_rel = f".orch/run/logs/{tid}-{rec['run']}.log"
@@ -610,8 +654,7 @@ def start(
             cmd += ["--allow", pat]
         if p["stdin"] is not None:
             sf = run_dir(root) / f"prompt-{rec['run']}.txt"
-            _atomic(sf, p["stdin"])
-            os.chmod(sf, 0o600)
+            _atomic(sf, p["stdin"], 0o600)
             cmd += ["--stdin-file", str(sf)]
         if p["session"] and not p["resumed"]:
             cmd += ["--new-session", p["session"]]
@@ -690,7 +733,7 @@ def set_process_fields(root: Path, tid: str, run: str, **fields) -> None:
 
 
 def _on_term(root: Path, tid: str, run: str, current: dict) -> None:
-    """SIGTERM (from `orch run stop`): end the agent and its helpers too, then leave the claim."""
+    """SIGTERM: end the agent and its helpers too, then leave the claim."""
     if os.name == "nt":
         return
     import signal
@@ -738,6 +781,7 @@ def wrap(
     turns = 0
     while True:
         ids = list(item_ids or [])
+        turn_items = [i for i in _pending_read(root, tid) if i["id"] in ids]
         rc, out = _run_turn(
             argv,
             root,
@@ -747,8 +791,9 @@ def wrap(
             (lambda ids=ids: mark_delivered(root, tid, ids)) if ids else None,
             on_proc,
         )
-        if resumed and rc != 0:  # the session is gone: start fresh once and keep the new id
-            p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=[])
+        if resumed and rc != 0 and adapters.session_missing(name, out, root):
+            # only "that session does not exist" starts fresh; the input of this turn goes in with it
+            p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
             rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc)
         sid = new_session or adapters.parse_session(name, out, root)
@@ -788,18 +833,28 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
     if new_session and rc == 0:
         tickets.record_session(root, tid, name, new_session, host())
     release(root, tid, run)  # input still waiting stays in the pending file for the next start
-    hooks = run_dir(root) / f"hooks-{run}.json"
-    hooks.unlink(missing_ok=True)
+    (run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
+    with contextlib.suppress(Exception):
+        from orch import runs_live
+
+        runs_live.start_waiting(root)
     return rc
 
 
 # ---------------------------------------------------------------- the footer
 
 
-def footer(root: Path, argv_by: str | None) -> str | None:
+def footer(root: Path, argv_by: str | None, tid_hint: str | None = None) -> str | None:
     """'New on t_x since you looked: ...' for the run this process belongs to, once per new revision."""
     run, tid = os.environ.get("ORCH_RUN"), os.environ.get("ORCH_TICKET")
-    if not run or not tid or not re.fullmatch(r"t_[a-z0-9]{6,16}", tid):
+    if not run or not tid:
+        # a hand-started agent has no ORCH_RUN: it is the pid-less claim whose `by` it passes as --by
+        tid = tid_hint if isinstance(tid_hint, str) else None
+        rec = read(root, tid) if tid and re.fullmatch(r"t_[a-z0-9]{6,16}", tid) else None
+        if not rec or rec.get("pid") is not None or not argv_by or rec.get("by") != argv_by:
+            return None
+        run = rec["run"]
+    if not tid or not re.fullmatch(r"t_[a-z0-9]{6,16}", tid):
         return None
     rec = read(root, tid)
     if not rec or rec["run"] != run:

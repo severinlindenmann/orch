@@ -237,6 +237,12 @@ def session_mode(name: str, root: Path | None = None) -> str:
     return load(name, root)["session"]["id"]
 
 
+def session_missing(name: str, output: str, root: Path | None = None) -> bool:
+    """True when the output says the resumed session does not exist (the only case for starting fresh)."""
+    pat = load(name, root)["session"].get("missing")
+    return bool(pat and re.search(pat, output, re.IGNORECASE))
+
+
 def parse_session(name: str, output: str, root: Path | None = None) -> str | None:
     """The session id a run printed (for tools whose ids come from output)."""
     a = load(name, root)

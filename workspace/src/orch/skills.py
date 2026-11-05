@@ -19,6 +19,7 @@ GITIGNORE_LINES = [
     ".orch/inbox-seen.json",
     ".orch/addons/",
     ".orch/run/",
+    ".orch/tickets/*/evidence/",
 ]
 GITIGNORE_HEADER = "# orch (local only)"
 

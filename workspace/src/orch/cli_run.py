@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
 from pathlib import Path
 
-from orch import adapters, runs, tickets
+from orch import adapters, runs, runs_live, tickets
 from orch.errors import Refused
 
 SUBCOMMANDS = (
@@ -24,19 +25,27 @@ SUBCOMMANDS = (
     "event",
     "done",
 )
-NOT_YET = ("send", "attach", "stop", "event", "done")
 
 
 def add_parsers(sub, common) -> None:
     r = sub.add_parser("run", help=argparse.SUPPRESS).add_subparsers(dest="sub")
     for name in SUBCOMMANDS:
         x = r.add_parser(name, parents=[common], help=argparse.SUPPRESS)
-        if name in NOT_YET:
-            x.add_argument("rest", nargs=argparse.REMAINDER)
-            continue
-        x.add_argument("ticket")
-        if name in ("claim", "start", "argv"):
+        x.add_argument("ticket", nargs="?" if name in ("event", "done") else None)
+        if name in ("claim", "argv"):
             x.add_argument("--mode", choices=("oneshot", "live"), default="oneshot")
+        if name == "start":
+            x.add_argument("--mode", choices=("oneshot", "live"), help="default: live in tmux when possible")
+        if name == "send":
+            x.add_argument("text", nargs="?", help="what to tell the agent")
+            x.add_argument("--file", help="read the text from this file")
+            x.add_argument("--kind", choices=runs.PENDING_KINDS, default="message")
+        if name == "attach":
+            x.add_argument("--watch", action="store_true", help="only watch, do not type")
+        if name == "event":
+            x.add_argument("--kind", required=True, choices=runs_live.KINDS)
+            x.add_argument("--run", help="the run (the tool's hook passes it)")
+            x.add_argument("--session-id", help="the tool's session id")
         if name in ("claim", "session", "argv"):
             x.add_argument("--agent", help="which agent (default: the one chosen for this folder)")
         if name == "claim":
@@ -73,6 +82,7 @@ def _wrap_cmd(root: Path, rest: list[str]) -> None:
     p.add_argument("--ticket", required=True)
     p.add_argument("--agent", required=True)
     p.add_argument("--fresh", action="store_true")
+    p.add_argument("--live", action="store_true")
     p.add_argument("--resumed", action="store_true")
     p.add_argument("--allow", action="append", default=[])
     p.add_argument("--stdin-file")
@@ -80,12 +90,17 @@ def _wrap_cmd(root: Path, rest: list[str]) -> None:
     p.add_argument("--items", default="")
     a = p.parse_args(rest[:i])
     stdin = None
+    rec = runs.read(root, a.ticket)
+    if not rec or rec["run"] != a.run:
+        raise Refused("orch run _wrap is internal.")
     if a.stdin_file:
-        f = Path(a.stdin_file).resolve()
-        if runs.run_dir(root).resolve() not in f.parents:
-            raise Refused("orch run _wrap is internal.")  # never read or delete a file outside .orch/run/
+        f = Path(a.stdin_file)
+        if f.resolve() != (runs.run_dir(root) / f"prompt-{a.run}.txt").resolve():
+            raise Refused("orch run _wrap is internal.")  # never read or delete any other file
         stdin = f.read_text(encoding="utf-8")
         f.unlink(missing_ok=True)
+    if a.live:
+        sys.exit(runs.wrap_live(root, a.run, a.ticket, a.agent, rest[i + 1 :], a.new_session))
     code = runs.wrap(
         root,
         a.run,
@@ -140,7 +155,51 @@ def _status(args, root: Path) -> None:
         )
     else:
         text = _holder_line(rec, tid) + (f" {waiting} more waiting." if waiting else "")
+        if rec.get("mode") == "live":
+            text += " " + runs_live.line(rec)
     _out(args, data, text)
+
+
+def _session_id(args) -> str | None:
+    if args.kind != "session":
+        return None
+    if args.session_id:
+        return args.session_id
+    if sys.stdin is None or sys.stdin.isatty():
+        return None
+    try:
+        data = json.loads(sys.stdin.read(65536) or "{}")  # the tool's hook input
+    except (ValueError, OSError):
+        return None
+    sid = data.get("session_id") if isinstance(data, dict) else None
+    return sid if isinstance(sid, str) else None
+
+
+def _done(args, root: Path, tid: str | None) -> None:
+    """A generic agent says it finished a piece of work (idle)."""
+    run = os.environ.get("ORCH_RUN")
+    if not tid:
+        raise Refused("Say which ticket: orch run done <ticket>")
+    n = runs_live.event(root, "idle", run, tid, None)
+    _out(
+        args,
+        {"sent": n},
+        "Noted." + (f" {n} message{'s' if n != 1 else ''} from you waiting: sent." if n else ""),
+    )
+
+
+def _send(args, root: Path, tid: str, by: str) -> None:
+    if args.file:
+        p = Path(args.file)
+        if p.stat().st_size > 64_000:
+            raise Refused("That file is too long to send (8000 characters at most).")
+        text = p.read_text(encoding="utf-8")
+    else:
+        text = args.text
+    if not text:
+        raise Refused('Say what to send: orch run send <ticket> "text"  (or --file <path>)')
+    res = runs_live.send(root, tid, by, text, args.kind)
+    _out(args, res, runs_live.send_text(res, tid))
 
 
 def dispatch(args, root: Path) -> bool:
@@ -150,13 +209,31 @@ def dispatch(args, root: Path) -> bool:
     if sub == "_wrap":
         _wrap_cmd(root, args.rest)
         return True
-    if sub in NOT_YET or sub is None:
-        raise Refused("orch run is not available yet.")
+    if sub is None:
+        raise Refused("Say what to do: orch run start|status|send|attach|stop <ticket>")
+    if sub != "event":  # a hook must stay quiet; everything else first closes sessions idle for an hour
+        with contextlib.suppress(Exception):
+            runs_live.cleanup(root)
     by = args.by or tickets.current_actor()
     if not 1 <= len(by) <= 64 or any(ord(c) < 32 for c in by):
         raise Refused("--by must be 1 to 64 characters, e.g. agent:helper.")
-    tid = args.ticket
-    if sub == "claim":
+    tid = args.ticket or os.environ.get("ORCH_TICKET")
+    if sub == "event":
+        runs_live.event(root, args.kind, args.run or os.environ.get("ORCH_RUN"), tid, _session_id(args))
+    elif sub == "done":
+        _done(args, root, tid)
+    elif sub == "send":
+        _send(args, root, tid, by)
+    elif sub == "attach":
+        runs_live.attach(root, tid, args.watch)
+    elif sub == "stop":
+        ok = runs_live.stop(root, tid)
+        _out(
+            args,
+            {"stopped": ok},
+            f"Stopped {tid}. The work done so far is kept." if ok else f"Nothing is running on {tid}.",
+        )
+    elif sub == "claim":
         name = args.agent or adapters.detect_env(os.environ) or _chosen_or_generic(root)
         try:
             rec = runs.claim(
@@ -169,7 +246,13 @@ def dispatch(args, root: Path) -> bool:
             tickets.record_session(root, tid, name, args.session, runs.host())
         _out(args, {"claimed": True, "run": rec["run"]}, f"Claimed {tid} (run {rec['run']}).")
     elif sub == "release":
-        res = runs.release(root, tid, args.run)
+        run_id = args.run or os.environ.get("ORCH_RUN")
+        rec = runs.read(root, tid)
+        if rec and not run_id and isinstance(rec.get("pid"), int) and runs.state(rec) == "alive":
+            raise Refused(
+                f"An agent process is working on {tid}. Only that run can release it (--run {rec['run']})."
+            )
+        res = runs.release(root, tid, run_id)
         _out(args, res, "Released." if res["released"] else "Nothing to release.")
     elif sub == "status":
         _status(args, root)
@@ -200,7 +283,13 @@ def dispatch(args, root: Path) -> bool:
         for note in r["notes"]:
             print(note, file=sys.stderr)
         how = "Continued the earlier conversation" if r["resumed"] else "Started fresh from the ticket"
-        _out(args, r, f"{how} ({r['agent']}). Run {r['run']}. Log: {r['log']}")
+        where = "in a live session" if r["mode"] == "live" else f"Log: {r['log']}"
+        _out(
+            args,
+            r,
+            f"{how} ({r['agent']}). Run {r['run']}. {where}"
+            + (f" See it: orch run attach {tid}" if r["mode"] == "live" else ""),
+        )
     return True
 
 
@@ -209,7 +298,7 @@ def after_command(args, root: Path, stdout_is_json: bool) -> None:
     if getattr(args, "cmd", None) == "run":
         return
     try:
-        line = runs.footer(root, getattr(args, "by", None))
+        line = runs.footer(root, getattr(args, "by", None), getattr(args, "id", None))
     except Exception:  # a footer must never break the command it follows
         return
     if line:
