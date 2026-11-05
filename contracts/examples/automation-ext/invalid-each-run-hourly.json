@@ -1,1 +1,1 @@
-{ "recurring": true, "cron": "0 * * * *", "each_run": "hourly" }
+{ "recurring": true, "cron": "0 * * * *", "each_run": "sub-ticket" }

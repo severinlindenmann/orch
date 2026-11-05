@@ -9,7 +9,7 @@
     "cron": { "type": "string", "pattern": "^\\S+ \\S+ \\S+ \\S+ \\S+$", "description": "5-field cron (min hour day month weekday), read in tz (UTC when tz is absent). Missed runs (machine off): one catch-up run, never several." },
     "tz": { "type": "string", "pattern": "^(UTC|[A-Za-z_]+(/[A-Za-z0-9_+-]+){1,2})$", "description": "IANA time zone the cron is read in, e.g. Europe/Zurich. Default: [workspace] tz of .orch/config.toml, else UTC." },
     "agent": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "description": "Names an agent: a built-in adapter or an [agents.<name>] entry of .orch/config.toml. Never a command. Default: [workspace] agent." },
-    "each_run": { "const": "sub-ticket", "description": "Optional. Each run gets its own sub-ticket (parent = this ticket); only for repeats daily or slower. Absent = every run works on this ticket." },
+    "each_run": { "const": "sub-ticket", "description": "Optional. Each run gets its own sub-ticket (parent = this ticket); only for repeats daily or slower (cron minute and hour are plain numbers, checked here). Absent = every run works on this ticket." },
     "last_run": { "oneOf": [{ "type": "string", "format": "date-time", "pattern": "Z$" }, { "type": "null" }], "description": "Written by the add-on after each run." },
     "run": { "const": true, "description": "On a sub-ticket: made for one run of its parent." },
     "at": { "type": "string", "format": "date-time", "pattern": "Z$", "description": "On a sub-ticket: the planned time of that run (UTC)." },
@@ -17,7 +17,7 @@
   },
   "allOf": [
     { "if": { "properties": { "recurring": { "const": true } }, "required": ["recurring"] }, "then": { "required": ["cron"] } },
-    { "if": { "required": ["each_run"] }, "then": { "required": ["recurring", "cron"], "properties": { "recurring": { "const": true } } } },
+    { "if": { "required": ["each_run"] }, "then": { "required": ["recurring", "cron"], "properties": { "recurring": { "const": true }, "cron": { "pattern": "^[0-9]{1,2} [0-9]{1,2} \\S+ \\S+ \\S+$", "description": "each_run needs a repeat daily or slower: one fixed minute and hour." } } } },
     { "if": { "required": ["run"] }, "then": { "required": ["at", "occurrence"], "not": { "anyOf": [{ "required": ["recurring"] }, { "required": ["each_run"] }] } } }
   ]
 }

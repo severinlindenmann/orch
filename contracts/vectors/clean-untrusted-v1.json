@@ -1,6 +1,6 @@
 {
   "name": "clean-untrusted-v1",
-  "description": "clean_untrusted(text, limit=2000): text from outside (relay messages, webhooks) before it goes into ticket history or an agent prompt. In this order: NFC; U+2028/U+2029 become newline; drop control (Cc) and format (Cf) characters except newline and tab, tag characters U+E0000-E007F, variation selectors U+FE00-FE0F and U+E0100-E01EF, U+2800, U+034F, U+3164, U+115F, U+1160, U+FEFF, U+FFA0; then remove <!-- ... --> comments, repeated until nothing changes; then remove an unterminated '<!--' and everything after it; cut to limit. Dropping invisible characters first means they cannot hide a comment marker. Visible text is never rewritten. The relay's description rule (relay-api.md PATCH /v1/me) already rejects what this strips.",
+  "description": "clean_untrusted(text, limit=2000): text from outside (relay messages, webhooks) before it goes into ticket history or an agent prompt. In this order: NFC; U+2028/U+2029 become newline; drop control (Cc), format (Cf), unassigned (Cn) and surrogate (Cs) characters except newline and tab, every Default_Ignorable_Code_Point (U+00AD, U+034F, U+061C, U+115F-1160, U+17B4-17B5, U+180B-180F, U+200B-200F, U+202A-202E, U+2060-206F, U+3164, U+FE00-FE0F, U+FEFF, U+FFA0, U+FFF0-FFF8, U+1BCA0-1BCA3, U+1D173-1D17A, U+E0000-E0FFF) and U+2800; then remove <!-- ... --> comments, repeated until nothing changes; then remove an unterminated '<!--' and everything after it; cut to limit. Dropping invisible characters first means they cannot hide a comment marker. Cn follows the implementation's Unicode version; the vectors use code points unassigned for a long time (U+0378). Visible text is never rewritten. The relay's description rule (relay-api.md PATCH /v1/me) already rejects what this strips.",
   "cases": [
     {
       "name": "bidi-zero-width-comment",
@@ -46,6 +46,11 @@
       "name": "line-and-paragraph-separator",
       "in": "one\u2028two\u2029three",
       "out": "one\ntwo\nthree"
+    },
+    {
+      "name": "default-ignorable-and-unassigned",
+      "in": "Pay\u17b4\u180e\u2065\ud834\udd73\udb43\udfff now\u0378!",
+      "out": "Pay now!"
     }
   ]
 }

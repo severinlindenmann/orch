@@ -18,6 +18,7 @@
   },
   "allOf": [
     { "if": { "properties": { "type": { "const": "text" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/text" } } } },
+    { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["update"] } } }, "then": { "required": ["ticket"] } },
     { "if": { "properties": { "type": { "const": "file" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/file" } } } },
     { "if": { "properties": { "type": { "const": "question" } } }, "then": { "required": ["ticket"], "properties": { "body": { "$ref": "#/$defs/question" } } } },
     { "if": { "properties": { "type": { "const": "answer" } } }, "then": { "required": ["ticket", "reply_to"], "properties": { "body": { "$ref": "#/$defs/answer" } } } },
@@ -41,7 +42,12 @@
           "type": "object", "required": ["kind"], "additionalProperties": false,
           "properties": {
             "kind": { "enum": ["ack", "working", "note", "result", "question", "failure", "stopped"], "description": "What this text says about the ticket's work. The relay pushes only result, question, failure and stopped; the others are stored and listed, never pushed (relay-api.md, Push)." },
-            "title": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$", "description": "Optional short ticket title for the phone, plain text, one line." }
+            "title": {
+              "type": "string", "minLength": 1, "maxLength": 120,
+              "pattern": "^[\\p{Zs}]*[\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}][\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}\\p{Zs}]*$",
+              "not": { "anyOf": [{ "pattern": "[\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u3164\ufe00-\ufe0f\uffa0\udb40\udd00-\udb40\uddef]" }, { "pattern": "[\\p{M}][\\p{M}][\\p{M}]" }] },
+              "description": "Optional short ticket title for the phone. Same character rule as the PATCH /v1/me description (relay-api.md): one line, NFC, only letters, marks, numbers, punctuation, symbols and spaces (Unicode L, M, N, P, S, Zs), not only spaces, no control/format/line/paragraph separators, no Default_Ignorable_Code_Point characters, at most 2 combining marks in a row. The relay refuses a text that breaks it (422 invalid); NFC is checked by the relay."
+            }
           },
           "description": "Optional. A work update about the message's ticket. Old clients ignore it and show the text as before."
         }

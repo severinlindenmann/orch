@@ -233,11 +233,19 @@ for case in bvec["must_fail"]:
 # (so they cannot split a comment marker), then remove comments until nothing changes, then an open "<!--" tail.
 _COMMENT = re.compile(r"<!--.*?-->", re.S)
 _OPEN_TAIL = re.compile(r"<!--.*\Z", re.S)
+# Default_Ignorable_Code_Point (Unicode DerivedCoreProperties), dropped whatever their category.
 _DROP = (
-    set(range(0xE0000, 0xE0080))  # tag characters
-    | set(range(0xE0100, 0xE01F0))  # variation selectors supplement
-    | set(range(0xFE00, 0xFE10))  # variation selectors
-    | {0x2800, 0x034F, 0x3164, 0x115F, 0x1160, 0xFEFF, 0xFFA0}
+    {0x00AD, 0x034F, 0x061C, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x3164, 0xFEFF, 0xFFA0}
+    | set(range(0x180B, 0x1810))
+    | set(range(0x200B, 0x2010))
+    | set(range(0x202A, 0x202F))
+    | set(range(0x2060, 0x2070))
+    | set(range(0xFE00, 0xFE10))
+    | set(range(0xFFF0, 0xFFF9))
+    | set(range(0x1BCA0, 0x1BCA4))
+    | set(range(0x1D173, 0x1D17B))
+    | set(range(0xE0000, 0xE1000))
+    | {0x2800}  # braille blank: looks empty, not ignorable
 )
 
 
@@ -246,7 +254,7 @@ def clean_untrusted(text, limit=2000):
     text = "".join(
         ch
         for ch in text
-        if ch in "\n\t" or (unicodedata.category(ch) not in ("Cc", "Cf") and ord(ch) not in _DROP)
+        if ch in "\n\t" or (unicodedata.category(ch) not in ("Cc", "Cf", "Cn", "Cs") and ord(ch) not in _DROP)
     )
     while True:
         cut = _COMMENT.sub("", text)

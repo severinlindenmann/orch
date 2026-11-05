@@ -1500,5 +1500,43 @@
         "next": "m_a7c2k9q3x1b8d4f6"
       }
     }
+  },
+  {
+    "_note": "Phone: a ticket needs its workspace (ticket ids are per workspace).",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/updates?ticket=t_q3sum1",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 422,
+      "body": {
+        "error": "invalid",
+        "message": "Add the workspace of this ticket."
+      }
+    }
+  },
+  {
+    "_note": "Phone: a workspace that is not on this phone's list answers exactly like an unknown one.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/updates?workspace=ws_other00001&ticket=t_q3sum1",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [],
+        "next": null
+      }
+    }
   }
 ]
