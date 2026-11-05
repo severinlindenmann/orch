@@ -43,6 +43,18 @@ final class TicketTests: XCTestCase {
         XCTAssertEqual(t("stopped").status, .done)
     }
 
+    func testStateLine() {
+        func t(_ k: String, _ text: String = "Q3 summary is ready in the shared folder today.") -> Ticket {
+            TicketBuilder.build(updates: [TicketUpdate(id: "m", workspace: "ws_a", workspaceName: "A", ticket: "t_1", kind: k, title: "X", text: text, replyTo: nil, at: "2026-11-05T10:00:00Z")], questions: [], answers: [:])[0]
+        }
+        XCTAssertEqual(t("working").stateLine, "Working on it")
+        XCTAssertEqual(t("result").stateLine, "Done — Q3 summary is ready in the")
+        XCTAssertEqual(t("stopped").stateLine, "Stopped")
+        XCTAssertTrue(t("failure", "No access").stateLine.hasPrefix("Did not work"))
+        let q = MockRelayTestsFixtures.question
+        XCTAssertEqual(TicketBuilder.build(updates: [], questions: [q], answers: [:])[0].stateLine, "Waiting for your answer")
+    }
+
     func testTextBodyReadsUpdateKind() throws {
         let json = #"{"id":"m_1","from":"ws_a","to":"ph_1","type":"text","created_at":"2026-11-05T10:00:00Z","ticket":"t_1","body":{"text":"Got it: x","update":{"kind":"ack","title":"x"}}}"#
         let m = try JSONCoding.decoder.decode(TextMessage.self, from: Data(json.utf8))
@@ -96,6 +108,7 @@ final class TicketModelTests: XCTestCase {
         let ack = model.ack(for: model.lastSent!.messageId)
         XCTAssertEqual(ack?.text, "Got it: Prepare the Q3 summary")
         XCTAssertEqual(model.tickets(.working).count, 2, "the new ticket is under Working on")
+        XCTAssertTrue(model.tickets.contains { $0.ticket == ack?.ticket && $0.workspace == ack?.workspace }, "See ticket finds it")
         let t = model.tickets(.working).first { $0.title == "Invoice CSV export" }!
         let ok2 = await model.send(to: t.workspace, text: "Use semicolons", ticket: t.ticket); XCTAssertTrue(ok2)
         XCTAssertEqual(model.tickets(.working).count, 2, "a reply stays on its ticket")
