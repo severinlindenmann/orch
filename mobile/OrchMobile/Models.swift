@@ -55,6 +55,13 @@ struct Question: Codable, Sendable, Equatable, Identifiable {
     let message: QuestionMessage
     let workspaceName: String
     var id: String { message.id }
+    /// A `relay:allow` question: a workspace handed over a task that is not allowed yet (SA-12). Answered like any question.
+    var isAllow: Bool { message.body.options.contains("Once") && message.body.options.contains("Always") }
+    /// Button wording; the raw option is what gets sent.
+    func label(_ option: String) -> String {
+        guard isAllow else { return option }
+        switch option { case "Once": return "Allow once"; case "Always": return "Always"; case "No": return "Ignore"; default: return option }
+    }
     var workspaceDisplayName: String { displayName(workspaceName) }
     /// Same ticket, same asker, same wording = the same question, even if the relay delivered it more than once.
     var contentKey: String { [message.from, message.ticket ?? "", message.body.questionId, message.body.text].joined(separator: "\u{1f}") }
@@ -73,7 +80,12 @@ extension Array where Element == Question {
 }
 
 /// `GET /v1/phone/messages`: a text between this phone and a workspace (either direction).
-struct TextBody: Codable, Sendable, Equatable { let text: String }
+struct TextBody: Codable, Sendable, Equatable {
+    let text: String
+    /// Work update about the message's ticket (contracts/message.schema.json); nil on a plain text.
+    var update: TextUpdate? = nil
+}
+struct TextUpdate: Codable, Sendable, Equatable { let kind: String; var title: String? = nil }
 struct TextMessage: Codable, Sendable, Equatable {
     let id: String
     let from: String
@@ -90,6 +102,19 @@ struct PhoneMessage: Codable, Sendable, Equatable, Identifiable {
     var fromPhone: Bool { message.from.hasPrefix("ph_") }
     /// The workspace on the other side of the conversation.
     var workspaceId: String { fromPhone ? message.to : message.from }
+}
+
+/// `GET /v1/phone/updates`: one item per (workspace, ticket), its newest update first.
+struct TicketUpdate: Codable, Sendable, Equatable, Identifiable {
+    let id: String
+    let workspace: String
+    let workspaceName: String
+    let ticket: String
+    let kind: String
+    let title: String?
+    let text: String
+    let replyTo: String?
+    let at: String
 }
 
 struct IdResponse: Decodable, Sendable { let id: String }

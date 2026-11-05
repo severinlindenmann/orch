@@ -9,7 +9,7 @@ import XCTest
         XCTAssertTrue(app.staticTexts["Pilatus Workspace"].waitForExistence(timeout: 15))
         sleep(2)
         // The tab bar is deliberately capped at xxxLarge (like system tab bars); everything else must scale.
-        let tabBar: Set<String> = ["Home", "Questions", "Send", "Settings", "2"]
+        let tabBar: Set<String> = ["Home", "Questions", "Ask", "Settings", "2"]
         try app.performAccessibilityAudit(for: .dynamicType) { issue in tabBar.contains(issue.element?.label ?? "") }
     }
 }

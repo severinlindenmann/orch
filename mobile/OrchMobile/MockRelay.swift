@@ -7,7 +7,7 @@ actor MockRelay: RelayAPI {
     private(set) var sent: [(to: String, text: String)] = []
     private var answered: [String: String] = [:]
     private var signedOut = false
-    private var counter = 0
+    private var counter = 0, updateCounter = 0
     private let latency: Duration
 
     /// Simulator evidence hooks: `-mockLatencyMs N`, `-mockFail YES` (network error), `-mockEmpty YES` (no workspaces or questions).
@@ -15,12 +15,13 @@ actor MockRelay: RelayAPI {
     private let empty = UserDefaults.standard.bool(forKey: "mockEmpty")
 
     init(latency: Duration? = nil) {
+        if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
         let ms = UserDefaults.standard.integer(forKey: "mockLatencyMs")
         self.latency = latency ?? .milliseconds(ms > 0 ? ms : 150)
     }
 
     private let names = [pilatus: "Pilatus Workspace", reports: "Reports"]
-    private let all: [Question] = [
+    private var all: [Question] = [
         Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_q1date0ts0000001", from: pilatus, to: "phones", type: "question",
                                           createdAt: "2026-11-04T10:41:00Z", ticket: "t_7k3f9q",
                                           body: QuestionBody(questionId: "q1", title: "Rename field X in ingestion job", text: "DATE or TIMESTAMP?",
@@ -41,6 +42,32 @@ actor MockRelay: RelayAPI {
                      workspaceName: "Pilatus Workspace"),
     ]
     private var sentMessages: [PhoneMessage] = []
+
+    /// Work updates per (workspace, ticket), newest per ticket is what the feed returns.
+    private var updateLog: [TicketUpdate] = [
+        TicketUpdate(id: "m_upd0000000000001", workspace: pilatus, workspaceName: "Pilatus Workspace", ticket: "t_q3sum1", kind: "result",
+                     title: "Q3 summary", text: "Q3 summary is ready in the shared folder.", replyTo: nil, at: "2026-11-05T11:20:00Z"),
+        TicketUpdate(id: "m_upd0000000000002", workspace: reports, workspaceName: "Reports", ticket: "t_9k2m4q", kind: "working",
+                     title: "Invoice CSV export", text: "Working on: Invoice CSV export", replyTo: nil, at: "2026-11-05T15:12:00Z"),
+    ]
+
+    /// The question the relay add-on asks when a workspace hands over a task that is not allowed yet (relay:allow).
+    static let allowQuestion = Question(
+        message: QuestionMessage(schema: "orch.msg/1", id: "m_q3allow00000003", from: pilatus, to: "phones", type: "question",
+                                 createdAt: "2026-11-05T09:30:00Z", ticket: "t_a110w1",
+                                 body: QuestionBody(questionId: "q1", title: "Prepare Q3 numbers",
+                                                    text: "Reports wants Pilatus Workspace to: Prepare Q3 numbers.",
+                                                    options: ["Once", "Always", "No"], recommended: nil)),
+        workspaceName: "Pilatus Workspace")
+
+    /// Simulator and test hook: an allow question arrives.
+    func deliverAllow() { if !all.contains(where: { $0.id == Self.allowQuestion.id }) { all.append(Self.allowQuestion) } }
+    /// Simulator and test hook: the workspace reports on a ticket.
+    func deliverUpdate(workspace: String, ticket: String, kind: String, title: String?, text: String, replyTo: String? = nil) {
+        updateCounter += 1
+        updateLog.append(TicketUpdate(id: String(format: "m_upd%013d", updateCounter + 100), workspace: workspace, workspaceName: names[workspace] ?? workspace,
+                                      ticket: ticket, kind: kind, title: title, text: text, replyTo: replyTo, at: ISO8601DateFormatter().string(from: Date())))
+    }
 
     /// Simulator and test hook: a workspace writes to the phone after launch (a text push arrived).
     func deliverText(from workspace: String, text: String) {
@@ -89,6 +116,13 @@ actor MockRelay: RelayAPI {
         if empty { return [] }
         return (received + sentMessages).sorted { $0.message.createdAt > $1.message.createdAt }
     }
+    func updates() async throws -> [TicketUpdate] {
+        try await check()
+        if empty { return [] }
+        var newest: [String: TicketUpdate] = [:]
+        for u in updateLog where (newest["\(u.workspace)|\(u.ticket)"]?.at ?? "") <= u.at { newest["\(u.workspace)|\(u.ticket)"] = u }
+        return newest.values.sorted { $0.at > $1.at }
+    }
     func answer(questionMessageId: String, answer: String) async throws -> String {
         try await check()
         guard all.contains(where: { $0.id == questionMessageId }) else { throw RelayError.api(status: 404, code: "not_found", message: "Question not found.") }
@@ -104,8 +138,12 @@ actor MockRelay: RelayAPI {
         guard names[to] != nil else { throw RelayError.api(status: 403, code: "not_allowed", message: "This phone may not reach that workspace.") }
         sent.append((to, text))
         counter += 1
+        // The relay add-on's "Got it": a new ticket for a phone text, the same ticket for a reply.
+        let ack = String(text.prefix(40)).trimmingCharacters(in: .whitespaces)
+        deliverUpdate(workspace: to, ticket: ticket ?? String(format: "t_ph%06d", counter), kind: "ack", title: ack, text: "Got it: \(ack)",
+                      replyTo: String(format: "m_ph0nesend%06d", counter))
         sentMessages.append(PhoneMessage(message: TextMessage(id: String(format: "m_ph0nesend%06d", counter), from: "ph_iphone0001", to: to, type: "text",
-                                                              createdAt: ISO8601DateFormatter().string(from: Date()), ticket: nil, body: TextBody(text: text)),
+                                                              createdAt: ISO8601DateFormatter().string(from: Date()), ticket: ticket, body: TextBody(text: text)),
                                          workspaceName: names[to] ?? to))
         return String(format: "m_ph0nesend%06d", counter)
     }

@@ -171,7 +171,9 @@ def r6(e):
     check(it and it[-1]["allowed"] is False, f"delegate should wait for the human: {it}")
     mid = it[-1]["id"]
     _sched_once(e, "Reports")
-    check(_agent_runs(log) == 0 and len(tickets(e, "Reports")) == before, "automation acted before the human allowed")
+    asking = [t for t in tickets(e, "Reports") if (t.get("ext", {}).get("relay") or {}).get("allow_message") == mid]
+    check(len(asking) == 1 and asking[0]["status"] == "waiting", f"one waiting allow-question ticket expected: {asking}")
+    check(_agent_runs(log) == 0 and len(tickets(e, "Reports")) == before + 1, "automation acted before the human allowed")
     e.orch("Reports", "relay", "allow", mid, "--once")
     allow = [m for m in inbox(e, "Pilatus") if m["type"] == "allow"]
     check(allow and allow[-1]["reply_to"] == mid, f"allow message back to Pilatus: {allow}")
@@ -180,7 +182,8 @@ def r6(e):
     check(_agent_runs(log) == 1, f"agent runs: {_agent_runs(log)}")
     check(len(tickets(e, "Reports")) - before == len(new), f"unrelated tickets appeared: {[t['title'] for t in tickets(e, 'Reports')]}")
     check(len(new) == 1, f"DOUBLE TICKET: {len(new)} tickets for one delegate: {[(t['id'], t['title']) for t in new]}")
-    check([c["text"] for c in new[0]["checklist"]] == ["step one"], "checklist not copied")
+    check(new[0]["id"] == asking[0]["id"], "the allow-question ticket is the one that runs")
+    check([c["text"].endswith(": step one") and c["text"].startswith("From ") for c in new[0]["checklist"]] == [True], f"checklist not copied: {new[0]['checklist']}")
     _sched_once(e, "Reports")
     check(_agent_runs(log) == 1, "once-allow was used twice")
 

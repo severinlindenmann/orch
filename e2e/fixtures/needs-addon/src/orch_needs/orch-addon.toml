@@ -1,0 +1,9 @@
+schema = "orch.addon/1"
+orch_api = 1
+name = "needs-addon"
+version = "0.1.0"
+description = "e2e fixture: shows rows in orch needs; never started in the background."
+run = "orch_needs"
+skill = "skills/orch-needs-addon"
+background = true
+needs = true

@@ -12,7 +12,7 @@ struct RootView: View {
                     tabItem(.home, "Home", "house") { HomeView() }
                     tabItem(.questions, "Questions", "text.bubble") { QuestionsView() }
                         .badge(model.openQuestionCount)
-                    tabItem(.send, "Send", "plus") { SendView() }
+                    tabItem(.send, "Ask", "plus") { SendView() }
                     tabItem(.settings, "Settings", "gearshape") { SettingsView() }
                 }
                 .tint(Theme.brand)
