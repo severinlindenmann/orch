@@ -1,7 +1,8 @@
-import pytest
 import json
 import urllib.error
 import urllib.request
+
+import pytest
 
 from orch_dashboard.data import find_workspace, load_state
 
