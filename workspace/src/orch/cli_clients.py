@@ -81,7 +81,7 @@ def add_parsers(sub, common) -> None:
     life = argparse.ArgumentParser(add_help=False)
     life.add_argument("--days", type=int, help="keep for N days (1-90, default 7)")
     life.add_argument("--permanent", action="store_true")
-    x = pub.add_parser("file", parents=[common, life], help="encrypt and share a file, or a folder with index.html as a page")
+    x = pub.add_parser("file", parents=[common, life], help="encrypt and share a file or a page folder")
     x.add_argument("path")
     x = pub.add_parser("app", parents=[common, life], help="deploy a folder that has app.toml")
     x.add_argument("folder")
