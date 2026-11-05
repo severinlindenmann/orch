@@ -36,6 +36,9 @@ def _home_path(p: str) -> str:
 def _service_line(r: dict) -> str:
     if r.get("error"):
         return f"  {r['addon']:<12}did not start: {r['error']}"
+    if r.get("running") is False and "last_seen" in r:
+        seen = services.ago(r["last_seen"])
+        return f"  {r['addon']:<12}not running (last seen {seen}) - start it: orch start"
     url = services.local_url(r.get("url"))
     return f"  {r['addon']:<12}" + (url or f"running (pid {r.get('pid')})")
 
@@ -83,6 +86,15 @@ def _services_cmd(args, root: Path) -> None:
             raise Refused(", ".join(r["addon"] for r in bad) + " did not start (see above).")
     elif args.cmd == "status":
         ws = services.status()
+        if (root / ".orch").is_dir():  # this workspace: one row per background add-on, stopped ones too
+            here = services.workspace_rows(root)
+            if here:
+                key = str(root.resolve())
+                w = next((x for x in ws if x["workspace"] == key), None)
+                if w is None:
+                    w = {"workspace": key, "name": root.resolve().name, "addons": []}
+                    ws = sorted([*ws, w], key=lambda x: (x["name"].lower(), x["workspace"]))
+                w["addons"] = here
         lines = []
         for w in ws:
             lines.append(f"{w['name']}  ({_home_path(w['workspace'])})")

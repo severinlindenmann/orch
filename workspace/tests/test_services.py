@@ -80,7 +80,17 @@ def test_start_starts_only_background_addons_and_records_them(svc, proj, run):
         {
             "workspace": str(proj.resolve()),
             "name": proj.name,
-            "addons": [{"addon": "hello", "pid": reg[0]["pid"], "url": "http://127.0.0.1:18420"}],
+            "addons": [
+                {
+                    "addon": "hello",
+                    "name": "hello",
+                    "running": True,
+                    "since": reg[0]["started_at"],
+                    "last_seen": json.loads(out)[0]["addons"][0]["last_seen"],
+                    "pid": reg[0]["pid"],
+                    "url": "http://127.0.0.1:18420",
+                }
+            ],
         }
     ]
     run("start")  # again: one entry, not two
@@ -302,3 +312,25 @@ def test_gitignore_never_follows_a_link(proj):
     (proj / ".gitignore").symlink_to("AGENTS.md")
     with pytest.raises(Refused):
         skills.ensure_gitignore(proj)
+
+
+def test_status_says_when_an_addon_is_not_running(svc, proj, run):
+    run("start")
+    run("stop")
+    code, out, _ = run("status", "--json")
+    row = json.loads(out)[0]["addons"][0]
+    assert row["name"] == "hello" and row["running"] is False and row["since"] is None and row["last_seen"]
+    code, out, _ = run("status")
+    assert "hello" in out and "not running (last seen just now) - start it: orch start" in out
+
+
+def test_ago_words():
+    assert services.ago(None) == "never seen"
+    from datetime import UTC, datetime, timedelta
+
+    def at(**kw):
+        return (datetime.now(UTC) - timedelta(**kw)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    assert services.ago(at(hours=3)) == "3 h ago"
+    assert services.ago(at(minutes=10)) == "10 min ago"
+    assert services.ago(at(days=3)) == "3 d ago"
