@@ -471,7 +471,8 @@ def test_allow_refused_under_agent(proj, run, rel, monkeypatch):
     code, _, err = run("relay", "allow", "m_deleg00000000010", "--once")
     assert code == 2 and "Ask the human" in err
     assert not [m for m in rel.sent if m["type"] == "allow"]
+    # UX-17 (owner decision): an explicit --by human:... is a label, no longer refused under an agent
     code, _, err = run("answer", "t_x", "q1", "A", "--by", "human:owner")
-    assert code == 2 and "Ask the human" in err
+    assert code == 2 and "Ask the human" not in err and "doesn't exist" in err
     monkeypatch.delenv("CLAUDECODE")
     assert run("relay", "allow", "m_deleg00000000010", "--once")[0] == 0

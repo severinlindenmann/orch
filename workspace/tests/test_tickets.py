@@ -195,7 +195,7 @@ def test_patch_with_revision_check(proj, run, new_ticket, validate):
     assert code == 0 and json.loads(out)["revision"] == 2
     validate(read(proj, tid))
     code, out, err = run("ticket", "patch", tid, "--if-revision", "1", '{"title": "Late"}', "--json")
-    assert code == 2 and "revision" in json.loads(out)["error"] and "Refused:" in err
+    assert code == 2 and "revision" in json.loads(out) and "Refused:" in err
     assert read(proj, tid)["title"] == "Renamed"
     w = '{"status": "waiting", "waiting_on": {"kind": "time", "until": "2030-01-01T00:00:00Z"}}'
     assert run("ticket", "patch", tid, "--if-revision", "2", w)[0] == 0

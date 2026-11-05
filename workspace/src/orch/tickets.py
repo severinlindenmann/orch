@@ -22,7 +22,10 @@ from orch.errors import Refused
 STATUSES = ("open", "active", "waiting", "done", "dropped")
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
-PATCH_FIELDS = ("title", "status", "waiting_on")
+PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "summary")
+VIA_RE = re.compile(r"^[a-z][a-z0-9-]{1,15}$")
+KIND_RE = re.compile(r"^(plain|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$")
+DOING_STALE_SECONDS = 2 * 3600
 _ID_RE = re.compile(r"^t_[a-z0-9]{6,16}$")
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
@@ -69,8 +72,6 @@ def current_actor(explicit: str | None = None) -> str:
     """--by, else the agent tool seen in the environment, else human:<os user>."""
     if explicit:
         who = explicit
-        if who.startswith("human:"):
-            require_human(f"Record this as done by {who}?", f"acting as {who}")
     elif agent_tool():
         who = "agent:" + str(agent_tool())
     else:
@@ -146,7 +147,7 @@ def _locked(root: Path, tid: str):
             if stale and _break_stale(lock):
                 continue
             if time.monotonic() > end:
-                raise Refused(f"Ticket {tid} is being changed right now. Try again.") from None
+                raise Refused(f"Ticket {tid} is busy (retried for 5 s). Try again.") from None
             time.sleep(0.02)
     try:
         yield
@@ -160,12 +161,87 @@ def revision(ticket: dict) -> int:
     return r if isinstance(r, int) and not isinstance(r, bool) and r >= 0 else 0
 
 
-def save(root: Path, ticket: dict) -> None:
-    """Atomic and checked: under a lock, refused when the file changed since this ticket was loaded
-    (no lost updates between agents and add-ons); `revision` goes up by 1 on every write."""
+class Conflict(Refused):
+    """An edit of something a person saw that changed meanwhile: exit 2 plus revision, changed_by, current."""
+
+    def __init__(self, message: str, extra: dict):
+        super().__init__(message)
+        self.extra = extra
+
+
+def _changed_by(ticket: dict) -> str:
+    h = ticket.get("history") or [{}]
+    return h[-1].get("by", "unknown")
+
+
+def _conflict(ticket: dict, what: str, current) -> Conflict:
+    by = _changed_by(ticket)
+    h = (ticket.get("history") or [{}])[-1]
+    when = f" at {h['at'][11:16]}" if h.get("at") else ""
+    return Conflict(
+        f"{what} was changed by {by}{when}.",
+        {"revision": revision(ticket), "changed_by": by, "current": current},
+    )
+
+
+def _get(ticket: dict, path: str):
+    """'checklist.c2.text' / 'title' / 'due': the value at a path (list items found by their id)."""
+    cur = ticket
+    for part in path.split("."):
+        if isinstance(cur, list):
+            cur = next((x for x in cur if isinstance(x, dict) and x.get("id") == part), None)
+        elif isinstance(cur, dict):
+            cur = cur.get(part)
+        else:
+            return None
+        if cur is None:
+            return None
+    return cur
+
+
+def _write(root: Path, ticket: dict) -> None:
+    """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
     p = ticket_path(root, ticket["id"])
     p.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(ticket, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp, p)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def apply_op(
+    root: Path, tid: str, fn, *, expect: tuple[str, object] | None = None, if_revision: int | None = None
+):
+    """The one write path: load, change and write under ONE lock, so concurrent plain ops all land on the
+    latest revision. `fn(ticket)` changes the dict (no subprocess, nothing slow) and returns a result.
+    Only an edit of something a person saw passes `expect=(path, old value)` or `if_revision`;
+    it is refused (Conflict, exit 2) when that changed. Returns (ticket, result)."""
+    ticket_path(root, tid)  # id shape check, same friendly refusal
+    with _locked(root, tid):
+        ticket = load(root, tid)
+        if if_revision is not None and revision(ticket) != if_revision:
+            raise _conflict(ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
+        if expect is not None and _get(ticket, expect[0]) != expect[1]:
+            parent, _, leaf = expect[0].rpartition(".")
+            raise _conflict(ticket, parent.split(".")[-1] or leaf, _get(ticket, parent or leaf))
+        result = fn(ticket)
+        ticket["revision"] = revision(ticket) + 1
+        ticket["updated_at"] = now()
+        _write(root, ticket)
+        return ticket, result
+
+
+def save(root: Path, ticket: dict) -> None:
+    """Write a ticket loaded earlier: refused when the file changed since (create and tests use it;
+    every op goes through apply_op instead)."""
     with _locked(root, ticket["id"]):
+        p = ticket_path(root, ticket["id"])
         if p.exists():
             try:
                 on_disk = revision(json.loads(p.read_text(encoding="utf-8")))
@@ -177,25 +253,7 @@ def save(root: Path, ticket: dict) -> None:
                 )
         ticket["revision"] = revision(ticket) + 1
         ticket["updated_at"] = now()
-        fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-                json.dump(ticket, f, indent=2, ensure_ascii=False)
-                f.write("\n")
-            os.replace(tmp, p)
-        except BaseException:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-            raise
-
-
-def load_checked(root: Path, tid: str, if_revision: int | None) -> dict:
-    ticket = load(root, tid)
-    if if_revision is not None and revision(ticket) != if_revision:
-        raise Refused(
-            f"Ticket {tid} is at revision {revision(ticket)}, not {if_revision}. Read it again and retry."
-        )
-    return ticket
+        _write(root, ticket)
 
 
 def list_all(root: Path) -> list[dict]:
@@ -211,8 +269,8 @@ def list_all(root: Path) -> list[dict]:
     return out
 
 
-def add_history(ticket: dict, by: str, text: str) -> None:
-    ticket["history"].append({"at": now(), "by": by, "text": text})
+def add_history(ticket: dict, by: str, text: str, via: str = "cli") -> None:
+    ticket["history"].append({"at": now(), "by": by, "via": via, "text": text})
 
 
 def create(root: Path, title: str, by: str) -> dict:
@@ -230,7 +288,7 @@ def create(root: Path, title: str, by: str) -> dict:
         "checklist": [],
         "links": [],
         "questions": [],
-        "history": [{"at": t, "by": by, "text": "Created"}],
+        "history": [{"at": t, "by": by, "via": "cli", "text": "Created"}],
     }
     save(root, ticket)
     return ticket
@@ -253,29 +311,87 @@ def _check_can_finish(ticket: dict) -> None:
 def set_status(root: Path, tid: str, status: str, by: str) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
-    ticket = load(root, tid)
-    if status == "done":
-        _check_can_finish(ticket)
-    if status != "waiting":
-        ticket["waiting_on"] = None
-    old = ticket["status"]
-    ticket["status"] = status
-    if old != status:
-        add_history(ticket, by, f"Status {old} -> {status}")
-    save(root, ticket)
-    return ticket
+
+    def op(ticket):
+        if status == "done":
+            _check_can_finish(ticket)
+        if status != "waiting":
+            ticket["waiting_on"] = None
+        old = ticket["status"]
+        ticket["status"] = status
+        if old != status:
+            add_history(ticket, by, f"Status {old} -> {status}")
+
+    return apply_op(root, tid, op)[0]
 
 
-def edit(root: Path, tid: str, title: str | None, by: str) -> dict:
-    ticket = load(root, tid)
+# ---------------------------------------------------------------- plain fields (owner, due, note, summary)
+
+
+def clean_field(key: str, value):
+    """Validate owner, due, note or summary (None or empty clears it); returns the value to store."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if not isinstance(value, str):
+        raise Refused(f"{key} must be text.")
+    v = value.strip()
+    if key == "owner" and len(v) > 64:
+        raise Refused("An owner is at most 64 characters.")
+    if key == "note" and len(v) > 2000:
+        raise Refused("A note is at most 2000 characters.")
+    if key == "summary" and len(v) > 200:
+        raise Refused("A summary is at most 200 characters.")
+    if key == "due":
+        try:
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
+                raise ValueError
+            datetime.strptime(v, "%Y-%m-%d")
+        except ValueError:
+            raise Refused("due must be a date like 2026-11-10.") from None
+    return v
+
+
+def _set_field(ticket: dict, key: str, value) -> None:
+    v = clean_field(key, value)
+    if v is None:
+        ticket.pop(key, None)
+    else:
+        ticket[key] = v
+
+
+def edit(
+    root: Path,
+    tid: str,
+    title: str | None,
+    by: str,
+    fields: dict | None = None,
+    if_revision: int | None = None,
+) -> dict:
+    """Rename and/or set owner, due, note (`fields`)."""
     if title is not None:
         title = title.strip()
         if not title or len(title) > 200:
             raise Refused("A title needs 1 to 200 characters.")
-        ticket["title"] = title
-        add_history(ticket, by, "Title changed")
-    save(root, ticket)
-    return ticket
+    fields = fields or {}
+    for k, v in fields.items():
+        clean_field(k, v)
+
+    def op(ticket):
+        if title is not None:
+            ticket["title"] = title
+            add_history(ticket, by, "Title changed")
+        for k, v in fields.items():
+            _set_field(ticket, k, v)
+        if fields:
+            add_history(ticket, by, "Edited " + ", ".join(sorted(fields)))
+
+    return apply_op(root, tid, op, if_revision=if_revision)[0]
+
+
+def set_summary(root: Path, tid: str, text: str, by: str) -> dict:
+    """No history line: it would double the history on every run."""
+    clean_field("summary", text)
+    return apply_op(root, tid, lambda t: _set_field(t, "summary", text))[0]
 
 
 def _next_id(items: list[dict], prefix: str) -> str:
@@ -283,15 +399,43 @@ def _next_id(items: list[dict], prefix: str) -> str:
     return f"{prefix}{max(nums, default=0) + 1}"
 
 
+# ---------------------------------------------------------------- checklist
+
+
+def _item(ticket: dict, cid: str) -> dict:
+    item = next((c for c in ticket["checklist"] if c["id"] == cid), None)
+    if item is None:
+        raise Refused(
+            f"Ticket {ticket['id']} has no check {cid}. "
+            f"Run `orch ticket show {ticket['id']}` to see its checks."
+        )
+    return item
+
+
+def proof_label(ev: dict) -> str:
+    """Short name of one piece of proof: title, else file name, else the ref; plus its result text."""
+    if ev.get("title"):
+        label = str(ev["title"])
+    elif ev.get("type") == "file":
+        label = str(ev.get("ref", "")).replace("\\", "/").rsplit("/", 1)[-1]
+    else:
+        label = str(ev.get("ref", ""))
+    if ev.get("text"):
+        label += f" ({ev['text']})" if ev.get("type") == "file" else f" · {ev['text']}"
+    return label
+
+
 def check_add(root: Path, tid: str, text: str, by: str) -> tuple[dict, dict]:
     if not text.strip():
         raise Refused("A checklist item needs text.")
-    ticket = load(root, tid)
-    item = {"id": _next_id(ticket["checklist"], "c"), "text": text.strip(), "done": False, "evidence": []}
-    ticket["checklist"].append(item)
-    add_history(ticket, by, f"Added check {item['id']}")
-    save(root, ticket)
-    return ticket, item
+
+    def op(ticket):
+        item = {"id": _next_id(ticket["checklist"], "c"), "text": text.strip(), "done": False, "evidence": []}
+        ticket["checklist"].append(item)
+        add_history(ticket, by, f"Added check {item['id']}")
+        return item
+
+    return apply_op(root, tid, op)
 
 
 def parse_evidence(raw: str) -> dict:
@@ -308,6 +452,11 @@ def parse_evidence(raw: str) -> dict:
     return ev
 
 
+def _clear_doing(item: dict) -> None:
+    for k in ("state", "by", "at"):
+        item.pop(k, None)
+
+
 def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> tuple[dict, dict]:
     ticket = load(root, tid)  # a missing ticket is reported before anything else
     if not evidence:
@@ -317,23 +466,141 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
             "(also --pr, --commit, --file, --url)."
         )
     evs = [parse_evidence(e) for e in evidence]
-    item = next((c for c in ticket["checklist"] if c["id"] == cid), None)
-    if item is None:
-        raise Refused(f"Ticket {tid} has no check {cid}. Run `orch ticket show {tid}` to see its checks.")
-    item["evidence"].extend(evs)
-    item["done"] = True
-    add_history(ticket, by, f"Check {cid} done")
-    save(root, ticket)
-    return ticket, item
+    _item(ticket, cid)
+
+    def op(t):
+        item = _item(t, cid)
+        item["evidence"].extend(evs)
+        item["done"] = True
+        _clear_doing(item)
+        add_history(t, by, f"Check {cid} done")
+        return item
+
+    return apply_op(root, tid, op)
+
+
+def check_edit(
+    root: Path, tid: str, cid: str, text: str, by: str, if_revision: int | None = None, was: str | None = None
+) -> tuple[dict, dict]:
+    if not text.strip():
+        raise Refused("A checklist item needs text.")
+
+    def op(t):
+        item = _item(t, cid)
+        item["text"] = text.strip()
+        add_history(t, by, f"Renamed {cid}")
+        return item
+
+    expect = (f"checklist.{cid}.text", was) if was is not None else None
+    return apply_op(root, tid, op, expect=expect, if_revision=if_revision)
+
+
+def check_move(root: Path, tid: str, cid: str, after: str, by: str) -> tuple[dict, dict]:
+    def op(t):
+        item = _item(t, cid)
+        _item(t, after)
+        if after == cid:
+            raise Refused("A check cannot follow itself.")
+        t["checklist"].remove(item)
+        idx = next(i for i, c in enumerate(t["checklist"]) if c["id"] == after)
+        t["checklist"].insert(idx + 1, item)
+        add_history(t, by, f"Moved {cid} after {after}")
+        return item
+
+    return apply_op(root, tid, op)
+
+
+def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
+    """Always allowed. The history line keeps the step text and its proof."""
+
+    def op(t):
+        item = _item(t, cid)
+        t["checklist"].remove(item)
+        proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
+        state = "was done" if item.get("done") else "was open"
+        add_history(
+            t, by, f"Removed step {cid} '{item['text']}' ({state}" + (f"; proof: {proof})" if proof else ")")
+        )
+        return item
+
+    return apply_op(root, tid, op)
+
+
+def check_reopen(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
+    """Open again; the old proof stays in the history line."""
+
+    def op(t):
+        item = _item(t, cid)
+        proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
+        item["done"] = False
+        item["evidence"] = []
+        _clear_doing(item)
+        add_history(t, by, f"Reopened {cid}" + (f" (old proof: {proof})" if proof else ""))
+        return item
+
+    return apply_op(root, tid, op)
+
+
+def check_start(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
+    """Mark a step as being worked on; the mark on any other step goes."""
+
+    def op(t):
+        item = _item(t, cid)
+        if item.get("done"):
+            raise Refused(f"{cid} is already done. Reopen it first: orch check reopen {tid} {cid}")
+        for c in t["checklist"]:
+            _clear_doing(c)
+        item.update({"state": "doing", "by": by, "at": now()})
+        return item
+
+    return apply_op(root, tid, op)
+
+
+def check_stop(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
+    def op(t):
+        item = _item(t, cid)
+        _clear_doing(item)
+        return item
+
+    return apply_op(root, tid, op)
+
+
+def doing_stale(root: Path, ticket: dict, item: dict, at: float | None = None) -> bool:
+    """A 'doing' mark that is older than 2 h, or while a run record exists without a live process."""
+    try:
+        age = (at or time.time()) - datetime.strptime(item["at"], "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=UTC
+        ).timestamp()
+    except (KeyError, ValueError):
+        return True
+    if age > DOING_STALE_SECONDS:
+        return True
+    rec = root / ".orch" / "run" / "tickets" / f"{ticket['id']}.json"
+    if rec.is_file():
+        try:
+            pid = json.loads(rec.read_text(encoding="utf-8")).get("pid")
+        except (OSError, ValueError, AttributeError):
+            return False
+        return not _pid_alive(pid)
+    return False
+
+
+def _pid_alive(pid) -> bool:
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # exists, other user (or not signalable on this OS)
+    return True
 
 
 def log(root: Path, tid: str, text: str, by: str) -> dict:
     if not text.strip():
         raise Refused("A history entry needs text.")
-    ticket = load(root, tid)
-    add_history(ticket, by, text.strip())
-    save(root, ticket)
-    return ticket
+    return apply_op(root, tid, lambda t: add_history(t, by, text.strip()))[0]
 
 
 def link_add(root: Path, tid: str, type_: str, url: str, title: str | None, by: str) -> dict:
@@ -341,14 +608,15 @@ def link_add(root: Path, tid: str, type_: str, url: str, title: str | None, by: 
         raise Refused("A link type is lowercase letters, digits and dashes, e.g. github, jira, teams.")
     if not url.strip():
         raise Refused("A link needs a url.")
-    ticket = load(root, tid)
-    link = {"type": type_, "url": url.strip()}
-    if title:
-        link["title"] = title
-    ticket["links"].append(link)
-    add_history(ticket, by, f"Linked {title or type_}")
-    save(root, ticket)
-    return ticket
+
+    def op(t):
+        link = {"type": type_, "url": url.strip()}
+        if title:
+            link["title"] = title
+        t["links"].append(link)
+        add_history(t, by, f"Linked {title or type_}")
+
+    return apply_op(root, tid, op)[0]
 
 
 def validate_ext(schema: dict, obj: dict, addon: str) -> None:
@@ -379,71 +647,103 @@ def ext_set(
         raise Refused("ext data must be a JSON object.") from None
     if not isinstance(obj, dict):
         raise Refused("ext data must be a JSON object.")
-    ticket = load_checked(root, tid, if_revision)
-    ext = ticket.setdefault("ext", {})
-    cur = ext.get(addon)
-    merged = {**cur, **obj} if isinstance(cur, dict) else obj  # keep fields this call does not mention
-    if schema is not None:
-        validate_ext(schema, merged, addon)
-    ext[addon] = merged
-    add_history(ticket, by, f"Set ext.{addon}")
-    save(root, ticket)
-    return ticket
+
+    def op(ticket):
+        ext = ticket.setdefault("ext", {})
+        cur = ext.get(addon)
+        merged = {**cur, **obj} if isinstance(cur, dict) else obj  # keep fields this call does not mention
+        if schema is not None:
+            validate_ext(schema, merged, addon)  # small schema check; no subprocess
+        ext[addon] = merged
+        add_history(ticket, by, f"Set ext.{addon}")
+
+    return apply_op(root, tid, op, if_revision=if_revision)[0]
 
 
 def ask(
-    root: Path, tid: str, text: str, options: list[str], recommended: str | None, by: str
+    root: Path,
+    tid: str,
+    text: str,
+    options: list[str],
+    recommended: str | None,
+    by: str,
+    kind: str | None = None,
+    action: str | None = None,
+    check: str | None = None,
 ) -> tuple[dict, dict]:
     if not text.strip():
         raise Refused("A question needs text.")
     if recommended is not None and options and recommended not in options:
         raise Refused("The recommended answer must be one of the options.")
-    ticket = load(root, tid)
-    for old in ticket["questions"]:  # the same open question is not asked twice
-        if old["answer"] is None and old["text"] == text.strip() and old["options"] == list(options):
-            return ticket, old
-    q = {
-        "id": _next_id(ticket["questions"], "q"),
-        "text": text.strip(),
-        "options": list(options),
-        "recommended": recommended,
-        "answer": None,
-        "answered_by": None,
-        "via": None,
-    }
-    ticket["questions"].append(q)
-    ticket["status"] = "waiting"
-    ticket["waiting_on"] = {"kind": "question", "ref": q["id"]}
-    add_history(ticket, by, f"Asked {q['id']}, waiting")
-    save(root, ticket)
-    return ticket, q
+    if kind is not None and not KIND_RE.fullmatch(kind):
+        raise Refused("A question kind is plain or <add-on>:<name>, lowercase.")
+    act = None
+    if action is not None:
+        try:
+            act = json.loads(action)
+        except ValueError:
+            act = None
+        if not isinstance(act, dict):
+            raise Refused("--action must be a JSON object.")
+
+    def op(ticket):
+        for old in ticket["questions"]:  # the same open question is not asked twice
+            if old["answer"] is None and old["text"] == text.strip() and old["options"] == list(options):
+                return old
+        if check is not None:
+            _item(ticket, check)
+        q = {
+            "id": _next_id(ticket["questions"], "q"),
+            "text": text.strip(),
+            "options": list(options),
+            "recommended": recommended,
+            "answer": None,
+            "answered_by": None,
+            "via": None,
+        }
+        if kind is not None:
+            q["kind"] = kind
+        if act is not None:
+            q["action"] = act
+        if check is not None:
+            q["check"] = check
+        ticket["questions"].append(q)
+        ticket["status"] = "waiting"
+        ticket["waiting_on"] = {"kind": "question", "ref": q["id"]}
+        add_history(ticket, by, f"Asked {q['id']}, waiting")
+        return q
+
+    return apply_op(root, tid, op)
 
 
 def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tuple[dict, dict]:
-    if via not in ("cli", "phone", "relay"):
-        raise Refused("via must be cli, phone or relay.")
+    if not VIA_RE.fullmatch(via):
+        raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")
     if not text.strip():
         raise Refused("An answer needs text.")
-    ticket = load(root, tid)
-    q = next((x for x in ticket["questions"] if x["id"] == qid), None)
-    if q is None:
-        raise Refused(f"Ticket {tid} has no question {qid}.")
-    if q["answer"] is not None:
-        raise Refused(f"{qid} is already answered.")
     text = text.strip()
-    for opt in q["options"]:  # an option matches case-insensitively: store its spelling; else free text
-        if opt.casefold() == text.casefold():
-            text = opt
-            break
-    q["answer"], q["answered_by"], q["via"] = text, by, via
-    w = ticket.get("waiting_on")
-    if w and w.get("kind") == "question" and w.get("ref") == qid:
-        ticket["waiting_on"] = None
-        if ticket["status"] == "waiting":
-            ticket["status"] = "active"
-    add_history(ticket, by, f"Answered {qid}: {text}")
-    save(root, ticket)
-    return ticket, q
+
+    def op(ticket):
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None:
+            raise Refused(f"Ticket {tid} has no question {qid}.")
+        if q["answer"] is not None:
+            raise Refused(f"{qid} is already answered.")
+        ans = text
+        for opt in q["options"]:  # an option matches case-insensitively: store its spelling; else free text
+            if opt.casefold() == ans.casefold():
+                ans = opt
+                break
+        q["answer"], q["answered_by"], q["via"] = ans, by, via
+        w = ticket.get("waiting_on")
+        if w and w.get("kind") == "question" and w.get("ref") == qid:
+            ticket["waiting_on"] = None
+            if ticket["status"] == "waiting":
+                ticket["status"] = "active"
+        add_history(ticket, by, f"Answered {qid}: {ans}", via)
+        return q
+
+    return apply_op(root, tid, op)
 
 
 def waiting_value(kind: str, ref: str | None = None, until: str | None = None) -> dict:
@@ -463,16 +763,16 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
     if clear:
         if until or on:
             raise Refused("--clear cannot be combined with --until or --on.")
-        ticket = load(root, tid)
-        ticket["waiting_on"] = None
-        if ticket["status"] == "waiting":
-            ticket["status"] = "active"
-        add_history(ticket, by, "Wait cleared")
-        save(root, ticket)
-        return ticket
+
+        def op(ticket):
+            ticket["waiting_on"] = None
+            if ticket["status"] == "waiting":
+                ticket["status"] = "active"
+            add_history(ticket, by, "Wait cleared")
+
+        return apply_op(root, tid, op)[0]
     if bool(until) == bool(on):
         raise Refused("Use exactly one of --until <time> or --on <kind>:<ref>.")
-    ticket = load(root, tid)
     if until:
         w = waiting_value("time", until=until)
         note = f"Waiting until {w['until']}"
@@ -482,15 +782,18 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
             raise Refused("--on needs <kind>:<ref>, kind ticket, question or external. For a time: --until.")
         w = waiting_value(kind, ref)
         note = f"Waiting on {kind} {w['ref']}"
-    ticket["waiting_on"] = w
-    ticket["status"] = "waiting"
-    add_history(ticket, by, note)
-    save(root, ticket)
-    return ticket
+
+    def op2(ticket):
+        ticket["waiting_on"] = w
+        ticket["status"] = "waiting"
+        add_history(ticket, by, note)
+
+    load(root, tid)
+    return apply_op(root, tid, op2)[0]
 
 
 def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
-    """Atomic change of several fields (title, status, waiting_on); refused when `revision` changed."""
+    """Atomic change of several fields; refused (exit 2 + current values) when `revision` changed."""
     try:
         obj = json.loads(data)
     except ValueError:
@@ -500,28 +803,65 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
     bad = sorted(set(obj) - set(PATCH_FIELDS))
     if bad:
         raise Refused(f"A patch can change only: {', '.join(PATCH_FIELDS)} (not {bad[0]}).")
-    ticket = load_checked(root, tid, if_revision)
     if "title" in obj:
         t = obj["title"]
         if not isinstance(t, str) or not t.strip() or len(t.strip()) > 200:
             raise Refused("A title needs 1 to 200 characters.")
-        ticket["title"] = t.strip()
+    for k in ("owner", "due", "note", "summary"):
+        if k in obj:
+            clean_field(k, obj[k])
     w = obj.get("waiting_on")
     if "waiting_on" in obj and w is not None:
         if not isinstance(w, dict) or set(w) - {"kind", "until", "ref"}:
             raise Refused("waiting_on is {kind, until} or {kind, ref}, or null.")
         w = waiting_value(str(w.get("kind")), w.get("ref"), w.get("until"))
-    status = obj.get("status", ticket["status"])
-    if status not in STATUSES:
-        raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
-    if status == "done":
-        _check_can_finish(ticket)
-    if "waiting_on" in obj:
-        ticket["waiting_on"] = w
-    if status != "waiting":
-        ticket["waiting_on"] = None
-    old, ticket["status"] = ticket["status"], status
-    note = f" (status {old} -> {status})" if old != status else ""
-    add_history(ticket, by, "Patched " + ", ".join(sorted(obj)) + note)
-    save(root, ticket)
-    return ticket
+
+    def op(ticket):
+        if "title" in obj:
+            ticket["title"] = obj["title"].strip()
+        status = obj.get("status", ticket["status"])
+        if status not in STATUSES:
+            raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
+        if status == "done":
+            _check_can_finish(ticket)
+        for k in ("owner", "due", "note", "summary"):
+            if k in obj:
+                _set_field(ticket, k, obj[k])
+        if "waiting_on" in obj:
+            ticket["waiting_on"] = w
+        if status != "waiting":
+            ticket["waiting_on"] = None
+        old, ticket["status"] = ticket["status"], status
+        note = f" (status {old} -> {status})" if old != status else ""
+        add_history(ticket, by, "Patched " + ", ".join(sorted(obj)) + note)
+
+    return apply_op(root, tid, op, if_revision=if_revision)[0]
+
+
+# ---------------------------------------------------------------- agent sessions (used by the run lane)
+
+
+def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dict:
+    """Remember the agent session for this agent and machine (updates last_used when it is known)."""
+
+    def op(t):
+        sessions = t.setdefault("sessions", [])
+        for s in sessions:
+            if s.get("agent") == agent and s.get("host") == host:
+                s["id"], s["last_used"] = sid, now()
+                break
+        else:
+            sessions.append({"agent": agent, "id": sid, "host": host, "last_used": now()})
+            if len(sessions) > 32:
+                sessions.sort(key=lambda s: s.get("last_used", ""))
+                del sessions[0 : len(sessions) - 32]
+
+    return apply_op(root, tid, op)[0]
+
+
+def sessions_for(ticket: dict, agent: str, host: str) -> str | None:
+    """The session id to resume for this agent on this machine, else None. No age limit."""
+    for s in ticket.get("sessions") or []:
+        if s.get("agent") == agent and s.get("host") == host:
+            return s.get("id")
+    return None
