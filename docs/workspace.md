@@ -17,6 +17,7 @@ workspace/
   src/orch/tickets.py       load/save/validate, keeps unknown fields, atomic write (tmp + rename)
   src/orch/init.py          orch init: folders, skill, AGENTS.md block, .claude/skills link, .gitignore
   src/orch/addons.py        orch addon add|list|remove|uninstall, activation, add-on dispatch (subprocess), orch update
+  src/orch/services.py      orch start|stop|status: background processes of active add-ons, running.json
   src/orch/publish.py       publish client (encrypt, upload, apps)
   src/orch/relay.py         relay client (inbox, send, allow, refresh, webhook)
   skills/orch/SKILL.md      copied into projects by init
@@ -30,6 +31,7 @@ workspace/
 | `orch init` | Set up the project folder (local-files.md). Safe to run again |
 | `orch addon add <name\|./folder> [--yes]` / `remove <name> [--purge]` / `list` / `uninstall <name>` | Add-on contract (contracts/addon-manifest.md): install a built-in or local add-on and turn it on in this workspace (`.orch/addons.json`), or turn it off. The core knows no add-on by name |
 | `orch <addon> …` | Runs an active add-on as a subprocess; listed under **Add-ons** in `orch --help` |
+| `orch start` / `orch stop [PATH\|NAME] [--all\|--pick]` / `orch status` | Starts the background process of every active add-on that has one (dashboard in the background with its link, scheduler), one line per add-on; add-ons without one are left alone. `stop` in a workspace stops that one; outside one (or `--pick`) it lists the running workspaces by number and asks which (or `all`); without a terminal it needs a name, a folder or `--all`. `status` shows what runs where. Running list: `running.json` in the user's orch folder (`~/.orch-tool/`), dead processes dropped on read |
 | `orch update` | Reinstalls orch + all installed add-ons together from where orch was installed from (the same repo and branch), then refreshes the skills and AGENTS.md blocks in this project |
 | `orch addon add publish --yes` + `orch publish connect <url> --workspace ws_… --token orp_…` / `orch addon add relay --yes` + `orch relay connect …` | What the admin prompts contain (publish-api.md, relay-api.md). `orch publish …` / `orch relay …` / `ask --phone` are refused until the add-on is on |
 | `orch ticket new "<title>"` / `list` / `show <id>` / `status <id> <status>` | Tickets. `done` is refused while a checked item lacks evidence |

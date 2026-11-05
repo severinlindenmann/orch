@@ -10,7 +10,8 @@ A light, read-only web page that shows the tickets (active, waiting, open, done)
 (for example Schedule). Add-on tabs and ticket rows appear when the add-on is turned on and go when it is turned off.
 
 ## Commands
-- `orch dashboard` starts it on http://127.0.0.1:8420 (this computer only). Tell the user the link. It follows changes by itself.
+- `orch start` starts it in the background with the other add-ons and prints the link (this computer only); `orch stop` stops them.
+  Tell the user the link. `orch dashboard` runs it in the foreground on http://127.0.0.1:8420. It follows changes by itself.
 - `orch dashboard snapshot` writes one static HTML file `dashboard-snapshot.html` (no inbox, no add-on tabs).
 - Add `--with-addons` to a snapshot only when the user asks to include add-on tabs and their ticket rows.
 - `orch dashboard snapshot --publish` publishes that snapshot as a private publish app and prints the link.

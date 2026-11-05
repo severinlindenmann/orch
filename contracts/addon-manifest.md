@@ -16,13 +16,13 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | Key | Meaning |
 |---|---|
 | `schema = "orch.addon/1"`, `orch_api = 1` | Manifest format and add-on contract version. Other values: refused |
-| `name` | `[a-z][a-z0-9-]{1,31}`, not a core command (`ticket`, `addon`, `relay`, `publish`, `init`, `update`, `config`, … see schema). Unique in the tool env. `publish` and `relay` are built-in add-ons shipped inside the orch package (`orch/builtin/<name>/orch-addon.toml`): off until `orch addon add publish|relay`, no other add-on may take these names |
+| `name` | `[a-z][a-z0-9-]{1,31}`, not a core command (`ticket`, `addon`, `relay`, `publish`, `init`, `update`, `config`, `start`, `stop`, `status`, … see schema). Unique in the tool env. `publish` and `relay` are built-in add-ons shipped inside the orch package (`orch/builtin/<name>/orch-addon.toml`): off until `orch addon add publish|relay`, no other add-on may take these names |
 | `version`, `description` | `x.y.z`; one plain sentence (shown in `orch addon list` and `orch --help`) |
 | `run` | Top-level module. `orch <name> <args>` = subprocess `<orch's python> -m <run> <args>` |
 | `skill` | Folder with `SKILL.md` → copied to `.agents/skills/orch-<name>/` |
 | `agents_block` | AGENTS.md block body (default `<skill>/AGENTS-block.md`) |
 | `ticket_ext` | Local JSON Schema for `ext.<name>` (no remote `$ref`, ≤ 32 KB) |
-| `background` | `true` = has a long-running process; must implement `orch <name> stop` |
+| `background` | `true` = has a long-running process; must implement `orch <name> start\|stop\|status --json` (Background, below) |
 | `[dashboard]` | `label` (≤ 16 chars), `icon` (fixed set in the schema), `order`: the add-on has a tab filled by `orch <name> view --json` |
 | `[[ticket_view]]` | Ticket detail rows from `ext.<name>`: `field`, `label`, `format` = `text` · `time` · `cron-human` · `chips` · `yes-no` |
 
@@ -83,7 +83,23 @@ then refreshes skills and AGENTS blocks of the active add-ons in this workspace.
   `orch ticket patch <id> --if-revision N '<json>'` (atomic; refused when `revision` changed), `orch log`, `orch wait`, `orch ticket list --json`.
   An add-on writes only `ext.<name>`, `.orch/addons/<name>/`, and the history entries it logs (`by: agent:<name>`).
 - Config: one file `.orch/config.toml`; the add-on reads only its own table `[<name>]` (and `[<name>.*]`). Defaults live in the add-on.
-- Required subcommands: `view --json` if `[dashboard]`; `stop` if `background`. Optional: `status --json`.
+- Required subcommands: `view --json` if `[dashboard]`; `start`, `stop`, `status` (all with `--json`) if `background`.
+
+## Background (`orch start`, `orch stop`, `orch status`)
+
+An active add-on with `background = true` runs one process per workspace, started and stopped by its own commands:
+- `orch <name> start --json` → starts it detached (or finds it running), exit 0, stdout `{"running": true, "pid": N, "url"?: "http://127.0.0.1:P"}`;
+  refused → exit 2 with `{"error"}`. Must return within 60 s.
+- `orch <name> stop --json` → `{"stopped": bool}` (false = was not running). `status --json` → `{"running": bool, "pid"?, "url"?}`, exit 1 when not running.
+- `orch start` (core, in a workspace) calls `start` on every active background add-on, prints one line per add-on (its `url`, or
+  `running (pid N)`), opens the first `url` in the browser when run in a terminal (`--no-open`), and records each in
+  `running.json` in the user's orch folder: `[{"workspace", "name", "addon", "pid", "url"?, "started_at"}]`.
+  Entries whose pid is gone are dropped whenever the file is read.
+- `orch stop`: in a workspace → that workspace; outside one (or `--pick`) → the running workspaces as a numbered list, the user
+  picks a number or `all`; `orch stop <path|name>` / `--all` without asking. It calls `stop` on each active background add-on there.
+  An add-on that is no longer on there is never run; its process ends by itself.
+- `orch status [--json]`: `running.json` grouped by workspace `[{"workspace", "name", "addons": [{"addon", "pid", "url"?}]}]`.
+Add-ons without `background` are ignored by all three. The core never starts anything at login.
 
 ## Core commands an add-on may rely on (`--json`)
 

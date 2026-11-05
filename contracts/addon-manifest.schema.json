@@ -12,7 +12,7 @@
     "name": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{1,31}$",
-      "not": { "enum": ["orch", "core", "ticket", "check", "log", "ask", "answer", "link", "ext", "wait", "addon", "addons", "update", "init", "publish", "relay", "config", "help", "version", "view"] },
+      "not": { "enum": ["orch", "core", "ticket", "check", "log", "ask", "answer", "link", "ext", "wait", "addon", "addons", "update", "init", "publish", "relay", "config", "help", "version", "view", "start", "stop", "status"] },
       "description": "Command `orch <name>`, ext key ext.<name>, folder .orch/addons/<name>/, config table [<name>], skill folder orch-<name>, AGENTS markers orch:addon:<name>."
     },
     "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
@@ -21,7 +21,7 @@
     "skill": { "$ref": "#/$defs/path", "description": "Folder with SKILL.md (frontmatter name: orch-<name>). Copied to .agents/skills/orch-<name>/." },
     "agents_block": { "$ref": "#/$defs/path", "description": "Markdown body of the AGENTS.md block. Default: <skill>/AGENTS-block.md." },
     "ticket_ext": { "$ref": "#/$defs/path", "description": "Local JSON Schema (no remote $ref, max 32 KB) for ticket ext.<name>. Without it the add-on writes no ticket data." },
-    "background": { "type": "boolean", "default": false, "description": "true = the add-on has a long-running process. It must implement `orch <name> stop`; deactivation calls it." },
+    "background": { "type": "boolean", "default": false, "description": "true = the add-on has a long-running process. It must implement `orch <name> start|stop|status --json`; `orch start`/`orch stop` and deactivation call them (addon-manifest.md, Background)." },
     "dashboard": {
       "type": "object",
       "required": ["label", "icon"],
