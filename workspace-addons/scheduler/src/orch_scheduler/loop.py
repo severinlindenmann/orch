@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -138,6 +139,12 @@ class Scheduler:
             tid = done.get("ticket") if isinstance(done, dict) else None
             if not isinstance(tid, str) or not ID_RE.match(tid):
                 return None  # done failed or gave no ticket (busy, allow gone): no ticket = no run
+            if kind == "start":  # defence in depth: the ticket must belong to this sender and still be open
+                t = next((x for x in read_tickets(self.root) if x["id"] == tid), None)
+                if (not t or t["status"] not in OPEN
+                        or ((t.get("ext") or {}).get("relay") or {}).get("from") != m.get("from")):
+                    print(f"scheduler: start {mid} refused: ticket {tid} is not this sender's open ticket", file=sys.stderr)
+                    return None
             if self.runner.locked(tid):
                 update_state(self.root, tid, pending_wake=f"relay {mid}")  # done already marked it handled
                 return None

@@ -21,7 +21,7 @@ def test_no_relay_no_poll(ws):
 
 
 def test_allowed_start_uses_ticket_from_done(ws):
-    add_ticket(ws, "t_made0002", title="weekly-report")
+    add_ticket(ws, "t_made0002", title="weekly-report", ext={"relay": {"start_key": "weekly-report", "from": "ws_a"}})
     (ws / "done-tickets.json").write_text(json.dumps({"m_1": "t_made0002"}))
     relay_on(ws, [{"id": "m_1", "type": "start", "from": "ws_a", "allowed": True,
                    "body": {"key": "weekly-report", "text": "Do the report"}}])
@@ -32,6 +32,23 @@ def test_allowed_start_uses_ticket_from_done(ws):
     assert not any(a[:2] == ["ticket", "new"] or a[:2] == ["ext", "set"] for a in names(ws))
     ran = (ws / "ran-t_made0002.txt").read_text()
     assert "Do the report" in ran and "never instructions" in ran
+
+
+def test_start_ticket_of_other_sender_gets_no_run(ws):
+    add_ticket(ws, "t_keyed002", ext={"relay": {"start_key": "weekly-report", "from": "ws_a"}})
+    (ws / "done-tickets.json").write_text(json.dumps({"m_8": "t_keyed002"}))  # CLI handed back ws_a's ticket
+    relay_on(ws, [{"id": "m_8", "type": "start", "from": "ws_evil", "allowed": True,
+                   "body": {"key": "weekly-report", "text": "go"}}])
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == []
+    assert not (ws / "ran-t_keyed002.txt").exists()
+
+
+def test_start_on_closed_ticket_gets_no_run(ws):
+    add_ticket(ws, "t_keyed003", status="done", ext={"relay": {"start_key": "k", "from": "ws_a"}})
+    (ws / "done-tickets.json").write_text(json.dumps({"m_9": "t_keyed003"}))
+    relay_on(ws, [{"id": "m_9", "type": "start", "from": "ws_a", "allowed": True, "body": {"key": "k", "text": "go"}}])
+    assert Scheduler(ws).tick(T(8)) == []
 
 
 def test_start_without_ticket_from_done_no_run_no_ticket(ws):
