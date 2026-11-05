@@ -18,6 +18,7 @@ from orch import (
     cli_status,
     net,
     relay,
+    services,
     tickets,
 )
 from orch import init as init_mod
@@ -51,10 +52,47 @@ def _line(t: dict) -> str:
     return f"{t['title']}  ({', '.join(bits)})  [{t['id']}]"
 
 
-def _show(t: dict) -> str:
+def _ago(iso: str) -> str:
+    import datetime as dt
+
+    try:
+        secs = (
+            dt.datetime.now(dt.UTC) - dt.datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        ).total_seconds()
+    except (ValueError, AttributeError):
+        return "a while ago"
+    return f"{int(secs // 3600)} h ago" if secs >= 3600 else f"{max(int(secs // 60), 1)} min ago"
+
+
+def _check_line(root: Path | None, t: dict, c: dict, open_q: list[dict]) -> str:
+    mark = "[x]" if c["done"] else "[ ]"
+    line = f"  {mark} {c['text']}  [{c['id']}]"
+    if c["done"] and c["evidence"]:
+        line += f"  - proof: {c['evidence'][0]['ref']}"
+    q = next((q for q in open_q if q.get("check") == c["id"]), None)
+    if q:
+        line += f"  - waiting for your answer ({q['id']})"
+    if c.get("state") == "doing" and not c["done"] and root is not None:
+        who = c.get("by", "someone")
+        if tickets.doing_stale(root, t, c):
+            line += f"  - {who} was on it ({_ago(c.get('at', ''))}, not running)"
+        else:
+            line += f"  - {who} is on it"
+    return line
+
+
+def _show(t: dict, root: Path | None = None) -> str:
     open_q = [q for q in t["questions"] if q["answer"] is None]
     head = f"{t['title']}  [{t['id']}]"
-    out = [head, f"Status: {t['status']}" + (f" - {_progress(t)}" if _progress(t) else "")]
+    out = [head]
+    if t.get("summary"):
+        out.append(t["summary"])
+    out.append(f"Status: {t['status']}" + (f" - {_progress(t)}" if _progress(t) else ""))
+    extra = [f"{k.capitalize()}: {t[k]}" for k in ("owner", "due") if t.get(k)]
+    if extra:
+        out.append("  ".join(extra))
+    if t.get("note"):
+        out.append(f"Note: {t['note']}")
     if t.get("waiting_on"):
         w = t["waiting_on"]
         if w["kind"] == "time":
@@ -71,12 +109,7 @@ def _show(t: dict) -> str:
             out.append(f"  {q['text']}{opts}{rec}  [{q['id']}]")
     if t["checklist"]:
         out.append("\nChecklist:")
-        for c in t["checklist"]:
-            if c["done"]:
-                ev = c["evidence"][0]
-                out.append(f"  [x] {c['text']}  [{c['id']}]  - proof: {ev['ref']}")
-            else:
-                out.append(f"  [ ] {c['text']}  [{c['id']}]")
+        out += [_check_line(root, t, c, open_q) for c in t["checklist"]]
     answered = [q for q in t["questions"] if q["answer"] is not None]
     if answered:
         out.append("\nAnswered:")
@@ -183,6 +216,13 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = t.add_parser("edit", parents=[common])
     x.add_argument("id")
     x.add_argument("--title")
+    x.add_argument("--owner", help="who owns it (a name; empty clears)")
+    x.add_argument("--due", metavar="YYYY-MM-DD", help="due day (empty clears)")
+    x.add_argument("--note", help="a free note (empty clears)")
+    x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
+    x = t.add_parser("summary", parents=[common], help="where things stand, one or two sentences")
+    x.add_argument("id")
+    x.add_argument("text")
     x = t.add_parser("wait", parents=[common])
     x.add_argument("id")
     x.add_argument("--until")
@@ -190,7 +230,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--clear", action="store_true", help="clear waiting_on")
     x = t.add_parser("patch", parents=[common])
     x.add_argument("id")
-    x.add_argument("data", help='JSON object: title, status, waiting_on, e.g. \'{"title": "New"}\'')
+    x.add_argument(
+        "data",
+        help='JSON object: title, status, waiting_on, owner, due, note, summary, e.g. \'{"title": "New"}\'',
+    )
     x.add_argument("--if-revision", type=int, required=True, metavar="N")
 
     x = sub.add_parser("wait", parents=[common], help="same as: ticket wait")
@@ -203,6 +246,25 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = c.add_parser("add", parents=[common])
     x.add_argument("id")
     x.add_argument("text")
+    x = c.add_parser("edit", parents=[common], help="rename a task")
+    x.add_argument("id")
+    x.add_argument("check")
+    x.add_argument("text")
+    x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
+    x.add_argument("--was", metavar="TEXT", help="refused when the task text is no longer this")
+    x = c.add_parser("move", parents=[common], help="put a task after another")
+    x.add_argument("id")
+    x.add_argument("check")
+    x.add_argument("--after", required=True, metavar="CID")
+    for name, hlp in (
+        ("remove", "remove a task (kept in the history)"),
+        ("reopen", "open a done task again"),
+        ("start", "mark a task as being worked on"),
+        ("stop", "clear the working mark"),
+    ):
+        x = c.add_parser(name, parents=[common], help=hlp)
+        x.add_argument("id")
+        x.add_argument("check")
     x = c.add_parser("done", parents=[common])
     x.add_argument("id")
     x.add_argument("check")
@@ -220,11 +282,14 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--option", action="append", default=[])
     x.add_argument("--recommend", "--recommended", dest="recommend")
     x.add_argument("--phone", action="store_true", help="also send the question to the phones via relay")
+    x.add_argument("--kind", metavar="KIND", help="plain (default) or <add-on>:<name>")
+    x.add_argument("--action", metavar="JSON", help="data for the add-on that acts on the answer")
+    x.add_argument("--check", metavar="CID", help="the task this question belongs to")
     x = sub.add_parser("answer", parents=[common], help="answer a question")
     x.add_argument("id")
     x.add_argument("question")
     x.add_argument("answer")
-    x.add_argument("--via", choices=("cli", "phone", "relay"), default="cli")
+    x.add_argument("--via", default="cli", metavar="WORD", help="where the answer comes from (default cli)")
 
     lk = sub.add_parser("link", help="links").add_subparsers(dest="sub", required=True)
     x = lk.add_parser("add", parents=[common])
@@ -257,6 +322,18 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
     ]
     return p
+
+
+def _addon_note(root: Path, q: dict) -> str | None:
+    """An answer to an add-on question is only recorded when that add-on is off or not running."""
+    owner = str(q.get("kind", "plain")).partition(":")[0]
+    if owner == "plain" or ":" not in str(q.get("kind", "")):
+        return None
+    if owner in addons.active(root) and any(
+        e.get("addon") == owner and Path(e.get("workspace", "")) == root for e in services.running()
+    ):
+        return None
+    return f"Recorded. The {owner} acts on it when it runs."
 
 
 def run(args: argparse.Namespace) -> None:
@@ -304,13 +381,19 @@ def run(args: argparse.Namespace) -> None:
         _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
         t = _visible(root, tickets.load(root, args.id))
-        _out(args, t, _show(t))
+        _out(args, t, _show(t, root))
     elif cmd == "ticket" and sub == "status":
         t = tickets.set_status(root, args.id, args.status, by())
         _out(args, t, f"{t['title']} - {t['status']}")
     elif cmd == "ticket" and sub == "edit":
-        t = tickets.edit(root, args.id, args.title, by())
-        _out(args, t, f"Renamed to: {t['title']}")
+        fields = {k: getattr(args, k) for k in ("owner", "due", "note") if getattr(args, k) is not None}
+        if args.title is None and not fields:
+            raise Refused("Say what to change: --title, --owner, --due or --note.")
+        t = tickets.edit(root, args.id, args.title, by(), fields, args.if_revision)
+        _out(args, t, f"Saved (revision {t['revision']}).")
+    elif cmd == "ticket" and sub == "summary":
+        t = tickets.set_summary(root, args.id, args.text, by())
+        _out(args, t, "Summary saved.")
     elif cmd == "ticket" and sub == "patch":
         t = tickets.patch(root, args.id, args.if_revision, args.data, by())
         _out(args, t, f"{t['id']} changed (revision {t['revision']})")
@@ -327,6 +410,27 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "check" and sub == "add":
         t, c = tickets.check_add(root, args.id, args.text, by())
         _out(args, c, f"Added to the checklist: {c['text']}  [{c['id']}]")
+    elif cmd == "check" and sub in ("edit", "move", "remove", "reopen", "start", "stop"):
+        who = by()
+        if sub == "edit":
+            t, c = tickets.check_edit(root, args.id, args.check, args.text, who, args.if_revision, args.was)
+            msg = f"{c['id']} renamed."
+        elif sub == "move":
+            t, c = tickets.check_move(root, args.id, args.check, args.after, who)
+            msg = f"{c['id']} now follows {args.after}."
+        elif sub == "remove":
+            t, c = tickets.check_remove(root, args.id, args.check, who)
+            msg = f"{c['id']} removed. It and its proof are kept in the history."
+        elif sub == "reopen":
+            t, c = tickets.check_reopen(root, args.id, args.check, who)
+            msg = f"{c['id']} is open again. Its proof stays in the history."
+        elif sub == "start":
+            t, c = tickets.check_start(root, args.id, args.check, who)
+            msg = f"{c['id']}: {who} is on it."
+        else:
+            t, c = tickets.check_stop(root, args.id, args.check, who)
+            msg = f"{c['id']}: no longer marked as being worked on."
+        _out(args, c, msg)
     elif cmd == "check":
         shorthand = [
             json.dumps({"type": k, "ref": getattr(args, k)})
@@ -343,16 +447,24 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ask":
         if args.phone and "relay" not in addons.active(root):
             raise Refused(addons.not_on_message(root, "relay"))
-        t, q = tickets.ask(root, args.id, args.text, args.option, args.recommend, by())
+        t, q = tickets.ask(
+            root, args.id, args.text, args.option, args.recommend, by(), args.kind, args.action, args.check
+        )
         if args.phone:
             cli_clients.send_phone_question(root, t["id"], q)
-        _out(args, q, f"Question asked. {t['title']} is now waiting for an answer.")
+        _out(
+            args,
+            q,
+            f"Asked {q['id']}" + (f" on {q['check']}" if q.get("check") else "") + f", waiting. {t['title']} "
+            "is now waiting for an answer.",
+        )
     elif cmd == "answer":
         who = by()
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
         t, q = tickets.answer(root, args.id, args.question, args.answer, who, args.via)
-        _out(args, q, f"Answered: {q['answer']}")
+        note = _addon_note(root, q)
+        _out(args, q, f"Answered: {q['answer']}" + (f"\n{note}" if note else ""))
     elif cmd == "link":
         t = tickets.link_add(root, args.id, args.type, args.url, args.title, by())
         _out(args, t["links"][-1], f"Linked {args.title or args.type}: {args.url}")
@@ -386,7 +498,7 @@ def main(argv: list[str] | None = None) -> int:
     def refuse(e: Refused) -> int:
         print(f"Refused: {e}", file=sys.stderr)
         if want_json:
-            print(json.dumps({"error": str(e)}, ensure_ascii=False))
+            print(json.dumps({"error": str(e), **getattr(e, "extra", {})}, ensure_ascii=False))
         return 2
 
     try:

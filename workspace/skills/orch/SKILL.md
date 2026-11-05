@@ -20,6 +20,14 @@ Keep the ticket current as work changes.
 
 All commands accept `--json`. Exit code 0 = ok, 2 = refused (the reason is in plain words).
 
+# Tasks and summary
+
+- Before you work on a task: `orch check start <id> <c>` (a done task or a start on another one clears the mark).
+- Change the list with `orch check edit|move --after <c>|remove|reopen <id> <c>`; a removed task stays in the history.
+- Tie a question to a task: `orch ask <id> "<question>" --check <c>`.
+- End every run with `orch ticket summary <id> "<where things stand>"` (at most 200 characters).
+- Optional fields: `orch ticket edit <id> --owner <name> --due YYYY-MM-DD --note "<text>"`.
+
 # Evidence before done
 
 A checklist item is done only when it has at least one evidence entry:
