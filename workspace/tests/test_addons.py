@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import sys
@@ -709,3 +710,88 @@ def test_stale_lock_is_claimed_by_one_waiter_only(proj, new_ticket):
     assert tickets._break_stale(lock) is False  # second waiter finds nothing to take
     lock.write_text("", encoding="utf-8")  # a fresh lock someone else holds is put back, not broken
     assert tickets._break_stale(lock) is False and lock.exists()
+
+
+# ---- owner bugs 5 Nov: built-in add-on from a git install ------------------------------------------
+
+
+def test_builtin_add_asks_on_a_tty_and_shows_what_it_adds(proj, run, tmp_path, monkeypatch, uv_calls):
+    """Bug A: `orch addon add dashboard` in a terminal shows the add-on and asks, instead of refusing."""
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    monkeypatch.setattr(addons, "_install_origin", lambda: {})
+    folder = make_addon(tmp_path / "pv")
+    seen = []
+    monkeypatch.setattr(addons, "preview_builtin", lambda n: seen.append(n) or addons.folder_manifest(folder))
+    monkeypatch.setattr(addons, "_entry_points", lambda: {})
+
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(sys, "stdin", Tty("n\n"))
+    code, _, err = run("addon", "add", "hello")
+    assert code == 2 and seen == ["hello"] and "Adds a dashboard tab: Hello" in err and "Add it? [y/N]" in err
+    assert "Not confirmed" in err and not uv_calls
+    monkeypatch.setattr(sys, "stdin", Tty("y\n"))
+    run("addon", "add", "hello")
+    assert uv_calls and uv_calls[0][-1].endswith("#subdirectory=workspace-addons/hello")
+    reg = json.loads((Path(os.environ["ORCH_HOME"]) / "addons.json").read_text(encoding="utf-8"))
+    assert reg == [{"name": "hello", "source": "built-in", "version": "0.1.0"}]
+    # not a terminal (agents, CI): refused with the hint, nothing fetched
+    seen.clear()
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    code, _, err = run("addon", "add", "other")
+    assert code == 2 and "--yes" in err and not seen
+
+
+def test_addons_install_from_where_orch_came_from(proj, monkeypatch, uv_calls):
+    """Bug B: installed with ORCH_REF=develop, `orch addon add` must not reinstall orch from main (that
+    downgraded orch and fed the new registry entries to the old code as package names)."""
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    monkeypatch.delenv("ORCH_REF", raising=False)
+    monkeypatch.setattr(
+        addons, "_install_origin", lambda: {"repo": "https://github.com/someone/orch", "ref": "develop"}
+    )
+    addons._save_registry([{"name": "dashboard", "source": "built-in", "version": "0.0.0"}])
+    addons._install_tool(
+        addons.registry() + [{"name": "scheduler", "source": "built-in", "version": "0.0.0"}]
+    )
+    args = uv_calls[0]
+    assert all(isinstance(a, str) for a in args)
+    assert args[3] == "git+https://github.com/someone/orch@develop#subdirectory=workspace"
+    assert args[4:] == [
+        "--with",
+        "git+https://github.com/someone/orch@develop#subdirectory=workspace-addons/dashboard",
+        "--with",
+        "git+https://github.com/someone/orch@develop#subdirectory=workspace-addons/scheduler",
+    ]
+    monkeypatch.setenv("ORCH_REF", "v1")  # an explicit override still wins
+    assert addons.spec("workspace").endswith("@v1#subdirectory=workspace")
+
+
+def test_install_origin_reads_direct_url(monkeypatch, tmp_path):
+    import importlib.metadata as md
+
+    class D:
+        def __init__(self, data):
+            self.data = data
+
+        def read_text(self, _):
+            return json.dumps(self.data)
+
+    cases = [
+        (
+            {
+                "url": "https://github.com/a/orch",
+                "subdirectory": "workspace",
+                "vcs_info": {"vcs": "git", "requested_revision": "develop", "commit_id": "abc"},
+            },
+            {"repo": "https://github.com/a/orch", "ref": "develop"},
+        ),
+        ({"url": (tmp_path / "workspace").as_uri(), "dir_info": {}}, {"repo": str(tmp_path), "local": True}),
+        ({"url": (tmp_path / "workspace").as_uri(), "dir_info": {"editable": True}}, {}),
+        ({"url": "https://x/y.whl", "archive_info": {}}, {}),
+    ]
+    for data, want in cases:
+        monkeypatch.setattr(md, "distribution", lambda _n, d=data: D(d))
+        assert addons._install_origin() == want
