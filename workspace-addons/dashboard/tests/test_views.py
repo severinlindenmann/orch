@@ -1,5 +1,9 @@
 import copy
 import json
+import os
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -80,3 +84,56 @@ def test_invalid_view_never_replaces_last_good(ws, fake_orch):
 
 def test_no_orch_command_is_an_error_state(ws):
     assert ViewPuller(ws, None).pull("scheduler")["state"] == "error"
+
+
+def _script(fake_orch, body):
+    fake_orch.write_text(f"#!{sys.executable}\nimport sys, time, os, subprocess\n" + body)
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def test_timeout_kills_the_whole_process_group(ws, fake_orch):
+    pidfile = fake_orch.parent / "child.pid"
+    _script(fake_orch, f"""
+c = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+open({str(pidfile)!r}, "w").write(str(c.pid))
+time.sleep(60)
+""")
+    r = ViewPuller(ws, str(fake_orch), timeout=0.5).pull("scheduler")
+    assert r["state"] == "error" and "too long" in r["message"]
+    pid = int(pidfile.read_text())
+    for _ in range(20):
+        if not alive(pid):
+            break
+        time.sleep(0.1)
+    assert not alive(pid), "orphaned child survived"
+
+
+def test_output_is_capped_while_reading(ws, fake_orch):
+    _script(fake_orch, """
+while True:
+    sys.stdout.write("a" * 65536); sys.stdout.flush()
+""")
+    t0 = time.time()
+    r = ViewPuller(ws, str(fake_orch), timeout=5).pull("scheduler")
+    assert r["state"] == "error" and "too large" in r["message"] and time.time() - t0 < 3  # killed at the cap, not at the timeout
+
+
+def test_one_pull_in_flight_per_add_on(ws, fake_orch):
+    counter = fake_orch.parent / "runs.txt"
+    _script(fake_orch, f"""
+open({str(counter)!r}, "a").write("x")
+time.sleep(0.6)
+print(open({str(fake_orch.parent / "view.json")!r}).read())
+""")
+    p = ViewPuller(ws, str(fake_orch), timeout=3)
+    with ThreadPoolExecutor(5) as ex:
+        results = list(ex.map(lambda _: p.pull("scheduler"), range(5)))
+    assert all(r["state"] == "ok" for r in results)
+    assert counter.read_text() == "x"

@@ -125,3 +125,25 @@ def test_tickets_come_from_the_orch_command_when_there_is_one(ws, fake_orch):
     fake_orch.write_text(src)
     s = load_state(ws, orch_bin=str(fake_orch))
     assert [x["title"] for x in s["tickets"]] == ["From the command"]
+
+
+def test_foreign_origin_never_triggers_a_pull(ws, fake_orch):
+    import http.client
+    import threading
+
+    from orch_dashboard.server import make_server
+    runs = fake_orch.parent / "runs.txt"
+    fake_orch.write_text(fake_orch.read_text().replace("mode = (d", f'open({str(runs)!r}, "a").write("x") if a[1:] == ["view", "--json"] else None\nmode = (d'))
+    srv = make_server(ws, 0, orch_bin=str(fake_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+    try:
+        for hdr, want in (({"Origin": "https://evil.example"}, 403), ({"Origin": f"http://localhost:{port}"}, 403),
+                          ({"Sec-Fetch-Site": "cross-site"}, 403), ({"Origin": f"http://127.0.0.1:{port}"}, 200), ({}, 200)):
+            c = http.client.HTTPConnection("127.0.0.1", port)
+            c.request("GET", "/api/addon/scheduler", headers={"Host": f"127.0.0.1:{port}", **hdr})
+            assert c.getresponse().status == want, hdr
+        assert runs.read_text() == "xx"  # only the two same-origin requests ran the add-on
+    finally:
+        srv.shutdown()
+        srv.server_close()

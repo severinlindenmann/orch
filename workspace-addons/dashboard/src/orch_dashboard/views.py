@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
 import threading
 import time
@@ -119,30 +120,89 @@ class ViewPuller:
     def __init__(self, root: Path, orch_bin: str | None, timeout: float = TIMEOUT):
         self.root, self.orch_bin, self.timeout = root, orch_bin, timeout
         self.last: dict[str, dict] = {}
+        self.inflight: dict[str, dict] = {}
         self.lock = threading.Lock()
 
     def _run(self, name: str):
         if not self.orch_bin:
             return None, "The orch command was not found."
-        try:
-            p = subprocess.run([self.orch_bin, name, "view", "--json"], check=False, cwd=self.root, capture_output=True,
-                               timeout=self.timeout, env={**os.environ, "ORCH_ROOT": str(self.root),
-                                                          "ORCH_BIN": self.orch_bin, "ORCH_ADDON": name})
-        except subprocess.TimeoutExpired:
-            return None, "It took too long to answer."
+        env = {**os.environ, "ORCH_ROOT": str(self.root), "ORCH_BIN": self.orch_bin, "ORCH_ADDON": name}
+        try:  # own session: on timeout or too much output the whole process group is killed
+            p = subprocess.Popen([self.orch_bin, name, "view", "--json"], cwd=self.root, env=env, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
         except OSError:
             return None, "The orch command could not be started."
-        if len(p.stdout) > MAX_BYTES:
+        chunks: list[bytes] = []
+        state = {"n": 0, "big": False}
+
+        def kill():
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+        def read():  # hard cap while reading, not after
+            while True:
+                data = p.stdout.read1(65536)
+                if not data:
+                    return
+                state["n"] += len(data)
+                if state["n"] > MAX_BYTES:
+                    state["big"] = True
+                    kill()
+                    return
+                chunks.append(data)
+
+        t = threading.Thread(target=read, daemon=True)
+        t.start()
+        t.join(self.timeout)
+        timed_out = t.is_alive()
+        if timed_out:
+            kill()
+        kill()  # also catches children that outlive the add-on process
+        t.join(1)
+        p.wait()
+        p.stdout.close()
+        if state["big"]:
             return None, "The answer was too large."
+        if timed_out:
+            return None, "It took too long to answer."
         if p.returncode != 0:
             return None, "It could not be read right now."
         try:
-            view = check_view(json.loads(p.stdout))
+            view = check_view(json.loads(b"".join(chunks)))
         except ValueError:
             view = None
         return (view, "") if view else (None, "The answer was not in the expected form.")
 
     def pull(self, name: str) -> dict:
+        """One pull per add-on at a time: concurrent callers wait for the one in flight and share its result."""
+        with self.lock:
+            flight = self.inflight.get(name)
+            mine = flight is None
+            if mine:
+                flight = self.inflight[name] = {"done": threading.Event(), "result": None}
+        if not mine:
+            flight["done"].wait(self.timeout + 5)
+            return flight["result"] or self._cached(name)
+        try:
+            flight["result"] = self._pull(name)
+        finally:
+            with self.lock:
+                self.inflight.pop(name, None)
+            flight["done"].set()
+        return flight["result"]
+
+    def _cached(self, name: str) -> dict:
+        with self.lock:
+            old = self.last.get(name)
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if old:
+            return {"state": "stale", "view": old["view"], "as_of": old["view"]["generated_at"], "checked": now,
+                    "message": "It took too long to answer."}
+        return {"state": "error", "view": None, "as_of": None, "checked": now, "message": "It took too long to answer."}
+
+    def _pull(self, name: str) -> dict:
         view, why = self._run(name)
         now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         with self.lock:

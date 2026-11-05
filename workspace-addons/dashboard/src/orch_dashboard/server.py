@@ -43,10 +43,21 @@ class Handler(BaseHTTPRequestHandler):
         host = host.rsplit("]", 1)[0] + "]" if host.startswith("[") else host.split(":", 1)[0]
         return host in ("127.0.0.1", "localhost", "[::1]")
 
+    def _same_origin(self) -> bool:
+        origin = self.headers.get("Origin")
+        if self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
+            return False
+        if origin is None:
+            return True
+        host = (self.headers.get("Host") or "").strip().lower()
+        return origin.lower() in (f"http://{host}",)
+
     def do_GET(self):
         if not self._host_ok():  # DNS rebinding guard
             return self._send(421, b"misdirected request", "text/plain")
         path = self.path.split("?", 1)[0]
+        if path.startswith("/api/") and not self._same_origin():  # a foreign page must not trigger pulls
+            return self._send(403, b"forbidden", "text/plain")
         if path == "/api/state":
             return self._send(200, json.dumps(load_state(self.root, orch_bin=self.orch_bin)).encode(),
                               "application/json")
