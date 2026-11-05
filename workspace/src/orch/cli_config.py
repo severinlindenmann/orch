@@ -109,6 +109,8 @@ def _config(args, root: Path) -> None:
                 raise Refused(
                     'Say the name and the command: orch config agent add <name> --command "... {prompt}"'
                 )
+            if args.name in adapters.builtin_names():
+                raise Refused(f"'{args.name}' is a built-in agent; pick another name.")
             config.add_agent(root, args.name, args.command, args.interactive)
             tail = (
                 "starts fresh each run; no live steps"

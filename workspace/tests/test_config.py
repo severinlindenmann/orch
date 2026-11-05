@@ -142,3 +142,8 @@ def test_command_from_settings_prints_its_notice_once(proj, run):
     assert config.first_use_notice(cmd) == f"Using agent command from this folder's settings: {cmd}"
     assert config.first_use_notice(cmd) is None
     assert config.first_use_notice(cmd + " --other").startswith("Using agent command")
+
+
+def test_cannot_add_an_agent_named_like_a_builtin(proj, run):
+    code, _, err = run("config", "agent", "add", "claude", "--command", "x {prompt}")
+    assert code == 2 and "built-in" in err and not (proj / ".orch" / "config.toml").exists()

@@ -15,6 +15,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -65,6 +66,13 @@ def load(name: str, root: Path | None = None) -> dict:
     """The adapter for an agent name: the built-in one, or the one a [agents.<name>] entry picks, with the
     user's command and interactive command added."""
     entry = config.agent_entries(root).get(name) if root is not None else None
+    if entry and name in _registry():
+        print(
+            f"This folder's settings define an agent called '{name}'; pick another name. "
+            "Using the built-in one.",
+            file=sys.stderr,
+        )
+        entry = None
     base = entry["adapter"] if entry else name
     reg = _registry()
     if base not in reg:
@@ -175,6 +183,16 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
             out.append("--")
         out.append(str(v["prompt"]))
     return out
+
+
+def command_notice(name: str, mode: str = "oneshot", root: Path | None = None) -> str | None:
+    """The one-time line for a command that comes from this folder's settings: names the command that will
+    run. None for built-in adapters, or when this machine has seen that command before."""
+    a = load(name, root)
+    cmd = a["interactive"] if mode == "live" else a["command"]
+    if not a["from_settings"] or not cmd or a["adapter"] != "generic":
+        return None
+    return config.first_use_notice(cmd)
 
 
 def prompt_via_stdin(name: str, root: Path | None = None) -> bool:
