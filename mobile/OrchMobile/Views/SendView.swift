@@ -20,7 +20,8 @@ struct SendView: View {
     }
 
     private var askTitle: String {
-        guard sent == nil, let ws = model.workspaces.first(where: { $0.id == workspaceID }) else { return "Ask for something." }
+        if let sent { return "Ask \(sent.workspaceName)." }
+        guard let ws = model.workspaces.first(where: { $0.id == workspaceID }) else { return "Ask for something." }
         return "Ask \(ws.displayName)."
     }
     @State private var openTicket: Ticket?
