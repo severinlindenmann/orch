@@ -102,6 +102,13 @@ def _wrap_cmd(root: Path, rest: list[str]) -> None:
     sys.exit(code)
 
 
+def _chosen_or_generic(root: Path) -> str:
+    try:
+        return adapters.chosen(root)
+    except Refused:
+        return "generic"  # a hand-started agent we know nothing about
+
+
 def _holder_line(rec: dict, tid: str) -> str:
     who = adapters.load(rec["agent"])["label"] if rec["agent"] in adapters.builtin_names() else rec["agent"]
     since = rec.get("started_at", "")[11:16]
@@ -150,7 +157,7 @@ def dispatch(args, root: Path) -> bool:
         raise Refused("--by must be 1 to 64 characters, e.g. agent:helper.")
     tid = args.ticket
     if sub == "claim":
-        name = args.agent or adapters.detect_env(os.environ) or adapters.chosen(root)
+        name = args.agent or adapters.detect_env(os.environ) or _chosen_or_generic(root)
         try:
             rec = runs.claim(
                 root, tid, by, name, args.mode, pid=args.pid, take_over=args.take_over, busy_text=args.text

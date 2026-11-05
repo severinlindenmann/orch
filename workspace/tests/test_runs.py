@@ -53,7 +53,9 @@ def test_claim_writes_a_valid_record_and_release_removes_it(proj, new_ticket):
 def test_busy_ticket_exits_2_queues_the_event_once(proj, new_ticket, run):
     tid = new_ticket()
     runs.claim(proj, tid, "agent:scheduler", "claude", pid=os.getpid())
-    code, out, err = run("run", "claim", tid, "--by", "focus", "--text", "Also add October", "--json")
+    code, out, err = run(
+        "run", "claim", tid, "--by", "focus", "--agent", "claude", "--text", "Also add October", "--json"
+    )
     j = json.loads(out)
     assert (
         code == 2
