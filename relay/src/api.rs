@@ -222,6 +222,7 @@ async fn post_message(
             return Err(forbidden("`from` must be the authenticated workspace."));
         }
         rules::validate_schema(&msg).map_err(invalid)?;
+        rules::check_update_title(&msg).map_err(invalid)?;
         let id = msg["id"].as_str().unwrap_or("").to_string();
         let digest = sha256_hex(&serde_json::to_vec(&msg).unwrap());
         let old: Option<(String, String)> = c

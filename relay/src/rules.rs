@@ -32,6 +32,19 @@ pub fn validate_schema(msg: &Value) -> Result<(), String> {
     }
 }
 
+/// `body.update.title` follows the description character rule (relay-api.md): NFC, allowed characters, at most 2 stacked
+/// marks. The schema checks most of it; NFC and the exact character rule are checked here.
+pub fn check_update_title(msg: &Value) -> Result<(), String> {
+    let Some(t) = msg["body"]["update"]["title"].as_str() else {
+        return Ok(());
+    };
+    let n = store::valid_description(t).map_err(|e| format!("update.title: {e}"))?;
+    if n != t.trim() || t.chars().any(|c| c == '\n' || c == '\r') {
+        return Err("update.title must be one line of plain text in NFC form.".into());
+    }
+    Ok(())
+}
+
 /// The one answer for "unknown workspace" and "not connected".
 pub const NO_REACHABLE: &str = "No reachable workspace with this id. Ask the admin.";
 
