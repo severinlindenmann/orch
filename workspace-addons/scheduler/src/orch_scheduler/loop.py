@@ -56,6 +56,8 @@ class Scheduler:
         for t in tickets:
             tid = t["id"]
             if t["status"] not in OPEN:
+                if state.get(tid, {}).get("pending_wake"):
+                    update_state(self.root, tid, pending_wake=None)
                 continue
             tpl = pick_agent(self.cfg, t)
             wake = parse(t.get("wake_at"))
@@ -136,6 +138,8 @@ class Scheduler:
         return tid
 
     def _handle(self, m: dict, now: datetime) -> str | None:
+        # RULE: THE SCHEDULER ONLY ACTS ON WHAT THE CLI DECIDED (`allowed`, `applied`, or the ticket `relay done`
+        # returns). It never decides on a relay message itself: no CLI decision, or `done` fails -> no run.
         kind, mid, body = m.get("type"), m["id"], m.get("body") or {}
         tid: str | None = None
         text = ""
@@ -150,6 +154,8 @@ class Scheduler:
             if tid and self.runner.locked(tid):
                 return None
             done = orchcli.call(self.root, "relay", "done", mid, by=False)
+            if not isinstance(done, dict):
+                return None  # done failed (busy, allow gone): message stays unseen, retried next pass
             if kind == "delegate":
                 # `orch relay done` already made the ticket for an allowed delegate: use it, never a second one
                 tid = done.get("ticket") if isinstance(done, dict) else None
@@ -162,17 +168,7 @@ class Scheduler:
         if kind == "answer" and m.get("applied") is True:
             return None  # applied by `orch relay inbox`; its wake_at starts the run once (wake path)
         if kind == "answer":
-            t = tickets.get(m.get("ticket"))
-            if not t or t["status"] != "waiting" or self.runner.locked(t["id"]):
-                return None
-            orchcli.call(self.root, "relay", "done", mid, by=False)
-            if str(m.get("from", "")).startswith("ph_"):
-                return None  # a phone answer is applied as the human by `orch relay inbox`, never as the scheduler
-            if orchcli.call(self.root, "answer", t["id"], str(body.get("question_id")), str(body.get("answer")),
-                            "--via", "relay") is None:
-                orchcli.log(self.root, t["id"], "Scheduler could not record an answer from the relay; agent not started")
-                return None
-            return None  # `orch answer` sets wake_at; the wake path starts the run once
+            return None  # not applied by the CLI (not asked / not allowed): the scheduler never applies it itself
         if kind == "webhook":
             wid = body.get("webhook_id")
             for t in tickets.values():

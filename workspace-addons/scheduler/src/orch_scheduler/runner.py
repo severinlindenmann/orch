@@ -110,12 +110,14 @@ def _alive(pid: int) -> bool:
 
 
 REDACT = [
-    re.compile(r"(?i)(authorization|bearer)\s*[:=]?\s*(bearer\s+)?\S+"),
-    re.compile(r"(?i)\b(password|passwd|secret|token)\s*[:=]\s*\S+"),
+    re.compile(r"(?i)(?<![A-Za-z])(\w*(?:password|passwd|secret|token)|api[_-]?key|x-api-key)\s*[:=]\s*\S+"),
+    re.compile(r"(?i)\bauthorization\s*:\s*\S+(?:\s+\S+)?"),
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=\-]{6,}"),
     re.compile(r"\bAKIA[0-9A-Z]{12,}"),
     re.compile(r"(?<=://)[^/\s:@]+:[^/\s@]+@"),
     re.compile(r"\b(?:sk-|ghp_|gho_|github_pat_|xox[a-z]-)[A-Za-z0-9_\-]{8,}"),
-    re.compile(r"[A-Za-z0-9+/=_\-]{32,}"),
+    re.compile(r"\b[0-9a-fA-F]{32}\b"),
+    re.compile(r"(?=[^\s/]*\d)(?=[^\s/]*[A-Za-z])[A-Za-z0-9+=_\-]{41,}"),
 ]
 
 

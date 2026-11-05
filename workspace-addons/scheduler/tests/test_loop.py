@@ -222,9 +222,24 @@ def test_failed_start_logged_once_per_streak(ws):
 
 def test_redacts_password_aws_and_hex(ws, tmp_path):
     from orch_scheduler.runner import redact
-    for raw in ("password=hunter2", "PASSWORD: s3cret", "AKIAABCDEFGHIJKLMNOP", "d41d8cd98f00b204e9800998ecf8427e"):
+    for raw in ("password=hunter2", "PASSWORD: s3cret", "AKIAABCDEFGHIJKLMNOP", "d41d8cd98f00b204e9800998ecf8427e",
+                "client_secret=abc123", "access_token=xyz789", "api_key: k9k9k9", "x-api-key: k8k8k8",
+                "Authorization: Bearer tok777"):
         out = redact("x " + raw)
-        assert "hunter2" not in out and "s3cret" not in out and "AKIA" not in out and "d41d8cd9" not in out, raw
+        for bad in ("hunter2", "s3cret", "AKIA", "d41d8cd9", "abc123", "xyz789", "k9k9k9", "k8k8k8", "tok777"):
+            assert bad not in out, raw
+    for keep in ('File "/Users/lume/orch-dev/.worktrees/draft-sa-scheduler/workspace-addons/scheduler/src/orch_scheduler/runner.py", line 3',
+                 "commit 119fd56a1b2c3d4e5f60718293a4b5c6d7e8f901 failed", "No module named orch_scheduler_extra_long_module_name_x",
+                 "authorization failed for user", "Invalid bearer token"):
+        assert redact(keep) == keep, keep
+
+
+def test_pending_wake_cleared_when_ticket_closed(ws):
+    from orch_scheduler.runner import update_state
+    add_ticket(ws, "t_pend0040", status="done")
+    update_state(ws, "t_pend0040", pending_wake="x")
+    assert Scheduler(ws).tick(T(8)) == []
+    assert not load_state(ws)["t_pend0040"].get("pending_wake")
 
 
 def test_run_env_has_agent_and_ticket(ws, tmp_path):

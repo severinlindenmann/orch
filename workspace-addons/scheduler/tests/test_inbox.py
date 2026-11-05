@@ -71,18 +71,6 @@ def test_delegate_uses_ticket_made_by_done_no_double(ws):
     assert ["ticket", "new", "Check logs"] not in names(ws)
 
 
-def test_answer_for_waiting_ticket(ws):
-    add_ticket(ws, "t_ask00001", status="waiting")
-    relay_on(ws, {"items": [{"id": "m_6", "type": "answer", "ticket": "t_ask00001",
-                             "body": {"question_id": "q1", "answer": "Yes", "answered_by": "human:s"}}]})
-    s = Scheduler(ws)
-    assert s.tick(T(8)) == []  # recorded; the wake_at the answer sets starts the run, once
-    assert s.tick(T(8, 1)) == ["t_ask00001"]
-    s.runner.reap(T(8, 2), wait=True)
-    assert s.tick(T(8, 3)) == []
-    assert ["answer", "t_ask00001", "q1", "Yes", "--via", "relay"] in names(ws)
-
-
 def test_applied_answer_resumes_active_ticket(ws):
     add_ticket(ws, "t_ask00002", status="active")
     relay_on(ws, [{"id": "m_9", "type": "answer", "ticket": "t_ask00002", "applied": True,
@@ -122,12 +110,24 @@ def test_start_key_other_sender_gets_own_ticket(ws):
         "start_key": "weekly-report", "from": "ws_evil"}
 
 
-def test_failed_answer_does_not_start_agent(ws):
+def test_peer_answer_not_applied_by_cli_is_ignored(ws):
+    """The scheduler only acts on what the CLI decided: a peer answer the CLI did not apply -> nothing."""
     add_ticket(ws, "t_ask00003", status="waiting", waiting_on={"kind": "question", "ref": "q1"})
-    relay_on(ws, [{"id": "m_10", "type": "answer", "ticket": "t_ask00003", "from": "ws_a",
+    relay_on(ws, [{"id": "m_10", "type": "answer", "ticket": "t_ask00003", "from": "ws_a", "applied": False,
                    "body": {"question_id": "q9", "answer": "Yes"}}])
-    (ws / "fail-answer").write_text("1")
-    assert Scheduler(ws).tick(T(8)) == []
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == []
+    assert s.tick(T(8, 2)) == []
+    assert not any(a[0] in ("answer",) or a[:2] == ["relay", "done"] for a in names(ws))
+
+
+def test_start_not_run_when_done_fails(ws):
+    relay_on(ws, [{"id": "m_1", "type": "start", "from": "ws_a", "allowed": True,
+                   "body": {"key": "weekly-report", "text": "Do the report"}}])
+    (ws / "fail-done").write_text("1")
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == []
+    assert not (ws / "seen.json").exists()
 
 
 def test_phone_answer_is_never_recorded_by_scheduler(ws):

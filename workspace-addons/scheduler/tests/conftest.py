@@ -23,6 +23,8 @@ def save(t): (tdir / (t["id"] + ".json")).write_text(json.dumps(t))
 if args[:2] == ["relay", "inbox"]:
     p = root / "inbox.json"
     print(p.read_text() if p.exists() else "[]")
+elif args[:2] == ["relay", "done"] and (root / "fail-done").exists():
+    sys.exit(2)
 elif args[:2] == ["relay", "done"]:
     s = root / "seen.json"
     seen = json.loads(s.read_text()) if s.exists() else []
