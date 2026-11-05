@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -108,12 +109,26 @@ def _alive(pid: int) -> bool:
     return True
 
 
+REDACT = [
+    re.compile(r"(?i)(authorization|bearer)\s*[:=]?\s*(bearer\s+)?\S+"),
+    re.compile(r"(?<=://)[^/\s:@]+:[^/\s@]+@"),
+    re.compile(r"\b(?:sk-|ghp_|gho_|github_pat_|xox[a-z]-)[A-Za-z0-9_\-]{8,}"),
+    re.compile(r"[A-Za-z0-9+/=_\-]{33,}"),
+]
+
+
+def redact(line: str) -> str:
+    for rx in REDACT:
+        line = rx.sub("[redacted]", line)
+    return line
+
+
 def _tail(path: Path, n: int = 5) -> list[str]:
     try:
         lines = [x for x in path.read_text(errors="replace").splitlines() if x.strip() and not x.startswith("# ")]
     except OSError:
         return []
-    return [x[:300] for x in lines[-n:]]
+    return [redact(x)[:300] for x in lines[-n:]]
 
 
 @dataclass
@@ -170,7 +185,7 @@ class Runner:
                 f.write(f"# could not start: {e}\n# end {fmt(now)} exit 127\n")
                 lock.unlink(missing_ok=True)
                 self._record(tid, now, 127, log_path, None)
-                update_state(self.root, tid, failed={"exit": 127, "tail": [f"could not start: {e}"[:300]], "at": fmt(now)})
+                update_state(self.root, tid, failed={"exit": 127, "untrusted_tail": [redact(f"could not start: {e}")[:300]], "at": fmt(now)})
                 orchcli.log(self.root, tid, f"Scheduler could not start the agent ({e.__class__.__name__})")
                 return False
         lock.write_text(str(proc.pid))
@@ -201,13 +216,12 @@ class Runner:
             e.update(last_exit=code, last_log=r.log_path.name, last_run=fmt(r.started))
             tail = _tail(r.log_path)
             if code != 0:
-                e["failed"] = {"exit": code, "tail": tail, "at": fmt(datetime.now(UTC))}
+                e["failed"] = {"exit": code, "untrusted_tail": tail, "at": fmt(datetime.now(UTC))}
             else:
                 e.pop("failed", None)
             save_state(self.root, st)
             if code != 0:
-                reason = (tail[-1][:120] if tail else f"exit code {code}")
-                orchcli.log(self.root, tid, f"Run failed: {reason}")
+                orchcli.log(self.root, tid, f"Run failed (exit {code}). Details in the scheduler log.")
             orchcli.log(self.root, tid, f"Scheduler run finished, exit code {code}")
             del self.runs[tid]
             done.append(tid)

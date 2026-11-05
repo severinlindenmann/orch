@@ -231,16 +231,50 @@ def test_failed_run_recorded_and_surfaced(ws, tmp_path):
     s.tick(T(8, 1))
     finish(s, T(8, 2))
     f = load_state(ws)["t_fail0001"]["failed"]
-    assert f["exit"] == 1 and "login expired" in f["tail"][-1]
+    assert f["exit"] == 1 and "login expired" in f["untrusted_tail"][-1]
     logs = [c["args"][2] for c in calls(ws) if c["args"][0] == "log"]
-    assert any(x.startswith("Run failed: ") and "login expired" in x for x in logs)
+    assert "Run failed (exit 1). Details in the scheduler log." in logs
 
 
 def test_success_clears_failed(ws):
     add_ticket(ws, "t_fail0002", wake_at="2026-11-04T08:00:00Z")
     from orch_scheduler.runner import update_state
-    update_state(ws, "t_fail0002", failed={"exit": 1, "tail": ["x"]})
+    update_state(ws, "t_fail0002", failed={"exit": 1, "untrusted_tail": ["x"]})
     s = Scheduler(ws)
     s.tick(T(8, 1))
     finish(s, T(8, 2))
     assert "failed" not in load_state(ws)["t_fail0002"]
+
+
+def test_failed_run_secret_not_in_ticket_and_redacted_in_state(ws, tmp_path):
+    import sys
+    a = tmp_path / "leak.py"
+    a.write_text("print('Authorization: Bearer abc123def456')\n"
+                 "print('clone https://bob:hunter2@example.com/x.git')\n"
+                 "print('key sk-ant-api03-ABCDEFGHIJKLMNOP and ghp_ABCDEFGHIJKLMNOPQRSTUV')\n"
+                 "print('blob ' + 'a1b2c3d4' * 6)\nraise SystemExit(3)")
+    (ws / ".orch/scheduler/config.toml").write_text(f"agent = '{sys.executable} {a} {{prompt}}'\n")
+    add_ticket(ws, "t_fail0003", wake_at="2026-11-04T08:00:00Z")
+    s = Scheduler(ws)
+    s.tick(T(8, 1))
+    finish(s, T(8, 2))
+    blob = json.dumps(calls(ws))
+    for secret in ("abc123def456", "hunter2", "ABCDEFGHIJKLMNOP", "a1b2c3d4a1b2"):
+        assert secret not in blob
+    tail = " ".join(load_state(ws)["t_fail0003"]["failed"]["untrusted_tail"])
+    for secret in ("abc123def456", "hunter2", "ABCDEFGHIJKLMNOP", "a1b2c3d4a1b2"):
+        assert secret not in tail
+    assert "[redacted]" in tail
+
+
+def test_failed_start_backs_off_five_minutes(ws):
+    (ws / ".orch/scheduler/config.toml").write_text("agent = 'no-such-agent-xyz {prompt}'\n")
+    add_ticket(ws, "t_wake022", status="waiting", wake_at="2026-11-04T08:00:00Z")
+    s = Scheduler(ws)
+    s.tick(T(8, 1))
+    n = len([c for c in calls(ws) if c["args"][0] == "log"])
+    assert load_state(ws)["t_wake022"]["last_attempt"]
+    s.tick(T(8, 4))  # inside 5 minutes: no new attempt
+    assert len([c for c in calls(ws) if c["args"][0] == "log"]) == n
+    s.tick(T(8, 7))  # after: tries again
+    assert len([c for c in calls(ws) if c["args"][0] == "log"]) > n

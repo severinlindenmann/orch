@@ -12,6 +12,7 @@ from .cron import fmt, is_due, next_after, parse
 from .runner import Runner, load_config, load_state, pick_agent, sdir, update_state
 
 ID_RE = re.compile(r"^t_[a-z0-9]{6,16}$")
+RETRY_AFTER = timedelta(minutes=5)
 OPEN = ("open", "active", "waiting")
 
 
@@ -60,7 +61,9 @@ class Scheduler:
             wake = parse(t.get("wake_at"))
             pst = state.get(tid, {})
             wake_due = bool(wake and wake <= now and pst.get("last_wake") != t["wake_at"])
-            if wake_due or pst.get("pending_wake"):
+            last_try = parse(pst.get("last_attempt"))
+            backoff = bool(last_try and now - last_try < RETRY_AFTER)
+            if (wake_due or pst.get("pending_wake")) and not backoff:
                 if self.runner.locked(tid):
                     if not pst.get("pending_wake"):
                         update_state(self.root, tid, pending_wake=t.get("wake_at") or "wake")
@@ -75,7 +78,11 @@ class Scheduler:
                         orchcli.call(self.root, "wait", tid, "--clear")  # also makes a waiting ticket active
                         if t["status"] == "open":
                             orchcli.call(self.root, "ticket", "status", tid, "active")
+                else:
+                    update_state(self.root, tid, last_attempt=fmt(now))
                 continue
+            if wake_due or pst.get("pending_wake"):
+                continue  # failed start: wait out the backoff
             cron = ((t.get("ext") or {}).get("scheduler") or {}).get("cron")
             if t.get("type") == "recurring" and cron:
                 since = parse(state.get(tid, {}).get("last_run")) or parse(t.get("created_at")) or now
