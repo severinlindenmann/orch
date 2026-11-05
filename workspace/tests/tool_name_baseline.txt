@@ -1,0 +1,8 @@
+# Places that may still name an agent tool (claude, codex; case-insensitive), with the most hits allowed.
+# Everything else must go through adapters.py + agents.json. This list may only shrink.
+workspace/src/orch/skills.py 14
+workspace/src/orch/addons.py 1
+workspace/src/orch/relay.py 1
+workspace/src/orch/init.py 5
+workspace-addons/scheduler/src/orch_scheduler/runner.py 1
+workspace-addons/scheduler/src/orch_scheduler/skills/orch-scheduler/SKILL.md 5
