@@ -198,7 +198,7 @@ final class OnboardingFlowUITests: XCTestCase {
         let tab = app.buttons["Send"]
         XCTAssertTrue(tab.waitForExistence(timeout: 15))
         XCTAssertGreaterThanOrEqual(tab.frame.height, 44)
-        tab.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.1)).tap()
+        tab.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2)).tap()
         XCTAssertTrue(app.staticTexts["Say it. Send it"].waitForExistence(timeout: 3))
     }
 }
