@@ -1,0 +1,13 @@
+[
+  { "id": "core:q:t_7k3f9q:q2", "source": "core", "kind": "question", "ticket": "t_7k3f9q", "title": "Invoice export",
+    "text": "Send the CSV to Acme now?", "tone": "needs-you", "since": "2026-11-05T08:12:00Z",
+    "answer": { "question": "q2", "options": ["Yes", "No"], "recommended": "Yes" } },
+  { "id": "core:q:t_sl33p1:q3", "source": "core", "kind": "automation:failure", "ticket": "t_sl33p1", "title": "Nightly import",
+    "text": "Nightly import failed (exit 1). Try again?", "tone": "bad", "since": "2026-11-05T06:00:14Z",
+    "answer": { "question": "q3", "options": ["Try again", "Stop"], "recommended": "Try again" } },
+  { "id": "core:wait:t_wr4n2c", "source": "core", "kind": "overdue-wait", "ticket": "t_wr4n2c", "title": "Weekly report",
+    "text": "Waiting on Acme IT (Jonas) since 2 Nov", "tone": "warn", "since": "2026-11-04T00:00:00Z" },
+  { "id": "relay:allow:m_9c2k7d0a1b3e5f7h", "source": "relay", "kind": "relay:allow", "ticket": null,
+    "title": "landing-site wants to hand over", "text": "Add rate limit", "tone": "needs-you", "since": "2026-11-05T08:40:00Z",
+    "cli": "orch relay allow m_9c2k7d0a1b3e5f7h --once", "stale": false }
+]

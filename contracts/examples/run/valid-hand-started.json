@@ -1,0 +1,5 @@
+{
+  "schema": "orch.run/1", "ticket": "t_wr4n2c", "run": "r_k9d2m4", "by": "human:severin", "agent": "codex", "mode": "oneshot",
+  "tmux": null, "pid": null, "pid_started": null, "started_at": "2026-11-05T08:00:00Z", "renewed_at": "2026-11-05T08:02:00Z",
+  "pending": false, "stop_requested": null, "seen_revision": 4, "maybe_stale_since": "2026-11-05T08:32:00Z"
+}

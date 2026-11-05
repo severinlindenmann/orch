@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/needs.schema.json",
+  "title": "orch Needs you v1 (stdout of `orch needs --json`)",
+  "description": "What waits for a person, one list for every surface (terminal, browser, phone). The core makes its rows from tickets alone: open questions and waits past their `until`. An active add-on whose manifest has `needs = true` adds rows through `orch <name> needs --json` (same row shape, pulled with a 2 s timeout; on failure its last rows come back with stale = true). Rows are sorted questions first, then bad, then warn; ids are stable and unique, so a surface can remember what it showed. Unknown fields are kept.",
+  "type": "array",
+  "items": { "$ref": "#/$defs/row" },
+  "$defs": {
+    "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$" },
+    "row": {
+      "type": "object",
+      "required": ["id", "source", "kind", "ticket", "title", "text", "tone", "since"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}:[A-Za-z0-9_.:-]{1,200}$", "description": "<source>:<stable key>. Core: core:q:<ticket id>:<question id> and core:wait:<ticket id>." },
+        "source": { "$ref": "#/$defs/name", "description": "core, or the add-on name that made the row." },
+        "kind": { "type": "string", "pattern": "^(question|overdue-wait|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$", "description": "question (a plain open question), overdue-wait (waiting_on.until passed, any wait kind), or <add-on>:<name> (a question of that kind, or an add-on's own row)." },
+        "ticket": { "oneOf": [{ "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" }, { "type": "null" }] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Plain text (shown with textContent): usually the ticket title." },
+        "text": { "type": "string", "minLength": 1, "maxLength": 500, "description": "Plain text: the question, or what is late." },
+        "tone": { "enum": ["needs-you", "bad", "warn"] },
+        "since": { "$ref": "#/$defs/time", "description": "Since when it waits (question asked, wait passed, event time)." },
+        "answer": {
+          "type": "object", "required": ["question", "options", "recommended"],
+          "properties": {
+            "question": { "type": "string", "pattern": "^q[0-9]{1,4}$" },
+            "options": { "type": "array", "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 80 }, "description": "Empty = free answer." },
+            "recommended": { "type": ["string", "null"] }
+          },
+          "description": "Present when the row can be answered in place: `orch answer <ticket> <question> <option>`."
+        },
+        "cli": { "type": "string", "minLength": 1, "maxLength": 300, "description": "Optional command that settles the row, shown to people who use the terminal." },
+        "stale": { "type": "boolean", "description": "true = an add-on's row from its last good pull (the pull failed or timed out now)." }
+      }
+    }
+  }
+}

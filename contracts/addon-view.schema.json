@@ -18,8 +18,8 @@
     "tone": { "enum": ["neutral", "good", "warn", "needs-you", "bad"], "default": "neutral" },
     "link": {
       "type": "string", "maxLength": 500,
-      "pattern": "^(t_[a-z0-9]{6,16}|https://[^\\s<>\"'`]+)$",
-      "description": "A ticket id (opens the ticket detail) or an https URL (opens in a new tab, rel=noopener noreferrer). Nothing else."
+      "pattern": "^(t_[a-z0-9]{6,16}|https://[^\\s<>\"'`]+|addon:(?![/\\\\])(?!.*\\.\\.)[A-Za-z0-9_./?=&%-]{0,300})$",
+      "description": "A ticket id (opens the ticket detail), an https URL (opens in a new tab, rel=noopener noreferrer), or addon:<path>: a page of THIS add-on, resolved only against its own checked [page] url (no '..', no leading '/'). Nothing else."
     },
     "chip": {
       "type": "object", "required": ["label"], "additionalProperties": false,

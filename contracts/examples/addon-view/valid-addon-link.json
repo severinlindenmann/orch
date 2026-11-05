@@ -1,0 +1,12 @@
+{
+  "schema": "orch.addon-view/1",
+  "generated_at": "2026-11-05T09:20:00Z",
+  "notice": "Live page is running.",
+  "notice_tone": "good",
+  "blocks": [
+    { "type": "stat", "label": "Working now", "value": 2, "tone": "good" },
+    { "type": "list", "title": "Live now", "items": [
+      { "title": "Invoice export", "subtitle": "Claude · step 3 of 5", "chips": [{ "label": "4 min" }], "tone": "good", "link": "addon:t/t_7k3f9q" },
+      { "title": "Weekly report", "subtitle": "Waiting for your answer", "tone": "needs-you", "link": "addon:t/t_wr4n2c" } ] }
+  ]
+}

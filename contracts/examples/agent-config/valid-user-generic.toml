@@ -1,0 +1,11 @@
+# .orch/config.toml (agent part)
+[workspace]
+agent = "my-agent"
+
+[agents.my-agent]
+adapter = "generic"
+command = "my-agent --prompt {prompt}"
+interactive = "my-agent"
+
+[agents.claude-work]
+adapter = "claude"

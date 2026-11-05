@@ -1,5 +1,6 @@
-"""Check every contract example (tickets incl. ext.scheduler, messages, workspaces, add-on manifests and views)
-and the publish crypto vector.
+"""Check every contract example (tickets incl. ext.scheduler, run records, pending input, Needs you rows,
+agent adapters and their config entries, messages, workspaces, add-on manifests and views) and the publish
+crypto vectors. Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py
 """
@@ -64,7 +65,20 @@ V = {
     "workspaces": validator("workspaces"),
     "addon-manifest": validator("addon-manifest"),
     "addon-view": validator("addon-view"),
+    "run": validator("run"),
+    "run-pending": validator("run-pending"),
+    "needs": validator("needs"),
+    "agent-adapter": validator("agent-adapter"),
 }
+# The [workspace] agent + [agents.<name>] part of .orch/config.toml: a $def of agent-adapter.schema.json.
+_adapters = json.loads((HERE / "agent-adapter.schema.json").read_text())
+V["agent-config"] = Draft202012Validator(
+    {"$ref": "#/$defs/user_config", "$defs": _adapters["$defs"]}, format_checker=FormatChecker()
+)
+# Core schemas never name an add-on or an agent tool (provider agnostic, core works alone). Older core files that
+# predate this rule (message, workspaces, addon-manifest's reserved names) are not listed here.
+CORE_CLEAN = ["ticket", "run", "run-pending", "needs", "agent-adapter"]
+TOOL_NAMES = re.compile(r"scheduler|automation|focus|relay|dashboard|publish|claude|codex", re.I)
 # Add-on ext schemas, keyed by ext name. A ticket's ext.<name> is checked with it (as the CLI does for installed add-ons).
 EXT = {"scheduler": validator("addons/scheduler.ext")}
 
@@ -89,8 +103,17 @@ def check(kind, doc, want_ok, label):
 
 
 for kind in V:
-    for f in sorted((HERE / "examples" / kind).glob("*.*")):
+    files = sorted((HERE / "examples" / kind).glob("*.*"))
+    for f in files:
         check(kind, load(f), f.name.startswith("valid-"), f"examples/{kind}/{f.name}")
+    for prefix in ("valid-", "invalid-"):
+        if not any(f.name.startswith(prefix) for f in files):
+            fails.append(f"examples/{kind}: needs at least one {prefix}* example")
+
+for name in CORE_CLEAN:
+    hit = TOOL_NAMES.search((HERE / f"{name}.schema.json").read_text())
+    if hit:
+        fails.append(f"{name}.schema.json names an add-on or agent tool: {hit.group(0)!r}")
 
 review = HERE / "review"
 check("ticket", json.loads((review / "ticket.example.json").read_text()), True, "review/ticket")

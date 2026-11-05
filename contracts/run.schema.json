@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/run.schema.json",
+  "title": "orch run record v1 (.orch/run/tickets/<ticket id>.json)",
+  "description": "The claim of the one agent run working on a ticket on this machine. Gitignored, per machine, never committed. Written only under the per-ticket O_EXCL lock (.orch/run/tickets/<id>.lock): re-read, decide, write tmp + os.replace. Session ids are NOT kept here: they live in the ticket (ticket.sessions[]), which is the one store. A missing file = nobody works on the ticket here. Unknown fields are kept.",
+  "type": "object",
+  "required": ["schema", "ticket", "run", "by", "agent", "mode", "tmux", "pid", "pid_started", "started_at", "renewed_at", "pending", "stop_requested", "seen_revision"],
+  "properties": {
+    "schema": { "const": "orch.run/1" },
+    "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "Same as the file name." },
+    "run": { "type": "string", "pattern": "^r_[a-z0-9_]{6,32}$", "description": "Random id of this run, new on every claim." },
+    "by": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f]+$", "description": "Who started the run: a free actor name (a person, or whatever passed --by). The core never lists the allowed values." },
+    "agent": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "description": "Adapter name (agent-adapter.schema.json key or a [agents.<name>] entry)." },
+    "mode": { "enum": ["live", "oneshot"], "description": "live = long-running interactive agent in tmux; oneshot = one process per turn (the fallback that always works)." },
+    "tmux": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object", "required": ["socket", "session"], "additionalProperties": false,
+          "properties": {
+            "socket": { "type": "string", "pattern": "^orch-[a-z0-9]{4,32}$", "description": "tmux -L socket name: orch-<hash of the workspace path>." },
+            "session": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "tmux session name = the ticket id." }
+          }
+        }
+      ],
+      "description": "Where a live run sits. null for oneshot."
+    },
+    "pid": { "oneOf": [{ "type": "integer", "minimum": 2 }, { "type": "null" }], "description": "Process of the agent (or of `orch run _wrap`). null = hand-started agent that claimed by itself. A claim with a pid is stale only when that pid is gone or alive with a different start time." },
+    "pid_started": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }], "description": "Start time of pid as the OS reports it; guards against pid reuse." },
+    "started_at": { "$ref": "#/$defs/time" },
+    "renewed_at": { "$ref": "#/$defs/time", "description": "Last orch write by the run. Without a pid: 'maybe stale' after 30 min without one; taken over only by an explicit `orch run start --take-over`." },
+    "pending": { "type": "boolean", "description": "true = input waits in .orch/run/pending/<ticket id>.jsonl (run-pending.schema.json)." },
+    "stop_requested": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }], "description": "When someone asked the run to stop; null = nobody." },
+    "seen_revision": { "type": "integer", "minimum": 0, "description": "Ticket revision the running agent has seen; the 'New on <ticket> since you looked' footer (stderr only) lists what changed after it." },
+    "maybe_stale_since": { "$ref": "#/$defs/time", "description": "Optional. Set when a claim without a pid passed 30 min without an orch write." },
+    "reason": { "type": "string", "maxLength": 200, "description": "Optional. Plain words why the run was started, e.g. 'Answer to q2'." },
+    "log": { "type": "string", "pattern": "^\\.orch/run/logs/[A-Za-z0-9_.-]{1,120}$", "description": "Optional. Log file of a oneshot run, relative to the workspace root." }
+  },
+  "$defs": {
+    "time": { "type": "string", "format": "date-time", "pattern": "Z$" }
+  }
+}

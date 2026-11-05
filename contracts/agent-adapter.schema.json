@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/agent-adapter.schema.json",
+  "title": "orch agent adapters v1 (workspace/src/orch/agents.json)",
+  "description": "The one place that knows agent tools: how to find one, the argv for a fresh or resumed run (oneshot or live in tmux), how a live run takes input and says it is idle, how session ids are obtained, and capability flags that switch features on or off (the generic adapter is the floor: everything works with all flags false). Only adapters.py reads it. Argv items may hold the placeholders {prompt} {session} {new_session} {orch_hooks_file} {allow}; the string \"{command}\" / \"{interactive}\" in place of an argv means the user's [agents.<name>] command, split with shlex. A oneshot argv without {prompt} gets the prompt appended (prompt_via arg). User entries in .orch/config.toml are described by $defs/user_config (local-files.md).",
+  "type": "object",
+  "required": ["schema", "adapters"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "orch.agent-adapters/1" },
+    "note": { "type": "string" },
+    "adapters": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": { "$ref": "#/$defs/adapter" }
+    }
+  },
+  "$defs": {
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+    "path": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9_./-]{1,200}$" },
+    "arg": { "type": "string", "pattern": "^([^{}]|\\{(prompt|session|new_session|orch_hooks_file|allow)\\})*$" },
+    "argv": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/arg" } },
+    "signal": { "type": "string", "pattern": "^(hook:[A-Za-z]{1,32}|orch:run-done)$", "description": "hook:<Event> = the tool's own hook calls `orch run event`; orch:run-done = the agent runs `orch run done` itself." },
+    "adapter": {
+      "type": "object",
+      "required": ["label", "detect", "prompt_via", "oneshot", "live", "session", "capabilities"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 32, "description": "Shown to people. \"{name}\" = the user's entry name." },
+        "detect": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "additionalProperties": false, "minProperties": 1,
+              "properties": {
+                "binary": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$", "description": "Found on PATH = installed." },
+                "env_any": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" }, "description": "Any set = orch runs inside this tool (labels agent:<name>)." },
+                "env_prefix": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" }
+              }
+            }
+          ]
+        },
+        "prompt_via": { "enum": ["arg", "stdin"] },
+        "oneshot": {
+          "type": "object", "required": ["fresh", "resume"], "additionalProperties": false,
+          "properties": {
+            "fresh": { "oneOf": [{ "$ref": "#/$defs/argv" }, { "const": "{command}" }] },
+            "resume": { "oneOf": [{ "$ref": "#/$defs/argv" }, { "type": "null" }], "description": "null = cannot resume: every run starts fresh from the ticket and its summary." },
+            "stream_args": { "$ref": "#/$defs/argv", "description": "Optional. Added for a machine-readable event stream." },
+            "allow_args": { "$ref": "#/$defs/argv", "description": "Optional. Added to retry with a tool allowed ({allow})." }
+          }
+        },
+        "live": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "required": ["fresh", "send", "interrupt_keys", "idle_signal"], "additionalProperties": false,
+              "properties": {
+                "fresh": { "oneOf": [{ "$ref": "#/$defs/argv" }, { "const": "{interactive}" }] },
+                "resume": { "oneOf": [{ "$ref": "#/$defs/argv" }, { "type": "null" }] },
+                "send": { "enum": ["bracketed-paste+Enter"], "description": "How text goes in: tmux paste-buffer -p, then Enter." },
+                "interrupt_keys": { "type": "array", "items": { "type": "string", "pattern": "^[A-Za-z0-9-]{1,16}$" }, "description": "tmux send-keys names that stop the current turn." },
+                "idle_signal": { "$ref": "#/$defs/signal" },
+                "attention_signal": { "$ref": "#/$defs/signal" },
+                "events": { "oneOf": [{ "type": "string", "pattern": "^[a-z0-9-]{1,40}/[0-9]{1,3}$" }, { "type": "null" }], "description": "Name of the event normaliser for this tool's transcript/stream, or null (board from ticket changes only)." }
+              }
+            }
+          ],
+          "description": "null = no live mode; runs are oneshot."
+        },
+        "hooks": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "object", "propertyNames": { "pattern": "^[A-Za-z]{1,32}$" }, "additionalProperties": { "type": "string", "pattern": "^orch run event --kind [a-z-]{1,24}$" } }
+          ],
+          "description": "Tool hook event -> the orch command it runs. orch writes them into a per-run file ({orch_hooks_file})."
+        },
+        "session": {
+          "type": "object", "required": ["id"], "additionalProperties": false,
+          "properties": {
+            "id": { "enum": ["chosen-by-orch", "from-output", "none"], "description": "chosen-by-orch = orch passes {new_session}; from-output = read from the run's output; none = no sessions." },
+            "hand_started": { "oneOf": [{ "$ref": "#/$defs/signal" }, { "type": "null" }], "description": "How a session started by hand reports its id, or null." },
+            "parse": { "type": "string", "pattern": "^[a-z0-9:-]{1,40}/[0-9]{1,3}$", "description": "For from-output: name of the output parser." }
+          }
+        },
+        "capabilities": {
+          "type": "object",
+          "required": ["resume", "choose_session_id", "interactive_tmux", "hooks", "stream", "permission_retry", "subagents", "usage"],
+          "additionalProperties": false,
+          "properties": {
+            "resume": { "type": "boolean" }, "choose_session_id": { "type": "boolean" }, "interactive_tmux": { "type": "boolean", "description": "For generic: true only when the user entry sets interactive." },
+            "hooks": { "type": "boolean" }, "stream": { "type": "boolean" }, "permission_retry": { "type": "boolean" },
+            "subagents": { "type": "boolean" }, "usage": { "type": "boolean" }
+          }
+        },
+        "files": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "additionalProperties": false,
+              "properties": {
+                "instructions": { "$ref": "#/$defs/path", "description": "File the tool reads by itself (AGENTS.md)." },
+                "instructions_link": { "type": "object", "propertyNames": { "$ref": "#/$defs/path" }, "additionalProperties": { "type": "string", "pattern": "^@[A-Za-z0-9_./-]{1,200}$" }, "description": "File -> line it must contain, e.g. TOOL.md -> @AGENTS.md (the file this tool reads at start)." },
+                "skills_link": { "$ref": "#/$defs/path", "description": "Folder linked to .agents/skills." }
+              }
+            }
+          ],
+          "description": "Files orch prepares so this tool finds AGENTS.md and the skills."
+        }
+      }
+    },
+    "user_config": {
+      "type": "object",
+      "description": "The agent part of .orch/config.toml, parsed (other tables belong to add-ons and are not checked here).",
+      "properties": {
+        "workspace": {
+          "type": "object",
+          "properties": { "agent": { "$ref": "#/$defs/name", "description": "Which agent does the work here: an adapter name or an [agents.<name>] entry." } }
+        },
+        "agents": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/name" },
+          "additionalProperties": {
+            "type": "object", "required": ["adapter"], "additionalProperties": false,
+            "properties": {
+              "adapter": { "$ref": "#/$defs/name", "description": "Built-in adapter whose rules apply, e.g. generic." },
+              "command": { "type": "string", "minLength": 1, "maxLength": 500, "description": "Oneshot command line ({prompt} optional; appended when missing). Used without confirmation; the first use on a machine prints one notice line." },
+              "interactive": { "type": "string", "minLength": 1, "maxLength": 500, "description": "Optional command that starts the tool interactively (live runs in tmux)." }
+            }
+          }
+        }
+      }
+    }
+  }
+}
