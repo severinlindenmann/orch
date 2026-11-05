@@ -4,7 +4,6 @@ import UIKit
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var keyboardUp = false
 
     var body: some View {
@@ -35,7 +34,7 @@ struct RootView: View {
             }
         }
         .overlay(alignment: .top) { StatusBarCover().frame(height: 0) }
-        .id(typeSize).foregroundStyle(Theme.text).tint(Theme.brand)
+        .foregroundStyle(Theme.text).tint(Theme.brand)
         .background(Theme.bg.ignoresSafeArea()).preferredColorScheme(.dark)
     }
 

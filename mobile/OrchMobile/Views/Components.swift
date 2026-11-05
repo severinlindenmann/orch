@@ -20,7 +20,9 @@ struct OrbitMark: View {
 }
 
 struct Brand: View {
+    @Environment(\.dynamicTypeSize) private var dynamicType
     var body: some View {
+        let _ = dynamicType
         HStack(spacing: 8) {
             OrbitMark().frame(width: 30, height: 30)
             Text("orch").font(Theme.font(23, .bold)).tracking(-1)
@@ -102,7 +104,9 @@ extension View {
 struct Eyebrow: View {
     let text: String
     var color: Color = Theme.muted
+    @Environment(\.dynamicTypeSize) private var dynamicType
     var body: some View {
+        let _ = dynamicType
         Text(text).font(Theme.font(11, .semibold)).tracking(1.2).foregroundStyle(color).lineLimit(2).minimumScaleFactor(0.7)
     }
 }
@@ -110,7 +114,9 @@ struct Eyebrow: View {
 struct ScreenHeading: View {
     let title: String
     let subtitle: String
+    @Environment(\.dynamicTypeSize) private var dynamicType
     var body: some View {
+        let _ = dynamicType
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(Theme.font(29, .semibold)).tracking(-1.1)
                 .lineLimit(4).minimumScaleFactor(0.6)
@@ -132,7 +138,9 @@ struct StatusBarCover: View {
 
 struct ModelMessage: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var dynamicType
     var body: some View {
+        let _ = dynamicType
         if let message = model.message {
             VStack(alignment: .leading, spacing: 6) {
                 Text("⚠︎ \(message)").font(Theme.font(13)).foregroundStyle(Theme.danger)

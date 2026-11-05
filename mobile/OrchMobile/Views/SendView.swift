@@ -28,6 +28,7 @@ struct SendView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if !editing || sent != nil { ScreenHeading(title: "Say it. Send it.", subtitle: "A thought, a request, a next step.").padding(.top, 14) }
                 if let sent { sentState(sent) }
+                else if model.workspaces.isEmpty && model.message != nil { offlineState }
                 else if model.workspaces.isEmpty && model.hasLoaded { emptyState }
                 else { composer }
                 ModelMessage().padding(.top, 12)
@@ -54,6 +55,18 @@ struct SendView: View {
         .sensoryFeedback(.success, trigger: model.sendTick)
         .sensoryFeedback(.error, trigger: model.errorTick)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: sent)
+    }
+
+    private var offlineState: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Can't load your workspaces").font(Theme.font(15, .semibold))
+            Text("Check your connection, then try again. You can send a message once they load.")
+                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Button { Task { await model.refresh() } } label: {
+                Text(model.isLoading ? "Trying…" : "Try again").font(Theme.font(13, .semibold)).foregroundStyle(Theme.brand)
+                    .frame(minWidth: 120, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(PressStyle()).disabled(model.isLoading).accessibilityIdentifier("send-retry")
+        }.orchCard().padding(.top, 26)
     }
 
     private var emptyState: some View {
@@ -125,9 +138,9 @@ struct SendView: View {
                         .overlay(Circle().stroke((recording ? Theme.danger : Theme.brand).opacity(0.3)))
                         .overlay {
                             if recording {
-                                Circle().stroke(Theme.danger.opacity(reduceMotion ? 0.8 : (pulse ? 0.2 : 0.6)), lineWidth: 3)
-                                    .scaleEffect(reduceMotion ? 1.1 : (pulse ? 1.2 : 1))
-                                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulse)
+                                Circle().stroke(Theme.danger.opacity(0.7), lineWidth: 3)
+                                    .scaleEffect(reduceMotion ? 1.1 : (pulse ? 1.15 : 1))
+                                    .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: pulse)
                             }
                         }
                 }.buttonStyle(.plain).accessibilityIdentifier("mic")
@@ -174,7 +187,7 @@ struct SendView: View {
                 .padding(.vertical, 16)
             Button("Send another message") { sent = nil; text = "" }.buttonStyle(SecondaryButtonStyle())
             Button("Back to home →") { model.tab = .home }
-                .font(Theme.font(13)).foregroundStyle(Theme.muted).frame(minHeight: 44)
+                .buttonStyle(WideButtonStyle(color: Theme.muted)).font(Theme.font(13))
         }.frame(maxWidth: .infinity).padding(.top, 48)
     }
 
