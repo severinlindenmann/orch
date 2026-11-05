@@ -67,7 +67,8 @@ def _block_ok(b) -> bool:
             isinstance(d, dict) and isinstance(d.get("date"), str) and _DATE.match(d["date"])
             and isinstance(d.get("items"), list) and len(d["items"]) <= 20
             and all(_item_ok(i, ("title",), lambda i: _text(i["title"], 80)
-                             and _opt(i, "time", lambda v: isinstance(v, str) and bool(_HM.match(v))))
+                             and _opt(i, "time", lambda v: isinstance(v, str) and bool(_HM.match(v)))
+                             and _opt(i, "every", lambda v: _text(v, 24)) and _opt(i, "note", lambda v: _text(v, 60)))
                     for i in d["items"]) for d in days)
     if t == "timeline":
         items = b.get("items")

@@ -54,7 +54,7 @@ of consent lives on this machine under `~/.orch-tool/` (`contracts/addon-manifes
 | `orch scheduler start` / `stop` / `status` | Background process; `stop` also runs on `orch addon remove scheduler` |
 | `orch scheduler repeat <id> "<cron>" [--agent codex]` / `--off` | Sets `ext.scheduler {recurring, cron, agent}` via `orch ext set` |
 | `orch scheduler list` | Next wake-ups and repeats, in plain words |
-| `orch scheduler view --json` | Dashboard tab: next run, runs today, failed runs, a calendar strip, repeating list, recent runs |
+| `orch scheduler view --json` | Dashboard tab: next run, runs today, failed runs, a 7-day calendar strip (a repeat more often than hourly is one card per day: "Every 5 min · next 15:05 · 288 runs/day"; hourly or less shows each time), next runs (one line per ticket), repeating list in plain words ("Every 5 minutes", "Mondays at 08:00", local time), recent runs |
 
 Scheduler pass (only while active in this workspace; exits when turned off):
 1. Ticket waiting with `waiting_on.kind = time` and `until <= now`, status not done/dropped → `orch wait <id> --clear`, run agent.

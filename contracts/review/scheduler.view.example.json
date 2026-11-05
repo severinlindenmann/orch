@@ -9,7 +9,7 @@
     { "type": "stat", "label": "Failed runs", "value": 1, "tone": "bad" },
     { "type": "calendar", "days": [
       { "date": "2026-11-05", "items": [ { "time": "10:00", "title": "Weekly report", "tone": "neutral", "link": "t_wr4n2c" } ] },
-      { "date": "2026-11-06", "items": [] },
+      { "date": "2026-11-06", "items": [ { "time": "00:00", "every": "Every 5 min", "title": "TEST: pick a new word", "note": "288 runs/day", "link": "t_wd5m01" } ] },
       { "date": "2026-11-09", "items": [ { "time": "08:00", "title": "Check nightly import", "link": "t_sl33p1" } ] }
     ] },
     { "type": "list", "title": "Repeating", "items": [

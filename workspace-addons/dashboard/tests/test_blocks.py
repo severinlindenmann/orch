@@ -65,3 +65,15 @@ def test_text_is_text_not_markup(tmp_path):
     tree = run(tmp_path, v)
     assert "<img src=x onerror=alert(1)>" in texts(tree)  # shown as words
     assert not any(x["tag"] == "img" for x in walk(tree)) and not any(x["tag"] == "hologram" for x in walk(tree))
+
+
+@node
+def test_calendar_repeat_item_shows_every_and_note(tmp_path):
+    v = {"blocks": [{"type": "calendar", "days": [{"date": "2026-11-05", "items": [
+        {"time": "15:05", "every": "Every 5 min", "title": "TEST: pick a word", "note": "next 15:05 · 288 runs/day",
+         "link": "t_wd5m0001"}]}]}]}
+    tree = run(tmp_path, v)
+    runs = [x for x in walk(tree) if "run" in x["cls"].split()]
+    assert len(runs) == 1 and "repeat" in runs[0]["cls"]
+    t = texts(runs[0])
+    assert "Every 5 min" in t and "TEST: pick a word" in t and "288 runs/day" in t and "15:05 " not in t[:6]
