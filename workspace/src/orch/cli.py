@@ -212,7 +212,7 @@ def _visible(root: Path, t: dict) -> dict:
     return {**t, "ext": {k: v for k, v in ext.items() if k in on}}
 
 
-_PLACEHOLDERS = {"run", "needs", "agents", "config"}  # hidden until built
+_PLACEHOLDERS = {"run", "agents", "config"}  # hidden until built
 ADVANCED_TOP = {"update", "wait", "log", "answer", "link", "ext"}
 ADVANCED_SUB = {
     "relay": {"done", "delegate", "start", "allow", "download", "webhook"},
