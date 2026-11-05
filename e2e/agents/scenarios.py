@@ -318,7 +318,7 @@ def ag_a45(e):
     check(rc == 0, f"scheduler start: {err or out}")
     try:
         def logs(t):
-            return sorted((ws / ".orch/addons/scheduler/logs").glob(f"{t}-*.log"))
+            return sorted((ws / ".orch/run/logs").glob(f"{t}-*.log"))
         end = time.time() + 600
         while time.time() < end:
             l4, l5 = logs(t4), logs(t5)
@@ -329,7 +329,7 @@ def ag_a45(e):
     finally:
         e.sh(["orch", "scheduler", "stop"], cwd=ws)
         # keep the scheduler logs in the transcript
-        body = "".join(f"\n### {p.name}\n{p.read_text(errors='replace')[-4000:]}\n" for p in sorted((ws / ".orch/addons/scheduler/logs").glob("*.log")))
+        body = "".join(f"\n### {p.name}\n{p.read_text(errors='replace')[-4000:]}\n" for p in sorted((ws / ".orch/run/logs").glob("*.log")))
         save_transcript(e, "AG-A45", f"# codex runs started by the scheduler in Reports\n{body}")
     d4, d5 = tload(ws, t4), tload(ws, t5)
     l4, l5 = logs(t4), logs(t5)
