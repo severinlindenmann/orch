@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import cli
+from orch import addons, cli
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 
@@ -19,8 +19,7 @@ def proj(tmp_path, monkeypatch):
             monkeypatch.delenv(k)
     fake_home = tmp_path.parent / f"{tmp_path.name}_home"
     fake_home.mkdir(exist_ok=True)
-    monkeypatch.setenv("HOME", str(fake_home))
-    monkeypatch.setenv("USERPROFILE", str(fake_home))
+    monkeypatch.setattr(addons, "real_home", lambda: fake_home)
     monkeypatch.setenv("ORCH_HOME", str(fake_home / "orchhome"))
     return tmp_path
 

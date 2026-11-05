@@ -80,10 +80,26 @@ def spec(subdir: str) -> str:
     return f"git+{r}@{ref()}#subdirectory={subdir}"
 
 
-def _trusted_home(h: Path) -> bool:
-    """ORCH_HOME counts only under the user's real home, and not inside any project: no folder from it up to
-    the home folder may hold .orch, .agents or .git (a repo .envrc could aim ORCH_HOME at its own parent)."""
-    top = Path.home().resolve()
+def real_home() -> Path:
+    """The user's home from the account database on POSIX (not $HOME, which a project .envrc can set)."""
+    try:
+        import pwd
+
+        return Path(pwd.getpwuid(os.getuid()).pw_dir)
+    except (ImportError, KeyError):
+        return Path.home()
+
+
+def _trusted_home(h: Path, root: Path | None = None) -> bool:
+    """ORCH_HOME counts only under the user's real home, outside the current folder and the workspace, and
+    with no .orch, .agents or .git in any folder from it up to home (a repo .envrc could aim it at its parent)."""
+    top = real_home().resolve()
+    for base in (Path.cwd().resolve(), *([root.resolve()] if root else [])):
+        try:
+            h.relative_to(base)
+        except ValueError:
+            continue
+        return False  # inside the current folder or the workspace
     try:
         h.relative_to(top)
     except ValueError:
@@ -98,12 +114,12 @@ def _trusted_home(h: Path) -> bool:
 
 def home(root: Path | None = None) -> Path:
     """The user's orch folder: ORCH_HOME when trusted (see _trusted_home), else ~/.orch-tool."""
-    real = Path.home() / ".orch-tool"
+    real = real_home() / ".orch-tool"
     env = os.environ.get("ORCH_HOME")
     if not env:
         return real
     h = Path(env).resolve()
-    if _trusted_home(h):
+    if _trusted_home(h, root):
         return h
     print(
         f"Note: ORCH_HOME ({env}) is ignored (not a plain folder under your home); using {real}.",

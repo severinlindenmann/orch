@@ -623,7 +623,7 @@ def test_agents_block_cannot_forge_markers(tmp_path):
 
 
 def test_orch_home_must_be_plain_folder_under_home(proj, monkeypatch, capfd):
-    h = Path.home()
+    h = addons.real_home()
     real = h / ".orch-tool"
     for bad in (
         proj / "shipped",
@@ -639,6 +639,8 @@ def test_orch_home_must_be_plain_folder_under_home(proj, monkeypatch, capfd):
         (repo / marker).mkdir(parents=True)
         monkeypatch.setenv("ORCH_HOME", str(repo / "sub" / "home"))
         assert addons.home() == real, marker
+    monkeypatch.setenv("HOME", str(proj / "fakehome"))  # $HOME is not what counts
+    assert addons.real_home() == h
     ok = h / "cfg" / "orchhome"
     monkeypatch.setenv("ORCH_HOME", str(ok))
     assert addons.home() == ok.resolve()
