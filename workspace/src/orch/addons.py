@@ -43,8 +43,8 @@ ICONS = frozenset(
     "clock calendar inbox list chart bell book globe link check star box chat folder user bolt".split()
 )
 FORMATS = frozenset({"text", "time", "cron-human", "chips", "yes-no", "open-page"})
-GITIGNORE_RE = re.compile(r"^(?!/)(?![A-Za-z]:)(?!.*\.\.)(?!.*\\)[A-Za-z0-9_./* -]{1,200}$")
-PAGE_PATH_RE = re.compile(r"^/[A-Za-z0-9_./-]{0,200}$")
+GITIGNORE_RE = re.compile(r"(?!/)(?![A-Za-z]:)(?!.*\.\.)(?!.*\\)[A-Za-z0-9_./* -]{1,200}")
+PAGE_PATH_RE = re.compile(r"/[A-Za-z0-9_./-]{0,200}")
 TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page".split()
@@ -352,7 +352,7 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
     ok_gi = (
         isinstance(gi, list)
         and len(gi) <= 16
-        and all(isinstance(x, str) and GITIGNORE_RE.match(x) for x in gi)
+        and all(isinstance(x, str) and GITIGNORE_RE.fullmatch(x) for x in gi)
     )
     if not ok_gi:
         raise _bad("gitignore lines are relative paths inside the workspace (at most 16)")
@@ -370,7 +370,7 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
             not isinstance(pg, dict)
             or set(pg) - {"path", "label"}
             or not isinstance(pg.get("path"), str)
-            or not PAGE_PATH_RE.match(pg["path"])
+            or not PAGE_PATH_RE.fullmatch(pg["path"])
             or ".." in pg["path"]
             or pg["path"].startswith("//")
             or ("label" in pg and not _text_ok(pg["label"], 24))
@@ -847,7 +847,9 @@ def _gi_markers(name: str) -> tuple[str, str]:
 def _set_gitignore(root: Path, name: str, lines: list[str]) -> None:
     """The add-on's lines live in their own block of the workspace .gitignore; no lines = block removed."""
     path = root / ".gitignore"
-    text = skills._read_project_file(root, path)
+    f = skills._project_file(root, path)
+    text = f.read_bytes().decode("utf-8") if f.exists() else ""
+    eol = "\r\n" if "\r\n" in text else "\n"
     start, end = _gi_markers(name)
     rows = text.splitlines()
     if start in rows and end in rows[rows.index(start) :]:
@@ -856,7 +858,7 @@ def _set_gitignore(root: Path, name: str, lines: list[str]) -> None:
         rows = rows[:i] + rows[j + 1 :]
     if lines:
         rows += [start, *lines, end]
-    new = "\n".join(rows) + "\n" if rows else ""
+    new = eol.join(rows) + eol if rows else ""
     if new != text:
         skills._write_project_file(root, path, new)
 

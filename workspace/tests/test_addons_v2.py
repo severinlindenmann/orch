@@ -39,7 +39,7 @@ def test_page_needs_background_and_valid_path(tmp_path):
     ok = make_addon(tmp_path / "a", bg=True, extra='[page]\npath = "/notes"\nlabel = "Open notes"\n')
     # the extra table must come before [dashboard]; make_addon puts it right after background
     assert addons.folder_manifest(ok)["page"] == {"path": "/notes", "label": "Open notes"}
-    for bad in ('path = "notes"', 'path = "/a/../b"', 'path = "//x"'):
+    for bad in ('path = "/x\\n"', 'path = "notes"', 'path = "/a/../b"', 'path = "//x"'):
         f = make_addon(tmp_path / bad.replace('"', "").replace("/", "_"), bg=True, extra=f"[page]\n{bad}\n")
         with pytest.raises(Refused):
             addons.folder_manifest(f)
@@ -106,3 +106,13 @@ def test_list_text_and_json_new_fields(proj, run, hello):  # noqa: F811
     assert line == "  hello       on    Says hello."
     row = next(r for r in json.loads(run("addon", "list", "--json")[1]) if r["name"] == "hello")
     assert row["recommended"] is False and row["page"] is None and row["running"] is False
+
+
+def test_gitignore_keeps_crlf_and_is_idempotent(proj):
+    (proj / ".gitignore").write_bytes(b"a/\r\nb/\r\n")
+    addons._set_gitignore(proj, "hello", ["x/"])
+    addons._set_gitignore(proj, "hello", ["x/"])
+    raw = (proj / ".gitignore").read_bytes()
+    assert raw == b"a/\r\nb/\r\n# orch:addon:hello\r\nx/\r\n# /orch:addon:hello\r\n"
+    addons._set_gitignore(proj, "hello", [])
+    assert (proj / ".gitignore").read_bytes() == b"a/\r\nb/\r\n"
