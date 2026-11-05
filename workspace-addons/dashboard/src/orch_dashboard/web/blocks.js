@@ -91,7 +91,11 @@ const OrchBlocks = (() => {
         const head = el('div', 'day-head'); head.append(el('span', '', d.toLocaleDateString('en-GB', {weekday: 'short'})), el('b', '', d.getDate()));
         li.append(head);
         for (const it of arr(day.items)) {
-          const a = linked('run t-' + tone(it.tone), it.link, [el('time', '', it.time || ''), el('span', '', it.title)]);
+          // A frequent repeat is one item per day: "Every 5 min" in place of the time, a muted note below.
+          const when = it.every ? el('time', 'every', it.every) : el('time', '', it.time || '');
+          const parts = [when, el('span', '', it.title)];
+          if (it.note) parts.push(el('small', 'run-note', it.note));
+          const a = linked('run t-' + tone(it.tone) + (it.every ? ' repeat' : ''), it.link, parts);
           li.append(a);
         }
         strip.append(li);

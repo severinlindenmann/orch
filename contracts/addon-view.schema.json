@@ -80,6 +80,8 @@
                   "type": "object", "required": ["title"], "additionalProperties": false,
                   "properties": {
                     "time": { "type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$", "description": "HH:MM, already in the user's local time." },
+                  "every": { "$ref": "#/$defs/text", "maxLength": 24, "description": "Optional. A repeat that runs more often than hourly, shown as ONE item for the day instead of one per run: plain words such as \"Every 5 min\", shown in place of the time. `time` is then the first (or next) run of the day." },
+                  "note": { "$ref": "#/$defs/text", "maxLength": 60, "description": "Optional muted second line, e.g. \"next 15:05 · 288 runs/day\"." },
                     "title": { "$ref": "#/$defs/text", "maxLength": 80 },
                     "tone": { "$ref": "#/$defs/tone" },
                     "link": { "$ref": "#/$defs/link" }

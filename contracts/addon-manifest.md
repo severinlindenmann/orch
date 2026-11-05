@@ -99,7 +99,8 @@ The dashboard (itself an optional add-on, the host) never imports add-on code. F
 **pulls** `orch <name> view --json` (timeout 2 s, max 256 KB stdout, validated with `addon-view.schema.json`):
 - ok → render blocks, header "as of HH:MM" from `generated_at`, optional `notice`;
 - timeout / error / invalid → keep the last good result (in memory) with a "not up to date" state, or the error state if none.
-`view` must be read-only, fast, and must not start a background process. Blocks: `stat`, `list`, `calendar` (days strip),
+`view` must be read-only, fast, and must not start a background process. Blocks: `stat`, `list`, `calendar` (days strip; a repeat
+more often than hourly is one item per day with `every` ("Every 5 min", shown instead of the time) and a muted `note`),
 `timeline`, `chips`, `table` (typed columns text/number/duration/date/tone). Items may have a `link`: a ticket id (opens the
 ticket) or an `https://` URL (new tab). No buttons, no actions. Tone: `neutral` · `good` · `warn` · `needs-you` · `bad`.
 

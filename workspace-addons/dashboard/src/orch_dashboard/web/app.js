@@ -56,11 +56,21 @@
     return sameDay(d, now) ? 'Today' : sameDay(d, tomorrow) ? 'Tomorrow' : fmt(d, {weekday: 'short'});
   }
   const shortWhen = value => { const d = parse(value); return d ? `${relDay(value)} ${timeOf(value)}` : ''; };
+  // Plain words for the common UTC crons, times in local time ("Every 5 minutes", "Mondays at 08:00"); else ''.
   function cronShort(cron) {
-    const m = /^(\d{1,2}) (\d{1,2}) \* \* (\*|\d)$/.exec(String(cron || '').trim());
+    const c = String(cron || '').trim();
+    if (c === '* * * * *') return 'Every minute';
+    let m = /^\*\/(\d{1,2}) \* \* \* \*$/.exec(c);
+    if (m) return `Every ${Number(m[1])} minutes`;
+    if (/^0 \* \* \* \*$/.test(c)) return 'Every hour';
+    m = /^\d{1,2} \*\/(\d{1,2}) \* \* \*$/.exec(c);
+    if (m) return `Every ${Number(m[1])} hours`;
+    m = /^(\d{1,2}) (\d{1,2}) \* \* (\*|\d)$/.exec(c);
     if (!m) return '';
-    const at = `${m[2].padStart(2, '0')}:${m[1].padStart(2, '0')}`;
-    return m[3] === '*' ? `Daily ${at}` : `${dayWord[Number(m[3]) % 7].slice(0, 3)} ${at}`;
+    const utc = new Date(); utc.setUTCHours(Number(m[2]), Number(m[1]), 0, 0);
+    const shift = Math.round((Date.UTC(utc.getFullYear(), utc.getMonth(), utc.getDate()) - Date.UTC(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate())) / 864e5);
+    const at = `${String(utc.getHours()).padStart(2, '0')}:${String(utc.getMinutes()).padStart(2, '0')}`;
+    return m[3] === '*' ? `Every day at ${at}` : `${dayWord[(Number(m[3]) + shift + 7) % 7]}s at ${at}`;
   }
   const tag = (kind, icon, text, title) => `<span class="tag ${kind}"${title ? ` title="${esc(title)}"` : ''}>${icon ? ic(icon) : ''}${esc(text)}</span>`;
   // One arc per checklist step: filled = done, amber = done without proof, grey = still to do.
