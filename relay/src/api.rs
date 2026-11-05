@@ -213,12 +213,14 @@ async fn post_message(
         }
         let stored = rules::authorize(&c, &app.key, &me, msg)?;
         store::insert_message(&c, &app.key, &stored, &digest)?;
-        let push = stored["type"] == "question" && stored["to"] == "phones";
+        let to = stored["to"].as_str().unwrap_or("");
+        let push = matches!(stored["type"].as_str(), Some("question" | "text"))
+            && (to == "phones" || to.starts_with("ph_"));
         (stored, push)
     };
     app.notify.notify_waiters();
     if push {
-        crate::phone::push_question(&app, &stored).await;
+        crate::phone::push_message(&app, &stored).await;
     }
     Ok((StatusCode::CREATED, Json(json!({"id": stored["id"]}))))
 }

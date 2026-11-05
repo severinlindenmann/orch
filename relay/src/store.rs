@@ -388,8 +388,50 @@ pub fn directory(c: &Connection, me: &str) -> rusqlite::Result<Value> {
         })
         .collect();
     Ok(
-        json!({"schema": "orch.workspaces/1", "self": me, "updated_at": fmt_time(now()), "workspaces": items}),
+        json!({"schema": "orch.workspaces/1", "self": me, "updated_at": fmt_time(now()), "workspaces": items,
+            "phones": phones_of(c, me)?}),
     )
+}
+
+/// Paired phones (signed in) whose list holds workspace `ws`: `[{id, name, online, last_seen}]` by name.
+/// The admin's phone pairing is the rule: these phones may reach `ws` and `ws` may send text/questions to them.
+pub fn phones_of(c: &Connection, ws: &str) -> rusqlite::Result<Vec<Value>> {
+    let mut st = c.prepare(
+        "SELECT id,name,workspaces,last_seen FROM phones WHERE token_hash IS NOT NULL ORDER BY name, id",
+    )?;
+    let rows = st.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, Option<i64>>(3)?,
+        ))
+    })?;
+    let mut out = vec![];
+    for row in rows {
+        let (id, name, list, last) = row?;
+        if parse_list(&list).iter().any(|w| w == ws) {
+            out.push(json!({"id": id, "name": name, "online": online(last), "last_seen": last.map(fmt_time)}));
+        }
+    }
+    Ok(out)
+}
+
+/// True when phone `pid` is paired (signed in) and may reach workspace `ws`.
+pub fn phone_reaches(c: &Connection, pid: &str, ws: &str) -> bool {
+    phones_of(c, ws).is_ok_and(|p| p.iter().any(|x| x["id"] == pid))
+}
+
+/// The workspaces in a phone's list (empty when there is no such phone).
+pub fn phone_workspaces(c: &Connection, pid: &str) -> Vec<String> {
+    c.query_row("SELECT workspaces FROM phones WHERE id=?1", [pid], |r| {
+        r.get::<_, String>(0)
+    })
+    .optional()
+    .ok()
+    .flatten()
+    .map(|l| parse_list(&l))
+    .unwrap_or_default()
 }
 
 /// `me` plus every workspace connected to it by a pair rule.

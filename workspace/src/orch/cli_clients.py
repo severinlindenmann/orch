@@ -345,8 +345,9 @@ def _inbox_line(i: dict, root: Path) -> str:
     tail = f"  [{m['id']}]"
     if i["note"]:
         return f"{head}: {i['note']}{tail}"
+    reply = f' - reply: orch relay send {m["from"]} "<text>"' if m["from"].startswith("ph_") else ""
     detail = {
-        "text": lambda: b.get("text", ""),
+        "text": lambda: b.get("text", "") + reply,
         "file": lambda: (
             f"{b.get('name')} ({_size(b.get('size') or 0)}) - save it with: orch relay download {m['id']}"
         ),

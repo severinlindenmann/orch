@@ -31,6 +31,7 @@ the user. Never run `orch relay allow` yourself and never use `--by human:...`: 
 Ask the human to run: `orch relay allow <message id> --once` or `--permanent`.
 `orch relay inbox` shows `[allowed: once|permanent]` or `[not allowed yet]`; run `orch relay done <id>` before you start the work.
 To ask the owner's phone: `orch ask <ticket> "<question>" --option A --option B --phone`; the answer lands in the ticket by itself.
+A message from a phone (`from: ph_…`) is the owner writing: answer with `orch relay send ph_… "<text>"`. The paired phones are under `phones` in `workspaces.json`.
 
 # Shared skills, MCP servers and credentials
 
