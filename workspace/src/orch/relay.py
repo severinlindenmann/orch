@@ -791,12 +791,13 @@ def apply_allow_answers(root: Path) -> list[str]:
                 if r.get("allow_note") != q["id"]:
                     ans = clean_untrusted(str(q["answer"]), 100)
 
-                    def note(tk, qid=q["id"], ans=ans):
+                    def note(tk, qid=q["id"], ans=ans, mid=mid):
                         tk["ext"]["relay"]["allow_note"] = qid
                         tickets.add_history(
                             tk,
                             "agent:relay",
-                            f"Answer not understood: {ans} - reply Allow once, Always or Ignore",
+                            f"Answer not understood: {ans} - run: orch relay allow {mid} --once "
+                            f"(or --permanent), or: orch relay done {mid} to ignore it",
                             "relay",
                         )
 
@@ -975,6 +976,7 @@ def done(root: Path, mid: str) -> dict:
 def _ticket_for(root: Path, msg: dict) -> str:
     """A start reuses a ticket only for the same sender and key while it is open; else a new one."""
     b, by = msg["body"], f"agent:relay from {msg['from']}"
+    peer = clean_untrusted(name_of(root, msg["from"]), 60) or msg["from"]
     if msg["type"] == "start":
         for t in tickets.list_all(root):
             r = t.get("ext", {}).get("relay", {})
@@ -988,7 +990,10 @@ def _ticket_for(root: Path, msg: dict) -> str:
                 return t["id"]
         title = f"Relay task {b['key']}"
     else:
-        title = " ".join(clean_untrusted(b["title"], 200).split()) or f"Task from {msg['from']}"
+        # outside text is data: cleaned, one line, framed with who sent it, never longer than a title
+        peer = clean_untrusted(name_of(root, msg["from"]), 60) or msg["from"]
+        said = " ".join(clean_untrusted(b["title"], 200).split()) or "a task"
+        title = f"From {peer}: {said}"[:200]
     t = tickets.create(root, title, by)
     ext = {"from": msg["from"], "message": msg["id"]}
     if msg["type"] == "start":
@@ -997,7 +1002,8 @@ def _ticket_for(root: Path, msg: dict) -> str:
     if line := _allow_history(root, msg):
         tickets.apply_op(root, t["id"], lambda tk: tickets.add_history(tk, by, line, "relay"))
     for item in b.get("checklist", []) if msg["type"] == "delegate" else []:
-        tickets.check_add(root, t["id"], clean_untrusted(str(item), 200) or "(empty)", by)
+        said = " ".join(clean_untrusted(str(item), 200).split()) or "(empty)"
+        tickets.check_add(root, t["id"], f"From {peer}: {said}"[:200], by)
     return t["id"]
 
 
