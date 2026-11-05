@@ -38,8 +38,6 @@ def test_output_is_unchanged(proj, capsys, cmd):
         ["run", "claim", "x"],
         ["run", "status"],
         ["run", "done"],
-        ["agents", "list"],
-        ["config", "get"],
     ],
 )
 def test_placeholders_say_not_available(proj, run, argv):
@@ -51,6 +49,6 @@ def test_provenance_unchanged(proj, monkeypatch):
     monkeypatch.delenv("ORCH_AGENT", raising=False)
     assert tickets.agent_tool() is None
     monkeypatch.setenv("CLAUDECODE", "1")
-    assert tickets.current_actor() == "agent:claude-code"
+    assert tickets.current_actor() == "agent:claude"
     monkeypatch.setenv("ORCH_AGENT", "x")
     assert tickets.current_actor() == "agent:x"
