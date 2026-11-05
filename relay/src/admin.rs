@@ -95,9 +95,15 @@ fn parse_description(v: &Value) -> Res<String> {
     store::valid_description(v.as_str().unwrap_or("")).map_err(invalid)
 }
 
-pub fn prompt(public: &str, ws: &str, token: &str) -> String {
+pub fn prompt(public: &str, ws: &str, token: &str, described: bool) -> String {
+    // The admin already typed a description: do not ask the agent to describe itself.
+    let describe = if described {
+        ""
+    } else {
+        "\nThen describe this workspace in one sentence and 2-4 tags: orch relay profile --description \"...\" --tags a,b"
+    };
     format!(
-        "Connect this workspace to orch-relay. Run in the project folder:\n  orch addon add relay --yes\n  orch relay connect {public} --workspace {ws} --token {token}\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL {public}/onboarding.sh | sh -s -- --workspace {ws} --token {token}\n  Windows: & ([scriptblock]::Create((irm {public}/onboarding.ps1))) -Workspace {ws} -Token {token}\nThen describe this workspace in one sentence and 2-4 tags: orch relay profile --description \"...\" --tags a,b"
+        "Connect this workspace to orch-relay. Run in the project folder:\n  orch addon add relay --yes\n  orch relay connect {public} --workspace {ws} --token {token}\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL {public}/onboarding.sh | sh -s -- --workspace {ws} --token {token}\n  Windows: & ([scriptblock]::Create((irm {public}/onboarding.ps1))) -Workspace {ws} -Token {token}{describe}"
     )
 }
 
@@ -150,7 +156,7 @@ async fn add_ws(
         "INSERT INTO workspaces(id,name,description,tags,token_hash,created_at,description_by,tags_by) VALUES(?1,?2,?3,?4,?5,?6,'admin','admin')",
         params![id, name, desc, serde_json::to_string(&tags).unwrap(), token_hash(&token), now()],
     )?;
-    let p = prompt(&app.cfg.public_url, &id, &token);
+    let p = prompt(&app.cfg.public_url, &id, &token, !desc.is_empty());
     Ok((
         StatusCode::CREATED,
         Json(json!({"id": id, "token": token, "prompt": p})),
@@ -281,7 +287,12 @@ async fn new_token(
     if n == 0 {
         return Err(not_found("No such workspace."));
     }
-    let p = prompt(&app.cfg.public_url, &id, &token);
+    let described: bool = app.db.lock().unwrap().query_row(
+        "SELECT description_by='admin' AND description<>'' FROM workspaces WHERE id=?1",
+        [&id],
+        |r| r.get(0),
+    )?;
+    let p = prompt(&app.cfg.public_url, &id, &token, described);
     Ok(Json(json!({"token": token, "prompt": p})))
 }
 

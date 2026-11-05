@@ -634,3 +634,27 @@ async fn relay_icons_on_public_and_admin() {
         .unwrap()
         .contains(r#"href="/favicon.svg""#));
 }
+
+#[tokio::test]
+async fn labels_prompt_skips_describe_line_when_admin_described() {
+    let t = start().await;
+    let (_, v) = t
+        .admin_json(
+            "POST",
+            "/admin/api/workspaces",
+            Some(json!({"name": "D", "description": "Jobs", "tags": []})),
+        )
+        .await;
+    assert!(!v["prompt"]
+        .as_str()
+        .unwrap()
+        .contains("describe this workspace"));
+    let id = v["id"].as_str().unwrap();
+    let (_, v) = t
+        .admin_json("POST", &format!("/admin/api/workspaces/{id}/token"), None)
+        .await;
+    assert!(!v["prompt"]
+        .as_str()
+        .unwrap()
+        .contains("describe this workspace"));
+}

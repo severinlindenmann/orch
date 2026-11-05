@@ -32,6 +32,9 @@ pub fn validate_schema(msg: &Value) -> Result<(), String> {
     }
 }
 
+/// The one answer for "unknown workspace" and "not connected".
+pub const NO_REACHABLE: &str = "No reachable workspace with this id. Ask the admin.";
+
 /// Pair rule index: text 0, files 1, delegate 2, start 3.
 fn kind_of(typ: &str) -> Option<(usize, &'static str)> {
     match typ {
@@ -61,8 +64,13 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
                 )));
             }
         } else if valid_id(&to, "ws_", 10) {
-            let Some(to_name) = store::ws_name(c, &to) else {
-                return Err(not_found("There is no such workspace."));
+            // Unknown id and "not connected" answer the same, so a workspace this one has no
+            // rule with is never revealed (existence or name).
+            let connected = store::rule_flags(c, sender, &to).is_some()
+                || store::rule_flags(c, &to, sender).is_some();
+            let to_name = store::ws_name(c, &to).filter(|_| connected);
+            let Some(to_name) = to_name else {
+                return Err(not_found(NO_REACHABLE));
             };
             let ok = store::rule_flags(c, sender, &to).is_some_and(|f| f[idx]);
             if !ok {
