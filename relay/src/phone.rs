@@ -55,14 +55,11 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
         [token_hash(code)],
     )?;
     tx.execute(
-        "UPDATE phones SET token_hash=?2, last_seen=?3 WHERE id=?1",
+        "UPDATE phones SET token_hash=?2, last_seen=?3, paired_at=?3 WHERE id=?1",
         params![pid, token_hash(&token), now()],
     )?;
-    if let Some(n) = v["name"].as_str().filter(|n| !n.trim().is_empty()) {
-        tx.execute(
-            "UPDATE phones SET name=?2 WHERE id=?1",
-            params![pid, n.trim()],
-        )?;
+    if let Some(n) = v["name"].as_str().and_then(store::clean_phone_name) {
+        tx.execute("UPDATE phones SET name=?2 WHERE id=?1", params![pid, n])?;
     }
     tx.commit()?;
     let list: String = c.query_row("SELECT workspaces FROM phones WHERE id=?1", [&pid], |r| {
@@ -184,21 +181,28 @@ async fn messages(
         .unwrap_or(i64::MAX);
     let c = app.db.lock().unwrap();
     let (pid, _, ws) = auth::phone(&c, &h)?;
+    // Filter by sender/peer and time in SQL (indexed); broadcasts only from after this phone paired (L3).
+    let since: i64 = c
+        .query_row(
+            "SELECT COALESCE(paired_at, created_at) FROM phones WHERE id=?1",
+            [&pid],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let list = serde_json::to_string(&ws).unwrap_or("[]".into());
     let mut st = c.prepare(&format!(
-        "SELECT {MSG_COLS} FROM messages WHERE type='text' AND seq<?2
-         AND (to_addr IN ('phones', ?1) OR from_addr=?1) ORDER BY seq DESC"
+        "SELECT {MSG_COLS} FROM messages WHERE type='text' AND seq<?2 AND (
+            (to_addr='phones' AND stored_at>=?4 AND from_addr IN (SELECT value FROM json_each(?3)))
+            OR (to_addr=?1 AND from_addr IN (SELECT value FROM json_each(?3)))
+            OR (from_addr=?1 AND to_addr IN (SELECT value FROM json_each(?3)))
+         ) ORDER BY seq DESC LIMIT ?5"
     ))?;
-    let mut rows = vec![];
-    for m in st.query_map(params![pid, after], msg_from_row)? {
-        let m = m?;
-        let peer = if m.from == pid { &m.to } else { &m.from };
-        if ws.contains(peer) {
-            rows.push(m);
-            if rows.len() > limit {
-                break;
-            }
-        }
-    }
+    let mut rows: Vec<crate::store::Msg> = st
+        .query_map(
+            params![pid, after, list, since, limit as i64 + 1],
+            msg_from_row,
+        )?
+        .collect::<Result<_, _>>()?;
     let more = rows.len() > limit;
     rows.truncate(limit);
     let items: Vec<Value> = rows
@@ -325,6 +329,8 @@ async fn signout(State(app): State<AppState>, h: HeaderMap) -> Res<StatusCode> {
 /// text pushes carry `type: "text"` and `text_id` instead.
 pub async fn push_message(app: &AppState, q: &Value) {
     let to = q["to"].as_str().unwrap_or("").to_string();
+    let from = q["from"].as_str().unwrap_or("").to_string();
+    let is_text = q["type"] == "text";
     let targets: Vec<(bool, String)> = {
         let c = app.db.lock().unwrap();
         let mut st = match c.prepare(
@@ -344,10 +350,18 @@ pub async fn push_message(app: &AppState, q: &Value) {
             })
             .map(|r| r.flatten().collect::<Vec<_>>())
             .unwrap_or_default();
-        let from = q["from"].as_str().unwrap_or("").to_string();
+        let mut budget = app.push_budget.lock().unwrap();
         rows.into_iter()
             .filter(|(_, _, w, id)| {
                 store::parse_list(w).contains(&from) && (to == "phones" || &to == id)
+            })
+            // L2: texts are always stored; only the push is skipped when the budget is used up.
+            .filter(|(.., id)| {
+                !is_text
+                    || budget
+                        .entry(format!("{from}|{id}"))
+                        .or_default()
+                        .allow(crate::util::now())
             })
             .map(|(s, t, ..)| (s, t))
             .collect()

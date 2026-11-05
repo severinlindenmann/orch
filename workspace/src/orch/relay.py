@@ -168,9 +168,13 @@ def _received_token(root: Path, peer: str, kind: str, key: str | None) -> str | 
 # ---- sending ------------------------------------------------------------------------------------
 
 
+def _read_dir(root: Path) -> dict:
+    return net.read_json(root / ".agents" / "skills" / "orch-relay" / "workspaces.json", {})
+
+
 def _directory(root: Path) -> list[dict]:
     """Workspaces and paired phones from workspaces.json (refresh writes it)."""
-    d = net.read_json(root / ".agents" / "skills" / "orch-relay" / "workspaces.json", {})
+    d = _read_dir(root)
     return [*d.get("workspaces", []), *d.get("phones", [])]
 
 
@@ -178,9 +182,21 @@ def resolve(root: Path, target: str) -> str:
     """ws_/ph_ id, 'phones', or a workspace or phone name from workspaces.json."""
     if re.fullmatch(r"ws_[a-z0-9]{10}|phones|ph_[a-z0-9]{10}", target):
         return target
-    for w in _directory(root):
-        if target.lower() in (str(w.get("name", "")).lower(), w.get("id")):
+    entries = _directory(root)
+    for w in entries:
+        if w.get("id") == target:
             return w["id"]
+    # Workspaces are matched before phones. Two entries with the same name: ask for the id.
+    d = _read_dir(root)
+    for kind, label in (("workspaces", "workspaces"), ("phones", "phones")):
+        hits = [w for w in d.get(kind, []) if target.lower() == str(w.get("name", "")).lower()]
+        if len(hits) == 1:
+            return hits[0]["id"]
+        if len(hits) > 1:
+            count = {2: "Two"}.get(len(hits), str(len(hits)))
+            raise Refused(
+                f"{count} {label} are called {target}: {', '.join(h['id'] for h in hits)}. Send to the id."
+            )
     names = [w["name"] for w in _directory(root) if w.get("name")]
     known = (
         "Workspaces and phones you can message: " + ", ".join(names) + "."
