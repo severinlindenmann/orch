@@ -1538,5 +1538,97 @@
         "next": null
       }
     }
+  },
+  {
+    "_note": "Phone: work updates, grouped (no ticket): one item per (workspace, ticket) with its newest update, newest first. A read view over the stored texts that carry body.update; title falls back to the newest titled update of that ticket.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/updates",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "m_upd0result00001",
+            "workspace": "ws_pilatus001",
+            "workspace_name": "Pilatus Workspace",
+            "ticket": "t_7k3f9q",
+            "kind": "result",
+            "title": "Invoice export",
+            "text": "Done: the export button downloads a CSV.\nTests: 48 passed.",
+            "reply_to": null,
+            "at": "2026-11-05T09:20:00Z"
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Phone: one ticket's updates, newest first, paged. after = id of the last item of the previous page; next = last item's id when more exist.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/updates?workspace=ws_pilatus001&ticket=t_7k3f9q&limit=2",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "m_upd0result00001",
+            "workspace": "ws_pilatus001",
+            "workspace_name": "Pilatus Workspace",
+            "ticket": "t_7k3f9q",
+            "kind": "result",
+            "title": "Invoice export",
+            "text": "Done: the export button downloads a CSV.",
+            "reply_to": null,
+            "at": "2026-11-05T09:20:00Z"
+          },
+          {
+            "id": "m_upd0working0001",
+            "workspace": "ws_pilatus001",
+            "workspace_name": "Pilatus Workspace",
+            "ticket": "t_7k3f9q",
+            "kind": "working",
+            "title": "Invoice export",
+            "text": "Working on it.",
+            "reply_to": null,
+            "at": "2026-11-05T09:12:00Z"
+          }
+        ],
+        "next": "m_upd0working0001"
+      }
+    }
+  },
+  {
+    "_note": "Phone: ticket without workspace is refused; a workspace not on the phone's list answers like an unknown one (200, empty).",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/updates?ticket=t_7k3f9q",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 422,
+      "body": {
+        "error": "invalid",
+        "message": "`ticket` needs `workspace`."
+      }
+    }
   }
 ]
