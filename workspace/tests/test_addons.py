@@ -214,6 +214,9 @@ def test_add_needs_consent_then_installs_and_activates(proj, run, hello, uv_call
             "dashboard": {"label": "Hello", "icon": "star", "order": 20},
             "ticket_view": [{"field": "greeting", "label": "Greeting", "format": "text"}],
             "background": False,
+            "recommended": False,
+            "page": None,
+            "running": False,
         }
     ]
 
