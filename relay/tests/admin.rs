@@ -83,6 +83,7 @@ async fn admin_add_workspace_prompt_token_stored_hashed() {
     let (id, token) = (v["id"].as_str().unwrap(), v["token"].as_str().unwrap());
     assert!(token.starts_with("orn_") && token.len() == 47);
     let p = v["prompt"].as_str().unwrap();
+    assert!(p.contains("orch addon add relay --yes\n  orch relay connect"));
     assert!(p.contains(&format!(
         "orch relay connect https://relay.test --workspace {id} --token {token}"
     )));
@@ -260,6 +261,7 @@ async fn admin_onboarding_scripts_are_served() {
         .await
         .unwrap();
     assert!(ps.contains("orch relay connect") && !ps.contains("__RELAY_URL__"));
+    assert!(ps.contains("orch addon add relay --yes"));
 }
 
 #[tokio::test]

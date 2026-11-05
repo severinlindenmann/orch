@@ -244,6 +244,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         _hide_advanced(p)
         notes.append("More commands: orch --help-all")
     p.epilog = "\n\n".join(notes) or None
+    # publish and relay are built-in add-ons: listed under "Add-ons" only when on (never as core commands)
+    top = p._subparsers._group_actions[0]
+    top._choices_actions[:] = [a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS]
     return p
 
 
@@ -348,6 +351,8 @@ def run(args: argparse.Namespace) -> None:
         h = t["history"][-1]
         _out(args, h, f"{h['at']} {h['by']}: {h['text']}")
     elif cmd == "ask":
+        if args.phone and "relay" not in addons.active(root):
+            raise Refused(addons.not_on_message(root, "relay"))
         t, q = tickets.ask(root, args.id, args.text, args.option, args.recommend, by())
         if args.phone:
             cli_clients.send_phone_question(root, t["id"], q)
@@ -397,6 +402,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         lines = addons.help_lines(root) if ("-h" in argv or "--help" in argv or not argv) else None
         parser = build_parser(show_all, lines)
+        if argv and argv[0] in addons.CORE_ADDONS and argv[0] not in addons.active(root):
+            raise Refused(addons.not_on_message(root, argv[0]))  # built-in add-on that is off: no command
         if (
             argv
             and not argv[0].startswith("-")

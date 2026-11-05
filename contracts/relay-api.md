@@ -56,7 +56,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 
 Push for a new question (APNs): `{"aps": {"alert": {"title": "<workspace name>", "body": "<question text, max 120 chars>"}, "sound": "default"}, "message_id": "m_…", "workspace": "ws_…"}`. Tapping opens that question.
 
-Admin prompt for a workspace (shown once): `orch relay connect https://relay.severin.io --workspace ws_… --token orn_…`
+Admin prompt for a workspace (shown once): `orch addon add relay --yes` then `orch relay connect https://relay.severin.io --workspace ws_… --token orn_…`
 (+ the `onboarding.sh/.ps1` line for machines without orch). `connect` runs `orch init` if needed, checks `/v1/whoami`,
 writes `.orch/secrets/relay.json`, copies the `orch-relay` skill (shipped inside the CLI), adds the AGENTS.md block, then runs `orch relay refresh`.
 
@@ -68,7 +68,7 @@ Phone onboarding link (from the admin portal, also as QR code, valid 24 h, one u
 | Method | Path | What |
 |---|---|---|
 | GET, POST, PUT | `/webhook/<id>?token=whk_…` | Stored as a `webhook` message to the owning workspace → `202`. A `once` webhook is used up in the same database transaction that stores the message; later calls → `410`. Wrong token `401`. Body max 1 MB, stored as text |
-| GET | `/onboarding.sh`, `/onboarding.ps1` | Small scripts: install orch if missing, then `orch relay connect` |
+| GET | `/onboarding.sh`, `/onboarding.ps1` | Small scripts: install orch if missing, then `orch addon add relay --yes` and `orch relay connect` |
 | GET | `/health` | `200 ok` |
 | GET | `/`, any unknown non-`/v1` path | Dark HTML page "This page isn't available" (`200` for `/`, `404` otherwise; no product name). Unknown `/v1/…` paths answer JSON `404 not_found` |
 

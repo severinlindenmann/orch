@@ -80,6 +80,11 @@ class Scheduler:
             return False
         if self.last_inbox and now - self.last_inbox < timedelta(seconds=self.cfg["inbox_every"]):
             return False
+        if not orchcli.addon_on(self.root, "relay"):  # the relay add-on is off here: no inbox pass
+            self.last_inbox = now
+            return False
+        if self.last_inbox and now - self.last_inbox < timedelta(seconds=self.cfg["inbox_every"]):
+            return False
         self.last_inbox = now
         return True
 

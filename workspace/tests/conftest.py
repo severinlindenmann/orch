@@ -58,10 +58,20 @@ def new_ticket(proj, run):
     return _n
 
 
+def turn_on(root, name):
+    """`orch addon add <name> --yes` for the built-in publish/relay add-ons, output swallowed."""
+    import contextlib
+    import io
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        addons.add(root, name, yes=True)
+
+
 @pytest.fixture
 def pub(proj, run):
     from fakes import make_publish
 
+    turn_on(proj, "publish")
     srv = make_publish()
     yield srv
     srv.stop()
@@ -71,6 +81,7 @@ def pub(proj, run):
 def rel(proj, run):
     from fakes import make_relay
 
+    turn_on(proj, "relay")
     srv = make_relay()
     yield srv
     srv.stop()

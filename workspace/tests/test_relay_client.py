@@ -34,7 +34,7 @@ def test_connect(proj, run, rel):
     assert json.loads((proj / ".orch/secrets/relay.json").read_text())["token"] == rel.token
     assert (proj / ".agents/skills/orch-relay/SKILL.md").is_file()
     assert (proj / ".agents/skills/orch-relay/workspaces.json").is_file()
-    assert "orch:begin orch-relay" in (proj / "AGENTS.md").read_text()
+    assert "<!-- orch:addon:relay -->" in (proj / "AGENTS.md").read_text()
     assert run("relay", "whoami")[0] == 0
 
 

@@ -379,7 +379,7 @@
     }
   },
   {
-    "_note": "Public: onboarding script (macOS/Linux). Installs orch if missing, then runs orch publish connect.",
+    "_note": "Public: onboarding script (macOS/Linux). Installs orch if missing, then runs orch addon add publish --yes and orch publish connect.",
     "request": {
       "method": "GET",
       "path": "/onboarding.sh",
@@ -481,7 +481,7 @@
       "body": {
         "id": "ws_pilatus001",
         "token": "orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3",
-        "prompt": "Connect this workspace to orch-publish. Run in the project folder:\n  orch publish connect https://publish.severin.io --workspace ws_pilatus001 --token orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL https://publish.severin.io/onboarding.sh | sh -s -- --workspace ws_pilatus001 --token orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3\n  Windows: & ([scriptblock]::Create((irm https://publish.severin.io/onboarding.ps1))) -Workspace ws_pilatus001 -Token orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3"
+        "prompt": "Connect this workspace to orch-publish. Run in the project folder:\n  orch addon add publish --yes\n  orch publish connect https://publish.severin.io --workspace ws_pilatus001 --token orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL https://publish.severin.io/onboarding.sh | sh -s -- --workspace ws_pilatus001 --token orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3\n  Windows: & ([scriptblock]::Create((irm https://publish.severin.io/onboarding.ps1))) -Workspace ws_pilatus001 -Token orp_k3J9xQ2vB7mN4pL8sT1wY6zA0cD5fG2hJ4kM7nP9qR3"
       }
     }
   },

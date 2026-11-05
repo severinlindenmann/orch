@@ -38,7 +38,7 @@ Expired apps are stopped and removed by the hourly sweep, like files.
 | GET | `/f/<id>` | Small HTML page. Its JS reads `#k=` from the URL, fetches the blob, decrypts in the browser, offers the download. States: decrypting, ready, expired (`410`), missing key, wrong key. Headers: `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'` |
 | GET | `/f/<id>/blob` | The encrypted blob (`application/octet-stream`). `404` / `410` when gone |
 | ANY | `/a/<name>/...` | The app. Private apps need `?token=<view_token>` once; the server sets a cookie (HttpOnly, SameSite=Lax, path `/a/<name>/`) and redirects without the token. No token → small "This app is private" page (`401`) |
-| GET | `/onboarding.sh`, `/onboarding.ps1` | Small scripts: install orch if missing, then `orch publish connect` (below) |
+| GET | `/onboarding.sh`, `/onboarding.ps1` | Small scripts: install orch if missing, then `orch addon add publish --yes` and `orch publish connect` (below) |
 | GET | `/health` | `200 ok` |
 
 Known prototype risk: apps run on the same origin as `/f/` pages and each other. A hostile app could read another app's pages in the browser. Only the owner's workspaces deploy apps.
@@ -49,13 +49,14 @@ The admin creates a workspace. The portal shows the prompt once:
 
 ```
 Connect this workspace to orch-publish. Run in the project folder:
+  orch addon add publish --yes
   orch publish connect https://publish.severin.io --workspace ws_pilatus001 --token orp_...
 If orch is not installed yet:
   macOS/Linux: curl -fsSL https://publish.severin.io/onboarding.sh | sh -s -- --workspace ws_pilatus001 --token orp_...
   Windows:     & ([scriptblock]::Create((irm https://publish.severin.io/onboarding.ps1))) -Workspace ws_pilatus001 -Token orp_...
 ```
 
-`onboarding.sh/.ps1` only install orch if missing (they run the GitHub `install.sh/.ps1`) and then run `orch publish connect`.
+`onboarding.sh/.ps1` only install orch if missing (they run the GitHub `install.sh/.ps1`) and then run `orch addon add publish --yes` and `orch publish connect`.
 `connect` (in the CLI): runs `orch init` if needed, checks the token with `/v1/whoami`, writes `.orch/secrets/publish.json`,
 copies the `orch-publish` skill (shipped inside the CLI) to `.agents/skills/`, adds the AGENTS.md block. Layout: local-files.md.
 

@@ -72,7 +72,9 @@ def fake_orch(tmp_path):
          "ticket_view": [{"field": "cron", "label": "Repeats", "format": "cron-human"},
                          {"field": "agents", "label": "Agents", "format": "chips"}]},
         {"name": "wiki", "version": "0.1.0", "description": "y", "source": "built-in", "active": False,
-         "dashboard": {"label": "Wiki", "icon": "book", "order": 20}, "background": False, "ticket_view": []}]))
+         "dashboard": {"label": "Wiki", "icon": "book", "order": 20}, "background": False, "ticket_view": []},
+        {"name": "relay", "version": "0.1.0", "description": "z", "source": "built-in", "active": True,
+         "dashboard": None, "background": False, "ticket_view": []}]))
     (d / "view.json").write_text(VIEW.read_text())
     (d / "mode.txt").write_text("ok")
     script = d / "orch"

@@ -388,6 +388,8 @@ def ag_f1(e):
     for kind, j in (("publish", pj), ("relay", rj)):
         m = re.search(rf"orch {kind} connect \S+ --workspace \S+ --token \S+", j.get("prompt", ""))
         check(m, f"{kind} admin prompt has no connect line: {j.get('prompt', '')[:120]}")
+        check(f"orch addon add {kind} --yes" in j.get("prompt", ""), f"{kind} admin prompt does not add the add-on")
+        sh("orch", "addon", "add", kind, "--yes")  # the prompt's first line
         sh(*shlex.split(m.group(0)))
     e.cleanup.append(publish_cleanup_dir(e, ws, env))
     e.creds[("rel", "Fresh")] = (rj["id"], rj["token"])

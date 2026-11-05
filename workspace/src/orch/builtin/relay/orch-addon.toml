@@ -1,0 +1,9 @@
+# Built into orch (no separate package): `orch addon add relay` turns it on in a workspace.
+schema = "orch.addon/1"
+orch_api = 1
+name = "relay"
+version = "0.1.0"
+description = "Messages and tasks between workspaces and phones."
+run = "orch"
+skill = "skills/orch-relay"
+agents_block = "skills/orch-relay/AGENTS-block.md"

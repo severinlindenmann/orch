@@ -1,11 +1,14 @@
-# orch-workspace-addons (dashboard, scheduler, your own)
+# orch-workspace-addons (dashboard, scheduler, publish, relay, your own)
 
 Add-ons are split from the core but feel like one product once turned on. The core knows no add-on by name; everything
 goes through the add-on contract: `contracts/addon-manifest.md` (manifest, activation, CLI rules, views, skills, ticket data).
 
 ## What they do
-**Dashboard** (optional host): a light, read-only web page on the laptop. Built-in tabs: Tickets, and Inbox when the relay is
-set up in this workspace (configured, not "online right now"). Plus one tab per active add-on with `[dashboard]`, rendered from
+**Publish** and **relay** (built into the orch package, `workspace/src/orch/builtin/<name>/orch-addon.toml`): the clients for the
+publish and relay servers. Nothing to install; `orch addon add publish|relay` asks, then adds the command, skill and AGENTS.md entry.
+The admin pages' "Add workspace" prompt runs `orch addon add <name> --yes` before `connect`.
+**Dashboard** (optional host): a light, read-only web page on the laptop. Built-in tabs: Tickets, and Inbox when the relay add-on is
+on and set up in this workspace (configured, not "online right now"). Plus one tab per active add-on with `[dashboard]`, rendered from
 `orch <name> view --json` blocks, and add-on rows in the ticket detail from `[[ticket_view]]`. No buttons that change data.
 Optional: a read-only snapshot published as a private publish app (add-on content left out by default).
 **Scheduler:** starts agent runs: wakes tickets that wait until a time (`waiting_on.kind = time`), repeats by cron
@@ -27,13 +30,15 @@ installs (if needed) and turns the add-on on in this workspace.
 ## Turn on, turn off
 | You run | Result |
 |---|---|
-| `orch addon add scheduler` | Shows what it brings (command, skill + AGENTS.md entry, ticket data key, dashboard tab, background process) and asks; `--yes` skips the question. Installs it on this computer if needed, then turns it on **in this workspace only** |
+| `orch addon add scheduler` | Shows what it brings (command, skill + AGENTS.md entry, ticket data key, dashboard tab, background process) and asks "Add it? [y/N]" in a terminal; `--yes` skips the question (without a terminal and without `--yes` it is refused with that hint). Installs it on this computer if needed, then turns it on **in this workspace only** |
 | `orch addon add ./my-addon` | Same for a local folder, labelled "local (not checked by orch)". Change anything in the folder later and it is off until you add it again (`orch update` tells you: "changed on disk") |
 | `orch addon list [--json]` | What is installed and what is on here |
 | `orch addon remove scheduler [--purge]` | Off in this workspace: stops its process, removes its skill and AGENTS.md entry, tab and ticket rows. Ticket data (`ext.scheduler`) stays in the files, hidden; `--purge` also deletes `.orch/addons/scheduler/` and the `[scheduler]` settings |
-| `orch addon uninstall scheduler` | Removes it from this computer (only when it is off here) |
+| `orch addon uninstall scheduler` | Removes it from this computer (only when it is off here; not for publish/relay, which are part of orch) |
 
-With no add-on on, orch shows no trace of them: not in `orch --help`, skills, AGENTS.md or the dashboard. Only the user turns one on:
+Built-in add-ons install from where orch itself came from (the repo and branch of the install, e.g. `ORCH_REF=develop`), so orch and its add-ons always match.
+
+With no add-on on (publish and relay included), orch shows no trace of them: not in `orch --help`, skills, AGENTS.md or the dashboard. Only the user turns one on:
 a `.orch/addons.json` that arrives with a git clone activates nothing (the command answers with `orch addon add <name>`); the proof
 of consent lives on this machine under `~/.orch-tool/` (`contracts/addon-manifest.md`). `ORCH_HOME` is honoured only for a plain folder under the real home.
 
@@ -54,7 +59,7 @@ of consent lives on this machine under `~/.orch-tool/` (`contracts/addon-manifes
 Scheduler pass (only while active in this workspace; exits when turned off):
 1. Ticket waiting with `waiting_on.kind = time` and `until <= now`, status not done/dropped → `orch wait <id> --clear`, run agent.
 2. `ext.scheduler.recurring` with `cron` due (5-field, UTC) → run agent. Missed runs (machine off) → one catch-up run.
-3. `orch relay inbox --json` (if the relay is set up). Run agent for an allowed `start`/`delegate`, or an `answer`/`webhook` for a ticket waiting on it.
+3. `orch relay inbox --json` (only if the relay add-on is on here and set up; otherwise no inbox pass). Run agent for an allowed `start`/`delegate`, or an `answer`/`webhook` for a ticket waiting on it.
 4. Run = `[scheduler] agent` from `.orch/config.toml` with prompt `Continue orch ticket <id>. Read .agents/skills/orch/SKILL.md first.`;
    one run per ticket at a time; logs in `.orch/addons/scheduler/logs/`; `orch log … --by agent:scheduler`; `ext.scheduler.last_run`.
 

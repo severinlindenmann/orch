@@ -29,7 +29,7 @@
 2. `orch init` once per project folder (`.orch/`, the `orch` skill, AGENTS.md block, `.claude/skills` link, `.gitignore`).
 3. Optional add-ons: `orch addon add dashboard` / `orch addon add scheduler` (or a local folder). Later: `orch update` (orch + all add-ons together).
 4. The admin opens the portal (private network) → "Add workspace" → name, description, tags (+ rights for publish).
-5. The portal shows a prompt with `orch publish connect …` / `orch relay connect …` (+ the onboarding line for machines without orch). The user pastes it into any agent tool.
+5. The portal shows a prompt with `orch addon add publish --yes` + `orch publish connect …` / `orch addon add relay --yes` + `orch relay connect …` (+ the onboarding line for machines without orch). The user pastes it into any agent tool.
 6. Phone: relay portal → "Add phone" → pick workspaces → QR / `orch://pair` link → open on the iPhone.
 
 ## Domains, ports, access

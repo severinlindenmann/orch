@@ -38,15 +38,20 @@ def tickets(root: Path) -> list[dict]:
             and ID_RE.match(t["id"]) and t.get("status")] if isinstance(items, list) else []
 
 
-def is_active(root: Path) -> bool | None:
-    """Is this add-on turned on here? None = could not find out (keep running)."""
+def addon_on(root: Path, name: str) -> bool | None:
+    """Is add-on `name` turned on here? None = could not find out."""
     data = call(root, "addon", "list", by=False)
     if not isinstance(data, list):
         return None
     for a in data:
-        if isinstance(a, dict) and a.get("name") == "scheduler":
+        if isinstance(a, dict) and a.get("name") == name:
             return bool(a.get("active"))
     return False
+
+
+def is_active(root: Path) -> bool | None:
+    """Is this add-on turned on here? None = could not find out (keep running)."""
+    return addon_on(root, "scheduler")
 
 
 def set_ext(root: Path, t: dict, **changes) -> bool:
