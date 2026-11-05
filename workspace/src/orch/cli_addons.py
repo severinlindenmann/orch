@@ -36,11 +36,7 @@ def dispatch(args, root: Path) -> bool:
         _out(
             args,
             rows,
-            "\n".join(
-                f"{r['name']:<12}{'on ' if r['active'] else 'off'}  {r['description']}"
-                + ("" if r["active"] else f"  (turn on: orch addon add {r['name']})")
-                for r in rows
-            )
+            "\n".join(f"  {r['name']:<12}{'on' if r['active'] else 'off':<6}{r['description']}" for r in rows)
             or "No add-ons are installed. Turn one on with: orch addon add <name>",
         )
     elif sub == "add":

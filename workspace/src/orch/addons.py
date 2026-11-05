@@ -37,15 +37,17 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 # Names an add-on may never take: core commands (same list as contracts/addon-manifest.schema.json).
 RESERVED = frozenset(
     "orch core ticket check log ask answer link ext wait addon addons update init publish relay config help "
-    "version view start stop status".split()
+    "version view start stop status run needs agents".split()
 )
 ICONS = frozenset(
     "clock calendar inbox list chart bell book globe link check star box chat folder user bolt".split()
 )
-FORMATS = frozenset({"text", "time", "cron-human", "chips", "yes-no"})
+FORMATS = frozenset({"text", "time", "cron-human", "chips", "yes-no", "open-page"})
+GITIGNORE_RE = re.compile(r"(?!/)(?![A-Za-z]:)(?!.*\.\.)(?!.*\\)[A-Za-z0-9_./* -]{1,200}")
+PAGE_PATH_RE = re.compile(r"/[A-Za-z0-9_./-]{0,200}")
 TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
-    "ticket_view".split()
+    "ticket_view recommended gitignore runs_agents requires needs page".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -343,6 +345,41 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         ):
             raise _bad("a [[ticket_view]] row needs field, label and format")
     m["ticket_view"] = tv
+    for key in ("recommended", "runs_agents", "needs"):
+        if not isinstance(m.setdefault(key, False), bool):
+            raise _bad(f"{key} is true or false")
+    gi = m.setdefault("gitignore", [])
+    ok_gi = (
+        isinstance(gi, list)
+        and len(gi) <= 16
+        and all(isinstance(x, str) and GITIGNORE_RE.fullmatch(x) for x in gi)
+    )
+    if not ok_gi:
+        raise _bad("gitignore lines are relative paths inside the workspace (at most 16)")
+    rq = m.setdefault("requires", [])
+    if (
+        not isinstance(rq, list)
+        or len(rq) > 8
+        or len(set(map(str, rq))) != len(rq)
+        or not all(isinstance(x, str) and NAME_RE.match(x) for x in rq)
+    ):
+        raise _bad("requires is a list of add-on names")
+    pg = m.get("page")
+    if pg is not None:
+        if (
+            not isinstance(pg, dict)
+            or set(pg) - {"path", "label"}
+            or not isinstance(pg.get("path"), str)
+            or not PAGE_PATH_RE.fullmatch(pg["path"])
+            or ".." in pg["path"]
+            or pg["path"].startswith("//")
+            or ("label" in pg and not _text_ok(pg["label"], 24))
+        ):
+            raise _bad("[page] has a path that starts with / (and an optional label)")
+        if not bg:
+            raise _bad("[page] needs background = true")
+    if any(r["format"] == "open-page" for r in tv) and pg is None:
+        raise _bad("an open-page row needs a [page]")
     m["dir"] = base
     return m
 
@@ -575,10 +612,25 @@ def active_ext_schema(root: Path, name: str) -> dict | None:
     return json.loads((m["dir"] / m["ticket_ext"]).read_text(encoding="utf-8"))
 
 
+def _running_here(root: Path) -> set[str]:
+    from orch import services  # services imports addons
+
+    here = root.resolve()
+    out = set()
+    for e in services.running():
+        try:
+            if Path(e["workspace"]).resolve() == here:
+                out.add(e["addon"])
+        except (OSError, KeyError, TypeError):
+            continue
+    return out
+
+
 def listing(root: Path) -> list[dict]:
     """`orch addon list --json`: the one source the dashboard uses."""
     act = active(root)
     reg = {e["name"]: e for e in registry()}
+    up = _running_here(root)
     out = []
     for name, m in sorted(discover().items()):
         src = reg.get(name, {}).get("source", "built-in")
@@ -592,6 +644,9 @@ def listing(root: Path) -> list[dict]:
                 "dashboard": m.get("dashboard"),
                 "ticket_view": m["ticket_view"],
                 "background": m["background"],
+                "recommended": m["recommended"],
+                "page": m.get("page"),
+                "running": name in up,
             }
         )
     return out
@@ -702,6 +757,7 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
         _activate(root, source)
         return
     if source in CORE_ADDONS:  # part of orch: nothing to install
+        _check_requires(root, core_manifests()[source])
         _confirm(core_manifests()[source], False, yes)
         record_consent(root, source)
         _activate(root, source)
@@ -713,6 +769,7 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
         if not (folder / "pyproject.toml").is_file():
             raise Refused(f"{folder} is not an add-on folder (no pyproject.toml).")
         m = folder_manifest(folder)
+        _check_requires(root, m)
         _confirm(m, True, yes)
         entry = {"name": m["name"], "source": str(folder), "version": m["version"]}
     else:
@@ -724,6 +781,7 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
             entry = known
             m = discover().get(name)
             if m:
+                _check_requires(root, m)
                 _confirm(m, known["source"] != "built-in", yes)
         else:
             base = Path(repo()) / "workspace-addons" / name if _is_local(repo()) else None
@@ -731,6 +789,7 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
                 if not base.is_dir():
                     raise Refused(f"There is no built-in add-on '{name}'.")
                 m = folder_manifest(base)
+                _check_requires(root, m)
                 _confirm(m, False, yes)
             elif yes:
                 m = None
@@ -747,11 +806,21 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
     reexec(["addon", "add", entry["name"], "--project-only"])
 
 
+def _check_requires(root: Path, m: dict) -> None:
+    missing = [r for r in m.get("requires", []) if r not in active(root)]
+    if missing:
+        raise Refused(
+            f"{m['name']} needs {', '.join(missing)} to be on first. Turn it on: orch addon add {missing[0]}"
+        )
+
+
 def _activate(root: Path, name: str) -> None:
     m = discover().get(name)
     if m is None:
         raise Refused(f"The add-on '{name}' is not installed or its {MANIFEST} is not valid.")
+    _check_requires(root, m)
     _apply_project(root, m)
+    _set_gitignore(root, name, m["gitignore"])
     a = listed(root)
     prev = a.get(name, {})
     a[name] = {"version": m["version"], "activated_at": prev.get("activated_at") or _now()}
@@ -769,6 +838,29 @@ def _apply_project(root: Path, m: dict) -> None:
     body = skills.read_block(skill, f"orch-{name}", base / m["agents_block"])
     skills.set_block(root, name, body, addon=True)
     skills.link_claude_skills(root)
+
+
+def _gi_markers(name: str) -> tuple[str, str]:
+    return f"# orch:addon:{name}", f"# /orch:addon:{name}"
+
+
+def _set_gitignore(root: Path, name: str, lines: list[str]) -> None:
+    """The add-on's lines live in their own block of the workspace .gitignore; no lines = block removed."""
+    path = root / ".gitignore"
+    f = skills._project_file(root, path)
+    text = f.read_bytes().decode("utf-8") if f.exists() else ""
+    eol = "\r\n" if "\r\n" in text else "\n"
+    start, end = _gi_markers(name)
+    rows = text.splitlines()
+    if start in rows and end in rows[rows.index(start) :]:
+        i = rows.index(start)
+        j = rows.index(end, i)
+        rows = rows[:i] + rows[j + 1 :]
+    if lines:
+        rows += [start, *lines, end]
+    new = eol.join(rows) + eol if rows else ""
+    if new != text:
+        skills._write_project_file(root, path, new)
 
 
 def _remove_skill_folders(root: Path, name: str) -> None:
@@ -794,6 +886,7 @@ def remove(root: Path, name: str, purge: bool = False) -> None:
         if r.returncode != 0:
             print(f"Note: '{name} stop' did not finish cleanly; the process ends by itself.", file=sys.stderr)
     _remove_skill_folders(root, name)
+    _set_gitignore(root, name, [])
     skills.remove_block(root, name, addon=True)
     del a[name]
     _save_active(root, a)
