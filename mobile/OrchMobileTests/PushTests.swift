@@ -39,3 +39,35 @@ final class PushTests: XCTestCase {
         AppDelegate.model = nil
     }
 }
+
+@MainActor
+final class TextPushTests: XCTestCase {
+    func testTextPayloadParsing() {
+        XCTAssertEqual(PushPayload.textWorkspace(["type": "text", "text_id": "m_x", "workspace": "ws_1"]), "ws_1")
+        XCTAssertNil(PushPayload.textWorkspace(["message_id": "m_q", "workspace": "ws_1"]))
+        XCTAssertNil(PushPayload.textWorkspace(["type": "text", "workspace": ""]))
+        XCTAssertNil(PushPayload.textWorkspace(["type": "text", "workspace": 7]))
+        XCTAssertNil(PushPayload.messageId(["type": "text", "text_id": "m_x", "workspace": "ws_1"]))
+    }
+
+    func testTextTapOpensTheWorkspaceMessages() async {
+        let model = AppModel(useMock: true)
+        AppDelegate.model = model
+        AppDelegate.handleTap(textWorkspace: MockRelay.pilatus)
+        XCTAssertEqual(model.tab, .send)
+        XCTAssertEqual(model.questionFilter, MockRelay.pilatus)
+        XCTAssertNil(model.focusedQuestion)
+        AppDelegate.model = nil
+    }
+
+    func testTextTapBeforeModelExistsIsKept() {
+        AppDelegate.model = nil
+        AppDelegate.handleTap(textWorkspace: MockRelay.reports)
+        XCTAssertEqual(AppDelegate.pendingText, MockRelay.reports)
+        let model = AppModel(useMock: true)
+        AppDelegate.model = model
+        XCTAssertNil(AppDelegate.pendingText)
+        XCTAssertEqual(model.questionFilter, MockRelay.reports)
+        AppDelegate.model = nil
+    }
+}

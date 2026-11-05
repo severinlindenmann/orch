@@ -31,6 +31,7 @@ struct SendView: View {
                 else if model.workspaces.isEmpty && model.message != nil { offlineState }
                 else if model.workspaces.isEmpty && model.hasLoaded { emptyState }
                 else { composer }
+                if !model.workspaces.isEmpty { conversation }
                 ModelMessage().padding(.top, 12)
             }.padding(.horizontal, 23).padding(.top, 6).padding(.bottom, 20)
         }
@@ -169,6 +170,26 @@ struct SendView: View {
             }
             Text("Your workspace will pick it up from here.").themeFont(11)
                 .foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 2)
+        }
+    }
+
+    /// What this phone and the picked workspace wrote to each other, newest first.
+    @ViewBuilder private var conversation: some View {
+        let items = model.messages.filter { $0.workspaceId == workspaceID }.prefix(10)
+        if !items.isEmpty {
+            let name = model.workspaces.first { $0.id == workspaceID }?.displayName ?? "workspace"
+            Eyebrow(text: "MESSAGES WITH \(name.uppercased())").padding(.top, 30).padding(.bottom, 8)
+            ForEach(items) { m in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(m.fromPhone ? "You" : name).themeFont(11, .semibold).foregroundStyle(m.fromPhone ? Theme.muted : Theme.brand)
+                    Text(m.message.body.text).themeFont(13).foregroundStyle(Theme.text)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                    .background(m.fromPhone ? Theme.surface : Theme.brand.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(m.fromPhone ? Theme.border : Theme.brand.opacity(0.27)))
+                    .padding(.bottom, 8)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("message-\(m.id)")
+            }
         }
     }
 

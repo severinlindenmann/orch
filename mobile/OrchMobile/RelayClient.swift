@@ -6,6 +6,7 @@ protocol RelayAPI: Sendable {
     func registerPush(apnsToken: String, sandbox: Bool) async throws
     func workspaces() async throws -> [Workspace]
     func questions() async throws -> [Question]
+    func messages() async throws -> [PhoneMessage]
     func answer(questionMessageId: String, answer: String) async throws -> String
     func send(to: String, text: String, ticket: String?) async throws -> String
     func transcribe(audio: Data, language: String?) async throws -> Transcript
@@ -81,6 +82,9 @@ struct URLSessionRelayClient: RelayAPI {
     }
     func questions() async throws -> [Question] {
         try JSONCoding.decoder.decode(ListResponse<Question>.self, from: try await request("GET", "/v1/phone/questions")).items
+    }
+    func messages() async throws -> [PhoneMessage] {
+        try JSONCoding.decoder.decode(ListResponse<PhoneMessage>.self, from: try await request("GET", "/v1/phone/messages")).items
     }
     func answer(questionMessageId: String, answer: String) async throws -> String {
         struct Req: Encodable { let questionMessageId: String; let answer: String }

@@ -19,6 +19,8 @@ final class AppModel {
     // Data
     private(set) var workspaces: [Workspace] = []
     private(set) var questions: [Question] = []
+    /// Texts between this phone and its workspaces, newest first.
+    private(set) var messages: [PhoneMessage] = []
     /// question message id -> the answer this phone sent
     private(set) var answers: [String: String] = [:]
     private(set) var isLoading = false
@@ -138,7 +140,9 @@ final class AppModel {
         do {
             async let w = client.workspaces()
             async let q = client.questions()
-            workspaces = try await w; questions = try await q.deduplicated()
+            let before = messages
+            async let m = (try? await client.messages()) ?? before  // an older relay without /messages must not break the rest
+            workspaces = try await w; questions = try await q.deduplicated(); messages = await m
             message = nil; hasLoaded = true; lastUpdated = Date()
         } catch { handle(error) }
     }
@@ -160,6 +164,7 @@ final class AppModel {
         guard !clean.isEmpty else { return false }
         do {
             _ = try await client.send(to: workspaceId, text: clean, ticket: nil)
+            if let m = try? await client.messages() { messages = m }
             lastSent = SentNote(workspaceName: workspaces.first { $0.id == workspaceId }?.displayName ?? "your workspace", text: clean)
             message = nil; sendTick += 1; announcement = "Message sent to \(lastSent?.workspaceName ?? "your workspace")"
             return true
@@ -181,6 +186,12 @@ final class AppModel {
         Task { await refresh() }
     }
 
+    /// Text push tap: the Send tab, on that workspace, with its messages.
+    func openMessages(workspaceId: String) {
+        focusedQuestion = nil; questionFilter = workspaceId; tab = .send
+        Task { await refresh() }
+    }
+
     func signOut() async {
         try? await client.signOut()
         Keychain.delete()
@@ -188,7 +199,7 @@ final class AppModel {
     }
 
     private func reset() {
-        credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; answers = [:]; hasLoaded = false
+        credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; messages = []; answers = [:]; hasLoaded = false
         pairedWorkspaces = []; lastSent = nil; lastUpdated = nil; message = nil; tab = .home; phase = .onboarding
     }
 
@@ -213,6 +224,7 @@ final class AppModel {
             tab = ["questions": .questions, "send": .send, "settings": .settings][t] ?? .home
         }
         if phase == .ready, let id = d.string(forKey: "openQuestion") { openQuestion(messageId: id) }  // stands in for a push tap in the Simulator
+        if phase == .ready, let ws = d.string(forKey: "openTextPush") { openMessages(workspaceId: ws) }  // stands in for a text push tap
         if phase == .ready { await refresh(); if !useMock { await PushPermission.registerIfAuthorized() } }
     }
 }
