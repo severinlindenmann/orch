@@ -27,6 +27,10 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
             digest TEXT NOT NULL, payload BLOB NOT NULL, stored_at INTEGER NOT NULL, acked_at INTEGER);
         CREATE INDEX IF NOT EXISTS msg_to ON messages(to_addr, acked_at);
         CREATE INDEX IF NOT EXISTS msg_reply ON messages(reply_to);
+        DROP INDEX IF EXISTS msg_text_to;
+        DROP INDEX IF EXISTS msg_text_from;
+        CREATE INDEX IF NOT EXISTS msg_type_to_from ON messages(type, to_addr, from_addr, seq);
+        CREATE INDEX IF NOT EXISTS msg_type_from_to ON messages(type, from_addr, to_addr, seq);
         CREATE TABLE IF NOT EXISTS blobs(id TEXT PRIMARY KEY, uploader TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, created_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS webhooks(id TEXT PRIMARY KEY, workspace TEXT NOT NULL, mode TEXT NOT NULL, ticket TEXT,
             token_hash TEXT NOT NULL, created_at INTEGER NOT NULL, last_call_at INTEGER, used INTEGER NOT NULL DEFAULT 0);
@@ -47,6 +51,8 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
     ] {
         let _ = c.execute(&format!("ALTER TABLE workspaces ADD COLUMN {col}"), []);
     }
+    // When the phone paired (L3): broadcasts to `phones` from before are not shown to it.
+    let _ = c.execute("ALTER TABLE phones ADD COLUMN paired_at INTEGER", []);
     Ok(())
 }
 
@@ -333,6 +339,16 @@ pub fn valid_description(d: &str) -> Result<String, &'static str> {
         return Err("The description has too many stacked accents or marks.");
     }
     Ok(d)
+}
+
+/// Display name a phone gives at pairing: NFC, trimmed, characters outside the description allowlist dropped,
+/// at most 60 characters. `None` when nothing is left (the admin's label stays).
+pub fn clean_phone_name(n: &str) -> Option<String> {
+    use unicode_normalization::UnicodeNormalization;
+    let n: String = n.nfc().filter(|c| good_char(*c)).collect();
+    let n: String = n.trim().chars().take(60).collect();
+    let n = n.trim().to_string();
+    (!n.is_empty()).then_some(n)
 }
 
 /// Tag: lowercase letters, digits and hyphens, 1 to 24 characters.

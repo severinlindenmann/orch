@@ -89,6 +89,19 @@ def test_reply_to_paired_phone(proj, run, rel):
     assert rel.sent[-1]["to"] == phone
 
 
+def test_send_by_name_with_two_matching_phones_is_refused(proj, run, rel):
+    rel.snapshot["workspaces"]["phones"] = [
+        {"id": "ph_aaaaaaaaaa", "name": "Owner iPhone", "online": True, "last_seen": None},
+        {"id": "ph_bbbbbbbbbb", "name": "owner iphone", "online": True, "last_seen": None},
+    ]
+    connect(run, rel)
+    run("relay", "refresh")
+    code, _, err = run("relay", "send", "Owner iPhone", "secret")
+    assert code != 0 and not rel.sent
+    assert "Two phones are called Owner iPhone: ph_aaaaaaaaaa, ph_bbbbbbbbbb. Send to the id." in err
+    assert run("relay", "send", "ph_bbbbbbbbbb", "ok")[0] == 0 and rel.sent[-1]["to"] == "ph_bbbbbbbbbb"
+
+
 def test_send_file_and_receive_download(proj, run, rel):
     connect(run, rel)
     (proj / "rows.csv").write_bytes(b"a,b\n1,2\n")
