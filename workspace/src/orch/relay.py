@@ -753,10 +753,11 @@ _WIN_RESERVED = re.compile(r"^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$", re.I
 
 def safe_name(name: str) -> str:
     """Base name only; characters Windows refuses become _, reserved device names get a leading _."""
-    base = re.split(r"[\\/]", str(name))[-1].strip().strip(". ")
+    name = clean_untrusted(str(name), 1000)  # the same cleaning as the inbox line: saved name == shown name
+    base = re.split(r"[\\/]", name)[-1].strip().strip(". ")
     base = re.sub(r'[<>:"|?*\x00-\x1f]', "_", base)
     if not base:
-        raise Refused("The file has no usable name.")
+        raise Refused("The file has no usable name (it was empty or only invisible characters). Not saved.")
     if _WIN_RESERVED.match(base):
         base = "_" + base
     return base[:200]

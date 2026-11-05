@@ -823,3 +823,15 @@ def test_relay_help_lists_webhook_and_outbox(proj, run, rel, capsys):
         cli.main(["relay", "--help-all"])
     out = capsys.readouterr().out
     assert "outbox" in out and "addresses that turn outside calls" in out
+
+
+def test_received_name_is_cleaned_like_the_inbox_line(proj, run, rel):
+    connect(run, rel)
+    _file_msg(rel, "m_file000000000001", "photo\u202egpj.exe", b"a")
+    _file_msg(rel, "m_file000000000002", "\u200b\u202e\u2800", b"b")
+    out = run("relay", "inbox")[1]
+    assert "photogpj.exe" in out and "\u202e" not in out
+    assert run("relay", "download", "m_file000000000001")[0] == 0
+    assert [p.name for p in (proj / "received").iterdir()] == ["photogpj.exe"]
+    code, _, err = run("relay", "download", "m_file000000000002")
+    assert code == 2 and "no usable name" in err
