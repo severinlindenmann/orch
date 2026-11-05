@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="380" viewBox="0 0 680 380" role="img" aria-labelledby="title desc">
+<title id="title">Invoice export ready</title><desc id="desc">October invoices with an Export CSV button and a successful export message.</desc>
+<style>:root {
+  color-scheme: dark;
+  --bg: #0e1014;
+  --sidebar: #0a0c0f;
+  --surface: #15181d;
+  --surface-2: #1c2027;
+  --surface-3: #242a32;
+  --border: #2a3038;
+  --border-strong: #3a424d;
+  --text: #e8eaed;
+  --text-muted: #9aa3ad;
+  --text-faint: #8b949e;
+  --brand: #2fc6a3;
+  --on-brand: #06231c;
+  --brand-strong: #1fa98a;
+  --brand-soft: rgba(47, 198, 163, 0.14);
+  --addon: #f07a2e;
+  --on-addon: #1a0b02;
+  --addon-soft: rgba(240, 122, 46, 0.12);
+  --addon-border: rgba(240, 122, 46, 0.45);
+  --success: #4ade80;
+  --success-soft: rgba(74, 222, 128, 0.14);
+  --warning: #fbbf24;
+  --warning-soft: rgba(251, 191, 36, 0.14);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
+  --info: #60a5fa;
+  --info-soft: rgba(96, 165, 250, 0.14);
+  --fs-1: 12px; /* xs */
+  --fs-2: 14px; /* sm */
+  --fs-3: 16px; /* md */
+  --fs-4: 22px; /* lg */
+  --fs-5: 28px; /* xl */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --r1: 8px;
+  --r2: 10px;
+  --radius: 8px;
+  --radius-card: 10px;
+  --h: 36px;
+  --touch: 44px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --lift-shadow: 0 10px 24px -6px rgb(0 0 0 / 0.55), 0 2px 6px rgb(0 0 0 / 0.4);
+  --tok-keyword: #ff7b72;
+  --tok-const: #79c0ff;
+  --tok-string: #a5d6ff;
+  --tok-tag: #7ee787;
+  --tok-func: #d2a8ff;
+  --tok-name: #ffa657;
+  --tok-comment: #8b949e;
+  --tok-invalid: #ffa198;
+} text {font-family:system-ui,sans-serif;fill:var(--text);font-size:var(--fs-2)} .muted{fill:var(--text-muted)} .line{stroke:var(--border)}</style>
+<rect width="680" height="380" rx="10" fill="var(--bg)"/>
+<text x="28" y="42" class="muted">Ticket · Invoice CSV export</text>
+<text x="28" y="86" style="font-size:var(--fs-4);font-weight:600">Invoices · October 2026</text>
+<rect x="518" y="60" width="134" height="36" rx="8" fill="var(--brand)"/>
+<text x="541" y="83" style="fill:var(--on-brand);font-weight:600">Export CSV</text>
+<rect x="28" y="120" width="624" height="184" rx="8" fill="var(--surface)" stroke="var(--border)"/>
+<text x="44" y="148" class="muted">Invoice</text><text x="180" y="148" class="muted">Customer</text><text x="430" y="148" class="muted">Amount CHF</text><text x="563" y="148" class="muted">Status</text>
+<path d="M28 162h624M28 207h624M28 252h624" class="line"/>
+<text x="44" y="190">INV-2041</text><text x="180" y="190">Bäckerei Huber</text><text x="430" y="190">1’240.00</text><text x="563" y="190" style="fill:var(--success)">Paid</text>
+<text x="44" y="235">INV-2042</text><text x="180" y="235">Velo Meier AG</text><text x="430" y="235">3’980.50</text><text x="563" y="235" style="fill:var(--info)">Open</text>
+<text x="44" y="280">INV-2043</text><text x="180" y="280">Café Lindengarten</text><text x="430" y="280">612.00</text><text x="563" y="280" style="fill:var(--success)">Paid</text>
+<circle cx="35" cy="342" r="4" fill="var(--success)"/><text x="49" y="347" class="muted">8 invoices exported · Ready to review</text>
+</svg>
