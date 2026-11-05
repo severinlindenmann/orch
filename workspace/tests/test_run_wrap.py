@@ -78,9 +78,20 @@ def test_start_runs_the_agent_and_it_works_the_ticket(proj, run, gen):
 def test_second_start_gets_exit_2_and_the_event_goes_in_after_exactly_once(proj, run, gen):
     log = gen("--silent 1.5")
     tid = _ticket_with_check(proj, run)
-    assert run("run", "start", tid)[0] == 0
+    assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     _wait(proj, tid, gone=False)
-    code, out, _ = run("run", "start", tid, "--by", "agent:phone", "--text", "Also add October", "--json")
+    code, out, _ = run(
+        "run",
+        "start",
+        tid,
+        "--mode",
+        "oneshot",
+        "--by",
+        "agent:phone",
+        "--text",
+        "Also add October",
+        "--json",
+    )
     j = json.loads(out)
     assert code == 2 and j["pending"] is True
     _wait(proj, tid)
@@ -94,7 +105,7 @@ def test_second_start_gets_exit_2_and_the_event_goes_in_after_exactly_once(proj,
 def test_killed_wrapper_with_a_live_agent_still_holds_the_ticket(proj, run, gen):
     log = gen("--silent 1.5")
     tid = _ticket_with_check(proj, run)
-    run("run", "start", tid)
+    run("run", "start", tid, "--mode", "oneshot")
     _wait(proj, tid, gone=False)
     rec = runs.read(proj, tid)
     end = time.monotonic() + 10
@@ -106,14 +117,16 @@ def test_killed_wrapper_with_a_live_agent_still_holds_the_ticket(proj, run, gen)
     os.kill(rec["pid"], signal.SIGKILL)  # the wrapper we started
     os.waitpid(rec["pid"], 0)  # this test is its parent (a real `orch run start` exits and init reaps it)
     assert runs.state(runs.read(proj, tid)) == "alive"  # the agent still works: never two agents
-    code, out, _ = run("run", "start", tid, "--json")
+    code, out, _ = run("run", "start", tid, "--mode", "oneshot", "--json")
     assert code == 2 and json.loads(out)["pending"] is True
     end = time.monotonic() + 15
     while runs.state(runs.read(proj, tid)) != "dead" and time.monotonic() < end:
         time.sleep(0.1)
     assert runs.state(runs.read(proj, tid)) == "dead"
     assert "Use CHF" in " ".join(i["text"] for i in runs.undelivered(proj, tid))
-    code, out, _ = run("run", "start", tid, "--json")  # now the dead claim is taken over without asking
+    code, out, _ = run(
+        "run", "start", tid, "--mode", "oneshot", "--json"
+    )  # now the dead claim is taken over without asking
     assert code == 0
     _wait(proj, tid)
     told = [p for p in _lines(log, "prompt") if "Use CHF" in p]
@@ -147,7 +160,7 @@ def test_resume_is_used_when_there_is_a_session_and_allow_goes_to_argv_only(proj
     tid = _ticket_with_check(proj, run)
     old = "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
     tickets.record_session(proj, tid, "claude", old, runs.host())
-    code, out, err = run("run", "start", tid, "--allow", "Bash(git push:*)", "--json")
+    code, out, err = run("run", "start", tid, "--mode", "oneshot", "--allow", "Bash(git push:*)", "--json")
     assert code == 0 and json.loads(out)["resumed"] is True and err == ""
     _wait(proj, tid)
     line = calls.read_text(encoding="utf-8").splitlines()[0]
@@ -156,7 +169,7 @@ def test_resume_is_used_when_there_is_a_session_and_allow_goes_to_argv_only(proj
     # nothing was written for the allowance
     assert not (proj / ".claude").exists() and not list(proj.glob("**/settings*.json"))
     # --fresh starts a new conversation and records its id
-    assert run("run", "start", tid, "--fresh")[0] == 0
+    assert run("run", "start", tid, "--mode", "oneshot", "--fresh")[0] == 0
     _wait(proj, tid)
     second = calls.read_text(encoding="utf-8").splitlines()[1]
     assert "--session-id" in second and "--resume" not in second
@@ -169,7 +182,7 @@ def test_failed_resume_falls_back_to_fresh_once_and_records_the_new_id(proj, run
     tid = _ticket_with_check(proj, run)
     old = "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
     tickets.record_session(proj, tid, "claude", old, runs.host())
-    assert run("run", "start", tid)[0] == 0
+    assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     _wait(proj, tid)
     lines = calls.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2 and "--resume" in lines[0] and "--session-id" in lines[1]
@@ -180,7 +193,7 @@ def test_failed_resume_falls_back_to_fresh_once_and_records_the_new_id(proj, run
 def test_allow_is_ignored_with_one_notice_by_an_adapter_that_cannot_use_it(proj, run, gen):
     log = gen()
     tid = _ticket_with_check(proj, run)
-    code, out, err = run("run", "start", tid, "--allow", "Bash(rm:*)", "--json")
+    code, out, err = run("run", "start", tid, "--mode", "oneshot", "--allow", "Bash(rm:*)", "--json")
     assert code == 0 and "--allow was ignored" in err
     _wait(proj, tid)
     assert "Bash(rm:*)" not in " ".join(_lines(log, "prompt"))
@@ -196,7 +209,7 @@ def test_codex_session_comes_from_the_output(proj, run, tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ["PATH"])
     config.set_key(proj, "workspace", "agent", "codex")
     tid = _ticket_with_check(proj, run)
-    assert run("run", "start", tid)[0] == 0
+    assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     _wait(proj, tid)
     assert (
         tickets.sessions_for(tickets.load(proj, tid), "codex", runs.host())
@@ -227,7 +240,7 @@ def test_a_plain_failure_does_not_fall_back_to_fresh(proj, run, tmp_path, monkey
     tid = _ticket_with_check(proj, run)
     old = "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
     tickets.record_session(proj, tid, "claude", old, runs.host())
-    assert run("run", "start", tid)[0] == 0
+    assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     _wait(proj, tid)
     assert len(out.read_text().splitlines()) == 1  # one try, no second run
     assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) == old
@@ -239,7 +252,7 @@ def test_the_fresh_fallback_carries_the_pending_input(proj, run, tmp_path, monke
     tid = _ticket_with_check(proj, run)
     tickets.record_session(proj, tid, "claude", "f88ec2ca-0930-42dd-9d5e-00fbbd59067d", runs.host())
     runs.pending_add(proj, tid, "phone", "message", "Also add October")
-    assert run("run", "start", tid)[0] == 0
+    assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     _wait(proj, tid)
     lines = calls.read_text(encoding="utf-8").splitlines()
     assert "Also add October" in lines[0] and "Also add October" in lines[1]
