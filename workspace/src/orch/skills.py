@@ -13,6 +13,7 @@ from orch.errors import Refused
 BLOCK_FILE = "AGENTS-block.md"
 BLOCK_FILES = (BLOCK_FILE, "agents-block.md")  # add-ons may ship either spelling
 GITIGNORE_LINES = [
+    ".orch/.local-id",
     ".orch/secrets/",
     ".orch/inbox/",
     ".orch/inbox-seen.json",
@@ -68,7 +69,8 @@ def _block_re(name: str, addon: bool = False) -> re.Pattern:
     return re.compile(rf"{re.escape(b)}\n.*?{re.escape(e)}\n?", re.S)
 
 
-_MARKER_RE = re.compile(r"[ \t]*<!-- /?orch:(?:begin|end|addon)[: ][^>]*-->[ \t]*\n?")
+_MARKER_RE = re.compile(r"[ \t]*<!--\s*/?orch:[^>]*-->[ \t]*\n?")
+_MARKER_START = re.compile(r"<!--\s*/?orch:")
 
 
 def set_block(root: Path, name: str, body: str, addon: bool = False) -> None:
@@ -76,7 +78,14 @@ def set_block(root: Path, name: str, body: str, addon: bool = False) -> None:
     addon=True uses the add-on markers <!-- orch:addon:<name> --> ... <!-- /orch:addon:<name> -->."""
     path = root / "AGENTS.md"
     text = path.read_text(encoding="utf-8") if path.exists() else ""
-    body = _MARKER_RE.sub("", body).strip()  # the markers are ours; a body must not bring its own
+    while True:  # the markers are ours; strip until stable so pieces cannot join into a marker
+        new = _MARKER_RE.sub("", body)
+        if new == body:
+            break
+        body = new
+    if _MARKER_START.search(body):
+        raise Refused("An AGENTS.md block cannot contain orch markers (<!-- orch:... -->).")
+    body = body.strip()
     b, e = _markers(name, addon)
     block = f"{b}\n{body}\n{e}\n"
     rx = _block_re(name, addon)

@@ -126,6 +126,7 @@ def test_discovery_never_imports_addon_code(tmp_path, monkeypatch):
     folder = make_addon(tmp_path / "a")
     monkeypatch.syspath_prepend(str(folder / "src"))
     monkeypatch.setattr(addons, "_entry_points", lambda: {"hello": "orch_hello"})
+    addons._save_registry([{"name": "hello", "source": str(folder), "version": "0.1.0"}])
     found = addons.discover()
     assert list(found) == ["hello"] and found["hello"]["version"] == "0.1.0"
     assert not (tmp_path / "a" / "IMPORTED-hello").exists()
@@ -232,11 +233,12 @@ def test_builtin_name_from_local_repo(proj, run, tmp_path, monkeypatch, uv_calls
     assert code == 2 and not (proj / ".orch" / "addons.json").exists()  # not installed -> never activated
 
 
-def test_leftovers_never_activate(proj, run, hello):
+def test_leftovers_never_activate(proj, run, hello, monkeypatch):
     # installed on the machine, but never turned on here; everything a leftover could be is present
     sys.path.insert(0, str(hello / "src"))
+    monkeypatch.setattr(addons, "_entry_points", lambda: {"hello": "orch_hello"})
+    addons._save_registry([{"name": "hello", "source": str(hello), "version": "0.1.0"}])
     try:
-        addons._entry_points = lambda: {"hello": "orch_hello"}
         (proj / ".orch" / "addons" / "hello").mkdir(parents=True)
         (proj / ".agents/skills/orch-hello").mkdir(parents=True)
         (proj / "AGENTS.md").write_text("<!-- orch:addon:hello -->\nx\n<!-- /orch:addon:hello -->\n")
@@ -324,7 +326,7 @@ def test_remove_keeps_data_and_text_outside_block(proj, run, hello):
     (proj / "AGENTS.md").write_text(agents + "\nTail text\n", encoding="utf-8")
     assert run("addon", "remove", "hello")[0] == 0
     assert not (proj / ".agents/skills/orch-hello").exists()
-    assert not (proj / ".agents/skills/orch-hello-extra").exists()
+    assert (proj / ".agents/skills/orch-hello-extra").exists()  # exact name only
     assert (proj / ".agents/skills/orch-hellox").exists()
     text = (proj / "AGENTS.md").read_text(encoding="utf-8")
     assert "orch:addon" not in text and text.startswith("# Mine\nhello\n") and "Tail text" in text
@@ -564,3 +566,112 @@ def test_core_text_names_no_addon():
 def test_relay_status(proj, run, rel):
     code, out, _ = run("relay", "status", "--json")
     assert code == 0 and json.loads(out) == {"configured": False}
+
+
+# ---- security review 3 ------------------------------------------------------------------------------
+
+
+def test_default_repo_is_never_a_folder(proj, monkeypatch):
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    planted = proj / "https:" / "github.com" / "severinlindenmann" / "orch"
+    planted.mkdir(parents=True)
+    assert not addons._is_local(addons.DEFAULT_REPO)
+    assert addons.spec("workspace").startswith("git+https://github.com/severinlindenmann/orch@")
+    monkeypatch.setenv("ORCH_REPO", "relative/dir")  # relative: not local either
+    (proj / "relative" / "dir").mkdir(parents=True)
+    assert not addons._is_local("relative/dir")
+    monkeypatch.setenv("ORCH_REPO", str(proj))
+    assert addons._is_local(str(proj))
+
+
+def test_duplicate_entry_point_names_disable_both(tmp_path, monkeypatch):
+    a = make_addon(tmp_path / "a")
+    monkeypatch.syspath_prepend(str(a / "src"))
+    addons._save_registry([{"name": "hello", "source": str(a), "version": "0.1.0"}])
+    monkeypatch.setattr(addons, "_entry_points", lambda: [("hello", "orch_hello"), ("hello", "orch_evil")])
+    assert addons.discover() == {}
+    monkeypatch.setattr(addons, "_entry_points", lambda: [("hello", "orch_hello")])
+    assert list(addons.discover()) == ["hello"]
+    # an entry point the user never installed through orch does not count
+    addons._save_registry([])
+    assert addons.discover() == {}
+
+
+def test_agents_block_cannot_forge_markers(tmp_path):
+    from orch import skills
+
+    root = tmp_path
+    for body in (
+        "x <!-- /orch:add<!-- orch:end y -->on:foo --> tail",
+        "x <!-- orch:be<!-- orch:end y -->gin orch --> tail",
+        "x <!--orch:end orch --> tail",
+        "x <!-- orch:end orch tail",
+    ):
+        try:
+            skills.set_block(root, "foo", body, addon=True)
+        except Refused:
+            continue
+        text = (root / "AGENTS.md").read_text(encoding="utf-8")
+        assert text.count("<!-- orch:addon:foo -->") == 1 and "<!-- /orch:addon:foo -->" in text
+        assert text.count("<!--") == 2, text  # only our two markers remain
+        skills.remove_block(root, "foo", addon=True)
+        assert not (root / "AGENTS.md").read_text(encoding="utf-8").strip()
+
+
+def test_consent_store_ignores_orch_home_inside_workspace(proj, monkeypatch):
+    monkeypatch.setenv("ORCH_HOME", str(proj / "shipped"))
+    assert addons.home() == Path.home() / ".orch-tool"
+    monkeypatch.setenv("ORCH_HOME", str(proj.parent / "elsewhere"))
+    assert addons.home() == (proj.parent / "elsewhere").resolve()
+
+
+def test_consent_bound_to_workspace_id(proj, run, hello):
+    install(run, hello)
+    wid = (proj / ".orch/.local-id").read_text(encoding="utf-8").strip()
+    assert len(wid) == 32
+    assert run("hello", "greet")[0] == 0
+    (proj / ".orch/.local-id").unlink()  # clone/copy: no id -> consent needed again
+    assert addons.active(proj) == {}
+    assert run("hello", "greet")[0] == 2
+    (proj / ".orch/.local-id").write_text("0" * 32, encoding="utf-8")  # a forged id has no record
+    assert addons.active(proj) == {}
+    assert run("addon", "add", str(hello), "--yes")[0] == 0
+    assert run("hello", "greet")[0] == 0
+
+
+def test_consent_records_of_deleted_workspaces_are_pruned(proj, run, hello, tmp_path):
+    install(run, hello)
+    cp = addons.consent_path()
+    recs = json.loads(cp.read_text(encoding="utf-8"))
+    recs.append({"workspace_id": "a" * 32, "workspace": str(tmp_path / "gone"), "name": "hello"})
+    cp.write_text(json.dumps(recs), encoding="utf-8")
+    addons.record_consent(proj, "hello")
+    left = json.loads(cp.read_text(encoding="utf-8"))
+    assert [r["workspace"] for r in left] == [str(proj.resolve())]
+
+
+def test_update_does_not_reaccept_changed_local_folder(proj, run, hello, uv_calls):
+    run("init")
+    install(run, hello)
+    (hello / "src/orch_hello/__main__.py").write_text("print('changed')\n", encoding="utf-8")
+    (proj / ".agents/skills/orch-hello/SKILL.md").write_text("mine", encoding="utf-8")
+    code, _, err = run("update")
+    assert code == 0 and "changed on disk" in err
+    assert (proj / ".agents/skills/orch-hello/SKILL.md").read_text(encoding="utf-8") == "mine"
+    assert run("hello", "greet")[0] == 2  # still off until the user agrees again
+
+
+def test_stale_lock_is_claimed_by_one_waiter_only(proj, new_ticket):
+    import os
+
+    from orch import tickets
+
+    tid = new_ticket()
+    lock = proj / ".orch" / "tickets" / f".lock-{tid}"
+    lock.write_text("", encoding="utf-8")
+    old = lock.stat().st_mtime - 120
+    os.utime(lock, (old, old))
+    assert tickets._break_stale(lock) is True and not lock.exists()
+    assert tickets._break_stale(lock) is False  # second waiter finds nothing to take
+    lock.write_text("", encoding="utf-8")  # a fresh lock someone else holds is put back, not broken
+    assert tickets._break_stale(lock) is False and lock.exists()

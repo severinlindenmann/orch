@@ -16,6 +16,7 @@ import importlib.util
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -61,7 +62,14 @@ def ref() -> str:
 
 
 def _is_local(r: str) -> bool:
-    return Path(r).exists()
+    """A source is a folder ONLY when ORCH_REPO is set explicitly to an absolute existing folder.
+    The default GitHub URL is never a path (a relative folder named like it must not count)."""
+    return (
+        "ORCH_REPO" in os.environ
+        and r == os.environ["ORCH_REPO"]
+        and Path(r).is_absolute()
+        and Path(r).is_dir()
+    )
 
 
 def spec(subdir: str) -> str:
@@ -72,8 +80,21 @@ def spec(subdir: str) -> str:
     return f"git+{r}@{ref()}#subdirectory={subdir}"
 
 
-def home() -> Path:
-    return Path(os.environ.get("ORCH_HOME") or Path.home() / ".orch-tool")
+def home(root: Path | None = None) -> Path:
+    """The user's orch folder. ORCH_HOME counts only when it points outside the workspace (a repo .envrc
+    must not be able to supply its own registry or consent store); otherwise ~/.orch-tool."""
+    real = Path.home() / ".orch-tool"
+    env = os.environ.get("ORCH_HOME")
+    if not env:
+        return real
+    h = Path(env).resolve()
+    for base in (Path.cwd().resolve(), *([root.resolve()] if root else [])):
+        try:
+            h.relative_to(base)
+        except ValueError:
+            continue
+        return real
+    return h
 
 
 def registry_path() -> Path:
@@ -262,14 +283,11 @@ def parse_manifest(file: Path) -> dict:
     return m
 
 
-def _entry_points() -> dict[str, str]:
+def _entry_points() -> list[tuple[str, str]] | dict[str, str]:
     """name -> module from the entry-point group orch.addons (tests replace this)."""
     from importlib.metadata import entry_points
 
-    out = {}
-    for ep in entry_points(group="orch.addons"):
-        out[ep.name] = ep.value
-    return out
+    return [(ep.name, ep.value) for ep in entry_points(group="orch.addons")]
 
 
 def _manifest_file(module: str) -> Path | None:
@@ -291,8 +309,16 @@ def _manifest_file(module: str) -> Path | None:
 def discover() -> dict[str, dict]:
     """Every installed add-on with a valid manifest, by name. Invalid ones are skipped."""
     importlib.invalidate_caches()
+    eps = _entry_points()
+    eps = list(eps.items()) if isinstance(eps, dict) else list(eps)
+    names = [n for n, _ in eps]
+    installed = set(installed_names())
     out = {}
-    for name, module in _entry_points().items():
+    for name, module in eps:
+        # one name, one package: a second entry point with the same name disables both;
+        # and only add-ons the user installed through orch (registry) count
+        if names.count(name) > 1 or name not in installed:
+            continue
         f = _manifest_file(module)
         if f is None:
             continue
@@ -333,13 +359,38 @@ def _consents() -> list[dict]:
     return [e for e in data if isinstance(e, dict)] if isinstance(data, list) else []
 
 
+def _write_consents(items: list[dict]) -> None:
+    consent_path().parent.mkdir(parents=True, exist_ok=True)
+    consent_path().write_text(json.dumps(items, indent=2), encoding="utf-8")
+
+
+ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def workspace_id(root: Path, create: bool = False) -> str | None:
+    """Random id in gitignored .orch/.local-id. Consent is bound to it: a clone or copy has none."""
+    f = root / ".orch" / ".local-id"
+    try:
+        v = f.read_text(encoding="utf-8").strip()
+        if ID_RE.match(v):
+            return v
+    except OSError:
+        pass
+    if not create:
+        return None
+    f.parent.mkdir(parents=True, exist_ok=True)
+    v = secrets.token_hex(16)
+    f.write_text(v + "\n", encoding="utf-8")
+    return v
+
+
 def folder_hash(folder: Path) -> str:
-    """Content hash of a local add-on folder (paths + bytes; no .git, caches, virtual envs)."""
+    """Content hash of a local add-on folder (paths + bytes; no .git, caches, virtual envs, build output)."""
     h = hashlib.sha256()
-    skip = {".git", "__pycache__", ".venv", "node_modules", ".pytest_cache", ".ruff_cache"}
+    skip = {".git", "__pycache__", ".venv", "node_modules", ".pytest_cache", ".ruff_cache", "build", "dist"}
     for p in sorted(folder.rglob("*")):
         rel = p.relative_to(folder)
-        if skip & set(rel.parts) or not p.is_file():
+        if skip & set(rel.parts) or any(x.endswith(".egg-info") for x in rel.parts) or not p.is_file():
             continue
         h.update(rel.as_posix().encode() + b"\0")
         try:
@@ -349,9 +400,10 @@ def folder_hash(folder: Path) -> str:
     return h.hexdigest()
 
 
-def _record_for(root: Path, name: str) -> dict:
+def _record_for(root: Path, name: str, wid: str) -> dict:
     src = next((e["source"] for e in registry() if e["name"] == name), "built-in")
     rec = {
+        "workspace_id": wid,
         "workspace": str(root.resolve()),
         "name": name,
         "source": "built-in" if src == "built-in" else "local",
@@ -364,26 +416,41 @@ def _record_for(root: Path, name: str) -> dict:
 
 def record_consent(root: Path, name: str) -> None:
     """The user turned `name` on in this workspace, on THIS machine (not from a file that arrived by git)."""
-    rec = _record_for(root, name)
-    keep = [e for e in _consents() if not (e.get("workspace") == rec["workspace"] and e.get("name") == name)]
-    consent_path().parent.mkdir(parents=True, exist_ok=True)
-    consent_path().write_text(json.dumps([*keep, rec], indent=2), encoding="utf-8")
+    wid = workspace_id(root, create=True)
+    rec = _record_for(root, name, wid)
+    # replace this workspace's record; prune records of workspaces that no longer exist
+    keep = [
+        e
+        for e in _consents()
+        if isinstance(e.get("workspace"), str)
+        and Path(e["workspace"]).is_dir()
+        and not (e.get("workspace_id") == wid and e.get("name") == name)
+    ]
+    _write_consents([*keep, rec])
 
 
 def drop_consent(root: Path, name: str) -> None:
-    ws = str(root.resolve())
-    keep = [e for e in _consents() if not (e.get("workspace") == ws and e.get("name") == name)]
-    consent_path().parent.mkdir(parents=True, exist_ok=True)
-    consent_path().write_text(json.dumps(keep, indent=2), encoding="utf-8")
+    wid = workspace_id(root)
+    _write_consents([e for e in _consents() if not (e.get("workspace_id") == wid and e.get("name") == name)])
+
+
+def _stale_consent(root: Path, name: str) -> bool:
+    """A consent record exists for this workspace and add-on but no longer matches (local folder changed)."""
+    wid = workspace_id(root)
+    return wid is not None and any(
+        e.get("workspace_id") == wid and e.get("name") == name for e in _consents()
+    )
 
 
 def consented(root: Path, name: str) -> bool:
-    ws = str(root.resolve())
-    rec = next((e for e in _consents() if e.get("workspace") == ws and e.get("name") == name), None)
+    wid = workspace_id(root)
+    if wid is None:
+        return False
+    rec = next((e for e in _consents() if e.get("workspace_id") == wid and e.get("name") == name), None)
     if rec is None:
         return False
     try:
-        return rec == _record_for(root, name)
+        return rec == _record_for(root, name, wid)
     except OSError:
         return False
 
@@ -596,13 +663,11 @@ def _apply_project(root: Path, m: dict) -> None:
 
 
 def _remove_skill_folders(root: Path, name: str) -> None:
-    sdir = root / ".agents" / "skills"
-    if not sdir.is_dir():
-        return
-    for p in sorted(sdir.iterdir()):
-        if p.name == f"orch-{name}" or p.name.startswith(f"orch-{name}-"):
-            skills.unlink_skill(root, p.name)
-            skills.remove_skill(root, p.name)
+    """Exactly orch-<name>: never a neighbour such as orch-<name>-x (another add-on or the user's skill)."""
+    d = root / ".agents" / "skills" / f"orch-{name}"
+    if d.exists() or d.is_symlink():
+        skills.unlink_skill(root, d.name)
+        skills.remove_skill(root, d.name)
 
 
 def remove(root: Path, name: str, purge: bool = False) -> None:
@@ -719,8 +784,13 @@ def update(root: Path, project_only: bool = False) -> list[str]:
     found = discover()
     a = listed(root)
     on = sorted(active(root))
-    for n in on:
-        record_consent(root, n)  # `orch update` by the user: same source, new content is accepted
+    for n in sorted(set(a) - set(on)):
+        if _stale_consent(root, n):
+            print(
+                f"Add-on {n} changed on disk since you turned it on, so it was not refreshed. "
+                f"Check it, then turn it on again: orch addon add <folder> --yes",
+                file=sys.stderr,
+            )
     for n in on:
         m = found.get(n)
         if m is None:

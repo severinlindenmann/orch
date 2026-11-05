@@ -111,6 +111,25 @@ def load(root: Path, tid: str) -> dict:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+def _break_stale(lock: Path) -> bool:
+    """Claim a stale lock by renaming it to a name only we know (atomic: just one waiter wins), then check
+    that what we took is really old. If it was a fresh lock a faster waiter had just made, put it back."""
+    mine = lock.with_name(f"{lock.name}.{secrets.token_hex(4)}")
+    try:
+        os.replace(lock, mine)
+    except OSError:
+        return False
+    try:
+        if time.time() - mine.stat().st_mtime > 30:
+            return True
+        with contextlib.suppress(OSError):
+            os.link(mine, lock)  # no-clobber put-back
+        return False
+    finally:
+        with contextlib.suppress(OSError):
+            mine.unlink()
+
+
 @contextlib.contextmanager
 def _locked(root: Path, tid: str):
     """One writer at a time per ticket: an exclusive lock file next to it (stale after 30 s)."""
@@ -123,10 +142,10 @@ def _locked(root: Path, tid: str):
             break
         except FileExistsError:
             try:
-                if time.time() - lock.stat().st_mtime > 30:
-                    lock.unlink()
-                    continue
+                stale = time.time() - lock.stat().st_mtime > 30
             except OSError:
+                continue
+            if stale and _break_stale(lock):
                 continue
             if time.monotonic() > end:
                 raise Refused(f"Ticket {tid} is being changed right now. Try again.") from None
