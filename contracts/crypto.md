@@ -28,6 +28,20 @@ header JSON  = {"name": "report.pdf", "type": "application/pdf", "size": 12345}
 - Cap: 100 MB = 100 × 1024 × 1024 bytes of **file content** (env `PUBLISH_MAX_FILE_MB`, default 100). The server accepts blobs up to cap + 64 KiB + 36 bytes (header + overhead). One-shot GCM in memory is fine at this size.
 - Test vectors: `vectors/publish-blob-v1.json` (one good blob, plus `wrong key` and `truncated` cases that must fail). Python, Rust (tests only) and the browser JS must all pass them.
 - Apps are **not** encrypted.
+- Folder bundle (`orch publish file <folder>`, a small site of html + css + js + json): the OPF1 header has
+  `"type": "application/vnd.orch.bundle"` and `"name": "<folder name>"`; the file bytes are a bundle:
+
+```
+bundle = u32 big-endian index length M | index JSON, M bytes UTF-8 | the files' bytes, one after another, in index order
+index  = {"v": 1, "entry": "index.html", "files": [{"path": "index.html", "type": "text/html", "size": 120}, ...]}
+```
+
+  Reader rules (any failure = "broken file"): `1 <= M <= 1 MiB`; `v` is 1; 1 to 2000 files; each `path` is
+  1 to 255 chars, `/`-separated, no leading `/`, no `\`, no NUL, no empty, `.` or `..` segment, unique; `size` is an
+  integer >= 0; the sizes add up to exactly the bytes left after the index; `entry` is `index.html` and is in `files`.
+  Writer: files sorted by path, compact JSON (`,` `:`), skips dot files and folders (`.env`, `.git`), `node_modules`,
+  `__pycache__` and symlinks. The whole bundle counts against the same 100 MB cap.
+  Vector: `vectors/publish-bundle-v1.json` (the bundle bytes, not encrypted; plus `must_fail` cases).
 
 ## 2. Relay: TLS + encrypted at rest + admin can read
 

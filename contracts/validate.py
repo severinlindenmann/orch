@@ -133,6 +133,44 @@ for case in vec["must_fail"]:
     except Exception:  # noqa: BLE001
         pass
 
+
+def unbundle(raw):
+    """Reader rules of crypto.md "Folder bundle". Returns {path: bytes}."""
+    (m,) = struct.unpack(">I", raw[:4])
+    if not 1 <= m <= 1 << 20 or 4 + m > len(raw):
+        raise ValueError("bad index length")
+    idx = json.loads(raw[4 : 4 + m].decode())
+    files, out, pos = idx["files"], {}, 4 + m
+    if idx.get("v") != 1 or not 1 <= len(files) <= 2000 or idx.get("entry") != "index.html":
+        raise ValueError("bad index")
+    for f in files:
+        p, n = f["path"], f["size"]
+        segs = p.split("/")
+        bad = not 1 <= len(p) <= 255 or "\\" in p or "\0" in p or any(x in ("", ".", "..") for x in segs)
+        if bad or p in out or not isinstance(n, int) or n < 0:
+            raise ValueError("bad path or size: " + p)
+        out[p] = raw[pos : pos + n]
+        pos += n
+    if pos != len(raw) or "index.html" not in out:
+        raise ValueError("sizes do not add up")
+    return out
+
+
+bvec = json.loads((HERE / "vectors" / "publish-bundle-v1.json").read_text())
+try:
+    got = unbundle(bytes.fromhex(bvec["good"]["bundle_hex"]))
+    want = {f["path"]: f["content_utf8"].encode() for f in bvec["good"]["files"]}
+    if got != want:
+        fails.append("bundle vector good: files differ")
+except Exception as e:  # noqa: BLE001
+    fails.append(f"bundle vector good: {e!r}")
+for case in bvec["must_fail"]:
+    try:
+        unbundle(bytes.fromhex(case["bundle_hex"]))
+        fails.append(f"bundle vector {case['name']}: unpacked but must fail")
+    except Exception:  # noqa: BLE001
+        pass
+
 if fails:
     print("\n".join("FAIL " + f for f in fails))
     sys.exit(1)

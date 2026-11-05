@@ -78,6 +78,46 @@ def test_file_share_roundtrip_and_link(proj, run, pub):
     assert json.loads((proj / ".orch/secrets/files/keys.json").read_text())[res["id"]]
 
 
+BVEC = json.loads((Path(__file__).resolve().parents[2] / "contracts/vectors/publish-bundle-v1.json").read_text())
+
+
+def _unbundle(raw: bytes) -> dict:
+    import struct
+
+    (m,) = struct.unpack(">I", raw[:4])
+    idx, pos, out = json.loads(raw[4 : 4 + m]), 4 + m, {}
+    for f in idx["files"]:
+        out[f["path"]] = raw[pos : pos + f["size"]]
+        pos += f["size"]
+    assert pos == len(raw) and idx["entry"] == "index.html" and idx["v"] == 1
+    return out
+
+
+def test_folder_share_packs_a_bundle_matching_the_vector(proj, run, pub):
+    connect(run, pub)
+    site = proj / "site"
+    for f in BVEC["good"]["files"]:
+        (site / f["path"]).parent.mkdir(parents=True, exist_ok=True)
+        (site / f["path"]).write_text(f["content_utf8"])
+    (site / ".env").write_text("SECRET=1")
+    (site / "node_modules").mkdir()
+    (site / "node_modules/x.js").write_text("x")
+    code, out, _ = run("publish", "file", "site", "--json")
+    assert code == 0, out
+    res = json.loads(out)
+    header, content = publish.decrypt(pub.files[res["id"]], publish.b64u_decode(res["link"].split("#k=")[1]))
+    assert (header["name"], header["type"], res["name"]) == ("site", publish.BUNDLE_TYPE, "site")
+    want = _unbundle(bytes.fromhex(BVEC["good"]["bundle_hex"]))
+    assert _unbundle(content) == want
+
+
+def test_folder_without_index_html_is_refused(proj, run, pub):
+    connect(run, pub)
+    (proj / "notes").mkdir()
+    (proj / "notes/a.txt").write_text("a")
+    assert "index.html" in run("publish", "file", "notes")[2]
+    assert not pub.files
+
 def test_file_permanent_refused_without_right(proj, run, pub):
     connect(run, pub)
     (proj / "a.txt").write_text("x")

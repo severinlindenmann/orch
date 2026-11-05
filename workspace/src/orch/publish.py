@@ -118,24 +118,66 @@ def _tokens_path(root: Path) -> Path:
     return net.secrets_dir(root) / "apps" / "view-tokens.json"
 
 
+BUNDLE_TYPE = "application/vnd.orch.bundle"
+
+
+def bundle(folder: Path) -> bytes:
+    """Folder -> bundle bytes (crypto.md "Folder bundle"): u32 BE index length | index JSON | files in order."""
+    if (folder / ".orch").exists():
+        raise Refused("This folder is the workspace root. Share a folder inside it.")
+    files = []
+    for dirpath, dirs, names in os.walk(folder):
+        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
+        for f in sorted(names):
+            p = Path(dirpath) / f
+            if p.is_symlink() or f in SKIP_DIRS or f.startswith(".") or not p.is_file():
+                continue
+            files.append((p.relative_to(folder).as_posix(), p))
+    files.sort()
+    if "index.html" not in [r for r, _ in files]:
+        raise Refused("The folder needs an index.html to be shared as a page.")
+    if len(files) > 2000:
+        raise Refused("The folder has more than 2000 files.")
+    if sum(p.stat().st_size for _, p in files) > MAX_FILE:
+        raise Refused("The folder is bigger than 100 MB.")
+    datas = [p.read_bytes() for _, p in files]
+    index = {
+        "v": 1,
+        "entry": "index.html",
+        "files": [
+            {"path": r, "type": mimetypes.guess_type(r)[0] or "application/octet-stream", "size": len(d)}
+            for (r, _), d in zip(files, datas)
+        ],
+    }
+    raw = json.dumps(index, ensure_ascii=False, separators=(",", ":")).encode()
+    return struct.pack(">I", len(raw)) + raw + b"".join(datas)
+
+
 def share_file(root: Path, path: Path, days: int | None, permanent: bool) -> dict:
-    if not path.is_file():
-        raise Refused(f"{path} is not a file.")
-    if path.stat().st_size > MAX_FILE:
+    if path.is_dir():
+        content, mime = bundle(path), BUNDLE_TYPE
+        if len(content) > MAX_FILE:
+            raise Refused("The folder is bigger than 100 MB.")
+    elif not path.is_file():
+        raise Refused(f"{path} is not a file or folder.")
+    elif path.stat().st_size > MAX_FILE:
         raise Refused("The file is bigger than 100 MB.")
+    else:
+        content = path.read_bytes()
+        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     q = _life(days, permanent)
-    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    blob, key = encrypt(path.read_bytes(), path.name, mime)
+    name = path.resolve().name if path.is_dir() else path.name
+    blob, key = encrypt(content, name, mime)
     res = _api(root, "POST", "/v1/files" + (f"?{q}" if q else ""), blob)
     k = b64u(key)
     keys = net.read_json(_keys_path(root), {})
     keys[res["id"]] = k
     net.write_json(_keys_path(root), keys, True)
     names = net.read_json(_names_path(root), {})
-    names[res["id"]] = path.name
+    names[res["id"]] = name
     net.write_json(_names_path(root), names, True)
     res["link"] = f"{res['url']}#k={k}"
-    res["name"] = path.name
+    res["name"] = name
     return res
 
 
