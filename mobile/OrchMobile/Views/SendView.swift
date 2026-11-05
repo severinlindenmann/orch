@@ -26,7 +26,7 @@ struct SendView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if !editing || sent != nil { ScreenHeading(title: "Say it. Send it.", subtitle: "A thought, a request, a next step.").padding(.top, 14) }
+                if !editing || sent != nil { ScreenHeading(title: "Ask for something.", subtitle: "A thought, a request, a next step.").padding(.top, 14) }
                 if let sent { sentState(sent) }
                 else if model.workspaces.isEmpty && model.message != nil { offlineState }
                 else if model.workspaces.isEmpty && model.hasLoaded { emptyState }
@@ -154,7 +154,7 @@ struct SendView: View {
                 if let error = voice?.error { Text(error).font(.caption).foregroundStyle(Theme.danger) }
             }.frame(maxWidth: .infinity).padding(.top, 5).padding(.bottom, editing ? 6 : 16)
             let canSend = !(recording || transcribing || toggling || sending || workspaceID.isEmpty || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            Button(sending ? "Sending…" : "Send to inbox ↑") {
+            Button(sending ? "Sending…" : "Ask \(model.workspaces.first { $0.id == workspaceID }?.displayName ?? "your workspace") ↑") {
                 guard canSend else { showHint = true; return }
                 showHint = false
                 sending = true
@@ -168,14 +168,16 @@ struct SendView: View {
                 Text(hintText).themeFont(12).foregroundStyle(Theme.danger).frame(maxWidth: .infinity)
                     .accessibilityIdentifier("send-hint")
             }
-            Text("Your workspace will pick it up from here.").themeFont(11)
+            Text("It becomes a ticket. You hear back when there is a result, a question or a problem.").themeFont(11)
                 .foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 2)
         }
     }
 
     /// What this phone and the picked workspace wrote to each other, newest first.
     @ViewBuilder private var conversation: some View {
-        let items = model.messages.filter { $0.workspaceId == workspaceID }.prefix(10)
+        // "Got it" and progress lines are status lines (SentState, Your tickets), not messages.
+        let quiet: Set<String> = ["ack", "working", "note"]
+        let items = model.messages.filter { $0.workspaceId == workspaceID && !quiet.contains($0.message.body.update?.kind ?? "") }.prefix(10)
         if !items.isEmpty {
             let name = model.workspaces.first { $0.id == workspaceID }?.displayName ?? "workspace"
             Eyebrow(text: "MESSAGES WITH \(name.uppercased())").padding(.top, 30).padding(.bottom, 8)
@@ -198,8 +200,14 @@ struct SendView: View {
             Image(systemName: "checkmark").themeFont(28).foregroundStyle(Theme.brand)
                 .frame(width: 72, height: 72).background(Theme.brand.opacity(0.07), in: Circle())
                 .overlay(Circle().stroke(Theme.brand.opacity(0.33))).padding(.bottom, 13)
-            Text("It's in the inbox.").themeFont(25, .semibold)
+            Text("On its way.").themeFont(25, .semibold)
             Text("Sent to \(note.workspaceName)").themeFont(13).foregroundStyle(Theme.muted)
+            if let ack = model.ack(for: note.messageId) {
+                Text(ack.text).themeFont(13, .medium).foregroundStyle(Theme.brand).accessibilityIdentifier("ack-line")
+            } else {
+                Text("Waiting for \(note.workspaceName) to pick it up…").themeFont(13).foregroundStyle(Theme.muted)
+                    .accessibilityIdentifier("ack-waiting")
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text("You sent:").themeFont(11).foregroundStyle(Theme.muted)
                 Text(note.text).themeFont(14).foregroundStyle(Theme.text)
@@ -207,9 +215,14 @@ struct SendView: View {
                 .overlay(alignment: .leading) { Rectangle().fill(Theme.brand).frame(width: 3) }
                 .padding(.vertical, 16)
             Button("Send another message") { sent = nil; text = "" }.buttonStyle(SecondaryButtonStyle())
-            Button("Back to home →") { model.tab = .home }
+            Button("See your tickets →") { model.tab = .home }
                 .buttonStyle(WideButtonStyle(color: Theme.muted)).themeFont(13)
         }.frame(maxWidth: .infinity).padding(.top, 48)
+            .task(id: note.messageId) {   // the "Got it" arrives a moment after the send
+                for _ in 0..<10 where model.ack(for: note.messageId) == nil {
+                    try? await Task.sleep(for: .seconds(2)); await model.refreshUpdates()
+                }
+            }
     }
 
     private func optionTitle(_ ws: Workspace) -> String {
