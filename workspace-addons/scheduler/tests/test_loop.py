@@ -228,7 +228,11 @@ def test_redacts_password_aws_and_hex(ws, tmp_path):
         out = redact("x " + raw)
         for bad in ("hunter2", "s3cret", "AKIA", "d41d8cd9", "abc123", "xyz789", "k9k9k9", "k8k8k8", "tok777"):
             assert bad not in out, raw
-    for keep in ('File "/Users/lume/orch-dev/.worktrees/draft-sa-scheduler/workspace-addons/scheduler/src/orch_scheduler/runner.py", line 3',
+    aws = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    assert aws not in redact("secret key is " + aws + " ok") and aws not in redact(aws)
+    for keep in ("sha 119fd56a1b2c3d4e5f60718293a4b5c6d7e8f901 x",
+                 "path /usr/local/lib/python3/site-packages/some_pkg_dir/mod",
+                 'File "/Users/lume/orch-dev/.worktrees/draft-sa-scheduler/workspace-addons/scheduler/src/orch_scheduler/runner.py", line 3',
                  "commit 119fd56a1b2c3d4e5f60718293a4b5c6d7e8f901 failed", "No module named orch_scheduler_extra_long_module_name_x",
                  "authorization failed for user", "Invalid bearer token"):
         assert redact(keep) == keep, keep

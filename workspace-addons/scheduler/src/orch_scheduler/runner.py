@@ -117,6 +117,8 @@ REDACT = [
     re.compile(r"(?<=://)[^/\s:@]+:[^/\s@]+@"),
     re.compile(r"\b(?:sk-|ghp_|gho_|github_pat_|xox[a-z]-)[A-Za-z0-9_\-]{8,}"),
     re.compile(r"\b[0-9a-fA-F]{32}\b"),
+    re.compile(r"(?<![A-Za-z0-9/+])(?![0-9a-f]{40}(?![A-Za-z0-9/+]))(?=[A-Za-z0-9/+]*[A-Za-z])(?=[A-Za-z0-9/+]*[0-9/+])"
+               r"[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])"),
     re.compile(r"(?=[^\s/]*\d)(?=[^\s/]*[A-Za-z])[A-Za-z0-9+=_\-]{41,}"),
 ]
 

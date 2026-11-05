@@ -126,17 +126,6 @@ class Scheduler:
                 started.append(tid)
         return started
 
-    def _find_or_make(self, key: str, sender: str) -> str | None:
-        for t in read_tickets(self.root):
-            r = (t.get("ext") or {}).get("relay") or {}
-            if r.get("start_key") == key and r.get("from") == sender and t["status"] in OPEN:
-                return t["id"]
-        made = orchcli.call(self.root, "ticket", "new", key)
-        tid = made.get("id") if isinstance(made, dict) else None
-        if tid:
-            orchcli.call(self.root, "ext", "set", tid, "relay", json.dumps({"start_key": key, "from": sender}))
-        return tid
-
     def _handle(self, m: dict, now: datetime) -> str | None:
         # RULE: THE SCHEDULER ONLY ACTS ON WHAT THE CLI DECIDED (`allowed`, `applied`, or the ticket `relay done`
         # returns). It never decides on a relay message itself: no CLI decision, or `done` fails -> no run.
@@ -144,23 +133,15 @@ class Scheduler:
         tid: str | None = None
         text = ""
         if kind in ("start", "delegate") and m.get("allowed") is True:
-            if kind == "start":
-                tid = self._find_or_make(str(body.get("key", "")), str(m.get("from", "")))
-                text = str(body.get("text", ""))
-            else:
-                text = str(body.get("text", ""))
-            if kind == "start" and not tid:
-                return None
-            if tid and self.runner.locked(tid):
-                return None
+            text = str(body.get("text", ""))
             done = orchcli.call(self.root, "relay", "done", mid, by=False)
-            if not isinstance(done, dict):
-                return None  # done failed (busy, allow gone): message stays unseen, retried next pass
+            tid = done.get("ticket") if isinstance(done, dict) else None
+            if not isinstance(tid, str) or not ID_RE.match(tid):
+                return None  # done failed or gave no ticket (busy, allow gone): no ticket = no run
+            if self.runner.locked(tid):
+                update_state(self.root, tid, pending_wake=f"relay {mid}")  # done already marked it handled
+                return None
             if kind == "delegate":
-                # `orch relay done` already made the ticket for an allowed delegate: use it, never a second one
-                tid = done.get("ticket") if isinstance(done, dict) else None
-                if not tid:
-                    return None  # the CLI is the allow authority: no ticket from it = no run
                 orchcli.log(self.root, tid, f"Delegated by {m.get('from')}: {text[:500]}")
             return tid if self.runner.start(tid, outside_prompt(tid, kind, text), self.cfg["agent"],
                                             f"relay {kind} {mid}", now) else None
