@@ -24,7 +24,13 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `ticket_ext` | Local JSON Schema for `ext.<name>` (no remote `$ref`, ≤ 32 KB) |
 | `background` | `true` = has a long-running process; must implement `orch <name> start\|stop\|status --json` (Background, below) |
 | `[dashboard]` | `label` (≤ 16 chars), `icon` (fixed set in the schema), `order`: the add-on has a tab filled by `orch <name> view --json` |
-| `[[ticket_view]]` | Ticket detail rows from `ext.<name>`: `field`, `label`, `format` = `text` · `time` · `cron-human` · `chips` · `yes-no` |
+| `[[ticket_view]]` | Ticket detail rows from `ext.<name>`: `field`, `label`, `format` = `text` · `time` · `cron-human` · `chips` · `yes-no` · `open-page` (an "Open" button to `[page]` `path` + `/` + the value; needs `[page]`) |
+| `recommended` | `true` = `orch init --recommended` turns it on (the core names no add-on; it reads this key) |
+| `gitignore` | Lines for the workspace `.gitignore`, added by `orch addon add`, removed by `orch addon remove`: relative paths inside the workspace, no leading `/`, no `..`, no `\`, no drive letter |
+| `runs_agents` | `true` = the add-on starts agent runs; it does so only through `orch run start` (one claim per ticket, the workspace's agent) |
+| `requires` | Add-on names that must be active first; `orch addon add` refuses and names the missing ones (nothing is turned on by itself) |
+| `needs` | `true` = implements `orch <name> needs --json` → rows of `needs.schema.json` for `orch needs` (only rows that are not ticket questions: those come from the tickets) |
+| `[page]` | `path` (starts with `/`), optional `label`: the add-on serves its own local page; needs `background = true`. Its base url is the checked `url` from `orch <name> status --json` (`http://127.0.0.1:<port>`) |
 
 All paths are relative to the manifest's folder and must stay inside it (no `..`, no absolute paths, no symlink leaving it).
 
@@ -112,6 +118,12 @@ Add-ons without `background` are ignored by all three. The core never starts any
 
 ## Core commands an add-on may rely on (`--json`)
 
+- `orch run start <ticket> [--mode live|oneshot] [--fresh] [--by <name>]`, `orch run send|stop|status <ticket>`: the only way
+  to start or talk to an agent run (run.schema.json, run-pending.schema.json). A busy ticket queues the input; it is never refused.
+- `orch needs --json`: rows of `needs.schema.json` (core rows + the pulled rows of active add-ons with `needs = true`).
+- Questions: `orch ask <ticket> "<text>" --kind <name>:<what> [--option …] --json` adds a question whose `kind` the add-on
+  owns, with an opaque `action` object (`--action '<json>'`); the add-on acts on answered questions of its own prefix. `via` is a free short word.
+
 - `orch ticket list --json`: a plain JSON list of ticket objects (`ticket.schema.json`, with `revision` and `ext`); done and dropped tickets only with `--all` (or `--status <s>`).
   `orch ticket show <id> --json`: one ticket; `ext.<name>` is left out for add-ons that are not active.
 - `orch addon list --json`: above. `orch relay status --json`: `{"configured": false}` or
@@ -127,7 +139,9 @@ The dashboard (itself an optional add-on, the host) never imports add-on code. F
 `view` must be read-only, fast, and must not start a background process. Blocks: `stat`, `list`, `calendar` (days strip; a repeat
 more often than hourly is one item per day with `every` ("Every 5 min", shown instead of the time) and a muted `note`),
 `timeline`, `chips`, `table` (typed columns text/number/duration/date/tone). Items may have a `link`: a ticket id (opens the
-ticket) or an `https://` URL (new tab). No buttons, no actions. Tone: `neutral` · `good` · `warn` · `needs-you` · `bad`.
+ticket), an `https://` URL (new tab), or `addon:<path>` — a page of **this** add-on: the dashboard resolves it only against
+the same add-on's checked `[page]` url (`http://127.0.0.1:<port>/<path>`); no `..`, no leading `/`, never another add-on or
+host. No buttons, no actions. Tone: `neutral` · `good` · `warn` · `needs-you` · `bad`.
 
 **One product:** the dashboard renders blocks with the orch design system only (tokens, the fixed icon set, motion, skeleton
 while loading, the same empty and error states and wording); add-on tabs sit in the same nav list as Tickets/Inbox, ordered by

@@ -1,0 +1,2 @@
+{ "schema": "orch.addon-view/1", "generated_at": "2026-11-05T09:20:00Z",
+  "blocks": [ { "type": "list", "title": "Live now", "items": [ { "title": "Other add-on", "link": "addon:../relay/inbox" } ] } ] }

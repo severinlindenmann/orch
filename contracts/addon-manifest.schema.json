@@ -6,13 +6,14 @@
   "type": "object",
   "required": ["schema", "orch_api", "name", "version", "description", "run", "skill"],
   "additionalProperties": false,
+  "dependentSchemas": { "page": { "required": ["background"], "properties": { "background": { "const": true } } } },
   "properties": {
     "schema": { "const": "orch.addon/1" },
     "orch_api": { "const": 1, "description": "Version of the add-on contract (CLI, view, ext rules) this add-on was written for." },
     "name": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{1,31}$",
-      "not": { "enum": ["orch", "core", "ticket", "check", "log", "ask", "answer", "link", "ext", "wait", "addon", "addons", "update", "init", "publish", "relay", "config", "help", "version", "view", "start", "stop", "status"] },
+      "not": { "enum": ["orch", "core", "ticket", "check", "log", "ask", "answer", "link", "ext", "wait", "addon", "addons", "update", "init", "publish", "relay", "config", "help", "version", "view", "start", "stop", "status", "run", "needs", "agents"] },
       "description": "Command `orch <name>`, ext key ext.<name>, folder .orch/addons/<name>/, config table [<name>], skill folder orch-<name>, AGENTS markers orch:addon:<name>."
     },
     "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
@@ -44,9 +45,31 @@
         "properties": {
           "field": { "type": "string", "pattern": "^[a-z_][a-z0-9_]{0,31}$", "description": "Top-level key in ext.<name>." },
           "label": { "$ref": "#/$defs/text", "maxLength": 24 },
-          "format": { "enum": ["text", "time", "cron-human", "chips", "yes-no"] }
+          "format": { "enum": ["text", "time", "cron-human", "chips", "yes-no", "open-page"], "description": "open-page = an 'Open' button to [page] path + '/' + the field value (needs [page]); shown only when the value is set." }
         }
       }
+    },
+    "recommended": { "type": "boolean", "default": false, "description": "true = `orch init --recommended` turns it on. The core lists no add-on by name." },
+    "gitignore": {
+      "type": "array", "maxItems": 16,
+      "items": { "type": "string", "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\.\\.)(?!.*\\\\)[A-Za-z0-9_./* -]{1,200}$" },
+      "description": "Lines added to the workspace .gitignore by `orch addon add` and removed by `orch addon remove`. Relative paths inside the workspace: no leading '/', no '..', no backslash, no drive letter."
+    },
+    "runs_agents": { "type": "boolean", "default": false, "description": "true = the add-on starts agent runs (always through `orch run start`)." },
+    "requires": {
+      "type": "array", "maxItems": 8, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$" },
+      "description": "Add-on names that must be active first. `orch addon add` refuses with the missing names; nothing is turned on by itself."
+    },
+    "needs": { "type": "boolean", "default": false, "description": "true = the add-on has `orch <name> needs --json` (rows of needs.schema.json) for `orch needs`." },
+    "page": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "pattern": "^/[A-Za-z0-9_./-]{0,200}$", "not": { "pattern": "\\.\\.|^//" }, "description": "Path on the add-on's own local page; the base url is the checked url of `orch <name> status --json` (http://127.0.0.1:<port>)." },
+        "label": { "$ref": "#/$defs/text", "maxLength": 24, "description": "Button text, default 'Open'." }
+      },
+      "description": "The add-on serves its own local page (needs background = true). The dashboard shows a button that opens it in a new tab."
     }
   },
   "$defs": {

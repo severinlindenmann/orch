@@ -1,0 +1,29 @@
+# A live-board add-on with every key added in v2 (recommended, gitignore, runs_agents, requires, needs, [page]).
+schema = "orch.addon/1"
+orch_api = 1
+name = "focus"
+version = "0.1.0"
+description = "A live board for one ticket: watch the agent work, answer it, check the proof."
+run = "orch_focus"
+skill = "skills/orch-focus"
+ticket_ext = "ext.schema.json"
+background = true
+recommended = false
+runs_agents = true
+needs = true
+requires = []
+gitignore = [".orch/addons/focus/cache/", "received/"]
+
+[page]
+path = "/"
+label = "Open live"
+
+[dashboard]
+label = "Focus"
+icon = "star"
+order = 20
+
+[[ticket_view]]
+field = "board"
+label = "Live board"
+format = "open-page"

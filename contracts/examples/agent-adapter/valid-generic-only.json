@@ -1,0 +1,39 @@
+{
+  "schema": "orch.agent-adapters/1",
+  "note": "Built in: workspace/src/orch/agents.json. A user entry in .orch/config.toml [agents.<name>] picks one of these with adapter = \"<name>\".",
+  "adapters": {
+    "generic": {
+      "label": "{name}",
+      "detect": null,
+      "prompt_via": "arg",
+      "oneshot": {
+        "fresh": "{command}",
+        "resume": null
+      },
+      "live": {
+        "fresh": "{interactive}",
+        "send": "bracketed-paste+Enter",
+        "interrupt_keys": [],
+        "idle_signal": "orch:run-done",
+        "events": null
+      },
+      "hooks": null,
+      "session": {
+        "id": "none"
+      },
+      "capabilities": {
+        "resume": false,
+        "choose_session_id": false,
+        "interactive_tmux": false,
+        "hooks": false,
+        "stream": false,
+        "permission_retry": false,
+        "subagents": false,
+        "usage": false
+      },
+      "files": {
+        "instructions": "AGENTS.md"
+      }
+    }
+  }
+}

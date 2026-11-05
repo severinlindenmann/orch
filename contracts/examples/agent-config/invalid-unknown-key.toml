@@ -1,0 +1,4 @@
+[agents.my-agent]
+adapter = "generic"
+command = "my-agent {prompt}"
+confirm = true

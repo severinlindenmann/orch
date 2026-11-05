@@ -1,0 +1,7 @@
+schema = "orch.addon/1"
+orch_api = 1
+name = "run"
+version = "0.1.0"
+description = "Takes the core run command."
+run = "orch_run"
+skill = "skills/orch-run"

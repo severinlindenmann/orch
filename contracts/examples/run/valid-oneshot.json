@@ -1,0 +1,17 @@
+{
+  "schema": "orch.run/1",
+  "ticket": "t_sl33p1",
+  "run": "r_20261105_0600",
+  "by": "Marco",
+  "agent": "my-agent",
+  "mode": "oneshot",
+  "tmux": null,
+  "pid": 51022,
+  "pid_started": "2026-11-05T06:00:01Z",
+  "started_at": "2026-11-05T06:00:01Z",
+  "renewed_at": "2026-11-05T06:00:14Z",
+  "pending": true,
+  "stop_requested": null,
+  "seen_revision": 3,
+  "log": ".orch/run/logs/t_sl33p1-r_20261105_0600.log"
+}
