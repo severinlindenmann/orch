@@ -939,3 +939,28 @@ async fn phone_updates_title_rule_is_enforced() {
         201
     );
 }
+
+#[tokio::test]
+async fn phone_updates_scan_is_capped_per_request() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    let (s, old) = upd(&t, &a, &p.0, "t_aaaaaa", "result", Some("Old"), "old").await;
+    assert_eq!(s, 201);
+    let (_, newer) = upd(&t, &a, &p.0, "t_aaaaaa", "note", Some("Old"), "newer").await;
+    for i in 0..2100 {
+        assert_eq!(ws_text(&t, &a, &p.0, &format!("n{i}")).await.0, 201);
+    }
+    // the two updates lie beyond 2000 newer rows: the request stops at the cap instead of walking them
+    let (s, g) = t.phone(&p, "GET", "/v1/phone/updates", None).await;
+    assert_eq!((s, &g["items"]), (200, &json!([])));
+    // `after` is resolved in SQL: the page after `newer` is found without walking the newer rows
+    let q = format!(
+        "/v1/phone/updates?workspace={}&ticket=t_aaaaaa&after={}",
+        a.id,
+        newer["id"].as_str().unwrap()
+    );
+    let (s, v) = t.phone(&p, "GET", &q, None).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["items"][0]["id"], old["id"]);
+}

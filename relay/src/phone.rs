@@ -235,6 +235,9 @@ async fn messages(
 
 /// Work-update texts for a phone, newest first (?1 phone id, ?2 JSON workspace list, ?3 paired-at, ?4 ticket or NULL,
 /// ?5 seq cursor, ?6 batch size). The same messages table as `MESSAGES_SQL`, only what workspaces sent.
+/// Most rows opened (decrypted) for one `/v1/phone/updates` request.
+const MAX_SCAN: usize = 2000;
+
 const UPDATES_SQL: &str =
     "SELECT seq,id,from_addr,to_addr,type,created_at,ticket,reply_to,payload,acked_at FROM (
         SELECT m.* FROM json_each(?2) j CROSS JOIN messages m
@@ -288,9 +291,23 @@ async fn updates(
     // Walk the filtered view newest first, in batches, and keep the texts with `body.update`.
     let mut st = c.prepare(UPDATES_SQL)?;
     let mut cursor = i64::MAX;
+    if let (Some(a), Some(t), Some(w)) = (after, ticket, workspace) {
+        // `after` must be an update of this ticket in this phone's view; its seq is the cursor (no walking).
+        let m: Option<store::Msg> = c
+            .query_row(
+                &format!("SELECT {MSG_COLS} FROM messages WHERE id=?1 AND type='text' AND ticket=?2 AND from_addr=?3 AND ((to_addr='phones' AND stored_at>=?5) OR to_addr=?4)"),
+                params![a, t, w, pid, since],
+                msg_from_row,
+            )
+            .optional()?;
+        match m {
+            Some(m) if store::open_payload(&app.key, &m).0["update"].is_object() => cursor = m.seq,
+            _ => return Err(bad_after()),
+        }
+    }
+    let mut scanned = 0usize;
     let mut out: Vec<(store::Msg, Value)> = vec![];
     let mut seen = std::collections::HashSet::new();
-    let mut after_found = after.is_none();
     let mut more = false;
     let mut titles: Vec<Option<String>> = vec![];
     let mut extra = 0;
@@ -304,16 +321,17 @@ async fn updates(
         let Some(last) = rows.last() else { break };
         cursor = last.seq;
         for m in rows {
+            // Hard cap on rows opened per request, whatever was found.
+            scanned += 1;
+            if scanned > MAX_SCAN {
+                more = ticket.is_some() && !out.is_empty();
+                break 'scan;
+            }
             let (body, _) = store::open_payload(&app.key, &m);
             if !body["update"].is_object() {
                 continue;
             }
             if ticket.is_some() {
-                if !after_found {
-                    // Skip everything up to and including the `after` item.
-                    after_found = after.is_some_and(|a| *a == m.id);
-                    continue;
-                }
                 if out.len() == limit {
                     more = true;
                     break 'scan;
@@ -349,9 +367,6 @@ async fn updates(
                 }
             }
         }
-    }
-    if !after_found {
-        return Err(bad_after());
     }
     let next = if more {
         out.last().map(|(m, _)| Value::from(m.id.clone()))
