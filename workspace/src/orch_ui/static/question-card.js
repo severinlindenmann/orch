@@ -20,13 +20,7 @@
     let storage = opts.storage;
     if (!storage) { try { storage = root.localStorage; } catch (_) { /* Optional storage. */ } }
     const state = root.QuestionCardState.create({key: 'orch.q.' + question.ticket + '.' + question.id,
-      send: (answer, actionId) => {
-        // The state timer may fire before its final countdown tick.
-        // Once sending begins the undo window is closed.
-        undoButton.disabled = true;
-        undoButton.textContent = 'Undo 0';
-        return opts.send(answer, actionId);
-      }, storage, clock: opts.clock});
+      send: opts.send, storage, clock: opts.clock});
     const card = make('article', 'qcard');
     const meta = make('div', 'row qmeta');
     const badge = make('span', 'badge attn', 'Needs you');
@@ -105,6 +99,8 @@
         status.textContent = "Answering '" + s.answer + "'...";
         undoButton = button('Undo ' + s.secondsLeft, 'btn', () => state.undo());
         controls.append(undoButton);
+      } else if (phase === 'sending') {
+        status.textContent = "Sending '" + s.answer + "'...";
       } else if (phase === 'sent') {
         status.textContent = ["Answered '" + s.answer + "'", s.who, s.via].filter(Boolean).join(' · ');
       } else if (phase === 'conflict') {

@@ -107,3 +107,17 @@ test('a second tap while pending is ignored', () => {
   assert.equal(card.choose('No').ok, false);
   assert.equal(card.getState().answer, 'Yes');
 });
+
+test('undo and a new choice are refused while the send is in flight', async () => {
+  let release; const gate = new Promise(r => { release = r; });
+  const {card, clock, sent} = make(async () => { await gate; return {status: 200, who: 'Marco', via: 'dashboard'}; });
+  card.choose('Yes');
+  await clock.advance(5000); await tick();
+  assert.equal(card.getState().phase, 'sending');
+  assert.equal(card.undo(), false);
+  assert.equal(card.choose('No').ok, false);
+  assert.equal(card.getState().phase, 'sending');
+  release(); await tick(); await tick();
+  assert.equal(card.getState().phase, 'sent');
+  assert.equal(sent.length, 1);
+});

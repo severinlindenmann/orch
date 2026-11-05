@@ -1,5 +1,5 @@
 /* Question card logic, no DOM. One tap sends nothing for 5 seconds (Undo); then exactly one send.
-   idle -> pending -> sent | undone | conflict | error ;  a reload with an unsent pending answer -> notsent.
+   idle -> pending -> sending -> sent | undone | conflict | error ;  a reload with an unsent pending answer -> notsent.
    Clock, send function, storage and id source are injected so tests need no browser and no real time. */
 (function (root, factory) {
   const api = factory();
@@ -53,7 +53,7 @@
     }
 
     function choose(text) {
-      if (state.phase === 'pending') return {ok: false, error: 'Already answering.'};
+      if (state.phase === 'pending' || state.phase === 'sending') return {ok: false, error: 'Already answering.'};
       const error = validate(text);
       if (error) return {ok: false, error};
       const actionId = newId();
@@ -77,6 +77,7 @@
       if (state.phase !== 'pending') return;
       stopTimers();
       const {answer, actionId} = state;
+      set({phase: 'sending', answer, actionId});
       let res;
       try { res = await opts.send(answer, actionId); } catch (e) { res = {status: 0, message: 'Could not reach orch.'}; }
       clear();
