@@ -126,6 +126,8 @@ actor MockRelay: RelayAPI {
     func answer(questionMessageId: String, answer: String) async throws -> String {
         try await check()
         guard all.contains(where: { $0.id == questionMessageId }) else { throw RelayError.api(status: 404, code: "not_found", message: "Question not found.") }
+        // Simulator evidence hook `-mockRace YES`: another phone answered "DATE" a moment before this one.
+        if UserDefaults.standard.bool(forKey: "mockRace"), answered[questionMessageId] == nil { answered[questionMessageId] = "DATE" }
         if let a = answered[questionMessageId] {
             throw RelayError.api(status: 409, code: "already_answered", message: "This question was already answered: \(a).")
         }
