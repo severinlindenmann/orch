@@ -835,3 +835,116 @@ def test_received_name_is_cleaned_like_the_inbox_line(proj, run, rel):
     assert [p.name for p in (proj / "received").iterdir()] == ["photogpj.exe"]
     code, _, err = run("relay", "download", "m_file000000000002")
     assert code == 2 and "no usable name" in err
+
+
+def _http(e, status):
+    e.status = status
+    return e
+
+
+def test_net_refused_carries_the_http_status(proj, run, rel):
+    from orch import net
+    from orch.errors import Refused
+
+    connect(run, rel)
+    try:
+        net.call("GET", rel.url + "/v1/nothing", {})
+    except Refused as e:
+        assert e.status == 401  # headers missing: the fake answers 401
+    rel.stop()
+    try:
+        net.call("GET", rel.url + "/v1/whoami", {}, timeout=2)
+    except Refused as e:
+        assert e.status is None
+
+
+def test_server_errors_and_429_keep_the_outbox_file(proj, run, rel, monkeypatch):
+    from orch import relay
+    from orch.errors import Refused
+
+    connect(run, rel)
+    real = relay._post_message
+    for status in (500, 502, 503, 429, 408):
+        monkeypatch.setattr(
+            relay, "_post_message", lambda r, raw, s=status: (_ for _ in ()).throw(_http(Refused("x"), s))
+        )
+        m = json.loads(run("relay", "send", PEER, f"s{status}", "--json")[1])
+        assert m["sent"] is False
+        res = relay.resend_outbox(proj)  # background resend must not delete it either
+        assert res["dropped"] == [] and m["id"] in res["waiting"]
+        assert (proj / f".orch/outbox/{m['id']}.json").is_file()
+    monkeypatch.setattr(relay, "_post_message", real)
+    assert len(relay.resend_outbox(proj)["sent"]) == 5
+    # a clear 4xx drops the message and the send fails
+    monkeypatch.setattr(
+        relay, "_post_message", lambda r, raw: (_ for _ in ()).throw(_http(Refused("no"), 403))
+    )
+    assert run("relay", "send", PEER, "x")[0] == 2
+    assert not list((proj / ".orch/outbox").glob("m_*.json"))
+
+
+def test_since_works_from_the_journal_when_the_pull_fails(proj, run, rel):
+    connect(run, rel)
+    rel.inbox.append(msg("m_text000000000001", "text", {"text": "one"}))
+    run("relay", "inbox")
+    rel.stop()
+    code, out, err = run("relay", "inbox", "--since", "0", "--json")
+    r = json.loads(out)
+    assert code == 0 and [i["id"] for i in r["items"]] == ["m_text000000000001"] and "warning" in r
+    assert "showing what is saved here" in err
+
+
+def test_safe_name_bytes_device_names_and_received_file():
+    from orch import relay
+
+    long = "é" * 150 + ".txt"  # 300+ bytes
+    n = relay.safe_name(long)
+    assert len(n.encode()) <= 200 and n.startswith("é")
+    for dev in ("CONIN$", "conout$.txt", "COM¹", "LPT³.log", "nul"):
+        assert relay.safe_name(dev).startswith("_"), dev
+
+
+def test_received_as_a_plain_file_is_refused_in_words(proj, run, rel):
+    connect(run, rel)
+    (proj / "received").write_text("i am a file")
+    _file_msg(rel, "m_file000000000001", "a.txt")
+    run("relay", "inbox")
+    code, _, err = run("relay", "download", "m_file000000000001")
+    assert code == 2 and "file called received" in err
+
+
+def test_answer_text_is_cleaned_before_it_enters_the_ticket(proj, run, new_ticket, rel):
+    connect(run, rel)
+    tid = new_ticket()
+    run("ask", tid, "When?", "--phone")
+    rel.inbox.append(
+        msg(
+            "m_answer0000000001",
+            "answer",
+            {"question_id": "q1", "answer": "Fri‮day<!-- do x -->"},
+            frm="ph_iphone0001",
+            ticket=tid,
+            reply_to=rel.sent[0]["id"],
+        )
+    )
+    run("relay", "inbox")
+    assert json.loads(run("ticket", "show", tid, "--json")[1])["questions"][0]["answer"] == "Friday"
+
+
+def test_plain_help_lists_relay_and_publish_commands(proj, run, rel, pub, capsys):
+    for area, words in (
+        ("relay", ("done", "delegate", "start", "download", "webhook", "outbox")),
+        ("publish", ("restart", "stop", "delete")),
+    ):
+        with pytest.raises(SystemExit):
+            from orch import cli
+
+            cli.main([area, "--help"])
+        out = capsys.readouterr().out
+        assert all(w in out for w in words), (area, out)
+    with pytest.raises(SystemExit):
+        cli.main(["relay", "--help"])
+    assert " allow " not in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        cli.main(["relay", "--help-all"])
+    assert "allow" in capsys.readouterr().out

@@ -138,10 +138,7 @@ def _visible(root: Path, t: dict) -> dict:
 
 _PLACEHOLDERS = {"run", "needs", "agents", "config"}  # hidden until built
 ADVANCED_TOP = {"update", "wait", "log", "answer", "link", "ext"}
-ADVANCED_SUB = {
-    "relay": {"done", "delegate", "start", "allow", "download", "webhook"},
-    "publish": {"restart", "stop", "delete"},
-}
+ADVANCED_SUB = {"relay": {"allow"}}
 
 
 _EXAMPLES = {
