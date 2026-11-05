@@ -6,7 +6,7 @@ import XCTest
         let app = XCUIApplication()
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["Pilatus Workspace"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Invoice CSV export"].waitForExistence(timeout: 15))
         sleep(2)
         // The tab bar is deliberately capped at xxxLarge (like system tab bars); everything else must scale.
         let tabBar: Set<String> = ["Home", "Questions", "Ask", "Settings", "2"]
