@@ -1,4 +1,6 @@
 import json
+import os
+import socket
 import time
 import urllib.request
 
@@ -9,11 +11,28 @@ from orch_dashboard.cli import main
 
 
 def _free_port() -> int:
-    import socket
-
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+@pytest.fixture
+def kills(monkeypatch):
+    """Record every real signal; signal 0 (is it alive?) still goes to the OS. No test sends a real signal to a
+    pid it did not start."""
+    sent, real = [], os.kill
+
+    def fake(pid, sig):
+        if sig == 0:
+            return real(pid, 0)
+        sent.append((pid, sig))
+
+    monkeypatch.setattr(os, "kill", fake)
+    return sent
+
+
+def _rundir(ws):
+    return ws / ".orch" / "run" / "dashboard"
 
 
 def test_start_status_stop(ws, capsys):
@@ -25,8 +44,9 @@ def test_start_status_stop(ws, capsys):
         assert main(["--dir", str(ws), "status", "--json"]) == 0
         st = json.loads(capsys.readouterr().out)
         assert st == {"running": True, "pid": cur["pid"], "url": service.url(cur["port"])}
+        assert (_rundir(ws) / "server.json").is_file() and not (ws / ".orch/addons/dashboard").exists()
     finally:
-        assert service.stop(ws)
+        assert service.stop(ws) == "stopped"
     for _ in range(50):
         if not service.alive(cur["pid"]):
             break
@@ -60,15 +80,14 @@ def test_planted_module_in_the_workspace_is_not_run(ws):
 
 
 def test_start_refuses_when_the_port_answers_with_another_nonce(ws, monkeypatch):
-    monkeypatch.setattr(service, "_nonce_of", lambda port: "someone-else")
+    monkeypatch.setattr(service, "ident", lambda port: {"nonce": "someone-else", "pid": 4242})
     with pytest.raises(RuntimeError, match="Something else answers"):
         service.start(ws, port=_free_port())
-    assert service.running(ws) is None and not list((ws / ".orch/addons/dashboard").glob("ready-*"))
+    monkeypatch.undo()
+    assert service.running(ws) is None and not list(_rundir(ws).glob("ready-*"))
 
 
 def test_busy_port_falls_back_to_a_free_one(ws, monkeypatch):
-    import socket
-
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         s.listen()
@@ -77,14 +96,51 @@ def test_busy_port_falls_back_to_a_free_one(ws, monkeypatch):
         cur = service.start(ws)
         try:
             assert cur["port"] != busy
-            with urllib.request.urlopen(service.url(cur["port"]) + "/ready", timeout=5) as r:
-                assert r.status == 200
+            assert service.ident(cur["port"])["pid"] == cur["pid"]
         finally:
             service.stop(ws)
 
 
-def test_stale_file_is_dropped(ws):
-    f = ws / ".orch/addons/dashboard/server.json"
-    f.parent.mkdir(parents=True)
-    f.write_text(json.dumps({"pid": 999999, "port": 1}))
-    assert service.running(ws) is None and not f.exists()
+@pytest.mark.parametrize("pid", [-1, 0, 1, "parent", "self"])
+def test_committed_pid_file_is_never_signalled(ws, kills, capsys, pid):
+    """A repo can force-add .orch/run/dashboard/server.json (or an old .orch/addons/dashboard/server.json)."""
+    pid = {"parent": os.getppid(), "self": os.getpid()}.get(pid, pid)
+    rec = {"pid": pid, "port": _free_port(), "nonce": "0" * 32}
+    _rundir(ws).mkdir(parents=True)
+    (_rundir(ws) / "server.json").write_text(json.dumps(rec))
+    (ws / ".orch/addons/dashboard").mkdir(parents=True)
+    (ws / ".orch/addons/dashboard/server.json").write_text(json.dumps(rec))
+    assert service.running(ws) is None
+    assert main(["--dir", str(ws), "stop", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["stopped"] is False
+    assert kills == []
+    assert main(["--dir", str(ws), "status", "--json"]) == 1  # status is not fooled either
+
+
+def test_live_pid_with_the_wrong_server_is_not_signalled(ws, kills, monkeypatch):
+    rec = {"pid": os.getpid(), "port": 1, "nonce": "a" * 32}
+    _rundir(ws).mkdir(parents=True)
+    (_rundir(ws) / "server.json").write_text(json.dumps(rec))
+    monkeypatch.setattr(service, "ident", lambda port: {"nonce": "a" * 32, "pid": 999999})  # pid differs
+    assert service.stop(ws) == "not verified" and kills == []
+
+
+def test_symlinks_are_never_followed(ws, tmp_path):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me")
+    _rundir(ws).mkdir(parents=True)
+    (_rundir(ws) / "server.json").symlink_to(victim)
+    assert service.running(ws) is None and victim.read_text() == "keep me"
+    (_rundir(ws) / "server.log").symlink_to(victim)
+    with pytest.raises(RuntimeError, match="symbolic link"):
+        service.start(ws, port=_free_port())
+    assert victim.read_text() == "keep me"
+
+
+def test_run_folder_symlink_is_refused(ws, tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (ws / ".orch/run").symlink_to(elsewhere, target_is_directory=True)
+    with pytest.raises(RuntimeError, match="symbolic link"):
+        service.start(ws, port=_free_port())
+    assert list(elsewhere.iterdir()) == []

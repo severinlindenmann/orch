@@ -1,6 +1,8 @@
 import json
+import os
 import time
 
+import pytest
 from conftest import add_ticket
 
 from orch_scheduler import service
@@ -12,13 +14,13 @@ def test_start_status_stop(ws):
     assert service.running_pid(ws) == pid
     assert service.start(ws) == pid  # no second one
     assert main(["--dir", str(ws), "status"]) == 0
-    assert service.stop(ws)
+    assert service.stop(ws) == "stopped"
     for _ in range(30):
         if service.running_pid(ws) is None:
             break
         time.sleep(0.1)
     assert main(["--dir", str(ws), "status"]) == 1
-    assert not service.stop(ws)
+    assert service.stop(ws) == "not running"
 
 
 def test_list(ws):
@@ -49,13 +51,67 @@ def test_repeat_refuses_plainly(ws, capsys):
 def test_planted_module_in_the_workspace_is_not_run(ws):
     (ws / "orch_scheduler.py").write_text("open('PLANTED', 'w').write('x')\n")
     (ws / "json.py").write_text("open('PLANTED', 'w').write('x')\n")
-    pid = service.start(ws)
+    pid = service.start(ws)  # returns only once the child recorded itself (so it imported and ran)
     try:
-        for _ in range(30):  # give the child time to import
-            if (ws / ".orch/addons/scheduler/scheduler.log").read_text().strip():
-                break
-            time.sleep(0.1)
         assert service.running_pid(ws) == pid
     finally:
         service.stop(ws)
     assert not (ws / "PLANTED").exists()
+
+
+@pytest.fixture
+def kills(monkeypatch):
+    """Record every real signal; signal 0 (is it alive?) still goes to the OS."""
+    sent, real = [], os.kill
+
+    def fake(pid, sig):
+        if sig == 0:
+            return real(pid, 0)
+        sent.append((pid, sig))
+
+    monkeypatch.setattr(os, "kill", fake)
+    return sent
+
+
+@pytest.mark.parametrize("pid", [-1, 0, 1, "parent", "self"])
+def test_committed_pid_file_is_never_signalled(ws, kills, capsys, pid):
+    """A repo can force-add .orch/run/scheduler/scheduler.json (or the old .orch/addons/scheduler/scheduler.pid)."""
+    pid = {"parent": os.getppid(), "self": os.getpid()}.get(pid, pid)
+    started = service.proc_start(pid) or "x" if isinstance(pid, int) and pid > 1 else "x"
+    d = ws / ".orch/run/scheduler"
+    d.mkdir(parents=True)
+    (d / "scheduler.json").write_text(json.dumps({"pid": pid, "nonce": "0" * 32, "started": started}))
+    (ws / ".orch/addons/scheduler").mkdir(parents=True, exist_ok=True)
+    (ws / ".orch/addons/scheduler/scheduler.pid").write_text(str(pid))
+    assert service.running_pid(ws) is None
+    assert main(["--dir", str(ws), "stop", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["stopped"] is False
+    assert kills == []
+
+
+def test_symlinks_are_refused(ws, tmp_path):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me")
+    d = ws / ".orch/run/scheduler"
+    d.mkdir(parents=True)
+    (d / "scheduler.log").symlink_to(victim)
+    assert main(["--dir", str(ws), "start"]) == 2
+    assert victim.read_text() == "keep me"
+    (d / "scheduler.log").unlink()
+    (d / "scheduler.json").symlink_to(victim)
+    assert service.running_pid(ws) is None and victim.read_text() == "keep me"
+
+
+def test_data_folder_symlink_is_refused(ws, tmp_path):
+    from orch_scheduler.runner import sdir
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    import shutil
+
+    shutil.rmtree(ws / ".orch/addons/scheduler", ignore_errors=True)
+    (ws / ".orch/addons").mkdir(parents=True, exist_ok=True)
+    (ws / ".orch/addons/scheduler").symlink_to(elsewhere, target_is_directory=True)
+    with pytest.raises(RuntimeError, match="symbolic link"):
+        sdir(ws)
+    assert list(elsewhere.iterdir()) == []

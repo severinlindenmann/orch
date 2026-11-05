@@ -160,7 +160,8 @@ def a9(e):
     check(not lst.get("scheduler", {}).get("active"), f"list says active: {lst.get('scheduler')}")
     check("scheduler" not in [a["name"] for a in _dash_tabs(e, ws)], "tab from a file alone")
     # an empty background run does nothing either: no process, no log
-    check(not list((ws / ".orch/addons/scheduler").glob("*.pid")), "a process was started")
+    check(not list((ws / ".orch/addons/scheduler").glob("*.pid")) and not (ws / ".orch/run/scheduler").exists(),
+          "a process was started")
     # turning it on is the user's action
     check(e.addon_add(ws, "scheduler")[0] == 0, "addon add scheduler in the clone")
     check(e.sh(["orch", "scheduler", "list"], cwd=ws)[0] == 0, "command not available after the user turned it on")
@@ -440,6 +441,9 @@ def a17(e):
         check(urls["Start1"] != urls["Start2"], f"two dashboards on one port: {urls}")
         rc, out, _ = e.sh(["orch", "start"], cwd=one)  # again: same processes, plain lines
         check(rc == 0 and "Started in Start1:" in out and urls["Start1"] in out and "scheduler" in out, f"start text: {out}")
+        check(".orch/run/" in (one / ".gitignore").read_text().splitlines(), "runtime files not gitignored")
+        check((one / ".orch/run/dashboard/server.json").is_file() and (one / ".orch/run/scheduler/scheduler.json").is_file(),
+              "runtime files not in .orch/run/")
         st = e.orchj(e.tmp, "status")
         check(sorted(w["name"] for w in st) == ["Start1", "Start2"], f"status: {st}")
         check(all(len(w["addons"]) == 2 for w in st), f"status add-ons: {st}")

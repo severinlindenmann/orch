@@ -12,20 +12,26 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import orchcli
+from . import orchcli, runfiles
 from .cron import fmt
 
 DEFAULT_AGENT = 'claude -p "{prompt}"'
-GITIGNORE = "scheduler.pid\nscheduler.log\nlocks/\nlogs/\nstate.json\nruns.jsonl\n"
+GITIGNORE = "locks/\nlogs/\nstate.json\nruns.jsonl\n"
 
 
 def sdir(root: Path) -> Path:
+    """.orch/addons/scheduler/ with logs/ and locks/. A symlink anywhere on that path is refused (a repo could aim
+    it at files outside); files in it are written without following symlinks (runfiles.open_append, os.replace)."""
     d = root / ".orch" / "addons" / "scheduler"
+    for p in (root / ".orch", root / ".orch" / "addons", d, d / "logs", d / "locks"):
+        if p.is_symlink():
+            raise RuntimeError(f"{p} is a symbolic link; the scheduler does not use it. Remove it and try again.")
     (d / "logs").mkdir(parents=True, exist_ok=True)
     (d / "locks").mkdir(exist_ok=True)
     gi = d / ".gitignore"
-    if not gi.exists():
-        gi.write_text(GITIGNORE)
+    if not gi.exists() and not gi.is_symlink():
+        with runfiles.open_append(gi) as f:
+            f.write(GITIGNORE)
     return d
 
 
@@ -88,6 +94,10 @@ def build_argv(template: str, prompt: str) -> list[str]:
 
 
 def _alive(pid: int) -> bool:
+    if not runfiles.valid_pid(pid):
+        return False
+    if os.name == "nt":
+        return runfiles.alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -141,7 +151,7 @@ class Runner:
         os.close(fd)
         log_path = d / "logs" / f"{tid}-{now.strftime('%Y%m%dT%H%M%SZ')}.log"
         argv = build_argv(template, prompt)
-        with open(log_path, "a") as f:
+        with runfiles.open_append(log_path) as f:
             f.write(f"# start {fmt(now)} ticket {tid} ({reason})\n# command {shlex.join(argv[:1])} ...\n")
             f.flush()
             try:
@@ -154,14 +164,15 @@ class Runner:
                 update_state(self.root, tid, last_exit=127, last_log=log_path.name)
                 orchcli.log(self.root, tid, f"Scheduler could not start the agent ({e.__class__.__name__})")
                 return False
-        lock.write_text(str(proc.pid))
+        with runfiles.open_append(lock) as f:  # created above with O_EXCL: ours, not a symlink
+            f.write(str(proc.pid))
         self.runs[tid] = Run(tid, proc, log_path, lock, now, reason, time.monotonic())
         orchcli.log(self.root, tid, f"Scheduler started an agent run ({reason}). Log: {log_path.name}")
         return True
 
     def _history(self, tid: str, started: datetime, took: float, code: int) -> None:
         """One line per finished run in runs.jsonl (the dashboard view reads it)."""
-        with open(sdir(self.root) / "runs.jsonl", "a") as f:
+        with runfiles.open_append(sdir(self.root) / "runs.jsonl") as f:
             f.write(json.dumps({"ticket": tid, "at": fmt(started), "took": round(took), "exit": code}) + "\n")
 
     def reap(self, now: datetime, wait: bool = False) -> list[str]:
@@ -171,7 +182,7 @@ class Runner:
             code = r.proc.wait() if wait else r.proc.poll()
             if code is None:
                 continue
-            with open(r.log_path, "a") as f:
+            with runfiles.open_append(r.log_path) as f:
                 f.write(f"# end {fmt(datetime.now(UTC))} exit {code}\n")
             r.lock.unlink(missing_ok=True)
             self._history(tid, r.started, time.monotonic() - r.t0, code)

@@ -18,10 +18,13 @@ f = Path(os.environ["ORCH_ROOT"], "svc.txt")
 cmd = sys.argv[1]
 if cmd == "start":
     if Path(os.environ["ORCH_ROOT"], "fail.txt").exists():
-        print("Refused: port is busy", file=sys.stderr)
+        print("Refused: port is busy\x1b]0;evil\x07", file=sys.stderr)
         sys.exit(2)
     f.write_text("on", encoding="utf-8")
-    print(json.dumps({"running": True, "pid": int(os.environ["TEST_ALIVE_PID"]), "url": "http://127.0.0.1:18420"}))
+    bad = Path(os.environ["ORCH_ROOT"], "bad.json")
+    over = json.loads(bad.read_text(encoding="utf-8")) if bad.exists() else {}
+    print(json.dumps({"running": True, "pid": int(os.environ["TEST_ALIVE_PID"]), "url": "http://127.0.0.1:18420",
+                      **over}))
 elif cmd == "stop":
     was = f.exists()
     f.unlink(missing_ok=True)
@@ -87,7 +90,9 @@ def test_start_json_and_failure(svc, proj, run):
     code, out, err = run("start", "--json")
     assert code == 2 and "hello did not start" in err
     rows = json.loads(out.split('\n{"error"')[0])["addons"]
-    assert rows == [{"addon": "hello", "running": False, "error": "port is busy"}]
+    assert rows == [
+        {"addon": "hello", "running": False, "error": "port is busy]0;evil"}
+    ]  # control chars gone
     assert services.status() == []
 
 
@@ -186,3 +191,41 @@ def test_dead_pids_are_pruned(proj):
 
 def test_start_stop_status_are_reserved_names():
     assert {"start", "stop", "status"} <= addons.RESERVED
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://evil.example:80/",
+        "https://127.0.0.1:8420",
+        "http://127.0.0.1:8420/\x1b[2J",
+        "javascript:alert(1)",
+        42,
+    ],
+)
+def test_only_local_urls_are_printed_or_opened(svc, proj, run, monkeypatch, url):
+    (proj / "bad.json").write_text(json.dumps({"url": url}), encoding="utf-8")
+    opened = []
+    monkeypatch.setattr("webbrowser.open", lambda u: opened.append(u))
+    code, out, _ = run("start")
+    assert code == 0 and "running (pid " in out and str(url) not in out and "\x1b" not in out
+    assert opened == [] and all("url" not in a for w in services.status() for a in w["addons"])
+
+
+@pytest.mark.parametrize("pid", [-1, 0, 1, True, "12"])
+def test_bad_pids_from_an_addon_are_not_recorded(svc, proj, run, pid):
+    (proj / "bad.json").write_text(json.dumps({"pid": pid}), encoding="utf-8")
+    assert run("start")[0] == 0
+    assert services.status() == []
+    assert not any(services.pid_alive(p) for p in (-1, 0, 1))
+
+
+def test_add_on_error_text_has_no_escape_sequences(svc, proj, run):
+    (proj / "fail.txt").write_text("x", encoding="utf-8")
+    code, out, err = run("start")
+    assert code == 2 and "port is busy" in out and "\x1b" not in out and "\x07" not in out
+
+
+def test_start_keeps_runtime_files_out_of_git(svc, proj, run):
+    run("start")
+    assert ".orch/run/" in (proj / ".gitignore").read_text(encoding="utf-8").splitlines()

@@ -270,7 +270,8 @@ def _home_path(p: str) -> str:
 def _service_line(r: dict) -> str:
     if r.get("error"):
         return f"  {r['addon']:<12}did not start: {r['error']}"
-    return f"  {r['addon']:<12}" + (r.get("url") or f"running (pid {r.get('pid')})")
+    url = services.local_url(r.get("url"))
+    return f"  {r['addon']:<12}" + (url or f"running (pid {r.get('pid')})")
 
 
 def _pick(running: list[dict]) -> list[Path]:
@@ -306,7 +307,7 @@ def _services_cmd(args, root: Path) -> None:
             print(f"Started in {root.name}:")
             print("\n".join(_service_line(r) for r in rows))
             print("Stop: orch stop")
-        url = next((r["url"] for r in rows if r.get("url") and not r.get("error")), None)
+        url = next((services.local_url(r.get("url")) for r in rows if services.local_url(r.get("url"))), None)
         if url and not args.no_open and not args.json and sys.stdout.isatty():
             import webbrowser
 

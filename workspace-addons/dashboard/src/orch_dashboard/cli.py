@@ -69,10 +69,23 @@ def _service(args, root: Path) -> int:
         u = service.url(cur["port"])
         out({"running": True, "pid": cur["pid"], "url": u}, f"Dashboard for {root.name}: {u}  (stop: orch dashboard stop)")
     elif args.cmd == "stop":
-        stopped = service.stop(root)
-        out({"stopped": stopped}, "Dashboard stopped." if stopped else "The dashboard was not running.")
+        try:
+            res = service.stop(root)
+        except RuntimeError as e:
+            res = "not verified: " + str(e)
+        if res == "stopped":
+            out({"stopped": True}, "Dashboard stopped.")
+        elif res == "not running":
+            out({"stopped": False}, "The dashboard was not running.")
+        else:
+            note = ("A file in .orch/run/dashboard/ names a process that is not this dashboard; nothing was stopped."
+                    if res == "not verified" else res)
+            out({"stopped": False, "note": note}, note)
     else:
-        cur = service.running(root)
+        try:
+            cur = service.running(root)
+        except RuntimeError:
+            cur = None
         data = {"running": bool(cur), **({"pid": cur["pid"], "url": service.url(cur["port"])} if cur else {})}
         out(data, f"Dashboard running: {data['url']}" if cur else "The dashboard is not running.")
         return 0 if cur else 1

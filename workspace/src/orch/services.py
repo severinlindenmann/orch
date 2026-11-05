@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import addons
+from orch import addons, skills
 from orch.errors import Refused
 
 
@@ -25,23 +26,27 @@ def running_path() -> Path:
 
 
 def pid_alive(pid: int) -> bool:
-    if not isinstance(pid, int) or pid <= 0:
+    """True when pid > 1 names a running process. Never signals: 0, 1 and negatives are refused."""
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
         return False
-    if os.name == "nt":  # os.kill(pid, 0) would end the process on Windows
+    if (
+        os.name == "nt"
+    ):  # os.kill(pid, 0) would end the process on Windows; exit code 259 is not proof of life
         import ctypes
 
         k = ctypes.windll.kernel32
         k.OpenProcess.restype = ctypes.c_void_p
         k.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong)
-        k.GetExitCodeProcess.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong))
+        k.WaitForSingleObject.argtypes = (ctypes.c_void_p, ctypes.c_ulong)
+        k.WaitForSingleObject.restype = ctypes.c_ulong
         k.CloseHandle.argtypes = (ctypes.c_void_p,)
-        h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        h = k.OpenProcess(0x00100000 | 0x1000, False, pid)  # SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION
         if not h:
             return False
-        code = ctypes.c_ulong()
-        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
-        k.CloseHandle(h)
-        return bool(ok) and code.value == 259  # STILL_ACTIVE
+        try:
+            return k.WaitForSingleObject(h, 0) == 0x102  # WAIT_TIMEOUT: still running
+        finally:
+            k.CloseHandle(h)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -51,6 +56,14 @@ def pid_alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+URL_RE = re.compile(r"^http://(127\.0\.0\.1|localhost):[0-9]{1,5}(/[!-~]*)?$")
+
+
+def local_url(u: object) -> str | None:
+    """Only a link to this computer (http://127.0.0.1:<port> or localhost) is printed or opened."""
+    return u if isinstance(u, str) and len(u) <= 200 and URL_RE.match(u) else None
 
 
 def _load() -> list[dict]:
@@ -67,6 +80,7 @@ def _load() -> list[dict]:
         and isinstance(e.get("workspace"), str)
         and isinstance(e.get("addon"), str)
         and isinstance(e.get("pid"), int)
+        and (e.get("url") is None or local_url(e["url"]))
     ]
 
 
@@ -121,6 +135,11 @@ def _call(root: Path, name: str, m: dict, sub: str) -> dict:
     return data
 
 
+def _printable(v: object) -> str:
+    """Add-on text for the terminal: no control characters (no escape sequences), at most 200 characters."""
+    return "".join(c for c in str(v) if c.isprintable())[:200]
+
+
 def _workspace_root(root: Path) -> Path:
     if not (root / ".orch").is_dir():
         raise Refused(
@@ -132,16 +151,18 @@ def _workspace_root(root: Path) -> Path:
 def start(root: Path) -> list[dict]:
     """Start the background process of every active add-on here. One row per add-on."""
     root = _workspace_root(root).resolve()
+    skills.ensure_gitignore(root)  # .orch/run/ (runtime files of the add-ons) stays out of git
     rows = []
     entries = [e for e in running() if e["workspace"] != str(root)]
     for name, m in _services(root).items():
         res = _call(root, name, m, "start")
         row = {"addon": name, "running": bool(res.get("running")) and "error" not in res}
-        for k in ("pid", "url"):
-            if res.get(k) is not None:
-                row[k] = res[k]
+        if pid_alive(res.get("pid")):
+            row["pid"] = res["pid"]
+        if local_url(res.get("url")):
+            row["url"] = res["url"]
         if "error" in res:
-            row["error"] = str(res["error"])
+            row["error"] = _printable(res["error"])
         rows.append(row)
         if row["running"] and isinstance(row.get("pid"), int):
             entries.append(
@@ -167,7 +188,7 @@ def stop(root: Path) -> list[dict]:
         res = _call(root, name, m, "stop")
         row = {"addon": name, "stopped": bool(res.get("stopped"))}
         if "error" in res:
-            row["error"] = str(res["error"])
+            row["error"] = _printable(res["error"])
         rows.append(row)
     _save([e for e in running() if e["workspace"] != str(root)])
     return rows

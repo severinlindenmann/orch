@@ -99,6 +99,14 @@ An active add-on with `background = true` runs one process per workspace, starte
   picks a number or `all`; `orch stop <path|name>` / `--all` without asking. It calls `stop` on each active background add-on there.
   An add-on that is no longer on there is never run; its process ends by itself.
 - `orch status [--json]`: `running.json` grouped by workspace `[{"workspace", "name", "addons": [{"addon", "pid", "url"?}]}]`.
+- Runtime files of the background process (pid, port, nonce, log) live in `.orch/run/<name>/` (gitignored, 0700). A repo can
+  still force-add files there, so an add-on never trusts them alone: no symlinks are followed (`.orch/run` or the folder being a
+  symlink is refused; reads with `O_NOFOLLOW`, writes as a new file + rename), a pid counts only when it is > 1, and before any
+  signal the add-on checks the process is its own (dashboard: `GET /ready` answers the nonce and the pid from the record;
+  scheduler: the start time of that pid and, on POSIX, its command line `orch_scheduler --dir <root>`). Not verified → nothing is
+  signalled; `stop` says so (`{"stopped": false, "note"}`), and the stale file is replaced on the next `start`.
+- The core prints or opens only `url`s of the form `http://127.0.0.1:<port>` / `http://localhost:<port>`, ignores pids ≤ 1, and
+  strips control characters from add-on errors.
 Add-ons without `background` are ignored by all three. The core never starts anything at login.
 
 ## Core commands an add-on may rely on (`--json`)
