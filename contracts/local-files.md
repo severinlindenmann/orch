@@ -6,7 +6,7 @@ A workspace is any folder (git or not). Nothing needs git. Everything orch write
 AGENTS.md                         one block per orch skill (below)
 CLAUDE.md                         gets the line "@AGENTS.md" if it lacks it (Claude Code reads CLAUDE.md)
 .gitignore                        gets the lines below
-.agents/skills/<name>/SKILL.md    the one real skills folder: orch (init), orch-publish / orch-relay (connect), orch-dashboard / orch-scheduler (addon add), shared skills (relay refresh)
+.agents/skills/<name>/SKILL.md    the one real skills folder: orch (init), orch-publish / orch-relay (connect), orch-<add-on> (addon add, only while active), shared skills (relay refresh)
 .agents/skills/orch-relay/workspaces.json   directory of reachable workspaces (workspaces.schema.json), written by refresh
 .claude/skills  ->  ../.agents/skills      symlink (macOS/Linux) or junction (Windows, no admin needed)
 .orch/
@@ -22,10 +22,10 @@ CLAUDE.md                         gets the line "@AGENTS.md" if it lacks it (Cla
   inbox/<message id>.json         every message received (raw, untrusted). GITIGNORED
   inbox/files/<blob id>/<name>    downloaded file messages. GITIGNORED
   inbox-seen.json                 {"m_…": "2026-11-04T11:00:00Z"} ids already processed. GITIGNORED
-  scheduler/
-    config.toml                   agent = "claude -p {prompt}"  (or "codex exec {prompt}", any CLI)
-    state.json                    {"t_…": {"last_run": "…Z", "next_run": "…Z"}}. GITIGNORED
-    logs/<ticket>-<time>.log      output of each agent run. GITIGNORED
+  config.toml                     one config file; one table per add-on, e.g. [scheduler] agent = "claude -p {prompt}"
+  addons.json                     {"active": {"<name>": {"version", "activated_at"}}}: the ONE switch for an add-on here (addon-manifest.md)
+  addons/<name>/                  the add-on's own folder; only it writes here. GITIGNORED. Kept on remove, deleted with --purge
+    (scheduler: state.json {"t_…": {"last_run", "next_run"}}, logs/<ticket>-<time>.log)
 ```
 
 ## .gitignore lines (added once, by `orch init`)
@@ -35,13 +35,13 @@ CLAUDE.md                         gets the line "@AGENTS.md" if it lacks it (Cla
 .orch/secrets/
 .orch/inbox/
 .orch/inbox-seen.json
-.orch/scheduler/state.json
-.orch/scheduler/logs/
+.orch/addons/
 ```
 
 ## AGENTS.md block
 
 One block per skill, between markers. Tools replace the whole block on update and never touch text outside it.
+Add-on blocks use `<!-- orch:addon:<name> -->` … `<!-- /orch:addon:<name> -->` (addon-manifest.md) and exist only while the add-on is active.
 
 ```
 <!-- orch:begin orch-relay -->
@@ -74,7 +74,7 @@ Reject absolute paths, `..`, drive letters, and symlinks or hard links in archiv
 ## Inbox rules (all clients)
 
 1. `orch relay inbox` downloads new messages, saves each to `.orch/inbox/<id>.json`, acks them on the relay, prints those not in `inbox-seen.json`.
-2. Before acting on a message, the agent (or scheduler) runs `orch relay done <id>`: the id goes into `inbox-seen.json` first, then the work starts.
+2. Before acting on a message, the agent (or an add-on that starts agents) runs `orch relay done <id>`: the id goes into `inbox-seen.json` first, then the work starts.
    A seen id is never processed again. If the run crashes, the work is not redone by itself; the user sees it in the ticket history. There is no exactly-once guarantee.
 3. `delegate` / `start` run only with an allow in `allows.json → given` for the same peer and kind (and key for start):
    - **once**: made by `orch relay allow <id> --once`; bound to that one message id, marked `used: true` when it runs, never valid again.

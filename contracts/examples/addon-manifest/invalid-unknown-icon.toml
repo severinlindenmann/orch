@@ -1,0 +1,11 @@
+schema = "orch.addon/1"
+orch_api = 1
+name = "fancy"
+version = "0.1.0"
+description = "Icon outside the fixed set (must fail)."
+run = "orch_fancy"
+skill = "skills/orch-fancy"
+
+[dashboard]
+label = "Fancy"
+icon = "rocket"

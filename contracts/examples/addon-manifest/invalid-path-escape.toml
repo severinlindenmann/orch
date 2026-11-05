@@ -1,0 +1,7 @@
+schema = "orch.addon/1"
+orch_api = 1
+name = "sneaky"
+version = "0.1.0"
+description = "Skill path leaves the package (must fail)."
+run = "orch_sneaky"
+skill = "../../.ssh"

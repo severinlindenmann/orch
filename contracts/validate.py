@@ -1,4 +1,5 @@
-"""Check every contract example and the publish crypto vector.
+"""Check every contract example (tickets incl. ext.scheduler, messages, workspaces, add-on manifests and views)
+and the publish crypto vector.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py
 """
@@ -7,6 +8,7 @@ import json
 import re
 import struct
 import sys
+import tomllib
 import unicodedata
 from pathlib import Path
 
@@ -56,22 +58,45 @@ def validator(name):
     return Draft202012Validator(schema, format_checker=FormatChecker())
 
 
-V = {"ticket": validator("ticket"), "message": validator("message"), "workspaces": validator("workspaces")}
+V = {
+    "ticket": validator("ticket"),
+    "message": validator("message"),
+    "workspaces": validator("workspaces"),
+    "addon-manifest": validator("addon-manifest"),
+    "addon-view": validator("addon-view"),
+}
+# Add-on ext schemas, keyed by ext name. A ticket's ext.<name> is checked with it (as the CLI does for installed add-ons).
+EXT = {"scheduler": validator("addons/scheduler.ext")}
+
+
+def errors(kind, doc):
+    errs = list(V[kind].iter_errors(doc))
+    if kind == "ticket" and isinstance(doc.get("ext"), dict):
+        for name, data in doc["ext"].items():
+            if name in EXT:
+                errs += list(EXT[name].iter_errors(data))
+    return errs
+
+
+def load(f):
+    return tomllib.loads(f.read_text()) if f.suffix == ".toml" else json.loads(f.read_text())
 
 
 def check(kind, doc, want_ok, label):
-    errs = list(V[kind].iter_errors(doc))
+    errs = errors(kind, doc)
     if bool(errs) == want_ok:
         fails.append(f"{label}: expected {'valid' if want_ok else 'invalid'}, got {errs[0].message if errs else 'valid'}")
 
 
 for kind in V:
-    for f in sorted((HERE / "examples" / kind).glob("*.json")):
-        check(kind, json.loads(f.read_text()), f.name.startswith("valid-"), f"examples/{kind}/{f.name}")
+    for f in sorted((HERE / "examples" / kind).glob("*.*")):
+        check(kind, load(f), f.name.startswith("valid-"), f"examples/{kind}/{f.name}")
 
 review = HERE / "review"
 check("ticket", json.loads((review / "ticket.example.json").read_text()), True, "review/ticket")
 check("workspaces", json.loads((review / "workspaces.example.json").read_text()), True, "review/workspaces")
+check("addon-manifest", load(review / "scheduler.orch-addon.toml"), True, "review/scheduler.orch-addon")
+check("addon-view", load(review / "scheduler.view.example.json"), True, "review/scheduler.view")
 for i, m in enumerate(json.loads((review / "message.examples.json").read_text())):
     check("message", m, True, f"review/message[{i}]")
 

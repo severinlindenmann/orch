@@ -151,6 +151,9 @@ def test_ask_recommend_must_be_option(proj, run, new_ticket):
     assert run("ask", tid, "q?", "--option", "A", "--recommend", "B")[0] == 2
 
 
+@pytest.mark.xfail(
+    reason="contract changed in PR #52; rewritten in lane A (core CLI: generic waiting_on)", strict=True
+)
 def test_wait_until_and_on(proj, run, new_ticket, validate):
     tid = new_ticket()
     assert run("wait", tid, "--until", "2026-11-05T08:00:00+01:00")[0] == 0

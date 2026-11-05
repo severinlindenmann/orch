@@ -2,6 +2,8 @@ import json
 import urllib.error
 import urllib.request
 
+import pytest
+
 from orch_dashboard.data import find_workspace, load_state
 
 
@@ -25,6 +27,7 @@ def test_state_reads_contract_ticket(ws):
     assert len(t["checklist"]) == 3 and t["questions"][0]["answer"] is None
 
 
+@pytest.mark.xfail(reason='contract changed in PR #52; rewritten in lane B (dashboard: scheduler is an add-on view now)', strict=True)
 def test_scheduler_rows(ws):
     rows = load_state(ws)["scheduler"]
     by = {r["ticket"]: r for r in rows}

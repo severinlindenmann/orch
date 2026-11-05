@@ -1,0 +1,33 @@
+{
+  "schema": "orch.addon-view/1",
+  "generated_at": "2026-11-05T08:00:03Z",
+  "notice": "Running. Checks every minute.",
+  "notice_tone": "good",
+  "blocks": [
+    { "type": "stat", "label": "Next run", "value": "in 2 h", "tone": "neutral" },
+    { "type": "stat", "label": "Runs today", "value": 3, "tone": "good" },
+    { "type": "stat", "label": "Failed runs", "value": 1, "tone": "bad" },
+    { "type": "calendar", "days": [
+      { "date": "2026-11-05", "items": [ { "time": "10:00", "title": "Weekly report", "tone": "neutral", "link": "t_wr4n2c" } ] },
+      { "date": "2026-11-06", "items": [] },
+      { "date": "2026-11-09", "items": [ { "time": "08:00", "title": "Check nightly import", "link": "t_sl33p1" } ] }
+    ] },
+    { "type": "list", "title": "Repeating", "items": [
+      { "title": "Weekly report", "subtitle": "Every Monday at 08:00", "chips": [ { "label": "codex" } ], "link": "t_wr4n2c" }
+    ], "more": 0 },
+    { "type": "timeline", "title": "Recent runs", "items": [
+      { "at": "2026-11-05T07:00:12Z", "text": "Weekly report finished", "tone": "good", "link": "t_wr4n2c" },
+      { "at": "2026-11-05T06:00:02Z", "text": "Nightly import failed (exit 1)", "tone": "bad", "link": "t_sl33p1" }
+    ] },
+    { "type": "table", "title": "Run times", "columns": [
+      { "key": "ticket", "label": "Ticket", "type": "text" },
+      { "key": "took", "label": "Took", "type": "duration" },
+      { "key": "at", "label": "When", "type": "date" },
+      { "key": "state", "label": "State", "type": "tone" }
+    ], "rows": [
+      { "cells": { "ticket": "Weekly report", "took": 312, "at": "2026-11-05T07:00:12Z", "state": "good" }, "link": "t_wr4n2c" },
+      { "cells": { "ticket": "Docs", "took": 40, "at": "2026-11-04", "state": "warn" }, "link": "https://github.com/acme/ingest/pull/17" }
+    ] },
+    { "type": "chips", "title": "Agents", "items": [ { "label": "claude" }, { "label": "codex" } ] }
+  ]
+}

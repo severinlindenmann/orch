@@ -2,8 +2,8 @@
   "schema": "orch.ticket/1",
   "id": "t_7k3f9q",
   "title": "Rename field X in ingestion job",
-  "type": "task",
   "status": "waiting",
+  "revision": 7,
   "created_at": "2026-11-04T08:30:00Z",
   "updated_at": "2026-11-04T10:41:00Z",
   "checklist": [
@@ -100,7 +100,6 @@
       "text": "Asked q1 on the phone, waiting"
     }
   ],
-  "wake_at": "2026-11-05T07:00:00Z",
   "waiting_on": {
     "kind": "question",
     "ref": "q1"

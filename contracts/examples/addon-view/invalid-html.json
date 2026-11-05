@@ -1,0 +1,2 @@
+{ "schema": "orch.addon-view/1", "generated_at": "2026-11-05T08:00:03Z",
+  "blocks": [ { "type": "list", "title": "Runs", "items": [ { "title": "<img src=x onerror=alert(1)>" } ] } ] }
