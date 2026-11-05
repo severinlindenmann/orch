@@ -476,3 +476,299 @@ def test_allow_refused_under_agent(proj, run, rel, monkeypatch):
     assert code == 2 and "Ask the human" not in err and "doesn't exist" in err
     monkeypatch.delenv("CLAUDECODE")
     assert run("relay", "allow", "m_deleg00000000010", "--once")[0] == 0
+
+
+# ---- W1-L4 PR1: nothing lost, nothing hijacked ---------------------------------------------------
+
+
+def _start_msg(mid, key, frm=PEER, **body):
+    return msg(mid, "start", {"key": key, "text": "go", **body}, frm=frm)
+
+
+def _allow_start(run, mid):
+    assert run("relay", "allow", mid, "--once")[0] == 0
+
+
+def _tickets(run):
+    return json.loads(run("ticket", "list", "--json")[1])
+
+
+def test_start_key_binds_same_sender_and_open_ticket_only(proj, run, rel):
+    connect(run, rel)
+    rel.inbox += [_start_msg("m_start0000000001a", "weekly-report")]
+    run("relay", "inbox")
+    _allow_start(run, "m_start0000000001a")
+    t1 = json.loads(run("relay", "done", "m_start0000000001a", "--json")[1])["ticket"]
+    # another sender with the same key never lands on that ticket
+    rel.inbox.append(_start_msg("m_start0000000002b", "weekly-report", frm="ws_billing0001"))
+    run("relay", "inbox")
+    _allow_start(run, "m_start0000000002b")
+    t2 = json.loads(run("relay", "done", "m_start0000000002b", "--json")[1])["ticket"]
+    assert t2 and t2 != t1
+    # the same sender with an open ticket reuses it
+    rel.inbox.append(_start_msg("m_start0000000003c", "weekly-report"))
+    run("relay", "inbox")
+    _allow_start(run, "m_start0000000003c")
+    assert json.loads(run("relay", "done", "m_start0000000003c", "--json")[1])["ticket"] == t1
+    # ... and running done again gives the same ticket, not a new one
+    assert json.loads(run("relay", "done", "m_start0000000003c", "--json")[1])["ticket"] == t1
+    # a finished ticket is not reused
+    run("ticket", "status", t1, "done", "--by", "human:tester")
+    rel.inbox.append(_start_msg("m_start0000000004d", "weekly-report"))
+    run("relay", "inbox")
+    _allow_start(run, "m_start0000000004d")
+    t4 = json.loads(run("relay", "done", "m_start0000000004d", "--json")[1])["ticket"]
+    assert t4 not in (t1, t2)
+
+
+def test_done_twice_makes_one_ticket(proj, run, rel):
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000001", "delegate", {"title": "Once", "text": "x"}))
+    run("relay", "inbox")
+    run("relay", "allow", "m_deleg00000000001", "--once")
+    a = json.loads(run("relay", "done", "m_deleg00000000001", "--json")[1])
+    b = json.loads(run("relay", "done", "m_deleg00000000001", "--json")[1])
+    assert a["ticket"] and a["ticket"] == b["ticket"] and a["new"] and not b["new"]
+    assert len(_tickets(run)) == 1
+
+
+def test_done_crash_before_seen_makes_no_second_ticket(proj, run, rel, monkeypatch):
+    from orch import relay
+
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000001", "delegate", {"title": "Once", "text": "x"}))
+    run("relay", "inbox")
+    run("relay", "allow", "m_deleg00000000001", "--once")
+
+    def boom(root, mid):
+        raise RuntimeError("crash")
+
+    real = relay._mark_seen
+    monkeypatch.setattr(relay, "_mark_seen", boom)
+    try:
+        relay.done(proj, "m_deleg00000000001")
+    except RuntimeError:
+        pass
+    monkeypatch.setattr(relay, "_mark_seen", real)
+    assert len(_tickets(run)) == 1
+    rel.acked.clear()
+    items = json.loads(run("relay", "inbox", "--json")[1])  # still pending, and still marked allowed
+    assert items[0]["allowed"] is True
+    r = json.loads(run("relay", "done", "m_deleg00000000001", "--json")[1])
+    assert r["ticket"] == _tickets(run)[0]["id"] and len(_tickets(run)) == 1
+
+
+def test_done_holds_the_lock_and_refuses_when_busy(proj, run, rel):
+    from orch import relay
+
+    connect(run, rel)
+    rel.inbox.append(msg("m_text000000000001", "text", {"text": "x"}))
+    run("relay", "inbox")
+    with relay.locked(proj):
+        try:
+            with relay.locked(proj, wait=0.1):
+                raise AssertionError("second lock must not be granted")
+        except relay.Refused as e:
+            assert "busy" in str(e)
+    assert run("relay", "done", "m_text000000000001")[0] == 0
+
+
+def test_arrivals_journal_and_since(proj, run, rel):
+    connect(run, rel)
+    rel.inbox += [
+        msg("m_text000000000001", "text", {"text": "one"}),
+        msg("m_text000000000002", "text", {"text": "two"}),
+    ]
+    run("relay", "inbox")
+    lines = (proj / ".orch/inbox/arrivals.jsonl").read_text().splitlines()
+    rows = [json.loads(x) for x in lines]
+    assert [r["seq"] for r in rows] == [1, 2] and rows[0]["id"] == "m_text000000000001"
+    assert set(rows[0]) == {"seq", "id", "type", "from", "at"}
+    rel.acked.clear()
+    run("relay", "inbox")  # redelivered: journaled once
+    assert len((proj / ".orch/inbox/arrivals.jsonl").read_text().splitlines()) == 2
+    run("relay", "done", "m_text000000000001")
+    r = json.loads(run("relay", "inbox", "--since", "0", "--json")[1])
+    assert r["next"] == 2 and [i["seq"] for i in r["items"]] == [1, 2]
+    assert r["items"][0]["seen"] is True and r["items"][1]["seen"] is False
+    r = json.loads(run("relay", "inbox", "--since", "1", "--json")[1])
+    assert [i["id"] for i in r["items"]] == ["m_text000000000002"]
+    assert "m_text000000000002" not in json.loads(
+        (proj / ".orch/inbox-seen.json").read_text()
+    )  # marks nothing
+
+
+def test_since_returns_an_answer_the_agent_already_pulled(proj, run, new_ticket, rel):
+    """Regression for review F1 (one answer must not start two runs): an agent's `orch relay inbox` applies
+    and marks the answer; a later `--since` still reports it with applied=<ticket>, so a consumer sees
+    it was handled and starts no second run."""
+    connect(run, rel)
+    tid = new_ticket()
+    assert run("ask", tid, "When?", "--phone")[0] == 0
+    q = rel.sent[0]
+    rel.inbox.append(
+        msg(
+            "m_answer0000000001",
+            "answer",
+            {"question_id": "q1", "answer": "Friday"},
+            frm="ph_iphone0001",
+            ticket=tid,
+            reply_to=q["id"],
+        )
+    )
+    assert "answered q1" in run("relay", "inbox")[1]  # agent pulls first: seen + applied
+    rel.acked.clear()
+    assert run("relay", "inbox")[1].strip() == "No new messages."  # nothing applied twice
+    r = json.loads(run("relay", "inbox", "--since", "0", "--json")[1])
+    (item,) = r["items"]
+    assert item["id"] == "m_answer0000000001" and item["seen"] is True and item["applied"] == tid
+
+
+def test_arrivals_rotate_and_old_cursor_starts_at_oldest_kept(proj, run, rel, monkeypatch):
+    from orch import relay
+
+    connect(run, rel)
+    monkeypatch.setattr(relay, "ARRIVALS_MAX", 6)
+    for n in range(1, 8):
+        rel.inbox.append(msg(f"m_text00000000000{n}", "text", {"text": str(n)}))
+        run("relay", "inbox")
+    rows = [json.loads(x) for x in (proj / ".orch/inbox/arrivals.jsonl").read_text().splitlines()]
+    assert len(rows) <= 6 and rows[-1]["seq"] == 7 and rows[0]["seq"] > 1
+    r = json.loads(run("relay", "inbox", "--since", "0", "--json")[1])
+    assert r["items"][0]["seq"] == rows[0]["seq"] and r["next"] == 7
+
+
+def test_outbox_saves_first_and_resends_the_same_bytes(proj, run, rel, monkeypatch):
+    from orch import relay
+    from orch.errors import Refused
+
+    connect(run, rel)
+
+    def down(root, raw):
+        raise Refused("Can't reach relay.example right now. Check your internet and try again.")
+
+    real = relay._post_message
+    monkeypatch.setattr(relay, "_post_message", down)
+    code, out, _ = run("relay", "send", PEER, "Field X renamed", "--json")
+    m = json.loads(out)
+    assert code == 0 and m["sent"] is False and not rel.sent
+    code, out, _ = run("relay", "send", PEER, "plain")
+    assert "Not sent yet" in out and "next orch relay command" in out
+    files = sorted((proj / ".orch/outbox").glob("m_*.json"))
+    assert len(files) == 2
+    stored = (proj / f".orch/outbox/{m['id']}.json").read_bytes()
+    assert json.loads(stored)["body"] == {"text": "Field X renamed"}
+    assert "m_" in run("relay", "outbox")[1]
+    monkeypatch.setattr(relay, "_post_message", real)
+    # the next relay command sends the stored bytes first; the relay never sees a second message
+    run("relay", "whoami")
+    assert len(rel.sent) == 2 and m["id"] in [s["id"] for s in rel.sent]
+    assert next(s for s in rel.sent if s["id"] == m["id"])["created_at"] == m["created_at"]
+    assert not list((proj / ".orch/outbox").glob("m_*.json"))
+    assert run("relay", "send", PEER, "again")[0] == 0  # no 409 for the resent ids
+    assert run("relay", "outbox")[1].strip() == "Nothing is waiting to be sent."
+
+
+def test_outbox_resend_command_and_refused_message_is_dropped(proj, run, rel, monkeypatch):
+    from orch import relay
+    from orch.errors import Refused
+
+    connect(run, rel)
+    real = relay._post_message
+    monkeypatch.setattr(
+        relay, "_post_message", lambda r, raw: (_ for _ in ()).throw(Refused("Can't reach x"))
+    )
+    run("relay", "send", PEER, "later")
+    monkeypatch.setattr(relay, "_post_message", real)
+    code, out, _ = run("relay", "outbox", "--resend")
+    assert code == 0 and "Sent 1 waiting message" in out and len(rel.sent) == 1
+    # a message the relay refuses is not kept for ever
+    monkeypatch.setattr(
+        relay, "_post_message", lambda r, raw: (_ for _ in ()).throw(Refused("Can't reach x"))
+    )
+    run("relay", "send", "ws_denied0001", "x")
+    monkeypatch.setattr(relay, "_post_message", real)
+    code, out, _ = run("relay", "outbox", "--resend")
+    assert "refused" in out and not list((proj / ".orch/outbox").glob("m_*.json"))
+
+
+def test_outbox_refuses_a_symlinked_file(proj, run, rel):
+    from orch import relay
+
+    connect(run, rel)
+    (proj / ".orch/outbox").mkdir()
+    target = proj / "secret.txt"
+    target.write_text("keep")
+    mid = "m_" + "a" * 16
+    (proj / f".orch/outbox/{mid}.json").symlink_to(target)
+    try:
+        relay._write_outbox(proj, mid, b"{}")
+        raise AssertionError("must not follow the link")
+    except OSError:
+        pass
+    assert target.read_text() == "keep" and relay.outbox_list(proj) == []
+
+
+def test_relay_resolve_wording_is_generic(proj, run, rel):
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
+    connect(run, rel)
+    code, _, err = run("relay", "send", "nobody", "x")
+    assert code == 2 and "No reachable workspace called nobody. Ask the admin." in err
+    assert "Reports" in err
+
+
+def _http(e, status):
+    e.status = status
+    return e
+
+
+def test_net_refused_carries_the_http_status(proj, run, rel):
+    from orch import net
+    from orch.errors import Refused
+
+    connect(run, rel)
+    try:
+        net.call("GET", rel.url + "/v1/nothing", {})
+    except Refused as e:
+        assert e.status == 401  # headers missing: the fake answers 401
+    rel.stop()
+    try:
+        net.call("GET", rel.url + "/v1/whoami", {}, timeout=2)
+    except Refused as e:
+        assert e.status is None
+
+
+def test_server_errors_and_429_keep_the_outbox_file(proj, run, rel, monkeypatch):
+    from orch import relay
+    from orch.errors import Refused
+
+    connect(run, rel)
+    real = relay._post_message
+    for status in (500, 502, 503, 429, 408):
+        monkeypatch.setattr(
+            relay, "_post_message", lambda r, raw, s=status: (_ for _ in ()).throw(_http(Refused("x"), s))
+        )
+        m = json.loads(run("relay", "send", PEER, f"s{status}", "--json")[1])
+        assert m["sent"] is False
+        res = relay.resend_outbox(proj)  # background resend must not delete it either
+        assert res["dropped"] == [] and m["id"] in res["waiting"]
+        assert (proj / f".orch/outbox/{m['id']}.json").is_file()
+    monkeypatch.setattr(relay, "_post_message", real)
+    assert len(relay.resend_outbox(proj)["sent"]) == 5
+    # a clear 4xx drops the message and the send fails
+    monkeypatch.setattr(
+        relay, "_post_message", lambda r, raw: (_ for _ in ()).throw(_http(Refused("no"), 403))
+    )
+    assert run("relay", "send", PEER, "x")[0] == 2
+    assert not list((proj / ".orch/outbox").glob("m_*.json"))
+
+
+def test_since_works_from_the_journal_when_the_pull_fails(proj, run, rel):
+    connect(run, rel)
+    rel.inbox.append(msg("m_text000000000001", "text", {"text": "one"}))
+    run("relay", "inbox")
+    rel.stop()
+    code, out, err = run("relay", "inbox", "--since", "0", "--json")
+    r = json.loads(out)
+    assert code == 0 and [i["id"] for i in r["items"]] == ["m_text000000000001"] and "warning" in r
+    assert "showing what is saved here" in err

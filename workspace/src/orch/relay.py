@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import hashlib
 import hmac
 import json
@@ -11,6 +12,7 @@ import os
 import re
 import secrets
 import shutil
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -21,6 +23,8 @@ ALNUM = "abcdefghijklmnopqrstuvwxyz0123456789"
 MAX_BLOB = 100 * 1024 * 1024
 SKILL_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 SHARED_MARK = ".orch-shared"
+LOCK_STALE = 30  # seconds before a relay.lock counts as left behind
+ARRIVALS_MAX = 5000  # lines in arrivals.jsonl before the oldest half goes
 RESERVED = {"orch", "orch-publish", "orch-relay"}  # plus every "orch-*": add-on skills (see _stage)
 
 
@@ -61,14 +65,65 @@ def seen(root: Path) -> dict:
     return net.read_json(_seen_path(root), {})
 
 
-def mark_seen(root: Path, mid: str) -> bool:
-    """Returns True when the id was new. Written before anyone acts on the message."""
+def _mark_seen(root: Path, mid: str) -> bool:
+    """Returns True when the id was new. Caller holds the relay lock."""
     s = seen(root)
     if mid in s:
         return False
     s[mid] = tickets.now()
     net.write_json(_seen_path(root), s)
     return True
+
+
+def _break_stale(lock: Path) -> bool:
+    """Claim a stale lock by renaming it to a name only we know (atomic: one waiter wins), then check that
+    what we took is really old. A fresh lock a faster waiter just made is put back."""
+    mine = lock.with_name(f"{lock.name}.{secrets.token_hex(4)}")
+    try:
+        os.replace(lock, mine)
+    except OSError:
+        return False
+    try:
+        if time.time() - mine.stat().st_mtime > LOCK_STALE:
+            return True
+        with contextlib.suppress(OSError):
+            os.link(mine, lock)  # no-clobber put-back
+        return False
+    finally:
+        with contextlib.suppress(OSError):
+            mine.unlink()
+
+
+@contextlib.contextmanager
+def locked(root: Path, wait: float = 10.0):
+    """`.orch/relay.lock`: one writer of the inbox files at a time (O_EXCL, works on every OS). Not reentrant.
+    Only the owner removes it again (a token in the file), so a slow holder never frees a successor's lock."""
+    lock = root / ".orch" / "relay.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_hex(8).encode()
+    end = time.monotonic() + wait
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, token)
+            os.close(fd)
+            break
+        except FileExistsError:
+            try:
+                stale = time.time() - lock.stat().st_mtime > LOCK_STALE
+            except OSError:
+                continue
+            if stale and _break_stale(lock):
+                continue
+            if time.monotonic() > end:
+                raise Refused("The relay inbox is busy right now. Try again in a moment.") from None
+            time.sleep(0.02)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            if lock.read_bytes() == token:
+                lock.unlink()
 
 
 def _allows_path(root: Path) -> Path:
@@ -198,13 +253,10 @@ def resolve(root: Path, target: str) -> str:
                 f"{count} {label} are called {target}: {', '.join(h['id'] for h in hits)}. Send to the id."
             )
     names = [w["name"] for w in _directory(root) if w.get("name")]
-    known = (
-        "Workspaces and phones you can message: " + ", ".join(names) + "."
-        if names
-        else "No other workspaces or phones are known yet."
-    )
+    known = " You can message: " + ", ".join(names) + "." if names else ""
     raise Refused(
-        f"No workspace or phone called {target!r}. {known} Run: orch relay refresh to update the list."
+        f"No reachable workspace called {target}. Ask the admin.{known} "
+        "Run: orch relay refresh to update the list."
     )
 
 
@@ -216,9 +268,42 @@ def name_of(root: Path, ws_id: str) -> str:
     return {"phones": "the phones", "admin": "the admin"}.get(ws_id, ws_id)
 
 
+def _unreachable(e: Refused) -> bool:
+    """No answer, a server error (5xx), too many requests (429) or a timeout (408): keep and retry.
+    Only a clear 4xx from the relay means it will never take this message."""
+    status = getattr(e, "status", None)
+    return status is None or status >= 500 or status in (408, 429)
+
+
+def _post_message(root: Path, raw: bytes) -> None:
+    cfg = _cfg(root)
+    headers = {**net.auth_headers(cfg), "Content-Type": "application/json"}
+    net.call_json("POST", cfg["url"] + "/v1/messages", headers, raw, 60)
+
+
+def _outbox(root: Path) -> Path:
+    return root / ".orch" / "outbox"
+
+
+def _write_outbox(root: Path, mid: str, raw: bytes) -> Path:
+    d = _outbox(root)
+    d.parent.mkdir(parents=True, exist_ok=True)
+    d.mkdir(exist_ok=True)
+    if d.is_symlink():
+        raise Refused(".orch/outbox is a link. Not sending.")
+    p = d / f"{mid}.json"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(p, flags, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(raw)
+    return p
+
+
 def _message(
     root: Path, to: str, type_: str, body: dict, ticket: str | None = None, reply_to: str | None = None
 ) -> dict:
+    """Save the exact bytes first, then post. When the relay can't be reached the file stays in
+    .orch/outbox/ and the result carries sent=False: the next orch relay command sends the same bytes."""
     msg = {
         "schema": "orch.msg/1",
         "id": new_id(),
@@ -232,8 +317,56 @@ def _message(
         msg["ticket"] = ticket
     if reply_to:
         msg["reply_to"] = reply_to
-    _api(root, "POST", "/v1/messages", msg)
+    raw = json.dumps(msg).encode("utf-8")
+    path = _write_outbox(root, msg["id"], raw)
+    try:
+        _post_message(root, raw)
+    except Refused as e:
+        if _unreachable(e):
+            return {**msg, "sent": False}
+        path.unlink(missing_ok=True)  # the relay said no: nothing to retry
+        raise
+    path.unlink(missing_ok=True)
     return msg
+
+
+def outbox_list(root: Path) -> list[dict]:
+    """Messages saved but not taken by the relay yet, oldest first: [{id, to, type, created_at}]."""
+    out = []
+    d = _outbox(root)
+    if d.is_symlink() or not d.is_dir():
+        return out
+    for f in sorted(d.glob("m_*.json")):
+        if f.is_symlink() or not re.fullmatch(r"m_[a-z0-9]{16}", f.stem):
+            continue
+        m = net.read_json(f, None)
+        if isinstance(m, dict) and m.get("id") == f.stem:
+            out.append({k: m.get(k) for k in ("id", "to", "type", "created_at")})
+    return sorted(out, key=lambda m: (str(m["created_at"]), m["id"]))
+
+
+def resend_outbox(root: Path) -> dict:
+    """Post what is left in .orch/outbox/, byte for byte (same id: the relay never makes a second message).
+    Returns {"sent": [ids], "waiting": [ids], "dropped": [{id, reason}]}. Stops at the first unreachable."""
+    res: dict = {"sent": [], "waiting": [], "dropped": []}
+    items = outbox_list(root)
+    for n, m in enumerate(items):
+        p = _outbox(root) / f"{m['id']}.json"
+        try:
+            raw = p.read_bytes()
+        except OSError:
+            continue
+        try:
+            _post_message(root, raw)
+        except Refused as e:
+            if _unreachable(e):
+                res["waiting"] = [x["id"] for x in items[n:]]
+                break
+            res["dropped"].append({"id": m["id"], "reason": str(e)})
+        else:
+            res["sent"].append(m["id"])
+        p.unlink(missing_ok=True)
+    return res
 
 
 def send_text(root: Path, target: str, text: str, ticket: str | None = None) -> dict:
@@ -311,33 +444,62 @@ def asked_to_phones(root: Path, tid: str, qid: str) -> bool:
     )
 
 
-def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
-    """(note, ticket id when the answer was applied)."""
-    note = _apply_answer_note(root, msg)
-    asked = net.read_json(_asked_path(root), {}).get(str(msg.get("reply_to")))
-    return note, (asked["ticket"] if note.startswith("answered ") and asked else None)
-
-
-def _apply_answer_note(root: Path, msg: dict) -> str:
-    """Only for a question this workspace sent; ticket and question come from our own record."""
+def _answer_asked(root: Path, msg: dict) -> tuple[dict | None, str]:
+    """(our record of the question, '') when this answer is one we asked for, else (None, why)."""
     asked = net.read_json(_asked_path(root), {}).get(str(msg.get("reply_to")))
     frm, b = str(msg.get("from", "")), msg.get("body", {})
-    if not asked:
-        return "ignored: not an answer to a question this workspace sent"
+    if not isinstance(asked, dict):
+        return None, "ignored: not an answer to a question this workspace sent"
     if not (frm.startswith("ph_") if asked["to"] == "phones" else frm == asked["to"]):
-        return f"ignored: {frm} was not asked"
+        return None, f"ignored: {frm} was not asked"
     if b.get("question_id") != asked["question_id"]:
-        return "ignored: answer is for another question"
+        return None, "ignored: answer is for another question"
+    return asked, ""
+
+
+def _answer_by(msg: dict) -> tuple[str, str]:
+    frm, b = str(msg.get("from", "")), msg.get("body", {})
     by = b.get("answered_by")
     ok_prefix = "human:" if frm.startswith("ph_") else ("human:", "agent:")
     if not (isinstance(by, str) and by.startswith(ok_prefix)):
         by = f"human:{frm}" if frm.startswith("ph_") else f"agent:{frm}"
-    via = "phone" if frm.startswith("ph_") else "relay"
+    return by, ("phone" if frm.startswith("ph_") else "relay")
+
+
+def _applied_ticket(root: Path, msg: dict) -> str | None:
+    """The ticket this answer was written into (by this message), else None. Read-only."""
+    asked, _ = _answer_asked(root, msg)
+    if not asked:
+        return None
+    by, via = _answer_by(msg)
     try:
-        tickets.answer(root, asked["ticket"], asked["question_id"], str(b.get("answer")), by, via)
+        q = next(
+            x for x in tickets.load(root, asked["ticket"])["questions"] if x["id"] == asked["question_id"]
+        )
+    except (Refused, StopIteration, ValueError, KeyError):
+        return None
+    return (
+        asked["ticket"]
+        if q.get("answer") is not None and q.get("answered_by") == by and q.get("via") == via
+        else None
+    )
+
+
+def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
+    """(note, ticket id when the answer was applied). Only for a question this workspace sent."""
+    asked, why = _answer_asked(root, msg)
+    if not asked:
+        return why, None
+    by, via = _answer_by(msg)
+    try:
+        tickets.answer(
+            root, asked["ticket"], asked["question_id"], str(msg.get("body", {}).get("answer")), by, via
+        )
     except Refused as e:
-        return f"not applied to {asked['ticket']}: {e}"
-    return f"answered {asked['question_id']} on {asked['ticket']} (via {via})"
+        if _applied_ticket(root, msg):  # a crash after the write, before "seen": same answer, nothing to redo
+            return f"answered {asked['question_id']} on {asked['ticket']} (via {via})", asked["ticket"]
+        return f"not applied to {asked['ticket']}: {e}", None
+    return f"answered {asked['question_id']} on {asked['ticket']} (via {via})", asked["ticket"]
 
 
 def _store_allow(root: Path, msg: dict) -> str:
@@ -352,21 +514,77 @@ def _store_allow(root: Path, msg: dict) -> str:
     return "one-time allow (nothing to keep)"
 
 
-def inbox(root: Path, wait: int = 0) -> list[dict]:
-    """Pull, save every message, ack, then handle the ones not seen. Returns [{message, note, allowed}]."""
+def _arrivals_path(root: Path) -> Path:
+    return root / ".orch" / "inbox" / "arrivals.jsonl"
+
+
+def _read_arrivals(root: Path) -> list[dict]:
+    try:
+        lines = _arrivals_path(root).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    out = []
+    for ln in lines:
+        try:
+            e = json.loads(ln)
+        except ValueError:
+            continue
+        if isinstance(e, dict) and isinstance(e.get("seq"), int) and isinstance(e.get("id"), str):
+            out.append(e)
+    return out
+
+
+def _journal(root: Path, msgs: list[dict]) -> None:
+    """Append every id not yet in arrivals.jsonl: {seq, id, type, from, at}. Under the lock, an id once."""
+    with locked(root):
+        have = _read_arrivals(root)
+        known = {e["id"] for e in have}
+        seq = max((e["seq"] for e in have), default=0)
+        new = []
+        for m in msgs:
+            if m["id"] in known:
+                continue
+            known.add(m["id"])
+            seq += 1
+            new.append(
+                {"seq": seq, "id": m["id"], "type": m.get("type"), "from": m.get("from"), "at": tickets.now()}
+            )
+        if not new:
+            return
+        path = _arrivals_path(root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if len(have) + len(new) > ARRIVALS_MAX:  # rotate: keep the newest half
+            keep = (have + new)[-(ARRIVALS_MAX // 2) :]
+            data = "".join(json.dumps(e) + "\n" for e in keep)
+            net.write_atomic(path, data.encode("utf-8"))
+        else:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write("".join(json.dumps(e) + "\n" for e in new))
+
+
+def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
+    """Download, save every message first, journal the new ids, then ack. Marks nothing seen."""
     wait = max(0, min(30, wait))
     _, resp = _api(root, "GET", f"/v1/inbox?wait={wait}", timeout=wait + 30)
-    msgs = net.items(resp)
     d = root / ".orch" / "inbox"
     ok = []
-    arrival = {str(m.get("id")): n for n, m in enumerate(msgs) if isinstance(m, dict)}
-    for m in msgs:
+    arrival = {}
+    for n, m in enumerate(net.items(resp)):
         if not isinstance(m, dict) or not re.fullmatch(r"m_[a-z0-9]{16}", str(m.get("id", ""))):
             continue
         net.write_json(d / f"{m['id']}.json", m)
+        arrival[m["id"]] = n
         ok.append(m)
     if ok:
+        _journal(root, ok)
         _api(root, "POST", "/v1/inbox/ack", {"ids": [m["id"] for m in ok]})
+    return ok, arrival
+
+
+def inbox(root: Path, wait: int = 0) -> list[dict]:
+    """Pull, save, journal, ack, then handle the ones not seen. Returns [{message, note, allowed}]."""
+    _, arrival = _pull(root, wait)
+    d = root / ".orch" / "inbox"
     pending = []
     for f in d.glob("m_*.json"):  # everything saved and not yet seen, also from earlier pulls
         m = net.read_json(f, None)
@@ -381,37 +599,114 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
     ):
         note, auto, applied = "", False, None
         try:
-            if m.get("type") == "answer":
-                mark_seen(root, m["id"])
-                (note, applied), auto = _apply_answer(root, m), True
-            elif m.get("type") == "allow":
-                mark_seen(root, m["id"])
-                note, auto = _store_allow(root, m), True
+            if m.get("type") in ("answer", "allow"):
+                with locked(root):
+                    if m["id"] not in seen(root):  # another reader may have handled it meanwhile
+                        if m["type"] == "answer":
+                            note, applied = _apply_answer(root, m)
+                        else:
+                            note = _store_allow(root, m)
+                        auto = True
+                        _mark_seen(root, m["id"])  # last
+                if not auto:
+                    continue
         except (KeyError, TypeError) as e:
             note = f"could not read this message: {e}"
         out.append(
-            {"message": m, "note": note, "auto": auto, "applied": applied, "allowed": allowed(root, m)}
+            {
+                "message": m,
+                "note": note,
+                "auto": auto,
+                "applied": applied,
+                "allowed": _allowed_or_made(root, m),
+            }
         )
     return out
 
 
+def since(root: Path, seq: int, wait: int = 0) -> dict:
+    """Every arrival after `seq`, seen or not: {"next", "items": [{seq, id, type, from, at, seen, applied,
+    allowed}]}. Pulls (waiting up to `wait` s when nothing newer is journaled) but marks nothing seen.
+    The journal is a hint: the flags come from the saved message file and the local state."""
+    warning = None
+    try:
+        _pull(root, 0 if [e for e in _read_arrivals(root) if e["seq"] > seq] else wait)
+    except Refused as e:  # best effort: the journal on disk is still true
+        warning = str(e)
+    have = _read_arrivals(root)
+    if have and seq < have[0]["seq"] - 1:
+        seq = have[0]["seq"] - 1  # the cursor is older than what was kept: start from the oldest kept
+    done_ids = seen(root)
+    items = []
+    for e in have:
+        if e["seq"] <= seq:
+            continue
+        m = net.read_json(root / ".orch" / "inbox" / f"{e['id']}.json", None)
+        if not isinstance(m, dict) or m.get("id") != e["id"]:
+            continue
+        items.append(
+            {
+                "seq": e["seq"],
+                "id": e["id"],
+                "type": m.get("type"),
+                "from": m.get("from"),
+                "at": e.get("at"),
+                "seen": e["id"] in done_ids,
+                "applied": _applied_ticket(root, m) if m.get("type") == "answer" else None,
+                "allowed": bool(_allowed_or_made(root, m)),
+            }
+        )
+    out = {"next": have[-1]["seq"] if have else seq, "items": items}
+    if warning:
+        out["warning"] = warning
+    return out
+
+
+def _ticket_by_message(root: Path, mid: str) -> str | None:
+    for t in tickets.list_all(root):
+        r = t.get("ext", {}).get("relay", {})
+        if r.get("message") == mid or mid in r.get("messages", []):
+            return t["id"]
+    return None
+
+
+def _allowed_or_made(root: Path, msg: dict) -> str | None:
+    """An allow for this message, or 'once' when its ticket exists already (the allow was spent)."""
+    mode = allowed(root, msg)
+    if mode is None and msg.get("type") in ("delegate", "start") and _ticket_by_message(root, msg["id"]):
+        return "once"
+    return mode
+
+
 def done(root: Path, mid: str) -> dict:
-    """Mark seen first. An allowed delegate/start then gets its ticket (inbox rule 4)."""
+    """Under the lock: an allowed delegate/start gets its ticket (the one for this message if it exists),
+    then the id is written to seen LAST. Running it twice gives the same ticket (inbox rule 2)."""
     msg = load_message(root, mid)
-    first = mark_seen(root, mid)
-    res: dict = {"id": mid, "new": first, "ticket": None}
-    mode = allowed(root, msg) if first else None
-    if mode:
-        res["ticket"] = _ticket_for(root, msg)
-        _use_once(root, msg)
-    return res
+    with locked(root):
+        res: dict = {"id": mid, "new": mid not in seen(root), "ticket": None}
+        if msg.get("type") in ("delegate", "start"):
+            tid = _ticket_by_message(root, mid)
+            if tid is None and allowed(root, msg):
+                tid = _ticket_for(root, msg)
+                _use_once(root, msg)
+            res["ticket"] = tid
+        _mark_seen(root, mid)
+        return res
 
 
 def _ticket_for(root: Path, msg: dict) -> str:
+    """A start reuses a ticket only for the same sender and key while it is open; else a new one."""
     b, by = msg["body"], f"agent:relay from {msg['from']}"
     if msg["type"] == "start":
         for t in tickets.list_all(root):
-            if t.get("ext", {}).get("relay", {}).get("start_key") == b["key"]:
+            r = t.get("ext", {}).get("relay", {})
+            if (
+                r.get("start_key") == b["key"]
+                and r.get("from") == msg["from"]
+                and t.get("status") in ("open", "active", "waiting")
+            ):  # remember this message too, so a second `done` finds the same ticket
+                more = [*r.get("messages", []), msg["id"]]
+                tickets.ext_set(root, t["id"], "relay", json.dumps({"messages": more[-20:]}), by)
                 return t["id"]
         title = f"Relay task {b['key']}"
     else:
