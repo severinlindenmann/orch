@@ -75,7 +75,9 @@ class Scheduler:
                         upd["last_wake"] = t["wake_at"]
                     update_state(self.root, tid, **upd)
                     if wake_due:  # after the start; through the CLI so a concurrent ticket edit is not lost
-                        orchcli.call(self.root, "wait", tid, "--clear")  # also makes a waiting ticket active
+                        cur = next((x for x in read_tickets(self.root) if x["id"] == tid), t)
+                        if cur.get("wake_at") == t["wake_at"]:  # a newer wake_at stays for the next pass
+                            orchcli.call(self.root, "wait", tid, "--clear")  # also makes a waiting ticket active
                         if t["status"] == "open":
                             orchcli.call(self.root, "ticket", "status", tid, "active")
                 else:
@@ -152,24 +154,13 @@ class Scheduler:
                 # `orch relay done` already made the ticket for an allowed delegate: use it, never a second one
                 tid = done.get("ticket") if isinstance(done, dict) else None
                 if not tid:
-                    made = orchcli.call(self.root, "ticket", "new", str(body.get("title", "Delegated task"))[:200])
-                    tid = made.get("id") if isinstance(made, dict) else None
-                if not tid:
-                    return None
+                    return None  # the CLI is the allow authority: no ticket from it = no run
                 orchcli.log(self.root, tid, f"Delegated by {m.get('from')}: {text[:500]}")
             return tid if self.runner.start(tid, outside_prompt(tid, kind, text), self.cfg["agent"],
                                             f"relay {kind} {mid}", now) else None
         tickets = {t["id"]: t for t in read_tickets(self.root)}
         if kind == "answer" and m.get("applied") is True:
-            # `orch relay inbox` already applied the answer (ticket is active again); resume it once.
-            t = tickets.get(m.get("ticket"))
-            if not t:
-                return None
-            if self.runner.locked(t["id"]):
-                update_state(self.root, t["id"], pending_wake=f"answer {mid}")  # already applied: don't lose it
-                return None
-            return t["id"] if self.runner.start(t["id"], outside_prompt(t["id"], "answer", str(body.get("answer"))),
-                                                pick_agent(self.cfg, t), f"relay answer {mid}", now) else None
+            return None  # applied by `orch relay inbox`; its wake_at starts the run once (wake path)
         if kind == "answer":
             t = tickets.get(m.get("ticket"))
             if not t or t["status"] != "waiting" or self.runner.locked(t["id"]):
@@ -181,8 +172,7 @@ class Scheduler:
                             "--via", "relay") is None:
                 orchcli.log(self.root, t["id"], "Scheduler could not record an answer from the relay; agent not started")
                 return None
-            return t["id"] if self.runner.start(t["id"], outside_prompt(t["id"], "answer", str(body.get("answer"))),
-                                                pick_agent(self.cfg, t), f"relay answer {mid}", now) else None
+            return None  # `orch answer` sets wake_at; the wake path starts the run once
         if kind == "webhook":
             wid = body.get("webhook_id")
             for t in tickets.values():

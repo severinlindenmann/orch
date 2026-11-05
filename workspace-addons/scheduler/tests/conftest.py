@@ -46,7 +46,10 @@ elif args[:2] == ["ext", "set"]:
     t = load(args[2]); t.setdefault("ext", {{}})[args[3]] = json.loads(args[4]); save(t); print("{{}}")
 elif args[0] == "answer" and (root / "fail-answer").exists():
     sys.exit(2)
-elif args[0] in ("log", "answer"):
+elif args[0] == "answer":
+    t = load(args[1]); t["status"] = "active"; t["wake_at"] = "2026-11-04T00:00:00Z"  # as PR #50 answer()
+    save(t); print("{{}}")
+elif args[0] == "log":
     print("{{}}")
 else:
     sys.exit(2)

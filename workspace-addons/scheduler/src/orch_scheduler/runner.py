@@ -86,10 +86,10 @@ def _alive_windows(pid: int) -> bool:
     """os.kill(pid, 0) would send CTRL_C_EVENT on Windows; ask the process table instead."""
     import ctypes
 
-    k = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    k = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
     h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
     if not h:
-        return k.GetLastError() == 5  # access denied: exists
+        return ctypes.get_last_error() == 5  # access denied: exists
     try:
         code = ctypes.c_ulong()
         return bool(k.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
@@ -111,9 +111,11 @@ def _alive(pid: int) -> bool:
 
 REDACT = [
     re.compile(r"(?i)(authorization|bearer)\s*[:=]?\s*(bearer\s+)?\S+"),
+    re.compile(r"(?i)\b(password|passwd|secret|token)\s*[:=]\s*\S+"),
+    re.compile(r"\bAKIA[0-9A-Z]{12,}"),
     re.compile(r"(?<=://)[^/\s:@]+:[^/\s@]+@"),
     re.compile(r"\b(?:sk-|ghp_|gho_|github_pat_|xox[a-z]-)[A-Za-z0-9_\-]{8,}"),
-    re.compile(r"[A-Za-z0-9+/=_\-]{33,}"),
+    re.compile(r"[A-Za-z0-9+/=_\-]{32,}"),
 ]
 
 
@@ -184,9 +186,11 @@ class Runner:
             except OSError as e:
                 f.write(f"# could not start: {e}\n# end {fmt(now)} exit 127\n")
                 lock.unlink(missing_ok=True)
+                first = "failed" not in load_state(self.root).get(tid, {})  # one history line per failure streak
                 self._record(tid, now, 127, log_path, None)
                 update_state(self.root, tid, failed={"exit": 127, "untrusted_tail": [redact(f"could not start: {e}")[:300]], "at": fmt(now)})
-                orchcli.log(self.root, tid, f"Scheduler could not start the agent ({e.__class__.__name__})")
+                if first:
+                    orchcli.log(self.root, tid, f"Scheduler could not start the agent ({e.__class__.__name__})")
                 return False
         lock.write_text(str(proc.pid))
         self.runs[tid] = Run(tid, proc, log_path, lock, now, reason)

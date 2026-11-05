@@ -50,13 +50,13 @@ def test_not_allowed_is_left_alone(ws):
     assert not (ws / "seen.json").exists()
 
 
-def test_delegate_becomes_ticket(ws):
+def test_delegate_without_ticket_from_done_makes_no_ticket_no_run(ws):
+    """The CLI is the allow authority: `relay done` returns no ticket -> no scheduler-made ticket, no run."""
     relay_on(ws, [{"id": "m_5", "type": "delegate", "from": "ws_b", "allowed": True,
                    "body": {"title": "Check logs", "text": "look at them"}}])
     s = Scheduler(ws)
-    (tid,) = s.tick(T(8))
-    s.runner.reap(T(8, 1), wait=True)
-    assert json.loads((ws / f".orch/tickets/{tid}.json").read_text())["title"] == "Check logs"
+    assert s.tick(T(8)) == []
+    assert not any(a[:2] == ["ticket", "new"] for a in names(ws))
 
 
 def test_delegate_uses_ticket_made_by_done_no_double(ws):
@@ -76,8 +76,10 @@ def test_answer_for_waiting_ticket(ws):
     relay_on(ws, {"items": [{"id": "m_6", "type": "answer", "ticket": "t_ask00001",
                              "body": {"question_id": "q1", "answer": "Yes", "answered_by": "human:s"}}]})
     s = Scheduler(ws)
-    assert s.tick(T(8)) == ["t_ask00001"]
-    s.runner.reap(T(8, 1), wait=True)
+    assert s.tick(T(8)) == []  # recorded; the wake_at the answer sets starts the run, once
+    assert s.tick(T(8, 1)) == ["t_ask00001"]
+    s.runner.reap(T(8, 2), wait=True)
+    assert s.tick(T(8, 3)) == []
     assert ["answer", "t_ask00001", "q1", "Yes", "--via", "relay"] in names(ws)
 
 
@@ -86,8 +88,7 @@ def test_applied_answer_resumes_active_ticket(ws):
     relay_on(ws, [{"id": "m_9", "type": "answer", "ticket": "t_ask00002", "applied": True,
                    "body": {"question_id": "q1", "answer": "Yes"}}])
     s = Scheduler(ws)
-    assert s.tick(T(8)) == ["t_ask00002"]
-    s.runner.reap(T(8, 1), wait=True)
+    assert s.tick(T(8)) == []  # nothing started here: PR #50's answer() set wake_at, the wake path runs it
     assert not any(a[:1] == ["answer"] for a in names(ws))  # the CLI applied it already
 
 

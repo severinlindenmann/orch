@@ -176,20 +176,55 @@ def test_pending_wake_while_running_starts_after_reap(ws, tmp_path):
     finish(s, T(8, 3))
 
 
-def test_pending_wake_for_applied_answer(ws, tmp_path):
-    _slow_cfg(ws, tmp_path)
-    add_ticket(ws, "t_pend0031", status="active", wake_at="2026-11-04T08:00:00Z")
-    s = Scheduler(ws)
-    assert s.tick(T(8, 0)) == ["t_pend0031"]
+def test_applied_answer_with_wake_at_runs_once(ws):
+    add_ticket(ws, "t_ans00001", status="active", wake_at="2026-11-04T08:01:00Z")
     (ws / ".orch/secrets").mkdir()
     (ws / ".orch/secrets/relay.json").write_text("{}")
     (ws / "inbox.json").write_text(json.dumps(
-        [{"id": "m1", "type": "answer", "applied": True, "ticket": "t_pend0031", "from": "ph_x", "body": {"answer": "yes"}}]))
-    s.tick(T(8, 1))
-    assert load_state(ws)["t_pend0031"]["pending_wake"]
+        [{"id": "m1", "type": "answer", "applied": True, "ticket": "t_ans00001", "from": "ph_x", "body": {"answer": "yes"}}]))
+    s = Scheduler(ws)
+    first = s.tick(T(8, 1))
+    finish(s, T(8, 1))
+    (ws / "inbox.json").write_text("[]")
+    second = s.tick(T(8, 2))
     finish(s, T(8, 2))
-    assert s.tick(T(8, 2)) == ["t_pend0031"]
-    finish(s, T(8, 3))
+    assert first == ["t_ans00001"] and second == []
+
+
+def test_wait_clear_skipped_if_wake_at_changed(ws, monkeypatch):
+    add_ticket(ws, "t_wake023", status="waiting", wake_at="2026-11-04T08:00:00Z")
+    s = Scheduler(ws)
+    real = s.runner.start
+
+    def start(*a, **k):
+        ok = real(*a, **k)
+        p = ws / ".orch/tickets/t_wake023.json"
+        t = json.loads(p.read_text())
+        t["wake_at"] = "2026-11-04T08:00:30Z"  # a new wake arrived during the start
+        p.write_text(json.dumps(t))
+        return ok
+
+    monkeypatch.setattr(s.runner, "start", start)
+    assert s.tick(T(8, 1)) == ["t_wake023"]
+    finish(s, T(8, 2))
+    assert "wait" not in [c["args"][0] for c in calls(ws)]
+    assert json.loads((ws / ".orch/tickets/t_wake023.json").read_text())["wake_at"] == "2026-11-04T08:00:30Z"
+
+
+def test_failed_start_logged_once_per_streak(ws):
+    (ws / ".orch/scheduler/config.toml").write_text("agent = 'no-such-agent-xyz {prompt}'\n")
+    add_ticket(ws, "t_wake024", status="waiting", wake_at="2026-11-04T08:00:00Z")
+    s = Scheduler(ws)
+    for m in (1, 7, 13):
+        s.tick(T(8, m))
+    assert [c["args"][0] for c in calls(ws)].count("log") == 1
+
+
+def test_redacts_password_aws_and_hex(ws, tmp_path):
+    from orch_scheduler.runner import redact
+    for raw in ("password=hunter2", "PASSWORD: s3cret", "AKIAABCDEFGHIJKLMNOP", "d41d8cd98f00b204e9800998ecf8427e"):
+        out = redact("x " + raw)
+        assert "hunter2" not in out and "s3cret" not in out and "AKIA" not in out and "d41d8cd9" not in out, raw
 
 
 def test_run_env_has_agent_and_ticket(ws, tmp_path):
@@ -276,5 +311,5 @@ def test_failed_start_backs_off_five_minutes(ws):
     assert load_state(ws)["t_wake022"]["last_attempt"]
     s.tick(T(8, 4))  # inside 5 minutes: no new attempt
     assert len([c for c in calls(ws) if c["args"][0] == "log"]) == n
-    s.tick(T(8, 7))  # after: tries again
-    assert len([c for c in calls(ws) if c["args"][0] == "log"]) > n
+    s.tick(T(8, 7))  # after: tries again (no new history line, same streak)
+    assert load_state(ws)["t_wake022"]["last_attempt"] == "2026-11-04T08:07:00Z"
