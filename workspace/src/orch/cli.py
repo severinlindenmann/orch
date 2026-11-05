@@ -280,6 +280,13 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = t.add_parser("new", parents=[common])
     x.add_argument("title")
     x.add_argument("--parent", metavar="ID", help="make it a sub-ticket of this ticket")
+    x.add_argument(
+        "--ext",
+        action="append",
+        default=[],
+        metavar="ADDON=JSON",
+        help="add-on data, written with the ticket",
+    )
     x = t.add_parser("tree", parents=[common], help="a ticket and its sub-tickets")
     x.add_argument("id")
     x = t.add_parser("list", parents=[common])
@@ -453,7 +460,13 @@ def run(args: argparse.Namespace) -> None:
     elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
         pass
     elif cmd == "ticket" and sub == "new":
-        t = tickets.create(root, args.title, by(), args.parent)
+        t = tickets.create(
+            root,
+            args.title,
+            by(),
+            args.parent,
+            tickets.parse_ext_args(args.ext, lambda a: addons.active_ext_schema(root, a)),
+        )
         part = f" (part of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
             args,

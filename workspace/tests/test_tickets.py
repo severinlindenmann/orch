@@ -295,3 +295,21 @@ def test_done_refused_while_an_item_is_unchecked(proj, run, new_ticket):
     assert code == 2 and "c1" in err and "not checked" in err
     assert read(proj, tid)["status"] == "open"
     assert run("ticket", "status", tid, "dropped")[0] == 0  # a dropped ticket is not affected
+
+
+def test_new_with_ext_is_one_write_and_checked(proj, run, validate):
+    code, out, _ = run(
+        "ticket", "new", "Child", "--ext", 'foo={"occurrence":"t_x:1"}', "--ext", 'bar-1={"a":1}', "--json"
+    )
+    assert code == 0
+    t = read(proj, json.loads(out)["id"])
+    validate(t)
+    assert t["ext"] == {"foo": {"occurrence": "t_x:1"}, "bar-1": {"a": 1}}
+    assert t["history"][0]["text"] == "Created"
+
+
+@pytest.mark.parametrize("bad", ["foo", "Foo={}", "foo=[1]", "foo=notjson"])
+def test_new_with_bad_ext_makes_no_ticket(proj, run, bad):
+    code, _, err = run("ticket", "new", "Nope", "--ext", bad)
+    assert code == 2 and "ext" in err.lower()
+    assert not list((proj / ".orch" / "tickets").glob("t_*.json"))

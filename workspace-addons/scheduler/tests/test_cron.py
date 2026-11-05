@@ -125,14 +125,21 @@ def test_each_run_makes_one_sub_ticket_per_occurrence_and_runs_on_it(ws):
     assert s.tick(T(7, 2, d=5)) == [] and len(kids(ws)) == 1
 
 
-def test_sub_ticket_is_reused_after_a_crash(ws):
-    """Made but never marked (crash between the two writes): found again by title, no second one."""
+def test_sub_ticket_is_made_in_one_write_with_its_occurrence(ws):
     add_ticket(ws, "t_sub00002", title="Report", created_at="2026-11-01T00:00:00Z",
                ext={"scheduler": {"recurring": True, "cron": "0 7 * * *", "tz": "UTC", "each_run": "sub-ticket"}})
-    add_ticket(ws, "t_half0001", title="Report · 2026-11-05 07:00", parent="t_sub00002")
+    Scheduler(ws).tick(T(7, 1, d=5))
+    new = [c["args"] for c in calls(ws) if c["args"][:2] == ["ticket", "new"]]
+    assert len(new) == 1 and new[0][-2] == "--ext" and "t_sub00002:2026-11-05T07:00:00Z" in new[0][-1]
+    assert not any(c["args"][:2] == ["ext", "set"] and c["args"][2] != "t_sub00002" for c in calls(ws))  # no second write
+
+
+def test_only_a_child_with_this_occurrence_id_is_reused(ws):
+    add_ticket(ws, "t_sub00003", title="Report", created_at="2026-11-01T00:00:00Z",
+               ext={"scheduler": {"recurring": True, "cron": "0 7 * * *", "tz": "UTC", "each_run": "sub-ticket"}})
+    add_ticket(ws, "t_other001", title="Report \u00b7 2026-11-05 07:00", parent="t_sub00003")  # same title, no occurrence id
     (tid,) = Scheduler(ws).tick(T(7, 1, d=5))
-    assert tid == "t_half0001" and len(kids(ws)) == 1
-    assert kids(ws)[0]["ext"]["scheduler"]["occurrence"].endswith("2026-11-05T07:00:00Z")
+    assert tid != "t_other001" and len(kids(ws)) == 2
 
 
 def test_ticket_agent_goes_to_run_start(ws):

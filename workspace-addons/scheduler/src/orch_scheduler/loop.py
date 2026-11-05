@@ -3,6 +3,7 @@
 The scheduler never runs an agent itself: every run is `orch run start` (core decides resume / fresh / busy)."""
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -81,14 +82,10 @@ class Scheduler:
         for c in kids:
             if ((c.get("ext") or {}).get("scheduler") or {}).get("occurrence") == occ:
                 return c["id"]
-        for c in kids:  # made, but the crash came before its mark was written
-            if c["title"] == title and not ((c.get("ext") or {}).get("scheduler") or {}).get("occurrence"):
-                orchcli.set_ext(self.root, c, **mark)
-                return c["id"]
-        made = orchcli.call(self.root, "ticket", "new", title, "--parent", t["id"])
+        made = orchcli.call(self.root, "ticket", "new", title, "--parent", t["id"], "--ext",
+                            "scheduler=" + json.dumps(mark))  # one write: never a child without its occurrence id
         if not isinstance(made, dict) or not made.get("id"):
             return None
-        orchcli.set_ext(self.root, made, **mark)
         orchcli.log(self.root, made["id"], f"One run of the repeat {t['id']} ({t['title']}). Do what that ticket says.")
         return made["id"]
 
