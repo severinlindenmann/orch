@@ -47,7 +47,7 @@ def _progress(t: dict) -> str:
     return f"{d} of {n} done" if n else ""
 
 
-def _line(t: dict) -> str:
+def _line(t: dict, all_: list[dict] | None = None) -> str:
     bits = [t["status"]] + ([_progress(t)] if _progress(t) else [])
     return f"{t['title']}  ({', '.join(bits)})  [{t['id']}]"
 
@@ -64,21 +64,60 @@ def _ago(iso: str) -> str:
     return f"{int(secs // 3600)} h ago" if secs >= 3600 else f"{max(int(secs // 60), 1)} min ago"
 
 
-def _check_line(root: Path | None, t: dict, c: dict, open_q: list[dict]) -> str:
-    mark = "[x]" if c["done"] else "[ ]"
-    line = f"  {mark} {c['text']}  [{c['id']}]"
-    if c["done"] and c["evidence"]:
-        line += f"  - proof: {c['evidence'][0]['ref']}"
+def _short(ev: dict) -> str:
+    t, ref = ev.get("type"), str(ev.get("ref", ""))
+    if t == "commit":
+        return ref[:7]
+    if t == "command":
+        return f"{ref} · {ev['text']}" if ev.get("text") else ref
+    if t == "file" or ev.get("title"):
+        return tickets.proof_label(ev)
+    return ref if len(ref) <= 80 else ref[:77] + "..."
+
+
+def _chip(root: Path | None, ev: dict) -> str:
+    text = _short(ev)
+    if ev.get("type") == "file" and root is not None and not tickets.proof_present(root, ev):
+        text = (ev.get("title") or tickets.proof_label({**ev, "text": ""})) + " (file on another computer)"
+    elif ev.get("type") == "file" and ev.get("text") and ev.get("title"):
+        text = f"{ev['title']} (file, {ev['text']})"
+    return text
+
+
+def _who_added(t: dict, c: dict, ev: dict) -> str:
+    by = ev.get("by")
+    if not by:
+        line = next((h for h in reversed(t["history"]) if h["text"] == f"Check {c['id']} done"), None)
+        by = line["by"] if line else ""
+    return "● You" if by.startswith("human:") else "○ Agent says"
+
+
+def _check_lines(root: Path | None, t: dict, c: dict, open_q: list[dict]) -> list[str]:
     q = next((q for q in open_q if q.get("check") == c["id"]), None)
-    if q:
-        line += f"  - waiting for your answer ({q['id']})"
+    mark = "✓" if c["done"] else ("◐" if c.get("state") == "doing" else "○")
+    line = f"  {mark} {c['id']} {c['text']}"
+    if q and not c["done"]:
+        line += f"   waiting for your answer ({q['id']})"
     if c.get("state") == "doing" and not c["done"] and root is not None:
         who = c.get("by", "someone")
         if tickets.doing_stale(root, t, c):
-            line += f"  - {who} was on it ({_ago(c.get('at', ''))}, not running)"
+            line += f"   {who} was on it ({_ago(c.get('at', ''))}, not running)"
         else:
-            line += f"  - {who} is on it"
-    return line
+            line += f"   {who} is on it"
+    out = [line]
+    for ev in c.get("evidence", []):
+        role = f"{ev['role']:<7} " if ev.get("role") else ""
+        out.append(f"       {role}{_chip(root, ev)}   {_who_added(t, c, ev)}")
+    return out
+
+
+def _lookup(root: Path | None, tid: str) -> dict | None:
+    if root is None:
+        return None
+    try:
+        return tickets.load(root, tid)
+    except (Refused, ValueError, OSError):
+        return None
 
 
 def _show(t: dict, root: Path | None = None) -> str:
@@ -87,20 +126,38 @@ def _show(t: dict, root: Path | None = None) -> str:
     out = [head]
     if t.get("summary"):
         out.append(t["summary"])
+    d, n = tickets.checks_done(t)
     out.append(f"Status: {t['status']}" + (f" - {_progress(t)}" if _progress(t) else ""))
+    if n and d == n:
+        out.append(f"✓ All done · {n} of {n}")
     extra = [f"{k.capitalize()}: {t[k]}" for k in ("owner", "due") if t.get(k)]
     if extra:
         out.append("  ".join(extra))
     if t.get("note"):
         out.append(f"Note: {t['note']}")
+    if t.get("parent"):
+        p = _lookup(root, t["parent"])
+        out.append(f"Part of: {p['title']} ({p['id']})" if p else f"Part of: {t['parent']} (parent missing)")
+    if root is not None:
+        cc = tickets.children_counts(tickets.list_all(root), t["id"])
+        if cc["total"]:
+            out.append(f"Sub-tickets: {cc['closed']} of {cc['total']} closed")
     if t.get("waiting_on"):
         w = t["waiting_on"]
         if w["kind"] == "time":
             out.append(f"Waiting until: {net.when(w['until'])}")
+        elif w["kind"] == "ticket":
+            b = _lookup(root, w["ref"])
+            out.append(
+                f"Blocked by: {b['title']} ({b['id']}, {b['status']})" if b else f"Blocked by: {w['ref']}"
+            )
         else:
             out.append(
                 "Waiting for: " + ("an answer" if w["kind"] == "question" else f"{w['kind']} {w['ref']}")
             )
+    for ln in t["links"]:
+        if ln["type"] == "ticket":
+            out.append(f"Came from: {ln.get('title') or ln['url']}")
     if open_q:
         out.append("\nNeeds an answer:")
         for q in open_q:
@@ -109,19 +166,38 @@ def _show(t: dict, root: Path | None = None) -> str:
             out.append(f"  {q['text']}{opts}{rec}  [{q['id']}]")
     if t["checklist"]:
         out.append("\nChecklist:")
-        out += [_check_line(root, t, c, open_q) for c in t["checklist"]]
+        for c in t["checklist"]:
+            out += _check_lines(root, t, c, open_q)
     answered = [q for q in t["questions"] if q["answer"] is not None]
     if answered:
         out.append("\nAnswered:")
         for q in answered:
             out.append(f"  {q['text']} - {q['answer']} ({q['answered_by']})")
-    if t["links"]:
+    links = [ln for ln in t["links"] if ln["type"] != "ticket"]
+    if links:
         out.append("\nLinks:")
-        out += [f"  {ln.get('title') or ln['type']}: {ln['url']}" for ln in t["links"]]
+        out += [f"  {ln.get('title') or ln['type']}: {ln['url']}" for ln in links]
     if t["history"]:
         out.append("\nRecent:")
         out += [f"  {net.when(h['at'])}  {h['by']}: {h['text']}" for h in t["history"][-3:]]
     return "\n".join(out)
+
+
+def _tree(all_: list[dict], t: dict, prefix: str = "", seen: frozenset = frozenset()) -> list[str]:
+    kids = tickets.children_of(all_, t["id"])
+    out = []
+    for i, k in enumerate(kids):
+        last = i == len(kids) - 1
+        closed = k["status"] in tickets.CLOSED
+        mark = "✓" if closed else ("○" if k["status"] == "open" else "◐")
+        state = ""
+        if not closed:
+            asks = any(q["answer"] is None for q in k["questions"])
+            state = "   " + ("waiting for your answer" if k["status"] == "waiting" and asks else k["status"])
+        out.append(f"{prefix}{'└─' if last else '├─'} {mark} {k['title']}{state}")
+        if k["id"] not in seen:
+            out += _tree(all_, k, prefix + ("   " if last else "│  "), seen | {t["id"]})
+    return out
 
 
 CORE_EXT = {"relay"}  # ext keys the core itself writes (relay-created tickets)

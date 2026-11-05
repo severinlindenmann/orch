@@ -26,6 +26,9 @@ PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "summar
 VIA_RE = re.compile(r"^[a-z][a-z0-9-]{1,15}$")
 KIND_RE = re.compile(r"^(plain|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$")
 DOING_STALE_SECONDS = 2 * 3600
+MAX_PROOF_BYTES = 25 * 1024 * 1024
+ROLES = ("result", "check", "support")
+_WIN_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
 _ID_RE = re.compile(r"^t_[a-z0-9]{6,16}$")
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
@@ -273,10 +276,12 @@ def add_history(ticket: dict, by: str, text: str, via: str = "cli") -> None:
     ticket["history"].append({"at": now(), "by": by, "via": via, "text": text})
 
 
-def create(root: Path, title: str, by: str) -> dict:
+def create(root: Path, title: str, by: str, parent: str | None = None) -> dict:
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
+    if parent is not None:
+        load(root, parent)  # the parent must exist (cycles are impossible: it is set only here)
     t = now()
     ticket = {
         "schema": "orch.ticket/1",
@@ -288,8 +293,10 @@ def create(root: Path, title: str, by: str) -> dict:
         "checklist": [],
         "links": [],
         "questions": [],
-        "history": [{"at": t, "by": by, "via": "cli", "text": "Created"}],
+        "history": [{"at": t, "by": by, "via": "cli", "text": "Created" + (f" under {parent}" if parent else "")}],
     }
+    if parent is not None:
+        ticket["parent"] = parent
     save(root, ticket)
     return ticket
 
@@ -470,6 +477,9 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
 
     def op(t):
         item = _item(t, cid)
+        for ev in evs:
+            ev.setdefault("by", by)
+            ev.setdefault("at", now())
         item["evidence"].extend(evs)
         item["done"] = True
         _clear_doing(item)
@@ -865,3 +875,102 @@ def sessions_for(ticket: dict, agent: str, host: str) -> str | None:
         if s.get("agent") == agent and s.get("host") == host:
             return s.get("id")
     return None
+
+
+# ---------------------------------------------------------------- proof files
+
+
+def _proof_name(name: str) -> str:
+    n = re.sub(r"[^A-Za-z0-9._ -]", "_", name).strip(" .") or "file"
+    if n.split(".")[0].lower() in _WIN_RESERVED:
+        n = "_" + n
+    return n[:120]
+
+
+def _size_text(n: int) -> str:
+    if n >= 1024 * 1024:
+        return f"{n / (1024 * 1024):.1f} MB"
+    return f"{max(round(n / 1024), 1)} KB"
+
+
+def attach_file(root: Path, tid: str, path: str, title: str | None, role: str | None) -> dict:
+    """Copy a workspace file into .orch/tickets/<tid>/evidence/ and return the evidence entry for it.
+    Only regular files inside the workspace, no link followed anywhere on the way, at most 25 MB."""
+    import shutil
+
+    load(root, tid)
+    if role is not None and role not in ROLES:
+        raise Refused(f"A proof role is one of: {', '.join(ROLES)}.")
+    if title is not None and not 1 <= len(title.strip()) <= 120:
+        raise Refused("A proof title needs 1 to 120 characters.")
+    base = Path(os.path.realpath(root))
+    given = Path(os.path.abspath(os.path.expanduser(path)))
+    rel = None
+    for b in (Path(os.path.abspath(root)), base):
+        try:
+            rel = given.relative_to(b)
+            break
+        except ValueError:
+            continue
+    inside = Refused("proof files must be inside this workspace.")
+    if rel is None or ".." in rel.parts:
+        raise inside
+    cur = base
+    for part in rel.parts:
+        cur = cur / part
+        if cur.is_symlink():
+            raise Refused("proof files cannot be links. Give the real file.")
+    if rel.parts[:2] == (".orch", "secrets") or ".git" in rel.parts:
+        raise inside
+    if not cur.exists():
+        raise Refused(f"{path} doesn't exist.")
+    if not cur.is_file():
+        raise Refused(f"{path} is not a file.")
+    size = cur.stat().st_size
+    if size > MAX_PROOF_BYTES:
+        raise Refused(
+            f"{cur.name} is {_size_text(size)}. A proof file can be at most 25 MB. Use --url or --note."
+        )
+    dest_dir = tickets_dir(root) / tid / "evidence"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    name = _proof_name(cur.name)
+    dest, n = dest_dir / name, 1
+    while dest.exists():
+        n += 1
+        stem, dot, ext = name.rpartition(".")
+        dest = dest_dir / (f"{stem}-{n}.{ext}" if dot and stem else f"{name}-{n}")
+    shutil.copyfile(cur, dest)
+    ev = {"type": "file", "ref": dest.relative_to(base).as_posix(), "text": _size_text(size)}
+    if title:
+        ev["title"] = title.strip()
+    if role:
+        ev["role"] = role
+    return ev
+
+
+def proof_present(root: Path, ev: dict) -> bool:
+    """False for a copied proof file that is not on this computer (evidence/ is not in git)."""
+    ref = str(ev.get("ref", ""))
+    if ev.get("type") != "file" or not ref.startswith(".orch/tickets/") or "/evidence/" not in ref:
+        return True
+    return (root / ref).is_file()
+
+
+# ---------------------------------------------------------------- sub-tickets
+
+
+CLOSED = ("done", "dropped")
+
+
+def children_of(all_: list[dict], tid: str) -> list[dict]:
+    return [t for t in all_ if t.get("parent") == tid]
+
+
+def children_counts(all_: list[dict], tid: str) -> dict:
+    kids = children_of(all_, tid)
+    closed = sum(1 for k in kids if k.get("status") in CLOSED)
+    return {"total": len(kids), "closed": closed, "open": len(kids) - closed}
+
+
+def open_children(root: Path, tid: str) -> list[dict]:
+    return [k for k in children_of(list_all(root), tid) if k.get("status") not in CLOSED]
