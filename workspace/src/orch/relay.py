@@ -215,13 +215,19 @@ def give_allow(root: Path, mid: str, mode: str, by: str | None = None, via: str 
         raise
     if (atid := _allow_ticket(root, mid)) is not None:  # allowed from any surface: the question is settled
         who = by if by else "someone"
+        word = "Allow once" if mode == "once" else "Always"
 
-        def close(tk):
-            if tk["status"] not in ("done", "dropped"):
-                tk["status"], tk["waiting_on"] = "done", None
-                tickets.add_history(tk, "agent:relay", f"Allowed by {who} ({via or 'cli'})", "relay")
+        def settle(tk):
+            q = next((x for x in tk["questions"] if x.get("kind") == "relay:allow"), None)
+            if q is not None and q["answer"] is None:  # allowed by the CLI, not by answering the question
+                q["answer"], q["answered_by"], q["via"] = word, by or "unknown", via or "cli"
+                tk["waiting_on"] = None
+                if tk["status"] == "waiting":
+                    tk["status"] = "active"
+            tickets.add_history(tk, "agent:relay", f"Allowed by {who} ({via or 'cli'})", "relay")
 
-        tickets.apply_op(root, atid, close)
+        tickets.apply_op(root, atid, settle)
+        # the ticket stays: `relay done` turns it into the task's ticket (one delegate = one ticket)
     return out
 
 
@@ -820,11 +826,11 @@ def apply_allow_answers(root: Path) -> list[str]:
                 except Refused as e:
                     notes.append(f"could not allow {mid}: {e}")
                     continue
-                label, status = f"Allowed by {who} ({via})", "done"
+                label, status = f"Allowed by {who} ({via})", None  # give_allow wrote the history line
 
             def op(tk, qid=q["id"], label=label, status=status, by=by):
                 tk["ext"]["relay"]["allow_applied"] = qid
-                if tk["status"] not in ("done", "dropped"):  # give_allow already closed an allowed one
+                if status:  # ignored: the ticket is dropped
                     tickets.add_history(tk, by, label, "relay")
                     tk["status"], tk["waiting_on"] = status, None
 
@@ -987,6 +993,8 @@ def _ticket_for(root: Path, msg: dict) -> str:
             ):  # remember this message too, so a second `done` finds the same ticket
                 more = [*r.get("messages", []), msg["id"]]
                 tickets.ext_set(root, t["id"], "relay", json.dumps({"messages": more[-20:]}), by)
+                if (atid := _allow_ticket(root, msg["id"])) is not None and atid != t["id"]:
+                    _merge_allow(root, atid, t["id"], by)
                 return t["id"]
         title = f"Relay task {b['key']}"
     else:
@@ -994,17 +1002,41 @@ def _ticket_for(root: Path, msg: dict) -> str:
         peer = clean_untrusted(name_of(root, msg["from"]), 60) or msg["from"]
         said = " ".join(clean_untrusted(b["title"], 200).split()) or "a task"
         title = f"From {peer}: {said}"[:200]
-    t = tickets.create(root, title, by)
+    atid = _allow_ticket(root, msg["id"])  # the allow question's ticket becomes the task's ticket
+    if atid is not None:
+        tid = atid
+
+        def retitle(tk):
+            tk["title"] = title
+            tk["waiting_on"] = None
+            if tk["status"] in ("waiting", "dropped"):
+                tk["status"] = "active"
+
+        tickets.apply_op(root, tid, retitle)
+    else:
+        tid = tickets.create(root, title, by)["id"]
+        if line := _allow_history(root, msg):
+            tickets.apply_op(root, tid, lambda tk: tickets.add_history(tk, by, line, "relay"))
+    if not tickets.load(root, tid)["checklist"]:
+        for item in b.get("checklist", []) if msg["type"] == "delegate" else []:
+            said = " ".join(clean_untrusted(str(item), 200).split()) or "(empty)"
+            tickets.check_add(root, tid, f"From {peer}: {said}"[:200], by)
     ext = {"from": msg["from"], "message": msg["id"]}
     if msg["type"] == "start":
         ext["start_key"] = b["key"]
-    tickets.ext_set(root, t["id"], "relay", json.dumps(ext), by)
-    if line := _allow_history(root, msg):
-        tickets.apply_op(root, t["id"], lambda tk: tickets.add_history(tk, by, line, "relay"))
-    for item in b.get("checklist", []) if msg["type"] == "delegate" else []:
-        said = " ".join(clean_untrusted(str(item), 200).split()) or "(empty)"
-        tickets.check_add(root, t["id"], f"From {peer}: {said}"[:200], by)
-    return t["id"]
+    tickets.ext_set(root, tid, "relay", json.dumps(ext), by)  # last: `done` finds the ticket by this
+    return tid
+
+
+def _merge_allow(root: Path, atid: str, into: str, by: str) -> None:
+    """A start that joins an open ticket: its allow-question ticket is not a second task."""
+
+    def op(tk):
+        if tk["status"] not in ("done", "dropped"):
+            tk["status"], tk["waiting_on"] = "dropped", None
+            tickets.add_history(tk, by, f"Joined {into}", "relay")
+
+    tickets.apply_op(root, atid, op)
 
 
 _WIN_RESERVED = re.compile(
