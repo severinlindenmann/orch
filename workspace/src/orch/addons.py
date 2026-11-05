@@ -53,23 +53,52 @@ EXT_SCHEMA_MAX = 32 * 1024
 # ---------------------------------------------------------------- sources
 
 
+def _install_origin() -> dict:
+    """Where this orch was installed from (PEP 610 direct_url.json written by uv): a git URL and ref, or a
+    folder. Add-ons and `orch update` install from the SAME place, so an install from a branch stays on it.
+    Editable dev installs and anything unreadable give {} (the defaults). Tests replace this."""
+    from importlib.metadata import PackageNotFoundError, distribution
+
+    try:
+        d = json.loads(distribution("orch-workspace").read_text("direct_url.json") or "{}")
+    except (PackageNotFoundError, OSError, ValueError):
+        return {}
+    url, sub = d.get("url"), d.get("subdirectory") or ""
+    if not isinstance(url, str):
+        return {}
+    vcs = d.get("vcs_info")
+    if isinstance(vcs, dict) and vcs.get("vcs") == "git" and sub == "workspace":
+        out = {"repo": url}
+        if isinstance(vcs.get("requested_revision"), str):
+            out["ref"] = vcs["requested_revision"]
+        return out
+    di = d.get("dir_info")
+    if isinstance(di, dict) and not di.get("editable") and url.startswith("file://"):
+        from urllib.parse import urlparse
+        from urllib.request import url2pathname
+
+        folder = Path(url2pathname(urlparse(url).path))
+        if folder.name == "workspace" and folder.is_absolute() and folder.parent.is_dir():
+            return {"repo": str(folder.parent), "local": True}
+    return {}
+
+
 def repo() -> str:
-    return os.environ.get("ORCH_REPO", DEFAULT_REPO)
+    return os.environ.get("ORCH_REPO") or _install_origin().get("repo") or DEFAULT_REPO
 
 
 def ref() -> str:
-    return os.environ.get("ORCH_REF", "main")
+    return os.environ.get("ORCH_REF") or _install_origin().get("ref") or "main"
 
 
 def _is_local(r: str) -> bool:
-    """A source is a folder ONLY when ORCH_REPO is set explicitly to an absolute existing folder.
-    The default GitHub URL is never a path (a relative folder named like it must not count)."""
-    return (
-        "ORCH_REPO" in os.environ
-        and r == os.environ["ORCH_REPO"]
-        and Path(r).is_absolute()
-        and Path(r).is_dir()
-    )
+    """A source is a folder ONLY when ORCH_REPO is set explicitly to an absolute existing folder, or orch
+    itself was installed from that folder. The default GitHub URL is never a path (a relative folder named
+    like it must not count)."""
+    if "ORCH_REPO" in os.environ:
+        return r == os.environ["ORCH_REPO"] and Path(r).is_absolute() and Path(r).is_dir()
+    o = _install_origin()
+    return bool(o.get("local")) and r == o["repo"] and Path(r).is_dir()
 
 
 def spec(subdir: str) -> str:
@@ -614,10 +643,38 @@ def _confirm(m: dict, local: bool, yes: bool) -> None:
         return
     if not sys.stdin.isatty():
         raise Refused(f"{text}\nTo continue run it again with --yes.")
-    sys.stderr.write(text + "\nTurn it on? [y/N] ")
+    sys.stderr.write(text + "\nAdd it? [y/N] ")
     sys.stderr.flush()
     if sys.stdin.readline().strip().lower() not in ("y", "yes"):
         raise Refused("Not confirmed. Nothing was changed.")
+
+
+def preview_builtin(name: str) -> dict:
+    """The manifest of a built-in add-on that is not installed yet, so the user sees what it adds before
+    saying yes: its package alone (no dependencies) is fetched into a temp folder; nothing is installed."""
+    uv = _which_uv()
+    if not uv:
+        raise Refused("uv is not installed. Run the orch install script first.")
+    with tempfile.TemporaryDirectory(prefix="orch-preview-") as tmp:
+        r = subprocess.run(
+            [
+                uv,
+                "pip",
+                "install",
+                "--quiet",
+                "--no-deps",
+                "--python",
+                sys.executable,
+                "--target",
+                tmp,
+                spec(f"workspace-addons/{name}"),
+            ],
+            text=True,
+            capture_output=True,
+        )
+        if r.returncode != 0:
+            raise Refused(f"There is no built-in add-on '{name}' (or it could not be fetched).")
+        return folder_manifest(Path(tmp))
 
 
 def reexec(args: list[str]) -> None:
@@ -660,9 +717,14 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
                     raise Refused(f"There is no built-in add-on '{name}'.")
                 m = folder_manifest(base)
                 _confirm(m, False, yes)
-            elif not yes:
+            elif yes:
+                m = None
+            elif not sys.stdin.isatty():
                 raise Refused(f"Installing the built-in add-on {name}: run it again with --yes.")
-            entry = {"name": name, "source": "built-in", "version": m["version"] if base else "0.0.0"}
+            else:
+                m = preview_builtin(name)
+                _confirm(m, False, False)
+            entry = {"name": name, "source": "built-in", "version": m["version"] if m else "0.0.0"}
     if entry not in reg:
         _install_tool([e for e in reg if e["name"] != entry["name"]] + [entry])
         _save_registry([e for e in reg if e["name"] != entry["name"]] + [entry])

@@ -342,3 +342,56 @@ def a15(e):
         check(reg[0]["source"] == str(dup.resolve()), f"duplicate add did not update the single entry: {reg}")
         return "same name from a second folder replaces the single entry (no double)"
     return "duplicate refused"
+
+
+@scenario("I1", slow=True)
+def i1(e):
+    """Real installer from git (not the dev checkout), like the owner: install.sh with ORCH_REF=<this commit>,
+    then a fresh project, orch init, add dashboard by answering y in a terminal, add scheduler with --yes.
+    Both add-ons and orch itself must come from the same commit (no silent reinstall from main)."""
+    import os
+    import pty
+
+    from lib import Skip
+
+    rc, sha, _ = e.sh(["git", "-C", str(e.repo), "rev-parse", "HEAD"])
+    if rc != 0:
+        raise Skip("not a git checkout")
+    sha = sha.strip()
+    d = e.tmp / "i1"
+    home, bin_, ws = d / "home", d / "bin", d / "proj"
+    for p in (home, bin_, ws):
+        p.mkdir(parents=True)
+    env = {k: v for k, v in e.env.items() if k != "ORCH_REPO"}
+    env.update({"HOME": str(home), "UV_TOOL_DIR": str(d / "uvtools"), "UV_TOOL_BIN_DIR": str(bin_),
+                "PATH": f"{bin_}{os.pathsep}{e.path}", "ORCH_HOME": str(e.orch_home / "i1"),
+                "ORCH_REPO": "https://github.com/severinlindenmann/orch", "ORCH_REF": sha})
+    rc, out, err = e.sh(["sh", str(e.repo / "install.sh")], env=env, timeout=900)
+    check(rc == 0, f"install.sh: {(err or out)[-300:]}")
+    del env["ORCH_REPO"], env["ORCH_REF"]  # a new terminal: the installer's variables are gone
+
+    def run(*args, stdin=None, timeout=900):
+        p = subprocess.run(["orch", *args], cwd=ws, env=env, capture_output=True, text=True, stdin=stdin,
+                           timeout=timeout)
+        return p.returncode, p.stdout, p.stderr
+
+    check(run("init")[0] == 0, "orch init")
+    # a terminal: the consent text is shown and asked; answer y
+    master, slave = pty.openpty()
+    os.write(master, b"y\n")
+    try:
+        rc, out, err = run("addon", "add", "dashboard", stdin=slave)
+    finally:
+        os.close(slave)
+        os.close(master)
+    check(rc == 0 and "Add it? [y/N]" in err and "Adds the command: orch dashboard" in err, f"add dashboard (tty): {rc} {(err or out)[-300:]}")
+    rc, out, err = run("addon", "add", "scheduler", stdin=subprocess.DEVNULL)  # no terminal, no --yes: hint
+    check(rc == 2 and "--yes" in err, f"scheduler without --yes: {rc} {(err or out)[-200:]}")
+    rc, out, err = run("addon", "add", "scheduler", "--yes")
+    check(rc == 0, f"add scheduler --yes: {(err or out)[-300:]}")
+    lst = {x["name"]: x["active"] for x in json.loads(run("addon", "list", "--json")[1])}
+    check(lst == {"dashboard": True, "scheduler": True}, f"addon list {lst}")
+    tools = (d / "uvtools" / "orch-workspace" / "uv-receipt.toml").read_text()
+    check(tools.count(sha) >= 3 and "@main" not in tools, f"orch and add-ons not all from {sha[:8]}: {tools[-400:]}")
+    rc, out, _ = run("scheduler", "--help")
+    check(rc == 0, "orch scheduler --help")
