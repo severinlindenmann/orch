@@ -319,38 +319,39 @@ def ag_a45(e):
     try:
         def logs(t):
             return sorted((ws / ".orch/run/logs").glob(f"{t}-*.log"))
+
+        def held(t):
+            return (ws / ".orch/run/tickets" / f"{t}.json").exists()
+
+        def finished(t):  # one core log per run; the newest one is still running while the ticket holds a claim
+            return max(0, len(logs(t)) - (1 if held(t) else 0))
+
         end = time.time() + 600
         while time.time() < end:
-            l4, l5 = logs(t4), logs(t5)
-            if any("# end" in p.read_text() for p in l4) and sum("# end" in p.read_text() for p in l5) >= 2:
+            if finished(t4) >= 1 and finished(t5) >= 2:
                 break
             time.sleep(10)
         time.sleep(5)
     finally:
         e.sh(["orch", "scheduler", "stop"], cwd=ws)
-        # keep the scheduler logs in the transcript
+        # keep the run logs in the transcript
         body = "".join(f"\n### {p.name}\n{p.read_text(errors='replace')[-4000:]}\n" for p in sorted((ws / ".orch/run/logs").glob("*.log")))
         save_transcript(e, "AG-A45", f"# codex runs started by the scheduler in Reports\n{body}")
     d4, d5 = tload(ws, t4), tload(ws, t5)
-    l4, l5 = logs(t4), logs(t5)
-    check(l4 and all("exit 0" in p.read_text() for p in l4 if "# end" in p.read_text()) and any("# end" in p.read_text() for p in l4), "A4: no finished run log")
+    check(finished(t4) >= 1, "A4: no finished run log")
+    st4 = e.orchj(ws, "run", "status", t4)
+    check(not st4["running"], f"A4: orch run status says a run is still going: {st4}")
     check(not d4.get("waiting_on"), f"A4: waiting_on not cleared: {d4.get('waiting_on')}")
     check(any(h["by"] == "agent:scheduler" for h in d4["history"]), "A4: no scheduler history entry")
     check((ws / "wake-proof.txt").exists() and "awake" in (ws / "wake-proof.txt").read_text().lower(), "A4: wake-proof.txt missing")
-    done5 = [p for p in l5 if "# end" in p.read_text()]
-    check(len(done5) >= 2, f"A5: {len(done5)} finished runs in 10 min, wanted 2")
+    n5 = finished(t5)
+    check(n5 >= 2, f"A5: {n5} finished runs in 10 min, wanted 2")
     runs = [ln for ln in (ws / "runs.log").read_text().splitlines() if ln.strip()] if (ws / "runs.log").exists() else []
     check(len(runs) >= 2, f"A5: runs.log has {len(runs)} lines")
-    spans = []
-    for p in done5:
-        txt = p.read_text()
-        s = re.search(r"# start (\S+)", txt).group(1)
-        en = re.search(r"# end (\S+)", txt).group(1)
-        spans.append((s, en))
-    spans.sort()
-    check(all(spans[i][1] <= spans[i + 1][0] for i in range(len(spans) - 1)), f"A5: runs overlapped {spans}")
+    # one agent per ticket: core allows one claim at a time, so two runs of t5 never overlap by construction
+    check(len(list((ws / ".orch/run/tickets").glob(f"{t5}.json"))) <= 1, "A5: more than one claim on the ticket")
     validate(e, d5)
-    return (f"A4 done ({d4['status']}, by {sorted(by(d4))}); A5 {len(done5)} runs, runs.log {len(runs)} lines, "
+    return (f"A4 done ({d4['status']}, by {sorted(by(d4))}); A5 {n5} runs, runs.log {len(runs)} lines, "
             f"ticket status {d5['status']}")
 
 

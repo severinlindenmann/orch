@@ -6,6 +6,7 @@ workspace folder and runs with a private PATH that names no claude, codex or tmu
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pty
@@ -22,7 +23,7 @@ from lib import Fail, check, free_port, http, scenario, wait_http
 
 AGENT = Path(__file__).parent / "fixtures" / "generic-agent" / "agent.py"
 NEEDS_FIXTURE = Path(__file__).parent / "fixtures" / "needs-addon"
-ESSENTIALS = ("uv", "git", "python3", "ps", "sh", "env", "sleep", "cat", "date", "ls", "head", "tail", "kill", "mkdir", "rm", "cp", "tr", "grep")
+ESSENTIALS = ("uv", "node", "git", "python3", "ps", "sh", "env", "sleep", "cat", "date", "ls", "head", "tail", "kill", "mkdir", "rm", "cp", "tr", "grep")
 
 
 def wait_for(fn, secs: float = 30, step: float = 0.1):
@@ -53,7 +54,10 @@ class W:
         parts = ([str(extra_bin)] if extra_bin else []) + [str(e.bin), str(self.bindir)]
         self.env = {"PATH": os.pathsep.join(parts), "GENERIC_AGENT_LOG": str(self.log), "ORCH_CMD": "orch", **(env or {})}
         e.sh(["git", "init", "-q", "-b", "main"], cwd=self.root, env=self.env, check_rc=True)
-        self.tmux_sockets: list[str] = []
+        # registered now, so a failing scenario still kills the tmux server it started (socket = hash of the folder)
+        self.tmux_sockets: list[str] = (
+            ["orch-" + hashlib.sha256(str(self.root.resolve()).encode("utf-8")).hexdigest()[:8]] if tmux else []
+        )
         e.cleanup.append(self.close)
 
     def close(self):
@@ -156,6 +160,26 @@ def pty_run(cmd: list[str], cwd: Path, env: dict, answers: list[str], secs: floa
     return rc, out.decode("utf-8", "replace")
 
 
+def attach_watch(w: W, tid: str, needle: bytes, secs: float = 15) -> bytes:
+    """`orch run attach --watch` on a terminal; returns what it showed until `needle` appeared."""
+    master, slave = pty.openpty()
+    p = subprocess.Popen(["orch", "run", "attach", tid, "--watch"], cwd=w.root, env={**w.e.env, **w.env, "TERM": "xterm"},
+                         stdin=slave, stdout=slave, stderr=slave)
+    os.close(slave)
+    seen = b""
+    end = time.time() + secs
+    while time.time() < end and needle not in seen:
+        if select.select([master], [], [], 0.3)[0]:
+            try:
+                seen += os.read(master, 8192)
+            except OSError:
+                break
+    p.kill()
+    p.wait()
+    os.close(master)
+    return seen
+
+
 # ------------------------------------------------------------------------------------------------ core alone
 
 
@@ -242,7 +266,7 @@ def c3(e):
     w.sh(["git", "clone", "-q", str(w.root), str(clone)], check_rc=True)
     rc, out, err = e.sh(["orch", "ticket", "show", tid], cwd=clone, env=w.env)
     check(rc == 0 and "on another computer" in out, f"clone does not say proof is on another computer: {out[-300:]!r}")
-    check(not list((clone / ".orch" / "tickets" / tid).glob("evidence/*")) if (clone / ".orch" / "tickets" / tid).exists() else True, "proof file came with the clone")
+    check(not list((clone / ".orch" / "tickets" / tid).glob("evidence/*")), "proof file came with the clone")
     # sessions are per computer: this one resumes, a session recorded on another host does not
     sid = "0b3a4c6e-1111-4222-8333-444455556666"
     w.o("run", "claim", tid, "--agent", "claude", "--session", sid)
@@ -496,7 +520,7 @@ def l1(e):
     tid = w.ticket("Live work", "step")
     r = w.j("run", "start", tid, "--mode", "live")
     check(r["mode"] == "live" and r["tmux"]["session"] == tid, f"live start: {r}")
-    w.tmux_sockets.append(r["tmux"]["socket"])
+    check(r["tmux"]["socket"] in w.tmux_sockets, f"tmux socket {r['tmux']['socket']} is not the one W cleans up")
     check(wait_for(lambda: w.lines("input"), 30), "the first prompt never reached the live agent")
     check("Live work" in w.lines("input")[0], f"first input {w.lines('input')[0]!r}")
     check(wait_for(lambda: (w.claim(tid) or {}).get("live", {}).get("state") == "idle", 20), "agent did not become idle (orch run done)")
@@ -507,21 +531,7 @@ def l1(e):
     check(len(w.lines("input")) == 2, f"input arrived more than once: {w.lines('input')}")
     pend = (w.root / ".orch/run/pending" / f"{tid}.jsonl").read_text().splitlines()
     check(all(json.loads(x).get("delivered_at") for x in pend), "an input is still marked as waiting")
-    # attach (read only) shows the pane
-    master, slave = pty.openpty()
-    p = subprocess.Popen(["orch", "run", "attach", tid, "--watch"], cwd=w.root, env={**e.env, **w.env, "TERM": "xterm"}, stdin=slave, stdout=slave, stderr=slave)
-    os.close(slave)
-    seen = b""
-    end = time.time() + 15
-    while time.time() < end and b"Use CHF" not in seen:
-        if select.select([master], [], [], 0.3)[0]:
-            try:
-                seen += os.read(master, 8192)
-            except OSError:
-                break
-    p.kill()
-    p.wait()
-    os.close(master)
+    seen = attach_watch(w, tid, b"Use CHF")
     check(b"Use CHF" in seen or b"got:" in seen, f"attach did not show the live session: {seen[-200:]!r}")
     st = w.o("run", "status", tid)[1]
     check("live session" in st, f"status of a live run: {st!r}")
@@ -572,15 +582,15 @@ def t2(e):
     k2 = w.ticket("Tag it", "tag", parent=parent)
     tree = w.o("ticket", "tree", parent)[1]
     check("Write notes" in tree and "Tag it" in tree and tree.index("Release 2") < tree.index("Write notes"), f"tree: {tree!r}")
-    show = w.j("ticket", "show", parent)
-    check(show.get("children", {}).get("total") == 2 if isinstance(show.get("children"), dict) else True, f"children counts: {show.get('children')}")
+    check("Sub-tickets: 0 of 2 closed" in w.o("ticket", "show", parent)[1], "ticket show lacks the sub-ticket count")
     w.j("run", "start", k1)
     w.wait_done(k1)
     check(w.load(k1)["checklist"][0]["done"] and not w.load(k2)["checklist"][0]["done"], "the agent touched the wrong ticket")
     check(w.load(k1).get("parent") == parent, "child lost its parent")
     rows = w.j("ticket", "list", "--all")
-    kids = [t for t in (rows if isinstance(rows, list) else rows.get("tickets", [])) if t.get("parent") == parent]
+    kids = [t for t in rows if t.get("parent") == parent]
     check(len(kids) == 2, f"list does not show both children: {rows}")
+    check(next(t for t in rows if t["id"] == parent)["children"] == {"total": 2, "closed": 0, "open": 2}, "list counts of the parent")
 
 
 # ------------------------------------------------------------------------------------------------ servers
@@ -644,6 +654,14 @@ def p6(e):
         check((t.get("ext", {}).get("relay") or {}).get("start_key") == key, f"{tid} start_key: {t.get('ext')}")
 
 
+def _stop(p) -> None:
+    p.terminate()
+    try:
+        p.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        p.kill()
+
+
 def _spawn(e, binary: str, env: dict, name: str):
     log = open(e.tmp / f"{name}.log", "w")
     p = subprocess.Popen([binary], env=env, stdout=log, stderr=log, cwd=e.tmp)
@@ -668,19 +686,20 @@ def w2(e):
     p = _spawn(e, bins["relay"], {**base_env, "ORCH_RELAY_DATA_DIR": str(rd), "ORCH_RELAY_MASTER_KEY_FILE": str(e.tmp / "w2-relay.key"),
                                    "ORCH_RELAY_LISTEN": f"127.0.0.1:{rp}", "ORCH_RELAY_ADMIN_LISTEN": f"127.0.0.1:{ra}",
                                    "ORCH_RELAY_ADMIN_TOKEN": tok, "ORCH_RELAY_PUBLIC_ORIGIN": f"http://127.0.0.1:{rp}"}, "w2-relay")
-    check(wait_http(f"http://127.0.0.1:{rp}/health", 30), "relay alone did not start")
-    w = W(e, "V2-W2R").init()
-    a = http("POST", f"http://127.0.0.1:{ra}/admin/api/workspaces", {"X-Orch-Admin": tok}, {"name": "w2-alone", "description": "alone", "tags": ["w2"]})
-    check(a.status == 201, f"relay admin add: {a}")
-    j = a.json()
-    w.o("addon", "add", "relay", "--yes", by=None, env={})
-    w.o("relay", "connect", f"http://127.0.0.1:{rp}", "--workspace", j["id"], "--token", j["token"], by=None)
-    who = w.j("relay", "whoami", by=None)
-    check(who["id"] == j["id"], f"relay whoami {who}")
-    act = {a["name"] for a in w.j("addon", "list", by=None) if a.get("active")}
-    check("relay" in act and "publish" not in act, f"active add-ons in the relay-only workspace: {act}")
-    p.terminate()
-    p.wait(timeout=15)
+    try:
+        check(wait_http(f"http://127.0.0.1:{rp}/health", 30), "relay alone did not start")
+        w = W(e, "V2-W2R").init()
+        a = http("POST", f"http://127.0.0.1:{ra}/admin/api/workspaces", {"X-Orch-Admin": tok}, {"name": "w2-alone", "description": "alone", "tags": ["w2"]})
+        check(a.status == 201, f"relay admin add: {a}")
+        j = a.json()
+        w.o("addon", "add", "relay", "--yes", by=None, env={})
+        w.o("relay", "connect", f"http://127.0.0.1:{rp}", "--workspace", j["id"], "--token", j["token"], by=None)
+        who = w.j("relay", "whoami", by=None)
+        check(who["id"] == j["id"], f"relay whoami {who}")
+        act = {a["name"] for a in w.j("addon", "list", by=None) if a.get("active")}
+        check("relay" in act and "publish" not in act, f"active add-ons in the relay-only workspace: {act}")
+    finally:
+        _stop(p)
     # publish alone
     pd = e.tmp / "w2-publish"
     pd.mkdir()
@@ -696,18 +715,19 @@ def w2(e):
                                      "ORCH_PUBLISH_ADMIN_LISTEN": f"127.0.0.1:{pa}", "ORCH_PUBLISH_ADMIN_TOKEN": tokp,
                                      "ORCH_PUBLISH_PUBLIC_ORIGIN": f"http://127.0.0.1:{pp}", "ORCH_PUBLISH_MAX_FILE_MB": "2",
                                      "ORCH_PUBLISH_APP_PORTS": f"{base}-{base}"}, "w2-publish")
-    check(wait_http(f"http://127.0.0.1:{pp}/health", 30), "publish alone did not start")
-    w2_ = W(e, "V2-W2P").init()
-    a = http("POST", f"http://127.0.0.1:{pa}/admin/api/workspaces", {"X-Orch-Admin": tokp},
-             {"name": "w2-pub-alone", "description": "alone", "tags": ["w2"], "rights": {"files": True, "apps": False, "permanent": False, "public": False}})
-    check(a.status == 201, f"publish admin add: {a}")
-    j = a.json()
-    w2_.o("addon", "add", "publish", "--yes", by=None)
-    w2_.o("publish", "connect", f"http://127.0.0.1:{pp}", "--workspace", j["id"], "--token", j["token"], by=None)
-    (w2_.root / "hello.txt").write_text("hello from publish alone\n")
-    act = {a["name"] for a in w2_.j("addon", "list", by=None) if a.get("active")}
-    check("publish" in act and "relay" not in act, f"active add-ons in the publish-only workspace: {act}")
-    r = w2_.j("publish", "file", str(w2_.root / "hello.txt"), by=None)
-    check(r.get("link") or r.get("url"), f"publish file result {r}")
-    q.terminate()
-    q.wait(timeout=15)
+    try:
+        check(wait_http(f"http://127.0.0.1:{pp}/health", 30), "publish alone did not start")
+        w2_ = W(e, "V2-W2P").init()
+        a = http("POST", f"http://127.0.0.1:{pa}/admin/api/workspaces", {"X-Orch-Admin": tokp},
+                 {"name": "w2-pub-alone", "description": "alone", "tags": ["w2"], "rights": {"files": True, "apps": False, "permanent": False, "public": False}})
+        check(a.status == 201, f"publish admin add: {a}")
+        j = a.json()
+        w2_.o("addon", "add", "publish", "--yes", by=None)
+        w2_.o("publish", "connect", f"http://127.0.0.1:{pp}", "--workspace", j["id"], "--token", j["token"], by=None)
+        (w2_.root / "hello.txt").write_text("hello from publish alone\n")
+        act = {a["name"] for a in w2_.j("addon", "list", by=None) if a.get("active")}
+        check("publish" in act and "relay" not in act, f"active add-ons in the publish-only workspace: {act}")
+        r = w2_.j("publish", "file", str(w2_.root / "hello.txt"), by=None)
+        check(r.get("link") or r.get("url"), f"publish file result {r}")
+    finally:
+        _stop(q)
