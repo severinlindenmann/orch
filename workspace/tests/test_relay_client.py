@@ -606,3 +606,26 @@ def test_inbox_under_orch_agent_still_applies_phone_answer(proj, run, new_ticket
     assert run("relay", "inbox")[0] == 0
     t = _ticket(proj, tid)
     assert t["questions"][0]["answer"] == "DATE" and t["questions"][0]["via"] == "phone"
+
+
+def test_start_key_matches_only_same_sender_and_open_ticket(proj, run, rel):
+    from orch import relay
+
+    connect(run, rel)
+    a = msg("m_start0000000000a", "start", {"key": "weekly", "text": "x"}, frm="ws_peera0001")
+    b = msg("m_start0000000000b", "start", {"key": "weekly", "text": "x"}, frm="ws_peerb0001")
+    ta = relay._ticket_for(proj, a)
+    before = _ticket(proj, ta)
+    tb = relay._ticket_for(proj, b)
+    assert tb != ta
+    assert _ticket(proj, ta) == before
+    r = _ticket(proj, tb)["ext"]["relay"]
+    assert r["from"] == "ws_peerb0001" and r["start_key"] == "weekly"
+    # same sender, same key, later message: the open ticket is reused
+    a2 = msg("m_start0000000000c", "start", {"key": "weekly", "text": "x"}, frm="ws_peera0001")
+    assert relay._ticket_for(proj, a2) == ta
+    # a finished ticket is not reused
+    assert run("ticket", "status", ta, "active")[0] == 0
+    assert run("ticket", "status", ta, "done")[0] == 0
+    a3 = msg("m_start0000000000d", "start", {"key": "weekly", "text": "x"}, frm="ws_peera0001")
+    assert relay._ticket_for(proj, a3) not in (ta, tb)

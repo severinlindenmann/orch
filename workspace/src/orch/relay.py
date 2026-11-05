@@ -451,7 +451,12 @@ def _ticket_for(root: Path, msg: dict) -> str:
         return found
     if msg["type"] == "start":
         for t in tickets.list_all(root):
-            if t.get("ext", {}).get("relay", {}).get("start_key") == b["key"]:
+            r = t.get("ext", {}).get("relay", {})
+            if (
+                r.get("start_key") == b["key"]
+                and r.get("from") == msg["from"]
+                and t.get("status") in ("open", "active", "waiting")
+            ):
                 return t["id"]
         title = f"Relay task {b['key']}"
     else:
