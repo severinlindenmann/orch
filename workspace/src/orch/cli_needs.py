@@ -1,19 +1,15 @@
-"""`orch needs` and `orch agents` (hidden until built)."""
+"""`orch needs`. `orch agents` lives in cli_config.py."""
 
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 
 from orch import needs as needs_mod
-from orch.errors import Refused
 
 
 def add_parsers(sub, common) -> None:
     sub.add_parser("needs", parents=[common], help="what waits for a person")
-    x = sub.add_parser("agents", parents=[common], help=argparse.SUPPRESS)
-    x.add_argument("rest", nargs=argparse.REMAINDER)
 
 
 def _line(r: dict) -> str:
@@ -29,8 +25,6 @@ def _line(r: dict) -> str:
 
 
 def dispatch(args, root: Path) -> bool:
-    if args.cmd == "agents":
-        raise Refused("orch agents is not available yet.")
     if args.cmd != "needs":
         return False
     rows = needs_mod.needs(root)

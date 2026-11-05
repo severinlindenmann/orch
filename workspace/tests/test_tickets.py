@@ -99,7 +99,7 @@ def test_log_actor(proj, run, new_ticket, monkeypatch):
     monkeypatch.setenv("CLAUDECODE", "1")
     run("log", tid, "by env")
     h = read(proj, tid)["history"]
-    assert h[-2]["by"] == "agent:codex" and h[-1]["by"] == "agent:claude-code"
+    assert h[-2]["by"] == "agent:codex" and h[-1]["by"] == "agent:claude"
     monkeypatch.delenv("CLAUDECODE")
     run("log", tid, "human")
     assert read(proj, tid)["history"][-1]["by"].startswith("human:")

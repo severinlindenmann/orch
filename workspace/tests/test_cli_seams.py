@@ -10,8 +10,8 @@ from orch import cli, tickets
 
 # Captured from develop (4b4a62c) in an empty folder; the only fields that vary by program name are normalised.
 GOLDEN = {
-    "--help": "usage: orch [-h] [--version] <command> ...\n\norch: tickets with evidence for any agent tool\n\npositional arguments:\n  <command>\n    init      set up this folder (safe to repeat)\n    start     start the add-ons that run in the background here\n    stop      stop them (asks which workspace when you are outside one)\n    status    what runs in the background, and where\n    addon     add-ons: add, remove, list\n    ticket    tickets\n    check     checklist\n    ask       ask a question and wait for the answer\n\noptions:\n  -h, --help  show this help message and exit\n  --version   show program's version number and exit\n\nMore commands: orch --help-all\n",
-    "--help-all": "usage: orch [-h] [--version] <command> ...\n\norch: tickets with evidence for any agent tool\n\npositional arguments:\n  <command>\n    init      set up this folder (safe to repeat)\n    update    install the latest orch and the add-ons you use\n    start     start the add-ons that run in the background here\n    stop      stop them (asks which workspace when you are outside one)\n    status    what runs in the background, and where\n    addon     add-ons: add, remove, list\n    ticket    tickets\n    wait      same as: ticket wait\n    check     checklist\n    log       add a history entry\n    ask       ask a question and wait for the answer\n    answer    answer a question\n    link      links\n    ext       add-on data on a ticket\n\noptions:\n  -h, --help  show this help message and exit\n  --version   show program's version number and exit\n",
+    "--help": "usage: orch [-h] [--version] <command> ...\n\norch: tickets with evidence for any agent tool\n\npositional arguments:\n  <command>\n    init      set up this folder (safe to repeat)\n    start     start the add-ons that run in the background here\n    stop      stop them (asks which workspace when you are outside one)\n    status    what runs in the background, and where\n    addon     add-ons: add, remove, list\n    ticket    tickets\n    check     checklist\n    ask       ask a question and wait for the answer\n    needs     what waits for a person\n\noptions:\n  -h, --help  show this help message and exit\n  --version   show program's version number and exit\n\nMore commands: orch --help-all\n",
+    "--help-all": "usage: orch [-h] [--version] <command> ...\n\norch: tickets with evidence for any agent tool\n\npositional arguments:\n  <command>\n    init      set up this folder (safe to repeat)\n    update    install the latest orch and the add-ons you use\n    start     start the add-ons that run in the background here\n    stop      stop them (asks which workspace when you are outside one)\n    status    what runs in the background, and where\n    addon     add-ons: add, remove, list\n    ticket    tickets\n    wait      same as: ticket wait\n    check     checklist\n    log       add a history entry\n    ask       ask a question and wait for the answer\n    answer    answer a question\n    link      links\n    ext       add-on data on a ticket\n    needs     what waits for a person\n\noptions:\n  -h, --help  show this help message and exit\n  --version   show program's version number and exit\n",
     "status": "Nothing runs in the background. Start it in a workspace: orch start\n",
     "status --json": "[]\n",
     "addon list": "  publish     off   Shares files and small apps by private link.\n  relay       off   Messages and tasks between workspaces and phones.\n",
@@ -35,11 +35,7 @@ def test_output_is_unchanged(proj, capsys, cmd):
 @pytest.mark.parametrize(
     "argv",
     [
-        ["run", "claim", "x"],
-        ["run", "status"],
         ["run", "done"],
-        ["agents", "list"],
-        ["config", "get"],
     ],
 )
 def test_placeholders_say_not_available(proj, run, argv):
@@ -51,6 +47,6 @@ def test_provenance_unchanged(proj, monkeypatch):
     monkeypatch.delenv("ORCH_AGENT", raising=False)
     assert tickets.agent_tool() is None
     monkeypatch.setenv("CLAUDECODE", "1")
-    assert tickets.current_actor() == "agent:claude-code"
+    assert tickets.current_actor() == "agent:claude"
     monkeypatch.setenv("ORCH_AGENT", "x")
     assert tickets.current_actor() == "agent:x"

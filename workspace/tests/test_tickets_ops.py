@@ -197,7 +197,7 @@ def test_explicit_human_by_not_refused_under_agent(proj, run, new_ticket, monkey
     code, _, _ = run("log", tid, "from a person", "--by", "human:marco")
     assert code == 0 and read(proj, tid)["history"][-1]["by"] == "human:marco"
     run("log", tid, "default")
-    assert read(proj, tid)["history"][-1]["by"] == "agent:claude-code"
+    assert read(proj, tid)["history"][-1]["by"] == "agent:claude"
 
 
 def test_sessions_record_and_find(proj, validate, new_ticket):

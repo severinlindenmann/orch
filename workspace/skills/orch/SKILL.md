@@ -28,6 +28,13 @@ All commands accept `--json`. Exit code 0 = ok, 2 = refused (the reason is in pl
 - End every run with `orch ticket summary <id> "<where things stand>"` (at most 200 characters).
 - Optional fields: `orch ticket edit <id> --owner <name> --due YYYY-MM-DD --note "<text>"`.
 
+# Sub-tickets and proof files
+
+- Split big work: `orch ticket new "<title>" --parent <id>` (the parent must exist; set only when creating). See `orch ticket tree <id>`.
+- Closing a ticket whose sub-tickets are open still works but warns; close the sub-tickets first.
+- A file as proof: `orch check done <id> <c> --file <path> --title "<name>"` copies it (workspace files only, at most 25 MB).
+- To say a ticket waits for another one: `orch wait <id> --on ticket:<other id>`.
+
 # Evidence before done
 
 A checklist item is done only when it has at least one evidence entry:
