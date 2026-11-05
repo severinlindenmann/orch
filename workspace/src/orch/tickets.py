@@ -5,6 +5,7 @@ Unknown fields are kept: a ticket is loaded as a plain dict, changed, saved whol
 
 from __future__ import annotations
 
+import contextlib
 import getpass
 import json
 import os
@@ -12,6 +13,7 @@ import re
 import secrets
 import sys
 import tempfile
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -19,7 +21,8 @@ from orch.errors import Refused
 
 STATUSES = ("open", "active", "waiting", "done", "dropped")
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
-WAIT_KINDS = ("question", "workspace", "webhook", "person", "other")
+WAIT_KINDS = ("time", "ticket", "question", "external")
+PATCH_FIELDS = ("title", "status", "waiting_on")
 _ID_RE = re.compile(r"^t_[a-z0-9]{6,16}$")
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
@@ -108,21 +111,74 @@ def load(root: Path, tid: str) -> dict:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+@contextlib.contextmanager
+def _locked(root: Path, tid: str):
+    """One writer at a time per ticket: an exclusive lock file next to it (stale after 30 s)."""
+    lock = tickets_dir(root) / f".lock-{tid}"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    end = time.monotonic() + 5
+    while True:
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > 30:
+                    lock.unlink()
+                    continue
+            except OSError:
+                continue
+            if time.monotonic() > end:
+                raise Refused(f"Ticket {tid} is being changed right now. Try again.") from None
+            time.sleep(0.02)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            lock.unlink()
+
+
+def revision(ticket: dict) -> int:
+    r = ticket.get("revision", 0)
+    return r if isinstance(r, int) and not isinstance(r, bool) and r >= 0 else 0
+
+
 def save(root: Path, ticket: dict) -> None:
-    """Atomic: write a temp file in the same folder, then rename over the target."""
+    """Atomic and checked: under a lock, refused when the file changed since this ticket was loaded
+    (no lost updates between agents and add-ons); `revision` goes up by 1 on every write."""
     p = ticket_path(root, ticket["id"])
     p.parent.mkdir(parents=True, exist_ok=True)
-    ticket["updated_at"] = now()
-    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-            json.dump(ticket, f, indent=2, ensure_ascii=False)
-            f.write("\n")
-        os.replace(tmp, p)
-    except BaseException:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-        raise
+    with _locked(root, ticket["id"]):
+        if p.exists():
+            try:
+                on_disk = revision(json.loads(p.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                on_disk = revision(ticket)
+            if on_disk != revision(ticket):
+                raise Refused(
+                    f"Ticket {ticket['id']} changed while you worked on it. Read it again and retry."
+                )
+        ticket["revision"] = revision(ticket) + 1
+        ticket["updated_at"] = now()
+        fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(ticket, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+            os.replace(tmp, p)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+
+
+def load_checked(root: Path, tid: str, if_revision: int | None) -> dict:
+    ticket = load(root, tid)
+    if if_revision is not None and revision(ticket) != if_revision:
+        raise Refused(
+            f"Ticket {tid} is at revision {revision(ticket)}, not {if_revision}. Read it again and retry."
+        )
+    return ticket
 
 
 def list_all(root: Path) -> list[dict]:
@@ -142,7 +198,7 @@ def add_history(ticket: dict, by: str, text: str) -> None:
     ticket["history"].append({"at": now(), "by": by, "text": text})
 
 
-def create(root: Path, title: str, by: str, recurring: str | None = None) -> dict:
+def create(root: Path, title: str, by: str) -> dict:
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
@@ -151,7 +207,6 @@ def create(root: Path, title: str, by: str, recurring: str | None = None) -> dic
         "schema": "orch.ticket/1",
         "id": new_id(root),
         "title": title,
-        "type": "recurring" if recurring else "task",
         "status": "open",
         "created_at": t,
         "updated_at": t,
@@ -160,8 +215,6 @@ def create(root: Path, title: str, by: str, recurring: str | None = None) -> dic
         "questions": [],
         "history": [{"at": t, "by": by, "text": "Created"}],
     }
-    if recurring:
-        ticket["ext"] = {"scheduler": {"cron": recurring}}
     save(root, ticket)
     return ticket
 
@@ -171,23 +224,25 @@ def checks_done(ticket: dict) -> tuple[int, int]:
     return sum(1 for x in c if x.get("done")), len(c)
 
 
+def _check_can_finish(ticket: dict) -> None:
+    open_ = [c["id"] for c in ticket["checklist"] if not c.get("done")]
+    if open_:
+        raise Refused(f"Not done: {', '.join(open_)} is not checked yet.")
+    bad = [c["id"] for c in ticket["checklist"] if not c.get("evidence")]
+    if bad:
+        raise Refused(f"Not done: {', '.join(bad)} is checked without evidence.")
+
+
 def set_status(root: Path, tid: str, status: str, by: str) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
     ticket = load(root, tid)
     if status == "done":
-        open_ = [c["id"] for c in ticket["checklist"] if not c.get("done")]
-        if open_:
-            raise Refused(f"Not done: {', '.join(open_)} is not checked yet.")
-        bad = [c["id"] for c in ticket["checklist"] if not c.get("evidence")]
-        if bad:
-            raise Refused(f"Not done: {', '.join(bad)} is checked without evidence.")
+        _check_can_finish(ticket)
     if status != "waiting":
         ticket["waiting_on"] = None
     old = ticket["status"]
     ticket["status"] = status
-    if status in ("done", "dropped"):
-        ticket["wake_at"] = None
     if old != status:
         add_history(ticket, by, f"Status {old} -> {status}")
     save(root, ticket)
@@ -279,24 +334,41 @@ def link_add(root: Path, tid: str, type_: str, url: str, title: str | None, by: 
     return ticket
 
 
-def ext_set(root: Path, tid: str, addon: str, data: str, by: str) -> dict:
-    if not re.fullmatch(r"[a-z0-9_-]{1,32}", addon):
-        raise Refused("An add-on key is lowercase letters, digits, - or _.")
+def validate_ext(schema: dict, obj: dict, addon: str) -> None:
+    import jsonschema
+
+    errs = sorted(jsonschema.Draft202012Validator(schema).iter_errors(obj), key=lambda e: list(e.path))
+    if errs:
+        e = errs[0]
+        where = ".".join(str(x) for x in e.path)
+        raise Refused(f"ext.{addon}{'.' + where if where else ''}: {e.message}")
+
+
+def ext_set(
+    root: Path,
+    tid: str,
+    addon: str,
+    data: str,
+    by: str,
+    if_revision: int | None = None,
+    schema: dict | None = None,
+) -> dict:
+    """Merge `data` into ext.<addon>. `schema` = the ticket_ext schema of the add-on when it is active."""
+    if not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", addon):
+        raise Refused("An add-on key is lowercase letters, digits or -.")
     try:
         obj = json.loads(data)
     except ValueError:
         raise Refused("ext data must be a JSON object.") from None
     if not isinstance(obj, dict):
         raise Refused("ext data must be a JSON object.")
-    ticket = load(root, tid)
+    ticket = load_checked(root, tid, if_revision)
     ext = ticket.setdefault("ext", {})
     cur = ext.get(addon)
-    if isinstance(cur, dict):  # merge: keep fields this call does not mention
-        cur.update(obj)
-    else:
-        ext[addon] = obj
-    if ticket["type"] == "recurring" and not isinstance(ext.get("scheduler", {}).get("cron"), str):
-        raise Refused("A recurring ticket needs ext.scheduler.cron.")
+    merged = {**cur, **obj} if isinstance(cur, dict) else obj  # keep fields this call does not mention
+    if schema is not None:
+        validate_ext(schema, merged, addon)
+    ext[addon] = merged
     add_history(ticket, by, f"Set ext.{addon}")
     save(root, ticket)
     return ticket
@@ -357,12 +429,25 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
     return ticket, q
 
 
+def waiting_value(kind: str, ref: str | None = None, until: str | None = None) -> dict:
+    if kind not in WAIT_KINDS:
+        raise Refused(f"A wait kind is one of: {', '.join(WAIT_KINDS)}.")
+    if kind == "time":
+        if not until:
+            raise Refused("Waiting for a time needs until.")
+        return {"kind": "time", "until": parse_time(until)}
+    if not isinstance(ref, str) or not ref.strip() or len(ref.strip()) > 200:
+        raise Refused(f"Waiting on {kind} needs a ref (1 to 200 characters).")
+    return {"kind": kind, "ref": ref.strip()}
+
+
 def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear: bool = False) -> dict:
+    """Generic waiting: the core records waiting_on and never promises that something wakes the ticket."""
     if clear:
         if until or on:
             raise Refused("--clear cannot be combined with --until or --on.")
         ticket = load(root, tid)
-        ticket["wake_at"] = ticket["waiting_on"] = None
+        ticket["waiting_on"] = None
         if ticket["status"] == "waiting":
             ticket["status"] = "active"
         add_history(ticket, by, "Wait cleared")
@@ -372,16 +457,54 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
         raise Refused("Use exactly one of --until <time> or --on <kind>:<ref>.")
     ticket = load(root, tid)
     if until:
-        ticket["wake_at"] = parse_time(until)
-        ticket["waiting_on"] = None
-        note = f"Waiting until {ticket['wake_at']}"
+        w = waiting_value("time", until=until)
+        note = f"Waiting until {w['until']}"
     else:
         kind, sep, ref = on.partition(":")
-        if not sep or kind not in WAIT_KINDS or not ref.strip():
-            raise Refused(f"--on needs <kind>:<ref> with kind one of: {', '.join(WAIT_KINDS)}.")
-        ticket["waiting_on"] = {"kind": kind, "ref": ref.strip()}
-        note = f"Waiting on {kind} {ref.strip()}"
+        if not sep or kind not in WAIT_KINDS or kind == "time":
+            raise Refused("--on needs <kind>:<ref>, kind ticket, question or external. For a time: --until.")
+        w = waiting_value(kind, ref)
+        note = f"Waiting on {kind} {w['ref']}"
+    ticket["waiting_on"] = w
     ticket["status"] = "waiting"
     add_history(ticket, by, note)
+    save(root, ticket)
+    return ticket
+
+
+def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
+    """Atomic change of several fields (title, status, waiting_on); refused when `revision` changed."""
+    try:
+        obj = json.loads(data)
+    except ValueError:
+        raise Refused('A patch is a JSON object, e.g. \'{"title": "New"}\'.') from None
+    if not isinstance(obj, dict) or not obj:
+        raise Refused("A patch is a JSON object with at least one field.")
+    bad = sorted(set(obj) - set(PATCH_FIELDS))
+    if bad:
+        raise Refused(f"A patch can change only: {', '.join(PATCH_FIELDS)} (not {bad[0]}).")
+    ticket = load_checked(root, tid, if_revision)
+    if "title" in obj:
+        t = obj["title"]
+        if not isinstance(t, str) or not t.strip() or len(t.strip()) > 200:
+            raise Refused("A title needs 1 to 200 characters.")
+        ticket["title"] = t.strip()
+    w = obj.get("waiting_on")
+    if "waiting_on" in obj and w is not None:
+        if not isinstance(w, dict) or set(w) - {"kind", "until", "ref"}:
+            raise Refused("waiting_on is {kind, until} or {kind, ref}, or null.")
+        w = waiting_value(str(w.get("kind")), w.get("ref"), w.get("until"))
+    status = obj.get("status", ticket["status"])
+    if status not in STATUSES:
+        raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
+    if status == "done":
+        _check_can_finish(ticket)
+    if "waiting_on" in obj:
+        ticket["waiting_on"] = w
+    if status != "waiting":
+        ticket["waiting_on"] = None
+    old, ticket["status"] = ticket["status"], status
+    note = f" (status {old} -> {status})" if old != status else ""
+    add_history(ticket, by, "Patched " + ", ".join(sorted(obj)) + note)
     save(root, ticket)
     return ticket

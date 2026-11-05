@@ -401,7 +401,7 @@ def test_ticket_wait_clear(proj, run, new_ticket):
     run("ticket", "wait", tid, "--until", "2030-01-01T00:00:00Z")
     code, out, _ = run("ticket", "wait", tid, "--clear", "--json")
     t = json.loads(out)
-    assert code == 0 and t["wake_at"] is None and t["status"] == "active"
+    assert code == 0 and t["waiting_on"] is None and t["status"] == "active"
 
 
 def test_inbox_keeps_the_relay_order_within_one_second(proj, run, rel):

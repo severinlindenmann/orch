@@ -108,6 +108,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--workspace", required=True)
     x.add_argument("--token", required=True)
     rel.add_parser("whoami", parents=[common], help="show who you are and which phones are paired")
+    rel.add_parser("status", parents=[common], help="is this folder connected to a relay (no network)")
     _add_profile(rel)
     x = rel.add_parser("inbox", parents=[common], help="pull new messages")
     x.add_argument("--wait", type=int, default=0, help="wait up to N seconds (max 30)")
@@ -232,6 +233,17 @@ def run_relay(args, root: Path, out) -> None:
             who,
             f"Connected to {_host(args.url)} as {who['name']}.\n{line}\n"
             'Next: describe this workspace: orch relay profile --description "..." --tags a,b',
+        )
+    elif sub == "status":
+        try:
+            c = net.load_service(root, "relay")
+            st = {"configured": True, "url": c["url"], "workspace": c["workspace"]}
+        except Refused:
+            st = {"configured": False}
+        out(
+            args,
+            st,
+            f"Connected to {_host(st['url'])}." if st["configured"] else "Not connected to a relay.",
         )
     elif sub == "whoami":
         w = relay.whoami(root)
