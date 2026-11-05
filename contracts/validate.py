@@ -229,8 +229,8 @@ for case in bvec["must_fail"]:
         pass
 
 # clean_untrusted (SA-14): reference rules of vectors/clean-untrusted-v1.json;
-# workspace/src/orch/text.py must give the same outputs. Order matters: drop invisible characters FIRST (so they
-# cannot split a comment marker), then remove comments until nothing changes, then an unterminated "<!--" tail.
+# workspace/src/orch/text.py must give the same outputs. Order matters: drop invisible characters FIRST
+# (so they cannot split a comment marker), then remove comments until nothing changes, then an open "<!--" tail.
 _COMMENT = re.compile(r"<!--.*?-->", re.S)
 _OPEN_TAIL = re.compile(r"<!--.*\Z", re.S)
 _DROP = (
