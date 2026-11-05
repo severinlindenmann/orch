@@ -17,7 +17,11 @@ def proj(tmp_path, monkeypatch):
     for k in list(os.environ):
         if k.startswith("CODEX_"):
             monkeypatch.delenv(k)
-    monkeypatch.setenv("ORCH_HOME", str(tmp_path.parent / f"{tmp_path.name}_orchhome"))
+    fake_home = tmp_path.parent / f"{tmp_path.name}_home"
+    fake_home.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
+    monkeypatch.setenv("ORCH_HOME", str(fake_home / "orchhome"))
     return tmp_path
 
 
