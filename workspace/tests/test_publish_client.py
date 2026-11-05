@@ -1,8 +1,10 @@
 import io
 import json
+import os
 import tarfile
 from pathlib import Path
 
+import pytest
 from conftest import turn_on
 from fakes import WS
 
@@ -153,14 +155,18 @@ def test_folder_names_the_viewer_rejects_are_refused_before_upload(proj, run, pu
     site = proj / "site"
     site.mkdir()
     (site / "index.html").write_text("<h1>hi</h1>")
-    (site / "a\\b.css").write_text("x")
-    assert "Rename" in run("publish", "file", "site")[2]
-    (site / "a\\b.css").unlink()
-    deep = site / "/".join(["d" * 60] * 4)
-    deep.mkdir(parents=True)
-    (deep / "long-name.css").write_text("x")
-    assert "255 characters" in run("publish", "file", "site")[2]
+    if os.sep == "/":  # a \\ in a file name is only possible on Linux/macOS
+        (site / "a\\b.css").write_text("x")
+        assert "Rename" in run("publish", "file", "site")[2]
+        (site / "a\\b.css").unlink()
+        deep = site / "/".join(["d" * 60] * 4)  # Windows paths stop at 260 characters
+        deep.mkdir(parents=True)
+        (deep / "long-name.css").write_text("x")
+        assert "255 characters" in run("publish", "file", "site")[2]
     assert not pub.files
+    for bad in ("a\\b.css", "x/../y.css", "d" * 256, "bad\udcff.css"):
+        with pytest.raises(Refused, match="Rename"):
+            publish._bundle_path(bad)
 
 
 def test_folder_without_index_html_is_refused(proj, run, pub):
