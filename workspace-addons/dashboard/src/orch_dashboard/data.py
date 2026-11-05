@@ -79,9 +79,9 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
     return tickets, skipped
 
 
-def load_addons(root: Path, orch_bin: str | None) -> list[dict]:
+def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
     """Active add-ons that have a dashboard tab and/or ticket rows, from `orch addon list --json`, by `order`."""
-    raw = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    raw = run_orch(orch_bin, ["addon", "list", "--json"], root) if raw is None else raw
     out = []
     for a in raw if isinstance(raw, list) else []:
         if not (isinstance(a, dict) and a.get("active") is True and isinstance(a.get("name"), str)
@@ -146,8 +146,14 @@ def load_inbox(root: Path, names: dict[str, str] | None = None) -> list[dict]:
 def load_state(root: Path, include_inbox: bool = True, orch_bin: str | None = None, with_addons: bool = True) -> dict:
     """with_addons=False (snapshots by default): no add-on tabs, no ticket rows, `ext` dropped from tickets."""
     tickets, skipped = load_tickets(root, orch_bin)
+    raw = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    # the Inbox needs the relay add-on on here (and a connection); otherwise no Inbox at all
+    relay = (root / ".orch" / "secrets" / "relay.json").is_file() and any(
+        isinstance(a, dict) and a.get("name") == "relay" and a.get("active") is True
+        for a in (raw if isinstance(raw, list) else []))
+    include_inbox = include_inbox and relay
     names = load_names(root) if include_inbox else {}
-    addons = load_addons(root, orch_bin) if with_addons else []
+    addons = load_addons(root, orch_bin, raw) if with_addons else []
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
@@ -159,7 +165,7 @@ def load_state(root: Path, include_inbox: bool = True, orch_bin: str | None = No
         "addons": addons,
         "names": names if include_inbox else {},
         "inbox": load_inbox(root, names) if include_inbox else None,
-        "relay": (root / ".orch" / "secrets" / "relay.json").is_file(),
+        "relay": relay,
     }
     state["rev"] = hashlib.sha1(
         json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()).hexdigest()[:12]

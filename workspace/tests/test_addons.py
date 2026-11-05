@@ -115,6 +115,11 @@ def hello(tmp_path, monkeypatch, uv_calls):
         sys.path.remove(str(folder / "src"))
 
 
+def third_party() -> dict:
+    """discover() without the built-in publish and relay add-ons (always there)."""
+    return {k: v for k, v in addons.discover().items() if k not in addons.CORE_ADDONS}
+
+
 def install(run, folder):
     code, out, err = run("addon", "add", str(folder), "--yes")
     assert code == 0, err
@@ -128,7 +133,7 @@ def test_discovery_never_imports_addon_code(tmp_path, monkeypatch):
     monkeypatch.syspath_prepend(str(folder / "src"))
     monkeypatch.setattr(addons, "_entry_points", lambda: {"hello": "orch_hello"})
     addons._save_registry([{"name": "hello", "source": str(folder), "version": "0.1.0"}])
-    found = addons.discover()
+    found = third_party()
     assert list(found) == ["hello"] and found["hello"]["version"] == "0.1.0"
     assert not (tmp_path / "a" / "IMPORTED-hello").exists()
     assert "orch_hello" not in sys.modules
@@ -176,7 +181,7 @@ def test_entry_point_must_match_manifest(tmp_path, monkeypatch):
     monkeypatch.setattr(
         addons, "_entry_points", lambda: {"other": "orch_hello", "os": "os", "ticket": "json"}
     )
-    assert addons.discover() == {}
+    assert third_party() == {}
 
 
 # ---- add / list / activation ------------------------------------------------------------------------
@@ -198,7 +203,7 @@ def test_add_needs_consent_then_installs_and_activates(proj, run, hello, uv_call
     assert not (proj / ".agents/skills/orch-hello/AGENTS-block.md").exists()
     agents = (proj / "AGENTS.md").read_text(encoding="utf-8")
     assert "<!-- orch:addon:hello -->\n## orch-hello" in agents and "<!-- /orch:addon:hello -->" in agents
-    rows = json.loads(run("addon", "list", "--json")[1])
+    rows = [r for r in json.loads(run("addon", "list", "--json")[1]) if r["name"] not in addons.CORE_ADDONS]
     assert rows == [
         {
             "name": "hello",
@@ -594,12 +599,12 @@ def test_duplicate_entry_point_names_disable_both(tmp_path, monkeypatch):
     monkeypatch.syspath_prepend(str(a / "src"))
     addons._save_registry([{"name": "hello", "source": str(a), "version": "0.1.0"}])
     monkeypatch.setattr(addons, "_entry_points", lambda: [("hello", "orch_hello"), ("hello", "orch_evil")])
-    assert addons.discover() == {}
+    assert third_party() == {}
     monkeypatch.setattr(addons, "_entry_points", lambda: [("hello", "orch_hello")])
-    assert list(addons.discover()) == ["hello"]
+    assert list(third_party()) == ["hello"]
     # an entry point the user never installed through orch does not count
     addons._save_registry([])
-    assert addons.discover() == {}
+    assert third_party() == {}
 
 
 def test_agents_block_cannot_forge_markers(tmp_path):
@@ -795,3 +800,63 @@ def test_install_origin_reads_direct_url(monkeypatch, tmp_path):
     for data, want in cases:
         monkeypatch.setattr(md, "distribution", lambda _n, d=data: D(d))
         assert addons._install_origin() == want
+
+
+# ---- publish and relay are built-in add-ons -----------------------------------------------------------
+
+
+def help_text(capfd, *flags) -> str:
+    with pytest.raises(SystemExit):
+        cli.main(list(flags or ["--help"]))
+    return capfd.readouterr().out
+
+
+def test_clean_init_shows_no_addon_commands(proj, run, capfd):
+    assert run("init")[0] == 0
+    for flag in ("--help", "--help-all"):
+        out = help_text(capfd, flag)
+        for name in ("publish", "relay", "dashboard", "scheduler"):
+            assert f"    {name} " not in out and f"  {name}  " not in out, (flag, name, out)
+    tree = (proj / "AGENTS.md").read_text(encoding="utf-8") + "".join(
+        p.name for p in (proj / ".agents" / "skills").iterdir()
+    )
+    for name in ("publish", "relay", "dashboard", "scheduler"):
+        assert f"orch-{name}" not in tree and f"orch {name}" not in tree
+    rows = {r["name"]: r["active"] for r in json.loads(run("addon", "list", "--json")[1])}
+    assert rows == {"publish": False, "relay": False}
+    code, _, err = run("relay", "inbox")
+    assert code == 2 and "Turn it on: orch addon add relay" in err
+    code, _, err = run("publish", "whoami")
+    assert code == 2 and "Turn it on: orch addon add publish" in err
+    code, _, err = run("publish", "--help")
+    assert code == 2 and "Turn it on: orch addon add publish" in err
+    t = json.loads(run("ticket", "new", "T", "--json")[1])["id"]
+    code, _, err = run("ask", t, "Ok?", "--phone")
+    assert code == 2 and "orch addon add relay" in err
+    assert json.loads(run("ticket", "show", t, "--json")[1])["questions"] == []  # nothing asked
+
+
+def test_add_relay_and_publish_like_any_addon(proj, run, uv_calls, capfd):
+    run("init")
+    code, out, err = run("addon", "add", "relay")  # no tty, no --yes
+    assert code == 2 and "Adds the command: orch relay" in err and "--yes" in err
+    code, out, err = run("addon", "add", "relay", "--yes")
+    assert code == 0 and "relay is turned on" in out and not uv_calls  # part of orch: nothing installed
+    assert (proj / ".agents/skills/orch-relay/SKILL.md").is_file()
+    assert "<!-- orch:addon:relay -->" in (proj / "AGENTS.md").read_text(encoding="utf-8")
+    out = help_text(capfd)
+    assert "relay" in out.split("Add-ons:")[1] and "publish" not in out
+    code, _, err = run("relay", "inbox")
+    assert code == 2 and "not connected" in err  # on, but not connected yet
+    code, _, err = run("addon", "uninstall", "relay")
+    assert code == 2 and "part of orch" in err
+    assert run("addon", "remove", "relay")[0] == 0
+    assert not (proj / ".agents/skills/orch-relay").exists()
+    assert "orch:addon:relay" not in (proj / "AGENTS.md").read_text(encoding="utf-8")
+    assert run("relay", "inbox")[0] == 2
+
+
+def test_core_addon_names_stay_reserved_for_others(tmp_path, run, proj, uv_calls):
+    folder = make_addon(tmp_path / "x", mutate=lambda t: t.replace('name = "hello"', 'name = "relay"'))
+    with pytest.raises(Refused, match="core command"):
+        addons.folder_manifest(folder)

@@ -115,12 +115,13 @@ def p1(e):
     """Admin adds Pilatus (description, tags, rights); connect writes secrets, skill, AGENTS block."""
     pid, tok = e.connect_publish("Pilatus", desc="Product work", tags=["engineering"])
     prompt = e.prompts[("pub", "Pilatus")]
+    check("orch addon add publish --yes" in prompt, "prompt does not turn the publish add-on on first")
     check("orch publish connect" in prompt and pid in prompt, f"prompt lacks the connect line: {prompt[:100]}")
     ws = e.ws("Pilatus")
     sec = json.loads((ws / ".orch/secrets/publish.json").read_text())
     check(sec["workspace"] == pid and sec["token"] == tok, "secrets/publish.json wrong")
     check((ws / ".agents/skills/orch-publish/SKILL.md").is_file(), "orch-publish skill missing")
-    check("orch:begin orch-publish" in (ws / "AGENTS.md").read_text(), "AGENTS.md block missing")
+    check("<!-- orch:addon:publish -->" in (ws / "AGENTS.md").read_text(), "AGENTS.md block missing")
     rc, out, _ = e.sh(["git", "check-ignore", ".orch/secrets/publish.json"], cwd=ws)
     check(rc == 0, "secrets are not gitignored")
     who = e.orchj("Pilatus", "publish", "whoami")

@@ -22,7 +22,8 @@ def save(t): (tdir / (t["id"] + ".json")).write_text(json.dumps(t))
 if args[:2] == ["ticket", "list"]:
     print(json.dumps([json.loads(p.read_text()) for p in sorted(tdir.glob("t_*.json"))]))
 elif args[:2] == ["addon", "list"]:
-    print(json.dumps([{{"name": "scheduler", "active": not (root / "inactive").exists()}}]))
+    print(json.dumps([{{"name": "scheduler", "active": not (root / "inactive").exists()}},
+                      {{"name": "relay", "active": not (root / "relay-off").exists()}}]))
 elif args[0] == "wait" and "--clear" in args:
     t = load(args[1]); t["waiting_on"] = None; save(t); print("{{}}")
 elif args[:2] == ["relay", "inbox"]:

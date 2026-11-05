@@ -48,6 +48,10 @@ TOP_KEYS = frozenset(
     "ticket_view".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
+# Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
+# off until `orch addon add <name>`; their commands are parsed by the core CLI. No other add-on may take
+# these names (they stay in RESERVED).
+CORE_ADDONS = ("publish", "relay")
 
 
 # ---------------------------------------------------------------- sources
@@ -268,7 +272,7 @@ def _remote_ref(node) -> bool:
     return False
 
 
-def parse_manifest(file: Path) -> dict:
+def parse_manifest(file: Path, core: bool = False) -> dict:
     """Validate orch-addon.toml (addon-manifest.schema.json) and the paths it names. Never runs add-on code.
     Returns the manifest plus `dir` (its folder). Refused when anything is off."""
     try:
@@ -284,7 +288,7 @@ def parse_manifest(file: Path) -> dict:
     name = m.get("name")
     if not isinstance(name, str) or not NAME_RE.match(name):
         raise _bad("name is 2 to 32 lowercase letters, digits or dashes")
-    if name in RESERVED:
+    if name in RESERVED and not (core and name in CORE_ADDONS):
         raise _bad(f"'{name}' is a core command and cannot be an add-on name")
     if not isinstance(m.get("version"), str) or not VERSION_RE.match(m["version"]):
         raise _bad("version is x.y.z")
@@ -366,8 +370,13 @@ def _manifest_file(module: str) -> Path | None:
     return None
 
 
+def core_manifests() -> dict[str, dict]:
+    base = Path(__file__).resolve().parent / "builtin"
+    return {n: parse_manifest(base / n / MANIFEST, core=True) for n in CORE_ADDONS}
+
+
 def discover() -> dict[str, dict]:
-    """Every installed add-on with a valid manifest, by name. Invalid ones are skipped."""
+    """Every installed add-on with a valid manifest, by name (the built-in core ones included)."""
     importlib.invalidate_caches()
     eps = _entry_points()
     eps = list(eps.items()) if isinstance(eps, dict) else list(eps)
@@ -389,7 +398,7 @@ def discover() -> dict[str, dict]:
         if m["name"] != name or m["run"] != module:  # the entry point must say what the manifest says
             continue
         out[name] = m
-    return out
+    return {**out, **core_manifests()}
 
 
 def folder_manifest(folder: Path) -> dict:
@@ -692,6 +701,12 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
             raise Refused(not_on_message(root, source))
         _activate(root, source)
         return
+    if source in CORE_ADDONS:  # part of orch: nothing to install
+        _confirm(core_manifests()[source], False, yes)
+        record_consent(root, source)
+        _activate(root, source)
+        print(f"{source} is turned on in this workspace.")
+        return
     reg = registry()
     if _is_path(source):
         folder = Path(source).expanduser().resolve()
@@ -850,6 +865,8 @@ def drop_config_table(root: Path, name: str) -> None:
 
 def uninstall(root: Path, name: str) -> None:
     """Remove the package from this machine. Refused while it is on in this workspace."""
+    if name in CORE_ADDONS:
+        raise Refused(f"{name} is part of orch. Turn it off here with: orch addon remove {name}")
     if name in active(root):
         raise Refused(f"The {name} add-on is turned on here. Turn it off first: orch addon remove {name}")
     reg = registry()

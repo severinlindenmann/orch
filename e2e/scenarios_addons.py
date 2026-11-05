@@ -314,7 +314,7 @@ def a14(e):
 def a15(e):
     """Reserved and duplicate names are refused; a broken manifest is refused; nothing changes."""
     ws = e.ws("Names")
-    for n in ("ticket", "addon", "relay", "init"):
+    for n in ("ticket", "addon", "update", "init"):  # relay/publish are built-in add-ons now (A16)
         rc, out, err = e.sh(["orch", "addon", "add", n, "--yes"], cwd=ws)
         check(rc == 2 and "Refused" in err, f"reserved name {n} accepted: {rc} {err!r}")
     src = _local_addon(e)
@@ -390,8 +390,31 @@ def i1(e):
     rc, out, err = run("addon", "add", "scheduler", "--yes")
     check(rc == 0, f"add scheduler --yes: {(err or out)[-300:]}")
     lst = {x["name"]: x["active"] for x in json.loads(run("addon", "list", "--json")[1])}
-    check(lst == {"dashboard": True, "scheduler": True}, f"addon list {lst}")
+    check(lst == {"dashboard": True, "scheduler": True, "publish": False, "relay": False}, f"addon list {lst}")
     tools = (d / "uvtools" / "orch-workspace" / "uv-receipt.toml").read_text()
     check(tools.count(sha) >= 3 and "@main" not in tools, f"orch and add-ons not all from {sha[:8]}: {tools[-400:]}")
     rc, out, _ = run("scheduler", "--help")
     check(rc == 0, "orch scheduler --help")
+
+
+@scenario("A16")
+def a16(e):
+    """A clean `orch init`: none of publish, relay, dashboard, scheduler in --help, skills or AGENTS.md; their
+    commands answer with `orch addon add <name>`. Adding relay brings exactly its command, skill and block."""
+    ws = e.ws("Clean")
+    help_ = _help(e, ws)
+    tree = _tree_text(ws)
+    for name in ("publish", "relay", "dashboard", "scheduler"):
+        check(f"\n    {name} " not in help_ and f"\n  {name} " not in help_, f"{name} in a clean --help")
+        check(f"orch-{name}" not in tree and f"orch {name}" not in tree, f"{name} in a clean skill/AGENTS.md")
+        rc, _, err = e.sh(["orch", name, "--help"], cwd=ws)
+        # dashboard/scheduler: "not an orch command" when not installed on this computer, else "orch addon add"
+        check(rc == 2 and (f"orch addon add {name}" in err or "not an orch command" in err), f"orch {name} while off: {rc} {err[-200:]}")
+    rc, out, err = e.sh(["orch", "addon", "add", "relay", "--yes"], cwd=ws)
+    check(rc == 0 and "Adds the command: orch relay" in out, f"add relay: {(err or out)[-200:]}")
+    check("relay" in _help(e, ws).split("Add-ons:")[1], "relay not under Add-ons in --help")
+    check((ws / ".agents/skills/orch-relay/SKILL.md").is_file(), "relay skill missing")
+    check("<!-- orch:addon:relay -->" in (ws / "AGENTS.md").read_text(), "relay AGENTS block missing")
+    check("publish" not in _help(e, ws), "publish appeared with relay")
+    e.orch(ws, "addon", "remove", "relay")
+    check("orch-relay" not in _tree_text(ws), "relay left a trace after remove")

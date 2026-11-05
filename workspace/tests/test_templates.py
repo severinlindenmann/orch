@@ -10,6 +10,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from conftest import turn_on
 
 from orch import cli, publish, templates
 from orch.errors import Refused
@@ -41,7 +42,8 @@ def test_refusals(tmp_path):
         templates.create("python", "none", tmp_path / "full")
 
 
-def test_cli(tmp_path, capsys):
+def test_cli(proj, tmp_path, capsys):
+    turn_on(proj, "publish")
     assert cli.main(["publish", "new", "python", "--store", "json", str(tmp_path / "demo-app")]) == 0
     assert "Created a python app" in capsys.readouterr().out
     assert (tmp_path / "demo-app" / "store.py").is_file()

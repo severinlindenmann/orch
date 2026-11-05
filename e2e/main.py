@@ -132,6 +132,7 @@ class E:
             self.prompts = getattr(self, "prompts", {})
             self.prompts[key] = j.get("prompt", "")
             self.cleanup.append(lambda i=j["id"]: self.pub.admin.call("DELETE", f"/admin/api/workspaces/{i}"))
+            self.orch(self.ws(name), "addon", "add", "publish", "--yes")  # what the admin prompt runs first
             self.orch(self.ws(name), "publish", "connect", self.pub.url, "--workspace", j["id"], "--token", j["token"])
         return self.creds[key]
 
@@ -146,6 +147,7 @@ class E:
             self.prompts = getattr(self, "prompts", {})
             self.prompts[key] = j.get("prompt", "")
             self.cleanup.append(lambda i=j["id"]: self.rel.admin.call("DELETE", f"/admin/api/workspaces/{i}"))
+            self.orch(self.ws(name), "addon", "add", "relay", "--yes")
             self.orch(self.ws(name), "relay", "connect", self.rel.url, "--workspace", j["id"], "--token", j["token"])
         return self.creds[key]
 

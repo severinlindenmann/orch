@@ -20,6 +20,13 @@ def test_no_relay_no_poll(ws):
     assert not any(a[:2] == ["relay", "inbox"] for a in names(ws))
 
 
+def test_relay_addon_off_no_poll(ws):
+    relay_on(ws, [{"id": "m_1", "type": "start", "from": "ws_a", "allowed": True, "body": {"key": "k", "text": "x"}}])
+    (ws / "relay-off").write_text("")
+    assert Scheduler(ws).tick(T(8)) == []
+    assert not any(a[0] == "relay" for a in names(ws))
+
+
 def test_allowed_start_creates_ticket_and_runs(ws):
     relay_on(ws, [{"id": "m_1", "type": "start", "from": "ws_a", "allowed": True,
                    "body": {"key": "weekly-report", "text": "Do the report"}}])

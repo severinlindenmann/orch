@@ -4,6 +4,7 @@ import json
 import re
 
 import pytest
+from conftest import turn_on
 from fakes import WS
 
 from orch import skills
@@ -142,6 +143,7 @@ def test_plain_usage_errors(proj, run, capsys):
 
 
 def test_not_connected_and_unknown_recipient_are_plain(proj, run):
+    turn_on(proj, "relay")
     code, _, err = run("relay", "inbox")
     assert code == 2 and "relay admin page" in err and "<token>" not in err and "(" not in err
     code, _, err = run("relay", "send", "Nobody", "hi")
@@ -154,5 +156,6 @@ def test_ticket_new_next_step(proj, run):
 
 
 def test_help_lists_everyday_commands(proj, run, capsys):
+    turn_on(proj, "relay")
     out = _exit(run, capsys, "relay", "--help")[1]
     assert all(c in out for c in ("send", "whoami", "connect", "inbox"))

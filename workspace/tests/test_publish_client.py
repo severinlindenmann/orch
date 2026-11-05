@@ -3,6 +3,7 @@ import json
 import tarfile
 from pathlib import Path
 
+from conftest import turn_on
 from fakes import WS
 
 from orch import publish
@@ -44,7 +45,7 @@ def test_connect_saves_token_and_installs_skill(proj, run, pub):
     cfg = json.loads((proj / ".orch/secrets/publish.json").read_text())
     assert cfg == {"url": pub.url, "workspace": WS, "token": pub.token}
     assert (proj / ".agents/skills/orch-publish/SKILL.md").is_file()
-    assert "orch:begin orch-publish" in (proj / "AGENTS.md").read_text()
+    assert "<!-- orch:addon:publish -->" in (proj / "AGENTS.md").read_text()
     assert ".orch/secrets/" in (proj / ".gitignore").read_text()
 
 
@@ -55,6 +56,7 @@ def test_connect_wrong_token_is_refused_and_saves_nothing(proj, run, pub):
 
 
 def test_not_connected(run, proj):
+    turn_on(proj, "publish")
     code, _, err = run("publish", "whoami")
     assert code == 2 and "not connected" in err
 

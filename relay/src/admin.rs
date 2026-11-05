@@ -96,7 +96,7 @@ fn parse_description(v: &Value) -> Res<String> {
 
 pub fn prompt(public: &str, ws: &str, token: &str) -> String {
     format!(
-        "Connect this workspace to orch-relay. Run in the project folder:\n  orch relay connect {public} --workspace {ws} --token {token}\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL {public}/onboarding.sh | sh -s -- --workspace {ws} --token {token}\n  Windows: & ([scriptblock]::Create((irm {public}/onboarding.ps1))) -Workspace {ws} -Token {token}\nThen describe this workspace in one sentence and 2-4 tags: orch relay profile --description \"...\" --tags a,b"
+        "Connect this workspace to orch-relay. Run in the project folder:\n  orch addon add relay --yes\n  orch relay connect {public} --workspace {ws} --token {token}\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL {public}/onboarding.sh | sh -s -- --workspace {ws} --token {token}\n  Windows: & ([scriptblock]::Create((irm {public}/onboarding.ps1))) -Workspace {ws} -Token {token}\nThen describe this workspace in one sentence and 2-4 tags: orch relay profile --description \"...\" --tags a,b"
     )
 }
 

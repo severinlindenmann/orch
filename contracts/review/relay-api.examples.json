@@ -702,7 +702,7 @@
     }
   },
   {
-    "_note": "Public: onboarding script (macOS/Linux; /onboarding.ps1 for Windows). Installs orch if missing, then orch relay connect.",
+    "_note": "Public: onboarding script (macOS/Linux; /onboarding.ps1 for Windows). Installs orch if missing, then orch addon add relay --yes and orch relay connect.",
     "request": {
       "method": "GET",
       "path": "/onboarding.sh",
@@ -790,7 +790,7 @@
       "body": {
         "id": "ws_pilatus001",
         "token": "orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN",
-        "prompt": "Connect this workspace to orch-relay. Run in the project folder:\n  orch relay connect https://relay.severin.io --workspace ws_pilatus001 --token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL https://relay.severin.io/onboarding.sh | sh -s -- --workspace ws_pilatus001 --token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN\n  Windows: & ([scriptblock]::Create((irm https://relay.severin.io/onboarding.ps1))) -Workspace ws_pilatus001 -Token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+        "prompt": "Connect this workspace to orch-relay. Run in the project folder:\n  orch addon add relay --yes\n  orch relay connect https://relay.severin.io --workspace ws_pilatus001 --token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL https://relay.severin.io/onboarding.sh | sh -s -- --workspace ws_pilatus001 --token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN\n  Windows: & ([scriptblock]::Create((irm https://relay.severin.io/onboarding.ps1))) -Workspace ws_pilatus001 -Token orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
       }
     }
   },

@@ -2,7 +2,8 @@
 
 ## What it does
 Tickets as JSON files that any agent tool can use: checklist items that count as done only with evidence,
-links to any tool, questions and answers, history. Plus the client commands for publish and relay.
+links to any tool, questions and answers, history. The publish and relay clients ship in the same package as
+built-in add-ons: off (no command in `orch --help`, no skill, no AGENTS.md entry) until `orch addon add publish|relay`.
 Runs on Windows, macOS and Linux, with or without git.
 
 ## Tech stack
@@ -18,7 +19,8 @@ workspace/
   src/orch/addons.py        orch addon add|list|remove|uninstall, activation, add-on dispatch (subprocess), orch update
   src/orch/publish.py       publish client (encrypt, upload, apps)
   src/orch/relay.py         relay client (inbox, send, allow, refresh, webhook)
-  skills/{orch, orch-publish, orch-relay}/SKILL.md   copied into projects by init / connect
+  skills/orch/SKILL.md      copied into projects by init
+  src/orch/builtin/{publish,relay}/orch-addon.toml + skills/orch-<name>/   built-in add-ons, copied by `orch addon add`
   tests/
 ```
 
@@ -28,8 +30,8 @@ workspace/
 | `orch init` | Set up the project folder (local-files.md). Safe to run again |
 | `orch addon add <name\|./folder> [--yes]` / `remove <name> [--purge]` / `list` / `uninstall <name>` | Add-on contract (contracts/addon-manifest.md): install a built-in or local add-on and turn it on in this workspace (`.orch/addons.json`), or turn it off. The core knows no add-on by name |
 | `orch <addon> …` | Runs an active add-on as a subprocess; listed under **Add-ons** in `orch --help` |
-| `orch update` | Reinstalls orch + all installed add-ons together from GitHub `main`, then refreshes the skills and AGENTS.md blocks in this project |
-| `orch publish connect <url> --workspace ws_… --token orp_…` / `orch relay connect …` | What the admin prompts contain (publish-api.md, relay-api.md) |
+| `orch update` | Reinstalls orch + all installed add-ons together from where orch was installed from (the same repo and branch), then refreshes the skills and AGENTS.md blocks in this project |
+| `orch addon add publish --yes` + `orch publish connect <url> --workspace ws_… --token orp_…` / `orch addon add relay --yes` + `orch relay connect …` | What the admin prompts contain (publish-api.md, relay-api.md). `orch publish …` / `orch relay …` / `ask --phone` are refused until the add-on is on |
 | `orch ticket new "<title>"` / `list` / `show <id>` / `status <id> <status>` | Tickets. `done` is refused while a checked item lacks evidence |
 | `orch ticket patch <id> --if-revision N '<json>'` | Atomic change of several fields; refused when the ticket's `revision` changed meanwhile. Every write adds 1 to `revision` |
 | `orch check add <id> "<text>"` / `done <id> <c> --evidence '{"type":…,"ref":…}'` | Checklist; `done` without evidence is refused |

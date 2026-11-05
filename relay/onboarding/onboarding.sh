@@ -22,4 +22,5 @@ if ! command -v orch >/dev/null 2>&1; then
   PATH="$HOME/.local/bin:$PATH"
   export PATH
 fi
+orch addon add relay --yes
 orch relay connect "$RELAY_URL" --workspace "$WORKSPACE" --token "$TOKEN"

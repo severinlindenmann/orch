@@ -87,7 +87,9 @@ This installs [uv](https://docs.astral.sh/uv/) if you do not have it, then the `
 1. In your project folder: `orch init`. This creates `.orch/` and teaches your agent tool about orch.
 2. Add the dashboard: `orch addon add dashboard` (and `orch addon add scheduler` if you want timed runs).
 3. Optional: connect to publish and relay. Your admin opens the admin page, clicks **Add workspace**, and gets a short
-   prompt to paste into your agent tool. It runs `orch publish connect ...` or `orch relay connect ...` for you.
+   prompt to paste into your agent tool. It turns on the add-on (`orch addon add publish --yes` / `orch addon add relay --yes`)
+   and runs `orch publish connect ...` or `orch relay connect ...` for you. Publish and relay are built-in add-ons: a clean
+   orch shows none of their commands until you add them.
 4. Phone: in the relay admin page choose **Add phone**, pick the workspaces, and scan the QR code with the iPhone app.
 5. Later: `orch update` brings orch and the add-ons up to date.
 

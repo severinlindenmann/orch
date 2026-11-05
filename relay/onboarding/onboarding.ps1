@@ -12,4 +12,6 @@ if (-not (Get-Command orch -ErrorAction SilentlyContinue)) {
   irm https://raw.githubusercontent.com/severinlindenmann/orch/__INSTALL_REF__/install.ps1 | iex
   $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 }
+orch addon add relay --yes
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 orch relay connect $RelayUrl --workspace $Workspace --token $Token

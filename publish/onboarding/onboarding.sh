@@ -23,4 +23,5 @@ if ! command -v orch >/dev/null 2>&1; then
   PATH="$HOME/.local/bin:$PATH"
   export PATH
 fi
+orch addon add publish --yes
 exec orch publish connect "$URL" --workspace "$WS" --token "$TOKEN"
