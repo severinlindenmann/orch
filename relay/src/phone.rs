@@ -66,8 +66,8 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
         r.get(0)
     })?;
     // Its workspaces now list this phone (refresh) and may send to it.
-    store::bump_and_hint(&c, &app.key, &store::parse_list(&list))?;
-    let ws: Vec<Value> = store::parse_list(&list)
+    store::bump_and_hint(&c, &app.key, &store::parse_ws_list(&list))?;
+    let ws: Vec<Value> = store::parse_ws_list(&list)
         .iter()
         .filter_map(|w| store::ws_name(&c, w).map(|n| json!({"id": w, "name": n})))
         .collect();
@@ -365,7 +365,7 @@ pub async fn push_message(app: &AppState, q: &Value) {
         let mut budget = app.push_budget.lock().unwrap();
         rows.into_iter()
             .filter(|(_, _, w, id)| {
-                store::parse_list(w).contains(&from) && (to == "phones" || &to == id)
+                store::parse_ws_list(w).contains(&from) && (to == "phones" || &to == id)
             })
             // L2: texts are always stored; only the push is skipped when the budget is used up.
             .filter(|(.., id)| {

@@ -725,7 +725,9 @@ fn check_ws_list(c: &Connection, v: &Value) -> Res<Vec<String>> {
         if !store::ws_exists(c, w) {
             return Err(invalid(format!("{w} is not a workspace.")));
         }
-        out.push(w.to_string());
+        if !out.iter().any(|o| o == w) {
+            out.push(w.to_string());
+        }
     }
     Ok(out)
 }
@@ -738,7 +740,7 @@ async fn list_phones(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Valu
         .query_map([], |r| {
             let last: Option<i64> = r.get(4)?;
             Ok(json!({"id": r.get::<_, String>(0)?, "name": r.get::<_, String>(1)?,
-                "workspaces": store::parse_list(&r.get::<_, String>(2)?), "paired": r.get::<_, bool>(3)?,
+                "workspaces": store::parse_ws_list(&r.get::<_, String>(2)?), "paired": r.get::<_, bool>(3)?,
                 "online": store::online(last)}))
         })?
         .collect::<Result<_, _>>()?;

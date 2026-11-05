@@ -651,3 +651,54 @@ async fn phone_message_queries_use_the_indexes() {
         // any sort is of the (small) matched rows, never of the main table
     }
 }
+
+#[tokio::test]
+async fn phone_list_with_a_workspace_twice_shows_everything_once() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    // the admin saves the same workspace twice: stored once
+    let (s, v) = t
+        .admin_json(
+            "PATCH",
+            &format!("/admin/api/phones/{}", p.0),
+            Some(json!({"workspaces": [a.id, a.id]})),
+        )
+        .await;
+    assert_eq!(s, 200, "{v}");
+    let (_, l) = t.admin_json("GET", "/admin/api/phones", None).await;
+    assert_eq!(l["items"][0]["workspaces"], json!([a.id]));
+    // an old row with a repeat (saved before the fix) is read once too
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE phones SET workspaces=?2 WHERE id=?1",
+            rusqlite::params![p.0, json!([a.id, a.id]).to_string()],
+        )
+        .unwrap();
+    question(&t, &a, "q?", "q1").await;
+    assert_eq!(ws_text(&t, &a, &p.0, "hi").await.0, 201);
+    assert_eq!(
+        t.phone(&p, "GET", "/v1/phone/questions", None).await.1["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        t.phone(&p, "GET", "/v1/phone/messages", None).await.1["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        t.phone(&p, "GET", "/v1/phone/workspaces", None).await.1["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
