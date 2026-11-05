@@ -98,15 +98,35 @@ fn open_questions(
     pid: &str,
     ws: &[String],
 ) -> rusqlite::Result<Vec<store::Msg>> {
-    let mut st = c.prepare(&format!(
-        "SELECT {MSG_COLS} FROM messages m WHERE type='question' AND to_addr IN ('phones', ?1)
-         AND NOT EXISTS (SELECT 1 FROM messages a WHERE a.reply_to=m.id AND a.type='answer') ORDER BY seq DESC"
-    ))?;
+    let list = serde_json::to_string(ws).unwrap_or("[]".into());
+    let mut st = c.prepare(OPEN_QUESTIONS_SQL)?;
     let rows = st
-        .query_map([pid], msg_from_row)?
+        .query_map(params![pid, list], msg_from_row)?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows.into_iter().filter(|m| ws.contains(&m.from)).collect())
+    Ok(rows)
 }
+
+/// Open questions to `phones` or to one phone (?1) from the workspaces in the JSON list (?2). One index-driven
+/// branch per case, joined from `json_each`: no scan of the whole messages table.
+pub const OPEN_QUESTIONS_SQL: &str = "SELECT seq,id,from_addr,to_addr,type,created_at,ticket,reply_to,payload,acked_at FROM (
+        SELECT m.* FROM json_each(?2) j CROSS JOIN messages m
+          WHERE m.type='question' AND m.to_addr='phones' AND m.from_addr=j.value
+        UNION ALL
+        SELECT m.* FROM json_each(?2) j CROSS JOIN messages m
+          WHERE m.type='question' AND m.to_addr=?1 AND m.from_addr=j.value
+     ) m WHERE NOT EXISTS (SELECT 1 FROM messages a WHERE a.reply_to=m.id AND a.type='answer') ORDER BY seq DESC";
+
+/// Texts for a phone: ?1 phone id, ?2 cursor, ?3 JSON workspace list, ?4 paired-at, ?5 limit.
+pub const MESSAGES_SQL: &str = "SELECT seq,id,from_addr,to_addr,type,created_at,ticket,reply_to,payload,acked_at FROM (
+        SELECT m.* FROM json_each(?3) j CROSS JOIN messages m
+          WHERE m.type='text' AND m.to_addr='phones' AND m.from_addr=j.value AND m.stored_at>=?4 AND m.seq<?2
+        UNION ALL
+        SELECT m.* FROM json_each(?3) j CROSS JOIN messages m
+          WHERE m.type='text' AND m.to_addr=?1 AND m.from_addr=j.value AND m.seq<?2
+        UNION ALL
+        SELECT m.* FROM json_each(?3) j CROSS JOIN messages m
+          WHERE m.type='text' AND m.from_addr=?1 AND m.to_addr=j.value AND m.seq<?2
+     ) ORDER BY seq DESC LIMIT ?5";
 
 async fn workspaces(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {
     let c = app.db.lock().unwrap();
@@ -182,21 +202,13 @@ async fn messages(
     let c = app.db.lock().unwrap();
     let (pid, _, ws) = auth::phone(&c, &h)?;
     // Filter by sender/peer and time in SQL (indexed); broadcasts only from after this phone paired (L3).
-    let since: i64 = c
-        .query_row(
-            "SELECT COALESCE(paired_at, created_at) FROM phones WHERE id=?1",
-            [&pid],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
+    let since: i64 = c.query_row(
+        "SELECT COALESCE(paired_at, created_at) FROM phones WHERE id=?1",
+        [&pid],
+        |r| r.get(0),
+    )?;
     let list = serde_json::to_string(&ws).unwrap_or("[]".into());
-    let mut st = c.prepare(&format!(
-        "SELECT {MSG_COLS} FROM messages WHERE type='text' AND seq<?2 AND (
-            (to_addr='phones' AND stored_at>=?4 AND from_addr IN (SELECT value FROM json_each(?3)))
-            OR (to_addr=?1 AND from_addr IN (SELECT value FROM json_each(?3)))
-            OR (from_addr=?1 AND to_addr IN (SELECT value FROM json_each(?3)))
-         ) ORDER BY seq DESC LIMIT ?5"
-    ))?;
+    let mut st = c.prepare(MESSAGES_SQL)?;
     let mut rows: Vec<crate::store::Msg> = st
         .query_map(
             params![pid, after, list, since, limit as i64 + 1],

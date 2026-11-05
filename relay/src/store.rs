@@ -27,8 +27,10 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
             digest TEXT NOT NULL, payload BLOB NOT NULL, stored_at INTEGER NOT NULL, acked_at INTEGER);
         CREATE INDEX IF NOT EXISTS msg_to ON messages(to_addr, acked_at);
         CREATE INDEX IF NOT EXISTS msg_reply ON messages(reply_to);
-        CREATE INDEX IF NOT EXISTS msg_text_to ON messages(type, to_addr, seq);
-        CREATE INDEX IF NOT EXISTS msg_text_from ON messages(type, from_addr, seq);
+        DROP INDEX IF EXISTS msg_text_to;
+        DROP INDEX IF EXISTS msg_text_from;
+        CREATE INDEX IF NOT EXISTS msg_type_to_from ON messages(type, to_addr, from_addr, seq);
+        CREATE INDEX IF NOT EXISTS msg_type_from_to ON messages(type, from_addr, to_addr, seq);
         CREATE TABLE IF NOT EXISTS blobs(id TEXT PRIMARY KEY, uploader TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, created_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS webhooks(id TEXT PRIMARY KEY, workspace TEXT NOT NULL, mode TEXT NOT NULL, ticket TEXT,
             token_hash TEXT NOT NULL, created_at INTEGER NOT NULL, last_call_at INTEGER, used INTEGER NOT NULL DEFAULT 0);

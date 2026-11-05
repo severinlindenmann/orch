@@ -600,3 +600,54 @@ async fn phone_broadcast_history_starts_at_pairing_and_filters_in_sql() {
     assert_eq!(m["items"].as_array().unwrap().len(), 1);
     assert!(m["next"].is_string());
 }
+
+#[tokio::test]
+async fn phone_message_queries_use_the_indexes() {
+    let t = start().await;
+    let c = t.app.db.lock().unwrap();
+    let plan_of = |sql: &str, n: usize| -> String {
+        let mut st = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let all: Vec<rusqlite::types::Value> = vec![
+            rusqlite::types::Value::Text("ph_x".into()),
+            if n == 5 {
+                i64::MAX.into()
+            } else {
+                rusqlite::types::Value::Text("[]".into())
+            },
+            rusqlite::types::Value::Text("[]".into()),
+            0i64.into(),
+            50i64.into(),
+        ];
+        let rows = st
+            .query_map(rusqlite::params_from_iter(all.into_iter().take(n)), |r| {
+                r.get::<_, String>(3)
+            })
+            .unwrap();
+        rows.map(|r| r.unwrap()).collect::<Vec<_>>().join("\n")
+    };
+    for (name, plan) in [
+        ("messages", plan_of(orch_relay::phone::MESSAGES_SQL, 5)),
+        (
+            "questions",
+            plan_of(orch_relay::phone::OPEN_QUESTIONS_SQL, 2),
+        ),
+    ] {
+        assert!(
+            !plan.contains("SCAN m") && !plan.contains("SCAN messages"),
+            "{name}: {plan}"
+        );
+        for line in plan.lines().filter(|l| l.contains("messages")) {
+            assert!(
+                line.contains("INDEX msg_type_") || line.contains("INDEX msg_reply"),
+                "{name}: messages must be read through an index: {line}\n{plan}"
+            );
+            assert!(
+                line.contains("from_addr=")
+                    || line.contains("to_addr=")
+                    || line.contains("reply_to="),
+                "{name}: not just (type=?): {line}\n{plan}"
+            );
+        }
+        // any sort is of the (small) matched rows, never of the main table
+    }
+}
