@@ -1,19 +1,19 @@
 [project]
 name = "orch-scheduler"
-version = "0.1.0"
-description = "orch scheduler add-on: starts agent runs at wake_at, by cron and from the relay inbox"
+version = "0.2.0"
+description = "orch scheduler add-on: starts agent runs at a set time, by cron and from the relay inbox"
 requires-python = ">=3.11"
 dependencies = ["croniter>=2"]
 
 [project.scripts]
 orch-scheduler = "orch_scheduler.cli:main"
 
-# The orch CLI discovers add-on commands in this group: `orch scheduler ...` calls main(argv).
+# Module only: orch finds orch-addon.toml next to it (find_spec) and never imports it.
 [project.entry-points."orch.addons"]
-scheduler = "orch_scheduler.cli:main"
+scheduler = "orch_scheduler"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6", "jsonschema>=4", "rfc3339-validator"]
 
 [build-system]
 requires = ["hatchling"]

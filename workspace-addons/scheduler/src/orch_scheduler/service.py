@@ -1,4 +1,4 @@
-"""Background process: `orch scheduler start|stop|status` with a pidfile in .orch/scheduler/."""
+"""Background process: `orch scheduler start|stop` with a pidfile in .orch/addons/scheduler/."""
 from __future__ import annotations
 
 import os
@@ -11,10 +11,10 @@ from .runner import _alive, sdir
 
 
 def _pidfile(root: Path) -> Path:
-    return sdir(root) / "scheduler.pid"
+    return root / ".orch" / "addons" / "scheduler" / "scheduler.pid"
 
 
-def running_pid(root: Path) -> int | None:
+def running_pid(root: Path, clean: bool = True) -> int | None:
     p = _pidfile(root)
     try:
         pid = int(p.read_text().strip())
@@ -22,7 +22,8 @@ def running_pid(root: Path) -> int | None:
         return None
     if _alive(pid):
         return pid
-    p.unlink(missing_ok=True)
+    if clean:
+        p.unlink(missing_ok=True)
     return None
 
 
@@ -30,9 +31,10 @@ def start(root: Path) -> int:
     pid = running_pid(root)
     if pid:
         return pid
+    sdir(root)
     kw = {"creationflags": 0x00000208} if os.name == "nt" else {"start_new_session": True}
     with open(sdir(root) / "scheduler.log", "a") as out:
-        proc = subprocess.Popen([sys.executable, "-m", "orch_scheduler.cli", "--dir", str(root), "run"], cwd=root,
+        proc = subprocess.Popen([sys.executable, "-m", "orch_scheduler", "--dir", str(root), "run"], cwd=root,
                                 stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **kw)
     _pidfile(root).write_text(str(proc.pid))
     return proc.pid

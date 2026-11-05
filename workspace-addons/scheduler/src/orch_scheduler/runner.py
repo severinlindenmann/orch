@@ -1,4 +1,4 @@
-"""Starts agent commands: one run per ticket (lock file), output to .orch/scheduler/logs/, state.json."""
+"""Starts agent commands: one run per ticket (lock file), output to .orch/addons/scheduler/logs/, state.json."""
 from __future__ import annotations
 
 import json
@@ -6,6 +6,7 @@ import os
 import shlex
 import subprocess
 import tempfile
+import time
 import tomllib
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -19,7 +20,7 @@ GITIGNORE = "scheduler.pid\nscheduler.log\nlocks/\n"
 
 
 def sdir(root: Path) -> Path:
-    d = root / ".orch" / "scheduler"
+    d = root / ".orch" / "addons" / "scheduler"
     (d / "logs").mkdir(parents=True, exist_ok=True)
     (d / "locks").mkdir(exist_ok=True)
     gi = d / ".gitignore"
@@ -29,22 +30,28 @@ def sdir(root: Path) -> Path:
 
 
 def load_config(root: Path) -> dict:
-    p = root / ".orch" / "scheduler" / "config.toml"
+    """The [scheduler] table of .orch/config.toml: agent, interval, inbox_every, [scheduler.agents]."""
+    p = root / ".orch" / "config.toml"
     cfg: dict = {}
     if p.is_file():
         try:
-            cfg = tomllib.loads(p.read_text())
+            t = tomllib.loads(p.read_text()).get("scheduler")
+            cfg = dict(t) if isinstance(t, dict) else {}
         except (tomllib.TOMLDecodeError, OSError):
             cfg = {}
-    cfg.setdefault("agent", DEFAULT_AGENT)
-    cfg["interval"] = int(cfg.get("interval", 60))
-    cfg["inbox_every"] = int(cfg.get("inbox_every", 60))
+    if not isinstance(cfg.get("agent"), str):
+        cfg["agent"] = DEFAULT_AGENT
+    for k, d in (("interval", 60), ("inbox_every", 60)):
+        try:
+            cfg[k] = max(1, int(cfg.get(k, d)))
+        except (TypeError, ValueError):
+            cfg[k] = d
     return cfg
 
 
 def load_state(root: Path) -> dict:
     try:
-        d = json.loads((root / ".orch" / "scheduler" / "state.json").read_text())
+        d = json.loads((root / ".orch" / "addons" / "scheduler" / "state.json").read_text())
         return d if isinstance(d, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -66,7 +73,7 @@ def update_state(root: Path, tid: str, **kw) -> None:
 
 def pick_agent(cfg: dict, ticket: dict | None) -> str:
     """ext.scheduler.agent may only NAME an entry of [agents] in the local config; never a command from ticket data."""
-    want = ((ticket or {}).get("ext") or {}).get("scheduler", {}).get("agent")
+    want = (((ticket or {}).get("ext") or {}).get("scheduler") or {}).get("agent")
     agents = cfg.get("agents")
     if isinstance(want, str) and isinstance(agents, dict) and isinstance(agents.get(want), str):
         return agents[want]
@@ -98,6 +105,7 @@ class Run:
     lock: Path
     started: datetime
     reason: str
+    t0: float = 0.0
 
 
 class Runner:
@@ -142,21 +150,19 @@ class Runner:
             except OSError as e:
                 f.write(f"# could not start: {e}\n# end {fmt(now)} exit 127\n")
                 lock.unlink(missing_ok=True)
-                self._record(tid, now, 127, log_path, None)
+                self._history(tid, now, 0, 127)
+                update_state(self.root, tid, last_exit=127, last_log=log_path.name)
                 orchcli.log(self.root, tid, f"Scheduler could not start the agent ({e.__class__.__name__})")
                 return False
         lock.write_text(str(proc.pid))
-        self.runs[tid] = Run(tid, proc, log_path, lock, now, reason)
+        self.runs[tid] = Run(tid, proc, log_path, lock, now, reason, time.monotonic())
         orchcli.log(self.root, tid, f"Scheduler started an agent run ({reason}). Log: {log_path.name}")
         return True
 
-    def _record(self, tid: str, now: datetime, code: int, log_path: Path, next_run: str | None) -> None:
-        st = load_state(self.root)
-        e = st.setdefault(tid, {})
-        e.update(last_run=fmt(now), last_exit=code, last_log=log_path.name)
-        if next_run is not None:
-            e["next_run"] = next_run
-        save_state(self.root, st)
+    def _history(self, tid: str, started: datetime, took: float, code: int) -> None:
+        """One line per finished run in runs.jsonl (the dashboard view reads it)."""
+        with open(sdir(self.root) / "runs.jsonl", "a") as f:
+            f.write(json.dumps({"ticket": tid, "at": fmt(started), "took": round(took), "exit": code}) + "\n")
 
     def reap(self, now: datetime, wait: bool = False) -> list[str]:
         """Collect finished runs: log footer, history entry, state. wait=True blocks (tests, --once)."""
@@ -168,9 +174,10 @@ class Runner:
             with open(r.log_path, "a") as f:
                 f.write(f"# end {fmt(datetime.now(UTC))} exit {code}\n")
             r.lock.unlink(missing_ok=True)
+            self._history(tid, r.started, time.monotonic() - r.t0, code)
             st = load_state(self.root)
             e = st.setdefault(tid, {})
-            e.update(last_exit=code, last_log=r.log_path.name, last_run=fmt(r.started))
+            e.update(last_exit=code, last_log=r.log_path.name)
             save_state(self.root, st)
             orchcli.log(self.root, tid, f"Scheduler run finished, exit code {code}")
             del self.runs[tid]

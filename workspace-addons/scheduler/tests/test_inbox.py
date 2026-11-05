@@ -92,7 +92,7 @@ def test_applied_answer_resumes_active_ticket(ws):
 
 
 def test_webhook_for_waiting_ticket(ws):
-    add_ticket(ws, "t_hook0001", status="waiting", waiting_on={"kind": "webhook", "ref": "wh_abcdefghij"})
+    add_ticket(ws, "t_hook0001", status="waiting", waiting_on={"kind": "external", "ref": "wh_abcdefghij"})
     relay_on(ws, [{"id": "m_7", "type": "webhook", "from": "webhook:wh_abcdefghij",
                    "body": {"webhook_id": "wh_abcdefghij", "payload": "{}"}}])
     s = Scheduler(ws)
