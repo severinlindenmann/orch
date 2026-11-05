@@ -74,7 +74,7 @@ def test_send_by_name_from_directory(proj, run, rel):
 
 
 def test_reply_to_paired_phone(proj, run, rel):
-    """A text from a phone shows how to answer it; refresh lists the paired phones; send by phone name."""
+    """A text from a phone makes a ticket; refresh lists the paired phones; send by phone name."""
     phone = "ph_iphone0001"
     rel.snapshot["workspaces"]["phones"] = [
         {"id": phone, "name": "Severin's iPhone", "online": True, "last_seen": None}
@@ -83,7 +83,7 @@ def test_reply_to_paired_phone(proj, run, rel):
     assert "1 phone you can reach" in run("relay", "refresh")[1]
     rel.inbox.append(msg("m_phone00000000001", "text", {"text": "can you answer my phone"}, frm=phone))
     out = run("relay", "inbox")[1]
-    assert "Message from Severin's iPhone" in out and f"reply: orch relay send {phone}" in out
+    assert "Message from Severin's iPhone" in out and "new ticket t_" in out  # a phone text starts work now
     code, out, _ = run("relay", "send", phone, "yes")
     assert code == 0 and rel.sent[-1]["to"] == phone and "Severin's iPhone" in out
     run("relay", "send", "severin's iphone", "by name")
@@ -200,7 +200,7 @@ def test_allow_once_bound_to_message_and_ticket_made(proj, run, rel):
         )
     )
     out = run("relay", "inbox")[1]
-    assert "not allowed yet" in out
+    assert "waiting for your answer on t_" in out
     code, out, _ = run("relay", "allow", "m_deleg00000000001", "--once")
     a = rel.sent[0]
     assert a["type"] == "allow" and a["reply_to"] == "m_deleg00000000001" and a["to"] == PEER
@@ -948,3 +948,141 @@ def test_plain_help_lists_relay_and_publish_commands(proj, run, rel, pub, capsys
     with pytest.raises(SystemExit):
         cli.main(["relay", "--help-all"])
     assert "allow" in capsys.readouterr().out
+
+
+# ---- phone texts start work, the allow question (SA-01, SA-12, UX-02) --------------------------
+
+PHONE = "ph_iphone0001"
+
+
+def _phone_setup(rel, run):
+    rel.snapshot["workspaces"]["phones"] = [
+        {"id": PHONE, "name": "Marco's iPhone", "online": True, "last_seen": None}
+    ]
+    connect(run, rel)
+
+
+def test_phone_text_without_ticket_makes_one_ticket_and_one_ack(proj, run, rel):
+    _phone_setup(rel, run)
+    rel.inbox.append(msg("m_phone00000000001", "text", {"text": "Prepare the Q3 summary\nplease"}, frm=PHONE))
+    code, out, _ = run("relay", "inbox")
+    assert code == 0 and "new ticket t_" in out
+    ts = _tickets(run)
+    assert len(ts) == 1 and ts[0]["title"] == "Prepare the Q3 summary please"
+    ext = ts[0]["ext"]["relay"]
+    assert (ext["origin"], ext["from"], ext["message"]) == ("phone", PHONE, "m_phone00000000001")
+    ack = rel.sent[-1]
+    assert ack["to"] == PHONE and ack["reply_to"] == "m_phone00000000001" and ack["ticket"] == ts[0]["id"]
+    assert ack["body"]["update"]["kind"] == "ack" and ack["body"]["text"].startswith("Got it")
+    # redelivered: nothing new, no second ack
+    rel.acked.clear()
+    run("relay", "inbox")
+    run("relay", "inbox")
+    assert len(_tickets(run)) == 1 and len(rel.sent) == 1
+
+
+def test_phone_text_crash_before_seen_is_idempotent(proj, run, rel, monkeypatch):
+    from orch import relay
+
+    _phone_setup(rel, run)
+    rel.inbox.append(msg("m_phone00000000002", "text", {"text": "Do X"}, frm=PHONE))
+
+    def boom(root, mid):
+        raise RuntimeError("crash")
+
+    real = relay._mark_seen
+    monkeypatch.setattr(relay, "_mark_seen", boom)
+    with pytest.raises(RuntimeError):
+        relay.inbox(proj)
+    monkeypatch.setattr(relay, "_mark_seen", real)
+    rel.acked.clear()
+    run("relay", "inbox")
+    assert len(_tickets(run)) == 1 and len(rel.sent) == 1
+
+
+def test_phone_text_on_a_ticket_continues_it(proj, run, rel, new_ticket):
+    from orch import runs
+
+    _phone_setup(rel, run)
+    tid = new_ticket("Weekly report")
+    run("ask", tid, "Which week?", "--by", "human:tester")
+    run("ticket", "status", tid, "done", "--by", "human:tester")
+    m = msg("m_phone00000000003", "text", {"text": "Also add the totals"}, frm=PHONE, ticket=tid)
+    rel.inbox.append(m)
+    run("relay", "inbox")
+    run("relay", "inbox")
+    t = json.loads(run("ticket", "show", tid, "--json")[1])
+    assert t["status"] == "open" and t["waiting_on"] is None
+    lines = [h["text"] for h in t["history"]]
+    assert lines.count("From Marco's iPhone: Also add the totals") == 1
+    assert len(runs.undelivered(proj, tid)) == 1
+    assert len(_tickets(run)) == 1 and not rel.sent, "no new ticket, no second agent, no ack"
+
+
+def test_phone_text_with_unknown_ticket_makes_a_new_one(proj, run, rel):
+    _phone_setup(rel, run)
+    rel.inbox.append(msg("m_phone00000000004", "text", {"text": "Hello"}, frm=PHONE, ticket="t_zzzzzz"))
+    run("relay", "inbox")
+    assert len(_tickets(run)) == 1
+
+
+def test_workspace_text_is_not_acted_on(proj, run, rel):
+    connect(run, rel)
+    rel.inbox.append(msg("m_text000000000009", "text", {"text": "Hi there"}))
+    assert "Hi there" in run("relay", "inbox")[1] and not _tickets(run)
+
+
+def _allow_ticket_of(run):
+    return next(t for t in _tickets(run) if t.get("ext", {}).get("relay", {}).get("allow_message"))
+
+
+def test_allow_question_once_applied_once(proj, run, rel):
+    from orch import relay
+
+    connect(run, rel)
+    mid = "m_deleg00000000001"
+    rel.inbox.append(msg(mid, "delegate", {"title": "Add rate limit", "text": "x"}))
+    run("relay", "inbox")
+    run("relay", "inbox")
+    t = _allow_ticket_of(run)
+    assert len(_tickets(run)) == 1 and t["status"] == "waiting"
+    q = t["questions"][0]
+    assert q["kind"] == "relay:allow" and q["options"] == ["Allow once", "Always", "Ignore"]
+    assert "wants" in q["text"] and "Add rate limit" in q["text"]
+    assert q["action"]["message"] == mid and q["action"]["peer"] == PEER
+    assert relay.allowed(proj, msg(mid, "delegate", {"title": "Add rate limit"})) is None
+    # answered on the dashboard; the next relay command applies it once
+    run("answer", t["id"], q["id"], "Allow once", "--via", "dashboard", "--by", "human:Marco")
+    run("relay", "inbox")
+    run("relay", "inbox")
+    run("relay", "outbox")
+    allows = [m for m in rel.sent if m["type"] == "allow"]
+    assert len(allows) == 1 and allows[0]["body"]["mode"] == "once"
+    g = json.loads((proj / ".orch/secrets/allows.json").read_text())["given"]
+    assert len(g) == 1 and g[0]["by"] == "Marco" and g[0]["via"] == "dashboard"
+    done_t = json.loads(run("ticket", "show", t["id"], "--json")[1])
+    assert done_t["status"] == "done"
+    work = json.loads(run("relay", "done", mid, "--json")[1])["ticket"]
+    hist = [h["text"] for h in json.loads(run("ticket", "show", work, "--json")[1])["history"]]
+    assert "Allowed by Marco (dashboard)" in hist
+
+
+def test_allow_question_always_and_ignore(proj, run, rel):
+    connect(run, rel)
+    rel.inbox.append(msg("m_start00000000001", "start", {"key": "weekly", "text": "go"}))
+    rel.inbox.append(msg("m_deleg00000000002", "delegate", {"title": "Spam", "text": "x"}))
+    run("relay", "inbox")
+    by_msg = {t["ext"]["relay"]["allow_message"]: t for t in _tickets(run)}
+    s, d = by_msg["m_start00000000001"], by_msg["m_deleg00000000002"]
+    assert s["questions"][0]["action"]["key"] == "weekly"
+    run("answer", s["id"], "q1", "Always", "--via", "phone", "--by", "human:Marco")
+    run("answer", d["id"], "q1", "Ignore", "--via", "cli")
+    run("relay", "inbox")
+    sent = [m for m in rel.sent if m["type"] == "allow"]
+    assert len(sent) == 1 and sent[0]["body"]["mode"] == "permanent" and sent[0]["body"]["key"] == "weekly"
+    dropped = json.loads(run("ticket", "show", d["id"], "--json")[1])
+    assert dropped["status"] == "dropped"
+    notes = json.loads((proj / ".orch/inbox-notes.json").read_text())
+    assert "m_deleg00000000002" in notes
+    rel.acked.clear()
+    assert "Spam" not in run("relay", "inbox")[1], "an ignored message does not come back"
