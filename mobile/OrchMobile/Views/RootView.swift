@@ -3,26 +3,21 @@ import UIKit
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var keyboardUp = false
 
     var body: some View {
         Group {
             if model.phase == .ready {
-                ZStack {
-                    HomeView().opacity(model.tab == .home ? 1 : 0)
-                        .allowsHitTesting(model.tab == .home).accessibilityHidden(model.tab != .home)
-                    QuestionsView().opacity(model.tab == .questions ? 1 : 0)
-                        .allowsHitTesting(model.tab == .questions).accessibilityHidden(model.tab != .questions)
-                    SendView().opacity(model.tab == .send ? 1 : 0)
-                        .allowsHitTesting(model.tab == .send).accessibilityHidden(model.tab != .send)
-                    SettingsView().opacity(model.tab == .settings ? 1 : 0)
-                        .allowsHitTesting(model.tab == .settings).accessibilityHidden(model.tab != .settings)
+                // System tab bar (floating glass on iOS 26, standard bar on 18): native spacing, badge, Dynamic Type, safe area.
+                TabView(selection: Binding(get: { model.tab }, set: { selectTab($0) })) {
+                    tabItem(.home, "Home", "house") { HomeView() }
+                    tabItem(.questions, "Questions", "text.bubble") { QuestionsView() }
+                        .badge(model.openQuestionCount)
+                    tabItem(.send, "Send", "plus") { SendView() }
+                    tabItem(.settings, "Settings", "gearshape") { SettingsView() }
                 }
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: model.tab)
-                .safeAreaInset(edge: .bottom, spacing: 0) { if !keyboardUp { tabs } }
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
+                .tint(Theme.brand)
+                .toolbarColorScheme(.dark, for: .tabBar)
+                .sensoryFeedback(.selection, trigger: model.tab)
                 .onChange(of: model.tab) { _, _ in
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
@@ -38,37 +33,14 @@ struct RootView: View {
         .background(Theme.bg.ignoresSafeArea()).preferredColorScheme(.dark)
     }
 
-    private var tabs: some View {
-        HStack(spacing: 0) {
-            tab(.home, "Home", "house")
-            tab(.questions, "Questions", "text.bubble")
-            tab(.send, "Send", "plus")
-            tab(.settings, "Settings", "gearshape")
-        }
-        .padding(.horizontal, 8).padding(.top, 4).padding(.bottom, 4)
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-        .background(Theme.sidebar)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
+    private func selectTab(_ tab: Tab) {
+        if tab != .questions { model.focusedQuestion = nil }
+        model.tab = tab
     }
 
-    private func tab(_ tab: Tab, _ title: String, _ symbol: String) -> some View {
-        Button { if tab != .questions { model.focusedQuestion = nil }; model.tab = tab } label: {
-            VStack(spacing: 5) {
-                Image(systemName: symbol).themeFont(21)
-                    .overlay(alignment: .topTrailing) {
-                        if tab == .questions, model.openQuestionCount > 0 {
-                            Text("\(model.openQuestionCount)").themeFont(10, .bold)
-                                .padding(.horizontal, 4).background(Theme.brand, in: Capsule())
-                                .foregroundStyle(Theme.onBrand).offset(x: 12, y: -6)
-                        }
-                    }
-                Text(title).themeFont(11).lineLimit(1).minimumScaleFactor(0.7)
-            }.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-        }
-        .buttonStyle(PressStyle()).foregroundStyle(model.tab == tab ? Theme.brand : Theme.muted)
-        .accessibilityLabel(title)
-        .accessibilityValue(tab == .questions ? "\(model.openQuestionCount) open questions" : "")
-        .accessibilityAddTraits(model.tab == tab ? [.isSelected] : [])
-        .sensoryFeedback(.selection, trigger: model.tab)
+    private func tabItem<V: View>(_ tab: Tab, _ title: String, _ symbol: String, @ViewBuilder _ content: () -> V) -> some View {
+        content().background(Theme.bg.ignoresSafeArea())
+            .tabItem { Label(title, systemImage: symbol) }
+            .tag(tab)
     }
 }
