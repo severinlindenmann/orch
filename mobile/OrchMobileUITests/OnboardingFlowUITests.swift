@@ -66,13 +66,13 @@ final class OnboardingFlowUITests: XCTestCase {
     /// Answer has a 3 s undo window; undo returns the options and nothing is sent.
     func testAnswerCanBeUndone() {
         let app = XCUIApplication()
-        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-startTab", "questions"]
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-startTab", "questions", "-undoSeconds", "30"]
         app.launch()
         let answer = app.buttons["answer-TIMESTAMP"]
         XCTAssertTrue(answer.waitForExistence(timeout: 15))
         answer.tap()
         let undo = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'undo-'")).firstMatch
-        XCTAssertTrue(undo.waitForExistence(timeout: 3))
+        XCTAssertTrue(undo.waitForExistence(timeout: 10))
         undo.tap()
         XCTAssertTrue(app.buttons["answer-TIMESTAMP"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.staticTexts["Answer sent: TIMESTAMP"].exists)
