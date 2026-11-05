@@ -35,7 +35,17 @@
     },
     "text": {
       "type": "object", "required": ["text"],
-      "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 20000 } }
+      "properties": {
+        "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
+        "update": {
+          "type": "object", "required": ["kind"], "additionalProperties": false,
+          "properties": {
+            "kind": { "enum": ["ack", "working", "note", "result", "question", "failure", "stopped"], "description": "What this text says about the ticket's work. The relay pushes only result, question, failure and stopped; the others are stored and listed, never pushed (relay-api.md, Push)." },
+            "title": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$", "description": "Optional short ticket title for the phone, plain text, one line." }
+          },
+          "description": "Optional. A work update about the message's ticket. Old clients ignore it and show the text as before."
+        }
+      }
     },
     "file": {
       "type": "object", "required": ["blob_id", "name", "size", "sha256"],

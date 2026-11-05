@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/addons/automation/ext.schema.json",
+  "title": "orch automation ticket data: ext.automation",
+  "description": "Owned by the automation add-on (the scheduler renamed; its ticket_ext, the add-on ships a byte-identical copy). The core never reads it. Replaces addons/scheduler.ext.schema.json once W2-L7-P4 migrates ext.scheduler -> ext.automation (local-files.md, Automation rename); until then both exist. One-time waits stay core: waiting_on {kind: time, until}. A repeating ticket has recurring/cron/tz/agent/each_run/last_run; a sub-ticket made for one run (each_run = sub-ticket) has run/at/occurrence.",
+  "type": "object",
+  "properties": {
+    "recurring": { "type": "boolean", "description": "true = run again and again by cron." },
+    "cron": { "type": "string", "pattern": "^\\S+ \\S+ \\S+ \\S+ \\S+$", "description": "5-field cron (min hour day month weekday), read in tz (UTC when tz is absent). Missed runs (machine off): one catch-up run, never several." },
+    "tz": { "type": "string", "pattern": "^(UTC|[A-Za-z_]+(/[A-Za-z0-9_+-]+){1,2})$", "description": "IANA time zone the cron is read in, e.g. Europe/Zurich. Default: [workspace] tz of .orch/config.toml, else UTC." },
+    "agent": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "description": "Names an agent: a built-in adapter or an [agents.<name>] entry of .orch/config.toml. Never a command. Default: [workspace] agent." },
+    "each_run": { "const": "sub-ticket", "description": "Optional. Each run gets its own sub-ticket (parent = this ticket); only for repeats daily or slower. Absent = every run works on this ticket." },
+    "last_run": { "oneOf": [{ "type": "string", "format": "date-time", "pattern": "Z$" }, { "type": "null" }], "description": "Written by the add-on after each run." },
+    "run": { "const": true, "description": "On a sub-ticket: made for one run of its parent." },
+    "at": { "type": "string", "format": "date-time", "pattern": "Z$", "description": "On a sub-ticket: the planned time of that run (UTC)." },
+    "occurrence": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$", "description": "On a sub-ticket: <parent id>:<at>. One sub-ticket per occurrence; a crashed tick finds it and reuses it." }
+  },
+  "allOf": [
+    { "if": { "properties": { "recurring": { "const": true } }, "required": ["recurring"] }, "then": { "required": ["cron"] } },
+    { "if": { "required": ["each_run"] }, "then": { "required": ["recurring", "cron"], "properties": { "recurring": { "const": true } } } },
+    { "if": { "required": ["run"] }, "then": { "required": ["at", "occurrence"], "not": { "anyOf": [{ "required": ["recurring"] }, { "required": ["each_run"] }] } } }
+  ]
+}

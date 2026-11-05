@@ -1416,5 +1416,89 @@
         "message": "Voice transcription is not set up on this relay."
       }
     }
+  },
+  {
+    "_note": "Phone: Your tickets. A read view over the stored texts that carry body.update: one item per (workspace, ticket), the newest update first. Nothing is stored for it.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/updates",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "m_r3s8t1u6v2w9x4y7",
+            "workspace": "ws_pilatus001",
+            "workspace_name": "Pilatus Workspace",
+            "ticket": "t_q3sum1",
+            "kind": "result",
+            "title": "Q3 summary",
+            "text": "Q3 summary is ready in the shared folder.",
+            "reply_to": null,
+            "at": "2026-11-05T11:20:00Z"
+          },
+          {
+            "id": "m_upd0000000000002",
+            "workspace": "ws_reports001",
+            "workspace_name": "Reports",
+            "ticket": "t_9k2m4q",
+            "kind": "working",
+            "title": "Invoice CSV export",
+            "text": "Working on: Invoice CSV export",
+            "reply_to": null,
+            "at": "2026-11-05T15:12:00Z"
+          }
+        ],
+        "next": null
+      }
+    }
+  },
+  {
+    "_note": "Phone: one ticket's updates, newest first, paged with after = the last id of the previous page.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/updates?workspace=ws_pilatus001&ticket=t_q3sum1&limit=2",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "m_r3s8t1u6v2w9x4y7",
+            "workspace": "ws_pilatus001",
+            "workspace_name": "Pilatus Workspace",
+            "ticket": "t_q3sum1",
+            "kind": "result",
+            "title": "Q3 summary",
+            "text": "Q3 summary is ready in the shared folder.",
+            "reply_to": null,
+            "at": "2026-11-05T11:20:00Z"
+          },
+          {
+            "id": "m_a7c2k9q3x1b8d4f6",
+            "workspace": "ws_pilatus001",
+            "workspace_name": "Pilatus Workspace",
+            "ticket": "t_q3sum1",
+            "kind": "ack",
+            "title": "Q3 summary",
+            "text": "Got it: Q3 summary",
+            "reply_to": "m_p3q7x2k9a1b4c8d0",
+            "at": "2026-11-05T09:02:04Z"
+          }
+        ],
+        "next": "m_a7c2k9q3x1b8d4f6"
+      }
+    }
   }
 ]

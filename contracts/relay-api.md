@@ -52,6 +52,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | GET | `/v1/phone/workspaces` | – | list of `{id, name, description, tags, online, last_seen, open_questions}` (only workspaces this phone may reach) |
 | GET | `/v1/phone/questions` | – | list of `{message, workspace_name}`, open questions only (sent to `phones` or to this phone by a workspace on its list) |
 | GET | `/v1/phone/messages?after=&limit=` | – | list of `{message, workspace_name}`, newest first: `text` messages that workspaces on its list sent to this phone or to `phones`, and the texts this phone sent to them (`workspace_name` = the other side) |
+| GET | `/v1/phone/updates?ticket=&workspace=&after=&limit=` | – | A read view over the same stored `text` messages as `/v1/phone/messages` (no second store, nothing new is written): only texts with `body.update` that workspaces on this phone's list sent to this phone or to `phones`. Without `ticket`: one item per (workspace, ticket), the newest update, newest first (the "Your tickets" list). With `ticket` + `workspace`: that ticket's updates, newest first, paged by `after` (an item `id` from the previous page). `limit` 1–100, default 50. `{items: [{id, workspace, workspace_name, ticket, kind, title, text, reply_to, at}], next: <id> \| null}`. `title`/`text` are plain text from the message, never HTML |
 | POST | `/v1/phone/answer` | `{question_message_id, answer}` | `201 {id}`. The relay builds the `answer` message (`from: ph_…`, `answered_by: human:<phone name>`, routed as above). First answer wins; later answers from any phone → `409 already_answered` |
 | POST | `/v1/phone/send` | `{to: ws_…, text, ticket?}` | `201 {id}`. A `text` message from the phone (voice becomes text on the phone). `to` must be on the phone's list |
 | POST | `/v1/phone/transcribe` | Body = the audio bytes, `Content-Type: audio/m4a` (also `audio/wav`, `audio/webm`), max 10 MB / 2 min, optional `?language=de` (else the language is detected) | `200 {text, language, duration}` (`duration` in seconds). `503 transcription_off` when the admin set no Deepgram key (the app then uses on-device speech), `502 transcription_failed` when Deepgram fails or is unreachable, `429 rate_limited` after 30 calls a minute per phone, `413 too_large`, `422 invalid` (type, empty, language) |
@@ -59,6 +60,10 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 
 Push for a new question (APNs): `{"aps": {"alert": {"title": "<workspace name>", "body": "<question text, max 120 chars>"}, "sound": "default"}, "message_id": "m_…", "workspace": "ws_…"}`. Tapping opens that question.
 Push for a new text to a phone (`ph_…` or `phones`): same `aps`, plus `"type": "text", "text_id": "m_…", "workspace": "ws_…"` (no `message_id`); tapping opens the messages with that workspace.
+Work updates (`body.update` on a text, message.schema.json): the relay pushes a text with `update.kind` = `result`, `question`,
+`failure` or `stopped` as above (push body = `update.title` + ": " + the first line of the text, max 120 chars); `ack`, `working`
+and `note` are stored and listed (`/v1/phone/messages`, `/v1/phone/updates`) but **never pushed**. A text without `update` is
+pushed as before. The filter runs in the relay, not in the sender, and the per-sender push budget still applies.
 Pushes go to the phones the message is for: `phones` = every paired phone with the sender on its list, `ph_…` = that phone.
 
 Admin prompt for a workspace (shown once): `orch addon add relay --yes` then `orch relay connect https://relay.severin.io --workspace ws_… --token orn_…`

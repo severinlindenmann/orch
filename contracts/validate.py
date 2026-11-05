@@ -70,6 +70,8 @@ V = {
     "run-pending": validator("run-pending"),
     "needs": validator("needs"),
     "agent-adapter": validator("agent-adapter"),
+    "run-event": validator("addons/focus/run-event"),
+    "automation-ext": validator("addons/automation/ext"),
 }
 # The [workspace] agent + [agents.<name>] part of .orch/config.toml: a $def of agent-adapter.schema.json.
 _adapters = json.loads((HERE / "agent-adapter.schema.json").read_text())
@@ -81,14 +83,15 @@ V["agent-config"] = Draft202012Validator(
 CORE_CLEAN = ["ticket", "run", "run-pending", "needs", "agent-adapter"]
 TOOL_NAMES = re.compile(r"scheduler|automation|focus|relay|dashboard|publish|claude|codex", re.I)
 # Add-on ext schemas, keyed by ext name. A ticket's ext.<name> is checked with it (as the CLI does for installed add-ons).
-EXT = {"scheduler": validator("addons/scheduler.ext")}
+EXT = {"scheduler": validator("addons/scheduler.ext"), "automation": V["automation-ext"]}
 
 
 SESSION_ARG = re.compile(r"^(\{session\}|--[a-z][a-z0-9-]*=\{session\})$")
 
 
 def argv_errors(doc):
-    """Order rules of agent-adapter.schema.json $defs/argv that JSON Schema cannot express (adapters.py checks the same):
+    """Order rules of agent-adapter.schema.json $defs/argv that JSON Schema cannot express
+    (adapters.py checks the same):
     {prompt} is a whole item after a '--' item; {session} is a whole item or --flag={session}."""
     out = []
     for name, a in (doc.get("adapters") or {}).items():
@@ -106,6 +109,10 @@ def argv_errors(doc):
 
 
 def errors(kind, doc):
+    if kind == "run-event":  # an example file is a list of events (one log)
+        if not isinstance(doc, list) or not doc:
+            return [types.SimpleNamespace(message="needs a non-empty list of events")]
+        return [e for ev in doc for e in V[kind].iter_errors(ev)]
     errs = list(V[kind].iter_errors(doc))
     if kind == "agent-adapter" and not errs:
         errs += argv_errors(doc)
@@ -220,6 +227,34 @@ for case in bvec["must_fail"]:
         fails.append(f"bundle vector {case['name']}: unpacked but must fail")
     except Exception:  # noqa: BLE001
         pass
+
+# clean_untrusted (SA-14): reference rules of vectors/clean-untrusted-v1.json;
+# workspace/src/orch/text.py must give the same outputs.
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
+_DROP = set(range(0xE0000, 0xE0080)) | {0x2800, 0x034F, 0x3164, 0x115F, 0x1160, 0xFEFF}
+
+
+def clean_untrusted(text, limit=2000):
+    text = _COMMENT.sub("", unicodedata.normalize("NFC", text))
+    keep = [
+        ch
+        for ch in text
+        if ch in "\n\t"
+        or (
+            unicodedata.category(ch) not in ("Cc", "Cf")
+            and ord(ch) not in _DROP
+            and not 0xFE00 <= ord(ch) <= 0xFE0F
+        )
+    ]
+    return "".join(keep)[:limit]
+
+
+cvec = json.loads((HERE / "vectors" / "clean-untrusted-v1.json").read_text())
+if len(cvec["cases"]) < 3:
+    fails.append("clean-untrusted vector: needs three cases")
+for case in cvec["cases"]:
+    if clean_untrusted(case["in"]) != case["out"]:
+        fails.append(f"clean-untrusted vector {case['name']}: output differs")
 
 if fails:
     print("\n".join("FAIL " + f for f in fails))

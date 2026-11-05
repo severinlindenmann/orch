@@ -1,0 +1,11 @@
+[
+  { "v": 1, "at": "2026-11-05T09:11:59Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "main", "kind": "run.state", "text": "Working", "data": { "state": "working", "source": "adapter" } },
+  { "v": 1, "at": "2026-11-05T09:12:05Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "main", "kind": "tool.start", "text": "Run invoice tests", "data": { "id": "toolu_01U1QBwX", "tool": "Bash", "command": "uv run pytest -q tests/invoices", "source": "adapter" } },
+  { "v": 1, "at": "2026-11-05T09:12:08Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "main", "kind": "tool.end", "text": "48 passed in 3.12s", "data": { "id": "toolu_01U1QBwX", "ok": true, "ms": 3129, "source": "adapter" } },
+  { "v": 1, "at": "2026-11-05T09:12:09Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "h_1", "kind": "helper.start", "text": "checking colours", "data": { "id": "toolu_01Hk2", "source": "adapter" } },
+  { "v": 1, "at": "2026-11-05T09:13:02Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "h_1", "kind": "helper.end", "text": "Colours match the brand", "data": { "id": "toolu_01Hk2", "ok": true, "source": "adapter" } },
+  { "v": 1, "at": "2026-11-05T09:16:40Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "main", "kind": "task.done", "text": "Export button", "data": { "check": "c2", "source": "ticket" } },
+  { "v": 1, "at": "2026-11-05T09:18:00Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "main", "kind": "denial", "text": "Needs your OK to use WebFetch", "data": { "tool": "WebFetch", "source": "adapter" } },
+  { "v": 1, "at": "2026-11-05T09:20:40Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "main", "kind": "usage", "text": "Covered by subscription", "data": { "window": "seven_day", "used": 0.82, "status": "warning", "source": "adapter" } },
+  { "v": 1, "at": "2026-11-05T09:20:41Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "main", "kind": "run.state", "text": "Finished", "data": { "state": "idle", "turns": 14, "denials": 1, "source": "adapter" } }
+]
