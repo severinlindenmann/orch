@@ -25,7 +25,7 @@ mkdir -p "$TMP/home"
 BINS='{}'
 if [ "$MODE" = local ]; then
   case "$WHAT" in
-    all|P*|R*|M*|F*|*,P*|*,R*)
+    all|P*|R*|M*|F*|*,P*|*,R*|V2|V2-P6*|V2-W2*|*,V2-P6*|*,V2-W2*)
       export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
       ( cd "$REPO/publish" && cargo build --release -j 4 -q )
       ( cd "$REPO/relay" && cargo build --release -j 4 -q )
@@ -47,7 +47,7 @@ fi
 
 # minimal PATH: uv, node, git, claude, codex live in these folders
 EXTRA_PATH=""
-for c in uv node git claude codex python3; do
+for c in uv node git claude codex python3 tmux; do
   p=$(command -v "$c" 2>/dev/null || true)
   [ -n "$p" ] && EXTRA_PATH="$EXTRA_PATH:$(dirname "$p")"
 done

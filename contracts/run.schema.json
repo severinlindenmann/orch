@@ -34,6 +34,17 @@
     "seen_revision": { "type": "integer", "minimum": 0, "description": "Ticket revision the running agent has seen; the 'New on <ticket> since you looked' footer (stderr only) lists what changed after it." },
     "maybe_stale_since": { "$ref": "#/$defs/time", "description": "Optional. Set when a claim without a pid passed 30 min without an orch write." },
     "reason": { "type": "string", "maxLength": 200, "description": "Optional. Plain words why the run was started, e.g. 'Answer to q2'." },
+    "agent_pid": { "oneOf": [{ "type": "integer", "minimum": 2 }, { "type": "null" }], "description": "Optional. Process of the agent itself, set by the wrapper. The claim is alive while pid OR agent_pid is alive with its recorded start time, so a killed wrapper does not free a working agent." },
+    "agent_pid_started": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }], "description": "Optional. Start time of agent_pid (pid-reuse guard)." },
+    "seen_history": { "type": "integer", "minimum": 0, "description": "Optional. Number of history lines the running agent has seen (for the footer)." },
+    "live": {
+      "type": "object", "additionalProperties": false, "required": ["state", "since"],
+      "properties": {
+        "state": { "enum": ["starting", "idle", "working", "attention"], "description": "What the live agent last said: idle comes from its tool's hook or `orch run done`; input is pasted only while idle." },
+        "since": { "$ref": "#/$defs/time" }
+      },
+      "description": "Optional, live runs only."
+    },
     "log": { "type": "string", "pattern": "^\\.orch/run/logs/[A-Za-z0-9_.-]{1,120}$", "description": "Optional. Log file of a oneshot run, relative to the workspace root." }
   },
   "$defs": {

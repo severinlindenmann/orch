@@ -26,8 +26,9 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, services, tickets
+from orch import adapters, procs, services, tickets
 from orch.errors import Refused
+from orch.procs import pid_started
 
 LEASE_SECONDS = 30 * 60
 LOCK_STALE_SECONDS = 30
@@ -82,63 +83,59 @@ def _iso(ts: float) -> str:
     return datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def pid_started(pid: int) -> str | None:
-    """Start time of a process as the OS reports it (guards against pid reuse), else None."""
-    if not isinstance(pid, int) or pid <= 1:
-        return None
-    try:
-        if os.name == "nt":
-            import ctypes
-            from ctypes import wintypes
-
-            k = ctypes.windll.kernel32
-            k.OpenProcess.restype = wintypes.HANDLE
-            h = k.OpenProcess(0x1000, False, pid)
-            if not h:
-                return None
-            try:
-                c, e, kt, ut = (wintypes.FILETIME() for _ in range(4))
-                if not k.GetProcessTimes(h, *(ctypes.byref(x) for x in (c, e, kt, ut))):
-                    return None
-                ticks = (c.dwHighDateTime << 32) | c.dwLowDateTime
-                return _iso(ticks / 1e7 - 11644473600)
-            finally:
-                k.CloseHandle(h)
-        r = subprocess.run(
-            ["ps", "-o", "lstart=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
-        )
-        text = " ".join(r.stdout.split())
-        if not text:
-            return None
-        return _iso(time.mktime(time.strptime(text, "%a %b %d %H:%M:%S %Y")))
-    except Exception:
-        return None
-
-
 # ---------------------------------------------------------------- the lock and the record
+
+
+def _lock_text(lock: Path) -> str | None:
+    try:
+        return lock.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _break_dead(lock: Path) -> bool:
+    """Take away the lock of a holder that is verifiably dead (rename: only one waiter wins). What we took
+    must be exactly what we checked; else it is put back, and if that fails we do NOT go on (one holder)."""
+    seen = _lock_text(lock)
+    if not seen or not procs.owner_dead(seen):
+        return False
+    mine = lock.with_name(f"{lock.name}.{secrets.token_hex(4)}")
+    try:
+        os.replace(lock, mine)
+    except OSError:
+        return False
+    try:
+        if _lock_text(mine) == seen:
+            return True
+        with contextlib.suppress(OSError):
+            os.link(mine, lock)  # it was a live holder's newer lock: put it back, no clobber
+        return False
+    finally:
+        with contextlib.suppress(OSError):
+            mine.unlink()
 
 
 @contextlib.contextmanager
 def locked(root: Path, tid: str):
-    """The per-ticket run lock. Stale after 30 s (a holder does only quick file work)."""
+    """The per-ticket run lock. Free when its holder is verifiably dead, or old with no holder named."""
     lock = run_dir(root) / "tickets" / f"{tid}.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
     end = time.monotonic() + 10
     while True:
         try:
-            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w") as f:
+                f.write(procs.own_token())
             break
         except FileExistsError:
+            if _break_dead(lock):
+                continue
             try:
                 stale = time.time() - lock.stat().st_mtime > LOCK_STALE_SECONDS
             except OSError:
                 continue
-            if stale and tickets._break_stale(lock):
-                continue
+            if stale and not _lock_text(lock) and tickets._break_stale(lock):
+                continue  # nobody is named in it (its writer died before writing): the age rule
             if time.monotonic() > end:
                 raise Refused(f"Ticket {tid} is busy (retried for 10 s). Try again.") from None
             time.sleep(0.01)
@@ -329,17 +326,21 @@ def pending_add(
         return item
 
 
+def mark_delivered_locked(root: Path, tid: str, ids: list[str]) -> None:
+    items = _pending_read(root, tid)
+    for i in items:
+        if i["id"] in ids and not i.get("delivered_at"):
+            i["delivered_at"] = tickets.now()
+    _pending_write(root, tid, items)
+    rec = read(root, tid)
+    if rec is not None:
+        rec["pending"] = any(not i.get("delivered_at") for i in items)
+        _write(root, rec)
+
+
 def mark_delivered(root: Path, tid: str, ids: list[str]) -> None:
     with locked(root, tid):
-        items = _pending_read(root, tid)
-        for i in items:
-            if i["id"] in ids and not i.get("delivered_at"):
-                i["delivered_at"] = tickets.now()
-        _pending_write(root, tid, items)
-        rec = read(root, tid)
-        if rec is not None:
-            rec["pending"] = any(not i.get("delivered_at") for i in items)
-            _write(root, rec)
+        mark_delivered_locked(root, tid, ids)
 
 
 # ---------------------------------------------------------------- claim, renew, release
@@ -435,6 +436,8 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
         if keep_if_pending and waiting:
             return {"released": False, "pending": True}
         _delete(root, tid)
+        for leftover in (f"env-{rec['run']}.json", f"prompt-{rec['run']}.txt", f"hooks-{rec['run']}.json"):
+            (run_dir(root) / leftover).unlink(missing_ok=True)  # files made for this run only
         return {"released": True, "pending": waiting}
 
 
@@ -503,6 +506,7 @@ def plan(
     prompt: str | None = None,
     agent: str | None = None,
     items: list[dict] | None = None,
+    hooks_file: str | None = None,
 ) -> dict:
     """Resume or fresh, decided here once: resume only when the adapter can, this ticket has a session for
     this agent on this machine, and --fresh is not set."""
@@ -511,7 +515,7 @@ def plan(
     a = adapters.load(name, root)
     items = undelivered(root, tid) if items is None else items
     sid = None if fresh else tickets.sessions_for(ticket, name, host())
-    v = {"allow": adapters.allow_patterns(allow), "session": sid}
+    v = {"allow": adapters.allow_patterns(allow), "session": sid, "orch_hooks_file": hooks_file}
     argv = None
     resumed = False
     if sid and a["capabilities"]["resume"]:
@@ -544,7 +548,8 @@ def plan(
         "session": sid if resumed else new_session,
         "tmux": None,
         "argv": argv,
-        "stdin": v["prompt"] if a["prompt_via"] == "stdin" else None,
+        "stdin": v["prompt"] if a["prompt_via"] == "stdin" and mode == "oneshot" else None,
+        "prompt": v["prompt"],
         "item_ids": [i["id"] for i in items],
     }
 
@@ -560,14 +565,39 @@ def start(
     fresh: bool = False,
     take_over: bool = False,
     allow: list[str] | None = None,
-    mode: str = "oneshot",
+    mode: str | None = None,
     text: str | None = None,
+    agent: str | None = None,
 ) -> dict:
-    if mode != "oneshot":
-        raise Refused("Only --mode oneshot is available here.")
-    name = adapters.chosen(root)
+    """Start (or continue) the agent on a ticket. mode None = live in tmux when the agent and the machine can,
+    else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent."""
+    from orch import runs_live
+
+    name = agent or adapters.chosen(root)
+    adapters.load(name, root)  # refuses a name nobody knows
     a = adapters.load(name, root)
     notes = []
+    live_ok = runs_live.available(a)
+    if mode is None:
+        mode = "live" if live_ok else "oneshot"
+    elif mode == "live" and not live_ok:
+        notes.append(
+            "A live session needs tmux and an agent that can run interactively; working one turn at a time."
+        )
+        mode = "oneshot"
+    if mode == "live":
+        notice = adapters.command_notice(name, mode, root)
+        r = runs_live.start_live(
+            root,
+            tid,
+            by,
+            name,
+            fresh=fresh,
+            take_over=take_over,
+            busy_text=text or f"{by} asked for more work on this ticket.",
+        )
+        r["notes"] = notes + ([notice] if notice else [])
+        return r
     notice = adapters.command_notice(name, mode, root)
     if notice:
         notes.append(notice)
@@ -746,6 +776,39 @@ def wrap(
         argv, stdin, resumed = p["argv"], p["stdin"], p["resumed"]
         new_session = None if p["resumed"] else p["session"]
         item_ids = p["item_ids"]
+
+
+def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_session: str | None) -> int:
+    """The pane process of a live run: the agent runs on the pane's terminal; this waits for it to end."""
+    rec = read(root, tid)
+    if not rec or rec["run"] != run:
+        return 1
+    set_process(root, tid, run, os.getpid())
+    env = {**os.environ, "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
+    current: dict = {}
+    _on_term(root, tid, run, current)
+    if os.name != "nt":
+        import signal
+
+        signal.signal(signal.SIGINT, signal.SIG_IGN)  # Escape/^C belong to the agent, not to this wrapper
+    try:
+        proc = subprocess.Popen(argv, cwd=root, env=env)
+    except OSError as e:
+        print(f"orch could not start the agent: {e}", file=sys.stderr)
+        release(root, tid, run)
+        return 127
+    current["proc"] = proc
+    set_process_fields(root, tid, run, agent_pid=proc.pid, agent_pid_started=pid_started(proc.pid))
+    rc = proc.wait()
+    if new_session and rc == 0:
+        tickets.record_session(root, tid, name, new_session, host())
+    release(root, tid, run)  # input still waiting stays in the pending file for the next start
+    (run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
+    with contextlib.suppress(Exception):
+        from orch import runs_live
+
+        runs_live.start_waiting(root)
+    return rc
 
 
 # ---------------------------------------------------------------- the footer

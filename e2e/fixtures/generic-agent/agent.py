@@ -9,7 +9,7 @@ $ORCH_TICKET or in the prompt, starts and finishes the first open checklist item
 at start and after each line, which is how a generic agent says "idle".
 --silent N: sleeps N seconds without any orch call (a quiet agent must keep its claim).
 
-$ORCH_CMD names the orch command (default: orch). $GENERIC_AGENT_LOG, when set, gets one line per prompt or
+$ORCH_CMD names the orch command (default: orch). $ORCH_TEST_AGENT_LOG (or $GENERIC_AGENT_LOG), when set, gets one line per prompt or
 input line ("prompt: ..." / "input: ...") so tests can count what arrived.
 """
 
@@ -28,7 +28,7 @@ def orch(*args: str) -> subprocess.CompletedProcess:
 
 
 def log(kind: str, text: str) -> None:
-    path = os.environ.get("GENERIC_AGENT_LOG")
+    path = os.environ.get("ORCH_TEST_AGENT_LOG") or os.environ.get("GENERIC_AGENT_LOG")
     if path:
         with open(path, "a", encoding="utf-8") as f:
             f.write(f"{kind}: {text.strip().replace(chr(10), ' | ')}\n")

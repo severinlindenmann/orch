@@ -55,7 +55,7 @@ final class AppModelTests: XCTestCase {
         await model.answer(model.questions[0], with: "TIMESTAMP")
         XCTAssertEqual(model.openQuestionCount, 1)
         let ok = await model.send(to: MockRelay.reports, text: "  Check totals  ")
-        XCTAssertTrue(ok); XCTAssertEqual(model.lastSent, .init(workspaceName: "Reports", text: "Check totals"))
+        XCTAssertTrue(ok); XCTAssertEqual(model.lastSent, .init(workspaceName: "Reports", text: "Check totals", messageId: model.lastSent?.messageId ?? ""))
         let empty = await model.send(to: MockRelay.reports, text: "   "); XCTAssertFalse(empty)
         await model.signOut()
         XCTAssertEqual(model.phase, .onboarding); XCTAssertNil(Keychain.load()); XCTAssertTrue(model.workspaces.isEmpty)

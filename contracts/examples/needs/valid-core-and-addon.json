@@ -7,7 +7,7 @@
     "answer": { "question": "q3", "options": ["Try again", "Stop"], "recommended": "Try again" } },
   { "id": "core:wait:t_wr4n2c", "source": "core", "kind": "overdue-wait", "ticket": "t_wr4n2c", "title": "Weekly report",
     "text": "Waiting on Acme IT (Jonas) since 2 Nov", "tone": "warn", "since": "2026-11-04T00:00:00Z" },
-  { "id": "relay:allow:m_9c2k7d0a1b3e5f7h", "source": "relay", "kind": "relay:allow", "ticket": null,
+  { "id": "relay:allow:m_9c2k7d0a1b3e5f7h", "source": "relay", "kind": "relay:allow", "ticket": "t_4q8w2e",
     "title": "landing-site wants to hand over", "text": "Add rate limit", "tone": "needs-you", "since": "2026-11-05T08:40:00Z",
     "cli": "orch relay allow m_9c2k7d0a1b3e5f7h --once", "stale": false }
 ]
