@@ -13,11 +13,13 @@ import re
 import secrets
 import shutil
 import time
+import unicodedata
 import urllib.parse
 from pathlib import Path
 
 from orch import net, skills, tickets
 from orch.errors import Refused
+from orch.text import clean_untrusted
 
 ALNUM = "abcdefghijklmnopqrstuvwxyz0123456789"
 MAX_BLOB = 100 * 1024 * 1024
@@ -369,8 +371,38 @@ def resend_outbox(root: Path) -> dict:
     return res
 
 
-def send_text(root: Path, target: str, text: str, ticket: str | None = None) -> dict:
-    return _message(root, resolve(root, target), "text", {"text": text}, ticket)
+UPDATE_KINDS = ("ack", "working", "note", "result", "question", "failure", "stopped")
+
+
+def _update_title(root: Path, ticket: str) -> str | None:
+    """The ticket's title as the phone's one-line title (letters, numbers, punctuation, symbols, spaces)."""
+    try:
+        title = tickets.load(root, ticket)["title"]
+    except (Refused, ValueError, KeyError):
+        return None
+    line = " ".join(clean_untrusted(title, 200).split())
+    line = "".join(c for c in line if unicodedata.category(c)[0] in "LMNPS" or c == " ")
+    return line[:120].strip() or None
+
+
+def send_text(
+    root: Path,
+    target: str,
+    text: str,
+    ticket: str | None = None,
+    update: str | None = None,
+    reply_to: str | None = None,
+) -> dict:
+    body: dict = {"text": text}
+    if update:
+        if update not in UPDATE_KINDS:
+            raise Refused(f"--update is one of: {', '.join(UPDATE_KINDS)}.")
+        if not ticket:
+            raise Refused("An update belongs to a ticket. Add --ticket <id>.")
+        body["update"] = {"kind": update}
+        if title := _update_title(root, ticket):
+            body["update"]["title"] = title
+    return _message(root, resolve(root, target), "text", body, ticket, reply_to)
 
 
 def send_file(root: Path, target: str, path: Path, text: str | None, ticket: str | None = None) -> dict:
@@ -493,7 +525,12 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     by, via = _answer_by(msg)
     try:
         tickets.answer(
-            root, asked["ticket"], asked["question_id"], str(msg.get("body", {}).get("answer")), by, via
+            root,
+            asked["ticket"],
+            asked["question_id"],
+            clean_untrusted(str(msg.get("body", {}).get("answer")), 2000),
+            by,
+            via,
         )
     except Refused as e:
         if _applied_ticket(root, msg):  # a crash after the write, before "seen": same answer, nothing to redo
@@ -710,23 +747,60 @@ def _ticket_for(root: Path, msg: dict) -> str:
                 return t["id"]
         title = f"Relay task {b['key']}"
     else:
-        title = b["title"]
+        title = " ".join(clean_untrusted(b["title"], 200).split()) or f"Task from {msg['from']}"
     t = tickets.create(root, title, by)
     ext = {"from": msg["from"], "message": msg["id"]}
     if msg["type"] == "start":
         ext["start_key"] = b["key"]
     tickets.ext_set(root, t["id"], "relay", json.dumps(ext), by)
     for item in b.get("checklist", []) if msg["type"] == "delegate" else []:
-        tickets.check_add(root, t["id"], str(item), by)
+        tickets.check_add(root, t["id"], clean_untrusted(str(item), 200) or "(empty)", by)
     return t["id"]
 
 
+_WIN_RESERVED = re.compile(
+    r"^(con|prn|aux|nul|conin\$|conout\$|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3])(\..*)?$", re.I
+)
+
+
 def safe_name(name: str) -> str:
-    base = re.split(r"[\\/]", str(name))[-1].strip().strip(".")
+    """Base name only; characters Windows refuses become _, reserved device names get a leading _."""
+    name = clean_untrusted(str(name), 1000)  # the same cleaning as the inbox line: saved name == shown name
+    base = re.split(r"[\\/]", name)[-1].strip().strip(". ")
     base = re.sub(r'[<>:"|?*\x00-\x1f]', "_", base)
     if not base:
-        raise Refused("The file has no usable name.")
-    return base[:200]
+        raise Refused("The file has no usable name (it was empty or only invisible characters). Not saved.")
+    if _WIN_RESERVED.match(base):
+        base = "_" + base
+    return base.encode("utf-8")[:200].decode("utf-8", "ignore").rstrip(". ")
+
+
+def _save_received(root: Path, name: str, raw: bytes) -> Path:
+    """received/<name>; a clash gets ' (2)', ' (3)' ... before the extension (created with O_EXCL)."""
+    d = root / "received"
+    if d.is_symlink():
+        raise Refused("received is a link. Not saving.")
+    if d.exists() and not d.is_dir():
+        raise Refused(
+            "There is a file called received in this folder. Move it away so downloads can go there."
+        )
+    d.mkdir(exist_ok=True)
+    stem, dot, ext = name.rpartition(".")
+    if not dot or not stem:
+        stem, ext = name, ""
+    else:
+        ext = "." + ext
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    for n in range(1, 1000):
+        dest = d / (name if n == 1 else f"{stem} ({n}){ext}")
+        try:
+            fd = os.open(dest, flags, 0o644)
+        except FileExistsError:
+            continue
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+        return dest
+    raise Refused("Too many files with that name in received/.")
 
 
 def download(root: Path, mid: str) -> Path:
@@ -740,9 +814,7 @@ def download(root: Path, mid: str) -> Path:
     _, raw = net.call("GET", f"{cfg['url']}/v1/blobs/{b['blob_id']}", net.auth_headers(cfg), timeout=300)
     if len(raw) != b.get("size") or hashlib.sha256(raw).hexdigest() != b.get("sha256"):
         raise Refused("The downloaded file does not match the message (size or sha256). Not saved.")
-    dest = root / ".orch" / "inbox" / "files" / b["blob_id"] / safe_name(b["name"])
-    net.write_atomic(dest, raw)
-    return dest
+    return _save_received(root, safe_name(b["name"]), raw)
 
 
 # ---- refresh ------------------------------------------------------------------------------------

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from orch import net, publish, relay, templates, tickets
 from orch.errors import Refused
+from orch.text import clean_untrusted
 
 
 def _size(n: int) -> str:
@@ -96,7 +97,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--store", choices=templates.STORES, default="none")
     pub.add_parser("list", parents=[common], help="list shared files and apps")
     for n in ("restart", "stop"):
-        x = pub.add_parser(n, parents=[common])
+        x = pub.add_parser(n, parents=[common], help=f"{n} a deployed app")
         x.add_argument("name")
     x = pub.add_parser("delete", parents=[common], help="delete a file (f_...) or an app (name)")
     x.add_argument("id")
@@ -116,7 +117,9 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--since", type=int, help="add-ons: list every arrival after this number (marks nothing)")
     x = rel.add_parser("outbox", parents=[common], help="messages saved but not sent yet")
     x.add_argument("--resend", action="store_true", help="try to send them now")
-    x = rel.add_parser("done", parents=[common], help="mark a message as processed, before acting")
+    x = rel.add_parser(
+        "done", parents=[common], help="mark a message as handled (and get the ticket of an allowed task)"
+    )
     x.add_argument("id")
     t = argparse.ArgumentParser(add_help=False)
     t.add_argument("--ticket")
@@ -124,6 +127,8 @@ def add_parsers(sub, common) -> None:
     x.add_argument("workspace")
     x.add_argument("text", nargs="?", default="")
     x.add_argument("--file")
+    x.add_argument("--update", choices=relay.UPDATE_KINDS, help="mark the text as a work update of --ticket")
+    x.add_argument("--reply-to", help="id of the message this answers")
     x = rel.add_parser("delegate", parents=[common, t], help="hand a task to another workspace")
     x.add_argument("workspace")
     x.add_argument("title")
@@ -141,13 +146,15 @@ def add_parsers(sub, common) -> None:
     rel.add_parser("refresh", parents=[common], help="update settings and the workspace list")
     x = rel.add_parser("download", parents=[common], help="save the file of a file message")
     x.add_argument("id")
-    w = rel.add_parser("webhook", help="incoming webhooks").add_subparsers(dest="wsub", required=True)
-    x = w.add_parser("new", parents=[common, t])
+    w = rel.add_parser("webhook", help="addresses that turn outside calls into messages").add_subparsers(
+        dest="wsub", required=True
+    )
+    x = w.add_parser("new", parents=[common, t], help="make a webhook address (shown once)")
     g = x.add_mutually_exclusive_group(required=True)
     g.add_argument("--once", action="store_true")
     g.add_argument("--permanent", action="store_true")
-    w.add_parser("list", parents=[common])
-    x = w.add_parser("delete", parents=[common])
+    w.add_parser("list", parents=[common], help="list webhooks")
+    x = w.add_parser("delete", parents=[common], help="delete a webhook")
     x.add_argument("id")
 
 
@@ -315,10 +322,12 @@ def run_relay(args, root: Path, out) -> None:
             txt += f" Ticket: {r['ticket']}"
         out(args, r, txt)
     elif sub == "send":
+        if args.file and (args.update or args.reply_to):
+            raise Refused("--update and --reply-to go with a text, not a file.")
         if args.file:
             m = relay.send_file(root, args.workspace, Path(args.file), args.text or None, t)
         elif args.text:
-            m = relay.send_text(root, args.workspace, args.text, t)
+            m = relay.send_text(root, args.workspace, args.text, t, args.update, args.reply_to)
         else:
             raise Refused("Nothing to send. Give a text or --file.")
         out(args, m, _sent_line(root, m, "Message sent to {}."))
@@ -396,16 +405,23 @@ def _inbox_line(i: dict, root: Path) -> str:
     if i["note"]:
         return f"{head}: {i['note']}{tail}"
     reply = f' - reply: orch relay send {m["from"]} "<text>"' if m["from"].startswith("ph_") else ""
+
+    def c(v, n=2000):
+        return clean_untrusted(str(v or ""), n)
+
+    def file_line():
+        said = f": {c(b.get('text'), 500)}" if b.get("text") else ""
+        name = f"{c(b.get('name'), 200)} ({_size(b.get('size') or 0)})"
+        return f"{name}{said} - save it with: orch relay download {m['id']}"
+
     detail = {
-        "text": lambda: b.get("text", "") + reply,
-        "file": lambda: (
-            f"{b.get('name')} ({_size(b.get('size') or 0)}) - save it with: orch relay download {m['id']}"
-        ),
-        "question": lambda: b.get("text", ""),
-        "delegate": lambda: b.get("title", ""),
-        "start": lambda: f"{b.get('key')}: {b.get('text', '')}",
+        "text": lambda: c(b.get("text")) + reply,
+        "file": file_line,
+        "question": lambda: c(b.get("text")),
+        "delegate": lambda: c(b.get("title"), 200),
+        "start": lambda: f"{c(b.get('key'), 48)}: {c(b.get('text'))}",
         "refresh-hint": lambda: "new settings are waiting - run: orch relay refresh",
-        "webhook": lambda: b.get("payload", "")[:200],
+        "webhook": lambda: c(b.get("payload"), 200),
     }.get(m["type"], lambda: "")()
     if m["type"] in ("delegate", "start"):
         al = i["allowed"]
