@@ -490,3 +490,44 @@ def test_done_wake_marks_seen_last(proj, run, new_ticket, rel, monkeypatch):
     assert "Hi" in run("relay", "inbox")[1]
     assert run("relay", "done", "m_text000000000001", "--wake", tid)[0] == 0
     assert "m_text000000000001" in relay.seen(proj)
+
+
+def test_done_crash_after_ticket_creation_makes_one_ticket(proj, run, rel, monkeypatch):
+    from orch import relay
+
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000001", "delegate", {"title": "A", "text": "x"}))
+    run("relay", "inbox")
+    run("relay", "allow", "m_deleg00000000001", "--once")
+
+    def boom(root, msg):
+        raise RuntimeError("crash")
+
+    with monkeypatch.context() as m:
+        m.setattr(relay, "_use_once", boom)
+        with pytest.raises(RuntimeError):
+            run("relay", "done", "m_deleg00000000001")
+    assert run("relay", "done", "m_deleg00000000001")[0] == 0
+    assert len(json.loads(run("ticket", "list", "--json")[1])) == 1
+    g = json.loads((proj / ".orch/secrets/allows.json").read_text())["given"]
+    assert len(g) == 1 and g[0]["used"] is True
+
+
+def test_done_wake_unknown_ticket_refused_before_anything(proj, run, rel):
+    from orch import relay
+
+    connect(run, rel)
+    rel.inbox.append(msg("m_text000000000001", "text", {"text": "Hi"}))
+    run("relay", "inbox")
+    code, _, err = run("relay", "done", "m_text000000000001", "--wake", "t_nope00")
+    assert code == 2 and "t_nope00" in err
+    assert "m_text000000000001" not in relay.seen(proj)
+
+
+def test_done_wake_unknown_ticket_creates_no_ticket(proj, run, rel):
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000001", "delegate", {"title": "A", "text": "x"}))
+    run("relay", "inbox")
+    run("relay", "allow", "m_deleg00000000001", "--once")
+    assert run("relay", "done", "m_deleg00000000001", "--wake", "t_nope00")[0] == 2
+    assert json.loads(run("ticket", "list", "--json")[1]) == []

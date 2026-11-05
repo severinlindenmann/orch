@@ -379,6 +379,8 @@ def done(root: Path, mid: str, wake: str | None = None) -> dict:
     Everything here is idempotent by message id. An allowed delegate/start gets its ticket (inbox rule 4);
     `wake` records the message on that ticket and wakes it now."""
     msg = load_message(root, mid)
+    if wake:
+        tickets.load(root, wake)  # a wrong ticket id fails before anything is created or used
     first = mid not in seen(root)
     res: dict = {"id": mid, "new": first, "ticket": None}
     if first:
@@ -396,6 +398,9 @@ def done(root: Path, mid: str, wake: str | None = None) -> dict:
 
 def _ticket_for(root: Path, msg: dict) -> str:
     b, by = msg["body"], f"agent:relay from {msg['from']}"
+    for t in tickets.list_all(root):  # idempotent by message id: a re-delivery after a crash reuses it
+        if t.get("ext", {}).get("relay", {}).get("message") == msg["id"]:
+            return t["id"]
     if msg["type"] == "start":
         for t in tickets.list_all(root):
             if t.get("ext", {}).get("relay", {}).get("start_key") == b["key"]:
