@@ -143,3 +143,10 @@ def command(pid: int) -> str:
     except (OSError, subprocess.TimeoutExpired):
         return ""
     return r.stdout.strip()
+
+
+def runs_args(cmd: str, args: list[str]) -> bool:
+    """True when the command line has exactly these arguments in a row (whole words: --dir /x/ws never
+    matches --dir /x/ws2)."""
+    s = " " + " ".join(args)
+    return cmd.endswith(s) or (s + " ") in cmd

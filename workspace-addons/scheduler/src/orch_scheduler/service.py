@@ -33,7 +33,7 @@ def _verified(root: Path, rec: dict | None) -> int | None:
         return None
     if os.name != "nt":  # POSIX: it must also be our command for this folder
         cmd = runfiles.command(pid)
-        if "orch_scheduler" not in cmd or str(root) not in cmd:
+        if not runfiles.runs_args(cmd, ["-m", "orch_scheduler", "--dir", str(root.resolve()), "run"]):
             return None
     return pid
 

@@ -24,14 +24,19 @@ GITIGNORE_HEADER = "# orch (local only)"
 
 
 def _project_file(root: Path, path: Path) -> Path:
-    """The file behind AGENTS.md, CLAUDE.md or .gitignore. A symlink is followed only when it stays inside
-    the project (CLAUDE.md -> AGENTS.md is common); one that leads outside is refused."""
+    """The file behind AGENTS.md, CLAUDE.md or .gitignore. A link is followed only from AGENTS.md or
+    CLAUDE.md and only to exactly the project's AGENTS.md or CLAUDE.md (CLAUDE.md -> AGENTS.md is common).
+    Any other link (to .git/config, a git hook, ...) is refused; .gitignore never follows a link."""
     if path.is_symlink():
+        top = root.resolve()
         target = path.resolve()
-        try:
-            target.relative_to(root.resolve())
-        except ValueError:
-            raise Refused(f"{path} points outside this project; orch will not write there.") from None
+        if path.name not in ("AGENTS.md", "CLAUDE.md") or target not in (
+            top / "AGENTS.md",
+            top / "CLAUDE.md",
+        ):
+            raise Refused(
+                f"{path} is a link orch does not write through. Make it a plain file and try again."
+            )
         path = target
     if path.exists() and not path.is_file():
         raise Refused(f"{path} is not a regular file; orch will not write there.")

@@ -115,3 +115,23 @@ def test_data_folder_symlink_is_refused(ws, tmp_path):
     with pytest.raises(RuntimeError, match="symbolic link"):
         sdir(ws)
     assert list(elsewhere.iterdir()) == []
+
+
+def test_command_line_must_name_exactly_this_folder(ws, kills, monkeypatch):
+    """--dir /x/ws must not match a scheduler of /x/ws2 (or any longer path)."""
+    from orch_scheduler import runfiles
+
+    root = str(ws.resolve())
+    assert runfiles.runs_args(f"python -P -m orch_scheduler --dir {root} run", ["-m", "orch_scheduler", "--dir", root, "run"])
+    assert not runfiles.runs_args(f"python -P -m orch_scheduler --dir {root}2 run", ["--dir", root, "run"])
+    assert not runfiles.runs_args(f"python -m orch_scheduler --dir {root} running", ["--dir", root, "run"])
+    me = os.getpid()
+    d = ws / ".orch/run/scheduler"
+    d.mkdir(parents=True)
+    (d / "scheduler.json").write_text(json.dumps({"pid": me, "nonce": "1" * 32, "started": service.proc_start(me)}))
+    monkeypatch.setattr(runfiles, "command", lambda pid: f"python -P -m orch_scheduler --dir {root}2 run")
+    assert service.running_pid(ws, clean=False) is None
+    assert service.stop(ws) == "not verified" and kills == []
+    (d / "scheduler.json").write_text(json.dumps({"pid": me, "nonce": "1" * 32, "started": service.proc_start(me)}))
+    monkeypatch.setattr(runfiles, "command", lambda pid: f"python -P -m orch_scheduler --dir {root} run")
+    assert service.running_pid(ws, clean=False) == me  # the exact folder does match (no signal sent here)

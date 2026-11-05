@@ -188,3 +188,13 @@ def test_run_folder_symlink_is_refused(ws, tmp_path):
     with pytest.raises(RuntimeError, match="symbolic link"):
         service.start(ws, port=_free_port())
     assert list(elsewhere.iterdir()) == []
+
+
+def test_command_line_must_name_exactly_this_folder(ws, kills, monkeypatch):
+    me, root = os.getpid(), str(ws.resolve())
+    rec = {"pid": me, "port": 1, "nonce": "b" * 32, "started": service.runfiles.proc_start(me)}
+    _rundir(ws).mkdir(parents=True)
+    (_rundir(ws) / "server.json").write_text(json.dumps(rec))
+    monkeypatch.setattr(service.runfiles, "command", lambda pid: f"python -P -m orch_dashboard --dir {root}2 serve")
+    monkeypatch.setattr(service, "ident", lambda port, c: {"pid": me, "mac": service.mac("b" * 32, c)})
+    assert service.stop(ws) == "not verified" and kills == []

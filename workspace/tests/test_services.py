@@ -242,7 +242,7 @@ def test_project_files_never_written_through_a_link_outside(proj, tmp_path, name
     victim = tmp_path.parent / f"{tmp_path.name}-victim.txt"
     victim.write_text("keep me", encoding="utf-8")
     (proj / name).symlink_to(victim)
-    with pytest.raises(Refused, match="outside this project"):
+    with pytest.raises(Refused, match="link orch does not write through"):
         {".gitignore": skills.ensure_gitignore, "CLAUDE.md": skills.ensure_claude_md}.get(
             name, lambda r: skills.set_block(r, "x", "body")
         )(proj)
@@ -256,7 +256,11 @@ def test_start_refuses_a_gitignore_link_outside(svc, proj, run, tmp_path):
     (proj / ".gitignore").unlink()
     (proj / ".gitignore").symlink_to(victim)
     code, _, err = run("start")
-    assert code == 2 and "outside this project" in err and victim.read_text(encoding="utf-8") == "keep me"
+    assert (
+        code == 2
+        and "link orch does not write through" in err
+        and victim.read_text(encoding="utf-8") == "keep me"
+    )
 
 
 @NO_WIN_LINKS
@@ -267,3 +271,34 @@ def test_claude_md_linked_to_agents_md_inside_still_works(proj, run):
     assert (proj / "CLAUDE.md").is_symlink() and "@AGENTS.md" in (proj / "AGENTS.md").read_text(
         encoding="utf-8"
     )
+
+
+@NO_WIN_LINKS
+@pytest.mark.parametrize(
+    "name,target",
+    [(".gitignore", ".git/config"), ("CLAUDE.md", ".git/hooks/pre-commit"), ("AGENTS.md", ".orch/x")],
+)
+def test_links_inside_the_project_to_other_files_are_refused(proj, name, target):
+    from orch import skills
+    from orch.errors import Refused
+
+    t = proj / target
+    t.parent.mkdir(parents=True, exist_ok=True)
+    t.write_text("keep me\n", encoding="utf-8")
+    (proj / name).symlink_to(t)
+    with pytest.raises(Refused, match="link orch does not write through"):
+        {".gitignore": skills.ensure_gitignore, "CLAUDE.md": skills.ensure_claude_md}.get(
+            name, lambda r: skills.set_block(r, "x", "body")
+        )(proj)
+    assert t.read_text(encoding="utf-8") == "keep me\n"
+
+
+@NO_WIN_LINKS
+def test_gitignore_never_follows_a_link(proj):
+    from orch import skills
+    from orch.errors import Refused
+
+    (proj / "AGENTS.md").write_text("x\n", encoding="utf-8")
+    (proj / ".gitignore").symlink_to("AGENTS.md")
+    with pytest.raises(Refused):
+        skills.ensure_gitignore(proj)

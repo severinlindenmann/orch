@@ -53,7 +53,7 @@ def _is_ours(root: Path, pid: int, port: int, nonce: str, started: str | None) -
         return False
     if os.name != "nt":
         cmd = runfiles.command(pid)
-        if "orch_dashboard" not in cmd or f"--dir {root.resolve()}" not in cmd:
+        if not runfiles.runs_args(cmd, ["-m", "orch_dashboard", "--dir", str(root.resolve()), "serve"]):
             return False
     c = secrets.token_hex(16)
     got = ident(port, c)
