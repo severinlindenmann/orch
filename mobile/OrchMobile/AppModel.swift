@@ -21,8 +21,12 @@ final class AppModel {
     private(set) var questions: [Question] = []
     /// Texts between this phone and its workspaces, newest first.
     private(set) var messages: [PhoneMessage] = []
+    /// Newest work update per ticket (`GET /v1/phone/updates`).
+    private(set) var updates: [TicketUpdate] = []
     /// question message id -> the answer this phone sent
     private(set) var answers: [String: String] = [:]
+    /// questions someone else answered first (409): `answers` then holds their answer
+    private(set) var answeredElsewhere: Set<String> = []
     private(set) var isLoading = false
     private(set) var hasLoaded = false
     /// When the last refresh succeeded (drives "Last updated ...").
@@ -43,7 +47,7 @@ final class AppModel {
     var focusedQuestion: String?
     var notificationsEnabled = true
 
-    struct SentNote: Equatable { let workspaceName: String; let text: String }
+    struct SentNote: Equatable { let workspaceName: String; let text: String; var messageId: String = "" }
 
     let useMock: Bool
     private let mock: MockRelay?
@@ -91,6 +95,11 @@ final class AppModel {
 
     var relayHost: String { credentials?.relay.host ?? invite?.host ?? "your server" }
     var phoneName: String { credentials?.phoneName ?? "This iPhone" }
+    /// "Your tickets": Needs you, Working on, Done.
+    var tickets: [Ticket] { TicketBuilder.build(updates: updates, questions: questions, answers: answers) }
+    func tickets(_ status: Ticket.Status) -> [Ticket] { tickets.filter { $0.status == status } }
+    /// The "Got it" line the workspace sent for a text of this phone.
+    func ack(for messageId: String) -> TicketUpdate? { updates.first { $0.replyTo == messageId && $0.kind == "ack" } }
     var openQuestionCount: Int { questions.filter { answers[$0.id] == nil }.count }
 
     // MARK: Onboarding
@@ -142,7 +151,9 @@ final class AppModel {
             async let q = client.questions()
             let before = messages
             async let m = (try? await client.messages()) ?? before  // an older relay without /messages must not break the rest
-            workspaces = try await w; questions = try await q.deduplicated(); messages = await m
+            let beforeUpdates = updates
+            async let u = (try? await client.updates()) ?? beforeUpdates  // same for /updates
+            workspaces = try await w; questions = try await q.deduplicated(); messages = await m; updates = await u
             message = nil; hasLoaded = true; lastUpdated = Date()
         } catch { handle(error) }
     }
@@ -153,19 +164,25 @@ final class AppModel {
             answers[q.id] = option; answerTick += 1; announcement = "Answer sent: \(option)"
             await refresh()
         } catch let RelayError.api(status, code, text) where status == 409 && code == "already_answered" {
-            answers[q.id] = text
-            message = text
+            answers[q.id] = text; answeredElsewhere.insert(q.id)
+            message = nil
             await refresh()
         } catch { handle(error) }
     }
 
-    func send(to workspaceId: String, text: String) async -> Bool {
+    /// Only the "Got it" lines, for the sent screen.
+    func refreshUpdates() async {
+        if let u = try? await client.updates() { updates = u }
+    }
+
+    func send(to workspaceId: String, text: String, ticket: String? = nil) async -> Bool {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return false }
         do {
-            _ = try await client.send(to: workspaceId, text: clean, ticket: nil)
+            let id = try await client.send(to: workspaceId, text: clean, ticket: ticket)
             if let m = try? await client.messages() { messages = m }
-            lastSent = SentNote(workspaceName: workspaces.first { $0.id == workspaceId }?.displayName ?? "your workspace", text: clean)
+            if let u = try? await client.updates() { updates = u }
+            lastSent = SentNote(workspaceName: workspaces.first { $0.id == workspaceId }?.displayName ?? "your workspace", text: clean, messageId: id)
             message = nil; sendTick += 1; announcement = "Message sent to \(lastSent?.workspaceName ?? "your workspace")"
             return true
         } catch { handle(error); return false }
@@ -199,7 +216,7 @@ final class AppModel {
     }
 
     private func reset() {
-        credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; messages = []; answers = [:]; hasLoaded = false
+        credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; messages = []; updates = []; answers = [:]; answeredElsewhere = []; hasLoaded = false
         pairedWorkspaces = []; lastSent = nil; lastUpdated = nil; message = nil; tab = .home; phase = .onboarding
     }
 

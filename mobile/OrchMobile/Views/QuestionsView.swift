@@ -48,7 +48,7 @@ struct QuestionsView: View {
     }
 
     @ViewBuilder private var list: some View {
-        ScreenHeading(title: allDone ? "You're all caught up." : "Over to you.",
+        ScreenHeading(title: allDone ? "You're all caught up." : "Needs you.",
                       subtitle: allDone ? "Nothing else needs you right now." : "Pick an answer. We'll take it from there.")
         if model.workspaces.count > 1 {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -99,21 +99,27 @@ struct QuestionsView: View {
             HStack {
                 Text(question.workspaceDisplayName).foregroundStyle(Theme.muted)
                 Spacer()
-                Text(answer == nil ? "Needs you" : "✓ Answered").foregroundStyle(Theme.brand)
+                Text(answer == nil ? (question.isAllow ? "Allow?" : "Needs you") : "✓ Answered").foregroundStyle(Theme.brand)
             }.themeFont(12)
             Text(question.message.body.text).themeFont(18, .semibold).tracking(-0.35)
             if let title = question.message.body.title {
-                Text("Task: \(title)").themeFont(12).foregroundStyle(Theme.muted)
+                Text("Ticket: \(title)").themeFont(12).foregroundStyle(Theme.muted)
             }
             if let answer {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Answer sent: \(answer)").themeFont(14)
+                    if model.answeredElsewhere.contains(question.id) {
+                        Text("Already answered").themeFont(14, .semibold)
+                        Text(answer).themeFont(13).foregroundStyle(Theme.muted)
+                    } else {
+                        Text("Answered \(question.label(answer)) · \(model.phoneName) · phone").themeFont(14)
+                            .accessibilityIdentifier("answered-\(question.id)")
+                    }
                 }.foregroundStyle(Theme.brand).padding(.top, 2)
             } else if let choice = pending[question.id] {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
                         ProgressView().tint(Theme.brand)
-                        Text(sending.contains(question.id) ? "Sending \(choice)…" : "Sending \(choice) in 3 s…").themeFont(14, .medium)
+                        Text(sending.contains(question.id) ? "Sending \(question.label(choice))…" : "Sending \(question.label(choice)) in \(Int(Self.undoSeconds)) s…").themeFont(14, .medium)
                     }
                     if !sending.contains(question.id) {
                         Button("Undo") { undo(question) }.buttonStyle(SecondaryButtonStyle())
@@ -125,11 +131,11 @@ struct QuestionsView: View {
                     ForEach(question.message.body.options, id: \.self) { option in
                         let recommended = option == question.message.body.recommended
                         Button { choose(question, option) } label: {
-                            let tag = Text("Recommended").themeFont(11, .semibold).foregroundStyle(Theme.brand)
+                            let tag = Text("Suggested").themeFont(11, .semibold).foregroundStyle(Theme.brand)
                                 .lineLimit(1).fixedSize()
                                 .padding(.horizontal, 8).padding(.vertical, 3)
                                 .overlay(Capsule().stroke(Theme.brand.opacity(0.7)))
-                            let label = Text(option).themeFont(15).lineLimit(3).minimumScaleFactor(0.6)
+                            let label = Text(question.label(option)).themeFont(15).lineLimit(3).minimumScaleFactor(0.6)
                             Group {
                                 if typeSize.isAccessibilitySize {
                                     VStack(alignment: .leading, spacing: 6) { label; if recommended { tag } }
@@ -143,7 +149,7 @@ struct QuestionsView: View {
                                 .contentShape(Rectangle())
                         }.buttonStyle(PressStyle()).disabled(sending.contains(question.id))
                             .accessibilityIdentifier("answer-\(option)")
-                            .accessibilityLabel(recommended ? "\(option), recommended" : option)
+                            .accessibilityLabel(recommended ? "\(question.label(option)), suggested" : question.label(option))
                     }
                 }.padding(.top, 4)
             }
@@ -151,11 +157,11 @@ struct QuestionsView: View {
             .accessibilityElement(children: .contain).accessibilityLabel("\(question.workspaceDisplayName): \(question.message.body.text)").accessibilityIdentifier("question-\(question.id)")
     }
 
-    /// Tap = start a 3 s undo window; the answer is sent when it ends.
-    /// 3 s undo window; UI tests may widen it with `-undoSeconds N` so a slow CI simulator cannot outrun the Undo tap.
+    /// Tap = start a 5 s undo window (X-14 a); the answer is sent when it ends.
+    /// 5 s undo window; UI tests may widen it with `-undoSeconds N` so a slow CI simulator cannot outrun the Undo tap.
     private static var undoSeconds: Double {
         let v = UserDefaults.standard.double(forKey: "undoSeconds")
-        return v > 0 ? v : 3
+        return v > 0 ? v : 5
     }
     private func choose(_ question: Question, _ option: String) {
         pending[question.id] = option

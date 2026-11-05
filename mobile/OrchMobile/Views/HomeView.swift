@@ -4,6 +4,8 @@ struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expandedTags: Set<String> = []
+    @State private var showWorkspaces = false
+    @State private var openTicket: Ticket?
 
     private var greeting: String {
         switch Calendar.current.component(.hour, from: Date()) {
@@ -14,7 +16,8 @@ struct HomeView: View {
     }
 
     private var subtitle: String {
-        if model.openQuestionCount > 0 { return "\(model.openQuestionCount == 1 ? "One thing needs" : "A few things need") your answer." }
+        let n = model.tickets(.needsYou).count
+        if n > 0 { return "\(n == 1 ? "One ticket needs" : "\(n) tickets need") you." }
         switch model.connection {
         case .ok: return "All clear. Nothing needs you right now."
         case .unreachable: return "Can't reach your workspaces."
@@ -29,44 +32,54 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Brand().padding(.bottom, 28)
                 Eyebrow(text: greeting.uppercased(), color: Theme.brand).padding(.bottom, 12)
-                ScreenHeading(title: "Your workspaces.", subtitle: subtitle)
+                ScreenHeading(title: "Your tickets.", subtitle: subtitle)
                 if let when = model.lastUpdatedText { Text(when).themeFont(12).foregroundStyle(Theme.muted).padding(.top, 6) }
-                if model.openQuestionCount > 0 {
-                    Button { model.questionFilter = nil; model.tab = .questions } label: {
-                        HStack(spacing: 12) {
-                            Text("?").themeFont(18).frame(width: 30, height: 30)
-                                .background(Theme.brand.opacity(0.1), in: Circle()).foregroundStyle(Theme.brand)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(model.openQuestionCount == 1 ? "1 question for you" : "\(model.openQuestionCount) questions for you").themeFont(13, .semibold)
-                                Text("A quick answer keeps things moving.").themeFont(10).foregroundStyle(Theme.muted)
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right").themeFont(13, .semibold).foregroundStyle(Theme.brand)
-                        }.padding(.horizontal, 12).padding(.vertical, 16)
-                            .background(Theme.brand.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.brand.opacity(0.27)))
-                    }.buttonStyle(PressStyle()).padding(.top, 26)
-                }
-                HStack { Eyebrow(text: "WORKSPACES"); Spacer(); if model.hasLoaded { Eyebrow(text: "\(model.workspaces.count)") } }
-                    .padding(.top, 30).padding(.bottom, 12)
-                if !model.hasLoaded && model.workspaces.isEmpty && model.message == nil {
+                if !model.hasLoaded && model.message == nil {
                     ForEach(0..<2, id: \.self) { _ in
-                        workspaceRow(Workspace(id: "x", name: "Workspace name", description: "What this workspace does", tags: [], online: true, lastSeen: nil, openQuestions: 0))
-                    }.skeleton(true).accessibilityHidden(true)
+                        ticketRow(Ticket(id: "x", workspace: "x", workspaceName: "Workspace", ticket: nil, title: "Ticket title goes here",
+                                         text: "", status: .working, kind: "working", at: "", question: nil))
+                    }.skeleton(true).accessibilityHidden(true).padding(.top, 20)
                 }
-                ForEach(model.workspaces) { workspace in workspaceRow(workspace) }
-                if model.workspaces.isEmpty && model.hasLoaded {
+                ForEach([Ticket.Status.needsYou, .working, .done], id: \.self) { status in
+                    let rows = model.tickets(status)
+                    if !rows.isEmpty {
+                        HStack { Eyebrow(text: status.title.uppercased()); Spacer(); Eyebrow(text: "\(rows.count)") }
+                            .padding(.top, 28).padding(.bottom, 4)
+                        ForEach(rows) { ticketRow($0) }
+                    }
+                }
+                if model.hasLoaded && model.tickets.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("No workspaces yet").themeFont(15, .semibold)
-                        Text("Ask the person who invited you to add a workspace. It will show up here.")
+                        Text("No tickets yet").themeFont(15, .semibold)
+                        Text("Ask a workspace for something with the Ask tab. It shows up here.")
                             .themeFont(13).foregroundStyle(Theme.muted)
                         checkAgain
-                    }.orchCard()
+                    }.orchCard().padding(.top, 26)
                 }
+                DisclosureGroup(isExpanded: $showWorkspaces) {
+                    if !model.hasLoaded && model.workspaces.isEmpty && model.message == nil {
+                        ForEach(0..<2, id: \.self) { _ in
+                            workspaceRow(Workspace(id: "x", name: "Workspace name", description: "What this workspace does", tags: [], online: true, lastSeen: nil, openQuestions: 0))
+                        }.skeleton(true).accessibilityHidden(true)
+                    }
+                    ForEach(model.workspaces) { workspace in workspaceRow(workspace) }
+                    if model.workspaces.isEmpty && model.hasLoaded {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("No workspaces yet").themeFont(15, .semibold)
+                            Text("Ask the person who invited you to add a workspace. It will show up here.")
+                                .themeFont(13).foregroundStyle(Theme.muted)
+                            checkAgain
+                        }.orchCard()
+                    }
+                } label: {
+                    Text("Workspaces (\(model.workspaces.count))").themeFont(13, .semibold).foregroundStyle(Theme.muted)
+                        .frame(minHeight: 44, alignment: .leading)
+                }.tint(Theme.muted).padding(.top, 28).accessibilityIdentifier("workspaces-toggle")
                 ModelMessage().padding(.top, 12)
             }.padding(.horizontal, 23).padding(.top, 6).padding(.bottom, 20)
         }.refreshable { await model.refresh() }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: model.workspaces)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: model.tickets)
+            .sheet(item: $openTicket) { TicketView(ticket: $0).presentationDetents([.large]) }
     }
 
     private var checkAgain: some View {
@@ -74,6 +87,28 @@ struct HomeView: View {
             Text(model.isLoading ? "Checking…" : "Check again").themeFont(13, .semibold).foregroundStyle(Theme.brand)
                 .frame(minWidth: 120, minHeight: 44, alignment: .leading).contentShape(Rectangle())
         }.buttonStyle(PressStyle()).disabled(model.isLoading)
+    }
+
+    private func ticketRow(_ t: Ticket) -> some View {
+        Button {
+            if let q = t.question { model.openQuestion(messageId: q.id) } else { openTicket = t }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: t.symbol).themeFont(20)
+                    .foregroundStyle(t.status == .needsYou ? Theme.warn : t.status == .working ? Theme.muted : (t.kind == "result" ? Theme.brand : Theme.danger))
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(t.title).themeFont(14, .medium).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                    Text(t.workspaceName).themeFont(12).foregroundStyle(Theme.muted)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right").themeFont(12).foregroundStyle(Theme.muted)
+            }.frame(minHeight: 44).padding(.vertical, 12).contentShape(Rectangle())
+        }.buttonStyle(PressStyle())
+            .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(t.status.title): \(t.title), \(t.workspaceName)")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("ticket-\(t.id)")
     }
 
     private func workspaceRow(_ workspace: Workspace) -> some View {
