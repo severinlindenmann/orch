@@ -229,6 +229,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
+    { name = "jsonschema" },
 ]
 
 [package.dev-dependencies]
@@ -240,7 +241,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cryptography", specifier = ">=42" }]
+requires-dist = [
+    { name = "cryptography", specifier = ">=42" },
+    { name = "jsonschema", specifier = ">=4" },
+]
 
 [package.metadata.requires-dev]
 dev = [

@@ -43,11 +43,14 @@ def _show(t: dict) -> str:
     open_q = [q for q in t["questions"] if q["answer"] is None]
     head = f"{t['title']}  [{t['id']}]"
     out = [head, f"Status: {t['status']}" + (f" - {_progress(t)}" if _progress(t) else "")]
-    if t.get("wake_at"):
-        out.append(f"Wakes up: {net.when(t['wake_at'])}")
     if t.get("waiting_on"):
         w = t["waiting_on"]
-        out.append("Waiting for: " + ("an answer" if w["kind"] == "question" else f"{w['kind']} {w['ref']}"))
+        if w["kind"] == "time":
+            out.append(f"Waiting until: {net.when(w['until'])}")
+        else:
+            out.append(
+                "Waiting for: " + ("an answer" if w["kind"] == "question" else f"{w['kind']} {w['ref']}")
+            )
     if open_q:
         out.append("\nNeeds an answer:")
         for q in open_q:
@@ -74,6 +77,18 @@ def _show(t: dict) -> str:
         out.append("\nRecent:")
         out += [f"  {net.when(h['at'])}  {h['by']}: {h['text']}" for h in t["history"][-3:]]
     return "\n".join(out)
+
+
+CORE_EXT = {"relay"}  # ext keys the core itself writes (relay-created tickets)
+
+
+def _visible(root: Path, t: dict) -> dict:
+    """Ticket data as the CLI shows it: ext keys of add-ons that are not on stay in the file, hidden."""
+    ext = t.get("ext")
+    if not ext:
+        return t
+    on = set(addons.active(root)) | CORE_EXT
+    return {**t, "ext": {k: v for k, v in ext.items() if k in on}}
 
 
 ADVANCED_TOP = {"update", "wait", "log", "answer", "link", "ext"}
@@ -125,7 +140,7 @@ def _hide_advanced(parser: argparse.ArgumentParser) -> None:
             hide(a, names)
 
 
-def build_parser(show_all: bool = False) -> argparse.ArgumentParser:
+def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable output")
     common.add_argument("--by", help="actor, agent:<tool> or human:<name> (default: detected)")
@@ -135,23 +150,24 @@ def build_parser(show_all: bool = False) -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
     sub.add_parser("init", parents=[common], help="set up this folder (safe to repeat)")
-    u = sub.add_parser("update", parents=[common], help="install the latest orch and add-ons")
+    u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
 
-    a = sub.add_parser("addon", help="add-ons: dashboard, scheduler").add_subparsers(
-        dest="sub", required=True
-    )
-    for n in ("add", "remove"):
-        x = a.add_parser(n, parents=[common])
-        x.add_argument("name")
-        if n == "add":
-            x.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
+    a = sub.add_parser("addon", help="add-ons: add, remove, list").add_subparsers(dest="sub", required=True)
+    x = a.add_parser("add", parents=[common], help="install an add-on and turn it on here")
+    x.add_argument("name", metavar="NAME|./FOLDER", help="a built-in add-on name or a local folder")
+    x.add_argument("--yes", action="store_true", help="do not ask")
+    x.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
+    x = a.add_parser("remove", parents=[common], help="turn an add-on off in this workspace")
+    x.add_argument("name")
+    x.add_argument("--purge", action="store_true", help="also delete its data folder and settings")
+    x = a.add_parser("uninstall", parents=[common], help="remove an add-on from this computer")
+    x.add_argument("name")
     a.add_parser("list", parents=[common])
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
     x.add_argument("title")
-    x.add_argument("--recurring", metavar="CRON", help="5-field cron, UTC")
     x = t.add_parser("list", parents=[common])
     x.add_argument("--status", choices=tickets.STATUSES)
     x.add_argument("--all", action="store_true", help="include done and dropped tickets")
@@ -167,13 +183,17 @@ def build_parser(show_all: bool = False) -> argparse.ArgumentParser:
     x.add_argument("id")
     x.add_argument("--until")
     x.add_argument("--on", metavar="KIND:REF")
-    x.add_argument("--clear", action="store_true", help="clear wake_at and waiting_on")
+    x.add_argument("--clear", action="store_true", help="clear waiting_on")
+    x = t.add_parser("patch", parents=[common])
+    x.add_argument("id")
+    x.add_argument("data", help='JSON object: title, status, waiting_on, e.g. \'{"title": "New"}\'')
+    x.add_argument("--if-revision", type=int, required=True, metavar="N")
 
     x = sub.add_parser("wait", parents=[common], help="same as: ticket wait")
     x.add_argument("id")
     x.add_argument("--until")
     x.add_argument("--on", metavar="KIND:REF")
-    x.add_argument("--clear", action="store_true", help="clear wake_at and waiting_on")
+    x.add_argument("--clear", action="store_true", help="clear waiting_on")
 
     c = sub.add_parser("check", help="checklist").add_subparsers(dest="sub", required=True)
     x = c.add_parser("add", parents=[common])
@@ -214,10 +234,16 @@ def build_parser(show_all: bool = False) -> argparse.ArgumentParser:
     x.add_argument("id")
     x.add_argument("addon")
     x.add_argument("data", help="JSON object")
+    x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     cli_clients.add_parsers(sub, common)
+    p.formatter_class = argparse.RawDescriptionHelpFormatter
+    notes = []
+    if addon_lines:
+        notes.append("Add-ons:\n" + "\n".join(addon_lines))
     if not show_all:
         _hide_advanced(p)
-        p.epilog = "More commands: orch --help-all"
+        notes.append("More commands: orch --help-all")
+    p.epilog = "\n\n".join(notes) or None
     return p
 
 
@@ -238,25 +264,29 @@ def run(args: argparse.Namespace) -> None:
             print("orch is up to date.")
     elif cmd == "addon":
         if sub == "list":
-            inst = addons.project_addons(root)
-            data = {n: ("installed" if n in inst else "not installed") for n in addons.KNOWN}
+            rows = addons.listing(root)
             _out(
                 args,
-                data,
+                rows,
                 "\n".join(
-                    f"{n:<10} " + ("on" if s == "installed" else f"off (turn on: orch addon add {n})")
-                    for n, s in data.items()
-                ),
+                    f"{r['name']:<12}{'on ' if r['active'] else 'off'}  {r['description']}"
+                    + ("" if r["active"] else f"  (turn on: orch addon add {r['name']})")
+                    for r in rows
+                )
+                or "No add-ons are installed. Turn one on with: orch addon add <name>",
             )
         elif sub == "add":
-            addons.add(root, args.name, args.project_only)
+            addons.add(root, args.name, args.yes, args.project_only)
             if args.project_only:
-                _out(args, {"ok": True}, f"{args.name} is added to this project.")
+                _out(args, {"ok": True}, f"{args.name} is turned on in this workspace.")
+        elif sub == "remove":
+            addons.remove(root, args.name, args.purge)
+            _out(args, {"ok": True}, f"{args.name} is turned off in this workspace.")
         else:
-            addons.remove(root, args.name)
-            _out(args, {"ok": True}, f"{args.name} is removed from this project.")
+            addons.uninstall(root, args.name)
+            _out(args, {"ok": True}, f"{args.name} is removed from this computer.")
     elif cmd == "ticket" and sub == "new":
-        t = tickets.create(root, args.title, by(), args.recurring)
+        t = tickets.create(root, args.title, by())
         _out(
             args,
             t,
@@ -264,26 +294,23 @@ def run(args: argparse.Namespace) -> None:
             f'Next: add one checklist item per step: orch check add {t["id"]} "<step>"',
         )
     elif cmd == "ticket" and sub == "list":
+        all_ = [_visible(root, t) for t in tickets.list_all(root)]
         ts = [
             t
-            for t in tickets.list_all(root)
+            for t in all_
             if (
                 t["status"] == args.status
                 if args.status
                 else args.all or t["status"] not in ("done", "dropped")
             )
         ]
-        hidden = (
-            0
-            if args.status or args.all
-            else sum(1 for t in tickets.list_all(root) if t["status"] in ("done", "dropped"))
-        )
+        hidden = 0 if args.status or args.all else sum(1 for t in all_ if t["status"] in ("done", "dropped"))
         txt = "\n".join(_line(t) for t in ts) or 'No open tickets. Create one with: orch ticket new "<title>"'
         if hidden and not args.json:
             txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
         _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
-        t = tickets.load(root, args.id)
+        t = _visible(root, tickets.load(root, args.id))
         _out(args, t, _show(t))
     elif cmd == "ticket" and sub == "status":
         t = tickets.set_status(root, args.id, args.status, by())
@@ -291,6 +318,9 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "edit":
         t = tickets.edit(root, args.id, args.title, by())
         _out(args, t, f"Renamed to: {t['title']}")
+    elif cmd == "ticket" and sub == "patch":
+        t = tickets.patch(root, args.id, args.if_revision, args.data, by())
+        _out(args, t, f"{t['id']} changed (revision {t['revision']})")
     elif (cmd == "ticket" and sub == "wait") or cmd == "wait":
         t = tickets.wait(root, args.id, args.until, args.on, by(), args.clear)
         _out(
@@ -298,7 +328,8 @@ def run(args: argparse.Namespace) -> None:
             t,
             f"{t['id']} wait cleared"
             if args.clear
-            else f"{t['id']} is waiting" + (f" until {t['wake_at']}" if args.until else f" on {args.on}"),
+            else f"{t['id']} is waiting"
+            + (f" until {t['waiting_on']['until']}" if args.until else f" on {args.on}"),
         )
     elif cmd == "check" and sub == "add":
         t, c = tickets.check_add(root, args.id, args.text, by())
@@ -335,33 +366,46 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "relay":
         cli_clients.run_relay(args, root, _out)
     elif cmd == "ext":
-        t = tickets.ext_set(root, args.id, args.addon, args.data, by())
+        t = tickets.ext_set(
+            root,
+            args.id,
+            args.addon,
+            args.data,
+            by(),
+            args.if_revision,
+            addons.active_ext_schema(root, args.addon),
+        )
         _out(args, t["ext"][args.addon], f"ext.{args.addon} set on {t['id']}")
 
 
-def _addon_command(name: str):
-    """An installed add-on registers `<name> = module:function` in the entry-point group orch.addons."""
-    from importlib.metadata import entry_points
-
-    return next(iter(entry_points(group="orch.addons", name=name)), None)
-
-
 def main(argv: list[str] | None = None) -> int:
-    for s in (sys.stdout, sys.stderr):
-        if hasattr(s, "reconfigure"):
-            s.reconfigure(encoding="utf-8")
+    for s_ in (sys.stdout, sys.stderr):
+        if hasattr(s_, "reconfigure"):
+            s_.reconfigure(encoding="utf-8")
     argv = sys.argv[1:] if argv is None else list(argv)
     show_all = "--help-all" in argv
     argv = ["--help" if a == "--help-all" else a for a in argv]
-    parser = build_parser(show_all)
-    if argv and not argv[0].startswith("-") and argv[0] not in parser._subparsers._group_actions[0].choices:
-        ep = _addon_command(argv[0])
-        if ep is not None:
-            return int(ep.load()(argv[1:]) or 0)
-    args = parser.parse_args(argv)
+    root = _find_root()
+    want_json = "--json" in argv
+
+    def refuse(e: Refused) -> int:
+        print(f"Refused: {e}", file=sys.stderr)
+        if want_json:
+            print(json.dumps({"error": str(e)}, ensure_ascii=False))
+        return 2
+
     try:
+        lines = addons.help_lines(root) if ("-h" in argv or "--help" in argv or not argv) else None
+        parser = build_parser(show_all, lines)
+        if (
+            argv
+            and not argv[0].startswith("-")
+            and argv[0] not in parser._subparsers._group_actions[0].choices
+        ):
+            if argv[0] in addons.active(root) or argv[0] in addons.discover():
+                return addons.dispatch(root, argv[0], argv[1:])
+        args = parser.parse_args(argv)
         run(args)
     except Refused as e:
-        print(f"Refused: {e}", file=sys.stderr)
-        return 2
+        return refuse(e)
     return 0

@@ -16,7 +16,7 @@ def test_init_creates_everything(proj, run):
     assert "<!-- orch:begin orch -->" in agents and "<!-- orch:end orch -->" in agents
     assert (proj / "CLAUDE.md").read_text(encoding="utf-8").splitlines() == ["@AGENTS.md"]
     gi = (proj / ".gitignore").read_text(encoding="utf-8")
-    assert ".orch/secrets/" in gi and ".orch/scheduler/logs/" in gi
+    assert ".orch/secrets/" in gi and ".orch/addons/" in gi and ".orch/.local-id" in gi
     assert (proj / ".claude/skills/orch/SKILL.md").is_file()  # through the link
     assert (proj / ".orch/tickets").is_dir()
 

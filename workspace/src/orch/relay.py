@@ -21,7 +21,7 @@ ALNUM = "abcdefghijklmnopqrstuvwxyz0123456789"
 MAX_BLOB = 100 * 1024 * 1024
 SKILL_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 SHARED_MARK = ".orch-shared"
-RESERVED = {"orch", "orch-publish", "orch-relay", "orch-dashboard", "orch-scheduler"}
+RESERVED = {"orch", "orch-publish", "orch-relay"}  # plus every "orch-*": add-on skills (see _stage)
 
 
 def new_id(prefix: str = "m_", n: int = 16) -> str:
@@ -475,7 +475,12 @@ def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
     for sk in snap.get("skills", []):
         name = sk.get("name") if isinstance(sk, dict) else None
         try:
-            if not isinstance(name, str) or not SKILL_RE.match(name) or name in RESERVED:
+            if (
+                not isinstance(name, str)
+                or not SKILL_RE.match(name)
+                or name in RESERVED
+                or name.startswith("orch-")
+            ):
                 raise Refused(f"bad skill name {name!r}")
             files = sk.get("files")
             if not isinstance(files, dict) or not files:

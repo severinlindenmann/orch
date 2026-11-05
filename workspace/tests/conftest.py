@@ -17,7 +17,7 @@ def proj(tmp_path, monkeypatch):
     for k in list(os.environ):
         if k.startswith("CODEX_"):
             monkeypatch.delenv(k)
-    monkeypatch.setenv("ORCH_HOME", str(tmp_path / "_orchhome"))
+    monkeypatch.setenv("ORCH_HOME", str(tmp_path.parent / f"{tmp_path.name}_orchhome"))
     return tmp_path
 
 
