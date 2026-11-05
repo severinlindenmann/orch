@@ -36,19 +36,6 @@ def read_tickets(root: Path) -> list[dict]:
     return out
 
 
-def _clear_wake(root: Path, tid: str) -> None:
-    """The orch CLI has no command to clear wake_at (deviation logged): small atomic edit of that one field."""
-    p = root / ".orch" / "tickets" / f"{tid}.json"
-    try:
-        t = json.loads(p.read_text())
-        t["wake_at"] = None
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(t, indent=2, ensure_ascii=False) + "\n")
-        tmp.replace(p)
-    except (OSError, ValueError):
-        pass
-
-
 class Scheduler:
     def __init__(self, root: Path):
         self.root = root
@@ -71,14 +58,23 @@ class Scheduler:
                 continue
             tpl = pick_agent(self.cfg, t)
             wake = parse(t.get("wake_at"))
-            if wake and wake <= now and state.get(tid, {}).get("last_wake") != t["wake_at"]:
-                if not self.runner.locked(tid):
-                    _clear_wake(self.root, tid)
-                    if t["status"] != "active":
-                        orchcli.call(self.root, "ticket", "status", tid, "active")
-                    update_state(self.root, tid, last_wake=t["wake_at"])
-                    if self.runner.start(tid, base_prompt(tid), tpl, "wake_at reached", now):
-                        started.append(tid)
+            pst = state.get(tid, {})
+            wake_due = bool(wake and wake <= now and pst.get("last_wake") != t["wake_at"])
+            if wake_due or pst.get("pending_wake"):
+                if self.runner.locked(tid):
+                    if not pst.get("pending_wake"):
+                        update_state(self.root, tid, pending_wake=t.get("wake_at") or "wake")
+                elif self.runner.start(tid, base_prompt(tid), tpl,
+                                       "wake_at reached" if wake_due else "pending wake", now):
+                    started.append(tid)
+                    upd = {"pending_wake": None}
+                    if wake_due:
+                        upd["last_wake"] = t["wake_at"]
+                    update_state(self.root, tid, **upd)
+                    if wake_due:  # after the start; through the CLI so a concurrent ticket edit is not lost
+                        orchcli.call(self.root, "wait", tid, "--clear")  # also makes a waiting ticket active
+                        if t["status"] == "open":
+                            orchcli.call(self.root, "ticket", "status", tid, "active")
                 continue
             cron = ((t.get("ext") or {}).get("scheduler") or {}).get("cron")
             if t.get("type") == "recurring" and cron:
@@ -160,7 +156,10 @@ class Scheduler:
         if kind == "answer" and m.get("applied") is True:
             # `orch relay inbox` already applied the answer (ticket is active again); resume it once.
             t = tickets.get(m.get("ticket"))
-            if not t or self.runner.locked(t["id"]):
+            if not t:
+                return None
+            if self.runner.locked(t["id"]):
+                update_state(self.root, t["id"], pending_wake=f"answer {mid}")  # already applied: don't lose it
                 return None
             return t["id"] if self.runner.start(t["id"], outside_prompt(t["id"], "answer", str(body.get("answer"))),
                                                 pick_agent(self.cfg, t), f"relay answer {mid}", now) else None

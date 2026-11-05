@@ -36,6 +36,12 @@ elif args[:2] == ["ticket", "new"]:
     save(t); print(json.dumps(t))
 elif args[:2] == ["ticket", "status"]:
     t = load(args[2]); t["status"] = args[3]; save(t); print(json.dumps(t))
+elif args[0] == "wait" and "--clear" in args:
+    if (root / "fail-wait").exists():
+        sys.exit(2)
+    t = load(args[1]); t["wake_at"] = t["waiting_on"] = None
+    if t["status"] == "waiting": t["status"] = "active"
+    save(t); print(json.dumps(t))
 elif args[:2] == ["ext", "set"]:
     t = load(args[2]); t.setdefault("ext", {{}})[args[3]] = json.loads(args[4]); save(t); print("{{}}")
 elif args[0] == "answer" and (root / "fail-answer").exists():

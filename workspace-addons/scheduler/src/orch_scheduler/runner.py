@@ -5,6 +5,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 import tomllib
 from dataclasses import dataclass
@@ -80,7 +81,24 @@ def build_argv(template: str, prompt: str) -> list[str]:
     return [p.replace("{prompt}", prompt) for p in parts]
 
 
+def _alive_windows(pid: int) -> bool:
+    """os.kill(pid, 0) would send CTRL_C_EVENT on Windows; ask the process table instead."""
+    import ctypes
+
+    k = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return k.GetLastError() == 5  # access denied: exists
+    try:
+        code = ctypes.c_ulong()
+        return bool(k.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+    finally:
+        k.CloseHandle(h)
+
+
 def _alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        return _alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -88,6 +106,14 @@ def _alive(pid: int) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def _tail(path: Path, n: int = 5) -> list[str]:
+    try:
+        lines = [x for x in path.read_text(errors="replace").splitlines() if x.strip() and not x.startswith("# ")]
+    except OSError:
+        return []
+    return [x[:300] for x in lines[-n:]]
 
 
 @dataclass
@@ -138,11 +164,13 @@ class Runner:
             f.flush()
             try:
                 proc = subprocess.Popen(argv, cwd=self.root, stdout=f, stderr=subprocess.STDOUT,
-                                        stdin=subprocess.DEVNULL)
+                                        stdin=subprocess.DEVNULL,
+                                        env={**os.environ, "ORCH_AGENT": "1", "ORCH_TICKET": tid})
             except OSError as e:
                 f.write(f"# could not start: {e}\n# end {fmt(now)} exit 127\n")
                 lock.unlink(missing_ok=True)
                 self._record(tid, now, 127, log_path, None)
+                update_state(self.root, tid, failed={"exit": 127, "tail": [f"could not start: {e}"[:300]], "at": fmt(now)})
                 orchcli.log(self.root, tid, f"Scheduler could not start the agent ({e.__class__.__name__})")
                 return False
         lock.write_text(str(proc.pid))
@@ -171,7 +199,15 @@ class Runner:
             st = load_state(self.root)
             e = st.setdefault(tid, {})
             e.update(last_exit=code, last_log=r.log_path.name, last_run=fmt(r.started))
+            tail = _tail(r.log_path)
+            if code != 0:
+                e["failed"] = {"exit": code, "tail": tail, "at": fmt(datetime.now(UTC))}
+            else:
+                e.pop("failed", None)
             save_state(self.root, st)
+            if code != 0:
+                reason = (tail[-1][:120] if tail else f"exit code {code}")
+                orchcli.log(self.root, tid, f"Run failed: {reason}")
             orchcli.log(self.root, tid, f"Scheduler run finished, exit code {code}")
             del self.runs[tid]
             done.append(tid)

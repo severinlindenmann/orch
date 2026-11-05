@@ -22,7 +22,7 @@ def test_wake_at_runs_agent_once(ws):
     t = json.loads((ws / ".orch/tickets/t_wake001.json").read_text())
     assert t["wake_at"] is None and t["status"] == "active"
     cs = calls(ws)
-    assert ["ticket", "status", "t_wake001", "active"] in [c["args"] for c in cs]
+    assert ["wait", "t_wake001", "--clear"] in [c["args"] for c in cs]
     assert [c["args"][0] for c in cs].count("log") == 2  # started + finished
     assert all(c["by"] == "agent:scheduler" for c in cs if c["args"][0] == "log")
     assert s.tick(T(8, 5)) == []  # not again
@@ -128,3 +128,119 @@ def test_invalid_ticket_id_skipped(ws):
     (ws / ".orch/tickets/t_bad.json").write_text(
         json.dumps({"id": "t_../../escape", "status": "open", "wake_at": "2026-11-04T08:00:00Z"}))
     assert Scheduler(ws).tick(T(9)) == []
+
+
+# -- draft superagent: S1 wake order, S2 pending, S3 env, S4 alive, S5 failed ---------------------
+def _slow_cfg(ws, tmp_path, secs=1.5):
+    import sys
+    slow = tmp_path / "slow.py"
+    slow.write_text(f"import time; time.sleep({secs})")
+    (ws / ".orch/scheduler/config.toml").write_text(f"agent = '{sys.executable} {slow} {{prompt}}'\n")
+
+
+def test_wake_clears_through_cli_after_start(ws):
+    add_ticket(ws, "t_wake020", status="waiting", wake_at="2026-11-04T08:00:00Z")
+    s = Scheduler(ws)
+    assert s.tick(T(8, 1)) == ["t_wake020"]
+    finish(s, T(8, 2))
+    names = [c["args"][0] for c in calls(ws)]
+    i_log = next(i for i, c in enumerate(calls(ws)) if c["args"][0] == "log")
+    assert ["wait", "t_wake020", "--clear"] in [c["args"] for c in calls(ws)]
+    assert calls(ws)[i_log]["args"][0] == "log" and names.index("wait") > i_log  # started first, cleared after
+    assert json.loads((ws / ".orch/tickets/t_wake020.json").read_text())["wake_at"] is None
+
+
+def test_wake_stays_set_if_start_fails(ws):
+    (ws / ".orch/scheduler/config.toml").write_text("agent = 'no-such-agent-xyz {prompt}'\n")
+    add_ticket(ws, "t_wake021", status="waiting", wake_at="2026-11-04T08:00:00Z")
+    s = Scheduler(ws)
+    assert s.tick(T(8, 1)) == []
+    t = json.loads((ws / ".orch/tickets/t_wake021.json").read_text())
+    assert t["wake_at"] == "2026-11-04T08:00:00Z" and t["status"] == "waiting"
+    assert "wait" not in [c["args"][0] for c in calls(ws)]
+
+
+def test_pending_wake_while_running_starts_after_reap(ws, tmp_path):
+    _slow_cfg(ws, tmp_path)
+    add_ticket(ws, "t_rec00030", type="recurring", ext={"scheduler": {"cron": "* * * * *"}})
+    s = Scheduler(ws)
+    assert s.tick(T(8, 0)) == ["t_rec00030"]
+    t = json.loads((ws / ".orch/tickets/t_rec00030.json").read_text())
+    t["wake_at"] = "2026-11-04T08:00:30Z"
+    (ws / ".orch/tickets/t_rec00030.json").write_text(json.dumps(t))
+    s.tick(T(8, 1))  # still running: wake recorded as pending, not lost
+    assert load_state(ws)["t_rec00030"]["pending_wake"]
+    finish(s, T(8, 2))
+    assert s.tick(T(8, 2)) == ["t_rec00030"]
+    assert not load_state(ws)["t_rec00030"].get("pending_wake")
+    finish(s, T(8, 3))
+
+
+def test_pending_wake_for_applied_answer(ws, tmp_path):
+    _slow_cfg(ws, tmp_path)
+    add_ticket(ws, "t_pend0031", status="active", wake_at="2026-11-04T08:00:00Z")
+    s = Scheduler(ws)
+    assert s.tick(T(8, 0)) == ["t_pend0031"]
+    (ws / ".orch/secrets").mkdir()
+    (ws / ".orch/secrets/relay.json").write_text("{}")
+    (ws / "inbox.json").write_text(json.dumps(
+        [{"id": "m1", "type": "answer", "applied": True, "ticket": "t_pend0031", "from": "ph_x", "body": {"answer": "yes"}}]))
+    s.tick(T(8, 1))
+    assert load_state(ws)["t_pend0031"]["pending_wake"]
+    finish(s, T(8, 2))
+    assert s.tick(T(8, 2)) == ["t_pend0031"]
+    finish(s, T(8, 3))
+
+
+def test_run_env_has_agent_and_ticket(ws, tmp_path):
+    import sys
+    a = tmp_path / "envagent.py"
+    a.write_text("import os; open('env.txt','w').write(os.environ.get('ORCH_AGENT','')+' '+os.environ.get('ORCH_TICKET',''))")
+    (ws / ".orch/scheduler/config.toml").write_text(f"agent = '{sys.executable} {a} {{prompt}}'\n")
+    add_ticket(ws, "t_env00001", wake_at="2026-11-04T08:00:00Z")
+    s = Scheduler(ws)
+    s.tick(T(8, 1))
+    finish(s, T(8, 2))
+    assert (ws / "env.txt").read_text() == "1 t_env00001"
+
+
+def test_alive_windows_does_not_use_os_kill(monkeypatch):
+    import os
+
+    from orch_scheduler import runner
+    monkeypatch.setattr(runner.sys, "platform", "win32")
+    monkeypatch.setattr(os, "kill", lambda *a: (_ for _ in ()).throw(AssertionError("os.kill on windows")))
+    monkeypatch.setattr(runner, "_alive_windows", lambda pid: pid == 42, raising=False)
+    assert runner._alive(42) is True and runner._alive(7) is False
+
+
+def test_alive_posix_still_uses_kill():
+    import os
+
+    from orch_scheduler import runner
+    assert runner._alive(os.getpid()) and not runner._alive(999999)
+
+
+def test_failed_run_recorded_and_surfaced(ws, tmp_path):
+    import sys
+    a = tmp_path / "bad.py"
+    a.write_text("import sys; print('Error: login expired, run claude /login'); sys.exit(1)")
+    (ws / ".orch/scheduler/config.toml").write_text(f"agent = '{sys.executable} {a} {{prompt}}'\n")
+    add_ticket(ws, "t_fail0001", wake_at="2026-11-04T08:00:00Z")
+    s = Scheduler(ws)
+    s.tick(T(8, 1))
+    finish(s, T(8, 2))
+    f = load_state(ws)["t_fail0001"]["failed"]
+    assert f["exit"] == 1 and "login expired" in f["tail"][-1]
+    logs = [c["args"][2] for c in calls(ws) if c["args"][0] == "log"]
+    assert any(x.startswith("Run failed: ") and "login expired" in x for x in logs)
+
+
+def test_success_clears_failed(ws):
+    add_ticket(ws, "t_fail0002", wake_at="2026-11-04T08:00:00Z")
+    from orch_scheduler.runner import update_state
+    update_state(ws, "t_fail0002", failed={"exit": 1, "tail": ["x"]})
+    s = Scheduler(ws)
+    s.tick(T(8, 1))
+    finish(s, T(8, 2))
+    assert "failed" not in load_state(ws)["t_fail0002"]
