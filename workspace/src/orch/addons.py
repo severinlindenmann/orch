@@ -74,9 +74,10 @@ def _install_origin() -> dict:
         return out
     di = d.get("dir_info")
     if isinstance(di, dict) and not di.get("editable") and url.startswith("file://"):
-        from urllib.parse import unquote, urlparse
+        from urllib.parse import urlparse
+        from urllib.request import url2pathname
 
-        folder = Path(unquote(urlparse(url).path))
+        folder = Path(url2pathname(urlparse(url).path))
         if folder.name == "workspace" and folder.is_absolute() and folder.parent.is_dir():
             return {"repo": str(folder.parent), "local": True}
     return {}
