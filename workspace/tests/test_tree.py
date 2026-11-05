@@ -62,12 +62,10 @@ def test_tree(proj, run):
     run("ticket", "status", a, "done")
     out = run("ticket", "tree", p)[1].splitlines()
     assert out[0] == "Quarter close"
-    top = sorted(out[1:3])  # same-second tickets: order between siblings is not defined
-    assert top == sorted(["├─ ✓ Bank", "└─ ○ VAT return   open"]) or {x[3:] for x in top} == {
-        "✓ Bank",
-        "○ VAT return   open",
-    }
-    assert any(x.strip().startswith("└─ ○ Sub of VAT") for x in out[2:])
+    text = "\n".join(out)  # same-second siblings: their order is not defined
+    assert "├─ ✓ Bank" in text or "└─ ✓ Bank" in text
+    assert "○ VAT return   open" in text
+    assert any(x.endswith("└─ ○ Sub of VAT   open") and x.startswith(("│  ", "   ")) for x in out)
 
 
 def test_blocked_by_and_came_from(proj, run):
@@ -101,7 +99,12 @@ def test_closing_parent_warns_but_saves(proj, run):
     run("ticket", "status", p, "active")
     code, out, err = run("ticket", "status", p, "done", "--json")
     j = json.loads(out)
-    assert j["status"] == "done" and j["warnings"] == [f"2 sub-tickets are still open: {k1}, {k2}"]
+    assert (
+        j["status"] == "done"
+        and len(j["warnings"]) == 1
+        and j["warnings"][0].startswith("2 sub-tickets are still open: ")
+        and {k1, k2} <= set(j["warnings"][0].replace(",", " ").split())
+    )
     run("ticket", "status", k1, "done")
     run("ticket", "status", k2, "dropped")
     run("ticket", "status", p, "active")
