@@ -585,26 +585,18 @@ def doing_stale(root: Path, ticket: dict, item: dict, at: float | None = None) -
         return True
     if age > DOING_STALE_SECONDS:
         return True
+    if not _ID_RE.match(str(ticket.get("id", ""))):
+        return False  # never build a path from anything that is not a ticket id
     rec = root / ".orch" / "run" / "tickets" / f"{ticket['id']}.json"
     if rec.is_file():
+        from orch import services
+
         try:
             pid = json.loads(rec.read_text(encoding="utf-8")).get("pid")
         except (OSError, ValueError, AttributeError):
             return False
-        return not _pid_alive(pid)
+        return not services.pid_alive(pid)
     return False
-
-
-def _pid_alive(pid) -> bool:
-    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True  # exists, other user (or not signalable on this OS)
-    return True
 
 
 def log(root: Path, tid: str, text: str, by: str) -> dict:
