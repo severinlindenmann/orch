@@ -317,6 +317,9 @@ def a5(e):
         time.sleep(5)  # let the scheduler reap the finished runs (log footer)
     finally:
         _sched(e, ws, "stop")
+        # end the recurrence: an open every-minute ticket left in Reports would start the agent in later
+        # scenarios (R6-R8 assert exact agent runs there)
+        e.orch(ws, "ticket", "status", t, "dropped")
     lines = log.read_text().split("\n")
     kinds = [l.split()[0] for l in lines if l.strip()]
     check(all(kinds[i] != kinds[i + 1] for i in range(len(kinds) - 1)), f"runs overlapped: {kinds}")
