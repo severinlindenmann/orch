@@ -23,6 +23,7 @@ pub fn router() -> Router<AppState> {
         .route("/v1/phone/answer", post(answer))
         .route("/v1/phone/send", post(send))
         .route("/v1/phone/messages", get(messages))
+        .route("/v1/phone/updates", get(updates))
         .route("/v1/phone/signout", post(signout))
         .route(
             "/v1/phone/transcribe",
@@ -232,6 +233,145 @@ async fn messages(
     Ok(Json(json!({"items": items, "next": next})))
 }
 
+/// Work-update texts for a phone, newest first (?1 phone id, ?2 JSON workspace list, ?3 paired-at, ?4 ticket or NULL,
+/// ?5 seq cursor, ?6 batch size). The same messages table as `MESSAGES_SQL`, only what workspaces sent.
+const UPDATES_SQL: &str =
+    "SELECT seq,id,from_addr,to_addr,type,created_at,ticket,reply_to,payload,acked_at FROM (
+        SELECT m.* FROM json_each(?2) j CROSS JOIN messages m
+          WHERE m.type='text' AND m.to_addr='phones' AND m.from_addr=j.value AND m.stored_at>=?3
+            AND (?4 IS NULL OR m.ticket=?4) AND m.seq<?5
+        UNION ALL
+        SELECT m.* FROM json_each(?2) j CROSS JOIN messages m
+          WHERE m.type='text' AND m.to_addr=?1 AND m.from_addr=j.value
+            AND (?4 IS NULL OR m.ticket=?4) AND m.seq<?5
+     ) ORDER BY seq DESC LIMIT ?6";
+
+/// `GET /v1/phone/updates`: a read view over the stored texts that carry `body.update` (relay-api.md). Nothing is written.
+async fn updates(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+) -> Res<Json<Value>> {
+    let limit = q
+        .get("limit")
+        .and_then(|l| l.parse::<usize>().ok())
+        .unwrap_or(50)
+        .clamp(1, 100);
+    let workspace = q.get("workspace").filter(|w| !w.is_empty());
+    let ticket = q.get("ticket").filter(|t| !t.is_empty());
+    let after = q.get("after").filter(|a| !a.is_empty());
+    if ticket.is_some() && workspace.is_none() {
+        return Err(invalid("`ticket` needs `workspace`."));
+    }
+    let c = app.db.lock().unwrap();
+    let (pid, _, ws) = auth::phone(&c, &h)?;
+    // A workspace that is not on the list answers like an unknown one: an empty list.
+    let list: Vec<String> = match workspace {
+        Some(w) if ws.contains(w) => vec![w.clone()],
+        Some(_) => vec![],
+        None => ws,
+    };
+    let bad_after = || invalid("`after` is not an update of this ticket.");
+    if list.is_empty() {
+        return if after.is_some() && ticket.is_some() {
+            Err(bad_after())
+        } else {
+            Ok(Json(json!({"items": [], "next": null})))
+        };
+    }
+    let since: i64 = c.query_row(
+        "SELECT COALESCE(paired_at, created_at) FROM phones WHERE id=?1",
+        [&pid],
+        |r| r.get(0),
+    )?;
+    let list_json = serde_json::to_string(&list).unwrap_or("[]".into());
+    // Walk the filtered view newest first, in batches, and keep the texts with `body.update`.
+    let mut st = c.prepare(UPDATES_SQL)?;
+    let mut cursor = i64::MAX;
+    let mut out: Vec<(store::Msg, Value)> = vec![];
+    let mut seen = std::collections::HashSet::new();
+    let mut after_found = after.is_none();
+    let mut more = false;
+    let mut titles: Vec<Option<String>> = vec![];
+    let mut extra = 0;
+    'scan: loop {
+        let rows: Vec<store::Msg> = st
+            .query_map(
+                params![pid, list_json, since, ticket, cursor, 200i64],
+                msg_from_row,
+            )?
+            .collect::<Result<_, _>>()?;
+        let Some(last) = rows.last() else { break };
+        cursor = last.seq;
+        for m in rows {
+            let (body, _) = store::open_payload(&app.key, &m);
+            if !body["update"].is_object() {
+                continue;
+            }
+            if ticket.is_some() {
+                if !after_found {
+                    // Skip everything up to and including the `after` item.
+                    after_found = after.is_some_and(|a| *a == m.id);
+                    continue;
+                }
+                if out.len() == limit {
+                    more = true;
+                    break 'scan;
+                }
+                out.push((m, body));
+            } else {
+                // Grouped: the newest update per (workspace, ticket); its title falls back to the newest
+                // titled update of that ticket (looked for in a bounded number of older rows).
+                let key = (m.from.clone(), m.ticket.clone());
+                if seen.insert(key.clone()) {
+                    if out.len() < limit {
+                        out.push((m, body));
+                    }
+                } else if let Some(i) = out
+                    .iter()
+                    .position(|(o, _)| (o.from.clone(), o.ticket.clone()) == key)
+                {
+                    if titles[i].is_none() {
+                        titles[i] = body["update"]["title"].as_str().map(String::from);
+                    }
+                }
+                if titles.len() < out.len() {
+                    titles.push(
+                        out.last()
+                            .and_then(|(_, b)| b["update"]["title"].as_str().map(String::from)),
+                    );
+                }
+                if out.len() == limit {
+                    extra += 1;
+                    if extra > 1000 || titles.iter().all(|t| t.is_some()) {
+                        break 'scan;
+                    }
+                }
+            }
+        }
+    }
+    if !after_found {
+        return Err(bad_after());
+    }
+    let next = if more {
+        out.last().map(|(m, _)| Value::from(m.id.clone()))
+    } else {
+        None
+    };
+    let items: Vec<Value> = out
+        .iter()
+        .enumerate()
+        .map(|(i, (m, b))| {
+            let u = &b["update"];
+            json!({"id": m.id, "workspace": m.from, "workspace_name": store::ws_name(&c, &m.from),
+                "ticket": m.ticket, "kind": u["kind"],
+                "title": if ticket.is_some() { u["title"].clone() } else { titles.get(i).cloned().flatten().into() }, "text": b["text"],
+                "reply_to": m.reply_to, "at": m.created_at})
+        })
+        .collect();
+    Ok(Json(json!({"items": items, "next": next})))
+}
+
 async fn answer(
     State(app): State<AppState>,
     h: HeaderMap,
@@ -343,6 +483,18 @@ pub async fn push_message(app: &AppState, q: &Value) {
     let to = q["to"].as_str().unwrap_or("").to_string();
     let from = q["from"].as_str().unwrap_or("").to_string();
     let is_text = q["type"] == "text";
+    // Work updates: only result / question / failure / stopped are pushed. ack, working and note stay quiet
+    // and do not use up the text budget.
+    let update = &q["body"]["update"];
+    if is_text
+        && update.is_object()
+        && !matches!(
+            update["kind"].as_str(),
+            Some("result" | "question" | "failure" | "stopped")
+        )
+    {
+        return;
+    }
     let targets: Vec<(bool, String)> = {
         let c = app.db.lock().unwrap();
         let mut st = match c.prepare(
@@ -385,12 +537,14 @@ pub async fn push_message(app: &AppState, q: &Value) {
         let c = app.db.lock().unwrap();
         store::ws_name(&c, q["from"].as_str().unwrap_or("")).unwrap_or_default()
     };
-    let text: String = q["body"]["text"]
-        .as_str()
-        .unwrap_or("")
-        .chars()
-        .take(120)
-        .collect();
+    let body_text = q["body"]["text"].as_str().unwrap_or("");
+    let text: String = match update["title"].as_str() {
+        Some(t) if is_text => format!("{t}: {}", body_text.lines().next().unwrap_or("")),
+        _ => body_text.to_string(),
+    }
+    .chars()
+    .take(120)
+    .collect();
     let mut payload = json!({"aps": {"alert": {"title": name, "body": text}, "sound": "default"},
         "workspace": q["from"]});
     if q["type"] == "question" {
