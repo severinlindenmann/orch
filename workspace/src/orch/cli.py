@@ -195,7 +195,8 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     p.add_argument("--version", action="version", version=f"orch {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
-    sub.add_parser("init", parents=[common], help="set up this folder (safe to repeat)")
+    x = sub.add_parser("init", parents=[common], help="set up this folder (safe to repeat)")
+    x.add_argument("--yes", action="store_true", help="do not ask; take the first agent found")
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
 
@@ -344,7 +345,13 @@ def run(args: argparse.Namespace) -> None:
     if cmd == "init":
         root = Path.cwd()
         lines = init_mod.init(root)
-        _out(args, {"ok": True, "root": str(root), "details": lines}, "orch is ready in this folder.")
+        asking = sys.stdin.isatty() and not args.json
+        agent = init_mod.choose_agent(root, args.yes, asking)
+        _out(
+            args,
+            {"ok": True, "root": str(root), "details": lines, "agent": agent},
+            f"orch is ready in this folder. {agent}",
+        )
     elif cmd == "update":
         done = addons.update(root, args.project_only)
         if args.project_only:
