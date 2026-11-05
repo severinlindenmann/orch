@@ -115,8 +115,12 @@ def _wrap_cmd(root: Path, rest: list[str]) -> None:
         stdin = f.read_text(encoding="utf-8")
         f.unlink(missing_ok=True)
     if isinstance(env, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
-        os.environ.clear()  # from here on this process, and the agent, run in the starter's environment
-        os.environ.update(env)
+        # from here on this process, and the agent, run in the starter's environment, except what belongs to
+        # the pane's own terminal (the starter may have no terminal at all)
+        pane = {k: os.environ[k] for k in ("TERM", "COLORTERM", "TMUX", "TMUX_PANE") if k in os.environ}
+        os.environ.clear()
+        os.environ.update({k: v for k, v in env.items() if k not in pane})
+        os.environ.update(pane)
     if a.live:
         sys.exit(runs.wrap_live(root, a.run, a.ticket, a.agent, rest[i + 1 :], a.new_session))
     code = runs.wrap(

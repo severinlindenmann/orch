@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import os
 import subprocess
 import time
@@ -50,10 +49,16 @@ def pid_started(pid: int) -> str | None:
         return None
 
 
-@functools.cache
+_tokens: dict[int, str] = {}
+
+
 def own_token() -> str:
-    """What a lock file holds: our pid and start time, so a reused pid is not mistaken for the holder."""
-    return f"{os.getpid()} {pid_started(os.getpid()) or '-'}"
+    """What a lock file holds: our pid and start time, so a reused pid is not mistaken for the holder.
+    Cached per pid, so a forked child does not claim its parent's token."""
+    pid = os.getpid()
+    if pid not in _tokens:
+        _tokens[pid] = f"{pid} {pid_started(pid) or '-'}"
+    return _tokens[pid]
 
 
 def owner_dead(text: str) -> bool:

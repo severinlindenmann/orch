@@ -2,6 +2,7 @@
 
 import json
 import os
+import secrets
 import shlex
 import shutil
 import signal
@@ -350,17 +351,18 @@ def test_each_live_run_gets_the_environment_of_its_own_starter(proj, run, lab, t
     monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ["PATH"])
     _claude_live(proj)
     a, b = _ticket(run, "A"), _ticket(run, "B")
-    monkeypatch.setenv("MARKER", "token-A")
+    tok_a, tok_b = "tok-" + secrets.token_hex(8), "tok-" + secrets.token_hex(8)
+    monkeypatch.setenv("MARKER", tok_a)
     assert run("run", "start", a)[0] == 0  # this start also starts the workspace's tmux server
     _until(lambda: marks.exists() and marks.read_text().strip(), what="first agent")
-    monkeypatch.setenv("MARKER", "token-B")  # a rotated key, for example
+    monkeypatch.setenv("MARKER", tok_b)  # a rotated key, for example
     assert run("run", "start", b)[0] == 0
     _until(lambda: len(marks.read_text().split("\n")) > 2, what="second agent")
     seen = dict(line.split()[::-1] for line in marks.read_text().strip().splitlines())
-    assert seen == {a: "token-A", b: "token-B"}
+    assert seen == {a: tok_a, b: tok_b}
     assert not list((proj / ".orch" / "run").glob("env-*.json"))  # read once, removed
     ps = subprocess.run(["ps", "-axww", "-o", "command="], capture_output=True, text=True).stdout
-    hit = [ln[:150] for ln in ps.splitlines() if "token-B" in ln and "pytest" not in ln]
+    hit = [ln[:150] for ln in ps.splitlines() if tok_b in ln]
     assert not hit, hit  # never on a command line
 
 
@@ -481,3 +483,26 @@ def test_start_can_name_the_agent_for_one_run(proj, run, lab, tmp_path, monkeypa
     assert config.agent_name(proj) == "fake"  # the folder's choice is unchanged
     code, _, err = run("run", "start", tid, "--agent", "nobody")
     assert code == 2 and "No agent called 'nobody'" in err
+
+
+@needs_tmux
+def test_the_pane_keeps_its_own_terminal_variables(proj, run, lab, tmp_path, monkeypatch):
+    d = tmp_path / "clbin"
+    d.mkdir()
+    out = tmp_path / "term.txt"
+    f = d / "claude"
+    f.write_text(
+        '#!/bin/sh\necho "TERM=$TERM TMUX=${TMUX:+set} X=$STARTER_VAR" >> '
+        + shlex.quote(str(out))
+        + "\nexec cat\n"
+    )
+    f.chmod(f.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ["PATH"])
+    monkeypatch.delenv("TERM", raising=False)  # started from a script with no terminal
+    monkeypatch.setenv("STARTER_VAR", "from-starter")
+    _claude_live(proj)
+    tid = _ticket(run)
+    assert run("run", "start", tid)[0] == 0
+    _until(lambda: out.exists() and out.read_text().strip(), what="agent env")
+    line = out.read_text().strip()
+    assert "TERM=" in line and "TERM= " not in line and "TMUX=set" in line and "X=from-starter" in line
