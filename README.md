@@ -131,8 +131,8 @@ All commands accept `--json` for agents.
 | `contracts/` | Shared formats: ticket, message, APIs, crypto, with test vectors | JSON Schema, docs | `contracts.yml` (and every folder below that uses it) |
 | `workspace/` | The `orch` command and its skills | Python, uv | `workspace.yml` |
 | `workspace-addons/` | Dashboard and scheduler | Python, uv | `addons.yml` |
-| `publish/` | Encrypted files and small apps (publish.severin.io) | Rust | `publish.yml`, `publish-deploy.yml` |
-| `relay/` | Inbox, rules, webhooks, shared tools, phone API (relay.severin.io) | Rust | `relay.yml`, `relay-deploy.yml` |
+| `publish/` | Encrypted files and small apps (publish.severin.io) | Rust | `publish.yml` |
+| `relay/` | Inbox, rules, webhooks, shared tools, phone API (relay.severin.io) | Rust | `relay.yml` |
 | `mobile/` | iPhone app | Swift | `mobile.yml` |
 | `e2e/` | End-to-end scenarios | Playwright, scripts | `e2e.yml` (by hand or nightly) |
 | `brand/` | Logo and colours | | |
