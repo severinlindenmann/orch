@@ -22,7 +22,7 @@
         "events": "claude-transcript/1"
       },
       "hooks": { "SessionStart": "orch run event --kind session", "Stop": "orch run event --kind idle", "Notification": "orch run event --kind attention" },
-      "session": { "id": "chosen-by-orch", "hand_started": "hook:SessionStart" },
+      "session": { "id": "chosen-by-orch", "hand_started": "hook:SessionStart", "missing": "No conversation found with session ID" },
       "capabilities": { "resume": true, "choose_session_id": true, "interactive_tmux": true, "hooks": true, "stream": true, "permission_retry": true, "subagents": true, "usage": true },
       "files": { "instructions_link": { "CLAUDE.md": "@AGENTS.md" }, "skills_link": ".claude/skills" }
     },
@@ -36,7 +36,7 @@
       },
       "live": null,
       "hooks": null,
-      "session": { "id": "from-output", "parse": "codex-exec-json/1" },
+      "session": { "id": "from-output", "parse": "codex-exec-json/1", "missing": "no rollout found for thread id" },
       "capabilities": { "resume": true, "choose_session_id": false, "interactive_tmux": false, "hooks": false, "stream": false, "permission_retry": false, "subagents": false, "usage": false },
       "files": { "instructions": "AGENTS.md" }
     },

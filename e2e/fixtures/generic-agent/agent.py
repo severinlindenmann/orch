@@ -31,7 +31,11 @@ def log(kind: str, text: str) -> None:
     path = os.environ.get("GENERIC_AGENT_LOG")
     if path:
         with open(path, "a", encoding="utf-8") as f:
-            f.write(f"{kind}: {text.strip()}\n")
+            f.write(f"{kind}: {text.strip().replace(chr(10), ' | ')}\n")
+
+
+def log_env() -> None:
+    log("env", " ".join(os.environ.get(k, "-") for k in ("ORCH_RUN", "ORCH_TICKET", "ORCH_AGENT")))
 
 
 def ticket_of(text: str) -> str | None:
@@ -63,6 +67,7 @@ def main(argv: list[str]) -> int:
         elif a != "--interactive":
             rest.append(a)
     prompt = " ".join(rest)
+    log_env()
     if silent is not None:
         log("prompt", prompt)
         time.sleep(silent)

@@ -66,12 +66,16 @@ def _save(root: Path, name: str) -> None:
 
 
 def _other(root: Path) -> str:
-    from orch import config
+    from orch import adapters, config
 
+    name = input("Name for it [my-agent]: ").strip() or "my-agent"
+    if not config.NAME_RE.match(name):
+        raise Refused(f"'{name}' is not a name orch can use. Use lowercase letters, digits and '-'.")
+    if name in adapters.builtin_names() or name in config.agent_entries(root):
+        raise Refused(f"There is already an agent called '{name}'. Pick another name; nothing was changed.")
     cmd = input("Command (use {prompt} where the task goes): ").strip()
     if not cmd:
         return "No agent chosen; set one later: orch config set workspace.agent <name>"
-    name = "my-agent"
     config.add_agent(root, name, cmd)
     _save(root, name)
     return f"Agent: {name} (starts fresh each run; it cannot continue a conversation)."
