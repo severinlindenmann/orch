@@ -228,3 +228,11 @@ def test_notice_names_the_command_that_runs(proj):
     assert adapters.command_notice("mine", "oneshot", proj) is None  # once
     assert "mine-agent --live" in adapters.command_notice("mine", "live", proj)
     assert adapters.command_notice("claude", "oneshot", proj) is None
+
+
+def test_session_parsing_against_real_recorded_output():
+    fx = ROOT / "e2e" / "fixtures" / "agent-output"
+    codex = (fx / "codex-exec-json.jsonl").read_text(encoding="utf-8")  # codex-cli 0.163.0, recorded 5 Nov
+    assert adapters.parse_session("codex", codex) == "01a1ad41-d898-7323-a687-0b497c12a830"
+    claude = json.loads((fx / "claude-print-json.json").read_text(encoding="utf-8"))  # claude 2.1.318
+    assert adapters.SESSION_RE.match(claude["session_id"])  # the id orch passed with --session-id comes back
