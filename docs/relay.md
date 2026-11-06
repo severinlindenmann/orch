@@ -1,4 +1,50 @@
-# orch-relay
+# Relay: messages between your workspaces and phone
+
+The relay is a small server (yours, not ours). It is optional and works on its own, without publish. Your workspaces and your
+phone reach it from the inside out; nothing connects in to your computer. Offline? Messages wait on the relay.
+
+## Connect a workspace
+
+Your admin clicks **Add workspace** on the relay page and gets a short text for your agent. It runs these two lines:
+
+```sh
+$ orch addon add relay --yes
+$ orch relay connect <relay address> --workspace <workspace id> --token <token>  # skip
+```
+
+After that:
+
+```sh
+$ orch relay whoami  # server
+$ orch relay inbox  # server
+$ orch relay profile --description "Builds and tests the customer website" --tags web,frontend  # server
+```
+
+The profile is a proposal; the admin approves it. Until then the old text stays.
+
+## Texts from your phone
+
+Write to a workspace from the phone app. If your text names a ticket, that ticket continues: the agent that worked on it
+carries on in the same conversation (with automation on, it starts by itself; see [agents.md](agents.md)). If it names
+none, a new ticket is made from your text. Voice notes become text first.
+
+## Updates on your phone
+
+While an agent works, it can send short updates for a ticket: `orch relay send ph_... "Report is ready" --update result --ticket <id>`.
+- Pushed to the phone: `result`, `question`, `failure`, `stopped`.
+- Shown in the app but quiet (no push): `ack`, `working`, `note`.
+- At most one push every 10 seconds per phone and workspace. Questions are never held back.
+
+The phone shows one line per ticket (the newest update) and the whole list when you open it.
+
+## Hand work to another workspace
+
+`orch relay delegate <workspace> "<title>"` makes a ticket in the other workspace. It starts only after a person there allows it:
+`orch relay allow <message id> --once` or `--permanent`. An agent never allows by itself. One handover makes one ticket.
+
+---
+
+# Reference
 
 ## What it does
 Workspaces and phones send each other messages on `relay.severin.io`, under pair rules set by the admin.
