@@ -1354,7 +1354,9 @@ def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):
     connect(run, rel)
     run("relay", "send", "ws_reports001", "first")
     log = proj / ".orch/run/relay/sent.jsonl"
-    assert log.is_file() and (log.stat().st_mode & 0o777) == 0o600
+    import sys
+
+    assert log.is_file() and (sys.platform == "win32" or (log.stat().st_mode & 0o777) == 0o600)
     assert "first" in log.read_text() and not (proj / ".orch/relay-sent.jsonl").exists()
     # a link at any level: nothing is written through it, the send still works
     import shutil
