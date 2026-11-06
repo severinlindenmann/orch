@@ -116,10 +116,12 @@ enum ChatBuilder {
     static func workspaceItems(_ ws: String, _ d: ChatData) -> [ChatItem] {
         var out: [ChatItem] = []
         let keyOf = Dictionary(d.tickets.filter { $0.workspace == ws }.compactMap { t in t.ticket.map { ($0, t) } }, uniquingKeysWith: { a, _ in a })
+        var chipped = Set<String>()   // one "Ticket created" chip per ticket, even if the workspace acked twice
         for m in d.messages where m.workspaceId == ws {
             let msg = m.message
             if let u = msg.body.update {
                 guard u.kind == "ack" else { continue }          // the rest lives on the ticket card and in the ticket chat
+                if let t = msg.ticket, !chipped.insert(t).inserted { continue }
                 let key = msg.key ?? msg.ticket.flatMap { keyOf[$0]?.key }
                 let title = u.title ?? msg.body.text
                 out.append(ChatItem(id: "sys-" + m.id, at: msg.createdAt,
@@ -221,7 +223,7 @@ enum ChatBuilder {
     static func timeText(_ iso: String, now: Date = Date(), calendar: Calendar = .current) -> String {
         guard let d = ISO8601DateFormatter().date(from: String(iso.prefix(while: { $0 != "~" }))) else { return "" }
         let f = DateFormatter()
-        if calendar.isDate(d, inSameDayAs: now) { f.dateFormat = "H:mm" }
+        if calendar.isDate(d, inSameDayAs: now) { f.dateFormat = "HH:mm" }
         else if calendar.isDate(d, inSameDayAs: calendar.date(byAdding: .day, value: -1, to: now) ?? now) { return "Yesterday" }
         else { f.dateFormat = "d MMM" }
         return f.string(from: d)

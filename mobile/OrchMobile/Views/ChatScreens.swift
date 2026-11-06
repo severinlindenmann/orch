@@ -71,7 +71,7 @@ struct ChatRoomView: View {
             Image(systemName: "bubble.left").font(.system(size: 32)).foregroundStyle(Theme.brand)
             Text("Say hello to \(name)").themeFont(17, .semibold)
             Text("Your first message starts a ticket.").themeFont(14).foregroundStyle(Theme.muted)
-        }.accessibilityIdentifier("room-empty")
+        }.accessibilityIdentifier("room-empty").task { await model.watchWhileOpen() }
     }
 }
 

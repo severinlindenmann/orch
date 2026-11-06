@@ -120,7 +120,11 @@ final class AppModel {
                  questions: questionLog.values.sorted { $0.message.createdAt < $1.message.createdAt }.map { $0 }, answers: answers, outbox: outbox)
     }
     var chatRooms: [RoomRow] { ChatBuilder.rooms(chatData, read: readState) }
-    var totalUnread: Int { chatRooms.reduce(0) { $0 + $1.unread } }
+    /// Tab badge: new messages in chats that are not open right now.
+    var totalUnread: Int {
+        let open: Set<String> = Set(path.compactMap { if case .workspace(let id) = $0 { id } else { nil } })
+        return chatRooms.reduce(0) { $0 + (open.contains($1.workspace.id) ? 0 : $1.unread) }
+    }
     func workspace(_ id: String) -> Workspace? { workspaces.first { $0.id == id } }
     func ticket(_ ws: String, _ t: String) -> Ticket? { tickets.first { $0.workspace == ws && $0.ticket == t } }
 

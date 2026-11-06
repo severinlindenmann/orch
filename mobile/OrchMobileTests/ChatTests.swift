@@ -212,6 +212,23 @@ final class ChatTests: XCTestCase {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
         XCTAssertEqual(ChatBuilder.timeText("2026-11-05T11:20:00Z", now: now, calendar: cal), "Yesterday")
         XCTAssertEqual(ChatBuilder.timeText("2026-11-01T11:20:00Z", now: now, calendar: cal).isEmpty, false)
+        let early = ISO8601DateFormatter().date(from: "2026-11-06T00:30:00Z")!
+        XCTAssertEqual(ChatBuilder.timeText("2026-11-06T00:01:00Z", now: early, calendar: cal), "00:01", "hour is zero-padded")
+    }
+
+    func testTwoAcksOfOneTicketShowOneChipAndTheBadgeSkipsTheOpenChat() throws {
+        func ack(_ id: String, _ at: String) throws -> PhoneMessage {
+            let j = #"{"message":{"schema":"orch.msg/1","id":"\#(id)","from":"ws_a","to":"ph_p","type":"text","created_at":"\#(at)","ticket":"t_1","body":{"text":"Got it: X","update":{"kind":"ack","title":"X"}}},"workspace_name":"A"}"#
+            return try JSONCoding.decoder.decode(PhoneMessage.self, from: Data(j.utf8))
+        }
+        let d = ChatData(workspaces: [], messages: [try ack("m_1", "2026-11-06T10:00:00Z"), try ack("m_2", "2026-11-06T10:00:05Z")],
+                         tickets: [], questions: [], answers: [:], outbox: [])
+        let chips = ChatBuilder.workspaceItems("ws_a", d).filter { if case .system = $0.kind { return true }; return false }
+        XCTAssertEqual(chips.count, 1)
+        let m = AppModel(useMock: true, voiceMode: .scripted)
+        let all = m.totalUnread
+        m.path = [.workspace(m.workspaces.first?.id ?? MockRelay.pilatus)]
+        XCTAssertLessThanOrEqual(m.totalUnread, all)
     }
 
     /// An image shows its proof title ("Q3 chart"), like files and links; the file name only without one.

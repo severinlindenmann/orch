@@ -40,4 +40,14 @@ final class RefreshTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(150))
         XCTAssertEqual(StubProtocol.seen.filter { $0.url?.path == "/v1/phone/updates" }.count, n, "closing the chat stops it")
     }
+
+    func testBadgeSkipsTheOpenWorkspaceChat() async throws {
+        let m = AppModel(useMock: true, voiceMode: .scripted)
+        await m.refresh()
+        let before = m.totalUnread
+        let busy = m.chatRooms.first { $0.unread > 0 }
+        guard let busy else { return XCTAssertEqual(before, 0) }
+        m.path = [.workspace(busy.workspace.id)]
+        XCTAssertEqual(m.totalUnread, before - busy.unread)
+    }
 }
