@@ -553,6 +553,8 @@ def _answer_asked(root: Path, msg: dict) -> tuple[dict | None, str]:
 def _answer_by(msg: dict) -> tuple[str, str]:
     frm, b = str(msg.get("from", "")), msg.get("body", {})
     by = b.get("answered_by")
+    if isinstance(by, str):  # untrusted: it is pasted to the agent as "From <by>: ..."
+        by = " ".join(clean_untrusted(by, 100).split())
     ok_prefix = "human:" if frm.startswith("ph_") else ("human:", "agent:")
     if not (isinstance(by, str) and by.startswith(ok_prefix)):
         by = f"human:{frm}" if frm.startswith("ph_") else f"agent:{frm}"
