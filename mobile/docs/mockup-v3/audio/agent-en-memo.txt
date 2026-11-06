@@ -1,0 +1,1 @@
+Here's where the website launch stands. The new landing page is live on the preview link, and all checks passed. I fixed the broken image on mobile and compressed the photos, so the page now loads in under one second. One thing for you: please look at the pricing section and tell me if the wording is right. After that I can publish it.
