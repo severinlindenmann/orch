@@ -9,6 +9,7 @@ pub mod phone;
 pub mod push;
 pub mod rules;
 pub mod shared;
+pub mod speech;
 pub mod state;
 pub mod store;
 pub mod transcribe;

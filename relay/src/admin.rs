@@ -795,21 +795,33 @@ async fn get_voice(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>
     guard(&app, &h)?;
     let c = app.db.lock().unwrap();
     Ok(Json(
-        json!({"deepgram": crate::transcribe::status(&c, &app.key)}),
+        json!({"deepgram": crate::transcribe::status(&c, &app.key), "tts_enabled": crate::speech::enabled(&c)}),
     ))
 }
 
 async fn put_voice(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<Json<Value>> {
     guard(&app, &h)?;
     let v = parse_body(&body)?;
+    // `tts_enabled` alone switches reading aloud on or off; `deepgram_key` sets the key.
+    let switch = v["tts_enabled"].as_bool();
+    if v.get("tts_enabled").is_some() && switch.is_none() {
+        return Err(invalid("`tts_enabled` must be true or false."));
+    }
     let k = v["deepgram_key"].as_str().unwrap_or("").trim();
-    if k.len() < 8 || k.len() > 200 || !k.chars().all(|c| c.is_ascii_graphic()) {
+    if !(switch.is_some() && v.get("deepgram_key").is_none())
+        && (k.len() < 8 || k.len() > 200 || !k.chars().all(|c| c.is_ascii_graphic()))
+    {
         return Err(invalid("`deepgram_key` must be the Deepgram API key."));
     }
     let c = app.db.lock().unwrap();
-    crate::transcribe::set_key(&c, &app.key, k)?;
+    if v.get("deepgram_key").is_some() || switch.is_none() {
+        crate::transcribe::set_key(&c, &app.key, k)?;
+    }
+    if let Some(on) = switch {
+        crate::speech::set_enabled(&c, on)?;
+    }
     Ok(Json(
-        json!({"deepgram": crate::transcribe::status(&c, &app.key)}),
+        json!({"deepgram": crate::transcribe::status(&c, &app.key), "tts_enabled": crate::speech::enabled(&c)}),
     ))
 }
 
