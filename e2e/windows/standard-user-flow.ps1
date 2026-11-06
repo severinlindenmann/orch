@@ -79,7 +79,7 @@ if ($url) {
 }
 Check ("$state" -match "Windows smoke") "the dashboard shows the ticket"
 $again = O start --no-open | Out-String; L $again
-Check ($LASTEXITCODE -eq 0) "a second orch start while it runs"
+Check ($LASTEXITCODE -eq 0 -and $again -match [regex]::Escape($url)) "a second orch start keeps the running dashboard"
 L "--- stop"; L (O stop | Out-String)
 Check ($LASTEXITCODE -eq 0) "orch stop"
 $restart = O start --no-open | Out-String; L $restart
