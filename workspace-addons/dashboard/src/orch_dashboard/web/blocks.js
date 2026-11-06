@@ -10,7 +10,7 @@ const OrchBlocks = (() => {
   const HTTPS = /^https:\/\/[^\s<>"'`]+$/;
   const arr = v => Array.isArray(v) ? v : [];
   const ADDON = /^addon:([a-z][a-z0-9-]{1,31})(\/[A-Za-z0-9_./-]{0,100})?$/;
-  const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{2,5}\/?$/;
+  const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/;
   let opts = {};   // {addonUrl(name) -> local page address or null}, set per render()
   const VERB = /^[a-z][a-z-]{0,20}$/;
 

@@ -75,7 +75,7 @@
 
   /* Links to other running pages of this workspace (label and address come from the services data). */
   function serviceLinks(services, ownOrigin) {
-    return arr(services).filter(s => s && s.running === true && typeof s.url === 'string' && /^http:\/\/(127\.0\.0\.1|localhost):\d+/.test(s.url)
+    return arr(services).filter(s => s && s.running === true && typeof s.url === 'string' && /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/.test(s.url)
       && !s.url.startsWith(ownOrigin) && /^[a-z][a-z0-9-]{1,31}$/.test(String(s.addon || s.name)))
       .map(s => ({label: String(s.addon || s.name), url: s.url}));
   }
@@ -125,6 +125,9 @@
       if (!kids.has(t.parent)) kids.set(t.parent, []);
       kids.get(t.parent).push(t);
     }
+    // Children in the order they were made (the order of the work), not the order the page lists tickets.
+    const made = t => Date.parse(t.created_at) || 0;
+    for (const list of kids.values()) list.sort((a, b) => made(a) - made(b) || String(a.id).localeCompare(String(b.id)));
     const seen = new Set(), out = [];
     const walk = (t, depth, idx) => {
       if (seen.has(t.id)) return;

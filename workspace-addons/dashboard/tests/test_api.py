@@ -152,3 +152,18 @@ def test_file_proof_knows_if_it_is_on_this_computer(ws):
     t = next(x for x in load_tickets(ws)[0] if x["id"] == "t_proof0001")
     ev = t["checklist"][0]["evidence"]
     assert [e.get("missing") for e in ev] == [False, True, True, None]  # outside the workspace counts as not here
+
+
+def test_file_proof_symlink_and_absolute_path_outside_the_workspace_count_as_missing(ws):
+    import json as _json
+
+    from orch_dashboard.data import load_tickets
+    outside = ws.parent / "private.txt"
+    outside.write_text("secret")
+    (ws / "link.txt").symlink_to(outside)
+    ex = _json.loads((ws / ".orch" / "tickets" / "t_weekly01.json").read_text())
+    ex.update(id="t_proof0002", checklist=[{"id": "c1", "text": "x", "done": True, "evidence": [
+        {"type": "file", "ref": "link.txt"}, {"type": "file", "ref": str(outside)}, {"type": "file", "ref": "/etc/hosts"}]}])
+    (ws / ".orch" / "tickets" / "t_proof0002.json").write_text(_json.dumps(ex))
+    t = next(x for x in load_tickets(ws)[0] if x["id"] == "t_proof0002")
+    assert [e["missing"] for e in t["checklist"][0]["evidence"]] == [True, True, True]

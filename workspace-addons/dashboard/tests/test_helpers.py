@@ -105,3 +105,19 @@ def test_tree_rows_children_counts_collapse_and_missing_parent():
 def test_proof_mark_you_or_agent_says():
     assert call("proofMark", {"by": "human:Mia"})["label"] == "You"
     assert call("proofMark", {"by": "agent:claude"})["label"] == "Agent says" and call("proofMark", {})["mark"] == "○"
+
+
+@node
+def test_tree_children_follow_creation_order_not_list_order():
+    ts = [{"id": "t_p", "created_at": "2026-11-01T00:00:00Z"},
+          {"id": "t_c3", "parent": "t_p", "created_at": "2026-11-03T00:00:00Z"},
+          {"id": "t_c1", "parent": "t_p", "created_at": "2026-11-01T01:00:00Z"},
+          {"id": "t_c2", "parent": "t_p", "created_at": "2026-11-02T00:00:00Z"}]
+    assert [r["ticket"]["id"] for r in call("treeRows", ts)] == ["t_p", "t_c1", "t_c2", "t_c3"]
+
+
+@node
+def test_service_link_port_has_one_to_five_digits():
+    ok = {"addon": "panel", "running": True, "url": "http://127.0.0.1:8"}
+    bad = {"addon": "panel2", "running": True, "url": "http://127.0.0.1:123456"}
+    assert [r["label"] for r in call("serviceLinks", [ok, bad], "http://127.0.0.1:1")] == ["panel"]

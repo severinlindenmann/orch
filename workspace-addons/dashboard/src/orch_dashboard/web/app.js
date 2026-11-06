@@ -338,7 +338,11 @@
     const pageName = r.kind === 'addon' ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'tickets' ? 'Tickets' : 'Home';
     document.getElementById('workspace-name').textContent = clean(state.workspace || 'Workspace');
     document.getElementById('workspace-mode').textContent = snapshot ? 'Shared copy' : 'Local workspace';
-    document.getElementById('crumb').textContent = pageName;
+    const crumb = document.getElementById('crumb');
+    if (r.kind === 'ticket') {
+      const tk = ticketOf(r.id);
+      crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' / ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || 'Ticket');
+    } else crumb.textContent = pageName;
     const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
     reconcile(nav, fragment(navLink('#home', 'Home', 'page', array(state.needs).length ? h('span', {className:'count'}, array(state.needs).length) : null), navLink('#tickets', 'Tickets', 'table'),
       h('p', {className:'eyebrow'}, 'Add-ons'), addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon, h('span', {className:'addon-tag', 'aria-label':'Add-on'}, 'A')))));
