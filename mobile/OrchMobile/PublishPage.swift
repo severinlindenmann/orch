@@ -103,8 +103,8 @@ struct PublishBundle: Equatable, Sendable {
         for f in list {
             guard let path = f["path"] as? String, let type = f["type"] as? String, let size = f["size"] as? Int, size >= 0,
                   validPath(path), seen.insert(path).inserted else { throw PublishError.broken }
+            guard size <= (b.count - 4 - m) - total else { throw PublishError.broken }   // checked before adding: no overflow
             total += size
-            guard total <= b.count - 4 - m else { throw PublishError.broken }
             out.append(File(path: path, type: type, data: Data(b[at..<(at + size)]))); at += size
         }
         let lower = entry.lowercased()

@@ -131,7 +131,7 @@ struct ArtifactViewer: View {
     private var canComment: Bool {
         guard case .ready(let content) = loadState else { return false }
         switch content {
-        case .web, .publish(.page), .publish(.bundle): return true
+        case .publish(.page), .publish(.bundle): return true
         case .data(_, _, let mime): return mime == "application/pdf" || mime.hasPrefix("image/")
         case .publish(.file(let file)): return file.type == "application/pdf" || file.type.hasPrefix("image/")
         case .quickLook, .link: return false
@@ -152,7 +152,7 @@ struct ArtifactViewer: View {
 
     @ViewBuilder private func surface(_ content: ArtifactSurfaceContent) -> some View {
         switch content {
-        case .web, .publish(.page), .publish(.bundle):
+        case .publish(.page), .publish(.bundle):
             HTMLSurface(content: content, commentMode: commentMode, store: store) { loadState = .failed($0) }
         case .data(let data, _, let mime):
             if mime == "application/pdf" { PDFSurface(data: data, commentMode: commentMode, store: store) }
@@ -178,16 +178,20 @@ struct ArtifactViewer: View {
                     if case .file(let file) = published, file.type != "application/pdf", !file.type.hasPrefix("image/") {
                         content = try fileContent(file.bytes, name: file.name, mime: file.type)
                     } else { content = .publish(published) }
-                } else { content = .web(url) }
+                } else if ["http", "https"].contains(url.scheme?.lowercased()) {
+                    content = .link(url)   // an app or any other page: the external browser, never in-app (no pins there in v3)
+                } else { throw PublishError.broken }
             case .pdf, .image, .file:
-                guard let id = item.blobId, let data = await (loader.blob?(id) ?? model.blob(id)) else {
+                let loaded: Data?
+                if let id = item.blobId { if let custom = loader.blob { loaded = await custom(id) } else { loaded = await model.blob(id) } } else { loaded = nil }
+                guard let data = loaded else {
                     if !Task.isCancelled { loadState = .failed("Could not load this file. Check your connection and try again.") }
                     return
                 }
                 let mime = item.kind == .pdf ? "application/pdf" : (item.mime ?? (item.kind == .image ? "image/*" : "application/octet-stream"))
                 content = try fileContent(data, name: item.name ?? item.title, mime: mime)
             case .link:
-                guard let url = item.url else { throw PublishError.broken }
+                guard let url = item.url, ["http", "https"].contains(url.scheme?.lowercased()) else { throw PublishError.broken }
                 content = .link(url)
             }
             guard !Task.isCancelled else { return }

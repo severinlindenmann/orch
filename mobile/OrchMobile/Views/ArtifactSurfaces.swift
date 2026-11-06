@@ -6,7 +6,6 @@ import QuickLook
 // The viewer owns loading and temporary files; surfaces only display the result.
 enum ArtifactSurfaceContent {
     case publish(PublishContent)
-    case web(URL)
     case data(Data, name: String, mime: String)
     case quickLook(URL)
     case link(URL)
@@ -27,9 +26,7 @@ struct HTMLSurface: UIViewRepresentable {
         controller.addUserScript(WKUserScript(source: AnchorScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         controller.add(context.coordinator, name: AnchorScript.handler)
         configuration.userContentController = controller
-        if case .publish = content {
-            configuration.setURLSchemeHandler(context.coordinator, forURLScheme: NetworkBlock.scheme)
-        }
+        configuration.setURLSchemeHandler(context.coordinator, forURLScheme: NetworkBlock.scheme)
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.isInspectable = false
@@ -62,7 +59,6 @@ struct HTMLSurface: UIViewRepresentable {
         init(_ parent: HTMLSurface) { self.parent = parent }
 
         func load(_ view: WKWebView) {
-            if case .web(let url) = parent.content { view.load(URLRequest(url: url)); return }
             loadTask = Task { @MainActor [weak self, weak view] in
                 guard let self, let view else { return }
                 do {
@@ -118,9 +114,10 @@ struct HTMLSurface: UIViewRepresentable {
         nonisolated func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             MainActor.assumeIsolated {
-                if case .web = parent.content { decisionHandler(.allow); return }
-                let scheme = navigationAction.request.url?.scheme?.lowercased()
-                decisionHandler(scheme == NetworkBlock.scheme || scheme == "about" || scheme == nil ? .allow : .cancel)
+                // Only the decrypted local document: the orch-page scheme and about:blank. Everything else (links in the page) is refused.
+                let url = navigationAction.request.url
+                let local = url?.scheme?.lowercased() == NetworkBlock.scheme || url?.absoluteString == "about:blank"
+                decisionHandler(local ? .allow : .cancel)
             }
         }
 

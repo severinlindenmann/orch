@@ -61,6 +61,12 @@ final class PublishVectorTests: XCTestCase {
             XCTAssertThrowsError(try PublishBundle.parse(hex(c["bundle_hex"] as! String)), c["name"] as! String)
         }
     }
+    func testBundleSizesCannotOverflow() throws {
+        // Two files whose sizes add up past Int.max must be refused, not trap.
+        let idx = #"{"v":1,"entry":"a.html","files":[{"path":"a.html","type":"text/html","size":9223372036854775807},{"path":"b.html","type":"text/html","size":9223372036854775807}]}"#
+        var d = Data([0, 0, 0, UInt8(idx.utf8.count)]); d.append(Data(idx.utf8)); d.append(Data(repeating: 0, count: 8))
+        XCTAssertThrowsError(try PublishBundle.parse(d))
+    }
     func testPublishLinkNeedsAFileIdAndAKey() {
         let key = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
         let l = PublishLink(URL(string: "https://publish.example.org/f/abc123#k=\(key)")!)
