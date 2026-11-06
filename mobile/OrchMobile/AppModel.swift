@@ -315,7 +315,10 @@ final class AppModel {
     func send(_ draft: MessageDraft, to target: SendTarget) async throws -> OutboxItem {
         let item = try outbox.enqueue(draft, to: target)
         await flushOutbox()
-        return outbox.item(clientId: item.clientId) ?? item
+        if let now = outbox.item(clientId: item.clientId) { return now }
+        // Already listed by the relay (so removed from the outbox): report it as sent.
+        var done = item; done.sentMessageId = messages.first { $0.clientId == item.clientId }?.id
+        return done
     }
     /// Try a refused message again / drop it.
     func retrySend(_ clientId: String) async { outbox.retry(clientId); await flushOutbox() }

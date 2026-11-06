@@ -29,7 +29,7 @@ final class MockRelayTests: XCTestCase {
     func testSendOnlyToReachable() async throws {
         let m = MockRelay(latency: .zero)
         _ = try await m.send(to: MockRelay.reports, text: "hi", ticket: nil)
-        do { _ = try await m.send(to: "ws_other", text: "x", ticket: nil); XCTFail() } catch { XCTAssertEqual((error as? RelayError).map { if case .api(let s, _, _) = $0 { s } else { 0 } }, 403) }
+        do { _ = try await m.send(to: "ws_other00001", text: "x", ticket: nil); XCTFail() } catch { XCTAssertEqual((error as? RelayError).map { if case .api(let s, _, _) = $0 { s } else { 0 } }, 403) }
     }
     func testSignOutGives401() async throws {
         let m = MockRelay(latency: .zero); try await m.signOut()
