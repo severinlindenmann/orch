@@ -1,9 +1,1 @@
-{
- "workspace-addons/dashboard/src/orch_dashboard/web/app.js": {
-  "Inbox": 1,
-  "Issue": 2
- },
- "workspace-addons/dashboard/src/orch_dashboard/web/index.html": {
-  "Inbox": 1
- }
-}
+{}

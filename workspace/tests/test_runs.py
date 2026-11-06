@@ -144,8 +144,15 @@ def test_two_concurrent_takeovers_of_a_stale_claim_have_one_winner(proj, new_tic
         assert runs.read(proj, tid)["by"] in ("x", "y")
 
 
-def test_status_without_a_runner_says_nobody_will_start_it(proj, new_ticket, run):
+def test_status_without_a_run_says_none_is_active(proj, new_ticket, run):
     tid = new_ticket()
+    code, out, _ = run("run", "status", tid)
+    assert code == 0 and out.strip() == f"No run is active for this ticket. Start one: orch run start {tid}"
+
+
+def test_status_with_queued_input_and_no_runner_says_queued(proj, new_ticket, run):
+    tid = new_ticket()
+    runs.pending_add(proj, tid, "phone", "message", "hello")
     code, out, _ = run("run", "status", tid)
     assert code == 0 and out.strip() == (
         f"Queued. Nothing will start it: no background add-on is running here. Start it: orch run start {tid}"

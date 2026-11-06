@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--once", action="store_true", help="one pass, wait for the agents, then stop")
     sub.add_parser("start", parents=[common], help="run in the background")
     sub.add_parser("stop", parents=[common], help="stop the background run")
-    sub.add_parser("status", parents=[common], help="is it running?")
+    sub.add_parser("status", parents=[common], help="is it running? (exit 0 when running, 1 when stopped)")
     sub.add_parser("list", parents=[common], help="next wake-ups and repeats")
     sub.add_parser("migrate", parents=[common], help="take over what the old scheduler left (safe to repeat)")
     sub.add_parser("needs", parents=[common], help="rows for `orch needs`")
@@ -162,7 +162,7 @@ def _run(args, root: Path) -> int:
         ls = listen.read(root) if pid else {}
         listening = bool(pid and ls.get("listening"))
         heard = "Listening for the phone and other workspaces." if listening else (ls.get("note") or NOT_LISTENING)
-        line = f"Scheduler running (pid {pid}). {heard}" if pid else "Scheduler is not running."
+        line = f"Automation is running (pid {pid}). {heard}" if pid else "Automation is not running."
         out({"running": bool(pid), "pid": pid, "listening": listening}, line)
         return 0 if pid else 1
     elif args.cmd == "migrate":
