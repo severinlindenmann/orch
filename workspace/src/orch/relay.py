@@ -794,6 +794,14 @@ def _by_relay(frm: str) -> str:
     return f"agent:relay from {frm}"
 
 
+def _mark_described(root: Path, mid: str) -> None:
+    st = _v3_state(root)
+    if mid not in st["described"]:
+        st["described"].append(mid)
+        st["described"] = st["described"][-V3_STATE_KEEP:]
+        _v3_save(root, st)
+
+
 def _ticket_exists(root: Path, tid) -> bool:
     try:
         tickets.load(root, str(tid))
@@ -827,7 +835,14 @@ def _v3_path(root: Path) -> Path:
 def _v3_state(root: Path) -> dict:
     s = net.read_json(_v3_path(root), {})
     s = s if isinstance(s, dict) else {}
-    for k, v in (("acked", []), ("working", {}), ("lang", {}), ("saved", {}), ("tries", {})):
+    for k, v in (
+        ("acked", []),
+        ("working", {}),
+        ("lang", {}),
+        ("saved", {}),
+        ("tries", {}),
+        ("described", []),
+    ):
         if not isinstance(s.get(k), type(v)):
             s[k] = v
     return s
@@ -843,7 +858,10 @@ def _num(v) -> float | None:
 
 
 PHONE_BLOB_MAX = 25 * 1024 * 1024
-PHONE_TRIES = 5  # pulls a phone message is retried after a transient relay error, then it is marked seen
+PHONE_TRIES = (
+    5  # tries after a transient relay error, and at least PHONE_RETRY_SECONDS since the first failure,
+)
+PHONE_RETRY_SECONDS = 60  # then the last pull finishes the message without the files it could not fetch
 
 
 class Transient(Refused):
@@ -879,7 +897,7 @@ def _fetch_blob(root: Path, blob_id, size, sha256=None) -> bytes | None:
     return raw
 
 
-def _save_phone_file(root: Path, tid: str, mid: str, att: dict) -> str:
+def _save_phone_file(root: Path, tid: str, mid: str, att: dict, final: bool = False) -> str:
     """Download one attachment of a phone text into .orch/tickets/<tid>/files/ and return the line the agent
     sees. Name, kind and mime come from the phone and are not trusted: only a cleaned base name is used."""
     kind = att.get("kind")
@@ -889,7 +907,12 @@ def _save_phone_file(root: Path, tid: str, mid: str, att: dict) -> str:
     st = _v3_state(root)
     if (done := st.setdefault("saved", {}).get(key)) and (root / done).is_file():
         return f"{label}: {done}"  # a retry of this message: never download or save it twice
-    raw = _fetch_blob(root, att.get("blob_id"), att.get("size"), att.get("sha256"))
+    try:
+        raw = _fetch_blob(root, att.get("blob_id"), att.get("size"), att.get("sha256"))
+    except Transient:
+        if not final:
+            raise
+        raw = None  # last try: the ticket is finished without this file
     if raw is None:
         return f"{label} {shown}: could not be downloaded."
     try:
@@ -943,7 +966,7 @@ def _more(n: int, what: str) -> str:
     return f"  (+{n} more {what} not shown)"
 
 
-def _describe(root: Path, tid: str, mid: str, who: str, body: dict) -> str:
+def _describe(root: Path, tid: str, mid: str, who: str, body: dict, final: bool = False) -> str:
     """What a phone text says in plain words for the ticket's history and the agent: the text, the voice
     transcript (and its language), saved photos and files (paths), the location with a map link and the
     feedback on a proof. Files are downloaded on the way."""
@@ -970,7 +993,7 @@ def _describe(root: Path, tid: str, mid: str, who: str, body: dict) -> str:
     for att in atts[:LISTED]:
         if isinstance(att, dict):
             try:
-                lines.append(_save_phone_file(root, tid, mid, att))
+                lines.append(_save_phone_file(root, tid, mid, att, final))
             except Transient:
                 raise
             except (Refused, OSError):
@@ -1074,12 +1097,14 @@ def send_working(root: Path) -> list[str]:
     return sent
 
 
-def _continue(root: Path, tid: str, mid: str, who: str, by: str, body: dict, general: bool) -> None:
+def _continue(
+    root: Path, tid: str, mid: str, who: str, by: str, body: dict, general: bool, final: bool = False
+) -> None:
     """A phone text into an existing ticket (or the General ticket): queue it for the running agent, then
     record it. Same message id twice = once."""
     if mid in _relay_ext(root, tid).get("messages", []):
         return
-    text = _describe(root, tid, mid, who, body)
+    text = _describe(root, tid, mid, who, body, final)
     if general:
         text += f'\n(Phone message {mid}. To make a ticket of it: orch relay topic --from {mid} "<title>")'
     runs.pending_add(root, tid, who, "message", text, "phone", "p_" + mid[2:])
@@ -1102,7 +1127,7 @@ def _continue(root: Path, tid: str, mid: str, who: str, by: str, body: dict, gen
     tickets.apply_op(root, tid, op)
 
 
-def _phone_text(root: Path, msg: dict) -> tuple[str, str]:
+def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     """Act on a text from a phone (under relay.lock). General (body.general) goes to the hidden General
     ticket, a text naming a local ticket continues it, any other makes a new ticket. Every phone text gets
     an ack (reply_to = its id) and later a "working" update. Idempotent by message id.
@@ -1119,13 +1144,13 @@ def _phone_text(root: Path, msg: dict) -> tuple[str, str]:
         return f"added to {tid}", tid
     if tid is None and general:
         tid = tickets.ensure_general(root, by)
-        _continue(root, tid, mid, who, by, body, True)
+        _continue(root, tid, mid, who, by, body, True, final)
         _working_add(root, mid, frm, tid, True, "item")
         _ack_once(root, mid, frm, tid, True, "Got it")
         return "General conversation", tid
     if tid is None and msg.get("ticket") and _ticket_exists(root, msg["ticket"]):
         tid = msg["ticket"]
-        _continue(root, tid, mid, who, by, body, False)
+        _continue(root, tid, mid, who, by, body, False, final)
         _working_add(root, mid, frm, tid, False, "item")
         _ack_once(root, mid, frm, tid, False, "Got it")
         return f"added to {tid}", tid
@@ -1134,10 +1159,11 @@ def _phone_text(root: Path, msg: dict) -> tuple[str, str]:
         t = tickets.create(root, _phone_title(root, str(body.get("text") or spoken or ""), frm), by)
         tid = t["id"]
         tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
-    if not any(h.get("via") == "phone" for h in tickets.load(root, tid)["history"]):
+    if mid not in _v3_state(root)["described"]:
         # also the retry of a message whose files could not be fetched the first time (Transient)
-        text = _describe(root, tid, mid, who, body)
+        text = _describe(root, tid, mid, who, body, final)
         tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"))
+        _mark_described(root, mid)
         _working_add(root, mid, frm, tid, False, "run")
     _ack_once(root, mid, frm, tid, False, f"Got it: {tickets.load(root, tid)['title']}"[:300])
     return f"new ticket {tid}", tid
@@ -1150,20 +1176,32 @@ def topic(root: Path, mid: str, title: str, by: str) -> dict:
     msg = load_message(root, mid)
     if msg.get("type") != "text" or not str(msg.get("from", "")).startswith("ph_"):
         raise Refused(f"{mid} is not a text from a phone.")
-    for t in tickets.list_all(root):
-        if _relay_ext(root, t["id"]).get("message") == mid:
-            raise Refused(f"That message already started {t.get('key') or t['id']}.")
-    title = " ".join(clean_untrusted(title, 400).split())[:200].strip()
-    if not title:
-        raise Refused("A topic needs a title.")
     frm = msg["from"]
     body = msg.get("body") if isinstance(msg.get("body"), dict) else {}
     who = _line(name_of(root, frm), 100) or _line(frm, 100)
+    for t in tickets.list_all(root):
+        if _relay_ext(root, t["id"]).get("message") == mid:
+            if mid in _v3_state(root)["described"]:
+                raise Refused(f"That message already started {t.get('key') or t['id']}.")
+            # started but never finished (an error half way): finish it now
+            tid = t["id"]
+            text = _describe(root, tid, mid, who, body, True)
+            tickets.apply_op(root, tid, lambda tk, text=text: tickets.add_history(tk, by, text, "phone"))
+            _mark_described(root, mid)
+            st = _v3_state(root)
+            st["acked"].append(mid)
+            _v3_save(root, st)
+            ack = send_text(root, frm, f"Got it: {t['title']}"[:300], tid, "ack", mid)
+            return {"ticket": tid, "key": t.get("key"), "message": ack}
+    title = " ".join(clean_untrusted(title, 400).split())[:200].strip()
+    if not title:
+        raise Refused("A topic needs a title.")
     t = tickets.create(root, title, by)
     tid = t["id"]
     tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
-    text = _describe(root, tid, mid, who, body)
+    text = _describe(root, tid, mid, who, body, True)
     tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"))
+    _mark_described(root, mid)
     st = _v3_state(root)
     st["acked"].append(mid)  # this ack names the ticket; the General "Got it" is not sent again
     _v3_save(root, st)
@@ -1333,19 +1371,22 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
             elif typ == "text" and str(m.get("from", "")).startswith("ph_"):
                 with locked(root):
                     if m["id"] not in seen(root):
+                        tr = _v3_state(root)["tries"].get(m["id"])
+                        final = (
+                            isinstance(tr, dict)
+                            and tr.get("n", 0) >= PHONE_TRIES
+                            and time.time() - float(tr.get("first", 0)) >= PHONE_RETRY_SECONDS
+                        )
                         try:
-                            note, applied = _phone_text(root, m)
-                        except Transient as e:
+                            note, applied = _phone_text(root, m, final)
+                        except Transient:
                             st = _v3_state(root)
-                            n = int(st["tries"].get(m["id"], 0)) + 1
-                            st["tries"][m["id"]] = n
+                            tr = st["tries"].get(m["id"])
+                            tr = tr if isinstance(tr, dict) else {"n": 0, "first": time.time()}
+                            st["tries"][m["id"]] = {"n": int(tr.get("n", 0)) + 1, "first": tr.get("first")}
                             st["tries"] = dict(list(st["tries"].items())[-V3_STATE_KEEP:])
                             _v3_save(root, st)
-                            if n < PHONE_TRIES:
-                                continue  # not marked seen: the next pull tries again
-                            note = (
-                                f"could not fetch this phone message's files: {clean_untrusted(str(e), 200)}"
-                            )
+                            continue  # not marked seen: the next pull tries again (the last one finishes it)
                         except (Refused, OSError, ValueError, KeyError, TypeError) as e:
                             # one bad message never blocks the ones behind it: it is marked seen with a note
                             note = f"could not use this phone message: {clean_untrusted(str(e), 200)}"

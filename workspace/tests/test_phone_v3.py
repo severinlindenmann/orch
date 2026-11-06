@@ -711,7 +711,9 @@ def test_new_topic_with_a_transient_blob_error_is_described_on_retry(proj, run, 
     assert any("a.pdf" in h["text"] for h in full["history"]) and len(acks(conn)) == 1
 
 
-def test_five_transient_failures_mark_the_message_seen_with_a_note(proj, run, new_ticket, conn, monkeypatch):
+def test_transient_failures_give_up_by_count_and_time_then_finish_without_the_file(
+    proj, run, new_ticket, conn, monkeypatch
+):
     tid = new_ticket("T")
     conn.blobs["b_ph0nef1le0000002"] = b"%PDF"
     att = {
@@ -722,15 +724,75 @@ def test_five_transient_failures_mark_the_message_seen_with_a_note(proj, run, ne
         "mime": "application/pdf",
     }
     calls = _flaky_blob(monkeypatch, 99)
-    conn.inbox.append(msg(M1, {"attachments": [att]}, ticket=tid))
-    outs = []
-    for _ in range(5):
+    conn.inbox.append(msg(M1, {"text": "see", "attachments": [att]}, ticket=tid))
+    for _ in range(7):  # five tries used up, but 60 s have not passed: still retried, still kept
         conn.acked.clear()
-        outs.append(run("relay", "inbox")[1])
-    assert "could not fetch" in outs[-1] and calls["n"] == 5
+        run("relay", "inbox")
+    assert calls["n"] == 7 and not acks(conn)
+    monkeypatch.setattr(relay, "PHONE_RETRY_SECONDS", 0)
     conn.acked.clear()
     run("relay", "inbox")
-    assert calls["n"] == 5, "seen now: not tried again"
+    hist = [h["text"] for h in json.loads(run("ticket", "show", tid, "--json")[1])["history"]]
+    assert any("File a.pdf: could not be downloaded." in h for h in hist) and len(acks(conn)) == 1
+    n = calls["n"]
+    conn.acked.clear()
+    run("relay", "inbox")
+    assert calls["n"] == n, "seen now: not tried again"
+
+
+def test_new_ticket_is_never_left_empty_after_the_last_try(proj, run, conn, monkeypatch):
+    conn.blobs["b_ph0nef1le0000002"] = b"%PDF"
+    att = {
+        "blob_id": "b_ph0nef1le0000002",
+        "kind": "file",
+        "name": "a.pdf",
+        "size": 4,
+        "mime": "application/pdf",
+    }
+    _flaky_blob(monkeypatch, 99)
+    monkeypatch.setattr(relay, "PHONE_RETRY_SECONDS", 0)
+    conn.inbox.append(msg(M1, {"text": "Offerte", "attachments": [att]}))
+    for _ in range(relay.PHONE_TRIES + 1):
+        conn.acked.clear()
+        run("relay", "inbox")
+    (t,) = tickets_listed(run)
+    full = json.loads(run("ticket", "show", t["id"], "--json")[1])
+    assert any("could not be downloaded" in h["text"] for h in full["history"])
+    assert len(acks(conn)) == 1 and acks(conn)[0]["ticket"] == t["id"]
+    assert M1[2:] and relay._v3_state(proj)["working"].get(M1)
+
+
+def test_described_guard_is_per_message_not_any_phone_history(proj, run, conn, monkeypatch):
+    # a ticket that already has a phone history line from another message still gets this message described
+    conn.inbox.append(msg(M1, {"text": "first"}))
+    run("relay", "inbox")
+    (t,) = tickets_listed(run)
+    assert M1 in relay._v3_state(proj)["described"]
+    st = relay._v3_state(proj)
+    st["described"] = []
+    relay._v3_save(proj, st)
+    conn.acked.clear()
+    run("relay", "inbox")  # seen: nothing happens
+    from orch import tickets
+
+    assert sum("first" in h["text"] for h in tickets.load(proj, t["id"])["history"]) == 1
+
+
+def test_topic_finishes_a_ticket_that_was_started_but_never_described(proj, run, conn, monkeypatch):
+    conn.inbox.append(msg(GEN, {"text": "Rechnungen exportieren", "general": True}))
+    run("relay", "inbox")
+    from orch import tickets
+
+    t = tickets.create(proj, "CSV export", "agent:x")
+    tickets.ext_set(
+        proj, t["id"], "relay", json.dumps({"origin": "phone", "from": PHONE, "message": GEN}), "agent:x"
+    )
+    code, out, err = run("relay", "topic", "--from", GEN, "ignored", "--json")
+    assert code == 0, err
+    full = tickets.load(proj, t["id"])
+    assert any("Rechnungen exportieren" in h["text"] for h in full["history"])
+    assert acks(conn)[-1]["ticket"] == t["id"] and acks(conn)[-1]["reply_to"] == GEN
+    assert run("relay", "topic", "--from", GEN, "again")[0] == 2, "now it is really started"
 
 
 def test_blob_download_is_bounded_and_state_defaults_are_repaired(proj, run, conn):
