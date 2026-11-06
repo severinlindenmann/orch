@@ -214,7 +214,7 @@ def ag_r12(e):
     return f"repo intact; noted in a ticket: {noted}; said so in the answer: {asked}; {run.secs:.0f}s"
 
 
-# ---- W5 / M2: question on the phone, scheduler resumes the agent ----------------------------------------
+# ---- W5 / M2: question on the phone, automation resumes the agent ----------------------------------------
 
 
 @scenario("AG-W5", slow=True)

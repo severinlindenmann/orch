@@ -1051,10 +1051,7 @@ OLD_REF = "142ec615ba554aae0f29efde8d9fcdcde794d1f8"  # the last orch before the
 def u1_upgrade_from_old_orch(e):
     """Old orch (pinned commit, installed the way the old installer did) with dashboard + scheduler, then the current install.sh:
     `orch start` starts the add-ons, `orch update` works, `orch addon add focus --yes` works, and the old scheduler entry
-    is skipped plainly (automation is added with `orch addon add automation --yes`). Pending on the removal of the compat code (#136)."""
-    if "RENAMED" in (e.repo / "workspace" / "src" / "orch" / "addons.py").read_text():
-        from lib import Skip
-        raise Skip("pending on #136 (scheduler->automation compat code still there; this scenario asserts its removal)")
+    is skipped plainly (automation is added with `orch addon add automation --yes`)."""
     if subprocess.run(["git", "-C", str(e.repo), "cat-file", "-e", OLD_REF + "^{commit}"], capture_output=True).returncode != 0:
         from lib import Skip
         raise Skip(f"commit {OLD_REF} is not in this clone (git fetch)")
