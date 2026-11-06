@@ -28,7 +28,7 @@ def _step_text(name: str, inp: dict) -> str:
     target = inp.get("file_path") or inp.get("path") or inp.get("pattern") or inp.get("url")
     if name == "Bash":
         first = str(inp.get("command", "")).strip().splitlines()[:1]
-        return "Run " + (first[0][:80] if first else "a command")
+        return "Run " + (ev.redact(first[0])[:80] if first else "a command")
     verb = _WORDS.get(name, name)
     if target:
         return f"{verb} {os.path.basename(str(target)) or target}"[:120]

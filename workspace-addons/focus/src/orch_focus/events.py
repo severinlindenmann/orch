@@ -43,6 +43,16 @@ def redact(text: str) -> str:
     return out
 
 
+def _redact_all(v):
+    if isinstance(v, str):
+        return redact(v)
+    if isinstance(v, dict):
+        return {k: _redact_all(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_redact_all(x) for x in v]
+    return v
+
+
 def now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -54,9 +64,9 @@ def make(
     if kind not in KINDS:
         raise ValueError(f"unknown event kind {kind}")
     d = {k: v for k, v in data.items() if v is not None}
-    for k in ("command",):
-        if k in d:
-            d[k] = redact(d[k])[:500]
+    d = _redact_all(d)  # every string in data, whatever its key
+    if "command" in d:
+        d["command"] = d["command"][:500]
     d["source"] = source
     return {
         "v": 1, "at": at or now(), "run": run, "ticket": ticket, "agent": agent, "kind": kind,

@@ -132,3 +132,35 @@ def test_unknown_kind_refused_by_make_and_skipped_by_reader(tmp_path):
     log.path.parent.mkdir(parents=True)
     log.path.write_text('{"kind":"future.thing"}\nnot json\n')
     assert log.read()[0] == []
+
+
+def test_evidence_in_task_done_is_redacted():
+    w = TicketWatcher(RUN, TID)
+    secret = "ghp_" + "a" * 30
+    c = {
+        "id": "c1",
+        "text": "x",
+        "done": True,
+        "evidence": [{"type": "note", "ref": "r", "text": f"token {secret}"}],
+    }
+    out = w.feed({"checklist": [c], "questions": []})
+    assert secret not in json.dumps(out) and "[hidden]" in out[0]["data"]["evidence"]
+
+
+def test_make_redacts_every_data_string():
+    secret = "ghp_" + "b" * 30
+    e = ev.make(RUN, TID, "main", "tool.end", "ok", "adapter", other=secret, nested={"a": [secret]})
+    assert secret not in json.dumps(e)
+
+
+def test_secret_crossing_char_80_is_hidden_in_step_text():
+    secret = "ghp_" + "c" * 30
+    cmd = "echo " + "x" * 70 + " " + secret
+    assert cmd.index(secret) < 80 < cmd.index(secret) + len(secret)
+    m = ClaudeMapper(RUN, TID)
+    line = {
+        "type": "assistant",
+        "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": cmd}}]},
+    }
+    out = m.feed(line)
+    assert "ghp_" not in json.dumps(out)
