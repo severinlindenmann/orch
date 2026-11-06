@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
 
@@ -273,49 +273,48 @@ def build(root: Path, now: datetime | None = None) -> dict:
     pid = service.running_pid(root, clean=False)
     blocks: list[dict] = []
 
-    nxt = events[0][0] if events else None
-    blocks.append({"type": "stat", "label": "Next run", "value": _in(nxt - now) if nxt else "none planned"})
-    today = now.strftime("%Y-%m-%d")
-    blocks.append({"type": "stat", "label": "Runs today", "value": sum(r["at"].startswith(today) for r in runs)})
-    if runs and runs[-1]["exit"] != 0:
-        blocks.append({"type": "stat", "label": "Last run failed", "value": f"exit {runs[-1]['exit']}", "tone": "bad"})
-
-    local = now.astimezone()
-    days = []
-    for i in range(7):
-        d = (local + timedelta(days=i)).date()
-        start = datetime.combine(d, time.min, tzinfo=local.tzinfo).astimezone(UTC)
-        end = datetime.combine(d + timedelta(days=1), time.min, tzinfo=local.tzinfo).astimezone(UTC)
-        days.append({"date": d.isoformat(), "items": _day_items(tickets, now, start, end, i == 0)})
-    blocks.append({"type": "calendar", "days": days})
-
-    items = [{"title": clean(e[1]["title"]), "subtitle": clean(e[2], 200), "link": e[1]["id"]} for e in events]
-    blocks.append({"type": "list", "title": "Next runs", "items": items[:10], "more": max(0, len(items) - 10)})
     sched_rows = _schedules(tickets, now)
-    blocks.append({"type": "list", "title": "Schedules", "items": sched_rows[:20], "more": max(0, len(sched_rows) - 20)})
+    on = sum(1 for r in sched_rows if r["toggle"]["on"])
+    if sched_rows:
+        blocks.append({"type": "list", "title": f"Schedules · {on} on", "items": sched_rows[:20], "more": max(0, len(sched_rows) - 20)})
+    else:
+        blocks.append({"type": "list", "title": "Schedules · 0 on", "items": [{
+            "title": "No repeats yet",
+            "subtitle": 'Ask your agent, or run: orch automation repeat <ticket> "daily 07:30"'.replace("<", "").replace(">", "")}]})
 
     ls = listen.read(root) if pid else {}
-    blocks.append({"type": "stat", "label": "Listening", "value": "yes" if ls.get("listening") else "no",
-                   "tone": "good" if ls.get("listening") else "warn"})
     sources = _sources(tickets, ls, bool(pid))
-    blocks.append({"type": "list", "title": "Listen", "items": sources[:20], "more": max(0, len(sources) - 20)})
+    blocks.append({"type": "list", "title": f"Listen · {len(sources)} source{'' if len(sources) == 1 else 's'}",
+                   "items": sources[:20], "more": max(0, len(sources) - 20)})
     warn = needs.rows(root, now)
     if warn:
         blocks.append({"type": "list", "title": "Needs a look", "items": [
             {"title": clean(r["title"]), "subtitle": clean(r["text"], 200), "tone": r["tone"], "link": r["ticket"]}
             for r in warn[:10]]})
 
-    rows = [{"cells": {"ticket": title(r["ticket"]), "state": "good" if r["exit"] == 0 else "bad",
-                       "took": r.get("took", 0), "at": r["at"], "exit": r["exit"]},
-             **({"link": r["ticket"]} if r["ticket"] in by_id else {})} for r in reversed(runs[-20:])]
-    blocks.append({"type": "table", "title": "Recent runs", "columns": [
-        {"key": "ticket", "label": "Ticket", "type": "text"}, {"key": "state", "label": "State", "type": "tone"},
-        {"key": "exit", "label": "Exit", "type": "number"}, {"key": "took", "label": "Took", "type": "duration"},
-        {"key": "at", "label": "When", "type": "date"}], "rows": rows})
+    recent = []
+    for r in reversed(runs[-5:]):
+        ok = r["exit"] == 0
+        when = parse(r["at"]).astimezone().strftime("%a %H:%M")
+        took = r.get("took")
+        how = ("done" + (f" in {max(1, round(took / 60))} min" if isinstance(took, int | float) and took else "")) if ok else "did not finish"
+        row = {"title": title(r["ticket"]), "subtitle": f"{when}" + (f" · {how}" if ok else ""),
+               "chips": [{"label": "Done" if ok else "Stopped", "tone": "good" if ok else "bad"}]}
+        if r["ticket"] in by_id:
+            row["link"] = r["ticket"]
+        recent.append(row)
+    if recent:
+        blocks.append({"type": "list", "title": "Recent runs", "items": recent})
 
+    today = now.strftime("%Y-%m-%d")
+    ran = sum(r["at"].startswith(today) for r in runs)
     view = {"schema": "orch.addon-view/1", "generated_at": fmt(now), "blocks": blocks}
     if pid:
-        view.update(notice="Running. Checks every minute.", notice_tone="good")
+        nxt = events[0][0] if events else None
+        line = "Running." + (f" Next run {_in(nxt - now)}." if nxt else " Nothing planned.")
+        if ran >= 5:
+            line += f" Ran {ran} times today."
+        view.update(notice=line, notice_tone="good")
     else:
         view.update(notice="Automation is stopped: nothing starts by itself.", notice_tone="warn")
     return view

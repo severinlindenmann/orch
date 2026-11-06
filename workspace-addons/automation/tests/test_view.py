@@ -30,49 +30,37 @@ def check(view):
 
 
 def blocks(view, type_, title=None):
-    return [b for b in view["blocks"] if b["type"] == type_ and (title is None or b.get("title") == title)]
+    return [b for b in view["blocks"] if b["type"] == type_ and (title is None or b.get("title", "").split(" · ")[0] == title)]
 
 
 def test_empty_view_is_valid(ws):
     v = build(ws, T(8))
     check(v)
-    assert blocks(v, "stat")[0]["value"] == "none planned"
-    assert len(blocks(v, "calendar")[0]["days"]) == 7
+    assert {b["type"] for b in v["blocks"]} == {"list"}  # no stat cards, no calendar, no table
+    (sch,) = blocks(v, "list", "Schedules")
+    assert sch["title"] == "Schedules · 0 on" and 'orch automation repeat ticket "daily 07:30"' in sch["items"][0]["subtitle"]
     assert "stopped" in v["notice"]
-
-
-def test_next_runs_calendar_and_list(ws):
-    add_ticket(ws, "t_wake001", title="Check import", status="waiting",
-               waiting_on={"kind": "time", "until": "2026-11-05T10:00:00Z"})
+def test_schedule_listed_and_old_blocks_gone(ws):
     add_ticket(ws, "t_rec00001", title="Weekly <b>report</b>", ext={"automation": {"recurring": True, "cron": "0 7 * * 1"}})
     v = build(ws, T(8))
     check(v)
-    assert blocks(v, "stat")[0]["value"] == "in 1 d"
-    (lst,) = blocks(v, "list", "Next runs")
-    assert [i["link"] for i in lst["items"]] == ["t_wake001", "t_rec00001"]
-    assert lst["items"][1]["subtitle"] == "Mondays at 07:00 UTC · next Mon 07:00" and "<" not in lst["items"][1]["title"]
+    assert not blocks(v, "stat") and not blocks(v, "calendar") and not blocks(v, "table")
     (rep,) = blocks(v, "list", "Schedules")
+    assert rep["title"] == "Schedules · 1 on"
     assert [(i["title"], i["subtitle"]) for i in rep["items"]] == [("Weekly breport/b", "Mondays at 07:00 UTC · next in 4 d")]
-    days = blocks(v, "calendar")[0]["days"]
-    assert sum(len(d["items"]) for d in days) == 2
-
-
-def test_recent_runs_and_failed_stat(ws):
-    add_ticket(ws, "t_wake002", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+def test_recent_runs_short_list_with_titles(ws):
+    add_ticket(ws, "t_wake002", title="Bank check", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
     s = Scheduler(ws)
     s.tick(T(8))
     (ws / "ended-t_wake002").write_text("")  # ended at once, wrote nothing: a fast fail
     s.tick(T(8, 1))
     v = build(ws, T(9))
     check(v)
-    stats = {b["label"]: b for b in blocks(v, "stat")}
-    assert stats["Last run failed"]["tone"] == "bad" and stats["Runs today"]["value"] == 1
-    (tbl,) = blocks(v, "table", "Recent runs")
-    assert tbl["rows"][0]["cells"]["state"] == "bad" and tbl["rows"][0]["link"] == "t_wake002"
-
-
-def test_good_run_has_duration_and_no_failed_stat(ws):
-    add_ticket(ws, "t_wake003", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    (lst,) = blocks(v, "list", "Recent runs")
+    assert lst["items"][0]["title"] == "Bank check" and lst["items"][0]["chips"][0] == {"label": "Stopped", "tone": "bad"} and lst["items"][0]["link"] == "t_wake002"
+    assert "exit" not in json.dumps(lst).lower()
+def test_good_run_has_duration(ws):
+    add_ticket(ws, "t_wake003", title="Good", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
     s = Scheduler(ws)
     s.tick(T(8))
     import os
@@ -82,10 +70,8 @@ def test_good_run_has_duration_and_no_failed_stat(ws):
     s.tick(T(8, 1))
     v = build(ws, T(9))
     check(v)
-    assert "Last run failed" not in {b["label"] for b in blocks(v, "stat")}
-    assert blocks(v, "table")[0]["rows"][0]["cells"]["exit"] == 0
-
-
+    item = blocks(v, "list", "Recent runs")[0]["items"][0]
+    assert item["chips"][0]["label"] == "Done" and "done in" in item["subtitle"]
 def test_view_is_read_only_and_cli_prints_json(ws, capsys):
     add_ticket(ws, "t_wake004")
     before = sorted(p.name for p in (ws / ".orch").rglob("*") if p.is_file())
@@ -94,34 +80,20 @@ def test_view_is_read_only_and_cli_prints_json(ws, capsys):
     assert before == sorted(p.name for p in (ws / ".orch").rglob("*") if p.is_file())
 
 
-def test_frequent_repeat_is_one_card_per_day_on_every_day(ws):
+def test_frequent_repeat_is_one_row(ws):
     add_ticket(ws, "t_five0001", title="TEST: every 5 min", ext={"automation": {"recurring": True, "cron": "*/5 * * * *"}})
-    add_ticket(ws, "t_three001", title="Every 3 hours", ext={"automation": {"recurring": True, "cron": "0 */3 * * *"}})
-    v = build(ws, T(15, 2))  # 2026-11-05 15:02 UTC
+    v = build(ws, T(15, 2))
     check(v)
-    days = blocks(v, "calendar")[0]["days"]
-    assert len(days) == 7
-    for i, d in enumerate(days):
-        five = [x for x in d["items"] if x["link"] == "t_five0001"]
-        assert len(five) == 1, d  # one card, every day (later days are not empty)
-        assert five[0]["every"] == "Every 5 min" and "288 runs/day" in five[0]["note"]
-        assert five[0]["time"] == ("15:05" if i == 0 else "00:00")
-        assert five[0]["note"] == ("next 15:05 · 288 runs/day" if i == 0 else "288 runs/day")
-        three = [x for x in d["items"] if x["link"] == "t_three001"]  # every 3 h: each time shown
-        assert all("every" not in x for x in three) and len(three) == (2 if i == 0 else 8)
-    (lst,) = blocks(v, "list", "Next runs")
-    assert [i["link"] for i in lst["items"]] == ["t_five0001", "t_three001"]  # one line per ticket
-    assert lst["items"][0]["subtitle"].startswith("Every 5 minutes · next ")
+    (rep,) = blocks(v, "list", "Schedules")
+    assert len(rep["items"]) == 1 and rep["items"][0]["subtitle"].startswith("Every 5 minutes · next ")
+def test_notice_says_next_run_when_running(ws, monkeypatch):
+    from orch_automation import service
 
-
-def test_hourly_shows_times(ws):
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
     add_ticket(ws, "t_hour0001", ext={"automation": {"recurring": True, "cron": "0 * * * *"}})
     v = build(ws, T(8))
     check(v)
-    d = blocks(v, "calendar")[0]["days"][1]
-    assert len(d["items"]) == 20 and all("every" not in x for x in d["items"])  # 24 runs, capped at 20 cards
-
-
+    assert v["notice"].startswith("Running. Next run in ")
 @pytest.mark.parametrize("cron,words", [
     ("* * * * *", "Every minute"),
     ("*/5 * * * *", "Every 5 minutes"),
@@ -178,7 +150,7 @@ def test_listen_section_shows_state_and_arrivals(ws):
     finally:
         mp.undo()
     check(v)
-    assert {b["label"]: b["value"] for b in blocks(v, "stat")}["Listening"] == "yes"
+    assert not blocks(v, "stat")
     (arr,) = blocks(v, "list", "Listen")
     (relay,) = arr["items"]
     assert relay["title"] == "Phone and other workspaces"
@@ -204,7 +176,6 @@ def test_paused_schedule_stays_listed_but_is_not_planned(ws):
     add_ticket(ws, "t_rec00001", title="Close", ext={"automation": {"recurring": True, "cron": "0 8 * * *", "paused": True}})
     v = build(ws, T(7))
     check(v)
-    assert blocks(v, "stat")[0]["value"] == "none planned"
     (row,) = blocks(v, "list", "Schedules")[0]["items"]
     assert row["toggle"]["on"] is False and row["subtitle"].endswith("off")
     assert next(d for d in row["detail"] if d["label"] == "Next run")["value"].startswith("Off")
