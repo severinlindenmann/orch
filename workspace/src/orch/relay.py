@@ -860,7 +860,7 @@ def _save_phone_file(root: Path, tid: str, att: dict) -> str:
     sees. Name, kind and mime come from the phone and are not trusted: only a cleaned base name is used."""
     kind = att.get("kind")
     label = {"image": "Photo", "voice": "Voice recording"}.get(kind, "File")
-    shown = " ".join(clean_untrusted(str(att.get("name", "")), 255).split()) or "file"
+    shown = _line(att.get("name", ""), 80) or "file"
     raw = _fetch_blob(root, att.get("blob_id"), att.get("size"))
     if raw is None:
         return f"{label} {shown}: could not be downloaded."
@@ -872,19 +872,34 @@ def _save_phone_file(root: Path, tid: str, att: dict) -> str:
     return f"{label}: {dest.relative_to(root).as_posix()}"
 
 
+def _line(v, n: int) -> str:
+    """One line of phone-supplied free text: cleaned, whitespace collapsed (no line breaks), cut to n."""
+    return " ".join(clean_untrusted(str(v), n * 2).split())[:n]
+
+
+def _int_in(v, lo: int, hi: int) -> int | None:
+    return v if isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi else None
+
+
+def _frac(v) -> int | None:
+    f = _num(v)
+    return round(f * 100) if f is not None and 0 <= f <= 1 else None
+
+
 def _pin_line(pin: dict) -> str:
     a = pin.get("anchor") if isinstance(pin.get("anchor"), dict) else {}
     kind = a.get("type")
     if kind == "html":
-        where = clean_untrusted(str(a.get("quote") or a.get("selector") or "the page"), 200)
-        where = f'"{" ".join(where.split())}"'
+        q = _line(a.get("quote") or a.get("selector") or "", 200)
+        where = f'"{q}"' if q else "the page"
     elif kind == "pdf":
-        where = f"page {a.get('page')}"
+        page = _int_in(a.get("page"), 1, 99999)
+        where = f"page {page}" if page else "a page"
     else:
-        x, y = _num(a.get("x")), _num(a.get("y"))
-        where = f"the picture at {round((x or 0) * 100)}% across, {round((y or 0) * 100)}% down"
-    said = clean_untrusted(str(pin.get("text") or pin.get("transcript") or ""), 2000)
-    n = pin.get("n") if isinstance(pin.get("n"), int) else "-"
+        x, y = _frac(a.get("x")), _frac(a.get("y"))
+        where = f"the picture at {x}% across, {y}% down" if x is not None and y is not None else "the picture"
+    said = _line(pin.get("text") or pin.get("transcript") or "", 300)
+    n = _int_in(pin.get("n"), 1, 50) or "-"
     return f"  {n}. {where}: {said}".rstrip(": ")
 
 
@@ -901,11 +916,12 @@ def _describe(root: Path, tid: str, who: str, body: dict) -> str:
     voice = body.get("voice")
     if isinstance(voice, dict):
         said = clean_untrusted(str(voice.get("transcript", "")), 2000).strip()
-        lang = clean_untrusted(str(voice.get("lang", "")), 10)
+        lang = str(voice.get("lang", ""))
+        lang = lang if re.fullmatch(r"[a-z]{2}(-[A-Z]{2})?", lang) else "unknown"
         lines.append(
             f'Voice message ({lang}): "{said}"' if said else "Voice message (nothing could be understood)"
         )
-        if re.fullmatch(r"[a-z]{2}(-[A-Z]{2})?", lang):
+        if lang != "unknown":
             st = _v3_state(root)
             st["lang"][tid] = lang
             _v3_save(root, st)
@@ -920,7 +936,7 @@ def _describe(root: Path, tid: str, who: str, body: dict) -> str:
     lat, lon = (_num(loc.get("lat")), _num(loc.get("lon"))) if isinstance(loc, dict) else (None, None)
     if lat is not None and lon is not None:
         if -90 <= lat <= 90 and -180 <= lon <= 180:
-            label = " ".join(clean_untrusted(str(loc.get("label", "")), 200).split())
+            label = _line(loc.get("label", ""), 100)
             q = urllib.parse.urlencode({"ll": f"{lat},{lon}", **({"q": label} if label else {})})
             lines.append(
                 f"Location: {lat:.5f}, {lon:.5f}"
@@ -933,7 +949,10 @@ def _describe(root: Path, tid: str, who: str, body: dict) -> str:
             ticket = tickets.load(root, tid)
         except (Refused, OSError, ValueError):
             ticket = {}
-        title = phone_view.artifact_title(root, ticket, str(fb.get("artifact_id", ""))) or "a file"
+        title = (
+            _line(phone_view.artifact_title(root, ticket, str(fb.get("artifact_id", ""))) or "", 100)
+            or "a file"
+        )
         rev = re.sub(r"[^A-Za-z0-9._:-]", "", str(fb.get("artifact_rev", "")))[:12]
         head = f"Feedback on {title}" + (f" ({rev})" if rev else "")
         if fb.get("verdict") == "approve":
