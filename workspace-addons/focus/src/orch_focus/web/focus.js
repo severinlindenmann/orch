@@ -249,7 +249,7 @@
     const u = v.board.usage, d = v.board.denials;
     const lines = [];
     if (u) lines.push(h('p', {class: 'fx-line ' + (u.status === 'limited' ? 'bad' : 'warn'), text: u.text}));
-    if (v.attention) lines.push(h('p', {class: 'fx-line warn'}, 'Waiting for your OK in the live session. ', h('button', {class: 'btn ghost xs', 'data-act': 'attach', text: 'Open live session'})));
+    if (v.attention) lines.push(h('p', {class: 'fx-line warn'}, (v.why || 'Waiting for your OK in the live session.') + ' ', h('button', {class: 'btn ghost xs', 'data-act': 'attach', text: 'Open live session'})));
     if (v.retry_error) lines.push(h('p', {class: 'fx-line bad', text: 'Could not run it again: ' + v.retry_error}));
     if (d.length) lines.push(h('p', {class: 'fx-line warn', text: d[d.length - 1].text + '. It waits for your OK.'}));
     els.line.replaceChildren(...lines);

@@ -56,9 +56,6 @@ EXT_SCHEMA_MAX = 32 * 1024
 CORE_ADDONS = ("publish", "relay")
 # Separate packages that ship in this repo's workspace-addons/ and are installed on `orch addon add <name>`.
 SHIPPED_ADDONS = ("automation", "dashboard", "focus")
-# Shipped add-ons that were renamed: old name -> new name. Read wherever a name is stored (machine registry,
-# a workspace's .orch/addons.json, consent records), so an upgrade from an old install keeps working.
-RENAMED = {"scheduler": "automation"}
 
 
 # ---------------------------------------------------------------- sources
@@ -180,30 +177,16 @@ def registry() -> list[dict]:
         return []
     if not isinstance(data, list):
         return []
-    return _renamed(
-        [
-            e
-            for e in data
-            if isinstance(e, dict) and isinstance(e.get("name"), str) and isinstance(e.get("source"), str)
-        ]
-    )
-
-
-def _renamed(entries: list[dict]) -> list[dict]:
-    """Built-in entries under an old name get the new name; one entry per name (the first wins)."""
-    out, seen = [], set()
-    for e in entries:
-        if e["source"] == "built-in" and e["name"] in RENAMED:
-            e = {**e, "name": RENAMED[e["name"]]}
-        if e["name"] not in seen:
-            seen.add(e["name"])
-            out.append(e)
-    return out
+    return [
+        e
+        for e in data
+        if isinstance(e, dict) and isinstance(e.get("name"), str) and isinstance(e.get("source"), str)
+    ]
 
 
 def _missing_source(e: dict) -> str | None:
     """Why this entry can not be installed any more (None = it can)."""
-    if e["source"] == "built-in":  # a renamed one has its new name already (_renamed)
+    if e["source"] == "built-in":
         local = _is_local(repo()) and not (Path(repo()) / "workspace-addons" / e["name"]).is_dir()
         return "it no longer ships with orch" if local else None
     return None if Path(e["source"]).is_dir() else f"its folder {e['source']} is gone"
@@ -251,7 +234,7 @@ def _install_tool(entries: list[dict]) -> None:
     """Install orch with these add-ons in one uv tool env. An entry that can not be installed any more is
     left out with a note (it stays in the registry), so one stale entry never blocks the rest."""
     args = ["tool", "install", "--reinstall", spec("workspace")]
-    for e in _renamed(entries):
+    for e in entries:
         why = _missing_source(e)
         if why:
             n = e["name"]
@@ -600,8 +583,7 @@ def record_consent(root: Path, name: str) -> None:
 
 def drop_consent(root: Path, name: str) -> None:
     wid = workspace_id(root)
-    names = {name, *(old for old, new in RENAMED.items() if new == name)}
-    _write_consents([e for e in _consents() if not (e.get("workspace_id") == wid and e.get("name") in names)])
+    _write_consents([e for e in _consents() if not (e.get("workspace_id") == wid and e.get("name") == name)])
 
 
 def _stale_consent(root: Path, name: str) -> bool:
@@ -616,9 +598,8 @@ def consented(root: Path, name: str) -> bool:
     wid = workspace_id(root)
     if wid is None:
         return False
-    names = {name, *(old for old, new in RENAMED.items() if new == name)}
     for rec in _consents():
-        if rec.get("workspace_id") != wid or rec.get("name") not in names:
+        if rec.get("workspace_id") != wid or rec.get("name") != name:
             continue
         try:
             if rec == _record_for(root, rec["name"], wid):
@@ -637,12 +618,7 @@ def listed(root: Path) -> dict[str, dict]:
         return {}
     if not isinstance(a, dict):
         return {}
-    out = {k: v for k, v in a.items() if isinstance(k, str) and NAME_RE.match(k) and isinstance(v, dict)}
-    for old, new in RENAMED.items():  # an old name turned on here means the new one
-        if old in out:
-            v = out.pop(old)
-            out.setdefault(new, v)
-    return out
+    return {k: v for k, v in a.items() if isinstance(k, str) and NAME_RE.match(k) and isinstance(v, dict)}
 
 
 def active(root: Path) -> dict[str, dict]:
@@ -845,7 +821,7 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
         _confirm(m, True, yes)
         entry = {"name": m["name"], "source": str(folder), "version": m["version"]}
     else:
-        name = RENAMED.get(source, source)
+        name = source
         if not NAME_RE.match(name) or name in RESERVED:
             raise Refused(f"'{name}' is not an add-on name.")
         known = next((e for e in reg if e["name"] == name), None)
@@ -948,7 +924,6 @@ def _remove_skill_folders(root: Path, name: str) -> None:
 def remove(root: Path, name: str, purge: bool = False) -> None:
     if not NAME_RE.match(name):
         raise Refused(f"'{name}' is not an add-on name.")
-    name = RENAMED.get(name, name)
     a = listed(root)
     if name not in a:
         raise Refused(f"The {name} add-on is not turned on in this workspace.")
@@ -1056,7 +1031,7 @@ def update(root: Path, project_only: bool = False, after_install: bool = False) 
         reg = registry()
         if reg:
             _install_tool(reg)
-            _save_registry(reg)  # stores renamed entries under their new name
+            _save_registry(reg)
             print("Add-ons installed again: " + ", ".join(e["name"] for e in reg))
         return []
     if not project_only:

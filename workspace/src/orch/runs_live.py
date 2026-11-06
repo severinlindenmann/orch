@@ -7,7 +7,10 @@ process (the wrapper). Input waits in the pending file and is pasted (bracketed 
 the agent says it is idle: the tool's own hooks call `orch run event --kind idle`, a generic agent calls
 `orch run done`. At most 4 live sessions per workspace. A session idle for an hour is closed on the next
 `orch run` call (there is no daemon); its session id stays on the ticket, so the next start continues it.
-Nothing here reads the screen to decide anything.
+Nothing here reads the screen to decide anything, with one exception that only explains: a run still
+"starting" (no hook has fired) is checked against the adapter's live.screens (a question the tool asks
+before it is up, such as whether to trust the folder) and, after STARTUP_SECONDS, is shown as waiting for a
+person instead of "working".
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from orch.errors import Refused
 MAX_LIVE = 4
 IDLE_SECONDS = 60 * 60
 PASTE_DELAY = 0.3
+STARTUP_SECONDS = 60
 KINDS = ("session", "idle", "attention")
 
 
@@ -111,6 +115,9 @@ def start_live(
         tmux(root, "kill-session", "-t", target(tid))  # left over from a crash: the claim is gone
     rec = runs.claim(root, tid, by, name, "live", take_over=take_over, busy_text=busy_text)
     run = rec["run"]
+    # never blocks a start: a screen the tool still shows is explained by check_starting
+    with contextlib.suppress(Exception):
+        adapters.trust_folder(name, root)
     hooks_path = runs.run_dir(root) / f"hooks-{run}.json"
     try:
         hooks = adapters.hooks_doc(name, run, root)
@@ -268,8 +275,15 @@ def send_text(result: dict, tid: str) -> str:
 
 def attach(root: Path, tid: str, watch: bool) -> None:
     rec = runs.read(root, tid)
+    if rec and rec.get("mode") != "live" and runs.state(rec) == "alive":
+        log = f" Or follow its output: tail -f {rec['log']}" if rec.get("log") else ""
+        raise Refused(
+            f"The agent on {tid} works one step at a time, so there is no live session to open. "
+            f"Watch it in Focus: orch focus open {tid}.{log}"
+        )
     if not rec or rec.get("mode") != "live" or not session_exists(root, tid):
-        raise Refused(f"No live session on {tid}. Start one: orch run start {tid}")
+        why = "" if shutil.which("tmux") else " Live sessions need tmux, which is not installed here."
+        raise Refused(f"No live session on {tid}.{why} Start one: orch run start {tid}")
     env = {k: v for k, v in os.environ.items() if k != "TMUX"}
     argv = ["tmux", "-L", socket_name(root), "attach", "-t", target(tid)] + (["-r"] if watch else [])
     os.execvpe("tmux", argv, env)
@@ -330,6 +344,9 @@ def cleanup(root: Path) -> list[str]:
             if session_exists(root, tid):
                 tmux(root, "kill-session", "-t", target(tid))
             continue
+        if st == "alive" and live.get("state") == "starting":
+            check_starting(root, rec)
+            continue
         if st != "alive" or live.get("state") != "idle" or runs.undelivered(root, tid):
             continue
         try:
@@ -342,6 +359,37 @@ def cleanup(root: Path) -> list[str]:
     if closed:
         start_waiting(root)
     return closed
+
+
+def check_starting(root: Path, rec: dict, now: float | None = None) -> str | None:
+    """A live run whose tool has not said it is up: if its pane shows a screen the adapter knows (it waits
+    for a person), or it is still not up after STARTUP_SECONDS, mark it as waiting for a person, with why.
+    Nothing is typed into the pane. The tool's own hooks set the state again once it is up."""
+    tid, run = rec["ticket"], rec["run"]
+    try:
+        age = (time.time() if now is None else now) - runs._parse((rec.get("live") or {})["since"])
+    except (KeyError, ValueError):
+        return None
+    if age < 3:
+        return None
+    pane = tmux(root, "capture-pane", "-p", "-t", target(tid)) if session_exists(root, tid) else None
+    note = None
+    if pane is not None and pane.returncode == 0:
+        note = adapters.screen_note(rec["agent"], root, pane.stdout, tid)
+    if note is None and age >= STARTUP_SECONDS:
+        label = adapters.load(rec["agent"], root)["label"]
+        note = (
+            f"{label} has not started up after a minute. "
+            f"Open the live session to see why: orch run attach {tid}"
+        )
+    if note is None:
+        return None
+    with runs.locked(root, tid):
+        cur = runs.read(root, tid)
+        if cur and cur["run"] == run and (cur.get("live") or {}).get("state") == "starting":
+            cur["live"] = {"state": "attention", "since": tickets.now(), "why": note}
+            runs._write(root, cur)
+    return note
 
 
 def start_waiting(root: Path) -> None:
@@ -365,6 +413,8 @@ def start_waiting(root: Path) -> None:
 def line(rec: dict) -> str:
     """One plain sentence about a live run, for `orch run status`."""
     state = (rec.get("live") or {}).get("state", "starting")
+    if (rec.get("live") or {}).get("why"):
+        return rec["live"]["why"]
     words = {
         "starting": "starting up",
         "idle": "waiting for input",

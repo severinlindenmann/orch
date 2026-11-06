@@ -100,7 +100,6 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("stop", parents=[common], help="stop the background run")
     sub.add_parser("status", parents=[common], help="is it running? (exit 0 when running, 1 when stopped)")
     sub.add_parser("list", parents=[common], help="next wake-ups and repeats")
-    sub.add_parser("migrate", parents=[common], help="take over what the old scheduler left (safe to repeat)")
     sub.add_parser("needs", parents=[common], help="rows for `orch needs`")
     sub.add_parser("view", parents=[common], help="dashboard tab data")
     rp = sub.add_parser("repeat", parents=[common], help="repeat a ticket, or wake it once; say when in plain words")
@@ -165,12 +164,6 @@ def _run(args, root: Path) -> int:
         line = f"Automation is running (pid {pid}). {heard}" if pid else "Automation is not running."
         out({"running": bool(pid), "pid": pid, "listening": listening}, line)
         return 0 if pid else 1
-    elif args.cmd == "migrate":
-        from . import migrate
-
-        res = migrate.run(root)
-        out(res, f"Moved {res['tickets']} ticket(s), {res['files']} file(s)." + (" Settings moved." if res["config"] else "")
-            + (f" {res['note']}" if res.get("note") else ""))
     elif args.cmd == "needs":
         from . import needs
 

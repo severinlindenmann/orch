@@ -232,6 +232,74 @@ def hooks_doc(name: str, run_id: str, root: Path | None = None) -> dict | None:
     }
 
 
+def trust_folder(name: str, root: Path, environ: Mapping[str, str] | None = None) -> str:
+    """Before a live start: tell the tool this folder is trusted, when its adapter declares how (live.trust).
+    Returns "set", "already", "none" (nothing declared) or "skipped" (file missing, unreadable or changing).
+
+    Only the one key is set. The file belongs to the tool, which may write it at the same moment: read it,
+    merge, re-read just before an atomic replace and give up (never clobber) when it changed meanwhile."""
+    t = ((load(name, root).get("live") or {}).get("trust")) if name else None
+    if not t:
+        return "none"
+    # only the workspace the person set up with `orch init` (its consent), never any other folder
+    if not (root / ".orch" / "tickets").is_dir() or (root / ".orch").is_symlink():
+        return "skipped"
+    env = os.environ if environ is None else environ
+    base = Path(env.get(t.get("dir_env") or "", "") or env.get("HOME") or Path.home())
+    f = base / t["file"]
+    folder = str(root.resolve())
+    keys = [folder if k == "{folder}" else k for k in t["path"]]
+    if f.is_symlink():
+        return "skipped"  # never replace a link with a file
+    for _ in range(3):
+        try:
+            raw = f.read_bytes()
+            doc = json.loads(raw)
+        except (OSError, ValueError):
+            return "skipped"
+        if not isinstance(doc, dict):
+            return "skipped"
+        node = doc
+        for k in keys[:-1]:
+            nxt = node.get(k)
+            if nxt is None:
+                nxt = node[k] = {}
+            if not isinstance(nxt, dict):
+                return "skipped"
+            node = nxt
+        if node.get(keys[-1]) is True:
+            return "already"
+        node[keys[-1]] = True
+        tmp = f.with_name(f".{f.name}.orch-{os.getpid()}.tmp")
+        try:
+            mode = f.stat().st_mode & 0o777
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+            with os.fdopen(fd, "w", encoding="utf-8") as out:
+                json.dump(doc, out, indent=2, ensure_ascii=False)
+            if f.read_bytes() != raw:
+                continue  # the tool wrote meanwhile: read again
+            os.replace(tmp, f)
+            return "set"
+        except OSError:
+            return "skipped"
+        finally:
+            tmp.unlink(missing_ok=True)
+    return "skipped"
+
+
+def screen_note(name: str, root: Path | None, text: str, tid: str) -> str | None:
+    """The plain line for a screen that waits for a person (live.screens), or None."""
+    a = load(name, root)
+    for s in (a.get("live") or {}).get("screens") or []:
+        try:
+            hit = re.search(s["match"], text, re.IGNORECASE)
+        except re.error:
+            continue
+        if hit:
+            return s["say"].replace("{label}", a["label"]).replace("{ticket}", tid)
+    return None
+
+
 def session_mode(name: str, root: Path | None = None) -> str:
     """chosen-by-orch | from-output | none"""
     return load(name, root)["session"]["id"]

@@ -62,3 +62,13 @@ If the conversation cannot be continued (another agent, another computer, sessio
 
 A live session needs [tmux](https://github.com/tmux/tmux). Without it, or for agents that cannot run live, `run start` runs the
 task once and stops when the agent exits. Everything else works the same.
+On a Mac: `brew install tmux`. Without it you see the agent's steps in Focus (`orch focus open <id>`) or in its output
+file (`.orch/run/logs/<id>-<run>.log`); `orch run attach` says so instead of opening a screen.
+
+## A live agent that waits before it starts
+
+Some tools ask a question the first time they open a folder (Claude asks whether to trust it). orch answers the trust
+question in the tool's own settings before a live start. If the tool still shows a screen that waits for a person, the run
+shows that question, not "working": open the live session with `orch run attach <id>` and answer it.
+
+Every agent run may use the `orch` command itself, so it can add tasks, tick them and write the summary.

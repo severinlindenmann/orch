@@ -24,7 +24,6 @@ Some add-ons run in the background: `orch start` starts them all, `orch stop` st
 
 ## Automation
 
-Automation was called "scheduler". Repeats set by the old version keep working (they are moved to the new name the first time).
 It never starts an agent by itself: it calls `orch run start <id>`, so there is never a second agent on a ticket and your
 agent settings apply ([agents.md](agents.md)).
 
