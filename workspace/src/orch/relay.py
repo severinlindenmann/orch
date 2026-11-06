@@ -842,26 +842,41 @@ def _num(v) -> float | None:
     return float(v) if isinstance(v, int | float) and not isinstance(v, bool) else None
 
 
-def _fetch_blob(root: Path, blob_id, size) -> bytes | None:
+PHONE_BLOB_MAX = 25 * 1024 * 1024
+
+
+def _fetch_blob(root: Path, blob_id, size, sha256=None) -> bytes | None:
+    """The bytes of a phone upload, or None: bad id, over 25 MB, wrong size, or (when the message names one)
+    wrong sha256."""
     if not re.fullmatch(r"b_[a-z0-9]{16}", str(blob_id)):
+        return None
+    if isinstance(size, int) and not isinstance(size, bool) and size > PHONE_BLOB_MAX:
         return None
     cfg = _cfg(root)
     try:
         _, raw = net.call("GET", f"{cfg['url']}/v1/blobs/{blob_id}", net.auth_headers(cfg), timeout=300)
     except Refused:
         return None
-    if not isinstance(raw, bytes) or (isinstance(size, int) and len(raw) != size):
+    if not isinstance(raw, bytes) or len(raw) > PHONE_BLOB_MAX:
+        return None
+    if isinstance(size, int) and len(raw) != size:
+        return None
+    if isinstance(sha256, str) and hashlib.sha256(raw).hexdigest() != sha256.lower():
         return None
     return raw
 
 
-def _save_phone_file(root: Path, tid: str, att: dict) -> str:
+def _save_phone_file(root: Path, tid: str, mid: str, att: dict) -> str:
     """Download one attachment of a phone text into .orch/tickets/<tid>/files/ and return the line the agent
     sees. Name, kind and mime come from the phone and are not trusted: only a cleaned base name is used."""
     kind = att.get("kind")
     label = {"image": "Photo", "voice": "Voice recording"}.get(kind, "File")
     shown = _line(att.get("name", ""), 80) or "file"
-    raw = _fetch_blob(root, att.get("blob_id"), att.get("size"))
+    key = f"{mid}:{att.get('blob_id')}"
+    st = _v3_state(root)
+    if (done := st.setdefault("saved", {}).get(key)) and (root / done).is_file():
+        return f"{label}: {done}"  # a retry of this message: never download or save it twice
+    raw = _fetch_blob(root, att.get("blob_id"), att.get("size"), att.get("sha256"))
     if raw is None:
         return f"{label} {shown}: could not be downloaded."
     try:
@@ -869,7 +884,11 @@ def _save_phone_file(root: Path, tid: str, att: dict) -> str:
     except Refused:
         name = "file"
     dest = _save_into(tickets.files_dir(root, tid), name, raw)
-    return f"{label}: {dest.relative_to(root).as_posix()}"
+    rel = dest.relative_to(root).as_posix()
+    st["saved"][key] = rel
+    st["saved"] = dict(list(st["saved"].items())[-V3_STATE_KEEP:])
+    _v3_save(root, st)
+    return f"{label}: {rel}"
 
 
 def _line(v, n: int) -> str:
@@ -903,19 +922,27 @@ def _pin_line(pin: dict) -> str:
     return f"  {n}. {where}: {said}".rstrip(": ")
 
 
-def _describe(root: Path, tid: str, who: str, body: dict) -> str:
+DESCRIBE_MAX = 7500  # runs.pending_add takes 8000
+LISTED = 10
+
+
+def _more(n: int, what: str) -> str:
+    return f"  (+{n} more {what} not shown)"
+
+
+def _describe(root: Path, tid: str, mid: str, who: str, body: dict) -> str:
     """What a phone text says in plain words for the ticket's history and the agent: the text, the voice
     transcript (and its language), saved photos and files (paths), the location with a map link and the
     feedback on a proof. Files are downloaded on the way."""
     from orch import phone_view
 
     lines = []
-    text = clean_untrusted(str(body.get("text", "")), 2000)
+    text = _line(body.get("text", ""), 2000)  # one line: it cannot fake the lines orch adds below
     if text:
         lines.append(text)
     voice = body.get("voice")
     if isinstance(voice, dict):
-        said = clean_untrusted(str(voice.get("transcript", "")), 2000).strip()
+        said = _line(voice.get("transcript", ""), 2000)
         lang = str(voice.get("lang", ""))
         lang = lang if re.fullmatch(r"[a-z]{2}(-[A-Z]{2})?", lang) else "unknown"
         lines.append(
@@ -926,12 +953,15 @@ def _describe(root: Path, tid: str, who: str, body: dict) -> str:
             st["lang"][tid] = lang
             _v3_save(root, st)
     atts = body.get("attachments")
-    for att in (atts if isinstance(atts, list) else [])[:10]:
+    atts = atts if isinstance(atts, list) else []
+    for att in atts[:LISTED]:
         if isinstance(att, dict):
             try:
-                lines.append(_save_phone_file(root, tid, att))
+                lines.append(_save_phone_file(root, tid, mid, att))
             except (Refused, OSError):
                 lines.append("A file could not be saved.")
+    if len(atts) > LISTED:
+        lines.append(_more(len(atts) - LISTED, "files"))
     loc = body.get("location")
     lat, lon = (_num(loc.get("lat")), _num(loc.get("lon"))) if isinstance(loc, dict) else (None, None)
     if lat is not None and lon is not None:
@@ -959,10 +989,19 @@ def _describe(root: Path, tid: str, who: str, body: dict) -> str:
             lines.append(f"{head}: \U0001f44d Looks good")
         else:
             lines.append(f"{head}: changes wanted")
-        pins = fb.get("pins")
-        lines += [_pin_line(p) for p in (pins if isinstance(pins, list) else [])[:50] if isinstance(p, dict)]
+        pins = [
+            p for p in (fb.get("pins") if isinstance(fb.get("pins"), list) else []) if isinstance(p, dict)
+        ]
+        lines += [_pin_line(p) for p in pins[:LISTED]]
+        if len(pins) > LISTED:
+            lines.append(_more(len(pins) - LISTED, "comments"))
     first = f"From {who}: {lines[0]}" if lines else f"From {who}: (empty)"
-    return "\n".join([first, *lines[1:]])
+    out = "\n".join([first, *lines[1:]])
+    return (
+        out
+        if len(out) <= DESCRIBE_MAX
+        else out[: DESCRIBE_MAX - 40].rstrip() + "…\n  (the rest is not shown)"
+    )
 
 
 def _ack_once(root: Path, mid: str, to: str, tid: str, general: bool, text: str) -> None:
@@ -1025,7 +1064,7 @@ def _continue(root: Path, tid: str, mid: str, who: str, by: str, body: dict, gen
     record it. Same message id twice = once."""
     if mid in _relay_ext(root, tid).get("messages", []):
         return
-    text = _describe(root, tid, who, body)
+    text = _describe(root, tid, mid, who, body)
     if general:
         text += f'\n(Phone message {mid}. To make a ticket of it: orch relay topic --from {mid} "<title>")'
     runs.pending_add(root, tid, who, "message", text, "phone", "p_" + mid[2:])
@@ -1080,7 +1119,7 @@ def _phone_text(root: Path, msg: dict) -> tuple[str, str]:
         t = tickets.create(root, _phone_title(root, str(body.get("text") or spoken or ""), frm), by)
         tid = t["id"]
         tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
-        text = _describe(root, tid, who, body)
+        text = _describe(root, tid, mid, who, body)
         tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"))
         _working_add(root, mid, frm, tid, False, "run")
     _ack_once(root, mid, frm, tid, False, f"Got it: {tickets.load(root, tid)['title']}"[:300])
@@ -1106,7 +1145,7 @@ def topic(root: Path, mid: str, title: str, by: str) -> dict:
     t = tickets.create(root, title, by)
     tid = t["id"]
     tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
-    text = _describe(root, tid, who, body)
+    text = _describe(root, tid, mid, who, body)
     tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"))
     st = _v3_state(root)
     st["acked"].append(mid)  # this ack names the ticket; the General "Got it" is not sent again
@@ -1277,7 +1316,11 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
             elif typ == "text" and str(m.get("from", "")).startswith("ph_"):
                 with locked(root):
                     if m["id"] not in seen(root):
-                        note, applied = _phone_text(root, m)
+                        try:
+                            note, applied = _phone_text(root, m)
+                        except (Refused, OSError, ValueError, KeyError, TypeError) as e:
+                            # one bad message never blocks the ones behind it: it is marked seen with a note
+                            note = f"could not use this phone message: {clean_untrusted(str(e), 200)}"
                         auto = True
                         _mark_seen(root, m["id"])  # last
             elif typ in ("delegate", "start") and not _allowed_or_made(root, m):

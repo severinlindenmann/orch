@@ -102,7 +102,12 @@ def records(root: Path) -> list[dict]:
 
 
 def live_alive(root: Path) -> list[dict]:
-    return [r for r in records(root) if r.get("mode") == "live" and runs.state(r) == "alive"]
+    """Live runs that count against MAX_LIVE (the hidden General ticket's run does not)."""
+    return [
+        r
+        for r in records(root)
+        if r.get("mode") == "live" and runs.state(r) == "alive" and not tickets.is_general(root, r["ticket"])
+    ]
 
 
 # ---------------------------------------------------------------- start

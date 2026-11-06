@@ -347,6 +347,14 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
     return out
 
 
+def is_general(root: Path, tid: str) -> bool:
+    """True for the hidden General ticket (reads one file; a missing or unreadable ticket is not General)."""
+    try:
+        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("general") is True
+    except (OSError, ValueError, Refused, AttributeError):
+        return False
+
+
 def general_id(root: Path) -> str | None:
     """The id of this workspace's hidden General ticket, or None before the first General text."""
     for t in list_all(root, include_general=True):

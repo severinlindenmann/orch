@@ -356,6 +356,19 @@ def mark_delivered_locked(root: Path, tid: str, ids: list[str]) -> None:
 def mark_delivered(root: Path, tid: str, ids: list[str]) -> None:
     with locked(root, tid):
         mark_delivered_locked(root, tid, ids)
+    notify_working(root)
+
+
+def notify_working(root: Path) -> None:
+    """A phone text just went into a run (or its run exists): tell the phone "Working" now, not on the next
+    inbox pull. Best effort, never fails the run; the pull stays as the fallback."""
+    try:
+        from orch import relay
+
+        if (relay._v3_path(root)).is_file():
+            relay.send_working(root)
+    except Exception:  # noqa: BLE001 - nothing here may break a run
+        return
 
 
 # ---------------------------------------------------------------- claim, renew, release
@@ -413,7 +426,8 @@ def claim(
         if any(not i.get("delivered_at") for i in _pending_read(root, tid)):
             rec["pending"] = True
         _write(root, rec)
-        return rec
+    notify_working(root)
+    return rec
 
 
 def set_process(root: Path, tid: str, run: str, pid: int, **fields) -> bool:
