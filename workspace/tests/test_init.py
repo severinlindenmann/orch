@@ -129,6 +129,7 @@ def test_codex_only_needs_only_agents_md(proj, run, monkeypatch):
     assert (proj / ".agents/skills/orch/SKILL.md").is_file() and not (proj / ".claude").exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink")
 def test_files_entries_come_from_the_data(proj, monkeypatch):
     reg = adapters._registry()
     monkeypatch.setitem(

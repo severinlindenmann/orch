@@ -275,7 +275,12 @@ def test_start_refuses_a_gitignore_link_outside(svc, proj, run, tmp_path):
 
 
 @NO_WIN_LINKS
-def test_claude_md_linked_to_agents_md_inside_still_works(proj, run):
+def test_claude_md_linked_to_agents_md_inside_still_works(proj, run, monkeypatch):
+    from orch import adapters
+
+    monkeypatch.setattr(
+        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+    )
     (proj / "AGENTS.md").write_text("# mine\n", encoding="utf-8")
     (proj / "CLAUDE.md").symlink_to("AGENTS.md")
     assert run("init")[0] == 0
