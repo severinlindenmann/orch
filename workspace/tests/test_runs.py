@@ -309,3 +309,47 @@ def test_orch_writes_of_a_hand_started_agent_renew_its_claim(proj, new_ticket, r
     assert runs.state(runs.read(proj, tid)) == "maybe-stale"
     run("log", tid, "mine", "--by", "agent:hand")
     assert runs.state(runs.read(proj, tid)) == "alive"
+
+
+def test_a_reader_holding_the_record_open_does_not_break_a_write_or_delete(proj, new_ticket, monkeypatch):
+    """Windows refuses os.replace/unlink on a file another process has open for a moment: wait it out."""
+    from orch import procs
+
+    monkeypatch.setattr(procs, "_FILE_BUSY", True)
+    tid = new_ticket()
+    rec = runs.claim(proj, tid, "agent:a", "fake", "oneshot")
+    real_replace, real_unlink = os.replace, runs.Path.unlink
+    busy = {"replace": 2, "unlink": 2}
+
+    def replace(a, b):
+        if busy["replace"]:
+            busy["replace"] -= 1
+            raise PermissionError(13, "in use")
+        return real_replace(a, b)
+
+    def unlink(self, *a, **k):
+        if busy["unlink"] and self.name.endswith(".json"):
+            busy["unlink"] -= 1
+            raise PermissionError(13, "in use")
+        return real_unlink(self, *a, **k)
+
+    monkeypatch.setattr(procs.os, "replace", replace)
+    monkeypatch.setattr(procs.Path, "unlink", unlink)
+    assert runs.set_process(proj, tid, rec["run"], os.getpid())
+    assert runs.release(proj, tid, rec["run"])["released"]
+    assert runs.read(proj, tid) is None and busy == {"replace": 0, "unlink": 0}
+
+
+def test_permission_errors_are_not_retried_off_windows(monkeypatch):
+    from orch import procs
+
+    monkeypatch.setattr(procs, "_FILE_BUSY", False)
+    calls = []
+
+    def op():
+        calls.append(1)
+        raise PermissionError(13, "no")
+
+    with pytest.raises(PermissionError):
+        procs._wait_free(op)
+    assert calls == [1]

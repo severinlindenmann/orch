@@ -6,6 +6,7 @@ import os
 import subprocess
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 
 
 def _iso(ts: float) -> str:
@@ -47,6 +48,34 @@ def pid_started(pid: int) -> str | None:
         return _iso(time.mktime(time.strptime(text, "%a %b %d %H:%M:%S %Y")))
     except Exception:
         return None
+
+
+# Windows refuses to replace or delete a file another process has open (Python opens files without
+# FILE_SHARE_DELETE), and our small JSON files are read lock-free all the time. That refusal is
+# momentary, so it is waited out here, in the one place every replace/delete of such a file goes through.
+_FILE_BUSY = os.name == "nt"
+FILE_BUSY_SECONDS = 5.0
+
+
+def replace(src, dst) -> None:
+    """os.replace that waits out a reader holding the target open (Windows only)."""
+    _wait_free(lambda: os.replace(src, dst))
+
+
+def unlink(path) -> None:
+    """Path.unlink(missing_ok=True) that waits out a reader holding the file open (Windows only)."""
+    _wait_free(lambda: Path(path).unlink(missing_ok=True))
+
+
+def _wait_free(op) -> None:
+    end = time.monotonic() + FILE_BUSY_SECONDS
+    while True:
+        try:
+            return op()
+        except PermissionError:
+            if not _FILE_BUSY or time.monotonic() > end:
+                raise
+            time.sleep(0.005)
 
 
 _tokens: dict[int, str] = {}

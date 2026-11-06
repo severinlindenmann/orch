@@ -143,7 +143,7 @@ def locked(root: Path, tid: str):
         yield
     finally:
         with contextlib.suppress(OSError):
-            lock.unlink()
+            procs.unlink(lock)
 
 
 def _atomic(path: Path, text: str, mode: int = 0o666) -> None:
@@ -153,7 +153,7 @@ def _atomic(path: Path, text: str, mode: int = 0o666) -> None:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)  # private from the first byte
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
-        os.replace(tmp, path)
+        procs.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -171,7 +171,7 @@ def _write(root: Path, rec: dict) -> None:
 
 
 def _delete(root: Path, tid: str) -> None:
-    record_path(root, tid).unlink(missing_ok=True)
+    procs.unlink(record_path(root, tid))
 
 
 def _running(pid, started) -> bool:
