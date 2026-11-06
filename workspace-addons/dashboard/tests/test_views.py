@@ -148,10 +148,12 @@ KITDIR = Path(__file__).resolve().parents[3] / "workspace" / "src" / "orch_ui" /
 
 
 def test_kit_copy_is_in_sync_with_orch_ui():
-    if not KITDIR.is_dir():
-        pytest.skip("workspace kit not next to this add-on")
+    """Every kit css/js file (not the demo pages) is copied next to the page, served, and byte-equal."""
+    assert KITDIR.is_dir(), "the workspace kit folder must be next to this add-on in the repo"
     from orch_dashboard.server import KIT
-    for name in KIT:
+    kit = sorted(p.name for p in KITDIR.iterdir() if p.suffix in (".css", ".js") and not p.name.startswith("demo"))
+    assert kit and kit == sorted(KIT), "server.KIT must list exactly the kit files"
+    for name in kit:
         assert (WEBDIR / "kit" / name).read_bytes() == (KITDIR / name).read_bytes(), f"copy kit/{name} again"
 
 
@@ -180,3 +182,12 @@ def test_server_serves_the_kit_files_and_nothing_else_under_kit(server):
     for bad in ("../app.js", "nothing.css", "x/../tokens.css"):
         with pytest.raises(urllib.error.HTTPError):
             urllib.request.urlopen(f"{server}/kit/{bad}")
+
+
+def test_no_html_strings_for_server_text_in_the_page_code():
+    """Text from tickets, people and add-ons goes through DOM builders (textContent); only icons use innerHTML."""
+    for line in (WEBDIR / "app.js").read_text().splitlines():
+        for bad in ("insertAdjacentHTML", "outerHTML", "document.write", "eval("):
+            assert bad not in line, line
+        if "innerHTML" in line:
+            assert "iconEl" in line or "ic-wrap" in line, line
