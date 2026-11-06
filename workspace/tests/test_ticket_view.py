@@ -218,3 +218,43 @@ def test_redact_and_safe_url_units():
     assert phone_view.safe_url("javascript:alert(1)") is None
     assert phone_view.safe_url("https://user:pw@example.ch/a") == "https://example.ch/a"
     assert phone_view.safe_url("file:///etc/passwd") is None
+
+
+@pytest.mark.parametrize(
+    "kind", ["dotdot", "absolute", "secrets", "linked_folder", "linked_file", "other_ticket"]
+)
+def test_proof_refs_that_leave_the_evidence_folder_are_never_uploaded(proj, run, new_ticket, conn, kind):
+    import os
+
+    tid = new_ticket("Sneaky ref")
+    other = new_ticket("Other")
+    run("check", "add", tid, "a")
+    sec = proj / ".orch/secrets"
+    sec.mkdir(parents=True, exist_ok=True)
+    (sec / "token.txt").write_text("orn_SECRET")
+    ev_dir = proj / ".orch/tickets" / tid / "evidence"
+    ref = f".orch/tickets/{tid}/evidence/x.png"
+    if kind == "dotdot":
+        ref = f".orch/tickets/{tid}/evidence/../../../secrets/token.txt"
+    elif kind == "absolute":
+        ref = str(sec / "token.txt")
+    elif kind == "secrets":
+        ref = ".orch/secrets/token.txt"
+    elif kind == "linked_folder":
+        ev_dir.parent.mkdir(parents=True, exist_ok=True)
+        os.symlink(sec, ev_dir)
+        ref = f".orch/tickets/{tid}/evidence/token.txt"
+    elif kind == "linked_file":
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        os.symlink(sec / "token.txt", ev_dir / "x.png")
+    elif kind == "other_ticket":
+        d = proj / ".orch/tickets" / other / "evidence"
+        d.mkdir(parents=True)
+        (d / "x.png").write_bytes(b"other")
+        ref = f".orch/tickets/{other}/evidence/x.png"
+    t = tickets.load(proj, tid)
+    t["checklist"][0].update(done=True, evidence=[{"type": "file", "ref": ref, "role": "result"}])
+    tickets.save(proj, t)
+    run("relay", "send", "phones", "x", "--ticket", tid, "--update", "result")
+    assert not conn.blobs, kind
+    assert views(conn)[0]["body"]["ticket_view"]["attachments"] == []

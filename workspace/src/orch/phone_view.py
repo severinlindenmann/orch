@@ -15,7 +15,9 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import os
 import re
+import stat
 import time
 import urllib.parse
 from pathlib import Path
@@ -116,16 +118,52 @@ def phone_proof(root: Path, ticket: dict) -> list[dict]:
     return out
 
 
-def _proof_file(root: Path, tid: str, ev: dict) -> Path | None:
-    """A copied proof file of this ticket (.orch/tickets/<tid>/evidence/<name>), never anything else."""
+def _proof_file(root: Path, tid: str, ev: dict) -> tuple[str, bytes] | None:
+    """(name, bytes) of a copied proof file of this ticket, .orch/tickets/<tid>/evidence/<name>, never
+    anything else: the ref has exactly that shape, no part on the way is a link, the real path stays in
+    the ticket's evidence folder (never .orch/secrets), and the file is opened without following links
+    and read from that handle (at most 25 MB)."""
     ref = str(ev.get("ref", ""))
     parts = ref.split("/")
-    if len(parts) != 5 or parts[:4] != [".orch", "tickets", tid, "evidence"] or parts[4] in ("", ".", ".."):
+    name = parts[4] if len(parts) == 5 else ""
+    if (
+        len(parts) != 5
+        or parts[:4] != [".orch", "tickets", tid, "evidence"]
+        or name in ("", ".", "..")
+        or "\\" in ref
+        or "\0" in ref
+        or not tickets._ID_RE.fullmatch(tid)
+    ):
         return None
-    p = root / ref
-    if p.is_symlink() or not p.is_file() or p.stat().st_size > tickets.MAX_PROOF_BYTES:
+    base = Path(os.path.realpath(root))
+    cur = base
+    for part in parts:
+        cur = cur / part
+        if cur.is_symlink():
+            return None
+    folder = base / ".orch" / "tickets" / tid / "evidence"
+    real = Path(os.path.realpath(cur))
+    secrets = Path(os.path.realpath(net.secrets_dir(base)))
+    if real.parent != folder or real == secrets or secrets in real.parents:
         return None
-    return p
+    try:
+        fd = os.open(real, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        return None
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        try:
+            same = os.lstat(cur)  # still the file we checked (not swapped while we looked)
+        except OSError:
+            return None
+        if (st.st_dev, st.st_ino) != (same.st_dev, same.st_ino):
+            return None
+        if not stat.S_ISREG(st.st_mode) or st.st_size > tickets.MAX_PROOF_BYTES:
+            return None
+        data = f.read(tickets.MAX_PROOF_BYTES + 1)
+    if len(data) > tickets.MAX_PROOF_BYTES:
+        return None
+    return name, data
 
 
 def _state_path(root: Path) -> Path:
@@ -145,11 +183,10 @@ def save_state(root: Path, s: dict) -> None:
     net.write_json(_state_path(root), s, True)
 
 
-def _upload(root: Path, p: Path, state: dict) -> dict | None:
+def _upload(root: Path, data: bytes, state: dict) -> dict | None:
     """Upload a proof file once (cached by content); {blob_id, size} or None when the relay says no."""
     from orch import relay
 
-    data = p.read_bytes()
     sha = hashlib.sha256(data).hexdigest()
     got = state["blobs"].get(sha)
     if got and time.time() - got.get("at", 0) < BLOB_DAYS * 86400:
@@ -173,16 +210,16 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
     for ev in phone_proof(root, ticket):
         at = ev["at"] if _TIME.fullmatch(str(ev.get("at"))) else at0
         if ev.get("type") == "file":
-            p = _proof_file(root, tid, ev)
-            b = _upload(root, p, state) if (p and upload and state is not None) else None
+            f = _proof_file(root, tid, ev)
+            b = _upload(root, f[1], state) if (f and upload and state is not None) else None
             if not b:
                 continue
-            kind = "image" if p.suffix.lower() in IMAGE_EXT else "file"
-            name = _clip(p.name, 255) or "file"
+            kind = "image" if Path(f[0]).suffix.lower() in IMAGE_EXT else "file"
+            name = _clip(f[0], 255) or "file"
             out.append(
                 {
                     "kind": kind,
-                    "title": _clip(ev.get("title") or p.name, 200) or name,
+                    "title": _clip(ev.get("title") or f[0], 200) or name,
                     "blob_id": b["blob_id"],
                     "name": name,
                     "size": b["size"],
