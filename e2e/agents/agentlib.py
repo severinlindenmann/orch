@@ -44,7 +44,7 @@ def codex_cmd(ws: Path, prompt: str) -> list[str]:
             "--skip-git-repo-check", "-C", str(ws), prompt]
 
 
-def scheduler_agent_line(e, tool: str) -> str:
+def automation_agent_line(e, tool: str) -> str:
     """The agent command line (`agent = <command>`; sched_config turns it into [workspace] agent + [agents.e2eagent]; same restrictions as the direct runs)."""
     if tool == "claude":
         tools = " ".join(shlex.quote(t) for t in CLAUDE_TOOLS)
@@ -141,7 +141,7 @@ def save_transcript(e, name: str, text: str, append: bool = False) -> None:
         f.write(redact(text, secrets) + "\n")
 
 
-def scheduler_once(e, ws: Path, name: str, timeout: int = 400, env_over: dict | None = None) -> str:
+def automation_once(e, ws: Path, name: str, timeout: int = 400, env_over: dict | None = None) -> str:
     """`orch automation run --once` (starts due agents; then waits for their runs to end). Log files are added to the transcript."""
     env = {**agent_env(e), **(env_over or {})}
     p = subprocess.run(["orch", "automation", "run", "--once"], cwd=ws, env=env, capture_output=True, timeout=timeout)
@@ -150,7 +150,7 @@ def scheduler_once(e, ws: Path, name: str, timeout: int = 400, env_over: dict | 
     while list((ws / ".orch/run/tickets").glob("*.json")) and time.time() < end:
         time.sleep(1)
     logs = sorted((ws / ".orch/run/logs").glob("*.log"))
-    body = f"\n## scheduler run --once in {ws.name}: rc={p.returncode}\n{out}\n"
+    body = f"\n## automation run --once in {ws.name}: rc={p.returncode}\n{out}\n"
     for lg in logs:
         body += f"\n### {lg.name}\n{lg.read_text(errors='replace')[-6000:]}\n"
     save_transcript(e, name, body, append=True)
