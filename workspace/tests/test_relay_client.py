@@ -90,6 +90,15 @@ def test_reply_to_paired_phone(proj, run, rel):
     assert rel.sent[-1]["to"] == phone
 
 
+def test_refresh_handles_the_waiting_refresh_hints(proj, run, rel):
+    """After a refresh the inbox no longer says "new settings are waiting"."""
+    connect(run, rel)
+    rel.inbox.append(msg("m_hint000000000001", "refresh-hint", {}, frm="relay"))
+    assert "new settings are waiting" in run("relay", "inbox")[1]
+    run("relay", "refresh")
+    assert "new settings are waiting" not in run("relay", "inbox")[1]
+
+
 def test_send_by_name_with_two_matching_phones_is_refused(proj, run, rel):
     rel.snapshot["workspaces"]["phones"] = [
         {"id": "ph_aaaaaaaaaa", "name": "Owner iPhone", "online": True, "last_seen": None},

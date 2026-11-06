@@ -1198,6 +1198,11 @@ def refresh(root: Path) -> str:
     finally:
         shutil.rmtree(stage, ignore_errors=True)
     skillrender.refresh_skills(root)
+    with locked(root):  # the refresh-hints waiting in the inbox are handled now
+        for f in (root / ".orch" / "inbox").glob("m_*.json"):
+            m = net.read_json(f, None)
+            if isinstance(m, dict) and m.get("id") == f.stem and m.get("type") == "refresh-hint":
+                _mark_seen(root, f.stem)
     n = len(snap.get("workspaces", {}).get("workspaces", []))
     p = len(snap.get("workspaces", {}).get("phones", []))
     msg = (
