@@ -1323,25 +1323,31 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
     schema = json.loads((CONTRACTS / "addon-view.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(v)
     people, recent = v["blocks"]
-    assert v["notice"] == "Connected." and people["title"] == "Who you can reach · 1"
-    assert people["items"][0]["title"] == "Reports" and "messages and files" in people["items"][0]["subtitle"]
+    assert v["notice"] == "Connected." and people["title"] == "Workspaces you can talk to · 1"
+    assert (
+        people["items"][0]["title"] == "Reports"
+        and people["items"][0]["chips"][0]["label"] == "Messages and files"
+    )
     details = {d["label"]: d["value"] for d in people["items"][0]["detail"]}
     assert details["You may give them tasks"] == "Not yet"
-    titles = [(i["title"], i["chips"][0]["label"]) for i in recent["items"]]
-    assert ("Thanks, got it", "Out · Message") in titles and ("march.csv", "In · File") in titles
-    assert any(i["title"] == "March numbers bready/b" for i in recent["items"])
-    assert any(
-        "2.0 KB" in i["subtitle"] and i["subtitle"].startswith("From Reports") for i in recent["items"]
-    )
+    items = recent["items"]
+    assert {i["title"] for i in items} == {"Reports → you", "you → Reports"}
+    assert any("Thanks, got it" in i["subtitle"] for i in items)  # sent text
+    assert any("March numbers bready/b" in i["subtitle"] for i in items)  # received text, markup stripped
+    assert any(i.get("chips") == [{"label": "march.csv · 2.0 KB"}] for i in items)  # file chip
 
 
-def test_view_not_connected_has_no_blocks(proj, run):
+def test_view_not_connected_says_so(proj, run):
     from conftest import turn_on
 
     turn_on(proj, "relay")
     code, out, _ = run("relay", "view", "--json")
     v = json.loads(out)
-    assert code == 0 and v["blocks"] == [] and "Not connected" in v["notice"]
+    assert (
+        code == 0
+        and "not connected" in v["notice"]
+        and v["blocks"][0]["items"][0]["title"] == "Not connected"
+    )
 
 
 def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):

@@ -119,13 +119,13 @@ def _peers(root: Path) -> list[dict]:
     d = relay._read_dir(root)
     rows = []
     a = relay.allows(root)
-    for kind, label in (("workspaces", "Workspace"), ("phones", "Phone")):
+    for kind, label in (("workspaces", "Workspace"), ("phones", "Your phone")):
         for w in d.get(kind, []):
             if not isinstance(w, dict) or not isinstance(w.get("id"), str):
                 continue
             pid, name = w["id"], plain(w.get("name") or w["id"], 60)
             detail = [{"label": "Messages and files", "value": "Yes"}]
-            words = ["messages and files"]
+            pills = [{"label": "Messages and files", "tone": "good"}]
             if kind == "workspaces":
                 mine = _yes(a["received"], pid, "delegate"), _yes(a["received"], pid, "start")
                 theirs = _yes(a["given"], pid, "delegate"), _yes(a["given"], pid, "start")
@@ -141,12 +141,14 @@ def _peers(root: Path) -> list[dict]:
                         "value": f"Yes ({theirs[1]})" if theirs[1] else "Ask each time",
                     },
                 ]
-                words += (["tasks"] if mine[0] else []) + (["start work"] if mine[1] else [])
+                pills += ([{"label": "Give tasks", "tone": "good"}] if mine[0] else []) + (
+                    [{"label": "Start work", "tone": "good"}] if mine[1] else []
+                )
+            else:  # a paired phone may do all three
+                pills += [{"label": "Give tasks", "tone": "good"}, {"label": "Start work", "tone": "good"}]
             if w.get("description"):
                 detail.append({"label": "About", "value": plain(w["description"], 200)})
-            rows.append(
-                {"title": name, "subtitle": plain(f"{label} · " + ", ".join(words), 200), "detail": detail}
-            )
+            rows.append({"title": name, "subtitle": label, "chips": pills, "detail": detail})
     return rows
 
 
@@ -160,8 +162,20 @@ def view(root: Path) -> dict:
     try:
         net.load_service(root, "relay")
     except Refused:
-        out["notice"] = "Not connected to a relay yet. Ask your admin for the connect line."
+        out["notice"] = "Relay not connected. Connect it in Settings."
         out["notice_tone"] = "warn"
+        out["blocks"].append(
+            {
+                "type": "list",
+                "title": "Relay",
+                "items": [
+                    {
+                        "title": "Not connected",
+                        "subtitle": "Then you see the workspaces you can talk to and their messages here.",
+                    }
+                ],
+            }
+        )
         return out
     peers = _peers(root)
     waiting = len(relay.outbox_list(root))
@@ -175,39 +189,39 @@ def view(root: Path) -> dict:
     out["blocks"].append(
         {
             "type": "list",
-            "title": f"Who you can reach · {len(peers)}",
+            "title": f"Workspaces you can talk to · {len(peers)}",
             "items": peers[:50]
             or [{"title": "Nobody yet", "subtitle": "Ask your admin, then run: orch relay refresh"}],
         }
     )
     rows: list[tuple[str, dict]] = []
+
+    def row(at: str, who: str, arrow: str, type_: str, line: str, extra: str) -> tuple[str, dict]:
+        title = f"{who} → you" if arrow == "in" else f"you → {who}"
+        item: dict = {"title": plain(title, 200)}
+        if type_ == "file":
+            item["subtitle"] = _stamp(at) or "-"
+            item["chips"] = [{"label": plain(f"{line} · {extra}" if extra else line, 40)}]
+        else:
+            item["subtitle"] = plain(" · ".join(x for x in (_stamp(at), line) if x), 200)
+            if type_ != "text":
+                item["chips"] = [{"label": KINDS[type_]}]
+        return at, item
+
     for m in _received(root):
         line, extra = preview(m["type"], m.get("body"))
-        at = str(m.get("created_at") or "")
-        who = relay.name_of(root, m["from"])
         rows.append(
-            (
-                at,
-                {
-                    "title": line,
-                    "subtitle": plain(" · ".join(x for x in (f"From {who}", extra, _stamp(at)) if x), 200),
-                    "chips": [{"label": f"In · {KINDS[m['type']]}"}],
-                },
-            )
+            row(str(m.get("created_at") or ""), relay.name_of(root, m["from"]), "in", m["type"], line, extra)
         )
     for e in _sent(root):
-        who = relay.name_of(root, e["to"])
-        at = str(e.get("at") or "")
         rows.append(
-            (
-                at,
-                {
-                    "title": plain(e.get("preview") or "-"),
-                    "subtitle": plain(
-                        " · ".join(x for x in (f"To {who}", str(e.get("extra") or ""), _stamp(at)) if x), 200
-                    ),
-                    "chips": [{"label": f"Out · {KINDS[e['type']]}"}],
-                },
+            row(
+                str(e.get("at") or ""),
+                relay.name_of(root, e["to"]),
+                "out",
+                e["type"],
+                plain(e.get("preview") or "-"),
+                str(e.get("extra") or ""),
             )
         )
     rows.sort(key=lambda r: r[0], reverse=True)
