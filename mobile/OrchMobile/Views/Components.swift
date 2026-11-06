@@ -162,3 +162,45 @@ struct ModelMessage: View {
         }
     }
 }
+
+struct DayDivider: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text).themeFont(13).foregroundStyle(Theme.muted).padding(.vertical, 12).frame(maxWidth: .infinity)
+    }
+}
+
+struct JumpToLatestButton: View {
+    let count: Int
+    var body: some View {
+        VStack(spacing: 0) {
+            Image(systemName: "arrow.down").themeFont(18)
+            if count > 0 { Text("\(count)").themeFont(11, .semibold) }
+        }.frame(minWidth: 44, minHeight: 44).foregroundStyle(Theme.brand)
+            .background(Theme.surface3, in: Circle()).accessibilityLabel(count > 0 ? "Jump to latest, \(count) unread" : "Jump to latest")
+            .accessibilityIdentifier("jump-latest")
+    }
+}
+
+struct StatusLine: View {
+    let text: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(text).themeFont(13)
+            if reduceMotion { dots(phase: 0) }
+            else { TimelineView(.animation(minimumInterval: 0.4)) { context in dots(phase: Int(context.date.timeIntervalSinceReferenceDate * 2.5) % 3) } }
+            Spacer(minLength: 0)
+        }.foregroundStyle(Theme.muted).padding(.horizontal, 16).padding(.vertical, 7).background(Theme.surface)
+            .accessibilityElement(children: .ignore).accessibilityLabel(text)
+    }
+    private func dots(phase: Int) -> some View {
+        HStack(spacing: 3) { ForEach(0..<3) { index in Circle().frame(width: 3, height: 3).opacity(reduceMotion || phase == index ? 1 : 0.3) } }.accessibilityHidden(true)
+    }
+}
+
+struct PresenceDot: View {
+    var body: some View { Circle().fill(Theme.brand).frame(width: 6, height: 6).accessibilityHidden(true) }
+}
