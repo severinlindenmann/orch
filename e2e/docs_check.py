@@ -176,9 +176,10 @@ def check_file(env: Env, path: Path, fast: bool, servers: Servers | None, only_l
     ws = env.tmp / f"ws-{path.stem}"
     ws.mkdir()
     (ws / "report.csv").write_text("item,total\nwidgets,12\n")
-    for cmd in (["config", "agent", "add", "my-agent", "--command", "my-agent {prompt}"],
-                ["config", "set", "workspace.agent", "my-agent"]):
-        env.run(["orch", *cmd], ws)  # the agent the docs talk about is already chosen
+    if not any(t[:3] == ["config", "agent", "add"] for _, t, _ in ((n, tk[1:], g) for n, tk, g in lines)):
+        for cmd in (["config", "agent", "add", "my-agent", "--command", "my-agent {prompt}"],
+                    ["config", "set", "workspace.agent", "my-agent"]):
+            env.run(["orch", *cmd], ws)  # the agent the docs talk about is already chosen (unless the file adds it)
     needs_server = any(t == "server" for _, _, t in lines)
     if needs_server and servers:
         servers.connect(env, ws)

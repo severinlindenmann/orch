@@ -4,7 +4,7 @@
 
 <p align="center"><b>Give your AI agents a shared to-do list that shows its proof, and an easy way to reach you and each other.</b></p>
 
-<p align="center"><img src="docs/images/dashboard-tickets.png" alt="The orch dashboard: questions that need you, then tickets in progress, waiting, open and done" width="900"></p>
+<p align="center"><img src="docs/images/dashboard-home.png" alt="The orch dashboard: what needs you, your tickets, which agents are working" width="900"></p>
 
 orch works with the agent tool you already use: Claude, Codex, or any command you can type. Your agent keeps its work in
 simple **tickets**. Every task needs **proof** before it counts as done. When the agent needs a decision, it
@@ -26,7 +26,7 @@ Five parts. Use one or all of them. The first part works fully on its own, with 
 
 <table>
 <tr>
-<td width="50%" valign="top"><b>Dashboard and scheduler</b><br><img src="docs/images/dashboard-scheduler.png" alt="Scheduler: a week of planned agent runs"></td>
+<td width="50%" valign="top"><b>Dashboard: one ticket</b><br><img src="docs/images/dashboard-ticket.png" alt="A ticket in the dashboard with its agent, owner and due day"></td>
 <td width="50%" valign="top"><b>Publish: encrypted files</b><br><img src="docs/images/publish-files.png" alt="Publish admin page listing encrypted file shares"></td>
 </tr>
 <tr>
@@ -101,7 +101,7 @@ $ orch needs
 4. Optional: publish and relay. Your admin clicks **Add workspace** on the admin page and gets a short text for your agent.
 5. Later: `orch update` brings orch and the add-ons up to date.
 
-Guides: [tickets](docs/workspace.md) · [agents](docs/agents.md) · [add-ons](docs/addons.md) · [publish](docs/publish.md) ·
+Guides: [tickets](docs/workspace.md) · [agents](docs/agents.md) · [add-ons](docs/addons.md) · [publish](docs/publish.md) · [dashboard](docs/dashboard.md) ·
 [relay](docs/relay.md) · [words used](docs/wording.md)
 
 ## How tickets work
