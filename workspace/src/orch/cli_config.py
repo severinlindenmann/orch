@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -117,10 +118,18 @@ def test_agent(root: Path, name: str) -> dict:
         return result(False, f"{label} is not installed.")
     stdin = TEST_PROMPT if adapters.prompt_via_stdin(name, root) else None
     t0 = time.monotonic()
+    scratch = tempfile.mkdtemp(prefix="orch-agent-test-")  # an empty folder: the agent cannot touch the workspace
+    try:
+        return _run_test(argv, stdin, scratch, label, t0, result)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _run_test(argv, stdin, scratch, label, t0, result) -> dict:
     try:
         proc = subprocess.Popen(
             argv,
-            cwd=root,
+            cwd=scratch,
             stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
