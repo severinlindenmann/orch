@@ -10,7 +10,7 @@ def test_snapshot_single_file(ws):
     assert "window.ORCH_SNAPSHOT=" in html and "<style>" in html
     assert 'href="style.css"' not in html and 'src="app.js"' not in html and 'href="tokens.css"' not in html
     data = json.loads(re.search(r"window\.ORCH_SNAPSHOT=(.*?);</script>", html, re.DOTALL).group(1))
-    assert data["inbox"] is None and any(t["id"] == "t_7k3f9q" for t in data["tickets"])
+    assert any(t["id"] == "t_7k3f9q" for t in data["tickets"])
     assert "orn_SECRET" not in html and "weekly report query" not in html  # inbox text stays local
 
 

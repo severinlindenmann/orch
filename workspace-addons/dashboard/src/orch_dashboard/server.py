@@ -26,6 +26,7 @@ def web_file(name: str) -> bytes:
 
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = 10  # a short body must not hold a thread
     def __init__(self, *a, root: Path, orch_bin: str | None, puller: ViewPuller, **kw):
         self.root, self.orch_bin, self.puller = root, orch_bin, puller
         self.nonce = os.environ.get("ORCH_DASHBOARD_NONCE", "")
@@ -120,7 +121,7 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n))
             if not isinstance(body, dict) or set(body) - {"op", "args"}:
                 raise ValueError
-        except ValueError:
+        except (ValueError, RecursionError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
         try:
             code, text, extra = actions.run_op(self.root, self.orch_bin, body.get("op"), body.get("args", {}))
@@ -131,7 +132,7 @@ class Handler(BaseHTTPRequestHandler):
         if code != 200:
             hdr = {"X-Revision": str(extra["revision"])} if extra else None
             return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
-        self._send(200, json.dumps(load_state(self.root, orch_bin=self.orch_bin)).encode(), "application/json")
+        self._send(200, json.dumps(load_state(self.root, orch_bin=self.orch_bin, fresh=True)).encode(), "application/json")
 
 
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:

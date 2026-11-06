@@ -146,15 +146,15 @@ else: sys.exit(2)
     s = load_state(ws, orch_bin=str(script))
     assert s["needs"][0]["id"] == "question:t_1:q1"
     assert s["services"] == [{"addon": "automation", "running": False}]
-    assert s["runs"]["t_7k3f9q"]["running"] is False and "t_other1x" not in s["runs"]
-    assert not any(k.startswith("t_other") and "done" in k for k in s["runs"])
+    active = next(t["id"] for t in s["tickets"] if t["status"] in ("active", "waiting"))
+    assert s["runs"][active]["running"] is False
+    assert all(next(t for t in s["tickets"] if t["id"] == k)["status"] in ("active", "waiting") for k in s["runs"])
 
 
 def test_dashboard_source_names_no_addon():
     from pathlib import Path
-    # the act path (the old inbox/snapshot code names relay/publish; P2 removes it)
     src = Path(actions.__file__).parent
-    text = (src / "actions.py").read_text() + (src / "server.py").read_text()
+    text = "".join((src / f).read_text() for f in ("actions.py", "server.py", "data.py"))
     for name in ("scheduler", "automation", "relay", "focus", "publish", "wiki"):
         assert not re.search(rf"\b{name}\b", text, re.IGNORECASE), name
 
@@ -163,3 +163,34 @@ def test_snapshot_state_has_no_needs_services_or_runs(ws, act_orch):
     from orch_dashboard.data import load_state
     s = load_state(ws, orch_bin=str(act_orch), with_addons=False)
     assert s["needs"] == [] and s["services"] == [] and s["runs"] == {}
+
+
+def test_runs_are_cached_between_polls(ws, tmp_path):
+    from orch_dashboard import data
+    d = tmp_path / "c"
+    d.mkdir()
+    script = d / "orch"
+    import sys
+    script.write_text(f"""#!{sys.executable}
+import json, sys, pathlib
+a = sys.argv[1:]
+if a[:2] == ["run", "status"]:
+    open(pathlib.Path(__file__).parent / "n", "a").write("x")
+    print(json.dumps({{"running": True}}))
+else: sys.exit(2)
+""")
+    script.chmod(0o755)
+    data._RUNS.clear()
+    data.load_state(ws, orch_bin=str(script))
+    n1 = len((d / "n").read_text())
+    data.load_state(ws, orch_bin=str(script))
+    assert len((d / "n").read_text()) == n1  # second poll: no new calls
+    data.load_state(ws, orch_bin=str(script), fresh=True)
+    assert len((d / "n").read_text()) == 2 * n1
+
+
+def test_trailing_newline_ids_and_deep_json_are_refused(act_server, act_orch):
+    assert post(act_server, {"op": "log", "args": {"ticket": "t_abcdef\n", "text": "a"}})[0] == 400
+    assert post(act_server, {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "due": "2026-11-30\n"}})[0] == 400
+    assert post(act_server, None, raw="[" * 100000)[0] == 400
+    assert acts(act_orch) == []

@@ -13,9 +13,9 @@ import subprocess
 from pathlib import Path
 
 MAX_TEXT = 2000
-TID = re.compile(r"^t_[a-z0-9]{6,16}$")
-QID = re.compile(r"^q[0-9]{1,4}$")
-DAY = re.compile(r"^(\d{4}-\d\d-\d\d)?$")
+TID = re.compile(r"t_[a-z0-9]{6,16}")
+QID = re.compile(r"q[0-9]{1,4}")
+DAY = re.compile(r"(\d{4}-\d\d-\d\d)?")
 PATCH_KEYS = ("title", "status", "owner", "due", "note", "summary")
 STATUSES = ("open", "active", "waiting", "done", "dropped")
 
@@ -29,13 +29,13 @@ class Unavailable(Exception):
 
 
 def _tid(v) -> str:
-    if not isinstance(v, str) or not TID.match(v):
+    if not isinstance(v, str) or not TID.fullmatch(v):
         raise BadRequest("That is not a ticket id.")
     return v
 
 
 def _qid(v) -> str:
-    if not isinstance(v, str) or not QID.match(v):
+    if not isinstance(v, str) or not QID.fullmatch(v):
         raise BadRequest("That is not a question id.")
     return v
 
@@ -90,7 +90,7 @@ def _ticket_patch(a):
     for k, v in data.items():
         if k == "status" and v not in STATUSES:
             raise BadRequest("That is not a status.")
-        if k == "due" and not (isinstance(v, str) and DAY.match(v)):
+        if k == "due" and not (isinstance(v, str) and DAY.fullmatch(v)):
             raise BadRequest("The due day must look like 2026-11-30.")
         if k not in ("status", "due"):
             _text(v, k, empty=k in ("owner", "note"))
@@ -105,7 +105,7 @@ def _ticket_edit(a):
     for k in ("owner", "due", "note"):
         if k in a:
             v = _text(a[k], k, empty=True)
-            if k == "due" and not DAY.match(v):
+            if k == "due" and not DAY.fullmatch(v):
                 raise BadRequest("The due day must look like 2026-11-30.")
             flags.append(f"--{k}={v}")
     if not flags:

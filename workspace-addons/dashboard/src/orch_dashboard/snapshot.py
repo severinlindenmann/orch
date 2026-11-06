@@ -22,7 +22,7 @@ def _inline_json(obj) -> str:
 def render_snapshot(root: Path, with_addons: bool = False, orch_bin: str | None = None) -> str:
     """Return the snapshot as one HTML string (css, js, logo and data inline)."""
     orch_bin = orch_bin or os.environ.get("ORCH_BIN") or None
-    state = load_state(root, include_inbox=False, orch_bin=orch_bin, with_addons=with_addons)
+    state = load_state(root, orch_bin=orch_bin, with_addons=with_addons)
     if with_addons:  # the user asked: add-on tabs go along, each with one pulled view
         puller = ViewPuller(root, orch_bin)
         state["views"] = {a["name"]: puller.pull(a["name"]) for a in state["addons"] if a["dashboard"]}
