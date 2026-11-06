@@ -381,7 +381,8 @@
   function size(bytes) {
     const value = Number(bytes);
     if (!Number.isFinite(value) || value < 0) return '';
-    return value >= 1048576 ? `${(value / 1048576).toFixed(1).replace(/\.0$/, '')} MB` : `${Math.max(1, Math.round(value / 1024))} KB`;
+    if (value < 1024) return `${value} ${value === 1 ? 'byte' : 'bytes'}`;
+    return value < 1048576 ? `${(value / 1024).toFixed(1).replace(/\.0$/, '')} KB` : `${(value / 1048576).toFixed(1).replace(/\.0$/, '')} MB`;
   }
   function workspaceName(id) { return workspaces.find(w => w.id === id)?.name || 'Unknown workspace'; }
   function safeUrl(value) {
