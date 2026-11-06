@@ -1,0 +1,21 @@
+{
+  "schema": "orch.addon-view/1",
+  "generated_at": "2026-11-06T08:00:00Z",
+  "blocks": [
+    { "type": "list", "title": "Schedules", "items": [
+      { "title": "Month-end check", "subtitle": "Every weekday at 08:00 · next Fri 08:00",
+        "toggle": { "on": true, "label": "Month-end check on or off", "action": { "op": "addon.act", "args": { "verb": "toggle", "target": "t_mec009" } } },
+        "detail": [
+          { "label": "Repeats", "value": "Every weekday at 08:00" },
+          { "label": "Last run", "value": "Thu 5 Nov, 08:00 · done", "tone": "good" },
+          { "label": "Webhook address", "value": "https://hooks.example.org/w/abc", "copy": true },
+          { "label": "Recent", "lines": ["14:08 invoice.paid · started a run", "11:30 invoice.paid · started a run"] }
+        ],
+        "tickets": [ { "id": "t_mec009", "key": "MEC-0009", "title": "Reconcile bank balance", "status": { "label": "Blocked", "tone": "warn" } } ],
+        "actions": [
+          { "label": "Run now", "action": { "op": "addon.act", "args": { "verb": "run", "target": "t_mec009" } } },
+          { "label": "Delete", "tone": "bad", "confirm": "Delete this schedule?", "action": { "op": "addon.act", "args": { "verb": "delete", "target": "t_mec009" } } }
+        ] }
+    ] }
+  ]
+}

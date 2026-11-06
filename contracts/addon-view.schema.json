@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://orch.severin.io/contracts/addon-view.schema.json",
   "title": "orch add-on view v1 (stdout of `orch <name> view --json`)",
-  "description": "Pulled by the dashboard (timeout 2 s, max 256 KB). Declarative blocks only, no actions; every string is plain text (rendered with textContent, never as HTML). Unknown block types are skipped. See addon-manifest.md, Views.",
+  "description": "Pulled by the dashboard (timeout 2 s, max 256 KB). Declarative blocks only; the only way back is a list row's `toggle`/`actions` (fixed ops, see $defs/action), never a command; every string is plain text (rendered with textContent, never as HTML). Unknown block types are skipped. See addon-manifest.md, Views.",
   "type": "object",
   "required": ["schema", "generated_at", "blocks"],
   "properties": {
@@ -21,6 +21,7 @@
       "pattern": "^(t_[a-z0-9]{6,16}|https://[^\\s<>\"'`]+|addon:(?![/\\\\])(?!.*\\.\\.)[A-Za-z0-9_./?=&%-]{0,300})$",
       "description": "A ticket id (opens the ticket detail), an https URL (opens in a new tab, rel=noopener noreferrer), or addon:<path>: a page of THIS add-on, resolved only against its own checked [page] url (no '..', no leading '/'). Nothing else."
     },
+    "action": {"type": "object", "required": ["op"], "additionalProperties": false, "description": "A request the dashboard may send back, never a command line. `op` names one entry of the dashboard's fixed op table; unknown ops are not shown. For an add-on's own verbs the op is `addon.act`: the dashboard runs `orch <this add-on> act <verb> -- <target>` for the add-on whose view this is (it cannot name another add-on).", "properties": {"op": {"type": "string", "pattern": "^[a-z][a-z.]{0,31}$"}, "args": {"type": "object", "maxProperties": 6, "propertyNames": {"pattern": "^[a-z_][a-z0-9_]{0,31}$"}, "additionalProperties": {"oneOf": [{"type": "boolean"}, {"type": "number"}, {"type": "string", "maxLength": 200, "pattern": "^[^<>]*$"}]}}}},
     "chip": {
       "type": "object", "required": ["label"], "additionalProperties": false,
       "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 40 }, "tone": { "$ref": "#/$defs/tone" } }
@@ -57,7 +58,11 @@
               "subtitle": { "$ref": "#/$defs/text" },
               "chips": { "type": "array", "maxItems": 6, "items": { "$ref": "#/$defs/chip" } },
               "tone": { "$ref": "#/$defs/tone" },
-              "link": { "$ref": "#/$defs/link" }
+              "link": { "$ref": "#/$defs/link" },
+              "detail": {"type": "array", "maxItems": 12, "description": "Makes the row expandable (accordion): collapsed shows title, subtitle and toggle; expanded shows these labelled fields.", "items": {"type": "object", "required": ["label"], "additionalProperties": false, "properties": {"label": {"$ref": "#/$defs/text", "maxLength": 30}, "value": {"$ref": "#/$defs/text"}, "lines": {"type": "array", "maxItems": 5, "items": {"$ref": "#/$defs/text"}, "description": "Several short lines instead of one value (e.g. recent events)."}, "tone": {"$ref": "#/$defs/tone"}, "copy": {"type": "boolean", "description": "Show a Copy button for `value`."}}}},
+              "tickets": {"type": "array", "maxItems": 10, "description": "Tickets linked to this row, shown in the expanded part; each links to the ticket.", "items": {"type": "object", "required": ["id", "title"], "additionalProperties": false, "properties": {"id": {"type": "string", "pattern": "^t_[a-z0-9]{6,16}$"}, "key": {"$ref": "#/$defs/text", "maxLength": 24}, "title": {"$ref": "#/$defs/text"}, "status": {"$ref": "#/$defs/chip"}}}},
+              "toggle": {"type": "object", "required": ["on", "label", "action"], "additionalProperties": false, "description": "An On/Off switch on the collapsed row. `action` carries the NEW state in its args when sent.", "properties": {"on": {"type": "boolean"}, "label": {"$ref": "#/$defs/text", "maxLength": 60}, "action": {"$ref": "#/$defs/action"}}},
+              "actions": {"type": "array", "maxItems": 4, "description": "Buttons in the expanded part. `confirm` = a short question; the dashboard shows a small Yes/No (no typed word) before sending.", "items": {"type": "object", "required": ["label", "action"], "additionalProperties": false, "properties": {"label": {"$ref": "#/$defs/text", "maxLength": 30}, "action": {"$ref": "#/$defs/action"}, "confirm": {"$ref": "#/$defs/text", "maxLength": 80}, "tone": {"enum": ["neutral", "bad"]}}}}
             }
           }
         },
