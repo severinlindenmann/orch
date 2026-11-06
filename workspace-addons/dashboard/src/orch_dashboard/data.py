@@ -101,6 +101,20 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
     return out
 
 
+def load_settings(root: Path, orch_bin: str | None) -> dict:
+    """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
+    agents, rows = run_orch(orch_bin, ["agents", "--json"], root), run_orch(orch_bin, ["addon", "list", "--json"], root)
+    keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
+    return {
+        "folder": str(root),
+        "agents": [{k: a.get(k) for k in keep} for a in (agents if isinstance(agents, list) else [])
+                   if isinstance(a, dict) and isinstance(a.get("name"), str)],
+        "addons": [{"name": r["name"], "description": str(r.get("description") or "")[:200], "active": r.get("active") is True}
+                   for r in (rows if isinstance(rows, list) else []) if isinstance(r, dict) and isinstance(r.get("name"), str)
+                   and _NAME.match(r["name"])],
+    }
+
+
 def load_services(root: Path, orch_bin: str | None) -> list[dict]:
     """Background add-ons of this workspace, running or not. Source: `orch status --json` only (rows: addon, running, url)."""
     raw = run_orch(orch_bin, ["status", "--json"], root)
@@ -150,6 +164,7 @@ def load_state(root: Path, orch_bin: str | None = None, with_addons: bool = True
         "needs": needs if isinstance(needs, list) else [],
         "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
         "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},
+        "settings": load_settings(root, orch_bin) if with_addons else None,
     }
     state["rev"] = hashlib.sha1(
         json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()).hexdigest()[:12]
