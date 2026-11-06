@@ -123,3 +123,25 @@ def test_config_code_refuses_bad_value(proj, run):
     assert code == 2 and "2 to 4 letters or digits" in err
     code, out, _ = run("config", "get", "workspace.code", "--json")
     assert json.loads(out) == {"workspace.code": None}
+
+
+def test_key_shaped_ids_of_other_commands_pass_through(proj):
+    """Only arguments that name a ticket are resolved: a publish app or file called app-1 stays app-1,
+    even when a ticket APP-1 exists, and an unknown key-shaped name is never refused as a ticket."""
+    import argparse
+
+    from orch import cli
+
+    config.set_code(proj, "APP")
+    tid = tickets.create(proj, "x", "human:tester")["id"]
+    for cmd, sub in (("publish", "delete"), ("publish", "extend"), ("relay", "done"), ("relay", "download")):
+        for value in ("app-1", "app-9"):
+            a = argparse.Namespace(cmd=cmd, sub=sub, id=value)
+            cli._resolve_keys(a, proj)
+            assert a.id == value
+    a = argparse.Namespace(cmd="publish", sub="restart", name="app-1")
+    cli._resolve_keys(a, proj)
+    assert a.name == "app-1"
+    a = argparse.Namespace(cmd="relay", sub="send", id=None, ticket="app-1")
+    cli._resolve_keys(a, proj)
+    assert a.ticket == tid
