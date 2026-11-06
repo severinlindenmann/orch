@@ -74,6 +74,44 @@ def test_a_ticket_done_for_an_hour_closes_its_session(proj, run, closed):
     assert runs_live.cleanup(proj) == [tid]
 
 
+@pytest.mark.parametrize("change", ["state", "input"])
+def test_idle_close_rechecks_under_the_lock(proj, run, closed, monkeypatch, change):
+    """The run became busy, or a message came in, between the read and the close: it is not closed."""
+    tid = _live(proj, run, "idle", 61)
+    stale = runs_live.records(proj)
+    if change == "state":
+        rec = runs.read(proj, tid)
+        runs_live._set_state(proj, tid, rec["run"], "working")
+    else:
+        runs.pending_add(proj, tid, "human:t", "message", "one more thing")
+    monkeypatch.setattr(runs_live, "records", lambda root: stale)
+    assert runs_live.cleanup(proj) == [] and closed == []
+
+
+def test_a_closing_session_gets_no_more_input(proj, run, closed, monkeypatch):
+    tid = _live(proj, run, "idle", 61)
+    assert runs_live.cleanup(proj) == [tid]
+    assert runs.read(proj, tid).get("closing")
+    monkeypatch.setattr(runs_live, "session_exists", lambda root, t: True)
+    pasted = []
+    monkeypatch.setattr(runs_live, "tmux", lambda root, *a, **kw: pasted.append(a))
+    runs.pending_add(proj, tid, "human:t", "message", "late")
+    assert runs_live.deliver(proj, tid) == 0 and pasted == []
+    assert [i["text"] for i in runs.undelivered(proj, tid)] == ["late"]  # kept for the next start
+
+
+def test_a_failed_close_lets_input_in_again(proj, run, monkeypatch):
+    tid = _live(proj, run, "idle", 61)
+    monkeypatch.setattr(runs_live, "start_waiting", lambda root: None)
+
+    def boom(root, rec, interrupt):
+        raise RuntimeError("busy")
+
+    monkeypatch.setattr(runs_live, "_close", boom)
+    assert runs_live.cleanup(proj) == []
+    assert not runs.read(proj, tid).get("closing")
+
+
 # ---------------------------------------------------------------- artifacts
 
 

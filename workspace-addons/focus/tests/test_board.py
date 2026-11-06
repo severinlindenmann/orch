@@ -240,18 +240,31 @@ def test_secret_across_every_limit_is_hidden_on_every_producer_path():
         valid(e)
 
 
-def test_huge_value_is_redacted_fast():
+def test_huge_value_is_redacted_fast(monkeypatch):
+    """Structural, not wall-clock: make() scans only a capped window of a huge value, and redact() is linear
+    (8x the input costs about 8x, never the 64x a quadratic pattern would; the bound is generous for a busy machine)."""
     import time
 
+    seen = []
+    real = ev.redact
+    monkeypatch.setattr(ev, "redact", lambda t: seen.append(len(t)) or real(t))
     big = "a" * (5 * 1024 * 1024)
-    t0 = time.time()
     e = ev.make(RUN, TID, "main", "tool.end", big, "adapter", command=big, other=big + ".orch/secrets")
-    assert time.time() - t0 < 1.0
     assert len(e["text"]) <= 500 and len(e["data"]["command"]) <= 500
-    t0 = time.time()
-    ev.redact("x" * (5 * 1024 * 1024))
-    ev.redact(("path/.orch" + "x") * 200000)
-    assert time.time() - t0 < 2.0
+    assert seen and max(seen) <= 500 + 256 + 4096
+    monkeypatch.undo()
+
+    def best(text):
+        out = []
+        for _ in range(3):
+            t0 = time.perf_counter()
+            ev.redact(text)
+            out.append(time.perf_counter() - t0)
+        return max(min(out), 1e-4)
+
+    for unit in ("x", "path/.orch" + "x", "ghp_ab "):
+        small, large = best(unit * 20000), best(unit * 160000)
+        assert large / small < 32, (unit, small, large)
 
 
 def test_secret_at_the_cap_is_hidden():
