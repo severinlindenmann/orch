@@ -475,7 +475,7 @@
     }
   },
   {
-    "_note": "Phone: my workspaces with open questions.",
+    "_note": "Phone: my workspaces with open questions. muted_until: null, a time, or \"forever\" (PATCH /v1/phone/workspaces/<id>).",
     "request": {
       "method": "GET",
       "path": "/v1/phone/workspaces",
@@ -499,7 +499,8 @@
             ],
             "online": true,
             "last_seen": "2026-11-04T10:41:00Z",
-            "open_questions": 1
+            "open_questions": 1,
+            "muted_until": null
           },
           {
             "id": "ws_home000001",
@@ -510,7 +511,8 @@
             ],
             "online": false,
             "last_seen": "2026-11-03T21:10:00Z",
-            "open_questions": 0
+            "open_questions": 0,
+            "muted_until": "forever"
           }
         ],
         "next": null
@@ -560,7 +562,7 @@
     }
   },
   {
-    "_note": "Phone: text messages with the workspaces on its list (sent to this phone or to phones, and what the phone sent), newest first.",
+    "_note": "Phone: text messages with the workspaces on its list (sent to this phone or to phones, and what the phone sent), newest first. Own texts carry delivered_at (when the workspace acked it from its inbox, else null) and client_id; workspace texts have both null.",
     "request": {
       "method": "GET",
       "path": "/v1/phone/messages",
@@ -587,7 +589,9 @@
                 "text": "Yes, I can answer your phone. The report is ready."
               }
             },
-            "workspace_name": "Pilatus Workspace"
+            "workspace_name": "Pilatus Workspace",
+            "delivered_at": null,
+            "client_id": null
           },
           {
             "message": {
@@ -598,10 +602,13 @@
               "type": "text",
               "created_at": "2026-11-04T10:43:00Z",
               "body": {
-                "text": "Can you answer my phone?"
+                "text": "Can you answer my phone?",
+                "client_id": "c3d4e5f6-0718-4293-a4b5-c6d7e8f90a1b"
               }
             },
-            "workspace_name": "Pilatus Workspace"
+            "workspace_name": "Pilatus Workspace",
+            "delivered_at": "2026-11-04T10:43:05Z",
+            "client_id": "c3d4e5f6-0718-4293-a4b5-c6d7e8f90a1b"
           }
         ],
         "next": null
@@ -609,7 +616,7 @@
     }
   },
   {
-    "_note": "Phone: answer with one tap. The relay builds the answer message.",
+    "_note": "Phone: answer with one tap. The relay builds the answer message. client_id: the phone's id for this answer, kept on retries.",
     "request": {
       "method": "POST",
       "path": "/v1/phone/answer",
@@ -619,13 +626,15 @@
       },
       "body": {
         "question_message_id": "m_q1date0ts0000001",
-        "answer": "TIMESTAMP"
+        "answer": "TIMESTAMP",
+        "client_id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
       }
     },
     "response": {
       "status": 201,
       "body": {
-        "id": "m_an5wer7q2w9e4r6t"
+        "id": "m_an5wer7q2w9e4r6t",
+        "client_id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
       }
     }
   },
@@ -640,7 +649,8 @@
       },
       "body": {
         "question_message_id": "m_q1date0ts0000001",
-        "answer": "DATE"
+        "answer": "DATE",
+        "client_id": "1f2e3d4c-5b6a-4987-8a6b-5c4d3e2f1a0b"
       }
     },
     "response": {
@@ -652,7 +662,7 @@
     }
   },
   {
-    "_note": "Phone: send text (typed or spoken) to Home's inbox.",
+    "_note": "Phone: send text (typed or spoken) to Home's inbox. No ticket and no general: asks for a new topic.",
     "request": {
       "method": "POST",
       "path": "/v1/phone/send",
@@ -662,6 +672,7 @@
       },
       "body": {
         "to": "ws_home000001",
+        "client_id": "0b7a4c1e-9d2f-4e6a-8b3c-5d6e7f809a1b",
         "text": "Book the train to Lucerne for Friday",
         "ticket": null
       }
@@ -669,7 +680,8 @@
     "response": {
       "status": 201,
       "body": {
-        "id": "m_ph0nesend7q2w9e4"
+        "id": "m_ph0nesend7q2w9e4",
+        "client_id": "0b7a4c1e-9d2f-4e6a-8b3c-5d6e7f809a1b"
       }
     }
   },
@@ -1628,6 +1640,739 @@
       "body": {
         "error": "invalid",
         "message": "`ticket` needs `workspace`."
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: upload a photo before sending it (raw bytes, max 25 MB). Kept 90 days.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/blobs",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9",
+        "Content-Type": "image/jpeg"
+      },
+      "body": "<binary>"
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "blob_id": "b_ph0ne1mage000001",
+        "size": 482113,
+        "sha256": "4f6b0c9d2e8a71f3b5c4d6e8f0a2b4c6d8e0f2a4b6c8d0e2f4a6b8c0d2e4f6a8"
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: an upload over 25 MB.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/blobs",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9",
+        "Content-Type": "application/pdf"
+      },
+      "body": "<binary>"
+    },
+    "response": {
+      "status": 413,
+      "body": {
+        "error": "too_large",
+        "message": "That file is too big. Send files up to 25 MB."
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: an empty upload.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/blobs",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9",
+        "Content-Type": "image/jpeg"
+      },
+      "body": ""
+    },
+    "response": {
+      "status": 422,
+      "body": {
+        "error": "invalid",
+        "message": "The upload is empty."
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: fetch my own upload again (e.g. the photo after reinstalling).",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/blobs/b_ph0ne1mage000001",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": "<binary>"
+    }
+  },
+  {
+    "_note": "Workspace: read a phone upload that a phone text to this workspace names (body.attachments, body.voice, a pin's voice_blob_id).",
+    "request": {
+      "method": "GET",
+      "path": "/v1/blobs/b_ph0ne1mage000001",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": "<binary>"
+    }
+  },
+  {
+    "_note": "Phone v3: a message in General with a photo. The relay builds the text (vectors/phone-v3-v1.json, send).",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/send",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "to": "ws_pilatus001",
+        "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+        "text": "Kannst du die Zahlen von gestern prüfen?",
+        "general": true,
+        "attachments": [
+          {
+            "blob_id": "b_ph0ne1mage000001",
+            "kind": "image",
+            "name": "IMG_2041.jpg",
+            "size": 482113,
+            "mime": "image/jpeg"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "id": "m_g3n3ral0000000a1",
+        "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70"
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: the same send again (the outbox retried): no second message.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/send",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "to": "ws_pilatus001",
+        "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+        "text": "Kannst du die Zahlen von gestern prüfen?",
+        "general": true,
+        "attachments": [
+          {
+            "blob_id": "b_ph0ne1mage000001",
+            "kind": "image",
+            "name": "IMG_2041.jpg",
+            "size": 482113,
+            "mime": "image/jpeg"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "id": "m_g3n3ral0000000a1",
+        "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+        "duplicate": true
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: a voice memo answering a workspace text in a topic.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/send",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "to": "ws_pilatus001",
+        "client_id": "2a3b4c5d-6e7f-4801-9a2b-3c4d5e6f7a8b",
+        "ticket": "t_q3sum1",
+        "reply_to": "m_r3s8t1u6v2w9x4y7",
+        "voice": {
+          "blob_id": "b_ph0nev0ice000003",
+          "transcript": "Mach die Grafik bitte etwas grösser.",
+          "lang": "de-CH",
+          "lang_source": "setting"
+        }
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "id": "m_v01cememo000000b",
+        "client_id": "2a3b4c5d-6e7f-4801-9a2b-3c4d5e6f7a8b"
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: current location to Home (no ticket: a new topic).",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/send",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "to": "ws_home000001",
+        "client_id": "3b4c5d6e-7f80-4912-8b3c-4d5e6f7a8b9c",
+        "location": {
+          "lat": 47.0502,
+          "lon": 8.3093,
+          "label": "Luzern Bahnhof",
+          "accuracy_m": 12
+        }
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "id": "m_l0cati0n0000000c",
+        "client_id": "3b4c5d6e-7f80-4912-8b3c-4d5e6f7a8b9c"
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: comment pins on a published page (one revision of attachment a_ee3652384f1b).",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/send",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "to": "ws_pilatus001",
+        "client_id": "4c5d6e7f-8091-4a23-9c4d-5e6f7a8b9cad",
+        "ticket": "t_q3sum1",
+        "feedback": {
+          "artifact_id": "a_ee3652384f1b",
+          "artifact_rev": "f_0123456789abcdef",
+          "verdict": "changes",
+          "pins": [
+            {
+              "n": 1,
+              "anchor": {
+                "type": "html",
+                "selector": "#chart-q3",
+                "quote": "Umsatz Q3",
+                "offset": 640,
+                "viewport_w": 390
+              },
+              "text": "Bigger, please."
+            },
+            {
+              "n": 2,
+              "anchor": {
+                "type": "html",
+                "quote": "Ausblick"
+              },
+              "voice_blob_id": "b_ph0nev0ice000004",
+              "transcript": "Den Ausblick kürzer."
+            }
+          ]
+        }
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "id": "m_f33dback0000000d",
+        "client_id": "4c5d6e7f-8091-4a23-9c4d-5e6f7a8b9cad"
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: \"Looks good\" on a PR. Never an approval to publish (that is a question answer).",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/send",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "to": "ws_pilatus001",
+        "client_id": "5d6e7f80-91a2-4b34-8d5e-6f7a8b9cadbe",
+        "ticket": "t_q3sum1",
+        "text": "Looks good",
+        "feedback": {
+          "artifact_id": "a_9b27f17f5357",
+          "artifact_rev": "9fceb02d0ae598e95dc970b74767f19372d61af8",
+          "verdict": "approve",
+          "pins": []
+        }
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "id": "m_l00ksg00d000000e",
+        "client_id": "5d6e7f80-91a2-4b34-8d5e-6f7a8b9cadbe"
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: General and a ticket at once.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/send",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "to": "ws_pilatus001",
+        "client_id": "6e7f8091-a2b3-4c45-9e6f-7a8b9cadbecf",
+        "text": "Hi",
+        "general": true,
+        "ticket": "t_q3sum1"
+      }
+    },
+    "response": {
+      "status": 422,
+      "body": {
+        "error": "invalid",
+        "message": "A message in General has no ticket."
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: an attachment this phone did not upload.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/send",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "to": "ws_pilatus001",
+        "client_id": "7f8091a2-b3c4-4d56-8f70-8b9cadbecfd0",
+        "attachments": [
+          {
+            "blob_id": "b_0123456789abcdef",
+            "kind": "file",
+            "name": "sample-rows.csv",
+            "size": 2048,
+            "mime": "text/csv"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 404,
+      "body": {
+        "error": "not_found",
+        "message": "That upload was not found. Send the file again."
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: retry of an answer (same client_id): no second answer.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/answer",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "question_message_id": "m_q1date0ts0000001",
+        "answer": "TIMESTAMP",
+        "client_id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "id": "m_an5wer7q2w9e4r6t",
+        "client_id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+        "duplicate": true
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: General and a new topic. The phone's own texts carry delivered_at + client_id. The workspace answered in General (general: true, no ticket), then acked the new-topic text with the new ticket + key and reply_to = the phone text (Started), and marked a long answer speak.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/messages?limit=4",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_r3s8t1u6v2w9x4y7",
+              "from": "ws_pilatus001",
+              "to": "ph_iphone0001",
+              "type": "text",
+              "created_at": "2026-11-06T20:14:00Z",
+              "ticket": "t_q3sum1",
+              "key": "PIL-12",
+              "body": {
+                "text": "The Q3 summary is ready. Revenue grew 8 percent, mostly in Lucerne. Costs stayed flat. I attached the chart and the draft.",
+                "update": {
+                  "kind": "result",
+                  "title": "Q3 summary"
+                },
+                "speak": {
+                  "lang": "en",
+                  "summary": "The Q3 summary is ready. Revenue grew 8 percent."
+                }
+              }
+            },
+            "workspace_name": "Pilatus Workspace",
+            "delivered_at": null,
+            "client_id": null
+          },
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_ack0newt0p1c0001",
+              "from": "ws_pilatus001",
+              "to": "ph_iphone0001",
+              "type": "text",
+              "created_at": "2026-11-06T20:02:10Z",
+              "ticket": "t_q3sum1",
+              "key": "PIL-12",
+              "reply_to": "m_n3wt0p1c00000001",
+              "body": {
+                "text": "Got it: Q3 summary",
+                "update": {
+                  "kind": "ack",
+                  "title": "Q3 summary"
+                }
+              }
+            },
+            "workspace_name": "Pilatus Workspace",
+            "delivered_at": null,
+            "client_id": null
+          },
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_n3wt0p1c00000001",
+              "from": "ph_iphone0001",
+              "to": "ws_pilatus001",
+              "type": "text",
+              "created_at": "2026-11-06T20:02:00Z",
+              "body": {
+                "client_id": "0b7a4c1e-9d2f-4e6a-8b3c-5d6e7f809a1b",
+                "text": "Make the Q3 summary for the board."
+              }
+            },
+            "workspace_name": "Pilatus Workspace",
+            "delivered_at": "2026-11-06T20:02:04Z",
+            "client_id": "0b7a4c1e-9d2f-4e6a-8b3c-5d6e7f809a1b"
+          },
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_g3n3ralrep1y0001",
+              "from": "ws_pilatus001",
+              "to": "ph_iphone0001",
+              "type": "text",
+              "created_at": "2026-11-06T19:58:30Z",
+              "reply_to": "m_g3n3ral0000000a1",
+              "body": {
+                "text": "Yesterday's numbers look fine.",
+                "general": true
+              }
+            },
+            "workspace_name": "Pilatus Workspace",
+            "delivered_at": null,
+            "client_id": null
+          }
+        ],
+        "next": "m_g3n3ralrep1y0001"
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: hear a text the workspace marked speak (Deepgram Aura-2, made once, then cached).",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/speech/m_r3s8t1u6v2w9x4y7",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": "<audio/mpeg>"
+    }
+  },
+  {
+    "_note": "Phone v3: this month's voice budget is used up (cached audio still plays).",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/speech/m_r3s8t1u6v2w9x4y7",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 402,
+      "body": {
+        "error": "tts_cap_reached",
+        "message": "This month's read-aloud budget is used up. You can raise it in Settings."
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: read-aloud is not set up on this relay (the app uses the phone's own voice).",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/speech/m_r3s8t1u6v2w9x4y7",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 503,
+      "body": {
+        "error": "tts_off",
+        "message": "Read-aloud is not set up on this relay."
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: my settings on the relay.",
+    "request": {
+      "method": "GET",
+      "path": "/v1/phone/settings",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "speak": "auto",
+        "swiss_german": false,
+        "tts_cap_usd": 10,
+        "tts_used_usd_month": 0.42
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: \"I speak Swiss German\" on. Transcription then uses de-CH.",
+    "request": {
+      "method": "PATCH",
+      "path": "/v1/phone/settings",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "swiss_german": true
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "speak": "auto",
+        "swiss_german": true,
+        "tts_cap_usd": 10,
+        "tts_used_usd_month": 0.42
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: a cap over 100.",
+    "request": {
+      "method": "PATCH",
+      "path": "/v1/phone/settings",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "tts_cap_usd": 150
+      }
+    },
+    "response": {
+      "status": 422,
+      "body": {
+        "error": "invalid",
+        "message": "The monthly limit is 0 to 100 dollars."
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: transcribe with Swiss German on and no ?language: Deepgram nova-3 de-CH.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/transcribe",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9",
+        "Content-Type": "audio/m4a"
+      },
+      "body": "<binary>"
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "text": "Mach die Grafik bitte etwas grösser.",
+        "language": "de-CH",
+        "duration": 3.1
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: add the workspaces of an invitation (orch://pair?relay=…&code=…) to this already paired phone.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/invitations/redeem",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "code": "pc_Rd3Em9Kx2Lp4Qw6Er8Ty1U"
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "workspaces": [
+          {
+            "id": "ws_reports001",
+            "name": "Reports"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: an invitation that was used already or expired.",
+    "request": {
+      "method": "POST",
+      "path": "/v1/phone/invitations/redeem",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "code": "pc_Tg5Yh7Uj9Ik2Ol4Pz6Xc8V"
+      }
+    },
+    "response": {
+      "status": 410,
+      "body": {
+        "error": "gone",
+        "message": "This invitation has expired or was already used. Ask the person who invited you for a new one."
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: mute Pilatus for one hour (no pushes from it until then; messages still arrive).",
+    "request": {
+      "method": "PATCH",
+      "path": "/v1/phone/workspaces/ws_pilatus001",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "muted_until": "2026-11-06T21:15:00Z"
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "id": "ws_pilatus001",
+        "name": "Pilatus Workspace",
+        "description": "Ingestion jobs and data pipelines.",
+        "tags": [
+          "data",
+          "work"
+        ],
+        "online": true,
+        "last_seen": "2026-11-06T20:14:00Z",
+        "open_questions": 0,
+        "muted_until": "2026-11-06T21:15:00Z"
+      }
+    }
+  },
+  {
+    "_note": "Phone v3: remove Home from this phone (an invitation adds it again).",
+    "request": {
+      "method": "DELETE",
+      "path": "/v1/phone/workspaces/ws_home000001",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 204,
+      "body": null
+    }
+  },
+  {
+    "_note": "Phone v3: a workspace that is not on this phone's list.",
+    "request": {
+      "method": "DELETE",
+      "path": "/v1/phone/workspaces/ws_other00001",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": null
+    },
+    "response": {
+      "status": 404,
+      "body": {
+        "error": "not_found",
+        "message": "That workspace is not on this phone."
       }
     }
   }

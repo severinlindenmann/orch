@@ -1,6 +1,7 @@
 """Check every contract example (tickets incl. ext.automation, run records, pending input, Needs you rows,
-agent adapters and their config entries, messages, workspaces, add-on manifests and views) and the publish
-crypto vectors. Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
+agent adapters and their config entries, messages, workspaces, add-on manifests and views), the publish
+crypto vectors, and the phone API v3 (every /v1/phone example in review/relay-api.examples.json against
+phone-api.schema.json, plus vectors/phone-v3-v1.json). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py
 """
@@ -311,6 +312,126 @@ for k in kvec["valid_keys"]:
 for k in kvec["invalid_keys"]:
     if _KEY.match(k):
         fails.append(f"ticket-key vector: {k!r} must be refused")
+
+
+# Phone API v3 (relay-api.md, Phone API): request/response bodies in phone-api.schema.json, which points into
+# message.schema.json. Every /v1/phone example and the phone-v3 vector are checked against it.
+from referencing import Registry, Resource  # noqa: E402
+
+_msg_schema = _expand(json.loads((HERE / "message.schema.json").read_text()))
+_phone_schema = json.loads((HERE / "phone-api.schema.json").read_text())
+_reg = Registry().with_resources(
+    [(s["$id"], Resource.from_contents(s)) for s in (_msg_schema, _phone_schema)]
+)
+
+
+def phone_errors(defname, doc):
+    v = Draft202012Validator({"$ref": f"{_phone_schema['$id']}#/$defs/{defname}"}, registry=_reg, format_checker=FormatChecker())
+    return list(v.iter_errors(doc))
+
+
+# (method, path regex, request $def or None, {status: response $def}); error statuses use $defs/error.
+PHONE_ROUTES = [
+    ("POST", r"/v1/phone/send", "send_request", {201: "send_response", 200: "send_response"}),
+    ("POST", r"/v1/phone/answer", "answer_request", {201: "answer_response", 200: "answer_response"}),
+    ("POST", r"/v1/phone/blobs", None, {201: "blob_response"}),
+    ("GET", r"/v1/phone/messages(\?.*)?", None, {200: "messages_response"}),
+    ("GET", r"/v1/phone/workspaces", None, {200: "workspaces_response"}),
+    ("PATCH", r"/v1/phone/workspaces/ws_[a-z0-9]{10}", "workspace_patch_request", {200: "workspace_item"}),
+    ("GET", r"/v1/phone/settings", None, {200: "settings"}),
+    ("PATCH", r"/v1/phone/settings", "settings_patch_request", {200: "settings"}),
+    ("POST", r"/v1/phone/invitations/redeem", "redeem_request", {200: "redeem_response"}),
+    ("POST", r"/v1/phone/transcribe(\?.*)?", None, {200: "transcribe_response"}),
+]
+NEW_PHONE_PATHS = ["/v1/phone/blobs", "/v1/phone/speech/", "/v1/phone/settings", "/v1/phone/invitations/redeem"]
+_seen_new = set()
+for i, ex in enumerate(json.loads((review / "relay-api.examples.json").read_text())):
+    req, resp = ex["request"], ex["response"]
+    for np in NEW_PHONE_PATHS:
+        if req["path"].startswith(np):
+            _seen_new.add(np)
+    for method, rx, reqdef, respdefs in PHONE_ROUTES:
+        if req["method"] != method or not re.fullmatch(rx, req["path"]):
+            continue
+        label = f"review/relay-api[{i}] {method} {req['path']} {resp['status']}"
+        if reqdef and req["body"] is not None:
+            for e in phone_errors(reqdef, req["body"])[:1]:
+                if resp["status"] < 400 or resp["status"] in (409, 410, 404):
+                    fails.append(f"{label}: request: {e.message}")
+        if resp["status"] >= 400:
+            for e in phone_errors("error", resp["body"])[:1]:
+                fails.append(f"{label}: error body: {e.message}")
+        elif resp["status"] in respdefs:
+            for e in phone_errors(respdefs[resp["status"]], resp["body"])[:1]:
+                fails.append(f"{label}: response: {e.message}")
+for np in NEW_PHONE_PATHS:
+    if np not in _seen_new:
+        fails.append(f"review/relay-api: needs an example for {np}")
+
+pvec = json.loads((HERE / "vectors" / "phone-v3-v1.json").read_text())
+
+
+def build_phone_text(phone, req):
+    """Reference: the text message the relay stores for POST /v1/phone/send (without id and created_at)."""
+    m = {"schema": "orch.msg/1", "from": phone, "to": req["to"], "type": "text"}
+    if req.get("ticket"):
+        m["ticket"] = req["ticket"]
+    if req.get("reply_to"):
+        m["reply_to"] = req["reply_to"]
+    body = {"client_id": req["client_id"]}
+    if req.get("general") is True:
+        body["general"] = True
+    for k in ("text", "attachments", "voice", "location", "feedback"):
+        if k in req:
+            body[k] = req[k]
+    m["body"] = body
+    return m
+
+
+for case in pvec["send"]:
+    ok = not phone_errors("send_request", case["request"])
+    if ok != case["ok"]:
+        fails.append(f"phone-v3 vector send {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
+    if case["ok"]:
+        built = build_phone_text(pvec["phone"], case["request"])
+        if built != case.get("built"):
+            fails.append(f"phone-v3 vector send {case['name']}: built message differs")
+        stored = {**built, "id": "m_0000000000000001", "created_at": "2026-11-06T20:00:00Z"}
+        for e in errors("message", stored)[:1]:
+            fails.append(f"phone-v3 vector send {case['name']}: built message invalid: {e.message}")
+for sect, defname in (("answer", "answer_request"), ("settings_patch", "settings_patch_request"), ("workspace_patch", "workspace_patch_request")):
+    for case in pvec[sect]:
+        if (not phone_errors(defname, case["request"])) != case["ok"]:
+            fails.append(f"phone-v3 vector {sect} {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
+
+
+def speech_text(body, limit):
+    """Reference (relay-api.md, Speech): summary else text; URLs -> 'link'; drop * ` #; one space per whitespace run;
+    longer than limit: cut after the last . ! ? that is followed by a space within the limit, else before the last
+    space within the limit, else hard at the limit."""
+    src = (body.get("speak") or {}).get("summary") or body["text"]
+    src = re.sub(r"https?://\S+", "link", src)
+    src = re.sub(r"[*`#]", "", src)
+    src = re.sub(r"\s+", " ", src).strip()
+    if len(src) <= limit:
+        return src
+    ends = [i for i in range(limit) if src[i] in ".!?" and src[i + 1] == " "]
+    if ends:
+        return src[: ends[-1] + 1]
+    spaces = [i for i in range(limit + 1) if src[i] == " "]
+    return src[: spaces[-1]] if spaces else src[:limit]
+
+
+for case in pvec["speech_text"]:
+    got = speech_text(case["body"], pvec["speech_max_chars"])
+    if got != case["spoken"]:
+        fails.append(f"phone-v3 vector speech_text {case['name']}: got {got!r}")
+import hashlib  # noqa: E402
+
+for case in pvec["artifact_ids"]:
+    got = "a_" + hashlib.sha256(f"{case['source']}\n{case['ref']}".encode()).hexdigest()[:12]
+    if got != case["id"] or not re.fullmatch(_msg_schema["$defs"]["artifact_id"]["pattern"], got):
+        fails.append(f"phone-v3 vector artifact_ids {case['ref']}: got {got}")
 
 if fails:
     print("\n".join("FAIL " + f for f in fails))

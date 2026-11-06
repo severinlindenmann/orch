@@ -1,0 +1,20 @@
+{
+ "schema": "orch.msg/1",
+ "created_at": "2026-11-06T20:02:00Z",
+ "id": "m_r3s8t1u6v2w9x4y7",
+ "from": "ws_pilatus001",
+ "to": "phones",
+ "type": "text",
+ "ticket": "t_q3sum1",
+ "body": {
+  "text": "The Q3 summary is ready. Revenue grew 8 percent.",
+  "update": {
+   "kind": "result",
+   "title": "Q3 summary"
+  },
+  "speak": {
+   "lang": "en",
+   "summary": "The Q3 summary is ready."
+  }
+ }
+}
