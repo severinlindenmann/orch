@@ -195,6 +195,22 @@ def test_add_on_kind_wins_and_off_falls_back_to_the_site():
     assert (off["label"], off["status"], off["group"]) == ("GitHub", None, "Links")
 
 
+def test_addon_type_on_another_host_shows_the_real_host_and_no_site_icon():
+    kinds = [
+        {
+            "kind": "github-pr",
+            "label": "GitHub PR",
+            "icon": "github",
+            "match": ["https://github.com/*"],
+            "addon": "gh",
+        }
+    ]
+    d = links.describe({"kind": "github-pr", "url": "https://evil.example/acme/pull/1"}, kinds)
+    assert (d["label"], d["icon"], d["host"]) == ("GitHub PR", "link", "evil.example")
+    real = links.describe({"kind": "github-pr", "url": "https://www.github.com/a/b/pull/1"}, kinds)
+    assert (real["icon"], real["host"]) == ("github", "github.com")
+
+
 def test_old_type_links_still_read():
     d = links.describe({"type": "github", "url": "https://github.com/a/b/pull/1", "title": "PR 1"}, [])
     assert (d["kind"], d["label"], d["title"]) == ("github", "GitHub", "PR 1")

@@ -129,6 +129,12 @@ def kind_of(link: dict) -> str:
     return k if isinstance(k, str) else "link"
 
 
+def _not_a_site_icon(icon: str) -> str:
+    """An add-on link type on an address that is no known site never shows a site's icon (a `github` icon on
+    evil.example would vouch for it): the generic link icon instead."""
+    return "link" if icon in {h["icon"] for h in known_sites()["hosts"]} else icon
+
+
 def describe(link: dict, kinds: list[dict]) -> dict:
     """How one link is shown: label (e.g. "GitHub · Pull request", "Figma", "Link"), short label (the type
     name, for lists), icon key and monogram, title (stored, else the short address), status (only while
@@ -139,6 +145,7 @@ def describe(link: dict, kinds: list[dict]) -> dict:
     s = site(url)
     out = {
         "kind": kind_of(link),
+        "host": _host_path(url)[0],  # the real host, always shown next to the type
         "title": title or one_line(short_url(url), 300) or "Link",
         "short": one_line(short_url(url), 300),
         "status": None,
@@ -150,7 +157,7 @@ def describe(link: dict, kinds: list[dict]) -> dict:
         out.update(
             label=f"{s['name']} · {k['label']}" if s else k["label"],
             type=k["label"],
-            icon=s["icon"] if s else k["icon"],
+            icon=s["icon"] if s else _not_a_site_icon(k["icon"]),
             mono=s["mono"] if s else k["label"][:2],
             status=st if isinstance(st, str) and STATUS_RE.fullmatch(st) else None,
             group=k["label"],
