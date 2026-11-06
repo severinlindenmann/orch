@@ -92,7 +92,8 @@ def test_trust_sets_only_the_one_key_and_keeps_the_rest(proj, run):
     doc = json.loads(f.read_text())
     assert doc["theme"] == "dark" and doc["projects"]["/other"] == {"x": 1}
     assert doc["projects"][str(proj.resolve())] == {"hasTrustDialogAccepted": True}
-    assert oct(f.stat().st_mode & 0o777) == "0o600"
+    if os.name != "nt":
+        assert oct(f.stat().st_mode & 0o777) == "0o600"  # the file keeps its own mode
     assert adapters.trust_folder("claude", proj) == "already"
     assert not [p for p in f.parent.iterdir() if p.name.endswith(".tmp")]
 
