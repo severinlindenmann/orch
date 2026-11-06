@@ -313,7 +313,8 @@ def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: 
         raise Refused(f"Could not finish the install: {e}. Reinstall orch with the install script.") from e
     print(
         f"Windows can not replace orch while it runs, so this finishes in the background once this command "
-        f"has ended (about a minute): {done}.\nCheck with: orch addon list   Log: {log}"
+        f"has ended: {done}.\nWait about a minute before the next orch command (orch is being replaced "
+        f"meanwhile). Then check with: orch addon list   Log: {log}"
     )
     return False
 
