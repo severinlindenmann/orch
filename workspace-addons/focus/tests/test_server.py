@@ -50,7 +50,7 @@ def test_state_needs_when_question_open(server, ws):
 
 def test_running_claude_run_writes_events_and_board(server, ws, fake_orch):
     (fake_orch.parent / "status.json").write_text(json.dumps(
-        {"running": True, "claim": {"run": "r_abc123", "agent": "claude", "mode": "live", "started_at": "2026-11-06T08:00:00Z"}}))  # fmt: skip
+        {"running": True, "claim": {"run": "r_abc12345", "agent": "claude", "mode": "live", "started_at": "2026-11-06T08:00:00Z"}}))  # fmt: skip
     v = json.loads(req(server, "GET", f"/api/t/{TID}")[1])
     assert v["state"] == "working" and v["generic"] is False and v["live"] is True
     p = ws / ".orch" / "tickets" / f"{TID}.json"
@@ -60,7 +60,7 @@ def test_running_claude_run_writes_events_and_board(server, ws, fake_orch):
     server.RequestHandlerClass.keywords["tracker"].status_cache.clear()
     v = json.loads(req(server, "GET", f"/api/t/{TID}")[1])
     assert [t["state"] for t in v["board"]["tasks"]] == ["done"]
-    assert (ws / ".orch/addons/focus/runs/r_abc123.events.jsonl").exists()
+    assert (ws / ".orch/addons/focus/runs/r_abc12345.events.jsonl").exists()
 
 
 @pytest.mark.parametrize(
@@ -161,7 +161,10 @@ def test_stop_started_stops_runs_focus_started(server, fake_orch):
     assert any(c[:3] == ["run", "stop", TID] for c in calls(fake_orch))
 
 
-@pytest.mark.parametrize("bad", ["../../x", "r_../../x", "r_ab", "R_ABCDEF", "r_abcdef/../../y", "x" * 5, 7])
+@pytest.mark.parametrize(
+    "bad",
+    ["../../x", "/tmp/x", "r_../../x", "r_ab", "R_ABCDEFG", "r_abcdefg/../../y", "r_abcdefgh/x", "x" * 5, 7],
+)
 def test_bad_run_id_writes_nothing_outside_runs(server, ws, fake_orch, bad):
     (fake_orch.parent / "status.json").write_text(json.dumps(
         {"running": True, "claim": {"run": bad, "agent": "claude", "mode": "live"}}))  # fmt: skip
@@ -173,9 +176,79 @@ def test_bad_run_id_writes_nothing_outside_runs(server, ws, fake_orch, bad):
     assert not (ws.parent / "x").exists() and not (ws / "x").exists()
 
 
-@pytest.mark.parametrize("bad", ["../../x", "r_../x", "", "r_a/b" + "c" * 8])
+@pytest.mark.parametrize("bad", ["../../x", "/tmp/x", "r_../x", "", "r_a/b" + "c" * 8, "r_abcdefghi"])
 def test_event_log_refuses_a_bad_run_id(tmp_path, bad):
     from orch_focus.events import EventLog
 
     with pytest.raises(ValueError):
         EventLog(tmp_path, bad)
+
+
+@pytest.mark.parametrize("link", [".orch/addons", ".orch/addons/focus", ".orch/addons/focus/runs", ".orch"])
+def test_symlinked_folder_on_the_way_is_refused(tmp_path, link):
+    from orch_focus.events import EventLog
+
+    root = tmp_path / "ws"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    target = root / link
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.symlink_to(elsewhere)
+    with pytest.raises(OSError):
+        EventLog(root, "r_abcdefgh").append({"v": 1})
+    assert list(elsewhere.rglob("*")) == []
+
+
+def _status(fake, run, by="focus", running=True):
+    (fake.parent / "status.json").write_text(
+        json.dumps({"running": running, "claim": {"run": run, "by": by, "agent": "x", "mode": "oneshot"}})
+    )
+
+
+def test_exit_stops_only_the_run_focus_started(server, fake_orch):
+    from orch_focus.server import stop_started
+
+    req(server, "POST", "/api/act", {"op": "run.start", "args": {"ticket": TID}})
+    tr = server.RequestHandlerClass.keywords["tracker"]
+    assert tr.started == {TID: "r_start001"}
+    # someone else started a different run on the same ticket meanwhile: not touched
+    _status(fake_orch, "r_other002", by="human:anna")
+    stop_started(server)
+    assert not any(c[:2] == ["run", "stop"] for c in calls(fake_orch))
+    # the same run id, but not started by focus: not touched
+    tr.started = {TID: "r_start001"}
+    _status(fake_orch, "r_start001", by="human:anna")
+    stop_started(server)
+    assert not any(c[:2] == ["run", "stop"] for c in calls(fake_orch))
+    # our own run: stopped
+    tr.started = {TID: "r_start001"}
+    _status(fake_orch, "r_start001")
+    stop_started(server)
+    assert any(c[:3] == ["run", "stop", TID] for c in calls(fake_orch))
+
+
+def test_stop_from_the_page_forgets_the_run_and_started_survives_a_restart(server, ws, fake_orch):
+    from orch_focus.server import Tracker
+
+    req(server, "POST", "/api/act", {"op": "run.start", "args": {"ticket": TID}})
+    assert Tracker(ws, str(fake_orch)).started == {TID: "r_start001"}  # a crash is recoverable
+    req(server, "POST", "/api/act", {"op": "run.stop", "args": {"ticket": TID}})
+    assert Tracker(ws, str(fake_orch)).started == {}
+
+
+def test_control_characters_are_dropped_from_text():
+    argv = actions.build_argv("run.send", {"ticket": TID, "text": "hi\x1b[31m there\x7f\nnext\t!"})
+    assert argv[-1] == "hi[31m there\nnext\t!"
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("run.send", {"ticket": TID, "text": "\x1b\x07"})
+
+
+def test_ticket_reading_is_bounded_and_symlink_safe(server, ws):
+    d = ws / ".orch" / "tickets"
+    (d / "t_bigone01.json").write_text('{"id":"t_bigone01","pad":"' + "x" * (3 * 1024 * 1024) + '"}')
+    assert req(server, "GET", "/api/t/t_bigone01")[0] == 404
+    moved = ws / ".orch" / "tickets-real"
+    d.rename(moved)
+    d.symlink_to(moved)
+    assert req(server, "GET", f"/api/t/{TID}")[0] == 404
+    assert json.loads(req(server, "GET", "/api/tickets")[1]) == []

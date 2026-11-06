@@ -52,6 +52,8 @@ if a[:2] == ["run", "status"]:
     print((d / "status.json").read_text())
 elif a[:2] == ["run", "send"]:
     print(json.dumps({{"id": "p1", "delivered": 0, "state": "none"}}))
+elif a[:2] == ["run", "start"]:
+    print(json.dumps({{"ok": True, "run": "r_start001"}}))
 else:
     print(json.dumps({{"ok": True}}))
 """)

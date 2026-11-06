@@ -10,7 +10,7 @@ import webbrowser
 from pathlib import Path
 
 from . import service
-from .server import DEFAULT_PORT, make_server, stop_started
+from .server import DEFAULT_PORT, TID_RE, make_server, stop_started
 
 
 def find_workspace(start: Path) -> Path | None:
@@ -92,7 +92,7 @@ def _service(args, root: Path) -> int:
             return 2
         u = service.url(cur["port"])
         if args.cmd == "open":
-            if not args.ticket.startswith("t_"):
+            if not TID_RE.fullmatch(args.ticket):
                 print("Give a ticket id like t_ab12cd.", file=sys.stderr)
                 return 2
             page = f"{u}/t/{args.ticket}"

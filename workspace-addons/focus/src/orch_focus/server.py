@@ -15,12 +15,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 
-from . import actions
+from . import actions, runfiles
 from .board import Board, TicketWatcher
 from .events import RUN_ID, EventLog
 
 DEFAULT_PORT = 8430
 MAX_BODY = 16384
+MAX_TICKET = 2 * 1024 * 1024
 TID_RE = re.compile(r"t_[a-z0-9]{6,16}")
 TYPES = {
     ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -43,12 +44,17 @@ def _kit(name: str) -> bytes:
 
 
 def _read_ticket(root: Path, tid: str) -> dict | None:
-    p = root / ".orch" / "tickets" / f"{tid}.json"
+    d = root / ".orch" / "tickets"
+    p = d / f"{tid}.json"
     try:
-        if p.is_symlink():
+        if d.is_symlink() or p.is_symlink() or not TID_RE.fullmatch(tid):
             return None
-        t = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        with open(p, "rb") as f:
+            raw = f.read(MAX_TICKET + 1)
+        if len(raw) > MAX_TICKET:
+            return None
+        t = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError, RecursionError):
         return None
     return t if isinstance(t, dict) else None
 
@@ -61,7 +67,37 @@ class Tracker:
         self.lock = threading.Lock()
         self.tickets: dict[str, dict] = {}
         self.status_cache: dict[str, tuple[float, dict]] = {}
-        self.started: set[str] = set()  # tickets whose run Focus started (stopped again when Focus ends)
+        # ticket -> run id, for the runs Focus started (kept in .orch/run/focus/ so a crash is recoverable)
+        self.started: dict[str, str] = self._load_started()
+
+    def _started_file(self) -> Path:
+        return runfiles.run_dir(self.root, "focus") / "started.json"
+
+    def _load_started(self) -> dict[str, str]:
+        try:
+            d = runfiles.read_json(self._started_file()) or {}
+        except RuntimeError:
+            return {}
+        return {
+            t: r
+            for t, r in d.items()
+            if TID_RE.fullmatch(str(t)) and isinstance(r, str) and RUN_ID.fullmatch(r)
+        }
+
+    def _save_started(self) -> None:
+        try:
+            runfiles.write_json(self._started_file(), self.started)
+        except (RuntimeError, OSError):
+            pass
+
+    def note_started(self, tid: str, run) -> None:
+        if isinstance(run, str) and RUN_ID.fullmatch(run):
+            self.started[tid] = run
+            self._save_started()
+
+    def forget_started(self, tid: str) -> None:
+        if self.started.pop(tid, None) is not None:
+            self._save_started()
 
     def run_status(self, tid: str) -> dict:
         hit = self.status_cache.get(tid)
@@ -151,6 +187,8 @@ class Tracker:
 
     def tickets_list(self) -> list[dict]:
         d = self.root / ".orch" / "tickets"
+        if d.is_symlink():
+            return []
         out = []
         for p in sorted(d.glob("t_*.json")) if d.is_dir() else []:
             t = _read_ticket(self.root, p.stem)
@@ -255,7 +293,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(503, str(e).encode(), "text/plain; charset=utf-8")
         self.tracker.status_cache.clear()
         if code == 200 and body.get("op") == "run.start":
-            self.tracker.started.add(args["ticket"])
+            self.tracker.note_started(args["ticket"], (extra or {}).get("run"))
+        elif code == 200 and body.get("op") == "run.stop":
+            self.tracker.forget_started(args["ticket"])
         if code != 200:
             hdr = {"X-Revision": str(extra["revision"])} if extra else None
             return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
@@ -265,14 +305,21 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def stop_started(srv) -> None:
-    """Focus ends: every run it started ends through core `orch run stop` (FO-07 a)."""
+    """Focus ends: a run Focus started ends through core `orch run stop` (FO-07 a), but only when the claim
+    on that ticket is still that run, started by Focus. A run someone else started later is never touched."""
     tracker = srv.RequestHandlerClass.keywords["tracker"]
-    for tid in sorted(tracker.started):
-        try:
-            actions.orch(tracker.root, tracker.orch_bin, ["run", "stop", tid, "--by", "focus"], timeout=20)
-        except actions.Unavailable:
-            pass
+    for tid, run in sorted(tracker.started.items()):
+        tracker.status_cache.pop(tid, None)
+        claim = tracker.run_status(tid).get("claim") or {}
+        if claim.get("run") == run and claim.get("by") == "focus":
+            try:
+                actions.orch(
+                    tracker.root, tracker.orch_bin, ["run", "stop", tid, "--by", "focus"], timeout=20
+                )
+            except actions.Unavailable:
+                pass
     tracker.started.clear()
+    tracker._save_started()
 
 
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:

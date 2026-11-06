@@ -13,7 +13,7 @@ import stat
 from datetime import UTC, datetime
 from pathlib import Path
 
-RUN_ID = re.compile(r"r_[a-z0-9_]{6,32}")  # the core run id pattern
+RUN_ID = re.compile(r"r_[a-z0-9]{8}")  # what core.runs.new_run_id makes
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 CAP_BYTES = 5 * 1024 * 1024
 KINDS = (
@@ -98,22 +98,33 @@ def make(
     }  # fmt: skip
 
 
+def _plain(p: Path) -> None:
+    if p.is_symlink() or not p.is_dir():
+        raise OSError(f"{p} is not a plain folder; Focus does not use it.")
+
+
+def runs_dir(root: Path, create: bool = True) -> Path:
+    """.orch/addons/focus/runs/, every level a plain folder (a symlink at any level is refused)."""
+    d = Path(root)
+    for part in (".orch", "addons", "focus", "runs"):
+        d = d / part
+        if create and not d.is_symlink():
+            d.mkdir(mode=0o700, exist_ok=True)
+        _plain(d)
+    return d
+
+
 class EventLog:
     def __init__(self, root: Path, run: str):
         if not isinstance(run, str) or not RUN_ID.fullmatch(run):
             raise ValueError("That is not a run id.")
-        runs = Path(root) / ".orch" / "addons" / "focus" / "runs"
-        self.path = runs / f"{run}.events.jsonl"
-        if self.path.parent != runs or ".." in self.path.relative_to(runs).parts:
-            raise ValueError("That is not a run id.")
+        self.root = Path(root)
+        self.path = self.root / ".orch" / "addons" / "focus" / "runs" / f"{run}.events.jsonl"
 
     def append(self, *events: dict) -> None:
         if not events:
             return
-        d = self.path.parent
-        d.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if d.is_symlink() or not d.is_dir():
-            raise OSError(f"{d} is not a plain folder; Focus does not write there.")
+        d = runs_dir(self.root)
         old = self.path.with_name(self.path.name + ".1")
         try:
             st = os.lstat(self.path)
@@ -133,6 +144,7 @@ class EventLog:
     def read(self, since: int = 0) -> tuple[list[dict], int]:
         """Events from byte offset `since`, and the new offset. Bad lines and unknown kinds are skipped."""
         try:
+            runs_dir(self.root, create=False)
             with os.fdopen(os.open(self.path, os.O_RDONLY | NOFOLLOW), "rb") as f:
                 if since > os.fstat(f.fileno()).st_size:  # the log was rotated: start again
                     since = 0

@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 MAX_TEXT = 2000
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 QID = re.compile(r"q[0-9]{1,4}")
 CID = re.compile(r"c[0-9]{1,4}")
@@ -40,6 +41,9 @@ def _text(v, name="text") -> str:
         raise BadRequest(f"The {name} is too long (at most {MAX_TEXT} characters).")
     if "\x00" in v:
         raise BadRequest(f"The {name} has a character that is not allowed.")
+    v = _CONTROL.sub("", v)  # other control characters (escape codes, DEL) are dropped; \n and \t stay
+    if not v.strip():
+        raise BadRequest(f"Please write the {name}.")
     return v
 
 
