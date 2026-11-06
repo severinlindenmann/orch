@@ -12,10 +12,11 @@ HARNESS = Path(__file__).parent / "blocks_harness.js"
 node = pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 
 
-def run(tmp_path, view):
+def run(tmp_path, view, urls=None):
     f = tmp_path / "v.json"
     f.write_text(json.dumps(view))
-    out = subprocess.run(["node", str(HARNESS), str(WEB / "blocks.js"), str(f)], capture_output=True, text=True, check=True)
+    out = subprocess.run(["node", str(HARNESS), str(WEB / "blocks.js"), str(f), json.dumps(urls or {})], capture_output=True,
+                         text=True, check=True)
     return json.loads(out.stdout)
 
 
@@ -77,3 +78,25 @@ def test_calendar_repeat_item_shows_every_and_note(tmp_path):
     assert len(runs) == 1 and "repeat" in runs[0]["cls"]
     t = texts(runs[0])
     assert "Every 5 min" in t and "TEST: pick a word" in t and "288 runs/day" in t and "15:05 " not in t[:6]
+
+
+ADDON_LINK = {"blocks": [{"type": "list", "title": "T", "items": [{"title": "Board", "link": "addon:panel/board"}]}]}
+
+
+@node
+def test_addon_link_opens_the_running_page_or_offers_start(tmp_path):
+    on = run(tmp_path, ADDON_LINK, {"panel": "http://127.0.0.1:8500"})
+    a = [n for n in walk(on) if n["tag"] == "a"]
+    assert a and a[0]["attrs"]["href"] == "http://127.0.0.1:8500/board" and a[0]["attrs"]["rel"] == "noopener noreferrer"
+    off = run(tmp_path, ADDON_LINK)
+    b = [n for n in walk(off) if n["tag"] == "button"]
+    assert b and b[0]["data"]["action"] == "start" and "Start panel" in texts(off) and not any(n["tag"] == "a" for n in walk(off))
+
+
+@node
+def test_addon_link_never_points_off_this_computer(tmp_path):
+    for bad in ("https://evil.example", "http://evil.example:80", "javascript:alert(1)", "http://127.0.0.1.evil.example:80"):
+        t = run(tmp_path, ADDON_LINK, {"panel": bad})
+        assert not any(n["tag"] == "a" for n in walk(t)), bad
+    traversal = {"blocks": [{"type": "list", "title": "T", "items": [{"title": "x", "link": "addon:panel/../../etc"}]}]}
+    assert not any(n["tag"] == "a" and n["attrs"].get("href", "").startswith("http") for n in walk(run(tmp_path, traversal, {"panel": "http://127.0.0.1:1"})))

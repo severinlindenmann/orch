@@ -15,7 +15,7 @@ STATUS_ORDER = ["active", "waiting", "open", "done", "dropped"]
 _NAME = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
 ICONS = ("clock", "calendar", "inbox", "list", "chart", "bell", "book", "globe", "link", "check", "star", "box",
          "chat", "folder", "user", "bolt")
-FORMATS = ("text", "time", "cron-human", "chips", "yes-no")
+FORMATS = ("text", "time", "cron-human", "chips", "yes-no", "open-page")
 
 
 def find_workspace(start: Path) -> Path | None:
@@ -58,6 +58,27 @@ def _valid_ticket(t, stem: str | None = None) -> bool:
             and t.get("status") in STATUS_ORDER)
 
 
+def _file_here(root: Path, tid: str, ref: str) -> bool:
+    """Is this proof file on this computer? Looked up under the workspace or the ticket's evidence folder, never outside."""
+    base = root.resolve()
+    for cand in (root / ref, root / ".orch" / "tickets" / tid / "evidence" / Path(ref).name):
+        try:
+            p = cand.resolve()
+            p.relative_to(base)
+        except (OSError, ValueError, RuntimeError):
+            continue
+        if p.is_file():
+            return True
+    return False
+
+
+def _mark_missing_proofs(root: Path, t: dict) -> None:
+    for c in t.get("checklist", []):
+        for ev in c.get("evidence", []) if isinstance(c, dict) and isinstance(c.get("evidence"), list) else []:
+            if isinstance(ev, dict) and ev.get("type") == "file" and isinstance(ev.get("ref"), str) and "\x00" not in ev["ref"]:
+                ev["missing"] = not _file_here(root, str(t["id"]), ev["ref"])
+
+
 def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int]:
     """Valid-looking tickets (schema orch.ticket/1, id, title, status). Returns (tickets, skipped).
     Read through `$ORCH_BIN ticket list --all --json` (without --all, done and dropped tickets would vanish); without the orch command (standalone use) from .orch/tickets."""
@@ -76,6 +97,7 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         for k in ("checklist", "links", "questions", "history"):
             if not isinstance(t.get(k), list):
                 t[k] = []
+        _mark_missing_proofs(root, t)
         tickets.append(t)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
     return tickets, skipped

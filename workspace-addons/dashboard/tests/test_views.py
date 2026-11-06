@@ -191,3 +191,12 @@ def test_no_html_strings_for_server_text_in_the_page_code():
             assert bad not in line, line
         if "innerHTML" in line:
             assert "iconEl" in line or "ic-wrap" in line, line
+
+
+def test_addon_links_pass_only_with_a_plain_name_and_path():
+    def v(link):
+        return {"schema": "orch.addon-view/1", "generated_at": "2026-11-06T08:00:00Z",
+                "blocks": [{"type": "list", "title": "T", "items": [{"title": "x", "link": link}]}]}
+    assert check_view(v("addon:panel/board")) and check_view(v("addon:panel"))
+    for bad in ("addon:../x", "addon:Panel/x", "addon:panel/a b", "addon:panel/<b>", "addon:", "ftp://x"):
+        assert check_view(v(bad)) is None, bad

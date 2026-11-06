@@ -9,6 +9,9 @@ const OrchBlocks = (() => {
   const TICKET = /^t_[a-z0-9]{6,16}$/;
   const HTTPS = /^https:\/\/[^\s<>"'`]+$/;
   const arr = v => Array.isArray(v) ? v : [];
+  const ADDON = /^addon:([a-z][a-z0-9-]{1,31})(\/[A-Za-z0-9_./-]{0,100})?$/;
+  const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{2,5}\/?$/;
+  let opts = {};   // {addonUrl(name) -> local page address or null}, set per render()
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -27,6 +30,19 @@ const OrchBlocks = (() => {
   // Wrap `child` in a link when `link` is a ticket id or an https URL; otherwise return it as is.
   function linked(cls, link, child) {
     const l = typeof link === 'string' ? link : '';
+    const am = ADDON.exec(l);
+    if (am && !am[2]?.includes('..')) {
+      // `addon:<name>/<path>`: that add-on's own page when it runs here, else a Start button (the page starts it).
+      const base = typeof opts.addonUrl === 'function' ? opts.addonUrl(am[1]) : null;
+      if (typeof base === 'string' && LOCAL.test(base)) {
+        const a = el('a', cls); a.href = base.replace(/\/$/, '') + (am[2] || '/'); a.target = '_blank'; a.rel = 'noopener noreferrer'; a.append(...child);
+        a.append(el('span', 'sr-only', ' (opens in a new tab)'));
+        return a;
+      }
+      const b = el('button', cls + ' btn outline sm'); b.type = 'button'; b.dataset.action = 'start'; b.append(...child);
+      b.append(el('span', '', ' · Start ' + am[1]));
+      return b;
+    }
     if (TICKET.test(l)) { const a = el('a', cls); a.href = '#ticket/' + encodeURIComponent(l); a.append(...child); return a; }
     if (HTTPS.test(l)) {
       const a = el('a', cls); a.href = l; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.append(...child);
@@ -145,7 +161,8 @@ const OrchBlocks = (() => {
   };
 
   // Stats sit together in one row; everything else follows in order. Unknown types are skipped.
-  function render(blocks) {
+  function render(blocks, options) {
+    opts = options || {};
     const root = document.createDocumentFragment();
     let stats = null;
     for (const b of arr(blocks)) {
