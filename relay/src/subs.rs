@@ -15,6 +15,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use futures_util::StreamExt;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -553,53 +554,16 @@ async fn stream(
         let c = app.db.lock().unwrap();
         log(&c, &s.id, "stream", None, "opened", true);
     }
-    let (tx, rx) = tokio::sync::mpsc::channel::<Event>(32);
-    let task_app = app.clone();
-    tokio::spawn(async move {
-        let _slot = slot;
-        let app = task_app;
-        let mut cursor = start;
-        loop {
-            let notified = app.notify.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            let page = {
-                let c = app.db.lock().unwrap();
-                // Rotated or removed: the stream ends at once. Scope and kinds are read fresh every time.
-                let cur = match load(&c, &s.id) {
-                    Ok(Some(cur)) if cur.token_hash == s.token_hash => cur,
-                    _ => break,
-                };
-                match read_events(&c, &app.key, &cur, cursor, 100) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        tracing::warn!("subscriber stream: {e}");
-                        break;
-                    }
-                }
-            };
-            cursor = page.last_seq;
-            for (_, e) in page.items {
-                let ev = Event::default()
-                    .id(e["id"].as_str().unwrap_or(""))
-                    .event(e["type"].as_str().unwrap_or("text"))
-                    .data(e.to_string());
-                if tx.send(ev).await.is_err() {
-                    return;
-                }
-            }
-            if page.more {
-                continue;
-            }
-            tokio::select! {
-                _ = &mut notified => {}
-                _ = tokio::time::sleep(Duration::from_secs(30)) => {}
-                _ = tx.closed() => return,
-            }
-        }
-    });
-    let body = futures_util::stream::unfold(rx, |mut rx| async move {
-        rx.recv().await.map(|e| (Ok::<_, Infallible>(e), rx))
+    // Pull-driven: an event is read (token, scope and kinds checked fresh) only when the reader is ready for it,
+    // so nothing is built ahead of a stalled reader and nothing outlives a rotate or a scope edit.
+    let body = live_events(app.clone(), s.id.clone(), s.token_hash.clone(), start).map(move |e| {
+        let _open = &slot;
+        Ok::<_, Infallible>(
+            Event::default()
+                .id(e["id"].as_str().unwrap_or(""))
+                .event(e["type"].as_str().unwrap_or("text"))
+                .data(e.to_string()),
+        )
     });
     Ok(Sse::new(body)
         .keep_alive(
@@ -608,6 +572,66 @@ async fn stream(
                 .text("ping"),
         )
         .into_response())
+}
+
+/// The next event for subscriber `id` after `after`, read with its current scope and kinds. `None` when the
+/// subscriber is gone or (with `token`) its token is no longer `token`. Streams and push call this right before
+/// each event they send, so an edit or a rotate applies to the very next event.
+pub fn next_event(
+    c: &Connection,
+    key: &crypto::Key,
+    id: &str,
+    token: Option<&str>,
+    after: i64,
+) -> rusqlite::Result<Option<Page>> {
+    match load(c, id)? {
+        Some(cur) if token.is_none_or(|t| t == cur.token_hash) => {
+            read_events(c, key, &cur, after, 1).map(Some)
+        }
+        _ => Ok(None),
+    }
+}
+
+/// The live events of a stream opened with the token whose hash is `token`, after seq `start`. Each event is read
+/// only when the reader asks for it (see `next_event`); the stream ends when the token is rotated or the subscriber
+/// removed. Waits for new messages (or 30 s) when there is nothing to send.
+pub fn live_events(
+    app: AppState,
+    id: String,
+    token: String,
+    start: i64,
+) -> impl futures_util::Stream<Item = Value> + Send {
+    futures_util::stream::unfold(start, move |mut cursor| {
+        let (app, id, token) = (app.clone(), id.clone(), token.clone());
+        async move {
+            loop {
+                let notified = app.notify.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                let page = {
+                    let c = app.db.lock().unwrap();
+                    match next_event(&c, &app.key, &id, Some(&token), cursor) {
+                        Ok(Some(p)) => p,
+                        Ok(None) => return None,
+                        Err(e) => {
+                            tracing::warn!("subscriber stream: {e}");
+                            return None;
+                        }
+                    }
+                };
+                cursor = page.last_seq;
+                if let Some((_, e)) = page.items.into_iter().next() {
+                    return Some((e, cursor));
+                }
+                if !page.more {
+                    tokio::select! {
+                        _ = &mut notified => {}
+                        _ = tokio::time::sleep(Duration::from_secs(30)) => {}
+                    }
+                }
+            }
+        }
+    })
 }
 
 async fn file(

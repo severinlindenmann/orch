@@ -894,3 +894,181 @@ fn signature_vectors_match_the_contract() {
         assert_eq!(got, c["signature"].as_str().unwrap(), "{}", c["name"]);
     }
 }
+
+// ---------- a stalled reader: token and scope are checked again right before each event ----------
+
+fn token_hash_of(t: &T, id: &str) -> String {
+    let c = t.app.db.lock().unwrap();
+    orch_relay::subs::load(&c, id).unwrap().unwrap().token_hash
+}
+
+fn max_seq(t: &T) -> i64 {
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .query_row("SELECT COALESCE(MAX(seq),0) FROM messages", [], |r| {
+            r.get(0)
+        })
+        .unwrap()
+}
+
+/// Every event the stream gives until it waits (300 ms without one) or ends; true when it ended.
+async fn drain(
+    s: &mut std::pin::Pin<Box<dyn futures_util::Stream<Item = Value> + Send>>,
+) -> (Vec<Value>, bool) {
+    use futures_util::StreamExt;
+    let mut out = vec![];
+    loop {
+        match tokio::time::timeout(std::time::Duration::from_millis(300), s.next()).await {
+            Ok(Some(e)) => out.push(e),
+            Ok(None) => return (out, true),
+            Err(_) => return (out, false),
+        }
+    }
+}
+
+#[tokio::test]
+async fn stalled_stream_gets_nothing_after_a_token_rotate() {
+    use futures_util::StreamExt;
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let s = add_sub(
+        &t,
+        json!({"name": "Bot", "workspaces": [a.id], "kinds": {"updates": true}}),
+    )
+    .await;
+    let mut live: std::pin::Pin<Box<dyn futures_util::Stream<Item = Value> + Send>> =
+        Box::pin(orch_relay::subs::live_events(
+            t.app.clone(),
+            s.id.clone(),
+            token_hash_of(&t, &s.id),
+            max_seq(&t),
+        ));
+    // 40 events wait while the reader takes only the first, then stalls
+    let mut sent = vec![];
+    for i in 0..40 {
+        sent.push(update(&t, &a, "note", &format!("n{i}")).await);
+    }
+    let first = live.next().await.unwrap();
+    assert_eq!(first["id"], sent[0]);
+    // the stalled reader gives the relay time to queue whatever it would queue
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    t.admin_json(
+        "POST",
+        &format!("/admin/api/subscribers/{}/token", s.id),
+        None,
+    )
+    .await;
+    update(&t, &a, "note", "after rotate").await;
+    let (rest, ended) = drain(&mut live).await;
+    assert!(
+        rest.is_empty(),
+        "nothing after the rotate, got {}",
+        rest.len()
+    );
+    assert!(ended, "a rotated token ends the stream");
+}
+
+#[tokio::test]
+async fn stalled_stream_drops_queued_events_the_new_scope_leaves_out() {
+    use futures_util::StreamExt;
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let b = t.add_ws("B").await;
+    let s = add_sub(
+        &t,
+        json!({"name": "Bot", "workspaces": [a.id, b.id], "kinds": {"updates": true, "results": true}}),
+    )
+    .await;
+    let mut live: std::pin::Pin<Box<dyn futures_util::Stream<Item = Value> + Send>> =
+        Box::pin(orch_relay::subs::live_events(
+            t.app.clone(),
+            s.id.clone(),
+            token_hash_of(&t, &s.id),
+            max_seq(&t),
+        ));
+    for i in 0..20 {
+        update(&t, &a, "note", &format!("a{i}")).await;
+        update(&t, &b, "note", &format!("b{i}")).await;
+        update(&t, &a, "result", &format!("ar{i}")).await;
+    }
+    let first = live.next().await.unwrap();
+    assert_eq!(first["text"], "a0");
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    // narrow: only workspace A, and no results
+    let (st, v) = t
+        .admin_json(
+            "PATCH",
+            &format!("/admin/api/subscribers/{}", s.id),
+            Some(json!({"workspaces": [a.id], "kinds": {"updates": true, "results": false}})),
+        )
+        .await;
+    assert_eq!(st, 200, "{v}");
+    let (rest, ended) = drain(&mut live).await;
+    assert!(!ended, "a scope edit keeps the stream open");
+    assert!(
+        rest.iter()
+            .all(|e| e["workspace"]["id"] == a.id.as_str() && e["kind"] == "note"),
+        "only notes of A after the edit: {rest:?}"
+    );
+    assert_eq!(rest.len(), 19, "a1..a19");
+}
+
+/// A receiver that narrows the subscriber to workspace `keep` during the first delivery.
+struct NarrowOnFirst {
+    app: orch_relay::state::AppState,
+    sub: String,
+    keep: String,
+    got: Mutex<Vec<Value>>,
+}
+
+#[async_trait::async_trait]
+impl Deliver for NarrowOnFirst {
+    async fn post(&self, _: &str, _: Vec<(&'static str, String)>, body: Vec<u8>) -> Outcome {
+        let mut got = self.got.lock().unwrap();
+        if got.is_empty() {
+            self.app
+                .db
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE subscribers SET workspaces=?2 WHERE id=?1",
+                    rusqlite::params![self.sub, json!([self.keep]).to_string()],
+                )
+                .unwrap();
+        }
+        got.push(serde_json::from_slice(&body).unwrap());
+        Outcome {
+            status: Some(200),
+            detail: String::new(),
+        }
+    }
+}
+
+#[tokio::test]
+async fn push_checks_the_scope_again_before_each_delivery() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let b = t.add_ws("B").await;
+    let s = add_sub(
+        &t,
+        json!({"name": "Hook", "workspaces": [a.id, b.id], "push_url": "https://hooks.example.com/orch"}),
+    )
+    .await;
+    let recv = Arc::new(NarrowOnFirst {
+        app: t.app.clone(),
+        sub: s.id.clone(),
+        keep: a.id.clone(),
+        got: Mutex::default(),
+    });
+    t.app.subs.set_deliver(recv.clone());
+    for i in 0..5 {
+        update(&t, &a, "result", &format!("a{i}")).await;
+        update(&t, &b, "result", &format!("b{i}")).await;
+    }
+    subs_push::tick(&t.app).await;
+    let got = recv.got.lock().unwrap();
+    let texts: Vec<&str> = got.iter().map(|e| e["text"].as_str().unwrap()).collect();
+    assert_eq!(texts, vec!["a0", "a1", "a2", "a3", "a4"]);
+}
