@@ -217,6 +217,25 @@ def start_local(e, tmp: Path, bins: dict, used: set[int]) -> tuple[Server, Serve
     return pub, rel
 
 
+def kill_group(p: subprocess.Popen) -> None:
+    """End a process started with start_new_session=True and everything it started (orch runs add-ons as children)."""
+    import signal
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(p.pid, sig)
+        except OSError:
+            return
+        try:
+            p.wait(5)
+            break
+        except subprocess.TimeoutExpired:
+            pass
+    try:
+        os.killpg(p.pid, signal.SIGKILL)  # anything left in the group after the parent went
+    except OSError:
+        pass
+
+
 # ---- text helpers ----------------------------------------------------------------------------------
 
 

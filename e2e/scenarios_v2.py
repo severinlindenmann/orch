@@ -59,6 +59,8 @@ class W:
             ["orch-" + hashlib.sha256(str(self.root.resolve()).encode("utf-8")).hexdigest()[:8]] if tmux else []
         )
         e.cleanup.append(self.close)
+        # `orch start` (or a scenario's own dashboard) leaves background servers: always stop them, even when the scenario fails
+        e.cleanup.append(lambda: self.e.sh(["orch", "stop"], cwd=self.root, env=self.env))
 
     def close(self):
         for s in self.tmux_sockets:
@@ -995,3 +997,103 @@ def f4_focus(e):
         check(not errs, f"{what} does not match {schema}.schema.json: {errs[:3]}")
     check(view["blocks"] and "Fence" in json.dumps(view), f"focus view does not show the running ticket: {view}")
     w.wait_done(tid, 40)
+
+
+# ------------------------------------------------------------------------------------------------ demo bugs (6 Nov)
+
+
+@scenario("V2-F5")
+def f5_dashboard_focus_view_while_running(e):
+    """The dashboard accepts the Focus view while a fake agent run is active (state ok, the item links to the running ticket)."""
+    w = W(e, "V2-F5").init()
+    focus_agent(w, "--hold 15")
+    tid = w.ticket("Running now", "one step")
+    fx = Focus(w)
+    fx.act_ok("run.start", {"ticket": tid})
+    w.wait_claim(tid)
+    rc, out, err = w.sh(["orch", "addon", "add", "dashboard", "--yes"], timeout=600)
+    check(rc == 0, f"addon add dashboard: {(err or out)[-300:]}")
+    w.o("start", by=None)
+    dbase = w.j("dashboard", "status", by=None)["url"].rstrip("/")
+    check(wait_http(dbase + "/"), "the dashboard did not come up")
+    check(w.claim(tid), "the run ended before the dashboard was asked (raise --hold)")
+    r = http("GET", dbase + "/api/addon/focus", timeout=15)
+    j = r.json() or {}
+    check(r.status == 200 and j.get("state") == "ok" and j.get("view"), f"the dashboard refused the Focus view of a running ticket: {r}")
+    links = [i.get("link") for b in j["view"]["blocks"] for i in b.get("items", [])]
+    check(f"addon:t/{tid}" in links, f"the running ticket is not linked in the Focus view: {links}")
+    w.wait_done(tid, 40)
+
+
+@scenario("V2-S2")
+def s2_dashboard_start_makes_tasks(e):
+    """A dashboard `run.start` with a fake one-shot agent finishes at least one task (#135: Start used to stay 'working' forever)."""
+    w = W(e, "V2-S2").init()
+    w.agent()
+    tid = w.ticket("Start from the dashboard", "first step", "second step")
+    rc, out, err = w.sh(["orch", "addon", "add", "dashboard", "--yes"], timeout=600)
+    check(rc == 0, f"addon add dashboard: {(err or out)[-300:]}")
+    w.o("start", by=None)
+    dbase = w.j("dashboard", "status", by=None)["url"].rstrip("/")
+    check(wait_http(dbase + "/"), "the dashboard did not come up")
+    r = http("POST", dbase + "/api/act", {"Origin": dbase, "Sec-Fetch-Site": "same-origin"}, {"op": "run.start", "args": {"ticket": tid}})
+    check(r.status == 200, f"dashboard run.start: {r}")
+    done = wait_for(lambda: [c for c in w.load(tid)["checklist"] if c.get("done")], 45)
+    check(done, f"no task done 45 s after Start: {w.load(tid)['checklist']}; agent log: {w.lines('prompt')}")
+    check(w.lines("prompt"), "the fake agent never got a prompt")
+    w.wait_done(tid, 40)
+
+
+OLD_REF = "142ec615"  # the last orch before the add-on registry fixes of 6 Nov: add-ons dashboard + scheduler
+
+
+@scenario("V2-U1", slow=True, local_only=True)
+def u1_upgrade_from_old_orch(e):
+    """Old orch (pinned commit, installed the way the old installer did) with dashboard + scheduler, then the current install.sh:
+    `orch start` starts the add-ons, `orch update` works, `orch addon add focus --yes` works, and the old scheduler entry
+    is skipped plainly (automation is added with `orch addon add automation --yes`). Pending on the removal of the compat code (#136)."""
+    if "RENAMED" in (e.repo / "workspace" / "src" / "orch" / "addons.py").read_text():
+        from lib import Skip
+        raise Skip("pending on #136 (scheduler->automation compat code still there; this scenario asserts its removal)")
+    if subprocess.run(["git", "-C", str(e.repo), "cat-file", "-e", OLD_REF + "^{commit}"], capture_output=True).returncode != 0:
+        from lib import Skip
+        raise Skip(f"commit {OLD_REF} is not in this clone (git fetch)")
+    real = os.environ.get("E2E_REAL_HOME") or str(Path.home())
+    ohome = Path(real) / f".orch-e2e-u1-{os.getpid()}"  # ORCH_HOME is only trusted under the real home, outside any git folder
+    ohome.mkdir()
+    import shutil as _sh
+    e.cleanup.append(lambda: _sh.rmtree(ohome, ignore_errors=True))
+    tools, ubin = e.tmp / "u1-uvtools", e.tmp / "u1-bin"
+    ubin.mkdir()
+    old_env = {"UV_TOOL_DIR": str(tools), "UV_TOOL_BIN_DIR": str(ubin), "ORCH_HOME": str(ohome),
+               "ORCH_REPO": "file://" + str(e.repo), "ORCH_REF": OLD_REF}
+    w = W(e, "V2-U1", extra_bin=ubin, env=old_env)
+    # 1) the old install.sh does exactly this: uv tool install --reinstall git+<repo>@<ref>#subdirectory=workspace
+    rc, out, err = w.sh(["uv", "tool", "install", "--reinstall", f"git+file://{e.repo}@{OLD_REF}#subdirectory=workspace"], timeout=900)
+    check(rc == 0, f"old orch install: {(err or out)[-300:]}")
+    w.o("init", "--yes", by=None)
+    for name in ("dashboard", "scheduler"):
+        rc, out, err = w.sh(["orch", "addon", "add", name, "--yes"], timeout=900)
+        check(rc == 0, f"old orch: addon add {name}: {(err or out)[-300:]}")
+    # 2) the current installer, from this checkout (the way a user upgrades), same machine folders
+    new_env = {"ORCH_REPO": str(e.repo)}
+    new_env_all = {**new_env, "ORCH_REF": ""}
+    rc, out, err = w.sh(["sh", str(e.repo / "install.sh")], env=new_env_all, timeout=900)
+    check(rc == 0, f"current install.sh: {(err or out)[-400:]}")
+    text = out + err
+    check("Traceback" not in text, f"install.sh printed a traceback: {text[-400:]}")
+    # 3) the work folder starts, updates and gets a new add-on
+    rc, out, err = w.sh(["orch", "start"], env=new_env_all, timeout=300)
+    check(rc == 0, f"orch start after the upgrade: {(err or out)[-300:]}")
+    dbase = w.j("dashboard", "status", by=None, env=new_env_all)["url"].rstrip("/")
+    check(wait_http(dbase + "/"), "the dashboard add-on did not start after the upgrade")
+    rc, out, err = w.sh(["orch", "update"], env=new_env_all, timeout=900)
+    check(rc == 0 and "Traceback" not in out + err, f"orch update: {(err or out)[-400:]}")
+    rc, out, err = w.sh(["orch", "addon", "add", "focus", "--yes"], env=new_env_all, timeout=900)
+    check(rc == 0, f"addon add focus after the upgrade: {(err or out)[-300:]}")
+    rc, out, err = w.sh(["orch", "addon", "add", "automation", "--yes"], env=new_env_all, timeout=900)
+    check(rc == 0, f"addon add automation after the upgrade: {(err or out)[-300:]}")
+    rows = w.j("addon", "list", by=None, env=new_env_all)
+    on = {r["name"] for r in rows if r.get("active")}
+    check({"dashboard", "focus", "automation"} <= on, f"active add-ons after the upgrade: {sorted(on)}")
+    check("scheduler" not in on, f"the old scheduler is still listed as on: {sorted(on)}")

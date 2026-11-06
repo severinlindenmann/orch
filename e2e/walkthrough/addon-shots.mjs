@@ -26,7 +26,7 @@ try {
   for (const t of ['Weekly report for the board', 'Check the nightly import', 'Update the onboarding notes'])
     ids.push(JSON.parse(sh(`orch ticket new "${t}" --json`)).id);
   const port = 18000 + Math.floor(Math.random() * 900);
-  dash = spawn('orch', ['dashboard', 'serve', '--port', String(port)], { cwd: ws, env, stdio: 'ignore' });
+  dash = spawn('orch', ['dashboard', 'serve', '--port', String(port)], { cwd: ws, env, stdio: 'ignore', detached: true });
   for (let i = 0; i < 60; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/`)).ok) break; } catch {} await new Promise(r => setTimeout(r, 250)); }
   browser = await chromium.launch();
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 760 }, colorScheme: 'light' })).newPage();
@@ -42,7 +42,7 @@ try {
   console.log('wrote', OUT);
 } finally {
   if (browser) await browser.close();
-  if (dash) dash.kill();
+  if (dash) { try { process.kill(-dash.pid, 'SIGKILL'); } catch {} }  // the server is a child of orch: end the group
   fs.rmSync(TMP, { recursive: true, force: true });
   fs.rmSync(OHOME, { recursive: true, force: true });
 }
