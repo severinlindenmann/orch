@@ -290,6 +290,61 @@ def list_all(root: Path) -> list[dict]:
     return out
 
 
+_FIELD_WORDS = {
+    "title": "title",
+    "owner": "owner",
+    "due": "due date",
+    "note": "note",
+    "summary": "summary",
+    "status": "status",
+    "waiting_on": "wait",
+}
+_STATUS_WORDS = {
+    "open": "Open",
+    "active": "Doing",
+    "waiting": "Waiting",
+    "done": "Done",
+    "dropped": "Dropped",
+}
+
+
+def _fields_text(raw: str) -> str | None:
+    keys = [k.strip() for k in raw.split(",")]
+    if any(k not in _FIELD_WORDS for k in keys):
+        return None  # free text someone logged by hand: shown as written
+    words = [_FIELD_WORDS[k] for k in keys]
+    return "the " + (", ".join(words[:-1]) + " and " + words[-1] if len(words) > 1 else words[0])
+
+
+def history_line(text: str) -> str:
+    """Plain words for the history lines orch itself writes (what a person reads in the CLI). The stored text
+    stays as it is; anything else, such as a line someone logged by hand, is shown as written."""
+    t = text.strip()
+    if re.fullmatch(r"Asked q\d+, waiting", t):
+        return "Asked a question"
+    if m := re.fullmatch(r"Answered q\d+: (.*)", t, re.DOTALL):
+        return f"Answered a question: {m.group(1)}"
+    if m := re.fullmatch(r"Status (\w+) -> (\w+)", t):
+        return f"Moved to {_STATUS_WORDS.get(m.group(2), m.group(2))}"
+    if m := re.fullmatch(r"Edited ([a-z_, ]+)", t):
+        if (f := _fields_text(m.group(1))) is not None:
+            return "Changed " + f
+    if m := re.fullmatch(r"Patched ([a-z_, ]+?)(?: \(status \w+ -> (\w+)\))?", t):
+        if (f := _fields_text(m.group(1))) is not None:
+            return (
+                "Changed " + f + (f" (now {_STATUS_WORDS.get(m.group(2), m.group(2))})" if m.group(2) else "")
+            )
+    if m := re.fullmatch(r"Added check (c\d+)", t):
+        return f"Added task {m.group(1)}"
+    if m := re.fullmatch(r"Check (c\d+) done", t):
+        return f"Finished task {m.group(1)}"
+    if m := re.fullmatch(r"Set ext\.([a-z][a-z0-9-]*)", t):
+        return f"Updated the data of the {m.group(1)} add-on"
+    if m := re.fullmatch(r"Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?", t):
+        return f"Removed data of the {m.group(1)} add-on"
+    return t
+
+
 def add_history(ticket: dict, by: str, text: str, via: str = "cli") -> None:
     ticket["history"].append({"at": now(), "by": by, "via": via, "text": text})
 
