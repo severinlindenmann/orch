@@ -116,16 +116,19 @@ def add_artifact_marks(tickets: list[dict]) -> None:
         return
     for t in tickets:
         art: dict[str, dict] = {}
-        pairs = [("link", ln.get("url"), ln.get("url")) for ln in t.get("links") or [] if isinstance(ln, dict)]
-        for c in t.get("checklist") or []:
-            for ev in c.get("evidence") or [] if isinstance(c, dict) else []:
-                if isinstance(ev, dict) and ev.get("type") in ("url", "pr", "commit"):
-                    pairs.append((ev["type"], ev.get("ref"), ev.get("ref")))
-        for source, ref, url in pairs[:100]:
-            if not isinstance(ref, str) or not isinstance(url, str) or not url.startswith(("http://", "https://")):
+        links = t.get("links") if isinstance(t.get("links"), list) else []
+        pairs = [("link", ln.get("url")) for ln in links if isinstance(ln, dict)]
+        for c in t.get("checklist") if isinstance(t.get("checklist"), list) else []:
+            evs = c.get("evidence") if isinstance(c, dict) and isinstance(c.get("evidence"), list) else []
+            pairs += [(ev["type"], ev.get("ref")) for ev in evs if isinstance(ev, dict) and ev.get("type") in ("url", "pr", "commit")]
+        for source, ref in pairs[:100]:
+            if not isinstance(ref, str) or not ref.startswith(("http://", "https://")):
                 continue
-            kind, rev = phone_view._url_art(source, url)
-            art[url] = {"id": phone_view.artifact_id(source, ref), "rev": rev, "kind": kind}
+            try:  # one bad entry never hides the others
+                kind, rev = phone_view._url_art(source, ref)
+                art[ref] = {"id": phone_view.artifact_id(source, ref), "rev": rev, "kind": kind}
+            except ValueError:
+                continue
         t["art"] = art
 
 

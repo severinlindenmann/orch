@@ -329,3 +329,11 @@ def test_links_carry_the_phone_artifact_id_rev_and_kind(ws):
     assert t["art"]["https://x.example/f/abc123"]["kind"] == "html"
     assert t["art"]["https://github.com/o/r/commit/abcdef1234"]["kind"] == "commit"
     assert t["art"]["https://example.com/org/repo/pull/7"]["id"].startswith("a_")
+
+
+def test_malformed_ticket_data_never_breaks_the_artifact_marks():
+    from orch_dashboard.data import add_artifact_marks
+    ts = [{"links": "x", "checklist": [1, {"evidence": "no"}, {"evidence": [3, {"type": "pr", "ref": "http://[bad"}]}]},
+          {"links": [5, {"url": "http://[bad"}, {"url": "https://ok.example/f/zz"}], "checklist": None}]
+    add_artifact_marks(ts)
+    assert ts[0]["art"] == {} and ts[1]["art"]["https://ok.example/f/zz"]["kind"] == "html"
