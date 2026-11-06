@@ -106,3 +106,25 @@ def test_odd_lines_do_not_stop_the_tail(ws):
 @pytest.mark.parametrize("run", ["../x", "r_ab", "x"])
 def test_bad_run_id_reads_nothing(ws, run):
     assert Tail(ws, TID, run, "claude", "oneshot").poll() == []
+
+
+def test_a_300kb_line_does_not_stall_the_tail(ws):
+    p = oneshot_log(ws)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "w") as f:
+        f.write(json.dumps(LINES[0]) + "\n")
+        f.write('{"type":"assistant","pad":"' + "x" * 300_000 + '"}\n')
+        f.write(json.dumps(LINES[1]) + "\n" + json.dumps(LINES[2]) + "\n")
+    t = Tail(ws, TID, RUN, "claude", "oneshot")
+    kinds = []
+    for _ in range(6):
+        kinds += [e["kind"] for e in t.poll()]
+    assert kinds == ["run.state", "tool.start", "tool.end"]  # the long line is dropped, the rest is read
+
+
+def test_linked_folder_on_the_way_is_not_read(ws, tmp_path):
+    real = tmp_path / "reallogs"
+    write(real / f"{TID}-{RUN}.log", LINES)
+    (ws / ".orch" / "run").mkdir(parents=True)
+    (ws / ".orch" / "run" / "logs").symlink_to(real)
+    assert Tail(ws, TID, RUN, "claude", "oneshot").poll() == []

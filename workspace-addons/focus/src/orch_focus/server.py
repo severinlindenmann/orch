@@ -57,6 +57,7 @@ class Tracker:
         self.perms = Permissions(root, orch_bin)
         self.last_agent: dict[str, tuple[str, str]] = {}  # ticket -> (agent, mode) of its latest run
         self.ticket_cache: dict[str, tuple[float, dict | None]] = {}
+        self.session_cache: dict[str, tuple[float, str, str | None]] = {}
 
     def _started_file(self) -> Path:
         return runfiles.run_dir(self.root, "focus") / "started.json"
@@ -164,9 +165,12 @@ class Tracker:
                 tr["board"].resolve_asks(ticket)
                 events = tr["events"]
             board = tr["board"].snapshot() if tr else Board().snapshot()
-        if tr and claim:
-            label = str(claim.get("agent") or "The agent").capitalize()
-            if self.perms.sync(tid, claim, board["denials"], ticket, label):
+        if tr:
+            last = self.last_agent.get(tid, (None, None))[0]
+            label = str(claim.get("agent") or last or "The agent").capitalize()
+            if self.perms.sync(
+                tid, claim, bool(status.get("running")), tr["run"], board["denials"], ticket, label
+            ):
                 self.status_cache.pop(tid, None)
                 self.ticket_cache.pop(tid, None)
         if run is None and claim.get("run") is not None:
@@ -212,6 +216,14 @@ class Tracker:
         }  # fmt: skip
 
     def session(self, tid: str, agent: str) -> str | None:
+        hit = self.session_cache.get(tid)
+        if hit and time.time() - hit[0] < 5.0 and hit[1] == agent:
+            return hit[2]
+        found = self._session(tid, agent)
+        self.session_cache[tid] = (time.time(), agent, found)
+        return found
+
+    def _session(self, tid: str, agent: str) -> str | None:
         try:
             code, out, _ = actions.orch(
                 self.root, self.orch_bin, ["run", "session", tid, "--agent", agent, "--json"], timeout=15
@@ -235,10 +247,15 @@ class Tracker:
             rows = json.loads(out) if code == 0 else []
         except (actions.Unavailable, ValueError, RecursionError):
             rows = []
-        return [
-            {"id": t["id"], "title": str(t.get("title", ""))[:200], "status": t["status"]}
-            for t in rows if isinstance(t, dict) and TID_RE.fullmatch(str(t.get("id"))) and t.get("status") in ("open", "active", "waiting")
-        ][:200]  # fmt: skip
+        out = []
+        for t in rows if isinstance(rows, list) else []:
+            if (
+                isinstance(t, dict)
+                and TID_RE.fullmatch(str(t.get("id")))
+                and t.get("status") in ("open", "active", "waiting")
+            ):
+                out.append({"id": t["id"], "title": str(t.get("title", ""))[:200], "status": t["status"]})
+        return out[:200]
 
 
 class Handler(BaseHTTPRequestHandler):

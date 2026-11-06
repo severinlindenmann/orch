@@ -17,6 +17,14 @@ NOT_NOW = "Not now"
 TOOL = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
 
 
+def _qid(out: str) -> str | None:
+    try:
+        q = json.loads(out).get("id")
+    except (ValueError, AttributeError):
+        return None
+    return q if isinstance(q, str) and re.fullmatch(r"q[0-9]{1,4}", q) else None
+
+
 class Permissions:
     def __init__(self, root: Path, orch_bin: str | None):
         self.root, self.orch_bin = root, orch_bin
@@ -30,20 +38,35 @@ class Permissions:
             d = runfiles.read_json(self._file()) or {}
         except RuntimeError:
             d = {}
-        return {"asked": list(d.get("asked", []))[-60:], "done": list(d.get("done", []))[-60:]}
+        qs = d.get("qs") if isinstance(d.get("qs"), dict) else {}
+        return {
+            "asked": list(d.get("asked", []))[-60:],
+            "done": list(d.get("done", []))[-60:],
+            "qs": dict(list(qs.items())[-60:]),
+        }
 
     def _save(self) -> None:
-        self.state = {k: v[-60:] for k, v in self.state.items()}
+        self.state = {
+            "asked": self.state["asked"][-60:],
+            "done": self.state["done"][-60:],
+            "qs": dict(list(self.state["qs"].items())[-60:]),
+        }
         runfiles.write_json(self._file(), self.state)
 
-    def _orch(self, argv: list[str]) -> int:
+    def _run(self, argv: list[str]) -> tuple[int, str, str]:
         try:
-            return actions.orch(self.root, self.orch_bin, argv, timeout=30)[0]
+            return actions.orch(self.root, self.orch_bin, argv, timeout=30)
         except actions.Unavailable:
-            return 1
+            return 1, "", ""
 
-    def sync(self, tid: str, claim: dict, denials: list[dict], ticket: dict, agent_label: str) -> bool:
-        """Ask for new denials, act on answers. Returns True when a run was started again."""
+    def sync(
+        self, tid: str, claim: dict, running: bool, last_run, denials: list[dict], ticket: dict, label: str
+    ) -> bool:
+        """Ask for new denials, act on answers. Returns True when a run was started again.
+
+        An answer counts only for a question Focus itself asked (its id is in the stored record, with the run
+        and the tool from the agent's denial), for the latest run, once that run is over. The tool never comes
+        from the question's own fields: an agent that makes up a focus:permission question gets nothing."""
         agent, run = claim.get("agent"), claim.get("run")
         restarted = False
         changed = False
@@ -56,24 +79,40 @@ class Permissions:
                     continue
                 self.state["asked"].append(key)
                 changed = True
-                self._orch([
-                    "ask", tid, f"{agent_label} needs your OK to use {tool}. Allow it and try again?",
+                code, out, _ = self._run([
+                    "ask", tid, f"{label} needs your OK to use {tool}. Allow it and try again?",
                     "--option", ALLOW, "--option", NOT_NOW, "--recommend", ALLOW, "--kind", KIND,
                     "--action", json.dumps({"tool": tool, "run": run}), "--by", "agent:focus", "--json",
                 ])  # fmt: skip
+                qid = _qid(out) if code == 0 else None
+                if qid:
+                    self.state["qs"][f"{tid}:{qid}"] = {
+                        "run": run,
+                        "tool": tool,
+                        "agent": agent,
+                        "mode": "oneshot",
+                    }
         for q in ticket.get("questions") or []:
-            if q.get("kind") != KIND or q.get("answer") is None:
+            if q.get("kind") != KIND or q.get("answer") is None or not isinstance(q.get("id"), str):
                 continue
             key = f"{tid}:{q['id']}"
-            if key in self.state["done"]:
-                continue
+            rec = self.state["qs"].get(key)
+            if rec is None or key in self.state["done"]:
+                continue  # not asked by Focus, or already handled
+            if running or rec["run"] != last_run:
+                continue  # the run is still going, or a newer run exists: this answer is old
             self.state["done"].append(key)
             changed = True
-            tool = (q.get("action") or {}).get("tool")
-            if q["answer"] == ALLOW and isinstance(tool, str) and TOOL.fullmatch(tool):
-                restarted = (
-                    self._orch(["run", "start", tid, f"--allow={tool}", "--by", "focus", "--json"]) == 0
+            if (
+                q["answer"] == ALLOW
+                and TOOL.fullmatch(rec["tool"])
+                and rec.get("mode") == "oneshot"
+                and adapterdata.permission_retry(self.root, rec.get("agent") or "")
+            ):
+                code, _, _ = self._run(
+                    ["run", "start", tid, f"--allow={rec['tool']}", "--by", "focus", "--json"]
                 )
+                restarted = code == 0
         if changed:
             try:
                 self._save()
