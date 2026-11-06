@@ -27,7 +27,7 @@ At that time the wait is cleared and a run starts.
 
 **Repeat, in plain words**
 
-    orch automation repeat <id> "every monday 08:00"
+    orch automation repeat <id> "every monday 08:00"      # <id> = ticket id or its key (DM1-12)
     orch automation repeat <id> "daily 07:30" --tz Europe/Zurich --each-run sub-ticket
     orch automation repeat <id> --off
 

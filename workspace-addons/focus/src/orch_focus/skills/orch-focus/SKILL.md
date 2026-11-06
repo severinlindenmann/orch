@@ -15,7 +15,7 @@ messages and stops agents only through `orch run start|send|stop`.
 
 **Open the page** (the user, or you when asked)
 
-    orch focus open <ticket>        # starts the page if needed and opens it
+    orch focus open <ticket>        # starts the page if needed and opens it; <ticket> = id or key (DM1-12)
     orch focus open <ticket> --no-open
     orch focus status               # is it running, and where?
     orch focus stop

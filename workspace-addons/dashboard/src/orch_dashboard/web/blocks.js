@@ -37,6 +37,8 @@ const OrchBlocks = (() => {
     if (am && !am[2]?.includes('..')) {
       // `addon:<name>/<path>`: that add-on's own page when it runs here, else a Start button (the page starts it).
       const base = typeof opts.addonUrl === 'function' ? opts.addonUrl(am[1]) : null;
+      const inApp = typeof base === 'string' && LOCAL.test(base) && typeof opts.inApp === 'function' ? opts.inApp(am[1]) : null;
+      if (inApp) { const a = el('a', cls); a.href = inApp(am[2] || '/'); a.append(...child); return a; }  // the add-on's page inside this app
       if (typeof base === 'string' && LOCAL.test(base)) {
         const a = el('a', cls); a.href = base.replace(/\/$/, '') + (am[2] || '/'); a.target = '_blank'; a.rel = 'noopener noreferrer'; a.append(...child);
         a.append(el('span', 'sr-only', ' (opens in a new tab)'));

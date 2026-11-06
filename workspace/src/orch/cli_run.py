@@ -184,18 +184,23 @@ def _status(args, root: Path) -> None:
     _out(args, data, text)
 
 
-def _session_id(args) -> str | None:
+def _hook_input(args) -> dict:
+    """The tool's hook input (JSON on stdin), or {}."""
+    if args.kind not in ("session", "attention") or sys.stdin is None or sys.stdin.isatty():
+        return {}
+    try:
+        data = json.loads(sys.stdin.read(65536) or "{}")
+    except (ValueError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _session_id(args, data: dict) -> str | None:
     if args.kind != "session":
         return None
     if args.session_id:
         return args.session_id
-    if sys.stdin is None or sys.stdin.isatty():
-        return None
-    try:
-        data = json.loads(sys.stdin.read(65536) or "{}")  # the tool's hook input
-    except (ValueError, OSError):
-        return None
-    sid = data.get("session_id") if isinstance(data, dict) else None
+    sid = data.get("session_id")
     return sid if isinstance(sid, str) else None
 
 
@@ -243,7 +248,10 @@ def dispatch(args, root: Path) -> bool:
         raise Refused("--by must be 1 to 64 characters, e.g. agent:helper.")
     tid = args.ticket or os.environ.get("ORCH_TICKET")
     if sub == "event":
-        runs_live.event(root, args.kind, args.run or os.environ.get("ORCH_RUN"), tid, _session_id(args))
+        data = _hook_input(args)
+        runs_live.event(
+            root, args.kind, args.run or os.environ.get("ORCH_RUN"), tid, _session_id(args, data), data
+        )
     elif sub == "done":
         _done(args, root, tid)
     elif sub == "send":

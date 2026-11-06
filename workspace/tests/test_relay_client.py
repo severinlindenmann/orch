@@ -1382,3 +1382,10 @@ def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):
     (proj / ".orch/run/relay").symlink_to(elsewhere)
     assert run("relay", "send", "ws_reports001", "second")[0] == 0
     assert list(elsewhere.iterdir()) == []
+
+
+def test_view_without_messages_names_a_workspace_to_try(proj, run, rel):
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports", "description": "Numbers"}]
+    connect(run, rel)
+    v = json.loads(run("relay", "view", "--json")[1])
+    assert v["blocks"][1]["items"][0]["subtitle"] == 'Try: orch relay send Reports "Hello"'

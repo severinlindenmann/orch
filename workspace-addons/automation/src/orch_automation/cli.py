@@ -38,23 +38,25 @@ def describe(root: Path) -> list[dict]:
             continue
         w = t.get("waiting_on") or {}
         if w.get("kind") == "time" and w.get("until"):
-            rows.append({"ticket": t["id"], "title": t["title"], "kind": "wake", "at": w["until"]})
+            rows.append({"ticket": t["id"], "key": t.get("key"), "title": t["title"], "kind": "wake", "at": w["until"]})
         s = (t.get("ext") or {}).get("automation") or {}
         if s.get("recurring") is True and s.get("cron"):
             if s.get("paused") is True:  # switched off: listed, no next time
-                rows.append({"ticket": t["id"], "title": t["title"], "kind": "repeat", "cron": s["cron"], "at": None, "off": True})
+                rows.append({"ticket": t["id"], "key": t.get("key"), "title": t["title"], "kind": "repeat", "cron": s["cron"], "at": None, "off": True})
                 continue
             nxt = next_after(s["cron"], datetime.now(UTC), plain.zone(s.get("tz")))
-            rows.append({"ticket": t["id"], "title": t["title"], "kind": "repeat", "cron": s["cron"],
+            rows.append({"ticket": t["id"], "key": t.get("key"), "title": t["title"], "kind": "repeat", "cron": s["cron"],
                          "at": fmt(nxt) if nxt else state.get(t["id"], {}).get("next_run")})
     return sorted(rows, key=lambda r: r["at"] or "")
 
 
 def repeat(root: Path, tid: str, phrase: str | None, off: bool, agent: str | None = None, tz: str | None = None,
            each_run: bool = False) -> dict:
-    t = next((x for x in orchcli.tickets(root) if x["id"] == tid), None)
+    want = tid.strip().upper()  # the ticket id, or its key (DM1-12, any case)
+    t = next((x for x in orchcli.tickets(root) if x["id"] == tid or str(x.get("key") or "").upper() == want), None)
     if t is None:
         raise Refused(f"There is no ticket {tid}.")
+    tid = t["id"]
     if off:
         if not orchcli.set_ext(root, t, remove=("each_run",), recurring=False):
             raise Refused("The ticket changed or the change was not accepted. Try again.")
@@ -171,7 +173,7 @@ def _run(args, root: Path) -> int:
         out(rs, "\n".join(f"{r['title']}: {r['text']}" for r in rs) or "Nothing needs you here.")
     elif args.cmd == "list":
         rows = describe(root)
-        out(rows, "\n".join(f"{x['ticket']}  {x['kind']} {x.get('cron', '')} {x['at'] or 'off'}  {x['title']}" for x in rows) or "Nothing scheduled.")
+        out(rows, "\n".join(f"{x['key'] or x['ticket']}  {x['kind']} {x.get('cron', '')} {x['at'] or 'off'}  {x['title']}" for x in rows) or "Nothing scheduled.")
     elif args.cmd == "view":
         from .view import build
         print(json.dumps(build(root)))
