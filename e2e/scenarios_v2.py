@@ -1068,6 +1068,7 @@ def u1_upgrade_from_old_orch(e):
     old_env = {"UV_TOOL_DIR": str(tools), "UV_TOOL_BIN_DIR": str(ubin), "ORCH_HOME": str(ohome),
                "ORCH_REPO": "file://" + str(e.repo), "ORCH_REF": OLD_REF}
     w = W(e, "V2-U1", extra_bin=ubin, env=old_env)
+    w.env["PATH"] += os.pathsep + "/usr/bin" + os.pathsep + "/bin"  # git's submodule scripts and install.sh need uname, sed, curl ...
     # 1) the old install.sh does exactly this: uv tool install --reinstall git+<repo>@<ref>#subdirectory=workspace
     rc, out, err = w.sh(["uv", "tool", "install", "--reinstall", f"git+file://{e.repo}@{OLD_REF}#subdirectory=workspace"], timeout=900)
     check(rc == 0, f"old orch install: {(err or out)[-300:]}")
