@@ -650,9 +650,12 @@ async fn stream_live_and_resume_with_last_event_id_and_two_stream_cap() {
 
 // ---------- push ----------
 
+/// (url, headers, body) of one POST.
+type Got = (String, Vec<(String, String)>, Vec<u8>);
+
 #[derive(Default)]
 struct FakeReceiver {
-    got: Mutex<Vec<(String, Vec<(String, String)>, Vec<u8>)>>,
+    got: Mutex<Vec<Got>>,
     status: Mutex<u16>,
 }
 
@@ -784,9 +787,8 @@ async fn push_signs_retries_with_backoff_and_stops_after_the_last_retry() {
         .await;
     assert_eq!((st, v["push"]["state"].as_str()), (200, Some("ok")));
     subs_push::tick(&t.app).await;
-    let got = recv.got.lock().unwrap();
-    assert_eq!(header(&got.last().unwrap().1, "x-orch-event-id"), e2);
-    drop(got);
+    let last = recv.got.lock().unwrap().last().unwrap().1.clone();
+    assert_eq!(header(&last, "x-orch-event-id"), e2);
     let (_, list) = t.admin_json("GET", "/admin/api/subscribers", None).await;
     assert_eq!(list["items"][0]["push"]["state"], "ok");
     assert!(list["items"][0]["push"]["last_ok_at"].is_string());

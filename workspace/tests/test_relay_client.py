@@ -191,13 +191,14 @@ def test_answer_from_phone_updates_ticket(proj, run, new_ticket, rel):
 
 
 def test_answer_from_relay_subscriber_is_recorded_as_that_system(proj, run, new_ticket, rel):
-    """A relay subscriber (sub_) may answer a question to the phones; it is recorded as agent:, never as a person."""
+    """A relay subscriber (sub_) may answer a phone question; recorded as agent:, never as a person."""
     connect(run, rel)
     tid = new_ticket()
     run("ask", tid, "Ship it?", "--option", "Yes", "--option", "No", "--phone", "--by", "agent:x")
     q = next(m for m in rel.sent if m["type"] == "question")
     body = {"question_id": "q1", "answer": "Yes", "answered_by": "human:Pretending to be a person"}
-    rel.inbox.append(msg("m_answer0000000021", "answer", body, frm="sub_nightmon01", ticket=tid, reply_to=q["id"]))
+    ans = msg("m_answer0000000021", "answer", body, frm="sub_nightmon01", ticket=tid, reply_to=q["id"])
+    rel.inbox.append(ans)
     assert "answered q1" in run("relay", "inbox")[1]
     qq = json.loads(run("ticket", "show", tid, "--json")[1])["questions"][0]
     assert (qq["answer"], qq["answered_by"], qq["via"]) == ("Yes", "agent:sub_nightmon01", "subscriber")
