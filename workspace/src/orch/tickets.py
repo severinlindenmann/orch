@@ -17,6 +17,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from orch import procs
 from orch.errors import Refused
 
 STATUSES = ("open", "active", "waiting", "done", "dropped")
@@ -129,8 +130,6 @@ def _break_stale(lock: Path) -> bool:
     except OSError:
         return False
     try:
-        from orch import procs
-
         try:
             holder = mine.read_text(encoding="utf-8")
         except OSError:
@@ -156,14 +155,18 @@ def _locked(root: Path, tid: str):
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             with os.fdopen(fd, "w") as f:
-                from orch import procs
-
                 f.write(procs.own_token())
             break
-        except FileExistsError:
+        except (
+            FileExistsError,
+            PermissionError,
+        ):  # Windows: a lock being deleted refuses with PermissionError
+            if time.monotonic() > end:
+                raise Refused(f"Ticket {tid} is busy (retried for 5 s). Try again.") from None
             try:
                 stale = time.time() - lock.stat().st_mtime > 30
             except OSError:
+                time.sleep(0.02)
                 continue
             if stale and _break_stale(lock):
                 continue
@@ -174,7 +177,7 @@ def _locked(root: Path, tid: str):
         yield
     finally:
         with contextlib.suppress(OSError):
-            lock.unlink()
+            procs.unlink(lock)
 
 
 def revision(ticket: dict) -> int:
@@ -229,7 +232,7 @@ def _write(root: Path, ticket: dict) -> None:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(ticket, f, indent=2, ensure_ascii=False)
             f.write("\n")
-        os.replace(tmp, p)
+        procs.replace(tmp, p)
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)

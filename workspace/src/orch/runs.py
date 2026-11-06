@@ -127,12 +127,18 @@ def locked(root: Path, tid: str):
             with os.fdopen(fd, "w") as f:
                 f.write(procs.own_token())
             break
-        except FileExistsError:
+        except (
+            FileExistsError,
+            PermissionError,
+        ):  # Windows: a lock being deleted refuses with PermissionError
+            if time.monotonic() > end:
+                raise Refused(f"Ticket {tid} is busy (retried for 10 s). Try again.") from None
             if _break_dead(lock):
                 continue
             try:
                 stale = time.time() - lock.stat().st_mtime > LOCK_STALE_SECONDS
             except OSError:
+                time.sleep(0.01)
                 continue
             if stale and not _lock_text(lock) and tickets._break_stale(lock):
                 continue  # nobody is named in it (its writer died before writing): the age rule
@@ -143,7 +149,7 @@ def locked(root: Path, tid: str):
         yield
     finally:
         with contextlib.suppress(OSError):
-            lock.unlink()
+            procs.unlink(lock)
 
 
 def _atomic(path: Path, text: str, mode: int = 0o666) -> None:
@@ -153,7 +159,7 @@ def _atomic(path: Path, text: str, mode: int = 0o666) -> None:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)  # private from the first byte
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
-        os.replace(tmp, path)
+        procs.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -171,7 +177,7 @@ def _write(root: Path, rec: dict) -> None:
 
 
 def _delete(root: Path, tid: str) -> None:
-    record_path(root, tid).unlink(missing_ok=True)
+    procs.unlink(record_path(root, tid))
 
 
 def _running(pid, started) -> bool:
@@ -637,14 +643,15 @@ def start(
             kw["creationflags"] = 0x00000200 | 0x00000008  # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
         else:
             kw["start_new_session"] = True
-        proc = subprocess.Popen(
-            cmd,
-            cwd=root,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            **kw,
-        )
+        with open(root / log_rel, "ab") as errlog:  # a wrapper that dies leaves its traceback in the run log
+            proc = subprocess.Popen(
+                cmd,
+                cwd=root,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=errlog,
+                **kw,
+            )
         set_process(root, tid, rec["run"], proc.pid, log=log_rel)
     except BaseException:
         release(root, tid, rec["run"])
