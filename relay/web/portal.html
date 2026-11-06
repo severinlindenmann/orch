@@ -271,7 +271,14 @@ function enhance(root){
 function moreMenu(label,action){const items=el('div',{class:'menu-items',hidden:true},action),b=button('⋯',()=>{items.hidden=!items.hidden;b.setAttribute('aria-expanded',String(!items.hidden))},'ghost icon');b.setAttribute('aria-label','More actions for '+label);b.setAttribute('aria-expanded','false');const menu=el('div',{class:'more-menu'},b,items);menu.addEventListener('keydown',e=>{if(e.key==='Escape'){items.hidden=true;b.setAttribute('aria-expanded','false');b.focus();e.stopPropagation()}});return menu}
 function sheet(title,...content){const d=el('dialog',{class:'sheet','aria-label':title},el('div',{class:'row'},el('h2',{class:'grow'},title),button('Close',()=>orch.close(d),'ghost')),el('div',{class:'stack'},content));d.addEventListener('close',()=>d.remove());document.body.append(d);enhance(d);orch.open(d);return d}
 function permissionLabel(r){return [r.text||r.files?'Messages':'',r.delegate?'Tasks':'',r.start?'Start':''].filter(Boolean).join(' · ')}
-function connectionList(id){const rows=networkRules.filter(r=>permissionLabel(r)&&(!id||r.from===id||r.to===id)&&workspaces.some(w=>w.id===r.from)&&workspaces.some(w=>w.id===r.to));return rows.length?rows.map(r=>button(name(r.from)+' → '+name(r.to)+' · '+permissionLabel(r),()=>edgeSheet(r.from,r.to),'ghost connection-row')):[sub('No connections yet')]}
+function connectionList(id,badges=false){
+ const rows=networkRules.filter(r=>permissionLabel(r)&&(!id||r.from===id||r.to===id)&&workspaces.some(w=>w.id===r.from)&&workspaces.some(w=>w.id===r.to));
+ return rows.length?rows.map(r=>{
+  const from=name(r.from),to=name(r.to),permission=permissionLabel(r);
+  if(!badges)return button(from+' → '+to+' · '+permission,()=>edgeSheet(r.from,r.to),'ghost connection-row');
+  return el('button',{type:'button',class:'ghost connection-row','aria-label':from+' to '+to+': '+permission,onclick:()=>edgeSheet(r.from,r.to)},el('span',{class:'connection-names'},from+' → '+to),el('span',{class:'badge active'},permission));
+ }):[sub('No connections yet')];
+}
 function edgeSheet(from,to){
  const adding=!from;let a=from||workspaces[0]?.id,b=to||workspaces[1]?.id;const controls=el('div'),rows=[];
  function draw(){rows.length=0;controls.replaceChildren();if(!a||!b||a===b)return;for(const [src,dst]of [[a,b],[b,a]]){const old=networkRules.find(r=>r.from===src&&r.to===dst)||{},r={from:src,to:dst};const switches=[['mf','Send messages and files',!!(old.text||old.files)],['delegate','Give tasks',!!old.delegate],['start','Start work',!!old.start]].map(([k,label,checked])=>{const c=input(k,'',{type:'checkbox',class:'toggle',role:'switch',checked,'aria-label':name(src)+' to '+name(dst)+': '+label});r[k]=c;return el('label',{class:'switch-label'},c,label)});rows.push(r);controls.append(el('section',{class:'pair'},el('h3',{},name(src)+' → '+name(dst)),el('div',{class:'pair-switches'},switches)))}}
@@ -288,7 +295,7 @@ function workspaceSheet(w){let d;const edit=form(async f=>{checkName(f);await ap
 }
 function svgEl(tag,attrs={},...children){const n=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [k,v]of Object.entries(attrs))n.setAttribute(k,String(v));for(const c of children.flat())if(c!==null&&c!==undefined)n.append(typeof c==='object'?c:document.createTextNode(String(c)));return n}
 function network(){
- const compact=workspaces.length>9,list=el('section',{class:compact?'connections':'mobile-connections'},el('div',{class:'card-h'},'Connections'),connectionList());
+ const compact=workspaces.length>9,list=el('section',{class:compact?'connections':'mobile-connections'},el('div',{class:'card-h'},'Connections'),connectionList(undefined,!compact));
  if(compact){list.append(el('div',{class:'card-h'},'Workspaces'),...workspaces.map(w=>button(w.name,()=>workspaceSheet(w),'ghost connection-row')),...phoneList.map(p=>button(p.name,()=>phoneSheet(p),'ghost connection-row')));return list}
  const cols=workspaces.length<=4?2:3,rows=Math.ceil(workspaces.length/cols),gridHeight=(rows-1)*210+72,phoneHeight=Math.max(0,(phoneList.length-1)*90+48);
  const height=Math.max(gridHeight,phoneHeight)+80,width=80+(cols-1)*330+190+(phoneList.length?310:0);
