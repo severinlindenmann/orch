@@ -1,0 +1,3 @@
+{ "schema": "orch.addon-view/1", "generated_at": "2026-11-06T08:00:00Z",
+  "blocks": [ { "type": "list", "title": "Schedules", "items": [
+    { "title": "Check", "actions": [ { "label": "Run now", "command": "orch automation run --once" } ] } ] } ] }

@@ -95,9 +95,11 @@ def _tz(t: dict):
     return zone(((t.get("ext") or {}).get("automation") or {}).get("tz"))
 
 
-def _repeats(t: dict) -> str | None:
+def _repeats(t: dict, paused_too: bool = False) -> str | None:
     sched = (t.get("ext") or {}).get("automation") or {}
     cron = sched.get("cron")
+    if sched.get("paused") is True and not paused_too:
+        return None  # switched off: stays listed, never planned
     if sched.get("recurring") is True and isinstance(cron, str) and len(cron.split()) == 5 and croniter.is_valid(cron):
         return cron
     return None
@@ -181,6 +183,70 @@ def _arrival(a: dict) -> dict:
     return {"title": kind, "subtitle": when, "chips": [chip]}
 
 
+_STATUS = {"open": ("Open", "neutral"), "active": ("Doing", "good"), "waiting": ("Waiting", "warn"),
+           "blocked": ("Blocked", "warn"), "done": ("Done", "good"), "dropped": ("Dropped", "neutral")}
+
+
+def _act(verb: str, tid: str) -> dict:
+    return {"op": "addon.act", "args": {"verb": verb, "target": tid}}
+
+
+def _linked(t: dict, tickets: list[dict]) -> list[dict]:
+    """The ticket itself, then the sub-tickets made for its runs."""
+    out = []
+    for x in [t] + [c for c in tickets if c.get("parent") == t["id"]][:9]:
+        label, tone = _STATUS.get(x.get("status"), (clean(x.get("status", "-"), 40), "neutral"))
+        out.append({"id": x["id"], "title": clean(x["title"]), "status": {"label": label, "tone": tone}})
+    return out
+
+
+def _schedules(tickets: list[dict], now: datetime) -> list[dict]:
+    rows = []
+    for t in tickets:
+        if t["status"] not in OPEN or not (cron := _repeats(t, True)):
+            continue
+        sched = (t.get("ext") or {}).get("automation") or {}
+        paused = sched.get("paused") is True
+        tz = _tz(t)
+        words = cron_human(cron, tz)
+        nxt = next_after(cron, now, tz)
+        nxt_s = nxt.astimezone().strftime("%a %d %b, %H:%M") if nxt else "none"
+        last = parse(sched.get("last_run"))
+        detail = [{"label": "Repeats", "value": clean(words, 200)},
+                  {"label": "Time zone", "value": clean(sched.get("tz") or "UTC", 60)},
+                  {"label": "Next run", "value": f"Off · would run {nxt_s}" if paused else nxt_s},
+                  {"label": "Last run", "value": last.astimezone().strftime("%a %d %b, %H:%M") if last else "Not yet"},
+                  {"label": "Agent", "value": clean(sched.get("agent") or "The workspace agent", 60)}]
+        what = t.get("summary") or t.get("note")
+        if what:
+            detail.append({"label": "What it does", "value": clean(what, 200)})
+        rows.append((nxt or now, {
+            "title": clean(t["title"]), "subtitle": clean(f"{words} · " + ("off" if paused else f"next {_in(nxt - now)}" if nxt else "never"), 200),
+            "toggle": {"on": not paused, "label": clean(t["title"], 40) + " on or off", "action": _act("toggle", t["id"])},
+            "detail": detail, "tickets": _linked(t, tickets),
+            "actions": [{"label": "Run now", "action": _act("run", t["id"])},
+                        {"label": "Delete", "tone": "bad", "confirm": "Stop and remove this schedule? Its tickets stay.",
+                         "action": _act("delete", t["id"])}]}))
+    return [r for _, r in sorted(rows, key=lambda e: e[0])]
+
+
+def _sources(tickets: list[dict], ls: dict, running: bool) -> list[dict]:
+    """The relay inbox (phone and other workspaces), then each ticket that waits for an outside webhook."""
+    recent = [_arrival(a) for a in reversed(ls.get("recent") or []) if isinstance(a, dict)]
+    last = f"last: {recent[0]['title']} {recent[0]['subtitle']}" if recent else "nothing arrived yet"
+    state = "Listening" if ls.get("listening") else clean(ls.get("note") or ("Not listening" if running else "Automation is stopped"), 80)
+    rows = [{"title": "Phone and other workspaces", "subtitle": clean(f"{state} · {last}", 200),
+             "detail": [{"label": "Recent", "lines": [clean(f"{r['subtitle']} {r['title']} · {r['chips'][0]['label']}", 150)
+                                                      for r in recent[:5]] or ["Nothing yet"]}]}]
+    for t in tickets:
+        w = t.get("waiting_on") or {}
+        if t["status"] == "waiting" and w.get("kind") == "external" and isinstance(w.get("ref"), str) and w["ref"].startswith("wh_"):
+            rows.append({"title": clean(t["title"]), "subtitle": "Webhook · waiting for it to arrive",
+                         "detail": [{"label": "Webhook address", "value": clean(w["ref"], 200), "copy": True}],
+                         "tickets": _linked(t, [])})
+    return rows
+
+
 def _runs(root: Path) -> list[dict]:
     out = []
     try:
@@ -225,19 +291,14 @@ def build(root: Path, now: datetime | None = None) -> dict:
 
     items = [{"title": clean(e[1]["title"]), "subtitle": clean(e[2], 200), "link": e[1]["id"]} for e in events]
     blocks.append({"type": "list", "title": "Next runs", "items": items[:10], "more": max(0, len(items) - 10)})
-    reps = sorted(((next_after(c, now, _tz(t)), t, c) for t in tickets if t["status"] in OPEN and (c := _repeats(t))),
-                  key=lambda e: e[0] or now)
-    if reps:  # UX-06: one row per repeat, soonest first; a monthly job stays visible
-        rep = [{"title": clean(t["title"]), "link": t["id"],
-                "subtitle": f"{cron_human(c, _tz(t))} · next {_in(n - now) if n else 'never'}"} for n, t, c in reps]
-        blocks.append({"type": "list", "title": "Repeats", "items": rep[:20], "more": max(0, len(rep) - 20)})
+    sched_rows = _schedules(tickets, now)
+    blocks.append({"type": "list", "title": "Schedules", "items": sched_rows[:20], "more": max(0, len(sched_rows) - 20)})
 
     ls = listen.read(root) if pid else {}
     blocks.append({"type": "stat", "label": "Listening", "value": "yes" if ls.get("listening") else "no",
                    "tone": "good" if ls.get("listening") else "warn"})
-    arrived = [_arrival(a) for a in reversed(ls.get("recent") or []) if isinstance(a, dict)]
-    blocks.append({"type": "list", "title": "What arrived", "items": arrived[:10],
-                   "more": max(0, len(arrived) - 10)})
+    sources = _sources(tickets, ls, bool(pid))
+    blocks.append({"type": "list", "title": "Listen", "items": sources[:20], "more": max(0, len(sources) - 20)})
     warn = needs.rows(root, now)
     if warn:
         blocks.append({"type": "list", "title": "Needs a look", "items": [
