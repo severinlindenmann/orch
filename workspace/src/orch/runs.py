@@ -830,6 +830,8 @@ def wrap(
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
             rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc)
         sid = new_session or adapters.parse_session(name, out, root)
+        if not sid and resumed and rc == 0:  # a continued conversation: it was used now ("last worked")
+            sid = tickets.sessions_for(tickets.load(root, tid), name, host())
         if sid:
             tickets.record_session(root, tid, name, sid, host())
         turns += 1

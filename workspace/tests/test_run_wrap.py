@@ -306,3 +306,20 @@ def test_failure_text_reads_the_tool_error_or_the_last_line():
     )
     assert runs.failure_text(2, '{"type": "system"}\n' + ok) == "exit code 2"
     assert runs.failure_text(3, "") == "exit code 3"
+
+
+def test_a_continued_conversation_counts_as_used_now(proj, run, tmp_path, monkeypatch):
+    _fake_claude(tmp_path, monkeypatch, resume_works=True)
+    config.set_key(proj, "workspace", "agent", "claude")
+    tid = _ticket_with_check(proj, run)
+    old = "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
+    tickets.record_session(proj, tid, "claude", old, runs.host())
+
+    def stamp(t):
+        t["sessions"][0]["last_used"] = "2026-01-01T00:00:00Z"
+
+    tickets.apply_op(proj, tid, stamp)
+    assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
+    _wait(proj, tid)
+    s = tickets.load(proj, tid)["sessions"][0]
+    assert s["id"] == old and s["last_used"] > "2026-01-01T00:00:00Z"
