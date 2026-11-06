@@ -70,7 +70,8 @@ final class AppModel {
 
 
     let useMock: Bool
-    private let mock: MockRelay?
+    /// The in-process fake when `useMock` (tests flip its offline/delivery switches).
+    let mock: MockRelay?
     private let session: URLSession
     let voiceMode: VoiceInput.Mode
 
@@ -314,7 +315,6 @@ final class AppModel {
     func send(_ draft: MessageDraft, to target: SendTarget) async throws -> OutboxItem {
         let item = try outbox.enqueue(draft, to: target)
         await flushOutbox()
-        if outbox.item(clientId: item.clientId)?.sentMessageId != nil { await reloadMessages(); await refreshUpdates() }
         return outbox.item(clientId: item.clientId) ?? item
     }
     /// Try a refused message again / drop it.
@@ -326,8 +326,9 @@ final class AppModel {
         guard !outbox.items.isEmpty, credentials != nil || useMock else { return }
         let events = await outbox.flush(using: client)
         guard credentials?.phoneId == me else { return }
-        if events.contains(.offline), events.isEmpty == false { announcement = "No connection. The message waits on this phone." }
+        if events.contains(.offline) { announcement = "No connection. The message waits on this phone." }
         await handle(events)
+        if events.contains(where: { if case .sent = $0 { true } else { false } }) { await reloadMessages(); await refreshUpdates() }
     }
 
     /// What the conversation builders read.

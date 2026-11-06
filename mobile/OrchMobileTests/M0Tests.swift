@@ -32,7 +32,8 @@ final class V3ContractTests: XCTestCase {
         for c in (v["send"] as! [[String: Any]]) where (c["ok"] as! Bool) {
             let r = try JSONCoding.decoder.decode(SendRequest.self, from: JSONSerialization.data(withJSONObject: c["request"]!))
             let enc = try JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(r)) as! NSDictionary
-            XCTAssertEqual(enc, c["request"] as! NSDictionary, c["name"] as! String)
+            let want = (c["request"] as! [String: Any]).filter { !($0.value is NSNull) }      // null ticket/reply_to = left out
+            XCTAssertEqual(enc, want as NSDictionary, c["name"] as! String)
         }
     }
     func testBuiltMessagesDecodeAsTexts() throws {
@@ -228,10 +229,10 @@ final class OutboxTests: XCTestCase {
     }
     func testInvalidDraftsAreRefusedAndLeaveNothingOnDisk() throws {
         let ob = Outbox(directory: dir, phone: "ph_iphone0001")
-        XCTAssertThrowsError(try ob.enqueue(MessageDraft(text: "   "), to: .general(workspace: "ws_a")))
-        XCTAssertThrowsError(try ob.enqueue(MessageDraft(feedback: DraftFeedback(artifactId: "a_9b27f17f5357", artifactRev: "r1", verdict: .approve)), to: .general(workspace: "ws_a")))   // feedback needs a topic
-        XCTAssertThrowsError(try ob.enqueue(MessageDraft(feedback: DraftFeedback(artifactId: "a_9b27f17f5357", artifactRev: "r1", verdict: .changes)), to: .topic(workspace: "ws_a", ticket: "t_q3sum1")))   // no pins
-        XCTAssertNoThrow(try ob.enqueue(MessageDraft(feedback: DraftFeedback(artifactId: "a_9b27f17f5357", artifactRev: "r1", verdict: .approve)), to: .topic(workspace: "ws_a", ticket: "t_q3sum1")))
+        XCTAssertThrowsError(try ob.enqueue(MessageDraft(text: "   "), to: .general(workspace: "ws_pilatus001")))
+        XCTAssertThrowsError(try ob.enqueue(MessageDraft(feedback: DraftFeedback(artifactId: "a_9b27f17f5357", artifactRev: "r1", verdict: .approve)), to: .general(workspace: "ws_pilatus001")))   // feedback needs a topic
+        XCTAssertThrowsError(try ob.enqueue(MessageDraft(feedback: DraftFeedback(artifactId: "a_9b27f17f5357", artifactRev: "r1", verdict: .changes)), to: .topic(workspace: "ws_pilatus001", ticket: "t_q3sum1")))   // no pins
+        XCTAssertNoThrow(try ob.enqueue(MessageDraft(feedback: DraftFeedback(artifactId: "a_9b27f17f5357", artifactRev: "r1", verdict: .approve)), to: .topic(workspace: "ws_pilatus001", ticket: "t_q3sum1")))
         XCTAssertEqual(ob.items.count, 1)
         XCTAssertEqual((try? FileManager.default.contentsOfDirectory(atPath: dir.path))?.filter { $0 != "outbox.json" }.count, 1)
     }
@@ -263,10 +264,10 @@ final class OutboxTests: XCTestCase {
     }
     func testAnotherPhonesItemsAreDroppedAndWipeClears() throws {
         let ob = Outbox(directory: dir, phone: "ph_a")
-        _ = try ob.enqueue(MessageDraft(text: "mine"), to: .general(workspace: "ws_a"))
+        _ = try ob.enqueue(MessageDraft(text: "mine"), to: .general(workspace: "ws_pilatus001"))
         let other = Outbox(directory: dir, phone: "ph_b"); XCTAssertTrue(other.items.isEmpty)
         let back = Outbox(directory: dir, phone: "ph_a"); XCTAssertTrue(back.items.isEmpty, "never sent under another phone; dropped")
-        _ = try other.enqueue(MessageDraft(text: "b"), to: .general(workspace: "ws_a")); other.wipe()
+        _ = try other.enqueue(MessageDraft(text: "b"), to: .general(workspace: "ws_pilatus001")); other.wipe()
         XCTAssertTrue(Outbox(directory: dir, phone: "ph_b").items.isEmpty)
     }
     func testFileLimits() throws {
@@ -511,10 +512,10 @@ final class AppModelV3Tests: XCTestCase {
     }
     func testOfflineMessageWaitsThenGoesOnRefreshWithOneClientId() async throws {
         let m = await paired()
-        UserDefaults.standard.set(true, forKey: "mockFail")
+        await m.mock!.setOffline(true)
         let item = try await m.send(MessageDraft(text: "later"), to: .general(workspace: MockRelay.pilatus))
         XCTAssertNil(item.sentMessageId); XCTAssertEqual(m.conversationItems(.general(workspace: MockRelay.pilatus)).last?.receipt, .queued)
-        UserDefaults.standard.removeObject(forKey: "mockFail")
+        await m.mock!.setOffline(false)
         await m.refresh()
         XCTAssertTrue(m.outbox.items.isEmpty)
         XCTAssertEqual(m.messages.filter { $0.message.body.text == "later" && $0.clientId == item.clientId }.count, 1)
@@ -542,9 +543,10 @@ final class AppModelV3Tests: XCTestCase {
     }
     func testSignOutWipesOutboxAndSpeech() async throws {
         let m = await paired()
-        UserDefaults.standard.set(true, forKey: "mockFail")
+        await m.mock!.setOffline(true)
         _ = try await m.send(MessageDraft(text: "x"), to: .general(workspace: MockRelay.pilatus))
-        UserDefaults.standard.removeObject(forKey: "mockFail")
+        XCTAssertEqual(m.outbox.items.count, 1)
+        await m.mock!.setOffline(false)
         await m.signOut()
         XCTAssertTrue(m.outbox.items.isEmpty); XCTAssertTrue(Outbox(directory: dir, phone: "ph_iphone0001").items.isEmpty)
     }

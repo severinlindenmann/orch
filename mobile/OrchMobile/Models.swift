@@ -434,12 +434,14 @@ struct SendRequest: Codable, Sendable, Equatable {
     var location: LocationShare? = nil
     var feedback: Feedback? = nil
 
-    enum Problem: Error, Equatable { case nothingToSend, generalWithTicket, feedbackNeedsTicket, badClientId, tooManyAttachments, attachmentTooBig, badFeedback }
+    enum Problem: Error, Equatable { case nothingToSend, badTarget, badLocation, generalWithTicket, feedbackNeedsTicket, badClientId, tooManyAttachments, attachmentTooBig, badFeedback }
     static let maxBlobBytes = 25 * 1024 * 1024
     static func isClientId(_ s: String) -> Bool { s.range(of: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", options: .regularExpression) != nil }
 
     func validate() throws {
         guard Self.isClientId(clientId) else { throw Problem.badClientId }
+        guard to.range(of: "^ws_[a-z0-9]{10}$", options: .regularExpression) != nil else { throw Problem.badTarget }
+        if let l = location, !(-90...90).contains(l.lat) || !(-180...180).contains(l.lon) { throw Problem.badLocation }
         guard (text?.isEmpty == false) || !(attachments ?? []).isEmpty || voice != nil || location != nil || feedback != nil else { throw Problem.nothingToSend }
         if general == true, ticket != nil { throw Problem.generalWithTicket }
         if feedback != nil, ticket == nil { throw Problem.feedbackNeedsTicket }
