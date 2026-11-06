@@ -26,6 +26,7 @@ def init(root: Path) -> list[str]:
         "Gitignore   .orch/secrets/ and other local files",
         "Tickets     .orch/tickets/",
         "Your agent can now use tickets.",
+        "Your agent will be allowed to work in this folder.",  # consent for a live start's folder trust
     ]
     return lines
 

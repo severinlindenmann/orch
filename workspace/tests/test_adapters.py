@@ -41,8 +41,24 @@ def test_argv_rule_checker_finds_bad_templates():
     assert len(adapters.argv_errors(bad)) == 2
 
 
-CLAUDE_FRESH = ["claude", "-p", "--session-id", NEW, "--permission-mode", "acceptEdits", "--", "Do it"]
-CLAUDE_RESUME = ["claude", "-p", "--resume", OLD, "--permission-mode", "acceptEdits", "--", "Do it"]
+RUN_CMDS = (
+    "check", "ask", "log", "link", "needs", "wait", "ticket show", "ticket list", "ticket tree", "ticket new",
+    "ticket summary", "ticket status", "ticket wait", "run done", "run status",
+)  # fmt: skip
+# the agent may run the orch commands a run needs (tasks, questions, summary), nothing else
+ORCH_OK = ["--allowedTools", ",".join(f"Bash(orch {c}:*)" for c in RUN_CMDS)]
+CLAUDE_FRESH = [
+    "claude",
+    "-p",
+    "--session-id",
+    NEW,
+    "--permission-mode",
+    "acceptEdits",
+    *ORCH_OK,
+    "--",
+    "Do it",
+]
+CLAUDE_RESUME = ["claude", "-p", "--resume", OLD, "--permission-mode", "acceptEdits", *ORCH_OK, "--", "Do it"]
 
 
 def test_claude_snapshots():
@@ -51,10 +67,30 @@ def test_claude_snapshots():
     assert adapters.render("claude", "resume", "oneshot", v) == CLAUDE_RESUME
     v["orch_hooks_file"] = ".orch/run/hooks-r_1.json"
     assert adapters.render("claude", "fresh", "live", v) == [
-        "claude", "--session-id", NEW, "--permission-mode", "acceptEdits",
+        "claude", "--session-id", NEW, "--permission-mode", "acceptEdits", *ORCH_OK,
         "--settings", ".orch/run/hooks-r_1.json",
     ]  # fmt: skip
     assert adapters.render("claude", "resume", "live", v)[:3] == ["claude", "--resume", OLD]
+
+
+def test_no_blanket_orch_permission_in_any_argv():
+    v = {"prompt": "p", "new_session": NEW, "session": OLD, "orch_hooks_file": "h.json", "stream": True}
+    for name in adapters.builtin_names():
+        for mode in ("oneshot", "live"):
+            for kind in ("fresh", "resume"):
+                try:
+                    argv = adapters.render(name, kind, mode, v) or []
+                except Refused:
+                    continue
+                for item in argv:
+                    for rule in item.split(","):
+                        assert rule not in ("Bash(orch:*)", "Bash(orch *)", "Bash(orch)", "Bash"), (
+                            name,
+                            rule,
+                        )
+                        if rule.startswith("Bash(orch"):
+                            sub = rule[len("Bash(orch ") : -len(":*)")]
+                            assert sub in RUN_CMDS, rule  # never config, addon, run start, answer, init, ...
 
 
 def test_codex_snapshots():
@@ -121,7 +157,7 @@ def test_user_entry_picks_a_builtin_adapter(proj):
 def test_allow_goes_in_only_where_the_adapter_can_retry(proj):
     v = {"prompt": "p", "new_session": NEW, "allow": ["Bash(git push:*)", "Edit"]}
     argv = adapters.render("claude", "fresh", "oneshot", v)
-    i = argv.index("--allowedTools")
+    i = len(argv) - 1 - argv[::-1].index("--allowedTools")  # the run's own, after the built-in orch one
     assert argv[i + 1] == "Bash(git push:*),Edit" and i < argv.index("--")
     assert "--allowedTools" not in (adapters.render("codex", "fresh", "oneshot", v) or [])
     _agent(proj, "gen", command="gen {prompt}")

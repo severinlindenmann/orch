@@ -108,6 +108,7 @@ def test_refuses_skills_dir_pointing_outside(proj, run, tmp_path_factory):
 def test_init_says_what_it_linked_and_what_is_next(proj, run):
     code, out, _ = run("init")
     assert code == 0 and "Linked for: Claude" in out and "Your agent can now use tickets." in out
+    assert "Your agent will be allowed to work in this folder." in out
 
 
 def test_no_agent_found_links_nothing(proj, run, monkeypatch):

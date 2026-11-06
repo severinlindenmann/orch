@@ -246,7 +246,16 @@ def test_attention_state_in_a_live_run(server, fake_orch):
     (fake_orch.parent / "status.json").write_text(json.dumps(
         {"running": True, "claim": {"run": "r_att00001", "agent": "claude", "mode": "live", "live": {"state": "attention"}}}))  # fmt: skip
     v = json.loads(req(server, "GET", f"/api/t/{TID}")[1])
-    assert v["state"] == "needs" and v["attention"] is True
+    assert v["state"] == "needs" and v["attention"] is True and v["why"] == ""
+
+
+def test_attention_shows_what_the_live_tool_waits_for(server, fake_orch):
+    why = "Claude asks whether to trust this folder. Open the live session and answer: orch run attach t_x"
+    (fake_orch.parent / "status.json").write_text(json.dumps(
+        {"running": True, "claim": {"run": "r_att00002", "agent": "claude", "mode": "live",
+                                    "live": {"state": "attention", "why": why}}}))  # fmt: skip
+    v = json.loads(req(server, "GET", f"/api/t/{TID}")[1])
+    assert v["state"] == "needs" and v["why"] == why
 
 
 def test_generic_comes_from_adapter_data_not_the_agent_name(server, ws, fake_orch):

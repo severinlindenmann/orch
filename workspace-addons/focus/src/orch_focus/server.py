@@ -227,6 +227,7 @@ class Tracker:
             "state": state,
             "generic": generic,
             "attention": bool(attention),
+            "why": str((claim.get("live") or {}).get("why") or "")[:400] if attention else "",
             "live": claim.get("mode") == "live",
             "board": board,
             "events": events[-60:],

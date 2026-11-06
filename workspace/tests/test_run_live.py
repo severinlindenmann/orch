@@ -181,9 +181,10 @@ def test_claude_live_hooks_session_idle_close_and_resume(proj, run, lab, tmp_pat
     cmds = {k: v[0]["hooks"][0]["command"] for k, v in json.loads(hooks.read_text())["hooks"].items()}
     assert cmds["Stop"] == f"orch run event --run {r['run']} --kind idle"
     _until(lambda: calls.exists() and calls.read_text().strip(), what="claude argv")
-    argv = calls.read_text().split()
-    assert argv[0] == "--session-id" and argv[2:4] == ["--permission-mode", "acceptEdits"]
-    assert argv[4:] == ["--settings", str(hooks)]
+    line = calls.read_text().strip()  # the fake joins argv with spaces; the allow rules contain spaces
+    argv = line.split()
+    assert argv[0] == "--session-id" and argv[2:5] == ["--permission-mode", "acceptEdits", "--allowedTools"]
+    assert "Bash(orch check:*)," in line and line.endswith(f" --settings {hooks}")
     # the tool's SessionStart hook: records the id on the ticket and the prompt goes in
     proc = subprocess.run(
         [sys.executable, "-m", "orch", "run", "event", "--run", r["run"], "--kind", "session"],

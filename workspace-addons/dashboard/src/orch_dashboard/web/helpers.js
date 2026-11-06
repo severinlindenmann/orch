@@ -102,6 +102,9 @@
       if (r.state === 'maybe-stale') return {state: 'stuck', agent, status: 'may be stuck · quiet for a while' + since,
         primary: start('Start anyway', {take_over: true}), items: [stop]};
       if (asks) return {state: 'needs', agent, status: 'waiting for your answer' + since, primary: {label: 'Answer', op: 'answer'}, items: [stop, fresh]};
+      const waits = claim.live && claim.live.state === 'attention' ? String(claim.live.why || 'waiting for your OK in the live session') : '';
+      if (waits) return {state: 'needs', agent, status: waits, primary: liveLink ? {label: 'Open ' + liveLink.label, op: 'open', url: liveLink.url} : stop,
+        items: liveLink ? [stop] : []};
       const live = liveLink ? {label: 'Open ' + liveLink.label, op: 'open', url: liveLink.url} : null;
       return {state: 'working', agent, status: 'working' + by + since, primary: live || stop, items: live ? [stop] : []};
     }
