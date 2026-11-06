@@ -43,8 +43,8 @@ def test_argv_rule_checker_finds_bad_templates():
 
 RUN_CMDS = (
     "check", "ask", "log", "link", "needs", "wait", "ticket show", "ticket list", "ticket tree", "ticket new",
-    "ticket summary", "ticket status", "ticket artifacts", "ticket artifacts-dir", "ticket wait", "ticket set", "run done",
-    "run status",
+    "ticket summary", "ticket status", "ticket artifacts", "ticket artifacts-dir", "ticket wait",
+    "ticket set", "run done", "run status",
 )  # fmt: skip
 # the agent may run the orch commands a run needs (tasks, questions, summary), nothing else
 ORCH_OK = ["--allowedTools", ",".join(f"Bash(orch {c}:*)" for c in RUN_CMDS)]
