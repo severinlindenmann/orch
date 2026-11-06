@@ -24,7 +24,7 @@
     const card = make('article', 'qcard');
     const meta = make('div', 'row qmeta');
     const badge = make('span', 'badge attn', 'Needs you');
-    meta.append(badge, make('span', 'muted', 'Ticket ' + question.ticket));
+    meta.append(badge, make('span', 'muted', question.key || ('Ticket ' + question.ticket)));
     if (question.since) meta.append(make('span', 'faint', question.since));
     const title = make('h3', '', question.title);
     title.id = 'qcard-title-' + (++serial);

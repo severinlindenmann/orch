@@ -12,10 +12,11 @@ HARNESS = Path(__file__).parent / "blocks_harness.js"
 node = pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 
 
-def run(tmp_path, view, urls=None, own=None):
+def run(tmp_path, view, urls=None, own=None, inapp=False):
     f = tmp_path / "v.json"
     f.write_text(json.dumps(view))
-    out = subprocess.run(["node", str(HARNESS), str(WEB / "blocks.js"), str(f), json.dumps(urls or {}), *([own] if own else [])], capture_output=True,
+    extra = [own or "", "inapp"] if inapp else ([own] if own else [])
+    out = subprocess.run(["node", str(HARNESS), str(WEB / "blocks.js"), str(f), json.dumps(urls or {}), *extra], capture_output=True,
                          text=True, check=True)
     return json.loads(out.stdout)
 
@@ -169,3 +170,12 @@ def test_own_page_link_resolves_against_this_addon(tmp_path):
     assert a and a[0]["attrs"]["href"] == "http://127.0.0.1:8500/t/t_abc12345"
     off = run(tmp_path, view, own="focus")
     assert "Start focus" in texts(off)
+
+
+@node
+def test_an_addon_page_shown_inside_the_app_opens_there_not_in_a_new_tab(tmp_path):
+    """Focus rows open the ticket's Focus page inside the dashboard (#open/focus/t/<id>) when it runs."""
+    view = {"blocks": [{"type": "list", "title": "T", "items": [{"title": "Run", "link": "addon:t/t_abc12345"}]}]}
+    a = [n for n in walk(run(tmp_path, view, {"focus": "http://127.0.0.1:8500"}, own="focus", inapp=True)) if n["tag"] == "a"]
+    assert a and a[0]["attrs"]["href"] == "#open/focus/t/t_abc12345" and "target" not in a[0]["attrs"]
+    assert "Start focus" in texts(run(tmp_path, view, own="focus", inapp=True))  # not running: still offers Start

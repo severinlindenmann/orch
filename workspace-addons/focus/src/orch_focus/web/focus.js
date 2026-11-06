@@ -220,7 +220,7 @@
       const node = h('div', {'data-row': '', class: 'fx-ask-wrap'});
       els.qs.append(node);
       const options = (q.options || []).map(o => ({text: o, suggested: o === q.recommended}));
-      const question = {ticket: TID, id: q.id, title: (els.agent.textContent || 'The agent') + ' asks', text: q.text, options};
+      const question = {ticket: TID, key: typeof v.ticket.key === 'string' ? v.ticket.key : undefined, id: q.id, title: (els.agent.textContent || 'The agent') + ' asks', text: q.text, options};
       if (window.QuestionCard) {
         window.QuestionCard.mount(node, question, {send: async (answer) => {
           const r = await act('answer', {ticket: TID, question: q.id, answer});
