@@ -61,8 +61,12 @@ A workspace proposes its own description and tags with `PATCH /v1/me` (see contr
 ## Previews
 
 After the browser decrypts a file, `/f/<id>` shows it by type (by file name ending, not by the type the sender
-wrote in the header). Header: file name, "Shared with you · size · N days left" (from the `X-Orch-Expires-At`
-header of `/f/<id>/blob`), Download and Copy link. Footer: "Only people with this link can open the file."
+wrote in the header). The document is the focus: one slim header line (logo, file name, "size · until Thu 19 Nov" as a
+date in the viewer's own time zone, Download, Copy link, full screen), the sender's optional note on one small line
+(from the encrypted header, shown as text, click to read all of a long one; no sender or workspace name), the viewer
+filling the rest of the window height (full screen with the button or the F key, Esc leaves), and a tiny footer
+("Only people with this link can open the file." plus pages, pixels or lines). Publish's own blue accent, dark, system
+font. The expiry comes from the `X-Orch-Expires-At` header of `/f/<id>/blob`. No inline styles or scripts (CSP).
 
 | Files | Preview |
 |---|---|
