@@ -731,3 +731,242 @@ def w2(e):
         check(r.get("link") or r.get("url"), f"publish file result {r}")
     finally:
         _stop(q)
+
+
+# ------------------------------------------------------------------------------------------------ Focus
+
+FOCUS_AGENT = Path(__file__).parent / "fixtures" / "focus-agent" / "agent.py"
+CLAUDE_FIXTURE = Path(__file__).resolve().parent.parent / "workspace-addons" / "focus" / "tests" / "fixtures" / "claude-run.jsonl"
+SECRET_IN_FIXTURE = "abc123secretvalue"
+
+
+class Focus:
+    """The Focus add-on installed in a workspace, its page started, and the page's own API."""
+
+    def __init__(self, w: W):
+        self.w = w
+        rc, out, err = w.sh(["orch", "addon", "add", "focus", "--yes"], timeout=600)
+        check(rc == 0, f"addon add focus: {(err or out)[-300:]}")
+        w.o("start", by=None)  # core starts the background add-ons and keeps the record `orch needs` checks
+        self.base = w.j("focus", "status", by=None)["url"].rstrip("/")
+        w.e.cleanup.append(lambda: w.sh(["orch", "stop"]))
+
+    def get(self, path: str, headers: dict | None = None):
+        return http("GET", self.base + path, headers)
+
+    def view(self, tid: str) -> dict:
+        r = self.get(f"/api/t/{tid}")
+        check(r.status == 200, f"/api/t/{tid}: {r}")
+        return r.json()
+
+    def act(self, op: str, args: dict, headers: dict | None = None):
+        h = {"Origin": self.base, "Sec-Fetch-Site": "same-origin", **(headers or {})}
+        return http("POST", self.base + "/api/act", h, {"op": op, "args": args})
+
+    def act_ok(self, op: str, args: dict) -> dict:
+        r = self.act(op, args)
+        check(r.status == 200, f"act {op}: {r}")
+        return r.json()
+
+
+def focus_agent(w: W, extra: str, name: str = "focusfake"):
+    py, ag = shlex.quote(sys.executable), shlex.quote(str(FOCUS_AGENT))
+    w.o("config", "agent", "add", name, "--command", f"{py} {ag} {extra} {{prompt}}", by=None)
+    w.o("config", "set", "workspace.agent", name, by=None)
+
+
+def _until_view(fx: Focus, tid: str, pred, secs: float = 40, what: str = ""):
+    last = {}
+
+    def probe():
+        last["v"] = fx.view(tid)
+        return pred(last["v"])
+
+    check(wait_for(probe, secs, 0.4), f"{what or 'view'} never happened; last state {last.get('v', {}).get('state')}")
+    return last["v"]
+
+
+@scenario("V2-F1")
+def f1_focus(e):
+    """Focus, generic one-shot agent: tasks tick, a question shows in needs, answer via /api/act, board updates, send is saved."""
+    w = W(e, "V2-F1").init()
+    focus_agent(w, "--ask 'Use CHF?' --hold 2")
+    tid = w.ticket("Invoice export", "first step", "second step")
+    fx = Focus(w)
+    started = fx.act_ok("run.start", {"ticket": tid})
+    check(started["result"].get("run"), f"run.start result {started['result']}")
+    v = _until_view(fx, tid, lambda v: v["state"] == "needs" and any(q.get("answer") is None for q in v["ticket"]["questions"]), what="open question on the board")
+    check(v["generic"] is True and v["run"]["agent"] == "focusfake" and v["run"]["running"], f"board of a generic run: {v['run']}")
+    check(v["done"] == 1 and v["total"] == 2, f"first task should be done by now: {v['done']}/{v['total']}")
+    rows = w.j("needs", by=None)
+    qrow = [r for r in rows if r["ticket"] == tid and r["kind"] == "question"]
+    check(len(qrow) == 1 and qrow[0]["text"] == "Use CHF?", f"question not in orch needs: {rows}")
+    qid = next(q["id"] for q in v["ticket"]["questions"] if q.get("answer") is None)
+    r = fx.act_ok("answer", {"ticket": tid, "question": qid, "answer": "Yes"})
+    q = next(q for q in r["view"]["ticket"]["questions"] if q["id"] == qid)
+    check(q["answer"] == "Yes" and q.get("via") == "focus", f"answer recorded as {q}")
+    v = _until_view(fx, tid, lambda v: v["done"] == 2 and not v["run"]["running"], 60, "both tasks done and the run over")
+    check(not [q for q in v["ticket"]["questions"] if q.get("answer") is None], "a question is still open")
+    rest = w.j("needs", by=None)
+    check(rest == [], f"needs not empty after the answer: {rest}")
+    sent = fx.act_ok("run.send", {"ticket": tid, "text": "also add the VAT column"})
+    check(sent["note"] == "Saved for the next run.", f"run.send note {sent['note']!r}")
+    check(fx.view(tid)["run"]["pending"] == 1, "the saved message is not pending")
+
+
+def fake_stream_claude(e, name: str) -> tuple[Path, Path]:
+    """A `claude` that prints the Focus stream-json fixture and stays up 8 s; when started with --allowedTools it prints a clean run."""
+    d = e.tmp / "fakeclaude" / name
+    d.mkdir(parents=True)
+    calls = d / "calls.txt"
+    f = d / "claude"
+    f.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "--version" ]; then echo "2.0.0 (fake)"; exit 0; fi\n'
+        f'echo "$@" | tr "\\n" " " >> {shlex.quote(str(calls))}; echo >> {shlex.quote(str(calls))}\n'
+        'if echo "$@" | grep -q -- "--allowedTools"; then\n'
+        '  echo \'{"type": "system", "subtype": "init", "session_id": "s2"}\'\n'
+        '  echo \'{"type": "result", "num_turns": 1, "is_error": false, "permission_denials": []}\'\n  exit 0\nfi\n'
+        f"cat {shlex.quote(str(CLAUDE_FIXTURE))}\nsleep 8\n"
+    )
+    f.chmod(0o755)
+    return d, calls
+
+
+@scenario("V2-F2")
+def f2_focus(e):
+    """Focus, Claude one-shot (fake claude, stream-json): steps, helpers, usage on the board; a denial asks; Allow and retry runs once with --allow."""
+    d, calls = fake_stream_claude(e, "f2")
+    w = W(e, "V2-F2", tmux=False, extra_bin=d).init()
+    w.o("config", "set", "workspace.agent", "claude", by=None)
+    tid = w.ticket("Colours", "check the brand colours")
+    fx = Focus(w)
+    fx.act_ok("run.start", {"ticket": tid})
+    v = _until_view(fx, tid, lambda v: v["board"]["denials"] and v["board"]["usage"] and any(e_["kind"] == "helper.end" for e_ in v["events"]), 40, "steps, usage and the denial on the board")
+    kinds = {e_["kind"] for e_ in v["events"]}
+    check({"tool.start", "tool.end", "helper.start", "helper.end"} <= kinds, f"event kinds on the board: {sorted(kinds)}")
+    texts = " | ".join(e_["text"] for e_ in v["events"])
+    check("Run invoice tests" in texts and "checking colours" in texts, f"step texts: {texts[:300]}")
+    check(SECRET_IN_FIXTURE not in json.dumps(v), "a secret from a command reached the page data")
+    check(v["board"]["usage"]["status"] == "warning" and v["board"]["usage"]["text"], f"usage line: {v['board']['usage']}")
+    check(v["board"]["denials"][0]["tool"] == "WebFetch", f"denials: {v['board']['denials']}")
+    v = _until_view(fx, tid, lambda v: any(q.get("kind") == "focus:permission" and q.get("answer") is None for q in v["ticket"]["questions"]), 30, "a focus:permission question")
+    q = next(q for q in v["ticket"]["questions"] if q.get("kind") == "focus:permission")
+    check(q["options"] == ["Allow and retry", "Not now"] and "WebFetch" in q["text"], f"permission question {q}")
+    check(len(calls.read_text().splitlines()) == 1, "more than one run before the answer")
+    w.wait_done(tid, 40)
+    fx.act_ok("answer", {"ticket": tid, "question": q["id"], "answer": "Allow and retry"})
+    check(wait_for(lambda: len(calls.read_text().splitlines()) == 2, 30), f"Allow and retry did not start a new run: {calls.read_text()!r}")
+    second = calls.read_text().splitlines()[1]
+    check("--allowedTools" in second and "WebFetch" in second, f"second run lacks --allow: {second!r}")
+    w.wait_done(tid, 40)
+    fx.view(tid)  # looking again must not start a third run
+    time.sleep(3)
+    check(len(calls.read_text().splitlines()) == 2, f"Allow and retry started more than one run: {calls.read_text()!r}")
+    check(not [x for x in fx.view(tid)["ticket"]["questions"] if x.get("answer") is None], "a question is still open")
+
+
+@scenario("V2-F3")
+def f3_focus(e):
+    """Focus, live in tmux: start via /api/act, send when idle, 'Waiting for your OK', Stop ends it, `orch focus stop` leaves nothing."""
+    if not shutil.which("tmux", path=e.path):
+        from lib import Skip
+        raise Skip("tmux is not installed")
+    w = W(e, "V2-F3", tmux=True).init()
+    w.agent(interactive=True)
+    tid = w.ticket("Live work", "step")
+    fx = Focus(w)
+    started = fx.act_ok("run.start", {"ticket": tid})["result"]
+    check(started["mode"] == "live" and started["tmux"], f"run.start through Focus should be live: {started}")
+    v = _until_view(fx, tid, lambda v: v["live"] and v["run"]["running"] and (w.claim(tid) or {}).get("live", {}).get("state") == "idle", 40, "a live run waiting for input")
+    check(wait_for(lambda: w.lines("input"), 30), "the first prompt never reached the live agent")
+    sent = fx.act_ok("run.send", {"ticket": tid, "text": "Use CHF please"})
+    check(wait_for(lambda: len(w.lines("input")) == 2, 30), f"sent text never arrived (note {sent['note']!r})")
+    check(w.lines("input")[1].endswith(": Use CHF please"), f"second input {w.lines('input')[1]!r}")
+    time.sleep(1.5)
+    check(len(w.lines("input")) == 2, f"input arrived more than once: {w.lines('input')}")
+    # the tool says it waits for the person's OK (its Notification hook)
+    run = w.claim(tid)["run"]
+    w.o("run", "event", "--run", run, "--kind", "attention", by=None)
+    v = _until_view(fx, tid, lambda v: v["attention"], 20, "the attention state")
+    check(v["state"] == "needs", f"attention should read as needs: {v['state']}")
+    blocks = w.j("focus", "view", by=None)
+    check("Waiting for your OK" in json.dumps(blocks), f"focus view lacks 'Waiting for your OK': {blocks}")
+    rows = w.j("focus", "needs", by=None)
+    check(any(r["kind"] == "focus:waiting" and r["ticket"] == tid for r in rows), f"focus needs rows {rows}")
+    w.o("run", "event", "--run", run, "--kind", "idle", by=None)
+    check(wait_for(lambda: not fx.view(tid)["attention"], 10), "attention did not clear on idle")
+    # Stop ends the run
+    fx.act_ok("run.stop", {"ticket": tid})
+    check(wait_for(lambda: w.claim(tid) is None, 20), "claim still there after Stop")
+    check(not fx.view(tid)["run"]["running"], "page still says running after Stop")
+    # a run Focus started does not outlive Focus
+    fx.act_ok("run.start", {"ticket": tid})
+    check(wait_for(lambda: w.claim(tid), 20), "second live run did not start")
+    sock = w.claim(tid)["tmux"]["socket"]
+    w.o("focus", "stop", by=None)
+    check(wait_for(lambda: w.claim(tid) is None, 20), f"`orch focus stop` left a run behind: {w.claim(tid)}")
+    rc = subprocess.run(["tmux", "-L", sock, "has-session", "-t", f"={tid}:"], capture_output=True, env=w.env).returncode
+    check(rc != 0, "tmux session still exists after `orch focus stop`")
+
+
+@scenario("V2-F4")
+def f4_focus(e):
+    """Focus fence: bad Host, cross-site, no Origin refused; a bad run id writes nothing; view and needs match their schemas."""
+    from jsonschema import Draft202012Validator, FormatChecker
+
+    w = W(e, "V2-F4").init()
+    focus_agent(w, "--hold 12")
+    tid = w.ticket("Fence", "step")
+    fx = Focus(w)
+    body = {"ticket": tid}
+    before = w.claim(tid)
+    check(before is None, "unexpected claim")
+    evil = "http://evil.example"
+    refused = {
+        "bad Host (GET)": fx.get("/api/tickets", {"Host": "evil.example"}),
+        "bad Host (POST)": fx.act("run.start", body, {"Host": "evil.example"}),
+        "cross-site Origin": fx.act("run.start", body, {"Origin": evil}),
+        "cross-site fetch": fx.act("run.start", body, {"Sec-Fetch-Site": "cross-site"}),
+        "no Origin": http("POST", fx.base + "/api/act", {"Sec-Fetch-Site": "same-origin"}, {"op": "run.start", "args": body}),
+        "not JSON": http("POST", fx.base + "/api/act", {"Origin": fx.base, "Content-Type": "text/plain"}, b'{"op":"run.start"}'),
+    }
+    for what, r in refused.items():
+        check(r.status in (400, 403, 415), f"{what} was not refused: {r}")
+    check(w.claim(tid) is None, "a refused request started a run")
+    check(fx.get("/api/tickets").status == 200, "the page itself no longer answers a proper request")
+    r = fx.act("run.start", {"ticket": "../../etc"})
+    check(r.status == 400, f"a bad ticket id must be refused: {r}")
+    r = fx.act("rm -rf", {"ticket": tid})
+    check(r.status == 400, f"an unknown op must be refused: {r}")
+    # a claim that names a bad run id: the page shows no run id and writes no file for it
+    claim = {"schema": "orch.run/1", "ticket": tid, "run": "../../evil", "by": "agent:x", "agent": "focusfake", "mode": "oneshot",
+             "tmux": None, "pid": os.getpid(), "pid_started": None, "started_at": "2026-11-05T10:00:00Z",
+             "renewed_at": "2026-11-05T10:00:00Z", "pending": False, "stop_requested": None, "seen_revision": 1, "seen_history": 1}
+    cf = w.claim_file(tid)
+    cf.parent.mkdir(parents=True, exist_ok=True)
+    cf.write_text(json.dumps(claim))
+
+    def files() -> set:
+        return {str(p.relative_to(e.tmp)) for p in e.tmp.rglob("*") if p.is_file() and ".git" not in p.parts and "evil" in str(p)}
+
+    snap = {str(p) for p in w.root.rglob("*") if ".git" not in p.parts}
+    v = fx.view(tid)
+    check(v["run"]["run"] is None, f"a bad run id is shown on the page: {v['run']}")
+    check(not files() and not any("evil" in str(p) for p in Path(e.tmp).parent.glob("evil*")), f"files written for a bad run id: {files()}")
+    new = {str(p) for p in w.root.rglob("*") if ".git" not in p.parts} - snap
+    check(not [n for n in new if "evil" in n], f"files written for a bad run id: {new}")
+    cf.unlink()
+    # view and needs against their schemas, with a run going
+    fx.act_ok("run.start", {"ticket": tid})
+    check(wait_for(lambda: w.claim(tid), 15), "run did not start")
+    contracts = e.repo / "contracts"
+    view = w.j("focus", "view", by=None)
+    needs = w.j("focus", "needs", by=None)
+    allneeds = w.j("needs", by=None)
+    for what, doc, schema in (("focus view", view, "addon-view"), ("focus needs", needs, "needs"), ("orch needs", allneeds, "needs")):
+        sch = json.loads((contracts / f"{schema}.schema.json").read_text())
+        errs = [f"{list(x.path)}: {x.message}" for x in Draft202012Validator(sch, format_checker=FormatChecker()).iter_errors(doc)]
+        check(not errs, f"{what} does not match {schema}.schema.json: {errs[:3]}")
+    check(view["blocks"] and "Fence" in json.dumps(view), f"focus view does not show the running ticket: {view}")
+    w.wait_done(tid, 40)
