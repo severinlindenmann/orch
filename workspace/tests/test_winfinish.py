@@ -57,6 +57,31 @@ def test_a_failed_reinstall_changes_nothing(tmp_path):
     assert not (tmp_path / "addons.json").exists()  # the add-on list stays as it was
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the lock is simulated with POSIX folder permissions")
+def test_orch_still_running_changes_nothing(tmp_path):
+    """The tool folder can not be renamed (orch still runs from it): give up, change nothing."""
+    job = _job(tmp_path)
+    job["wait"] = 1
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    job["free"] = [str(locked / "tool-env")]
+    (locked / "tool-env").mkdir()
+    locked.chmod(0o500)  # no rename inside: like Windows while orch runs
+    try:
+        assert _run_finisher(tmp_path, job).returncode == 1
+    finally:
+        locked.chmod(0o700)
+    assert "did not exit in time" in (tmp_path / "finish.log").read_text()
+    assert not (tmp_path / "addons.json").exists()
+
+
+def test_a_failing_next_step_is_reported(tmp_path):
+    job = _job(tmp_path, then_code="import sys; print('no consent'); sys.exit(2)")
+    assert _run_finisher(tmp_path, job).returncode == 1
+    log = (tmp_path / "finish.log").read_text()
+    assert "no consent" in log and "RESULT fail:" in log
+
+
 def test_a_crash_is_logged_and_clears_the_pending_mark(tmp_path):
     job = _job(tmp_path)
     job["registry"] = [str(tmp_path / "no-such-dir" / "addons.json"), "[]"]  # the write fails

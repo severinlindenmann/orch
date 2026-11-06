@@ -923,6 +923,8 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
     then = [["addon", "add", entry["name"], "--project-only"]]
     if entry not in reg or entry["name"] not in discover():  # new, changed, or its package is gone
         new = [e for e in reg if e["name"] != entry["name"]] + [entry]
+        # before the install: its follow-up step (now, or in the Windows finisher) needs the consent. If the
+        # install fails, the record does not match the unchanged registry, so it turns nothing on.
         record_consent(root, entry["name"], new)
         _reinstall(new, save=True, then=then, root=root, done=f"{entry['name']} installed and turned on")
         return
