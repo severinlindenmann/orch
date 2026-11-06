@@ -786,6 +786,7 @@ def link_add(
     if isinstance(title, str) and len(title) > 200:
         raise Refused("A link title is one line of at most 200 characters.")
     title = links.one_line(title) if isinstance(title, str) else None
+    # an explicit kind is kept as given (an add-on that is off shows it as a plain link until it is on again)
     kind = kind or links.kind_for(url, list(kinds))
     added = [True]
 

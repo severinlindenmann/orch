@@ -78,7 +78,7 @@ def site(url: str) -> dict | None:
             mhost, _, mpath = m.partition("/")
             if mhost.startswith("*."):
                 ok = host.endswith(mhost[1:])
-            else:
+            else:  # subdomains count too (gist.github.com is GitHub); look-alikes never do
                 ok = host == mhost or host.endswith("." + mhost)
             if ok and (not mpath or path == "/" + mpath or path.startswith("/" + mpath + "/")):
                 return {"name": h["name"], "icon": h["icon"], "mono": h["mono"]}
@@ -91,7 +91,7 @@ def _pattern(p: str) -> re.Pattern:
     out = ""
     for i, part in enumerate(p.split("*")):
         if i:
-            out += ".*" if i == p.count("*") and part == "" else r"[^/?#]+"
+            out += ".+" if i == p.count("*") and part == "" else r"[^/?#]+"
         out += re.escape(part)
     return re.compile(out, re.I)
 
