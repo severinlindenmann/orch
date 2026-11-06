@@ -108,7 +108,7 @@ def test_act_accepts_by_and_passes_it_to_every_orch_call(ws, capsys):
         assert main(["--dir", str(ws), "act", verb, "--by", me, "--json", "--", "t_rec00001"]) == 0, verb
         assert "error" not in json.loads(capsys.readouterr().out)
     writes = [c for c in calls(ws) if c["args"][:1] in (["ext"], ["run"])]
-    assert [c["args"][:2] for c in writes] == [["ext", "set"], ["run", "start"], ["ext", "unset"]]
+    assert [c["args"][:2] for c in writes] == [["ext", "set"], ["run", "start"], ["ext", "set"], ["ext", "unset"]]
     assert {c["by"] for c in writes} == {me}
 
 
@@ -116,3 +116,26 @@ def test_act_without_by_is_recorded_as_the_scheduler(ws):
     sched(ws)
     act(ws, "off", "t_rec00001")
     assert [c["by"] for c in calls(ws) if c["args"][:2] == ["ext", "set"]] == ["agent:automation"]
+
+
+def test_run_now_records_last_run_and_the_view_shows_it(ws):
+    from datetime import UTC, datetime
+
+    from orch_automation.cron import parse
+    from orch_automation.orchcli import tickets
+    from orch_automation.view import _schedules
+
+    sched(ws)
+    before = datetime.now(UTC)
+    act(ws, "run", "t_rec00001")
+    last = parse(ext(ws, "t_rec00001")["last_run"])
+    assert last and before.replace(microsecond=0) <= last <= datetime.now(UTC)
+    row = _schedules(tickets(ws), datetime.now(UTC))[0]
+    value = next(d["value"] for d in row["detail"] if d["label"] == "Last run")
+    assert value == last.astimezone().strftime("%a %d %b, %H:%M")
+
+
+def test_run_now_without_a_schedule_writes_no_ext(ws):
+    add_ticket(ws, "t_plain001")
+    act(ws, "run", "t_plain001")
+    assert ext(ws, "t_plain001") is None
