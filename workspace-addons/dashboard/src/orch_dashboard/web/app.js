@@ -137,7 +137,7 @@
     return fragment(heading('Today', now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + needs.length + ' need you · ' + working.length + (working.length === 1 ? ' agent working' : ' agents working')), banner,
       h('div', {className:'columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
         card('needs-you', 'Needs you', needs.length + (oldest ? ' · oldest ' + age(oldest) : ''), needs.length ? needs.map(n => needRow(n, newest)) : emptyRow('Nothing needs you right now.'), true),
-        card('your-tickets', 'Your tickets', current.length + (current.some(overdue) ? ' · ' + current.filter(overdue).length + ' overdue' : ''), current.length ? current.map(ticketRow) : firstTicket(), true)),
+        card('your-tickets', 'Your tickets', current.length + (current.some(overdue) ? ' · ' + current.filter(overdue).length + ' overdue' : ''), current.length ? current.map(ticketRow) : tickets().length ? h('div', {className:'card-row'}, h('p', {className:'grow muted'}, 'Nothing open. Finished tickets are under Tickets.'), newButton()) : firstTicket(), true)),
       h('aside', {className:'stack', 'data-key':'right'},
         card('agents', 'Agents', working.length + ' working', [agents.length ? agents : emptyRow('No agent is working right now.'), links.length ? h('div', {className:'card-row'}, links.map(link => h('a', {className:'meta', href:link.url}, 'Open ' + capitalise(link.label) + ' →'))) : null]),
         card('recently', 'Recently', '', recent.length ? recent : emptyRow('No recent activity.')))));
@@ -288,8 +288,8 @@
   const browserHost = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch (_) { return ''; } };
   const linkSub = (v, url) => {
     const bh = browserHost(url);
-    if (bh !== linkHost(v)) return h('span', {className:'lk-sub'}, h('span', {className:'lk-type'}, 'Link · '), h('span', {className:'lk-dom'}, bh));
-    return h('span', {className:'lk-sub'}, h('span', {className:'lk-type'}, linkType(v) + ' · '),
+    if (bh !== linkHost(v)) return h('span', {className:'lk-sub'}, h('span', {className:'lk-type'}, 'Link ·\u00a0'), h('span', {className:'lk-dom'}, bh));
+    return h('span', {className:'lk-sub'}, h('span', {className:'lk-type'}, linkType(v) + ' ·\u00a0'),
       v.host_head ? h('span', {className:'lk-head'}, '\u200E' + String(v.host_head) + '\u200E') : null, h('span', {className:'lk-dom'}, String(v.domain || '')));
   };
   function linkRow(t, link, removable) {
