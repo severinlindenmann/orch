@@ -697,5 +697,8 @@ fn not_available_is_visitor_page() {
     let page = include_str!("../web/not-available.html");
     assert!(page.contains("This page isn’t available"));
     assert!(!page.contains("admin-shell") && !page.contains("sidebar"));
-    assert!(!page.to_lowercase().contains("relay"), "the visitor page must not say what the server is");
+    assert!(
+        !page.to_lowercase().contains("relay"),
+        "the visitor page must not say what the server is"
+    );
 }
