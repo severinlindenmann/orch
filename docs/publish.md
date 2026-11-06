@@ -1,4 +1,38 @@
-# orch-publish
+# Publish: share a file or a small app
+
+Publish is a small server (yours). It is optional and works on its own, without the relay. A file is encrypted on your computer
+before it leaves. The key is part of the link (after the `#`), so the server never has it. Share the whole link; keep it private.
+
+## Connect a workspace
+
+Your admin clicks **Add workspace** on the publish page and gets a short text for your agent. It runs:
+
+```sh
+$ orch addon add publish --yes
+$ orch publish connect <publish address> --workspace <workspace id> --token <token>  # skip
+```
+
+## Share
+
+```sh
+$ orch publish whoami  # server
+$ orch publish file report.csv --days 7  # server
+$ orch publish list  # server
+```
+
+The link lasts 7 days unless you say `--days N` (up to 90) or `--permanent`. Put the link on the ticket so people find it:
+`orch link add <id> --type publish --url "<link>"`. A folder with an `index.html` opens as a website.
+
+## Keep a link, change what is behind it
+
+Two things keep the same link: **extend** (the file lives longer; never shorter, and a permanent file stays permanent) and
+**replace** (new content under the same link and the same end date). Redeploying an app (`orch publish app <folder>`) keeps its address
+and private view link; the old version keeps running if the new one fails its test. The server side is in
+[publish-api.md](../contracts/publish-api.md) (`PATCH` and `PUT /v1/files/<id>`).
+
+---
+
+# Reference
 
 ## What it does
 Public links on `publish.severin.io`: files at `/f/<id>` (end-to-end encrypted, the browser decrypts) and small apps at

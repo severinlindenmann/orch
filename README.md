@@ -6,8 +6,8 @@
 
 <p align="center"><img src="docs/images/dashboard-tickets.png" alt="The orch dashboard: questions that need you, then tickets in progress, waiting, open and done" width="900"></p>
 
-orch works with the agent tool you already use: Claude Code, Codex, Copilot or Cowork. Your agent keeps its work in
-simple **tickets**. Every checklist step needs **evidence** before it counts as done. When the agent needs a decision, it
+orch works with the agent tool you already use: Claude, Codex, or any command you can type. Your agent keeps its work in
+simple **tickets**. Every task needs **proof** before it counts as done. When the agent needs a decision, it
 asks you a **question**, and you can answer from your browser or your iPhone.
 
 > Status: **prototype**. It runs and is tested, but expect rough edges.
@@ -19,9 +19,9 @@ Five parts. Use one or all of them. The first part works fully on its own, with 
 | | Part | What it does |
 |---|---|---|
 | 1 | **Workspace: the `orch` command and skills** | Tickets, checklists with evidence, questions and history, stored as plain files in your project (`.orch/`). Your agent learns how to use them from a skill. |
-| 2 | **Dashboard and scheduler** (add-ons) | A page on your own computer that shows all tickets and the questions waiting for you. The scheduler wakes your agent at the right time, or when a message arrives. |
-| 3 | **Publish** | Share a file with a link. The file is encrypted, and only people with the full link can open it. Also hosts small apps. |
-| 4 | **Relay** | Lets your workspaces, your phone and outside services (webhooks) talk to each other, and share skills and tools. |
+| 2 | **Dashboard, Focus and automation** (add-ons) | A page on your own computer with all tickets and what needs you. Focus is a live page for one ticket. Automation starts your agent at the right time, or when a message arrives. |
+| 3 | **Publish** (works alone) | Share a file with a link. The file is encrypted, and only people with the full link can open it. Also hosts small apps. |
+| 4 | **Relay** (works alone) | Lets your workspaces, your phone and outside services (webhooks) talk to each other, and share skills and tools. |
 | 5 | **iPhone app** | Answer your agents' questions with one tap, and send them text or voice notes. |
 
 <table>
@@ -44,10 +44,10 @@ The same picture as a diagram GitHub draws itself:
 ```mermaid
 flowchart LR
   subgraph PC["Laptop / customer PC"]
-    AG["Agent: Claude Code, Codex, Copilot, Cowork"] --> CLI["orch CLI + skills"]
+    AG["Agent: Claude, Codex, any command"] --> CLI["orch CLI + skills"]
     CLI --> FILES[".orch/ tickets (plain files)"]
     FILES --> DASH["Dashboard (localhost)"]
-    FILES --> SCHED["Scheduler"]
+    FILES --> SCHED["Automation"]
   end
   subgraph VPS["Your VPS"]
     PUB["publish.severin.io<br/>/f/ encrypted files, /a/ apps, workspace API"]
@@ -80,26 +80,37 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/severinlindenmann/orch/main/install.ps1 | iex
 ```
 
-This installs [uv](https://docs.astral.sh/uv/) if you do not have it, then the `orch` command.
+This installs [uv](https://docs.astral.sh/uv/) if you do not have it, then the `orch` command. If it asks you to add a line to
+your shell file, do that and open a new terminal.
 
 ## First steps
 
-1. In your project folder: `orch init`. This creates `.orch/` and teaches your agent tool about orch.
-2. Add the dashboard: `orch addon add dashboard` (and `orch addon add scheduler` if you want timed runs).
-3. Optional: connect to publish and relay. Your admin opens the admin page, clicks **Add workspace**, and gets a short
-   prompt to paste into your agent tool. It turns on the add-on (`orch addon add publish --yes` / `orch addon add relay --yes`)
-   and runs `orch publish connect ...` or `orch relay connect ...` for you. Publish and relay are built-in add-ons: a clean
-   orch shows none of their commands until you add them.
-4. Phone: in the relay admin page choose **Add phone**, pick the workspaces, and scan the QR code with the iPhone app.
+In your project folder:
+
+```sh
+$ orch init
+$ orch ticket new "Fix the invoice export"
+$ orch check add <id> "Export the file"
+$ orch run start <id>
+$ orch needs
+```
+
+1. `orch init` creates `.orch/`, asks which agent to use, and teaches that agent about orch.
+2. Make a ticket, add tasks, and start your agent on it. `orch needs` lists what waits for you.
+3. More, when you want it: `orch addon add dashboard`, `focus` or `automation` ([docs/addons.md](docs/addons.md)).
+4. Optional: publish and relay. Your admin clicks **Add workspace** on the admin page and gets a short text for your agent.
 5. Later: `orch update` brings orch and the add-ons up to date.
+
+Guides: [tickets](docs/workspace.md) · [agents](docs/agents.md) · [add-ons](docs/addons.md) · [publish](docs/publish.md) ·
+[relay](docs/relay.md) · [words used](docs/wording.md)
 
 ## How tickets work
 
 - A ticket is one small file in `.orch/tickets/`. Any agent tool can read and write it. It works with no git, local git or remote git.
-- A ticket has a **checklist**. A step only counts as done when it has **evidence**: a pull request, a commit, a file, a link, a command or a note. Marking a ticket done is refused while a ticked step has none.
+- A ticket has **tasks**. A task only counts as done when it has **proof**: a pull request, a commit, a file, a link, a command or a note. Marking a ticket done is refused while a ticked task has none.
 - Agents **ask questions** with options and a recommended answer. Questions show up in the dashboard and, if you want, on your phone. Once you answer, the agent carries on.
 - Every change is written to the ticket's **history**, with who did it (`agent:codex`, `human:anna`) and when.
-- A ticket can **wait** for a time or for an answer, and the scheduler wakes the agent when that happens.
+- A ticket can **wait** for a time or for an answer, and automation wakes the agent when that happens.
 
 ## Common commands
 
@@ -108,9 +119,11 @@ All commands accept `--json` for agents.
 | Command | What it does |
 |---|---|
 | `orch ticket new "Title"` / `list` / `show <id>` | Create and look at tickets |
-| `orch check add <id> "Step"` / `orch check done <id> <step> --evidence ...` | Checklist steps, with proof |
+| `orch check add <id> "Task"` / `orch check done <id> <task> --note ...` | Tasks, with proof |
 | `orch ask <id> "Question?" --option A --option B --recommend A [--phone]` | Ask a person; `--phone` also sends it to the phone |
 | `orch wait <id> --until <time>` | Pause a ticket until a time or an answer |
+| `orch run start <id>` / `attach` / `stop` | Start your agent on a ticket, watch it, stop it |
+| `orch needs` | Everything that waits for you |
 | `orch publish file <path>` / `orch publish app <folder>` | Share an encrypted file or deploy a small app |
 | `orch relay inbox` / `send <workspace> "text"` | Read messages, message another workspace |
 | `orch addon add\|list\|remove` / `orch update` | Add-ons and updates |
@@ -132,7 +145,7 @@ All commands accept `--json` for agents.
 |---|---|---|---|
 | `contracts/` | Shared formats: ticket, message, APIs, crypto, with test vectors | JSON Schema, docs | `contracts.yml` (and every folder below that uses it) |
 | `workspace/` | The `orch` command and its skills | Python, uv | `workspace.yml` |
-| `workspace-addons/` | Dashboard and scheduler | Python, uv | `addons.yml` |
+| `workspace-addons/` | Dashboard, Focus, automation | Python, uv | `addons.yml` |
 | `publish/` | Encrypted files and small apps (publish.severin.io) | Rust | `publish.yml` |
 | `relay/` | Inbox, rules, webhooks, shared tools, phone API (relay.severin.io) | Rust | `relay.yml` |
 | `mobile/` | iPhone app | Swift | `mobile.yml` |

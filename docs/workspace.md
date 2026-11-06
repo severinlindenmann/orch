@@ -1,50 +1,112 @@
-# orch-workspace
+# Tickets, tasks and proof
+
+orch keeps your work in **tickets**. A ticket has **tasks**. A task counts as done only with **proof**.
+Everything is a plain file in `.orch/` in your project. No server, no account. Words: [wording.md](wording.md).
+
+Lines that start with `$` are run by `e2e/docs_check.py`, so they stay true.
+
+## Make a ticket
+
+```sh
+$ orch init
+$ orch ticket new "Fix the invoice export"
+$ orch check add <id> "Export the file"
+$ orch check add <id> "Check it opens"
+$ orch ticket edit <id> --owner Anna --due 2026-12-01 --note "Ask finance first"
+$ orch ticket summary <id> "Export works, the check is left"
+$ orch ticket show <id>
+```
+
+Owner, due day and note are free text for people. orch never acts on them. The summary is one or two sentences on
+where things stand; it is what you see first on the dashboard and the phone.
+
+## Tasks
+
+```sh
+$ orch check start <id> c1
+$ orch check edit <id> c2 "Check it opens in Excel"
+$ orch check move <id> c2 --after c1
+$ orch check stop <id> c1
+$ orch check remove <id> c2
+```
+
+`start` marks the task someone is working on. `remove` keeps the task in the history. `reopen` opens a done task again.
+
+## Proof
+
+A task is done when it has proof: a command, a note, a file, a link, a commit or a pull request.
+
+```sh
+$ orch check done <id> c1  # refused
+$ orch check done <id> c1 --command "uv run pytest -q"
+$ orch check reopen <id> c1
+$ orch check done <id> c1 --file report.csv --title "The export" --role result
+$ orch ticket status <id> done
+```
+
+`--file` copies the file into `.orch/tickets/<id>/evidence/`. Proof files are not committed to git (they stay on this
+computer). On another computer the ticket shows "file on another computer". Roles: `result`, `check`, `support`.
+
+## Sub-tickets
+
+```sh
+$ orch ticket new "Check the totals" --parent <id>
+$ orch ticket tree <id>
+```
+
+A big ticket can be split into sub-tickets. The parent shows "Sub-tickets: 0 of 1 closed".
+
+## Questions and what needs you
+
+```sh
+$ orch ask <id> "Send it to finance now?" --option Yes --option "Not yet" --recommend Yes
+$ orch needs
+$ orch answer <id> q1 "Yes"
+$ orch needs
+```
+
+`orch needs` is one list of everything that waits for a person: open questions first, then failed runs and add-on
+rows (for example "automation is not running"). The same list is on the dashboard and the phone.
+
+To pause a ticket until a time: `orch wait <id> --until 2026-12-01T08:00:00+01:00`.
+
+## Links and history
+
+```sh
+$ orch link add <id> --type github --url https://example.com/pr/1
+$ orch log <id> "Waiting for the new price list"
+```
+
+Every change is written to the ticket's history with who did it and where (`via`: terminal, dashboard, phone).
+
+## What orch does not protect
+
+- An agent runs as you. orch is a shared to-do list with proof, not a lock.
+- "You" or "human" in the history is a label. Any agent can write it.
+- Work outside orch (an agent running in another terminal) is not stopped or tracked.
+- Only messages sent through orch are tracked.
+
+Relay and publish are separate add-ons. A workspace may use either one alone, or neither.
+
+# Reference
 
 ## What it does
-Tickets as JSON files that any agent tool can use: checklist items that count as done only with evidence,
-links to any tool, questions and answers, history. The publish and relay clients ship in the same package as
-built-in add-ons: off (no command in `orch --help`, no skill, no AGENTS.md entry) until `orch addon add publish|relay`.
-Runs on Windows, macOS and Linux, with or without git.
-
-## Tech stack
-Python 3.12, uv. Stdlib `argparse`, `json`, `urllib.request`. Deps: `cryptography` (publish file encryption), `jsonschema` (check every write against `contracts/ticket.schema.json`). No server.
-
-## Folder layout
-```
-workspace/
-  pyproject.toml            package orch-workspace, script "orch"
-  src/orch/cli.py           argument parsing only
-  src/orch/tickets.py       load/save/validate, keeps unknown fields, atomic write (tmp + rename)
-  src/orch/init.py          orch init: folders, skill, AGENTS.md block, .claude/skills link, .gitignore
-  src/orch/addons.py        orch addon add|list|remove|uninstall, activation, add-on dispatch (subprocess), orch update
-  src/orch/services.py      orch start|stop|status: background processes of active add-ons, running.json
-  src/orch/publish.py       publish client (encrypt, upload, apps)
-  src/orch/relay.py         relay client (inbox, send, allow, refresh, webhook)
-  skills/orch/SKILL.md      copied into projects by init
-  src/orch/builtin/{publish,relay}/orch-addon.toml + skills/orch-<name>/   built-in add-ons, copied by `orch addon add`
-  tests/
-```
+Tickets as JSON files that any agent tool can use: tasks that count as done only with proof, links to any tool,
+questions and answers, history. Relay and publish ship in the same package as built-in add-ons: off until
+`orch addon add publish|relay`. Runs on Windows, macOS and Linux, with or without git.
 
 ## Commands
 | Command | Does |
 |---|---|
-| `orch init` | Set up the project folder (local-files.md). Safe to run again |
-| `orch addon add <name\|./folder> [--yes]` / `remove <name> [--purge]` / `list` / `uninstall <name>` | Add-on contract (contracts/addon-manifest.md): install a built-in or local add-on and turn it on in this workspace (`.orch/addons.json`), or turn it off. The core knows no add-on by name |
-| `orch <addon> …` | Runs an active add-on as a subprocess; listed under **Add-ons** in `orch --help` |
-| `orch start` / `orch stop [PATH\|NAME] [--all\|--pick]` / `orch status` | Starts the background process of every active add-on that has one (dashboard in the background with its link, scheduler), one line per add-on; add-ons without one are left alone. `stop` in a workspace stops that one; outside one (or `--pick`) it lists the running workspaces by number and asks which (or `all`); without a terminal it needs a name, a folder or `--all`. `status` shows what runs where. Running list: `running.json` in the user's orch folder (`~/.orch-tool/`), dead processes dropped on read |
-| `orch update` | Reinstalls orch + all installed add-ons together from where orch was installed from (the same repo and branch), then refreshes the skills and AGENTS.md blocks in this project |
-| `orch addon add publish --yes` + `orch publish connect <url> --workspace ws_… --token orp_…` / `orch addon add relay --yes` + `orch relay connect …` | What the admin prompts contain (publish-api.md, relay-api.md). `orch publish …` / `orch relay …` / `ask --phone` are refused until the add-on is on |
-| `orch ticket new "<title>"` / `list` / `show <id>` / `status <id> <status>` | Tickets. `done` is refused while a checked item lacks evidence |
-| `orch ticket patch <id> --if-revision N '<json>'` | Atomic change of several fields; refused when the ticket's `revision` changed meanwhile. Every write adds 1 to `revision` |
-| `orch check add <id> "<text>"` / `done <id> <c> --evidence '{"type":…,"ref":…}'` | Checklist; `done` without evidence is refused |
-| `orch log <id> "<text>"` | History entry. `by` = `--by`, else the agent tool seen in the environment (`agent:claude-code`, `agent:codex`), else `human:<os user>` |
-| `orch ask <id> "<q>" --option A --option B --recommend A [--phone]` / `answer <id> <q> "<a>"` | Questions; `--phone` also sends it to the phones via the relay |
-| `orch link add <id> --type <t> --url <u>` / `orch ext set <id> <addon> '<json>' [--if-revision N]` | Links and add-on data (`ext.<addon>`, checked with the add-on's schema when it is active) |
-| `orch wait <id> --until <time>` / `--on question:q1\|ticket:t_…\|external:<text>` / `--clear` | Sets `waiting_on` (`kind` time/question/ticket/external), status `waiting`. orch only records it; something wakes the ticket only if an add-on does (the scheduler wakes `time`) |
-| `orch publish whoami` / `file <path> [--days N\|--permanent]` / `app <folder> [--days N\|--permanent]` / `list` / `restart` / `stop` / `delete` / `new` | publish-api.md |
-| `orch relay inbox` / `done <m>` / `send <ws> "<text>" [--file f]` / `delegate` / `start` / `allow <m> --once\|--permanent` / `refresh` / `webhook new --once\|--permanent` / `whoami` (relay-api.md, local-files.md) | relay-api.md |
+| `orch init` | Sets up the project folder, asks which agent to use. Safe to run again |
+| `orch ticket new\|list\|show\|tree\|edit\|summary\|status\|wait\|patch` | Tickets. `done` is refused while a ticked task lacks proof |
+| `orch check add\|edit\|move\|remove\|reopen\|start\|stop\|done` | Tasks and proof |
+| `orch ask` / `answer` / `needs` | Questions and the list of what needs a person |
+| `orch link add`, `orch log`, `orch ext set` | Links, history, add-on data (`ext.<addon>`) |
+| `orch agents`, `orch config`, `orch run ...` | Agents and runs: [agents.md](agents.md) |
+| `orch addon add\|list\|remove\|uninstall`, `orch start\|stop\|status`, `orch update` | Add-ons: [addons.md](addons.md) |
 
-All commands accept `--json` for agents. Exit code 0 = ok, 2 = refused (stderr `Refused: <reason>`; with `--json` stdout `{"error": "<reason>"}`), 1 = bug. Add-ons follow the same rules.
+All commands accept `--json` for agents. Exit code 0 = ok, 2 = refused (stderr `Refused: <reason>`; with `--json` stdout `{"error": "<reason>"}`), 1 = bug.
 
 ## Data storage
 `.orch/` in the workspace (contracts/local-files.md). Tickets may be committed; secrets and inbox are gitignored.
@@ -60,4 +122,4 @@ One line from GitHub (public repo): `install.sh` / `install.ps1` in the repo roo
 `uv tool install git+https://github.com/severinlindenmann/orch#subdirectory=workspace`. Then `orch init` per project.
 
 ## Not included
-Signing, approvals, planning gates, fixed requirements, claims/locking, durations, a GUI, a server.
+Signing, approvals, planning gates, fixed requirements, durations, a server.
