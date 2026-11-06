@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -143,6 +144,26 @@ def load_inbox(root: Path, names: dict[str, str] | None = None) -> list[dict]:
     return out
 
 
+def load_services(root: Path, orch_bin: str | None) -> list[dict]:
+    """Background add-ons of this workspace, running or not, from `orch status --json` (rows: addon, running, url)."""
+    raw = run_orch(orch_bin, ["status", "--json"], root)
+    here = str(root.resolve())
+    for w in raw if isinstance(raw, list) else []:
+        if isinstance(w, dict) and w.get("workspace") == here and isinstance(w.get("addons"), list):
+            return [r for r in w["addons"] if isinstance(r, dict) and isinstance(r.get("addon"), str)]
+    return []
+
+
+def load_runs(root: Path, orch_bin: str | None, tickets: list[dict]) -> dict[str, dict]:
+    """Run status per open ticket, from `orch run status <id> --json`, a few at a time."""
+    if not orch_bin:
+        return {}
+    ids = [t["id"] for t in tickets if t["status"] not in ("done", "dropped")][:60]
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        got = list(pool.map(lambda i: run_orch(orch_bin, ["run", "status", i, "--json"], root), ids))
+    return {i: r for i, r in zip(ids, got, strict=True) if isinstance(r, dict)}
+
+
 def load_state(root: Path, include_inbox: bool = True, orch_bin: str | None = None, with_addons: bool = True) -> dict:
     """with_addons=False (snapshots by default): no add-on tabs, no ticket rows, `ext` dropped from tickets."""
     tickets, skipped = load_tickets(root, orch_bin)
@@ -157,6 +178,7 @@ def load_state(root: Path, include_inbox: bool = True, orch_bin: str | None = No
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
+    needs = run_orch(orch_bin, ["needs", "--json"], root)
     state = {
         "workspace": root.name,
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -166,6 +188,9 @@ def load_state(root: Path, include_inbox: bool = True, orch_bin: str | None = No
         "names": names if include_inbox else {},
         "inbox": load_inbox(root, names) if include_inbox else None,
         "relay": relay,
+        "needs": needs if isinstance(needs, list) else [],
+        "services": load_services(root, orch_bin),
+        "runs": load_runs(root, orch_bin, tickets),
     }
     state["rev"] = hashlib.sha1(
         json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()).hexdigest()[:12]
