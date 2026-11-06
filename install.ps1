@@ -15,7 +15,7 @@ $repo = if ($env:ORCH_REPO) { $env:ORCH_REPO } else { "https://github.com/severi
 $ref = if ($env:ORCH_REF) { $env:ORCH_REF } else { "main" }
 $r = $repo -replace '\.git$',''
 # A ref is a plain git ref name: in a zip URL a '../' or '#' could reach another repository or folder.
-if ($ref -notmatch '^[A-Za-z0-9._/-]+$' -or $ref -match '\.\.' -or $ref -match '^[-/]' -or $ref -match '(\.lock|/)$') {
+if ($ref -notmatch '\A[A-Za-z0-9._/-]+\z' -or $ref -match '\.\.' -or $ref -match '^[-/]' -or $ref -match '(\.lock|/)$') {
     throw "'$ref' is not a branch, tag or commit name (check ORCH_REF)."
 }
 if (-not (Test-Path $repo) -and $r -match '[\s"''#?]') { throw "'$r' is not a repository address (check ORCH_REPO)." }

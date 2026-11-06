@@ -98,14 +98,14 @@ def repo() -> str:
     return os.environ.get("ORCH_REPO") or _install_origin().get("repo") or DEFAULT_REPO
 
 
-_REF_OK = re.compile(r"^[A-Za-z0-9._/-]+$")
+_REF_OK = re.compile(r"[A-Za-z0-9._/-]+")
 
 
 def ref() -> str:
     """The branch, tag or commit to install. Checked like a git ref name: in a zip URL a '../' or '#' could
     point at another repository or folder (git+ took it as a revision only)."""
     r = os.environ.get("ORCH_REF") or _install_origin().get("ref") or "main"
-    if not _REF_OK.match(r) or ".." in r or r.startswith(("-", "/")) or r.endswith((".lock", "/")):
+    if not _REF_OK.fullmatch(r) or ".." in r or r.startswith(("-", "/")) or r.endswith((".lock", "/")):
         raise Refused(f"'{r}' is not a branch, tag or commit name orch can install from (check ORCH_REF).")
     return r
 

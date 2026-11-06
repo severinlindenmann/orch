@@ -16,7 +16,8 @@ R="${REPO%.git}"
 case "$REF" in
   *..*|-*|/*|*.lock|*/|"") echo "'$REF' is not a branch, tag or commit name (check ORCH_REF)." >&2; exit 1 ;;
 esac
-if printf '%s' "$REF" | grep -q '[^A-Za-z0-9._/-]'; then
+# Any other character (newlines too: the "!" end mark keeps $(...) from dropping trailing ones)
+if [ "$(printf '%s!' "$REF" | tr -d 'A-Za-z0-9._/-')" != "!" ]; then
   echo "'$REF' is not a branch, tag or commit name (check ORCH_REF)." >&2; exit 1
 fi
 if [ -d "$REPO" ]; then
