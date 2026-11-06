@@ -1,0 +1,11 @@
+{"type": "system", "subtype": "init", "session_id": "s1", "timestamp": "2026-11-05T09:11:59.100Z"}
+{"type": "assistant", "timestamp": "2026-11-05T09:12:05.000Z", "sessionId": "s1", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_01U1", "name": "Bash", "input": {"command": "TOKEN=abc123secretvalue uv run pytest -q tests/invoices", "description": "Run invoice tests"}}]}}
+{"type": "user", "timestamp": "2026-11-05T09:12:08.100Z", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01U1", "content": "48 passed in 3.12s"}]}}
+{"type": "assistant", "timestamp": "2026-11-05T09:12:09.000Z", "sessionId": "s1", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_01Hk", "name": "Task", "input": {"description": "checking colours", "prompt": "compare colours"}}]}}
+{"type": "assistant", "timestamp": "2026-11-05T09:12:20.000Z", "sessionId": "s1", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_02In", "name": "Read", "input": {"file_path": "/w/brand/colors.css"}}]}, "parent_tool_use_id": "toolu_01Hk"}
+{"type": "user", "timestamp": "2026-11-05T09:12:21.000Z", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_02In", "content": "ok"}]}, "parent_tool_use_id": "toolu_01Hk"}
+{"type": "user", "timestamp": "2026-11-05T09:13:02.000Z", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01Hk", "content": "Colours match the brand"}]}}
+{"type": "assistant", "timestamp": "2026-11-05T09:13:10.000Z", "sessionId": "s1", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_03Bd", "name": "Bash", "input": {"command": "npm run build"}}]}}
+{"type": "user", "timestamp": "2026-11-05T09:13:15.000Z", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_03Bd", "content": "build failed: exit 1", "is_error": true}]}}
+{"type": "rate_limit_event", "timestamp": "2026-11-05T09:20:40Z", "rate_limit_info": {"status": "allowed_warning", "rateLimitType": "seven_day", "utilization": 0.82}}
+{"type": "result", "timestamp": "2026-11-05T09:20:41Z", "num_turns": 14, "is_error": false, "permission_denials": [{"tool_name": "WebFetch", "tool_input": {}}]}
