@@ -21,7 +21,7 @@ def call(fn, *args):
     ("Created", "Ticket created"), ("Created under t_abc12345", "Created as a sub-ticket"),
     ("Edited due, owner", "Changed the due day and the owner"), ("Edited title", "Changed the title"),
     ("Asked q1, waiting", "Asked a question"), ("Answered q1: Yes", "Answered a question"),
-    ("Status open -> active", "Moved to Doing"), ("Status active -> done", "Moved to Done"),
+    ("Status open -> active", "Moved to Doing"), ("Check c2 done", "Finished a task"), ("Status active -> done", "Moved to Done"),
     ("Something the agent wrote", "Something the agent wrote")])
 def test_history_lines_are_plain_words(raw, want):
     assert call("historyLine", {"text": raw}) == want

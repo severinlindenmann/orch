@@ -166,7 +166,7 @@ def test_page_has_no_inline_code_and_loads_the_kit():
 
 
 def test_page_code_names_no_addon_and_has_no_blinking_needs():
-    js = ((WEBDIR / "app.js").read_text() + (WEBDIR / "style.css").read_text()).replace(".focus(", ".(")
+    js = ((WEBDIR / "app.js").read_text() + (WEBDIR / "style.css").read_text()).replace(".focus(", ".(").replace(":focus", ":")
     for name in ("scheduler", "automation", "relay", "focus", "publish", "wiki"):
         assert not re.search(rf"\b{name}\b", js, re.IGNORECASE), name
     assert "needs-pulse" not in js and "infinite" not in js
