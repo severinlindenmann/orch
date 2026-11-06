@@ -114,6 +114,51 @@ def new_id(root: Path) -> str:
     raise Refused("Could not find a free ticket id.")
 
 
+_KEY_RE = re.compile(r"^([A-Za-z0-9]{2,4})-([1-9][0-9]{0,8})$")
+
+
+def resolve(root: Path, ref):
+    """The one place a ticket key (DM1-12, any case) becomes the ticket id. Anything else is returned as it
+    is (an id, or a word the command refuses later)."""
+    if not isinstance(ref, str) or not _KEY_RE.match(ref.strip()):
+        return ref
+    want = ref.strip().upper()
+    for t in list_all(root):
+        if str(t.get("key", "")).upper() == want:
+            return t["id"]
+    raise Refused(f"Ticket {ref} doesn't exist. Run `orch ticket list` to see your tickets.")
+
+
+def _counter_path(root: Path) -> Path:
+    return root / ".orch" / "ticket-counter.json"
+
+
+def next_key(root: Path) -> str:
+    """<code>-<n> for a new ticket. n is 1 + the highest number handed out (counter file or any ticket's key),
+    written to the counter under one workspace lock, so no two tickets share a number and none is reused."""
+    from orch import config
+
+    code = config.workspace_code(root) or config.set_code(root, config.suggest_code(root.resolve().name))
+    with _locked(root, "key"):
+        p = _counter_path(root)
+        try:
+            last = int(json.loads(p.read_text(encoding="utf-8")).get("last", 0))
+        except (OSError, ValueError, AttributeError, TypeError):
+            last = 0
+        for t in list_all(root):
+            m = _KEY_RE.match(str(t.get("key", "")))
+            if m:
+                last = max(last, int(m.group(2)))
+        n = last + 1
+        tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
+        try:
+            tmp.write_text(json.dumps({"last": n}) + "\n", encoding="utf-8")
+            os.replace(tmp, p)
+        finally:
+            tmp.unlink(missing_ok=True)
+    return f"{code}-{n}"
+
+
 def load(root: Path, tid: str) -> dict:
     p = ticket_path(root, tid)
     if not p.exists():
@@ -398,6 +443,7 @@ def create(
     ticket = {
         "schema": "orch.ticket/1",
         "id": new_id(root),
+        "key": next_key(root),
         "title": title,
         "status": "open",
         "created_at": t,

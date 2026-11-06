@@ -330,10 +330,17 @@ async fn updates(
                 more = ticket.is_some() && !out.is_empty();
                 break 'scan;
             }
-            let (body, _) = store::open_payload(&app.key, &m);
+            let (body, top) = store::open_payload(&app.key, &m);
             if !body["update"].is_object() {
                 continue;
             }
+            let mut body = body;
+            // the ticket's display key (message `key`, e.g. DM1-12) rides along for the item
+            body["__key"] = top
+                .get("key")
+                .and_then(crate::rules::ticket_key)
+                .map(Value::from)
+                .unwrap_or(Value::Null);
             if ticket.is_some() {
                 if out.len() == limit {
                     more = true;
@@ -392,7 +399,7 @@ async fn updates(
         .map(|(i, (m, b))| {
             let u = &b["update"];
             json!({"id": m.id, "workspace": m.from, "workspace_name": store::ws_name(&c, &m.from),
-                "ticket": m.ticket, "kind": u["kind"],
+                "ticket": m.ticket, "key": b["__key"], "kind": u["kind"],
                 "title": if ticket.is_some() { u["title"].clone() } else { titles.get(i).cloned().flatten().into() }, "text": b["text"],
                 "reply_to": m.reply_to, "at": m.created_at,
                 "ticket_view": if ticket.is_some() { b["ticket_view"].clone() } else { views.get(i).cloned().unwrap_or(Value::Null) }})
@@ -479,8 +486,9 @@ async fn answer(
                 b["answer"].as_str().unwrap_or("")
             )));
         }
-        let (qb, _) = store::open_payload(&app.key, &q);
-        let m = store::system_message(
+        let (qb, qextra) = store::open_payload(&app.key, &q);
+        let m = store::system_message_with_key(
+            qextra.get("key").and_then(crate::rules::ticket_key),
             &c,
             &app.key,
             &pid,
@@ -611,15 +619,25 @@ pub async fn push_message(app: &AppState, q: &Value) {
         store::ws_name(&c, q["from"].as_str().unwrap_or("")).unwrap_or_default()
     };
     let body_text = q["body"]["text"].as_str().unwrap_or("");
-    let text: String = match update["title"].as_str() {
+    let text = match update["title"].as_str() {
         Some(t) if is_text => format!("{t}: {}", body_text.lines().next().unwrap_or("")),
         _ => body_text.to_string(),
+    };
+    // "DM1-12 · title": the ticket's display key first when the workspace sent one
+    let key = crate::rules::ticket_key(&q["key"]);
+    let text: String = match key {
+        Some(k) => format!("{k} · {text}"),
+        None => text,
     }
     .chars()
     .take(120)
     .collect();
     let mut payload = json!({"aps": {"alert": {"title": name, "body": text}, "sound": "default"},
         "workspace": q["from"]});
+    if q["ticket"].is_string() {
+        payload["ticket"] = q["ticket"].clone();
+        payload["key"] = key.map(Value::from).unwrap_or(Value::Null);
+    }
     if q["type"] == "question" {
         payload["message_id"] = q["id"].clone();
     } else {

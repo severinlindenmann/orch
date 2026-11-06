@@ -20,6 +20,29 @@ fn schema() -> &'static jsonschema::JSONSchema {
     })
 }
 
+/// The ticket's display key when it follows the contract pattern `^[A-Z0-9]{2,4}-[1-9][0-9]{0,8}$`
+/// (message.schema.json `key`, e.g. DM1-12); anything else is no key.
+pub fn ticket_key(v: &Value) -> Option<&str> {
+    let k = v.as_str()?;
+    let (code, n) = k.split_once('-')?;
+    let code_ok = (2..=4).contains(&code.len())
+        && code
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
+    let n_ok =
+        (1..=9).contains(&n.len()) && n.bytes().all(|b| b.is_ascii_digit()) && !n.starts_with('0');
+    (code_ok && n_ok).then_some(k)
+}
+
+/// A `key` that is not a valid display key is dropped (never stored, listed or pushed); the message itself is kept.
+pub fn clean_ticket_key(msg: &mut Value) {
+    if msg.get("key").is_some() && ticket_key(&msg["key"]).is_none() {
+        if let Some(o) = msg.as_object_mut() {
+            o.remove("key");
+        }
+    }
+}
+
 /// Err(text of the first problems) when `msg` is not a valid orch.msg/1.
 pub fn validate_schema(msg: &Value) -> Result<(), String> {
     match schema().validate(msg) {
@@ -122,8 +145,17 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
             if prev.is_some() {
                 return Err(already_answered("This question was already answered."));
             }
-            let (qbody, _) = open_payload(key, &q);
+            let (qbody, qextra) = open_payload(key, &q);
             msg["ticket"] = q.ticket.clone().map(Value::from).unwrap_or(Value::Null);
+            // the asker's display key travels with its ticket id; never trusted from the answerer
+            match qextra.get("key").and_then(ticket_key) {
+                Some(k) => msg["key"] = k.into(),
+                None => {
+                    if let Some(o) = msg.as_object_mut() {
+                        o.remove("key");
+                    }
+                }
+            }
             if let Some(qid) = qbody.get("question_id") {
                 msg["body"]["question_id"] = qid.clone();
             }

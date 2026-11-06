@@ -538,3 +538,46 @@ async fn replace_leaves_no_temp_files() {
         .count();
     assert_eq!(n, 1);
 }
+
+#[tokio::test]
+async fn files_original_size_upload_replace_and_lists() {
+    let blob = vector_blob();
+    let len = blob.len() as i64;
+    for (query, expected) in [
+        ("?size=12".to_string(), 12),
+        (String::new(), len),
+        (format!("?size={}", len + 1), len),
+        ("?size=-1".to_string(), len),
+        ("?size=0".to_string(), 0),
+        (format!("?size={len}"), len),
+    ] {
+        let t = setup();
+        let ws = t.workspace("A", basic_rights()).await;
+        let uploaded = t
+            .api(&ws, "POST", &format!("/v1/files{query}"), blob.clone())
+            .await;
+        assert_eq!(uploaded.status, 201);
+        let uploaded = uploaded.json();
+        assert_eq!(uploaded["size"], expected);
+        let id = uploaded["id"].as_str().unwrap();
+        for method in ["POST", "PUT"] {
+            if method == "PUT" {
+                // First change the stored size so replacement must update it again.
+                t.api(&ws, "PUT", &format!("/v1/files/{id}?size=1"), blob.clone())
+                    .await;
+                let replaced = t
+                    .api(&ws, "PUT", &format!("/v1/files/{id}{query}"), blob.clone())
+                    .await;
+                assert_eq!(replaced.status, 200);
+                assert_eq!(replaced.json()["size"], expected);
+            }
+            let list = t.api(&ws, "GET", "/v1/files", vec![]).await.json();
+            assert_eq!(list["items"][0]["size"], expected);
+            let admin = t
+                .adm("GET", "/admin/api/files", serde_json::Value::Null)
+                .await
+                .json();
+            assert_eq!(admin["items"][0]["size"], expected);
+        }
+    }
+}
