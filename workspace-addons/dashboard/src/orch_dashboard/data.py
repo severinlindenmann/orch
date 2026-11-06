@@ -178,7 +178,7 @@ def load_state(root: Path, include_inbox: bool = True, orch_bin: str | None = No
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
-    needs = run_orch(orch_bin, ["needs", "--json"], root)
+    needs = run_orch(orch_bin, ["needs", "--json"], root) if with_addons else None
     state = {
         "workspace": root.name,
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -189,8 +189,8 @@ def load_state(root: Path, include_inbox: bool = True, orch_bin: str | None = No
         "inbox": load_inbox(root, names) if include_inbox else None,
         "relay": relay,
         "needs": needs if isinstance(needs, list) else [],
-        "services": load_services(root, orch_bin),
-        "runs": load_runs(root, orch_bin, tickets),
+        "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
+        "runs": load_runs(root, orch_bin, tickets) if with_addons else {},
     }
     state["rev"] = hashlib.sha1(
         json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()).hexdigest()[:12]

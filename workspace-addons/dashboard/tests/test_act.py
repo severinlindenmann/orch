@@ -157,3 +157,9 @@ def test_dashboard_source_names_no_addon():
     text = (src / "actions.py").read_text() + (src / "server.py").read_text()
     for name in ("scheduler", "automation", "relay", "focus", "publish", "wiki"):
         assert not re.search(rf"\b{name}\b", text, re.IGNORECASE), name
+
+
+def test_snapshot_state_has_no_needs_services_or_runs(ws, act_orch):
+    from orch_dashboard.data import load_state
+    s = load_state(ws, orch_bin=str(act_orch), with_addons=False)
+    assert s["needs"] == [] and s["services"] == [] and s["runs"] == {}
