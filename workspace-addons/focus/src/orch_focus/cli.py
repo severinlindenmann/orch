@@ -34,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
     for name, text in (("start", "serve in the background"), ("stop", "stop the background page"),
                        ("status", "is it running, and where?")):  # fmt: skip
         sub.add_parser(name, help=text).add_argument("--json", action="store_true")
+    for name, text in (("view", "dashboard tab data"), ("needs", "rows for `orch needs`")):
+        sub.add_parser(name, help=text).add_argument("--json", action="store_true")
     op = sub.add_parser("open", help="open the live page of a ticket")
     op.add_argument("ticket")
     op.add_argument("--no-open", action="store_true", help="only print the address")
@@ -45,7 +47,29 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.cmd in (None, "serve"):
         return _serve(args, root)
+    if args.cmd in ("view", "needs"):
+        return _data(args, root)
     return _service(args, root)
+
+
+def _data(args, root: Path) -> int:
+    import os
+
+    orch_bin = os.environ.get("ORCH_BIN") or "orch"
+    if args.cmd == "view":
+        from .view import build
+
+        print(json.dumps(build(root, orch_bin)))
+        return 0
+    from .needs import rows
+
+    rs = rows(root, orch_bin)
+    print(
+        json.dumps(rs)
+        if args.json
+        else "\n".join(f"{r['title']}: {r['text']}" for r in rs) or "Nothing needs you here."
+    )
+    return 0
 
 
 def _serve(args, root: Path) -> int:

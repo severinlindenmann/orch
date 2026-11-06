@@ -1,8 +1,21 @@
+# workspace-addons/focus/src/orch_focus/orch-addon.toml
 schema = "orch.addon/1"
 orch_api = 1
 name = "focus"
-version = "0.0.1"
-description = "Placeholder for the focus add-on."
-run = "orch_focus"
+version = "0.1.0"
+description = "A live page for one ticket: watch the agent work, answer its questions, send it a message."
+run = "orch_focus"                          # orch focus <args>  ->  python -m orch_focus <args>
 skill = "skills/orch-focus"
-background = true
+agents_block = "skills/orch-focus/AGENTS-block.md"
+background = true                           # orch focus start|stop|status --json (orch start / orch stop)
+runs_agents = true                          # starts and stops runs only through `orch run start|send|stop`
+needs = true                                # orch focus needs --json
+
+[dashboard]
+label = "Live"
+icon = "bolt"
+order = 20
+
+[page]
+path = "/"
+label = "Open Focus"
