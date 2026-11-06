@@ -111,11 +111,11 @@ def _ticket_patch(a):
 
 
 def _ticket_edit(a):
-    _only(a, ("ticket", "owner", "due", "note", "if_revision"))
+    _only(a, ("ticket", "title", "owner", "due", "note", "if_revision"))
     flags = []
-    for k in ("owner", "due", "note"):
+    for k in ("title", "owner", "due", "note"):
         if k in a:
-            v = _text(a[k], k, empty=True)
+            v = _text(a[k], k, empty=k != "title")
             if k == "due" and not DAY.fullmatch(v):
                 raise BadRequest("The due day must look like 2026-11-30.")
             flags.append(f"--{k}={v}")

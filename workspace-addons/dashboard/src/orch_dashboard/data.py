@@ -116,9 +116,13 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
             d = None
         tv = [r for r in a.get("ticket_view") or [] if isinstance(r, dict) and isinstance(r.get("field"), str)
               and isinstance(r.get("label"), str) and r.get("format") in FORMATS]
+        pg = a.get("page") if isinstance(a.get("page"), dict) else None
+        if pg and not (isinstance(pg.get("path"), str) and re.fullmatch(r"/[A-Za-z0-9_./-]*", pg["path"]) and ".." not in pg["path"]):
+            pg = None
         if d or tv:
             out.append({"name": a["name"], "dashboard": d and {"label": d["label"][:16], "icon": d["icon"],
-                                                               "order": d.get("order", 50)}, "ticket_view": tv})
+                                                               "order": d.get("order", 50)}, "ticket_view": tv,
+                        "page": pg and {"path": pg["path"], "label": str(pg.get("label") or "")[:40]}})
     out.sort(key=lambda a: (a["dashboard"] or {}).get("order", 50))
     return out
 
@@ -140,6 +144,26 @@ def _consent(r: dict) -> str:
     return "\n".join(lines)[:1200]
 
 
+def _host(url) -> str:
+    m = re.match(r"^https?://[^/\s]+", str(url or ""))
+    return m.group(0)[:120] if m and "@" not in m.group(0) else ""
+
+
+def _addon_detail(root: Path, name: str) -> dict | None:
+    """Connection facts for an add-on that has a saved server link (.orch/secrets/<name>.json) and, if it keeps
+    one, a list of other workspaces (.agents/skills/orch-<name>/workspaces.json). Never the token."""
+    link = _load(root / ".orch" / "secrets" / f"{name}.json")
+    if not isinstance(link, dict) or "url" not in link:
+        return None
+    url = _host(link.get("url"))
+    out = {"connected": bool(url), "address": url, "workspaces": []}
+    d = _load(root / ".agents" / "skills" / f"orch-{name}" / "workspaces.json")
+    for w in (d.get("workspaces") if url and isinstance(d, dict) and isinstance(d.get("workspaces"), list) else [])[:50]:
+        if isinstance(w, dict) and isinstance(w.get("name"), str):
+            out["workspaces"].append({"name": w["name"][:60], "online": w.get("online") is True})
+    return out
+
+
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
     agents, rows = run_orch(orch_bin, ["agents", "--json"], root), run_orch(orch_bin, ["addon", "list", "--json"], root)
@@ -149,7 +173,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "agents": [{k: a.get(k) for k in keep} for a in (agents if isinstance(agents, list) else [])
                    if isinstance(a, dict) and isinstance(a.get("name"), str)],
         "addons": [{"name": r["name"], "description": str(r.get("description") or "")[:200], "active": r.get("active") is True,
-                    "consent": _consent(r)}
+                    "consent": _consent(r), "detail": _addon_detail(root, r["name"])}
                    for r in (rows if isinstance(rows, list) else []) if isinstance(r, dict) and isinstance(r.get("name"), str)
                    and _NAME.match(r["name"])],
     }

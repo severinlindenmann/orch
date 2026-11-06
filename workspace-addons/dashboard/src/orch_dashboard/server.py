@@ -6,13 +6,15 @@ import hmac
 import json
 import os
 import re
+import time
 from functools import partial
+from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 
 from . import actions
-from .data import load_addons, load_state
+from .data import load_addons, load_services, load_state
 from .views import ViewPuller
 
 DEFAULT_PORT = 8420
@@ -23,8 +25,18 @@ TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
          ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png"}
 
 
+PROXY = re.compile(r"/addon/([a-z][a-z0-9-]{1,31})(/[A-Za-z0-9_./-]*)?")
+LOCAL = re.compile(r"http://(?:127\.0\.0\.1|localhost):(\d{1,5})/?")
+PROXY_CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'self'; base-uri 'none'"
+PROXY_BODY = 16384
+PROXY_MAX_REPLY = 4 * 1024 * 1024
+
+
 def web_file(name: str) -> bytes:
     return resources.files("orch_dashboard").joinpath("web", name).read_bytes()
+
+
+_PORTS: dict[tuple[str, str], tuple[float, int | None]] = {}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -37,7 +49,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
         pass
 
-    def _send(self, code, body: bytes, ctype: str, extra: dict | None = None):
+    def _send(self, code, body: bytes, ctype: str, extra: dict | None = None, csp: str | None = None):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -45,7 +57,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
-        self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'")
+        self.send_header("Content-Security-Policy", csp or "default-src 'self'; img-src 'self' data:; style-src 'self'")
         self.end_headers()
         self.wfile.write(body)
 
@@ -53,6 +65,52 @@ class Handler(BaseHTTPRequestHandler):
         host = (self.headers.get("Host") or "").strip().lower()
         host = host.rsplit("]", 1)[0] + "]" if host.startswith("[") else host.split(":", 1)[0]
         return host in ("127.0.0.1", "localhost", "[::1]")
+
+    def _upstream_port(self, name: str) -> int | None:
+        """The local port of a running add-on that declares a [page]: both facts come from orch's own add-on data."""
+        hit = _PORTS.get((str(self.root), name))
+        if hit and time.monotonic() - hit[0] < 3:
+            return hit[1]
+        port = None
+        if any(a["name"] == name and a.get("page") for a in load_addons(self.root, self.orch_bin)):
+            for svc in load_services(self.root, self.orch_bin):
+                m = LOCAL.fullmatch(str(svc.get("url") or ""))
+                if svc.get("addon") == name and svc.get("running") is True and m and 0 < int(m.group(1)) < 65536:
+                    port = int(m.group(1))
+        _PORTS[(str(self.root), name)] = (time.monotonic(), port)
+        return port
+
+    def _proxy(self, method: str, name: str, rest: str, query: str):
+        """Show an add-on's page under this server's address. The dashboard's own fence has already passed; the
+        add-on's server runs its own fence on the request we forward (its Host, and for a POST its own Origin)."""
+        port = self._upstream_port(name)
+        if port is None or ".." in rest or "//" in rest:
+            return self._send(404, b"not found", "text/plain")
+        up = {"Host": f"127.0.0.1:{port}", "X-Forwarded-Prefix": f"/addon/{name}"}
+        body = None
+        if method == "POST":
+            if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+                return self._send(415, b"send JSON", "text/plain")
+            try:
+                n = int(self.headers.get("Content-Length") or "")
+                if not 0 < n <= PROXY_BODY:
+                    raise ValueError
+                body = self.rfile.read(n)
+            except (ValueError, OSError):
+                return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+            up.update({"Origin": f"http://127.0.0.1:{port}", "Content-Type": "application/json"})
+        try:
+            conn = HTTPConnection("127.0.0.1", port, timeout=20)
+            conn.request(method, (rest or "/") + (("?" + query) if query else ""), body=body, headers=up)
+            r = conn.getresponse()
+            data = r.read(PROXY_MAX_REPLY + 1)
+            ctype, rev = r.getheader("Content-Type") or "application/octet-stream", r.getheader("X-Revision")
+            conn.close()
+        except (OSError, ValueError):
+            return self._send(502, b"That page is not answering.", "text/plain; charset=utf-8")
+        if len(data) > PROXY_MAX_REPLY:
+            return self._send(502, b"That page is too large.", "text/plain; charset=utf-8")
+        self._send(r.status, data, ctype, {"X-Revision": rev} if rev else None, csp=PROXY_CSP)
 
     def _same_origin(self) -> bool:
         origin = self.headers.get("Origin")
@@ -66,7 +124,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._host_ok():  # DNS rebinding guard
             return self._send(421, b"misdirected request", "text/plain")
-        path = self.path.split("?", 1)[0]
+        path, _, query = self.path.partition("?")
+        px = PROXY.fullmatch(path)
+        if px:  # an add-on's page inside this app: same-site requests only (a frame of ours sends same-origin)
+            if self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
+                return self._send(403, b"forbidden", "text/plain")
+            return self._proxy("GET", px.group(1), px.group(2) or "/", query)
         if path.startswith("/api/") and not self._same_origin():  # a foreign page must not trigger pulls
             return self._send(403, b"forbidden", "text/plain")
         if path == "/ready" and self.nonce:  # challenge-response for start/stop; the nonce itself is never sent
@@ -111,11 +174,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
-        if path != "/api/act":
+        px = PROXY.fullmatch(path)
+        if path != "/api/act" and not (px and px.group(2) == "/api/act"):
             return self._refuse()
         why = self._fence()
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if px:
+            return self._proxy("POST", px.group(1), px.group(2), "")
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return self._send(415, b"send JSON", "text/plain")
         try:
