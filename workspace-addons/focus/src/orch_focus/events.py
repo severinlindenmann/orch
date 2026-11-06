@@ -101,7 +101,7 @@ def make(
 
 
 def _plain(p: Path) -> None:
-    if p.is_symlink() or not p.is_dir():
+    if runfiles.is_link(p) or not p.is_dir():
         raise OSError(f"{p} is not a plain folder; Focus does not use it.")
 
 
@@ -110,8 +110,8 @@ def runs_dir(root: Path, create: bool = True) -> Path:
     d = Path(root)
     for part in (".orch", "addons", "focus", "runs"):
         d = d / part
-        if create and not d.is_symlink():
-            runfiles.mkdir_private(d)
+        if create and not runfiles.is_link(d) and not runfiles.mkdir_private(d) and part == "runs":
+            runfiles.check_listable(d)
         _plain(d)
     return d
 

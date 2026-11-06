@@ -15,20 +15,39 @@ NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 WINDOWS = os.name == "nt"
 
 
+def reparse(p: Path) -> bool:
+    """True when p is a Windows reparse point (junction, mount point, symlink); False elsewhere or when missing."""
+    try:
+        return bool(getattr(os.lstat(p), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    except OSError:
+        return False
+
+
+def is_link(p: Path) -> bool:
+    """A symlink or, on Windows, a junction or any other reparse point."""
+    return p.is_symlink() or reparse(p)
+
+
+def check_listable(p: Path) -> None:
+    """Windows: a folder made by an elevated orch can not even be listed by the same user without elevation."""
+    if WINDOWS:
+        try:
+            os.scandir(p).close()
+        except PermissionError as e:
+            raise _denied(p, e) from e
+
+
 def run_dir(root: Path, name: str) -> Path:
-    """.orch/run/<name>/ (0700). Refused when .orch, .orch/run or the folder itself is a symlink."""
+    """.orch/run/<name>/ (0700). Refused when .orch, .orch/run or the folder itself is a link."""
     orch, run = root / ".orch", root / ".orch" / "run"
     d = run / name
     for p in (orch, run, d):
-        if p.is_symlink():
+        if is_link(p):
             raise RuntimeError(f"{p} is a symbolic link; orch does not use it. Remove it and try again.")
-        if p is not orch and not mkdir_private(p) and WINDOWS and p is d:
-            try:
-                os.scandir(
-                    p
-                ).close()  # an admin-made folder: the same user without elevation can not even list it
-            except PermissionError as e:
-                raise _denied(p, e) from e
+        if p is not orch and not mkdir_private(p) and p is d:
+            check_listable(p)
+        if is_link(p):
+            raise RuntimeError(f"{p} is a symbolic link; orch does not use it. Remove it and try again.")
         if not p.is_dir():
             raise RuntimeError(f"{p} is not a folder.")
     return d
@@ -77,6 +96,21 @@ def user_sid() -> str | None:
         k.CloseHandle(tok)
 
 
+def system_icacls() -> str:
+    """icacls.exe in the Windows system folder (from the API, never from an environment variable)."""
+    d = r"C:\Windows\System32"
+    if WINDOWS:
+        import ctypes
+
+        try:
+            buf = ctypes.create_unicode_buffer(260)
+            if ctypes.WinDLL("kernel32").GetSystemDirectoryW(buf, 260):
+                d = buf.value
+        except (AttributeError, OSError):
+            pass
+    return str(Path(d) / "icacls.exe")
+
+
 def grant_user(d: Path) -> None:
     """Windows: mkdir(mode=0o700) gives only OWNER RIGHTS, SYSTEM and Administrators. A folder made by an elevated
     process is owned by Administrators, so the same user without elevation is locked out. Also grant the current
@@ -84,10 +118,19 @@ def grant_user(d: Path) -> None:
     sid = user_sid()
     if not sid:
         return
-    icacls = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "icacls.exe"
+    try:  # right before the grant: only a plain folder, never a link someone swapped in after mkdir
+        st = os.lstat(d)
+    except OSError:
+        return
+    if not stat.S_ISDIR(st.st_mode) or is_link(d):
+        raise RuntimeError(f"{d} is not a plain folder; orch does not use it. Remove it and try again.")
     try:
+        # /L: act on a link itself, never on its target
         subprocess.run(
-            [str(icacls), str(d), "/grant", f"*{sid}:(OI)(CI)F"], capture_output=True, timeout=20, check=False
+            [system_icacls(), str(d), "/grant", f"*{sid}:(OI)(CI)F", "/L"],
+            capture_output=True,
+            timeout=20,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         pass
