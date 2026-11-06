@@ -1298,3 +1298,72 @@ def test_permanent_allow_crash_after_create_leaves_one_live_ticket(proj, run, re
     live = [t for t in _live(run) if t["title"].endswith(": B")]
     assert len(live) == 1 and live[0]["id"] == tid
     assert len(json.loads(run("ticket", "show", tid, "--json")[1])["history"]) >= 1
+
+
+def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports", "description": "Numbers"}]
+    connect(run, rel)
+    rel.inbox.append(msg("m_text000000000002", "text", {"text": "March numbers <b>ready</b>"}))
+    rel.inbox.append(
+        msg(
+            "m_file000000000002",
+            "file",
+            {"blob_id": "b_aaaaaaaaaaaaaaaa", "name": "march.csv", "size": 2048, "sha256": "0" * 64},
+            created_at="2026-11-04T11:00:00Z",
+        )
+    )
+    run("relay", "inbox")
+    run("relay", "send", "reports", "Thanks, got it")
+    code, out, _ = run("relay", "view", "--json")
+    assert code == 0
+    v = json.loads(out)
+    import jsonschema
+    from conftest import CONTRACTS
+
+    schema = json.loads((CONTRACTS / "addon-view.schema.json").read_text(encoding="utf-8"))
+    jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(v)
+    people, recent = v["blocks"]
+    assert v["notice"] == "Connected." and people["title"] == "Workspaces you can talk to · 1"
+    assert (
+        people["items"][0]["title"] == "Reports"
+        and people["items"][0]["chips"][0]["label"] == "Messages and files"
+    )
+    details = {d["label"]: d["value"] for d in people["items"][0]["detail"]}
+    assert details["You may give them tasks"] == "Not yet"
+    items = recent["items"]
+    assert {i["title"] for i in items} == {"Reports → you", "you → Reports"}
+    assert any("Thanks, got it" in i["subtitle"] for i in items)  # sent text
+    assert any("March numbers bready/b" in i["subtitle"] for i in items)  # received text, markup stripped
+    assert any(i.get("chips") == [{"label": "march.csv · 2.0 KB"}] for i in items)  # file chip
+
+
+def test_view_not_connected_says_so(proj, run):
+    from conftest import turn_on
+
+    turn_on(proj, "relay")
+    code, out, _ = run("relay", "view", "--json")
+    v = json.loads(out)
+    assert (
+        code == 0
+        and "not connected" in v["notice"]
+        and v["blocks"][0]["items"][0]["title"] == "Not connected"
+    )
+
+
+def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):
+    connect(run, rel)
+    run("relay", "send", "ws_reports001", "first")
+    log = proj / ".orch/run/relay/sent.jsonl"
+    import sys
+
+    assert log.is_file() and (sys.platform == "win32" or (log.stat().st_mode & 0o777) == 0o600)
+    assert "first" in log.read_text() and not (proj / ".orch/relay-sent.jsonl").exists()
+    # a link at any level: nothing is written through it, the send still works
+    import shutil
+
+    shutil.rmtree(proj / ".orch/run/relay")
+    elsewhere = proj / "elsewhere"
+    elsewhere.mkdir()
+    (proj / ".orch/run/relay").symlink_to(elsewhere)
+    assert run("relay", "send", "ws_reports001", "second")[0] == 0
+    assert list(elsewhere.iterdir()) == []
