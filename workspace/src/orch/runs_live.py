@@ -400,7 +400,11 @@ def cleanup(root: Path) -> list[str]:
         except (KeyError, ValueError):
             continue
         if (idle > limit or _done_for(root, tid, limit)) and _claim_close(root, rec):
-            _close(root, rec, interrupt=False)
+            try:
+                _close(root, rec, interrupt=False)
+            except Exception:  # the close failed: input may go in again; the next cleanup tries again
+                _unclaim_close(root, rec)
+                continue
             closed.append(tid)
     if closed:
         start_waiting(root)
@@ -421,6 +425,13 @@ def _claim_close(root: Path, rec: dict) -> bool:
         now["closing"] = tickets.now()
         runs._write(root, now)
     return True
+
+
+def _unclaim_close(root: Path, rec: dict) -> None:
+    with runs.locked(root, rec["ticket"]):
+        now = runs.read(root, rec["ticket"])
+        if now and now["run"] == rec["run"] and now.pop("closing", None):
+            runs._write(root, now)
 
 
 def _done_for(root: Path, tid: str, limit: float) -> bool:

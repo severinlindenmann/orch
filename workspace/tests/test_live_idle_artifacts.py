@@ -100,6 +100,18 @@ def test_a_closing_session_gets_no_more_input(proj, run, closed, monkeypatch):
     assert [i["text"] for i in runs.undelivered(proj, tid)] == ["late"]  # kept for the next start
 
 
+def test_a_failed_close_lets_input_in_again(proj, run, monkeypatch):
+    tid = _live(proj, run, "idle", 61)
+    monkeypatch.setattr(runs_live, "start_waiting", lambda root: None)
+
+    def boom(root, rec, interrupt):
+        raise RuntimeError("busy")
+
+    monkeypatch.setattr(runs_live, "_close", boom)
+    assert runs_live.cleanup(proj) == []
+    assert not runs.read(proj, tid).get("closing")
+
+
 # ---------------------------------------------------------------- artifacts
 
 
