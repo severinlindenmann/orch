@@ -1072,7 +1072,8 @@ def u1_upgrade_from_old_orch(e):
     # 1) the old install.sh does exactly this: uv tool install --reinstall git+<repo>@<ref>#subdirectory=workspace
     rc, out, err = w.sh(["uv", "tool", "install", "--reinstall", f"git+file://{e.repo}@{OLD_REF}#subdirectory=workspace"], timeout=900)
     check(rc == 0, f"old orch install: {(err or out)[-300:]}")
-    w.o("init", "--yes", by=None)
+    rc, out, err = w.sh(["orch", "init"])  # the old orch has no --yes
+    check(rc == 0, f"old orch init: {(err or out)[-300:]}")
     for name in ("dashboard", "scheduler"):
         rc, out, err = w.sh(["orch", "addon", "add", name, "--yes"], timeout=900)
         check(rc == 0, f"old orch: addon add {name}: {(err or out)[-300:]}")
