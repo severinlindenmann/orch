@@ -205,10 +205,25 @@ struct AttachmentTile: View {
                 row(symbol: "photo", title: attachment.label ?? "Image", sub: SafeLink.host(attachment.url) ?? "")
             }
         case "link":
-            row(symbol: "link", title: attachment.title ?? SafeLink.host(attachment.url) ?? "Link", sub: SafeLink.host(attachment.url) ?? "")
+            linkCard
         default:
             row(symbol: "doc", title: attachment.label ?? "File", sub: attachment.size.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "")
         }
+    }
+    /// A link card: the site or link-type tile (GH, Fg …), title, what it is, and the add-on's status.
+    private var linkCard: some View {
+        let a = attachment, host = SafeLink.host(a.url) ?? ""
+        let inner = HStack(spacing: 10) {
+            LinkTile(icon: a.icon, mono: a.mono)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(a.title ?? host).themeFont(14, .semibold).lineLimit(1)
+                Text(a.linkType.map { $0 == "Link" ? "Link · \(host)" : $0 } ?? host).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            if let s = a.status, !s.isEmpty { LinkStatus(text: s) }
+        }.foregroundStyle(Theme.text)
+        return Group { if let u = SafeLink.url(a.url) { Link(destination: u) { inner } } else { inner } }
+            .accessibilityIdentifier("link-card")
     }
     private func row(symbol: String, title: String, sub: String) -> some View {
         let inner = HStack(spacing: 10) {
@@ -291,5 +306,42 @@ struct ChatItemView: View {
         case .question(let q): QuestionBubble(question: q)
         case .attachment(let a): AttachmentBubble(attachment: a, at: item.at)
         }
+    }
+}
+
+
+/// The tile of a link: a known site's colour and letters, else the link symbol (same keys as the dashboard).
+struct LinkTile: View {
+    let icon: String?
+    let mono: String?
+    static let colors: [String: UInt32] = [
+        "github": 0x2b3137, "gitlab": 0x2b3137, "confluence": 0x1868db, "notion": 0xe8eaed, "figma": 0xa259ff,
+        "youtube": 0xe5302a, "gdocs": 0x2f7cf6, "gdrive": 0x2f7cf6, "jira": 0x2684ff, "linear": 0x5e6ad2, "gslides": 0xf4b400,
+        "slack": 0x4a154b, "miro": 0xffd02f, "gsheets": 0x1e8e3e, "loom": 0x625df5, "teams": 0x5b5fc7, "sharepoint": 0x038387,
+        "trello": 0x0c66e4, "dropbox": 0x0061fe,
+    ]
+    static let darkText: Set<String> = ["notion", "miro", "gslides"]
+    var body: some View {
+        let key = icon ?? "link", letters = String((mono ?? "").prefix(3))
+        ZStack {
+            if key == "link" || letters.isEmpty {
+                Image(systemName: "link").foregroundStyle(Theme.brand)
+            } else {
+                Text(letters).themeFont(12, .bold).foregroundStyle(Self.darkText.contains(key) ? Color(hex: 0x111111) : .white)
+            }
+        }
+        .frame(width: 34, height: 34)
+        .background(Self.colors[key].map { Color(hex: $0) } ?? Theme.surface3, in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+/// An add-on's status of a link (open, merged, unlisted …) as a small capsule.
+struct LinkStatus: View {
+    let text: String
+    var body: some View {
+        let tone: Color = ["open", "live", "public", "published"].contains(text) ? Theme.brand
+            : text == "merged" ? Theme.purple : ["review", "draft"].contains(text) ? Theme.warn : Theme.muted
+        Text(text).themeFont(11, .semibold).foregroundStyle(tone).padding(.horizontal, 8).padding(.vertical, 2)
+            .overlay(Capsule().stroke(tone.opacity(0.6)))
     }
 }

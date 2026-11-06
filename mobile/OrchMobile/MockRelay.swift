@@ -54,7 +54,7 @@ actor MockRelay: RelayAPI {
         checklist: ["Read the Q3 sheet", "Check the totals", "Prepare the summary", "Draw the charts", "Review the board deck"].map { .init(text: $0, done: true) },
         running: false,
         attachments: [.init(kind: "image", title: "q3-chart.png", blobId: "b_chart", name: "q3-chart.png", size: 48_000, at: "2026-11-05T11:19:00Z"),
-                      .init(kind: "link", title: "Board deck draft", url: "https://docs.pilatus.ch/board-q3", at: "2026-11-05T11:19:30Z"),
+                      .init(kind: "link", title: "Board deck draft", url: "https://docs.pilatus.ch/board-q3", at: "2026-11-05T11:19:30Z", linkType: "Link", icon: "link"),
                       .init(kind: "file", title: "test-report.pdf", name: "test-report.pdf", size: 84_000, at: "2026-11-05T11:19:40Z")],
         historyTail: [.init(at: "2026-11-05T10:34:00Z", by: "Claude", role: "agent", text: "Pulled the numbers from the Q3 sheet."),
                       .init(at: "2026-11-05T10:37:00Z", by: "Claude", role: "agent", text: "Draft is ready, charts next.")])
@@ -63,7 +63,8 @@ actor MockRelay: RelayAPI {
         checklist: [.init(text: "Read the invoice table", done: true), .init(text: "Choose the columns", done: true), .init(text: "Write the export", done: false),
                     .init(text: "Add a test", done: false)],
         running: true,
-        attachments: [.init(kind: "link", title: "Fix invoice export #142", url: "https://github.com/pilatus/reports/pull/142", at: "2026-11-05T15:10:00Z")],
+        attachments: [.init(kind: "link", title: "Fix invoice export #142", url: "https://github.com/pilatus/reports/pull/142", at: "2026-11-05T15:10:00Z",
+                            linkType: "GitHub · Pull request", icon: "github", mono: "GH", status: "review")],
         historyTail: [.init(at: "2026-11-05T15:05:00Z", by: "You", role: "person", text: "Please add an export for the invoices."),
                       .init(at: "2026-11-05T15:08:00Z", by: "Claude", role: "agent", text: "Reading the invoice table first.")])
 

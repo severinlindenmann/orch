@@ -72,4 +72,18 @@ final class ShotsUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["question-m_q1date0ts0000001"].waitForExistence(timeout: 15))
         try shot(app, "14-push-opened")
     }
+
+    /// Ticket links as link cards (tile, type, add-on status): shots for the links build, when its folder exists.
+    func testLinkCardShots() throws {
+        let home = ProcessInfo.processInfo.environment["SIMULATOR_HOST_HOME"] ?? NSHomeDirectory()
+        let out = URL(fileURLWithPath: home).appendingPathComponent("orch-dev/state/v2-plan-2026-11-05/build/shots/links-build")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: out.path), "no shots folder")
+        dir = out
+        var app = launch(["-openChat", "ws_reports001", "-openTicket", "t_9k2m4q"])
+        XCTAssertTrue(app.descendants(matching: .any)["attachment-link"].firstMatch.waitForExistence(timeout: 15))
+        try shot(app, "9-phone-link-card"); app.terminate()
+        app = launch(["-openChat", "ws_reports001", "-openTicket", "t_9k2m4q", "-openInfo", "YES"])
+        XCTAssertTrue(app.descendants(matching: .any)["info-tabs"].waitForExistence(timeout: 15))
+        app.buttons["Links 1"].tap(); try shot(app, "10-phone-info-links"); app.terminate()
+    }
 }
