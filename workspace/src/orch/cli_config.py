@@ -118,7 +118,7 @@ def test_agent(root: Path, name: str) -> dict:
         return result(False, f"{label} is not installed.")
     stdin = TEST_PROMPT if adapters.prompt_via_stdin(name, root) else None
     t0 = time.monotonic()
-    scratch = tempfile.mkdtemp(prefix="orch-agent-test-")  # an empty folder: the agent cannot touch the workspace
+    scratch = tempfile.mkdtemp(prefix="orch-agent-test-")  # empty: agent can't touch the workspace
     try:
         return _run_test(argv, stdin, scratch, label, t0, result)
     finally:
