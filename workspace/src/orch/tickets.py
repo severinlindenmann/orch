@@ -829,7 +829,11 @@ def link_remove(root: Path, tid: str, ref: str, by: str) -> tuple[dict, dict]:
         if ref.strip().isdigit():
             hit = next((ln for n, ln in nums if n == int(ref)), None)
         else:
-            hit = next((ln for _, ln in nums if ln["url"] == ref.strip()), None)
+            try:
+                canon = links.check_url(ref)
+            except Refused:
+                canon = ref.strip()
+            hit = next((ln for _, ln in nums if ln["url"] in (ref.strip(), canon)), None)
         if hit is None:
             raise Refused(
                 f"{t.get('key') or t['id']} has no link {ref}. See: orch link list {t.get('key') or t['id']}"

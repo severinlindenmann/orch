@@ -15,7 +15,7 @@ import json
 import re
 from functools import cache
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from orch.errors import Refused
 from orch.text import clean_untrusted
@@ -30,20 +30,43 @@ def known_sites() -> dict:
     return json.loads((Path(__file__).parent / "known_sites.json").read_text(encoding="utf-8"))
 
 
+def _ascii_host(host: str) -> str:
+    """A host as ASCII: punycode for a non-ASCII name, so a look-alike (a Cyrillic i) shows as xn--…."""
+    if host.isascii():
+        return host
+    try:
+        import idna  # UTS-46 when the package is there
+
+        return idna.encode(host, uts46=True).decode("ascii")
+    except ImportError:
+        return host.encode("idna").decode("ascii")
+
+
 def check_url(url) -> str:
-    """An http(s) address with a host, one line, at most 2000 characters. Returns it stripped."""
+    """An http(s) address with a host, one line, at most 2000 characters. Returns it in one canonical form
+    (scheme://host[:port]/path?query#fragment, host lowercase ASCII) so every reader (core, dashboard, phone,
+    browser) sees the same host. Refused: backslashes, whitespace, control and invisible characters, a user
+    name or password before the host (`user@`), and hosts that do not encode."""
     u = url.strip() if isinstance(url, str) else ""
-    bad = not u or len(u) > MAX_URL or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in u)
+    bad = not u or len(u) > MAX_URL or "\\" in u
+    bad = bad or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in u)
     bad = bad or clean_untrusted(u, MAX_URL) != u  # C1, bidi and invisible characters
+    out = ""
     if not bad:
         try:
             p = urlsplit(u)
-            bad = p.scheme.lower() not in ("http", "https") or not p.hostname
-        except ValueError:
-            bad = True
-    if bad:
+            host = p.hostname
+            if p.scheme.lower() in ("http", "https") and host and "@" not in p.netloc:
+                host = _ascii_host(host)
+                netloc = f"[{host}]" if ":" in host else host
+                if p.port is not None:
+                    netloc += f":{p.port}"
+                out = urlunsplit((p.scheme.lower(), netloc, p.path, p.query, p.fragment))
+        except (ValueError, UnicodeError):
+            out = ""
+    if not out or len(out) > MAX_URL:
         raise Refused("A link must be a web address that starts with https:// or http://.")
-    return u
+    return out
 
 
 def one_line(text, limit: int = 200) -> str:
