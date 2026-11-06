@@ -275,7 +275,7 @@
     const send = button('Add', 'outline sm', null);
     send.type = 'submit';
     form.append(input, send);
-    input.addEventListener('focus', () => locks.add(key));
+    input.addEventListener('focusin', () => locks.add(key));
     input.addEventListener('blur', () => { if (!input.value.trim()) { locks.delete(key); setTimeout(render, 0); } });
     form.addEventListener('submit', async event => {
       event.preventDefault();
