@@ -13,6 +13,7 @@ import stat
 from datetime import UTC, datetime
 from pathlib import Path
 
+RUN_ID = re.compile(r"r_[a-z0-9_]{6,32}")  # the core run id pattern
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 CAP_BYTES = 5 * 1024 * 1024
 KINDS = (
@@ -99,7 +100,12 @@ def make(
 
 class EventLog:
     def __init__(self, root: Path, run: str):
-        self.path = Path(root) / ".orch" / "addons" / "focus" / "runs" / f"{run}.events.jsonl"
+        if not isinstance(run, str) or not RUN_ID.fullmatch(run):
+            raise ValueError("That is not a run id.")
+        runs = Path(root) / ".orch" / "addons" / "focus" / "runs"
+        self.path = runs / f"{run}.events.jsonl"
+        if self.path.parent != runs or ".." in self.path.relative_to(runs).parts:
+            raise ValueError("That is not a run id.")
 
     def append(self, *events: dict) -> None:
         if not events:

@@ -12,7 +12,7 @@ FIX = Path(__file__).parent / "fixtures"
 SCHEMA = json.loads(
     (Path(__file__).resolve().parents[3] / "contracts/addons/focus/run-event.schema.json").read_text()
 )
-RUN, TID = "r_8k2m", "t_inv7c2"
+RUN, TID = "r_8k2m9z", "t_inv7c2"
 
 
 def valid(e):

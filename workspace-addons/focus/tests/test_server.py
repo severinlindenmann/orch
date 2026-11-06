@@ -159,3 +159,23 @@ def test_stop_started_stops_runs_focus_started(server, fake_orch):
     req(server, "POST", "/api/act", {"op": "run.start", "args": {"ticket": TID}})
     stop_started(server)
     assert any(c[:3] == ["run", "stop", TID] for c in calls(fake_orch))
+
+
+@pytest.mark.parametrize("bad", ["../../x", "r_../../x", "r_ab", "R_ABCDEF", "r_abcdef/../../y", "x" * 5, 7])
+def test_bad_run_id_writes_nothing_outside_runs(server, ws, fake_orch, bad):
+    (fake_orch.parent / "status.json").write_text(json.dumps(
+        {"running": True, "claim": {"run": bad, "agent": "claude", "mode": "live"}}))  # fmt: skip
+    before = {p for p in ws.parent.rglob("*")}
+    v = json.loads(req(server, "GET", f"/api/t/{TID}")[1])
+    assert v["run"]["run"] is None
+    new = {p for p in ws.parent.rglob("*")} - before
+    assert not [p for p in new if "events.jsonl" in p.name]
+    assert not (ws.parent / "x").exists() and not (ws / "x").exists()
+
+
+@pytest.mark.parametrize("bad", ["../../x", "r_../x", "", "r_a/b" + "c" * 8])
+def test_event_log_refuses_a_bad_run_id(tmp_path, bad):
+    from orch_focus.events import EventLog
+
+    with pytest.raises(ValueError):
+        EventLog(tmp_path, bad)

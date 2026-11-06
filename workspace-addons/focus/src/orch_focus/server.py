@@ -17,7 +17,7 @@ from pathlib import Path
 
 from . import actions
 from .board import Board, TicketWatcher
-from .events import EventLog
+from .events import RUN_ID, EventLog
 
 DEFAULT_PORT = 8430
 MAX_BODY = 16384
@@ -85,7 +85,9 @@ class Tracker:
             return None
         status = self.run_status(tid)
         claim = status.get("claim") or {}
-        run = claim.get("run") if isinstance(claim.get("run"), str) else None
+        run = (
+            claim.get("run") if isinstance(claim.get("run"), str) and RUN_ID.fullmatch(claim["run"]) else None
+        )
         with self.lock:
             tr = self.tickets.get(tid)
             if run and (tr is None or tr["run"] != run):
@@ -109,6 +111,8 @@ class Tracker:
                 tr["board"].resolve_asks(ticket)
                 events = tr["events"]
             board = tr["board"].snapshot() if tr else Board().snapshot()
+        if run is None and claim.get("run") is not None:
+            claim = {**claim, "run": None}  # an id that is not a run id is unknown
         return self._shape(ticket, status, claim, board, events)
 
     @staticmethod
