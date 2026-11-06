@@ -496,6 +496,8 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]
+    if ticket.get("note"):  # what the person asked for, in their words (not only in `orch ticket show`)
+        out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")
     if ticket.get("summary"):
         out.append(f"Where things stand: {_clip(ticket['summary'], 1500)}")
     todo = [c for c in ticket.get("checklist") or [] if not c.get("done")]
