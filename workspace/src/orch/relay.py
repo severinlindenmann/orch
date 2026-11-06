@@ -424,6 +424,43 @@ def _update_title(root: Path, ticket: str) -> str | None:
     return line[:120].strip() or None
 
 
+def _is_general(root: Path, ticket: str | None) -> bool:
+    if not ticket:
+        return False
+    try:
+        return tickets.load(root, ticket).get("general") is True
+    except (Refused, ValueError, OSError):
+        return False
+
+
+_DE_WORDS = re.compile(
+    r"\b(der|die|das|und|nicht|ist|ich|wir|ein|eine|f\u00fcr|mit|auf|den|dem|von|zu|wurde|haben|bitte|sind|auch|noch)\b",
+    re.I,
+)
+_EN_WORDS = re.compile(r"\b(the|and|is|to|of|for|with|that|this|you|are|was|have|it|in|on|please)\b", re.I)
+
+
+def guess_lang(text: str) -> str:
+    """de or en from the words of a text (simple on purpose)."""
+    de = len(_DE_WORDS.findall(text)) + len(re.findall("[\u00e4\u00f6\u00fc\u00df]", text, re.I))
+    return "de" if de > len(_EN_WORDS.findall(text)) else "en"
+
+
+def speak_hint(root: Path, ticket: str | None, text: str, summary: str | None = None) -> dict:
+    """body.speak = {lang, summary?}; lang: the ticket's last voice message (de-CH is de), else guessed"""
+    lang = None
+    if ticket:
+        last = str(_v3_state(root).get("lang", {}).get(ticket, ""))[:2]
+        lang = last if last in ("de", "en") else None
+    hint = {"lang": lang or guess_lang(f"{text} {summary or ''}")}
+    if summary is not None:
+        summary = " ".join(clean_untrusted(summary, 600).split())
+        if not summary:
+            raise Refused("The spoken summary is empty.")
+        hint["summary"] = summary[:600]
+    return hint
+
+
 def send_text(
     root: Path,
     target: str,
@@ -432,21 +469,32 @@ def send_text(
     update: str | None = None,
     reply_to: str | None = None,
     view: bool | None = None,
+    general: bool = False,
+    speak: dict | None = None,
 ) -> dict:
     """view: add the ticket snapshot for the phone (body.ticket_view); default for result, failure,
     stopped and question updates to a phone. A snapshot the relay refuses never blocks the text:
-    it goes again without one."""
+    it goes again without one. general (or a General ticket): the text goes to the General conversation
+    (body.general, no ticket, only the ack and working updates). speak: body.speak."""
     from orch import phone_view
 
     body: dict = {"text": text}
     to = resolve(root, target)
+    general = general or _is_general(root, ticket)
+    if general:
+        ticket = None
+        body["general"] = True
+    if speak:
+        body["speak"] = speak
     if update:
         if update not in UPDATE_KINDS:
             raise Refused(f"--update is one of: {', '.join(UPDATE_KINDS)}.")
-        if not ticket:
+        if general and update not in ("ack", "working"):
+            raise Refused("In General only the updates ack and working exist.")
+        if not ticket and not general:
             raise Refused("An update belongs to a ticket. Add --ticket <id>.")
         body["update"] = {"kind": update}
-        if title := _update_title(root, ticket):
+        if ticket and (title := _update_title(root, ticket)):
             body["update"]["title"] = title
     to_phone = to == "phones" or to.startswith("ph_")
     if view is None:
@@ -503,13 +551,46 @@ def send_start(root: Path, target: str, key: str, text: str, ticket: str | None)
     return _message(root, to, "start", body, ticket)
 
 
-def send_question(root: Path, ticket: dict, q: dict) -> dict:
+PERMISSION_OPTIONS = ("Once", "Always", "No")
+
+
+def question_extras(q: dict, previews: list[str] | None, scope: str | None) -> dict:
+    """body.previews ({option: attachment id}) and body.scope for a question to the phones. Refused
+    when an option is not one of the question's, an id is not an artifact id, or --scope is not a
+    permission question (options Once, Always, No)."""
+    out: dict = {}
+    if previews:
+        pv = {}
+        for item in previews:
+            opt, eq, aid = item.rpartition("=")
+            opt = opt.strip()
+            if not eq or opt not in q["options"]:
+                opts = ", ".join(q["options"])
+                raise Refused(f'--preview is "<option>=<attachment id>"; the options are: {opts}.')
+            if not re.fullmatch(r"a_[0-9a-f]{12}", aid.strip()):
+                raise Refused("An attachment id looks like a_ and 12 letters or digits.")
+            pv[opt] = aid.strip()
+        out["previews"] = pv
+    if scope is not None:
+        scope = " ".join(clean_untrusted(scope, 120).split())
+        if not scope:
+            raise Refused("--scope is empty.")
+        if not all(o in q["options"] for o in PERMISSION_OPTIONS):
+            raise Refused("--scope goes with a permission question: options Once, Always and No.")
+        out["scope"] = scope[:120]
+    return out
+
+
+def send_question(
+    root: Path, ticket: dict, q: dict, previews: list[str] | None = None, scope: str | None = None
+) -> dict:
     body = {
         "question_id": q["id"],
         "title": ticket["title"],
         "text": q["text"],
         "options": q["options"],
         "recommended": q["recommended"],
+        **question_extras(q, previews, scope),
     }
     msg = _message(root, "phones", "question", body, ticket["id"])
     asked = net.read_json(_asked_path(root), {})
@@ -731,55 +812,288 @@ def _phone_title(root: Path, text: str, frm: str) -> str:
     return line or f"Message from {name_of(root, frm)}"
 
 
+# State of the phone conversation: .orch/secrets/phone-v3.json
+#   acked   message ids of phone texts that got their ack (written before the ack is sent: never twice)
+#   working {message id: {ticket, to, general, kind: item|run, at}} acks waiting for "working"
+#   lang    {ticket id: language of the last voice message there}
+V3_STATE_KEEP = 300
+WORKING_DAYS = 7
+
+
+def _v3_path(root: Path) -> Path:
+    return net.secrets_dir(root) / "phone-v3.json"
+
+
+def _v3_state(root: Path) -> dict:
+    s = net.read_json(_v3_path(root), {})
+    s = s if isinstance(s, dict) else {}
+    for k, v in (("acked", []), ("working", {}), ("lang", {})):
+        if not isinstance(s.get(k), type(v)):
+            s[k] = v
+    return s
+
+
+def _v3_save(root: Path, s: dict) -> None:
+    s["acked"] = s["acked"][-V3_STATE_KEEP:]
+    net.write_json(_v3_path(root), s, True)
+
+
+def _num(v) -> float | None:
+    return float(v) if isinstance(v, int | float) and not isinstance(v, bool) else None
+
+
+def _fetch_blob(root: Path, blob_id, size) -> bytes | None:
+    if not re.fullmatch(r"b_[a-z0-9]{16}", str(blob_id)):
+        return None
+    cfg = _cfg(root)
+    try:
+        _, raw = net.call("GET", f"{cfg['url']}/v1/blobs/{blob_id}", net.auth_headers(cfg), timeout=300)
+    except Refused:
+        return None
+    if not isinstance(raw, bytes) or (isinstance(size, int) and len(raw) != size):
+        return None
+    return raw
+
+
+def _save_phone_file(root: Path, tid: str, att: dict) -> str:
+    """Download one attachment of a phone text into .orch/tickets/<tid>/files/ and return the line the agent
+    sees. Name, kind and mime come from the phone and are not trusted: only a cleaned base name is used."""
+    kind = att.get("kind")
+    label = {"image": "Photo", "voice": "Voice recording"}.get(kind, "File")
+    shown = " ".join(clean_untrusted(str(att.get("name", "")), 255).split()) or "file"
+    raw = _fetch_blob(root, att.get("blob_id"), att.get("size"))
+    if raw is None:
+        return f"{label} {shown}: could not be downloaded."
+    try:
+        name = safe_name(att.get("name", ""))
+    except Refused:
+        name = "file"
+    dest = _save_into(tickets.files_dir(root, tid), name, raw)
+    return f"{label}: {dest.relative_to(root).as_posix()}"
+
+
+def _pin_line(pin: dict) -> str:
+    a = pin.get("anchor") if isinstance(pin.get("anchor"), dict) else {}
+    kind = a.get("type")
+    if kind == "html":
+        where = clean_untrusted(str(a.get("quote") or a.get("selector") or "the page"), 200)
+        where = f'"{" ".join(where.split())}"'
+    elif kind == "pdf":
+        where = f"page {a.get('page')}"
+    else:
+        x, y = _num(a.get("x")), _num(a.get("y"))
+        where = f"the picture at {round((x or 0) * 100)}% across, {round((y or 0) * 100)}% down"
+    said = clean_untrusted(str(pin.get("text") or pin.get("transcript") or ""), 2000)
+    n = pin.get("n") if isinstance(pin.get("n"), int) else "-"
+    return f"  {n}. {where}: {said}".rstrip(": ")
+
+
+def _describe(root: Path, tid: str, who: str, body: dict) -> str:
+    """What a phone text says in plain words for the ticket's history and the agent: the text, the voice
+    transcript (and its language), saved photos and files (paths), the location with a map link and the
+    feedback on a proof. Files are downloaded on the way."""
+    from orch import phone_view
+
+    lines = []
+    text = clean_untrusted(str(body.get("text", "")), 2000)
+    if text:
+        lines.append(text)
+    voice = body.get("voice")
+    if isinstance(voice, dict):
+        said = clean_untrusted(str(voice.get("transcript", "")), 2000).strip()
+        lang = clean_untrusted(str(voice.get("lang", "")), 10)
+        lines.append(
+            f'Voice message ({lang}): "{said}"' if said else "Voice message (nothing could be understood)"
+        )
+        if re.fullmatch(r"[a-z]{2}(-[A-Z]{2})?", lang):
+            st = _v3_state(root)
+            st["lang"][tid] = lang
+            _v3_save(root, st)
+    atts = body.get("attachments")
+    for att in (atts if isinstance(atts, list) else [])[:10]:
+        if isinstance(att, dict):
+            try:
+                lines.append(_save_phone_file(root, tid, att))
+            except (Refused, OSError):
+                lines.append("A file could not be saved.")
+    loc = body.get("location")
+    lat, lon = (_num(loc.get("lat")), _num(loc.get("lon"))) if isinstance(loc, dict) else (None, None)
+    if lat is not None and lon is not None:
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
+            label = " ".join(clean_untrusted(str(loc.get("label", "")), 200).split())
+            q = urllib.parse.urlencode({"ll": f"{lat},{lon}", **({"q": label} if label else {})})
+            lines.append(
+                f"Location: {lat:.5f}, {lon:.5f}"
+                + (f" ({label})" if label else "")
+                + f" - https://maps.apple.com/?{q}"
+            )
+    fb = body.get("feedback")
+    if isinstance(fb, dict):
+        try:
+            ticket = tickets.load(root, tid)
+        except (Refused, OSError, ValueError):
+            ticket = {}
+        title = phone_view.artifact_title(root, ticket, str(fb.get("artifact_id", ""))) or "a file"
+        rev = re.sub(r"[^A-Za-z0-9._:-]", "", str(fb.get("artifact_rev", "")))[:12]
+        head = f"Feedback on {title}" + (f" ({rev})" if rev else "")
+        if fb.get("verdict") == "approve":
+            lines.append(f"{head}: \U0001f44d Looks good")
+        else:
+            lines.append(f"{head}: changes wanted")
+        pins = fb.get("pins")
+        lines += [_pin_line(p) for p in (pins if isinstance(pins, list) else [])[:50] if isinstance(p, dict)]
+    first = f"From {who}: {lines[0]}" if lines else f"From {who}: (empty)"
+    return "\n".join([first, *lines[1:]])
+
+
+def _ack_once(root: Path, mid: str, to: str, tid: str, general: bool, text: str) -> None:
+    """The ack of a phone text, at most once (marked before it goes out: the outbox keeps it until the relay
+    takes it). Not reachable now: the work goes on, nobody is blocked."""
+    st = _v3_state(root)
+    if mid in st["acked"]:
+        return
+    st["acked"].append(mid)
+    _v3_save(root, st)
+    with contextlib.suppress(Refused):
+        if general:
+            send_text(root, to, text, None, "ack", mid, general=True)
+        else:
+            send_text(root, to, text, tid, "ack", mid)
+
+
+def _working_add(root: Path, mid: str, to: str, tid: str, general: bool, kind: str) -> None:
+    st = _v3_state(root)
+    if mid not in st["working"]:
+        st["working"][mid] = {"ticket": tid, "to": to, "general": general, "kind": kind, "at": time.time()}
+        _v3_save(root, st)
+
+
+def send_working(root: Path) -> list[str]:
+    """The "working" update for phone texts whose agent run has started: the text went into a run
+    (kind item: its queued input was delivered) or the run of a new ticket exists (kind run). Once each."""
+    st = _v3_state(root)
+    sent = []
+    for mid, w in list(st["working"].items()):
+        tid, ready = w.get("ticket"), False
+        if time.time() - float(w.get("at", 0)) > WORKING_DAYS * 86400 or not _ticket_exists(root, tid):
+            st["working"].pop(mid)
+            continue
+        if w.get("kind") == "run":
+            rec = runs.read(root, tid)
+            ready = bool(rec) and runs.state(rec) != "dead"
+        else:
+            item = next((i for i in runs._pending_read(root, tid) if i["id"] == "p_" + mid[2:]), None)
+            if item is None:
+                st["working"].pop(mid)
+                continue
+            ready = bool(item.get("delivered_at"))
+        if not ready:
+            continue
+        st["working"].pop(mid)
+        _v3_save(root, st)  # first: never twice
+        with contextlib.suppress(Refused):
+            if w.get("general"):
+                send_text(root, w["to"], "Working on it", None, "working", mid, general=True)
+            else:
+                send_text(root, w["to"], "Working on it", tid, "working", mid)
+            sent.append(mid)
+    _v3_save(root, st)
+    return sent
+
+
+def _continue(root: Path, tid: str, mid: str, who: str, by: str, body: dict, general: bool) -> None:
+    """A phone text into an existing ticket (or the General ticket): queue it for the running agent, then
+    record it. Same message id twice = once."""
+    if mid in _relay_ext(root, tid).get("messages", []):
+        return
+    text = _describe(root, tid, who, body)
+    if general:
+        text += f'\n(Phone message {mid}. To make a ticket of it: orch relay topic --from {mid} "<title>")'
+    runs.pending_add(root, tid, who, "message", text, "phone", "p_" + mid[2:])
+
+    def op(t):
+        r = t.setdefault("ext", {}).setdefault("relay", {})
+        if mid in r.get("messages", []):
+            return
+        r["messages"] = [*r.get("messages", []), mid][-50:]
+        tickets.add_history(t, by, text, "phone")
+        t["waiting_on"] = None
+        if general:
+            return
+        if t["status"] in ("done", "dropped"):
+            t["status"] = "open"
+            tickets.add_history(t, by, "Reopened by a text from the phone", "phone")
+        elif t["status"] == "waiting":
+            t["status"] = "active"
+
+    tickets.apply_op(root, tid, op)
+
+
 def _phone_text(root: Path, msg: dict) -> tuple[str, str]:
-    """Act on a text from a phone (under relay.lock). A text naming a local ticket continues it, any other
-    makes a new ticket. Idempotent by message id. Returns (note, ticket id)."""
+    """Act on a text from a phone (under relay.lock). General (body.general) goes to the hidden General
+    ticket, a text naming a local ticket continues it, any other makes a new ticket. Every phone text gets
+    an ack (reply_to = its id) and later a "working" update. Idempotent by message id.
+    Returns (note, ticket id)."""
     mid, frm = msg["id"], msg["from"]
+    body = msg.get("body") if isinstance(msg.get("body"), dict) else {}
     who = clean_untrusted(name_of(root, frm), 100) or frm
-    text = clean_untrusted(str(msg.get("body", {}).get("text", "")), 2000)
     by = _by_relay(frm)
+    general = body.get("general") is True and not msg.get("ticket")
     tid = _ticket_by_message(root, mid)
     if tid is not None and _relay_ext(root, tid).get("message") != mid:
-        return f"added to {tid}", tid  # a re-run of a text that continued a ticket: nothing more to do
+        # a re-run of a text that continued a ticket: only an ack that did not go out is still sent
+        _ack_once(root, mid, frm, tid, general, "Got it")
+        return f"added to {tid}", tid
+    if tid is None and general:
+        tid = tickets.ensure_general(root, by)
+        _continue(root, tid, mid, who, by, body, True)
+        _working_add(root, mid, frm, tid, True, "item")
+        _ack_once(root, mid, frm, tid, True, "Got it")
+        return "General conversation", tid
     if tid is None and msg.get("ticket") and _ticket_exists(root, msg["ticket"]):
         tid = msg["ticket"]
-        # queue it for the running agent first (same id twice = once), then record it on the ticket
-        runs.pending_add(root, tid, who, "message", text or "(empty)", "phone", "p_" + mid[2:])
-
-        def op(t):
-            r = t.setdefault("ext", {}).setdefault("relay", {})
-            if mid in r.get("messages", []):
-                return
-            r["messages"] = [*r.get("messages", []), mid][-50:]
-            tickets.add_history(t, by, f"From {who}: {text}", "phone")
-            t["waiting_on"] = None
-            if t["status"] in ("done", "dropped"):
-                t["status"] = "open"
-                tickets.add_history(t, by, "Reopened by a text from the phone", "phone")
-            elif t["status"] == "waiting":
-                t["status"] = "active"
-
-        tickets.apply_op(root, tid, op)
+        _continue(root, tid, mid, who, by, body, False)
+        _working_add(root, mid, frm, tid, False, "item")
+        _ack_once(root, mid, frm, tid, False, "Got it")
         return f"added to {tid}", tid
     if tid is None:
-        t = tickets.create(root, _phone_title(root, text, frm), by)
+        spoken = body.get("voice", {}).get("transcript", "") if isinstance(body.get("voice"), dict) else ""
+        t = tickets.create(root, _phone_title(root, str(body.get("text") or spoken or ""), frm), by)
         tid = t["id"]
         tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
-
-        def op2(t):
-            tickets.add_history(t, by, f"From {who}: {text}", "phone")
-
-        tickets.apply_op(root, tid, op2)
-    ack = _relay_ext(root, tid).get("acked")
-    if not ack:
-        # mark first: the outbox keeps the message until the relay takes it, so it is never sent twice
-        tickets.ext_set(root, tid, "relay", json.dumps({"acked": True}), by)
-        try:
-            title = tickets.load(root, tid)["title"]
-            send_text(root, frm, f"Got it: {title}"[:300], tid, "ack", mid)
-        except Refused:
-            pass  # the phone is not reachable right now: the ticket exists, nobody is blocked
+        text = _describe(root, tid, who, body)
+        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"))
+        _working_add(root, mid, frm, tid, False, "run")
+    _ack_once(root, mid, frm, tid, False, f"Got it: {tickets.load(root, tid)['title']}"[:300])
     return f"new ticket {tid}", tid
+
+
+def topic(root: Path, mid: str, title: str, by: str) -> dict:
+    """`orch relay topic --from <message id> "<title>"`: a phone text (usually in General) becomes a normal
+    ticket with that message as its first input. The ack names the new ticket and its key (reply_to = the
+    message), so the phone shows "<key> started"."""
+    msg = load_message(root, mid)
+    if msg.get("type") != "text" or not str(msg.get("from", "")).startswith("ph_"):
+        raise Refused(f"{mid} is not a text from a phone.")
+    for t in tickets.list_all(root):
+        if _relay_ext(root, t["id"]).get("message") == mid:
+            raise Refused(f"That message already started {t.get('key') or t['id']}.")
+    title = " ".join(clean_untrusted(title, 400).split())[:200].strip()
+    if not title:
+        raise Refused("A topic needs a title.")
+    frm = msg["from"]
+    body = msg.get("body") if isinstance(msg.get("body"), dict) else {}
+    who = clean_untrusted(name_of(root, frm), 100) or frm
+    t = tickets.create(root, title, by)
+    tid = t["id"]
+    tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
+    text = _describe(root, tid, who, body)
+    tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"))
+    st = _v3_state(root)
+    st["acked"].append(mid)  # this ack names the ticket; the General "Got it" is not sent again
+    _v3_save(root, st)
+    ack = send_text(root, frm, f"Got it: {title}"[:300], tid, "ack", mid)
+    return {"ticket": tid, "key": t.get("key"), "message": ack}
 
 
 def _task_of(msg: dict) -> str:
@@ -906,6 +1220,8 @@ def sync_phone_views(root: Path) -> None:
     with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
         phone_view.sync_open(root)
         phone_view.sync(root)
+    with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
+        send_working(root)
 
 
 def inbox(root: Path, wait: int = 0) -> list[dict]:
@@ -1010,7 +1326,7 @@ def since(root: Path, seq: int, wait: int = 0) -> dict:
 
 
 def _ticket_by_message(root: Path, mid: str) -> str | None:
-    for t in tickets.list_all(root):
+    for t in tickets.list_all(root, include_general=True):
         r = t.get("ext", {}).get("relay", {})
         if r.get("message") == mid or mid in r.get("messages", []):
             return t["id"]
@@ -1133,6 +1449,11 @@ def _save_received(root: Path, name: str, raw: bytes) -> Path:
             "There is a file called received in this folder. Move it away so downloads can go there."
         )
     d.mkdir(exist_ok=True)
+    return _save_into(d, name, raw)
+
+
+def _save_into(d: Path, name: str, raw: bytes) -> Path:
+    """<d>/<name> (d exists and is not a link); a clash gets ' (2)', ' (3)' ... (created with O_EXCL)."""
     stem, dot, ext = name.rpartition(".")
     if not dot or not stem:
         stem, ext = name, ""
