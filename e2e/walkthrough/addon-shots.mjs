@@ -33,12 +33,12 @@ try {
   fs.mkdirSync(OUT, { recursive: true });
   await page.goto(`http://127.0.0.1:${port}/#tickets`); await page.waitForSelector('a.card');
   await page.screenshot({ path: path.join(OUT, 'addons-none.png') });
-  sh('orch addon add scheduler --yes');
-  sh(`orch scheduler repeat ${ids[0]} "0 7 * * 1"`);
+  sh('orch addon add automation --yes');
+  sh(`orch automation repeat ${ids[0]} "0 7 * * 1"`);
   sh(`orch wait ${ids[1]} --until 2099-01-01T08:00:00Z`);
-  await page.reload(); await page.waitForSelector('a[href="#addon/scheduler"]');
-  await page.click('a[href="#addon/scheduler"]'); await page.waitForSelector('text=Next runs'); await page.waitForTimeout(500);
-  await page.screenshot({ path: path.join(OUT, 'addons-scheduler.png') });
+  await page.reload(); await page.waitForSelector('a[href="#addon/automation"]');
+  await page.click('a[href="#addon/automation"]'); await page.waitForSelector('text=Next runs'); await page.waitForTimeout(500);
+  await page.screenshot({ path: path.join(OUT, 'addons-automation.png') });
   console.log('wrote', OUT);
 } finally {
   if (browser) await browser.close();

@@ -127,11 +127,11 @@ def tree_hash(ws: Path) -> dict:
     return out
 
 
-def setup_scheduler(e, name: str, tool: str, interval: int = 10) -> Path:
+def setup_automation(e, name: str, tool: str, interval: int = 10) -> Path:
     ws = e.ws(name)
-    if not (ws / ".agents/skills/orch-scheduler").exists():
-        rc, out, err = e.addon_add(ws, "scheduler")
-        check(rc == 0, f"addon add scheduler: {(err or out)[-200:]}")
+    if not (ws / ".agents/skills/orch-automation").exists():
+        rc, out, err = e.addon_add(ws, "automation")
+        check(rc == 0, f"addon add automation: {(err or out)[-200:]}")
     e.sched_config(ws, scheduler_agent_line(e, tool), interval, 5)
     return ws
 
@@ -221,7 +221,7 @@ def ag_r12(e):
 def ag_w5(e):
     """W5/M2: the agent asks with --phone and stops; the phone answers through the relay; the scheduler resumes the agent."""
     ids = e.relay_all()
-    ws = setup_scheduler(e, "Pilatus", "claude")
+    ws = setup_automation(e, "Pilatus", "claude")
     ph = pair_phone(e, [ids["Pilatus"]])
     before = {t["id"] for t in tickets(ws)}
     prompt = ("Our weekly export has to run on one fixed day and I cannot decide right now. Please track this as a ticket, "
@@ -248,7 +248,7 @@ def ag_w5(e):
     check(q.get("answer", "").lower() == "monday" and q.get("via") == "phone", f"question after answer: {q}")
     check((ws / "schedule.txt").exists() and "monday" in (ws / "schedule.txt").read_text().lower(),
           f"the resumed agent did not write schedule.txt with the answer: {(ws / 'schedule.txt').exists()}")
-    check(any(h["by"] == "agent:scheduler" for h in d["history"]), "no scheduler history entry")
+    check(any(h["by"] == "agent:automation" for h in d["history"]), "no scheduler history entry")
     validate(e, d)
     return f"question via phone, resumed by scheduler, status {d['status']}; {run.secs:.0f}s asking"
 
@@ -262,7 +262,7 @@ def ag_r6(e):
     ids = e.relay_all()
     for n in ("Pilatus", "Reports"):
         e.orch(n, "relay", "refresh")
-    wsp, wsr = e.ws("Pilatus"), setup_scheduler(e, "Reports", "claude")
+    wsp, wsr = e.ws("Pilatus"), setup_automation(e, "Reports", "claude")
     wj = json.loads((wsp / ".agents/skills/orch-relay/workspaces.json").read_text())
     check(any(w["id"] == ids["Reports"] for w in wj["workspaces"]), "Reports is not in Pilatus workspaces.json after refresh")
     prompt = ("Please hand the job 'Write the weekly report draft for week 45' to the workspace that is responsible for reports, "
@@ -296,7 +296,7 @@ def ag_r6(e):
     check(logs and logs[-1].read_text().strip(), f"no scheduler run log for {t['id']}")
     rc, out, err = e.sh(["orch", "run", "status", t["id"], "--json"], cwd=wsr)
     check(rc == 0 and not json.loads(out).get("running"), f"the run on {t['id']} did not finish: {out or err}")
-    worked = {b for b in by(t) if not b.startswith(("agent:scheduler", "agent:relay"))}
+    worked = {b for b in by(t) if not b.startswith(("agent:automation", "agent:relay"))}
     check(worked, f"the agent wrote nothing on {t['id']}: {sorted(by(t))}")
     allow_back = [m for m in e.orchj("Pilatus", "relay", "inbox") if m["type"] == "allow"]
     check(allow_back, "no allow message back to Pilatus")
@@ -311,17 +311,17 @@ def ag_r6(e):
 @scenario("AG-A45", slow=True)
 def ag_a45(e):
     """A4 + A5: orch wait --until in 2 min and a cron every 2 min, both started by the scheduler with codex in Reports."""
-    ws = setup_scheduler(e, "Reports", "codex", interval=10)
+    ws = setup_automation(e, "Reports", "codex", interval=10)
     t4 = e.orchj(ws, "ticket", "new", "A4: create the file wake-proof.txt in the project root containing the word awake, then set this ticket to done")["id"]
     until = (datetime.now(UTC) + timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     e.orch(ws, "wait", t4, "--until", until)
     t5 = e.orchj(ws, "ticket", "new", "A5: append one line to runs.log in the project root: the word run and the current UTC time from `date -u`. "
                  "Do nothing else. This ticket repeats, so leave its status as it is")["id"]
-    e.orch(ws, "scheduler", "repeat", t5, "*/2 * * * *")
-    rc, out, err = e.sh(["orch", "scheduler", "start"], cwd=ws)
+    e.orch(ws, "automation", "repeat", t5, "*/2 * * * *")
+    rc, out, err = e.sh(["orch", "automation", "start"], cwd=ws)
     check(rc == 0, f"scheduler start: {err or out}")
     def started(t):  # the scheduler writes one history entry per run it started
-        return [h for h in tload(ws, t)["history"] if h["by"] == "agent:scheduler" and "started an agent run" in h["text"]]
+        return [h for h in tload(ws, t)["history"] if h["by"] == "agent:automation" and "started an agent run" in h["text"]]
 
     def running(t):
         rc, out, err = e.sh(["orch", "run", "status", t, "--json"], cwd=ws)
@@ -335,7 +335,7 @@ def ag_a45(e):
             time.sleep(10)
         time.sleep(5)
     finally:
-        e.sh(["orch", "scheduler", "stop"], cwd=ws)
+        e.sh(["orch", "automation", "stop"], cwd=ws)
         # keep the run logs (written by core) in the transcript
         body = "".join(f"\n### {p.name}\n{p.read_text(errors='replace')[-4000:]}\n" for p in sorted((ws / ".orch/run/logs").glob("*.log")))
         save_transcript(e, "AG-A45", f"# codex runs started by the scheduler in Reports\n{body}")
@@ -392,8 +392,8 @@ def ag_f1(e):
     e.cleanup.append(publish_cleanup_dir(e, ws, env))
     e.creds[("rel", "Fresh")] = (rj["id"], rj["token"])
     e.creds[("pub", "Fresh")] = (pj["id"], pj["token"])
-    sh("orch", "addon", "add", "scheduler", "--yes", timeout=600)
-    (ws / ".orch/config.toml").write_text(f"[scheduler]\n{scheduler_agent_line(e, 'claude')}\ninterval = 10\ninbox_every = 5\n")
+    sh("orch", "addon", "add", "automation", "--yes", timeout=600)
+    (ws / ".orch/config.toml").write_text(f"[automation]\n{scheduler_agent_line(e, 'claude')}\ninterval = 10\ninbox_every = 5\n")
     ph = pair_phone(e, [rj["id"]])
     # agent phase 1
     prompt = ("I need the weekly status report published. Track the work as a ticket. Write report.md (title, three short bullet "

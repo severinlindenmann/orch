@@ -1,0 +1,7 @@
+# The old name of automation (alias for one release). Nothing but a command that forwards.
+schema = "orch.addon/1"
+orch_api = 1
+name = "scheduler"
+version = "0.3.0"
+description = "Old name of automation. Use: orch automation."
+run = "orch_scheduler"

@@ -1,0 +1,250 @@
+import json
+import os
+import time
+
+from conftest import T, add_ticket, calls, runs_started
+
+from orch_automation.loop import Scheduler
+from orch_automation.runner import load_state
+
+
+def tk(ws, tid):
+    return json.loads((ws / f".orch/tickets/{tid}.json").read_text())
+
+
+def end_run(ws, tid, age=60):
+    """The run is over; its log was last written `age` seconds after the start (os.utime)."""
+    (ws / f"ended-{tid}").write_text("")
+    log = ws / f".orch/run/logs/{tid}-r1.log"
+    t = time.time() + age
+    os.utime(log, (t, t))
+
+
+def test_wake_starts_run_through_core_once(ws):
+    add_ticket(ws, "t_wake001", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    s = Scheduler(ws)
+    assert s.tick(T(7, 59)) == []
+    assert s.tick(T(8, 1)) == ["t_wake001"]
+    cs = calls(ws)
+    start = next(c for c in cs if c["args"][:2] == ["run", "start"])
+    assert start["by"] == "agent:automation" and start["args"][:3] == ["run", "start", "t_wake001"]
+    t = tk(ws, "t_wake001")
+    assert t["waiting_on"] is None and t["status"] == "active"
+    assert s.tick(T(8, 5)) == [] and runs_started(ws) == ["t_wake001"]
+    assert load_state(ws)["t_wake001"]["last_wake"] == "2026-11-04T08:00:00Z"
+
+
+def test_wait_cleared_only_after_run_start_worked(ws):
+    """SA-15: a refused start leaves the wait in place."""
+    (ws / "noagent").write_text("")
+    add_ticket(ws, "t_wake002", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == []
+    t = tk(ws, "t_wake002")
+    assert t["waiting_on"] is not None
+    (q,) = t["questions"]
+    assert q["kind"] == "automation:failure" and "orch config set workspace.agent <name>" in q["text"]
+    assert q["options"] == ["Try again", "Leave it"]
+    s.tick(T(8, 1))  # asked once, not again
+    assert len(tk(ws, "t_wake002")["questions"]) == 1
+
+
+def test_busy_ticket_is_pending_not_second_agent(ws):
+    add_ticket(ws, "t_wake003", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    (ws / "busy-t_wake003").write_text("")
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == []  # no new run was started
+    assert tk(ws, "t_wake003")["waiting_on"] is None  # the wait is over; the running agent has it
+    assert s.watch == {} and s.tick(T(8, 5)) == []
+
+
+def test_done_ticket_not_woken(ws):
+    add_ticket(ws, "t_wake004", status="done", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    assert Scheduler(ws).tick(T(9)) == [] and runs_started(ws) == []
+
+
+def test_recurring_cron_and_catch_up(ws):
+    add_ticket(ws, "t_rec00001", created_at="2026-11-01T00:00:00Z",
+               ext={"automation": {"recurring": True, "cron": "0 7 * * *"}})
+    s = Scheduler(ws)
+    assert s.tick(T(8, 0, d=4)) == ["t_rec00001"]  # 3 missed days -> one run
+    assert s.tick(T(8, 2, d=4)) == []
+    assert load_state(ws)["t_rec00001"]["next_run"] == "2026-11-05T07:00:00Z"
+    assert s.tick(T(7, 1, d=5)) == ["t_rec00001"]
+    t = tk(ws, "t_rec00001")
+    assert t["ext"]["automation"]["last_run"] == "2026-11-05T07:01:00Z"
+
+
+def test_cron_busy_sets_last_run_no_pile_up(ws):
+    add_ticket(ws, "t_rec00002", ext={"automation": {"recurring": True, "cron": "* * * * *"}})
+    (ws / "busy-t_rec00002").write_text("")
+    s = Scheduler(ws)
+    assert s.tick(T(8, 0)) == []
+    assert tk(ws, "t_rec00002")["ext"]["automation"]["last_run"] == "2026-11-04T08:00:00Z"
+
+
+def test_fast_fail_asks_and_is_not_retried(ws):
+    add_ticket(ws, "t_fail0001", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == ["t_fail0001"]
+    end_run(ws, "t_fail0001", age=2)  # ended after 2 s, wrote nothing on the ticket
+    s.tick(T(8, 1))
+    (q,) = tk(ws, "t_fail0001")["questions"]
+    assert q["kind"] == "automation:failure" and "10 seconds" in q["text"]
+    s.tick(T(8, 2))
+    assert runs_started(ws) == ["t_fail0001"]  # not retried
+    row = json.loads((ws / ".orch/addons/automation/runs.jsonl").read_text().splitlines()[0])
+    assert row["exit"] == 1
+
+
+def test_slow_or_busy_run_is_not_a_failure(ws):
+    add_ticket(ws, "t_fail0002", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    s = Scheduler(ws)
+    s.tick(T(8))
+    end_run(ws, "t_fail0002", age=60)
+    s.tick(T(8, 1))
+    assert tk(ws, "t_fail0002").get("questions") == []
+
+
+def test_try_again_runs_once_even_after_restart(ws):
+    q = {"id": "q1", "text": "x", "options": ["Try again", "Leave it"], "kind": "automation:failure",
+         "answer": "Try again", "answered_by": "human:s", "via": "web"}
+    add_ticket(ws, "t_again001", questions=[q])
+    assert Scheduler(ws).tick(T(8)) == ["t_again001"]
+    assert tk(ws, "t_again001")["ext"]["automation"]["acted"] == ["q1"]
+    assert Scheduler(ws).tick(T(8, 1)) == []  # a restart (new object) does not run it again
+    assert runs_started(ws) == ["t_again001"]
+
+
+def test_leave_it_runs_nothing_but_is_recorded(ws):
+    q = {"id": "q1", "text": "x", "options": [], "kind": "automation:failure", "answer": "Leave it"}
+    add_ticket(ws, "t_leave001", questions=[q])
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+    assert tk(ws, "t_leave001")["ext"]["automation"]["acted"] == ["q1"]
+
+
+def test_one_answer_leads_to_exactly_one_run(ws):
+    """review-49-50 F1: an answer from the relay is applied by the CLI; the loop starts one run, then not again."""
+    add_ticket(ws, "t_ask00001", status="active")
+    (ws / ".orch/secrets").mkdir(parents=True)
+    (ws / ".orch/secrets/relay.json").write_text("{}")
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_1", "type": "answer", "ticket": "t_ask00001", "applied": True,
+                                                 "body": {"question_id": "q1", "answer": "Yes"}}]))
+    s = Scheduler(ws)
+    assert s.tick(T(8, 0)) == ["t_ask00001"]
+    (ws / "inbox.json").write_text("[]")  # the CLI marks it seen: it does not come again
+    assert s.tick(T(8, 2)) == []
+    assert runs_started(ws) == ["t_ask00001"]
+
+
+def test_ticket_cannot_supply_a_command(ws):
+    add_ticket(ws, "t_wake010", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"},
+               ext={"automation": {"agent": "rm -rf / {prompt}"}})
+    Scheduler(ws).tick(T(8))
+    assert runs_started(ws) == ["t_wake010"]
+    assert all("rm" not in " ".join(c["args"]) for c in calls(ws))
+
+
+def test_invalid_ticket_id_skipped(ws):
+    (ws / ".orch/tickets/t_bad.json").write_text(
+        json.dumps({"id": "t_../../escape", "status": "open", "waiting_on": "2026-11-04T08:00:00Z"}))
+    assert Scheduler(ws).tick(T(9)) == []
+
+
+def test_not_recurring_flag_means_no_cron_run(ws):
+    add_ticket(ws, "t_rec00004", ext={"automation": {"recurring": False, "cron": "* * * * *"}})
+    assert Scheduler(ws).tick(T(8)) == []
+
+
+def test_other_waits_are_not_woken(ws):
+    add_ticket(ws, "t_wait0001", status="waiting", waiting_on={"kind": "question", "ref": "q1"})
+    add_ticket(ws, "t_wait0002", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T09:00:00Z"})
+    assert Scheduler(ws).tick(T(8)) == []
+
+
+def test_cli_run_once(ws):
+    from orch_automation.cli import main
+    add_ticket(ws, "t_wake008", waiting_on={"kind": "time", "until": "2020-01-01T00:00:00Z"})
+    assert main(["--dir", str(ws), "run", "--once"]) == 0
+    assert runs_started(ws) == ["t_wake008"]
+
+
+def test_loop_exits_when_not_active(ws):
+    (ws / "inactive").write_text("1")
+    add_ticket(ws, "t_wake011", waiting_on={"kind": "time", "until": "2020-01-01T00:00:00Z"})
+    Scheduler(ws).run_forever(sleep=lambda _: (_ for _ in ()).throw(AssertionError("kept running")))
+    assert runs_started(ws) == []
+
+
+def test_own_history_entries_do_not_hide_a_fast_fail(ws):
+    """H1: the scheduler's own notes (wait cleared, status, run started) never count as work on the ticket."""
+    add_ticket(ws, "t_fail0003", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    s = Scheduler(ws)
+    s.tick(T(8))
+    end_run(ws, "t_fail0003", age=2)
+    s.tick(T(8, 1))
+    assert len(tk(ws, "t_fail0003")["questions"]) == 1
+
+
+def test_agent_note_makes_a_quick_run_fine(ws):
+    add_ticket(ws, "t_fail0004", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    s = Scheduler(ws)
+    s.tick(T(8))
+    t = tk(ws, "t_fail0004")
+    t["history"].append({"by": "agent:claude", "text": "done"})
+    (ws / ".orch/tickets/t_fail0004.json").write_text(json.dumps(t))
+    end_run(ws, "t_fail0004", age=2)
+    s.tick(T(8, 1))
+    assert tk(ws, "t_fail0004")["questions"] == []
+
+
+def test_failed_start_is_not_retried_every_pass(ws):
+    """H2: the wait stays (SA-15) but the wake is recorded, so only 'Try again' retries."""
+    (ws / "noagent").write_text("")
+    add_ticket(ws, "t_wake020", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    s = Scheduler(ws)
+    s.tick(T(8))
+    s.tick(T(8, 1))
+    assert runs_started(ws).count("t_wake020") == 1
+    assert tk(ws, "t_wake020")["waiting_on"] is not None
+
+
+def test_failed_cron_start_is_not_retried_every_pass(ws):
+    (ws / "noagent").write_text("")
+    add_ticket(ws, "t_rec00020", ext={"automation": {"recurring": True, "cron": "* * * * *"}})
+    s = Scheduler(ws)
+    s.tick(T(8))
+    s.tick(T(8, 0).replace(second=50))
+    assert runs_started(ws).count("t_rec00020") == 1
+
+
+def test_leave_it_never_reasks_and_try_again_clears_the_wait(ws):
+    (ws / "noagent").write_text("")
+    add_ticket(ws, "t_wake021", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
+    s = Scheduler(ws)
+    s.tick(T(8))
+    t = tk(ws, "t_wake021")
+    t["questions"][0]["answer"] = "Leave it"
+    (ws / ".orch/tickets/t_wake021.json").write_text(json.dumps(t))
+    s.tick(T(8, 1))
+    s.tick(T(8, 2))
+    assert len(tk(ws, "t_wake021")["questions"]) == 1 and runs_started(ws).count("t_wake021") == 1
+    # a second ticket: Try again with a working agent
+    (ws / "noagent").unlink()
+    add_ticket(ws, "t_wake022", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"},
+               questions=[{"id": "q1", "text": "x", "options": [], "kind": "automation:failure", "answer": "Try again"}],
+               ext={"automation": {}})
+    s.tick(T(8, 3))
+    t = tk(ws, "t_wake022")
+    assert t["waiting_on"] is None and t["status"] == "active"
+
+
+def test_phone_answer_to_own_failure_question_starts_once(ws):
+    add_ticket(ws, "t_ask00030", status="active",
+               questions=[{"id": "q1", "text": "x", "options": [], "kind": "automation:failure", "answer": "Try again"}])
+    (ws / ".orch/secrets").mkdir(parents=True)
+    (ws / ".orch/secrets/relay.json").write_text("{}")
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_1", "type": "answer", "ticket": "t_ask00030", "applied": True,
+                                                 "body": {"question_id": "q1", "answer": "Try again"}}]))
+    Scheduler(ws).tick(T(8))
+    assert runs_started(ws) == ["t_ask00030"]

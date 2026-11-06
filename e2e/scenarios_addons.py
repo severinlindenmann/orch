@@ -100,40 +100,40 @@ def a7(e):
 
 @scenario("A8")
 def a8(e):
-    """remove scheduler: command refused, tab + skill + block gone, ext kept and hidden; --purge deletes data and [scheduler]."""
+    """remove automation: command refused, tab + skill + block gone, ext kept and hidden; --purge deletes data and [automation]."""
     ws = e.ws("Reports2")
-    for a in ("dashboard", "scheduler"):
+    for a in ("dashboard", "automation"):
         check(e.addon_add(ws, a)[0] == 0, f"add {a}")
     t = e.orchj(ws, "ticket", "new", "A8 repeating")["id"]
-    e.orch(ws, "scheduler", "repeat", t, "0 7 * * 1")
-    check("scheduler" in e.orchj(ws, "ticket", "show", t)["ext"], "ext.scheduler not visible while active")
+    e.orch(ws, "automation", "repeat", t, "0 7 * * 1")
+    check("automation" in e.orchj(ws, "ticket", "show", t)["ext"], "ext.automation not visible while active")
     e.sched_config(ws, 'agent = "true"')
-    (ws / ".orch/addons/scheduler").mkdir(parents=True, exist_ok=True)
-    (ws / ".orch/addons/scheduler/state.json").write_text("{}")
+    (ws / ".orch/addons/automation").mkdir(parents=True, exist_ok=True)
+    (ws / ".orch/addons/automation/state.json").write_text("{}")
     with _dashboard(e, ws) as (_, get):
-        check(any(a["name"] == "scheduler" and a["dashboard"] for a in get("/api/state")[1]["addons"]), "tab missing before remove")
-    e.orch(ws, "addon", "remove", "scheduler")
-    rc, out, err = e.sh(["orch", "scheduler", "list"], cwd=ws)
-    check(rc == 2 and "not turned on in this workspace" in err and "orch addon add scheduler" in err, f"command not refused: {rc} {err!r}")
-    check(not (ws / ".agents/skills/orch-scheduler").exists(), "skill still there")
-    check("orch:addon:scheduler" not in (ws / "AGENTS.md").read_text(), "block still there")
-    check("scheduler" not in _help(e, ws).lower(), "scheduler still in --help")
-    check("scheduler" not in json.loads((ws / ".orch/addons.json").read_text())["active"], "still in addons.json")
+        check(any(a["name"] == "automation" and a["dashboard"] for a in get("/api/state")[1]["addons"]), "tab missing before remove")
+    e.orch(ws, "addon", "remove", "automation")
+    rc, out, err = e.sh(["orch", "automation", "list"], cwd=ws)
+    check(rc == 2 and "not turned on in this workspace" in err and "orch addon add automation" in err, f"command not refused: {rc} {err!r}")
+    check(not (ws / ".agents/skills/orch-automation").exists(), "skill still there")
+    check("orch:addon:automation" not in (ws / "AGENTS.md").read_text(), "block still there")
+    check("automation" not in _help(e, ws).lower(), "automation still in --help")
+    check("automation" not in json.loads((ws / ".orch/addons.json").read_text())["active"], "still in addons.json")
     with _dashboard(e, ws) as (_, get):
-        check(not any(a["name"] == "scheduler" for a in get("/api/state")[1]["addons"]), "tab still there after remove")
+        check(not any(a["name"] == "automation" for a in get("/api/state")[1]["addons"]), "tab still there after remove")
     # data kept, hidden
-    check(tload(ws, t)["ext"]["scheduler"]["cron"] == "0 7 * * 1", "ext.scheduler lost from the ticket file")
-    check("scheduler" not in (e.orchj(ws, "ticket", "show", t).get("ext") or {}), "inactive ext shown")
+    check(tload(ws, t)["ext"]["automation"]["cron"] == "0 7 * * 1", "ext.automation lost from the ticket file")
+    check("automation" not in (e.orchj(ws, "ticket", "show", t).get("ext") or {}), "inactive ext shown")
     e.orch(ws, "log", t, "still works")  # a hidden ext never blocks the ticket
-    check((ws / ".orch/addons/scheduler/state.json").exists(), "add-on data folder was deleted")
+    check((ws / ".orch/addons/automation/state.json").exists(), "add-on data folder was deleted")
     # the add-on is still installed on the machine, so it can come back; --purge on the second removal
-    check(e.addon_add(ws, "scheduler")[0] == 0, "add again")
-    check("scheduler" in (e.orchj(ws, "ticket", "show", t).get("ext") or {}), "ext not visible again after add")
-    e.orch(ws, "addon", "remove", "scheduler", "--purge")
-    check(not (ws / ".orch/addons/scheduler").exists(), "--purge kept the data folder")
+    check(e.addon_add(ws, "automation")[0] == 0, "add again")
+    check("automation" in (e.orchj(ws, "ticket", "show", t).get("ext") or {}), "ext not visible again after add")
+    e.orch(ws, "addon", "remove", "automation", "--purge")
+    check(not (ws / ".orch/addons/automation").exists(), "--purge kept the data folder")
     cfg = (ws / ".orch/config.toml").read_text() if (ws / ".orch/config.toml").exists() else ""
-    check("[scheduler]" not in cfg, "--purge kept [scheduler] in config.toml")
-    check(tload(ws, t)["ext"]["scheduler"]["cron"] == "0 7 * * 1", "--purge deleted ticket ext data")
+    check("[automation]" not in cfg, "--purge kept [automation] in config.toml")
+    check(tload(ws, t)["ext"]["automation"]["cron"] == "0 7 * * 1", "--purge deleted ticket ext data")
     return "ext kept and hidden; purge removes data folder and config table, not ticket data"
 
 
@@ -145,26 +145,26 @@ def a9(e):
     e.orch(ws, "init")
     t = e.orchj(ws, "ticket", "new", "A9 from the clone")["id"]
     d = tload(ws, t)
-    d["ext"] = {"scheduler": {"recurring": True, "cron": "* * * * *"}}
+    d["ext"] = {"automation": {"recurring": True, "cron": "* * * * *"}}
     (ws / ".orch/tickets" / f"{t}.json").write_text(json.dumps(d))
-    (ws / ".orch/addons.json").write_text(json.dumps({"active": {"scheduler": {"version": "0.2.0", "activated_at": "2026-11-01T00:00:00Z"}}}))
-    (ws / ".orch/addons/scheduler").mkdir(parents=True)
-    (ws / ".orch/addons/scheduler/state.json").write_text("{}")
+    (ws / ".orch/addons.json").write_text(json.dumps({"active": {"automation": {"version": "0.2.0", "activated_at": "2026-11-01T00:00:00Z"}}}))
+    (ws / ".orch/addons/automation").mkdir(parents=True)
+    (ws / ".orch/addons/automation/state.json").write_text("{}")
     (ws / ".orch/.local-id").unlink(missing_ok=True)  # a clone never brings the (gitignored) local id
-    rc, out, err = e.sh(["orch", "scheduler", "list"], cwd=ws)
-    check(rc == 2 and "not turned on" in err and "orch addon add scheduler" in err, f"clone activated or no hint: {rc} {err!r}")
-    check("scheduler" not in _help(e, ws).lower(), "listed add-on shows in --help")
-    check(not (ws / ".agents/skills/orch-scheduler").exists() and "scheduler" not in _tree_text(ws), "skill/AGENTS text from a file alone")
-    check("scheduler" not in (e.orchj(ws, "ticket", "show", t).get("ext") or {}), "ext shown without the add-on")
+    rc, out, err = e.sh(["orch", "automation", "list"], cwd=ws)
+    check(rc == 2 and "not turned on" in err and "orch addon add automation" in err, f"clone activated or no hint: {rc} {err!r}")
+    check("automation" not in _help(e, ws).lower(), "listed add-on shows in --help")
+    check(not (ws / ".agents/skills/orch-automation").exists() and "automation" not in _tree_text(ws), "skill/AGENTS text from a file alone")
+    check("automation" not in (e.orchj(ws, "ticket", "show", t).get("ext") or {}), "ext shown without the add-on")
     lst = {x["name"]: x for x in e.orchj(ws, "addon", "list")}
-    check(not lst.get("scheduler", {}).get("active"), f"list says active: {lst.get('scheduler')}")
-    check("scheduler" not in [a["name"] for a in _dash_tabs(e, ws)], "tab from a file alone")
+    check(not lst.get("automation", {}).get("active"), f"list says active: {lst.get('automation')}")
+    check("automation" not in [a["name"] for a in _dash_tabs(e, ws)], "tab from a file alone")
     # an empty background run does nothing either: no process, no log
-    check(not list((ws / ".orch/addons/scheduler").glob("*.pid")) and not (ws / ".orch/run/scheduler").exists(),
+    check(not list((ws / ".orch/addons/automation").glob("*.pid")) and not (ws / ".orch/run/automation").exists(),
           "a process was started")
     # turning it on is the user's action
-    check(e.addon_add(ws, "scheduler")[0] == 0, "addon add scheduler in the clone")
-    check(e.sh(["orch", "scheduler", "list"], cwd=ws)[0] == 0, "command not available after the user turned it on")
+    check(e.addon_add(ws, "automation")[0] == 0, "addon add automation in the clone")
+    check(e.sh(["orch", "automation", "list"], cwd=ws)[0] == 0, "command not available after the user turned it on")
 
 
 def _dash_tabs(e, ws) -> list[dict]:
@@ -203,11 +203,11 @@ def a10(e):
 def a11(e):
     """Snapshot leaves add-on tabs, ticket ext rows and add-on data out; --with-addons puts them in."""
     ws = e.ws("Snap")
-    for a in ("dashboard", "scheduler"):
+    for a in ("dashboard", "automation"):
         check(e.addon_add(ws, a)[0] == 0, f"add {a}")
     t = e.orchj(ws, "ticket", "new", "A11 visible ticket")["id"]
-    e.orch(ws, "scheduler", "repeat", t, "17 3 * * 2")
-    d = ws / ".orch/addons/scheduler"
+    e.orch(ws, "automation", "repeat", t, "17 3 * * 2")
+    d = ws / ".orch/addons/automation"
     d.mkdir(parents=True, exist_ok=True)
     (d / "state.json").write_text(json.dumps({"marker": "ADDON-DATA-XYZ"}))
     out1, out2 = e.tmp / "snap-plain.html", e.tmp / "snap-addons.html"
@@ -215,25 +215,25 @@ def a11(e):
     check(e.sh(["orch", "dashboard", "snapshot", "--out", str(out2), "--with-addons"], cwd=ws)[0] == 0, "snapshot --with-addons failed")
     plain, withadd = out1.read_text(), out2.read_text()
     check("A11 visible ticket" in plain, "ticket missing from the snapshot")
-    for needle in ("17 3 * * 2", "ADDON-DATA-XYZ", "orch-scheduler"):
+    for needle in ("17 3 * * 2", "ADDON-DATA-XYZ", "orch-automation"):
         check(needle not in plain, f"snapshot contains add-on content: {needle}")
-    check('"scheduler"' not in plain.split("window.ORCH_SNAPSHOT=", 1)[1].split("</script>", 1)[0], "scheduler named in the snapshot data")
+    check('"automation"' not in plain.split("window.ORCH_SNAPSHOT=", 1)[1].split("</script>", 1)[0], "automation named in the snapshot data")
     check("17 3 * * 2" in withadd, "--with-addons has no ticket ext")
     check("ADDON-DATA-XYZ" not in withadd, "add-on data folder leaked into the snapshot")
 
 
 @scenario("A12")
 def a12(e):
-    """No add-on on: no scheduler/dashboard trace in CLI help, skills, AGENTS.md or tickets; the commands are refused with the hint."""
+    """No add-on on: no automation/dashboard trace in CLI help, skills, AGENTS.md or tickets; the commands are refused with the hint."""
     ws = e.ws("Bare")
     h = _help(e, ws).lower()
-    for w in ("scheduler", "dashboard", "add-ons:"):
+    for w in ("automation", "dashboard", "add-ons:"):
         check(w not in h.replace("orch addon", "").replace("add-ons: add, remove, list", ""), f"--help mentions {w}")
     txt = _tree_text(ws)
-    for w in ("scheduler", "dashboard", "wake_at", "--recurring"):
+    for w in ("automation", "dashboard", "wake_at", "--recurring"):
         check(w not in txt, f"skills/AGENTS.md mention {w}")
     t = e.orchj(ws, "ticket", "new", "A12 plain")["id"]
-    for cmd in ("scheduler", "dashboard"):
+    for cmd in ("automation", "dashboard"):
         rc, out, err = e.sh(["orch", cmd, "--help"], cwd=ws)
         check(rc == 2 and (f"orch addon add {cmd}" in err or "is not an orch command" in err), f"orch {cmd}: {rc} {err!r}")
     rc, out, err = e.sh(["orch", "ticket", "new", "x", "--recurring", "* * * * *"], cwd=ws)
@@ -243,7 +243,7 @@ def a12(e):
     check(not (ws / ".orch/addons.json").exists(), "addons.json without any add-on")
     with_dash = e.ws("BareDash")
     check(e.addon_add(with_dash, "dashboard")[0] == 0, "add dashboard")
-    check("scheduler" not in _help(e, with_dash).lower() and "scheduler" not in _tree_text(with_dash), "dashboard alone mentions scheduler")
+    check("automation" not in _help(e, with_dash).lower() and "automation" not in _tree_text(with_dash), "dashboard alone mentions automation")
     d1 = e.orchj(with_dash, "ticket", "new", "A12 finished work")["id"]
     e.orch(with_dash, "ticket", "status", d1, "dropped")
     with _dashboard(e, with_dash) as (_, get):
@@ -256,36 +256,36 @@ def a12(e):
 
 @scenario("A13")
 def a13(e):
-    """Add scheduler: command, help group, skill, AGENTS block and dashboard tab appear and read like the built-ins."""
+    """Add automation: command, help group, skill, AGENTS block and dashboard tab appear and read like the built-ins."""
     ws = e.ws("Looks")
     before_help = _help(e, ws)
-    for a in ("dashboard", "scheduler"):
+    for a in ("dashboard", "automation"):
         check(e.addon_add(ws, a)[0] == 0, f"add {a}")
     h = e.sh(["orch", "--help"], cwd=ws)[1]
-    check("Add-ons" in h and "scheduler" in h and "dashboard" in h, f"help has no Add-ons group:\n{h}")
+    check("Add-ons" in h and "automation" in h and "dashboard" in h, f"help has no Add-ons group:\n{h}")
     check(h.index("ticket") < h.index("Add-ons"), "Add-ons group not below the core commands")
-    check(e.sh(["orch", "scheduler", "--help"], cwd=ws)[0] == 0, "orch scheduler --help")
-    rc, out, err = e.sh(["orch", "scheduler", "repeat", "t_nonexist", "* * * * *"], cwd=ws)
+    check(e.sh(["orch", "automation", "--help"], cwd=ws)[0] == 0, "orch automation --help")
+    rc, out, err = e.sh(["orch", "automation", "repeat", "t_nonexist", "* * * * *"], cwd=ws)
     check(rc == 2 and err.startswith("Refused:"), f"refusal style: {rc} {err!r}")
-    rc, out, _ = e.sh(["orch", "scheduler", "repeat", "t_nonexist", "* * * * *", "--json"], cwd=ws)
+    rc, out, _ = e.sh(["orch", "automation", "repeat", "t_nonexist", "* * * * *", "--json"], cwd=ws)
     check(rc == 2 and "error" in json.loads(out), f"--json error shape: {out!r}")
-    sk = (ws / ".agents/skills/orch-scheduler/SKILL.md").read_text()
-    check(sk.startswith("---\nname: orch-scheduler\n"), "skill front matter")
+    sk = (ws / ".agents/skills/orch-automation/SKILL.md").read_text()
+    check(sk.startswith("---\nname: orch-automation\n"), "skill front matter")
     core = (ws / ".agents/skills/orch/SKILL.md").read_text()
     check(sk.count("`orch ") >= 3 and core.count("`orch ") >= 3, "skills do not lead with commands")
-    check("--recurring" not in sk and "wake_at" not in sk, "old scheduler wording in the skill")
+    check("--recurring" not in sk and "wake_at" not in sk, "old automation wording in the skill")
     names = sorted(p.name for p in (ws / ".agents/skills").iterdir() if p.is_dir())
-    check({"orch", "orch-dashboard", "orch-scheduler"} <= set(names) and all(n == "orch" or n.startswith("orch-") for n in names), f"skill folder names {names}")
-    check((ws / ".claude/skills").is_symlink() and (ws / ".claude/skills/orch-scheduler/SKILL.md").is_file(), ".claude/skills does not show the add-on")
+    check({"orch", "orch-dashboard", "orch-automation"} <= set(names) and all(n == "orch" or n.startswith("orch-") for n in names), f"skill folder names {names}")
+    check((ws / ".claude/skills").is_symlink() and (ws / ".claude/skills/orch-automation/SKILL.md").is_file(), ".claude/skills does not show the add-on")
     a = (ws / "AGENTS.md").read_text()
-    blk = a.split("<!-- orch:addon:scheduler -->")[1].split("<!-- /orch:addon:scheduler -->")[0]
-    check(blk.strip().startswith("## orch-scheduler") and "SKILL.md" in blk and len(blk.strip().splitlines()) <= 6, f"AGENTS block shape: {blk!r}")
+    blk = a.split("<!-- orch:addon:automation -->")[1].split("<!-- /orch:addon:automation -->")[0]
+    check(blk.strip().startswith("## orch-automation") and "SKILL.md" in blk and len(blk.strip().splitlines()) <= 6, f"AGENTS block shape: {blk!r}")
     with _dashboard(e, ws) as (base, get):
         st = get("/api/state")[1]
         tabs = {x["name"]: x["dashboard"] for x in st["addons"] if x["dashboard"]}
-        check("scheduler" in tabs and tabs["scheduler"]["label"] == "Schedule", f"tabs {tabs}")
-        st2, v = get("/api/addon/scheduler")
-        check(st2 == 200 and v["state"] == "ok" and v["view"]["schema"] == "orch.addon-view/1", f"scheduler view: {v}")
+        check("automation" in tabs and tabs["automation"]["label"] == "Automation", f"tabs {tabs}")
+        st2, v = get("/api/addon/automation")
+        check(st2 == 200 and v["state"] == "ok" and v["view"]["schema"] == "orch.addon-view/1", f"automation view: {v}")
         check(get("/api/addon/nope")[0] == 404, "unknown add-on tab not 404")
     check(before_help != _help(e, ws), "help unchanged")
 
@@ -348,7 +348,7 @@ def a15(e):
 @scenario("I1", slow=True)
 def i1(e):
     """Real installer from git (not the dev checkout), like the owner: install.sh with ORCH_REF=<this commit>,
-    then a fresh project, orch init, add dashboard by answering y in a terminal, add scheduler with --yes.
+    then a fresh project, orch init, add dashboard by answering y in a terminal, add automation with --yes.
     Both add-ons and orch itself must come from the same commit (no silent reinstall from main)."""
     import os
     import pty
@@ -386,30 +386,30 @@ def i1(e):
         os.close(slave)
         os.close(master)
     check(rc == 0 and "Add it? [y/N]" in err and "Adds the command: orch dashboard" in err, f"add dashboard (tty): {rc} {(err or out)[-300:]}")
-    rc, out, err = run("addon", "add", "scheduler", stdin=subprocess.DEVNULL)  # no terminal, no --yes: hint
-    check(rc == 2 and "--yes" in err, f"scheduler without --yes: {rc} {(err or out)[-200:]}")
-    rc, out, err = run("addon", "add", "scheduler", "--yes")
-    check(rc == 0, f"add scheduler --yes: {(err or out)[-300:]}")
+    rc, out, err = run("addon", "add", "automation", stdin=subprocess.DEVNULL)  # no terminal, no --yes: hint
+    check(rc == 2 and "--yes" in err, f"automation without --yes: {rc} {(err or out)[-200:]}")
+    rc, out, err = run("addon", "add", "automation", "--yes")
+    check(rc == 0, f"add automation --yes: {(err or out)[-300:]}")
     lst = {x["name"]: x["active"] for x in json.loads(run("addon", "list", "--json")[1])}
-    check(lst == {"dashboard": True, "scheduler": True, "publish": False, "relay": False}, f"addon list {lst}")
+    check(lst == {"dashboard": True, "automation": True, "publish": False, "relay": False}, f"addon list {lst}")
     tools = (d / "uvtools" / "orch-workspace" / "uv-receipt.toml").read_text()
     check(tools.count(sha) >= 3 and "@main" not in tools, f"orch and add-ons not all from {sha[:8]}: {tools[-400:]}")
-    rc, out, _ = run("scheduler", "--help")
-    check(rc == 0, "orch scheduler --help")
+    rc, out, _ = run("automation", "--help")
+    check(rc == 0, "orch automation --help")
 
 
 @scenario("A16")
 def a16(e):
-    """A clean `orch init`: none of publish, relay, dashboard, scheduler in --help, skills or AGENTS.md; their
+    """A clean `orch init`: none of publish, relay, dashboard, automation in --help, skills or AGENTS.md; their
     commands answer with `orch addon add <name>`. Adding relay brings exactly its command, skill and block."""
     ws = e.ws("Clean")
     help_ = _help(e, ws)
     tree = _tree_text(ws)
-    for name in ("publish", "relay", "dashboard", "scheduler"):
+    for name in ("publish", "relay", "dashboard", "automation"):
         check(f"\n    {name} " not in help_ and f"\n  {name} " not in help_, f"{name} in a clean --help")
         check(f"orch-{name}" not in tree and f"orch {name}" not in tree, f"{name} in a clean skill/AGENTS.md")
         rc, _, err = e.sh(["orch", name, "--help"], cwd=ws)
-        # dashboard/scheduler: "not an orch command" when not installed on this computer, else "orch addon add"
+        # dashboard/automation: "not an orch command" when not installed on this computer, else "orch addon add"
         check(rc == 2 and (f"orch addon add {name}" in err or "not an orch command" in err), f"orch {name} while off: {rc} {err[-200:]}")
     rc, out, err = e.sh(["orch", "addon", "add", "relay", "--yes"], cwd=ws)
     check(rc == 0 and "Adds the command: orch relay" in out, f"add relay: {(err or out)[-200:]}")
@@ -423,10 +423,10 @@ def a16(e):
 
 @scenario("A17")
 def a17(e):
-    """`orch start` / `stop` / `status` across two workspaces with dashboard + scheduler on."""
+    """`orch start` / `stop` / `status` across two workspaces with dashboard + automation on."""
     one, two = e.ws("Start1"), e.ws("Start2")
     for ws in (one, two):
-        for a in ("dashboard", "scheduler"):
+        for a in ("dashboard", "automation"):
             check(e.addon_add(ws, a)[0] == 0, f"addon add {a} in {ws.name}")
     try:
         urls = {}
@@ -434,15 +434,15 @@ def a17(e):
             rc, out, err = e.sh(["orch", "start", "--json"], cwd=ws, timeout=60)
             check(rc == 0, f"start in {ws.name}: {(err or out)[-300:]}")
             rows = {r["addon"]: r for r in json.loads(out)["addons"]}
-            check(set(rows) == {"dashboard", "scheduler"} and all(r["running"] for r in rows.values()), f"start rows: {rows}")
+            check(set(rows) == {"dashboard", "automation"} and all(r["running"] for r in rows.values()), f"start rows: {rows}")
             e.pids += [r["pid"] for r in rows.values()]
             urls[ws.name] = rows["dashboard"]["url"]
             check(http("GET", urls[ws.name] + "/", timeout=5).status == 200, f"dashboard of {ws.name} does not answer")
         check(urls["Start1"] != urls["Start2"], f"two dashboards on one port: {urls}")
         rc, out, _ = e.sh(["orch", "start"], cwd=one)  # again: same processes, plain lines
-        check(rc == 0 and "Started in Start1:" in out and urls["Start1"] in out and "scheduler" in out, f"start text: {out}")
+        check(rc == 0 and "Started in Start1:" in out and urls["Start1"] in out and "automation" in out, f"start text: {out}")
         check(".orch/run/" in (one / ".gitignore").read_text().splitlines(), "runtime files not gitignored")
-        check((one / ".orch/run/dashboard/server.json").is_file() and (one / ".orch/run/scheduler/scheduler.json").is_file(),
+        check((one / ".orch/run/dashboard/server.json").is_file() and (one / ".orch/run/automation/automation.json").is_file(),
               "runtime files not in .orch/run/")
         st = e.orchj(e.tmp, "status")
         check(sorted(w["name"] for w in st) == ["Start1", "Start2"], f"status: {st}")

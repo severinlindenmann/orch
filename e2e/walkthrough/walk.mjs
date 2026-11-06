@@ -176,14 +176,14 @@ try {
     await page.click('a.card');
     await page.waitForSelector('text=Which format?');
   });
-  await step('dashboard-no-tab', 'Dashboard: no Schedule tab while the scheduler add-on is off', async () => {
-    if (await page.locator('a[href="#addon/scheduler"]').count()) throw new Error('scheduler tab without the add-on');
+  await step('dashboard-no-tab', 'Dashboard: no Automation tab while the automation add-on is off', async () => {
+    if (await page.locator('a[href="#addon/automation"]').count()) throw new Error('automation tab without the add-on');
   });
-  await step('dashboard-scheduler', 'Dashboard: turn the scheduler on (orch addon add scheduler), repeat the ticket, open the Schedule tab', async () => {
-    must('orch addon add scheduler --yes', dirs.Pilatus);
-    must(`orch scheduler repeat ${tid} "0 7 * * 1"`, dirs.Pilatus);
-    await page.reload(); await page.waitForSelector('a[href="#addon/scheduler"]');
-    await page.click('a[href="#addon/scheduler"]');
+  await step('dashboard-automation', 'Dashboard: turn automation on (orch addon add automation), repeat the ticket, open the Automation tab', async () => {
+    must('orch addon add automation --yes', dirs.Pilatus);
+    must(`orch automation repeat ${tid} "0 7 * * 1"`, dirs.Pilatus);
+    await page.reload(); await page.waitForSelector('a[href="#addon/automation"]');
+    await page.click('a[href="#addon/automation"]');
     await page.waitForSelector('text=Next runs');
   });
   await step('dashboard-inbox', 'Dashboard: inbox view', async () => {
