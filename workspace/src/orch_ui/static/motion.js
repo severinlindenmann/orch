@@ -16,10 +16,19 @@
     enter(el) {
       if (!el || reduce()) return;
       el.classList.remove('page-enter'); void el.offsetWidth;
-      const rows = [...el.querySelectorAll('[data-row]')].slice(0,8);
+      const rows = [...el.querySelectorAll('[data-row]:not(.needs-in)')].slice(0,8);
       rows.forEach((row,i) => {row.dataset.stagger='';row.style.setProperty('--row-delay',`${i*20}ms`);});
       el.classList.add('page-enter');
       setTimeout(() => {el.classList.remove('page-enter');rows.forEach(row=>delete row.dataset.stagger);}, 340);
+    },
+    live: false,
+    /* A "needs you" row that arrives while the page is open gets one soft fade. Never on load, reload or
+       refresh, and taking the class away again ends the animation, it does not start another one. */
+    needsIn(row) {
+      if (!row || !api.live || reduce() || document.documentElement.dataset.refresh !== undefined) return false;
+      row.classList.add('needs-in');
+      row.addEventListener('animationend', () => row.classList.remove('needs-in'), {once:true});
+      return true;
     },
     toast(text, kind='info') {
       let host = document.querySelector('.toasts');
@@ -74,6 +83,7 @@
       row.style.setProperty('--row-height',`${row.getBoundingClientRect().height}px`);row.classList.add('row-out');focusTarget?.focus();await wait(reduce()?0:160);row.remove();
     }
   };
+  window.addEventListener('load',()=>setTimeout(()=>{api.live=true;},0));
   document.addEventListener('DOMContentLoaded',()=>{
     const nav=performance.getEntriesByType('navigation')[0];
     if(nav?.type!=='reload' && document.referrer && new URL(document.referrer).pathname!==location.pathname) api.enter(document.querySelector('main'));

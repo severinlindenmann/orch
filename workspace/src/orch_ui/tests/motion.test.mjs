@@ -23,3 +23,36 @@ test('system font only and no thick warning bars in the kit', () => {
   assert.match(tokens, /--fs-body: 13px;/);
   assert.ok(!/border-left:[3-9]px solid var\(--warning\)[^}]*\}/.test(comps.replace(/\.qcard\{[^}]*\}/, '')));
 });
+
+import vm from 'node:vm';
+
+function load() {
+  const listeners = {};
+  const classes = new Set();
+  const row = {classList: {add: c => classes.add(c), remove: c => classes.delete(c)}, addEventListener() {}};
+  const ctx = {
+    performance: {getEntriesByType: () => [{type: 'navigate'}]},
+    matchMedia: () => ({matches: false}),
+    setTimeout, clearTimeout, document: {
+      documentElement: {dataset: {}}, addEventListener() {}, querySelector: () => null, querySelectorAll: () => [],
+    },
+    window: {addEventListener: (n, f) => { listeners[n] = f; }}, console,
+  };
+  ctx.window.window = ctx.window;
+  vm.runInNewContext(readFileSync(new URL('../static/motion.js', import.meta.url), 'utf8'), ctx);
+  return {orch: ctx.window.orch, row, classes, listeners};
+}
+
+test('needs-in is never applied on load, only to a row that arrives live', async () => {
+  const {orch, row, classes, listeners} = load();
+  assert.equal(orch.needsIn(row), false);
+  assert.ok(!classes.has('needs-in'), 'not before the page is live');
+  listeners.load();
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(orch.needsIn(row), true);
+  assert.ok(classes.has('needs-in'));
+});
+
+test('page-enter stagger skips rows that fade in as needs-you', () => {
+  assert.match(readFileSync(new URL('../static/motion.js', import.meta.url), 'utf8'), /\[data-row\]:not\(\.needs-in\)/);
+});
