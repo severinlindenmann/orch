@@ -106,8 +106,10 @@ input[type=file]::file-selector-button{font:inherit;color:var(--text);background
 .waiting-badge{fill:var(--brand-soft);stroke:var(--brand)}
 .waiting-count{fill:var(--brand);font-size:11px}
 .review-badge{fill:var(--warning-soft);stroke:var(--warning)}
-.review-text{fill:var(--warning);font-size:11px}.review-dot{fill:var(--warning)}
+.review-text{fill:var(--warning);font-size:11px}.review-dot{fill:var(--warning);stroke:var(--surface);stroke-width:1.5}
 .edge-line{fill:none;stroke:var(--brand);stroke-width:1.5}
+.network-ring .graph-edge:not(.highlight) .crowded-start{marker-start:none}
+.network-ring .graph-edge:not(.highlight) .crowded-end{marker-end:none}
 .network-arrow{fill:var(--brand)}
 .edge-hit{fill:none;stroke:transparent;stroke-width:20}
 .graph-edge:hover .edge-line,.graph-edge:focus .edge-line,.graph-edge.highlight .edge-line{stroke-width:2.5}

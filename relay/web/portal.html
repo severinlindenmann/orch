@@ -341,27 +341,31 @@ function network(){
    let y=24;
    for(const w of ordered){const h=(hasChange(w)?84:64)+(networkStatusLines(networkStatus(w),cardWidth-42).length-1)*16;positions.set(w.id,{x:0,y,w:cardWidth,h});y+=h+20}
    H=Math.max((ordered.length?y-24-20:0)+48,phoneList.length*72+48);
-   const attachments=new Map();for(const w of ordered){const p=positions.get(w.id),neighbors=sorted.filter(e=>e.a===w.id||e.b===w.id).sort((a,b)=>index.get(a.a===w.id?a.b:a.a)-index.get(b.a===w.id?b.b:b.a));neighbors.forEach((e,i)=>attachments.set(w.id+':'+sorted.indexOf(e),p.y+12+(p.h-24)*(neighbors.length===1?.5:i/(neighbors.length-1))))}
+   const attachments=new Map();for(const w of ordered){const p=positions.get(w.id),neighbors=sorted.filter(e=>e.a===w.id||e.b===w.id).sort((a,b)=>{const ay=positions.get(a.a===w.id?a.b:a.a).y,by=positions.get(b.a===w.id?b.b:b.a).y;return Number(ay>p.y)-Number(by>p.y)||by-ay});for(const above of [true,false]){const group=neighbors.filter(e=>(positions.get(e.a===w.id?e.b:e.a).y<p.y)===above);group.forEach((e,i)=>{const start=above?12:p.h/2+4,end=above?p.h/2-4:p.h-12,t=group.length===1?(above?0:1):i/(group.length-1);attachments.set(w.id+':'+sorted.indexOf(e),p.y+start+(end-start)*t)})}}
    for(const [i,p]of sorted.entries()){
     const a=positions.get(p.a),b=positions.get(p.b),ay=attachments.get(p.a+':'+i),by=attachments.get(p.b+':'+i),full=texts(p,a,b),short=full.length>1?['⇅ '+[...new Set(p.rules.flatMap(r=>permissionLabel(r).split(' · ')))].join(' · ')]:full;
-    const visible=edges.filter(e=>!e.blocked);
+    const visible=edges.filter(e=>!e.blocked),enclosed=visible.filter(e=>Math.min(e.ay,e.by)>=Math.min(ay,by)&&Math.max(e.ay,e.by)<=Math.max(ay,by));
     function candidate(lines,bend,t=.5){
      const w=Math.max(...lines.map(t=>networkTextWidth(t)))+24,h=lines.length*16+12,point=t=>({x:-3*(1-t)*t*bend,y:ay+(by-ay)*(3*t*t-2*t*t*t)}),q=point(t),box={x:q.x-w/2,y:q.y-h/2,w,h},steps=Math.ceil((2*bend+Math.abs(by-ay))/6),samples=Array.from({length:steps+1},(_,j)=>point(j/steps));
      return {p,lines,box,bend,ay,by,point,samples};
     }
-    const curveClear=e=>!visible.some(v=>e.samples.some(q=>inside(q,inset(v.box,4))));
+    // Ignore only the first/last 10 px at the attachments when checking card clearance.
+    const borderClear=e=>e.samples.every(q=>Math.hypot(q.x,q.y-ay)<=10||Math.hypot(q.x,q.y-by)<=10||q.x<=-10);
+    let minBend=32;while(!borderClear(candidate(short,minBend)))minBend+=16;
+    const curveClear=e=>borderClear(e)&&!visible.some(v=>e.samples.some(q=>inside(q,inset(v.box,4))));
     const fits=e=>e.box.x>=-room&&!visible.some(v=>intersects(inset(e.box,6),v.box))&&![...positions.values()].some(c=>intersects(inset(e.box,6),c))&&curveClear(e)&&!edges.some(v=>v.samples.some(q=>inside(q,inset(e.box,4))));
-    let chosen,lastBend=0;
+    let chosen,lastBend=minBend;
     for(const lines of full.length>1?[full,short]:[full]){
      const w=Math.max(...lines.map(t=>networkTextWidth(t)))+24;
      // At the midpoint the cubic reaches 3/4 of its control-point bend.
-     for(let bend=(w/2+8)/.75;.75*bend+w/2<=room;bend+=16){lastBend=Math.max(lastBend,bend);const e=candidate(lines,bend);if(fits(e)){chosen=e;break}}
+     const outerBend=Math.max(0,...enclosed.map(e=>-e.box.x+16+w/2))/.75;
+     for(let bend=Math.max(minBend,(w/2+8)/.75,outerBend);.75*bend+w/2<=room;bend+=16){lastBend=Math.max(lastBend,bend);const e=candidate(lines,bend);if(fits(e)){chosen=e;break}}
      if(chosen)break;
     }
     if(!chosen)for(const t of [.35,.65]){const e=candidate(short,lastBend,t);if(fits(e)){chosen=e;break}}
     if(!chosen){
      // Hidden chips do not obstruct later curves; every curve still obstructs visible chips.
-     for(let bend=lastBend;;bend=Math.max(0,bend-16)){const e=candidate(short,bend);if(curveClear(e)||bend===0){chosen={...e,blocked:true};break}}
+     for(let bend=lastBend;;bend=Math.max(minBend,bend-16)){const e=candidate(short,bend);if(curveClear(e)||bend===minBend){chosen={...e,blocked:true};break}}
     }
     edges.push(chosen);
    }
@@ -374,11 +378,12 @@ function network(){
    H=Math.max(H,phoneList.length*64+64);cy=H/2;
    ordered.forEach((w,i)=>{const angle=-Math.PI/2+2*Math.PI*i/ordered.length,x=cx+rx*Math.cos(angle),y=cy+ry*Math.sin(angle);positions.set(w.id,{x,y,angle});nodeBoxes.push({x:x-radius-4,y:y-radius-4,w:2*radius+8,h:2*radius+8})});
    phoneList.forEach((p,i)=>phones.set(p.id,{x:W-188,y:(H-phoneList.length*64+20)/2+i*64,w:176,h:44}));
-   for(const p of pairs){const a=positions.get(p.a),b=positions.get(p.b),control={x:(a.x+b.x)/2*.65+cx*.35,y:(a.y+b.y)/2*.65+cy*.35};const end=(v)=>{const dx=control.x-v.x,dy=control.y-v.y,len=Math.hypot(dx,dy)||1;return {x:v.x+dx/len*radius,y:v.y+dy/len*radius}};const start=end(a),finish=end(b),lines=texts(p,a,b),box={x:0,y:0,w:Math.max(...lines.map(t=>networkTextWidth(t)))+24,h:lines.length*16+12};edges.push({p,lines,box,d:`M${start.x} ${start.y} Q${control.x} ${control.y} ${finish.x} ${finish.y}`,point:t=>({x:(1-t)**2*start.x+2*(1-t)*t*control.x+t*t*finish.x,y:(1-t)**2*start.y+2*(1-t)*t*control.y+t*t*finish.y})})}
+   for(const p of pairs){const a=positions.get(p.a),b=positions.get(p.b),control={x:(a.x+b.x)/2*.65+cx*.35,y:(a.y+b.y)/2*.65+cy*.35};const end=(v)=>{const dx=control.x-v.x,dy=control.y-v.y,len=Math.hypot(dx,dy)||1;return {x:v.x+dx/len*(radius+3),y:v.y+dy/len*(radius+3)}};const start=end(a),finish=end(b),lines=texts(p,a,b),box={x:0,y:0,w:Math.max(...lines.map(t=>networkTextWidth(t)))+24,h:lines.length*16+12};edges.push({p,lines,box,d:`M${start.x} ${start.y} Q${control.x} ${control.y} ${finish.x} ${finish.y}`,point:t=>({x:(1-t)**2*start.x+2*(1-t)*t*control.x+t*t*finish.x,y:(1-t)**2*start.y+2*(1-t)*t*control.y+t*t*finish.y})})}
   }
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   nodeBoxes.push(...phones.values());
-  for(const e of edges){const ids=[wsKey(e.p.a),wsKey(e.p.b)],attrs={class:'edge-line',d:e.d};if(e.p.rules.some(r=>r.to===e.p.a))attrs['marker-start']='url(#network-arrow)';if(e.p.rules.some(r=>r.to===e.p.b))attrs['marker-end']='url(#network-arrow)';const label=networkPairLabel(e.p),key='e:'+JSON.stringify(ids);
+  const degree=new Map(ordered.map(w=>[w.id,pairs.filter(p=>p.a===w.id||p.b===w.id).length]));
+  for(const e of edges){const ids=[wsKey(e.p.a),wsKey(e.p.b)],attrs={class:'edge-line',d:e.d};if(e.p.rules.some(r=>r.to===e.p.a))attrs['marker-start']='url(#network-arrow)';if(e.p.rules.some(r=>r.to===e.p.b))attrs['marker-end']='url(#network-arrow)';if(!cards){if(degree.get(e.p.a)>6)attrs.class+=' crowded-start';if(degree.get(e.p.b)>6)attrs.class+=' crowded-end'}const label=networkPairLabel(e.p),key='e:'+JSON.stringify(ids);
    e.g=interactive(svgEl('g',{class:'graph-item graph-edge'},svgEl('path',{class:'edge-hit',d:e.d}),svgEl('path',attrs)),ids,label,()=>edgeSheet(e.p.a,e.p.b),key);lineLayer.append(e.g);
    e.chip=interactive(svgEl('g',{class:'graph-item edge-label'+(e.blocked?' chip-blocked':'')},svgEl('title',{},label),svgEl('rect',{width:e.box.w,height:e.box.h,rx:10}),e.lines.map((t,i)=>svgEl('text',{x:e.box.w/2,y:18+i*16,'text-anchor':'middle'},t))),ids,label,()=>edgeSheet(e.p.a,e.p.b),'c:'+key);chipLayer.append(e.chip);
    if(!cards){const q=e.point(.5);e.box.x=q.x-e.box.w/2;e.box.y=q.y-e.box.h/2}e.chip.setAttribute('transform',`translate(${e.box.x} ${e.box.y})`);
@@ -389,14 +394,14 @@ function network(){
   function badge(g,x,y,text,review=false){const w=networkTextWidth(text,11)+16;g.append(svgEl('rect',{class:review?'review-badge':'waiting-badge',x,y,width:w,height:18,rx:9}),svgEl('text',{class:review?'review-text':'waiting-count',x:x+8,y:y+13},text))}
   const outside=[];
   for(const [i,w]of ordered.entries()){const p=positions.get(w.id),status=networkStatus(w),count=Math.max(0,Number(w.unread)||0),review=hasChange(w),g=svgEl('g',{class:'graph-item graph-node'},svgEl('title',{},w.name+': '+status+(count?' · '+count+' waiting':'')+(review?' · needs review':'')));
-   if(cards){const countText=count+' waiting',countWidth=count?networkTextWidth(countText,11)+24:0;g.append(svgEl('rect',{class:'node-shape',x:p.x,y:p.y,width:p.w,height:p.h,rx:12}),svgEl('rect',{class:'focus-ring',x:p.x-4,y:p.y-4,width:p.w+8,height:p.h+8,rx:16}),svgEl('text',{class:'node-name',x:p.x+14,y:p.y+23},networkShort(w.name,p.w-28-countWidth)),svgEl('circle',{class:w.online?'online':'offline',cx:p.x+18,cy:p.y+43,r:4}),...networkStatusLines(status,p.w-42).map((line,i)=>svgEl('text',{class:'node-status',x:p.x+30,y:p.y+47+i*16},line)));if(count)badge(g,p.x+p.w-countWidth,p.y+9,countText);if(review)badge(g,p.x+12,p.y+p.h-24,'Needs your review',true);
+   if(cards){let countText=count+' waiting',countWidth=count?networkTextWidth(countText,11)+24:0;if(count&&networkTextWidth(w.name,13)>p.w-28-countWidth){countText=String(count);countWidth=networkTextWidth(countText,11)+24}g.append(svgEl('rect',{class:'node-shape',x:p.x,y:p.y,width:p.w,height:p.h,rx:12}),svgEl('rect',{class:'focus-ring',x:p.x-4,y:p.y-4,width:p.w+8,height:p.h+8,rx:16}),svgEl('text',{class:'node-name',x:p.x+14,y:p.y+23},networkShort(w.name,p.w-28-countWidth)),svgEl('circle',{class:w.online?'online':'offline',cx:p.x+18,cy:p.y+43,r:4}),...networkStatusLines(status,p.w-42).map((line,i)=>svgEl('text',{class:'node-status',x:p.x+30,y:p.y+47+i*16},line)));if(count)badge(g,p.x+p.w-countWidth,p.y+9,countText);if(review)badge(g,p.x+12,p.y+p.h-24,'Needs your review',true);
    }else{g.append(svgEl('circle',{class:'node-shape '+(w.online?'online-ring':'offline-ring'),cx:p.x,cy:p.y,r:radius}),svgEl('circle',{class:'focus-ring',cx:p.x,cy:p.y,r:radius+4}));
     const cos=Math.cos(p.angle),sin=Math.sin(p.angle),anchor=Math.abs(cos)<=Math.sin(Math.PI/12)?'middle':cos>0?'start':'end',label=networkShort(w.name,150,12),two=workspaces.length<=12,suffix=count?' · '+count+(two?' waiting':''):'',nameWidth=networkTextWidth(label,12)+(two?0:networkTextWidth(suffix,12));let lines=two?2:1,box,x,y;
     function place(step){const dist=radius+8+step*12,lw=Math.max(nameWidth,lines>1?networkTextWidth(status+suffix,11):0),lh=lines*16;x=p.x+cos*dist;y=p.y+sin*dist;const top=anchor==='middle'?(sin<0?y-lh:y):y-lh/2;box={x:x-(anchor==='end'?lw:anchor==='middle'?lw/2:0),y:top,w:lw,h:lh};y=top+12}
     for(let step=0;step<=4;step++){place(step);if(![...outside,...[...positions.values()].map(p=>({x:p.x-radius,y:p.y-radius,w:radius*2,h:radius*2})),...phones.values()].some(b=>box.x<b.x+b.w&&box.x+box.w>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y))break;if(step===4&&lines>1){lines=1;place(step)}}
     outside.push(box);const title=svgEl('text',{class:'ring-name',x,y,'text-anchor':anchor},label);if(!two&&count)title.append(svgEl('tspan',{class:'ring-waiting'},suffix));g.append(title);
     if(lines>1){const sub=svgEl('text',{class:'ring-status',x,y:y+16,'text-anchor':anchor},status);if(count)sub.append(svgEl('tspan',{class:'ring-waiting'},suffix));g.append(sub)}
-    if(review)g.append(svgEl('circle',{class:'review-dot',cx:p.x+cos*(radius+4),cy:p.y+sin*(radius+4),r:4}));
+    if(review)g.append(svgEl('circle',{class:'review-dot',cx:p.x+radius*Math.sin(Math.PI/6),cy:p.y-radius*Math.cos(Math.PI/6),r:4}));
     const hitX=Math.min(p.x-radius-4,box.x),hitY=Math.min(p.y-radius-4,box.y);g.prepend(svgEl('rect',{class:'node-hit',x:hitX,y:hitY,width:Math.max(p.x+radius+4,box.x+box.w)-hitX,height:Math.max(p.y+radius+4,box.y+box.h)-hitY}));
    }
    nodeLayer.append(interactive(g,[wsKey(w.id)],w.name+': '+status+(count?', '+count+' waiting':'')+(review?', Needs your review':''),()=>workspaceSheet(w),wsKey(w.id)));
