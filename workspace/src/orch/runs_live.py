@@ -8,10 +8,11 @@ the agent says it is idle: the tool's own hooks call `orch run event --kind idle
 `orch run done`. At most 4 live sessions per workspace. A session idle (or waiting for a person) for an
 hour (workspace.live_idle_minutes), or on a ticket Done for that long, is closed on the next
 `orch run` call (there is no daemon); its session id stays on the ticket, so the next start continues it.
-Nothing here reads the screen to decide anything, with one exception that only explains: a run still
-"starting" (no hook has fired) is checked against the adapter's live.screens (a question the tool asks
-before it is up, such as whether to trust the folder) and, after STARTUP_SECONDS, is shown as waiting for a
-person instead of "working".
+Nothing here reads the screen to decide anything, with one exception: a run still "starting" (no hook has
+fired) is checked against the adapter's live.screens (a screen the tool shows before it is up). The run's
+own wrapper passes the harmless first-run ones (theme, notes, trust of the `orch init` folder) with the
+adapter's keys, once each; any other (a login) and a start not up after STARTUP_SECONDS are shown as
+waiting for a person instead of "working".
 """
 
 from __future__ import annotations
@@ -452,10 +453,17 @@ def _done_for(root: Path, tid: str, limit: float) -> bool:
     return False
 
 
-def check_starting(root: Path, rec: dict, now: float | None = None) -> str | None:
-    """A live run whose tool has not said it is up: if its pane shows a screen the adapter knows (it waits
-    for a person), or it is still not up after STARTUP_SECONDS, mark it as waiting for a person, with why.
-    Nothing is typed into the pane. The tool's own hooks set the state again once it is up."""
+def check_starting(
+    root: Path, rec: dict, now: float | None = None, answered: list[str] | None = None
+) -> str | None:
+    """A live run whose tool has not said it is up: if its pane shows a screen the adapter knows that waits
+    for a person, or it is still not up after STARTUP_SECONDS, mark it as waiting for a person, with why.
+
+    Only the run's own wrapper passes `answered` (see watch_start): it then answers a harmless first-run
+    screen (adapter live.screens with answer) by sending those keys to this run's own pane, at most once per
+    screen per run. A folder-trust screen is answered only for the folder set up with `orch init` (its
+    consent), and only when the screen names that folder. A login or any other screen is never answered.
+    The tool's own hooks set the state again once it is up."""
     tid, run = rec["ticket"], rec["run"]
     try:
         age = (time.time() if now is None else now) - runs._parse((rec.get("live") or {})["since"])
@@ -464,9 +472,20 @@ def check_starting(root: Path, rec: dict, now: float | None = None) -> str | Non
     if age < 3:
         return None
     pane = tmux(root, "capture-pane", "-p", "-t", target(tid)) if session_exists(root, tid) else None
-    note = None
+    scr = None
     if pane is not None and pane.returncode == 0:
-        note = adapters.screen_note(rec["agent"], root, pane.stdout, ref(root, tid))
+        scr = adapters.screen(rec["agent"], root, pane.stdout, ref(root, tid))
+    if scr and scr.get("answer"):
+        if answered is None or scr["what"] in answered:
+            scr = None  # the wrapper answers it (or already did: the tool is still redrawing)
+        elif not scr.get("folder") or _names_own_folder(root, pane.stdout):
+            for i, k in enumerate(scr["answer"]):
+                if i:
+                    time.sleep(PASTE_DELAY)
+                tmux(root, "send-keys", "-t", target(tid), k)
+            answered.append(scr["what"])
+            return None
+    note = scr["say"] if scr else None
     if note is None and age >= STARTUP_SECONDS:
         label = adapters.load(rec["agent"], root)["label"]
         note = (
@@ -481,6 +500,40 @@ def check_starting(root: Path, rec: dict, now: float | None = None) -> str | Non
             cur["live"] = {"state": "attention", "since": tickets.now(), "why": note}
             runs._write(root, cur)
     return note
+
+
+def _names_own_folder(root: Path, text: str) -> bool:
+    if not adapters.orch_folder(root):
+        return False
+    lines = [ln.strip() for ln in text.splitlines()]
+    joined = lines + [a + b for a, b in zip(lines, lines[1:], strict=False)]  # a long path may wrap
+    return bool({str(root), str(root.resolve())} & set(joined))  # the whole line, not a part of a path
+
+
+def watch_start(root: Path, tid: str, run: str, name: str, proc: subprocess.Popen) -> list[str]:
+    """In the pane's wrapper, while the tool starts up: pass its harmless first-run screens (check_starting
+    with answers) so nobody has to open the live session, and say so once in the ticket history. Ends when
+    the tool is up (a hook changed the state), waits for a person, ends, or after STARTUP_SECONDS."""
+    answered: list[str] = []
+    if not any(s.get("answer") for s in (adapters.load(name, root).get("live") or {}).get("screens") or []):
+        return answered
+    end = time.time() + STARTUP_SECONDS + 5
+    while proc.poll() is None and time.time() < end:
+        rec = runs.read(root, tid)
+        if not rec or rec["run"] != run:
+            break
+        if (rec.get("live") or {"state": "starting"}).get("state") != "starting":
+            break
+        if rec.get("live") and check_starting(root, rec, answered=answered) is not None:
+            break
+        time.sleep(1)
+    if answered:
+        label = adapters.load(name, root)["label"]
+        with contextlib.suppress(Exception):
+            tickets.log(
+                root, tid, f"Answered {label}'s first-run screens ({', '.join(answered)}).", f"agent:{name}"
+            )
+    return answered
 
 
 def start_waiting(root: Path) -> None:
