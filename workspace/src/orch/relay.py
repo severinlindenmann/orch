@@ -585,7 +585,7 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
         return why, None
     by, via = _answer_by(msg)
     try:
-        tickets.answer(
+        t, q = tickets.answer(
             root,
             asked["ticket"],
             asked["question_id"],
@@ -597,7 +597,23 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
         if _applied_ticket(root, msg):  # a crash after the write, before "seen": same answer, nothing to redo
             return f"answered {asked['question_id']} on {asked['ticket']} (via {via})", asked["ticket"]
         return f"not applied to {asked['ticket']}: {e}", None
+    _to_waiting_agent(root, t["id"], q, by)
     return f"answered {asked['question_id']} on {asked['ticket']} (via {via})", asked["ticket"]
+
+
+def _to_waiting_agent(root: Path, tid: str, q: dict, by: str) -> None:
+    """An agent runs on the ticket: the answer goes into its answer queue, like `orch answer` (live: pasted
+    when it is idle). A phone's answer is a person's; another workspace's (agent:<name>) goes in too, since
+    the agent here is still waiting for it. The answer is saved either way: a busy run only delays it."""
+    from orch import runs_live
+
+    with contextlib.suppress(Refused, OSError):
+        if by.startswith("human:"):
+            runs_live.pass_answer(root, tid, q, by)
+        elif (rec := runs.read(root, tid)) and runs.state(rec) == "alive":
+            runs_live.send(
+                root, tid, by, f"Answer to your question {q['id']} ({q['text']}): {q['answer']}", "answer"
+            )
 
 
 def _store_allow(root: Path, msg: dict) -> str:

@@ -1389,3 +1389,53 @@ def test_view_without_messages_names_a_workspace_to_try(proj, run, rel):
     connect(run, rel)
     v = json.loads(run("relay", "view", "--json")[1])
     assert v["blocks"][1]["items"][0]["subtitle"] == 'Try: orch relay send Reports "Hello"'
+
+
+@pytest.mark.parametrize(
+    "frm, answered_by, who",
+    [("ph_iphone0001", "human:severin", "human:severin"), (PEER, "agent:Reports", "agent:Reports")],
+)
+def test_relay_answer_reaches_the_agent_that_waits(
+    proj, run, new_ticket, rel, monkeypatch, frm, answered_by, who
+):
+    """A phone's or another workspace's answer goes into the running agent's queue, like orch answer."""
+    from orch import runs
+
+    connect(run, rel)
+    tid = new_ticket()
+    to = "--phone" if frm.startswith("ph_") else None
+    run("ask", tid, "Use CHF?", "--option", "Yes", "--option", "No", *([to] if to else []), "--by", "agent:x")
+    if to:
+        reply = next(m for m in rel.sent if m["type"] == "question")["id"]
+    else:  # a question this workspace sent to Reports
+        reply = run("relay", "send", PEER, "Use CHF?", "--ticket", tid, "--json")[1]
+        reply = json.loads(reply)["id"]
+        from orch import net
+
+        p = net.secrets_dir(proj) / "questions-sent.json"
+        net.write_json(p, {reply: {"ticket": tid, "question_id": "q1", "to": PEER}}, True)
+    monkeypatch.setattr(
+        runs, "read", lambda root, t: {"run": "r1", "ticket": t, "mode": "oneshot", "agent": "x"}
+    )
+    monkeypatch.setattr(runs, "state", lambda rec, at=None: "alive")
+    body = {"question_id": "q1", "answer": "Yes", "answered_by": answered_by}
+    rel.inbox.append(msg("m_answer0000000009", "answer", body, frm=frm, ticket=tid, reply_to=reply))
+    assert "answered q1" in run("relay", "inbox")[1]
+    (item,) = runs.undelivered(proj, tid)
+    assert item["kind"] == "answer" and item["by"] == who
+    assert item["text"] == "Answer to your question q1 (Use CHF?): Yes"
+
+
+def test_relay_answer_without_a_run_queues_nothing(proj, run, new_ticket, rel):
+    from orch import runs
+
+    connect(run, rel)
+    tid = new_ticket()
+    run("ask", tid, "Q?", "--phone", "--by", "agent:x")
+    reply = next(m for m in rel.sent if m["type"] == "question")["id"]
+    body = {"question_id": "q1", "answer": "ok", "answered_by": "human:severin"}
+    rel.inbox.append(
+        msg("m_answer0000000010", "answer", body, frm="ph_iphone0001", ticket=tid, reply_to=reply)
+    )
+    assert "answered q1" in run("relay", "inbox")[1]
+    assert runs.undelivered(proj, tid) == []
