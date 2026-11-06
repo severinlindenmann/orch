@@ -232,27 +232,21 @@ final class ChatTests: XCTestCase {
 
     func testLinkCardAlwaysShowsTheRealHostAndNoBorrowedSiteIcon() {
         let evil = "https://evil.example/acme/pull/1"
-        XCTAssertEqual(LinkFace.subtitle(type: "GitHub · Pull request", url: evil), "Pull request · evil.example")
+        XCTAssertEqual(LinkFace.subtitle(type: "GitHub · Pull request", url: evil), "Link · evil.example")
         XCTAssertEqual(LinkFace.icon("github", url: evil), "link")
         XCTAssertEqual(LinkFace.icon("github", url: "https://github.com.evil.example/x"), "link")
         XCTAssertEqual(LinkFace.icon("github", url: "https://www.github.com/a/b/pull/1"), "github")
         XCTAssertEqual(LinkFace.icon("jira", url: "https://acme.atlassian.net/browse/X-1"), "jira")
-        XCTAssertEqual(LinkFace.subtitle(type: "GitHub · Pull request", url: "https://github.com/a/b/pull/1"), "GitHub · Pull request · github.com")
+        XCTAssertEqual(LinkFace.subtitle(type: "GitHub · Pull request", url: "https://github.com/a/b/pull/1"), "GitHub · github.com")
         XCTAssertEqual(LinkFace.subtitle(type: nil, url: evil), "Link · evil.example")
     }
 
-    func testLinkTypeIsAnAllowlistAndTheDomainIsTheRegistrablePart() {
+    func testOnlyKnownSiteNamesOnTheirOwnSiteAreShownAndTheDomainIsTheRegistrablePart() {
         let evil = "https://github.com.evil.example/x"
-        XCTAssertEqual(LinkFace.type("github\u{0323}com", url: evil), "Link")  // combining dot
-        XCTAssertEqual(LinkFace.type("github\u{FF0E}com", url: evil), "Link")  // fullwidth dot
-        XCTAssertEqual(LinkFace.type("GitHub", url: evil), "Link")  // a site name off its host
-        XCTAssertEqual(LinkFace.type("My GitHub PR", url: evil), "Link"); XCTAssertEqual(LinkFace.type("GitHub-PR", url: evil), "Link")
-        XCTAssertEqual(LinkFace.type("Pull\u{202E}request", url: evil), "Link")
-        XCTAssertEqual(LinkFace.type(String(repeating: "a", count: 25), url: evil), "Link")
-        for label in ["Git-Hub", "G i t h u b", "G\u{00ED}thub", "\u{01C0}github", "Kampagne Zürich", "mygooglesheets"] {
-            XCTAssertEqual(LinkFace.type(label, url: evil), "Link", label)
+        for label in ["GitHub", "Pull request", "Campaign 2026", "Gith0b", "Git-Hub", "G\u{00ED}thub", "github\u{FF0E}com", "anything at all"] {
+            XCTAssertEqual(LinkFace.type(label, url: evil), "Link", label)  // free text is always "Link"
         }
-        XCTAssertEqual(LinkFace.type("Campaign 2026", url: evil), "Campaign 2026")
+        XCTAssertEqual(LinkFace.type("GitHub", url: "https://gist.github.com/a"), "GitHub")
         XCTAssertTrue(LinkFace.hostParts(evil) == ("github.com.", "evil.example"))
         XCTAssertTrue(LinkFace.hostParts("https://shop.example.co.uk/") == ("shop.", "example.co.uk"))
         XCTAssertEqual(LinkFace.domain("shop.example.co.uk"), "example.co.uk")
