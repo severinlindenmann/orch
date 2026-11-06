@@ -92,6 +92,8 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         items = [(_load(f), f.stem) for f in _json_files(root / ".orch" / "tickets")]
     tickets, skipped = [], 0
     for t, stem in items:
+        if isinstance(t, dict) and t.get("general") is True:  # the hidden General conversation is no ticket
+            continue
         if not _valid_ticket(t, stem):
             skipped += 1
             continue
@@ -100,8 +102,43 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
                 t[k] = []
         _mark_missing_proofs(root, t)
         tickets.append(t)
+    add_artifact_marks(tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
     return tickets, skipped
+
+
+def add_artifact_marks(tickets: list[dict]) -> None:
+    """`art` on each ticket: {address: {id, rev, kind}} for its links and its pr/commit/url proof, with the same id, rev
+    and kind (html, pr, commit, link) the phone gets (the core's phone_view); nothing is uploaded."""
+    try:
+        from orch import phone_view
+    except ImportError:
+        return
+    for t in tickets:
+        art: dict[str, dict] = {}
+        pairs = [("link", ln.get("url"), ln.get("url")) for ln in t.get("links") or [] if isinstance(ln, dict)]
+        for c in t.get("checklist") or []:
+            for ev in c.get("evidence") or [] if isinstance(c, dict) else []:
+                if isinstance(ev, dict) and ev.get("type") in ("url", "pr", "commit"):
+                    pairs.append((ev["type"], ev.get("ref"), ev.get("ref")))
+        for source, ref, url in pairs[:100]:
+            if not isinstance(ref, str) or not isinstance(url, str) or not url.startswith(("http://", "https://")):
+                continue
+            kind, rev = phone_view._url_art(source, url)
+            art[url] = {"id": phone_view.artifact_id(source, ref), "rev": rev, "kind": kind}
+        t["art"] = art
+
+
+def load_general(root: Path) -> dict | None:
+    """The General conversation of the phone (the hidden ticket with `general: true`): {id, history}, oldest first."""
+    for f in _json_files(root / ".orch" / "tickets"):
+        t = _load(f)
+        if isinstance(t, dict) and t.get("general") is True and isinstance(t.get("id"), str) and t["id"] == f.stem:
+            hist = [h for h in t.get("history") if isinstance(h, dict) and isinstance(h.get("text"), str)] \
+                if isinstance(t.get("history"), list) else []
+            hist = [h for h in hist if h.get("text") != "Created"]
+            return {"id": t["id"], "history": hist[-200:]}
+    return None
 
 
 def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
@@ -331,6 +368,7 @@ def load_state(root: Path, orch_bin: str | None = None, with_addons: bool = True
         "tickets": tickets,
         "skipped": skipped,
         "addons": addons,
+        "general": load_general(root) if with_addons else None,  # snapshots carry no phone chat
         "needs": needs if isinstance(needs, list) else [],
         "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
         "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},
