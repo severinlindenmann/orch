@@ -78,7 +78,7 @@ def r2(e):
     out = e.orchj("Reports", "relay", "download", fil[0]["id"])
     got = Path(out["path"]).read_bytes()
     check(hashlib.sha256(got).hexdigest() == hashlib.sha256(f.read_bytes()).hexdigest() == fil[0]["body"]["sha256"], "sha256 differs")
-    check(".orch/inbox/files" in out["path"], f"download path {out['path']}")
+    check("/received/" in out["path"], f"download path {out['path']}")
 
 
 @scenario("R3")
@@ -335,7 +335,7 @@ def r13(e):
 
 @scenario("R15")
 def r15(e):
-    """Phone paired with Pilatus writes; Pilatus answers it (relay send ph_ + ask --phone), refresh lists the phone;
+    """Phone paired with Pilatus writes (the text becomes a ticket); Pilatus answers it (relay send ph_ + ask --phone), refresh lists the phone;
     Home (not paired with that phone) cannot reach it and is told what to do."""
     from scenarios_misc import pair, phone
 
@@ -347,13 +347,16 @@ def r15(e):
     d = json.loads((e.ws("Pilatus") / ".agents/skills/orch-relay/workspaces.json").read_text())
     check(ph[0] in [p["id"] for p in d.get("phones", [])], f"workspaces.json phones: {d.get('phones')}")
     _, out, _ = e.orch("Pilatus", "relay", "inbox")
-    check("can you answer my phone" in out and f"orch relay send {ph[0]}" in out, f"inbox: {out}")
+    # a text from the phone becomes a ticket (the inbox says which); the text is the ticket's content
+    check("Message from R15 iPhone" in out and "new ticket" in out, f"inbox: {out}")
+    made = [t for t in tickets(e, "Pilatus") if "can you answer my phone" in json.dumps(t)]
+    check(len(made) == 1, f"the phone text did not become exactly one ticket: {[t.get('title') for t in tickets(e, 'Pilatus')]}")
     e.orch("Pilatus", "relay", "send", ph[0], "yes, I can answer your phone")
     e.orch("Pilatus", "relay", "send", "R15 iPhone", "by name too")
     t = e.orchj("Pilatus", "ticket", "new", "R15 phone question")["id"]
     e.orch("Pilatus", "ask", t, "Ship it?", "--option", "yes", "--option", "no", "--phone")
     got = [x["message"]["body"]["text"] for x in phone(e, ph, "GET", "/v1/phone/messages").json()["items"]]
-    check(got[:3] == ["by name too", "yes, I can answer your phone", "can you answer my phone"], f"phone messages: {got}")
+    check(got[:4] == ["by name too", "yes, I can answer your phone", "Got it: can you answer my phone", "can you answer my phone"], f"phone messages: {got}")
     qs = [q for q in phone(e, ph, "GET", "/v1/phone/questions").json()["items"] if q["message"].get("ticket") == t]
     check(len(qs) == 1, f"phone questions: {qs}")
     # Home is not on this phone's list: refused with what to do, and its directory lists no such phone

@@ -957,15 +957,19 @@ def f4_focus(e):
     cf.parent.mkdir(parents=True, exist_ok=True)
     cf.write_text(json.dumps(claim))
 
+    def evil(p: Path) -> bool:
+        # a file or folder named for the bad run id; not "Libreville" in the add-on's uv tool install (tzdata)
+        return "uvtools" not in p.parts and any(part.startswith("evil") for part in p.parts)
+
     def files() -> set:
-        return {str(p.relative_to(e.tmp)) for p in e.tmp.rglob("*") if p.is_file() and ".git" not in p.parts and "evil" in str(p)}
+        return {str(p.relative_to(e.tmp)) for p in e.tmp.rglob("*") if p.is_file() and ".git" not in p.parts and evil(p)}
 
     snap = {str(p) for p in w.root.rglob("*") if ".git" not in p.parts}
     v = fx.view(tid)
     check(v["run"]["run"] is None, f"a bad run id is shown on the page: {v['run']}")
     check(not files() and not any("evil" in str(p) for p in Path(e.tmp).parent.glob("evil*")), f"files written for a bad run id: {files()}")
     new = {str(p) for p in w.root.rglob("*") if ".git" not in p.parts} - snap
-    check(not [n for n in new if "evil" in n], f"files written for a bad run id: {new}")
+    check(not [n for n in new if evil(Path(n))], f"files written for a bad run id: {new}")
     cf.unlink()
     # view and needs against their schemas, with a run going
     fx.act_ok("run.start", {"ticket": tid})
