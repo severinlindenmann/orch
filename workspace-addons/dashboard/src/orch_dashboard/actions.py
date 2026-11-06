@@ -12,10 +12,17 @@ import re
 import subprocess
 from pathlib import Path
 
+from .data import run_orch
+
 MAX_TEXT = 2000
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 QID = re.compile(r"q[0-9]{1,4}")
 DAY = re.compile(r"(\d{4}-\d\d-\d\d)?")
+ADDON = re.compile(r"[a-z][a-z0-9-]{1,31}")
+VERB = re.compile(r"[a-z][a-z-]{0,20}")
+# A name that is also a core command is never an add-on target, whatever the add-on list says.
+RESERVED = frozenset({"ticket", "check", "log", "ask", "answer", "link", "ext", "wait", "needs", "run", "start", "stop",
+                      "status", "init", "update", "addon", "agents", "config", "clients", "help", "setup", "dashboard"})
 PATCH_KEYS = ("title", "status", "owner", "due", "note", "summary")
 STATUSES = ("open", "active", "waiting", "done", "dropped")
 
@@ -137,9 +144,22 @@ def _addon_start(a):
     return ["start"], ["--no-open"], []
 
 
+def _addon_act(a):
+    """ONE generic op for an add-on's own verbs: `orch <addon> act <verb> -- <target>`. The add-on name is checked
+    against `orch addon list` in run_op (it must be on here); the dashboard code never names one."""
+    _only(a, ("addon", "verb", "target"))
+    addon, verb = a.get("addon"), a.get("verb")
+    if not (isinstance(addon, str) and ADDON.fullmatch(addon) and addon not in RESERVED):
+        raise BadRequest("That is not an add-on.")
+    if not (isinstance(verb, str) and VERB.fullmatch(verb)):
+        raise BadRequest("That action is not available.")
+    return [addon, "act", verb], [], [_tid(a.get("target"))]
+
+
 # op -> function(args) -> (words incl. ids, flags, free text after "--")
 OPS = {"answer": _answer, "ticket.new": _ticket_new, "ticket.patch": _ticket_patch, "ticket.edit": _ticket_edit,
-       "log": _log, "run.start": _run_start, "run.stop": _run_stop, "addon.start": _addon_start}
+       "log": _log, "run.start": _run_start, "run.stop": _run_stop, "addon.start": _addon_start,
+       "addon.act": _addon_act}
 
 
 def actor() -> str:
@@ -161,11 +181,19 @@ def build_argv(op, args) -> list[str]:
     return [*words, *flags, "--by", actor(), "--json", *(["--", *tail] if tail else [])]
 
 
+def _addon_is_on(root: Path, orch_bin: str, name: str) -> bool:
+    rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    return any(isinstance(r, dict) and r.get("name") == name and r.get("active") is True
+               for r in (rows if isinstance(rows, list) else []))
+
+
 def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict | None]:
     """Run one op. Returns (http status, plain text, parsed json or None)."""
     argv = build_argv(op, args)
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
+    if op == "addon.act" and not _addon_is_on(root, orch_bin, args["addon"]):
+        raise BadRequest("That add-on is not on in this workspace.")
     try:
         r = subprocess.run([orch_bin, *argv], check=False, cwd=root, capture_output=True, text=True, timeout=60,
                            stdin=subprocess.DEVNULL, env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin})
