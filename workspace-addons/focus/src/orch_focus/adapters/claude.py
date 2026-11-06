@@ -6,7 +6,9 @@ Claude-specific details live only in this file. Feed it one decoded JSON line at
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime
+from pathlib import Path
 
 from .. import events as ev
 
@@ -19,6 +21,22 @@ _WORDS = {
     "Grep": "Search",
     "Glob": "Find files",
 }
+
+
+SESSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{7,63}")
+
+
+def transcript_path(session: str) -> Path | None:
+    """Claude's transcript of a session: ~/.claude/projects/<folder>/<session>.jsonl (exact file name only)."""
+    if not isinstance(session, str) or not SESSION.fullmatch(session):
+        return None
+    base = Path.home() / ".claude" / "projects"
+    if base.is_symlink() or not base.is_dir():
+        return None
+    for p in base.glob(f"*/{session}.jsonl"):
+        if p.is_file() and not p.is_symlink() and not p.parent.is_symlink():
+            return p
+    return None
 
 
 def _step_text(name: str, inp: dict) -> str:

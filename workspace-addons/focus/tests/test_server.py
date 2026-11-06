@@ -58,6 +58,7 @@ def test_running_claude_run_writes_events_and_board(server, ws, fake_orch):
     t["checklist"][1].update(done=True, evidence=[{"type": "note", "ref": "ok", "text": "ok"}])
     p.write_text(json.dumps(t))
     server.RequestHandlerClass.keywords["tracker"].status_cache.clear()
+    server.RequestHandlerClass.keywords["tracker"].ticket_cache.clear()
     v = json.loads(req(server, "GET", f"/api/t/{TID}")[1])
     assert [t["state"] for t in v["board"]["tasks"]] == ["done"]
     assert (ws / ".orch/addons/focus/runs/r_abc12345.events.jsonl").exists()
@@ -81,7 +82,9 @@ def test_post_without_origin_refused_and_get_api_cross_site_refused(server, fake
     assert c.getresponse().status == 403
     assert req(server, "GET", f"/api/t/{TID}", headers={"Sec-Fetch-Site": "cross-site"})[0] == 403
     assert req(server, "GET", f"/api/t/{TID}", headers={"Host": "evil.example:1"})[0] == 403
-    assert calls(fake_orch) == [] or all(c[:2] == ["run", "status"] for c in calls(fake_orch))
+    assert calls(fake_orch) == [] or all(
+        c[:2] in (["run", "status"], ["ticket", "show"]) for c in calls(fake_orch)
+    )
 
 
 def test_ops_build_exact_argv(server, fake_orch):
@@ -101,7 +104,11 @@ def test_ops_build_exact_argv(server, fake_orch):
         == 200
     )
     assert go("answer", {"ticket": TID, "question": "q1", "answer": "CHF"})[0] == 200
-    got = [c for c in calls(fake_orch) if c[0] != "run" or c[1] != "status"]
+    got = [
+        c
+        for c in calls(fake_orch)
+        if c[:2] not in (["run", "status"], ["ticket", "show"], ["run", "session"])
+    ]
     assert got[0][:4] == ["run", "start", TID, "--by"] and got[0][4] == "focus"
     assert "--fresh" in got[1]
     assert got[2][:3] == ["run", "stop", TID]
@@ -121,7 +128,7 @@ def test_ops_build_exact_argv(server, fake_orch):
 def test_bad_ops_are_400_and_run_nothing(server, fake_orch, op, args):
     st, _, _ = req(server, "POST", "/api/act", {"op": op, "args": args})
     assert st == 400
-    assert not [c for c in calls(fake_orch) if c[:2] != ["run", "status"]]
+    assert not [c for c in calls(fake_orch) if c[:2] not in (["run", "status"], ["ticket", "show"])]
 
 
 def test_build_argv_unknown_and_types():
@@ -235,12 +242,45 @@ def test_control_characters_are_dropped_from_text():
         actions.build_argv("run.send", {"ticket": TID, "text": "\x1b\x07"})
 
 
-def test_ticket_reading_is_bounded_and_symlink_safe(server, ws):
-    d = ws / ".orch" / "tickets"
-    (d / "t_bigone01.json").write_text('{"id":"t_bigone01","pad":"' + "x" * (3 * 1024 * 1024) + '"}')
-    assert req(server, "GET", "/api/t/t_bigone01")[0] == 404
-    moved = ws / ".orch" / "tickets-real"
-    d.rename(moved)
-    d.symlink_to(moved)
-    assert req(server, "GET", f"/api/t/{TID}")[0] == 404
-    assert json.loads(req(server, "GET", "/api/tickets")[1]) == []
+def test_attention_state_in_a_live_run(server, fake_orch):
+    (fake_orch.parent / "status.json").write_text(json.dumps(
+        {"running": True, "claim": {"run": "r_att00001", "agent": "claude", "mode": "live", "live": {"state": "attention"}}}))  # fmt: skip
+    v = json.loads(req(server, "GET", f"/api/t/{TID}")[1])
+    assert v["state"] == "needs" and v["attention"] is True
+
+
+def test_generic_comes_from_adapter_data_not_the_agent_name(server, ws, fake_orch):
+    def view(agent, mode):
+        (fake_orch.parent / "status.json").write_text(
+            json.dumps({"running": True, "claim": {"run": "r_gen00001", "agent": agent, "mode": mode}})
+        )
+        tr = server.RequestHandlerClass.keywords["tracker"]
+        tr.status_cache.clear()
+        return json.loads(req(server, "GET", f"/api/t/{TID}")[1])
+
+    assert view("claude", "oneshot")["generic"] is False
+    assert view("codex", "oneshot")["generic"] is True
+    (ws / ".orch" / "config.toml").write_text('[agents.mine]\nadapter = "claude"\n')
+    assert view("mine", "live")["generic"] is False
+
+
+def test_oneshot_denial_asks_and_run_send_note(server, ws, fake_orch):
+    (ws / ".orch" / "run" / "logs").mkdir(parents=True)
+    (ws / ".orch" / "run" / "logs" / f"{TID}-r_den00001.log").write_text(
+        json.dumps({"type": "result", "permission_denials": [{"tool_name": "WebFetch"}]}) + "\n"
+    )
+    (fake_orch.parent / "status.json").write_text(
+        json.dumps(
+            {
+                "running": True,
+                "claim": {"run": "r_den00001", "agent": "claude", "mode": "oneshot", "by": "focus"},
+            }
+        )
+    )
+    v = json.loads(req(server, "GET", f"/api/t/{TID}")[1])
+    assert v["board"]["denials"][0]["tool"] == "WebFetch"
+    assert [c for c in calls(fake_orch) if c[0] == "ask" and "focus:permission" in c]
+    _st, body, _ = req(
+        server, "POST", "/api/act", {"op": "run.send", "args": {"ticket": TID, "text": "hello"}}
+    )
+    assert json.loads(body)["note"] == "Goes in after this step."

@@ -28,7 +28,7 @@
     try {
       r = await fetch('/api/act', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({op, args})});
     } catch (e) { return {ok: false, status: 0, message: 'Could not reach Focus.'}; }
-    if (r.ok) { const d = await r.json(); if (d.view) apply(d.view); return {ok: true, status: r.status, result: d.result}; }
+    if (r.ok) { const d = await r.json(); if (d.view) apply(d.view); return {ok: true, status: r.status, result: d.result, note: d.note}; }
     return {ok: false, status: r.status, message: (await r.text()).slice(0, 300)};
   }
 
@@ -247,6 +247,7 @@
     const u = v.board.usage, d = v.board.denials;
     const lines = [];
     if (u) lines.push(h('p', {class: 'fx-line ' + (u.status === 'limited' ? 'bad' : 'warn'), text: u.text}));
+    if (v.attention) lines.push(h('p', {class: 'fx-line warn'}, 'Waiting for your OK in the live session. ', h('button', {class: 'btn ghost xs', 'data-act': 'attach', text: 'Open live session'})));
     if (d.length) lines.push(h('p', {class: 'fx-line warn', text: d[d.length - 1].text + '. It waits for your OK.'}));
     els.line.replaceChildren(...lines);
   }
@@ -302,8 +303,7 @@
       els.msg.value = ''; grow();
       const r = await act('run.send', {ticket: TID, text});
       if (!r.ok) { els.msg.value = text; toast(r.message, 'error'); return; }
-      const res = r.result || {};
-      toast(res.delivered ? 'Sent.' : (view && view.run.running ? 'Goes in after this step.' : 'Saved for the next run.'), 'ok');
+      toast(r.note || 'Saved for the next run.', 'ok');
     });
     let cur = 0;
     document.addEventListener('keydown', e => {

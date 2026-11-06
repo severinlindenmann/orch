@@ -50,8 +50,22 @@ with open(d / "calls.jsonl", "a") as f:
 a = sys.argv[1:]
 if a[:2] == ["run", "status"]:
     print((d / "status.json").read_text())
+elif a[:2] == ["ticket", "show"]:
+    import os
+    p = pathlib.Path(os.environ["ORCH_ROOT"]) / ".orch" / "tickets" / (a[2] + ".json")
+    if not p.exists():
+        print(json.dumps({{"error": "no such ticket"}})); sys.exit(2)
+    print(p.read_text())
+elif a[:2] == ["ticket", "list"]:
+    import os
+    d = pathlib.Path(os.environ["ORCH_ROOT"]) / ".orch" / "tickets"
+    print(json.dumps([json.loads(x.read_text()) for x in sorted(d.glob("t_*.json"))]))
+elif a[:2] == ["run", "session"]:
+    print(json.dumps({{"agent": a[3], "session": None}}))
 elif a[:2] == ["run", "send"]:
     print(json.dumps({{"id": "p1", "delivered": 0, "state": "none"}}))
+elif a[0] == "ask":
+    print(json.dumps({{"id": "q7", "text": a[2], "answer": None}}))
 elif a[:2] == ["run", "start"]:
     print(json.dumps({{"ok": True, "run": "r_start001"}}))
 else:
