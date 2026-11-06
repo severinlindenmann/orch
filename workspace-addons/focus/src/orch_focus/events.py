@@ -43,13 +43,14 @@ def redact(text: str) -> str:
     return out
 
 
-def _redact_all(v):
+def _clean(v, limit: int):
+    """Redact first, then clip: a secret across the limit is hidden before it is cut."""
     if isinstance(v, str):
-        return redact(v)
+        return redact(v)[:limit]
     if isinstance(v, dict):
-        return {k: _redact_all(x) for k, x in v.items()}
+        return {k: _clean(x, limit) for k, x in v.items()}
     if isinstance(v, list):
-        return [_redact_all(x) for x in v]
+        return [_clean(x, limit) for x in v]
     return v
 
 
@@ -58,19 +59,27 @@ def now() -> str:
 
 
 def make(
-    run: str, ticket: str, agent: str, kind: str, text: str, source: str, at: str | None = None, **data
+    run: str,
+    ticket: str,
+    agent: str,
+    kind: str,
+    text: str,
+    source: str,
+    at: str | None = None,
+    text_max: int = 500,
+    limits: dict[str, int] | None = None,
+    **data,
 ) -> dict:
-    """One event dict in the contract shape. `text` is clipped to 500 chars and redacted."""
+    """One event dict in the contract shape. The ONLY place that clips: every string (text and each data
+    value) is redacted in full, then clipped to its limit (`text_max`, `limits[key]`, else 500)."""
     if kind not in KINDS:
         raise ValueError(f"unknown event kind {kind}")
-    d = {k: v for k, v in data.items() if v is not None}
-    d = _redact_all(d)  # every string in data, whatever its key
-    if "command" in d:
-        d["command"] = d["command"][:500]
+    lim = limits or {}
+    d = {k: _clean(v, lim.get(k, 500)) for k, v in data.items() if v is not None}
     d["source"] = source
     return {
         "v": 1, "at": at or now(), "run": run, "ticket": ticket, "agent": agent, "kind": kind,
-        "text": redact(text)[:500], "data": d,
+        "text": redact(str(text))[: min(text_max, 500)], "data": d,
     }  # fmt: skip
 
 
@@ -81,13 +90,16 @@ class EventLog:
     def append(self, *events: dict) -> None:
         if not events:
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        old = self.path.with_name(self.path.name + ".1")
         try:
             if self.path.stat().st_size > CAP_BYTES:
-                os.replace(self.path, self.path.with_name(self.path.name + ".1"))
+                os.replace(self.path, old)
+                os.chmod(old, 0o600)
         except FileNotFoundError:
             pass
         fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        os.chmod(self.path, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:
             for e in events:
                 f.write(json.dumps(e, ensure_ascii=False, separators=(",", ":")) + "\n")
@@ -96,6 +108,8 @@ class EventLog:
         """Events from byte offset `since`, and the new offset. Bad lines and unknown kinds are skipped."""
         try:
             with open(self.path, "rb") as f:
+                if since > os.fstat(f.fileno()).st_size:  # the log was rotated: start again
+                    since = 0
                 f.seek(since)
                 raw = f.read()
         except FileNotFoundError:

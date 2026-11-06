@@ -164,3 +164,77 @@ def test_secret_crossing_char_80_is_hidden_in_step_text():
     }
     out = m.feed(line)
     assert "ghp_" not in json.dumps(out)
+
+
+def test_read_after_rotation_resets_offset(tmp_path):
+    log = ev.EventLog(tmp_path, RUN)
+    events = generic_events()
+    log.append(*events)
+    _, off = log.read()
+    old = ev.CAP_BYTES
+    ev.CAP_BYTES = 10
+    try:
+        log.append(events[0])  # rotates, then writes one line to the fresh file
+    finally:
+        ev.CAP_BYTES = old
+    got, off2 = log.read(off)
+    assert got == [events[0]] and off2 < off
+    assert oct(log.path.with_name(log.path.name + ".1").stat().st_mode & 0o777) == "0o600"
+    assert oct(log.path.parent.stat().st_mode & 0o777) == "0o700"
+
+
+def test_bad_event_does_not_break_the_fold():
+    good = generic_events()
+    bad = [
+        {"kind": "task.start", "text": "x", "data": {}},
+        {"kind": "helper.end", "data": {}},
+        {"kind": "usage", "data": {}},
+    ]
+    b = Board.from_events([good[0], *bad, good[1]])
+    assert [t["check"] for t in b.snapshot()["tasks"]] == ["c1"]
+
+
+def _tool_use(name, inp):
+    return {
+        "type": "assistant",
+        "message": {"content": [{"type": "tool_use", "id": "t1", "name": name, "input": inp}]},
+    }
+
+
+def test_secret_across_every_limit_is_hidden_on_every_producer_path():
+    secret = "ghp_" + "d" * 30
+
+    def across(n):
+        pad = "x" * (n - 10)
+        return pad + " " + secret
+
+    outs = []
+    m = ClaudeMapper(RUN, TID)
+    outs += m.feed(_tool_use("Bash", {"command": across(120)}))  # step text limit 120
+    outs += m.feed(
+        {
+            "type": "user",
+            "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": across(200)}]},
+        }
+    )
+    outs += m.feed(_tool_use("Task", {"description": across(120)}))  # helper text limit 120
+    outs += m.feed(_tool_use("Read", {"file_path": "/a/" + across(120)}))
+    outs += m.feed(
+        {
+            "type": "rate_limit_event",
+            "rate_limit_info": {"status": "allowed_warning", "rateLimitType": across(32)},
+        }
+    )
+    outs += m.feed({"type": "result", "permission_denials": [{"tool_name": across(64)}]})
+    w = TicketWatcher(RUN, TID)
+    c = {
+        "id": "c1",
+        "text": across(500),
+        "done": True,
+        "evidence": [{"type": "note", "ref": "r", "text": across(200)}],
+    }
+    outs += w.feed({"checklist": [c], "questions": [{"id": "q1", "text": across(500), "answer": None}]})
+    assert outs
+    assert "ghp_" not in json.dumps(outs)
+    for e in outs:
+        valid(e)

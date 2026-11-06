@@ -28,18 +28,17 @@ def _step_text(name: str, inp: dict) -> str:
     target = inp.get("file_path") or inp.get("path") or inp.get("pattern") or inp.get("url")
     if name == "Bash":
         first = str(inp.get("command", "")).strip().splitlines()[:1]
-        return "Run " + (ev.redact(first[0])[:80] if first else "a command")
+        return "Run " + (first[0] if first else "a command")
     verb = _WORDS.get(name, name)
     if target:
-        return f"{verb} {os.path.basename(str(target)) or target}"[:120]
+        return f"{verb} {os.path.basename(str(target)) or target}"
     return verb
 
 
 def _result_text(content) -> str:
     if isinstance(content, list):
         content = " ".join(str(b.get("text", "")) for b in content if isinstance(b, dict))
-    text = " ".join(str(content or "").split())
-    return text[:200]
+    return " ".join(str(content or "").split())
 
 
 def _secs(a: str, b: str) -> float | None:
@@ -50,6 +49,11 @@ def _secs(a: str, b: str) -> float | None:
         return None
 
 
+# make() is the only place that clips (after redacting); these are the limits it gets.
+TEXT_MAX = {"tool.start": 120, "helper.start": 120, "tool.end": 200, "helper.end": 200}
+LIMITS = {"window": 32, "tool": 64, "id": 100}
+
+
 class ClaudeMapper:
     def __init__(self, run: str, ticket: str):
         self.run, self.tid = run, ticket
@@ -58,7 +62,10 @@ class ClaudeMapper:
         self._n = 0
 
     def _e(self, agent, kind, text, at=None, **data):
-        return ev.make(self.run, self.tid, agent, kind, text, "adapter", at=at, **data)
+        return ev.make(
+            self.run, self.tid, agent, kind, text, "adapter", at=at,
+            text_max=TEXT_MAX.get(kind, 500), limits=LIMITS, **data,
+        )  # fmt: skip
 
     def _agent(self, parent: str | None) -> str:
         return self._helper_of.get(parent, "main") if parent else "main"
@@ -93,12 +100,12 @@ class ClaudeMapper:
                 self._n += 1
                 h = f"h_{self._n}"
                 self._helper_of[tid] = h
-                text = str(inp.get("description") or inp.get("prompt") or "Helper")[:120]
+                text = str(inp.get("description") or inp.get("prompt") or "Helper")
                 self._open[tid] = {"kind": "helper", "at": at}
                 out.append(self._e(h, "helper.start", text, at, id=tid))
             else:
                 self._open[tid] = {"kind": "tool", "at": at, "agent": agent}
-                cmd = inp.get("command") if name == "Bash" else None
+                cmd = str(inp["command"]) if name == "Bash" and "command" in inp else None
                 out.append(
                     self._e(agent, "tool.start", _step_text(name, inp), at, id=tid, tool=name, command=cmd)
                 )
@@ -155,7 +162,7 @@ class ClaudeMapper:
                 text,
                 at,
                 used=used,
-                window=str(info.get("rateLimitType") or "")[:32] or None,
+                window=str(info.get("rateLimitType") or "") or None,
                 status=status,
             )
         ]
@@ -163,7 +170,7 @@ class ClaudeMapper:
     def _result(self, line, at):
         out = []
         for d in line.get("permission_denials") or []:
-            name = str(d.get("tool_name") or "a tool")[:64]
+            name = str(d.get("tool_name") or "a tool")
             out.append(self._e("main", "denial", f"Needs your OK to use {name}", at, tool=name))
         failed = bool(line.get("is_error"))
         out.append(self._e("main", "run.state", "Failed" if failed else "Finished", at,

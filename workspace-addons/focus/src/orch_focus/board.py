@@ -18,7 +18,7 @@ def _evidence_text(item: dict) -> str:
     if not proofs:
         return ""
     last = proofs[-1]
-    return str(last.get("summary") or last.get("text") or last.get("ref") or "")[:200]
+    return str(last.get("summary") or last.get("text") or last.get("ref") or "")
 
 
 class TicketWatcher:
@@ -31,7 +31,9 @@ class TicketWatcher:
         self._primed = False
 
     def _e(self, kind: str, text: str, at: str | None = None, **data) -> dict:
-        return ev.make(self.run, self.tid, "main", kind, text, "ticket", at=at, **data)
+        return ev.make(
+            self.run, self.tid, "main", kind, text, "ticket", at=at, limits={"evidence": 200}, **data
+        )
 
     def feed(self, ticket: dict, prime: bool = False) -> list[dict]:
         """Events for what changed since the last call. The first call (`prime=True`) only remembers."""
@@ -84,6 +86,13 @@ class Board:
         self.last_step = ""
 
     def apply(self, e: dict) -> None:
+        """Fold one event. An event that lacks a key it needs is skipped, never an error."""
+        try:
+            self._apply(e)
+        except (KeyError, TypeError, AttributeError):
+            pass
+
+    def _apply(self, e: dict) -> None:
         k, d = e.get("kind"), e.get("data") or {}
         if k == "run.state":
             self.state = d.get("state", self.state)
