@@ -885,7 +885,7 @@
           // The ticket exists: close now, save the optional details behind the scenes.
           window.orch.toast('Ticket created', 'ok');
           window.orch.close(d);
-          const details = await act('ticket.edit', {ticket:created.id, owner:values.owner, due:values.due, note:values.note});
+          const details = await act('ticket.edit', {ticket:created.id, ...Object.fromEntries(['owner', 'due', 'note'].filter(k => values[k]).map(k => [k, values[k]]))});  // only what was filled in
           if (!details.ok) window.orch.toast('The ticket was created, but its details were not saved: ' + details.text, 'error');
           return;
         }
