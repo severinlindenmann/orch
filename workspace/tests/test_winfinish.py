@@ -187,3 +187,24 @@ def test_start_falls_back_when_breaking_away_is_not_allowed(tmp_path, monkeypatc
     winfinish.start(tmp_path, ["uv"], [], tmp_path, "done")
     assert seen[0] & 0x01000000 and not seen[1] & 0x01000000
     assert (tmp_path / "finish.pending").read_text() == "77"
+
+
+def test_only_one_start_gets_the_mark(tmp_path, monkeypatch):
+    """Two orch commands at the same moment: the second one is refused, never a second job."""
+    monkeypatch.setattr(winfinish, "_popen", lambda argv, **k: __import__("os").getpid())  # alive
+    monkeypatch.setattr(winfinish.sys, "_base_executable", "/base/python", raising=False)
+    winfinish.start(tmp_path, ["uv"], [], tmp_path, "done")
+    with pytest.raises(winfinish.Busy):
+        winfinish.start(tmp_path, ["uv"], [], tmp_path, "done")
+
+
+def test_a_dead_mark_is_taken_over(tmp_path, monkeypatch):
+    import subprocess as sp
+
+    p = sp.Popen([sys.executable, "-c", "pass"])
+    p.wait()
+    (tmp_path / "finish.pending").write_text(str(p.pid))
+    monkeypatch.setattr(winfinish, "_popen", lambda argv, **k: 99)
+    monkeypatch.setattr(winfinish.sys, "_base_executable", "/base/python", raising=False)
+    winfinish.start(tmp_path, ["uv"], [], tmp_path, "done")
+    assert (tmp_path / "finish.pending").read_text() == "99"

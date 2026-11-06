@@ -111,6 +111,10 @@ PENDING_MAX_AGE = 600  # seconds without a sign of life: the finisher has died
 UV_TIMEOUT = 480  # below PENDING_MAX_AGE: the mark is refreshed right before uv starts
 
 
+class Busy(RuntimeError):
+    """Another finisher is still at work."""
+
+
 def needed() -> bool:
     """A reinstall must wait until orch has exited (only on Windows)."""
     return sys.platform == "win32"
@@ -202,8 +206,8 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
     )
     argv = [base, "-I", str(d / "finish.py"), str(d / "job.json")]
     mark = home / "finish.pending"
+    _claim(home, mark)  # no second job from here on
     try:
-        mark.write_text("starting", encoding="utf-8")  # no second job from here on
         try:
             pid = _popen(argv, creationflags=flags | breakaway, **kw)
         except OSError:  # the job does not allow breaking away: start it inside the job
@@ -213,6 +217,23 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
         mark.unlink(missing_ok=True)
         raise RuntimeError(f"could not start the finisher: {e}") from e
     return log_path(home)
+
+
+def _claim(home: Path, mark: Path) -> None:
+    """Create the pending mark atomically (two orch commands at the same moment: only one gets it). A mark
+    left by a finisher that is gone is taken over."""
+    for _ in range(2):
+        try:
+            fd = os.open(mark, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            if pending(home):
+                raise Busy("an add-on install or update is still finishing in the background") from None
+            mark.unlink(missing_ok=True)
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("starting")
+        return
+    raise Busy("an add-on install or update is still finishing in the background")
 
 
 def _popen(argv: list[str], **kw) -> int:
