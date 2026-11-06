@@ -123,6 +123,23 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
     return out
 
 
+def _consent(r: dict) -> str:
+    """What turning an add-on on does, in the same words as `orch addon add` asks (built from `orch addon list`)."""
+    name, d = r["name"], r.get("dashboard") if isinstance(r.get("dashboard"), dict) else None
+    lines = [f"{name} {r.get('version', '')}: {r.get('description', '')}".replace("  ", " ")]
+    if r.get("source") == "local":
+        lines.append("Source: local folder (not checked by orch). It runs code on this computer.")
+    lines.append(f"Adds the command: orch {name}")
+    lines.append(f"Adds a skill and an entry in AGENTS.md: orch-{name}")
+    if r.get("ticket_view"):
+        lines.append(f"Stores data on tickets under: ext.{name}")
+    if d and isinstance(d.get("label"), str):
+        lines.append(f"Adds a dashboard tab: {d['label']}")
+    if r.get("background"):
+        lines.append("Runs a background process.")
+    return "\n".join(lines)[:1200]
+
+
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
     agents, rows = run_orch(orch_bin, ["agents", "--json"], root), run_orch(orch_bin, ["addon", "list", "--json"], root)
@@ -131,7 +148,8 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "folder": str(root),
         "agents": [{k: a.get(k) for k in keep} for a in (agents if isinstance(agents, list) else [])
                    if isinstance(a, dict) and isinstance(a.get("name"), str)],
-        "addons": [{"name": r["name"], "description": str(r.get("description") or "")[:200], "active": r.get("active") is True}
+        "addons": [{"name": r["name"], "description": str(r.get("description") or "")[:200], "active": r.get("active") is True,
+                    "consent": _consent(r)}
                    for r in (rows if isinstance(rows, list) else []) if isinstance(r, dict) and isinstance(r.get("name"), str)
                    and _NAME.match(r["name"])],
     }
@@ -168,7 +186,8 @@ def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool
     return {i: _RUNS[(str(root), i)][1] for i in ids if _RUNS[(str(root), i)][1]}
 
 
-def load_state(root: Path, orch_bin: str | None = None, with_addons: bool = True, fresh: bool = False) -> dict:
+def load_state(root: Path, orch_bin: str | None = None, with_addons: bool = True, fresh: bool = False,
+               with_settings: bool = False) -> dict:
     """with_addons=False (snapshots by default): no add-on tabs, no ticket rows, `ext` dropped from tickets."""
     tickets, skipped = load_tickets(root, orch_bin)
     raw = run_orch(orch_bin, ["addon", "list", "--json"], root)
@@ -186,7 +205,7 @@ def load_state(root: Path, orch_bin: str | None = None, with_addons: bool = True
         "needs": needs if isinstance(needs, list) else [],
         "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
         "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},
-        "settings": load_settings(root, orch_bin) if with_addons else None,
+        "settings": load_settings(root, orch_bin) if with_settings else None,  # only the live local server: it holds the folder path
     }
     state["rev"] = hashlib.sha1(
         json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()).hexdigest()[:12]

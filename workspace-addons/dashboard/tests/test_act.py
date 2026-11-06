@@ -305,9 +305,60 @@ def test_settings_state_has_agents_and_every_addon(ws, act_orch):
         'if a[:2] == ["addon", "list"]:\n    print(json.dumps([{"name": "alpha", "description": "A", "active": True},'
         ' {"name": "beta", "description": "B", "active": False}]))\n    sys.exit(0)\nif a[:2] in (["addon", "list"]')
     act_orch.write_text(src)
-    s = load_state(ws, orch_bin=str(act_orch))["settings"]
+    s = load_state(ws, orch_bin=str(act_orch), with_settings=True)["settings"]
     assert s["agents"] == [{"name": "claude", "label": "Claude", "adapter": "claude", "found": True, "version": "2.1",
                             "can": "x", "status": "found 2.1", "chosen": True}]
     assert [(a["name"], a["active"]) for a in s["addons"]] == [("alpha", True), ("beta", False)]
     assert s["folder"] == str(ws)
-    assert load_state(ws, orch_bin=str(act_orch), with_addons=False)["settings"] is None
+    assert load_state(ws, orch_bin=str(act_orch))["settings"] is None  # only the live server asks for it
+    assert load_state(ws, orch_bin=str(act_orch), with_addons=False, with_settings=False)["settings"] is None
+    assert "consent" in s["addons"][0] and s["addons"][0]["consent"].startswith("alpha")
+
+
+def test_snapshots_carry_no_settings_and_no_folder_path(ws, act_orch):
+    from orch_dashboard.snapshot import render_snapshot
+    for with_addons in (False, True):
+        html = render_snapshot(ws, with_addons=with_addons, orch_bin=str(act_orch))
+        assert '"settings"' not in html.replace('"settings": null', "").replace('"settings":null', "")
+        assert str(ws) not in html and str(ws.parent) not in html
+
+
+def test_settings_state_only_from_the_live_server(ws, act_orch):
+    import threading
+
+    from orch_dashboard.server import make_server
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        import urllib.request
+        st = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{srv.server_address[1]}/api/state").read())
+        assert isinstance(st["settings"], dict) and st["settings"]["folder"] == str(ws)
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_agent_add_never_overwrites_and_is_logged(act_orch, ws):
+    import threading
+
+    from orch_dashboard.server import make_server
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:1] == ["agents"]:\n    print(json.dumps([{"name": "claude"}, {"name": "mine"}]))\n    sys.exit(0)\nif a[:2] in (["addon", "list"]')
+    act_orch.write_text(src)
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        code, text, _ = post(base, {"op": "config.agent.add", "args": {"name": "mine", "command": "tool {prompt}"}})
+        assert code == 400 and "already set up" in text
+        assert not [c for c in calls(act_orch) if c[:3] == ["config", "agent", "add"]]
+        code, text, _ = post(base, {"op": "config.agent.add", "args": {"name": "fresh", "command": "tool {prompt}"}})
+        assert code == 200, text
+        log = (ws / ".orch" / "run" / "dashboard" / "actions.log").read_text().splitlines()
+        rec = json.loads(log[-1])
+        assert rec["op"] == "config.agent.add" and rec["name"] == "fresh" and rec["command"] == "tool {prompt}"
+        assert rec["via"] == "dashboard" and rec["by"].startswith("human:")
+    finally:
+        srv.shutdown()
+        srv.server_close()

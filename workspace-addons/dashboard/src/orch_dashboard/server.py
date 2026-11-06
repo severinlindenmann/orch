@@ -76,7 +76,7 @@ class Handler(BaseHTTPRequestHandler):
             m = hmac.new(self.nonce.encode(), c.encode(), hashlib.sha256).hexdigest()
             return self._send(200, json.dumps({"pid": os.getpid(), "mac": m}).encode(), "application/json")
         if path == "/api/state":
-            return self._send(200, json.dumps(load_state(self.root, orch_bin=self.orch_bin)).encode(),
+            return self._send(200, json.dumps(load_state(self.root, orch_bin=self.orch_bin, with_settings=True)).encode(),
                               "application/json")
         if path.startswith("/api/addon/"):  # only names that are active here and have a tab
             name = path[len("/api/addon/"):]
@@ -136,10 +136,14 @@ class Handler(BaseHTTPRequestHandler):
         if code != 200:
             hdr = {"X-Revision": str(extra["revision"])} if extra else None
             return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
-        self._send(200, json.dumps(load_state(self.root, orch_bin=self.orch_bin, fresh=True)).encode(), "application/json")
+        self._send(200, json.dumps(load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)).encode(), "application/json")
+
+
+class _Server(ThreadingHTTPServer):
+    request_queue_size = 128  # the page loads a dozen files at once; the default of 5 resets connections (seen on macOS)
 
 
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:
     orch_bin = orch_bin if orch_bin is not None else os.environ.get("ORCH_BIN") or None
-    return ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin,
+    return _Server(("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin,
                                                             puller=ViewPuller(root, orch_bin)))

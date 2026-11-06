@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .data import run_orch
@@ -236,6 +237,25 @@ def _addon_known(root: Path, orch_bin: str, name: str) -> bool:
     return any(isinstance(r, dict) and r.get("name") == name for r in (rows if isinstance(rows, list) else []))
 
 
+def _agent_exists(root: Path, orch_bin: str, name: str) -> bool:
+    rows = run_orch(orch_bin, ["agents", "--json"], root)
+    return any(isinstance(r, dict) and r.get("name") == name for r in (rows if isinstance(rows, list) else []))
+
+
+def _audit(root: Path, op: str, args: dict) -> None:
+    """One line per settings change in .orch/run/dashboard/actions.log (local, gitignored): who, what, the exact command."""
+    keep = {k: v for k, v in args.items() if k in ("name", "command", "prompt_via", "on")}
+    line = json.dumps({"at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), "by": actor(), "via": "dashboard", "op": op, **keep},
+                      ensure_ascii=False)
+    try:
+        d = root / ".orch" / "run" / "dashboard"
+        d.mkdir(parents=True, exist_ok=True)
+        with open(d / "actions.log", "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass  # the change is done; a missing log must not turn it into an error
+
+
 def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict | None]:
     """Run one op. Returns (http status, plain text, parsed json or None)."""
     argv = build_argv(op, args)
@@ -245,6 +265,8 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
         raise BadRequest("That add-on is not on in this workspace.")
     if op == "addon.set" and not _addon_known(root, orch_bin, args["name"]):
         raise BadRequest("That add-on is not installed.")
+    if op == "config.agent.add" and _agent_exists(root, orch_bin, args["name"]):
+        raise BadRequest("An agent with that name is already set up. Pick another name (changing one is done in the terminal).")
     try:
         r = subprocess.run([orch_bin, *argv], check=False, cwd=root, capture_output=True, text=True, timeout=60,
                            stdin=subprocess.DEVNULL, env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin})
@@ -258,6 +280,8 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
     except ValueError:
         pass
     if r.returncode == 0:
+        if op in ("config.agent.add", "addon.set", "config.agent"):
+            _audit(root, op, args)
         return 200, "", out if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None
     if not msg:
