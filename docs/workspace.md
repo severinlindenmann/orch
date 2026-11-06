@@ -139,8 +139,10 @@ Windows: works for a standard user (no admin rights), without git and with the d
 installer runs with a bypass for that one process only). On Windows on ARM the installer picks an x64 Python
 (`cryptography` has no ARM64 Windows build). Windows can not replace a running program's files, so `orch addon add`,
 `orch addon uninstall` and `orch update` finish in the background right after the command ends (about a minute; log:
-`finish.log` in orch's home, `orch addon list` shows the result). CI runs `e2e/windows/run-as-standard-user.ps1` on
-develop pushes and on PRs that change the install path; on a winvm clone run the same script.
+`finish.log` in orch's home, `orch addon list` shows the result; wait for it before the next orch command). CI runs
+`e2e/windows/run-as-standard-user.ps1` on develop pushes and on PRs that change the install path: the standard-user
+flow (install, init, ticket, dashboard add-on in the background, update) and the scheduler flow (automation add-on: a
+repeat and a one-time wake-up in a named time zone start a fake agent). On a winvm clone run the same script.
 
 ## Not included
 Signing, approvals, planning gates, fixed requirements, durations, a server.

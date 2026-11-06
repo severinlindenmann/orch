@@ -111,6 +111,10 @@ PENDING_MAX_AGE = 600  # seconds without a sign of life: the finisher has died
 UV_TIMEOUT = 480  # below PENDING_MAX_AGE: the mark is refreshed right before uv starts
 
 
+class Busy(RuntimeError):
+    """Another finisher is still at work."""
+
+
 def needed() -> bool:
     """A reinstall must wait until orch has exited (only on Windows)."""
     return sys.platform == "win32"
@@ -122,13 +126,41 @@ def log_path(home: Path) -> Path:
 
 def pending(home: Path) -> bool:
     """A finisher is still at work. Each job carries the whole add-on list, so a second one started now
-    would undo the first (e.g. bring back an add-on that was just removed)."""
+    would undo the first (e.g. bring back an add-on that was just removed). The mark holds the finisher's
+    process id: a finisher that died (e.g. ended with the SSH session that started it) does not block."""
     import time
 
+    mark = home / "finish.pending"
     try:
-        return time.time() - (home / "finish.pending").stat().st_mtime < PENDING_MAX_AGE
+        fresh = time.time() - mark.stat().st_mtime < PENDING_MAX_AGE
+        text = mark.read_text(encoding="utf-8").strip()
     except OSError:
         return False
+    if not fresh:
+        return False
+    return not text.isdigit() or _alive(int(text))
+
+
+def _alive(pid: int) -> bool:
+    if sys.platform != "win32":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except OSError:
+            return True
+        return True
+    import ctypes
+
+    k32 = ctypes.windll.kernel32
+    h = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return False
+    try:
+        code = ctypes.c_ulong()
+        return bool(k32.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+    finally:
+        k32.CloseHandle(h)
 
 
 def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done: str,
@@ -161,24 +193,49 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
     (d / "finish.py").write_text(FINISHER, encoding="utf-8")
     (d / "job.json").write_text(json.dumps(job), encoding="utf-8")
     flags = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED_PROCESS, NEW_PROCESS_GROUP, NO_WINDOW
+    breakaway = (
+        0x01000000  # CREATE_BREAKAWAY_FROM_JOB: outlive the job (e.g. an SSH session) that started orch
+    )
+    kw = dict(
+        cwd=str(d),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        env={k: v for k, v in os.environ.items() if not k.startswith("PYTHON")},
+    )
+    argv = [base, "-I", str(d / "finish.py"), str(d / "job.json")]
+    mark = home / "finish.pending"
+    _claim(home, mark)  # no second job from here on
     try:
-        (home / "finish.pending").write_text(str(os.getpid()), encoding="utf-8")
-        _popen(
-            [base, "-I", str(d / "finish.py"), str(d / "job.json")],
-            cwd=str(d),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            close_fds=True,
-            creationflags=flags,
-            env={k: v for k, v in os.environ.items() if not k.startswith("PYTHON")},
-        )
-    except OSError as e:
-        (home / "finish.pending").unlink(missing_ok=True)
+        try:
+            pid = _popen(argv, creationflags=flags | breakaway, **kw)
+        except OSError:  # the job does not allow breaking away: start it inside the job
+            pid = _popen(argv, creationflags=flags, **kw)
+        mark.write_text(str(pid), encoding="utf-8")
+    except Exception as e:  # any failure: free the mark, or it would block installs for 10 minutes
+        mark.unlink(missing_ok=True)
         raise RuntimeError(f"could not start the finisher: {e}") from e
     return log_path(home)
 
 
-def _popen(*args, **kw) -> None:
-    """Tests replace this."""
-    subprocess.Popen(*args, **kw)
+def _claim(home: Path, mark: Path) -> None:
+    """Create the pending mark atomically (two orch commands at the same moment: only one gets it). A mark
+    left by a finisher that is gone is taken over."""
+    for _ in range(2):
+        try:
+            fd = os.open(mark, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            if pending(home):
+                raise Busy("an add-on install or update is still finishing in the background") from None
+            mark.unlink(missing_ok=True)
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("starting")
+        return
+    raise Busy("an add-on install or update is still finishing in the background")
+
+
+def _popen(argv: list[str], **kw) -> int:
+    """Start the finisher; its process id. Tests replace this."""
+    return subprocess.Popen(argv, **kw).pid
