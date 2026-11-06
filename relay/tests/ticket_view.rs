@@ -290,3 +290,49 @@ async fn phone_reads_only_blobs_named_in_a_view_sent_to_it() {
         .unwrap();
     assert_eq!(r.status(), 401);
 }
+
+#[tokio::test]
+async fn phone_blob_other_phone_and_workspace_removed_from_the_list_get_404() {
+    let t = start().await;
+    let (a, b) = (t.add_ws("A").await, t.add_ws("B").await);
+    let mine = t.pair_phone(&[&a, &b]).await;
+    let other = t.pair_phone(&[&b]).await; // paired, but A is not on its list
+    let bid = upload(&t, &a, b"chart".to_vec()).await;
+    // sent to this phone directly and to every phone
+    let (s, _) = send_view(
+        &t,
+        &a,
+        &mine.0,
+        "t_aaaaaa",
+        "result",
+        Some(view("T", json!([file_att(&bid, 5)]))),
+    )
+    .await;
+    assert_eq!(s, 201);
+    let (s, _) = send_view(
+        &t,
+        &a,
+        "phones",
+        "t_aaaaaa",
+        "result",
+        Some(view("T", json!([file_att(&bid, 5)]))),
+    )
+    .await;
+    assert_eq!(s, 201);
+    assert_eq!(phone_blob(&t, &mine, &bid).await, (200, b"chart".to_vec()));
+    assert_eq!(phone_blob(&t, &other, &bid).await.0, 404, "another phone");
+    // the admin takes A off this phone's list after the texts were sent: gone at once
+    let (s, v) = t
+        .admin_json(
+            "PATCH",
+            &format!("/admin/api/phones/{}", mine.0),
+            Some(json!({"workspaces": [b.id]})),
+        )
+        .await;
+    assert!(s < 300, "{s} {v}");
+    assert_eq!(
+        phone_blob(&t, &mine, &bid).await.0,
+        404,
+        "A is no longer on the list"
+    );
+}
