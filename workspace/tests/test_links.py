@@ -482,3 +482,27 @@ def test_refresh_who_people_refuses_agents(proj, run, hello, tid, monkeypatch): 
     assert code == 2 and "Only a person" in err
     monkeypatch.delenv("ORCH_AGENT")
     assert run("hello", "act", "refresh", "--by", "human:anna", "--", tid)[0] == 0
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "https://github.com\\@evil.example/",
+        "https://evil.example\\github.com/",
+        "https://github.com@evil.example/",
+        "https://user:pw@evil.example/",
+        "https://evil.example/\tx",
+        "https://evil.example/ x",
+    ],
+)
+def test_url_with_backslash_userinfo_or_whitespace_is_refused(bad):
+    with pytest.raises(Refused):
+        links.check_url(bad)
+
+
+def test_url_is_stored_canonical_with_an_ascii_host():
+    assert links.check_url("HTTPS://GitHub.COM:443/a/b?q=1#f") == "https://github.com:443/a/b?q=1#f"
+    homograph = links.check_url("https://gіthub.com/acme")  # Cyrillic i
+    assert homograph.startswith("https://xn--") and homograph.isascii()
+    d = links.describe({"kind": "link", "url": homograph}, [])
+    assert d["host"].startswith("xn--") and d["label"] == "Link" and d["icon"] == "link"
