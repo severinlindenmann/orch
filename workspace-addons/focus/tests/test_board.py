@@ -281,3 +281,17 @@ def test_symlinked_runs_folder_is_refused(tmp_path):
     with pytest.raises(OSError):
         ev.EventLog(tmp_path, RUN).append(generic_events()[0])
     assert list(real.iterdir()) == []
+
+
+def test_pem_block_across_the_window_is_hidden():
+    body = "\n".join("A" * 64 for _ in range(32))  # about 2 KB
+    pem = f"-----BEGIN PRIVATE KEY-----\n{body}\n-----END PRIVATE KEY-----"
+    for limit in (200, 500):
+        v = "x" * (limit - 50) + " " + pem + " tail"
+        out = ev.clip(v, limit)
+        assert "AAAA" not in out and "BEGIN PRIVATE" not in out
+        # end marker cut off entirely
+        cut = "x" * (limit - 50) + " -----BEGIN RSA PRIVATE KEY-----\n" + body
+        assert "AAAA" not in ev.clip(cut, limit)
+    e = ev.make(RUN, TID, "main", "tool.end", "y" * 450 + " " + pem, "adapter", note="z" * 450 + " " + pem)
+    assert "AAAA" not in json.dumps(e)

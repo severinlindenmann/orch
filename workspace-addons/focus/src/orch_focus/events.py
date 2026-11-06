@@ -21,6 +21,8 @@ KINDS = (
 )  # fmt: skip
 
 _SECRETS = [
+    # a PEM block hides from its start marker to its end marker, or to the end of the text when that is cut off
+    re.compile(r"-----BEGIN [A-Z0-9 ]+-----[\s\S]*?(?:-----END [A-Z0-9 ]+-----|\Z)"),
     re.compile(r"\b(sk|pk|rk)-[A-Za-z0-9_\-]{12,}"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
     re.compile(r"\bxox[abprs]-[A-Za-z0-9\-]{10,}"),
@@ -46,8 +48,13 @@ def redact(text: str) -> str:
 
 
 def clip(v: str, limit: int) -> str:
-    """Cap the work first (a 5 MB value is not scanned whole), redact, then clip to the limit."""
-    return redact(v[: limit + 256])[:limit]
+    """Cap the work first (a 5 MB value is not scanned whole), redact, then clip to the limit.
+    The window ends at the next whitespace after limit + 256 (at most 4 KB further), so no token is split."""
+    end = limit + 256
+    if len(v) > end:
+        m = re.search(r"\s", v[end : end + 4096])
+        end = end + m.start() if m else end + 4096
+    return redact(v[:end])[:limit]
 
 
 def _clean(v, limit: int):
