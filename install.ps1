@@ -15,5 +15,10 @@ if (Test-Path $repo) {
 }
 uv tool install --reinstall $spec
 if ($LASTEXITCODE -ne 0) { throw "uv tool install failed" }
-uv tool update-shell 2>$null | Out-Null
-Write-Host "orch is installed. Open a new terminal, go to your project folder and run: orch init"
+Write-Host "orch is installed."
+$bin = "$env:USERPROFILE\.local\bin"
+if (($env:Path -split ";") -notcontains $bin) {
+    Write-Host "Run this line in PowerShell, then open a new terminal:"
+    Write-Host "  [Environment]::SetEnvironmentVariable('Path', `"$bin;`" + [Environment]::GetEnvironmentVariable('Path','User'), 'User')"
+}
+Write-Host "Then go to your project folder and run: orch init"

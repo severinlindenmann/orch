@@ -145,3 +145,28 @@ def test_chat_notes():
     assert chat.note({"delivered": 0}, True, True) == "Goes in after this step."
     assert chat.note({"delivered": 0}, False, False) == "Saved for the next run."
     assert chat.note(None, False, False) == "Saved for the next run."
+
+
+def test_bad_records_in_the_state_file_are_dropped_on_load(ws, fake_orch):
+    d = ws / ".orch" / "run" / "focus"
+    d.mkdir(parents=True)
+    (d / "permissions.json").write_text(json.dumps({
+        "asked": ["a", 5, None], "done": "nope",
+        "qs": {"t:q1": {"run": RUN, "tool": "WebFetch"}, "t:q2": "str", "t:q3": {"run": 5, "tool": "x"}, "t:q4": {"run": RUN}},
+    }))  # fmt: skip
+    p = mk(ws, fake_orch)
+    assert p.state == {"asked": ["a"], "done": [], "qs": {"t:q1": {"run": RUN, "tool": "WebFetch"}}}
+    (d / "permissions.json").write_text("[1, 2]")
+    assert mk(ws, fake_orch).state == {"asked": [], "done": [], "qs": {}}
+
+
+def test_a_failed_retry_is_remembered_for_the_page(ws, tmp_path):
+    bad = tmp_path / "failstart"
+    bad.write_text(
+        '#!/bin/sh\ncase "$1" in ask) echo \'{"id":"q7"}\';; *) echo \'Refused: Busy now.\' >&2; exit 2;; esac\n'
+    )
+    bad.chmod(0o755)
+    p = Permissions(ws, str(bad))
+    sync(p, denials=DENIAL)
+    assert sync(p, claim={}, ticket=answered(ALLOW)) is False
+    assert p.failed[TID] == "Busy now."
