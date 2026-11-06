@@ -195,11 +195,13 @@ RUNS_MAX = 30
 
 
 def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool = False) -> dict[str, dict]:
-    """Run status for tickets that can have a run (not done or dropped), from `orch run status <id> --json`.
+    """Run status for tickets that can have a run (not done or dropped, or with a claim file), from `orch run status <id> --json`.
     Cached for a few seconds so the 3 s page poll costs nothing; an action's reply passes fresh=True."""
     if not orch_bin:
         return {}
+    claims = root / ".orch" / "run" / "tickets"  # a done ticket can still have its live session open
     ids = [t["id"] for t in tickets if t["status"] not in ("done", "dropped")][:RUNS_MAX]
+    ids += [t["id"] for t in tickets if t["status"] in ("done", "dropped") and (claims / f"{t['id']}.json").exists()]
     now = time.monotonic()
     todo = [i for i in ids if fresh or (str(root), i) not in _RUNS or now - _RUNS[(str(root), i)][0] > RUNS_TTL]
     if todo:

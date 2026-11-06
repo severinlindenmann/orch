@@ -251,3 +251,17 @@ def test_focus_view_with_a_run_is_accepted():
 def test_link_regex_is_the_schema_pattern():
     from orch_dashboard.views import _LINK
     assert _LINK.pattern == SCHEMA["$defs"]["link"]["pattern"]
+
+
+def test_a_done_ticket_with_an_open_live_session_gets_its_run_status(tmp_path, monkeypatch):
+    """The agent marked the ticket Done but its live session is still open: the page shows it (not "Continue")."""
+    from orch_dashboard import data
+
+    asked = []
+    monkeypatch.setattr(data, "run_orch", lambda b, args, root: asked.append(args[2]) or {"running": True})
+    (tmp_path / ".orch" / "run" / "tickets").mkdir(parents=True)
+    (tmp_path / ".orch" / "run" / "tickets" / "t_done0001.json").write_text("{}")
+    tickets = [{"id": "t_done0001", "status": "done"}, {"id": "t_done0002", "status": "done"},
+               {"id": "t_open0001", "status": "open"}]
+    got = data.load_runs(tmp_path, "orch", tickets, fresh=True)
+    assert sorted(asked) == ["t_done0001", "t_open0001"] and set(got) == {"t_done0001", "t_open0001"}

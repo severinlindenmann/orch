@@ -352,3 +352,39 @@ def test_run_messages_name_the_ticket_by_its_key(proj, run):
     key = tickets.load(proj, tid)["key"]
     assert key and run("run", "stop", tid)[1].strip() == f"Nothing is running on {key}."
     assert f"Claimed {key} " in run("run", "claim", tid, "--by", "agent:t")[1]
+
+
+@pytest.mark.parametrize(
+    "code, said", [(0, "The live session ended."), (3, "The live session ended with an error (exit code 3).")]
+)
+def test_a_live_session_that_ends_says_so_in_the_history(proj, run, code, said):
+    """The live agent quit (or never got past its own first-run screens): the ticket says so."""
+    tid = _ticket_with_check(proj, run)
+    rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+    assert (
+        runs.wrap_live(
+            proj, rec["run"], tid, "claude", [sys.executable, "-c", f"raise SystemExit({code})"], None
+        )
+        == code
+    )
+    last = tickets.load(proj, tid)["history"][-1]
+    assert (last["text"], last["by"]) == (said, "agent:claude")
+    assert runs.read(proj, tid) is None
+
+
+def test_a_live_session_we_stopped_adds_no_end_line(proj, run):
+    tid = _ticket_with_check(proj, run)
+    rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+    with runs.locked(proj, tid):
+        r = runs.read(proj, tid)
+        r["stop_requested"] = tickets.now()
+        runs._write(proj, r)
+    runs.wrap_live(proj, rec["run"], tid, "claude", [sys.executable, "-c", "raise SystemExit(1)"], None)
+    assert not any("live session ended" in h["text"] for h in tickets.load(proj, tid)["history"])
+
+
+def test_the_holder_line_says_the_start_in_local_time():
+    from orch import cli_run, net
+
+    rec = {"agent": "claude", "by": "human:t", "started_at": "2026-11-06T13:57:13Z"}
+    assert cli_run._holder_line(rec, "t_abc123").endswith(f"since {net.when('2026-11-06T13:57:13Z')}.")

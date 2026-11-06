@@ -874,6 +874,13 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
     rc = proc.wait()
     if new_session and rc == 0:
         tickets.record_session(root, tid, name, new_session, host())
+    now = read(root, tid)
+    if now and now["run"] == run and not now.get("stop_requested"):  # a person sees it ended (not our Stop)
+        said = "The live session ended."
+        if rc > 0:  # a signal (negative rc) is a plain end, not an error
+            said = f"The live session ended with an error (exit code {rc})."
+        with contextlib.suppress(Exception):
+            tickets.log(root, tid, said, f"agent:{name}")
     release(root, tid, run)  # input still waiting stays in the pending file for the next start
     (run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
     with contextlib.suppress(Exception):

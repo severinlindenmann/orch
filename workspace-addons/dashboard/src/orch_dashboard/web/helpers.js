@@ -159,6 +159,18 @@
     return out;
   }
 
+  /* "just now" under a minute, else "5 min ago" / "2 h ago" / "3 days ago"; "" for no date. */
+  function ago(iso, nowMs) {
+    const when = Date.parse(iso);
+    if (Number.isNaN(when)) return '';
+    const s = span(nowMs - when);
+    return s === 'just now' ? s : s + ' ago';
+  }
+  /* A file proof: its title or file name, then the size core saved in `text` ("hello.txt · 1 KB"). */
+  function fileProofLabel(ev) {
+    const e = ev || {}, base = String(e.ref || '').split(/[\\/]/).pop();
+    return [e.title || base || 'File', e.text].filter(Boolean).join(' · ');
+  }
   /* FO-14: who stands behind a proof. */
   function proofMark(ev) {
     return String((ev && ev.by) || '').startsWith('human:') ? {mark: '●', label: 'You'} : {mark: '○', label: 'Agent says'};
@@ -176,5 +188,5 @@
     }
     return n;
   }
-  return {flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, treeRows, proofMark};
+  return {flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, treeRows, proofMark, fileProofLabel, ago};
 });
