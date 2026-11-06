@@ -166,6 +166,52 @@ def test_event_for_an_unknown_run_is_quiet(proj, run):
     assert code == 0 and out == "" and err == ""
 
 
+# ---------------------------------------------------------------- a hook never blocks on an open stdin
+
+
+@pytest.mark.parametrize("kind", ["attention", "session"])
+def test_an_event_with_stdin_left_open_never_blocks(proj, run, monkeypatch, kind):
+    """V2-F3 hung 300 s: its caller left stdin an open pipe (inherited, never closed), and the attention
+    event read its hook input until the end of stdin. The read now gives up after HOOK_INPUT_SECONDS."""
+    from orch import cli_run
+
+    r, w = os.pipe()  # w stays open for the whole call: stdin never ends
+    monkeypatch.setattr(cli_run, "HOOK_INPUT_SECONDS", 0.2)
+    with os.fdopen(r, "r") as stdin:
+        monkeypatch.setattr(sys, "stdin", stdin)
+        t = time.monotonic()
+        code, out, err = run("run", "event", "--run", "r_nosuchrun", "--kind", kind)
+        took = time.monotonic() - t
+    os.close(w)
+    assert code == 0 and out == "" and err == "" and took < 2
+
+
+def test_hook_input_that_ends_is_read_whole():
+    from orch import cli_run
+
+    r, w = os.pipe()
+    os.write(w, b'{"notification_type": "idle_prompt"}')
+    os.close(w)
+    with os.fdopen(r, "r") as stdin:
+        assert json.loads(cli_run._read_bounded(stdin)) == {"notification_type": "idle_prompt"}
+
+
+@pytest.mark.slow
+def test_the_event_command_exits_with_stdin_left_open(proj):
+    """The real process, as a hook runner or a test harness calls it: stdin a pipe nobody closes."""
+    p = subprocess.Popen(
+        [sys.executable, "-m", "orch", "run", "event", "--run", "r_nosuchrun", "--kind", "attention"],
+        cwd=proj, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )  # fmt: skip
+    try:
+        rc = p.wait(timeout=15)  # stdin stays open (communicate() would close it)
+    finally:
+        if p.poll() is None:
+            p.kill()
+        out, err = p.communicate()
+    assert rc == 0 and out == b"" and err == b""
+
+
 # ---------------------------------------------------------------- Claude: hooks file, session id, idle close
 
 
