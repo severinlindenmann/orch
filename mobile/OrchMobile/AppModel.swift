@@ -251,6 +251,13 @@ final class AppModel {
         } catch { handle(error) }
     }
 
+    /// No network yet (cold start) or the relay is unreachable: worth one quiet retry before the offline banner.
+    private static func isOffline(_ error: Error) -> Bool {
+        if error is URLError { return true }
+        if case RelayError.network = error { return true }
+        return false
+    }
+
     private func load() async throws {
         do {
             async let w = client.workspaces()
