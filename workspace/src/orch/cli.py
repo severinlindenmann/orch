@@ -295,6 +295,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = t.add_parser("new", parents=[common])
     x.add_argument("title")
     x.add_argument("--parent", metavar="ID", help="make it a sub-ticket of this ticket")
+    x.add_argument("--owner", help="who owns it (a name)")
+    x.add_argument("--due", metavar="YYYY-MM-DD", help="due day")
+    x.add_argument("--note", help="a free note")
     x.add_argument(
         "--ext",
         action="append",
@@ -513,6 +516,7 @@ def run(args: argparse.Namespace) -> None:
             by(),
             args.parent,
             tickets.parse_ext_args(args.ext, lambda a: addons.active_ext_schema(root, a)),
+            {k: getattr(args, k) for k in ("owner", "due", "note") if getattr(args, k)},
         )
         part = f" (part of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(

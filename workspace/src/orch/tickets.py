@@ -432,13 +432,21 @@ def parse_ext_args(pairs: list[str] | None, schema_for=None) -> dict[str, dict]:
 
 
 def create(
-    root: Path, title: str, by: str, parent: str | None = None, ext: dict[str, dict] | None = None
+    root: Path,
+    title: str,
+    by: str,
+    parent: str | None = None,
+    ext: dict[str, dict] | None = None,
+    fields: dict | None = None,
 ) -> dict:
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
     if parent is not None:
         load(root, parent)  # the parent must exist (cycles are impossible: it is set only here)
+    fields = fields or {}
+    for k, v in fields.items():
+        clean_field(k, v)
     t = now()
     ticket = {
         "schema": "orch.ticket/1",
@@ -457,6 +465,8 @@ def create(
     }
     if parent is not None:
         ticket["parent"] = parent
+    for k, v in fields.items():  # owner, due, note: part of the one "Created" line
+        _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
         ticket["ext"] = ext
     save(root, ticket)
@@ -1219,7 +1229,9 @@ def _proof_name(name: str) -> str:
 def _size_text(n: int) -> str:
     if n >= 1024 * 1024:
         return f"{n / (1024 * 1024):.1f} MB"
-    return f"{max(round(n / 1024), 1)} KB"
+    if n >= 1024:
+        return f"{round(n / 1024)} KB"
+    return f"{n} B"
 
 
 def _too_big(name: str) -> str:
