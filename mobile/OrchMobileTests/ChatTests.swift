@@ -215,9 +215,41 @@ final class ChatTests: XCTestCase {
     }
 
     /// An image shows its proof title ("Q3 chart"), like files and links; the file name only without one.
+    func testLinkAttachmentCarriesTypeIconAndStatus() throws {
+        let json = #"{"kind":"link","title":"Add CSV export","url":"https://github.com/acme/billing/pull/418","at":"2026-11-06T09:38:00Z","label":"GitHub · Pull request","icon":"github","mono":"GH","status":"review"}"#
+        let a = try JSONDecoder().decode(TicketSnapshot.Attachment.self, from: Data(json.utf8))
+        XCTAssertEqual([a.linkType, a.icon, a.mono, a.status], ["GitHub · Pull request", "github", "GH", "review"])
+        XCTAssertEqual(a.label, "Add CSV export")  // the person reads the title, not the type
+        let old = try JSONDecoder().decode(TicketSnapshot.Attachment.self, from: Data(#"{"kind":"link","title":"x","url":"https://a.example","at":"2026-11-06T09:38:00Z"}"#.utf8))
+        XCTAssertNil(old.linkType); XCTAssertNil(old.status)
+    }
+
     func testAttachmentLabelPrefersTheTitle() {
         XCTAssertEqual(TicketSnapshot.Attachment(kind: "image", title: "Q3 chart", name: "bright.png").label, "Q3 chart")
         XCTAssertEqual(TicketSnapshot.Attachment(kind: "image", name: "bright.png").label, "bright.png")
         XCTAssertEqual(TicketSnapshot.Attachment(kind: "image").label, nil)
+    }
+
+    func testLinkCardAlwaysShowsTheRealHostAndNoBorrowedSiteIcon() {
+        let evil = "https://evil.example/acme/pull/1"
+        XCTAssertEqual(LinkFace.subtitle(type: "GitHub · Pull request", url: evil), "Link · evil.example")
+        XCTAssertEqual(LinkFace.icon("github", url: evil), "link")
+        XCTAssertEqual(LinkFace.icon("github", url: "https://github.com.evil.example/x"), "link")
+        XCTAssertEqual(LinkFace.icon("github", url: "https://www.github.com/a/b/pull/1"), "github")
+        XCTAssertEqual(LinkFace.icon("jira", url: "https://acme.atlassian.net/browse/X-1"), "jira")
+        XCTAssertEqual(LinkFace.subtitle(type: "GitHub · Pull request", url: "https://github.com/a/b/pull/1"), "GitHub · github.com")
+        XCTAssertEqual(LinkFace.subtitle(type: nil, url: evil), "Link · evil.example")
+    }
+
+    func testOnlyKnownSiteNamesOnTheirOwnSiteAreShownAndTheDomainIsTheRegistrablePart() {
+        let evil = "https://github.com.evil.example/x"
+        for label in ["GitHub", "Pull request", "Campaign 2026", "Gith0b", "Git-Hub", "G\u{00ED}thub", "github\u{FF0E}com", "anything at all"] {
+            XCTAssertEqual(LinkFace.type(label, url: evil), "Link", label)  // free text is always "Link"
+        }
+        XCTAssertEqual(LinkFace.type("GitHub", url: "https://gist.github.com/a"), "GitHub")
+        XCTAssertTrue(LinkFace.hostParts(evil) == ("github.com.", "evil.example"))
+        XCTAssertTrue(LinkFace.hostParts("https://shop.example.co.uk/") == ("shop.", "example.co.uk"))
+        XCTAssertEqual(LinkFace.domain("shop.example.co.uk"), "example.co.uk")
+        XCTAssertEqual(LinkFace.oneLine("Fix\u{1B}[31m\nbug", max: 200), "Fix [31m bug")
     }
 }

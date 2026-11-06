@@ -205,10 +205,32 @@ struct AttachmentTile: View {
                 row(symbol: "photo", title: attachment.label ?? "Image", sub: SafeLink.host(attachment.url) ?? "")
             }
         case "link":
-            row(symbol: "link", title: attachment.title ?? SafeLink.host(attachment.url) ?? "Link", sub: SafeLink.host(attachment.url) ?? "")
+            linkCard
         default:
             row(symbol: "doc", title: attachment.label ?? "File", sub: attachment.size.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "")
         }
+    }
+    /// A link card: the site or link-type tile (GH, Fg …), title, what it is, and the add-on's status.
+    private var linkCard: some View {
+        let a = attachment, host = SafeLink.host(a.url) ?? ""
+        let inner = HStack(spacing: 10) {
+            LinkTile(icon: LinkFace.icon(a.icon, url: a.url), mono: a.mono)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(LinkFace.oneLine(a.title, max: 200) ?? host).themeFont(14, .semibold).lineLimit(1)
+                HStack(spacing: 0) {  // the registrable domain never truncates; the type gives way first, then the host's head
+                    let (sub, dom) = LinkFace.hostParts(a.url)
+                    Text(LinkFace.type(a.linkType, url: a.url) + " · ").lineLimit(1).truncationMode(.tail)
+                    if !sub.isEmpty { Text(sub).lineLimit(1).truncationMode(.head).layoutPriority(1) }
+                    Text(dom).fontWeight(.semibold).foregroundStyle(Theme.text).lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false).layoutPriority(2)
+                }.themeFont(12).foregroundStyle(Theme.muted)
+                .accessibilityElement(children: .ignore).accessibilityLabel(LinkFace.subtitle(type: a.linkType, url: a.url))
+            }
+            Spacer(minLength: 0)
+            if let s = a.status, !s.isEmpty { LinkStatus(text: s) }
+        }.foregroundStyle(Theme.text)
+        return Group { if let u = SafeLink.url(a.url) { Link(destination: u) { inner } } else { inner } }
+            .accessibilityIdentifier("link-card")
     }
     private func row(symbol: String, title: String, sub: String) -> some View {
         let inner = HStack(spacing: 10) {
@@ -342,5 +364,132 @@ struct ChatItemView: View {
         case .question(let q): QuestionBubble(question: q)
         case .attachment(let a): AttachmentBubble(attachment: a, at: item.at)
         }
+    }
+}
+
+
+/// What a link card says it is (one rule for every link card; the dashboard has the same one).
+/// - Type: only a known site's name from the fixed table, and only on that site's own address; else "Link".
+/// - Host: the registrable domain (evil.example) in its own text that never truncates, the rest of the host
+///   before it, truncated from the head.
+/// - Icon: a site's icon only on that site's own host.
+enum LinkFace {
+    /// icon key -> the hosts of that site (a leading "." means any subdomain), mirrored from the core's known_sites.json
+    static let siteHosts: [String: [String]] = [
+        "github": ["github.com"], "gitlab": ["gitlab.com"], "confluence": [".atlassian.net"], "jira": [".atlassian.net"],
+        "linear": ["linear.app"], "notion": ["notion.so"], "figma": ["figma.com"], "miro": ["miro.com"],
+        "gdocs": ["docs.google.com"], "gsheets": ["docs.google.com"], "gslides": ["docs.google.com"], "gdrive": ["drive.google.com"],
+        "youtube": ["youtube.com", "youtu.be"], "loom": ["loom.com"], "slack": [".slack.com"], "teams": ["teams.microsoft.com"],
+        "sharepoint": [".sharepoint.com"], "trello": ["trello.com"], "dropbox": ["dropbox.com"],
+    ]
+    /// site name (lowercased) -> icon key, mirrored from known_sites.json
+    static let siteNames: [String: String] = [
+        "github": "github", "gitlab": "gitlab", "confluence": "confluence", "jira": "jira", "linear": "linear",
+        "notion": "notion", "figma": "figma", "miro": "miro", "google docs": "gdocs", "google sheets": "gsheets",
+        "google slides": "gslides", "google drive": "gdrive", "youtube": "youtube", "loom": "loom", "slack": "slack",
+        "teams": "teams", "sharepoint": "sharepoint", "trello": "trello", "dropbox": "dropbox",
+    ]
+    /// two-part public suffixes common enough to matter (no full list on the phone)
+    static let twoPartSuffixes: Set<String> = [
+        "co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "ne.jp", "or.jp",
+        "com.br", "com.cn", "com.mx", "co.in", "co.za", "com.tr", "com.sg", "com.hk", "co.kr", "github.io", "gitlab.io",
+    ]
+
+    static func host(_ url: String?) -> String {
+        let h = (SafeLink.host(url) ?? "").lowercased()
+        return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
+    }
+
+    /// The registrable part of a host (eTLD+1): "github.com.evil.example" -> "evil.example". An IP stays whole.
+    static func domain(_ host: String) -> String {
+        let parts = host.split(separator: ".").map(String.init)
+        if parts.count <= 2 || parts.allSatisfy({ Int($0) != nil }) || host.contains(":") { return host }
+        let n = twoPartSuffixes.contains(parts.suffix(2).joined(separator: ".")) ? 3 : 2
+        return parts.suffix(n).joined(separator: ".")
+    }
+
+    /// (the host before the domain, e.g. "gist.", the domain)
+    static func hostParts(_ url: String?) -> (String, String) {
+        let h = host(url), d = domain(h)
+        return (String(h.dropLast(d.count)), d)
+    }
+
+    static func onSite(_ key: String, url: String?) -> Bool {
+        let h = host(url)
+        return (siteHosts[key] ?? []).contains { $0.hasPrefix(".") ? h.hasSuffix($0) : (h == $0 || h.hasSuffix("." + $0)) }
+    }
+
+    /// The link type as shown: only known site names from the fixed table, each only on that site's own
+    /// address. Anything else (free text, add-on labels the phone can not check) is "Link".
+    static func type(_ raw: String?, url: String?) -> String {
+        let parts = (raw ?? "").components(separatedBy: " · ").filter { p in
+            siteNames[p.lowercased()].map { onSite($0, url: url) } ?? false
+        }
+        return parts.isEmpty ? "Link" : parts.joined(separator: " · ")
+    }
+
+    /// One line for tests and accessibility: "<type> · <host>".
+    static func subtitle(type raw: String?, url: String?) -> String {
+        let h = host(url)
+        return h.isEmpty ? type(raw, url: url) : "\(type(raw, url: url)) · \(h)"
+    }
+
+    /// Text from the workspace on one line: control, format (bidi, invisible) and line-break characters go, at most `max`.
+    static func oneLine(_ text: String?, max: Int) -> String? {
+        guard let text else { return nil }
+        var kept = String.UnicodeScalarView()
+        for u in text.unicodeScalars {
+            switch u.properties.generalCategory {
+            case .format: continue
+            case .control, .lineSeparator, .paragraphSeparator: kept.append(" ")
+            default: kept.append(u)
+            }
+        }
+        let t = String(kept).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return t.isEmpty ? nil : String(t.prefix(max))
+    }
+
+    /// The icon key to draw: a site's key only on that site's own host, else "link". An add-on's own icon (not a
+    /// site's) passes.
+    static func icon(_ icon: String?, url: String?) -> String {
+        guard let key = icon, !key.isEmpty else { return "link" }
+        guard siteHosts[key] != nil else { return LinkTile.colors[key] == nil ? key : "link" }
+        return onSite(key, url: url) ? key : "link"
+    }
+}
+
+/// The tile of a link: a known site's colour and letters, else the link symbol (same keys as the dashboard).
+struct LinkTile: View {
+    let icon: String?
+    let mono: String?
+    static let colors: [String: UInt32] = [
+        "github": 0x2b3137, "gitlab": 0x2b3137, "confluence": 0x1868db, "notion": 0xe8eaed, "figma": 0xa259ff,
+        "youtube": 0xe5302a, "gdocs": 0x2f7cf6, "gdrive": 0x2f7cf6, "jira": 0x2684ff, "linear": 0x5e6ad2, "gslides": 0xf4b400,
+        "slack": 0x4a154b, "miro": 0xffd02f, "gsheets": 0x1e8e3e, "loom": 0x625df5, "teams": 0x5b5fc7, "sharepoint": 0x038387,
+        "trello": 0x0c66e4, "dropbox": 0x0061fe,
+    ]
+    static let darkText: Set<String> = ["notion", "miro", "gslides"]
+    var body: some View {
+        let key = icon ?? "link", letters = String((mono ?? "").prefix(3))
+        ZStack {
+            if key == "link" || letters.isEmpty {
+                Image(systemName: "link").foregroundStyle(Theme.brand)
+            } else {
+                Text(letters).themeFont(12, .bold).foregroundStyle(Self.darkText.contains(key) ? Color(hex: 0x111111) : .white)
+            }
+        }
+        .frame(width: 34, height: 34)
+        .background(Self.colors[key].map { Color(hex: $0) } ?? Theme.surface3, in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+/// An add-on's status of a link (open, merged, unlisted …) as a small capsule.
+struct LinkStatus: View {
+    let text: String
+    var body: some View {
+        let tone: Color = ["open", "live", "public", "published"].contains(text) ? Theme.brand
+            : text == "merged" ? Theme.purple : ["review", "draft"].contains(text) ? Theme.warn : Theme.muted
+        Text(text).themeFont(11, .semibold).foregroundStyle(tone).padding(.horizontal, 8).padding(.vertical, 2)
+            .overlay(Capsule().stroke(tone.opacity(0.6)))
     }
 }

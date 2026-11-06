@@ -142,11 +142,19 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         var name: String? = nil
         var size: Int? = nil
         var at: String? = nil
+        /// Links only (from the workspace's link module): what the link is ("GitHub · Pull request"), the site or
+        /// link-type icon key, the tile letters and the add-on's status. Older workspaces send none of them.
+        var linkType: String? = nil
+        var icon: String? = nil
+        var mono: String? = nil
+        var status: String? = nil
         var id: String { [kind, blobId ?? url ?? name ?? title ?? "", at ?? ""].joined(separator: "|") }
         /// What a person reads: the proof title, else the file name.
         var label: String? { title ?? name }
-        init(kind: String = "file", title: String? = nil, url: String? = nil, blobId: String? = nil, name: String? = nil, size: Int? = nil, at: String? = nil) {
+        init(kind: String = "file", title: String? = nil, url: String? = nil, blobId: String? = nil, name: String? = nil, size: Int? = nil, at: String? = nil,
+             linkType: String? = nil, icon: String? = nil, mono: String? = nil, status: String? = nil) {
             self.kind = kind; self.title = title; self.url = url; self.blobId = blobId; self.name = name; self.size = size; self.at = at
+            self.linkType = linkType; self.icon = icon; self.mono = mono; self.status = status
         }
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: CodingKeys.self)
@@ -154,8 +162,10 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
             title = try? c.decodeIfPresent(String.self, forKey: .title); url = try? c.decodeIfPresent(String.self, forKey: .url)
             blobId = try? c.decodeIfPresent(String.self, forKey: .blobId); name = try? c.decodeIfPresent(String.self, forKey: .name)
             size = try? c.decodeIfPresent(Int.self, forKey: .size); at = try? c.decodeIfPresent(String.self, forKey: .at)
+            linkType = try? c.decodeIfPresent(String.self, forKey: .linkType); icon = try? c.decodeIfPresent(String.self, forKey: .icon)
+            mono = try? c.decodeIfPresent(String.self, forKey: .mono); status = try? c.decodeIfPresent(String.self, forKey: .status)
         }
-        enum CodingKeys: String, CodingKey { case kind, title, url, blobId, name, size, at }
+        enum CodingKeys: String, CodingKey { case kind, title, url, blobId, name, size, at, linkType = "label", icon, mono, status }
     }
     struct Line: Codable, Sendable, Equatable, Identifiable {
         var at: String? = nil
