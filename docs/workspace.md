@@ -39,7 +39,7 @@ workspace/
 | `orch check add <id> "<text>"` / `done <id> <c> --evidence '{"type":…,"ref":…}'` | Checklist; `done` without evidence is refused |
 | `orch log <id> "<text>"` | History entry. `by` = `--by`, else the agent tool seen in the environment (`agent:claude-code`, `agent:codex`), else `human:<os user>` |
 | `orch ask <id> "<q>" --option A --option B --recommend A [--phone]` / `answer <id> <q> "<a>"` | Questions; `--phone` also sends it to the phones via the relay |
-| `orch link add <id> --type <t> --url <u>` / `orch ext set <id> <addon> '<json>' [--if-revision N]` | Links and add-on data (`ext.<addon>`, checked with the add-on's schema when it is active) |
+| `orch link add <id> --type <t> --url <u>` / `orch ext set <id> <addon> '<json>' [--if-revision N]` / `orch ext unset <id> <addon>[.<key>] [--if-revision N]` | Links and add-on data (`ext.<addon>`, checked with the add-on's schema when it is active) |
 | `orch wait <id> --until <time>` / `--on question:q1\|ticket:t_…\|external:<text>` / `--clear` | Sets `waiting_on` (`kind` time/question/ticket/external), status `waiting`. orch only records it; something wakes the ticket only if an add-on does (the scheduler wakes `time`) |
 | `orch publish whoami` / `file <path> [--days N\|--permanent]` / `app <folder> [--days N\|--permanent]` / `list` / `restart` / `stop` / `delete` / `new` | publish-api.md |
 | `orch relay inbox` / `done <m>` / `send <ws> "<text>" [--file f]` / `delegate` / `start` / `allow <m> --once\|--permanent` / `refresh` / `webhook new --once\|--permanent` / `whoami` (relay-api.md, local-files.md) | relay-api.md |

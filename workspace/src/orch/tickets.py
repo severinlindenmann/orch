@@ -712,6 +712,51 @@ def ext_set(
     return apply_op(root, tid, op, if_revision=if_revision)[0]
 
 
+def ext_unset(
+    root: Path,
+    tid: str,
+    target: str,
+    by: str,
+    if_revision: int | None = None,
+    schema: dict | None = None,
+) -> dict:
+    """Drop ext.<addon> (target `addon`) or one key of it (`addon.key`). Nothing there: nothing written."""
+    addon, _, key = target.partition(".")
+    if not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", addon) or (
+        key and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", key)
+    ):
+        raise Refused(
+            "Name the data as <add-on> or <add-on>.<key>; the add-on is lowercase letters, digits or -."
+        )
+
+    def present(ticket):
+        cur = (ticket.get("ext") or {}).get(addon)
+        return cur is not None and (not key or (isinstance(cur, dict) and key in cur))
+
+    if if_revision is None and not present(load(root, tid)):
+        return load(root, tid)
+
+    def op(ticket):
+        if not present(ticket):
+            return
+        ext = ticket["ext"]
+        if key:
+            rest = {k: v for k, v in ext[addon].items() if k != key}
+            if rest and schema is not None:
+                validate_ext(schema, rest, addon)
+            ext[addon] = rest
+            add_history(ticket, by, f"Removed ext.{addon}.{key}")
+        else:
+            del ext[addon]
+            add_history(ticket, by, f"Removed ext.{addon}")
+        if not ext[addon] if addon in ext else False:
+            del ext[addon]
+        if not ext:
+            del ticket["ext"]
+
+    return apply_op(root, tid, op, if_revision=if_revision)[0]
+
+
 def ask(
     root: Path,
     tid: str,

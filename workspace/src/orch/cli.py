@@ -390,6 +390,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("addon")
     x.add_argument("data", help="JSON object")
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
+    x = e.add_parser("unset", parents=[common], help="remove an add-on's data, or one key of it")
+    x.add_argument("id")
+    x.add_argument("target", help="<add-on> or <add-on>.<key>")
+    x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     cli_clients.add_parsers(sub, common)
     cli_run.add_parsers(sub, common)
     cli_needs.add_parsers(sub, common)
@@ -609,6 +613,12 @@ def run(args: argparse.Namespace) -> None:
         cli_clients.run_publish(args, root, _out)
     elif cmd == "relay":
         cli_clients.run_relay(args, root, _out)
+    elif cmd == "ext" and args.sub == "unset":
+        addon = args.target.partition(".")[0]
+        t = tickets.ext_unset(
+            root, args.id, args.target, by(), args.if_revision, addons.active_ext_schema(root, addon)
+        )
+        _out(args, (t.get("ext") or {}).get(addon, {}), f"ext.{args.target} removed from {t['id']}")
     elif cmd == "ext":
         t = tickets.ext_set(
             root,

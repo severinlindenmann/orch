@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import addons, cli
+from orch import addons, cli, tickets
 from orch.errors import Refused
 
 MANIFEST = """\
@@ -523,6 +523,29 @@ def test_ext_set_if_revision(proj, run, new_ticket):
     code, out, _ = run("ext", "set", tid, "other", '{"a": 1}', "--if-revision", "1", "--json")
     assert code == 0
     assert run("ext", "set", tid, "other", '{"a": 2}', "--if-revision", "1")[0] == 2
+
+
+def test_ext_unset_drops_a_key_or_the_whole_add_on(proj, run, new_ticket):
+    tid = new_ticket()
+    run("ext", "set", tid, "other", '{"a": 1, "b": 2}')
+    run("ext", "set", tid, "keep", '{"x": 1}')
+    code, out, _ = run("ext", "unset", tid, "other.a", "--json")
+    assert code == 0 and json.loads(out) == {"b": 2}
+    code, out, _ = run("ext", "unset", tid, "other")
+    assert code == 0
+    t = tickets.load(proj, tid)  # `ticket show` hides add-ons that are not active
+    assert t["ext"] == {"keep": {"x": 1}}
+    assert t["history"][-1]["text"] == "Removed ext.other"
+
+
+def test_ext_unset_missing_is_quiet_and_if_revision_is_checked(proj, run, new_ticket):
+    tid = new_ticket()
+    before = json.loads(run("ticket", "show", tid, "--json")[1])["revision"]
+    assert run("ext", "unset", tid, "other.a")[0] == 0  # nothing there: nothing written
+    assert json.loads(run("ticket", "show", tid, "--json")[1])["revision"] == before
+    run("ext", "set", tid, "other", '{"a": 1}')
+    assert run("ext", "unset", tid, "other.a", "--if-revision", "99")[0] == 2
+    assert run("ext", "unset", tid, "Bad Name")[0] == 2
 
 
 # ---- update / uninstall -----------------------------------------------------------------------------
