@@ -10,7 +10,7 @@ import re
 import sys
 from pathlib import Path
 
-from orch import adapters, runs, runs_live, tickets
+from orch import adapters, net, runs, runs_live, tickets
 from orch.errors import Refused
 
 RUN_ID = re.compile(r"r_[a-z0-9_]{6,32}")
@@ -156,7 +156,7 @@ def _name(root: Path, tid: str) -> str:
 
 def _holder_line(rec: dict, tid: str, root: Path | None = None) -> str:
     who = adapters.load(rec["agent"])["label"] if rec["agent"] in adapters.builtin_names() else rec["agent"]
-    since = rec.get("started_at", "")[11:16]
+    since = net.when(rec.get("started_at"))  # local time, like every other time a person reads
     return f"{_name(root, tid) if root else tid} is being worked on by {rec['by']} ({who}) since {since}."
 
 

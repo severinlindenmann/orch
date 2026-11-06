@@ -381,3 +381,10 @@ def test_a_live_session_we_stopped_adds_no_end_line(proj, run):
         runs._write(proj, r)
     runs.wrap_live(proj, rec["run"], tid, "claude", [sys.executable, "-c", "raise SystemExit(1)"], None)
     assert not any("live session ended" in h["text"] for h in tickets.load(proj, tid)["history"])
+
+
+def test_the_holder_line_says_the_start_in_local_time():
+    from orch import cli_run, net
+
+    rec = {"agent": "claude", "by": "human:t", "started_at": "2026-11-06T13:57:13Z"}
+    assert cli_run._holder_line(rec, "t_abc123").endswith(f"since {net.when('2026-11-06T13:57:13Z')}.")
