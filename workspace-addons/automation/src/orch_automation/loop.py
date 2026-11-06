@@ -10,7 +10,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import migrate, orchcli
+from . import orchcli
 from .cron import fmt, is_due, last_due, next_after, parse
 from .orchcli import tickets as read_tickets
 from .plain import daily_or_slower, workspace_tz, zone
@@ -19,7 +19,7 @@ from .runner import history, load_config, load_state, sdir, update_state
 OPEN = ("open", "active", "waiting")
 FAST_FAIL_SECONDS = 10
 KIND = "automation:failure"
-KINDS = (KIND, "scheduler:failure")  # questions the old scheduler asked are read the same
+KINDS = (KIND,)
 TRY_AGAIN, LEAVE = "Try again", "Leave it"
 BUSY_TEXT = "More work arrived for this ticket: read the newest note on it."
 
@@ -41,7 +41,6 @@ class Scheduler:
         self.cfg = load_config(root)
         self.last_inbox: datetime | None = None
         self.wake = threading.Event()  # the listener sets it when something arrived
-        self.migrated = False
         self.watch: dict[str, dict] = {}  # tid -> {t0, at, log, hist} for runs started in the last moments
         sdir(root)
 
@@ -167,9 +166,6 @@ class Scheduler:
     def tick(self, now: datetime) -> list[str]:
         """One pass. Returns the ticket ids a run was started for."""
         self.cfg = load_config(self.root)
-        if not self.migrated:  # first pass: take over what the old scheduler left (idempotent)
-            self.migrated = True
-            migrate.run(self.root)
         self.check_watch()
         started: list[str] = self.act_on_answers(now)
         started += self.phone_tickets(now)

@@ -28,7 +28,7 @@ def sdir(root: Path) -> Path:
 
 
 def load_config(root: Path) -> dict:
-    """The [scheduler] table of .orch/config.toml: interval, inbox_every. The agent is [workspace] agent (core)."""
+    """The [automation] table of .orch/config.toml: interval, inbox_every. The agent is [workspace] agent (core)."""
     p = root / ".orch" / "config.toml"
     cfg: dict = {}
     if p.is_file():

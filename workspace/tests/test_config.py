@@ -3,6 +3,7 @@
 import json
 import os
 import stat
+import sys
 
 import pytest
 
@@ -175,3 +176,67 @@ def test_cannot_add_an_agent_that_already_exists(proj, run):
     code, _, err = run("config", "agent", "add", "my-agent", "--command", "second {prompt}")
     assert code == 2 and "already set up" in err
     assert config.agent_entries(proj)["my-agent"]["command"] == "first {prompt}"
+
+
+# ---------------------------------------------------------------- orch agents test
+
+
+def _script(tmp_path, body):
+    p = tmp_path / "fake-agent.py"
+    p.write_text(body)
+    return f"{sys.executable} {p} {{prompt}}"
+
+
+def test_agents_test_passes_and_writes_nothing(proj, run, capsys):
+    cmd = _script(proj, "import sys; print('ok')")
+    run("config", "agent", "add", "fake", "--command", cmd)
+    capsys.readouterr()
+    before = sorted(p.name for p in (proj / ".orch").rglob("*"))
+    with pytest.raises(SystemExit) as e:
+        run("agents", "test", "fake")
+    assert e.value.code == 0
+    assert "fake answered in" in capsys.readouterr().out
+    assert sorted(p.name for p in (proj / ".orch").rglob("*")) == before
+
+
+def test_agents_test_json_and_stdin(proj, run, capsys):
+    cmd = f'{sys.executable} -c "import sys; print(sys.stdin.read())"'
+    run("config", "agent", "add", "fake", "--command", cmd, "--prompt-via", "stdin")
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as e:
+        run("agents", "test", "fake", "--json")
+    assert e.value.code == 0
+    r = json.loads(capsys.readouterr().out)
+    assert r["ok"] and r["name"] == "fake"
+
+
+def test_agents_test_failed_command_shows_first_stderr_line(proj, run, capsys):
+    cmd = _script(proj, "import sys; sys.stderr.write('boom one\\nsecond\\n'); sys.exit(3)")
+    run("config", "agent", "add", "fake", "--command", cmd)
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as e:
+        run("agents", "test", "fake")
+    assert e.value.code == 1
+    assert capsys.readouterr().out.strip() == "The command failed: boom one"
+
+
+def test_agents_test_timeout(proj, run, capsys, monkeypatch):
+    from orch import cli_config
+
+    monkeypatch.setattr(cli_config, "TEST_TIMEOUT", 1)
+    cmd = _script(proj, "import time; time.sleep(30)")
+    run("config", "agent", "add", "fake", "--command", cmd)
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as e:
+        run("agents", "test", "fake")
+    assert e.value.code == 1
+    assert capsys.readouterr().out.strip() == "No answer within 1 s."
+
+
+def test_agents_test_not_installed_and_unknown(proj, run, capsys, fake_path):
+    with pytest.raises(SystemExit) as e:
+        run("agents", "test", "codex")
+    assert e.value.code == 1
+    assert capsys.readouterr().out.strip() == "Codex is not installed."
+    code, _, err = run("agents", "test", "nobody")
+    assert code == 2 and "No agent called" in err
