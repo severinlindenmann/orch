@@ -1,5 +1,6 @@
 use crate::crypto::Key;
 use crate::push::{ApnsConfig, Pusher};
+use crate::speech::{Aura, Speaker};
 use crate::transcribe::{Deepgram, Transcriber};
 use rusqlite::Connection;
 use std::collections::HashMap;
@@ -69,6 +70,8 @@ pub struct App {
     pub notify: Notify,
     pub pusher: Arc<dyn Pusher>,
     pub transcriber: Arc<dyn Transcriber>,
+    /// Text to speech (Deepgram Aura); tests put a fake in.
+    pub speaker: Mutex<Arc<dyn Speaker>>,
     /// phone/workspace id -> (window start, calls in window)
     pub transcribe_rate: Mutex<HashMap<String, (i64, u32)>>,
     /// Phone uploads in flight (memory bound).
@@ -76,6 +79,8 @@ pub struct App {
     /// Waiting for an upload slot / silence between two chunks, in ms (fields so tests can shorten them).
     pub upload_wait_ms: std::sync::atomic::AtomicU64,
     pub upload_idle_ms: std::sync::atomic::AtomicU64,
+    /// From this age on, an upload must average at least 16 KB/s (tests lower it).
+    pub upload_grace_ms: std::sync::atomic::AtomicU64,
     /// phone id -> bytes reserved by its upload in flight (one at a time per phone)
     pub upload_inflight: Mutex<HashMap<String, i64>>,
     /// phone id -> (window start, calls in window) for `POST /v1/phone/invitations/redeem`
@@ -133,11 +138,13 @@ impl App {
             notify: Notify::new(),
             pusher,
             transcriber,
+            speaker: Mutex::new(Arc::new(Aura::default())),
             transcribe_rate: Mutex::new(HashMap::new()),
             redeem_rate: Mutex::new(HashMap::new()),
             upload_slots: tokio::sync::Semaphore::new(4),
             upload_wait_ms: 5_000.into(),
             upload_idle_ms: 20_000.into(),
+            upload_grace_ms: 30_000.into(),
             upload_inflight: Mutex::new(HashMap::new()),
             push_budget: Mutex::new(HashMap::new()),
         }))

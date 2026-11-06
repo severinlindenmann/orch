@@ -9,6 +9,7 @@ pub mod phone;
 pub mod push;
 pub mod rules;
 pub mod shared;
+pub mod speech;
 pub mod state;
 pub mod store;
 pub mod transcribe;
@@ -29,6 +30,7 @@ pub fn spawn_purge(app: state::AppState) {
                     _ => {}
                 }
             }
+            speech::purge(&app.cfg.data_dir, util::now(), store::RETENTION_SECS);
             tokio::time::sleep(Duration::from_secs(3600)).await;
         }
     });
