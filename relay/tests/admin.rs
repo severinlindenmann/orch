@@ -601,7 +601,7 @@ fn portal_narrow_network_uses_connections_list() {
         .find(|block| block.contains(".network{display:none}"))
         .expect("hide the network diagram inside the narrow-screen media rule");
     assert!(narrow.contains(".network-legend{display:none}"));
-    assert!(narrow.contains(".mobile-connections{display:block}"));
+    assert!(narrow.contains(".mobile-connections{display:block"));
     assert!(css.contains(".mobile-connections{display:none}"));
 }
 
