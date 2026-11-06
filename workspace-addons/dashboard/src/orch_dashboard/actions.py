@@ -111,11 +111,11 @@ def _ticket_patch(a):
 
 
 def _ticket_edit(a):
-    _only(a, ("ticket", "owner", "due", "note", "if_revision"))
+    _only(a, ("ticket", "title", "owner", "due", "note", "if_revision"))
     flags = []
-    for k in ("owner", "due", "note"):
+    for k in ("title", "owner", "due", "note"):
         if k in a:
-            v = _text(a[k], k, empty=True)
+            v = _text(a[k], k, empty=k != "title")
             if k == "due" and not DAY.fullmatch(v):
                 raise BadRequest("The due day must look like 2026-11-30.")
             flags.append(f"--{k}={v}")
@@ -172,6 +172,12 @@ def _config_agent(a):
     return ["config", "set", "workspace.agent", _agent_name(a.get("name"))], [], []
 
 
+def _config_agent_test(a):
+    """Try an agent: `orch agents test <name> --json` answers {name, ok, reason}. Changes nothing, so no --by."""
+    _only(a, ("name",))
+    return ["agents", "test", _agent_name(a.get("name"))], [], []
+
+
 def _config_agent_add(a):
     """Add 'your own agent': `orch config agent add <name> --command=<one line>`. The command is ONE argv value
     (`--command=...`), so it can never be read as another option or run through a shell by the dashboard."""
@@ -204,7 +210,7 @@ def _addon_set(a):
 # op -> function(args) -> (words incl. ids, flags, free text after "--")
 OPS = {"answer": _answer, "ticket.new": _ticket_new, "ticket.patch": _ticket_patch, "ticket.edit": _ticket_edit,
        "log": _log, "run.start": _run_start, "run.stop": _run_stop, "addon.start": _addon_start,
-       "addon.act": _addon_act, "config.agent": _config_agent, "config.agent.add": _config_agent_add,
+       "addon.act": _addon_act, "config.agent": _config_agent, "config.agent.add": _config_agent_add, "config.agent.test": _config_agent_test,
        "addon.set": _addon_set}
 
 
@@ -224,6 +230,8 @@ def build_argv(op, args) -> list[str]:
     if not isinstance(args, dict):
         raise BadRequest("The arguments must be an object.")
     words, flags, tail = fn(args)
+    if op == "config.agent.test":
+        return [*words, "--json"]
     return [*words, *flags, "--by", actor(), "--json", *(["--", *tail] if tail else [])]
 
 
@@ -268,10 +276,12 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
         raise BadRequest("That add-on is not on in this workspace.")
     if op == "addon.set" and not _addon_known(root, orch_bin, args["name"]):
         raise BadRequest("That add-on is not installed.")
+    if op == "config.agent.test" and not _agent_exists(root, orch_bin, args["name"]):
+        raise BadRequest("That agent is not set up.")
     if op == "config.agent.add" and _agent_exists(root, orch_bin, args["name"]):
         raise BadRequest("An agent with that name is already set up. Pick another name (changing one is done in the terminal).")
     try:
-        r = subprocess.run([orch_bin, *argv], check=False, cwd=root, capture_output=True, text=True, timeout=60,
+        r = subprocess.run([orch_bin, *argv], check=False, cwd=root, capture_output=True, text=True, timeout=75 if op == "config.agent.test" else 60,
                            stdin=subprocess.DEVNULL, env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin})
     except subprocess.TimeoutExpired:
         return 504, "That took too long. Please try again.", None
@@ -282,6 +292,8 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
         out = json.loads(r.stdout)
     except ValueError:
         pass
+    if op == "config.agent.test" and isinstance(out, dict) and isinstance(out.get("ok"), bool):
+        return 200, "", out  # `orch agents test` exits 1 when the agent does not work; the JSON is the answer either way
     if r.returncode == 0:
         if op in ("config.agent.add", "addon.set", "config.agent"):
             _audit(root, op, args)

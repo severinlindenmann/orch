@@ -7,6 +7,8 @@
   const ic = (n, s = 16) => (window.icon ? window.icon(n, s) : '');
   const m = location.pathname.match(/\/(t_[a-z0-9]{6,16})$/);
   const TID = m && m[1];
+  const P = document.documentElement.dataset.prefix || '';  // set when the dashboard shows this page under its own address
+  const INAPP = !!P;
 
   function h(tag, attrs, ...kids) {
     const el = document.createElement(tag);
@@ -26,7 +28,7 @@
   async function act(op, args) {
     let r;
     try {
-      r = await fetch('/api/act', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({op, args})});
+      r = await fetch(P + '/api/act', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({op, args})});
     } catch (e) { return {ok: false, status: 0, message: 'Could not reach Focus.'}; }
     if (r.ok) { const d = await r.json(); if (d.view) apply(d.view); return {ok: true, status: r.status, result: d.result, note: d.note}; }
     return {ok: false, status: r.status, message: (await r.text()).slice(0, 300)};
@@ -36,10 +38,10 @@
   if (!TID) {
     document.title = 'Focus · orch';
     root.append(h('div', {class: 'fx-pick'}, h('h1', {text: 'Focus'}), h('p', {class: 'meta', text: 'Pick a ticket to watch.'})));
-    fetch('/api/tickets').then(r => r.json()).then(list => {
+    fetch(P + '/api/tickets').then(r => r.json()).then(list => {
       const box = root.querySelector('.fx-pick');
       if (!list.length) box.append(h('p', {class: 'muted', text: 'No open tickets.'}));
-      for (const t of list) box.append(h('a', {href: '/t/' + t.id}, h('span', {class: 'mono key', text: t.id}), h('span', {class: 'grow', text: t.title}), h('span', {class: 'meta', text: t.status})));
+      for (const t of list) box.append(h('a', {href: P + '/t/' + t.id}, h('span', {class: 'mono key', text: t.id}), h('span', {class: 'grow', text: t.title}), h('span', {class: 'meta', text: t.status})));
     });
     return;
   }
@@ -68,7 +70,7 @@
     els.full = h('button', {class: 'btn ghost icon sm', 'data-act': 'full', 'aria-label': 'Full screen', 'aria-pressed': 'false', title: 'Full screen (F)', icon: 'expand'});
     els.helpBtn = h('button', {class: 'btn ghost icon sm', 'data-act': 'help', 'aria-label': 'Keyboard shortcuts', title: 'Shortcuts (?)'}, h('kbd', {text: '?'}));
     const top = h('header', {class: 'fx-top'}, els.rail, h('div', {class: 'fx-title'}, els.key, els.title), h('div', {class: 'fx-prog'}, els.count, els.prog), els.live,
-      h('div', {class: 'fx-tools'}, els.stop, els.fresh, els.attachBtn, h('span', {class: 'sep opt'}), els.full, els.helpBtn, h('a', {class: 'btn ghost sm', href: '/', title: 'All tickets'}, h('span', {icon: 'x'}), h('span', {class: 'opt', text: 'Exit'}))));
+      h('div', {class: 'fx-tools'}, els.stop, els.fresh, els.attachBtn, h('span', {class: 'sep opt'}), els.full, els.helpBtn, h('a', {class: 'btn ghost sm', href: INAPP ? '/#ticket/' + TID : '/', target: INAPP ? '_top' : '_self', title: INAPP ? 'Back to the ticket' : 'All tickets'}, h('span', {icon: 'x'}), h('span', {class: 'opt', text: 'Exit'}))));
     els.tasks = h('div', {id: 'fx-tasks'});
     els.helpers = h('div');
     els.railNote = h('p', {class: 'meta', style: false});
@@ -329,9 +331,9 @@
     clearTimeout(timer);
     if (!document.hidden) {
       try {
-        const r = await fetch('/api/t/' + TID);
+        const r = await fetch(P + '/api/t/' + TID);
         if (r.ok) apply(await r.json());
-        else if (r.status === 404 && firstRender) { root.replaceChildren(h('div', {class: 'fx-pick'}, h('h1', {text: 'No such ticket'}), h('a', {href: '/', text: 'All tickets'}))); return; }
+        else if (r.status === 404 && firstRender) { root.replaceChildren(h('div', {class: 'fx-pick'}, h('h1', {text: 'No such ticket'}), h('a', {href: INAPP ? '/#home' : '/', target: INAPP ? '_top' : '_self', text: 'All tickets'}))); return; }
       } catch (e) { /* try again */ }
     }
     timer = setTimeout(poll, view && view.run.running ? 1500 : 3000);
