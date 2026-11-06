@@ -13,11 +13,13 @@ function Results($out) {
     if (-not $m.Success) { return @() }
     @(Get-Content $m.Groups[1].Value -ErrorAction SilentlyContinue | Select-String '^\S+ \S+ RESULT ')
 }
-function WaitFinish($out, $since) {
+# The finish log is shared with the earlier flow: only RESULT lines stamped at or after $from count.
+function WaitFinish($out, $from) {
     if (-not [regex]::IsMatch("$out", 'Log: (\S+)')) { return $true }
+    $stamp = $from.ToString("yyyy-MM-dd HH:mm:ss")
     $t0 = Get-Date
     while (((Get-Date) - $t0).TotalSeconds -lt 600) {
-        $last = Results $out | Select -Skip $since | Select -Last 1
+        $last = Results $out | Where-Object { "$_".Substring(0, 19) -ge $stamp } | Select -Last 1
         if ($last) { L "finisher: $last"; return ("$last" -match 'RESULT ok') }
         Start-Sleep 3
     }
@@ -38,7 +40,7 @@ $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 $env:ORCH_AGENT = ""
 $p = "$env:USERPROFILE\orch-sched"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
 O init | Out-Null
-$before = 0; $out = O addon add automation --yes | Out-String; L $out
+$before = Get-Date; $out = O addon add automation --yes | Out-String; L $out
 Check ($LASTEXITCODE -eq 0) "orch addon add automation"
 Check (WaitFinish $out $before) "automation install finished"
 
