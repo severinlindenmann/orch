@@ -123,6 +123,9 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
         if typ == "file" {
             check_blob(c, sender, &msg)?;
         }
+        if typ == "text" {
+            check_ticket_view(c, sender, &msg)?;
+        }
         return Ok(msg);
     }
     match typ.as_str() {
@@ -177,6 +180,45 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
         }
         _ => Err(forbidden("Only the relay makes this kind of message.")),
     }
+}
+
+/// Largest `body.ticket_view` the relay keeps: compact UTF-8 JSON bytes (message.schema.json).
+pub const MAX_TICKET_VIEW: usize = 16384;
+
+/// `body.ticket_view` (schema-checked already): at most 16 KB, and every attachment blob is one the sender
+/// uploaded, with its size. A blob of someone else answers exactly like a missing one (no existence oracle).
+fn check_ticket_view(c: &Connection, sender: &str, msg: &Value) -> Res<()> {
+    let view = &msg["body"]["ticket_view"];
+    if view.is_null() {
+        return Ok(());
+    }
+    if serde_json::to_vec(view).map_or(usize::MAX, |v| v.len()) > MAX_TICKET_VIEW {
+        return Err(invalid(
+            "ticket_view is bigger than 16 KB. Send fewer lines or attachments.",
+        ));
+    }
+    for a in view["attachments"].as_array().into_iter().flatten() {
+        let Some(id) = a["blob_id"].as_str() else {
+            continue;
+        };
+        let size: Option<i64> = c
+            .query_row(
+                "SELECT size FROM blobs WHERE id=?1 AND uploader=?2",
+                [id, sender],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match size {
+            Some(n) if Some(n) == a["size"].as_i64() => {}
+            Some(_) => {
+                return Err(invalid(
+                    "An attachment's size does not match the uploaded file.",
+                ))
+            }
+            None => return Err(not_found("Upload the attachment first (POST /v1/blobs).")),
+        }
+    }
+    Ok(())
 }
 
 fn reply_target(c: &Connection, msg: &Value) -> Res<store::Msg> {
