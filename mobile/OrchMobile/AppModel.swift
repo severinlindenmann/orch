@@ -218,16 +218,18 @@ final class AppModel {
         while !Task.isCancelled {
             try? await Task.sleep(for: interval)
             if Task.isCancelled { break }
-            await refresh(retry: false)
+            await refresh(retry: false, quiet: true)
         }
     }
 
-    func refresh(retry: Bool = true) async {
+    /// `quiet`: the background poll of an open chat, it must not flip `isLoading`.
+    func refresh(retry: Bool = true, quiet: Bool = false) async {
         guard phase == .ready || phase == .notifyStep, credentials != nil else { return }
-        isLoading = true; defer { isLoading = false }
+        if !quiet { isLoading = true }
+        defer { if !quiet { isLoading = false } }
         do {
             do { try await load() }
-            catch where retry && Self.isOffline(error) {
+            catch where retry && !useMock && Self.isOffline(error) {
                 // Cold start: the first request can run before the network is ready. Once more before the banner.
                 try await Task.sleep(for: retryDelay)
                 try await load()

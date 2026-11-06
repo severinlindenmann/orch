@@ -34,6 +34,7 @@ final class RefreshTests: XCTestCase {
         let t = Task { await m.watchWhileOpen(every: .milliseconds(30)) }
         try await Task.sleep(for: .milliseconds(300))
         t.cancel()
+        try await Task.sleep(for: .milliseconds(150))   // a request already in flight may still land
         let n = StubProtocol.seen.filter { $0.url?.path == "/v1/phone/updates" }.count
         XCTAssertGreaterThanOrEqual(n, 3, "an open chat polls the relay by itself")
         try await Task.sleep(for: .milliseconds(150))
