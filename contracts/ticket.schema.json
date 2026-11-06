@@ -88,8 +88,19 @@
     },
     "link": {
       "type": "object",
-      "required": ["type", "url"],
-      "properties": { "type": { "type": "string", "pattern": "^[a-z0-9-]{1,32}$", "description": "Any tool: github, jira, teams, file, ticket, ..." }, "url": { "type": "string", "minLength": 1 }, "title": { "type": "string" } }
+      "required": ["url"],
+      "anyOf": [{ "required": ["kind"] }, { "required": ["type"] }],
+      "description": "A page outside orch linked to the ticket (orch link add). kind: a link type an active add-on declares in [[ticket_links]], else 'link'; how it is shown comes from workspace/src/orch/links.py (add-on kind, else the known-sites table, else 'Link').",
+      "properties": {
+        "kind": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$" },
+        "type": { "type": "string", "pattern": "^[a-z0-9-]{1,32}$", "description": "Written before kind existed (github, jira, file, ticket, ...); read as kind." },
+        "url": { "type": "string", "minLength": 1, "maxLength": 2000, "description": "New links: http(s) only." },
+        "title": { "type": ["string", "null"], "maxLength": 200, "description": "Empty: the short address is shown." },
+        "status": { "type": "string", "pattern": "^[a-z0-9][a-z0-9 -]{0,23}$", "description": "Set only by the add-on that owns kind (refresh act); shown only while it is on." },
+        "thumb": { "type": "string", "pattern": "^artifacts/[A-Za-z0-9_.-]{1,100}$", "description": "A picture in the ticket's artifacts folder (add-on with preview = 'thumb')." },
+        "at": { "$ref": "#/$defs/time" },
+        "by": { "$ref": "#/$defs/who" }
+      }
     },
     "question": {
       "type": "object",

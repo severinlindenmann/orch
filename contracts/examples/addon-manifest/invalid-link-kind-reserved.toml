@@ -1,0 +1,14 @@
+# 'link' is the plain kind and cannot be an add-on link type.
+schema = "orch.addon/1"
+orch_api = 1
+name = "github"
+version = "0.1.0"
+description = "Pull requests and issues on tickets."
+run = "orch_github"
+skill = "skills/orch-github"
+
+[[ticket_links]]
+kind = "link"
+label = "Link"
+icon = "link"
+match = "https://github.com/*"

@@ -10,6 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 STATUS_ORDER = ["active", "waiting", "open", "done", "dropped"]
 _NAME = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
@@ -119,12 +120,107 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
         pg = a.get("page") if isinstance(a.get("page"), dict) else None
         if pg and not (isinstance(pg.get("path"), str) and re.fullmatch(r"/[A-Za-z0-9_./-]*", pg["path"]) and ".." not in pg["path"]):
             pg = None
-        if d or tv:
+        tf = _ticket_fields(a.get("ticket_fields"))
+        acts = [v for v in a.get("acts") or [] if isinstance(v, str) and re.fullmatch(r"[a-z][a-z-]{0,20}", v)]
+        kinds = [k.get("kind") for k in a.get("ticket_links") or [] if isinstance(k, dict) and isinstance(k.get("kind"), str)]
+        if d or tv or tf or acts or kinds:
             out.append({"name": a["name"], "dashboard": d and {"label": d["label"][:16], "icon": d["icon"],
                                                                "order": d.get("order", 50)}, "ticket_view": tv,
-                        "page": pg and {"path": pg["path"], "label": str(pg.get("label") or "")[:40]}})
+                        "page": pg and {"path": pg["path"], "label": str(pg.get("label") or "")[:40]},
+                        "ticket_fields": tf, "acts": acts, "link_kinds": kinds})
     out.sort(key=lambda a: (a["dashboard"] or {}).get("order", 50))
     return out
+
+
+FIELD_TYPES = ("text", "number", "date", "choice", "url")
+
+
+def _ticket_fields(tf) -> dict | None:
+    """`ticket_fields` of `orch addon list --json` (core already typed the schema): section, show_on_card, fields."""
+    if not (isinstance(tf, dict) and isinstance(tf.get("section"), str) and isinstance(tf.get("fields"), list)):
+        return None
+    fields = []
+    for f in tf["fields"]:
+        if not (isinstance(f, dict) and isinstance(f.get("key"), str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", f["key"])
+                and f.get("type") in FIELD_TYPES and isinstance(f.get("title"), str)):
+            continue
+        out = {"key": f["key"], "title": f["title"][:40], "type": f["type"], "read_only": f.get("read_only") is True,
+               "hidden": f.get("hidden") is True}
+        if f["type"] == "choice":
+            out["options"] = [{"value": o["value"], "label": str(o.get("label") or o["value"])[:40]}
+                              for o in f.get("options") or [] if isinstance(o, dict) and isinstance(o.get("value"), str)]
+        fields.append(out)
+    card = [k for k in tf.get("show_on_card") or [] if isinstance(k, str)][:3]
+    return {"section": tf["section"][:24], "show_on_card": card, "fields": fields}
+
+
+def link_kinds(raw) -> list[dict]:
+    """The link types of the active add-ons (`orch addon list --json` rows), for orch.links.describe."""
+    out, seen = [], set()
+    for a in sorted((a for a in raw if isinstance(a, dict) and a.get("active") is True) if isinstance(raw, list) else [],
+                    key=lambda a: str(a.get("name"))):
+        for k in a.get("ticket_links") or []:
+            if (isinstance(k, dict) and isinstance(k.get("kind"), str) and k["kind"] not in seen
+                    and isinstance(k.get("label"), str) and isinstance(k.get("icon"), str) and isinstance(k.get("match"), list)):
+                seen.add(k["kind"])
+                out.append({**k, "addon": a["name"]})
+    return out
+
+
+def add_link_views(tickets: list[dict], kinds: list[dict]) -> None:
+    """Each ticket link gets `view` (label, icon, mono, title, status, group) from the core's one link module."""
+    try:
+        from orch import links
+    except ImportError:  # standalone use without orch: no view, so the page shows no Links card
+        return
+    for t in tickets:
+        for ln in t.get("links") or []:
+            if isinstance(ln, dict) and isinstance(ln.get("url"), str):
+                ln["view"] = links.describe(ln, kinds)
+                ln["view"].update(shown_type=shown_type(ln["view"].get("label"), ln["url"], links),
+                                  **dict(zip(("host_head", "domain"), host_parts(ln["url"]))))
+
+
+# What a link row says it is: one rule (the phone app has the same one, LinkFace in ChatParts.swift).
+# Type: an allowlist. Each " · " part is a known site's name, kept only on that site's own address, or a plain
+# label of letters, digits, spaces and "-" (ASCII and precomposed Latin letters), at most 24, naming no site; else
+# dropped, and with nothing left the type is "Link". Host: the registrable domain (never cut) and the rest before it.
+_WORD = r"[A-Za-z0-9\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F-]+"
+_PLAIN = re.compile(rf"{_WORD}(?: {_WORD})*")
+TWO_PART_SUFFIXES = frozenset({
+    "co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "ne.jp", "or.jp",
+    "com.br", "com.cn", "com.mx", "co.in", "co.za", "com.tr", "com.sg", "com.hk", "co.kr", "github.io", "gitlab.io"})
+
+
+def shown_type(label, url: str, links) -> str:
+    names = {h["name"].lower() for h in links.known_sites()["hosts"]}
+    on = (links.site(url) or {}).get("name", "").lower()
+    parts = []
+    for p in (label if isinstance(label, str) else "").split(" · "):
+        if p.lower() in names:
+            if p.lower() == on:
+                parts.append(p)
+        elif len(p) <= 24 and _PLAIN.fullmatch(p) and not any(re.search(rf"\b{re.escape(n)}\b", p.lower()) for n in names):
+            parts.append(p)  # a plain label that names no site ("GitHub PR" off GitHub is just "Link")
+    return " · ".join(parts) or "Link"
+
+
+def domain(host: str) -> str:
+    """The registrable part of a host (eTLD+1): github.com.evil.example -> evil.example. An IP stays whole."""
+    parts = host.split(".")
+    if len(parts) <= 2 or all(x.isdigit() for x in parts) or ":" in host:
+        return host
+    return ".".join(parts[-3:] if ".".join(parts[-2:]) in TWO_PART_SUFFIXES else parts[-2:])
+
+
+def host_parts(url: str) -> tuple[str, str]:
+    """(the host before the domain, e.g. "gist.", the domain)."""
+    try:
+        host = (urlsplit(url).hostname or "").lower().removeprefix("www.")
+    except ValueError:
+        host = ""
+    d = domain(host)
+    return host[: len(host) - len(d)], d
 
 
 def _consent(r: dict) -> str:
@@ -224,6 +320,7 @@ def load_state(root: Path, orch_bin: str | None = None, with_addons: bool = True
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
+    add_link_views(tickets, link_kinds(raw) if with_addons else [])  # snapshots: known sites only, no add-on names
     needs = run_orch(orch_bin, ["needs", "--json"], root) if with_addons else None
     state = {
         "workspace": root.name,

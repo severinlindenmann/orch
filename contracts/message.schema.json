@@ -88,7 +88,7 @@
           }
         },
         "attachments": {
-          "type": "array", "maxItems": 50, "description": "Newest first. image/file: proof files the agent marked as result or check, uploaded with POST /v1/blobs (fetched by the phone with GET /v1/phone/blobs/<blob_id>). link: proof URLs, PRs and ticket links.",
+          "type": "array", "maxItems": 50, "description": "Newest first. image/file: proof files the agent marked as result or check, uploaded with POST /v1/blobs (fetched by the phone with GET /v1/phone/blobs/<blob_id>). link: proof URLs, PRs and ticket links (ticket links carry label, icon, mono and status when known; older phones ignore them).",
           "items": {
             "type": "object", "additionalProperties": false, "required": ["kind", "title", "at"],
             "properties": {
@@ -98,7 +98,11 @@
               "blob_id": { "type": "string", "pattern": "^b_[a-z0-9]{16}$" },
               "name": { "type": "string", "minLength": 1, "maxLength": 255 },
               "size": { "type": "integer", "minimum": 0, "maximum": 104857600 },
-              "at": { "type": "string", "format": "date-time", "pattern": "Z$" }
+              "at": { "type": "string", "format": "date-time", "pattern": "Z$" },
+              "label": { "type": "string", "minLength": 1, "maxLength": 60, "description": "Optional, links only: what the link is (\"GitHub · Pull request\", \"Figma\", \"Link\"), from workspace/src/orch/links.py." },
+              "icon": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$", "description": "Optional, links only: the site or link-type icon key (github, figma, youtube, link, ...); an unknown key shows the mono tile." },
+              "mono": { "type": "string", "minLength": 1, "maxLength": 3, "description": "Optional, links only: the letters on the tile (GH, Fg)." },
+              "status": { "type": "string", "pattern": "^[a-z0-9][a-z0-9 -]{0,23}$", "description": "Optional, links only: the add-on's status of the link (open, merged, unlisted)." }
             },
             "if": { "properties": { "kind": { "const": "link" } } },
             "then": { "required": ["url"], "not": { "required": ["blob_id"] } },

@@ -21,7 +21,7 @@ $ orch publish list  # server
 ```
 
 The link lasts 7 days unless you say `--days N` (up to 90) or `--permanent`. Put the link on the ticket so people find it:
-`orch link add <id> --type publish --url "<link>"`. A folder with an `index.html` opens as a website.
+`orch link add <id> "<link>" --title "<what it is>"`. A folder with an `index.html` opens as a website.
 
 ## Keep a link, change what is behind it
 
