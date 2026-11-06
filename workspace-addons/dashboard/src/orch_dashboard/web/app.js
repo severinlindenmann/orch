@@ -465,6 +465,7 @@
     if (ws.length) rows.push(row('Can talk to', ws.map(w => h('span', {className:w.online ? 'on-dot' : 'off-dot', title:w.online ? 'online' : 'offline'}, settingsText('span', {}, w.name)))));
     return h('dl', {}, rows);
   }
+  const FULL_WARNING = 'Full: the agent can change or delete anything in this folder and run any command without asking.';
   const PERMISSION_CHOICES = [['ask', 'Ask', 'The agent asks before it changes anything.'], ['auto', 'Auto', 'The agent works on its own and asks only for risky things.'], ['full', 'Full', 'The agent never asks.']];
   function permissionsCard(settings) {
     const current = PERMISSION_CHOICES.some(([value]) => value === settings.permissions) ? settings.permissions : 'auto';
@@ -476,7 +477,7 @@
     });
     return h('div', {className:'stack', 'data-key':'settings-permissions'}, h('h2', {className:'set-sub'}, 'What the agent may do'),
       h('div', {className:'card'}, h('div', {role:'radiogroup', 'aria-label':'What the agent may do'}, rows),
-        current === 'full' ? h('p', {className:'card-row bad', role:'note'}, 'Full: the agent can change or delete anything in this folder and run any command without asking.') : null));
+        current === 'full' ? h('p', {className:'card-row bad', role:'note'}, FULL_WARNING) : null));
   }
   function settingsPage() {
     const settings = state.settings;
@@ -1008,8 +1009,14 @@
     const perm = event.target.closest('[data-settings-permissions]');
     if (perm) {
       if (snapshot || settingsBusy.has('permissions')) return;
-      const result = await settingsSend('config.permissions', {mode:perm.dataset.settingsPermissions}, 'permissions');
-      if (result.ok) window.orch.toast('Saved. New agent runs use ' + capitalise(perm.dataset.settingsPermissions) + '.', 'ok');
+      const mode = perm.dataset.settingsPermissions;
+      const send = async () => {
+        const result = await settingsSend('config.permissions', mode === 'full' ? {mode, confirm:true} : {mode}, 'permissions');
+        if (result.ok) window.orch.toast('Saved. New agent runs use ' + capitalise(mode) + '.', 'ok');
+      };
+      if (mode !== 'full') { await send(); return; }
+      perm.checked = false;  // stays on the old choice until the person says Yes
+      settingsConfirm('Let the agent do everything?', FULL_WARNING, '', 'Yes, use Full', send);
       return;
     }
     const control = event.target.closest('[data-settings-agent]');

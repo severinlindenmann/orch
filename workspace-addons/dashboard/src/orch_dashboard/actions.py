@@ -185,10 +185,14 @@ def _config_agent(a):
 
 def _config_permissions(a):
     """How much an agent may do without asking: `orch config set workspace.permissions <ask|auto|full>`."""
-    _only(a, ("mode",))
+    _only(a, ("mode", "confirm"))
     mode = a.get("mode")
     if mode not in PERMISSIONS:
         raise BadRequest("Pick Ask, Auto or Full.")
+    if mode == "full" and a.get("confirm") is not True:
+        raise BadRequest("Full needs a Yes first: the agent will never ask.")  # the page sends confirm only after its Yes/No dialog
+    if a.get("confirm") not in (None, True, False):
+        raise BadRequest("A yes/no value must be true or false.")
     return ["config", "set", "workspace.permissions", mode], [], []
 
 
