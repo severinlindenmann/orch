@@ -71,6 +71,8 @@ pub struct App {
     pub transcriber: Arc<dyn Transcriber>,
     /// phone/workspace id -> (window start, calls in window)
     pub transcribe_rate: Mutex<HashMap<String, (i64, u32)>>,
+    /// phone id -> (window start, calls in window) for `POST /v1/phone/invitations/redeem`
+    pub redeem_rate: Mutex<HashMap<String, (i64, u32)>>,
     /// "workspace|phone" -> text-push budget state
     pub push_budget: Mutex<HashMap<String, PushBudget>>,
 }
@@ -125,6 +127,7 @@ impl App {
             pusher,
             transcriber,
             transcribe_rate: Mutex::new(HashMap::new()),
+            redeem_rate: Mutex::new(HashMap::new()),
             push_budget: Mutex::new(HashMap::new()),
         }))
     }

@@ -84,7 +84,7 @@ async fn question_keeps_key_and_phone_answer_copies_it() {
             &p,
             "POST",
             "/v1/phone/answer",
-            Some(json!({"question_message_id": qid, "answer": "DATE"})),
+            Some(json!({"client_id": "4705de22-948e-439d-87b9-fcd4081039ba", "question_message_id": qid, "answer": "DATE"})),
         )
         .await;
     assert_eq!(s, 201, "{v}");
