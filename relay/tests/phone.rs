@@ -79,7 +79,7 @@ async fn phone_pair_once_workspaces_and_signout() {
             &p,
             "POST",
             "/v1/phone/send",
-            Some(json!({"to": b.id, "text": "x"}))
+            Some(json!({"client_id": "506c7836-7437-445a-9d9b-d89cfa9280b1", "to": b.id, "text": "x"}))
         )
         .await
         .0,
@@ -90,7 +90,7 @@ async fn phone_pair_once_workspaces_and_signout() {
             &p,
             "POST",
             "/v1/phone/send",
-            Some(json!({"to": a.id, "text": "Book the train", "ticket": null})),
+            Some(json!({"client_id": "16d0f8ca-8ef5-4fe0-85f9-a49c4b36b2f0", "to": a.id, "text": "Book the train", "ticket": null})),
         )
         .await;
     assert_eq!(s, 201, "{v}");
@@ -166,7 +166,7 @@ async fn phone_question_push_answer_first_wins() {
             &p,
             "POST",
             "/v1/phone/answer",
-            Some(json!({"question_message_id": qid, "answer": "TIMESTAMP"})),
+            Some(json!({"client_id": "89844c7d-c056-4358-96fa-0029ddda285e", "question_message_id": qid, "answer": "TIMESTAMP"})),
         )
         .await;
     assert_eq!(s, 201, "{v}");
@@ -175,7 +175,7 @@ async fn phone_question_push_answer_first_wins() {
             &p2,
             "POST",
             "/v1/phone/answer",
-            Some(json!({"question_message_id": qid, "answer": "DATE"})),
+            Some(json!({"client_id": "caff3c95-72c7-41aa-9eaf-dfbdf8c28d86", "question_message_id": qid, "answer": "DATE"})),
         )
         .await;
     assert_eq!((s, v["error"].as_str()), (409, Some("already_answered")));
@@ -204,7 +204,7 @@ async fn phone_question_push_answer_first_wins() {
             &p,
             "POST",
             "/v1/phone/answer",
-            Some(json!({"question_message_id": bq, "answer": "x"}))
+            Some(json!({"client_id": "13ef7789-cc8e-4925-8274-ff257cda9365", "question_message_id": bq, "answer": "x"}))
         )
         .await
         .0,
@@ -262,7 +262,7 @@ async fn phone_send_validates_ticket() {
                 &p,
                 "POST",
                 "/v1/phone/send",
-                Some(json!({"to": a.id, "text": "x", "ticket": bad})),
+                Some(json!({"client_id": "ae0fc0e2-1274-4189-8a8a-81ede0473a22", "to": a.id, "text": "x", "ticket": bad})),
             )
             .await;
         assert_eq!((s, v["error"].as_str()), (422, Some("invalid")), "{bad}");
@@ -272,7 +272,7 @@ async fn phone_send_validates_ticket() {
             &p,
             "POST",
             "/v1/phone/send",
-            Some(json!({"to": a.id, "text": "x", "ticket": "t_abc123"}))
+            Some(json!({"client_id": "ee0e9b92-1964-4cdd-91ae-0ba7baea9b67", "to": a.id, "text": "x", "ticket": "t_abc123"}))
         )
         .await
         .0,
@@ -323,7 +323,7 @@ async fn phone_reply_paired_workspace_can_send_to_its_phone() {
             &p,
             "POST",
             "/v1/phone/send",
-            Some(json!({"to": a.id, "text": "can you answer my phone"})),
+            Some(json!({"client_id": "e630af20-fef5-4bd5-a526-3a3c376a94c3", "to": a.id, "text": "can you answer my phone"})),
         )
         .await;
     assert_eq!(s, 201);
@@ -422,7 +422,7 @@ async fn phone_reply_question_to_one_phone() {
             &p2,
             "POST",
             "/v1/phone/answer",
-            Some(json!({"question_message_id": qid, "answer": "no"})),
+            Some(json!({"client_id": "e4b43c69-d851-43ff-88e6-f1f92aee9dfd", "question_message_id": qid, "answer": "no"})),
         )
         .await;
     assert_eq!(s, 404);
@@ -431,7 +431,7 @@ async fn phone_reply_question_to_one_phone() {
             &p1,
             "POST",
             "/v1/phone/answer",
-            Some(json!({"question_message_id": qid, "answer": "yes"})),
+            Some(json!({"client_id": "261a3f6e-b052-4009-9ff1-17f42c53e689", "question_message_id": qid, "answer": "yes"})),
         )
         .await;
     assert_eq!(s, 201);

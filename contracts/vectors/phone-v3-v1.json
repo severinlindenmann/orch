@@ -385,11 +385,20 @@
   },
   {
    "name": "no-client-id",
-   "ok": false,
-   "why": "client_id is required",
+   "ok": true,
+   "why": "client_id is optional (app before v3); no dedupe",
    "request": {
     "to": "ws_pilatus001",
     "text": "Hi"
+   },
+   "built": {
+    "schema": "orch.msg/1",
+    "from": "ph_iphone0001",
+    "to": "ws_pilatus001",
+    "type": "text",
+    "body": {
+     "text": "Hi"
+    }
    }
   },
   {
@@ -654,11 +663,12 @@
   },
   {
    "name": "without-client-id",
-   "ok": false,
+   "ok": true,
    "request": {
     "question_message_id": "m_q1date0ts0000001",
     "answer": "TIMESTAMP"
-   }
+   },
+   "why": "client_id is optional (app before v3); no dedupe"
   }
  ],
  "settings_patch": [
