@@ -7,3 +7,8 @@ description = "Shares files and small apps by private link."
 run = "orch"
 skill = "skills/orch-publish"
 agents_block = "skills/orch-publish/AGENTS-block.md"
+
+[dashboard]
+label = "Shared"
+icon = "link"
+order = 60
