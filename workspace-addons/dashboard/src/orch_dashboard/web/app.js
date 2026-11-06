@@ -1,388 +1,551 @@
 'use strict';
 (() => {
-  document.title = 'orch · Dashboard';
   const snapshot = typeof window.ORCH_SNAPSHOT !== 'undefined';
-  const content = document.getElementById('content');
-  const statuses = ['active', 'waiting', 'open', 'done', 'dropped'];
+  const main = document.getElementById('content');
+  const nav = document.getElementById('side-nav');
   const array = value => Array.isArray(value) ? value : [];
-  const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-  const label = value => { const text = String(value ?? ''); return text.charAt(0).toUpperCase() + text.slice(1); };
-  const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
-  const parse = value => { const d = new Date(value); return value == null || value === '' || Number.isNaN(d.getTime()) ? null : d; };
-  const fmt = (d, opts) => d.toLocaleString('en-GB', opts);
-  const date = value => { const d = parse(value); return d ? fmt(d, {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : '—'; };
-  const day = value => { const d = parse(value); return d ? fmt(d, {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : ''; };
-  function ago(value) {
-    const d = parse(value);
-    if (!d) return '';
-    const min = Math.round((Date.now() - d.getTime()) / 60000);
-    if (min < 1) return 'just now';
-    if (min < 60) return `${min} min ago`;
-    if (min < 1440) return `${Math.round(min / 60)} h ago`;
-    return fmt(d, {weekday: 'short', day: 'numeric', month: 'short'});
+  const clean = value => String(value ?? '').replace(/\b(?:ws|t|q|m|ph|wh|b|f)_[a-zA-Z0-9]{4,}\b/g, '').replace(/\s+·\s+·/g, ' · ').trim();
+  const name = value => clean(String(value ?? '').replace(/^(human|agent):/, ''));
+  const icon = value => {
+    const svg = window.icon(String(value || 'page'));
+    return /<(path|rect|circle|polyline|line|ellipse)\b/.test(svg) ? svg : window.icon('page');
+  };
+  function iconEl(name) {
+    const node = document.createElement('span');
+    node.className = 'ic-wrap';
+    node.innerHTML = icon(name); // ic-wrap: only trusted kit icons use markup.
+    return node;
   }
-  const ticketHref = id => '#ticket/' + encodeURIComponent(String(id));
-  const openQuestions = ticket => array(ticket.questions).filter(q => q.answer == null);
-  const doneCount = ticket => array(ticket.checklist).filter(c => c.done).length;
-  // Never show internal ids: drop "message m_..." phrases and any ws_/t_/q_ style token.
-  const noIds = text => String(text ?? '').replace(/,?\s*message\s+m_\w+/gi, '').replace(/\b(?:ws|ph|m|t|q|wh|b|f)_[A-Za-z0-9]{4,}\b/g, '').replace(/\s+via\s+(?:the\s+)?relay\b/gi, '').replace(/\brelay\b/gi, '').replace(/\s+([,.])/g, '$1').replace(/\s+/g, ' ').trim();
-  const base = path => String(path).replace(/[?#].*$/, '').split(/[\\/]/).filter(Boolean).pop() || String(path);
-  const dayWord = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const names = () => state.names || {};
-  function evidenceLabel(e) {
-    const ref = String(e.ref ?? ''), text = String(e.text ?? '');
-    if (e.type === 'pr') { const n = /\/pull\/(\d+)|#(\d+)/.exec(ref); return n ? `PR #${n[1] || n[2]}` : 'Pull request'; }
-    if (e.type === 'commit') return `commit ${ref.slice(0, 7)}`;
-    if (e.type === 'file') return base(ref);
-    if (e.type === 'url') { try { return new URL(ref).hostname; } catch (_) { return 'Link'; } }
-    if (e.type === 'command') {
-      const tool = ref.split(/\s+/).find(w => w && !['uv', 'run', 'npx', 'python', 'python3', '-m', 'sudo'].includes(w)) || 'Command';
-      return text ? `${base(tool)}: ${text}` : `Ran ${base(tool)}`;
+  function append(node, children) {
+    for (const child of children.flat(Infinity)) {
+      if (child == null || child === false) continue;
+      node.appendChild(child instanceof Node ? child : document.createTextNode(String(child)));
     }
-    return noIds(text || ref) || 'Note';
+    return node;
   }
-  let state;
-  let renderedRoute = '';
-  // ---- visual helpers (inline SVG, no libraries) ----
-  const ic = (id, cls = '') => `<svg class="ic${cls ? ' ' + cls : ''}" aria-hidden="true" focusable="false"><use href="#i-${id}"/></svg>`;
-  const SM = {active: {icon: 'half', word: 'In progress'}, waiting: {icon: 'hourglass', word: 'Waiting'}, open: {icon: 'circle', word: 'Open'}, done: {icon: 'check', word: 'Done'}, dropped: {icon: 'x', word: 'Dropped'}};
-  const stepKind = item => (item.done ? (array(item.evidence).length ? 'ok' : 'noproof') : 'todo');
-  const timeOf = value => { const d = parse(value); return d ? fmt(d, {hour: '2-digit', minute: '2-digit'}) : ''; };
-  const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  function relDay(value) {
+  function h(tag, attrs = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs)) {
+      if (value == null) continue;
+      if (key === 'href' && !/^(#|https?:)/i.test(String(value))) continue;
+      if (key.startsWith('data-')) node.dataset[key.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = String(value);
+      else if (['className', 'hidden', 'disabled'].includes(key)) node[key] = value;
+      else node.setAttribute(key, String(value));
+    }
+    return append(node, children);
+  }
+  const fragment = (...children) => append(document.createDocumentFragment(), children);
+  const capitalise = value => String(value).replace(/^./, c => c.toUpperCase());
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const button = (text, cls, click) => {
+    const node = el('button', 'btn ' + cls, text);
+    node.type = 'button';
+    node.addEventListener('click', click);
+    return node;
+  };
+  const parse = value => {
+    if (!value) return null;
+    const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? value + 'T00:00:00' : value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const date = value => parse(value)?.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short'}) || '';
+  const time = value => parse(value)?.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) || '';
+  let state, renderedRoute = '', fetching = false, writing = 0, serial = 0, mutation = 0;
+  const now = () => parse(state?.now) || new Date();
+  const today = () => {
+    const d = now();
+    return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+  };
+  const age = value => {
     const d = parse(value);
     if (!d) return '';
-    const now = new Date(), tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    return sameDay(d, now) ? 'Today' : sameDay(d, tomorrow) ? 'Tomorrow' : fmt(d, {weekday: 'short'});
+    const mins = Math.max(0, Math.floor((now() - d) / 60000));
+    return mins < 60 ? Math.max(1, mins) + ' min' : mins < 1440 ? Math.floor(mins / 60) + ' h' : Math.floor(mins / 1440) + (mins < 2880 ? ' day' : ' days');
+  };
+  const tickets = () => array(state?.tickets);
+  const addons = () => array(state?.addons);
+  const ticketOf = id => tickets().find(t => String(t.id) === String(id));
+  const href = id => '#ticket/' + encodeURIComponent(id);
+  const questions = t => array(t.questions).filter(q => q.answer == null);
+  const activeTicket = t => !['done', 'dropped'].includes(t.status);
+  const overdue = t => activeTicket(t) && t.due && t.due < today();
+  const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
+  const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
+  const statusWord = t => questions(t).length ? 'Waiting for an answer' : ({active:'Doing', waiting:'Waiting', open:'Open', done:'Done', dropped:'Dropped'}[t.status] || 'Open');
+  const chip = (text, cls = '') => h('span', {className:'chip ' + cls}, text);
+  const statusChip = t => chip(activeTicket(t) && (t.status === 'waiting' || questions(t).length) ? 'Blocked' : statusWord(t), activeTicket(t) && (t.status === 'waiting' || questions(t).length) ? 'attn' : t.status === 'active' ? 'active' : '');
+  const heading = (title, sub = '') => h('header', {className:'page-heading', 'data-key':'heading'}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null);
+  const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);
+  const emptyRow = text => h('div', {className:'card-row muted'}, text);
+  const newButton = () => snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'new'}, 'New ticket');
+  const firstTicket = () => h('div', {className:'card-row'}, h('p', {className:'grow muted'}, 'Your first ticket starts here.'), newButton());
+  function ticketRow(t) {
+    const meta = [name(t.owner), t.due ? 'Due ' + date(t.due) : '', statusWord(t)].filter(Boolean);
+    const parent = ticketOf(t.parent);
+    let late = '';
+    if (overdue(t)) {
+      const days = Math.round((Date.parse(today()) - Date.parse(t.due)) / 86400000);
+      late = chip('Overdue ' + days + (days === 1 ? ' day' : ' days'), 'error');
+    }
+    return h('div', {className:'card-row ticket-row', 'data-key':'ticket-' + t.id}, h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, meta.join(' · ')), parent ? h('p', {className:'meta'}, 'Part of ', clean(parent.title)) : null), h('div', {className:'row'}, late, statusChip(t)));
   }
-  const shortWhen = value => { const d = parse(value); return d ? `${relDay(value)} ${timeOf(value)}` : ''; };
-  // Plain words for the common UTC crons, times in local time ("Every 5 minutes", "Mondays at 08:00"); else ''.
-  function cronShort(cron) {
-    const c = String(cron || '').trim();
-    if (c === '* * * * *') return 'Every minute';
-    let m = /^\*\/(\d{1,2}) \* \* \* \*$/.exec(c);
-    if (m) return `Every ${Number(m[1])} minutes`;
-    if (/^0 \* \* \* \*$/.test(c)) return 'Every hour';
-    m = /^\d{1,2} \*\/(\d{1,2}) \* \* \*$/.exec(c);
-    if (m) return `Every ${Number(m[1])} hours`;
-    m = /^(\d{1,2}) (\d{1,2}) \* \* (\*|\d)$/.exec(c);
-    if (!m) return '';
-    const utc = new Date(); utc.setUTCHours(Number(m[2]), Number(m[1]), 0, 0);
-    const shift = Math.round((Date.UTC(utc.getFullYear(), utc.getMonth(), utc.getDate()) - Date.UTC(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate())) / 864e5);
-    const at = `${String(utc.getHours()).padStart(2, '0')}:${String(utc.getMinutes()).padStart(2, '0')}`;
-    return m[3] === '*' ? `Every day at ${at}` : `${dayWord[(Number(m[3]) + shift + 7) % 7]}s at ${at}`;
+  function needRow(row, newest) {
+    const t = ticketOf(row.ticket);
+    const claim = state.runs?.[row.ticket]?.claim;
+    const by = name(row.agent || row.by || claim?.agent || claim?.by);
+    const meta = [typeof t?.key === 'string' ? clean(t.key) : '', by, t && clean(t.title)].filter(Boolean).join(' · ');
+    const choice = window.DashHelpers.needAction(row);
+    const action = snapshot
+      ? (t ? h('a', {className:'btn outline sm', href:href(t.id)}, 'Open') : null)
+      : h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id}, choice.label);
+    return h('div', {className:'card-row', 'data-key':'need-' + row.id, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null}, h('span', {className:'need-icon ' + (row.tone === 'bad' ? 'bad' : row.tone === 'warn' ? 'warn' : 'muted')}, iconEl(row.tone === 'bad' ? 'stop' : row.tone === 'warn' ? 'shield' : 'note')), h('div', {className:'grow'}, h('h3', {}, clean(row.text)), h('p', {className:'meta'}, meta)), h('time', {datetime:row.since || ''}, age(row.since)), action);
   }
-  const tag = (kind, icon, text, title) => `<span class="tag ${kind}"${title ? ` title="${esc(title)}"` : ''}>${icon ? ic(icon) : ''}${esc(text)}</span>`;
-  // One arc per checklist step: filled = done, amber = done without proof, grey = still to do.
-  function ring(ticket, size, text) {
-    const steps = array(ticket.checklist), n = steps.length;
-    if (!n) return '';
-    const done = doneCount(ticket), stroke = Math.max(4, Math.round(size / 9)), r = (size - stroke) / 2, c = 2 * Math.PI * r, mid = size / 2;
-    const gap = n > 1 && n <= 16 ? Math.min(4, c / n / 3) : 0, per = c / n;
-    const arcs = steps.map((item, i) => {
-      const kind = stepKind(item), len = Math.max(per - gap, 1);
-      return `<circle class="arc ${kind}" cx="${mid}" cy="${mid}" r="${r.toFixed(2)}" stroke-width="${stroke}" stroke-dasharray="${len.toFixed(2)} ${(c - len).toFixed(2)}" stroke-dashoffset="${(-i * per).toFixed(2)}"/>`;
-    }).join('');
-    const label = `${done} of ${plural(n, 'step')} done`;
-    return `<span class="ring${done === n ? ' full' : ''}" role="img" aria-label="${esc(label)}" title="${esc(label)}"><svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" aria-hidden="true"><g transform="rotate(-90 ${mid} ${mid})">${arcs}</g></svg>${text ? `<b>${done}/${n}</b>` : ''}</span>`;
+  function home() {
+    const needs = array(state.needs);
+    const rows = window.DashHelpers.agentRows(state.tickets, state.runs, Date.now());
+    const working = rows.filter(row => ['working', 'needs', 'stuck'].includes(row.state));
+    const current = sorted(tickets().filter(activeTicket));
+    const oldest = needs.map(n => parse(n.since)).filter(Boolean).sort((a, b) => a - b)[0];
+    const newest = needs.slice().sort((a, b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
+    const history = tickets().flatMap(t => array(t.history).map(entry => ({entry, title:t.title}))).sort((a, b) => (Date.parse(b.entry.at) || 0) - (Date.parse(a.entry.at) || 0)).slice(0, 5);
+    const stopped = array(state.services).some(s => s.running === false);
+    const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;
+    const agents = rows.slice(0, 5).map(row => h('div', {className:'card-row', 'data-key':'agent-' + row.agent + '-' + row.ticket}, h('span', {className:'dot ' + (row.state === 'stuck' ? 'needs' : row.state)}), h('div', {className:'grow'}, h('h3', {}, capitalise(name(row.agent) || 'Agent') + ' · ' + ({working:'working', needs:'needs you', stuck:'may be stuck', idle:'idle'}[row.state])), h('p', {className:'meta'}, row.state === 'idle' ? 'Last worked ' + age(row.since) + ' ago' : [clean(ticketOf(row.ticket)?.title), age(row.since)].filter(Boolean).join(' · ')))));
+    const links = window.DashHelpers.serviceLinks(state.services, location.origin);
+    const recent = history.map(({entry, title}) => {
+      const line = clean(window.DashHelpers.historyLine(entry));
+      return h('div', {className:'card-row'}, h('div', {className:'grow'}, h('h3', {}, line.length > 80 ? line.slice(0, 79) + '…' : line), h('p', {className:'meta'}, [name(entry.by), clean(title), age(entry.at)].filter(Boolean).join(' · '))));
+    });
+    return fragment(heading('Today', now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + needs.length + ' need you · ' + working.length + (working.length === 1 ? ' agent working' : ' agents working')), banner,
+      h('div', {className:'columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
+        card('needs-you', 'Needs you', needs.length + (oldest ? ' · oldest ' + age(oldest) : ''), needs.length ? needs.map(n => needRow(n, newest)) : emptyRow('Nothing needs you right now.'), true),
+        card('your-tickets', 'Your tickets', current.length + ' · ' + current.filter(overdue).length + ' overdue', current.length ? current.map(ticketRow) : firstTicket(), true)),
+      h('aside', {className:'stack', 'data-key':'right'},
+        card('agents', 'Agents', working.length + ' working', [agents.length ? agents : emptyRow('No agent is working right now.'), links.length ? h('div', {className:'card-row'}, links.map(link => h('a', {className:'meta', href:link.url, target:'_blank', rel:'noopener noreferrer'}, 'Open ' + capitalise(link.label) + ' →'))) : null]),
+        card('recently', 'Recently', '', recent.length ? recent : emptyRow('No recent activity.')))));
   }
-  const heading = title => `<div class="heading"><h1>${esc(title)}</h1></div>`;
-  const statusChip = status => `<span class="chip-status s-${esc(status)}">${ic(SM[status]?.icon || 'circle')}${esc(SM[status]?.word || label(status))}</span>`;
-  const disclosure = (key, title, body, icon) => `<details data-key="${esc(key)}"><summary>${icon ? ic(icon) : ''}<span>${esc(title)}</span>${ic('chevron', 'chev')}</summary>${body}</details>`;
-  const rawKey = t => /^[A-Z][A-Z0-9]*-\d+$/.test(t) || /^PR\s*#?\d+$/i.test(t) || /^[A-Z]{3,5}$/.test(t);
-  const linkKind = {jira: 'Issue in tracker', issue: 'Issue in tracker', github: 'Code review', pr: 'Code review', teams: 'Chat thread', publish: 'Shared file', xlsx: 'Excel file'};
-  function link(item) {
-    const url = String(item.url ?? '');
-    let safe = false, host = '';
-    try { const u = new URL(url); safe = ['http:', 'https:'].includes(u.protocol); host = u.hostname; } catch (_) { /* shown as text */ }
-    const raw = String(item.title || '').replace(/\s*\((?:encrypted|private)\)/i, '').trim();
-    const kind = linkKind[String(item.type || '').toLowerCase()] || linkKind[raw.toLowerCase()];
-    const title = (!raw || rawKey(raw)) ? (kind || (safe ? host : base(url)) || 'Link') : /^sample rows$/i.test(raw) ? 'Sample data' : raw;
-    return safe ? `<a class="chip" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${ic('link')}${esc(title)}</a>` : `<span class="chip">${ic('link')}${esc(title)}</span>`;
-  }
-  const linkBox = items => items.length > 1 ? disclosure('links', plural(items.length, 'link'), `<div class="chips">${items.map(link).join('')}</div>`, 'link') : `<div class="chips">${items.map(link).join('')}</div>`;
-  function evidenceChip(e) {
-    const ref = String(e.ref ?? ''), text = String(e.text ?? '');
-    let icon = 'note', words = noIds(text || ref) || 'Note';
-    if (e.type === 'pr') { icon = 'pr'; words = evidenceLabel(e); }
-    else if (e.type === 'commit') { icon = 'commit'; words = 'Code updated'; }
-    else if (e.type === 'file') { icon = 'file'; words = base(ref); }
-    else if (e.type === 'url') { icon = 'link'; words = evidenceLabel(e); }
-    else if (e.type === 'command') { icon = 'test'; const n = /(\d+)\s+passed/i.exec(text); words = n ? `${n[1]} checks OK` : (noIds(text) || 'Check passed'); }
-    const tip = e.type === 'commit' ? ref.slice(0, 7) : e.type === 'command' ? ref : '';
-    return `<span class="chip ev ev-${esc(e.type || 'note')}"${tip ? ` title="${esc(tip)}"` : ''}>${ic(icon)}<span>${esc(words)}</span></span>`;
-  }
-  function optionPills(q) {
-    const opts = array(q.options);
-    return opts.length ? `<ul class="pills" aria-label="Options">${opts.map(o => `<li class="opt${o === q.recommended ? ' rec' : ''}">${o === q.recommended ? ic('star') + esc(o) + '<small>suggested</small>' : esc(o)}</li>`).join('')}</ul>` : '';
-  }
-  function askCard(ticket, q, as = 'a', compact = false) {
-    const open = as === 'a' ? ` href="${esc(ticketHref(ticket.id))}"` : '';
-    const hint = compact || snapshot ? '' : `<p class="ask-hint">${ic('chat')}Answer in your agent or on your phone.</p>`;
-    return `<${as} class="ask${compact ? ' compact' : ''}"${open}><span class="ask-icon">${ic('question')}</span><div class="ask-body"><h2>${esc(q.text)}</h2><div class="ask-ticket">${esc(ticket.title)}</div>${compact ? '' : optionPills(q) + hint}</div>${as === 'a' && !snapshot ? ic('chevron', 'go') : ''}</${as}>`;
-  }
-  const wakeOf = ticket => ticket.waiting_on?.kind === 'time' ? ticket.waiting_on.until : null;
-  function waitTag(ticket) {
-    if (ticket.status !== 'waiting') return '';
-    const w = ticket.waiting_on, wake = wakeOf(ticket);
-    if (w && w.kind === 'ticket') return tag('wait', 'hourglass', 'Waiting for another ticket');
-    if (w && w.kind === 'external') return tag('wait', 'hourglass', 'Outside event');
-    if (wake) return tag('wait', 'clock', shortWhen(wake));
-    return tag('wait', 'hourglass', w && w.kind === 'question' ? 'Waiting for an answer' : 'Waiting');
-  }
-  function row(ticket) {
-    const count = openQuestions(ticket).length, needs = count > 0;
-    const chips = (needs ? tag('need', 'question', count > 1 ? `${count} questions` : 'Your answer') : waitTag(ticket));
-    return `<a class="card s-${esc(ticket.status)}${needs ? ' needs' : ''}" href="${esc(ticketHref(ticket.id))}"><div class="card-main"><div class="card-title">${esc(ticket.title)}</div>${chips ? `<div class="tags">${chips}</div>` : ''}</div>${ring(ticket, 44, true)}</a>`;
-  }
-  const mini = ticket => `<a class="mini s-${esc(ticket.status)}" href="${esc(ticketHref(ticket.id))}">${ic('check')}<span class="mini-title">${esc(ticket.title)}</span><time>${esc(ago(ticket.updated_at))}</time></a>`;
-  function weekBars(tickets) {
-    const now = new Date(), monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
-    const days = Array.from({length: 7}, (_, i) => new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i));
-    const counts = days.map(d => tickets.reduce((s, t) => s + array(t.history).filter(h => { const x = parse(h.at); return x && sameDay(x, d); }).length, 0));
-    const max = Math.max(1, ...counts), total = counts.reduce((a, b) => a + b, 0);
-    if (!total) return '';
-    const cols = days.map((d, i) => {
-      const future = d > now && !sameDay(d, now), today = sameDay(d, now), name = fmt(d, {weekday: 'short'});
-      return `<li class="${today ? 'today' : future ? 'future' : ''}" title="${esc(name)}: ${counts[i]}"><span class="val">${future ? '' : counts[i]}</span><span class="bar"><svg width="100%" height="56" aria-hidden="true"><rect x="0" width="100%" y="${100 - Math.max(counts[i] ? 12 : 3, Math.round(counts[i] / max * 100))}%" height="${Math.max(counts[i] ? 12 : 3, Math.round(counts[i] / max * 100))}%" rx="4" ${future ? 'hidden' : ''}/></svg></span><span class="dn"><span class="d-long">${esc(name)}</span><span class="d-short" aria-hidden="true">${esc(name.slice(0, 2))}</span></span></li>`;
-    }).join('');
-    return `<section class="week panel" aria-label="Activity this week: ${total} updates"><div class="week-head">${ic('spark')}<b>${total}</b><span>updates this week</span></div><ul class="bars">${cols}</ul></section>`;
-  }
-  function statusBar(tickets) {
-    const counts = statuses.map(s => [s, tickets.filter(t => t.status === s).length]).filter(([s, n]) => n && s !== 'dropped');
-    const total = counts.reduce((a, [, n]) => a + n, 0);
-    if (!total) return '';
-    const text = counts.map(([s, n]) => `${n} ${SM[s].word.toLowerCase()}`).join(', ');
-    let x = 0;
-    const rects = counts.map(([s, n]) => { const w = n / total * 100, r = `<rect class="s-${s}" x="${x.toFixed(2)}%" width="${w.toFixed(2)}%" y="0" height="100%"/>`; x += w; return r; }).join('');
-    return `<section class="overview panel" aria-label="${esc(text)}"><svg class="segbar" width="100%" height="12" aria-hidden="true" preserveAspectRatio="none"><clipPath id="segclip"><rect width="100%" height="100%" rx="6"/></clipPath><g clip-path="url(#segclip)">${rects}</g></svg><ul class="seg">${counts.map(([s, n]) => `<li class="s-${s}"><span class="seg-text">${ic(SM[s].icon)}<b>${n}</b><span>${esc(SM[s].word)}</span></span></li>`).join('')}</ul></section>`;
-  }
-  // Show the first `n` items; the rest sit behind a "Show all" disclosure (nothing hidden silently).
-  function capped(key, items, n, render, wrapClass) {
-    const shown = items.slice(0, n), rest = items.slice(n);
-    const wrap = html => wrapClass ? `<div class="${wrapClass}">${html}</div>` : html;
-    return wrap(shown.map(render).join('')) + (rest.length ? `<details class="more" data-key="${esc(key)}"><summary><span class="more-open">Show all ${items.length}</span><span class="more-close">Show fewer</span>${ic('chevron', 'chev')}</summary>${wrap(rest.map(render).join(''))}</details>` : '');
-  }
-  const newest = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
+  const expanded = new Set();
   function list() {
-    const tickets = array(state.tickets);
-    if (!tickets.length) return heading('Tickets') + `<section class="panel empty"><span class="empty-ic">${ic('list')}</span><h2>Your first ticket starts here.</h2><p>Ask your agent: “Prepare my weekly summary.” Your ticket will appear here.</p><button type="button" class="copy-req" data-copy="Prepare my weekly summary.">Copy this request</button></section>`;
-    const askItems = tickets.flatMap(t => openQuestions(t).map(q => [t, q]));
-    const asks = askItems.length ? `<section class="asks-block"><h2 class="group-title s-waiting">${ic('question')}<span>${plural(askItems.length, 'question')} ${askItems.length === 1 ? 'needs' : 'need'} you</span></h2>${capped('asks', askItems, 5, ([t, q]) => askCard(t, q, 'a', true), 'asks')}</section>` : '';
-    const body = statuses.map(status => {
-      const group = tickets.filter(ticket => ticket.status === status).sort(newest);
-      if (!group.length) return '';
-      if (status === 'dropped') return `<details class="group" data-key="dropped"><summary>${ic('x')}<span>Dropped</span><span class="num">${group.length}</span>${ic('chevron', 'chev')}</summary><div class="minis">${group.map(t => `<a class="mini s-dropped" href="${esc(ticketHref(t.id))}">${ic('x')}<span class="mini-title">${esc(t.title)}</span></a>`).join('')}</div></details>`;
-      return `<section class="group"><h2 class="group-title s-${status}">${ic(SM[status].icon)}<span>${esc(SM[status].word)}</span><span class="num">${group.length}</span></h2>${status === 'done' ? capped('g-done', group, 8, mini, 'minis') : capped('g-' + status, group, 8, row, 'cards')}</section>`;
-    }).join('');
-    return heading('Tickets') + `<div class="glance">${statusBar(tickets)}${weekBars(tickets)}</div>` + asks + body;
+    return fragment(heading('Tickets'), !tickets().length ? card('empty', 'Tickets', '', firstTicket()) : ['active', 'waiting', 'open', 'done', 'dropped'].map(status => {
+      const group = sorted(tickets().filter(t => t.status === status));
+      if (!group.length) return null;
+      const title = {active:'Doing', waiting:'Waiting', open:'Open', done:'Done', dropped:'Dropped'}[status];
+      if (!['done', 'dropped'].includes(status)) return card('group-' + status, title, group.length, group.map(ticketRow));
+      const open = expanded.has(status);
+      return h('section', {className:'card', 'data-key':'group-' + status}, h('button', {type:'button', className:'card-h card-toggle', 'data-action':'group', 'data-group':status, 'aria-expanded':open, 'aria-controls':'group-' + status}, h('span', {className:'chevron ' + (open ? '' : 'closed')}, iconEl('down')), h('span', {}, title + ' · ' + group.length)), h('div', {id:'group-' + status, hidden:!open}, group.map(ticketRow)));
+    }));
   }
-  // ---- add-ons: ticket-detail rows (from the manifest's ticket_view over ext.<name>) and tabs ----
-  const addons = () => array(state.addons);
-  const cronHuman = cron => cronShort(cron) || String(cron);
   function addonValue(row, value) {
     if (value == null || value === '' || (Array.isArray(value) && !value.length)) return '';
-    if (row.format === 'time') return esc(date(value));
-    if (row.format === 'cron-human') return esc(cronHuman(value));
+    if (row.format === 'time') return [date(value), time(value)].filter(Boolean).join(' ');
+    if (row.format === 'cron-human') return String(value);
     if (row.format === 'yes-no') return value === true ? 'Yes' : value === false ? 'No' : '';
-    if (row.format === 'chips') return `<div class="chips">${array(value).map(v => `<span class="chip">${esc(v)}</span>`).join('')}</div>`;
-    return typeof value === 'object' ? '' : esc(value);
+    if (row.format === 'chips') return h('div', {className:'chips'}, array(value).map(v => chip(clean(v))));
+    return typeof value === 'object' ? '' : clean(value);
   }
   function addonRows(ticket) {
     const rows = addons().flatMap(a => array(a.ticket_view).map(r => [r, (ticket.ext || {})[a.name]]))
-      .map(([r, ext]) => [r, ext && typeof ext === 'object' ? addonValue(r, ext[r.field]) : ''])
-      .filter(([, v]) => v);
-    return rows.length ? `<dl class="addon-rows">${rows.map(([r, v]) => `<dt>${esc(r.label)}</dt><dd>${v}</dd>`).join('')}</dl>` : '';
+      .map(([r, ext]) => [r, ext && typeof ext === 'object' ? addonValue(r, ext[r.field]) : '']).filter(([, v]) => v);
+    return rows.length ? h('dl', {className:'addon-rows'}, rows.map(([r, v]) => [h('dt', {}, r.label), h('dd', {}, v)])) : null;
   }
-  const addonViews = {};   // name -> {state, view, as_of, message} (last answer shown)
-  let addonTimer = null, addonSkelTimer = null, addonBusy = false;
-  function addonTab(name) {
-    const a = addons().find(x => x.name === name && x.dashboard);
-    if (!a) return '';
-    return heading(a.dashboard.label) + `<div id="addon-body" data-name="${esc(name)}"></div>`;
+  function detail(t) {
+    if (!t) return fragment(heading('Ticket not found'), h('a', {href:'#tickets'}, 'All tickets'));
+    const qs = questions(t).map(q => snapshot
+      ? card('question-' + q.id, clean(q.text), '', h('div', {className:'card-row'}, h('div', {className:'grow'}, h('p', {className:'muted'}, 'Waiting for an answer'), h('div', {className:'row'}, array(q.options).map(o => chip(clean(o), o === q.recommended ? 'attn' : ''))))))
+      : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
+    // Evidence.chip produces preview buttons; without a preview URL, plain proof chips are clearer.
+    const tasks = array(t.checklist).map(task => h('div', {className:'card-row'}, h('span', {className:'muted', 'aria-hidden':'true'}, iconEl(task.done ? 'check' : 'more')), h('div', {className:'grow'}, h('h3', {}, clean(task.text)), h('p', {className:'meta'}, task.done ? 'Done' : 'Not done'), h('div', {className:'row'}, array(task.evidence).map(ev => chip(clean(ev.summary || ev.text || ev.ref || 'Proof')))))));
+    const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => h('div', {className:'card-row'}, h('p', {}, [clean(entry.text), name(entry.by), age(entry.at)].filter(Boolean).join(' · '))));
+    const field = (label, value, cls = '') => h('div', {}, h('dt', {}, label), h('dd', {className:cls}, value));
+    return fragment(h('a', {href:'#tickets', 'data-key':'back'}, 'All tickets'), heading(t.title),
+      h('div', {className:'row', 'data-key':'ticket-meta'}, statusChip(t), t.owner ? chip(name(t.owner)) : null, t.due ? chip('Due ' + date(t.due)) : null, snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'edit', 'data-ticket':t.id}, 'Edit')),
+      t.summary ? h('p', {'data-key':'summary', className:'preserve-lines'}, clean(t.summary)) : null,
+      qs, card('tasks', 'Tasks', array(t.checklist).length, tasks.length ? tasks : emptyRow('No tasks yet.')),
+      card('history', 'History', '', history.length ? history : emptyRow('No history yet.')), addonRows(t),
+      h('details', {'data-key':'more'}, h('summary', {}, 'More details'), h('dl', {className:'ticket-details'}, field('Ticket', t.id, 'mono'), field('Created', date(t.created_at)), field('Updated', date(t.updated_at)), t.note ? field('Note', clean(t.note), 'preserve-lines') : null)));
   }
-  function addonBody(a, res) {
-    if (!res) return '<div class="skeleton-page" aria-busy="true" aria-label="Loading"><div class="skeleton skeleton-row addon-skel hide"></div><div class="skeleton skeleton-row addon-skel hide"></div></div>';
-    const retry = '<button type="button" class="retry addon-retry">Try again</button>';
-    if (res.state === 'error') return `<section class="panel empty"><span class="empty-ic">${ic(a.dashboard.icon === 'clock' ? 'clock' : 'x')}</span><h2>Can’t show ${esc(a.dashboard.label)} right now.</h2><p>${esc(res.message || '')} Nothing here was changed.</p>${retry}</section>`;
-    const v = res.view, asOf = timeOf(res.as_of);
-    const stale = res.state === 'stale' ? `<p class="addon-stale" role="status">${ic('clock')}<span>Not up to date. Showing the last answer from ${esc(asOf)}.</span>${retry}</p>` : '';
-    const notice = v.notice ? `<p class="addon-notice t-${esc(v.notice_tone || 'neutral')}">${esc(v.notice)}</p>` : '';
-    return `<p class="asof">As of ${esc(asOf)}</p>` + stale + notice + '<div id="addon-blocks"></div>';
+
+  // Reconcile matching DOM nodes so polling cannot replace a focused control or a draft.
+  const locks = new Set();
+  const mounts = new Map();
+  const nodeKey = node => node?.nodeType === 1 ? node.dataset.key || node.id || (node.dataset.action ? [node.dataset.action, node.dataset.need, node.dataset.ticket, node.dataset.group].join(':') : '') || (node.tagName === 'A' ? node.getAttribute('href') : '') : '';
+  function sync(target, source) {
+    if (target.nodeType === 3) { if (target.data !== source.data) target.data = source.data; return; }
+    if (target.nodeType !== 1) return;
+    if (locks.has(target.dataset.key) || mounts.has(target) || target.id === 'addon-body') return;
+    for (const attr of [...target.attributes]) {
+      if (attr.name === 'open' && target.tagName === 'DETAILS') continue;
+      if (!source.hasAttribute(attr.name)) target.removeAttribute(attr.name);
+    }
+    for (const attr of [...source.attributes]) {
+      if (target.getAttribute(attr.name) !== attr.value) target.setAttribute(attr.name, attr.value);
+    }
+    reconcile(target, source);
   }
-  // Fill #addon-body: chrome as text, blocks as DOM (textContent only).
-  function paintAddon(name) {
-    const a = addons().find(x => x.name === name), el = document.getElementById('addon-body');
-    if (!a || !el) return;
-    const res = addonViews[name];
-    el.innerHTML = addonBody(a, res);
-    const host = document.getElementById('addon-blocks');
-    if (!host || !res.view) return;
-    const frag = OrchBlocks.render(res.view.blocks);
-    if (frag.childNodes.length) host.append(frag);
-    else host.innerHTML = `<section class="panel empty"><span class="empty-ic">${ic('list')}</span><h2>Nothing to show yet.</h2><p>This page fills in as soon as there is something to see.</p></section>`;
+  function reconcile(target, source) {
+    const old = [...target.childNodes], used = new Set();
+    for (const fresh of [...source.childNodes]) {
+      const key = nodeKey(fresh);
+      const existing = old.find(n => !used.has(n) && n.nodeType === fresh.nodeType && n.nodeName === fresh.nodeName && (key ? nodeKey(n) === key : !nodeKey(n)));
+      const node = existing || fresh;
+      const at = target.childNodes[used.size];
+      if (node !== at) target.insertBefore(node, at || null);
+      if (existing) sync(existing, fresh);
+      used.add(node);
+    }
+    for (const node of old) if (!used.has(node) && !locks.has(node.dataset?.key)) node.remove();
   }
-  async function loadAddon(name, manual) {
-    if (addonBusy) return;
-    addonBusy = true;
-    const btn = content.querySelector('.addon-retry');
-    if (manual && btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); btn.textContent = 'Trying…'; }
+  const seenNeeds = new Set();
+  function accept(next) {
+    const first = !state;
+    const arrived = new Set(array(next.needs).filter(n => !seenNeeds.has(n.id)).map(n => n.id));
+    array(next.needs).forEach(n => seenNeeds.add(n.id));
+    state = next;
+    render(first ? new Set() : arrived);
+  }
+  function route() {
+    const hash = location.hash || '#home';
     try {
-      if (snapshot) { addonViews[name] = (state.views || {})[name]; }
-      else {
-        const r = await fetch('/api/addon/' + encodeURIComponent(name), {cache: 'no-store'});
-        if (!r.ok) throw new Error('addon');
-        addonViews[name] = await r.json();
+      if (hash.startsWith('#ticket/')) return {kind:'ticket', id:decodeURIComponent(hash.slice(8)), hash};
+      if (hash.startsWith('#addon/')) {
+        const id = decodeURIComponent(hash.slice(7));
+        if (addons().some(a => a.name === id && a.dashboard)) return {kind:'addon', id, hash};
       }
-    } catch (_) {
-      addonViews[name] = addonViews[name] ? {...addonViews[name], state: 'stale', message: 'No answer.'} : {state: 'error', message: 'No answer.', view: null};
-    } finally { addonBusy = false; }
-    if (location.hash === '#addon/' + name) paintAddon(name);
+    } catch (_) { /* Malformed links fall back to Home. */ }
+    return {kind:hash === '#tickets' ? 'tickets' : 'home', hash};
   }
-  function startAddon(name) {
-    window.clearTimeout(addonSkelTimer); window.clearInterval(addonTimer);
-    addonSkelTimer = window.setTimeout(() => document.querySelectorAll('.addon-skel').forEach(el => el.classList.remove('hide')), 300);
-    loadAddon(name);
-    if (!snapshot) addonTimer = window.setInterval(() => loadAddon(name), 15000);
-  }
-  function detail(ticket) {
-    const steps = array(ticket.checklist), open = openQuestions(ticket), qs = array(ticket.questions);
-    const blocker = open.length ? steps.findIndex(s => !s.done) : -1;
-    const stepper = steps.length ? `<section class="panel steps-panel"><ol class="steps">${steps.map((item, i) => {
-      const kind = stepKind(item), evidence = array(item.evidence);
-      const node = item.done ? ic('check') : i === blocker ? ic('question') : '';
-      return `<li class="step ${kind}${i === blocker ? ' blocked' : ''}"><span class="node" role="img" aria-label="${item.done ? 'Done' : i === blocker ? 'Needs your answer' : 'Not done'}">${node}</span><div class="step-body"><span class="check-text">${esc(item.text)}</span>${item.done ? `<div class="chips">${evidence.length ? evidence.map(evidenceChip).join('') : `<span class="chip noproof">${ic('question')}No proof yet</span>`}</div>` : ''}</div></li>`;
-    }).join('')}</ol></section>` : `<section class="panel steps-panel no-steps"><p>No steps yet. Your agent adds them as it plans the work.</p></section>`;
-    const history = array(ticket.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
-    const wake = parse(wakeOf(ticket));
-    const more = `<dl><dt>Type</dt><dd>${esc(label(ticket.type))}</dd><dt>Created</dt><dd>${esc(date(ticket.created_at))}</dd></dl>`;
-    const asks = qs.map(q => q.answer == null ? askCard(ticket, q, 'div')
-      : `<div class="ask done"><span class="ask-icon">${ic('check')}</span><div class="ask-body"><h2>${esc(q.text)}</h2><div class="pills"><span class="opt rec">${esc(q.answer)}</span></div>${q.answered_by ? `<div class="ask-ticket">${esc(String(q.answered_by).replace(/^(agent|human):/, ''))}${q.via ? ` · ${esc(q.via)}` : ''}</div>` : ''}</div></div>`).join('');
-    const side = (wake ? `<div class="side-item">${ic('calendar')}<div class="cal"><b>${esc(fmt(wake, {weekday: 'short'}))}</b><span>${wake.getDate()}</span></div><div class="cal-time">${esc(timeOf(wakeOf(ticket)))}<small>${esc(fmt(wake, {month: 'long'}))}</small></div></div>` : '')
-      + addonRows(ticket)
-      + (array(ticket.links).length ? linkBox(ticket.links) : '')
-      + disclosure('more', 'More details', more);
-    return '<a class="back" href="#tickets">' + ic('chevron', 'flip') + 'All tickets</a>'
-      + `<div class="detail-head">${ring(ticket, 72, true)}<div class="detail-title"><h1>${esc(ticket.title)}</h1><div class="statusline">${ticket.status === 'waiting' && !wake && waitTag(ticket) ? waitTag(ticket) : statusChip(ticket.status)}<span class="updated" title="Last change">${ic('clock')}Updated ${esc(ago(ticket.updated_at))}</span></div></div></div>`
-      + (asks ? `<div class="asks">${asks}</div>` : '')
-      + `<div class="detail-grid"><div>${stepper}${history.length ? `<section class="history">${disclosure('history', `History · ${history.length}`, `<ol class="timeline">${history.map(h => `<li>${esc(noIds(h.text))}<small>${esc(date(h.at))} · ${esc(String(h.by).replace(/^(agent|human):/, ''))}</small></li>`).join('')}</ol>`, 'clock')}</section>` : ''}</div>`
-      + `<aside class="panel context">${side}</aside></div>`;
-  }
-  const kindIcon = {text: 'chat', file: 'file', question: 'question', answer: 'test'};
-  const hue = name => { let h = 0; for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) % 5; return h + 1; };
-  function inbox() {
-    const messages = array(state.inbox).filter(m => m.type !== 'refresh-hint');
-    const tickets = array(state.tickets);
-    const titleOf = id => (tickets.find(t => String(t.id) === String(id)) || {}).title;
-    const askCount = tickets.reduce((n, t) => n + openQuestions(t).length, 0);
-    const asks = askCount ? `<a class="asks-line" href="#tickets">${ic('question')}<span>${plural(askCount, 'question')} waiting for you</span><b>See in Tickets</b>${ic('chevron', 'go')}</a>` : '';
-    const groups = [];
-    for (const m of messages) { let g = groups.find(x => x.name === m.from); if (!g) groups.push(g = {name: m.from, items: []}); g.items.push(m); }
-    const body = groups.map(g => {
-      const unread = g.items.filter(m => !m.seen).length;
-      g.items.sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0));
-      const msgHtml = m => {
-        const about = m.ticket != null ? titleOf(m.ticket) : '';
-        const text = noIds(m.text || m.title) || (m.type === 'file' ? 'A file' : 'New message');
-        return `<details class="msg${m.seen ? '' : ' unseen'}" data-key="msg-${esc(m.id)}"><summary><span class="dotmark" aria-label="${m.seen ? 'Seen' : 'New'}"></span>${m.type === 'file' ? ic('file') : ''}<span class="msg-text">${esc(text)}</span><time>${esc(ago(m.created_at))}</time>${ic('chevron', 'chev')}</summary><div class="msg-more"><p class="message-text">${esc(text)}</p>${about ? `<a class="chip" href="${esc(ticketHref(m.ticket))}">${ic('list')}${esc(about)}</a>` : ''}</div></details>`;
-      };
-      const first = g.items.slice(0, 3), rest = g.items.slice(3);
-      return `<section class="group sender"><h2 class="sender-head"><span class="avatar c${hue(g.name)}" aria-hidden="true">${g.name === 'Your phone' ? ic('phone') : esc(String(g.name).trim().charAt(0).toUpperCase() || '?')}</span><span>${esc(g.name)}</span>${unread ? `<span class="num unread">${unread} new</span>` : ''}<span class="num">${g.items.length}</span></h2><div class="panel">${first.map(msgHtml).join('')}${rest.length ? `<details class="more" data-key="more-${esc(g.name)}"><summary><span class="more-open">Show ${rest.length} earlier</span><span class="more-close">Show fewer</span>${ic('chevron', 'chev')}</summary>${rest.map(msgHtml).join('')}</details>` : ''}</div></section>`;
-    }).join('');
-    const empty = !asks && !body ? `<section class="panel empty"><span class="empty-ic">${ic('inbox')}</span><h2>No messages yet.</h2><p>Messages from your agent and other workspaces will appear here.</p><button type="button" class="copy-req" data-copy="Ask me a question about my tickets.">Copy this request</button></section>` : '';
-    return heading('Inbox') + asks + body + empty;
-  }
-  function render() {
+  function render(arrived = new Set()) {
     if (!state) return;
-    const currentRoute = location.hash || '#tickets';
-    const sameRoute = currentRoute === renderedRoute;
-    const openKeys = new Set(sameRoute ? [...content.querySelectorAll('details[open]')].map(el => el.dataset.key) : []);
+    const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
     const scroll = [window.scrollX, window.scrollY];
     const active = document.activeElement;
-    const focusedKey = sameRoute && active?.tagName === 'SUMMARY' ? active.parentElement.dataset.key : null;
-    let route = currentRoute.slice(1), ticket;
-    if (route.startsWith('ticket/')) {
-      let id;
-      try { id = decodeURIComponent(route.slice(7)); } catch (_) { id = ''; }
-      ticket = array(state.tickets).find(item => String(item.id) === id);
-      route = ticket ? 'ticket' : 'tickets';
-    }
-    let addonName = '';
-    if (route.startsWith('addon/')) { addonName = route.slice(6); route = addons().some(x => x.name === addonName && x.dashboard) ? 'addon' : 'tickets'; }
-    if (!['tickets', 'ticket', 'addon', 'inbox'].includes(route) || (route === 'inbox' && (snapshot || !state.relay))) route = 'tickets';
-    window.clearInterval(addonTimer); window.clearTimeout(addonSkelTimer);
-    if (route === 'tickets' && currentRoute !== '#tickets') history.replaceState(null, '', '#tickets');
-    const banner = snapshot ? `<div class="snapshot-banner">Shared copy · ${esc(date(state.now))}</div>` : '';
-    content.classList.remove('fade'); content.innerHTML = banner + (route === 'ticket' ? detail(ticket) : route === 'addon' ? addonTab(addonName) : route === 'inbox' ? inbox() : list());
-    content.querySelectorAll('details').forEach(el => { el.open = openKeys.has(el.dataset.key); if (focusedKey === el.dataset.key) el.querySelector('summary').focus({preventScroll: true}); });
-    for (const id of ['workspace-name', 'top-workspace']) document.getElementById(id).textContent = state.workspace ?? 'Workspace';
-    const count = (id, n) => { document.getElementById(id).textContent = n > 99 ? '99+' : n > 0 ? n : ''; };
-    count('ticket-count', array(state.tickets).length);
-    count('inbox-count', array(state.inbox).filter(m => !m.seen && m.type !== 'refresh-hint').length);
-    document.getElementById('inbox-nav').hidden = snapshot || !state.relay;
-    document.querySelectorAll('.addon-nav').forEach(el => el.remove());
-    const nav = document.getElementById('side-nav');
-    for (const a of addons().filter(x => x.dashboard)) {
-      const link = document.createElement('a');
-      link.className = 'addon-nav'; link.href = '#addon/' + a.name;
-      link.insertAdjacentHTML('beforeend', ic(a.dashboard.icon));
-      link.append(a.dashboard.label);
-      nav.append(link);
-    }
-    document.getElementById('side-nav').hidden = snapshot && !addons().some(x => x.dashboard);
+    const activeKey = nodeKey(active);
+    const pageName = r.kind === 'addon' ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'tickets' ? 'Tickets' : 'Home';
+    document.getElementById('workspace-name').textContent = clean(state.workspace || 'Workspace');
     document.getElementById('workspace-mode').textContent = snapshot ? 'Shared copy' : 'Local workspace';
-    document.getElementById('crumb').textContent = route === 'ticket' ? ticket.title : route === 'addon' ? addons().find(x => x.name === addonName).dashboard.label : label(route);
-    document.getElementById('updated').textContent = snapshot ? '' : ` · Updated ${timeOf(new Date().toISOString())}`;
-    document.querySelectorAll('nav.side-nav a').forEach(a => {
-      const selected = a.hash === (route === 'addon' ? '#addon/' + addonName : '#' + (route === 'ticket' ? 'tickets' : route));
-      a.classList.toggle('active', selected);
-      if (selected) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    document.getElementById('crumb').textContent = pageName;
+    const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
+    reconcile(nav, fragment(navLink('#home', 'Home', 'page', array(state.needs).length ? h('span', {className:'count'}, array(state.needs).length) : null), navLink('#tickets', 'Tickets', 'table'),
+      h('p', {className:'eyebrow'}, 'Add-ons'), addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon, h('span', {className:'addon-tag', 'aria-label':'Add-on'}, 'A')))));
+    if (changed) {
+      for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
+      main.replaceChildren();
+    }
+    reconcile(main, r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : addonTab(r.id));
+    for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
+    main.querySelectorAll('[data-question]').forEach(host => {
+      if (!mounts.has(host)) {
+        const t = ticketOf(host.dataset.ticket), q = array(t?.questions).find(q => q.id === host.dataset.question);
+        if (q) mountQuestion(host, {ticket:t.id, id:q.id, title:q.text, text:'', options:array(q.options).map(o => ({text:o, suggested:o === q.recommended}))});
+      }
     });
-    if (!sameRoute) { void content.offsetWidth; content.classList.add('fade'); }
-    renderedRoute = location.hash || '#tickets';
-    if (route === 'addon') { paintAddon(addonName); startAddon(addonName); }
-    window.scrollTo(...(sameRoute ? scroll : [0, 0]));
+    if (r.kind === 'addon') {
+      if (activeAddon !== r.id) startAddon(r.id);
+      else if (!document.getElementById('addon-body').childNodes.length) paintAddon(r.id);
+    } else {
+      clearInterval(addonTimer); activeAddon = null;
+    }
+    if (!changed && renderedRoute === r.hash && r.kind === 'home') {
+      main.querySelectorAll('[data-need-row]').forEach(row => { if (arrived.has(row.dataset.needRow)) window.orch.needsIn(row); });
+    }
+    if (changed) window.orch.enter(main);
+    renderedRoute = r.hash;
+    if (!active?.isConnected && activeKey && !document.querySelector('dialog[open]')) {
+      [...document.querySelectorAll('a,button,summary')].find(n => nodeKey(n) === activeKey)?.focus({preventScroll:true});
+    }
+    window.scrollTo(...(changed ? [0, 0] : scroll));
   }
-  let fetching = false;
+
+  const addonViews = Object.create(null), addonBusy = new Set();
+  let addonTimer, activeAddon = null;
+  const addonLabel = a => a?.dashboard?.label || a?.label || a?.name || 'Add-on';
+  function addonTab(id) {
+    return fragment(heading(addonLabel(addons().find(a => a.name === id))), h('div', {id:'addon-body', className:'stack', 'data-name':id}));
+  }
+  function addonBody(a, res) {
+    if (!res) return fragment(h('div', {className:'skeleton addon-loading', role:'status', 'aria-label':'Loading'}));
+    const retry = snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'retry-addon'}, 'Try again');
+    if (res.state === 'error' || !res.view) return fragment(h('section', {className:'card pad stack'}, h('h2', {}, 'Can’t show ', addonLabel(a), ' right now.'), h('p', {}, res.message || 'No answer.', ' Nothing here was changed.'), retry));
+    return fragment(h('p', {className:'meta'}, 'As of ', time(res.as_of)),
+      res.state === 'stale' ? h('div', {className:'banner attn', role:'status'}, h('p', {className:'grow'}, 'Not up to date. Showing the last answer from ', time(res.as_of), '.'), retry) : null,
+      res.view.notice ? h('p', {className:'banner ' + (res.view.notice_tone === 'bad' ? 'error' : ['warn', 'needs-you'].includes(res.view.notice_tone) ? 'attn' : '')}, clean(res.view.notice)) : null, h('div', {id:'addon-blocks'}));
+  }
+  function paintAddon(id) {
+    const host = document.getElementById('addon-body'), a = addons().find(a => a.name === id);
+    if (!host || host.dataset.name !== id || !a) return;
+    const scroll = [window.scrollX, window.scrollY];
+    const template = addonBody(a, addonViews[id]);
+    const blocks = template.querySelector('#addon-blocks');
+    if (blocks) {
+      blocks.append(OrchBlocks.render(addonViews[id].view.blocks));
+      if (!blocks.childNodes.length) blocks.append(h('section', {className:'card pad muted'}, 'Nothing to show yet.'));
+      blocks.querySelectorAll('.blk').forEach(n => n.classList.add('card'));
+      blocks.querySelectorAll('svg').forEach(n => {
+        n.replaceWith(iconEl('external'));
+      });
+      // Block text is supplied by add-ons; keep internal keys out of visible copy.
+      const walker = document.createTreeWalker(blocks, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) walker.currentNode.data = clean(walker.currentNode.data);
+    }
+    reconcile(host, template);
+    host.querySelectorAll('[data-action="retry-addon"]').forEach(n => { n.disabled = false; });
+    window.scrollTo(...scroll);
+  }
+  async function loadAddon(id, manual = false) {
+    if (addonBusy.has(id)) return;
+    addonBusy.add(id);
+    const retry = main.querySelector('[data-action="retry-addon"]');
+    if (manual && retry) { retry.disabled = true; retry.textContent = 'Trying…'; }
+    try {
+      if (snapshot) addonViews[id] = state.views?.[id] || {state:'error', message:'This shared copy has no view.'};
+      else {
+        const res = await fetch('/api/addon/' + encodeURIComponent(id), {cache:'no-store'});
+        if (!res.ok) throw new Error('No answer.');
+        addonViews[id] = await res.json();
+      }
+    } catch (_) {
+      addonViews[id] = addonViews[id]?.view ? {...addonViews[id], state:'stale'} : {state:'error', message:'No answer.'};
+    } finally { addonBusy.delete(id); }
+    if (route().kind === 'addon' && route().id === id) paintAddon(id);
+  }
+  function startAddon(id) {
+    clearInterval(addonTimer);
+    activeAddon = id;
+    paintAddon(id);
+    loadAddon(id);
+    if (!snapshot) addonTimer = setInterval(() => loadAddon(id), 15000);
+  }
+
+  async function act(op, args) {
+    if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
+    writing++;
+    mutation++;
+    try {
+      const res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op, args})});
+      if (res.status !== 200) return {ok:false, status:res.status, text:await res.text()};
+      const next = await res.json();
+      accept(next);
+      return {ok:true, status:200, state:next};
+    } catch (err) { return {ok:false, status:0, text:err.message || 'Could not reach orch.'}; }
+    finally { writing--; }
+  }
   async function refresh() {
-    if (fetching) return;
+    if (snapshot || fetching || writing) return;
     fetching = true;
+    const version = mutation;
     const connection = document.getElementById('connection');
     try {
-      const response = await fetch('/api/state', {cache: 'no-store'});
-      if (!response.ok) throw new Error('State request failed');
-      const next = await response.json();
-      if (!next || typeof next !== 'object' || Array.isArray(next)) throw new Error('Invalid state');
+      const res = await fetch('/api/state', {cache:'no-store'});
+      if (!res.ok) throw new Error('Could not load the workspace.');
+      const next = await res.json();
+      if (writing || version !== mutation) return;
       connection.hidden = true;
-      if (!state || next.rev !== state.rev) { state = next; render(); }
+      if (!state || next.rev !== state.rev) accept(next);
     } catch (_) {
-      document.getElementById('connection-text').textContent = state ? 'Can’t refresh right now. Showing the last update; trying again shortly.' : 'Can’t load your workspace right now. Trying again shortly.';
+      connection.textContent = state ? 'Can’t refresh right now. Showing the last update; trying again shortly.' : 'Can’t load your workspace right now. Trying again shortly.';
       connection.hidden = false;
-      if (!state) content.innerHTML = '<section class="panel empty"><span class="empty-ic">'+ic('clock')+'</span><h2>Waiting for your workspace…</h2><p>This page will fill in as soon as it answers.</p></section>';
     } finally { fetching = false; }
   }
-  const retry = document.getElementById('retry');
-  retry.addEventListener('click', async () => {
-    retry.disabled = true; retry.setAttribute('aria-busy', 'true'); retry.textContent = 'Trying…';
-    await refresh();
-    retry.disabled = false; retry.removeAttribute('aria-busy'); retry.textContent = 'Try again';
+  function dialog(title, cls = 'dialog', lock = '') {
+    const d = el('dialog', cls);
+    const id = 'dialog-title-' + (++serial);
+    const h = el('h2', '', clean(title)); h.id = id;
+    d.setAttribute('aria-labelledby', id); d.append(h);
+    const trigger = document.activeElement;
+    const triggerKey = nodeKey(trigger);
+    const actions = el('div', 'actions');
+    actions.append(button('Cancel', 'ghost', () => window.orch.close(d)));
+    if (lock) locks.add(lock);
+    d.addEventListener('close', () => {
+      const resolving = d.dataset.resolving === 'true';
+      if (lock && !resolving) locks.delete(lock);
+      for (const [host, mounted] of mounts) if (d.contains(host)) { mounted.destroy(); mounts.delete(host); }
+      d.remove();
+      if (!resolving) render();
+      if (trigger?.isConnected) trigger.focus({preventScroll:true});
+      else if (triggerKey) [...document.querySelectorAll('a,button')].find(n => nodeKey(n) === triggerKey)?.focus({preventScroll:true});
+    });
+    document.body.append(d);
+    return {d, actions};
+  }
+  function mountQuestion(host, q, context = {}) {
+    const mounted = window.QuestionCard.mount(host, {...q, title:clean(q.title), text:clean(q.text)}, {
+      send: async answer => {
+        const lock = context.lock || host.dataset.key;
+        if (lock) locks.add(lock);
+        const result = await act('answer', {ticket:q.ticket, question:q.id, answer});
+        if (!result.ok) {
+          let fresh = result.state;
+          try {
+            if (!fresh) {
+              const res = await fetch('/api/state', {cache:'no-store'});
+              if (res.ok) fresh = await res.json();
+            }
+          } catch (_) { /* Keep the original send error if the refresh also fails. */ }
+          const win = window.DashHelpers.winningAnswer(fresh?.tickets, q.ticket, q.id);
+          // Keep the mounted card and any open dialog intact while accepting the refresh.
+          if (fresh) { mutation++; accept(fresh); }
+          if (lock && !context.dialog) locks.delete(lock);
+          if (win !== null) return {status:409, other:{text:win.text, who:name(win.who), via:win.via}};
+          return {status:0, message:result.text};
+        }
+        const answered = array(ticketOf(q.ticket)?.questions).find(x => x.id === q.id);
+        const who = name(answered?.answered_by || result.state.who) || 'You';
+        // Let the shared card finish its send transition before releasing its host.
+        setTimeout(async () => {
+          window.orch.toast('Answered · ' + who + ' · dashboard', 'ok');
+          if (context.dialog) {
+            context.dialog.dataset.resolving = 'true';
+            await window.orch.close(context.dialog);
+          }
+          if (context.row?.isConnected) await window.orch.resolve(context.row);
+          if (lock) locks.delete(lock);
+          if (host.isConnected && mounts.has(host)) { mounts.get(host).destroy(); mounts.delete(host); }
+          render();
+          if (!document.querySelector('dialog[open]') && !document.activeElement?.closest('button,a,input,textarea')) {
+            main.querySelector('h1')?.setAttribute('tabindex', '-1');
+            main.querySelector('h1')?.focus({preventScroll:true});
+          }
+          refresh();
+        }, 0);
+        return {status:200, who, via:'dashboard'};
+      }
+    });
+    // The shared component uses the real key for persistence; only its visible label changes.
+    const label = host.querySelector('.qmeta .muted');
+    if (label) label.textContent = clean(ticketOf(q.ticket)?.title) || 'Ticket';
+    mounts.set(host, mounted);
+  }
+  async function openNeed(row, trigger) {
+    if (!row) return;
+    const action = window.DashHelpers.needAction(row);
+    if (action.kind === 'run') {
+      if (trigger.disabled) return;
+      trigger.disabled = true;
+      const result = await act('run.start', {ticket:row.ticket});
+      trigger.disabled = false;
+      window.orch.toast(result.ok ? 'Started again' : result.text, result.ok ? 'ok' : 'error');
+      return;
+    }
+    if (action.kind === 'answer' || action.kind === 'review') {
+      const {d, actions} = dialog(row.title, 'dialog', 'needs-you');
+      const host = el('div');
+      d.append(host, actions);
+      mountQuestion(host, {ticket:row.ticket, id:row.answer.question, title:row.title, text:row.text, options:array(row.answer.options).map(o => ({text:o, suggested:o === row.answer.recommended}))}, {dialog:d, row:trigger.closest('[data-need-row]'), lock:'needs-you'});
+      window.orch.open(d);
+    } else if (row.ticket) location.hash = href(row.ticket);
+    else {
+      const a = addons().find(a => a.dashboard && (a.name === row.source || String(row.kind).startsWith(a.name + ':')));
+      if (a) location.hash = '#addon/' + encodeURIComponent(a.name);
+      else {
+        const {d, actions} = dialog(row.title);
+        d.append(el('p', 'preserve-lines', clean(row.text || 'No further details.')), actions);
+        window.orch.open(d);
+      }
+    }
+  }
+  function ticketForm(t) {
+    const {d, actions} = dialog(t ? 'Edit ticket' : 'New ticket', t ? 'sheet' : 'dialog', t ? 'ticket-meta' : '');
+    const form = el('form'), fields = el('div', 'form-fields'), inputs = {};
+    for (const field of (t ? ['owner', 'due', 'note'] : ['title', 'owner', 'due', 'note'])) {
+      const label = el('label', '', field.charAt(0).toUpperCase() + field.slice(1) + (field === 'title' ? '' : ' (optional)'));
+      const input = el(field === 'note' ? 'textarea' : 'input', 'input');
+      input.name = field; input.id = 'field-' + serial + '-' + field;
+      if (field !== 'note') input.type = field === 'due' ? 'date' : 'text';
+      if (field === 'title') { input.required = true; input.maxLength = 200; }
+      input.value = t?.[field] || '';
+      label.htmlFor = input.id; label.append(input); fields.append(label); inputs[field] = input;
+    }
+    const error = el('p', 'bad'); error.setAttribute('role', 'alert');
+    const reload = button('Reload ticket', 'outline sm', async () => { await refresh(); await window.orch.close(d); const latest = ticketOf(t?.id); if (latest) ticketForm(latest); });
+    reload.hidden = true;
+    const submit = el('button', 'btn primary', t ? 'Save changes' : 'Create ticket'); submit.type = 'submit';
+    actions.append(submit);
+    form.append(fields, error, reload, actions); d.append(form);
+    let created = null, creationUnresolved = false;
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (!form.reportValidity() || submit.disabled || creationUnresolved) return;
+      submit.disabled = true; error.textContent = ''; reload.hidden = true;
+      const values = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.value.trim()]));
+      let result;
+      if (t) result = await act('ticket.edit', {ticket:t.id, owner:values.owner, due:values.due, note:values.note, if_revision:t.revision});
+      else {
+        if (!created) {
+          const previous = new Set(tickets().map(t => t.id));
+          result = await act('ticket.new', {title:values.title});
+          if (result.ok) {
+            created = tickets().filter(t => t.title === values.title && !previous.has(t.id)).sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0))[0];
+            if (!created) {
+              creationUnresolved = true;
+              result = {ok:false, status:0, text:'The ticket was created, but could not be found in the reply. Close this dialog and reload before trying again.'};
+            }
+          }
+        } else result = {ok:true};
+        if (result.ok && created && (values.owner || values.due || values.note)) {
+          result = await act('ticket.edit', {ticket:created.id, owner:values.owner, due:values.due, note:values.note});
+        }
+      }
+      submit.disabled = creationUnresolved;
+      if (!result.ok) {
+        error.textContent = result.text + (result.status === 409 ? ' Reload the ticket before trying again.' : '');
+        reload.hidden = !(t && result.status === 409);
+        if (created) { inputs.title.disabled = true; submit.textContent = 'Save details'; }
+        return;
+      }
+      window.orch.toast(t ? 'Ticket updated' : 'Ticket created', 'ok');
+      await window.orch.close(d);
+    });
+    window.orch.open(d);
+  }
+  document.getElementById('new-ticket').hidden = snapshot;
+  document.getElementById('new-ticket').addEventListener('click', () => ticketForm());
+  const toggle = document.getElementById('menu-toggle');
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    toggle.setAttribute('aria-expanded', String(open));
+    document.querySelector('.sidebar').dataset.open = String(open);
   });
-  document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape') return;
-    const open = document.activeElement?.closest?.('details[open]');
-    if (open) { open.open = false; open.querySelector('summary').focus(); }
+  nav.addEventListener('click', event => {
+    if (!event.target.closest('a')) return;
+    toggle.setAttribute('aria-expanded', 'false');
+    document.querySelector('.sidebar').dataset.open = 'false';
   });
-  document.addEventListener('click', event => {
-    const r = event.target.closest?.('.addon-retry'), body = document.getElementById('addon-body');
-    if (r && body) loadAddon(body.dataset.name, true);
+  main.addEventListener('click', async event => {
+    const control = event.target.closest('[data-action]');
+    if (!control) return;
+    const action = control.dataset.action;
+    if (action === 'group') {
+      const group = control.dataset.group;
+      if (expanded.has(group)) expanded.delete(group); else expanded.add(group);
+      render(); return;
+    }
+    if (snapshot) return;
+    if (action === 'new') ticketForm();
+    if (action === 'edit') ticketForm(ticketOf(control.dataset.ticket));
+    if (action === 'need') openNeed(array(state.needs).find(n => n.id === control.dataset.need), control);
+    if (action === 'retry-addon') loadAddon(route().id, true);
+    if (action === 'start') {
+      if (locks.has('background')) return;
+      locks.add('background');
+      control.disabled = true;
+      const result = await act('addon.start', {});
+      if (!result.ok) window.orch.toast(result.text, 'error');
+      locks.delete('background');
+      control.disabled = false;
+      render();
+    }
   });
-  document.addEventListener('click', async event => {
-    const b = event.target.closest?.('.copy-req');
-    if (!b) return;
-    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copied'; } catch (_) { b.textContent = 'Select and copy the sentence above'; }
-    window.setTimeout(() => { b.textContent = 'Copy this request'; }, 2000);
+  window.addEventListener('hashchange', async () => {
+    for (const d of document.querySelectorAll('dialog[open]')) await window.orch.close(d);
+    render();
   });
-  window.addEventListener('hashchange', render);
-  if (snapshot) { state = window.ORCH_SNAPSHOT || {}; render(); }
-  else { refresh(); window.setInterval(refresh, 3000); }
+  if (snapshot) accept(window.ORCH_SNAPSHOT || {});
+  else { refresh(); setInterval(refresh, 3000); }
 })();
+

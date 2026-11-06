@@ -1,0 +1,109 @@
+[
+ {
+  "id": "t_inv7c2",
+  "checklist": [
+   {
+    "id": "c1",
+    "text": "Export button",
+    "done": false,
+    "evidence": []
+   },
+   {
+    "id": "c2",
+    "text": "CSV columns",
+    "done": false,
+    "evidence": []
+   }
+  ],
+  "questions": []
+ },
+ {
+  "id": "t_inv7c2",
+  "checklist": [
+   {
+    "id": "c1",
+    "text": "Export button",
+    "done": false,
+    "evidence": [],
+    "state": "doing",
+    "by": "agent",
+    "at": "2026-11-05T09:12:05Z"
+   },
+   {
+    "id": "c2",
+    "text": "CSV columns",
+    "done": false,
+    "evidence": []
+   }
+  ],
+  "questions": []
+ },
+ {
+  "id": "t_inv7c2",
+  "checklist": [
+   {
+    "id": "c1",
+    "text": "Export button",
+    "done": true,
+    "evidence": [
+     {
+      "type": "command",
+      "ref": "pytest -q",
+      "text": "48 passed"
+     }
+    ]
+   },
+   {
+    "id": "c2",
+    "text": "CSV columns",
+    "done": false,
+    "evidence": []
+   }
+  ],
+  "questions": [
+   {
+    "id": "q3",
+    "text": "CHF or EUR?",
+    "options": [
+     "CHF",
+     "EUR"
+    ],
+    "answer": null
+   }
+  ]
+ },
+ {
+  "id": "t_inv7c2",
+  "checklist": [
+   {
+    "id": "c1",
+    "text": "Export button",
+    "done": true,
+    "evidence": [
+     {
+      "type": "command",
+      "ref": "pytest -q",
+      "text": "48 passed"
+     }
+    ]
+   },
+   {
+    "id": "c2",
+    "text": "CSV columns",
+    "done": false,
+    "evidence": []
+   }
+  ],
+  "questions": [
+   {
+    "id": "q3",
+    "text": "CHF or EUR?",
+    "options": [
+     "CHF",
+     "EUR"
+    ],
+    "answer": "CHF"
+   }
+  ]
+ }
+]
