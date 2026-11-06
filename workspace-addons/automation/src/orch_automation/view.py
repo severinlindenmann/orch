@@ -24,6 +24,12 @@ def clean(s: object, n: int = 80) -> str:
     return out or "-"
 
 
+def _name(t: dict) -> str:
+    """A ticket as people read it: its short key first when it has one ("DM1-12 · Invoice export")."""
+    key = t.get("key")
+    return clean(f"{key} · {t['title']}" if isinstance(key, str) and key else t["title"])
+
+
 def _dows(field: str) -> set[int] | None:
     out: set[int] = set()
     for part in field.lower().split(","):
@@ -146,7 +152,7 @@ def _day_items(tickets: list[dict], now: datetime, day_start: datetime, day_end:
         if until:
             at = max(until, now)
             if day_start <= at < day_end:
-                items.append((at, {"time": at.astimezone().strftime("%H:%M"), "title": clean(t["title"]), "link": t["id"]}))
+                items.append((at, {"time": at.astimezone().strftime("%H:%M"), "title": _name(t), "link": t["id"]}))
         cron = _repeats(t)
         if not cron:
             continue
@@ -159,10 +165,10 @@ def _day_items(tickets: list[dict], now: datetime, day_start: datetime, day_end:
             first = left[0].astimezone().strftime("%H:%M")
             lead = f"next {first}" if today else (f"from {first}" if first != "00:00" else "")
             note = " · ".join(x for x in (lead, f"{len(whole)} runs/day") if x)
-            items.append((left[0], {"time": first, "every": _every(int(min(gaps))), "title": clean(t["title"]),
+            items.append((left[0], {"time": first, "every": _every(int(min(gaps))), "title": _name(t),
                                     "note": note, "link": t["id"]}))
         else:
-            items += [(x, {"time": x.astimezone().strftime("%H:%M"), "title": clean(t["title"]), "link": t["id"]})
+            items += [(x, {"time": x.astimezone().strftime("%H:%M"), "title": _name(t), "link": t["id"]})
                       for x in left]
     return [i for _, i in sorted(items, key=lambda e: e[0])][:20]
 
@@ -196,7 +202,7 @@ def _linked(t: dict, tickets: list[dict]) -> list[dict]:
     out = []
     for x in [t] + [c for c in tickets if c.get("parent") == t["id"]][:9]:
         label, tone = _STATUS.get(x.get("status"), (clean(x.get("status", "-"), 40), "neutral"))
-        out.append({"id": x["id"], "title": clean(x["title"]), "status": {"label": label, "tone": tone}})
+        out.append({"id": x["id"], "title": _name(x), "status": {"label": label, "tone": tone}})
     return out
 
 
@@ -221,7 +227,7 @@ def _schedules(tickets: list[dict], now: datetime) -> list[dict]:
         if what:
             detail.append({"label": "What it does", "value": clean(what, 200)})
         rows.append((nxt or now, {
-            "title": clean(t["title"]), "subtitle": clean(f"{words} · " + ("off" if paused else f"next {_in(nxt - now)}" if nxt else "never"), 200),
+            "title": _name(t), "subtitle": clean(f"{words} · " + ("off" if paused else f"next {_in(nxt - now)}" if nxt else "never"), 200),
             "toggle": {"on": not paused, "label": clean(t["title"], 40) + " on or off", "action": _act("toggle", t["id"])},
             "detail": detail, "tickets": _linked(t, tickets),
             "actions": [{"label": "Run now", "action": _act("run", t["id"])},
@@ -241,7 +247,7 @@ def _sources(tickets: list[dict], ls: dict, running: bool) -> list[dict]:
     for t in tickets:
         w = t.get("waiting_on") or {}
         if t["status"] == "waiting" and w.get("kind") == "external" and isinstance(w.get("ref"), str) and w["ref"].startswith("wh_"):
-            rows.append({"title": clean(t["title"]), "subtitle": "Webhook · waiting for it to arrive",
+            rows.append({"title": _name(t), "subtitle": "Webhook · waiting for it to arrive",
                          "detail": [{"label": "Webhook address", "value": clean(w["ref"], 200), "copy": True}],
                          "tickets": _linked(t, [])})
     return rows
@@ -267,7 +273,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
     now = now or datetime.now(UTC)
     tickets = orchcli.tickets(root)
     by_id = {t["id"]: t for t in tickets}
-    title = lambda tid: clean(by_id.get(tid, {}).get("title", tid))
+    title = lambda tid: _name(by_id[tid]) if tid in by_id else clean(tid)
     events = _events(tickets, now, now + timedelta(days=7))
     runs = _runs(root)
     pid = service.running_pid(root, clean=False)

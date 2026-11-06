@@ -187,3 +187,22 @@ def test_webhook_source_has_a_copy_field(ws):
     check(v)
     items = blocks(v, "list", "Listen")[0]["items"]
     assert items[1]["detail"][0] == {"label": "Webhook address", "value": "wh_abc123", "copy": True}
+
+
+def test_rows_show_the_ticket_key_first(ws):
+    add_ticket(ws, "t_rec00002", title="Weekly report", key="MEC-7",
+               ext={"automation": {"recurring": True, "cron": "0 7 * * 1"}})
+    add_ticket(ws, "t_run00002", title="Weekly report run", key="MEC-8", parent="t_rec00002")
+    v = build(ws, T(8))
+    check(v)
+    (rep,) = blocks(v, "list", "Schedules")
+    assert rep["items"][0]["title"] == "MEC-7 · Weekly report"
+    assert [x["title"] for x in rep["items"][0]["tickets"]] == ["MEC-7 · Weekly report", "MEC-8 · Weekly report run"]
+
+
+def test_repeat_takes_a_key_and_list_shows_it(ws):
+    from orch_automation.cli import describe, repeat
+
+    add_ticket(ws, "t_rec00003", title="Bank check", key="MEC-9")
+    assert repeat(ws, "mec-9", "0 7 * * 1", False)["ticket"] == "t_rec00003"
+    assert [r["key"] for r in describe(ws) if r["ticket"] == "t_rec00003"] == ["MEC-9"]

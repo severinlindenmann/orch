@@ -40,3 +40,17 @@ def test_open_prints_the_ticket_address(ws, capsys):
         assert out["url"].endswith("/t/t_inv7c2ab") and out["running"] is True
     finally:
         service.stop(ws)
+
+
+def test_open_takes_a_ticket_key(ws, capsys):
+    p = ws / ".orch" / "tickets" / "t_inv7c2ab.json"
+    t = json.loads(p.read_text()) if p.exists() else {"id": "t_inv7c2ab"}
+    t["key"] = "INV-3"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(t))
+    try:
+        assert cli.main(["--dir", str(ws), "open", "inv-3", "--no-open", "--json"]) == 0
+        out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+        assert out["url"].endswith("/t/t_inv7c2ab")
+    finally:
+        service.stop(ws)
