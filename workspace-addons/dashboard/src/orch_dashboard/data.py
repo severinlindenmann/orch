@@ -183,13 +183,16 @@ def add_link_views(tickets: list[dict], kinds: list[dict]) -> None:
 
 # What a link row says it is: one rule (the phone app has the same one, LinkFace in ChatParts.swift).
 # Type: an allowlist. Each " · " part is a known site's name, kept only on that site's own address, or a plain
-# label of letters, digits, spaces and "-" (ASCII and precomposed Latin letters), at most 24, naming no site; else
+# label of ASCII letters, digits, spaces and "-", at most 24, naming no site even with spaces and "-" taken out; else
 # dropped, and with nothing left the type is "Link". Host: the registrable domain (never cut) and the rest before it.
-_WORD = r"[A-Za-z0-9\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F-]+"
-_PLAIN = re.compile(rf"{_WORD}(?: {_WORD})*")
+_PLAIN = re.compile(r"[A-Za-z0-9 -]{1,24}")
 TWO_PART_SUFFIXES = frozenset({
     "co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "ne.jp", "or.jp",
     "com.br", "com.cn", "com.mx", "co.in", "co.za", "com.tr", "com.sg", "com.hk", "co.kr", "github.io", "gitlab.io"})
+
+
+def _squeeze(s: str) -> str:
+    return s.lower().replace(" ", "").replace("-", "")
 
 
 def shown_type(label, url: str, links) -> str:
@@ -200,8 +203,8 @@ def shown_type(label, url: str, links) -> str:
         if p.lower() in names:
             if p.lower() == on:
                 parts.append(p)
-        elif len(p) <= 24 and _PLAIN.fullmatch(p) and not any(re.search(rf"\b{re.escape(n)}\b", p.lower()) for n in names):
-            parts.append(p)  # a plain label that names no site ("GitHub PR" off GitHub is just "Link")
+        elif _PLAIN.fullmatch(p) and not any(_squeeze(n) in _squeeze(p) for n in names):
+            parts.append(p)  # a free label that names no site, even squeezed ("G i t-Hub PR" is just "Link")
     return " · ".join(parts) or "Link"
 
 

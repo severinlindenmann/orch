@@ -131,11 +131,11 @@ def test_link_type_is_an_allowlist_and_the_domain_is_the_registrable_part():
     from orch import links
 
     evil = "https://github.com.evil.example/x"
-    for label in ("github\u0323com", "github\uff0ecom", "GitHub", "Pull\u202erequest", "a" * 25, "x.y", "a  b", "My GitHub PR", "GitHub-PR"):
+    for label in ("github\u0323com", "github\uff0ecom", "GitHub", "Pull\u202erequest", "a" * 25, "x.y", "My GitHub PR", "GitHub-PR", "Git-Hub", "G i t h u b", "G\u00edthub", "\u01c0github", "Kampagne Zürich"):
         assert data.shown_type(label, evil, links) == "Link", label
     assert data.shown_type("GitHub · Pull request", evil, links) == "Pull request"
     assert data.shown_type("GitHub · Pull request", "https://github.com/a/b/pull/1", links) == "GitHub · Pull request"
-    assert data.shown_type("Kampagne Zürich", evil, links) == "Kampagne Zürich"
+    assert data.shown_type("Campaign 2026", evil, links) == "Campaign 2026"
     assert data.host_parts(evil) == ("github.com.", "evil.example")
     assert data.host_parts("https://www.github.com/a") == ("", "github.com")
     assert data.host_parts("https://shop.example.co.uk/") == ("shop.", "example.co.uk")
