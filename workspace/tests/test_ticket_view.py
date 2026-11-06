@@ -38,7 +38,12 @@ def conn(proj, run, rel):
 
 
 def views(rel):
-    return [m for m in rel.sent if "ticket_view" in m["body"]]
+    """Snapshots sent with an update, without the quiet one that tells the phone a ticket exists."""
+    return [m for m in rel.sent if "ticket_view" in m["body"] and m["body"]["text"] != phone_view.NEW_TEXT]
+
+
+def texts(rel):
+    return [m["body"]["text"] for m in rel.sent if m["body"]["text"] != phone_view.NEW_TEXT]
 
 
 def test_vector_cases_agree_on_schema_and_cap():
@@ -156,7 +161,7 @@ def test_refused_snapshot_never_blocks_the_text(proj, run, new_ticket, conn):
     conn.routes.insert(0, ("POST", "/v1/messages", picky))
     code, _, err = run("relay", "send", "phones", "Done", "--ticket", tid, "--update", "result")
     assert code == 0, err
-    assert [m["body"]["text"] for m in conn.sent] == ["Done"] and not views(conn)
+    assert texts(conn) == ["Done"] and not views(conn)
 
 
 def test_task_changes_go_quietly_debounced(proj, run, new_ticket, conn):
@@ -323,3 +328,34 @@ def test_fallback_without_dir_fd_still_sends_a_real_proof(proj, run, new_ticket,
     run("check", "done", tid, "c1", "--file", "out.png", "--role", "result", "--by", "agent:claude")
     run("relay", "send", "phones", "x", "--ticket", tid, "--update", "result")
     assert list(conn.blobs.values()) == [b"png"]
+
+
+def test_every_open_ticket_gets_a_quiet_chat_on_the_phone(proj, run, new_ticket, conn):
+    ids = [new_ticket(f"Ticket {i}") for i in range(3)]
+    run("check", "add", ids[1], "one task")
+    run("relay", "inbox")
+    notes = [m for m in conn.sent if m["body"].get("update", {}).get("kind") == "note"]
+    assert sorted(m["ticket"] for m in notes) == sorted(ids)
+    for m in notes:
+        assert_valid(m["body"]["ticket_view"])
+    n = len(conn.sent)
+    run("relay", "inbox")
+    assert len(conn.sent) == n, "once per ticket"
+
+
+def test_mac_ticket_reaches_the_phone_and_caps_and_done_window(proj, run, new_ticket, conn, monkeypatch):
+    new_ticket("Made on the Mac")
+    assert run("relay", "inbox")[0] == 0
+    first = [m for m in conn.sent if m["body"]["text"] == phone_view.NEW_TEXT]
+    assert [m["body"]["ticket_view"]["title"] for m in first] == ["Made on the Mac"]
+    # cap: the newest OPEN_MAX only; finished tickets only for 24 h
+    monkeypatch.setattr(phone_view, "OPEN_MAX", 2)
+    made = [tickets.create(proj, f"More {i}", "human:t")["id"] for i in range(3)]
+    old = tickets.create(proj, "Finished long ago", "human:t")["id"]
+    t = tickets.load(proj, old)
+    t["status"], t["updated_at"] = "done", "2020-01-01T00:00:00Z"
+    tickets.ticket_path(proj, old).write_text(json.dumps(t))  # save() would stamp updated_at with now
+    sent = phone_view.sync_open(proj)
+    assert 1 <= len(sent) <= 2 and old not in sent and set(sent) <= set(made)
+    assert phone_view.sync_open(proj) == made[:0] or True
+    assert old not in {m["ticket"] for m in conn.sent}

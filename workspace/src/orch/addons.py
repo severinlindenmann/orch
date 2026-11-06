@@ -310,11 +310,17 @@ def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: 
         reg = (registry_path(), json.dumps(sorted(entries, key=lambda e: e["name"]), indent=2))
     try:
         log = winfinish.start(home(), [uv, *_tool_args(entries)], then, root, done, reg)
+    except winfinish.Busy:
+        raise Refused(
+            "An add-on install or update is still finishing in the background. "
+            f"Try again in a minute. Log: {winfinish.log_path(home())}"
+        ) from None
     except RuntimeError as e:
         raise Refused(f"Could not finish the install: {e}. Reinstall orch with the install script.") from e
     print(
         f"Windows can not replace orch while it runs, so this finishes in the background once this command "
-        f"has ended (about a minute): {done}.\nCheck with: orch addon list   Log: {log}"
+        f"has ended: {done}.\nWait about a minute before the next orch command (orch is being replaced "
+        f"meanwhile). Then check with: orch addon list   Log: {log}"
     )
     return False
 

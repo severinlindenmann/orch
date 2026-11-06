@@ -180,22 +180,36 @@ struct NewTopicView: View {
     let workspaceId: String
     @State private var text = ""
     @State private var sending = false
+    @State private var voice: VoiceInput?
     @FocusState private var focused: Bool
 
     var body: some View {
         let name = model.workspace(workspaceId)?.displayName ?? "Workspace"
+        let mic = MicInput(voice: voice)
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) { Avatar(name: name, size: 30); Text(name).themeFont(14).foregroundStyle(Theme.muted) }
-            TextField("What do you need?", text: $text, axis: .vertical).lineLimit(5...12).focused($focused).themeFont(17)
+            TextField(mic.recording ? "Recording your voice…" : mic.transcribing ? "Writing it down…" : "What do you need?", text: $text, axis: .vertical)
+                .lineLimit(5...12).focused($focused).themeFont(17).disabled(mic.busy || sending)
                 .padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: 14)).overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.borderStrong))
                 .accessibilityIdentifier("topic-field")
+            HStack(spacing: 10) {
+                MicButton(voice: voice, text: $text, disabled: sending)
+                Text(voice?.error ?? mic.label).themeFont(12, .medium).foregroundStyle(voice?.error != nil ? Theme.danger : Theme.muted)
+                    .accessibilityIdentifier("mic-status")
+            }
             Spacer()
-            let ok = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !sending
+            let ok = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !sending && !mic.busy
             Button { sending = true; Task { await model.startTopic(workspaceId: workspaceId, text: text); sending = false } } label: { Text(sending ? "Starting…" : "Start") }
                 .buttonStyle(PrimaryButtonStyle(muted: !ok)).disabled(!ok).accessibilityIdentifier("topic-start")
             Text("This starts a new ticket. You get a message when there is a result, a question or a problem.").themeFont(12).foregroundStyle(Theme.muted)
         }.padding(16).background(Theme.bg.ignoresSafeArea()).navigationTitle("New topic in \(name)").navigationBarTitleDisplayMode(.inline)
-            .onAppear { focused = true }
+            .onAppear { if !UserDefaults.standard.bool(forKey: "autoMic") { focused = true } }
+            .task {
+                if voice == nil { voice = MicInput.make(model) }
+                if UserDefaults.standard.bool(forKey: "autoMic") { await voice?.toggle(current: text) }
+            }
+            .onChange(of: voice?.transcript) { _, t in if let t { text = t } }
+            .onDisappear { voice?.stop() }
     }
 }
 
