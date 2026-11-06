@@ -30,6 +30,7 @@ pub fn spawn_purge(app: state::AppState) {
                     _ => {}
                 }
             }
+            speech::purge(&app.cfg.data_dir, util::now(), store::RETENTION_SECS);
             tokio::time::sleep(Duration::from_secs(3600)).await;
         }
     });

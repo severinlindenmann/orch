@@ -208,9 +208,9 @@ pub fn effective_language(explicit: Option<&str>, swiss_german: bool) -> Option<
     }
 }
 
-/// The phone's `swiss_german` setting. Wired to the settings store of `/v1/phone/settings` (lane R1) after that merges.
-fn swiss_german(_c: &Connection, _phone: &str) -> bool {
-    false
+/// The phone's `swiss_german` setting (`/v1/phone/settings`).
+fn swiss_german(c: &Connection, phone: &str) -> bool {
+    crate::store::phone_settings(c, phone)["swiss_german"] == true
 }
 
 async fn run(

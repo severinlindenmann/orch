@@ -33,6 +33,7 @@ pub fn router() -> Router<AppState> {
             post(upload_blob).layer(DefaultBodyLimit::disable()),
         )
         .route("/v1/phone/blobs/:id", get(blob))
+        .route("/v1/phone/speech/:id", get(speech))
         .route(
             "/v1/phone/settings",
             get(get_settings).patch(patch_settings),
@@ -766,7 +767,7 @@ pub const MAX_PHONE_BLOB: usize = 25 * 1024 * 1024;
 /// Most bytes one phone may upload in 24 hours: 1 GB.
 const PHONE_UPLOAD_DAY: i64 = 1024 * 1024 * 1024;
 /// Whole body at most this long (else 408).
-const UPLOAD_TOTAL: std::time::Duration = std::time::Duration::from_secs(120);
+const UPLOAD_TOTAL: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// The phone's one upload in flight; freed when the request ends, however it ends.
 struct UploadSlot {
@@ -863,9 +864,10 @@ async fn upload_blob(
     let sha = hex::encode(hasher.finalize());
     let id = rand_id("b_", 16);
     crate::crypto::seal_in_place(&app.key, &id, &mut buf);
-    tokio::fs::write(app.blob_path(&id), &buf)
-        .await
-        .map_err(internal)?;
+    if let Err(e) = tokio::fs::write(app.blob_path(&id), &buf).await {
+        let _ = tokio::fs::remove_file(app.blob_path(&id)).await;
+        return Err(internal(e));
+    }
     drop(buf);
     let ins = app.db.lock().unwrap().execute(
         "INSERT INTO blobs(id,uploader,size,sha256,created_at) VALUES(?1,?2,?3,?4,?5)",
@@ -1197,4 +1199,35 @@ pub async fn push_message(app: &AppState, q: &Value) {
             }
         }
     }
+}
+
+/// `GET /v1/phone/speech/<message_id>`: the text read aloud as mp3 (see `speech::generate`).
+async fn speech(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Res<axum::response::Response> {
+    use axum::response::IntoResponse;
+    let (pid, ws, settings) = {
+        let c = app.db.lock().unwrap();
+        let (pid, _, ws) = auth::phone(&c, &h)?;
+        let s = crate::speech::Settings::of(&c, &pid);
+        (pid, ws, s)
+    };
+    let speaker = app.speaker.lock().unwrap().clone();
+    let mp3 = crate::speech::generate(
+        &app.db,
+        &app.key,
+        &app.cfg.data_dir,
+        &*speaker,
+        &pid,
+        &ws,
+        &settings,
+        &id,
+        q.get("lang").map(String::as_str),
+        now(),
+    )
+    .await?;
+    Ok(([(axum::http::header::CONTENT_TYPE, "audio/mpeg")], mp3).into_response())
 }

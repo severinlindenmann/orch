@@ -1,5 +1,6 @@
 use crate::crypto::Key;
 use crate::push::{ApnsConfig, Pusher};
+use crate::speech::{Aura, Speaker};
 use crate::transcribe::{Deepgram, Transcriber};
 use rusqlite::Connection;
 use std::collections::HashMap;
@@ -69,6 +70,8 @@ pub struct App {
     pub notify: Notify,
     pub pusher: Arc<dyn Pusher>,
     pub transcriber: Arc<dyn Transcriber>,
+    /// Text to speech (Deepgram Aura); tests put a fake in.
+    pub speaker: Mutex<Arc<dyn Speaker>>,
     /// phone/workspace id -> (window start, calls in window)
     pub transcribe_rate: Mutex<HashMap<String, (i64, u32)>>,
     /// Phone uploads in flight (memory bound).
@@ -133,6 +136,7 @@ impl App {
             notify: Notify::new(),
             pusher,
             transcriber,
+            speaker: Mutex::new(Arc::new(Aura::default())),
             transcribe_rate: Mutex::new(HashMap::new()),
             redeem_rate: Mutex::new(HashMap::new()),
             upload_slots: tokio::sync::Semaphore::new(4),

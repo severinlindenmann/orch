@@ -189,25 +189,16 @@ impl Speaker for FakeSpeaker {
 
 // ---------- cost counter and the admin switch ----------
 
-pub fn init(c: &Connection) -> rusqlite::Result<()> {
-    c.execute_batch(
-        "CREATE TABLE IF NOT EXISTS tts_usage(phone_id TEXT NOT NULL, month TEXT NOT NULL, usd REAL NOT NULL,
-            PRIMARY KEY(phone_id, month));",
-    )
-}
-
 /// "YYYY-MM" (UTC) of a unix time.
 pub fn month_of(t: i64) -> String {
-    let d =
-        time::OffsetDateTime::from_unix_timestamp(t).unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-    format!("{:04}-{:02}", d.year(), d.month() as u8)
+    crate::store::month_key(t)
 }
 
-/// Read-aloud cost of a phone in the month of `at`: what `GET /v1/phone/settings` shows as `tts_used_usd_month`.
+/// Read-aloud cost of a phone in the month of `at`: what `GET /v1/phone/settings` shows as `tts_used_usd_month`
+/// (kept in `phone_settings`, counted only while `tts_month` is the current month).
 pub fn used_usd_month(c: &Connection, phone: &str, at: i64) -> f64 {
-    init(c).ok();
     c.query_row(
-        "SELECT usd FROM tts_usage WHERE phone_id=?1 AND month=?2",
+        "SELECT tts_used_usd FROM phone_settings WHERE phone=?1 AND tts_month=?2",
         params![phone, month_of(at)],
         |r| r.get(0),
     )
@@ -215,6 +206,21 @@ pub fn used_usd_month(c: &Connection, phone: &str, at: i64) -> f64 {
     .ok()
     .flatten()
     .unwrap_or(0.0)
+}
+
+/// Add `delta` (may be negative: a refund) to the phone's usage of the month of `at`; a new month starts at 0.
+fn add_usage(c: &Connection, phone: &str, at: i64, delta: f64) -> rusqlite::Result<()> {
+    c.execute(
+        "INSERT OR IGNORE INTO phone_settings(phone) VALUES(?1)",
+        [phone],
+    )?;
+    let month = month_of(at);
+    c.execute(
+        "UPDATE phone_settings SET tts_used_usd = MAX(0, (CASE WHEN tts_month=?2 THEN tts_used_usd ELSE 0 END) + ?3),
+            tts_month=?2 WHERE phone=?1",
+        params![phone, month, delta],
+    )?;
+    Ok(())
 }
 
 pub fn cost_usd(chars: usize) -> f64 {
@@ -249,6 +255,17 @@ pub struct Settings {
     /// `auto`, `always` or `never`
     pub speak: String,
     pub tts_cap_usd: f64,
+}
+
+impl Settings {
+    /// The phone's stored settings (defaults when it never changed them).
+    pub fn of(c: &Connection, phone: &str) -> Settings {
+        let v = crate::store::phone_settings(c, phone);
+        Settings {
+            speak: v["speak"].as_str().unwrap_or("auto").to_string(),
+            tts_cap_usd: v["tts_cap_usd"].as_f64().unwrap_or(10.0),
+        }
+    }
 }
 
 fn cache_path(data_dir: &Path, msg: &str, lang: &str) -> std::path::PathBuf {
@@ -383,7 +400,6 @@ async fn make(
     at: i64,
 ) -> Res<Vec<u8>> {
     let cost = cost_usd(text.chars().count());
-    let month = month_of(at);
     let api_key = {
         let c = db.lock().unwrap();
         // cached audio is free and always served
@@ -398,16 +414,11 @@ async fn make(
             None
         };
         let api_key = api_key.ok_or_else(tts_off)?;
-        init(&c)?;
         // cap check and reservation in one locked section, so parallel requests cannot share the same budget
         if used_usd_month(&c, phone, at) + cost > settings.tts_cap_usd + 1e-9 {
             return Err(tts_cap_reached());
         }
-        c.execute(
-            "INSERT INTO tts_usage(phone_id,month,usd) VALUES(?1,?2,?3)
-             ON CONFLICT(phone_id,month) DO UPDATE SET usd=usd+?3",
-            params![phone, month, cost],
-        )?;
+        add_usage(&c, phone, at, cost)?;
         api_key
     };
     let mp3 = match speaker.speak(&api_key, text, voice(lang)).await {
@@ -415,10 +426,7 @@ async fn make(
         Err(e) => {
             // refund the reservation
             let c = db.lock().unwrap();
-            let _ = c.execute(
-                "UPDATE tts_usage SET usd=MAX(0, usd-?3) WHERE phone_id=?1 AND month=?2",
-                params![phone, month, cost],
-            );
+            let _ = add_usage(&c, phone, at, -cost);
             return Err(tts_failed(e));
         }
     };

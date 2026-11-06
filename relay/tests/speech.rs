@@ -370,3 +370,107 @@ async fn concurrent_requests_never_pass_the_cap_and_one_generation_per_message()
     assert_eq!(r.sp.calls.lock().unwrap().len(), 4);
     assert!((r.used() - before - 6.0 * 0.030 / 1000.0).abs() < 1e-9);
 }
+
+#[tokio::test]
+async fn route_serves_the_mp3_end_to_end() {
+    let t = start().await;
+    let ws = t.add_ws("Alpha").await;
+    let p = t.pair_phone(&[&ws]).await;
+    let sp = Arc::new(FakeSpeaker::default());
+    *t.app.speaker.lock().unwrap() = sp.clone();
+    let get = |path: String| {
+        let (t, p) = (&t, &p);
+        async move {
+            let r = t
+                .http
+                .get(format!("{}{}", t.base, path))
+                .header("X-Orch-Phone", &p.0)
+                .header("Authorization", format!("Bearer {}", p.1))
+                .send()
+                .await
+                .unwrap();
+            let ct = r
+                .headers()
+                .get("content-type")
+                .map(|v| v.to_str().unwrap().to_string());
+            (r.status().as_u16(), ct, r.bytes().await.unwrap().to_vec())
+        }
+    };
+    let id = mid();
+    let m = json!({"schema": "orch.msg/1", "id": id, "from": ws.id, "to": p.0, "type": "text",
+        "created_at": "2026-11-04T10:00:00Z", "body": {"text": "Hallo Welt.", "speak": {"lang": "de"}}});
+    store::insert_message(&t.app.db.lock().unwrap(), &t.app.key, &m, "d").unwrap();
+    // no Deepgram key yet
+    assert_eq!(get(format!("/v1/phone/speech/{id}")).await.0, 503);
+    orch_relay::transcribe::set_key(
+        &t.app.db.lock().unwrap(),
+        &t.app.key,
+        "dg_secret_key_ABCD1234",
+    )
+    .unwrap();
+    let (s, ct, body) = get(format!("/v1/phone/speech/{id}")).await;
+    assert_eq!(
+        (s, ct.as_deref(), body.as_slice()),
+        (200, Some("audio/mpeg"), &b"ID3fake-mp3"[..])
+    );
+    assert_eq!(get(format!("/v1/phone/speech/{id}?lang=fr")).await.0, 422);
+    assert_eq!(get("/v1/phone/speech/m_unknown".into()).await.0, 404);
+    // usage shows in the settings
+    let (_, v) = t.phone(&p, "GET", "/v1/phone/settings", None).await;
+    assert!(
+        (v["tts_used_usd_month"].as_f64().unwrap() - 11.0 * 0.03 / 1000.0).abs() < 1e-9,
+        "{v}"
+    );
+    // cap 0: cached audio still served, a new language is refused
+    t.phone(
+        &p,
+        "PATCH",
+        "/v1/phone/settings",
+        Some(json!({"tts_cap_usd": 0})),
+    )
+    .await;
+    assert_eq!(get(format!("/v1/phone/speech/{id}")).await.0, 200);
+    assert_eq!(get(format!("/v1/phone/speech/{id}?lang=en")).await.0, 402);
+    assert_eq!(sp.calls.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn swiss_german_setting_sends_de_ch_to_transcription() {
+    let t = start().await;
+    let ws = t.add_ws("Alpha").await;
+    let p = t.pair_phone(&[&ws]).await;
+    orch_relay::transcribe::set_key(
+        &t.app.db.lock().unwrap(),
+        &t.app.key,
+        "dg_secret_key_ABCD1234",
+    )
+    .unwrap();
+    let post = |q: &'static str| {
+        let (t, p) = (&t, &p);
+        async move {
+            t.http
+                .post(format!("{}/v1/phone/transcribe{q}", t.base))
+                .header("X-Orch-Phone", &p.0)
+                .header("Authorization", format!("Bearer {}", p.1))
+                .header("Content-Type", "audio/m4a")
+                .body(vec![1u8; 50])
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16()
+        }
+    };
+    t.phone(
+        &p,
+        "PATCH",
+        "/v1/phone/settings",
+        Some(json!({"swiss_german": true})),
+    )
+    .await;
+    assert_eq!(post("").await, 200);
+    assert_eq!(post("?language=en").await, 200);
+    let calls = t.dg.calls.lock().unwrap();
+    assert_eq!(calls[0].3.as_deref(), Some("de-CH"));
+    assert_eq!(calls[1].3.as_deref(), Some("en"));
+}
