@@ -1,7 +1,6 @@
 """The scheduler became automation. Moves what the old add-on left: ticket data, settings, its own files.
 Safe to run again and again: whatever is already moved is left alone. Old data is kept (the old add-on name is
 off, so core hides `ext.scheduler`)."""
-
 from __future__ import annotations
 
 import json
@@ -77,10 +76,6 @@ def unsafe(root: Path) -> Path | None:
 def run(root: Path) -> dict:
     bad = unsafe(root)
     if bad is not None:
-        return {
-            "tickets": 0,
-            "config": False,
-            "files": 0,
-            "note": f"{bad} is a symbolic link; nothing was moved. Remove it and run: orch automation migrate",
-        }
+        return {"tickets": 0, "config": False, "files": 0,
+                "note": f"{bad} is a symbolic link; nothing was moved. Remove it and run: orch automation migrate"}
     return {"tickets": tickets(root), "config": config(root), "files": files(root)}

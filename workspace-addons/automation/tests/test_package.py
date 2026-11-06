@@ -18,11 +18,8 @@ def test_manifest_is_the_review_example_and_valid():
     import json
 
     import jsonschema
-
     pkg = resources.files("orch_automation")
-    assert (pkg / "orch-addon.toml").read_text() == (
-        CONTRACTS / "review" / "automation.orch-addon.toml"
-    ).read_text()
+    assert (pkg / "orch-addon.toml").read_text() == (CONTRACTS / "review" / "automation.orch-addon.toml").read_text()
     schema = json.loads((CONTRACTS / "addon-manifest.schema.json").read_text())
     jsonschema.validate(tomllib.loads((pkg / "orch-addon.toml").read_text()), schema)
 
@@ -35,13 +32,7 @@ def test_ext_schema_byte_identical_to_contract():
 def test_skill_and_agents_block():
     root = resources.files("orch_automation") / "skills" / "orch-automation"
     skill = (root / "SKILL.md").read_text()
-    assert (
-        skill.startswith("---\nname: orch-automation\n")
-        and "wake_at" not in skill
-        and "--recurring" not in skill
-    )
+    assert skill.startswith("---\nname: orch-automation\n") and "wake_at" not in skill and "--recurring" not in skill
     block = (root / "AGENTS-block.md").read_text()
-    assert (
-        block.startswith("## orch-automation") and "orch:addon" not in block and len(block.splitlines()) <= 6
-    )
+    assert block.startswith("## orch-automation") and "orch:addon" not in block and len(block.splitlines()) <= 6
     assert "skills/orch-automation/SKILL.md" in block and "wake_at" not in block
