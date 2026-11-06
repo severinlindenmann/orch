@@ -10,10 +10,10 @@
 <script src="/admin/kit.js"></script>
 <script>
 'use strict';
-const screens=[['overview','Overview'],['add','Add workspace'],['rules','Who can do what'],['messages','Messages'],['config','Shared tools'],['webhooks','Webhooks'],['phones','Phones']];
-function uiIcon(k){const span=document.createElement('span');span.innerHTML=window.icon(({overview:'home',add:'plus',rules:'swap',messages:'message',config:'tools',webhooks:'webhook',phones:'phone'})[k]||k,16);return span.firstElementChild}
+const screens=[['overview','Overview'],['add','Add workspace'],['groups','Groups'],['rules','Who can do what'],['messages','Messages'],['config','Shared tools'],['webhooks','Webhooks'],['phones','Phones']];
+function uiIcon(k){const span=document.createElement('span');span.innerHTML=window.icon(({overview:'home',add:'plus',groups:'group',rules:'swap',messages:'message',config:'tools',webhooks:'webhook',phones:'phone'})[k]||k,16);return span.firstElementChild}
 const $=s=>document.querySelector(s), app=$('#app'), enc=encodeURIComponent;
-let token='', epoch=0, workspaces=[], phoneList=[], toastTimer;
+let token='', epoch=0, workspaces=[], phoneList=[], groupList=[], mapGroup='', toastTimer;
 try{token=sessionStorage.getItem('orch_admin')||''}catch{}
 // All API text goes through text nodes. SVG pairing codes use a restricted SVG parser below.
 function el(tag,attrs={},...children){
@@ -108,9 +108,9 @@ function wsData(f){return {name:f.elements.name.value.trim(),description:f.eleme
 function wsFields(w={}){return [field('Workspace name',chk(input('name',w.name||'',{maxLength:100,placeholder:'e.g. Studio',autocomplete:'off'}),needs('Give the workspace a name.'))),field('Description (optional)',el('textarea',{name:'description',value:w.description||'',maxLength:280})),field('Tags',input('tags',(w.tags||[]).join(', ')))]}
 function checkName(f){if(!f.elements.name.value.trim())throw new FieldError('Give the workspace a name.','name')}
 async function copy(value){try{await navigator.clipboard.writeText(value)}catch{const t=el('textarea',{value,readOnly:true});document.body.append(t);t.select();const ok=document.execCommand('copy');t.remove();if(!ok)throw Error('Copy is not available here. Select the text and copy it.')}toast('Copied')}
-function promptResult(r,title){
+function promptResult(r,title,extra){
  document.querySelectorAll('dialog[open]').forEach(d=>orch.close(d));
- show(...head('',title),el('section',{class:'card form-body'},el('p',{},'Copy this and paste it into your agent, in the project that should use this workspace.'),el('div',{class:'copy-wrap'},el('pre',{class:'copy-box',id:'install-prompt'},r.prompt||''),button('Copy',()=>copy(r.prompt||''))),el('p',{class:'meta muted'},'This is shown only once. Copy it before you leave this page.'),el('a',{href:'#overview',class:'btn ghost',onclick:e=>{if(location.hash==='#overview'){e.preventDefault();route()}}},'Done')));
+ show(...head('',title),el('section',{class:'card form-body'},extra||null,el('p',{},'Copy this and paste it into your agent, in the project that should use this workspace.'),el('div',{class:'copy-wrap'},el('pre',{class:'copy-box',id:'install-prompt'},r.prompt||''),button('Copy',()=>copy(r.prompt||''))),el('p',{class:'meta muted'},'This is shown only once. Copy it before you leave this page.'),el('a',{href:'#overview',class:'btn ghost',onclick:e=>{if(location.hash==='#overview'){e.preventDefault();route()}}},'Done')));
 }
 let lastSeenShown='';
 function status(w){let t='Online';if(!w.online){t=w.last_seen?'Last seen '+ago(w.last_seen):'Not connected yet';const full=t;if(t===lastSeenShown)t='Offline';else lastSeenShown=t;return el('span',{class:'status',title:full},el('span',{class:'dot idle'}),t)}return el('span',{class:'status running'},el('span',{class:'dot live'}),t)}
@@ -157,7 +157,51 @@ async function overview(v){
  const net=panel('Your network',el('div',{id:'network-host'},network()));net.firstChild.append(button('Add connection',()=>edgeSheet(),'outline'));
  show(el('header',{class:'page-heading'},el('h1',{tabindex:'-1'},'Overview'),workspaces.length?sub((off?off+(off===1?' workspace is':' workspaces are')+' offline':'All workspaces are online')+' · '+wait+(wait===1?' message':' messages')+' waiting'):null),el('section',{class:'card',id:'reviews',hidden:true}),workspaces.length?net:panel('Your network',empty('No workspaces yet','',el('a',{class:'button primary',href:'#add'},'Add workspace'))),panel('Recent activity',...(feed.length?feed.map(f=>feedRow(f.m,f.n)):[empty('Nothing yet','Messages between your workspaces show up here.')]),el('div',{class:'form-body'},link('All messages →','#messages'))));renderReviews();
 }
-function add(){show(...head('Connection setup','Add a workspace','Give it a name. You can change everything later.'),el('section',{class:'card form-body form-card'},form(async f=>{checkName(f);const r=await api('/workspaces','POST',wsData(f));promptResult(r,'Your workspace is ready')},...wsFields({},false),el('div',{class:'actions'},submit('Create workspace'),link('Cancel','#overview')))))}
+// ---------- groups ----------
+const KIND_WORDS={skills:['skill','skills'],credentials:['secret','secrets'],mcp:['MCP','MCP']};
+const groupById=id=>groupList.find(g=>g.id===id);
+const gClass=g=>'g-'+(g?.colour||'none');
+function gChip(id){const g=groupById(id);return el('span',{class:'gchip '+gClass(g)},el('span',{class:'gdot'}),g?g.name:'No group')}
+function givesText(counts){const parts=['skills','credentials','mcp'].map(k=>[k,Number(counts?.[k])||0]).filter(([,n])=>n>0).map(([k,n])=>n+' '+KIND_WORDS[k][n===1?0:1]);return parts.length?parts.join(', '):'no shared tools yet'}
+function groupOptions(sel,current,withNew){sel.replaceChildren(...groupList.map(g=>el('option',{value:g.id,selected:g.id===current},g.name)));if(withNew)sel.append(el('option',{value:'__new'},'New group…'));return sel}
+async function add(v){
+ const data=await api('/shared');if(v!==epoch)return;
+ const all={skills:(data.skills||[]).length,credentials:(data.credentials||[]).length,mcp:(data.mcp||[]).length};
+ const sel=groupOptions(el('select',{name:'group'}),'',true);if(!groupList.length)sel.value='__new';else sel.prepend(el('option',{value:'',selected:true,disabled:true},'Choose a group'));
+ const newName=input('newGroup','',{maxLength:40,placeholder:'e.g. Marketing team',autocomplete:'off'}),newField=field('New group name',newName),gets=el('p',{class:'gets',role:'status'});
+ function update(){newField.hidden=sel.value!=='__new';const g=groupById(sel.value);gets.replaceChildren();if(!sel.value){gets.append('Its group decides which shared tools it gets.');return}
+  gets.append(el('b',{},'Gets: '+givesText(g?g.gives:all)),' · tools added later follow the group');if(sel.value==='__new')gets.append(' (all kinds; change it under Groups)')}
+ sel.onchange=update;update();
+ show(...head('Connection setup','Add a workspace','Give it a name. You can change everything later.'),el('section',{class:'card form-body form-card'},form(async f=>{checkName(f);
+  const d=wsData(f);if(!sel.value)throw new FieldError('Choose a group for the workspace.','group');
+  if(sel.value==='__new'){const n=newName.value.trim();if(!n)throw new FieldError('Give the new group a name.','newGroup');d.new_group=n}else d.group=sel.value;
+  const r=await api('/workspaces','POST',d);try{groupList=(await api('/groups')).items||[]}catch{}
+  promptResult(r,'Your workspace is ready',el('div',{class:'ready-summary'},gChip(r.group),el('span',{class:'meta muted'},'Shared with it: '+givesText(r.shared))))},
+  ...wsFields({},false),el('div',{class:'group-pick'},field('Group',sel),newField),gets,el('div',{class:'actions'},submit('Create workspace'),link('Cancel','#overview')))))}
+const COLOURS=['teal','violet','amber','blue','pink'];
+async function groupsPage(v){
+ const save=async(g,patch,msg)=>{await api('/groups/'+enc(g.id),'PATCH',patch);if(msg)toast(msg);await route()};
+ const newForm=form(async f=>{const n=f.elements.groupName.value.trim();if(!n)throw new FieldError('Give the group a name.','groupName');await api('/groups','POST',{name:n});toast('Group created');await route();focusMain()},field(groupList.length?'New group':'Group name',chk(input('groupName','',{maxLength:40,placeholder:'e.g. Work',autocomplete:'off'}),needs('Give the group a name.'))),submit('Create group'));newForm.classList.add('compact-add');
+ const card=g=>{
+  const members=workspaces.filter(w=>w.group===g.id);
+  const moveSel=w=>{const s=el('select',{'aria-label':'Move '+w.name+' to another group'},el('option',{value:''},'Move to…'),groupList.filter(x=>x.id!==g.id).map(x=>el('option',{value:x.id},x.name)));s.onchange=async()=>{if(!s.value)return;s.disabled=true;try{await api('/workspaces/'+enc(w.id),'PATCH',{group:s.value});toast(w.name+' moved to '+groupById(s.value).name+'. It keeps the tools it has.');await route()}catch(e){s.disabled=false;showError(null,e)}};return groupList.length>1?s:null};
+  const addSel=el('select',{'aria-label':'Add a workspace to '+g.name},el('option',{value:''},'Add a workspace…'),workspaces.filter(w=>w.group!==g.id).map(w=>el('option',{value:w.id},w.name)));
+  addSel.onchange=async()=>{if(!addSel.value)return;addSel.disabled=true;const w=workspaces.find(x=>x.id===addSel.value);try{await api('/workspaces/'+enc(w.id),'PATCH',{group:g.id});toast(w.name+' joined '+g.name+'.');await route()}catch(e){addSel.disabled=false;showError(null,e)}};
+  const kinds=[['skills','All skills'],['credentials','All secrets'],['mcp','All MCP']].map(([k,l])=>{const c=input('def-'+k,'',{type:'checkbox',checked:!!g.defaults[k]});c.onchange=async()=>{c.disabled=true;try{await save(g,{defaults:{[k]:c.checked}},c.checked?'Members now get '+l.toLowerCase().replace('mcp','MCP')+'.':'New members no longer get '+l.slice(4).toLowerCase().replace('mcp','MCP')+'. Nobody loses anything.')}catch(e){c.checked=!c.checked;c.disabled=false;showError(null,e)}};return el('label',{class:'check'},c,l)});
+  const talk=input('talk','',{type:'checkbox',class:'toggle',role:'switch',checked:!!g.talk,'aria-label':'Workspaces in '+g.name+' may message each other'});talk.onchange=async()=>{talk.disabled=true;try{await save(g,{talk:talk.checked},'Saved')}catch(e){talk.checked=!talk.checked;talk.disabled=false;showError(null,e)}};
+  const nameIn=input('rename',g.name,{maxLength:40,'aria-label':'Group name'});let colour=g.colour;
+  const sw=COLOURS.map(c=>{const b=el('button',{type:'button',class:'swatch g-'+c,'aria-label':c,'aria-pressed':String(c===g.colour),onclick:()=>{colour=c;sw.forEach(x=>x.setAttribute('aria-pressed',String(x===b)))}});b.classList.remove('btn','sm');return b});
+  const rename=el('div',{class:'rename-row',hidden:true},nameIn,el('div',{class:'swatches',role:'group','aria-label':'Colour'},sw),button('Save',async()=>{const n=nameIn.value.trim();if(!n)throw Error('Give the group a name.');await save(g,{name:n,colour},'Saved')},'primary'),button('Cancel',()=>{rename.hidden=true},'ghost'));
+  const menu=moreMenu(g.name,el('div',{},button('Rename or colour',()=>{rename.hidden=false;nameIn.focus();menu.querySelector('.menu-items').hidden=true},'ghost'),button('Delete group',async()=>{if(!await confirmDialog('Delete the group '+g.name+'?',members.length?'Its '+members.length+(members.length===1?' workspace stays':' workspaces stay')+' and keeps the tools it has. Only the group goes.':'It has no workspaces.','Delete group'))return;await api('/groups/'+enc(g.id),'DELETE');toast('Group deleted');await route();focusMain()},'ghost danger')));
+  return el('section',{class:'card group-card '+gClass(g)},el('div',{class:'card-h'},el('h2',{tabindex:'-1'},uiIcon('group'),g.name,el('span',{class:'gcount'},'· '+members.length+(members.length===1?' workspace':' workspaces'))),menu),rename,
+   el('div',{class:'group-body'},el('section',{},el('h3',{},'Members'),members.length?members.map(w=>el('div',{class:'member-row'},uiIcon('workspace'),el('span',{class:'grow'},w.name),moveSel(w))):el('p',{class:'meta muted'},'No workspaces yet.'),addSel.options.length>1?addSel:null),
+    el('section',{},el('h3',{},'Members get'),el('div',{class:'defaults'},kinds),el('p',{class:'meta muted'},'Now: '+givesText(g.gives)),el('label',{class:'talk-row'},talk,el('span',{},'Workspaces in this group may message each other',el('small',{},'Messages and files, both ways. Tasks and Start work stay under Who can do what.'))))),
+   el('div',{class:'group-foot'},'A tool you add later goes to every member when its kind is ticked. Leaving a group takes nothing away.'))};
+ const loose=workspaces.filter(w=>!w.group);
+ show(...head('','Groups'),sub('Put workspaces together, like Private, Work or Marketing team. Members get the group’s shared tools.'),
+  el('section',{class:'card'},newForm),...(groupList.length?groupList.map(card):[panel('Groups',empty('No groups yet','A new workspace always goes into a group. Create one here or when you add a workspace.'))]),
+  loose.length?panel('Not in a group · '+loose.length,...loose.map(w=>{const s=el('select',{'aria-label':'Move '+w.name+' to a group'},el('option',{value:''},'Move to group…'),groupList.map(x=>el('option',{value:x.id},x.name)));s.onchange=async()=>{if(!s.value)return;s.disabled=true;try{await api('/workspaces/'+enc(w.id),'PATCH',{group:s.value});toast(w.name+' moved to '+groupById(s.value).name+'.');await route()}catch(e){s.disabled=false;showError(null,e)}};return el('div',{class:'card-row member-row'},uiIcon('workspace'),el('span',{class:'grow'},w.name),groupList.length?s:null)})):null);
+}
 const flagLabels=[['text','Send messages and files'],['files','Send files'],['delegate','Give tasks'],['start','Start work']];
 async function rules(v){
  const [r,allows]=await Promise.all([api('/rules'),all('/allows')]);if(v!==epoch)return;
@@ -221,13 +265,26 @@ function messages(v){
 }
 function checks(selected=[]){return el('fieldset',{},el('legend',{},'Can reach'),el('div',{class:'checks workspace-pills'},workspaces.map(w=>el('label',{},input('workspace',w.id,{type:'checkbox',checked:selected.includes(w.id)}),w.name))))}
 const selected=f=>[...f.querySelectorAll('input[name="workspace"]:checked')].map(c=>c.value);
+// One block per group: a header row (group icon, colour, how many use it) and its workspaces beneath. A block where
+// only some members have the tool starts open; "whole group" and "none" stay folded.
+function usedBy(data,kind,itemName,saved,kinds){
+ const has=w=>(data.assign?.[w.id]?.[kind]||[]).includes(itemName);
+ async function put(w,on){const old=data.assign?.[w.id]||{},payload={};for(const [k]of kinds)payload[k]=[...(old[k]||[])];payload[kind]=on?[...new Set([...payload[kind],itemName])]:payload[kind].filter(n=>n!==itemName);await api('/shared/assign/'+enc(w.id),'PUT',payload);data.assign??={};data.assign[w.id]=payload}
+ const box=el('div',{class:'used-by'});
+ async function run(fn){const controls=[...box.querySelectorAll('input')];controls.forEach(x=>x.disabled=true);saved.className='save-state';saved.textContent='Saving…';try{await fn();saved.textContent='Saved'}catch(e){saved.className='save-state form-error';saved.setAttribute('role','alert');saved.textContent='Couldn’t save. Try again.'}finally{controls.forEach(x=>x.disabled=false);render()}}
+ function block(g,members){
+  const n=members.filter(has).length,state=!n?'none':n===members.length?'whole group':n+' of '+members.length;
+  const whole=input('whole','',{type:'checkbox',checked:n===members.length,'aria-label':(g?g.name:'No group')+': whole group'});whole.indeterminate=n>0&&n<members.length;
+  whole.onclick=e=>e.stopPropagation();whole.onchange=()=>run(async()=>{for(const w of members)if(has(w)!==whole.checked)await put(w,whole.checked)});
+  const rows=members.map(w=>{const c=input('assign','',{type:'checkbox',checked:has(w)});c.onchange=()=>run(()=>put(w,c.checked));return el('label',{},c,uiIcon('workspace'),w.name)});
+  return el('details',{class:'used-group '+gClass(g),open:n>0&&n<members.length},el('summary',{},el('span',{class:'chev'},uiIcon('chevron-right')),whole,el('span',{class:'ghead'},uiIcon('group'),g?g.name:'No group'),el('span',{class:'used-state'+(state==='whole group'?' whole':'')},'· '+members.length+(members.length===1?' workspace':' workspaces')+' · '+state)),el('div',{class:'used-ws'},rows))}
+ function render(){const open=new Set([...box.querySelectorAll('details[open]')].map(d=>d.dataset.k));box.replaceChildren(...[...groupList.map(g=>[g,workspaces.filter(w=>w.group===g.id)]),[null,workspaces.filter(w=>!w.group)]].filter(([,m])=>m.length).map(([g,m])=>{const d=block(g,m);d.dataset.k=g?g.id:'none';if(open.has(d.dataset.k))d.open=true;return d}))}
+ render();return box}
 async function config(v){
  const data=await api('/shared');if(v!==epoch)return;const groups=[['credentials','Secrets'],['mcp','MCP'],['skills','Skills']],cards={credentials:[],mcp:[],skills:[]};
  for(const [kind,label] of groups)for(const item of data[kind]||[]){const itemName=typeof item==='string'?item:item.name;
- const saved=el('span',{class:'save-state',role:'status'});const assignments=el('div',{class:'checks workspace-pills'},workspaces.map(w=>{const c=input('assign','',{type:'checkbox',checked:(data.assign?.[w.id]?.[kind]||[]).includes(itemName)});
- c.onchange=async()=>{const before=!c.checked;const controls=[...assignments.querySelectorAll('input[name="assign"]')];controls.forEach(x=>x.disabled=true);saved.className='save-state';saved.textContent='Saving…';try{const old=data.assign?.[w.id]||{},payload={};for(const [k]of groups)payload[k]=[...(old[k]||[])];payload[kind]=c.checked?[...new Set([...payload[kind],itemName])]:payload[kind].filter(n=>n!==itemName);await api('/shared/assign/'+enc(w.id),'PUT',payload);data.assign??={};data.assign[w.id]=payload;saved.textContent='Saved'}catch(e){c.checked=before;saved.className='save-state form-error';saved.setAttribute('role','alert');saved.textContent='Couldn’t save. Try again.'}finally{controls.forEach(x=>x.disabled=false)}};
- return el('label',{},c,w.name)}));
- cards[kind].push(el('div',{class:'card-row tool-row'},el('div',{class:'grow'},el('h3',{},itemName+(kind==='credentials'?' · ••••':'')),el('div',{class:'row-meta'},sub('Used by'),assignments,saved)),moreMenu(itemName,button('Remove',async()=>{if(!await confirmDialog('Remove '+itemName+'?','It is taken away from all workspaces.','Remove'))return;await api('/shared/'+kind+'/'+enc(itemName),'DELETE');toast(itemName+' removed');await route();focusMain()},'ghost danger'))));
+ const saved=el('span',{class:'save-state',role:'status'}),assignments=usedBy(data,kind,itemName,saved,groups);
+ cards[kind].push(el('div',{class:'card-row tool-row with-groups'},el('div',{class:'grow'},el('h3',{},itemName+(kind==='credentials'?' · ••••':'')),el('div',{class:'row-meta'},sub('Used by'),assignments,saved)),moreMenu(itemName,button('Remove',async()=>{if(!await confirmDialog('Remove '+itemName+'?','It is taken away from all workspaces.','Remove'))return;await api('/shared/'+kind+'/'+enc(itemName),'DELETE');toast(itemName+' removed');await route();focusMain()},'ghost danger'))));
  }
  // One small form per card: a problem in one never blocks the others.
  const skillForm=form(async f=>{const n=f.elements.skillName.value.trim();if(!n)throw new FieldError('Give the skill a name.','skillName');const file=f.elements.archive.files[0];if(!file)throw new FieldError('Choose a .tar.gz file.','archive');if(!file.name.endsWith('.tar.gz'))throw new FieldError('This needs to be a .tar.gz file.','archive');await api('/shared/skills/'+enc(n),'PUT',file,true);f.reset();toast('Skill saved');await route();focusMain()},field('Name',chk(input('skillName'),needs('Give the skill a name.'))),field('Skill file',input('archive','',{type:'file',accept:'.tar.gz,application/gzip'})),submit('Add skill'));
@@ -284,7 +341,7 @@ function connectionList(id,badges=false){
  const pairs=networkPairs().filter(p=>!id||p.a===id||p.b===id);
  return pairs.length?pairs.map(p=>{
   const both=p.rules.some(r=>r.from===p.a)&&p.rules.some(r=>r.from===p.b),r=p.rules[0];
-  return el('button',{type:'button',class:'ghost connection-row network-pair-row','aria-label':networkPairLabel(p),onclick:()=>edgeSheet(p.a,p.b)},
+  return el('button',{type:'button',class:'ghost connection-row network-pair-row','data-ws-pair':p.a+' '+p.b,'aria-label':networkPairLabel(p),onclick:()=>edgeSheet(p.a,p.b)},
    el('span',{class:'connection-names'},both?name(p.a)+' ⇄ '+name(p.b):name(r.from)+' → '+name(r.to)),
    (badges&&both&&p.rules.every(v=>['text','files','delegate','start'].every(k=>!!v[k]===!!r[k]))?[el('span',{class:'connection-direction'},el('span',{},'Both ways'),el('span',{class:'badge active'},permissionLabel(r)))]:p.rules.map(r=>el('span',{class:'connection-direction'},both?el('span',{},name(r.from)+' → '+name(r.to)):null,el('span',{class:'badge active'},permissionLabel(r))))))
  }):[sub('No connections yet')];
@@ -299,7 +356,7 @@ function edgeSheet(from,to){
 async function removePhone(p){if(!await confirmDialog('Remove '+p.name+'?','It will be signed out.','Remove phone'))return;await api('/phones/'+enc(p.id),'DELETE');toast(p.name+' removed');await route();focusMain()}
 function phoneEditor(p,after){return form(async f=>{await api('/phones/'+enc(p.id),'PATCH',{workspaces:selected(f)});p.workspaces=selected(f);toast('Saved');if(after)await after()},checks(p.workspaces||[]),submit('Save access'))}
 function phoneSheet(p){let d;d=sheet(p.name,sub(p.paired===false?'Waiting for first scan':p.online?'Online':'Connected'),phoneEditor(p,async()=>{await orch.close(d);await route()}),button('Remove phone',()=>removePhone(p),'danger'))}
-function workspaceSheet(w){let d;const edit=form(async f=>{checkName(f);await api('/workspaces/'+enc(w.id),'PATCH',wsData(f));toast('Saved');await refreshRow(w.id,'Saved. The new details are in use.',false);await orch.close(d)},...wsFields(w),submit('Save changes'));
+function workspaceSheet(w){let d;const gsel=groupOptions(el('select',{name:'group'}),w.group,false);if(!w.group)gsel.prepend(el('option',{value:'',selected:true},'No group'));const edit=form(async f=>{checkName(f);const data=wsData(f);if(gsel.value&&gsel.value!==w.group)data.group=gsel.value;await api('/workspaces/'+enc(w.id),'PATCH',data);if(data.group)await route();toast('Saved');await refreshRow(w.id,'Saved. The new details are in use.',false);await orch.close(d)},...wsFields(w),groupList.length?field('Group',gsel,'Moving keeps the tools it has and adds the new group’s tools.'):null,submit('Save changes'));
  const connections=el('div',{},networkRules.filter(r=>(r.from===w.id||r.to===w.id)&&permissionLabel(r)).map(r=>button(name(r.from)+' → '+name(r.to),async()=>{await orch.close(d);edgeSheet(r.from,r.to)},'ghost connection-row')));
  d=sheet(w.name,status(w),sub((Number(w.unread)||0)+' waiting'),el('h3',{},'Connections'),connections,edit,el('div',{class:'danger-zone'},button('New access key',async()=>{if(!await confirmDialog('Make a new access key?','The current key for '+w.name+' stops working and you must reconnect it.','Make new key'))return;const r=await api('/workspaces/'+enc(w.id)+'/token','POST');await orch.close(d);promptResult(r,'New access key')}),button('Remove workspace',async()=>{if(!await confirmDialog('Delete “'+w.name+'”?','Its messages and permissions are removed. This cannot be undone.','Delete workspace'))return;await api('/workspaces/'+enc(w.id),'DELETE');await orch.close(d);toast(w.name+' removed');await route();focusMain()},'danger')));
 }
@@ -311,25 +368,43 @@ function networkStatus(w){return w.online?'Online':w.last_seen?'Last seen '+ago(
 function networkStatusLines(text,width=190){const lines=[''];for(const word of text.split(' ')){const i=lines.length-1,next=lines[i]?lines[i]+' '+word:word;if(lines[i]&&networkTextWidth(next)>width)lines.push(word);else lines[i]=next}return lines}
 function network(){
  const root=el('div',{class:'network-wrap'}),pairs=networkPairs(),cards=workspaces.length<=6&&phoneList.length<=3;
- const list=el('section',{class:'mobile-connections'},el('div',{class:'card-h'},'Connections'),connectionList(undefined,true));
+ const list=el('section',{class:'mobile-connections'});
+ if(groupList.length){list.append(el('div',{class:'card-h'},'Workspaces by group'));for(const g of [...groupList,null]){const ms=workspaces.filter(w=>g?w.group===g.id:!groupById(w.group));if(!ms.length)continue;
+  list.append(el('div',{class:'list-group-head '+gClass(g),'data-ws-group':g?g.id:'none'},uiIcon('group'),el('span',{class:'grow'},(g?g.name:'No group')+' · '+ms.length+(ms.length===1?' workspace':' workspaces')),g?.talk?el('span',{class:'talk-note'},'⇄ may message each other'):null),
+   ...ms.map(w=>el('button',{type:'button',class:'ghost connection-row list-ws-row','data-ws':w.id,onclick:()=>workspaceSheet(w)},uiIcon('workspace'),el('span',{class:'connection-names'},w.name),el('span',{class:'connection-direction'},networkStatus(w)))))}}
+ list.append(el('div',{class:'card-h'},'Connections'),...[connectionList(undefined,true)].flat());
  if(phoneList.length)list.append(el('div',{class:'card-h'},'Phones'),...phoneList.map(p=>el('button',{type:'button',class:'ghost connection-row network-phone-row',onclick:()=>phoneSheet(p)},el('span',{class:'connection-names'},p.name),el('span',{class:'connection-direction'},networkPhoneStatus(p)))));
  const isolated=workspaces.filter(w=>!pairs.some(p=>p.a===w.id||p.b===w.id));
  if(isolated.length)list.append(el('p',{class:'network-note'},'Not connected to others: '+isolated.map(w=>w.name).join(', ')));
+ // Groups: each group's workspaces stay together, with a soft outline (cards) or band (ring) in the group colour.
+ const gIndex=w=>{const i=groupList.findIndex(g=>g.id===w.group);return i<0?groupList.length:i},grouped=groupList.length>0&&workspaces.some(w=>groupById(w.group));
+ const groupBreaks=list=>grouped?list.reduce((n,w,i)=>n+(i&&gIndex(w)!==gIndex(list[i-1])?1:0),0):0,GROUP_HEAD=30;
+ const blocks=()=>{const out=[];for(const w of ordered){const g=groupById(w.group)||null,last=out[out.length-1];if(last&&last.g===g)last.ws.push(w);else out.push({g,ws:[w]})}return out};
+ const chips=groupList.length?el('div',{class:'group-filter',role:'group','aria-label':'Show one group'},[{id:'',name:'All'},...groupList,...(workspaces.some(w=>!groupById(w.group))?[{id:'none',name:'No group'}]:[])].map(g=>el('button',{type:'button',class:'ghost '+(g.id&&g.id!=='none'?gClass(g):g.id?'g-none':''),'aria-pressed':String(mapGroup===g.id),onclick:e=>{mapGroup=g.id;e.currentTarget.parentElement.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b===e.currentTarget)));applyGroupFilter()}},g.id?el('span',{class:'gdot'}):null,g.name,g.talk?el('span',{class:'talk-mark',title:'Members may message each other','aria-label':', members may message each other'},' ⇄'):null))):null;
+ function applyGroupFilter(){
+  const members=new Set(workspaces.filter(w=>mapGroup==='none'?!groupById(w.group):w.group===mapGroup).map(w=>'w:'+w.id));
+  for(const p of phoneList)if((p.workspaces||[]).some(id=>members.has('w:'+id)))members.add('p:'+p.id);
+  root.querySelectorAll('.network .graph-item,.network .group-outline').forEach(g=>{const links=JSON.parse(g.dataset.links||'[]');g.classList.toggle('group-out',!!mapGroup&&!links.some(k=>members.has(k)))});
+  root.querySelectorAll('.mobile-connections [data-ws]').forEach(r=>{r.hidden=!!mapGroup&&!members.has('w:'+r.dataset.ws)});
+  root.querySelectorAll('.mobile-connections [data-ws-group]').forEach(r=>{r.hidden=!!mapGroup&&r.dataset.wsGroup!==mapGroup});
+  root.querySelectorAll('.mobile-connections [data-ws-pair]').forEach(r=>{r.hidden=!!mapGroup&&!r.dataset.wsPair.split(' ').some(id=>members.has('w:'+id))});
+ }
  const ordered=[],remaining=[...workspaces];
  while(remaining.length){const score=w=>pairs.reduce((n,p)=>n+((p.a===w.id||p.b===w.id)&&(!ordered.length||ordered.some(v=>v.id===(p.a===w.id?p.b:p.a)))?p.rules.length:0),0);let best=0;for(let i=1;i<remaining.length;i++)if(score(remaining[i])>score(remaining[best]))best=i;ordered.push(remaining.splice(best,1)[0])}
  // With at most six cards, choose the stable order with the shortest pair spans.
- if(cards&&ordered.length>1){let best=Infinity,bestOrder=ordered.slice();function visit(prefix,rest){if(rest.length){for(let i=0;i<rest.length;i++)visit([...prefix,rest[i]],rest.filter((_,j)=>i!==j));return}const at=new Map(prefix.map((w,i)=>[w.id,i])),score=pairs.reduce((sum,p)=>sum+(at.get(p.a)-at.get(p.b))**2,0);if(score<best){best=score;bestOrder=prefix}}visit([],ordered);ordered.splice(0,ordered.length,...bestOrder)}
+ if(cards&&ordered.length>1){let best=Infinity,bestOrder=ordered.slice();function visit(prefix,rest){if(rest.length){for(let i=0;i<rest.length;i++)visit([...prefix,rest[i]],rest.filter((_,j)=>i!==j));return}const at=new Map(prefix.map((w,i)=>[w.id,i])),score=pairs.reduce((sum,p)=>sum+(at.get(p.a)-at.get(p.b))**2,0)+groupBreaks(prefix)*1e6;if(score<best){best=score;bestOrder=prefix}}visit([],ordered);ordered.splice(0,ordered.length,...bestOrder)}
+ if(grouped){const at=new Map(ordered.map((w,i)=>[w.id,i]));ordered.sort((a,b)=>gIndex(a)-gIndex(b)||at.get(a.id)-at.get(b.id))}
  const emptyNote=()=>!pairs.length&&workspaces.length?el('p',{class:'network-note'},'No connections yet. Use Add connection to let two workspaces work together.'):null;
  const overlaps=(a,b)=>a.x<b.x+b.w+6&&a.x+a.w>b.x-6&&a.y<b.y+b.h+6&&a.y+a.h>b.y-6;
  let lastWidth=0,timer,observer;
  function draw(width){
-  lastWidth=width;if(window.innerWidth<=599){root.replaceChildren(list);const note=emptyNote();if(note)root.append(note);return}const W=width,positions=new Map(),phones=new Map(),edges=[],labelBoxes=[],nodeBoxes=[];
+  lastWidth=width;if(window.innerWidth<=599){root.replaceChildren(...(chips?[chips]:[]),list);const note=emptyNote();if(note)root.append(note);applyGroupFilter();return}const W=width,positions=new Map(),phones=new Map(),edges=[],labelBoxes=[],nodeBoxes=[];
   const below=!cards&&W<900,radius=below&&workspaces.length>20?7:workspaces.length>16?9:12,laneWidth=phoneList.length&&!below?212:0;
   const rx=Math.max(156,Math.min((W-laneWidth-280)/2,520));let ry=Math.max(120,Math.min(rx/1.3,workspaces.length>12?240:260,150+Math.max(0,workspaces.length-7)*7));
   let H=2*ry+112,cx=(W-laneWidth)/2,cy=H/2;
   const svg=svgEl('svg',{class:'network '+(cards?'network-cards':'network-ring'),viewBox:`0 0 ${W} ${H}`,'aria-label':'Workspace and phone connections'});
   svg.append(svgEl('defs',{},svgEl('marker',{id:'network-arrow',viewBox:'0 0 10 10',refX:10,refY:5,markerUnits:'userSpaceOnUse',markerWidth:8,markerHeight:8,orient:'auto-start-reverse'},svgEl('path',{class:'network-arrow',d:'M0 0 L10 5 L0 10 Z'}))));
-  const lineLayer=svgEl('g'),phoneLayer=svgEl('g'),nodeLayer=svgEl('g'),chipLayer=svgEl('g');svg.append(lineLayer,phoneLayer,nodeLayer,chipLayer);
+  const groupLayer=svgEl('g',{class:'group-layer'}),lineLayer=svgEl('g'),phoneLayer=svgEl('g'),nodeLayer=svgEl('g'),chipLayer=svgEl('g');svg.append(groupLayer,lineLayer,phoneLayer,nodeLayer,chipLayer);
   function interactive(g,ids,label,fn,key){g.setAttribute('tabindex','0');g.setAttribute('role','button');g.setAttribute('aria-label',label);g.dataset.links=JSON.stringify(ids);g.dataset.key=key;g.addEventListener('click',fn);g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fn()}});return g}
   const wsKey=id=>'w:'+id,phKey=id=>'p:'+id;
   function texts(p,a,b){const forward=p.rules.find(r=>r.from===p.a),reverse=p.rules.find(r=>r.from===p.b);if(!forward||!reverse||permissionLabel(forward)===permissionLabel(reverse))return [permissionLabel(forward||reverse)];const horizontal=Math.abs(b.x-a.x)>Math.abs(b.y-a.y),positive=horizontal?b.x>=a.x:b.y>=a.y,arrows=horizontal?['→','←']:['↓','↑'];return [(positive?arrows[0]:arrows[1])+' '+permissionLabel(forward),(positive?arrows[1]:arrows[0])+' '+permissionLabel(reverse)]}
@@ -379,7 +454,7 @@ function network(){
    const desiredRoom=Math.max(0,...pairs.flatMap(p=>p.rules.map(r=>networkTextWidth('↓ '+permissionLabel(r))+40)))+Math.max(0,pairs.length-1)*16;
    const gap=phoneList.length?clamp(W-cardWidth-phoneWidth-desiredRoom-12,64,260):0,room=W-cardWidth-(phoneList.length?phoneWidth+gap:0)-12;
    let y=24;
-   for(const w of ordered){const h=(hasChange(w)?84:64)+(networkStatusLines(networkStatus(w),cardWidth-42).length-1)*16;positions.set(w.id,{x:0,y,w:cardWidth,h});y+=h+20}
+   let prevGroup;for(const [i,w]of ordered.entries()){if(grouped&&(!i||(groupById(w.group)||null)!==prevGroup)){y+=GROUP_HEAD;prevGroup=groupById(w.group)||null}const h=(hasChange(w)?84:64)+(networkStatusLines(networkStatus(w),cardWidth-42).length-1)*16;positions.set(w.id,{x:0,y,w:cardWidth,h});y+=h+20}
    const columnHeight=ordered.length?y-44:0,phoneHeight=phoneList.length?phoneList.length*72-20:0;
    H=Math.max(columnHeight,phoneHeight)+76;
    for(const p of positions.values())p.y+=(H-columnHeight)/2-24;
@@ -443,6 +518,17 @@ function network(){
   }
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   nodeBoxes.push(...phones.values());
+  if(grouped)for(const b of blocks()){
+   const links=JSON.stringify(b.ws.map(w=>wsKey(w.id))),talk=!!b.g?.talk,title=(b.g?b.g.name:'No group')+': '+b.ws.length+(b.ws.length===1?' workspace':' workspaces')+(talk?', members may message each other':'');
+   const g=svgEl('g',{class:'group-outline '+gClass(b.g)+(talk?' talk':''),'data-links':links},svgEl('title',{},title));
+   if(cards){const f=positions.get(b.ws[0].id),l=positions.get(b.ws[b.ws.length-1].id),x=f.x-10,y=f.y-GROUP_HEAD+2,w=f.w+20,h=l.y+l.h-f.y+GROUP_HEAD+6;
+    if(b.g)g.append(svgEl('rect',{class:'group-box',x,y,width:w,height:h,rx:16}));
+    const label=svgEl('text',{class:'group-label',x:x+12,y:y+19},networkShort(b.g?b.g.name:'No group',talk?w*.42:w-24,12));if(talk)label.append(svgEl('tspan',{class:'group-talk'},' · ⇄ '+(networkTextWidth(b.g.name,12)+networkTextWidth(' · ⇄ may message each other',11)<=w-24?'may message each other':'message each other')));g.append(label);
+   }else if(b.g){const a0=positions.get(b.ws[0].id).angle,a1=positions.get(b.ws[b.ws.length-1].id).angle+(positions.get(b.ws[b.ws.length-1].id).angle<a0?2*Math.PI:0),pad=Math.min(.12,Math.PI/Math.max(ordered.length,3)*.55),n=Math.max(8,Math.ceil((a1-a0+2*pad)*40));
+    const d=Array.from({length:n+1},(_,i)=>{const a=a0-pad+(a1-a0+2*pad)*i/n;return (i?'L':'M')+(cx+rx*Math.cos(a)).toFixed(1)+' '+(cy+ry*Math.sin(a)).toFixed(1)}).join(' ');
+    g.append(svgEl('path',{class:'group-band',d,'stroke-width':2*radius+14}));if(talk)g.append(svgEl('path',{class:'group-talk-line',d}));const mid=(a0+a1)/2,inset=radius+30,lx=cx+(rx-inset)*Math.cos(mid),ly=cy+(ry-inset)*Math.sin(mid)+4,anchor=Math.abs(Math.cos(mid))<.35?'middle':Math.cos(mid)>0?'end':'start';g.append(svgEl('text',{class:'group-label ring-group-label',x:lx,y:ly,'text-anchor':anchor},b.g.name+(talk?' ⇄':'')))}
+   groupLayer.append(g);
+  }
   const degree=new Map(ordered.map(w=>[w.id,pairs.filter(p=>p.a===w.id||p.b===w.id).length]));
   for(const e of edges){const ids=[wsKey(e.p.a),wsKey(e.p.b)],attrs={class:'edge-line',d:e.d};if(e.p.rules.some(r=>r.to===e.p.a))attrs['marker-start']='url(#network-arrow)';if(e.p.rules.some(r=>r.to===e.p.b))attrs['marker-end']='url(#network-arrow)';if(!cards){if(degree.get(e.p.a)>6)attrs.class+=' crowded-start';if(degree.get(e.p.b)>6)attrs.class+=' crowded-end'}const label=networkPairLabel(e.p),key='e:'+JSON.stringify(ids);
    e.g=interactive(svgEl('g',{class:'graph-item graph-edge'},svgEl('path',{class:'edge-hit',d:e.d}),svgEl('path',attrs)),ids,label,()=>edgeSheet(e.p.a,e.p.b),key);lineLayer.append(e.g);
@@ -473,10 +559,10 @@ function network(){
   svg.addEventListener('mouseover',e=>highlight(e.target.closest('[role=button]')||svg.querySelector(':focus')));svg.addEventListener('mouseleave',()=>highlight(svg.querySelector(':focus')));svg.addEventListener('focusin',e=>highlight(e.target.closest('[role=button]')));svg.addEventListener('focusout',e=>highlight(e.relatedTarget?.closest?.('.network [role=button]')));
   const legend=el('div',{class:'network-legend'});
   function sample(kind){const s=svgEl('svg',{width:28,height:20,viewBox:'0 0 42 20','aria-hidden':'true'});if(kind==='online'||kind==='offline')s.append(svgEl('circle',{class:cards?kind:'node-shape '+kind+'-ring',cx:21,cy:10,r:cards?4:6}));else{s.append(svgEl('path',{class:kind==='phone'||kind==='unpaired'?'legend-phone '+kind:'edge-line',d:'M4 10 H38'}));if(kind==='one'||kind==='both')s.append(svgEl('path',{class:'network-arrow',d:'M32 6 L39 10 L32 14 Z'}));if(kind==='both')s.append(svgEl('path',{class:'network-arrow',d:'M10 6 L3 10 L10 14 Z'}))}return s}
-  for(const [kind,label]of [['one','One way'],['both','Both ways'],['allowed','What is allowed'],['phone','Phone can reach'],['unpaired','Phone not set up yet'],['online','Online'],['offline','Offline']]){const art=kind==='allowed'?svgEl('svg',{width:158,height:24,viewBox:'0 0 158 24',class:'edge-label','aria-hidden':'true'},svgEl('rect',{x:1,y:1,width:156,height:22,rx:10}),svgEl('text',{x:79,y:16,'text-anchor':'middle'},'Messages · Tasks · Start')):sample(kind);legend.append(el('span',{class:'network-legend-item'},art,label))}if(!cards)legend.append(el('span',{},'Point at a workspace to see its connections'));
-  if(!cards){const top=Math.min(0,...outside.map(b=>b.y-12)),bottom=Math.max(H,...outside.map(b=>b.y+b.h+12));if(top<0){for(const layer of [lineLayer,phoneLayer,nodeLayer,chipLayer])layer.setAttribute('transform',`translate(0 ${-top})`)}H=bottom-top;svg.setAttribute('viewBox',`0 0 ${W} ${H}`)}
+  for(const [kind,label]of [['one','One way'],['both','Both ways'],['allowed','What is allowed'],['phone','Phone can reach'],['unpaired','Phone not set up yet'],['online','Online'],['offline','Offline']]){const art=kind==='allowed'?svgEl('svg',{width:158,height:24,viewBox:'0 0 158 24',class:'edge-label','aria-hidden':'true'},svgEl('rect',{x:1,y:1,width:156,height:22,rx:10}),svgEl('text',{x:79,y:16,'text-anchor':'middle'},'Messages · Tasks · Start')):sample(kind);legend.append(el('span',{class:'network-legend-item'},art,label))}if(grouped){const box=svgEl('svg',{width:28,height:20,viewBox:'0 0 28 20','aria-hidden':'true',class:'g-violet'},svgEl('rect',{class:'group-box',x:1,y:2,width:26,height:16,rx:6}));legend.append(el('span',{class:'network-legend-item'},box,'Group'));if(groupList.some(g=>g.talk))legend.append(el('span',{class:'network-legend-item'},el('span',{class:'talk-key'},'⇄'),'Members of the group may message each other'))}if(!cards)legend.append(el('span',{},'Point at a workspace to see its connections'));
+  if(!cards){const top=Math.min(0,...outside.map(b=>b.y-12)),bottom=Math.max(H,...outside.map(b=>b.y+b.h+12));if(top<0){for(const layer of [groupLayer,lineLayer,phoneLayer,nodeLayer,chipLayer])layer.setAttribute('transform',`translate(0 ${-top})`)}H=bottom-top;svg.setAttribute('viewBox',`0 0 ${W} ${H}`)}
   const viewport=el('div',{class:'network-viewport'},svg);
-  const focusKey=root.querySelector(':focus')?.dataset.key;root.replaceChildren(viewport,legend,list);const note=emptyNote();if(note)root.append(note);if(focusKey){const match=[...svg.querySelectorAll('[data-key]')].find(g=>g.dataset.key===focusKey);match?.focus()}
+  const focusKey=root.querySelector(':focus')?.dataset.key;root.replaceChildren(...(chips?[chips]:[]),viewport,legend,list);const note=emptyNote();if(note)root.append(note);applyGroupFilter();if(focusKey){const match=[...svg.querySelectorAll('[data-key]')].find(g=>g.dataset.key===focusKey);match?.focus()}
  }
  draw(document.querySelector('#network-host')?.getBoundingClientRect().width||900);
  requestAnimationFrame(()=>{if(!root.isConnected)return;const host=root.closest('#network-host')||root.parentElement,width=host.getBoundingClientRect().width;if(width&&Math.abs(width-lastWidth)>8)draw(width);if(typeof ResizeObserver==='undefined')return;host._networkResizeCleanup?.();host._networkResizeCleanup=()=>{observer?.disconnect();clearTimeout(timer)};observer=new ResizeObserver(entries=>{if(!root.isConnected){observer.disconnect();clearTimeout(timer);return}const width=entries[0].contentRect.width;if(!width||Math.abs(width-lastWidth)<=8)return;clearTimeout(timer);timer=setTimeout(()=>{if(root.isConnected)draw(width);else observer.disconnect()},120)});observer.observe(host)});
@@ -491,7 +577,7 @@ document.body.classList.remove('menu-open');$('#menu').setAttribute('aria-expand
  if(!token){auth();return}document.body.classList.remove('signedout');const v=++epoch;
  $('#top-add').hidden=key!=='overview';document.querySelectorAll('dialog[open]').forEach(d=>orch.close(d));const changed=lastRoute!==null&&lastRoute!==key;lastRoute=key;
  const slow=loadingTimer=setTimeout(()=>{if(v===epoch)app.replaceChildren(skeleton())},300);
- try{const ws=await all('/workspaces');if(v!==epoch)return;workspaces=ws;phoneList=await all('/phones');if(v!==epoch)return;await ({overview,add,rules,messages,config,webhooks,phones}[key])(v);if(v===epoch){touched();if(changed)orch.enter(app)}}catch(e){if(v!==epoch||!token)return;show(panel('This page could not be loaded',empty('Could not load this page',e.message,button('Try again',()=>route()))))}finally{clearTimeout(slow)}
+ try{const ws=await all('/workspaces');if(v!==epoch)return;workspaces=ws;phoneList=await all('/phones');if(v!==epoch)return;groupList=(await api('/groups')).items||[];if(v!==epoch)return;await ({overview,add,groups:groupsPage,rules,messages,config,webhooks,phones}[key])(v);if(v===epoch){touched();if(changed)orch.enter(app)}}catch(e){if(v!==epoch||!token)return;show(panel('This page could not be loaded',empty('Could not load this page',e.message,button('Try again',()=>route()))))}finally{clearTimeout(slow)}
 }
 for(const [key,title,hidden]of screens)if(!hidden)$('#nav').append(el('a',{href:'#'+key,class:'nav-item'},uiIcon(key),title));
 $('#menu').addEventListener('click',()=>{const o=document.body.classList.toggle('menu-open');$('#menu').setAttribute('aria-expanded',String(o))});
