@@ -33,7 +33,9 @@ def init(root: Path) -> list[str]:
 def has_recommended(root: Path) -> bool:
     from orch import addons
 
-    return any(r["recommended"] and not r["active"] for r in addons.listing(root))
+    return any(r["recommended"] and not r["active"] for r in addons.listing(root)) or bool(
+        addons.shipped_recommended(fetch=False)
+    )
 
 
 def recommended(root: Path, yes: bool = False, interactive: bool = False) -> list[str]:
@@ -46,9 +48,12 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
     from orch import addons
 
     rows = [r for r in addons.listing(root) if r["recommended"] and not r["active"]]
+    mans = addons.discover()
+    for name, m in addons.shipped_recommended().items():  # shipped with orch, not installed yet
+        mans[name] = m
+        rows.append({"name": name})
     if not rows:
         return []
-    mans = addons.discover()
     text = "\n\n".join(addons.consent_text(mans[r["name"]], False) for r in rows)
     if not yes:
         if not interactive:

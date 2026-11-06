@@ -54,6 +54,8 @@ EXT_SCHEMA_MAX = 32 * 1024
 # off until `orch addon add <name>`; their commands are parsed by the core CLI. No other add-on may take
 # these names (they stay in RESERVED).
 CORE_ADDONS = ("publish", "relay")
+# Separate packages that ship in this repo's workspace-addons/ and are installed on `orch addon add <name>`.
+SHIPPED_ADDONS = ("automation", "dashboard", "focus")
 
 
 # ---------------------------------------------------------------- sources
@@ -412,6 +414,30 @@ def core_manifests() -> dict[str, dict]:
     return {n: parse_manifest(base / n / MANIFEST, core=True) for n in CORE_ADDONS}
 
 
+def shipped_recommended(fetch: bool = True) -> dict[str, dict]:
+    """Manifests of the shipped add-ons that are not installed yet and say recommended = true.
+    From the local source folder when there is one; else (fetch=True) the manifest is previewed from the
+    repo (one small download each), and with fetch=False the answer is empty."""
+    have = set(discover())
+    local = _is_local(repo())
+    out = {}
+    for name in SHIPPED_ADDONS:
+        if name in have:
+            continue
+        try:
+            if local:
+                m = folder_manifest(Path(repo()) / "workspace-addons" / name)
+            elif fetch:
+                m = preview_builtin(name)
+            else:
+                continue
+        except Refused:
+            continue
+        if m.get("recommended"):
+            out[name] = m
+    return out
+
+
 def discover() -> dict[str, dict]:
     """Every installed add-on with a valid manifest, by name (the built-in core ones included)."""
     importlib.invalidate_caches()
@@ -744,7 +770,8 @@ def preview_builtin(name: str) -> dict:
 def reexec(args: list[str]) -> None:
     """Run the freshly installed orch for the project step (this process still runs the old code).
     Tests replace this with an in-process call."""
-    r = subprocess.run([sys.executable, "-P", "-m", "orch", *args], text=True)
+    r = subprocess.run([sys.executable, "-P", "-m", "orch", *args], text=True, stdout=subprocess.PIPE)
+    sys.stdout.write(r.stdout)  # through our stdout, so a caller that redirects it (init --json) stays clean
     if r.returncode != 0:
         raise Refused("The project step failed (see above).")
 

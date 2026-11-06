@@ -183,6 +183,17 @@ def attach_watch(w: W, tid: str, needle: bytes, secs: float = 15) -> bytes:
 # ------------------------------------------------------------------------------------------------ core alone
 
 
+@scenario("V2-I1")
+def i1_init_recommended(e):
+    """`orch init --recommended --yes` turns on the dashboard, automation and focus add-ons, and not relay or publish."""
+    w = W(e, "V2-I1")
+    out = w.j("init", "--recommended", "--yes", by=None)
+    check(sorted(out.get("recommended") or []) == ["automation", "dashboard", "focus"], f"init turned on {out.get('recommended')}")
+    rows = w.j("addon", "list", by=None)
+    on = sorted(r["name"] for r in rows if r["active"])
+    check(on == ["automation", "dashboard", "focus"], f"active add-ons after init --recommended: {on}")
+
+
 @scenario("V2-C1")
 def c1(e):
     """Core alone (no add-on): owner/due/note, summary, task ops, --file proof (gitignored), sub-ticket + warning, needs."""

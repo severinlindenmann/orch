@@ -3,6 +3,7 @@ schema = "orch.addon/1"
 orch_api = 1
 name = "automation"
 version = "0.2.0"
+recommended = true                          # orch init --recommended turns it on
 description = "Starts agent runs at a set time, on a repeat, and when the phone or another workspace sends work."
 run = "orch_automation"                     # orch automation <args>  ->  python -m orch_automation <args>
 skill = "skills/orch-automation"

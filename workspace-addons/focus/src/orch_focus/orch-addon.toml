@@ -3,6 +3,7 @@ schema = "orch.addon/1"
 orch_api = 1
 name = "focus"
 version = "0.1.0"
+recommended = true                          # orch init --recommended turns it on
 description = "A live page for one ticket: watch the agent work, answer its questions, send it a message."
 run = "orch_focus"                          # orch focus <args>  ->  python -m orch_focus <args>
 skill = "skills/orch-focus"

@@ -154,6 +154,7 @@ def test_recommended_turns_on_marked_addons_or_none(proj, run, monkeypatch):
         {"name": "a3", "recommended": False, "active": False},
     ]
     monkeypatch.setattr(addons, "listing", lambda root: rows)
+    monkeypatch.setattr(addons, "shipped_recommended", lambda fetch=True: {})
     man = {"name": "x", "version": "1", "description": "d", "background": False}
     monkeypatch.setattr(addons, "discover", lambda: {r["name"]: man | {"name": r["name"]} for r in rows})
     seen = []
@@ -173,6 +174,7 @@ def test_recommended_failure_turns_none_on(proj, monkeypatch):
         {"name": "a2", "recommended": True, "active": False},
     ]
     monkeypatch.setattr(addons, "listing", lambda root: rows)
+    monkeypatch.setattr(addons, "shipped_recommended", lambda fetch=True: {})
     man = {"version": "1", "description": "d", "background": False}
     monkeypatch.setattr(addons, "discover", lambda: {r["name"]: man | {"name": r["name"]} for r in rows})
     on, off = [], []
@@ -187,3 +189,26 @@ def test_recommended_failure_turns_none_on(proj, monkeypatch):
     with pytest.raises(skills.Refused, match="Nothing was changed"):
         init.recommended(proj, yes=True)
     assert on == ["a1"] and off == ["a1"]
+
+
+def test_recommended_also_turns_on_shipped_addons_that_are_not_installed(proj, monkeypatch):
+    from orch import addons, init
+
+    monkeypatch.setattr(addons, "listing", lambda root: [])
+    monkeypatch.setattr(addons, "discover", lambda: {})
+    man = {"version": "1", "description": "d", "background": False}
+    monkeypatch.setattr(addons, "shipped_recommended", lambda fetch=True: {"dash": man | {"name": "dash"}})
+    seen = []
+    monkeypatch.setattr(addons, "add", lambda root, n, yes=False: seen.append(n))
+    assert init.recommended(proj, yes=True) == ["dash"] and seen == ["dash"]
+
+
+def test_shipped_recommended_reads_the_local_source_manifests(monkeypatch):
+    from pathlib import Path
+
+    from orch import addons
+
+    repo = Path(__file__).resolve().parents[2]
+    monkeypatch.setenv("ORCH_REPO", str(repo))
+    monkeypatch.setattr(addons, "discover", lambda: {})
+    assert sorted(addons.shipped_recommended()) == ["automation", "dashboard", "focus"]
