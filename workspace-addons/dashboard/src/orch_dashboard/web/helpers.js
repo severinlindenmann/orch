@@ -24,6 +24,9 @@
     if (/^Answered\b/.test(text)) return 'Answered a question';
     if ((m = /^Status \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
     if (/^Summary/.test(text)) return 'Updated the summary';
+    if ((m = /^Added (?:task|check)[:\s]+(.+)$/i.exec(text))) return 'Added a task: ' + m[1];
+    if ((m = /^Finished a task[:\s]+(.+)$/i.exec(text))) return 'Finished a task: ' + m[1];
+    if (/^(Updated|Removed) .+ settings$/.test(text)) return text;
     if (/^Check c\d+ done/i.test(text) || /^(Checked|Done)\b.*\bc\d+/.test(text) || /^Task .* done/i.test(text)) return 'Finished a task';
     if (/^Added task|^Added check/i.test(text)) return 'Added a task';
     if (/^Linked|^Link added/i.test(text)) return 'Added a link';
@@ -85,7 +88,7 @@
   const minutes = ms => Math.max(0, Math.round(ms / 60000));
   const span = ms => { const m = minutes(ms); return m < 1 ? 'just now' : m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : Math.round(m / 1440) + ' days'; };
 
-  /* The ONE agent line under the ticket title. state: working | stuck | needs | failed | resume | new.
+  /* The ONE agent line under the ticket title. state: working | starting | background | stuck | needs | failed | resume | new.
      primary = the main action {label, op, args} (op is a dashboard op, or "open" with a url); items = the rest, under "...". */
   function agentLine(ticket, run, nowMs, liveLink) {
     const t = ticket || {}, r = run || null, id = t.id;
@@ -102,12 +105,22 @@
       if (r.state === 'maybe-stale') return {state: 'stuck', agent, status: 'may be stuck · quiet for a while' + since,
         primary: start('Start anyway', {take_over: true}), items: [stop]};
       if (asks) return {state: 'needs', agent, status: 'waiting for your answer' + since, primary: {label: 'Answer', op: 'answer'}, items: [stop, fresh]};
+      const waits = claim.live && claim.live.state === 'attention' ? String(claim.live.why || 'waiting for your OK in the live session') : '';
+      if (waits) return {state: 'needs', agent, status: waits, primary: liveLink ? {label: 'Open ' + liveLink.label, op: 'open', url: liveLink.url} : stop,
+        items: liveLink ? [stop] : []};
       const live = liveLink ? {label: 'Open ' + liveLink.label, op: 'open', url: liveLink.url} : null;
+      if (claim.live && claim.live.state === 'starting') return {state: 'starting', agent, status: 'Starting…', primary: live || stop, items: live ? [stop] : []};
+      if (claim.mode === 'oneshot') return {state: 'background', agent, status: 'works in the background (no live view)' + since,
+        primary: live ? {...live, label: 'Watch in ' + liveLink.label} : stop, items: live ? [stop] : []};
       return {state: 'working', agent, status: 'working' + by + since, primary: live || stop, items: live ? [stop] : []};
     }
     if (r && r.state === 'dead') return {state: 'failed', agent, status: 'the last run ended without finishing',
       primary: start('Try again'), items: [fresh]};
     if (asks) return {state: 'needs', agent, status: 'waiting for your answer', primary: {label: 'Answer', op: 'answer'}, items: [fresh]};
+    if (sessions[0] && r && r.state === 'stopped') {
+      const when = Date.parse(sessions[0].last_used);
+      return {state: 'stopped', agent, status: 'Stopped' + (Number.isNaN(when) ? '' : ' · ' + span(nowMs - when) + ' ago'), primary: start('Continue'), items: [fresh]};
+    }
     if (sessions[0]) {
       const when = Date.parse(sessions[0].last_used);
       return {state: 'resume', agent, status: 'last worked ' + (Number.isNaN(when) ? 'earlier' : span(nowMs - when) + ' ago'),

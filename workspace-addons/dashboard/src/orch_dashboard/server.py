@@ -202,7 +202,10 @@ class Handler(BaseHTTPRequestHandler):
         if code != 200:
             hdr = {"X-Revision": str(extra["revision"])} if extra else None
             return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
-        self._send(200, json.dumps(load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)).encode(), "application/json")
+        state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
+        if body.get("op") == "config.agent.test" and isinstance(extra, dict):  # the answer of the try, plain words only
+            state["test"] = {"name": str(extra.get("name"))[:40], "ok": extra.get("ok") is True, "reason": str(extra.get("reason") or "")[:300]}
+        self._send(200, json.dumps(state).encode(), "application/json")
 
 
 class _Server(ThreadingHTTPServer):

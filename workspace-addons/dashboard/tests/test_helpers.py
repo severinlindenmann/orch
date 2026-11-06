@@ -134,3 +134,26 @@ console.log(JSON.stringify([n, sent]));
 """
     out = subprocess.run(["node", "-e", js, str(WEB / "helpers.js")], capture_output=True, text=True, check=True).stdout
     assert json.loads(out) == [1, ["Yes"]]
+
+
+@node
+def test_agent_line_run_states_starting_background_stopped():
+    now = 1793923200000
+    link = {"label": "focus", "url": "#open/focus/t/t_a"}
+    run = {"running": True, "state": "alive", "claim": {"agent": "claude", "mode": "live", "live": {"state": "starting", "since": "x"}}}
+    w = call("agentLine", T, run, now, link)
+    assert w["state"] == "starting" and w["status"] == "Starting…" and w["primary"]["op"] == "open"
+    run = {"running": True, "state": "alive", "claim": {"agent": "mine", "mode": "oneshot"}}
+    w = call("agentLine", T, run, now, link)
+    assert w["state"] == "background" and "no live view" in w["status"] and w["primary"]["label"] == "Watch in focus"
+    t = {**T, "sessions": [{"agent": "claude", "last_used": "2026-11-06T00:00:00Z"}]}
+    w = call("agentLine", t, {"running": False, "state": "stopped", "claim": {}}, now, None)
+    assert w["state"] == "stopped" and w["primary"]["label"] == "Continue"
+
+
+@node
+def test_history_lines_follow_the_core_wording():
+    assert call("historyLine", {"text": "Added a task: Call Anna"}) == "Added a task: Call Anna"
+    assert call("historyLine", {"text": "Finished a task: Check invoices"}) == "Finished a task: Check invoices"
+    assert call("historyLine", {"text": "Updated Publish settings"}) == "Updated Publish settings"
+    assert call("historyLine", {"text": "Removed Relay settings"}) == "Removed Relay settings"

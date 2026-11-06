@@ -220,11 +220,11 @@
   function agentBar(t) {
     const line = window.DashHelpers.agentLine(t, state.runs?.[t.id], Date.now(), liveLinkFor(t));
     const action = (item, primary) => {
-      const attrs = {className:primary ? 'btn sm ' + (line.state === 'working' ? 'outline' : 'primary') : 'menu-item', role:primary ? null : 'menuitem', 'data-key':primary ? 'agent-primary' : 'agent-' + item.label};
+      const attrs = {className:primary ? 'btn sm ' + (['working', 'starting', 'background'].includes(line.state) ? 'outline' : 'primary') : 'menu-item', role:primary ? null : 'menuitem', 'data-key':primary ? 'agent-primary' : 'agent-' + item.label};
       if (item.op === 'open') return /^#open\//.test(item.url) ? h('a', {...attrs, href:item.url}, item.label) : null;
       return h('button', {...attrs, type:'button', 'data-action':'agent', 'data-op':item.op, 'data-args':JSON.stringify(item.args || {}), 'data-ticket':t.id}, item.label);
     };
-    return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'}, h('span', {className:'dot ' + ({working:'working', needs:'needs', stuck:'needs', failed:'error'}[line.state] || 'idle')}),
+    return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'}, h('span', {className:'dot ' + ({working:'working', starting:'starting', background:'bg', needs:'needs', stuck:'needs', failed:'error', stopped:'stopped'}[line.state] || 'idle')}),
       h('span', {className:'ab-text grow'}, h('strong', {}, name(line.agent)), h('span', {className:'muted'}, ' · ' + clean(line.status))),
       h('span', {className:'ab-actions'}, action(line.primary, true), line.items.length ? h('details', {className:'menu', 'data-key':'agent-menu'}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More agent actions'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, line.items.map(item => action(item, false)))) : null));
   }
@@ -293,7 +293,7 @@
         panel('tasks', tasksCard('tasks')), panel('questions', [qs.length ? qs : emptyRow('No open questions'), answered]),
         panel('history', card('history', 'History', '', history.length ? history : emptyRow('No history yet.')))),
       h('aside', {className:'card ticket-aside'}, h('div', {className:'card-h'}, h('h2', {}, 'Details')),
-        h('dl', {className:'ticket-details'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', agent), field('Created', date(t.created_at)), field('Updated', age(t.updated_at)), field('Ticket', t.id, 'mono'))))));
+        h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', h('span', {className:'ed-ro'}, agent)), field('Created', h('span', {className:'ed-ro'}, date(t.created_at))), field('Updated', h('span', {className:'ed-ro'}, age(t.updated_at))), field('Ticket', h('span', {className:'ed-ro mono'}, t.id)))))));
   }
 
   const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note'};
@@ -301,37 +301,43 @@
   function inlineField(t, field) {
     const raw = t[field] == null ? '' : String(t[field]);
     const shown = field === 'due' ? date(raw) : field === 'owner' ? name(raw) : clean(raw);
-    if (snapshot) return el('span', field === 'note' ? 'preserve-lines' : '', shown || (field === 'title' ? '' : FIELD_HINT[field]));
+    if (snapshot) return el('span', field === 'note' ? 'ed-ro preserve-lines' : 'ed-ro', shown || (field === 'title' ? '' : FIELD_HINT[field]));
     const host = el('span', 'inline-host');
     host.dataset.key = 'inline-' + field + '-' + t.id;
-    const node = el('button', 'inline-edit' + (shown ? '' : ' empty') + (field === 'note' ? ' preserve-lines' : ''), shown || FIELD_HINT[field]);
+    const node = el('button', 'ed' + (shown ? '' : ' empty-v') + (field === 'note' ? ' preserve-lines' : '') + (field === 'title' ? ' ed-title' : ''), shown || FIELD_HINT[field]);
     Object.assign(node, {type:'button', title:'Click to change'});
     Object.assign(node.dataset, {action:'inline', field, ticket:t.id});
     host.append(node);
     return host;
   }
+  async function saveField(t, field, value) {
+    const result = await act('ticket.edit', {ticket:t.id, [field]:value, if_revision:t.revision});
+    if (!result.ok) window.orch.toast(result.text + (result.status === 409 ? ' Reload the page and try again.' : ''), 'error');
+  }
   function startInline(control) {
     const t = ticketOf(control.dataset.ticket), field = control.dataset.field, host = control.parentElement;
     if (!t || !host || locks.has(host.dataset.key)) return;
     const key = host.dataset.key;
-    const input = el(field === 'note' ? 'textarea' : 'input', 'input inline-input');
-    if (field === 'note') input.rows = 3; else input.type = field === 'due' ? 'date' : 'text';
-    if (field === 'title') input.maxLength = 200;
     const before = field === 'owner' ? name(t.owner) : t[field] == null ? '' : String(t[field]);
+    if (field === 'due') {
+      locks.add(key);
+      pickDate(control, before, async value => { if (value !== null && value !== before) await saveField(t, 'due', value); locks.delete(key); render(); });
+      return;
+    }
+    const input = el(field === 'note' ? 'textarea' : 'input', 'input inline-input');
+    if (field === 'note') input.rows = 3; else input.type = 'text';
+    if (field === 'title') input.maxLength = 200;
     input.value = before;
     input.setAttribute('aria-label', capitalise(field));
     locks.add(key);
-    host.replaceChildren(input);
+    host.replaceChildren(input, el('span', 'hint', field === 'note' ? 'Enter saves · Shift+Enter new line · Esc cancels' : 'Enter saves · Esc cancels'));
     input.focus();
     let done = false;
     const finish = async save => {
       if (done) return;
       done = true;
       const value = input.value.trim();
-      if (save && value !== before && !(field === 'title' && !value)) {
-        const result = await act('ticket.edit', {ticket:t.id, [field]:value, if_revision:t.revision});
-        if (!result.ok) window.orch.toast(result.text + (result.status === 409 ? ' Reload the page and try again.' : ''), 'error');
-      }
+      if (save && value !== before && !(field === 'title' && !value)) await saveField(t, field, value);
       locks.delete(key);
       render();
     };
@@ -342,6 +348,54 @@
     input.addEventListener('blur', () => finish(true));
   }
 
+  // A small calendar in the orch look instead of the browser's own picker. cb(value) with 'YYYY-MM-DD', '' (clear) or null (closed).
+  function pickDate(anchor, current, cb) {
+    document.querySelectorAll('.cal').forEach(n => n.remove());
+    const iso = d => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+    const todayIso = iso(new Date());
+    const start = parse(current) || new Date();
+    let view = new Date(start.getFullYear(), start.getMonth(), 1), closed = false;
+    const pop = el('div', 'cal');
+    pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Choose a day');
+    const close = value => {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener('mousedown', outside, true);
+      document.removeEventListener('keydown', key, true);
+      pop.remove();
+      cb(value);
+    };
+    const outside = event => { if (!pop.contains(event.target)) close(null); };
+    const key = event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(null); } };
+    const draw = () => {
+      pop.replaceChildren();
+      const head = el('div', 'cal-h');
+      const nav = (label, text, delta) => { const b = button(text, 'ghost icon sm', () => { view = new Date(view.getFullYear(), view.getMonth() + delta, 1); draw(); }); b.setAttribute('aria-label', label); return b; };
+      head.append(nav('Previous month', '‹', -1), el('strong', '', view.toLocaleDateString('en-GB', {month:'long', year:'numeric'})), nav('Next month', '›', 1));
+      const grid = el('div', 'cal-g');
+      for (const d of ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']) grid.append(el('span', 'cal-d', d));
+      const lead = (view.getDay() + 6) % 7, days = new Date(view.getFullYear(), view.getMonth() + 1, 0).getDate();
+      for (let i = 0; i < lead; i++) grid.append(el('span'));
+      for (let n = 1; n <= days; n++) {
+        const value = iso(new Date(view.getFullYear(), view.getMonth(), n));
+        const b = el('button', 'cal-x' + (value === todayIso ? ' today' : '') + (value === current ? ' sel' : ''), String(n));
+        b.type = 'button'; b.setAttribute('aria-label', value);
+        b.addEventListener('click', () => close(value));
+        grid.append(b);
+      }
+      const foot = el('div', 'cal-f');
+      foot.append(button('Clear', 'ghost sm', () => close('')), button('Today', 'outline sm', () => close(todayIso)));
+      pop.append(head, grid, foot);
+    };
+    draw();
+    document.body.append(pop);
+    const r = anchor.getBoundingClientRect();
+    pop.style.top = Math.min(r.bottom + 6, Math.max(8, innerHeight - pop.offsetHeight - 8)) + 'px';
+    pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + 'px';
+    setTimeout(() => { document.addEventListener('mousedown', outside, true); document.addEventListener('keydown', key, true); }, 0);
+    (pop.querySelector('.today, .sel') || pop.querySelector('.cal-x'))?.focus();
+  }
+
   let settingsTab = 'general';
   const settingsBusy = new Set();
   const settingsText = (tag, attrs, value) => {
@@ -349,69 +403,103 @@
     node.textContent = String(value ?? '');
     return node;
   };
-  function addonDetail(addon) {
-    const d = addon.detail;
+  const addonOpen = new Set(), agentTests = Object.create(null);
+  const short = text => { const first = String(text || '').split(/(?<=[.!?])\s/)[0]; return first.length > 70 ? first.slice(0, 67) + '…' : first; };
+  function addonSummary(addon) {
     if (addon.name === 'dashboard') return 'This page';
-    if (!addon.active) return addon.description;
-    if (!d) return addon.description;
+    const d = addon.detail;
+    if (!addon.active || !d) return short(addon.description);
     if (!d.connected) return 'Not connected yet';
-    const list = array(d.workspaces);
-    return 'Connected to ' + d.address + (list.length ? ' · can talk to ' + list.length + (list.length === 1 ? ' workspace: ' : ' workspaces: ') + list.map(w => w.name).join(', ') : '');
+    const n = array(d.workspaces).length;
+    return h('span', {className:'on-dot'}, 'Connected' + (n ? ' · ' + n + (n === 1 ? ' workspace' : ' workspaces') : ''));
+  }
+  function addonFacts(addon) {
+    const d = addon.detail, rows = [];
+    const row = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
+    rows.push(row('Address', [settingsText('span', {className:'mono'}, d.address), h('button', {type:'button', className:'ad-more', 'data-copy':d.address}, 'Copy')]));
+    rows.push(row('Status', h('span', {className:'on-dot'}, 'Connected')));
+    const ws = array(d.workspaces);
+    if (ws.length) rows.push(row('Can talk to', ws.map(w => h('span', {className:w.online ? 'on-dot' : 'off-dot', title:w.online ? 'online' : 'offline'}, settingsText('span', {}, w.name)))));
+    return h('dl', {}, rows);
   }
   function settingsPage() {
     const settings = state.settings;
     const agents = array(settings.agents).map(agent => {
-      const radio = h('input', {type:'radio', name:'settings-agent', value:agent.name, 'data-key':'settings-agent-' + agent.name, 'data-settings-agent':agent.name, disabled:settingsBusy.has('agent')});
+      const radio = h('input', {type:'radio', name:'settings-agent', value:agent.name, 'data-key':'settings-agent-' + agent.name, 'data-settings-agent':agent.name, disabled:settingsBusy.has('agent') || (!agent.found && agent.status !== 'your command')});
       radio.checked = !!agent.chosen;
+      const missing = !agent.found && agent.status !== 'your command';
       const status = agent.status === 'your command' ? 'Your own agent' : agent.found ? 'Found' + (agent.version ? ' · version ' + agent.version : '') : 'Not found on this computer';
-      return h('label', {className:'card-row agent-opt' + (agent.chosen ? ' sel' : ''), 'data-key':'settings-agent-row-' + agent.name}, radio,
+      return h('label', {className:'card-row agent-opt' + (missing ? ' off' : '') + (agent.chosen ? ' sel' : ''), 'data-key':'settings-agent-row-' + agent.name}, radio,
         h('div', {className:'grow'}, settingsText('h3', {}, agent.label), settingsText('p', {className:'meta'}, status)),
         agent.chosen ? h('span', {className:'chip active def'}, 'Default') : null);
+    }).map(row => row);
+    array(settings.agents).forEach((agent, i) => {
+      if (snapshot) return;
+      const test = h('button', {type:'button', className:'btn ghost sm', 'data-action':'agent-test', 'data-name':agent.name, 'data-key':'settings-test-' + agent.name, disabled:settingsBusy.has('test-' + agent.name)}, 'Test');
+      const note = agentTests[agent.name] ? h('span', {className:'meta test-note ' + (agentTests[agent.name].ok ? 'ok' : 'bad')}, agentTests[agent.name].reason) : null;
+      if (note) agents[i].append(note);
+      agents[i].append(test);
     });
     const panel = (id, body) => h('section', {className:'set-sec', id:'settings-panel-' + id, 'data-key':'settings-panel-' + id, role:'tabpanel', 'aria-labelledby':'settings-tab-' + id, hidden:settingsTab !== id, tabindex:'0'}, body);
+    const addonRow = addon => {
+      const more = addon.name !== 'dashboard' && addon.active && addon.detail?.connected, open = addonOpen.has(addon.name);
+      return h('div', {className:'ad-row', 'data-key':'settings-addon-' + addon.name},
+        h('div', {className:'ad-h'}, h('div', {className:'grow'}, settingsText('h3', {}, capitalise(addon.name)), h('span', {className:'meta'}, addonSummary(addon))),
+          more ? h('button', {type:'button', className:'ad-more', 'aria-expanded':open, 'data-action':'addon-more', 'data-name':addon.name}, h('span', {className:'chevron'}, iconEl('down')), 'Details') : null,
+          addon.name === 'dashboard' ? h('span', {className:'always'}, 'Always on') : h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':addon.name + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:settingsBusy.has('addon-' + addon.name)})),
+        more ? h('div', {className:'ad-b', hidden:!open}, addonFacts(addon)) : null);
+    };
     return h('div', {className:'settings stack'}, heading('Settings'),
       h('div', {className:'tabs', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Agent'], ['addons', 'Add-ons']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))),
       panel('general', h('div', {className:'card'},
         h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
         h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), settingsText('p', {className:'grow set-ctl mono'}, settings.folder)))),
-      panel('agent', [h('p', {className:'meta'}, 'The default agent works on new tickets. A ticket keeps its own agent session.'), h('div', {className:'card'}, h('div', {role:'radiogroup', 'aria-label':'Default agent'}, agents)),
-        snapshot ? null : h('div', {}, h('button', {type:'button', className:'btn outline sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, 'Add your own agent'))]),
-      panel('addons', h('div', {className:'card'}, array(settings.addons).map(addon => h('div', {className:'card-row addon-row', 'data-key':'settings-addon-' + addon.name},
-        h('div', {className:'grow'}, settingsText('h3', {}, capitalise(addon.name)), settingsText('p', {className:'meta'}, addonDetail(addon))),
-        addon.name === 'dashboard' ? null : h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':addon.name + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:settingsBusy.has('addon-' + addon.name)}))))));
+      panel('agent', [h('p', {className:'meta'}, 'Pick the default. It is saved right away.'), h('div', {className:'card'}, h('div', {role:'radiogroup', 'aria-label':'Default agent'}, agents),
+        snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own agent')))]),
+      panel('addons', h('div', {className:'card'}, array(settings.addons).map(addonRow))));
   }
-  // A small form for an agent that is started with a command. Save shows the command once more before adding it.
-  function openAgentForm() {
-    const {d, actions} = dialog('Add your own agent', 'dialog', 'settings-other');
+  // An agent that is started with a command: a small form that opens in the list; the command is shown before it is added.
+  function openAgentForm(control) {
+    const slot = control.closest('[data-key="settings-add-slot"]');
+    if (!slot || locks.has('settings-add-slot')) return;
+    locks.add('settings-add-slot');
     const input = (tag, attrs = {}) => Object.assign(el(tag, 'input'), attrs);
-    const nameIn = input('input', {type:'text', placeholder:'my-agent', maxLength:32});
-    const cmdIn = input('input', {type:'text', placeholder:'mytool --yes {prompt}'});
+    const nameIn = input('input', {type:'text', placeholder:'Name, e.g. report-tool', maxLength:32});
+    const cmdIn = input('input', {type:'text', placeholder:'report-tool --task {task}'});
     const via = input('select');
-    via.append(new Option('As an argument', 'arg'), new Option('On stdin', 'stdin'));
-    const use = Object.assign(el('input'), {type:'checkbox', checked:true});
+    via.append(new Option('The task goes in as an argument', 'arg'), new Option('The task goes in on stdin', 'stdin'));
     const err = el('p', 'bad'); err.setAttribute('role', 'alert');
-    const row = (label, control, hint) => { const l = el('label', 'stack', label); l.append(control); if (hint) l.append(el('span', 'meta', hint)); return l; };
-    const form = el('div', 'other-cmd');
-    form.append(row('Name', nameIn), row('Command', cmdIn, '{prompt} is replaced with the ticket and its tasks.'), row('The task goes in', via), row('', use), err);
-    use.parentElement.append(' Use it as the default agent');
-    const save = button('Save', 'primary', async () => {
-      const draft = {name:nameIn.value.trim(), command:cmdIn.value, prompt_via:via.value, use:use.checked};
-      err.textContent = !/^[a-z][a-z0-9-]{1,31}$/.test(draft.name) ? 'Use 2–32 characters: start with a lowercase letter, then use lowercase letters, numbers or hyphens.'
+    const row = (label, control, hint) => { const l = el('label', '', label); l.append(control); if (hint) l.append(el('span', 'hint', hint)); return l; };
+    const form = el('div', 'add-form');
+    const preview = el('div', 'cmd-preview');
+    preview.hidden = true;
+    const cancel = () => { locks.delete('settings-add-slot'); render(); };
+    const back = button('Back', 'ghost sm', () => { preview.hidden = true; fields.hidden = false; });
+    const fields = el('div', 'add-form');
+    fields.append(row('Name', nameIn), row('Command', cmdIn, '{prompt} is replaced with the ticket and its tasks.'), row('How the task goes in', via), err);
+    const next = button('Save', 'primary sm', () => {
+      const draft = {name:nameIn.value.trim(), command:cmdIn.value, prompt_via:via.value};
+      err.textContent = !/^[a-z][a-z0-9-]{1,31}$/.test(draft.name) ? 'Name: 2–32 characters, a lowercase letter first, then lowercase letters, numbers or hyphens.'
         : !draft.command.trim() || /[\r\n\u2028\u2029]/.test(draft.command) || Array.from(draft.command).length > 500 ? 'Enter a command on one line, up to 500 characters.' : '';
       if (err.textContent) return;
-      await window.orch.close(d);
-      settingsConfirm('Add ' + draft.name + '?', draft.command, 'mono preserve-lines', 'Yes, add it', async () => {
-        const args = {name:draft.name, command:draft.command};
-        if (draft.prompt_via === 'stdin') args.prompt_via = 'stdin';
-        const result = await settingsSend('config.agent.add', args, 'add');
-        if (!result.ok) return;
-        if (draft.use) await settingsSend('config.agent', {name:draft.name}, 'agent');
-        window.orch.toast(draft.name + ' added.', 'ok');
-      });
+      fields.hidden = true;
+      preview.hidden = false;
+      preview.replaceChildren(el('p', 'meta', 'orch will run this for each ticket:'), settingsText('pre', {className:'cmd-preview mono preserve-lines'}, draft.command),
+        (() => { const a = el('div', 'acts'); a.append(back, button('Add agent', 'primary sm', async () => {
+          const args = {name:draft.name, command:draft.command};
+          if (draft.prompt_via === 'stdin') args.prompt_via = 'stdin';
+          const result = await settingsSend('config.agent.add', args, 'add');
+          if (!result.ok) { preview.hidden = true; fields.hidden = false; err.textContent = result.text; return; }
+          await settingsSend('config.agent', {name:draft.name}, 'agent');
+          window.orch.toast(draft.name + ' added and set as the default.', 'ok');
+          cancel();
+        })); return a; })());
     });
-    d.append(form, actions);
-    actions.append(save);
-    window.orch.open(d);
+    const acts = el('div', 'acts');
+    acts.append(button('Cancel', 'ghost sm', cancel), next);
+    fields.append(acts);
+    form.append(fields, preview);
+    slot.replaceChildren(form);
     nameIn.focus();
   }
   function settingsConfirm(title, text, cls, label, send) {
@@ -511,11 +599,13 @@
     if (r.kind === 'ticket') {
       const tk = ticketOf(r.id);
       crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' / ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || 'Ticket');
+    } else if (r.kind === 'page') {
+      crumb.replaceChildren(pageName, ' › ', r.path.split('/').filter(Boolean).pop() || '');
     } else crumb.textContent = pageName;
     const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
     reconcile(nav, fragment(navLink('#home', 'Home', 'page', array(state.needs).length ? h('span', {className:'count'}, array(state.needs).length) : null), navLink('#tickets', 'Tickets', 'table'),
-      !snapshot && state.settings ? navLink('#settings', 'Settings', 'user') : null,
       h('p', {className:'eyebrow'}, 'Add-ons'), addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon))));
+    reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'user') : null));
     if (changed) {
       for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
       main.replaceChildren();
@@ -754,7 +844,12 @@
       const label = el('label', '', field.charAt(0).toUpperCase() + field.slice(1) + (field === 'title' ? '' : ' (optional)'));
       const input = el(field === 'note' ? 'textarea' : 'input', 'input');
       input.name = field; input.id = 'field-' + serial + '-' + field;
-      if (field !== 'note') input.type = field === 'due' ? 'date' : 'text';
+      if (field !== 'note') input.type = 'text';
+      if (field === 'due') {
+        input.readOnly = true; input.placeholder = 'Pick a day';
+        input.addEventListener('click', () => pickDate(input, input.value, v => { if (v !== null) input.value = v; }));
+        input.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); input.click(); } });
+      }
       if (field === 'title') { input.required = true; input.maxLength = 200; }
       input.value = t?.[field] || '';
       label.htmlFor = input.id; label.append(input); fields.append(label); inputs[field] = input;
@@ -921,7 +1016,17 @@
     }
     if (action === 'new') ticketForm();
     if (action === 'inline') startInline(control);
-    if (action === 'agent-add') openAgentForm();
+    if (action === 'agent-add') openAgentForm(control);
+    if (action === 'agent-test') {
+      event.preventDefault();
+      const n = control.dataset.name;
+      if (settingsBusy.has('test-' + n)) return;
+      agentTests[n] = {ok:false, reason:'Trying…'};
+      const result = await settingsSend('config.agent.test', {name:n}, 'test-' + n);
+      agentTests[n] = result.ok && result.state?.test ? result.state.test : {ok:false, reason:result.text || 'Could not try it.'};
+      render();
+    }
+    if (action === 'addon-more') { const n = control.dataset.name; if (addonOpen.has(n)) addonOpen.delete(n); else addonOpen.add(n); render(); }
     if (action === 'need') openNeed(array(state.needs).find(n => n.id === control.dataset.need), control);
     if (action === 'retry-addon') loadAddon(route().id, true);
     if (action === 'start') {

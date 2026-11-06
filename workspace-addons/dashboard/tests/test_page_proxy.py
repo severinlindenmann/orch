@@ -143,3 +143,31 @@ def test_ticket_edit_accepts_a_title_and_never_an_empty_one():
     assert "--title=New name" in argv
     with pytest.raises(actions.BadRequest):
         actions.build_argv("ticket.edit", {"ticket": "t_abcdef", "title": "  "})
+
+
+def test_agent_test_op_argv_and_reply(act_orch, ws):
+    import json as _json
+    import threading
+
+    from orch_dashboard import actions
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:2] == ["agents", "test"]:\n    print(json.dumps({"name": a[2], "ok": False, "reason": "Codex is not installed."}))\n    sys.exit(0)\n'
+        'if a[:1] == ["agents"]:\n    print(json.dumps([{"name": "codex"}]))\n    sys.exit(0)\nif a[:2] in (["addon", "list"]', 1)
+    act_orch.write_text(src)
+    assert actions.build_argv("config.agent.test", {"name": "codex"}) == ["agents", "test", "codex", "--json"]
+    for bad in ({"name": "../x"}, {"name": "codex", "x": 1}, {}):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("config.agent.test", bad)
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        h = {"Content-Type": "application/json", "Origin": base}
+        code, body, _ = call(base + "/api/act", "POST", h, _json.dumps({"op": "config.agent.test", "args": {"name": "codex"}}).encode())
+        assert code == 200 and _json.loads(body)["test"] == {"name": "codex", "ok": False, "reason": "Codex is not installed."}
+        code, _, _ = call(base + "/api/act", "POST", h, _json.dumps({"op": "config.agent.test", "args": {"name": "nobody"}}).encode())
+        assert code == 400
+    finally:
+        srv.shutdown()
+        srv.server_close()
