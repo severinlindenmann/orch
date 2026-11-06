@@ -315,6 +315,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = t.add_parser("summary", parents=[common], help="where things stand, one or two sentences")
     x.add_argument("id")
     x.add_argument("text")
+    x = t.add_parser("artifacts", parents=[common], help="the files this ticket produced")
+    x.add_argument("id")
+    x = t.add_parser("artifacts-dir", parents=[common], help="the folder for this ticket's output files")
+    x.add_argument("id")
     x = t.add_parser("wait", parents=[common])
     x.add_argument("id")
     x.add_argument("--until")
@@ -544,6 +548,20 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "summary":
         t = tickets.set_summary(root, args.id, args.text, by())
         _out(args, t, "Summary saved.")
+    elif cmd == "ticket" and sub == "artifacts":
+        rows = tickets.artifacts_list(root, args.id)
+        _out(
+            args,
+            rows,
+            "\n".join(
+                f"{r['name']}  {tickets._size_text(r['size'])}  {r['mtime']}  {r['path']}" for r in rows
+            )
+            or "No files yet. Put them in: orch ticket artifacts-dir " + args.id,
+        )
+    elif cmd == "ticket" and sub == "artifacts-dir":
+        d = tickets.artifacts_dir(root, args.id)
+        rel = d.relative_to(root).as_posix()
+        _out(args, {"path": rel}, rel)
     elif cmd == "ticket" and sub == "patch":
         t = tickets.patch(root, args.id, args.if_revision, args.data, by())
         warn = _child_warning(root, t)

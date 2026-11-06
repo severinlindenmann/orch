@@ -39,6 +39,79 @@ def agent_name(root: Path) -> str | None:
     return v if isinstance(v, str) and v else None
 
 
+PERMISSION_MODES = ("ask", "auto", "full")
+DEFAULT_PERMISSIONS = "auto"
+DEFAULT_LIVE_IDLE_MINUTES = 60
+
+
+def _perm_file() -> Path:
+    from orch import addons
+
+    return addons.home() / "permissions.json"
+
+
+def _perm_key(root: Path) -> str:
+    return hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()[:32]
+
+
+def permissions(root: Path | None) -> str:
+    """What agents may do here without asking: ask | auto | full. Kept per machine in the orch home, keyed by
+    the workspace's real path, never in the workspace: a committed config.toml (a cloned repo, or an agent
+    editing it) cannot raise it. A permissions key in .orch/config.toml is ignored. Default: auto."""
+    if root is None:
+        return DEFAULT_PERMISSIONS
+    try:
+        v = json.loads(_perm_file().read_text(encoding="utf-8")).get(_perm_key(root))
+    except (OSError, ValueError, AttributeError):
+        return DEFAULT_PERMISSIONS
+    return v if v in PERMISSION_MODES else DEFAULT_PERMISSIONS
+
+
+def set_permissions(root: Path, value: str, by: str = "human:owner") -> str:
+    """Save the mode for this machine. An agent may lower it, never raise it."""
+    if value not in PERMISSION_MODES:
+        raise Refused(f"'{value}' is not a mode. Pick one of: {', '.join(PERMISSION_MODES)}.")
+    if by.startswith("agent:") and PERMISSION_MODES.index(value) > PERMISSION_MODES.index(permissions(root)):
+        raise Refused(
+            "Only a person can allow an agent more. Ask them to run: "
+            f"orch config set workspace.permissions {value}"
+        )
+    p = _perm_file()
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8"))
+        doc = doc if isinstance(doc, dict) else {}
+    except (OSError, ValueError):
+        doc = {}
+    doc[_perm_key(root)] = value
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        tmp.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+        os.replace(tmp, p)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return value
+
+
+def live_idle_minutes(root: Path | None) -> int:
+    """[workspace] live_idle_minutes: how long a live session may sit idle (or the ticket stay Done) before
+    it is closed. Default 60; a value that is not a whole number above 0 is the default."""
+    if root is None:
+        return DEFAULT_LIVE_IDLE_MINUTES
+    try:
+        v = (read(root).get("workspace") or {}).get("live_idle_minutes")
+    except Refused:
+        return DEFAULT_LIVE_IDLE_MINUTES
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else DEFAULT_LIVE_IDLE_MINUTES
+
+
+def set_live_idle_minutes(root: Path, value: str) -> int:
+    if not value.isdigit() or not 1 <= int(value) <= 10080:
+        raise Refused("Give a whole number of minutes, from 1 to 10080 (one week).")
+    set_key(root, "workspace", "live_idle_minutes", int(value))
+    return int(value)
+
+
 CODE_RE = re.compile(r"^[A-Z0-9]{2,4}$")
 
 
@@ -83,7 +156,9 @@ def agent_entries(root: Path) -> dict[str, dict]:
     return out
 
 
-def _value(v: str) -> str:
+def _value(v: str | int) -> str:
+    if isinstance(v, int):
+        return str(v)
     # a JSON string is a valid TOML basic string, except that TOML forbids a raw DEL
     return json.dumps(v, ensure_ascii=False).replace("\x7f", "\\u007f")
 
@@ -123,7 +198,7 @@ def _headers(lines: list[str]) -> list[tuple[int, str]]:
     return out
 
 
-def set_key(root: Path, table: str, key: str, value: str) -> None:
+def set_key(root: Path, table: str, key: str, value: str | int) -> None:
     """Set `key = "value"` inside [table], creating the table (and file) when needed."""
     p = path(root)
     p.parent.mkdir(parents=True, exist_ok=True)
