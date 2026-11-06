@@ -361,3 +361,117 @@ async fn moving_keeps_old_tools_and_defaults_on_give_to_members() {
     let (_, gl) = t.admin_json("GET", "/admin/api/groups", None).await;
     assert_eq!(gl["items"][0]["members"], json!([]));
 }
+
+#[tokio::test]
+async fn group_routes_need_the_admin_header() {
+    let t = start().await;
+    let g = group(&t, json!({"name": "Work"})).await;
+    let gid = g["id"].as_str().unwrap().to_string();
+    let (w, _) = add_in(&t, "Finance", json!({"group": gid})).await;
+    let calls: Vec<(&str, String, Option<Value>)> = vec![
+        ("GET", "/admin/api/groups".into(), None),
+        (
+            "POST",
+            "/admin/api/groups".into(),
+            Some(json!({"name": "X"})),
+        ),
+        (
+            "PATCH",
+            format!("/admin/api/groups/{gid}"),
+            Some(json!({"defaults": {"credentials": true}})),
+        ),
+        ("DELETE", format!("/admin/api/groups/{gid}"), None),
+        (
+            "PATCH",
+            format!("/admin/api/workspaces/{}", w.id),
+            Some(json!({"group": Value::Null})),
+        ),
+        (
+            "POST",
+            "/admin/api/workspaces".into(),
+            Some(json!({"name": "Y", "new_group": "Z"})),
+        ),
+    ];
+    for (m, path, body) in calls {
+        for hdr in [None, Some("wrong")] {
+            let mut r = t.http.request(
+                reqwest::Method::from_bytes(m.as_bytes()).unwrap(),
+                format!("{}{}", t.admin, path),
+            );
+            if let Some(h) = hdr {
+                r = r.header("X-Orch-Admin", h);
+            }
+            if let Some(b) = &body {
+                r = r.json(b);
+            }
+            assert_eq!(r.send().await.unwrap().status(), 401, "{m} {path} {hdr:?}");
+        }
+    }
+    // nothing changed
+    let (_, gl) = t.admin_json("GET", "/admin/api/groups", None).await;
+    assert_eq!(gl["items"].as_array().unwrap().len(), 1);
+    assert_eq!(gl["items"][0]["members"], json!([w.id]));
+    assert_eq!(gl["items"][0]["defaults"], g["defaults"]);
+}
+
+fn skill_tar(text: &str) -> Vec<u8> {
+    let mut tar = tar::Builder::new(Vec::new());
+    let mut h = tar::Header::new_gnu();
+    h.set_size(text.len() as u64);
+    h.set_mode(0o644);
+    h.set_cksum();
+    tar.append_data(&mut h, "SKILL.md", text.as_bytes())
+        .unwrap();
+    let raw = tar.into_inner().unwrap();
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    std::io::Write::write_all(&mut gz, &raw).unwrap();
+    gz.finish().unwrap()
+}
+
+async fn put_skill(t: &T, name: &str, text: &str) -> Value {
+    let r = t
+        .http
+        .put(format!("{}/admin/api/shared/skills/{name}", t.admin))
+        .header("X-Orch-Admin", ADMIN)
+        .body(skill_tar(text))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    r.json().await.unwrap()
+}
+
+#[tokio::test]
+async fn a_new_version_of_a_revoked_tool_is_not_given_back() {
+    let t = start().await;
+    let g = group(&t, json!({"name": "Work"})).await;
+    let (a, _) = add_in(&t, "Finance", json!({"group": g["id"]})).await;
+    put_skill(&t, "sql", "---\nname: sql\n---\nv1\n").await;
+    put_mcp(&t, "files").await;
+    put_cred(&t, "BANK").await;
+    let s = snap(&t, &a).await;
+    assert_eq!(s["skills"][0]["name"], "sql");
+    // the admin takes all three away from this workspace
+    let (st, _) = t
+        .admin_json(
+            "PUT",
+            &format!("/admin/api/shared/assign/{}", a.id),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(st, 200);
+    // new versions of each come out: the group default does not give them back
+    assert_eq!(
+        put_skill(&t, "sql", "---\nname: sql\n---\nv2\n").await["version"],
+        2
+    );
+    put_mcp(&t, "files").await;
+    put_cred(&t, "BANK").await;
+    let s = snap(&t, &a).await;
+    assert!(s["skills"].as_array().unwrap().is_empty(), "{s}");
+    assert!(s["mcp"].as_object().unwrap().is_empty(), "{s}");
+    assert!(creds(&s).is_empty());
+    // a brand new tool still comes through the group default
+    put_cred(&t, "ROUTER").await;
+    assert_eq!(creds(&snap(&t, &a).await), ["ROUTER"]);
+}

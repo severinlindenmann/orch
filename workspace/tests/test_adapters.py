@@ -146,6 +146,12 @@ def test_the_mode_is_per_workspace(proj, tmp_path):
     assert config.permissions(other) == "auto"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_the_mode_file_is_private(proj):
+    config.set_permissions(proj, "full")
+    assert stat.S_IMODE(config._perm_file().stat().st_mode) == 0o600
+
+
 def test_agents_without_a_mapping_ignore_the_mode(proj):
     for perm in ("ask", "auto", "full"):
         assert adapters.render("codex", "fresh", "oneshot", {"prompt": "p", "permissions": perm}) == [

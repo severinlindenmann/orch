@@ -86,7 +86,9 @@ def set_permissions(root: Path, value: str, by: str = "human:owner") -> str:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
     try:
-        tmp.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)  # private
+        with os.fdopen(fd, "wb") as f:
+            f.write(json.dumps(doc, indent=1).encode("utf-8"))
         os.replace(tmp, p)
     finally:
         tmp.unlink(missing_ok=True)

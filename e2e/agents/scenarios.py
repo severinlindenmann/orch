@@ -346,7 +346,17 @@ def ag_a45(e):
     n5 = len(started(t5))
     check(n5 >= 2 and not running(t5), f"A5: {n5} runs started in 10 min, wanted 2")
     runs = [ln for ln in (ws / "runs.log").read_text().splitlines() if ln.strip()] if (ws / "runs.log").exists() else []
-    check(len(runs) >= 2, f"A5: runs.log has {len(runs)} lines")  # core's claim keeps runs from overlapping (run-lifecycle tests)
+    check(len(runs) >= 2, f"A5: runs.log has {len(runs)} lines")
+    # no overlap: each run of t5 has its own log (logs/<tid>-<run>.log, written from start to end); sorted by when
+    # it was made, a run's log is never made before the previous run's last write (2 s slack for the wrapper)
+    spans = []
+    for p in (ws / ".orch/run/logs").glob(f"{t5}-*.log"):
+        st = p.stat()
+        spans.append((getattr(st, "st_birthtime", st.st_ctime), st.st_mtime, p.name))
+    spans.sort()
+    check(len(spans) >= 2, f"A5: {len(spans)} run logs for {t5}, wanted 2")
+    for (_, prev_end, prev), (start, _, cur) in zip(spans, spans[1:]):
+        check(start >= prev_end - 2, f"A5: {cur} started {prev_end - start:.0f} s before {prev} ended (runs overlap)")
     validate(e, d5)
     return (f"A4 done ({d4['status']}, by {sorted(by(d4))}); A5 {n5} runs, runs.log {len(runs)} lines, "
             f"ticket status {d5['status']}")

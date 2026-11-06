@@ -194,6 +194,8 @@ def deliver(root: Path, tid: str) -> int:
         rec = runs.read(root, tid)
         if not rec or rec.get("mode") != "live" or (rec.get("live") or {}).get("state") != "idle":
             return 0
+        if rec.get("closing"):  # an idle close is under way: the item waits for the next start
+            return 0
         items = runs.undelivered(root, tid)
         if not items or not session_exists(root, tid):
             return 0
@@ -397,12 +399,39 @@ def cleanup(root: Path) -> list[str]:
             idle = time.time() - runs._parse(live["since"])
         except (KeyError, ValueError):
             continue
-        if idle > limit or _done_for(root, tid, limit):
-            _close(root, rec, interrupt=False)
+        if (idle > limit or _done_for(root, tid, limit)) and _claim_close(root, rec):
+            try:
+                _close(root, rec, interrupt=False)
+            except Exception:  # the close failed: input may go in again; the next cleanup tries again
+                _unclaim_close(root, rec)
+                continue
             closed.append(tid)
     if closed:
         start_waiting(root)
     return closed
+
+
+def _claim_close(root: Path, rec: dict) -> bool:
+    """Right before an idle close: under the run lock, the run must still be the same, still idle (or waiting
+    for a person) since the same moment, with nothing waiting to go in. It is then marked closing, so
+    deliver() pastes nothing more into it; a message sent meanwhile stays waiting for the next start."""
+    tid = rec["ticket"]
+    with runs.locked(root, tid):
+        now = runs.read(root, tid)
+        if not now or now["run"] != rec["run"] or runs.state(now) != "alive":
+            return False
+        if (now.get("live") or {}) != (rec.get("live") or {}) or runs.undelivered(root, tid):
+            return False
+        now["closing"] = tickets.now()
+        runs._write(root, now)
+    return True
+
+
+def _unclaim_close(root: Path, rec: dict) -> None:
+    with runs.locked(root, rec["ticket"]):
+        now = runs.read(root, rec["ticket"])
+        if now and now["run"] == rec["run"] and now.pop("closing", None):
+            runs._write(root, now)
 
 
 def _done_for(root: Path, tid: str, limit: float) -> bool:

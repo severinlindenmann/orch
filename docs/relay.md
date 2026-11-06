@@ -99,8 +99,14 @@ Those workspaces can send the phone text and questions (`orch relay send ph_… 
 `relay-deploy.yml` on push to `main`: build, copy over SSH, `systemctl restart orch-relay`, check `/health`.
 First install: `deploy/install.sh` (user, folders, master key, admin token, Caddy route). Same VPS as publish.
 
+## Groups
+Each workspace is in one group (Private, Work, ...). A group's defaults say which kinds of shared tools its members get
+(skills, secrets, MCP), and `talk` lets members message each other. Turning a default on grants all items of that kind to
+every member, including items you took away from one of them before; turning it off takes nothing away. A new version of
+an item you took away from a workspace does not give it back. Details: `contracts/relay-api.md` (Groups).
+
 ## Not included
-End-to-end encryption between workspaces, key rotation, groups/teams, several admins, message edit/delete by users,
+End-to-end encryption between workspaces, key rotation, teams with their own admins, several admins, message edit/delete by users,
 read receipts, a web client for messages.
 
 ## Workspace profile and the portal (UX round 1)
