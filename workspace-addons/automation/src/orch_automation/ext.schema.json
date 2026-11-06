@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://orch.severin.io/contracts/addons/automation/ext.schema.json",
   "title": "orch automation ticket data: ext.automation",
-  "description": "Owned by the automation add-on (the scheduler renamed; its ticket_ext, the add-on ships a byte-identical copy). The core never reads it. Replaces addons/scheduler.ext.schema.json once W2-L7-P4 migrates ext.scheduler -> ext.automation (local-files.md, Automation rename); until then both exist. One-time waits stay core: waiting_on {kind: time, until}. A repeating ticket has recurring/cron/tz/agent/each_run/last_run; a sub-ticket made for one run (each_run = sub-ticket) has run/at/occurrence.",
+  "description": "Owned by the automation add-on (its ticket_ext; the add-on ships a byte-identical copy). The core never reads it. One-time waits stay core: waiting_on {kind: time, until}. A repeating ticket has recurring/cron/tz/agent/each_run/last_run; a sub-ticket made for one run (each_run = sub-ticket) has run/at/occurrence.",
   "type": "object",
   "properties": {
     "paused": { "type": "boolean", "description": "true = the repeat is switched off: it stays listed but does not start runs. Absent = on." },
