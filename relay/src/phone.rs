@@ -24,6 +24,7 @@ pub fn router() -> Router<AppState> {
         .route("/v1/phone/send", post(send))
         .route("/v1/phone/messages", get(messages))
         .route("/v1/phone/updates", get(updates))
+        .route("/v1/phone/blobs/:id", get(blob))
         .route("/v1/phone/signout", post(signout))
         .route(
             "/v1/phone/transcribe",
@@ -310,6 +311,8 @@ async fn updates(
     let mut seen = std::collections::HashSet::new();
     let mut more = false;
     let mut titles: Vec<Option<String>> = vec![];
+    // grouped: the newest ticket_view of each ticket (a newer update without one keeps the last snapshot)
+    let mut views: Vec<Value> = vec![];
     let mut extra = 0;
     'scan: loop {
         let rows: Vec<store::Msg> = st
@@ -352,16 +355,26 @@ async fn updates(
                     if titles[i].is_none() {
                         titles[i] = body["update"]["title"].as_str().map(String::from);
                     }
+                    if views[i].is_null() {
+                        views[i] = body["ticket_view"].clone();
+                    }
                 }
                 if titles.len() < out.len() {
                     titles.push(
                         out.last()
                             .and_then(|(_, b)| b["update"]["title"].as_str().map(String::from)),
                     );
+                    views.push(
+                        out.last()
+                            .map_or(Value::Null, |(_, b)| b["ticket_view"].clone()),
+                    );
                 }
                 if out.len() == limit {
                     extra += 1;
-                    if extra > 1000 || titles.iter().all(|t| t.is_some()) {
+                    if extra > 1000
+                        || (titles.iter().all(|t| t.is_some())
+                            && views.iter().all(|v| !v.is_null()))
+                    {
                         break 'scan;
                     }
                 }
@@ -381,10 +394,55 @@ async fn updates(
             json!({"id": m.id, "workspace": m.from, "workspace_name": store::ws_name(&c, &m.from),
                 "ticket": m.ticket, "kind": u["kind"],
                 "title": if ticket.is_some() { u["title"].clone() } else { titles.get(i).cloned().flatten().into() }, "text": b["text"],
-                "reply_to": m.reply_to, "at": m.created_at})
+                "reply_to": m.reply_to, "at": m.created_at,
+                "ticket_view": if ticket.is_some() { b["ticket_view"].clone() } else { views.get(i).cloned().unwrap_or(Value::Null) }})
         })
         .collect();
     Ok(Json(json!({"items": items, "next": next})))
+}
+
+/// `GET /v1/phone/blobs/<id>`: a proof file named in a `body.ticket_view` of a text that a workspace on this phone's
+/// list sent to it or to `phones` (same filter as `/v1/phone/messages`), uploaded by that workspace. Else 404.
+async fn blob(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Res<axum::response::Response> {
+    use axum::response::IntoResponse;
+    let none = || not_found("No such file.");
+    if !valid_id(&id, "b_", 16) {
+        return Err(none());
+    }
+    {
+        let c = app.db.lock().unwrap();
+        let (pid, _, ws) = auth::phone(&c, &h)?;
+        let since: i64 = c.query_row(
+            "SELECT COALESCE(paired_at, created_at) FROM phones WHERE id=?1",
+            [&pid],
+            |r| r.get(0),
+        )?;
+        let ok: bool = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM view_blobs v JOIN messages m ON m.id=v.msg_id JOIN blobs b ON b.id=v.blob_id
+               WHERE v.blob_id=?1 AND m.type='text' AND b.uploader=m.from_addr
+                 AND m.from_addr IN (SELECT value FROM json_each(?2))
+                 AND ((m.to_addr='phones' AND m.stored_at>=?3) OR m.to_addr=?4))",
+            params![id, serde_json::to_string(&ws).unwrap_or("[]".into()), since, pid],
+            |r| r.get(0),
+        )?;
+        if !ok {
+            return Err(none());
+        }
+    }
+    let raw = tokio::fs::read(app.blob_path(&id))
+        .await
+        .map_err(|_| none())?;
+    let plain = crate::crypto::open(&app.key, &id, &raw)
+        .ok_or_else(|| internal("blob does not decrypt"))?;
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+        plain,
+    )
+        .into_response())
 }
 
 async fn answer(
