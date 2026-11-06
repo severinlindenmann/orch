@@ -9,9 +9,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 from datetime import UTC, datetime
 from pathlib import Path
 
+NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 CAP_BYTES = 5 * 1024 * 1024
 KINDS = (
     "run.state", "task.start", "task.done", "ask", "tool.start", "tool.end",
@@ -27,7 +29,7 @@ _SECRETS = [
     re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{5,}"),
     re.compile(r"(?i)(\b[A-Z0-9_]*(?:token|secret|password|passwd|api_?key|key)[A-Z0-9_]*\s*[=:]\s*)\S+"),
     re.compile(r"(?i)(--(?:token|password|secret|key)[= ])\S+"),
-    re.compile(r"\S*\.orch/secrets\S*"),
+    re.compile(r"(?<!\S)\S*?\.orch/secrets\S*"),
 ]
 
 
@@ -43,10 +45,15 @@ def redact(text: str) -> str:
     return out
 
 
+def clip(v: str, limit: int) -> str:
+    """Cap the work first (a 5 MB value is not scanned whole), redact, then clip to the limit."""
+    return redact(v[: limit + 256])[:limit]
+
+
 def _clean(v, limit: int):
     """Redact first, then clip: a secret across the limit is hidden before it is cut."""
     if isinstance(v, str):
-        return redact(v)[:limit]
+        return clip(v, limit)
     if isinstance(v, dict):
         return {k: _clean(x, limit) for k, x in v.items()}
     if isinstance(v, list):
@@ -79,7 +86,7 @@ def make(
     d["source"] = source
     return {
         "v": 1, "at": at or now(), "run": run, "ticket": ticket, "agent": agent, "kind": kind,
-        "text": redact(str(text))[: min(text_max, 500)], "data": d,
+        "text": clip(str(text), min(text_max, 500)), "data": d,
     }  # fmt: skip
 
 
@@ -90,16 +97,22 @@ class EventLog:
     def append(self, *events: dict) -> None:
         if not events:
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        d = self.path.parent
+        d.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if d.is_symlink() or not d.is_dir():
+            raise OSError(f"{d} is not a plain folder; Focus does not write there.")
         old = self.path.with_name(self.path.name + ".1")
         try:
-            if self.path.stat().st_size > CAP_BYTES:
-                os.replace(self.path, old)
-                os.chmod(old, 0o600)
+            st = os.lstat(self.path)
+            if stat.S_ISREG(st.st_mode) and st.st_size > CAP_BYTES:
+                os.replace(self.path, old)  # the file moves; its mode (0600) goes with it
         except FileNotFoundError:
             pass
-        fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-        os.chmod(self.path, 0o600)
+        fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | NOFOLLOW, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+        except AttributeError:  # Windows
+            pass
         with os.fdopen(fd, "a", encoding="utf-8") as f:
             for e in events:
                 f.write(json.dumps(e, ensure_ascii=False, separators=(",", ":")) + "\n")
@@ -107,12 +120,12 @@ class EventLog:
     def read(self, since: int = 0) -> tuple[list[dict], int]:
         """Events from byte offset `since`, and the new offset. Bad lines and unknown kinds are skipped."""
         try:
-            with open(self.path, "rb") as f:
+            with os.fdopen(os.open(self.path, os.O_RDONLY | NOFOLLOW), "rb") as f:
                 if since > os.fstat(f.fileno()).st_size:  # the log was rotated: start again
                     since = 0
                 f.seek(since)
                 raw = f.read()
-        except FileNotFoundError:
+        except OSError:
             return [], since
         end = raw.rfind(b"\n") + 1  # a half-written last line waits for the next read
         out = []

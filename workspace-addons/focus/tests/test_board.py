@@ -238,3 +238,46 @@ def test_secret_across_every_limit_is_hidden_on_every_producer_path():
     assert "ghp_" not in json.dumps(outs)
     for e in outs:
         valid(e)
+
+
+def test_huge_value_is_redacted_fast():
+    import time
+
+    big = "a" * (5 * 1024 * 1024)
+    t0 = time.time()
+    e = ev.make(RUN, TID, "main", "tool.end", big, "adapter", command=big, other=big + ".orch/secrets")
+    assert time.time() - t0 < 1.0
+    assert len(e["text"]) <= 500 and len(e["data"]["command"]) <= 500
+    t0 = time.time()
+    ev.redact("x" * (5 * 1024 * 1024))
+    ev.redact(("path/.orch" + "x") * 200000)
+    assert time.time() - t0 < 2.0
+
+
+def test_secret_at_the_cap_is_hidden():
+    secret = "ghp_" + "e" * 30
+    e = ev.make(RUN, TID, "main", "tool.end", "x" * 490 + " " + secret + "y" * 5000, "adapter")
+    assert "ghp_" not in json.dumps(e)
+
+
+def test_symlinked_log_is_not_followed(tmp_path):
+    log = ev.EventLog(tmp_path, RUN)
+    log.path.parent.mkdir(parents=True)
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    log.path.symlink_to(victim)
+    with pytest.raises(OSError):
+        log.append(generic_events()[0])
+    assert victim.read_text() == "keep"
+    assert log.read() == ([], 0)
+
+
+def test_symlinked_runs_folder_is_refused(tmp_path):
+    real = tmp_path / "elsewhere"
+    real.mkdir()
+    d = tmp_path / ".orch" / "addons" / "focus"
+    d.mkdir(parents=True)
+    (d / "runs").symlink_to(real)
+    with pytest.raises(OSError):
+        ev.EventLog(tmp_path, RUN).append(generic_events()[0])
+    assert list(real.iterdir()) == []
