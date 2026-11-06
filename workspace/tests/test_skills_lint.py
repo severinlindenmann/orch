@@ -178,11 +178,11 @@ def _check_line(line: str, core) -> str | None:
     first = words[0]
     if first in ADDON_SRC:
         src = ADDON_SRC[first].read_text(encoding="utf-8")
-        for w in words[1:]:
+        for w in words[1:2]:  # the add-on's own command; what follows may be a verb, not a command
             if f'"{w}"' not in src:
                 return f"add-on command '{first} {w}' not found in its cli.py"
         for fl in flags:
-            if f'"{fl}"' not in src and fl not in ("--json", "--help"):
+            if f'"{fl}"' not in src and fl not in ("--", "--json", "--help"):
                 return f"flag {fl} not found in the {first} add-on"
         return None
     parser, err = _walk(core, words)
