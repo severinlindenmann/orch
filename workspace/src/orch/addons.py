@@ -823,7 +823,8 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
     tid = tickets.resolve(root, rest[0])
     by = tickets.current_actor(argv[argv.index("--by") + 1] if "--by" in argv[:-1] else None)
     act = discover()[name]["acts"]["refresh"]
-    if act["who"] == "people" and not by.startswith("human:"):
+    # like cli_config._actor: an agent tool in the environment counts as an agent whatever --by says
+    if act["who"] == "people" and (tickets.agent_tool() or not by.startswith("human:")):
         raise Refused(
             f"Only a person runs the {name} refresh. Ask the user to click Refresh on the ticket page."
         )

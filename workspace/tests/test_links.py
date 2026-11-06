@@ -451,7 +451,7 @@ def test_old_type_flag_sets_the_kind_and_link_is_plain(proj, run, tid):  # noqa:
     assert [ln["kind"] for ln in tickets.load(proj, tid)["links"]] == ["github", "link"]
 
 
-def test_refresh_who_people_refuses_agents(proj, run, hello, tid):  # noqa: F811
+def test_refresh_who_people_refuses_agents(proj, run, hello, tid, monkeypatch):  # noqa: F811
     m = hello / "src" / "orch_hello" / "orch-addon.toml"
     m.write_text(
         m.read_text().replace(
@@ -461,4 +461,8 @@ def test_refresh_who_people_refuses_agents(proj, run, hello, tid):  # noqa: F811
     install(run, hello)
     code, _, err = run("hello", "act", "refresh", "--by", "agent:claude", "--", tid)
     assert code == 2 and "Only a person" in err
+    monkeypatch.setenv("ORCH_AGENT", "claude")  # an agent saying it is a person
+    code, _, err = run("hello", "act", "refresh", "--by", "human:anna", "--", tid)
+    assert code == 2 and "Only a person" in err
+    monkeypatch.delenv("ORCH_AGENT")
     assert run("hello", "act", "refresh", "--by", "human:anna", "--", tid)[0] == 0
