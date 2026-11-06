@@ -31,8 +31,10 @@ final class OnboardingFlowUITests: XCTestCase {
         let app = paired()
         let room = app.buttons["room-ws_pilatus001"]
         XCTAssertTrue(room.waitForExistence(timeout: 15))
-        XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_q3sum1"].exists, "nested ticket chat with its key")
+        XCTAssertFalse(app.buttons["ticket-ws_pilatus001|t_q3sum1"].exists, "topics live one level down, in the workspace")
         room.tap()
+        XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_q3sum1"].waitForExistence(timeout: 10), "topic row with its key")
+        app.buttons["general-ws_pilatus001"].tap()
         let answer = app.buttons["answer-TIMESTAMP"]
         XCTAssertTrue(answer.waitForExistence(timeout: 10))
         answer.tap()
@@ -51,6 +53,7 @@ final class OnboardingFlowUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-undoSeconds", "30", "-openChat", "ws_pilatus001"]
         app.launch()
+        openGeneral(app)
         let answer = app.buttons["answer-TIMESTAMP"]
         XCTAssertTrue(answer.waitForExistence(timeout: 15))
         answer.tap()
@@ -58,6 +61,12 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(undo.waitForExistence(timeout: 10))
         undo.tap()
         XCTAssertTrue(app.buttons["answer-TIMESTAMP"].waitForExistence(timeout: 3))
+    }
+
+    /// `-openChat ws` lands on the workspace (topics); the General conversation is one tap further.
+    private func openGeneral(_ app: XCUIApplication) {
+        let g = app.buttons["general-ws_pilatus001"]
+        if g.waitForExistence(timeout: 15) { g.tap() }
     }
 
     func testSearchFindsATicketByKey() {
@@ -75,8 +84,9 @@ final class OnboardingFlowUITests: XCTestCase {
         let new = app.buttons["new-chat"]
         XCTAssertTrue(new.waitForExistence(timeout: 15))
         new.tap()
+        app.buttons["compose-new-topic"].tap()
+        app.buttons["workspace-picker"].tap()
         app.buttons["pick-ws_reports001"].tap()
-        app.buttons["pick-continue"].tap()
         let field = app.textViews["topic-field"].exists ? app.textViews["topic-field"] : app.textFields["topic-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap(); field.typeText("Book the team lunch")
@@ -88,6 +98,7 @@ final class OnboardingFlowUITests: XCTestCase {
     /// Offline: the chat says so; a written text stays on the phone with "Waiting to send".
     func testOfflineTextWaits() {
         let app = paired(["-mockFail", "YES", "-openChat", "ws_pilatus001"])
+        openGeneral(app)
         // nothing loads offline, but the chat still opens and takes a text
         let field = app.textFields["composer-field"].exists ? app.textFields["composer-field"] : app.textViews["composer-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 15))
@@ -106,6 +117,7 @@ final class OnboardingFlowUITests: XCTestCase {
     /// VoiceOver label audit: every visible button on the main screens has a spoken label.
     func testEveryButtonHasALabel() {
         let app = paired(["-openChat", "ws_pilatus001"])
+        openGeneral(app)
         XCTAssertTrue(app.buttons["answer-DATE"].waitForExistence(timeout: 15))
         for b in app.buttons.allElementsBoundByIndex where b.exists && b.isHittable {
             XCTAssertFalse(b.label.trimmingCharacters(in: .whitespaces).isEmpty, "unlabelled button in chat: \(b.identifier)")
@@ -113,10 +125,10 @@ final class OnboardingFlowUITests: XCTestCase {
         app.terminate()
         let list = paired()
         XCTAssertTrue(list.buttons["new-chat"].waitForExistence(timeout: 15))
-        for tab in ["Chats", "Settings"] {
-            list.buttons[tab].tap(); sleep(1)
+        for screen in ["Chats", "Settings"] {
+            if screen == "Settings" { list.buttons["settings-button"].tap(); sleep(1) }
             for b in list.buttons.allElementsBoundByIndex where b.exists && b.isHittable {
-                XCTAssertFalse(b.label.trimmingCharacters(in: .whitespaces).isEmpty, "unlabelled button on \(tab): \(b.identifier)")
+                XCTAssertFalse(b.label.trimmingCharacters(in: .whitespaces).isEmpty, "unlabelled button on \(screen): \(b.identifier)")
             }
         }
     }
@@ -126,8 +138,8 @@ final class OnboardingFlowUITests: XCTestCase {
         let app = paired(["-mockFail", "YES"])
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS \"Can't reach the server\"")).firstMatch.waitForExistence(timeout: 15))
         XCTAssertTrue(app.buttons["Try again"].exists || app.buttons["Trying again…"].exists)
-        app.buttons["Settings"].tap()
-        XCTAssertTrue(app.staticTexts["●  Can't reach the server"].waitForExistence(timeout: 5))
+        app.buttons["settings-button"].tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS \"Can't reach the server\"")).firstMatch.waitForExistence(timeout: 5))
     }
 
     /// A bad invitation link keeps the sheet open and the typed text, and says what to do next.
@@ -175,13 +187,14 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["signout-confirm"].waitForExistence(timeout: 3))
     }
 
-    /// The tab bar column is tappable outside the icon and label.
-    func testTabsAreFullHeightTargets() {
+    /// The gear and + buttons are full 44 pt targets, also at their corners.
+    func testShellButtonsAreFullSizeTargets() {
         let app = paired()
-        let tab = app.buttons["Settings"]
-        XCTAssertTrue(tab.waitForExistence(timeout: 15))
-        XCTAssertGreaterThanOrEqual(tab.frame.height, 44)
-        tab.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2)).tap()
+        let gear = app.buttons["settings-button"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 15))
+        XCTAssertGreaterThanOrEqual(gear.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(app.buttons["new-chat"].frame.width, 44)
+        gear.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2)).tap()
         XCTAssertTrue(app.buttons["Sign out"].waitForExistence(timeout: 5))
     }
 }

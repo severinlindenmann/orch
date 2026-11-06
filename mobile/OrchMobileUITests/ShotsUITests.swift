@@ -32,6 +32,7 @@ final class ShotsUITests: XCTestCase {
         search.tap(); search.typeText("board"); try shot(app, "2-search"); app.terminate()
 
         app = launch(["-openChat", "ws_pilatus001"])
+        let general = app.buttons["general-ws_pilatus001"]; if general.waitForExistence(timeout: 15) { general.tap() }
         XCTAssertTrue(app.buttons["answer-TIMESTAMP"].waitForExistence(timeout: 15))
         try shot(app, "3-workspace-chat")
         app.buttons["answer-TIMESTAMP"].tap()
@@ -57,7 +58,7 @@ final class ShotsUITests: XCTestCase {
         app.buttons["Links 1"].tap(); try shot(app, "10-chat-info-links"); app.terminate()
 
         app = launch(["-openNewChat", "YES"])
-        XCTAssertTrue(app.buttons["pick-ws_pilatus001"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.textViews["topic-field"].waitForExistence(timeout: 15) || app.textFields["topic-field"].waitForExistence(timeout: 5))
         try shot(app, "11-new-chat"); app.terminate()
 
         app = launch(["-mockEmpty", "YES"])
