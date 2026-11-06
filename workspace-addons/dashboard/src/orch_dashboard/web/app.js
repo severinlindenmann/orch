@@ -117,13 +117,13 @@
     const current = sorted(tickets().filter(activeTicket));
     const oldest = needs.map(n => parse(n.since)).filter(Boolean).sort((a, b) => a - b)[0];
     const newest = needs.slice().sort((a, b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-    const history = tickets().flatMap(t => array(t.history).map(entry => ({entry, title:t.title}))).sort((a, b) => (Date.parse(b.entry.at) || 0) - (Date.parse(a.entry.at) || 0)).slice(0, 5);
+    const history = tickets().flatMap(t => array(t.history).map(entry => ({entry, title:t.title, checklist:t.checklist}))).sort((a, b) => (Date.parse(b.entry.at) || 0) - (Date.parse(a.entry.at) || 0)).slice(0, 5);
     const stopped = array(state.services).some(s => s.running === false);
     const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;
     const agents = rows.slice(0, 5).map(row => h('div', {className:'card-row', 'data-key':'agent-' + row.agent + '-' + row.ticket}, h('span', {className:'dot ' + (row.state === 'stuck' ? 'needs' : row.state)}), h('div', {className:'grow'}, h('h3', {}, capitalise(name(row.agent) || 'Agent') + ' · ' + ({working:'working', needs:'needs you', stuck:'may be stuck', idle:'idle'}[row.state])), h('p', {className:'meta'}, row.state === 'idle' ? 'Last worked ' + age(row.since) + ' ago' : [clean(ticketOf(row.ticket)?.title), age(row.since)].filter(Boolean).join(' · ')))));
     const links = pageLinks();
-    const recent = history.map(({entry, title}) => {
-      const line = clean(window.DashHelpers.historyLine(entry));
+    const recent = history.map(({entry, title, checklist}) => {
+      const line = clean(window.DashHelpers.historyLine(entry, checklist));
       return h('div', {className:'card-row'}, h('div', {className:'grow'}, h('h3', {}, line.length > 80 ? line.slice(0, 79) + '…' : line), h('p', {className:'meta'}, [name(entry.by), clean(title), age(entry.at)].filter(Boolean).join(' · '))));
     });
     return fragment(heading('Today', now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + needs.length + ' need you · ' + working.length + (working.length === 1 ? ' agent working' : ' agents working')), banner,
@@ -267,7 +267,7 @@
     const qs = questions(t).map(q => snapshot
       ? card('question-' + q.id, clean(q.text), '', h('div', {className:'card-row'}, h('div', {className:'grow'}, h('p', {className:'muted'}, 'Waiting for an answer'), h('div', {className:'row'}, array(q.options).map(o => chip(clean(o), o === q.recommended ? 'attn' : ''))))))
       : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
-    const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => h('div', {className:'card-row'}, h('p', {className:'grow'}, [clean(window.DashHelpers.historyLine(entry)), name(entry.by), surface(entry.via)].filter(Boolean).join(' · ')), h('time', {datetime:entry.at || ''}, age(entry.at))));
+    const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => h('div', {className:'card-row'}, h('p', {className:'grow'}, [clean(window.DashHelpers.historyLine(entry, t.checklist)), name(entry.by), surface(entry.via)].filter(Boolean).join(' · ')), h('time', {datetime:entry.at || ''}, age(entry.at))));
     const field = (label, value, cls = '') => h('div', {}, h('dt', {}, label), h('dd', {className:cls}, value));
     const total = array(t.checklist).length, done = array(t.checklist).filter(task => task.done).length;
     const tasksCard = key => card(key, total && done === total ? 'All done' : 'Tasks', done + ' of ' + total + (total && done === total ? '' : ' done'), total ? taskRows(t) : emptyRow('No tasks yet.'));

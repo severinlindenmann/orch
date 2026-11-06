@@ -276,3 +276,33 @@ def test_prompt_file_is_private_from_the_start(proj):
     p = proj / ".orch" / "run" / "x.txt"
     runs._atomic(p, "secret", 0o600)
     assert stat.S_IMODE(p.stat().st_mode) == 0o600
+
+
+def test_a_failed_step_says_why_in_the_ticket_history(proj, run, tmp_path, monkeypatch):
+    """`claude -p` not logged in prints an error result and stops: the person sees why nothing happened."""
+    d = tmp_path / "clbin"
+    d.mkdir()
+    f = d / "claude"
+    err = {"type": "result", "is_error": True, "result": "Not logged in · Please run /login"}
+    f.write_text(f"#!/bin/sh\necho '{json.dumps(err)}'\nexit 1\n")
+    f.chmod(f.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ["PATH"])
+    config.set_key(proj, "workspace", "agent", "claude")
+    tid = _ticket_with_check(proj, run)
+    assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
+    _wait(proj, tid)
+    last = tickets.load(proj, tid)["history"][-1]
+    assert last["text"] == "The agent stopped with an error: Not logged in · Please run /login"
+    assert last["by"] == "agent:claude"
+
+
+def test_failure_text_reads_the_tool_error_or_the_last_line():
+    ok = '{"type": "result", "is_error": false, "result": "done"}'
+    assert runs.failure_text(0, ok) is None and runs.failure_text(0, "all fine\n") is None
+    assert runs.failure_text(1, "starting\nrate limit reached\n") == "rate limit reached"
+    assert (
+        runs.failure_text(0, '{"type": "result", "is_error": true, "result": "Not logged in"}')
+        == "Not logged in"
+    )
+    assert runs.failure_text(2, '{"type": "system"}\n' + ok) == "exit code 2"
+    assert runs.failure_text(3, "") == "exit code 3"

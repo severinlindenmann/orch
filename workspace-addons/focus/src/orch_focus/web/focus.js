@@ -273,9 +273,11 @@
   }
   async function startFresh() { const r = await act('run.start', {ticket: TID, fresh: true}); if (!r.ok) toast(r.message, 'error'); else toast('Started fresh from the ticket.', 'ok'); }
   function showAttach() {
-    const cmd = 'orch run attach ' + TID + ' --watch';
+    // waiting for an OK: the person must type in the session, so no --watch; the short key (DM1-12) works too
+    const ok = !!(view && view.attention), key = (els.key && els.key.textContent) || TID;
+    const cmd = 'orch run attach ' + key + (ok ? '' : ' --watch');
     els.attachBox.hidden = !els.attachBox.hidden;
-    els.attachBox.replaceChildren(h('span', {class: 'meta', text: 'Watch the live session in a terminal:'}), h('code', {class: 'mono', text: cmd}),
+    els.attachBox.replaceChildren(h('span', {class: 'meta', text: ok ? 'Answer it in a terminal (Ctrl-b d to leave):' : 'Watch the live session in a terminal:'}), h('code', {class: 'mono', text: cmd}),
       h('button', {class: 'btn ghost xs', text: 'Copy', onclick: () => { try { navigator.clipboard.writeText(cmd); toast('Copied.', 'ok'); } catch (e) { /* select by hand */ } }}));
   }
 
