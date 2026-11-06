@@ -278,7 +278,7 @@ def test_refresh_writes_only_on_change(proj, capsys):
         ' "rights": {"files": true, "apps": false, "permanent": true, "public": false}}'
     )
     assert skillrender.refresh_skills(proj) == ["publish"]
-    assert "applies from the next agent session" in capsys.readouterr().out or True
+    assert "they apply from the next agent session" in capsys.readouterr().out
     text = skill.read_text(encoding="utf-8")
     assert "--permanent" in text and "--public" not in text and "orch publish app" not in text
 

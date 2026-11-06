@@ -32,7 +32,7 @@ one tab for every add-on that is turned on and has a page. It follows changes by
     orch dashboard status    # is it running, and where?
     orch dashboard stop
 
-`orch dashboard` runs it in the foreground on http://127.0.0.1:8420. The link works on this computer only. Give the
+`orch dashboard` runs it in the foreground and prints its address (usually 127.0.0.1:8420). The link works on this computer only. Give the
 user the printed link.
 
 **A read-only copy**
