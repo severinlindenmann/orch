@@ -44,6 +44,53 @@ def _chip(c):
     return isinstance(c, dict) and _text(c.get("label"), 40) and _opt(c, "tone", _tone)
 
 
+_OP = re.compile(r"^[a-z][a-z.]{0,31}$")
+
+
+def _keys_only(d, allowed):
+    return isinstance(d, dict) and set(d) <= set(allowed)
+
+
+def _action(a):
+    """{op, args}: flat scalars only; never a command line (extra keys such as `command` break the view)."""
+    if not (_keys_only(a, ("op", "args")) and isinstance(a.get("op"), str) and _OP.match(a["op"])):
+        return False
+    args = a.get("args", {})
+    return isinstance(args, dict) and len(args) <= 6 and all(
+        _KEY.match(str(k)) and (isinstance(v, (bool, int, float))
+                                or (isinstance(v, str) and len(v) <= 200 and "<" not in v and ">" not in v))
+        for k, v in args.items())
+
+
+def _detail_ok(d):
+    return _keys_only(d, ("label", "value", "lines", "tone", "copy")) and _text(d.get("label"), 30) \
+        and _opt(d, "value", _text) and _opt(d, "tone", _tone) and _opt(d, "copy", lambda v: isinstance(v, bool)) \
+        and _opt(d, "lines", lambda v: isinstance(v, list) and len(v) <= 5 and all(_text(x) for x in v))
+
+
+def _ticket_ref_ok(t):
+    return _keys_only(t, ("id", "key", "title", "status")) and isinstance(t.get("id"), str) \
+        and bool(re.match(r"^t_[a-z0-9]{6,16}$", t["id"])) and _text(t.get("title")) and _opt(t, "key", lambda v: _text(v, 24)) \
+        and _opt(t, "status", _chip)
+
+
+def _toggle_ok(t):
+    return _keys_only(t, ("on", "label", "action")) and isinstance(t.get("on"), bool) and _text(t.get("label"), 60) \
+        and _action(t.get("action"))
+
+
+def _row_action_ok(a):
+    return _keys_only(a, ("label", "action", "confirm", "tone")) and _text(a.get("label"), 30) and _action(a.get("action")) \
+        and _opt(a, "confirm", lambda v: _text(v, 80)) and a.get("tone", "neutral") in ("neutral", "bad")
+
+
+def _accordion_ok(i):
+    return _opt(i, "detail", lambda v: isinstance(v, list) and len(v) <= 12 and all(map(_detail_ok, v))) \
+        and _opt(i, "tickets", lambda v: isinstance(v, list) and len(v) <= 10 and all(map(_ticket_ref_ok, v))) \
+        and _opt(i, "toggle", _toggle_ok) \
+        and _opt(i, "actions", lambda v: isinstance(v, list) and len(v) <= 4 and all(map(_row_action_ok, v)))
+
+
 def _item_ok(it, required, extra):
     return isinstance(it, dict) and all(k in it for k in required) and _opt(it, "tone", _tone) \
         and _opt(it, "link", _link) and extra(it)
@@ -59,7 +106,8 @@ def _block_ok(b) -> bool:
         items = b.get("items")
         return _text(b.get("title"), 60) and isinstance(items, list) and len(items) <= 50 and _opt(b, "more", _int) \
             and all(_item_ok(i, ("title",), lambda i: _text(i["title"]) and _opt(i, "subtitle", _text)
-                             and _opt(i, "chips", lambda c: isinstance(c, list) and len(c) <= 6 and all(map(_chip, c))))
+                             and _opt(i, "chips", lambda c: isinstance(c, list) and len(c) <= 6 and all(map(_chip, c)))
+                             and _accordion_ok(i))
                     for i in items)
     if t == "calendar":
         days = b.get("days")
