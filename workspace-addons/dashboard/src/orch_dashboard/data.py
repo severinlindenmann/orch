@@ -170,7 +170,7 @@ def add_link_views(tickets: list[dict], kinds: list[dict]) -> None:
     """Each ticket link gets `view` (label, icon, mono, title, status, group) from the core's one link module."""
     try:
         from orch import links
-    except ImportError:  # standalone use without orch: the page shows plain links
+    except ImportError:  # standalone use without orch: no view, so the page shows no Links card
         return
     for t in tickets:
         for ln in t.get("links") or []:
