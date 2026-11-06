@@ -71,6 +71,11 @@ Check (Test-Path "$p\.agents\skills\orch-dashboard") "dashboard skill in the wor
 L "--- dashboard in the background"; $out = O start --no-open --json | Out-String; L $out
 $url = [regex]::Match($out, 'http://127\.0\.0\.1:\d+').Value
 Check ([bool]$url) "orch start runs the dashboard"
+# The run folder is private, and this user is in its ACL by SID (#168: granted from the process token)
+$sid = ([Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
+$acl = cmd /c "icacls `"$p\.orch\run\dashboard`" 2>&1" | Out-String; L $acl
+$name = ([Security.Principal.SecurityIdentifier]$sid).Translate([Security.Principal.NTAccount]).Value
+Check ($acl -match [regex]::Escape($name) -and $acl -notmatch 'Everyone|BUILTIN\\Users') "the dashboard's run folder is private and this user is granted (#168)"
 $state = $null
 if ($url) {
     foreach ($i in 1..20) {

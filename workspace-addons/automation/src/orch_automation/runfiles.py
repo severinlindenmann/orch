@@ -1,6 +1,7 @@
 """Runtime files of a background process in .orch/run/<name>/ (gitignored). A repo can still force-add files there,
 so nothing read from them is trusted alone: no symlinks are followed, a pid counts only when > 1, and the caller checks
-the process's identity before it signals anything. (Same file in orch_dashboard and orch_automation.)"""
+the process's identity before it signals anything. (Same file in orch_dashboard and orch_focus.)"""
+
 from __future__ import annotations
 
 import json
@@ -11,20 +12,148 @@ import tempfile
 from pathlib import Path
 
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+WINDOWS = os.name == "nt"
+
+
+def reparse(p: Path) -> bool:
+    """True when p is a Windows reparse point (junction, mount point, symlink); False elsewhere or when missing."""
+    try:
+        return bool(getattr(os.lstat(p), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    except OSError:
+        return False
+
+
+def is_link(p: Path) -> bool:
+    """A symlink or, on Windows, a junction or any other reparse point."""
+    return p.is_symlink() or reparse(p)
+
+
+def check_listable(p: Path) -> None:
+    """Windows: a folder made by an elevated orch can not even be listed by the same user without elevation."""
+    if WINDOWS:
+        try:
+            os.scandir(p).close()
+        except PermissionError as e:
+            raise _denied(p, e) from e
 
 
 def run_dir(root: Path, name: str) -> Path:
-    """.orch/run/<name>/ (0700). Refused when .orch, .orch/run or the folder itself is a symlink."""
+    """.orch/run/<name>/ (0700). Refused when .orch, .orch/run or the folder itself is a link."""
     orch, run = root / ".orch", root / ".orch" / "run"
     d = run / name
     for p in (orch, run, d):
-        if p.is_symlink():
+        if is_link(p):
             raise RuntimeError(f"{p} is a symbolic link; orch does not use it. Remove it and try again.")
-        if p is not orch:
-            p.mkdir(mode=0o700, exist_ok=True)
+        if p is not orch and not mkdir_private(p) and p is d:
+            check_listable(p)
+        if is_link(p):
+            raise RuntimeError(f"{p} is a symbolic link; orch does not use it. Remove it and try again.")
         if not p.is_dir():
             raise RuntimeError(f"{p} is not a folder.")
     return d
+
+
+def user_sid() -> str | None:
+    """The SID string of the user this process runs as (Windows, from the process token); None elsewhere."""
+    if not WINDOWS:
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    k, adv = ctypes.WinDLL("kernel32"), ctypes.WinDLL("advapi32")
+    k.GetCurrentProcess.restype = ctypes.c_void_p
+    k.LocalFree.argtypes = (ctypes.c_void_p,)
+    k.CloseHandle.argtypes = (ctypes.c_void_p,)
+    adv.OpenProcessToken.argtypes = (ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p))
+    adv.GetTokenInformation.argtypes = (
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    )
+    adv.ConvertSidToStringSidW.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p))
+    tok = ctypes.c_void_p()
+    if not adv.OpenProcessToken(k.GetCurrentProcess(), 0x8, ctypes.byref(tok)):  # TOKEN_QUERY
+        return None
+    try:
+        n = wintypes.DWORD()
+        adv.GetTokenInformation(
+            tok, 1, None, 0, ctypes.byref(n)
+        )  # 1 = TokenUser; the first call gives the size
+        buf = ctypes.create_string_buffer(n.value)
+        if not adv.GetTokenInformation(tok, 1, buf, n, ctypes.byref(n)):
+            return None
+        sid = ctypes.c_void_p.from_buffer(buf).value  # TOKEN_USER starts with the SID pointer
+        out = ctypes.c_void_p()
+        if not sid or not adv.ConvertSidToStringSidW(sid, ctypes.byref(out)):
+            return None
+        try:
+            return ctypes.wstring_at(out.value)
+        finally:
+            k.LocalFree(out)
+    finally:
+        k.CloseHandle(tok)
+
+
+def system_icacls() -> str:
+    """icacls.exe in the Windows system folder (from the API, never from an environment variable)."""
+    d = r"C:\Windows\System32"
+    if WINDOWS:
+        import ctypes
+
+        try:
+            buf = ctypes.create_unicode_buffer(260)
+            if ctypes.WinDLL("kernel32").GetSystemDirectoryW(buf, 260):
+                d = buf.value
+        except (AttributeError, OSError):
+            pass
+    return str(Path(d) / "icacls.exe")
+
+
+def grant_user(d: Path) -> None:
+    """Windows: mkdir(mode=0o700) gives only OWNER RIGHTS, SYSTEM and Administrators. A folder made by an elevated
+    process is owned by Administrators, so the same user without elevation is locked out. Also grant the current
+    user (inheritable); nobody else (not Users, not Everyone). Best effort: a standard user does not need it."""
+    sid = user_sid()
+    if not sid:
+        return
+    try:  # right before the grant: only a plain folder, never a link someone swapped in after mkdir
+        st = os.lstat(d)
+    except OSError:
+        return
+    if not stat.S_ISDIR(st.st_mode) or is_link(d):
+        raise RuntimeError(f"{d} is not a plain folder; orch does not use it. Remove it and try again.")
+    try:
+        # /L: act on a link itself, never on its target
+        subprocess.run(
+            [system_icacls(), str(d), "/grant", f"*{sid}:(OI)(CI)F", "/L"],
+            capture_output=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def mkdir_private(p: Path) -> bool:
+    """Create p as 0700 when it is missing; True only when this call created it (an existing folder is not touched)."""
+    try:
+        p.mkdir(mode=0o700)
+    except FileExistsError:
+        return False
+    if WINDOWS:
+        grant_user(p)
+    return True
+
+
+def _denied(d: Path, e: OSError) -> RuntimeError:
+    if not WINDOWS:
+        return RuntimeError(f"{d} is not writable: {e}")
+    return RuntimeError(
+        f"{d} was made by orch running as administrator. Run the same command once in an administrator "
+        f"window, or delete the .orch\\run\\{d.name} folder there."
+    )
 
 
 def read_json(p: Path) -> dict | None:
@@ -47,7 +176,10 @@ def read_json(p: Path) -> dict | None:
 
 def write_json(p: Path, data: dict) -> None:
     """Atomic write: a new file in the same folder, then rename over p (a symlink at p is replaced, never followed)."""
-    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
+    try:
+        fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
+    except PermissionError as e:
+        raise _denied(p.parent, e) from e
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f)
     os.replace(tmp, p)
@@ -55,9 +187,12 @@ def write_json(p: Path, data: dict) -> None:
 
 def open_append(p: Path):
     """Append to a log file; refuses a symlink."""
-    if p.is_symlink():
-        raise RuntimeError(f"{p} is a symbolic link; orch does not write to it.")
-    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND | NOFOLLOW, 0o600)
+    try:
+        if p.is_symlink():
+            raise RuntimeError(f"{p} is a symbolic link; orch does not write to it.")
+        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND | NOFOLLOW, 0o600)
+    except PermissionError as e:
+        raise _denied(p.parent, e) from e
     return os.fdopen(fd, "a", encoding="utf-8")
 
 
@@ -128,7 +263,9 @@ def proc_start(pid: int) -> str | None:
         finally:
             k.CloseHandle(h)
     try:
-        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5, check=False)
+        r = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5, check=False
+        )
     except (OSError, subprocess.TimeoutExpired):
         return None
     return r.stdout.strip() or None
@@ -139,7 +276,13 @@ def command(pid: int) -> str:
     if os.name == "nt":
         return ""
     try:
-        r = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5, check=False)
+        r = subprocess.run(
+            ["ps", "-ww", "-o", "command=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return ""
     return r.stdout.strip()
