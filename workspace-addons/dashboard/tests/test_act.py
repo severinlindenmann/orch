@@ -194,3 +194,37 @@ def test_trailing_newline_ids_and_deep_json_are_refused(act_server, act_orch):
     assert post(act_server, {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "due": "2026-11-30\n"}})[0] == 400
     assert post(act_server, None, raw="[" * 100000)[0] == 400
     assert acts(act_orch) == []
+
+
+def test_addon_act_runs_one_generic_argv_for_an_active_addon(act_orch, ws):
+    import threading
+
+    from orch_dashboard.server import make_server
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:2] == ["addon", "list"]:\n    print(json.dumps([{"name": "alpha", "active": True}, {"name": "beta", "active": False},'
+        ' {"name": "ticket", "active": True}]))\n    sys.exit(0)\nif a[:2] in (["addon", "list"]')
+    act_orch.write_text(src)
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    me = actions.actor()
+    try:
+        code, text, _ = post(base, {"op": "addon.act", "args": {"addon": "alpha", "verb": "toggle", "target": "t_abcdef"}})
+        assert code == 200, text
+        assert acts(act_orch)[-1] == ["alpha", "act", "toggle", "--by", me, "--json", "--", "t_abcdef"]
+        bad = [{"addon": "beta", "verb": "run", "target": "t_abcdef"},       # installed but off
+               {"addon": "gamma", "verb": "run", "target": "t_abcdef"},      # unknown
+               {"addon": "ticket", "verb": "run", "target": "t_abcdef"},     # a core command, never a target
+               {"addon": "alpha", "verb": "Run now", "target": "t_abcdef"},
+               {"addon": "alpha", "verb": "run;ls", "target": "t_abcdef"},
+               {"addon": "alpha", "verb": "run", "target": "--evil"},
+               {"addon": "alpha", "verb": "run", "target": "t_abcdef\n"},
+               {"addon": "../x", "verb": "run", "target": "t_abcdef"},
+               {"addon": "alpha", "verb": "run", "target": "t_abcdef", "extra": 1}]
+        for args in bad:
+            assert post(base, {"op": "addon.act", "args": args})[0] == 400, args
+        assert not any(c[1:2] == ["act"] and c[0] in ("beta", "gamma", "ticket") for c in calls(act_orch))
+    finally:
+        srv.shutdown()
+        srv.server_close()
