@@ -133,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     ac = sub.add_parser("act", parents=[common], help="what the dashboard buttons do: on, off, toggle, run, delete")
     ac.add_argument("verb", choices=actions.VERBS)
     ac.add_argument("target", help="ticket id")
+    ac.add_argument("--by", help="who pressed the button (recorded on the ticket); the add-on act contract")
     args = ap.parse_args(argv)
     try:
         root = find_workspace(Path(args.dir))
@@ -198,7 +199,7 @@ def _run(args, root: Path) -> int:
         print(json.dumps(build(root)))
     elif args.cmd == "act":
         try:
-            res = actions.act(root, args.verb, args.target)
+            res = actions.act(root, args.verb, args.target, args.by)
         except actions.Bad as e:
             raise Refused(str(e)) from None
         out(res, res["text"])

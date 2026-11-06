@@ -1,6 +1,9 @@
 import json
 import urllib.error
 import urllib.request
+from pathlib import Path
+
+import pytest
 
 from orch_dashboard.data import find_workspace, load_state
 
@@ -177,3 +180,110 @@ def test_many_parallel_loads_never_reset(server):
     with ThreadPoolExecutor(max_workers=36) as pool:
         codes = list(pool.map(lambda p: get(server + p)[0], paths))
     assert set(codes) == {200}
+
+
+# ---- Artifacts tab: file list and safe file reads
+
+def _get(base, path, headers=None):
+    import http.client
+    port = int(base.rsplit(":", 1)[1])
+    c = http.client.HTTPConnection("127.0.0.1", port)
+    c.request("GET", path, headers={"Host": f"127.0.0.1:{port}", **(headers or {})})
+    r = c.getresponse()
+    return r.status, r.read(), dict(r.getheaders())
+
+
+@pytest.fixture
+def art(ws, act_orch):
+    import threading
+
+    from orch_dashboard.server import make_server
+    d = ws / ".orch" / "tickets" / "t_other000x"
+    (d / "artifacts" / "sub").mkdir(parents=True)
+    (d / "evidence").mkdir()
+    (d / "artifacts" / "notes.md").write_text("# hello")
+    (d / "artifacts" / "page.html").write_text("<script>alert(1)</script>")
+    (d / "artifacts" / "pic.png").write_bytes(b"\x89PNG")
+    (d / "artifacts" / "pic.svg").write_text("<svg onload=alert(1)/>")
+    (d / "artifacts" / "sub" / "a.txt").write_text("deep")
+    (d / "artifacts" / "big.txt").write_bytes(b"x" * (2 * 1024 * 1024 + 1))
+    (d / "evidence" / "proof.txt").write_text("proof")
+    (ws / "secret.txt").write_text("outside")
+    (d / "artifacts" / "link.txt").symlink_to(ws / "secret.txt")
+    src = act_orch.read_text().replace(
+        "mode = (d", 'if a[:2] == ["ticket", "artifacts"]:\n    print(json.dumps([{"name": "notes.md", "size": 7, "mtime": "2026-11-06T16:05:00Z", "path": "x"},'
+        ' {"name": "bad", "size": "x"}, {"size": 1}]))\n    sys.exit(0)\nmode = (d')
+    act_orch.write_text(src)
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+    srv.server_close()
+
+
+def test_artifact_list_comes_from_orch_and_drops_bad_rows(art):
+    code, body, _ = _get(art, "/api/artifacts/t_other000x")
+    assert code == 200 and json.loads(body) == {"available": True, "files": [{"name": "notes.md", "size": 7, "mtime": "2026-11-06T16:05:00Z"}]}
+    assert _get(art, "/api/artifacts/..%2fx")[0] == 404 and _get(art, "/api/artifacts/t_x")[0] == 404
+
+
+def test_artifact_list_says_unavailable_when_orch_cannot_list(ws, act_orch):
+    from orch_dashboard import ticketfiles
+    assert ticketfiles.listing(ws, str(act_orch), "t_other000x") == {"available": False, "files": []}  # the fake exits 0 with no list
+    assert ticketfiles.listing(ws, None, "t_other000x")["available"] is False
+
+
+def test_files_are_shown_as_text_or_picture_only(art):
+    q = "/api/file?t=t_other000x&k=artifacts&n="
+    code, body, h = _get(art, q + "notes.md")
+    assert code == 200 and body == b"# hello" and h["Content-Type"].startswith("text/plain") and h["X-Content-Type-Options"] == "nosniff"
+    assert "sandbox" in h["Content-Security-Policy"]
+    code, body, h = _get(art, q + "page.html")  # a page is text, never a page
+    assert code == 200 and h["Content-Type"].startswith("text/plain")
+    assert _get(art, q + "pic.png")[2]["Content-Type"] == "image/png"
+    assert _get(art, q + "pic.svg")[0] == 404  # svg can run code: no preview
+    assert _get(art, q + "sub/a.txt")[1] == b"deep"
+    assert _get(art, "/api/file?t=t_other000x&k=evidence&n=proof.txt")[1] == b"proof"
+    assert _get(art, q + "pic.svg&dl=1")[2]["Content-Disposition"].startswith("attachment")
+    assert _get(art, q + "big.txt")[0] == 413
+
+
+@pytest.mark.parametrize("q", ["t=t_other000x&k=artifacts&n=../../../../secret.txt", "t=t_other000x&k=artifacts&n=link.txt",
+                               "t=t_other000x&k=artifacts&n=/etc/passwd", "t=t_other000x&k=artifacts&n=sub/../notes.md",
+                               "t=t_other000x&k=artifacts&n=..%5csecret", "t=t_other000x&k=tickets&n=../t_other000x.json",
+                               "t=..&k=artifacts&n=notes.md", "t=t_other000x&k=artifacts&n=", "t=t_other000x&k=artifacts&n=nothere.txt",
+                               "t=t_other000x&k=artifacts&n=notes.md%00.png", "t=t_other000x&k=artifacts&n=sub"])
+def test_file_reads_cannot_leave_the_ticket_folders(art, q):
+    assert _get(art, "/api/file?" + q)[0] in (404, 400)
+
+
+def test_a_linked_folder_is_not_followed(art, ws, tmp_path):
+    d = ws / ".orch" / "tickets" / "t_other000x"
+    out = tmp_path / "elsewhere"
+    out.mkdir()
+    (out / "x.txt").write_text("leak")
+    (d / "linked").symlink_to(out)
+    import shutil
+    shutil.rmtree(d / "evidence")
+    (d / "evidence").symlink_to(out)
+    assert _get(art, "/api/file?t=t_other000x&k=evidence&n=x.txt")[0] == 404
+
+
+def test_file_reads_refuse_foreign_origins(art):
+    assert _get(art, "/api/file?t=t_other000x&k=artifacts&n=notes.md", {"Sec-Fetch-Site": "cross-site"})[0] == 403
+    assert _get(art, "/api/artifacts/t_other000x", {"Sec-Fetch-Site": "cross-site"})[0] == 403
+
+
+def test_hard_links_and_pipes_are_not_served(art, ws):
+    import os
+    d = ws / ".orch" / "tickets" / "t_other000x" / "artifacts"
+    os.link(ws / "secret.txt", d / "hard.txt")
+    assert _get(art, "/api/file?t=t_other000x&k=artifacts&n=hard.txt")[0] == 404
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(d / "pipe.txt")
+        assert _get(art, "/api/file?t=t_other000x&k=artifacts&n=pipe.txt")[0] == 404  # answers at once, no hang
+
+
+def test_file_reads_go_through_the_one_core_reader():
+    src = (Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "ticketfiles.py").read_text()
+    assert "safefile.read_ticket_file" in src and "os.open" not in src and "lstat" not in src
