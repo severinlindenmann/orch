@@ -1,5 +1,5 @@
-"""Upgrading from an old orch: the install script drops the add-on packages, the registry may name `scheduler`
-(now automation), and a folder may still have `scheduler` turned on. None of that may block the user."""
+"""After the install script replaced orch: the add-on packages are gone but the registry still lists them,
+or a registered folder is gone. None of that may block the user."""
 
 import json
 import os
@@ -21,7 +21,7 @@ def _write_registry(entries):
 
 OLD = [
     {"name": "dashboard", "source": "built-in", "version": "0.0.0"},
-    {"name": "scheduler", "source": "built-in", "version": "0.0.0"},
+    {"name": "automation", "source": "built-in", "version": "0.0.0"},
 ]
 
 
@@ -37,12 +37,7 @@ def _withs(call):
     return [call[i + 1].rsplit("=", 1)[-1] for i, a in enumerate(call) if a == "--with"]
 
 
-def test_registry_reads_scheduler_as_automation(proj, github):
-    _write_registry([*OLD, {"name": "automation", "source": "built-in", "version": "0.0.0"}])
-    assert addons.installed_names() == ["dashboard", "automation"]
-
-
-def test_update_installs_automation_not_scheduler(proj, run, github, uv_calls, monkeypatch):  # noqa: F811
+def test_update_installs_every_registered_addon(proj, run, github, uv_calls, monkeypatch):  # noqa: F811
     monkeypatch.setattr(addons, "_entry_points", lambda: {})
     _write_registry(OLD)
     code, _, err = run("update")
@@ -80,7 +75,7 @@ def test_add_reinstalls_when_the_package_is_gone(proj, run, github, tmp_path, mo
     assert code == 0, err
     assert len(uv_calls) == 1
     assert _withs(uv_calls[0]) == ["workspace-addons/automation", "workspace-addons/dashboard"]
-    assert addons.installed_names() == ["automation", "dashboard"]  # saved under the new name
+    assert addons.installed_names() == ["automation", "dashboard"]
     assert "dashboard" in addons.active(proj)
 
 
@@ -94,16 +89,15 @@ def test_after_install_puts_registered_addons_back(proj, run, github, uv_calls, 
     assert "automation" in out
 
 
-def test_scheduler_turned_on_in_a_folder_counts_as_automation(proj, run, monkeypatch):  # noqa: F811
+def test_an_unknown_old_name_is_refused_plainly(proj, run, uv_calls, tmp_path, monkeypatch):  # noqa: F811
     (proj / ".orch").mkdir()
     (proj / ".orch/addons.json").write_text('{"active": {"scheduler": {"version": "0.2.0"}}}')
     monkeypatch.setattr(addons, "_entry_points", lambda: {})
-    addons.record_consent(proj, "scheduler")  # what the old orch wrote
-    assert list(addons.listed(proj)) == ["automation"]
-    assert list(addons.active(proj)) == ["automation"]
-    code, _, err = run("addon", "remove", "scheduler")  # the old name still turns it off
-    assert code == 0, err
-    assert addons.listed(proj) == {} and addons.active(proj) == {}
+    (tmp_path / "repo" / "workspace-addons").mkdir(parents=True)
+    monkeypatch.setenv("ORCH_REPO", str(tmp_path / "repo"))
+    assert addons.active(proj) == {}
+    code, _, err = run("addon", "add", "scheduler", "--yes")
+    assert code == 2 and "no built-in add-on 'scheduler'" in err and "Traceback" not in err, err
 
 
 def test_install_script_puts_addons_back():

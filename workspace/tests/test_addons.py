@@ -842,12 +842,12 @@ def test_clean_init_shows_no_addon_commands(proj, run, capfd):
     assert run("init")[0] == 0
     for flag in ("--help", "--help-all"):
         out = help_text(capfd, flag)
-        for name in ("publish", "relay", "dashboard", "scheduler"):
+        for name in ("publish", "relay", "dashboard", "automation"):
             assert f"    {name} " not in out and f"  {name}  " not in out, (flag, name, out)
     tree = (proj / "AGENTS.md").read_text(encoding="utf-8") + "".join(
         p.name for p in (proj / ".agents" / "skills").iterdir()
     )
-    for name in ("publish", "relay", "dashboard", "scheduler"):
+    for name in ("publish", "relay", "dashboard", "automation"):
         assert f"orch-{name}" not in tree and f"orch {name}" not in tree
     rows = {r["name"]: r["active"] for r in json.loads(run("addon", "list", "--json")[1])}
     assert rows == {"publish": False, "relay": False}
