@@ -606,6 +606,21 @@ fn portal_narrow_network_uses_connections_list() {
 }
 
 #[test]
+fn portal_network_map_draws_one_edge_per_pair() {
+    let page = include_str!("../web/portal.html");
+    let css = include_str!("../web/style.css");
+    // Rules are grouped per workspace pair; both directions share one line and one chip.
+    assert!(page.contains("function networkPairs()"));
+    assert!(page.contains("marker-start"));
+    // Phones have their own lane; the map lays out to the real width and the focus ring follows the node shape.
+    assert!(page.contains("'PHONES'") || page.contains("\"PHONES\"") || page.contains(">PHONES<"));
+    assert!(page.contains("ResizeObserver"));
+    assert!(css.contains(".focus-ring"));
+    // Many workspaces get the ring map instead of the list-only fallback.
+    assert!(!page.contains("compact=workspaces.length>9"));
+}
+
+#[test]
 fn portal_has_no_inline_styles() {
     let page = include_str!("../web/portal.html");
     assert!(!page.to_lowercase().contains("style="));
