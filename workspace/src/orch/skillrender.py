@@ -26,7 +26,7 @@ FACTS: dict[str, list[str]] = {
     "orch-relay": ["connected", "workspaces", "files", "delegate", "start", "phones", "webhooks"],
     "orch-publish": ["connected", "files", "apps", "permanent", "public"],
     "orch-automation": ["relay", "webhooks"],
-    "orch-dashboard": ["relay", "publish"],
+    "orch-dashboard": ["publish"],
 }
 
 
@@ -119,7 +119,7 @@ def facts_for(root: Path, skill: str) -> dict[str, bool]:
     if skill == "orch-automation":
         return {"relay": relay, "webhooks": relay}
     if skill == "orch-dashboard":
-        return {"relay": relay, "publish": _connected(root, "publish") is not None}
+        return {"publish": _connected(root, "publish") is not None}
     return {}
 
 

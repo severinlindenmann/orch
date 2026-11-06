@@ -1,0 +1,17 @@
+schema = "orch.skill-description/1"
+
+[online]
+lead = "Show the tickets in a web page on this computer with the orch dashboard."
+not_for = "Not for changing tickets (use the orch commands)."
+
+[[online.part]]
+when = []
+text = "give the user the link to see tickets, progress and proof in a browser"
+
+[[online.part]]
+when = []
+text = "write a read-only copy to send to someone"
+
+[[online.part]]
+when = ["publish"]
+text = "share that copy as a private link"

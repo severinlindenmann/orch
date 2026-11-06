@@ -1,4 +1,3 @@
 # Places that may still name an agent tool (claude, codex; case-insensitive), with the most hits allowed.
 # Everything else must go through adapters.py + agents.json. This list may only shrink.
-workspace-addons/automation/src/orch_automation/skills/orch-automation/SKILL.md 5
 workspace-addons/focus/src/orch_focus/adapters/claude.py 7

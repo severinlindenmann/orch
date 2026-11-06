@@ -171,7 +171,7 @@ def agent_ticket_task(e, sid: str, ws_name: str, tool: str, git: bool) -> str:
     t = max(new, key=lambda x: len(x["checklist"]))
     validate(e, t)
     ev = evidence_ok(t, 1)
-    want = "agent:claude-code" if tool == "claude" else "agent:codex"
+    want = "agent:claude" if tool == "claude" else "agent:codex"
     check(want in by(t), f"history has no {want}: {sorted(by(t))}")
     work = rename_done(e, ws)
     return f"{ev}; status {t['status']}; {work}; {run.secs:.0f}s"

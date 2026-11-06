@@ -157,6 +157,20 @@ the copy in `.agents/skills/` is always `orch-<name>`), written like the core sk
 `<!-- /orch:addon:<name> -->` and is replaced as a whole; text outside the markers is never touched. The block: a heading
 `## orch-<name>`, one line what it is, `Read .agents/skills/orch-<name>/SKILL.md`, at most 4 lines more.
 
+### Skills that say what is on (template)
+
+A skill may change with what is turned on or connected. Its `SKILL.md` (and `AGENTS-block.md`) may hold
+`{{#fact}}...{{/fact}}` (kept when the fact is true) and `{{^fact}}...{{/fact}}` (kept when false); a tag alone on its line
+leaves no blank line. Facts are booleans from local state only (never a name or text another workspace wrote). The
+front matter is `description: "{{description}}"`, built from `description.toml` next to it: `[online] lead`, `not_for`
+and `[[online.part]] when = [facts], text`; the parts whose facts are all true are joined into
+"<lead> Use when you need to: a, b, or c. <not_for>" (150-500 characters, must contain "Use when" and "Not for"). An
+optional `[offline] text` is used while the fact `connected` is false. `description.toml` is not copied to the project.
+Core renders it (`skillrender`) when an add-on is added or removed and when the relay or publish connection changes;
+it writes only on change and prints "Skills updated; they apply from the next agent session." A skill with no
+`{{` is copied as is. Every skill has the parts "When to use", "Recipes", "Rules"; the AGENTS block is a heading plus at
+most 3 lines. `workspace/tests/test_skills_lint.py` checks all of this for every shipped skill and every fact combination.
+
 ## Ticket data
 
 `ext.<name>` is a free object for the core. When the add-on is active, every CLI write of `ext.<name>` is checked with its

@@ -38,6 +38,9 @@ The profile change waits for the owner's approval. Then this skill is rewritten 
 {{#permanent}}
     orch publish file report.pdf --permanent     # only when the user asks for "forever"
 {{/permanent}}
+    orch publish file report.pdf --note "Q3 numbers"   # one line shown with the file, up to 280 characters
+    orch publish extend <f_id> --days 30               # keep the same link longer
+    orch publish file report-v2.pdf --replace <f_id>   # new content behind the same link (only on the computer that shared it)
 
 It prints the full link on its own line (it ends in `#k=...`). Give the user that whole line.
 {{/files}}
