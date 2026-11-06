@@ -299,3 +299,44 @@ async fn portal_prompt_skips_describe_line_when_admin_described() {
         .unwrap()
         .contains("describe this workspace"));
 }
+
+#[tokio::test]
+async fn admin_assets_served() {
+    let t = setup();
+    let css = call(&t.admin, "GET", "/admin/style.css", &[], vec![]).await;
+    assert_eq!(css.status, 200);
+    assert_eq!(css.headers["content-type"], "text/css; charset=utf-8");
+    assert!(css.text().contains("--brand:#60a5fa"));
+    let public_css = call(&t.public, "GET", "/_/style.css", &[], vec![]).await;
+    assert_eq!(public_css.status, 200);
+    assert_ne!(css.text(), public_css.text());
+
+    let kit = call(&t.admin, "GET", "/admin/kit.js", &[], vec![]).await;
+    assert_eq!(kit.status, 200);
+    assert_eq!(
+        kit.headers["content-type"],
+        "text/javascript; charset=utf-8"
+    );
+    assert!(kit.text().contains("window.icon"));
+    assert!(kit.text().contains("window.orch"));
+}
+
+#[test]
+fn portal_markup_respects_csp() {
+    let html = include_str!("../web/portal.html");
+    let js = include_str!("../web/portal.js");
+    for source in [html, js] {
+        let source = source.to_ascii_lowercase();
+        assert!(!source.contains("style=\""));
+        assert!(!source.contains("style='"));
+        assert!(!source.contains("<style"));
+    }
+    for script in html.split("<script").skip(1) {
+        let (attributes, rest) = script.split_once('>').expect("script opening tag");
+        assert!(attributes.contains("src=\""), "scripts must be external");
+        let (body, _) = rest.split_once("</script>").expect("script closing tag");
+        assert!(body.trim().is_empty(), "no inline script body");
+    }
+    assert!(html.contains("src=\"/admin/kit.js\" defer"));
+    assert!(html.contains("src=\"/admin/portal.js\" defer"));
+}
