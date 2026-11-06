@@ -6,6 +6,7 @@ phone-api.schema.json, plus vectors/phone-v3-v1.json). Every examples/<kind>/ fo
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py
 """
 import base64
+import hashlib
 import json
 import re
 import struct
@@ -16,6 +17,7 @@ import unicodedata
 from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker
+from referencing import Registry, Resource
 
 HERE = Path(__file__).parent
 fails = []
@@ -316,8 +318,6 @@ for k in kvec["invalid_keys"]:
 
 # Phone API v3 (relay-api.md, Phone API): request/response bodies in phone-api.schema.json, which points into
 # message.schema.json. Every /v1/phone example and the phone-v3 vector are checked against it.
-from referencing import Registry, Resource  # noqa: E402
-
 _msg_schema = _expand(json.loads((HERE / "message.schema.json").read_text()))
 _phone_schema = json.loads((HERE / "phone-api.schema.json").read_text())
 _reg = Registry().with_resources(
@@ -426,8 +426,6 @@ for case in pvec["speech_text"]:
     got = speech_text(case["body"], pvec["speech_max_chars"])
     if got != case["spoken"]:
         fails.append(f"phone-v3 vector speech_text {case['name']}: got {got!r}")
-import hashlib  # noqa: E402
-
 for case in pvec["artifact_ids"]:
     got = "a_" + hashlib.sha256(f"{case['source']}\n{case['ref']}".encode()).hexdigest()[:12]
     if got != case["id"] or not re.fullmatch(_msg_schema["$defs"]["artifact_id"]["pattern"], got):
