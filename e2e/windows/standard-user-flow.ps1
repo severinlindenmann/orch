@@ -68,4 +68,22 @@ $list = O addon list | Out-String; L $list
 Check ($list -match "dashboard") "dashboard still installed after the update"
 Check (Test-Path "$p\.agents\skills\orch-dashboard") "dashboard skill in the workspace"
 
+L "--- dashboard in the background"; $out = O start --no-open --json | Out-String; L $out
+$url = [regex]::Match($out, 'http://127\.0\.0\.1:\d+').Value
+Check ([bool]$url) "orch start runs the dashboard"
+$state = $null
+if ($url) {
+    foreach ($i in 1..20) {
+        try { $state = (Invoke-WebRequest "$url/api/state" -UseBasicParsing -TimeoutSec 5).Content; break } catch { Start-Sleep 1 }
+    }
+}
+Check ("$state" -match "Windows smoke") "the dashboard shows the ticket"
+$again = O start --no-open | Out-String; L $again
+Check ($LASTEXITCODE -eq 0) "a second orch start while it runs"
+L "--- stop"; L (O stop | Out-String)
+Check ($LASTEXITCODE -eq 0) "orch stop"
+$restart = O start --no-open | Out-String; L $restart
+Check ($LASTEXITCODE -eq 0 -and $restart -match "127\.0\.0\.1") "the dashboard starts again after a stop"
+O stop | Out-Null
+
 if ($fails.Count) { L "RESULT fail: $($fails -join '; ')" } else { L "RESULT ok" }
