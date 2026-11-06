@@ -30,6 +30,7 @@ def _job(tmp_path, uv_code="print('uv ok')", then_code="print('then ok')"):
         "uv": [sys.executable, "-c", uv_code],
         "free": [str(env)],
         "wait": 5,
+        "uv_timeout": 30,
         "registry": [str(tmp_path / "addons.json"), '[{"name": "dashboard"}]'],
         "then": [{"argv": [sys.executable, "-c", then_code, "x"], "cwd": str(tmp_path)}],
         "log": str(tmp_path / "finish.log"),
@@ -86,7 +87,13 @@ def test_start_writes_its_files_in_orchs_home_and_marks_pending(tmp_path, monkey
 
 
 def test_start_refuses_without_an_outside_python(tmp_path, monkeypatch):
-    monkeypatch.setattr(winfinish.sys, "_base_executable", winfinish.sys.executable, raising=False)
+    monkeypatch.setattr(winfinish.sys, "prefix", str(tmp_path / "tool-env"))
+    monkeypatch.setattr(
+        winfinish.sys,
+        "_base_executable",
+        str(tmp_path / "tool-env" / "Scripts" / "python.exe"),
+        raising=False,
+    )
     with pytest.raises(RuntimeError):
         winfinish.start(tmp_path, ["uv"], [], tmp_path, "done")
 

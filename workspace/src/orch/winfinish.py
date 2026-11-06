@@ -46,15 +46,31 @@ def free(path):
     raise RuntimeError("could not rename " + probe + " back to " + path + ": rename it back by hand")
 
 
+def busy():
+    """Keep the pending mark fresh while this finisher works (orch refuses a second job meanwhile)."""
+    try:
+        os.utime(job["pending"])
+    except OSError:
+        pass
+
+
 def main():
+    busy()
     say("waiting for orch to exit")
     deadline = time.time() + job["wait"]
     while not all(free(p) for p in job["free"]):
         if time.time() > deadline:
             say("RESULT fail: orch did not exit in time; nothing was changed. Run the command again.")
             return 1
+        busy()
         time.sleep(0.5)
-    r = subprocess.run(job["uv"], capture_output=True, text=True)
+    busy()
+    try:
+        r = subprocess.run(job["uv"], capture_output=True, text=True, timeout=job["uv_timeout"])
+    except subprocess.TimeoutExpired:
+        say("RESULT fail: uv took too long. Run it again: orch update")
+        return 1
+    busy()
     if r.returncode != 0:
         say("uv failed: " + (r.stderr or r.stdout).strip()[-1500:])
         say("RESULT fail: the reinstall failed. Run it again: orch update")
@@ -91,7 +107,8 @@ sys.exit(code)
 '''
 
 
-PENDING_MAX_AGE = 600  # seconds: a finisher that started longer ago has died
+PENDING_MAX_AGE = 600  # seconds without a sign of life: the finisher has died
+UV_TIMEOUT = 480  # below PENDING_MAX_AGE: the mark is refreshed right before uv starts
 
 
 def needed() -> bool:
@@ -118,7 +135,7 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
           registry: tuple[Path, str] | None = None) -> Path:  # fmt: skip
     """Start the finisher detached and return its log. `then`: orch commands run afterwards (in `cwd`)."""
     base = getattr(sys, "_base_executable", None)
-    if not base or Path(base).resolve() == Path(sys.executable).resolve():
+    if not base or Path(base).resolve().is_relative_to(Path(sys.prefix).resolve()):
         # the finisher must not run from orch's own folder: it would keep that folder locked
         raise RuntimeError("no Python outside orch's tool folder to finish the install with")
     env_dir = Path(sys.prefix)  # the uv tool folder this orch runs from
@@ -131,6 +148,7 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
         "uv": uv_argv,
         "free": free,
         "wait": 120,
+        "uv_timeout": UV_TIMEOUT,
         "registry": [str(registry[0]), registry[1]] if registry else None,
         "then": [{"argv": [str(py), "-P", "-m", "orch", *t], "cwd": str(cwd)} for t in then],
         "log": str(log_path(home)),
@@ -140,11 +158,11 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
     # In orch's own folder, not %TEMP% (which can be shared, e.g. C:\Windows\Temp for tasks).
     d = home / "finish"
     d.mkdir(parents=True, exist_ok=True)
-    (home / "finish.pending").write_text(str(os.getpid()), encoding="utf-8")
     (d / "finish.py").write_text(FINISHER, encoding="utf-8")
     (d / "job.json").write_text(json.dumps(job), encoding="utf-8")
     flags = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED_PROCESS, NEW_PROCESS_GROUP, NO_WINDOW
     try:
+        (home / "finish.pending").write_text(str(os.getpid()), encoding="utf-8")
         _popen(
             [base, "-I", str(d / "finish.py"), str(d / "job.json")],
             cwd=str(d),
