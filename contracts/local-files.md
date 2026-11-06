@@ -26,7 +26,8 @@ CLAUDE.md                         gets the line "@AGENTS.md" if it lacks it (Cla
   inbox-seen.json                 {"m_…": "2026-11-04T11:00:00Z"} ids already handled. GITIGNORED
   inbox-notes.json                {"m_…": {"at", "note"}} why a message was dropped (shown by `orch relay inbox`). GITIGNORED
   outbox/<message id>.json        the exact bytes of a message being sent, kept until the relay took them. GITIGNORED
-  config.toml                     one config file: [workspace] agent, [agents.<name>] (below), and one table per add-on ([<add-on name>])
+  ticket-counter.json             {"last": 12}: the highest ticket key number handed out here (Ticket keys, below). Can be committed
+  config.toml                     one config file: [workspace] agent and code, [agents.<name>] (below), and one table per add-on ([<add-on name>])
   addons.json                     {"active": {"<name>": {"version", "activated_at"}}}: the ONE switch for an add-on here (addon-manifest.md)
   run/                            GITIGNORED, per machine, never committed
     tickets/<ticket id>.json      the claim of the one agent run on that ticket (run.schema.json); <ticket id>.lock = O_EXCL lock file
@@ -57,11 +58,30 @@ received/                         files saved by `orch relay download` (visible,
 An active add-on adds its own lines from its manifest `gitignore` key (addon-manifest.md) on `orch addon add` and removes
 them on `orch addon remove`; the core never writes add-on lines.
 
+## Ticket keys
+
+People read a short key, e.g. `DM1-12`; the id (`t_…`) stays the identity everywhere (file names, refs, parent, messages).
+
+- **Code**: `[workspace] code` in `.orch/config.toml`, 2-4 uppercase letters or digits. `orch init` sets it once: `--code XY`,
+  else the suggestion from the folder name (initials of up to 4 words, one word gives its first 3 characters; reference
+  rule in validate.py, vectors/ticket-key-v1.json: "Month-end close" -> MEC). Unique enough for one person's workspaces;
+  nothing checks other workspaces. Change it with `orch config set workspace.code XY`: later tickets get the new code,
+  existing keys are never rewritten. A workspace without a code gets the suggestion saved on its first new ticket.
+- **Key**: every new ticket (`ticket new`, sub-tickets, phone texts, delegated tasks, add-on tickets such as automation
+  runs) gets `key = "<code>-<n>"` at creation, stored on the ticket. n = 1 + the highest of `.orch/ticket-counter.json`
+  `last` and every number in an existing ticket's key; the counter is written before the ticket, under the workspace
+  lock `.orch/tickets/.lock-key`, so two tickets made at the same time never share a number and a number is never reused
+  (a deleted ticket's number stays gone). Tickets made before keys have none; nothing adds one later.
+- **Lookup**: every command that takes a ticket id (positional id, `--parent`, `--ticket`, `--on ticket:`) also takes the
+  key, any case (`orch check add dm1-12 "…"`). It is turned into the id in one place before the command runs; a key that
+  no ticket has is refused like an unknown id. JSON output carries `key` (the stored ticket field).
+
 ## Agents (`.orch/config.toml`)
 
 ```toml
 [workspace]
 agent = "my-agent"          # who does the work here: a built-in adapter (agents.json) or an [agents.<name>] entry
+code = "MEC"                # ticket keys MEC-1, MEC-2, … (Ticket keys, above)
 
 [agents.my-agent]
 adapter = "generic"         # whose rules apply (agent-adapter.schema.json)

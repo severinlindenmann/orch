@@ -805,6 +805,19 @@ def test_send_update_sets_body_update_with_ticket_title(proj, run, new_ticket, r
     assert sent["ticket"] == tid and sent["reply_to"] == "m_ask0000000000001"
 
 
+def test_send_carries_ticket_key_and_takes_key_as_ticket(proj, run, new_ticket, rel):
+    from orch import tickets
+
+    connect(run, rel)
+    tid = new_ticket("Prepare the Q3 summary")
+    key = tickets.load(proj, tid)["key"]
+    code, _, _ = run(
+        "relay", "send", "ph_iphone0001", "Done", "--ticket", key.lower(), "--update", "result", "--json"
+    )  # fmt: skip
+    assert code == 0
+    assert rel.sent[0]["ticket"] == tid and rel.sent[0]["key"] == key
+
+
 def test_send_update_needs_a_ticket_and_a_known_kind(proj, run, rel):
     connect(run, rel)
     code, _, err = run("relay", "send", "ph_iphone0001", "x", "--update", "result")
