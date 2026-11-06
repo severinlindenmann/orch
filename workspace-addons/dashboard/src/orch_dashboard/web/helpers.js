@@ -146,5 +146,18 @@
   function proofMark(ev) {
     return String((ev && ev.by) || '').startsWith('human:') ? {mark: '●', label: 'You'} : {mark: '○', label: 'Agent says'};
   }
-  return {historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, treeRows, proofMark};
+  /* Leaving the page: every answer still in its Undo window is sent now. entries: [{state, send}]. Returns how many. */
+  function flushPending(entries) {
+    let n = 0;
+    for (const e of arr(entries)) {
+      const st = e && e.state && e.state.getState ? e.state.getState() : null;
+      if (!st || st.phase !== 'pending' || typeof e.send !== 'function') continue;
+      const answer = st.answer;
+      e.state.reset();
+      e.send(answer);
+      n++;
+    }
+    return n;
+  }
+  return {flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, treeRows, proofMark};
 });

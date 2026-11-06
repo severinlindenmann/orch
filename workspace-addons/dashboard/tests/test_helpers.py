@@ -121,3 +121,16 @@ def test_service_link_port_has_one_to_five_digits():
     ok = {"addon": "panel", "running": True, "url": "http://127.0.0.1:8"}
     bad = {"addon": "panel2", "running": True, "url": "http://127.0.0.1:123456"}
     assert [r["label"] for r in call("serviceLinks", [ok, bad], "http://127.0.0.1:1")] == ["panel"]
+
+
+@node
+def test_flush_pending_sends_an_answer_in_its_undo_window():
+    js = """
+const H = require(process.argv[1]); const sent = [];
+const mk = phase => { let st = {phase, answer: 'Yes'}; return {getState: () => st, reset() { st = {phase: 'idle'}; }}; };
+const n = H.flushPending([{state: mk('pending'), send: a => sent.push(a)}, {state: mk('idle'), send: a => sent.push('bad')},
+                          {state: mk('sending'), send: a => sent.push('bad')}]);
+console.log(JSON.stringify([n, sent]));
+"""
+    out = subprocess.run(["node", "-e", js, str(WEB / "helpers.js")], capture_output=True, text=True, check=True).stdout
+    assert json.loads(out) == [1, ["Yes"]]

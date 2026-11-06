@@ -1,4 +1,4 @@
-"""`orch focus view --json`: the dashboard tab "Live" (addon-view.schema.json). Declarative blocks, no actions.
+"""`orch focus view --json`: the dashboard tab "Focus" (addon-view.schema.json). Declarative blocks, no actions.
 
 Live now = runs in a live session; Working now = one-shot runs. Each links to its page: addon:t/<ticket>."""
 

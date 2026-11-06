@@ -13,7 +13,7 @@ ticket_ext = "ext.schema.json"             # byte-identical copy of contracts/ad
 needs = true                                # orch focus needs --json
 
 [dashboard]
-label = "Live"
+label = "Focus"
 icon = "bolt"
 order = 20
 
@@ -23,5 +23,5 @@ label = "Open Focus"
 
 [[ticket_view]]
 field = "page"
-label = "Live page"
+label = "Focus page"
 format = "open-page"
