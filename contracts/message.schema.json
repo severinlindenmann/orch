@@ -93,7 +93,7 @@
       "properties": {
         "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
         "client_id": { "$ref": "#/$defs/client_id" },
-        "general": { "type": "boolean", "description": "true = the workspace's General conversation (no ticket; a text with general true must not carry ticket). Its only update kinds are ack and working, with reply_to = the phone's General text (the Started / Working receipt, relay-api.md). Both ways: the phone sends it (POST /v1/phone/send general: true) and the workspace sets it on its replies in General. A text without ticket and without general from a phone asks for a new topic." },
+        "general": { "type": "boolean", "description": "true = the workspace's General conversation (no ticket; a text with general true must not carry ticket). Its only update kinds are ack and working, with reply_to = the phone's General text (the Started / Working receipt, relay-api.md). Rule (relay-api.md, General vs topics): a workspace text without ticket is General whether or not general is set; a phone text without ticket and without general is a pending new topic until an ack with reply_to = its id names the ticket. The relay never rewrites stored texts." },
         "speak": {
           "type": "object", "additionalProperties": false, "required": ["lang"],
           "description": "Workspace texts only: worth hearing. The phone may fetch audio for it (GET /v1/phone/speech/<message id>). Spoken text = summary if set, else text (relay-api.md, Speech).",
@@ -109,10 +109,10 @@
             "type": "object", "additionalProperties": false, "required": ["blob_id", "kind", "name", "size", "mime"],
             "properties": {
               "blob_id": { "$ref": "#/$defs/blob_id" },
-              "kind": { "enum": ["image", "file", "voice"] },
-              "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+              "kind": { "enum": ["image", "file", "voice"], "description": "As the phone says, unchecked; a display hint only." },
+              "name": { "type": "string", "minLength": 1, "maxLength": 255, "description": "As the phone says, unchecked. The workspace cleans it before using it as a file name (no / or \\, no leading dots, no control characters)." },
               "size": { "type": "integer", "minimum": 1, "maximum": 26214400 },
-              "mime": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.+-]{0,63}/[a-z0-9][a-z0-9.+-]{0,63}$" },
+              "mime": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.+-]{0,63}/[a-z0-9][a-z0-9.+-]{0,63}$", "description": "As the phone says, unchecked (the relay serves every blob as application/octet-stream); a hint only, never trusted." },
               "duration": { "type": "number", "minimum": 0, "maximum": 3600, "description": "Seconds, voice only." }
             }
           }

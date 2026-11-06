@@ -1,6 +1,6 @@
 {
  "name": "phone-v3-v1",
- "description": "Phone app v3 (relay-api.md, Phone API). send: POST /v1/phone/send bodies (phone-api.schema.json send_request); ok=true cases also give `built`, the text message the relay stores (message.schema.json; the relay adds id and created_at, from = the calling phone ph_iphone0001), ok=false = 422 invalid. answer, settings_patch, workspace_patch: request bodies, ok=false = 422. speech_text: the text GET /v1/phone/speech speaks for a text body (relay-api.md, Speech). general_updates: whole messages (message.schema.json), ok=false = 422 invalid. artifact_ids: ticket_view attachment ids (message.schema.json). Replayed by contracts/validate.py; the relay (R1, R2) and the workspace relay add-on (WS) replay the parts they build.",
+ "description": "Phone app v3 (relay-api.md, Phone API). send: POST /v1/phone/send bodies (phone-api.schema.json send_request); ok=true cases also give `built`, the text message the relay stores (message.schema.json; the relay adds id and created_at, from = the calling phone ph_iphone0001), ok=false = 422 invalid. answer, settings_patch, workspace_patch: request bodies, ok=false = 422. speech_text: the text GET /v1/phone/speech speaks for a text body (relay-api.md, Speech); an empty result means GET /v1/phone/speech answers 404. general_updates: whole messages (message.schema.json), ok=false = 422 invalid. artifact_ids: ticket_view attachment ids (message.schema.json). Replayed by contracts/validate.py; the relay (R1, R2) and the workspace relay add-on (WS) replay the parts they build.",
  "phone": "ph_iphone0001",
  "send": [
   {
@@ -704,10 +704,18 @@
    }
   },
   {
-   "name": "used-is-read-only",
+   "name": "only-unknown-field",
    "ok": false,
    "request": {
     "tts_used_usd_month": 0
+   }
+  },
+  {
+   "name": "unknown-field-kept",
+   "ok": true,
+   "request": {
+    "speak": "never",
+    "theme": "dark"
    }
   }
  ],
@@ -809,6 +817,16 @@
     "text": "Version 2.5 ist da! xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
    },
    "spoken": "Version 2.5 ist da!"
+  },
+  {
+   "name": "empty-after-cleaning",
+   "body": {
+    "text": "** ``` #",
+    "speak": {
+     "lang": "en"
+    }
+   },
+   "spoken": ""
   }
  ],
  "artifact_ids": [

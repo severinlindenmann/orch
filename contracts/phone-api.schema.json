@@ -104,7 +104,7 @@
       }
     },
     "settings_patch_request": {
-      "type": "object", "minProperties": 1, "additionalProperties": false,
+      "type": "object", "anyOf": [{ "required": ["speak"] }, { "required": ["swiss_german"] }, { "required": ["tts_cap_usd"] }],
       "properties": {
         "speak": { "enum": ["auto", "always", "never"] },
         "swiss_german": { "type": "boolean" },

@@ -39,7 +39,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | GET | `/v1/inbox?wait=0..30` | – | `{items: [message…], next: null}` not yet acked, oldest first, max 100. `wait` = long-poll seconds |
 | POST | `/v1/inbox/ack` | `{ids: [m_…]}` | `204`. Acked messages are no longer delivered (the admin can still read them). The relay keeps the ack time; for a phone's text it is that text's `delivered_at` (Phone API) |
 | POST | `/v1/blobs` | raw bytes, max 100 MB | `201 {blob_id, size, sha256}` |
-| GET | `/v1/blobs/<blob_id>` | – | raw bytes; only for the uploader, receivers of a `file` message with this blob, and the workspace a phone text names it in (`body.attachments[].blob_id`, `body.voice.blob_id`, `body.feedback.pins[].voice_blob_id` of a text to that workspace), else `404` |
+| GET | `/v1/blobs/<blob_id>` | – | raw bytes; only for the uploader, receivers of a `file` message with this blob, and the workspace a stored phone text names it in (`body.attachments[].blob_id`, `body.voice.blob_id`, `body.feedback.pins[].voice_blob_id` of a phone text whose `to` is exactly the calling workspace; never via `to: phones`), else `404`. That access lasts as long as the phone text is stored: removing the workspace from the phone or signing the phone out does not take it back. Always served as `application/octet-stream` |
 | POST | `/v1/webhooks` | `{mode: "once"\|"permanent", ticket?}` | `201 {id, url}`; `url` = `https://relay.severin.io/webhook/<id>?token=whk_…` (shown once) |
 | GET | `/v1/webhooks` | – | list of `{id, mode, ticket, created_at, last_call_at}` (own only) |
 | DELETE | `/v1/webhooks/<id>` | – | `204` |
@@ -58,22 +58,25 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | GET | `/v1/phone/questions` | – | list of `{message, workspace_name}`, open questions only (sent to `phones` or to this phone by a workspace on its list) |
 | GET | `/v1/phone/messages?after=&limit=` | – | list of `{message, workspace_name, delivered_at, client_id}`, newest first: `text` messages that workspaces on its list sent to this phone or to `phones`, and the texts this phone sent to them (`workspace_name` = the other side). General texts (no `ticket`) are listed like all others. `delivered_at` = when the receiving workspace acked the phone's own text (`POST /v1/inbox/ack`), else `null`; `client_id` = the text's `body.client_id`. Both are `null` on workspace texts. See Phone app v3 |
 | GET | `/v1/phone/updates?workspace=&ticket=&after=&limit=` | – | A read view over the same stored `text` messages as `/v1/phone/messages` (no second store, nothing is written): only texts with `body.update` that a workspace sent to this phone or to `phones`, filtered by the phone's workspace list **as it is at read time** (a workspace removed from the list disappears at once). **Grouped** (no `ticket`): one item per (workspace, ticket) with its newest update, newest first, at most `limit` (1–100, default 50) items; no paging, `next` is always `null`; `workspace` optionally narrows it. **One ticket** (`ticket` + `workspace`): that ticket's updates, newest first, `limit` per page; `after` = the `id` of an item of this same filtered view (the last item of the previous page), `next` = the last item's `id` when more exist, else `null`. `ticket` without `workspace` → `422 invalid`; an `after` that is not in this phone's filtered view of that ticket → `422 invalid`; a `workspace` that is not on the phone's list answers exactly like an unknown one: `200 {items: [], next: null}` (never `403`, so nothing tells them apart). Items: `{id, workspace, workspace_name, ticket, key, kind, title, text, reply_to, at, ticket_view}` (`key` = the ticket's display key from the message, e.g. `DM1-12`, or `null`); `title`/`text` are plain text from the message, never HTML `ticket_view` = the message's `body.ticket_view` (message.schema.json), else `null`; in the **grouped** view it is the newest `ticket_view` of that ticket (looked for in the same bounded rows as the title), so a newer update without one keeps the last snapshot. The relay passes it through as stored |
-| POST | `/v1/phone/blobs` | Body = the raw bytes, any `Content-Type` (image/jpeg, image/png, image/heic, application/pdf, audio/m4a, text/plain, application/octet-stream, …), max 25 MB | `201 {blob_id, size, sha256}`. `413 too_large` over 25 MB, `422 invalid` when empty. Stored like workspace blobs (encrypted at rest), kept **90 days** after the upload, then deleted (`404`). Readable only by this phone (`GET /v1/phone/blobs/<id>`) and by the workspace a text of this phone names it in (`GET /v1/blobs/<id>`). A retried upload makes a new blob; an unused one simply expires |
+| POST | `/v1/phone/blobs` | Body = the raw bytes, any `Content-Type` (image/jpeg, image/png, image/heic, application/pdf, audio/m4a, text/plain, application/octet-stream, …), max 25 MB | `201 {blob_id, size, sha256}`. `413 too_large` over 25 MB, `422 invalid` when empty. Stored like workspace blobs (encrypted at rest), kept **90 days** after the upload, then deleted (`404`). Readable only by this phone (`GET /v1/phone/blobs/<id>`) and by the workspace a text of this phone names it in (`GET /v1/blobs/<id>`). A retried upload makes a new blob; an unused one simply expires. The `Content-Type` is not stored or checked: every blob is served as `application/octet-stream`. No upload rate limit or storage cap in v3 besides the 25 MB per blob |
 | GET | `/v1/phone/blobs/<blob_id>` | – | raw bytes (`application/octet-stream`) of a proof file a workspace on the phone's list named in a `body.ticket_view` attachment of a text it sent to this phone or to `phones` (the same filter as `/v1/phone/messages`), or of a blob this phone uploaded; anything else, an unknown id included, answers `404` |
 | POST | `/v1/phone/answer` | `{question_message_id, answer, client_id}` | `201 {id, client_id}`. The relay builds the `answer` message (`from: ph_…`, `answered_by: human:<phone name>`, `body.client_id`, routed as above). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}` with the first answer's id (checked before the 409, so a retry of the winning answer is not a conflict). First answer wins; later answers from any phone → `409 already_answered` |
 | POST | `/v1/phone/send` | `{to: ws_…, client_id, text?, ticket?, general?, reply_to?, attachments?, voice?, location?, feedback?}` (phone-api.schema.json `send_request`) | `201 {id, client_id}`. A `text` message from the phone, built by the relay (see Phone app v3). `to` must be on the phone's list (`403 not_allowed`). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}`, no second message (the relay does not compare the content) |
 | POST | `/v1/phone/transcribe` | Body = the audio bytes, `Content-Type: audio/m4a` (also `audio/wav`, `audio/webm`), max 10 MB / 2 min, optional `?language=de` (`de`, `en`, `de-CH`, …; else the language is detected, or `de-CH` when the phone's `swiss_german` setting is on: Deepgram nova-3 with `language=de-CH`) | `200 {text, language, duration}` (`duration` in seconds). `503 transcription_off` when the admin set no Deepgram key (the app then uses on-device speech), `502 transcription_failed` when Deepgram fails or is unreachable, `429 rate_limited` after 30 calls a minute per phone, `413 too_large`, `422 invalid` (type, empty, language) |
 | POST | `/v1/phone/signout` | – | `204`. Deletes the token and the push registration; the old token gets `401` from now on |
-| GET | `/v1/phone/speech/<message_id>` | optional `?lang=de\|en` | `200` `audio/mpeg`: the text read aloud (see Speech). `404` unless the message is a text to this phone or to `phones` from a workspace on its list (the `/v1/phone/messages` filter) **and** (it has `body.speak` and the phone's `speak` setting is not `never`, or the setting is `always`). `402 tts_cap_reached`, `503 tts_off`, `502 tts_failed` |
+| GET | `/v1/phone/speech/<message_id>` | optional `?lang=de\|en` | `200` `audio/mpeg`: the text read aloud (see Speech). `404` unless the message is a text to this phone or to `phones` from a workspace on its list (the `/v1/phone/messages` filter) **and** (it has `body.speak` and the phone's `speak` setting is not `never`, or the setting is `always`). Empty spoken text → `404`. `?lang` other than `de`/`en` → `422 invalid`. `402 tts_cap_reached`, `503 tts_off`, `502 tts_failed` |
 | GET | `/v1/phone/settings` | – | `{speak, swiss_german, tts_cap_usd, tts_used_usd_month}`. Defaults: `auto`, `false`, `10`. `tts_used_usd_month` = read-aloud cost of this phone in the current calendar month (UTC) |
-| PATCH | `/v1/phone/settings` | `{speak?: auto\|always\|never, swiss_german?: bool, tts_cap_usd?: 0..100}` (at least one) | `200` the settings as for GET. Other fields or values → `422 invalid` |
+| PATCH | `/v1/phone/settings` | `{speak?: auto\|always\|never, swiss_german?: bool, tts_cap_usd?: 0..100}` (at least one) | `200` the settings as for GET. A bad value → `422 invalid`; unknown fields are ignored (common.md) |
 | POST | `/v1/phone/invitations/redeem` | `{code}` (phone auth) | `200 {workspaces: [{id, name}]}` = the invitation's workspaces, now all on this phone's list (ones already there stay). The code comes from the same `orch://pair?relay=…&code=pc_…` link or QR as pairing and works once: unknown → `404 not_found`, used or expired → `410 gone`. The phone entry the admin made with that invitation is removed (it was never paired); the added workspaces get a refresh-hint. At most 10 calls a minute per phone, else `429 rate_limited` |
 
 ## Phone app v3 (messenger)
 
 Shapes: `phone-api.schema.json` (requests and responses), `message.schema.json` (the stored text). Test vector:
 `vectors/phone-v3-v1.json`. Every phone write carries a `client_id` (a UUID the phone keeps for that message on every
-retry); the relay dedupes on (phone, `client_id`) for as long as it keeps the message.
+retry). One namespace per phone across `send` and `answer`: a `client_id` this phone already used on either route answers
+`200 {id, client_id, duplicate: true}` with the stored message's id, whatever the new body says (nothing is compared or
+stored), for as long as the relay keeps that message. Rate limits in v3: only redeem (10 a minute per phone) and transcribe
+(30 a minute); there is no send or upload rate limit and no storage cap besides 25 MB per blob.
 
 **Send → stored text.** The relay builds a `text` message `from: ph_…`, `to` from the request, `ticket` and `reply_to` when
 set (not null), and `body` = `{client_id, general: true (only when sent true), text, attachments, voice, location, feedback}`
@@ -84,21 +87,24 @@ upload of this phone (else `404 not_found`), and an attachment's `size` must equ
 
 | Request | Means |
 |---|---|
-| `general: true` | The workspace's **General** conversation: no ticket. The workspace answers in General with texts that carry `body.general: true` and no `ticket`. |
+| `general: true` | The workspace's **General** conversation: no ticket. |
 | no `ticket`, no `general` | **New topic**: the workspace starts a ticket for it and acks it (below). |
 | `ticket` | A message in that topic. |
-| `attachments` | `[{blob_id, kind: image\|file\|voice, name, size, mime, duration?}]`, 1–10 phone uploads. Photos are JPEG, at most 2048 px, without location data (the phone does this). |
+| `attachments` | `[{blob_id, kind: image\|file\|voice, name, size, mime, duration?}]`, 1–10 phone uploads. Photos are JPEG, at most 2048 px, without location data (the phone does this). `kind`, `name` and `mime` are what the phone says, not checked by the relay: the workspace must not trust them (look at the bytes) and must clean `name` before using it as a file name (no `/` or `\`, no leading dots, no control characters). |
 | `voice` | A voice memo: `{blob_id, transcript, lang, lang_source: detected\|setting\|corrected}`. The agent works from `transcript` (empty when nothing could be transcribed). |
 | `location` | `{lat, lon, label?, accuracy_m?}`, sent once. |
 | `feedback` | On one artifact revision of the ticket: `{artifact_id, artifact_rev, verdict: approve\|changes, pins: [{n, anchor, text?, voice_blob_id?, transcript?}]}`. `approve` = "Looks good" (pins may be empty), `changes` = at least one pin; a pin has `text` and/or `voice_blob_id`. Anchors: `html` {selector and/or quote, offset (scroll px), viewport_w}, `pdf` {page, x, y}, `image` {x, y}; x/y are fractions 0..1 from the top-left. Feedback is never an approval to publish (that is always a question answer). |
 
-**General vs topics on the phone.** `/v1/phone/messages` lists every text both ways. A text with `ticket` belongs to that
-topic; a text without `ticket` belongs to General (workspace replies there carry `general: true`). The phone's own
-new-topic text has neither until the workspace's ack names its ticket.
+**General vs topics (one rule).** `/v1/phone/messages` lists every text both ways; the relay never rewrites a stored text.
+- **Workspace texts:** `ticket` set = that topic; otherwise (`general: true`, or no `ticket` and no `general`) = General.
+  Workspaces should set `general: true` on General texts; an update in General must (schema).
+- **The phone's own texts:** `general: true` = General; `ticket` = that topic; neither = a **pending new topic** until a
+  workspace ack with `reply_to` = its id names the ticket (then the phone shows it in that topic).
 
 **Receipts.** ✓ = the relay stored it (`201`/`200`). ✓✓ = `delivered_at` is set (the workspace acked it from its inbox).
 **Started** = a workspace text with `body.update.kind` `ack` or `working` and `reply_to` = the phone text's id. The
-workspace **must** set `reply_to` on the ack (and on `working`) for a phone text; the ack of a new topic carries the new
+workspace **must** set `reply_to` on the ack (and on `working`) for a phone text; for topic updates the relay does not
+check it (older acks without `reply_to` stay valid), in General the schema does; the ack of a new topic carries the new
 `ticket` and its `key`, which moves the phone's text into that topic. **In General** the same receipts work without a
 ticket: a workspace text with `body.general: true`, no `ticket`, `reply_to` = the phone's General text and `body.update.kind`
 `ack` or `working` (only those two; no `title` needed, no `ticket_view`). These are stored and listed in
@@ -108,9 +114,10 @@ ticket: a workspace text with `body.general: true`, no `ticket`, `reply_to` = th
 `body.speak = {lang: de|en, summary?: ≤ 600}`. Spoken text = `summary` if set, else `text`; URLs become "link", `*`, `` ` `` and
 `#` are dropped, whitespace runs become one space; over 900 characters (≈ 60 s) it is cut after the last `.`, `!` or `?`
 followed by a space within the first 900, else at the last space, else at 900 (`speech_text` in the vector). Language =
-`?lang` if given, else `speak.lang`, else `en`; voice `de` → `aura-2-julius-de`, `en` → `aura-2-thalia-en` (Deepgram Aura-2,
+`?lang` if given (`de` or `en`, else `422 invalid`), else `speak.lang`, else `en`; voice `de` → `aura-2-julius-de`, `en` → `aura-2-thalia-en` (Deepgram Aura-2,
 the relay's one Deepgram key, `/admin/api/voice`). The relay makes the audio on the first request and caches it per
-(message, language); cached audio is served free and always, even over the cap. Cost = USD 0.030 per 1,000 characters
+(message, language); cached audio is served free and always, even over the cap. Another language for the same message is
+a new, paid generation and counts against the cap. An empty spoken text (nothing left after cleaning) → `404`. Cost = USD 0.030 per 1,000 characters
 spoken, counted per phone and calendar month (UTC) when audio is made. If `tts_used_usd_month` + this cost would pass the
 phone's `tts_cap_usd` → `402 tts_cap_reached` (cap 0 = never make new audio). No Deepgram key → `503 tts_off`; Deepgram
 failing → `502 tts_failed`. The phone then uses its own voice.
@@ -121,8 +128,12 @@ marked `speak`, `always` = on every workspace text, `never` = none), `swiss_germ
 
 **Artifacts** (`body.ticket_view.attachments`, message.schema.json): kinds `image`, `file` (blobs) and `link`, `html`
 (a published page or app), `pr`, `commit` (url kinds; a PR's state in `status`). `id` = `a_` + the first 12 hex
-characters of sha256(`"<evidence type>\n<ref>"`, or `"link\n<url>"` for ticket links) stays the same across revisions;
+characters of sha256(`"<evidence type>\n<ref>"` (UTF-8), where `<evidence type>` is the ticket evidence `type`:
+`pr`, `commit`, `file`, `url`, `command` or `note` (ticket.schema.json), and `<ref>` its `ref`; or `"link\n<url>"` for
+ticket links) stays the same across revisions (section `artifact_ids` of `vectors/phone-v3-v1.json`);
 `rev` names the revision (blob sha256, commit sha, publish id or deploy rev). Feedback points at (`id`, `rev`).
+ticket.schema.json is unchanged: the phone attachments are made from evidence and links at send time, `id` is derived
+from (type, ref) and `rev` from the content (blob sha256, commit sha, publish id), so nothing new needs storing.
 
 **Questions** (`body` of a `question`): optional `previews: {"<option>": "<attachment id>"}` (A/B choices, approve with a
 preview) and, for permission questions (options `Once` / `Always` / `No`), optional `scope` (shown as "Always allow
