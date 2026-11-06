@@ -822,7 +822,15 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
         raise Refused(f"Say which ticket: orch {name} act refresh -- <ticket>")
     tid = tickets.resolve(root, rest[0])
     by = tickets.current_actor(argv[argv.index("--by") + 1] if "--by" in argv[:-1] else None)
-    r = subprocess.run(cmd, cwd=root, env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8")
+    act = discover()[name]["acts"]["refresh"]
+    if act["who"] == "people" and not by.startswith("human:"):
+        raise Refused(
+            f"Only a person runs the {name} refresh. Ask the user to click Refresh on the ticket page."
+        )
+    # stderr stays out of the answer (a chatty add-on must not break --json)
+    r = subprocess.run(
+        cmd, cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8"
+    )
     if r.returncode != 0:
         sys.stdout.write(r.stdout)
         return r.returncode
@@ -832,6 +840,13 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
         raise Refused(f"The {name} add-on answered something orch cannot read.") from None
     if isinstance(out, dict) and out.get("ticket") and tickets.resolve(root, str(out["ticket"])) != tid:
         raise Refused(f"The {name} add-on answered for another ticket.")
+    writes = act["writes"] or ["links", f"ext.{name}"]  # what the manifest says the refresh may change
+    if isinstance(out, dict):
+        out = {
+            **out,
+            "links": out.get("links") if "links" in writes else [],
+            "ext": out.get("ext") if f"ext.{name}" in writes else {},
+        }
     t, changes = tickets.merge_refresh(root, tid, name, out, by, active_ext_schema(root, name))
     say = out.get("say") if isinstance(out.get("say"), str) else ""
     say = links.one_line(say, 300)

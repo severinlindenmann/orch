@@ -10,6 +10,7 @@ and `x-hidden` of the schema are used here.
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import date
 
@@ -71,10 +72,14 @@ def parse_value(f: dict, raw: str, schema_prop: dict):
         return None
     name = f["title"]
     if f["type"] == "number":
-        try:
-            n = float(v.replace("’", "").replace("'", "").replace(",", ""))
+        try:  # ’ and ' group thousands; a comma is refused (2,5 could be 2.5 or 25)
+            if "," in v:
+                raise ValueError
+            n = float(v.replace("’", "").replace("'", ""))
+            if not math.isfinite(n):
+                raise ValueError
         except ValueError:
-            raise Refused(f"{name} must be a number.") from None
+            raise Refused(f"{name} must be a number, e.g. 2400 or 2.5.") from None
         if schema_prop.get("type") == "integer" or n.is_integer():
             if schema_prop.get("type") == "integer" and not n.is_integer():
                 raise Refused(f"{name} must be a whole number.")
