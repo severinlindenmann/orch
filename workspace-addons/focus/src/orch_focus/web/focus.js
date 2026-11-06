@@ -184,9 +184,24 @@
       ...hs.map(x => h('div', {class: 'fx-helper'}, h('div', {class: 'row'}, h('span', {class: 'dot working'}), h('span', {class: 'grow', text: x.text})))))] : []));
   }
 
+  // The ticket lines orch writes itself, in the same plain words as the CLI and the dashboard.
+  const STATUS_WORD = {open: 'Open', active: 'Doing', waiting: 'Waiting', done: 'Done', dropped: 'Dropped'};
+  function plainLine(text, checklist) {
+    const task = id => { const c = (checklist || []).find(x => x.id === id); return c && c.text ? ': ' + c.text : ''; };
+    const addon = k => k.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase());
+    let m;
+    if ((m = /^Added check (c\d+)$/.exec(text))) return 'Added a task' + task(m[1]);
+    if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a task' + task(m[1]);
+    if (/^Asked q\d+, waiting$/.test(text)) return 'Asked a question';
+    if ((m = /^Answered q\d+: ([\s\S]*)$/.exec(text))) return 'Answered a question: ' + m[1];
+    if ((m = /^Status \w+ -> (\w+)$/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
+    if ((m = /^Set ext\.([a-z][a-z0-9-]*)$/.exec(text))) return 'Updated ' + addon(m[1]) + ' settings';
+    return text;
+  }
+
   function feedItems(v) {
     const items = [];
-    for (const e of v.ticket.history || []) items.push({at: e.at, icon: /Asked|waiting/.test(e.text) ? 'note' : (/done/.test(e.text) ? 'check' : 'text'), ok: /done/.test(e.text), text: e.text, who: e.by, you: /^human:/.test(e.by || '') && e.via !== 'cli'});
+    for (const e of v.ticket.history || []) items.push({at: e.at, icon: /Asked|waiting/.test(e.text) ? 'note' : (/done/.test(e.text) ? 'check' : 'text'), ok: /done/.test(e.text), text: plainLine(String(e.text || ''), v.ticket.checklist), who: e.by, you: /^human:/.test(e.by || '') && e.via !== 'cli'});
     for (const e of v.events) {
       if (e.kind === 'tool.start') items.push({at: e.at, icon: 'text', text: e.text});
       else if (e.kind === 'tool.end') items.push({at: e.at, icon: e.data.ok === false ? 'x' : 'check', ok: e.data.ok !== false, text: e.text});
