@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+WINDOWS = os.name == "nt"
 
 
 def run_dir(root: Path, name: str) -> Path:
@@ -22,10 +23,89 @@ def run_dir(root: Path, name: str) -> Path:
         if p.is_symlink():
             raise RuntimeError(f"{p} is a symbolic link; orch does not use it. Remove it and try again.")
         if p is not orch:
-            p.mkdir(mode=0o700, exist_ok=True)
+            mkdir_private(p)
         if not p.is_dir():
             raise RuntimeError(f"{p} is not a folder.")
     return d
+
+
+def user_sid() -> str | None:
+    """The SID string of the user this process runs as (Windows, from the process token); None elsewhere."""
+    if not WINDOWS:
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    k, adv = ctypes.WinDLL("kernel32"), ctypes.WinDLL("advapi32")
+    k.GetCurrentProcess.restype = ctypes.c_void_p
+    k.LocalFree.argtypes = (ctypes.c_void_p,)
+    k.CloseHandle.argtypes = (ctypes.c_void_p,)
+    adv.OpenProcessToken.argtypes = (ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p))
+    adv.GetTokenInformation.argtypes = (
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    )
+    adv.ConvertSidToStringSidW.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p))
+    tok = ctypes.c_void_p()
+    if not adv.OpenProcessToken(k.GetCurrentProcess(), 0x8, ctypes.byref(tok)):  # TOKEN_QUERY
+        return None
+    try:
+        n = wintypes.DWORD()
+        adv.GetTokenInformation(
+            tok, 1, None, 0, ctypes.byref(n)
+        )  # 1 = TokenUser; the first call gives the size
+        buf = ctypes.create_string_buffer(n.value)
+        if not adv.GetTokenInformation(tok, 1, buf, n, ctypes.byref(n)):
+            return None
+        sid = ctypes.c_void_p.from_buffer(buf).value  # TOKEN_USER starts with the SID pointer
+        out = ctypes.c_void_p()
+        if not sid or not adv.ConvertSidToStringSidW(sid, ctypes.byref(out)):
+            return None
+        try:
+            return ctypes.wstring_at(out.value)
+        finally:
+            k.LocalFree(out)
+    finally:
+        k.CloseHandle(tok)
+
+
+def grant_user(d: Path) -> None:
+    """Windows: mkdir(mode=0o700) gives only OWNER RIGHTS, SYSTEM and Administrators. A folder made by an elevated
+    process is owned by Administrators, so the same user without elevation is locked out. Also grant the current
+    user (inheritable); nobody else (not Users, not Everyone). Best effort: a standard user does not need it."""
+    sid = user_sid()
+    if not sid:
+        return
+    icacls = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "icacls.exe"
+    try:
+        subprocess.run(
+            [str(icacls), str(d), "/grant", f"*{sid}:(OI)(CI)F"], capture_output=True, timeout=20, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def mkdir_private(p: Path) -> bool:
+    """Create p as 0700 when it is missing; True only when this call created it (an existing folder is not touched)."""
+    try:
+        p.mkdir(mode=0o700)
+    except FileExistsError:
+        return False
+    if WINDOWS:
+        grant_user(p)
+    return True
+
+
+def _denied(p: Path, e: PermissionError) -> RuntimeError:
+    if not WINDOWS:
+        return RuntimeError(f"{p.parent} is not writable: {e}")
+    return RuntimeError(
+        f"{p.parent} was made by orch running as administrator. Run the same command once in an administrator "
+        f"window, or delete the .orch\\run\\{p.parent.name} folder there."
+    )
 
 
 def read_json(p: Path) -> dict | None:
@@ -48,7 +128,10 @@ def read_json(p: Path) -> dict | None:
 
 def write_json(p: Path, data: dict) -> None:
     """Atomic write: a new file in the same folder, then rename over p (a symlink at p is replaced, never followed)."""
-    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
+    try:
+        fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
+    except PermissionError as e:
+        raise _denied(p, e) from e
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f)
     os.replace(tmp, p)
@@ -58,7 +141,10 @@ def open_append(p: Path):
     """Append to a log file; refuses a symlink."""
     if p.is_symlink():
         raise RuntimeError(f"{p} is a symbolic link; orch does not write to it.")
-    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND | NOFOLLOW, 0o600)
+    try:
+        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND | NOFOLLOW, 0o600)
+    except PermissionError as e:
+        raise _denied(p, e) from e
     return os.fdopen(fd, "a", encoding="utf-8")
 
 
