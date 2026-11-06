@@ -57,6 +57,15 @@ def alive(rec: dict, now: float | None = None) -> bool:
     return seen is not None and now - seen <= STALE_SECONDS
 
 
+def _is_general(root: Path, tid: str) -> bool:
+    """The hidden General ticket of the phone conversation is not shown in Focus."""
+    try:
+        t = json.loads((Path(root) / ".orch" / "tickets" / f"{tid}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(t, dict) and t.get("general") is True
+
+
 def records(root: Path) -> list[dict]:
     """The claim records of runs that are alive here (a bad, big or linked file is skipped)."""
     d = Path(root) / ".orch" / "run" / "tickets"
@@ -77,6 +86,7 @@ def records(root: Path) -> list[dict]:
             and rec.get("ticket") == f.stem
             and isinstance(rec.get("run"), str)
             and alive(rec)
+            and not _is_general(root, f.stem)
         ):
             out.append(rec)
     return out

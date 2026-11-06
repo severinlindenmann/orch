@@ -330,17 +330,59 @@ def save(root: Path, ticket: dict) -> None:
         _write(root, ticket)
 
 
-def list_all(root: Path) -> list[dict]:
+def list_all(root: Path, include_general: bool = False) -> list[dict]:
+    """Every ticket by creation time. The hidden General ticket of the phone conversation (flag
+    `general: true`) is left out unless include_general: it is not a ticket anyone lists, counts or closes."""
     d = tickets_dir(root)
     out = []
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
-                out.append(json.loads(p.read_text(encoding="utf-8")))
+                t = json.loads(p.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
+            if include_general or not (isinstance(t, dict) and t.get("general") is True):
+                out.append(t)
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
+
+
+def is_general(root: Path, tid: str) -> bool:
+    """True for the hidden General ticket (reads one file; a missing or unreadable ticket is not General)."""
+    try:
+        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("general") is True
+    except (OSError, ValueError, Refused, AttributeError):
+        return False
+
+
+def general_id(root: Path) -> str | None:
+    """The id of this workspace's hidden General ticket, or None before the first General text."""
+    for t in list_all(root, include_general=True):
+        if isinstance(t, dict) and t.get("general") is True:
+            return t["id"]
+    return None
+
+
+def ensure_general(root: Path, by: str) -> str:
+    """The General ticket (flag general: true, no display key so no number is used up), made once."""
+    if tid := general_id(root):
+        return tid
+    t = now()
+    ticket = {
+        "schema": "orch.ticket/1",
+        "id": new_id(root),
+        "title": "General",
+        "general": True,
+        "status": "open",
+        "created_at": t,
+        "updated_at": t,
+        "checklist": [],
+        "links": [],
+        "questions": [],
+        "history": [{"at": t, "by": by, "via": "cli", "text": "Created"}],
+    }
+    save(root, ticket)
+    return ticket["id"]
 
 
 _FIELD_WORDS = {
@@ -1340,6 +1382,22 @@ def artifacts_path(root: Path, tid: str) -> Path:
     """.orch/tickets/<id>/artifacts/ : where the files a ticket produces go (next to evidence/)."""
     load(root, tid)
     return tickets_dir(root) / tid / "artifacts"
+
+
+def files_dir(root: Path, tid: str) -> Path:
+    """.orch/tickets/<id>/files/ : files people send to the ticket (from the phone), created. A link anywhere
+    on the way is refused."""
+    load(root, tid)
+    cur = root / ".orch"
+    for part in ("tickets", tid, "files"):
+        cur = cur / part
+        if cur.is_symlink():
+            raise Refused("The files folder of this ticket is a link. orch will not use it.")
+        if cur.exists() and not cur.is_dir():
+            raise Refused("The files folder of this ticket is blocked by a file. Move that file away.")
+        if not cur.exists():
+            cur.mkdir()
+    return cur
 
 
 def artifacts_dir(root: Path, tid: str) -> Path:
