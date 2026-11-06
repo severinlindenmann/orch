@@ -32,7 +32,7 @@ def find_workspace(start: Path) -> Path | None:
 def local_text(at: str | None) -> str | None:
     """A UTC time as the computer's local time with its zone: "Fri 07 Nov 09:00 CET"."""
     try:
-        return datetime.fromisoformat(at.replace("Z", "+00:00")).astimezone().strftime("%a %d %b %H:%M %Z") if at else None
+        return datetime.fromisoformat(at).astimezone().strftime("%a %d %b %H:%M %Z") if at else None
     except (ValueError, AttributeError):
         return None
 

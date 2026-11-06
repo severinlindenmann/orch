@@ -179,10 +179,14 @@ def _status(args, root: Path) -> None:
     st = runs.state(rec)
     data = {"ticket": tid, "running": st == "alive", "state": st, "pending": waiting, "claim": rec}
     if st == "dead":
-        text = f"The earlier run on {_name(root, tid)} ended without finishing. Start it again: orch run start {tid}"
+        text = (
+            f"The earlier run on {_name(root, tid)} ended without finishing. "
+            f"Start it again: orch run start {tid}"
+        )
     elif st == "maybe-stale":
         text = (
-            f"{_holder_line(rec, tid, root)} Nobody has written to the ticket for a while, so it may be stuck. "
+            f"{_holder_line(rec, tid, root)} Nobody has written to the ticket for a while, "
+            "so it may be stuck. "
             f"Take it over: orch run start {tid} --take-over"
         )
     else:

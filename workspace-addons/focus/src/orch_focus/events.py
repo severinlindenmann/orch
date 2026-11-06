@@ -164,7 +164,9 @@ class EventLog:
         return out, since + end
 
 
-NOISE = re.compile(r"^\s*(New on t_[a-z0-9]+ since you looked|Base directory for this skill|---\s*name:)", re.I)
+NOISE = re.compile(
+    r"^\s*(New on t_[a-z0-9]+ since you looked|Base directory for this skill|---\s*name:)", re.IGNORECASE
+)
 
 
 def for_display(events: list[dict]) -> list[dict]:

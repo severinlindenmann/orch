@@ -326,7 +326,7 @@ def test_a_continued_conversation_counts_as_used_now(proj, run, tmp_path, monkey
 
 
 def test_a_stop_we_asked_for_is_not_logged_as_an_error(proj, run, tmp_path, monkeypatch):
-    """Windows has no SIGTERM handler: the agent ends with a non-zero code after `orch run stop`; that is a normal end."""
+    """Windows has no SIGTERM handler: a non-zero end after `orch run stop` is a normal end."""
     d = tmp_path / "clbin"
     d.mkdir()
     f = d / "claude"
