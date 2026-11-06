@@ -18,6 +18,7 @@ import json
 import re
 import time
 import urllib.parse
+from datetime import datetime
 from pathlib import Path
 
 from orch import links, net, runs, safefile, tickets
@@ -286,6 +287,10 @@ def remember(root: Path, tid: str, to: str) -> None:
     except (Refused, ValueError, KeyError, OSError):
         return
     state["tickets"][tid] = {"to": to, "sig": sig, "at": time.time()}
+    if to.startswith("ph_"):  # this phone has a chat for the ticket now: sync_open skips it
+        state.setdefault("synced", {}).setdefault(to, [])
+        if tid not in state["synced"][to]:
+            state["synced"][to].append(tid)
     save_state(root, state)
 
 
@@ -308,4 +313,54 @@ def sync(root: Path, now: float | None = None) -> list[str]:
         with contextlib.suppress(Refused):
             relay.send_text(root, rec["to"], f"Tasks: {done} of {total} done", tid, "note", view=True)
             sent.append(tid)
+    return sent
+
+
+NEW_TEXT = "Ticket on your workspace"
+OPEN_MAX = 20  # open tickets the phone gets a chat for (newest first)
+DONE_HOURS = 24  # a finished ticket stays on the phone this long
+
+
+def _is_recent(ticket: dict, now: float) -> bool:
+    if ticket.get("status") not in ("done", "dropped"):
+        return True
+    try:
+        at = datetime.fromisoformat(str(ticket.get("updated_at"))).timestamp()
+    except ValueError:
+        return False
+    return now - at <= DONE_HOURS * 3600
+
+
+def sync_open(root: Path, now: float | None = None) -> list[str]:
+    """Every open ticket (and a done one for 24 h) gets a chat on every paired phone: one quiet note with
+    the snapshot (kind note, never pushed), at most OPEN_MAX, newest first, once per ticket and phone.
+    It goes to the phone's own address: a note to "phones" is only shown to phones that were paired when
+    it was sent, so a phone paired later would never see the old tickets. Returns the ticket ids sent."""
+    from orch import relay
+
+    now = time.time() if now is None else now
+    phones = [
+        p["id"] for p in relay._read_dir(root).get("phones", []) if str(p.get("id", "")).startswith("ph_")
+    ]
+    if not phones:
+        return []
+    state = load_state(root)
+    done_for = state.setdefault("synced", {})
+    open_ = [t for t in tickets.list_all(root) if _is_recent(t, now)]
+    open_.sort(key=lambda t: str(t.get("created_at", "")), reverse=True)
+    sent: list[str] = []
+    for ph in phones:
+        have = set(done_for.get(ph, []))
+        for t in [t for t in open_[:OPEN_MAX] if t["id"] not in have]:
+            done, total = tickets.checks_done(t)
+            text = f"Tasks: {done} of {total} done" if total else NEW_TEXT
+            try:
+                relay.send_text(root, ph, text, t["id"], "note", view=True)
+            except Refused:
+                break  # the relay is away or refuses this phone: the next pull tries again
+            have.add(t["id"])
+            done_for[ph] = sorted(have)
+            save_state(root, {**load_state(root), "synced": done_for})
+            if t["id"] not in sent:
+                sent.append(t["id"])
     return sent

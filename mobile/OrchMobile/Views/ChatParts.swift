@@ -238,20 +238,61 @@ struct BlobImage: View {
     }
 }
 
+/// The mic of every composer: tap to record, tap to stop, the transcript lands in the text field to edit before Send.
+/// `autoMic` (a setting) starts recording when the composer opens. Wording and labels as the old Send screen had them.
+@MainActor struct MicInput {
+    var voice: VoiceInput?
+    var recording: Bool { voice?.isRecording == true }
+    var transcribing: Bool { voice?.isTranscribing == true }
+    var busy: Bool { recording || transcribing }
+    var label: String { recording ? "Recording your voice… tap to stop" : transcribing ? "Writing it down…" : "Tap to speak" }
+
+    static func make(_ model: AppModel) -> VoiceInput { VoiceInput(mode: model.voiceMode, transcribe: { try await model.transcribe($0) }) }
+}
+
+struct MicButton: View {
+    let voice: VoiceInput?
+    @Binding var text: String
+    var disabled = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var toggling = false
+
+    var body: some View {
+        let m = MicInput(voice: voice)
+        Button {
+            toggling = true
+            Task { await voice?.toggle(current: text); toggling = false }
+        } label: {
+            Image(systemName: m.recording ? "stop.fill" : "mic.fill").font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(m.recording ? Theme.danger : Theme.brand)
+                .frame(width: 44, height: 44)
+                .background((m.recording ? Theme.danger : Theme.brand).opacity(0.1), in: Circle())
+                .overlay(Circle().stroke((m.recording ? Theme.danger : Theme.brand).opacity(m.recording ? 0.7 : 0.3), lineWidth: m.recording ? 2 : 1))
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: m.recording)
+        }.buttonStyle(.plain).accessibilityIdentifier("mic").accessibilityLabel(m.label)
+            .disabled(voice == nil || toggling || m.transcribing || disabled)
+    }
+}
+
 /// Text field + send. The note under it says what happens to the text.
 struct Composer: View {
+    @Environment(AppModel.self) private var model
     let placeholder: String
     let note: String
     var onSend: (String) async -> Bool
     @State private var text = ""
     @State private var sending = false
+    @State private var voice: VoiceInput?
     @FocusState private var focused: Bool
 
     var body: some View {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mic = MicInput(voice: voice)
         VStack(spacing: 6) {
             HStack(alignment: .bottom, spacing: 8) {
-                TextField(placeholder, text: $text, axis: .vertical).lineLimit(1...5).focused($focused).themeFont(15)
+                MicButton(voice: voice, text: $text, disabled: sending)
+                TextField(mic.recording ? "Recording your voice…" : mic.transcribing ? "Writing it down…" : placeholder, text: $text, axis: .vertical)
+                    .lineLimit(1...5).focused($focused).themeFont(15).disabled(mic.busy || sending)
                     .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44)
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22)).overlay(RoundedRectangle(cornerRadius: 22).stroke(Theme.borderStrong))
                     .accessibilityIdentifier("composer-field")
@@ -261,10 +302,20 @@ struct Composer: View {
                 } label: {
                     Image(systemName: "arrow.up").font(.system(size: 17, weight: .bold)).foregroundStyle(clean.isEmpty ? Theme.muted : Theme.onBrand)
                         .frame(width: 44, height: 44).background(clean.isEmpty ? Theme.surface3 : Theme.brand, in: Circle())
-                }.disabled(clean.isEmpty || sending).accessibilityLabel("Send").accessibilityIdentifier("composer-send")
+                }.disabled(clean.isEmpty || sending || mic.busy).accessibilityLabel("Send").accessibilityIdentifier("composer-send")
+            }
+            if mic.busy || voice?.error != nil {
+                Text(voice?.error ?? mic.label).themeFont(11, .medium).foregroundStyle(voice?.error != nil ? Theme.danger : Theme.muted)
+                    .accessibilityIdentifier("mic-status")
             }
             Text(note).themeFont(11).foregroundStyle(Theme.muted).accessibilityIdentifier("composer-note")
         }.padding(.horizontal, 14).padding(.vertical, 8).background(Theme.bg)
+            .task {
+                if voice == nil { voice = MicInput.make(model) }
+                if UserDefaults.standard.bool(forKey: "autoMic") { await voice?.toggle(current: text) }
+            }
+            .onChange(of: voice?.transcript) { _, t in if let t { text = t } }   // a final transcript can arrive as recording stops
+            .onDisappear { voice?.stop() }
     }
 }
 

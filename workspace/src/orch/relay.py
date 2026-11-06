@@ -899,11 +899,12 @@ def _allow_history(root: Path, msg: dict) -> str | None:
     return None
 
 
-def _sync_phone_views(root: Path) -> None:
+def sync_phone_views(root: Path) -> None:
     """Best effort: task changes of tickets the phone follows go out quietly (phone_view.sync)."""
     from orch import phone_view
 
     with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
+        phone_view.sync_open(root)
         phone_view.sync(root)
 
 
@@ -911,7 +912,7 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
     """Pull, save, journal, ack, then handle the ones not seen. Returns [{message, note, allowed}]."""
     with contextlib.suppress(Refused):
         apply_allow_answers(root)
-    _sync_phone_views(root)
+    sync_phone_views(root)
     _, arrival = _pull(root, wait)
     d = root / ".orch" / "inbox"
     pending = []
@@ -974,7 +975,7 @@ def since(root: Path, seq: int, wait: int = 0) -> dict:
     warning = None
     with contextlib.suppress(Refused):
         apply_allow_answers(root)
-    _sync_phone_views(root)
+    sync_phone_views(root)
     try:
         _pull(root, 0 if [e for e in _read_arrivals(root) if e["seq"] > seq] else wait)
     except Refused as e:  # best effort: the journal on disk is still true
@@ -1198,6 +1199,7 @@ def refresh(root: Path) -> str:
     finally:
         shutil.rmtree(stage, ignore_errors=True)
     skillrender.refresh_skills(root)
+    sync_phone_views(root)
     with locked(root):  # the refresh-hints waiting in the inbox are handled now
         for f in (root / ".orch" / "inbox").glob("m_*.json"):
             m = net.read_json(f, None)
