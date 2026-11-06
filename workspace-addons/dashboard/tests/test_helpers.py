@@ -261,3 +261,14 @@ def test_phone_text_with_only_a_voice_or_a_thumbs_up_and_foreign_files():
     assert call("phoneParts", "Edited the title", tid) is None
     r = call("phoneParts", "From Ben: Location: 1.0, 2.0 - https://evil.example/x", tid)
     assert r["parts"] == [] and r["text"].startswith("Location")
+
+
+@node
+def test_pins_with_quotes_and_overflow_note_and_sound_and_failed_download():
+    tid = "t_abc123456"
+    text = "\n".join(["From Anna: hi", '  1. "say "no" now": fix it', "  2. page 3: wrong", "  (+3 more comments not shown)",
+                      f"Voice recording: .orch/tickets/{tid}/files/v.m4a", "File x.pdf: could not be downloaded."])
+    r = call("phoneParts", text, tid)
+    assert [p["type"] for p in r["parts"]] == ["pin", "pin", "sound", "note"]
+    assert r["parts"][0]["where"] == '"say "no" now"' and r["parts"][0]["said"] == "fix it"
+    assert r["parts"][1]["where"] == "page 3" and r["parts"][2]["name"] == "v.m4a"

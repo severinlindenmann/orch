@@ -149,12 +149,18 @@ class Handler(BaseHTTPRequestHandler):
             q = parse_qs(query, keep_blank_values=True)
             one = lambda k: (q.get(k) or [""])[0]
             code, body, ctype, extra = ticketfiles.read_file(self.root, one("t"), one("k"), one("n"), one("dl") == "1")
-            rng = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range") or "")
-            if code == 200 and rng and ctype.startswith("audio/") and body:  # Safari plays a sound only with byte ranges
-                a = int(rng.group(1)) if rng.group(1) else max(0, len(body) - int(rng.group(2) or 0))
-                b = min(int(rng.group(2)), len(body) - 1) if rng.group(1) and rng.group(2) else len(body) - 1
+            rng = re.fullmatch(r"bytes=(\d{0,15})-(\d{0,15})", self.headers.get("Range") or "")
+            if code == 200 and rng and ctype.startswith("audio/") and body and (rng.group(1) or rng.group(2)):  # Safari plays a sound only with byte ranges
+                size = len(body)
+                if rng.group(1):
+                    a = int(rng.group(1))
+                    b = min(int(rng.group(2)), size - 1) if rng.group(2) else size - 1
+                else:
+                    a, b = max(0, size - int(rng.group(2))), size - 1
+                if a >= size:
+                    return self._send(416, b"", "text/plain", {"Content-Range": f"bytes */{size}"})
                 if a <= b:
-                    return self._send(206, body[a:b + 1], ctype, {**extra, "Content-Range": f"bytes {a}-{b}/{len(body)}"}, csp="default-src 'none'; sandbox")
+                    return self._send(206, body[a:b + 1], ctype, {**extra, "Content-Range": f"bytes {a}-{b}/{size}"}, csp="default-src 'none'; sandbox")
             return self._send(code, body, ctype, {"Accept-Ranges": "bytes", **extra} if ctype.startswith("audio/") else extra, csp="default-src 'none'; img-src 'self'; sandbox")
         if path.startswith("/api/addon/"):  # only names that are active here and have a tab
             name = path[len("/api/addon/"):]

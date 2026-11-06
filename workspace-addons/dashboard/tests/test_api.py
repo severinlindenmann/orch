@@ -337,3 +337,12 @@ def test_malformed_ticket_data_never_breaks_the_artifact_marks():
           {"links": [5, {"url": "http://[bad"}, {"url": "https://ok.example/f/zz"}], "checklist": None}]
     add_artifact_marks(ts)
     assert ts[0]["art"] == {} and ts[1]["art"]["https://ok.example/f/zz"]["kind"] == "html"
+
+
+@pytest.mark.parametrize("rng,code", [("bytes=20-30", 416), ("bytes=-", 200), ("bytes=a-b", 200), ("bytes=5-2", 200),
+                                      ("bytes=0-99999999999999999999", 200), ("bytes=-3", 206), ("bytes=8-", 206)])
+def test_range_edge_cases_never_crash(art, rng, code):
+    r = _get(art, "/api/file?t=t_other000x&k=files&n=voice.m4a", {"Range": rng})
+    assert r[0] == code
+    if code == 416:
+        assert r[2]["Content-Range"] == "bytes */10"
