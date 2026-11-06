@@ -31,6 +31,7 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         DROP INDEX IF EXISTS msg_text_from;
         CREATE INDEX IF NOT EXISTS msg_type_to_from ON messages(type, to_addr, from_addr, seq);
         CREATE INDEX IF NOT EXISTS msg_type_from_to ON messages(type, from_addr, to_addr, seq);
+        CREATE TABLE IF NOT EXISTS view_blobs(blob_id TEXT NOT NULL, msg_id TEXT NOT NULL, PRIMARY KEY(blob_id, msg_id));
         CREATE TABLE IF NOT EXISTS blobs(id TEXT PRIMARY KEY, uploader TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, created_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS webhooks(id TEXT PRIMARY KEY, workspace TEXT NOT NULL, mode TEXT NOT NULL, ticket TEXT,
             token_hash TEXT NOT NULL, created_at INTEGER NOT NULL, last_call_at INTEGER, used INTEGER NOT NULL DEFAULT 0);
@@ -183,6 +184,21 @@ pub fn insert_message(
     } else {
         None
     };
+    // Blobs a text's ticket_view names: phones that got the text may read them (GET /v1/phone/blobs/<id>).
+    if msg["type"] == "text" {
+        for a in msg["body"]["ticket_view"]["attachments"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            if let Some(b) = a["blob_id"].as_str() {
+                c.execute(
+                    "INSERT OR IGNORE INTO view_blobs(blob_id,msg_id) VALUES(?1,?2)",
+                    params![b, id],
+                )?;
+            }
+        }
+    }
     c.execute(
         "INSERT INTO messages(id,from_addr,to_addr,type,created_at,ticket,reply_to,blob_id,digest,payload,stored_at)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
@@ -501,6 +517,10 @@ pub fn bump_and_hint(c: &Connection, key: &Key, ws: &[String]) -> rusqlite::Resu
 pub fn purge(c: &Connection, data_dir: &Path, at: i64) -> rusqlite::Result<(usize, usize)> {
     let cutoff = at - RETENTION_SECS;
     let m = c.execute("DELETE FROM messages WHERE stored_at<?1", [cutoff])?;
+    c.execute(
+        "DELETE FROM view_blobs WHERE msg_id NOT IN (SELECT id FROM messages)",
+        [],
+    )?;
     let mut st = c.prepare("SELECT id FROM blobs WHERE created_at<?1")?;
     let ids: Vec<String> = st
         .query_map([cutoff], |r| r.get(0))?
