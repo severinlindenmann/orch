@@ -1,9 +1,10 @@
 """Skills that say what is on (SK-02/SK-03).
 
-A skill source may hold `{{#fact}}...{{/fact}}` (shown when the fact is true) and `{{^fact}}...{{/fact}}` (shown when
-it is false) sections, and `{{description}}`. Facts are booleans and counts only: never a name, never text another
-workspace wrote. `refresh_skills(root)` renders every turned-on add-on that has such a skill and writes only what
-changed."""
+A skill source may hold `{{#fact}}...{{/fact}}` (shown when the fact is true) and
+`{{^fact}}...{{/fact}}` (shown when it is false) sections, and `{{description}}`. Facts are booleans
+only: never a name, never text another workspace wrote. `refresh_skills(root)` renders every
+turned-on add-on that has such a skill and writes only what changed.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ import tomllib
 from pathlib import Path
 
 from orch import skills
+from orch.errors import Refused
 
 _SEC = re.compile(r"\{\{([#^])(\w+)\}\}(.*?)\{\{/\2\}\}", re.S)
 _TAG = re.compile(r"\{\{[#^/]\w+\}\}")
@@ -45,9 +47,7 @@ def render(text: str, facts: dict[str, bool]) -> str:
             raise ValueError(f"unknown fact in skill text: {name}")
     text = _STANDALONE.sub(r"\1", text)  # a tag alone on its line leaves no blank line
     while True:
-        new = _SEC.sub(
-            lambda m: m.group(3) if bool(facts[m.group(2)]) == (m.group(1) == "#") else "", text
-        )
+        new = _SEC.sub(lambda m: m.group(3) if bool(facts[m.group(2)]) == (m.group(1) == "#") else "", text)
         if new == text:
             break
         text = new
@@ -145,18 +145,38 @@ def _current_block(root: Path, name: str) -> str | None:
     return m.group(0) if m else None
 
 
+def _safe_write(root: Path, dest: Path, text: str) -> None:
+    """Never through a link: each folder from .agents down must be a real folder, and the file is replaced
+    (a new file next to it, then rename), so a planted SKILL.md link is replaced, not followed."""
+    import os
+    import tempfile
+
+    skills.check_inside(root, dest)
+    for p in (root / ".agents", root / ".agents" / "skills", dest.parent):
+        if skills._is_link(p):
+            raise Refused(f"{p} is a link; orch will not write there. Make it a plain folder and try again.")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".SKILL.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, dest)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
 def render_installed(root: Path, addon: str, source: Path) -> bool:
-    """Render one turned-on add-on's skill into .agents/skills/orch-<addon>/ and AGENTS.md. True if it changed."""
+    """Render one turned-on add-on's skill into .agents/skills/ and AGENTS.md. True if it changed."""
     skill = f"orch-{addon}"
     if "{{" not in (source / "SKILL.md").read_text(encoding="utf-8"):
         return False  # a plain skill: install_skill already copied it
     dest = root / ".agents" / "skills" / skill / "SKILL.md"
-    skills.check_inside(root, dest)
     body, block = render_skill(source, facts_for(root, skill))
     changed = False
     if not dest.is_file() or dest.read_text(encoding="utf-8") != body:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(body, encoding="utf-8", newline="\n")
+        _safe_write(root, dest, body)
         changed = True
     if block:
         want_b, want_e = skills._markers(addon, True)

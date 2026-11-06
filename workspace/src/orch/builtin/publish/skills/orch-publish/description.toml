@@ -1,0 +1,29 @@
+# Same rules as orch-relay/description.toml.
+schema = "orch.skill-description/1"
+
+[offline]
+text = "Connect this folder to an orch publish server so it can share files and small apps by private link. Use when the user pastes a publish connect line (orch publish connect ...) or asks to set up publish. Not for messages to other workspaces."
+
+[online]
+lead = "Share work by link with orch publish."
+not_for = "Not for messages to other workspaces or phones."
+
+[[online.part]]
+when = ["files"]
+text = "send someone a file, report, picture or static page as an encrypted private link"
+
+[[online.part]]
+when = ["apps"]
+text = "put a small web app online (form, tracker, preview, mini tool) from a template"
+
+[[online.part]]
+when = ["public"]
+text = "give an app an open public link"
+
+[[online.part]]
+when = ["permanent"]
+text = "keep a share without an end date"
+
+[[online.part]]
+when = []
+text = "list, stop or delete what this workspace shared"

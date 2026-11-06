@@ -30,7 +30,7 @@ def _instruction_files() -> tuple[str, ...]:
 
     names = ["AGENTS.md"]
     for n in adapters.builtin_names():
-        for fn in ((adapters.load(n).get("files") or {}).get("instructions_link") or {}):
+        for fn in (adapters.load(n).get("files") or {}).get("instructions_link") or {}:
             if fn not in names:
                 names.append(fn)
     return tuple(names)

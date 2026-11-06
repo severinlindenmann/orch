@@ -129,7 +129,9 @@ def test_codex_only_needs_only_agents_md(proj, run, monkeypatch):
 def test_files_entries_come_from_the_data(proj, monkeypatch):
     reg = adapters._registry()
     monkeypatch.setitem(
-        reg["codex"], "files", {"instructions_link": {"OTHER.md": "@AGENTS.md"}, "skills_link": ".other/skills"}
+        reg["codex"],
+        "files",
+        {"instructions_link": {"OTHER.md": "@AGENTS.md"}, "skills_link": ".other/skills"},
     )
     monkeypatch.setattr(
         adapters, "detect", lambda: [{"name": "codex", "label": "Codex", "found": True, "version": None}]
@@ -162,7 +164,10 @@ def test_recommended_turns_on_marked_addons_or_none(proj, run, monkeypatch):
 def test_recommended_failure_turns_none_on(proj, monkeypatch):
     from orch import addons, init
 
-    rows = [{"name": "a1", "recommended": True, "active": False}, {"name": "a2", "recommended": True, "active": False}]
+    rows = [
+        {"name": "a1", "recommended": True, "active": False},
+        {"name": "a2", "recommended": True, "active": False},
+    ]
     monkeypatch.setattr(addons, "listing", lambda root: rows)
     man = {"version": "1", "description": "d", "background": False}
     monkeypatch.setattr(addons, "discover", lambda: {r["name"]: man | {"name": r["name"]} for r in rows})

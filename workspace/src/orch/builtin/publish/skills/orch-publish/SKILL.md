@@ -1,34 +1,78 @@
 ---
 name: orch-publish
-description: Publish files and small apps to private links with the orch publish service.
+description: "{{description}}"
 ---
 # orch publish
 
-Publish shares a file or a small app by a private link. Files are encrypted on this machine before upload;
-the key is part of the link after `#` and never reaches the server. Share the whole link, keep it private.
+Share {{#files}}files and page folders{{/files}}{{#files}}{{#apps}} and {{/apps}}{{/files}}{{#apps}}small apps{{/apps}} by a link.
+{{#files}}Files are encrypted on this computer before upload; the key is the part of the link after `#` and never reaches
+the server. Whoever has the whole link can open it, so share it only with the people the user means.{{/files}}
 
-    orch publish whoami
-    orch publish file <path or page folder> [--days N | --permanent]   (a folder needs index.html; it opens as a website)
-    orch publish new static|python|node [--store none|json|markdown|sqlite] <folder>
-    orch publish app <folder> [--days N | --permanent]
-    orch publish list
-    orch publish restart <id> | stop <id> | delete <id>
+{{^connected}}
+## Connect
 
-`new` copies a working template (app.toml, health path, store) into `<folder>`; the folder name is the app
-name. Edit it, then deploy with `app`. Static apps allow store none or markdown.
+The user gets a connect line from the publish admin. Run exactly that line:
 
-Default lifetime is short; use `--permanent` only when the user asks. Record the link on the ticket:
-`orch link add <ticket> --type publish --url "<link>"`. Never publish secrets or `.orch/secrets/`.
-Maximum file size is 100 MB.
+    orch publish connect <url> --workspace <ws_id> --token <token>
+    orch publish profile --description "<one sentence: what this workspace is for>" --tags a,b
 
-# Describe this workspace
+The profile change waits for the owner's approval. Then this skill is rewritten with what you may share.
+{{/connected}}
+{{#connected}}
+## When to use
+{{#files}}
+- The user wants to send someone a file, a report, a picture or a static page.
+{{/files}}
+{{#apps}}
+- The user wants a small working web app online: a form, a tracker, a preview, a mini tool.
+{{/apps}}
+- Not for messages to another workspace or the phone (that is the relay).
 
-After connecting, describe this workspace once: `orch publish profile --description "<one sentence>" --tags a,b`
-The owner has to approve the change in the admin panel before it takes effect; `orch publish profile` shows what is waiting.
-(no options = show it). Description up to 280 characters; up to 8 tags of 24 characters.
+## Recipes
+{{#files}}
 
-# Links
+**Share a file or a page folder**
 
-`orch publish file` prints the full working link on its own line (it ends in `#k=<key>`): give the user that whole line.
-A private app's view link is saved in `.orch/secrets/`; deploying again or `orch publish list` shows it. Use
-`orch publish app <folder> --new-token` for a new one.
+    orch publish file report.pdf                 # kept 7 days (1-90 with --days N)
+    orch publish file site/                      # a folder with index.html opens as a website
+{{#permanent}}
+    orch publish file report.pdf --permanent     # only when the user asks for "forever"
+{{/permanent}}
+
+It prints the full link on its own line (it ends in `#k=...`). Give the user that whole line.
+{{/files}}
+{{#apps}}
+
+**Put a small app online**
+
+    orch publish new python --store sqlite tracker   # or static|node; store none|json|markdown|sqlite
+    # edit tracker/, then:
+    orch publish app tracker                         # private: the link carries ?token=
+{{#public}}
+    orch publish app tracker --public                # an open link, only when the user asks
+{{/public}}
+    orch publish app tracker --new-token             # a new view link; the old one stops working
+
+Static apps take store none or markdown. The folder name is the app name.
+{{/apps}}
+
+**Look after what you shared**
+
+    orch publish list                 # files and apps, links, end dates
+    orch publish stop <app>           # pause an app
+    orch publish restart <app>
+    orch publish delete <f_id or app> # gone for everyone
+
+Record every link on its ticket: `orch link add <id> --type publish --url "<link>"`.
+
+**Describe this workspace (once, after connecting)**
+
+    orch publish profile --description "<one sentence>" --tags a,b
+
+The owner approves it before it takes effect; `orch publish profile` shows what waits.
+{{/connected}}
+
+## Rules
+- Publish only what the user asked for. Never anything from `.orch/secrets/` or a file with keys or passwords.
+- Maximum file size: 100 MB.
+- `orch publish whoami` shows what this workspace may share. If something is refused, tell the user the plain reason.

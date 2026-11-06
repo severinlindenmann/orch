@@ -46,7 +46,17 @@ def test_connect_saves_token_and_installs_skill(proj, run, pub):
     code, out, _ = connect(run, pub)
     assert code == 0 and "Pilatus Workspace" in out
     cfg = json.loads((proj / ".orch/secrets/publish.json").read_text())
-    assert cfg == {"url": pub.url, "workspace": WS, "token": pub.token}
+    assert {k: cfg[k] for k in ("url", "workspace", "token")} == {
+        "url": pub.url,
+        "workspace": WS,
+        "token": pub.token,
+    }
+    assert set(cfg["rights"]) == {
+        "files",
+        "apps",
+        "permanent",
+        "public",
+    }  # the skill lists what may be shared
     assert (proj / ".agents/skills/orch-publish/SKILL.md").is_file()
     assert "<!-- orch:addon:publish -->" in (proj / "AGENTS.md").read_text()
     assert ".orch/secrets/" in (proj / ".gitignore").read_text()

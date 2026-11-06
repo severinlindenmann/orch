@@ -454,7 +454,11 @@ def run(args: argparse.Namespace) -> None:
             + "\n"
             + "\n".join(lines)
             + (f"\nTurned on: {', '.join(on)}" if on else "")
-            + ("\nNext: orch init --recommended" if not args.recommended and init_mod.has_recommended(root) else ""),
+            + (
+                "\nNext: orch init --recommended"
+                if not args.recommended and init_mod.has_recommended(root)
+                else ""
+            ),
         )
     elif cmd == "update":
         done = addons.update(root, args.project_only)

@@ -1,0 +1,43 @@
+# The description is built from parts, never hand-templated inside YAML.
+# Rendered = lead + " Use when you need to: " + parts (whose `when` facts are all true, joined ", ", last with ", or ")
+#            + ". " + not_for.   Lint: <= 500 characters, every part <= 90, no names, no text from other workspaces.
+schema = "orch.skill-description/1"
+
+[offline]                     # used when the fact `connected` is false
+text = "Connect this folder to an orch relay so it can exchange messages with other workspaces. Use when the user pastes a relay connect line (orch relay connect ...) or asks to set up the relay. Not for public share links."
+
+[online]
+lead = "Reach outside this folder through the orch relay."
+not_for = "Not for public share links (that is publish)."
+
+[[online.part]]
+when = []
+text = "read new messages and received files (inbox)"
+
+[[online.part]]
+when = ["delegate"]
+text = "hand a task to another workspace"
+
+[[online.part]]
+when = ["workspaces"]
+text = "send another workspace a text"
+
+[[online.part]]
+when = ["files"]
+text = "send it a file"
+
+[[online.part]]
+when = ["start"]
+text = "start a named job there"
+
+[[online.part]]
+when = ["phones"]
+text = "ask the owner on their phone or send them a result"
+
+[[online.part]]
+when = ["webhooks"]
+text = "make a webhook address so GitHub, Stripe, a form or any service can notify this workspace"
+
+[[online.part]]
+when = []
+text = "get skills, MCP servers and credentials the admin shared"

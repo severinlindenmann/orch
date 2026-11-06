@@ -67,7 +67,9 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
         for n in reversed(done):
             with contextlib.suppress(Exception):
                 addons.remove(root, n)
-        raise Refused(f"Could not turn on {', '.join(r['name'] for r in rows)}: {e} Nothing was changed.") from e
+        raise Refused(
+            f"Could not turn on {', '.join(r['name'] for r in rows)}: {e} Nothing was changed."
+        ) from e
     return done
 
 

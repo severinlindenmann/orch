@@ -253,9 +253,10 @@ def test_project_files_never_written_through_a_link_outside(proj, tmp_path, name
     victim.write_text("keep me", encoding="utf-8")
     (proj / name).symlink_to(victim)
     with pytest.raises(Refused, match="link orch does not write through"):
-        {".gitignore": skills.ensure_gitignore, "CLAUDE.md": lambda r: skills._ensure_line(r, "CLAUDE.md", "@AGENTS.md")}.get(
-            name, lambda r: skills.set_block(r, "x", "body")
-        )(proj)
+        {
+            ".gitignore": skills.ensure_gitignore,
+            "CLAUDE.md": lambda r: skills._ensure_line(r, "CLAUDE.md", "@AGENTS.md"),
+        }.get(name, lambda r: skills.set_block(r, "x", "body"))(proj)
     assert victim.read_text(encoding="utf-8") == "keep me"
 
 
@@ -297,9 +298,10 @@ def test_links_inside_the_project_to_other_files_are_refused(proj, name, target)
     t.write_text("keep me\n", encoding="utf-8")
     (proj / name).symlink_to(t)
     with pytest.raises(Refused, match="link orch does not write through"):
-        {".gitignore": skills.ensure_gitignore, "CLAUDE.md": lambda r: skills._ensure_line(r, "CLAUDE.md", "@AGENTS.md")}.get(
-            name, lambda r: skills.set_block(r, "x", "body")
-        )(proj)
+        {
+            ".gitignore": skills.ensure_gitignore,
+            "CLAUDE.md": lambda r: skills._ensure_line(r, "CLAUDE.md", "@AGENTS.md"),
+        }.get(name, lambda r: skills.set_block(r, "x", "body"))(proj)
     assert t.read_text(encoding="utf-8") == "keep me\n"
 
 

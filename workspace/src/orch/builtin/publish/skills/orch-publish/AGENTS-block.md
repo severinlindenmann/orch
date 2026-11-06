@@ -1,6 +1,3 @@
 ## orch-publish
-Share files and small apps by private link. Read `.agents/skills/orch-publish/SKILL.md`.
-Publish only what the user asked for. Never publish anything from `.orch/secrets/`.
-Add the resulting link to the ticket with `orch link add`.
-Right after connecting, describe this workspace once: `orch publish profile --description "<one sentence>" --tags a,b` (2-4 tags).
-Give the user the whole link `orch publish file` prints (it ends in `#k=...`); the app link keeps its `?token=`.
+{{#connected}}Share {{#files}}files{{/files}}{{#files}}{{#apps}} and {{/apps}}{{/files}}{{#apps}}small apps{{/apps}} by private link. Read `.agents/skills/orch-publish/SKILL.md`.
+Publish only what the user asked for, never `.orch/secrets/`. Give the user the whole printed link and add it to the ticket.{{/connected}}{{^connected}}Not connected yet. Read `.agents/skills/orch-publish/SKILL.md` when the user pastes a publish connect line.{{/connected}}
