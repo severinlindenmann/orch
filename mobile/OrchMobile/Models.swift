@@ -49,6 +49,8 @@ struct QuestionMessage: Codable, Sendable, Equatable {
     let createdAt: String
     let ticket: String?
     let body: QuestionBody
+    /// Display key like PIL-12 (optional: older workspaces do not send it).
+    var key: String? = nil
 }
 
 struct Question: Codable, Sendable, Equatable, Identifiable {
@@ -94,6 +96,7 @@ struct TextMessage: Codable, Sendable, Equatable {
     let createdAt: String
     let ticket: String?
     let body: TextBody
+    var key: String? = nil
 }
 struct PhoneMessage: Codable, Sendable, Equatable, Identifiable {
     let message: TextMessage
@@ -115,6 +118,83 @@ struct TicketUpdate: Codable, Sendable, Equatable, Identifiable {
     let text: String
     let replyTo: String?
     let at: String
+    var key: String? = nil
+    /// Snapshot of the ticket (tasks, history, proof). Optional: absent until the workspace sends it.
+    var ticketView: TicketSnapshot? = nil
+}
+
+/// `body.ticket_view` of a work update (docs TECH-NOTES "What is new"). Every field is optional so the app works before and after it ships.
+struct TicketSnapshot: Codable, Sendable, Equatable {
+    struct Task: Codable, Sendable, Equatable {
+        let text: String; var done: Bool
+        init(text: String, done: Bool = false) { self.text = text; self.done = done }
+        init(from d: Decoder) throws {
+            let c = try d.container(keyedBy: CodingKeys.self)
+            text = try c.decode(String.self, forKey: .text); done = (try? c.decodeIfPresent(Bool.self, forKey: .done)) ?? false
+        }
+        enum CodingKeys: String, CodingKey { case text, done }
+    }
+    struct Attachment: Codable, Sendable, Equatable, Identifiable {
+        var kind: String = "file"      // image | link | file
+        var title: String? = nil
+        var url: String? = nil
+        var blobId: String? = nil
+        var name: String? = nil
+        var size: Int? = nil
+        var at: String? = nil
+        var id: String { [kind, blobId ?? url ?? name ?? title ?? "", at ?? ""].joined(separator: "|") }
+        init(kind: String = "file", title: String? = nil, url: String? = nil, blobId: String? = nil, name: String? = nil, size: Int? = nil, at: String? = nil) {
+            self.kind = kind; self.title = title; self.url = url; self.blobId = blobId; self.name = name; self.size = size; self.at = at
+        }
+        init(from d: Decoder) throws {
+            let c = try d.container(keyedBy: CodingKeys.self)
+            kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? "file"
+            title = try? c.decodeIfPresent(String.self, forKey: .title); url = try? c.decodeIfPresent(String.self, forKey: .url)
+            blobId = try? c.decodeIfPresent(String.self, forKey: .blobId); name = try? c.decodeIfPresent(String.self, forKey: .name)
+            size = try? c.decodeIfPresent(Int.self, forKey: .size); at = try? c.decodeIfPresent(String.self, forKey: .at)
+        }
+        enum CodingKeys: String, CodingKey { case kind, title, url, blobId, name, size, at }
+    }
+    struct Line: Codable, Sendable, Equatable, Identifiable {
+        var at: String? = nil
+        var by: String? = nil
+        var text: String
+        var id: String { (at ?? "") + "|" + (by ?? "") + "|" + text }
+        init(at: String? = nil, by: String? = nil, text: String) { self.at = at; self.by = by; self.text = text }
+    }
+    var title: String? = nil
+    var status: String? = nil
+    var agent: String? = nil
+    var summary: String? = nil
+    var checklist: [Task] = []
+    var done: Int? = nil
+    var total: Int? = nil
+    var running: Bool? = nil
+    var attachments: [Attachment] = []
+    var historyTail: [Line] = []
+
+    init(title: String? = nil, status: String? = nil, agent: String? = nil, summary: String? = nil, checklist: [Task] = [],
+         running: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = []) {
+        self.title = title; self.status = status; self.agent = agent; self.summary = summary; self.checklist = checklist
+        self.done = checklist.filter(\.done).count; self.total = checklist.count
+        self.running = running; self.attachments = attachments; self.historyTail = historyTail
+    }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        title = try? c.decodeIfPresent(String.self, forKey: .title)
+        status = try? c.decodeIfPresent(String.self, forKey: .status)
+        agent = try? c.decodeIfPresent(String.self, forKey: .agent)
+        summary = try? c.decodeIfPresent(String.self, forKey: .summary)
+        checklist = (try? c.decodeIfPresent([Task].self, forKey: .checklist)) ?? []
+        done = try? c.decodeIfPresent(Int.self, forKey: .done)
+        total = try? c.decodeIfPresent(Int.self, forKey: .total)
+        running = try? c.decodeIfPresent(Bool.self, forKey: .running)
+        attachments = (try? c.decodeIfPresent([Attachment].self, forKey: .attachments)) ?? []
+        historyTail = (try? c.decodeIfPresent([Line].self, forKey: .historyTail)) ?? []
+    }
+    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, running, attachments, historyTail }
+    var doneCount: Int { done ?? checklist.filter(\.done).count }
+    var totalCount: Int { total ?? checklist.count }
 }
 
 struct IdResponse: Decodable, Sendable { let id: String }

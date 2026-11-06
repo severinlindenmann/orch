@@ -19,7 +19,7 @@ final class TicketTests: XCTestCase {
         let t = TicketBuilder.build(updates: try await m.updates(), questions: try await m.questions(), answers: [:])
         XCTAssertEqual(t.filter { $0.status == .needsYou }.count, 2)
         XCTAssertEqual(t.filter { $0.status == .working }.map(\.title), ["Invoice CSV export"])
-        XCTAssertEqual(t.filter { $0.status == .done }.map(\.title), ["Q3 summary"])
+        XCTAssertEqual(t.filter { $0.status == .done }.map(\.title), ["Q3 summary for the board"])
         XCTAssertEqual(t.map(\.status), t.map(\.status).sorted(), "Needs you first, Done last")
     }
 

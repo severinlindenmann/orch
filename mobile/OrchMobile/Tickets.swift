@@ -20,6 +20,11 @@ struct Ticket: Identifiable, Equatable, Sendable {
     let kind: String
     let at: String
     let question: Question?
+    /// Display key like PIL-12 and the ticket snapshot, both optional (a workspace that does not send them yet).
+    var key: String? = nil
+    var view: TicketSnapshot? = nil
+
+    var displayTitle: String { view?.title ?? title }
 
     /// One plain line under the title, from the update kind.
     var stateLine: String {
@@ -62,7 +67,8 @@ enum TicketBuilder {
             var st = status(forKind: u.kind)
             if st == .needsYou { st = .working }   // only a real open question counts (below)
             byKey[key] = Ticket(id: key, workspace: u.workspace, workspaceName: u.workspaceName, ticket: u.ticket,
-                                title: u.title ?? u.text, text: u.text, status: st, kind: u.kind, at: u.at, question: nil)
+                                title: u.ticketView?.title ?? u.title ?? u.text, text: u.text, status: st, kind: u.kind, at: u.at, question: nil,
+                                key: u.key, view: u.ticketView)
         }
         for q in questions where answers[q.id] == nil {
             let m = q.message
@@ -70,7 +76,7 @@ enum TicketBuilder {
             let old = byKey[key]
             byKey[key] = Ticket(id: key, workspace: m.from, workspaceName: q.workspaceName, ticket: m.ticket,
                                 title: m.body.title ?? old?.title ?? m.body.text, text: m.body.text, status: .needsYou,
-                                kind: "question", at: m.createdAt, question: q)
+                                kind: "question", at: m.createdAt, question: q, key: m.key ?? old?.key, view: old?.view)
         }
         return byKey.values.sorted { ($0.status, $1.at) < ($1.status, $0.at) }
     }

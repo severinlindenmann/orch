@@ -1,74 +1,75 @@
 import XCTest
 
-/// Evidence screenshots for the PR (default size and Dynamic Type XXL). Runs only when the target folder exists
-/// (`ORCH_SHOTS_DIR` is not needed: the folder under the host home is the switch), so CI skips it.
+/// Evidence screenshots of the chat screens for the PR. Runs only when the target folder exists
+/// (the folder under the host home is the switch), so CI skips it.
 final class ShotsUITests: XCTestCase {
     private var dir: URL!
     override func setUpWithError() throws {
         continueAfterFailure = false
         let home = ProcessInfo.processInfo.environment["SIMULATOR_HOST_HOME"] ?? NSHomeDirectory()
-        dir = URL(fileURLWithPath: home).appendingPathComponent("orch-dev/state/v2-plan-2026-11-05/build/shots/mobile")
+        dir = URL(fileURLWithPath: home).appendingPathComponent("orch-dev/state/v2-plan-2026-11-05/build/shots/mobile-chat")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: dir.path), "no shots folder")
     }
 
-    private func launch(_ extra: [String], xxl: Bool) -> XCUIApplication {
+    private func launch(_ extra: [String]) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES"] + extra
-        if xxl { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXL"] }
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-undoSeconds", "30"] + extra
         app.launch()
         return app
     }
-    private func shot(_ app: XCUIApplication, _ name: String, xxl: Bool) throws {
-        sleep(1)
-        try app.screenshot().pngRepresentation.write(to: dir.appendingPathComponent("\(name)-\(xxl ? "xxl" : "default").png"))
+    private func shot(_ app: XCUIApplication, _ name: String) throws {
+        sleep(2)
+        try app.screenshot().pngRepresentation.write(to: dir.appendingPathComponent("\(name).png"))
     }
 
-    func testShotsDefault() throws { try run(xxl: false) }
-    func testShotsXXL() throws { try run(xxl: true) }
+    func testShots() throws {
+        var app = launch([])
+        XCTAssertTrue(app.buttons["room-ws_pilatus001"].waitForExistence(timeout: 15))
+        try shot(app, "1-chats"); app.terminate()
 
-    private func run(xxl: Bool) throws {
-        // 1 + 2: Your tickets (all three groups), ticket detail sheet
-        var app = launch([], xxl: xxl)
-        XCTAssertTrue(app.staticTexts["Invoice CSV export"].waitForExistence(timeout: 15))
-        try shot(app, "1-your-tickets", xxl: xxl)
-        app.buttons["ticket-ws_reports001|t_9k2m4q"].tap()
-        XCTAssertTrue(app.staticTexts["ticket-title"].waitForExistence(timeout: 5) || app.otherElements["ticket-title"].exists || app.descendants(matching: .any)["ticket-title"].waitForExistence(timeout: 5))
-        try shot(app, "2-ticket-detail", xxl: xxl)
-        app.terminate()
+        app = launch([])
+        let search = app.textFields["chat-search"]; XCTAssertTrue(search.waitForExistence(timeout: 15))
+        search.tap(); search.typeText("board"); try shot(app, "2-search"); app.terminate()
 
-        // 3: Ask + Got it
-        app = launch(["-startTab", "send"], xxl: xxl)
-        let field = app.textViews["transcript"]
-        XCTAssertTrue(field.waitForExistence(timeout: 15))
-        field.tap(); field.typeText("Prepare the Q3 summary")
-        app.buttons["keyboard-done"].tap()
-        let send = app.buttons["send-button"]
-        if !send.isHittable { app.swipeUp() }
-        send.tap()
-        XCTAssertTrue(app.staticTexts["ack-line"].waitForExistence(timeout: 10))
-        try shot(app, "3-ask-got-it", xxl: xxl)
-        app.terminate()
-
-        // 4: allow question
-        app = launch(["-startTab", "questions", "-mockAllow", "YES", "-openQuestion", "m_q3allow00000003"], xxl: xxl)
-        XCTAssertTrue(app.buttons["answer-Once"].waitForExistence(timeout: 15))
-        try shot(app, "4-allow-question", xxl: xxl)
-        app.terminate()
-
-        // 5: normal question, 5 s undo window
-        app = launch(["-startTab", "questions"], xxl: xxl)
+        app = launch(["-openChat", "ws_pilatus001"])
         XCTAssertTrue(app.buttons["answer-TIMESTAMP"].waitForExistence(timeout: 15))
+        try shot(app, "3-workspace-chat")
         app.buttons["answer-TIMESTAMP"].tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'undo-'")).firstMatch.waitForExistence(timeout: 5))
-        try shot(app, "5-question-undo", xxl: xxl)
-        app.terminate()
+        try shot(app, "4-question-undo"); app.terminate()
 
-        // 6: answered by someone else first (409)
-        app = launch(["-startTab", "questions", "-mockRace", "YES", "-undoSeconds", "1"], xxl: xxl)
-        XCTAssertTrue(app.buttons["answer-TIMESTAMP"].waitForExistence(timeout: 15))
-        app.buttons["answer-TIMESTAMP"].tap()
-        XCTAssertTrue(app.staticTexts["Already answered"].waitForExistence(timeout: 15))
-        try shot(app, "6-answered-by-other", xxl: xxl)
-        app.terminate()
+        app = launch(["-mockAllow", "YES", "-openChat", "ws_pilatus001"])
+        XCTAssertTrue(app.buttons["answer-Once"].waitForExistence(timeout: 15))
+        try shot(app, "5-allow"); app.terminate()
+
+        app = launch(["-openChat", "ws_reports001", "-openTicket", "t_9k2m4q"])
+        XCTAssertTrue(app.descendants(matching: .any)["tasks-card"].waitForExistence(timeout: 15))
+        try shot(app, "6-ticket-chat-running")
+        app.buttons["tasks-toggle"].tap(); try shot(app, "7-ticket-tasks-open"); app.terminate()
+
+        app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_q3sum1"])
+        XCTAssertTrue(app.descendants(matching: .any)["tasks-card"].waitForExistence(timeout: 15))
+        try shot(app, "8-ticket-chat-done"); app.terminate()
+
+        app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_q3sum1", "-openInfo", "YES"])
+        XCTAssertTrue(app.descendants(matching: .any)["info-tabs"].waitForExistence(timeout: 15))
+        try shot(app, "9-chat-info-media")
+        app.buttons["Links 1"].tap(); try shot(app, "10-chat-info-links"); app.terminate()
+
+        app = launch(["-openNewChat", "YES"])
+        XCTAssertTrue(app.buttons["pick-ws_pilatus001"].waitForExistence(timeout: 15))
+        try shot(app, "11-new-chat"); app.terminate()
+
+        app = launch(["-mockEmpty", "YES"])
+        XCTAssertTrue(app.descendants(matching: .any)["chats-empty"].waitForExistence(timeout: 15))
+        try shot(app, "12-empty"); app.terminate()
+
+        app = launch(["-mockFail", "YES", "-openChat", "ws_pilatus001"])
+        XCTAssertTrue(app.descendants(matching: .any)["offline-banner"].waitForExistence(timeout: 15))
+        try shot(app, "13-offline"); app.terminate()
+
+        app = launch(["-openQuestion", "m_q1date0ts0000001"])
+        XCTAssertTrue(app.descendants(matching: .any)["question-m_q1date0ts0000001"].waitForExistence(timeout: 15))
+        try shot(app, "14-push-opened")
     }
 }

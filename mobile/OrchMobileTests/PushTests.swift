@@ -16,7 +16,7 @@ final class PushTests: XCTestCase {
         AppDelegate.model = model
         AppDelegate.handleTap(messageId: "m_q2friday00000002")
         XCTAssertEqual(model.focusedQuestion, "m_q2friday00000002")
-        XCTAssertEqual(model.tab, .questions)
+        XCTAssertEqual(model.tab, .chats)
         AppDelegate.model = nil
     }
 
@@ -54,8 +54,8 @@ final class TextPushTests: XCTestCase {
         let model = AppModel(useMock: true)
         AppDelegate.model = model
         AppDelegate.handleTap(textWorkspace: MockRelay.pilatus)
-        XCTAssertEqual(model.tab, .send)
-        XCTAssertEqual(model.questionFilter, MockRelay.pilatus)
+        XCTAssertEqual(model.tab, .chats)
+        XCTAssertEqual(model.path, [.workspace(MockRelay.pilatus)])
         XCTAssertNil(model.focusedQuestion)
         AppDelegate.model = nil
     }
@@ -67,7 +67,7 @@ final class TextPushTests: XCTestCase {
         let model = AppModel(useMock: true)
         AppDelegate.model = model
         XCTAssertNil(AppDelegate.pendingText)
-        XCTAssertEqual(model.questionFilter, MockRelay.reports)
+        XCTAssertEqual(model.path, [.workspace(MockRelay.reports)])
         AppDelegate.model = nil
     }
 }

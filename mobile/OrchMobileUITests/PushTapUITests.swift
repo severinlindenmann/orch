@@ -16,7 +16,7 @@ final class PushTapUITests: XCTestCase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let ok = springboard.buttons["Allow"]
         if ok.waitForExistence(timeout: 5) { ok.tap() }
-        XCTAssertTrue(app.staticTexts["Your workspaces"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["room-ws_pilatus001"].waitForExistence(timeout: 15))
     }
 
     private func waitForPushAndTap() {
@@ -39,7 +39,7 @@ final class PushTapUITests: XCTestCase {
         launchPaired(app)
         XCUIDevice.shared.press(.home)
         waitForPushAndTap()
-        XCTAssertTrue(app.buttons["all-questions"].waitForExistence(timeout: 15), "app did not come back focused on the question")
+        XCTAssertTrue(app.buttons["answer-DATE"].waitForExistence(timeout: 15), "app did not come back focused on the question")
     }
 
     func testTapFromTerminated() throws {
@@ -52,9 +52,9 @@ final class PushTapUITests: XCTestCase {
         // (the focused card itself is covered by PushTests.testTapBeforeModelExistsIsKeptForLater).
         let cold = XCUIApplication(bundleIdentifier: "io.severin.orch")
         XCTAssertTrue(cold.wait(for: .runningForeground, timeout: 30), "app did not come to the foreground")
-        let questionsTab = cold.buttons["Questions"]
+        let questionsTab = cold.buttons["Chats"]
         if !questionsTab.waitForExistence(timeout: 20) { print("COLD:", cold.debugDescription) }
         XCTAssertTrue(questionsTab.exists)
-        XCTAssertTrue(questionsTab.isSelected, "cold start did not open the Questions tab")
+        XCTAssertTrue(questionsTab.isSelected, "cold start did not open the Chats tab")
     }
 }

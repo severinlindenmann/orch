@@ -9,10 +9,8 @@ struct RootView: View {
             if model.phase == .ready {
                 // System tab bar (floating glass on iOS 26, standard bar on 18): native spacing, badge, Dynamic Type, safe area.
                 TabView(selection: Binding(get: { model.tab }, set: { selectTab($0) })) {
-                    tabItem(.home, "Home", "house") { HomeView() }
-                    tabItem(.questions, "Questions", "text.bubble") { QuestionsView() }
-                        .badge(model.openQuestionCount)
-                    tabItem(.send, "Ask", "plus") { SendView() }
+                    tabItem(.chats, "Chats", "bubble.left.and.bubble.right") { ChatsListView() }
+                        .badge(model.totalUnread)
                     tabItem(.settings, "Settings", "gearshape") { SettingsView() }
                 }
                 .tint(Theme.brand)
@@ -34,7 +32,6 @@ struct RootView: View {
     }
 
     private func selectTab(_ tab: Tab) {
-        if tab != .questions { model.focusedQuestion = nil }
         model.tab = tab
     }
 
