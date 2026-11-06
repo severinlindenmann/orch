@@ -21,7 +21,7 @@ def call(fn, *args):
     ("Created", "Ticket created"), ("Created under t_abc12345", "Created as a sub-ticket"),
     ("Edited due, owner", "Changed the due day and the owner"), ("Edited title", "Changed the title"),
     ("Asked q1, waiting", "Asked a question"), ("Answered q1: Yes", "Answered a question"),
-    ("Status open -> active", "Moved to Doing"), ("Status active -> done", "Moved to Done"),
+    ("Status open -> active", "Moved to Doing"), ("Check c2 done", "Finished a task"), ("Status active -> done", "Moved to Done"),
     ("Something the agent wrote", "Something the agent wrote")])
 def test_history_lines_are_plain_words(raw, want):
     assert call("historyLine", {"text": raw}) == want
@@ -62,3 +62,62 @@ def test_service_links_only_other_local_running_pages():
          {"addon": "evil", "running": True, "url": "https://example.com"},
          {"addon": "off", "running": False, "url": "http://127.0.0.1:8600"}]
     assert call("serviceLinks", s, "http://127.0.0.1:8420") == [{"label": "panel", "url": "http://127.0.0.1:8500"}]
+
+
+T = {"id": "t_a", "questions": [], "sessions": []}
+
+
+@node
+def test_agent_line_states_one_main_action():
+    now = 1793923200000  # 2026-11-06
+    line = lambda t, r=None, live=None: call("agentLine", t, r, now, live)
+    w = line(T, {"running": True, "state": "alive", "claim": {"agent": "claude", "by": "human:Mia", "started_at": "2026-11-06T00:00:00Z"}})
+    assert w["state"] == "working" and "started by Mia" in w["status"] and w["primary"]["op"] == "run.stop" and w["items"] == []
+    w2 = line(T, {"running": True, "state": "alive", "claim": {"agent": "claude"}}, {"label": "focus", "url": "http://127.0.0.1:1"})
+    assert w2["primary"]["op"] == "open" and w2["items"][0]["op"] == "run.stop"
+    stuck = line(T, {"running": True, "state": "maybe-stale", "claim": {"agent": "claude"}})
+    assert stuck["state"] == "stuck" and stuck["primary"] == {"label": "Start anyway", "op": "run.start", "args": {"ticket": "t_a", "take_over": True}}
+    needs = line({**T, "questions": [{"id": "q1", "answer": None}]})
+    assert needs["state"] == "needs" and needs["primary"]["label"] == "Answer"
+    dead = line(T, {"running": False, "state": "dead", "claim": {"agent": "claude"}})
+    assert dead["state"] == "failed" and dead["primary"]["label"] == "Try again" and dead["items"][0]["args"]["fresh"] is True
+    resume = line({**T, "sessions": [{"agent": "claude", "last_used": "2026-11-03T10:00:00Z"}]})
+    assert resume["state"] == "resume" and resume["status"] == "last worked 3 days ago" and resume["primary"]["label"] == "Continue"
+    assert resume["items"][0]["label"] == "Start fresh"
+    new = line(T)
+    assert new["state"] == "new" and new["primary"]["label"] == "Start" and new["status"] == "not started yet"
+
+
+@node
+def test_tree_rows_children_counts_collapse_and_missing_parent():
+    ts = [{"id": "t_p", "status": "open"}] + [{"id": f"t_c{i}", "status": "done" if i < 2 else "open", "parent": "t_p"} for i in range(5)] \
+        + [{"id": "t_o", "status": "open", "parent": "t_gone"}]
+    rows = call("treeRows", ts)
+    assert rows[0]["children"] == 5 and rows[0]["done"] == 2 and rows[0]["depth"] == 0
+    assert [r["late"] for r in rows[1:6]] == [False, False, False, True, True] and all(r["depth"] == 1 for r in rows[1:6])
+    orphan = rows[-1]
+    assert orphan["ticket"]["id"] == "t_o" and orphan["depth"] == 0 and orphan["parentMissing"] is True
+    cyc = call("treeRows", [{"id": "t_a", "parent": "t_b"}, {"id": "t_b", "parent": "t_a"}])
+    assert sorted(r["ticket"]["id"] for r in cyc) == ["t_a", "t_b"]
+
+
+@node
+def test_proof_mark_you_or_agent_says():
+    assert call("proofMark", {"by": "human:Mia"})["label"] == "You"
+    assert call("proofMark", {"by": "agent:claude"})["label"] == "Agent says" and call("proofMark", {})["mark"] == "○"
+
+
+@node
+def test_tree_children_follow_creation_order_not_list_order():
+    ts = [{"id": "t_p", "created_at": "2026-11-01T00:00:00Z"},
+          {"id": "t_c3", "parent": "t_p", "created_at": "2026-11-03T00:00:00Z"},
+          {"id": "t_c1", "parent": "t_p", "created_at": "2026-11-01T01:00:00Z"},
+          {"id": "t_c2", "parent": "t_p", "created_at": "2026-11-02T00:00:00Z"}]
+    assert [r["ticket"]["id"] for r in call("treeRows", ts)] == ["t_p", "t_c1", "t_c2", "t_c3"]
+
+
+@node
+def test_service_link_port_has_one_to_five_digits():
+    ok = {"addon": "panel", "running": True, "url": "http://127.0.0.1:8"}
+    bad = {"addon": "panel2", "running": True, "url": "http://127.0.0.1:123456"}
+    assert [r["label"] for r in call("serviceLinks", [ok, bad], "http://127.0.0.1:1")] == ["panel"]

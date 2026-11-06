@@ -24,7 +24,7 @@
     if (/^Answered\b/.test(text)) return 'Answered a question';
     if ((m = /^Status \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
     if (/^Summary/.test(text)) return 'Updated the summary';
-    if (/^(Checked|Done)\b.*\bc\d+/.test(text) || /^Task .* done/i.test(text)) return 'Finished a task';
+    if (/^Check c\d+ done/i.test(text) || /^(Checked|Done)\b.*\bc\d+/.test(text) || /^Task .* done/i.test(text)) return 'Finished a task';
     if (/^Added task|^Added check/i.test(text)) return 'Added a task';
     if (/^Linked|^Link added/i.test(text)) return 'Added a link';
     return text;
@@ -75,9 +75,76 @@
 
   /* Links to other running pages of this workspace (label and address come from the services data). */
   function serviceLinks(services, ownOrigin) {
-    return arr(services).filter(s => s && s.running === true && typeof s.url === 'string' && /^http:\/\/(127\.0\.0\.1|localhost):\d+/.test(s.url)
+    return arr(services).filter(s => s && s.running === true && typeof s.url === 'string' && /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/.test(s.url)
       && !s.url.startsWith(ownOrigin) && /^[a-z][a-z0-9-]{1,31}$/.test(String(s.addon || s.name)))
       .map(s => ({label: String(s.addon || s.name), url: s.url}));
   }
-  return {historyLine, winningAnswer, needAction, agentRows, serviceLinks};
+
+  const noPrefix = v => String(v || '').replace(/^(agent|human):/, '');
+  const capital = v => String(v || '').charAt(0).toUpperCase() + String(v || '').slice(1);
+  const minutes = ms => Math.max(0, Math.round(ms / 60000));
+  const span = ms => { const m = minutes(ms); return m < 1 ? 'just now' : m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : Math.round(m / 1440) + ' days'; };
+
+  /* The ONE agent line under the ticket title. state: working | stuck | needs | failed | resume | new.
+     primary = the main action {label, op, args} (op is a dashboard op, or "open" with a url); items = the rest, under "...". */
+  function agentLine(ticket, run, nowMs, liveLink) {
+    const t = ticket || {}, r = run || null, id = t.id;
+    const sessions = arr(t.sessions).slice().sort((a, b) => Date.parse(b.last_used || 0) - Date.parse(a.last_used || 0));
+    const claim = (r && r.claim) || {};
+    const agent = capital(noPrefix(claim.agent || (sessions[0] && sessions[0].agent) || '')) || 'Agent';
+    const asks = arr(t.questions).some(q => q && q.answer == null);
+    const start = (label, extra) => ({label, op: 'run.start', args: {ticket: id, ...(extra || {})}});
+    const stop = {label: 'Stop', op: 'run.stop', args: {ticket: id}};
+    const fresh = {label: 'Start fresh', op: 'run.start', args: {ticket: id, fresh: true}};
+    const since = claim.started_at ? ' · ' + span(nowMs - Date.parse(claim.started_at)) : '';
+    if (r && r.running === true) {
+      const by = claim.by ? ' · started by ' + noPrefix(claim.by) : '';
+      if (r.state === 'maybe-stale') return {state: 'stuck', agent, status: 'may be stuck · quiet for a while' + since,
+        primary: start('Start anyway', {take_over: true}), items: [stop]};
+      if (asks) return {state: 'needs', agent, status: 'waiting for your answer' + since, primary: {label: 'Answer', op: 'answer'}, items: [stop, fresh]};
+      const live = liveLink ? {label: 'Open ' + liveLink.label, op: 'open', url: liveLink.url} : null;
+      return {state: 'working', agent, status: 'working' + by + since, primary: live || stop, items: live ? [stop] : []};
+    }
+    if (r && r.state === 'dead') return {state: 'failed', agent, status: 'the last run ended without finishing',
+      primary: start('Try again'), items: [fresh]};
+    if (asks) return {state: 'needs', agent, status: 'waiting for your answer', primary: {label: 'Answer', op: 'answer'}, items: [fresh]};
+    if (sessions[0]) {
+      const when = Date.parse(sessions[0].last_used);
+      return {state: 'resume', agent, status: 'last worked ' + (Number.isNaN(when) ? 'earlier' : span(nowMs - when) + ' ago'),
+        primary: start('Continue'), items: [fresh]};
+    }
+    return {state: 'new', agent, status: 'not started yet', primary: start('Start'), items: []};
+  }
+
+  /* Tickets tab tree: parents with their children (N of M done), children beyond 3 collapsed, a child whose parent is
+     missing is shown as a top-level ticket. Input order is kept. */
+  function treeRows(tickets) {
+    const all = arr(tickets), byId = new Map(all.map(t => [t.id, t]));
+    const kids = new Map();
+    for (const t of all) if (t.parent && byId.has(t.parent) && t.parent !== t.id) {
+      if (!kids.has(t.parent)) kids.set(t.parent, []);
+      kids.get(t.parent).push(t);
+    }
+    // Children in the order they were made (the order of the work), not the order the page lists tickets.
+    const made = t => Date.parse(t.created_at) || 0;
+    for (const list of kids.values()) list.sort((a, b) => made(a) - made(b) || String(a.id).localeCompare(String(b.id)));
+    const seen = new Set(), out = [];
+    const walk = (t, depth, idx) => {
+      if (seen.has(t.id)) return;
+      seen.add(t.id);
+      const ch = kids.get(t.id) || [];
+      const done = ch.filter(c => c.status === 'done').length;
+      out.push({ticket: t, depth, children: ch.length, done, parentMissing: !!t.parent && !byId.has(t.parent), late: depth > 0 && idx >= 3});
+      ch.forEach((c, i) => walk(c, depth + 1, i));
+    };
+    for (const t of all) if (!t.parent || !byId.has(t.parent) || t.parent === t.id) walk(t, 0, 0);
+    for (const t of all) walk(t, 0, 0);  // a parent cycle still shows its tickets
+    return out;
+  }
+
+  /* FO-14: who stands behind a proof. */
+  function proofMark(ev) {
+    return String((ev && ev.by) || '').startsWith('human:') ? {mark: '●', label: 'You'} : {mark: '○', label: 'Agent says'};
+  }
+  return {historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, treeRows, proofMark};
 });

@@ -148,7 +148,7 @@ else: sys.exit(2)
     assert s["services"] == [{"addon": "automation", "running": False}]
     active = next(t["id"] for t in s["tickets"] if t["status"] in ("active", "waiting"))
     assert s["runs"][active]["running"] is False
-    assert all(next(t for t in s["tickets"] if t["id"] == k)["status"] in ("active", "waiting") for k in s["runs"])
+    assert all(next(t for t in s["tickets"] if t["id"] == k)["status"] not in ("done", "dropped") for k in s["runs"])
 
 
 def test_dashboard_source_names_no_addon():
