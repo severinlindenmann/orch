@@ -1342,3 +1342,20 @@ def test_view_not_connected_has_no_blocks(proj, run):
     code, out, _ = run("relay", "view", "--json")
     v = json.loads(out)
     assert code == 0 and v["blocks"] == [] and "Not connected" in v["notice"]
+
+
+def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):
+    connect(run, rel)
+    run("relay", "send", "ws_reports001", "first")
+    log = proj / ".orch/run/relay/sent.jsonl"
+    assert log.is_file() and (log.stat().st_mode & 0o777) == 0o600
+    assert "first" in log.read_text() and not (proj / ".orch/relay-sent.jsonl").exists()
+    # a link at any level: nothing is written through it, the send still works
+    import shutil
+
+    shutil.rmtree(proj / ".orch/run/relay")
+    elsewhere = proj / "elsewhere"
+    elsewhere.mkdir()
+    (proj / ".orch/run/relay").symlink_to(elsewhere)
+    assert run("relay", "send", "ws_reports001", "second")[0] == 0
+    assert list(elsewhere.iterdir()) == []

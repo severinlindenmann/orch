@@ -12,7 +12,7 @@ from orch import net, relay
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
-SENT_LOG = "relay-sent.jsonl"
+SENT_LOG = ("run", "relay", "sent.jsonl")  # under .orch/, which is not tracked by git
 SENT_MAX = 400  # lines kept in the sent log
 KINDS = {
     "text": "Message",
@@ -48,6 +48,16 @@ def preview(type_: str, body: dict) -> tuple[str, str]:
     return plain(body.get("text") or "-"), ""
 
 
+def _sent_path(root: Path) -> Path | None:
+    """.orch/run/relay/sent.jsonl, or None when .orch, run or relay (or the file) is a link."""
+    p = root / ".orch"
+    for part in SENT_LOG:
+        p = p / part
+        if p.is_symlink():
+            return None
+    return p
+
+
 def record_sent(root: Path, msg: dict) -> None:
     """Remember one message this workspace sent (the relay keeps no history for us). Never fails the send."""
     if msg.get("type") not in KINDS:
@@ -56,20 +66,22 @@ def record_sent(root: Path, msg: dict) -> None:
     entry = {"id": msg["id"], "to": msg["to"], "type": msg["type"], "at": msg["created_at"], "preview": line}
     if extra:
         entry["extra"] = extra
-    path = root / ".orch" / SENT_LOG
+    path = _sent_path(root)
+    if path is None:
+        return
     try:
         have = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
         have.append(json.dumps(entry))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(have[-SENT_MAX:]) + "\n", encoding="utf-8")
+        net.write_atomic(path, ("\n".join(have[-SENT_MAX:]) + "\n").encode("utf-8"), True)
     except OSError:
         pass
 
 
 def _sent(root: Path) -> list[dict]:
     out = []
+    path = _sent_path(root)
     try:
-        lines = (root / ".orch" / SENT_LOG).read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines() if path else []
     except OSError:
         return out
     for ln in lines:
