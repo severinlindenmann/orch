@@ -475,7 +475,11 @@ async fn blob(
     let plain = crate::crypto::open(&app.key, &id, &raw)
         .ok_or_else(|| internal("blob does not decrypt"))?;
     Ok((
-        [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+        [
+            (axum::http::header::CONTENT_TYPE, "application/octet-stream"),
+            (axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (axum::http::header::CONTENT_DISPOSITION, "attachment"),
+        ],
         plain,
     )
         .into_response())
@@ -573,7 +577,7 @@ async fn answer(
         check("answer_request", &v)?;
         let qid = v["question_message_id"].as_str().unwrap_or("");
         let text = v["answer"].as_str().unwrap_or("");
-        let cid = v["client_id"].as_str().unwrap_or("").to_string();
+        let cid = v["client_id"].as_str().map(String::from);
         let q = store::get_msg(&c, qid)?
             .filter(|q| {
                 q.typ == "question" && (q.to == "phones" || q.to == pid) && ws.contains(&q.from)
@@ -595,6 +599,11 @@ async fn answer(
             )));
         }
         let (qb, qextra) = store::open_payload(&app.key, &q);
+        let tx = c.unchecked_transaction()?;
+        let mut abody = json!({"question_id": qb["question_id"], "answer": text, "answered_by": format!("human:{name}")});
+        if let Some(cid) = &cid {
+            abody["client_id"] = cid.clone().into();
+        }
         let m = store::system_message_with_key(
             qextra.get("key").and_then(crate::rules::ticket_key),
             &c,
@@ -604,11 +613,13 @@ async fn answer(
             "answer",
             q.ticket.as_deref(),
             Some(qid),
-            json!({"question_id": qb["question_id"], "answer": text, "answered_by": format!("human:{name}"),
-                "client_id": cid}),
+            abody,
         )?;
         let id = m["id"].as_str().unwrap().to_string();
-        remember_client_id(&c, &pid, &cid, &id)?;
+        if let Some(cid) = &cid {
+            remember_client_id(&c, &pid, cid, &id)?;
+        }
+        tx.commit()?;
         (id, cid)
     };
     app.notify.notify_waiters();
@@ -656,7 +667,7 @@ async fn send(
         }
         check("send_request", &v)?;
         let to = v["to"].as_str().unwrap_or("");
-        let cid = v["client_id"].as_str().unwrap_or("");
+        let cid = v["client_id"].as_str();
         if !ws.iter().any(|w| w == to) || !store::ws_exists(&c, to) {
             return Err(not_allowed("This phone may not send to that workspace."));
         }
@@ -704,7 +715,9 @@ async fn send(
             }
         }
         let mut b = serde_json::Map::new();
-        b.insert("client_id".into(), cid.into());
+        if let Some(cid) = cid {
+            b.insert("client_id".into(), cid.into());
+        }
         if v["general"] == true {
             b.insert("general".into(), true.into());
         }
@@ -724,9 +737,12 @@ async fn send(
             cand["reply_to"] = r.into();
         }
         crate::rules::validate_schema(&cand).map_err(invalid)?;
+        let tx = c.unchecked_transaction()?;
         let m = store::system_message(&c, &app.key, &pid, to, "text", ticket, reply_to, body)?;
         let id = m["id"].as_str().unwrap().to_string();
-        remember_client_id(&c, &pid, cid, &id)?;
+        if let Some(cid) = cid {
+            remember_client_id(&c, &pid, cid, &id)?;
+        }
         // The workspace named in this text may read these files (GET /v1/blobs/<id>).
         for (b, _) in &blobs {
             c.execute(
@@ -734,6 +750,7 @@ async fn send(
                 [b, &id],
             )?;
         }
+        tx.commit()?;
         id
     };
     app.notify.notify_waiters();
@@ -746,6 +763,8 @@ async fn send(
 
 /// Largest phone upload: 25 MB.
 pub const MAX_PHONE_BLOB: usize = 25 * 1024 * 1024;
+/// Most bytes one phone may upload in 24 hours: 1 GB.
+const PHONE_UPLOAD_DAY: i64 = 1024 * 1024 * 1024;
 
 /// `POST /v1/phone/blobs`: raw bytes, stored like workspace blobs (encrypted), uploader = this phone.
 async fn upload_blob(
@@ -761,15 +780,31 @@ async fn upload_blob(
         auth::phone(&c, &h)?.0
     };
     let too_big = || too_large("Files can be at most 25 MB.");
-    if let Some(n) = h
+    let announced = h
         .get(axum::http::header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<usize>().ok())
+        .and_then(|v| v.parse::<usize>().ok());
+    if announced.is_some_and(|n| n > MAX_PHONE_BLOB) {
+        return Err(too_big());
+    }
+    // Daily budget per phone, checked before a body byte is read.
     {
-        if n > MAX_PHONE_BLOB {
-            return Err(too_big());
+        let c = app.db.lock().unwrap();
+        let used: i64 = c.query_row(
+            "SELECT COALESCE(SUM(size),0) FROM blobs WHERE uploader=?1 AND created_at>?2",
+            params![pid, now() - 86400],
+            |r| r.get(0),
+        )?;
+        if used + announced.unwrap_or(MAX_PHONE_BLOB) as i64 > PHONE_UPLOAD_DAY {
+            return Err(ApiError {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                code: "rate_limited",
+                message: "Too many uploads today. Try again tomorrow.".into(),
+            });
         }
     }
+    // At most a few uploads in flight per relay (memory).
+    let _permit = app.upload_slots.acquire().await.map_err(internal)?;
     let mut buf: Vec<u8> = Vec::new();
     let mut hasher = Sha256::new();
     let mut stream = body.into_data_stream();
@@ -792,10 +827,14 @@ async fn upload_blob(
         .await
         .map_err(internal)?;
     drop(buf);
-    app.db.lock().unwrap().execute(
+    let ins = app.db.lock().unwrap().execute(
         "INSERT INTO blobs(id,uploader,size,sha256,created_at) VALUES(?1,?2,?3,?4,?5)",
         params![id, pid, size as i64, sha, now()],
-    )?;
+    );
+    if let Err(e) = ins {
+        let _ = tokio::fs::remove_file(app.blob_path(&id)).await;
+        return Err(e.into());
+    }
     Ok((
         StatusCode::CREATED,
         Json(json!({"blob_id": id, "size": size, "sha256": sha})),
@@ -942,7 +981,7 @@ async fn redeem(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<J
     }
     let code = v["code"]
         .as_str()
-        .filter(|c| c.len() == 25 && c.starts_with("pc_"))
+        .filter(|c| c.starts_with("pc_"))
         .ok_or_else(|| invalid("`code` is the code from the invitation link (pc_…)."))?;
     let row: Option<(String, i64, bool)> = c
         .query_row(
@@ -975,6 +1014,13 @@ async fn redeem(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<J
     let added: Vec<String> = wanted.iter().filter(|w| !ws.contains(w)).cloned().collect();
     let mut list = ws.clone();
     list.extend(added.iter().cloned());
+    let tx = c.unchecked_transaction()?;
+    for w in &added {
+        c.execute(
+            "DELETE FROM phone_mutes WHERE phone=?1 AND ws=?2",
+            params![pid, w],
+        )?;
+    }
     c.execute(
         "UPDATE phones SET workspaces=?2 WHERE id=?1",
         params![pid, serde_json::to_string(&list).unwrap_or("[]".into())],
@@ -990,6 +1036,7 @@ async fn redeem(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<J
     if !added.is_empty() {
         store::bump_and_hint(&c, &app.key, &added)?;
     }
+    tx.commit()?;
     let out: Vec<Value> = wanted
         .iter()
         .filter_map(|w| store::ws_name(&c, w).map(|n| json!({"id": w, "name": n})))

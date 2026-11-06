@@ -193,16 +193,23 @@ async fn vector_settings_workspace_patch_and_answer_shapes() {
             assert_eq!((s, v["error"].as_str()), (422, Some("invalid")), "{n}");
         }
     }
-    // an answer without client_id is invalid
-    let (s, _) = t
-        .phone(
-            &p,
-            "POST",
-            "/v1/phone/answer",
-            Some(vectors()["answer"][1]["request"].clone()),
-        )
-        .await;
-    assert_eq!(s, 422);
+    // answer shapes from the vector: valid ones get past validation (unknown question = 404), invalid ones are 422
+    for case in vectors()["answer"].as_array().unwrap() {
+        let (s, _) = t
+            .phone(
+                &p,
+                "POST",
+                "/v1/phone/answer",
+                Some(case["request"].clone()),
+            )
+            .await;
+        assert_eq!(
+            s,
+            if case["ok"] == true { 404 } else { 422 },
+            "{}",
+            case["name"]
+        );
+    }
 }
 
 #[tokio::test]
@@ -901,4 +908,177 @@ async fn vector_general_updates_are_accepted_or_refused_by_the_relay() {
     let (_, u) = t.phone(&p, "GET", "/v1/phone/updates", None).await;
     assert_eq!(u["items"].as_array().unwrap().len(), 1);
     assert_eq!(u["items"][0]["ticket"], "t_q3sum1");
+}
+
+#[tokio::test]
+async fn client_id_is_optional_and_not_deduped_without_it() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    let (s1, v1) = send(&t, &p, json!({"to": a.id, "text": "same"})).await;
+    let (s2, v2) = send(&t, &p, json!({"to": a.id, "text": "same"})).await;
+    assert_eq!((s1, s2), (201, 201));
+    assert_ne!(v1["id"], v2["id"]);
+    assert_eq!(
+        (v1["client_id"].clone(), v2["client_id"].clone()),
+        (Value::Null, Value::Null)
+    );
+    let q = mid();
+    let m = json!({"schema": "orch.msg/1", "id": q, "from": a.id, "to": "phones", "type": "question", "ticket": "t_7k3f9q",
+        "created_at": "2026-11-06T10:00:00Z", "body": {"question_id": "q1", "text": "?", "options": ["A"], "recommended": null}});
+    assert_eq!(t.call(&a, "POST", "/v1/messages", Some(m)).await.0, 201);
+    let (s, v) = t
+        .phone(
+            &p,
+            "POST",
+            "/v1/phone/answer",
+            Some(json!({"question_message_id": q, "answer": "A"})),
+        )
+        .await;
+    assert_eq!((s, v["client_id"].clone()), (201, Value::Null));
+    let inbox = t.inbox(&a).await;
+    let texts: Vec<_> = inbox.iter().filter(|m| m["type"] == "text").collect();
+    assert!(texts.iter().all(|m| m["body"].get("client_id").is_none()));
+    let ans = inbox.iter().find(|m| m["type"] == "answer").unwrap();
+    assert!(ans["body"].get("client_id").is_none());
+}
+
+#[tokio::test]
+async fn upload_quota_per_phone_per_day_and_unused_uploads_expire() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    let p2 = t.pair_phone(&[&a]).await;
+    fake_blob(&t, &p.0, "b_quota00000000000", 1024 * 1024 * 1024);
+    let (s, v) = upload(&t, &p, vec![1u8; 10]).await;
+    assert_eq!((s, v["error"].as_str()), (429, Some("rate_limited")), "{v}");
+    assert_eq!(upload(&t, &p2, vec![1u8; 10]).await.0, 201, "per phone");
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE blobs SET created_at=created_at-90000 WHERE id='b_quota00000000000'",
+            [],
+        )
+        .unwrap();
+    let (s, up) = upload(&t, &p, vec![1u8; 10]).await;
+    assert_eq!(s, 201);
+    // an upload never named in a text is purged after 24 h; a named one stays
+    let (_, named) = upload(&t, &p, vec![2u8; 10]).await;
+    let nid = named["blob_id"].as_str().unwrap().to_string();
+    let att = json!([{"blob_id": nid, "kind": "file", "name": "n.bin", "size": 10, "mime": "application/pdf"}]);
+    assert_eq!(
+        send(&t, &p, json!({"to": a.id, "attachments": att}))
+            .await
+            .0,
+        201
+    );
+    let uid = up["blob_id"].as_str().unwrap().to_string();
+    {
+        let c = t.app.db.lock().unwrap();
+        c.execute(
+            "UPDATE blobs SET created_at=created_at-90000 WHERE uploader=?1",
+            [&p.0],
+        )
+        .unwrap();
+        orch_relay::store::purge(&c, t.dir.path(), orch_relay::util::now()).unwrap();
+    }
+    assert_eq!(phone_blob(&t, &p, &uid).await.0, 404);
+    assert_eq!(phone_blob(&t, &p, &nid).await.0, 200);
+}
+
+#[tokio::test]
+async fn blob_downloads_are_attachments_with_nosniff() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    let (_, up) = upload(&t, &p, b"<html>x</html>".to_vec()).await;
+    let bid = up["blob_id"].as_str().unwrap();
+    let att = json!([{"blob_id": bid, "kind": "file", "name": "n.html", "size": 14, "mime": "text/html"}]);
+    assert_eq!(
+        send(&t, &p, json!({"to": a.id, "attachments": att}))
+            .await
+            .0,
+        201
+    );
+    let r1 = t
+        .http
+        .get(format!("{}/v1/phone/blobs/{bid}", t.base))
+        .header("X-Orch-Phone", &p.0)
+        .header("Authorization", format!("Bearer {}", p.1))
+        .send()
+        .await
+        .unwrap();
+    let r2 = t
+        .http
+        .get(format!("{}/v1/blobs/{bid}", t.base))
+        .header("X-Orch-Workspace", &a.id)
+        .header("Authorization", format!("Bearer {}", a.token))
+        .send()
+        .await
+        .unwrap();
+    for r in [r1, r2] {
+        assert_eq!(r.status(), 200);
+        assert_eq!(r.headers()["x-content-type-options"], "nosniff");
+        assert_eq!(r.headers()["content-disposition"], "attachment");
+        assert_eq!(r.headers()["content-type"], "application/octet-stream");
+    }
+}
+
+#[tokio::test]
+async fn redeem_clears_old_mutes_of_added_workspaces() {
+    let t = start().await;
+    let (a, b) = (t.add_ws("A").await, t.add_ws("B").await);
+    let p = t.pair_phone(&[&a, &b]).await;
+    t.phone(
+        &p,
+        "PATCH",
+        &format!("/v1/phone/workspaces/{}", b.id),
+        Some(json!({"muted_until": "forever"})),
+    )
+    .await;
+    // remove B by hand (keeps the row) and re-add through an invitation
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE phones SET workspaces=?2 WHERE id=?1",
+            rusqlite::params![p.0, json!([a.id]).to_string()],
+        )
+        .unwrap();
+    let (_, v) = t
+        .admin_json(
+            "POST",
+            "/admin/api/phones",
+            Some(json!({"name": "i", "workspaces": [b.id]})),
+        )
+        .await;
+    let code = v["link"]
+        .as_str()
+        .unwrap()
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        t.phone(
+            &p,
+            "POST",
+            "/v1/phone/invitations/redeem",
+            Some(json!({"code": code}))
+        )
+        .await
+        .0,
+        200
+    );
+    let (_, l) = t.phone(&p, "GET", "/v1/phone/workspaces", None).await;
+    let bw = l["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == b.id.as_str())
+        .unwrap();
+    assert_eq!(bw["muted_until"], Value::Null);
 }

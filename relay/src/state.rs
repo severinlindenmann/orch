@@ -71,6 +71,8 @@ pub struct App {
     pub transcriber: Arc<dyn Transcriber>,
     /// phone/workspace id -> (window start, calls in window)
     pub transcribe_rate: Mutex<HashMap<String, (i64, u32)>>,
+    /// Phone uploads in flight (memory bound).
+    pub upload_slots: tokio::sync::Semaphore,
     /// phone id -> (window start, calls in window) for `POST /v1/phone/invitations/redeem`
     pub redeem_rate: Mutex<HashMap<String, (i64, u32)>>,
     /// "workspace|phone" -> text-push budget state
@@ -128,6 +130,7 @@ impl App {
             transcriber,
             transcribe_rate: Mutex::new(HashMap::new()),
             redeem_rate: Mutex::new(HashMap::new()),
+            upload_slots: tokio::sync::Semaphore::new(4),
             push_budget: Mutex::new(HashMap::new()),
         }))
     }

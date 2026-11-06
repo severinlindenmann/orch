@@ -573,9 +573,13 @@ pub fn purge(c: &Connection, data_dir: &Path, at: i64) -> rusqlite::Result<(usiz
         [],
     )?;
     c.execute("DELETE FROM phone_mutes WHERE until>=0 AND until<?1", [at])?;
-    let mut st = c.prepare("SELECT id FROM blobs WHERE created_at<?1")?;
+    // Phone uploads never named in a sent text go after 24 hours.
+    let mut st = c.prepare(
+        "SELECT id FROM blobs WHERE created_at<?1 OR (uploader LIKE 'ph\\_%' ESCAPE '\\' AND created_at<?2
+           AND id NOT IN (SELECT blob_id FROM phone_blobs))",
+    )?;
     let ids: Vec<String> = st
-        .query_map([cutoff], |r| r.get(0))?
+        .query_map([cutoff, at - 86400], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     for id in &ids {
         let _ = std::fs::remove_file(data_dir.join("blobs").join(id));

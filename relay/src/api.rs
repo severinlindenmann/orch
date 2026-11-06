@@ -398,7 +398,15 @@ async fn get_blob(
         .map_err(|_| not_found("No such file."))?;
     let plain =
         crypto::open(&app.key, &id, &raw).ok_or_else(|| internal("blob does not decrypt"))?;
-    Ok(([(header::CONTENT_TYPE, "application/octet-stream")], plain).into_response())
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/octet-stream"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::CONTENT_DISPOSITION, "attachment"),
+        ],
+        plain,
+    )
+        .into_response())
 }
 
 async fn refresh(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {
