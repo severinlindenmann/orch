@@ -298,7 +298,8 @@ def build(root: Path, now: datetime | None = None) -> dict:
         when = parse(r["at"]).astimezone().strftime("%a %H:%M")
         took = r.get("took")
         how = ("done" + (f" in {max(1, round(took / 60))} min" if isinstance(took, int | float) and took else "")) if ok else "did not finish"
-        row = {"title": title(r["ticket"]), "subtitle": f"{when} · {how}", "tone": "good" if ok else "bad"}
+        row = {"title": title(r["ticket"]), "subtitle": f"{when}" + (f" · {how}" if ok else ""),
+               "chips": [{"label": "Done" if ok else "Stopped", "tone": "good" if ok else "bad"}]}
         if r["ticket"] in by_id:
             row["link"] = r["ticket"]
         recent.append(row)

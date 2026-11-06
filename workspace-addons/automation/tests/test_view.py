@@ -57,7 +57,7 @@ def test_recent_runs_short_list_with_titles(ws):
     v = build(ws, T(9))
     check(v)
     (lst,) = blocks(v, "list", "Recent runs")
-    assert lst["items"][0]["title"] == "Bank check" and lst["items"][0]["tone"] == "bad" and lst["items"][0]["link"] == "t_wake002"
+    assert lst["items"][0]["title"] == "Bank check" and lst["items"][0]["chips"][0] == {"label": "Stopped", "tone": "bad"} and lst["items"][0]["link"] == "t_wake002"
     assert "exit" not in json.dumps(lst).lower()
 def test_good_run_has_duration(ws):
     add_ticket(ws, "t_wake003", title="Good", waiting_on={"kind": "time", "until": "2026-11-04T08:00:00Z"})
@@ -71,7 +71,7 @@ def test_good_run_has_duration(ws):
     v = build(ws, T(9))
     check(v)
     item = blocks(v, "list", "Recent runs")[0]["items"][0]
-    assert item["tone"] == "good" and "done" in item["subtitle"]
+    assert item["chips"][0]["label"] == "Done" and "done in" in item["subtitle"]
 def test_view_is_read_only_and_cli_prints_json(ws, capsys):
     add_ticket(ws, "t_wake004")
     before = sorted(p.name for p in (ws / ".orch").rglob("*") if p.is_file())
