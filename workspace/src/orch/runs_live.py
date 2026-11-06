@@ -58,6 +58,15 @@ def available(adapter: dict) -> bool:
     )
 
 
+def ref(root: Path, tid: str) -> str:
+    """How a person names the ticket in a command: its key (DM1-12), else its id."""
+    with contextlib.suppress(Exception):
+        k = tickets.load(root, tid).get("key")
+        if isinstance(k, str) and k:
+            return k
+    return tid
+
+
 def socket_name(root: Path) -> str:
     return "orch-" + hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()[:8]
 
@@ -428,12 +437,12 @@ def check_starting(root: Path, rec: dict, now: float | None = None) -> str | Non
     pane = tmux(root, "capture-pane", "-p", "-t", target(tid)) if session_exists(root, tid) else None
     note = None
     if pane is not None and pane.returncode == 0:
-        note = adapters.screen_note(rec["agent"], root, pane.stdout, tid)
+        note = adapters.screen_note(rec["agent"], root, pane.stdout, ref(root, tid))
     if note is None and age >= STARTUP_SECONDS:
         label = adapters.load(rec["agent"], root)["label"]
         note = (
             f"{label} has not started up after a minute. "
-            f"Open the live session to see why: orch run attach {tid}"
+            f"Open the live session to see why: orch run attach {ref(root, tid)}"
         )
     if note is None:
         return None
@@ -463,7 +472,7 @@ def start_waiting(root: Path) -> None:
             runs.start(root, tid, by, mode="live")
 
 
-def line(rec: dict) -> str:
+def line(rec: dict, root: Path | None = None) -> str:
     """One plain sentence about a live run, for `orch run status`."""
     state = (rec.get("live") or {}).get("state", "starting")
     if (rec.get("live") or {}).get("why"):
@@ -474,4 +483,5 @@ def line(rec: dict) -> str:
         "working": "working",
         "attention": "waiting for your OK",
     }
-    return f"In a live session ({words.get(state, state)}). See it: orch run attach {rec['ticket']}"
+    name = ref(root, rec["ticket"]) if root is not None else rec["ticket"]
+    return f"In a live session ({words.get(state, state)}). See it: orch run attach {name}"

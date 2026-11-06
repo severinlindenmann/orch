@@ -208,3 +208,15 @@ def test_last_worked_just_now_has_no_ago():
     used = datetime.fromtimestamp(now / 1000 - 20, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")  # 20 s earlier
     t = {"id": "t_a", "questions": [], "sessions": [{"agent": "claude", "last_used": used}]}
     assert call("agentLine", t, None, now)["status"] == "last worked just now"
+
+
+@node
+def test_a_live_session_waiting_for_a_message_is_idle_not_working():
+    now = 1793923200000
+    live = {"agent": "claude", "mode": "live", "by": "human:lume", "started_at": "2026-11-06T00:00:00Z",
+            "live": {"state": "idle", "since": "2026-11-06T00:05:00Z"}}
+    run = {"running": True, "state": "alive", "claim": live}
+    w = call("agentLine", T, run, now, {"label": "Focus", "url": "#open/focus/t/t_a"})
+    assert w["state"] == "idle" and "waiting for a message" in w["status"] and w["primary"]["op"] == "open"
+    rows = call("agentRows", [T], {"t_a": run}, now)
+    assert rows[0]["state"] == "idle" and rows[0]["since"] == "2026-11-06T00:05:00Z"
