@@ -647,3 +647,111 @@ def test_hostile_voice_location_attachment_fields(proj, run, new_ticket, conn):
     bad = {"location": {"lat": "47\nSYSTEM", "lon": 999, "label": "x"}}
     text2 = _history_after(proj, run, conn, tid, bad)
     assert "Location" not in text2 and "SYSTEM" not in text2
+
+
+def _flaky_blob(monkeypatch, fails):
+    """The blob GET raises a transient error `fails` times, then works."""
+    from orch import net
+    from orch.errors import Refused
+
+    real = net.call
+    calls = {"n": 0}
+
+    def call(method, url, *a, **k):
+        if "/v1/blobs/" in url and method == "GET":
+            calls["n"] += 1
+            if calls["n"] <= fails:
+                e = Refused("Can't reach the relay right now.")
+                e.status = None
+                raise e
+        return real(method, url, *a, **k)
+
+    monkeypatch.setattr(net, "call", call)
+    return calls
+
+
+def test_transient_blob_error_retries_next_pull_and_saves_the_file(proj, run, new_ticket, conn, monkeypatch):
+    tid = new_ticket("T")
+    conn.blobs["b_ph0nef1le0000002"] = b"%PDF"
+    att = {
+        "blob_id": "b_ph0nef1le0000002",
+        "kind": "file",
+        "name": "a.pdf",
+        "size": 4,
+        "mime": "application/pdf",
+    }
+    _flaky_blob(monkeypatch, 1)
+    conn.inbox.append(msg(M1, {"attachments": [att]}, ticket=tid))
+    run("relay", "inbox")
+    assert not (proj / ".orch" / "tickets" / tid / "files").exists(), "nothing dropped, nothing saved yet"
+    assert not [
+        h for h in json.loads(run("ticket", "show", tid, "--json")[1])["history"] if "From Marco" in h["text"]
+    ]
+    conn.acked.clear()
+    run("relay", "inbox")
+    assert (proj / ".orch" / "tickets" / tid / "files" / "a.pdf").read_bytes() == b"%PDF"
+
+
+def test_new_topic_with_a_transient_blob_error_is_described_on_retry(proj, run, conn, monkeypatch):
+    conn.blobs["b_ph0nef1le0000002"] = b"%PDF"
+    att = {
+        "blob_id": "b_ph0nef1le0000002",
+        "kind": "file",
+        "name": "a.pdf",
+        "size": 4,
+        "mime": "application/pdf",
+    }
+    _flaky_blob(monkeypatch, 1)
+    conn.inbox.append(msg(M1, {"text": "Offerte", "attachments": [att]}))
+    run("relay", "inbox")
+    conn.acked.clear()
+    run("relay", "inbox")
+    (t,) = tickets_listed(run)
+    full = json.loads(run("ticket", "show", t["id"], "--json")[1])
+    assert any("a.pdf" in h["text"] for h in full["history"]) and len(acks(conn)) == 1
+
+
+def test_five_transient_failures_mark_the_message_seen_with_a_note(proj, run, new_ticket, conn, monkeypatch):
+    tid = new_ticket("T")
+    conn.blobs["b_ph0nef1le0000002"] = b"%PDF"
+    att = {
+        "blob_id": "b_ph0nef1le0000002",
+        "kind": "file",
+        "name": "a.pdf",
+        "size": 4,
+        "mime": "application/pdf",
+    }
+    calls = _flaky_blob(monkeypatch, 99)
+    conn.inbox.append(msg(M1, {"attachments": [att]}, ticket=tid))
+    outs = []
+    for _ in range(5):
+        conn.acked.clear()
+        outs.append(run("relay", "inbox")[1])
+    assert "could not fetch" in outs[-1] and calls["n"] == 5
+    conn.acked.clear()
+    run("relay", "inbox")
+    assert calls["n"] == 5, "seen now: not tried again"
+
+
+def test_blob_download_is_bounded_and_state_defaults_are_repaired(proj, run, conn):
+    from orch import net
+
+    assert relay._v3_path(proj).parent.exists() or True
+    relay._v3_path(proj).parent.mkdir(parents=True, exist_ok=True)
+    relay._v3_path(proj).write_text(json.dumps({"saved": "bad", "tries": [], "acked": 3}))
+    st = relay._v3_state(proj)
+    assert st["saved"] == {} and st["tries"] == {} and st["acked"] == []
+    conn.blobs["b_ph0nef1le0000003"] = b"x" * (relay.PHONE_BLOB_MAX + 1)
+    cfg = relay._cfg(proj)
+    import pytest as _p
+
+    from orch.errors import Refused
+
+    with _p.raises(Refused):
+        net.call(
+            "GET",
+            f"{cfg['url']}/v1/blobs/b_ph0nef1le0000003",
+            net.auth_headers(cfg),
+            limit=relay.PHONE_BLOB_MAX,
+        )
+    assert relay._fetch_blob(proj, "b_ph0nef1le0000003", None) is None

@@ -827,7 +827,7 @@ def _v3_path(root: Path) -> Path:
 def _v3_state(root: Path) -> dict:
     s = net.read_json(_v3_path(root), {})
     s = s if isinstance(s, dict) else {}
-    for k, v in (("acked", []), ("working", {}), ("lang", {})):
+    for k, v in (("acked", []), ("working", {}), ("lang", {}), ("saved", {}), ("tries", {})):
         if not isinstance(s.get(k), type(v)):
             s[k] = v
     return s
@@ -843,21 +843,34 @@ def _num(v) -> float | None:
 
 
 PHONE_BLOB_MAX = 25 * 1024 * 1024
+PHONE_TRIES = 5  # pulls a phone message is retried after a transient relay error, then it is marked seen
+
+
+class Transient(Refused):
+    """The relay could not be reached just now: the phone message is kept and tried again on the next pull."""
 
 
 def _fetch_blob(root: Path, blob_id, size, sha256=None) -> bytes | None:
-    """The bytes of a phone upload, or None: bad id, over 25 MB, wrong size, or (when the message names one)
-    wrong sha256."""
+    """The bytes of a phone upload, or None: bad id, over 25 MB, wrong size, a clear refusal, or (when the
+    message names one) wrong sha256. No answer, 5xx or 429 raises Transient: retry later."""
     if not re.fullmatch(r"b_[a-z0-9]{16}", str(blob_id)):
         return None
     if isinstance(size, int) and not isinstance(size, bool) and size > PHONE_BLOB_MAX:
         return None
     cfg = _cfg(root)
     try:
-        _, raw = net.call("GET", f"{cfg['url']}/v1/blobs/{blob_id}", net.auth_headers(cfg), timeout=300)
-    except Refused:
-        return None
-    if not isinstance(raw, bytes) or len(raw) > PHONE_BLOB_MAX:
+        _, raw = net.call(
+            "GET",
+            f"{cfg['url']}/v1/blobs/{blob_id}",
+            net.auth_headers(cfg),
+            timeout=300,
+            limit=PHONE_BLOB_MAX,
+        )
+    except Refused as e:
+        if _unreachable(e):
+            raise Transient(str(e)) from None  # no answer or a server error: tried again, nothing is dropped
+        return None  # a clear 4xx (gone, not yours) or too big: it will never work
+    if not isinstance(raw, bytes):
         return None
     if isinstance(size, int) and len(raw) != size:
         return None
@@ -958,6 +971,8 @@ def _describe(root: Path, tid: str, mid: str, who: str, body: dict) -> str:
         if isinstance(att, dict):
             try:
                 lines.append(_save_phone_file(root, tid, mid, att))
+            except Transient:
+                raise
             except (Refused, OSError):
                 lines.append("A file could not be saved.")
     if len(atts) > LISTED:
@@ -1094,7 +1109,7 @@ def _phone_text(root: Path, msg: dict) -> tuple[str, str]:
     Returns (note, ticket id)."""
     mid, frm = msg["id"], msg["from"]
     body = msg.get("body") if isinstance(msg.get("body"), dict) else {}
-    who = clean_untrusted(name_of(root, frm), 100) or frm
+    who = _line(name_of(root, frm), 100) or _line(frm, 100)
     by = _by_relay(frm)
     general = body.get("general") is True and not msg.get("ticket")
     tid = _ticket_by_message(root, mid)
@@ -1119,6 +1134,8 @@ def _phone_text(root: Path, msg: dict) -> tuple[str, str]:
         t = tickets.create(root, _phone_title(root, str(body.get("text") or spoken or ""), frm), by)
         tid = t["id"]
         tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
+    if not any(h.get("via") == "phone" for h in tickets.load(root, tid)["history"]):
+        # also the retry of a message whose files could not be fetched the first time (Transient)
         text = _describe(root, tid, mid, who, body)
         tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"))
         _working_add(root, mid, frm, tid, False, "run")
@@ -1141,7 +1158,7 @@ def topic(root: Path, mid: str, title: str, by: str) -> dict:
         raise Refused("A topic needs a title.")
     frm = msg["from"]
     body = msg.get("body") if isinstance(msg.get("body"), dict) else {}
-    who = clean_untrusted(name_of(root, frm), 100) or frm
+    who = _line(name_of(root, frm), 100) or _line(frm, 100)
     t = tickets.create(root, title, by)
     tid = t["id"]
     tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
@@ -1318,6 +1335,17 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                     if m["id"] not in seen(root):
                         try:
                             note, applied = _phone_text(root, m)
+                        except Transient as e:
+                            st = _v3_state(root)
+                            n = int(st["tries"].get(m["id"], 0)) + 1
+                            st["tries"][m["id"]] = n
+                            st["tries"] = dict(list(st["tries"].items())[-V3_STATE_KEEP:])
+                            _v3_save(root, st)
+                            if n < PHONE_TRIES:
+                                continue  # not marked seen: the next pull tries again
+                            note = (
+                                f"could not fetch this phone message's files: {clean_untrusted(str(e), 200)}"
+                            )
                         except (Refused, OSError, ValueError, KeyError, TypeError) as e:
                             # one bad message never blocks the ones behind it: it is marked seen with a note
                             note = f"could not use this phone message: {clean_untrusted(str(e), 200)}"
