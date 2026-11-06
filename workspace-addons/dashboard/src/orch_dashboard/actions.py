@@ -27,6 +27,8 @@ RESERVED = frozenset({"ticket", "check", "log", "ask", "answer", "link", "ext", 
                       "status", "init", "update", "addon", "agents", "config", "clients", "help", "setup", "dashboard"})
 AGENT = re.compile(r"[a-z][a-z0-9-]{1,31}")
 MAX_COMMAND = 500
+MAX_TASK = 500
+PERMISSIONS = ("ask", "auto", "full")
 PATCH_KEYS = ("title", "status", "owner", "due", "note", "summary")
 STATUSES = ("open", "active", "waiting", "done", "dropped")
 
@@ -127,6 +129,15 @@ def _ticket_edit(a):
     return ["ticket", "edit", _tid(a.get("ticket"))], flags, []
 
 
+def _check_add(a):
+    """Add a task: `orch check add <ticket> --by ... -- <text>` (text up to 500 characters)."""
+    _only(a, ("ticket", "text"))
+    text = _text(a.get("text"), "task")
+    if len(text) > MAX_TASK:
+        raise BadRequest(f"The task is too long (at most {MAX_TASK} characters).")
+    return ["check", "add", _tid(a.get("ticket"))], [], [text.strip()]
+
+
 def _log(a):
     _only(a, ("ticket", "text"))
     return ["log", _tid(a.get("ticket"))], [], [_text(a.get("text"))]
@@ -172,6 +183,15 @@ def _config_agent(a):
     return ["config", "set", "workspace.agent", _agent_name(a.get("name"))], [], []
 
 
+def _config_permissions(a):
+    """How much an agent may do without asking: `orch config set workspace.permissions <ask|auto|full>`."""
+    _only(a, ("mode",))
+    mode = a.get("mode")
+    if mode not in PERMISSIONS:
+        raise BadRequest("Pick Ask, Auto or Full.")
+    return ["config", "set", "workspace.permissions", mode], [], []
+
+
 def _config_agent_test(a):
     """Try an agent: `orch agents test <name> --json` answers {name, ok, reason}. Changes nothing, so no --by."""
     _only(a, ("name",))
@@ -209,9 +229,9 @@ def _addon_set(a):
 
 # op -> function(args) -> (words incl. ids, flags, free text after "--")
 OPS = {"answer": _answer, "ticket.new": _ticket_new, "ticket.patch": _ticket_patch, "ticket.edit": _ticket_edit,
-       "log": _log, "run.start": _run_start, "run.stop": _run_stop, "addon.start": _addon_start,
+       "log": _log, "check.add": _check_add, "run.start": _run_start, "run.stop": _run_stop, "addon.start": _addon_start,
        "addon.act": _addon_act, "config.agent": _config_agent, "config.agent.add": _config_agent_add, "config.agent.test": _config_agent_test,
-       "addon.set": _addon_set}
+       "config.permissions": _config_permissions, "addon.set": _addon_set}
 
 
 def actor() -> str:
@@ -256,7 +276,7 @@ def _agent_exists(root: Path, orch_bin: str, name: str) -> bool:
 
 def _audit(root: Path, op: str, args: dict) -> None:
     """One line per settings change in .orch/run/dashboard/actions.log (local, gitignored): who, what, the exact command."""
-    keep = {k: v for k, v in args.items() if k in ("name", "command", "prompt_via", "on")}
+    keep = {k: v for k, v in args.items() if k in ("name", "command", "prompt_via", "on", "mode")}
     line = json.dumps({"at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), "by": actor(), "via": "dashboard", "op": op, **keep},
                       ensure_ascii=False)
     try:
@@ -295,7 +315,7 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
     if op == "config.agent.test" and isinstance(out, dict) and isinstance(out.get("ok"), bool):
         return 200, "", out  # `orch agents test` exits 1 when the agent does not work; the JSON is the answer either way
     if r.returncode == 0:
-        if op in ("config.agent.add", "addon.set", "config.agent"):
+        if op in ("config.agent.add", "addon.set", "config.agent", "config.permissions"):
             _audit(root, op, args)
         return 200, "", out if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None

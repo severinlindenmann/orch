@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 MAX_TEXT = 2000
+MAX_TASK = 500
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 QID = re.compile(r"q[0-9]{1,4}")
@@ -95,6 +96,15 @@ def _run_send(a):
     return ["run", "send", _t(a)], [], [_text(a.get("text"), "message")]
 
 
+def _check_add(a):
+    """Add a task: `orch check add <ticket> -- <text>` (text up to 500 characters)."""
+    _only(a, ("ticket", "text"))
+    text = _text(a.get("text"), "task").strip()
+    if len(text) > MAX_TASK:
+        raise BadRequest(f"The task is too long (at most {MAX_TASK} characters).")
+    return ["check", "add", _t(a)], [], [text]
+
+
 def _check(a, extra=()):
     _only(a, ("ticket", "check", *extra))
     return _t(a), _id(CID, a.get("check"), "task")
@@ -128,6 +138,7 @@ OPS = {
     "run.start": _run_start,
     "run.stop": _run_stop,
     "run.send": _run_send,
+    "check.add": _check_add,
     "check.edit": _check_edit,
     "check.move": _check_move,
     "check.remove": _check_plain("remove"),

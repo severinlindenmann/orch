@@ -143,3 +143,7 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 .fx-step.enter{animation:fx-in 260ms var(--ease-out,ease-out) both}
 .fx-dot::after{content:none}
 .fx[data-state=working][data-live] .fx-dot::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1px solid var(--brand);animation:fx-breathe 2.4s ease-out infinite}
+
+.fx-add-task{display:flex;gap:6px;padding:6px 8px 0}.fx-add-task .input{flex:1;min-width:0}
+.fx-when{display:block;margin-top:2px;font-size:11px}
+.fx-compose[hidden]{display:none}

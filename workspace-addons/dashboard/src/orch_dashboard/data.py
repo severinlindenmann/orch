@@ -168,8 +168,11 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
     agents, rows = run_orch(orch_bin, ["agents", "--json"], root), run_orch(orch_bin, ["addon", "list", "--json"], root)
     keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
+    perm = run_orch(orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
+    perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
     return {
         "folder": str(root),
+        "permissions": perm if perm in ("ask", "auto", "full") else "auto",  # core's default is Auto
         "agents": [{k: a.get(k) for k in keep} for a in (agents if isinstance(agents, list) else [])
                    if isinstance(a, dict) and isinstance(a.get("name"), str)],
         "addons": [{"name": r["name"], "description": str(r.get("description") or "")[:200], "active": r.get("active") is True,

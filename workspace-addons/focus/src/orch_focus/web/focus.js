@@ -23,6 +23,7 @@
     for (const kid of kids.flat()) if (kid != null) el.append(kid);
     return el;
   }
+  const STATUS_WORD = {open: 'To do', active: 'Doing', waiting: 'Waiting', done: 'Done', dropped: 'Dropped'};
   const toast = (text, kind) => (window.orch ? window.orch.toast(text, kind) : null);
 
   async function act(op, args) {
@@ -41,7 +42,7 @@
     fetch(P + '/api/tickets').then(r => r.json()).then(list => {
       const box = root.querySelector('.fx-pick');
       if (!list.length) box.append(h('p', {class: 'muted', text: 'No open tickets.'}));
-      for (const t of list) box.append(h('a', {href: P + '/t/' + t.id}, h('span', {class: 'mono key', text: t.key || t.id}), h('span', {class: 'grow', text: t.title}), h('span', {class: 'meta', text: t.status})));
+      for (const t of list.slice().sort((a, b) => Number(a.status === 'done') - Number(b.status === 'done'))) box.append(h('a', {href: P + '/t/' + t.id}, h('span', {class: 'mono key', text: t.key || t.id}), h('span', {class: 'grow', text: t.title}), h('span', {class: 'meta', text: STATUS_WORD[t.status] || t.status})));
     });
     return;
   }
@@ -74,7 +75,9 @@
     els.tasks = h('div', {id: 'fx-tasks'});
     els.helpers = h('div');
     els.railNote = h('p', {class: 'meta', style: false});
-    const rail = h('aside', {class: 'fx-rail', 'aria-label': 'Tasks'}, h('div', {}, h('p', {class: 'eyebrow'}, h('span', {text: 'Tasks'}), els.railCount = h('span')), els.tasks), els.helpers, els.railNote);
+    els.addInput = h('input', {class: 'input', type: 'text', maxlength: '500', placeholder: '+ Add task', 'aria-label': 'Add a task', name: 'task'});
+    els.addForm = h('form', {class: 'fx-add-task'}, els.addInput, h('button', {class: 'btn ghost xs', text: 'Add'}));
+    const rail = h('aside', {class: 'fx-rail', 'aria-label': 'Tasks'}, h('div', {}, h('p', {class: 'eyebrow'}, h('span', {text: 'Tasks'}), els.railCount = h('span')), els.tasks, els.addForm), els.helpers, els.railNote);
     els.tabs = [['live', 'Live'], ['proof', 'Proof']].map(([id, label], i) => h('button', {class: 'fx-tab', role: 'tab', id: 'fx-t-' + id, 'aria-controls': 'fx-p-' + id, 'aria-selected': String(i === 0), tabindex: i ? '-1' : '0', title: label + ' (' + (i + 1) + ')', 'data-tab': i, text: label}));
     els.sub = h('span', {class: 'meta', text: ''});
     els.feed = h('div', {class: 'fx-feed', role: 'log', 'aria-label': 'What the agent is doing'});
@@ -88,7 +91,7 @@
     els.form = h('form', {id: 'fx-form'}, els.msg, h('button', {class: 'btn primary sm', 'aria-label': 'Send', icon: 'send'}));
     els.hint = h('p', {class: 'hint'}, h('span', {}, h('kbd', {text: 'Enter'}), ' send'), h('span', {}, h('kbd', {text: '/'}), ' write'), h('span', {}, h('kbd', {text: '?'}), ' all shortcuts'), els.hintNote = h('span'));
     els.sent = h('p', {class: 'meta', 'aria-live': 'polite'});
-    const compose = h('div', {class: 'fx-compose'}, els.form, els.hint);
+    const compose = els.compose = h('div', {class: 'fx-compose'}, els.form, els.hint);
     const dl = [['Full screen', 'F'], ['Show or hide tasks', '['], ['Write a message', '/'], ['Stop or continue', 'S'], ['Live · Proof', '1 2'], ['Next or previous task', 'J K'], ['Close, leave full screen', 'Esc']];
     els.help = h('div', {class: 'fx-help', id: 'fx-help', hidden: true}, h('div', {class: 'fx-help-card', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'fx-help-t'},
       h('div', {class: 'row'}, h('h2', {id: 'fx-help-t', class: 'grow', text: 'Shortcuts'}), h('button', {class: 'btn ghost icon xs', 'data-act': 'help', 'aria-label': 'Close', icon: 'x'})),
@@ -102,6 +105,16 @@
   /* ---- render ---- */
   const hhmm = at => { try { return new Date(at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hour12: false}); } catch (e) { return ''; } };
   function evText(c) { const ev = (c.evidence || []).slice(-1)[0]; return ev ? String(ev.summary || ev.text || ev.ref || '') : ''; }
+  // When a proof was added, in the person's own time: "today 16:05", "yesterday 09:12", "5 Nov 09:12".
+  function stamp(at) {
+    const d = new Date(at), now = new Date();
+    if (!at || isNaN(d.getTime())) return '';
+    const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const diff = Math.round((day(now) - day(d)) / 86400000), t = hhmm(at);
+    if (diff === 0) return 'today ' + t;
+    if (diff === 1) return 'yesterday ' + t;
+    return d.getDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()] + (d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : '') + ' ' + t;
+  }
   const keyOf = o => JSON.stringify(o);
 
   function apply(v) {
@@ -122,10 +135,11 @@
     els.railCount.textContent = v.done + '/' + v.total;
     const running = v.run.running;
     els.stopIc.innerHTML = ic(running ? 'pause' : 'play');
-    els.stopL.textContent = running ? 'Stop' : (v.state === 'done' ? 'Start again' : 'Continue');
+    els.stopL.textContent = running ? 'Stop' : 'Continue';
+    els.compose.hidden = v.state === 'done' && !running;  /* a done ticket is a read-only board; Continue starts a run */
     els.fresh.hidden = running;
     els.attachBtn.hidden = !(running && v.live);
-    els.sub.textContent = running ? (v.live ? 'live session' : 'one run') : (v.run.run ? 'last run ended' : 'not started');
+    els.sub.textContent = running ? (v.live ? 'live session' : 'one run') : (v.state === 'done' ? 'done' : v.run.run ? 'last run ended' : 'not started');
     els.msg.placeholder = 'Message ' + els.agent.textContent + '…';
     els.hintNote.textContent = v.generic && !(running && v.live) ? 'Saved for the next run.' : (running ? 'Goes in after this step.' : '');
     els.railNote.textContent = v.generic ? 'This agent shows its tasks and questions as it ticks them off.' : '';
@@ -185,7 +199,6 @@
   }
 
   // The ticket lines orch writes itself, in the same plain words as the CLI and the dashboard.
-  const STATUS_WORD = {open: 'To do', active: 'Doing', waiting: 'Waiting', done: 'Done', dropped: 'Dropped'};
   function plainLine(text, checklist) {
     const task = id => { const c = (checklist || []).find(x => x.id === id); return c && c.text ? ': ' + c.text : ''; };
     const addon = k => k.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase());
@@ -194,7 +207,7 @@
     if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a task' + task(m[1]);
     if (/^Asked q\d+, waiting$/.test(text)) return 'Asked a question';
     if ((m = /^Answered q\d+: ([\s\S]*)$/.exec(text))) return 'Answered a question: ' + m[1];
-    if ((m = /^Status \w+ -> (\w+)$/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
+    if ((m = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
     if ((m = /^Set ext\.([a-z][a-z0-9-]*)$/.exec(text))) return 'Updated ' + addon(m[1]) + ' settings';
     return text;
   }
@@ -251,13 +264,13 @@
     const done = v.ticket.checklist.filter(c => c.done);
     const chips = [];
     for (const c of done) for (const ev of c.evidence || []) chips.push({c, ev});
-    const key = keyOf(chips.map(x => [x.c.id, x.ev.ref, x.ev.summary]));
+    const key = keyOf(chips.map(x => [x.c.id, x.ev.ref, x.ev.summary, x.ev.at]));
     els.tabs[1].textContent = 'Proof';
     if (chips.length) els.tabs[1].append(h('sup', {text: ' ' + chips.length}));
     if (key === els.paneProof.dataset.k) return;
     els.paneProof.dataset.k = key;
     els.paneProof.replaceChildren(chips.length
-      ? h('div', {class: 'fx-chips'}, chips.map(({c, ev}) => { const wrap = h('div', {title: c.text}); wrap.innerHTML = window.Evidence ? window.Evidence.chip(ev, {}) : ''; return wrap; }))
+      ? h('div', {class: 'fx-chips'}, chips.map(({c, ev}) => { const wrap = h('div', {title: c.text}); wrap.innerHTML = window.Evidence ? window.Evidence.chip(ev, {}) : ''; const when = stamp(ev.at); if (when) wrap.append(h('span', {class: 'fx-when meta', text: when})); return wrap; }))
       : h('p', {class: 'fx-empty muted', text: 'Proof shows here when a task is done.'}));
   }
 
@@ -325,6 +338,17 @@
       const r = await act('run.send', {ticket: TID, text});
       if (!r.ok) { els.msg.value = text; toast(r.message, 'error'); return; }
       toast(r.note || 'Saved for the next run.', 'ok');
+    });
+    els.addForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const text = els.addInput.value.trim();
+      if (!text) return;
+      els.addInput.disabled = true;
+      const r = await act('check.add', {ticket: TID, text});
+      els.addInput.disabled = false;
+      if (!r.ok) { toast(r.message, 'error'); els.addInput.focus(); return; }
+      els.addInput.value = '';
+      toast('Task added', 'ok');
     });
     let cur = 0;
     document.addEventListener('keydown', e => {
