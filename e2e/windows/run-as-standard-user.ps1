@@ -22,7 +22,8 @@ if (-not ($inf -match "SeBatchLogonRight.*$sid")) {
     $inf | Set-Content "$tmp\sec2.inf" -Encoding Unicode
     secedit /configure /db "$tmp\sec.sdb" /cfg "$tmp\sec2.inf" /areas USER_RIGHTS | Out-Null
 }
-Set-ExecutionPolicy Restricted -Scope LocalMachine -Force -ErrorAction SilentlyContinue  # Windows' default
+# Windows' default. The admin shell's own -ExecutionPolicy Bypass makes this warn ("overridden"): not an error here.
+try { Set-ExecutionPolicy Restricted -Scope LocalMachine -Force } catch { }
 $pub = "C:\Users\Public\orchsmoke"; New-Item -ItemType Directory -Force $pub | Out-Null
 Copy-Item "$PSScriptRoot\standard-user-flow.ps1", $Installer $pub -Force
 $installerName = Split-Path $Installer -Leaf
