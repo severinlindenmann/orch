@@ -838,7 +838,7 @@ def f1_focus(e):
 
 
 def fake_stream_claude(e, name: str) -> tuple[Path, Path]:
-    """A `claude` that prints the Focus stream-json fixture and stays up 8 s; when started with --allowedTools it prints a clean run."""
+    """A `claude` that prints the Focus stream-json fixture and stays up 8 s; when the run allows WebFetch (Allow and retry) it prints a clean run."""
     d = e.tmp / "fakeclaude" / name
     d.mkdir(parents=True)
     calls = d / "calls.txt"
@@ -847,7 +847,7 @@ def fake_stream_claude(e, name: str) -> tuple[Path, Path]:
         "#!/bin/sh\n"
         'if [ "$1" = "--version" ]; then echo "2.0.0 (fake)"; exit 0; fi\n'
         f'echo "$@" | tr "\\n" " " >> {shlex.quote(str(calls))}; echo >> {shlex.quote(str(calls))}\n'
-        'if echo "$@" | grep -q -- "--allowedTools"; then\n'
+        'if echo "$@" | grep -q "WebFetch"; then\n'
         '  echo \'{"type": "system", "subtype": "init", "session_id": "s2"}\'\n'
         '  echo \'{"type": "result", "num_turns": 1, "is_error": false, "permission_denials": []}\'\n  exit 0\nfi\n'
         f"cat {shlex.quote(str(CLAUDE_FIXTURE))}\nsleep 8\n"
