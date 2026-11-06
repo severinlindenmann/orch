@@ -66,6 +66,14 @@ def set_ext(root: Path, t: dict, remove: tuple = (), **changes) -> bool:
     return call(root, *args) is not None
 
 
+def ext_unset(root: Path, t: dict) -> bool:
+    """`orch ext unset <id> automation`: remove the whole entry; checked against the ticket revision when it has one."""
+    args = ["ext", "unset", t["id"], "automation"]
+    if isinstance(t.get("revision"), int):
+        args += ["--if-revision", str(t["revision"])]
+    return call(root, *args) is not None
+
+
 AGENT_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 
 

@@ -102,7 +102,7 @@ questions and answers, history. Relay and publish ship in the same package as bu
 | `orch ticket new\|list\|show\|tree\|edit\|summary\|status\|wait\|patch` | Tickets. `done` is refused while a ticked task lacks proof |
 | `orch check add\|edit\|move\|remove\|reopen\|start\|stop\|done` | Tasks and proof |
 | `orch ask` / `answer` / `needs` | Questions and the list of what needs a person |
-| `orch link add`, `orch log`, `orch ext set` | Links, history, add-on data (`ext.<addon>`) |
+| `orch link add`, `orch log`, `orch ext set\|unset` | Links, history, add-on data (`ext.<addon>`; `ext unset <id> <addon>[.<key>] [--if-revision N]` removes it) |
 | `orch agents`, `orch config`, `orch run ...` | Agents and runs: [agents.md](agents.md) |
 | `orch addon add\|list\|remove\|uninstall`, `orch start\|stop\|status`, `orch update` | Add-ons: [addons.md](addons.md) |
 
