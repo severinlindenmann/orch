@@ -130,15 +130,62 @@
         card('recently', 'Recently', '', recent.length ? recent : emptyRow('No recent activity.')))));
   }
   const expanded = new Set();
+  const treeExpanded = new Set(), treeSeen = new Set(), treeAll = new Set(), ticketTabs = new Map();
+  function treeBranch(rows, index) {
+    const row = rows[index], t = row.ticket;
+    if (!treeSeen.has(t.id)) { treeSeen.add(t.id); treeExpanded.add(t.id); }
+    const open = treeExpanded.has(t.id);
+    const children = [];
+    for (let i = index + 1; i < rows.length && rows[i].depth > row.depth; i++) {
+      if (rows[i].depth === row.depth + 1) children.push(i);
+    }
+    const late = children.filter(i => rows[i].late);
+    return fragment(h('div', {className:'card-row ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
+      row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, h('span', {className:'chevron ' + (open ? '' : 'closed')}, iconEl('down'))) : null,
+      h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, [name(t.owner), t.due ? 'Due ' + date(t.due) : '', row.children ? row.done + ' of ' + row.children + ' done' : ''].filter(Boolean).join(' · ')),
+        !row.depth && row.parentMissing ? h('p', {className:'meta'}, 'Part of a ticket that is not here') : null), statusChip(t)),
+      open ? children.filter(i => !rows[i].late || treeAll.has(t.id)).map(i => treeBranch(rows, i)) : null,
+      open && late.length && !treeAll.has(t.id) ? h('div', {className:'card-row child', 'data-key':'tree-all-' + t.id}, h('button', {type:'button', className:'btn ghost sm', 'data-action':'tree-all', 'data-ticket':t.id}, 'Show all ' + children.length)) : null);
+  }
   function list() {
+    const rows = window.DashHelpers.treeRows(tickets());
     return fragment(heading('Tickets'), !tickets().length ? card('empty', 'Tickets', '', firstTicket()) : ['active', 'waiting', 'open', 'done', 'dropped'].map(status => {
-      const group = sorted(tickets().filter(t => t.status === status));
+      const group = rows.map((row, i) => ({row, i})).filter(({row}) => row.depth === 0 && row.ticket.status === status);
       if (!group.length) return null;
       const title = {active:'Doing', waiting:'Waiting', open:'Open', done:'Done', dropped:'Dropped'}[status];
-      if (!['done', 'dropped'].includes(status)) return card('group-' + status, title, group.length, group.map(ticketRow));
+      const body = group.map(({i}) => treeBranch(rows, i));
+      if (!['done', 'dropped'].includes(status)) return card('group-' + status, title, group.length, body);
       const open = expanded.has(status);
-      return h('section', {className:'card', 'data-key':'group-' + status}, h('button', {type:'button', className:'card-h card-toggle', 'data-action':'group', 'data-group':status, 'aria-expanded':open, 'aria-controls':'group-' + status}, h('span', {className:'chevron ' + (open ? '' : 'closed')}, iconEl('down')), h('span', {}, title + ' · ' + group.length)), h('div', {id:'group-' + status, hidden:!open}, group.map(ticketRow)));
+      return h('section', {className:'card', 'data-key':'group-' + status}, h('button', {type:'button', className:'card-h card-toggle', 'data-action':'group', 'data-group':status, 'aria-expanded':open, 'aria-controls':'group-' + status}, h('span', {className:'chevron ' + (open ? '' : 'closed')}, iconEl('down')), h('span', {}, title + ' · ' + group.length)), h('div', {id:'group-' + status, hidden:!open}, body));
     }));
+  }
+  function localUrl(value) {
+    if (typeof value !== 'string' || !/^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/.test(value)) return null;
+    try { return new URL(value).href; } catch (_) { return null; }
+  }
+  function addonUrl(addon) {
+    return array(state.services).filter(s => s.addon === addon && s.running === true).map(s => localUrl(s.url)).find(Boolean) || null;
+  }
+  function addonLink(addon, path, label, startLabel = addon) {
+    if (!/^[a-z][a-z0-9-]{1,31}$/.test(addon) || typeof path !== 'string' || !/^[A-Za-z0-9_./-]*$/.test(path) || path.includes('..')) return null;
+    const base = addonUrl(addon);
+    return base ? h('a', {className:'chip outline', href:base.replace(/\/$/, '') + '/' + path.replace(/^\/+/, ''), target:'_blank', rel:'noopener noreferrer'}, label)
+      : snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start ' + startLabel);
+  }
+  function ticketLinks(t) {
+    const links = array(t.links).map(link => {
+      const url = link.url;
+      if (typeof url !== 'string') return null;
+      const addon = /^addon:([a-z][a-z0-9-]{1,31})\/([A-Za-z0-9_./-]*)$/.exec(url);
+      if (addon) return addonLink(addon[1], addon[2], clean(link.title) || addon[1]);
+      if (/^t_[A-Za-z0-9]+$/.test(url)) {
+        const target = ticketOf(url);
+        return target ? h('a', {className:'chip outline', href:href(url)}, clean(target.title)) : null;
+      }
+      if (!/^https:\/\/[^\s<>"'`]+$/.test(url)) return null;
+      try { const parsed = new URL(url); return h('a', {className:'chip outline', href:parsed.href, target:'_blank', rel:'noopener noreferrer'}, clean(link.title) || parsed.host); } catch (_) { return null; }
+    }).filter(Boolean);
+    return links.length ? h('div', {className:'chips', 'data-key':'ticket-links'}, links) : null;
   }
   function addonValue(row, value) {
     if (value == null || value === '' || (Array.isArray(value) && !value.length)) return '';
@@ -149,25 +196,88 @@
     return typeof value === 'object' ? '' : clean(value);
   }
   function addonRows(ticket) {
-    const rows = addons().flatMap(a => array(a.ticket_view).map(r => [r, (ticket.ext || {})[a.name]]))
-      .map(([r, ext]) => [r, ext && typeof ext === 'object' ? addonValue(r, ext[r.field]) : '']).filter(([, v]) => v);
+    const rows = addons().flatMap(a => array(a.ticket_view).map(r => [r, (ticket.ext || {})[a.name], a.name]))
+      .map(([r, ext, addon]) => [r, ext && typeof ext === 'object' ? (r.format === 'open-page' ? addonLink(addon, ext[r.field], 'Open live', r.label) : addonValue(r, ext[r.field])) : '']).filter(([, v]) => v);
     return rows.length ? h('dl', {className:'addon-rows'}, rows.map(([r, v]) => [h('dt', {}, r.label), h('dd', {}, v)])) : null;
+  }
+  function agentBar(t) {
+    const line = window.DashHelpers.agentLine(t, state.runs?.[t.id], Date.now(), window.DashHelpers.serviceLinks(state.services, location.origin)[0]);
+    const action = (item, primary) => {
+      const attrs = {className:primary ? 'btn sm ' + (line.state === 'working' ? 'outline' : 'primary') : 'menu-item', role:primary ? null : 'menuitem', 'data-key':primary ? 'agent-primary' : 'agent-' + item.label};
+      if (item.op === 'open') return localUrl(item.url) ? h('a', {...attrs, href:item.url, target:'_blank', rel:'noopener noreferrer'}, item.label) : null;
+      return h('button', {...attrs, type:'button', 'data-action':'agent', 'data-op':item.op, 'data-args':JSON.stringify(item.args || {}), 'data-ticket':t.id}, item.label);
+    };
+    return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'}, h('span', {className:'dot ' + ({working:'working', needs:'needs', stuck:'needs', failed:'error'}[line.state] || 'idle')}),
+      h('span', {className:'ab-text grow'}, h('strong', {}, name(line.agent)), h('span', {className:'muted'}, ' · ' + clean(line.status))),
+      h('span', {className:'ab-actions'}, action(line.primary, true), line.items.length ? h('details', {className:'menu', 'data-key':'agent-menu'}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More agent actions'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, line.items.map(item => action(item, false)))) : null));
+  }
+  const surface = via => clean(via === 'cli' ? 'terminal' : via);
+  function proofChip(ev) {
+    const kind = ev.type || ev.kind;
+    let label = ev.title || ev.text || String(ev.ref || '').split(/[\\/]/).pop() || 'Proof';
+    if (kind === 'pr') {
+      const number = ev.number || /(?:pull\/|#|^)(\d+)\b/.exec(String(ev.ref || ev.text || ''))?.[1];
+      label = number ? 'PR #' + number : 'PR';
+    } else if (kind === 'commit') label = 'Code updated';
+    else if (kind === 'command') {
+      const passed = /(\d+) passed/.exec([ev.text, ev.summary, ev.ref].filter(Boolean).join(' '));
+      if (passed) label = passed[1] + ' checks OK';
+    }
+    if (kind === 'note') label = ev.text || ev.title || ev.summary || ev.ref || 'Note';
+    label = clean(label);
+    if (kind === 'note' && label.length > 100) label = label.slice(0, 99) + '…';
+    const mark = window.DashHelpers.proofMark(ev);
+    return h('span', {className:'chip proof-chip'}, h('small', {className:'muted'}, mark.mark + ' ' + mark.label), ' ', label, ev.missing === true ? ' · on another computer' : null);
+  }
+  function taskRows(t) {
+    return array(t.checklist).map((task, i) => {
+      const meta = [name(task.owner || task.by), clean(task.summary)].filter(Boolean).join(' · ');
+      return h('div', {className:'card-row', 'data-key':'task-' + (task.id || i)}, task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot idle'}),
+        h('div', {className:'grow'}, h('h3', {}, clean(task.text)), meta ? h('p', {className:'meta'}, meta) : null,
+          array(task.evidence).length ? h('div', {className:'chips task-proofs'}, array(task.evidence).map(proofChip)) : null), chip(task.done ? 'Done' : 'To do', task.done ? 'success' : ''));
+    });
+  }
+  function selectTicketTab(id, tab, focusQuestion = false) {
+    ticketTabs.set(id, tab);
+    render();
+    if (focusQuestion) {
+      const host = main.querySelector('[data-question]');
+      if (host) { host.setAttribute('tabindex', '-1'); (host.querySelector('button,input,textarea') || host).focus(); }
+    }
   }
   function detail(t) {
     if (!t) return fragment(heading('Ticket not found'), h('a', {href:'#tickets'}, 'All tickets'));
     const qs = questions(t).map(q => snapshot
       ? card('question-' + q.id, clean(q.text), '', h('div', {className:'card-row'}, h('div', {className:'grow'}, h('p', {className:'muted'}, 'Waiting for an answer'), h('div', {className:'row'}, array(q.options).map(o => chip(clean(o), o === q.recommended ? 'attn' : ''))))))
       : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
-    // Evidence.chip produces preview buttons; without a preview URL, plain proof chips are clearer.
-    const tasks = array(t.checklist).map(task => h('div', {className:'card-row'}, h('span', {className:'muted', 'aria-hidden':'true'}, iconEl(task.done ? 'check' : 'more')), h('div', {className:'grow'}, h('h3', {}, clean(task.text)), h('p', {className:'meta'}, task.done ? 'Done' : 'Not done'), h('div', {className:'row'}, array(task.evidence).map(ev => chip(clean(ev.summary || ev.text || ev.ref || 'Proof')))))));
-    const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => h('div', {className:'card-row'}, h('p', {}, [clean(entry.text), name(entry.by), age(entry.at)].filter(Boolean).join(' · '))));
+    const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => h('div', {className:'card-row'}, h('p', {className:'grow'}, [clean(window.DashHelpers.historyLine(entry)), name(entry.by), surface(entry.via)].filter(Boolean).join(' · ')), h('time', {datetime:entry.at || ''}, age(entry.at))));
     const field = (label, value, cls = '') => h('div', {}, h('dt', {}, label), h('dd', {className:cls}, value));
-    return fragment(h('a', {href:'#tickets', 'data-key':'back'}, 'All tickets'), heading(t.title),
-      h('div', {className:'row', 'data-key':'ticket-meta'}, statusChip(t), t.owner ? chip(name(t.owner)) : null, t.due ? chip('Due ' + date(t.due)) : null, snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'edit', 'data-ticket':t.id}, 'Edit')),
-      t.summary ? h('p', {'data-key':'summary', className:'preserve-lines'}, clean(t.summary)) : null,
-      qs, card('tasks', 'Tasks', array(t.checklist).length, tasks.length ? tasks : emptyRow('No tasks yet.')),
-      card('history', 'History', '', history.length ? history : emptyRow('No history yet.')), addonRows(t),
-      h('details', {'data-key':'more'}, h('summary', {}, 'More details'), h('dl', {className:'ticket-details'}, field('Ticket', t.id, 'mono'), field('Created', date(t.created_at)), field('Updated', date(t.updated_at)), t.note ? field('Note', clean(t.note), 'preserve-lines') : null)));
+    const total = array(t.checklist).length, done = array(t.checklist).filter(task => task.done).length;
+    const tasksCard = key => card(key, total && done === total ? 'All done' : 'Tasks', done + ' of ' + total + (total && done === total ? '' : ' done'), total ? taskRows(t) : emptyRow('No tasks yet.'));
+    const parent = ticketOf(t.parent), children = tickets().filter(child => child.parent === t.id);
+    const selected = ticketTabs.get(t.id) || 'overview';
+    const tabs = [['overview', 'Overview'], ['tasks', 'Tasks ' + done + '/' + total], ['questions', 'Questions' + (qs.length ? ' (' + qs.length + ')' : '')], ['history', 'History']];
+    const panel = (id, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, capitalise(id)) : null, body);
+    const sessions = array(t.sessions).slice().sort((a, b) => (Date.parse(b.last_used) || 0) - (Date.parse(a.last_used) || 0));
+    const agent = sessions.length ? capitalise(name(sessions[0].agent) || 'Agent') + ' · continues its session' : capitalise(name(state.runs?.[t.id]?.claim?.agent)) || 'Not chosen yet';
+    const answered = array(t.questions).filter(q => q.answer != null).map(q => {
+      const answer = window.DashHelpers.winningAnswer(tickets(), t.id, q.id);
+      return h('div', {className:'card-row', 'data-key':'answered-' + q.id}, h('div', {className:'grow'}, h('h3', {}, clean(q.text)), h('p', {className:'meta preserve-lines'}, ['Answered', name(answer?.who), surface(answer?.via)].filter(Boolean).join(' · ') + ': ' + clean(answer?.text))));
+    });
+    return fragment(h('header', {className:'stack', 'data-key':'ticket-heading'},
+      parent ? h('a', {href:href(parent.id), className:'muted'}, 'Part of ' + clean(parent.title)) : null,
+      h('div', {className:'row'}, typeof t.key === 'string' ? h('span', {className:'mono'}, t.key) : null, chip('Ticket', 'outline'), statusChip(t)),
+      h('div', {className:'row', 'data-key':'ticket-meta'}, h('h1', {className:'grow'}, clean(t.title)), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'edit', 'data-ticket':t.id}, 'Edit')), snapshot ? null : agentBar(t)),
+      h('div', {className:'columns ticket-columns', 'data-key':'ticket-columns'}, h('div', {className:'stack'},
+        snapshot ? null : h('div', {className:'tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label]) => h('button', {type:'button', id:'ticket-tab-' + id, role:'tab', 'aria-selected':selected === id, 'aria-controls':'ticket-panel-' + id, tabindex:selected === id ? '0' : '-1', 'data-action':'ticket-tab', 'data-tab':id, 'data-ticket':t.id}, label))),
+        panel('overview', [t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null,
+          qs.length ? h('div', {className:'banner attn'}, h('p', {className:'grow'}, qs.length + (qs.length === 1 ? ' question needs you' : ' questions need you')), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'answer-tab', 'data-ticket':t.id}, 'Answer')) : null,
+          tasksCard('overview-tasks'), addonRows(t), ticketLinks(t), children.length ? card('sub-tickets', 'Sub-tickets', children.filter(child => child.status === 'done').length + ' of ' + children.length + ' done', children.map(child => h('div', {className:'card-row'}, h('a', {className:'grow', href:href(child.id)}, clean(child.title)), statusChip(child)))) : null]),
+        panel('tasks', tasksCard('tasks')), panel('questions', [qs.length ? qs : emptyRow('No open questions'), answered]),
+        panel('history', card('history', 'History', '', history.length ? history : emptyRow('No history yet.')))),
+      h('aside', {className:'card ticket-aside'}, h('div', {className:'card-h'}, h('h2', {}, 'Details')),
+        h('dl', {className:'ticket-details'}, field('Owner', name(t.owner) || 'Not chosen yet'), field('Due', date(t.due) || 'Not set'), field('Agent', agent), field('Created', date(t.created_at)), field('Updated', age(t.updated_at))),
+        h('details', {className:'ticket-more', 'data-key':'more'}, h('summary', {}, 'More details'), h('dl', {className:'ticket-details'}, field('Ticket', t.id, 'mono'), field('Created', t.created_at || ''), field('Updated', t.updated_at || ''), t.note ? field('Note', clean(t.note), 'preserve-lines') : null)))));
   }
 
   // Reconcile matching DOM nodes so polling cannot replace a focused control or a draft.
@@ -228,7 +338,11 @@
     const pageName = r.kind === 'addon' ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'tickets' ? 'Tickets' : 'Home';
     document.getElementById('workspace-name').textContent = clean(state.workspace || 'Workspace');
     document.getElementById('workspace-mode').textContent = snapshot ? 'Shared copy' : 'Local workspace';
-    document.getElementById('crumb').textContent = pageName;
+    const crumb = document.getElementById('crumb');
+    if (r.kind === 'ticket') {
+      const tk = ticketOf(r.id);
+      crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' / ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || 'Ticket');
+    } else crumb.textContent = pageName;
     const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
     reconcile(nav, fragment(navLink('#home', 'Home', 'page', array(state.needs).length ? h('span', {className:'count'}, array(state.needs).length) : null), navLink('#tickets', 'Tickets', 'table'),
       h('p', {className:'eyebrow'}, 'Add-ons'), addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon, h('span', {className:'addon-tag', 'aria-label':'Add-on'}, 'A')))));
@@ -282,7 +396,7 @@
     const template = addonBody(a, addonViews[id]);
     const blocks = template.querySelector('#addon-blocks');
     if (blocks) {
-      blocks.append(OrchBlocks.render(addonViews[id].view.blocks));
+      blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl}));
       if (!blocks.childNodes.length) blocks.append(h('section', {className:'card pad muted'}, 'Nothing to show yet.'));
       blocks.querySelectorAll('.blk').forEach(n => n.classList.add('card'));
       blocks.querySelectorAll('svg').forEach(n => {
@@ -538,7 +652,19 @@
     try { await navigator.clipboard.writeText(control.dataset.copy); window.orch.toast('Copied', 'ok'); }
     catch (_) { window.orch.toast('Could not copy. Select the text and copy it.', 'error'); }
   }
+  main.addEventListener('keydown', event => {
+    const tab = event.target.closest('[data-action="ticket-tab"]');
+    if (!tab || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const tabs = [...tab.parentElement.querySelectorAll('[role="tab"]')];
+    const index = tabs.indexOf(tab);
+    const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[tabs.length - 1] : tabs[(index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
+    selectTicketTab(tab.dataset.ticket, next.dataset.tab);
+    document.getElementById(next.id)?.focus();
+  });
   main.addEventListener('click', async event => {
+    const menu = event.target.closest('details.menu');
+    if (menu && event.target.closest('button,a')) menu.open = false;
     const row = event.target.closest('[data-addon-act]');
     if (row) { if (!snapshot) addonAct(row); return; }
     const copy = event.target.closest('[data-copy]');
@@ -546,12 +672,33 @@
     const control = event.target.closest('[data-action]');
     if (!control) return;
     const action = control.dataset.action;
+    if (action === 'tree' || action === 'tree-all') {
+      const id = control.dataset.ticket;
+      if (action === 'tree-all') treeAll.add(id);
+      else if (treeExpanded.has(id)) treeExpanded.delete(id); else treeExpanded.add(id);
+      render(); return;
+    }
+    if (action === 'ticket-tab' || action === 'answer-tab') {
+      selectTicketTab(control.dataset.ticket, action === 'answer-tab' ? 'questions' : control.dataset.tab, action === 'answer-tab');
+      return;
+    }
     if (action === 'group') {
       const group = control.dataset.group;
       if (expanded.has(group)) expanded.delete(group); else expanded.add(group);
       render(); return;
     }
     if (snapshot) return;
+    if (action === 'agent') {
+      if (control.dataset.op === 'answer') { selectTicketTab(control.dataset.ticket, 'questions', true); return; }
+      const op = control.dataset.op;
+      if (!['run.start', 'run.stop'].includes(op) || locks.has('agent-bar')) return;
+      locks.add('agent-bar'); control.disabled = true;
+      const result = await act(op, JSON.parse(control.dataset.args));
+      locks.delete('agent-bar'); control.disabled = false;
+      render();
+      window.orch.toast(result.ok ? (op === 'run.start' ? 'Started' : 'Stopped') : result.text, result.ok ? 'ok' : 'error');
+      return;
+    }
     if (action === 'new') ticketForm();
     if (action === 'edit') ticketForm(ticketOf(control.dataset.ticket));
     if (action === 'need') openNeed(array(state.needs).find(n => n.id === control.dataset.need), control);
