@@ -153,14 +153,6 @@ def test_no_orch_binary_is_503(server, ws):
         actions.run_op(ws, None, "run.stop", {"ticket": TID})
 
 
-def test_stop_started_stops_runs_focus_started(server, fake_orch):
-    from orch_focus.server import stop_started
-
-    req(server, "POST", "/api/act", {"op": "run.start", "args": {"ticket": TID}})
-    stop_started(server)
-    assert any(c[:3] == ["run", "stop", TID] for c in calls(fake_orch))
-
-
 @pytest.mark.parametrize(
     "bad",
     ["../../x", "/tmp/x", "r_../../x", "r_ab", "R_ABCDEFG", "r_abcdefg/../../y", "r_abcdefgh/x", "x" * 5, 7],

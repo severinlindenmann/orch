@@ -124,7 +124,7 @@ class EventLog:
     def append(self, *events: dict) -> None:
         if not events:
             return
-        d = runs_dir(self.root)
+        runs_dir(self.root)
         old = self.path.with_name(self.path.name + ".1")
         try:
             st = os.lstat(self.path)
