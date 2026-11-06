@@ -12,6 +12,13 @@ fi
 REPO="${ORCH_REPO:-https://github.com/severinlindenmann/orch}"
 REF="${ORCH_REF:-main}"
 R="${REPO%.git}"
+# A ref is a plain git ref name: in a zip URL a '../' or '#' could reach another repository or folder.
+case "$REF" in
+  *..*|-*|/*|*.lock|*/|"") echo "'$REF' is not a branch, tag or commit name (check ORCH_REF)." >&2; exit 1 ;;
+esac
+if printf '%s' "$REF" | grep -q '[^A-Za-z0-9._/-]'; then
+  echo "'$REF' is not a branch, tag or commit name (check ORCH_REF)." >&2; exit 1
+fi
 if [ -d "$REPO" ]; then
   SPEC="$REPO/workspace"
 else

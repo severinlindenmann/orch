@@ -198,7 +198,7 @@ def _status(args, root: Path) -> None:
 
 def _hook_input(args) -> dict:
     """The tool's hook input (JSON on stdin), or {}."""
-    if args.kind not in ("session", "attention") or term.is_terminal(sys.stdin):
+    if args.kind not in ("session", "attention") or sys.stdin is None or term.is_terminal(sys.stdin):
         return {}
     try:
         data = json.loads(sys.stdin.read(65536) or "{}")

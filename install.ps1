@@ -14,6 +14,11 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 $repo = if ($env:ORCH_REPO) { $env:ORCH_REPO } else { "https://github.com/severinlindenmann/orch" }
 $ref = if ($env:ORCH_REF) { $env:ORCH_REF } else { "main" }
 $r = $repo -replace '\.git$',''
+# A ref is a plain git ref name: in a zip URL a '../' or '#' could reach another repository or folder.
+if ($ref -notmatch '^[A-Za-z0-9._/-]+$' -or $ref -match '\.\.' -or $ref -match '^[-/]' -or $ref -match '(\.lock|/)$') {
+    throw "'$ref' is not a branch, tag or commit name (check ORCH_REF)."
+}
+if (-not (Test-Path $repo) -and $r -match '[\s"''#?]') { throw "'$r' is not a repository address (check ORCH_REPO)." }
 if (Test-Path $repo) {
     $spec = Join-Path $repo "workspace"
 } elseif ($r -like "https://github.com/*") {
@@ -31,6 +36,7 @@ uv tool install --reinstall --refresh @py $spec
 if ($LASTEXITCODE -ne 0) { throw "uv tool install failed" }
 # Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
 $toolBin = (uv tool dir --bin)
+if ($LASTEXITCODE -ne 0 -or -not $toolBin) { throw "uv tool dir failed" }
 & (Join-Path $toolBin "orch.exe") update --after-install
 if ($LASTEXITCODE -ne 0) { Write-Host "Note: your add-ons could not be installed again. Run: orch update" }
 Write-Host "orch is installed."

@@ -35,3 +35,37 @@ def test_no_other_isatty_in_orch():
         if re.search(r"\.isatty\(\)", line)
     ]
     assert bad == []
+
+
+def test_a_failing_isatty_is_not_a_terminal():
+    class S:
+        def isatty(self):
+            raise OSError
+
+    assert term.is_terminal(S()) is False
+
+
+def test_hook_input_without_stdin(monkeypatch):
+    """pythonw or a process started without std handles: sys.stdin is None (security review)."""
+    import argparse
+    import sys
+
+    from orch import cli_run
+
+    monkeypatch.setattr(sys, "stdin", None)
+    assert cli_run._hook_input(argparse.Namespace(kind="session")) == {}
+
+
+def test_require_human_refuses_without_a_terminal(monkeypatch):
+    import io
+    import sys
+
+    import pytest
+
+    from orch import tickets
+    from orch.errors import Refused
+
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
+    monkeypatch.setattr(sys, "stdin", io.StringIO("y\n"))
+    with pytest.raises(Refused):
+        tickets.require_human("ok?", "approve")

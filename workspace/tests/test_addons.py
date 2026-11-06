@@ -944,3 +944,34 @@ def test_core_addon_names_stay_reserved_for_others(tmp_path, run, proj, uv_calls
     folder = make_addon(tmp_path / "x", mutate=lambda t: t.replace('name = "hello"', 'name = "relay"'))
     with pytest.raises(Refused, match="core command"):
         addons.folder_manifest(folder)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["../../evil/x/archive/main", "main#subdirectory=x", "a b", "-x", 'm"--index-url', "/abs", "x.lock"],
+)
+def test_install_ref_is_a_plain_ref_name(monkeypatch, bad):
+    """In a zip URL a '../' would reach another repository (security review of the zip installs)."""
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    monkeypatch.setattr(addons, "_install_origin", lambda: {})
+    monkeypatch.setenv("ORCH_REF", bad)
+    with pytest.raises(Refused):
+        addons.spec("workspace")
+
+
+@pytest.mark.parametrize(
+    "good", ["main", "fix/windows-install", "v1.2.3", "ae5bb70c633d4a543d73a247d68449fac9d98150"]
+)
+def test_install_ref_accepts_branches_tags_commits(monkeypatch, good):
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    monkeypatch.setattr(addons, "_install_origin", lambda: {})
+    monkeypatch.setenv("ORCH_REF", good)
+    assert addons.spec("workspace").endswith(f"/archive/{good}.zip#subdirectory=workspace")
+
+
+def test_install_repo_with_quotes_or_spaces_is_refused(monkeypatch):
+    monkeypatch.setattr(addons, "_install_origin", lambda: {})
+    monkeypatch.delenv("ORCH_REF", raising=False)
+    monkeypatch.setenv("ORCH_REPO", 'https://github.com/a/orch" --index-url x')
+    with pytest.raises(Refused):
+        addons.spec("workspace")
