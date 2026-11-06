@@ -1,4 +1,6 @@
 import Foundation
+import ImageIO
+import UIKit
 
 /// The phone side of orch-relay. `URLSessionRelayClient` is the real thing, `MockRelay` the in-process fake.
 protocol RelayAPI: Sendable {
@@ -111,8 +113,20 @@ struct URLSessionRelayClient: RelayAPI {
     func signOut() async throws { _ = try await request("POST", "/v1/phone/signout") }
     func blob(id: String) async throws -> Data {
         guard BlobID.isValid(id) else { throw RelayError.api(status: 404, code: "not_found", message: "Image not found.") }
-        let d = try await request("GET", "/v1/phone/blobs/\(id)")
-        guard d.count <= BlobID.maxBytes else { throw RelayError.api(status: 413, code: "too_large", message: "Image too large.") }
+        guard let c = credentials else { throw RelayError.unauthorized }
+        var req = URLRequest(url: URL(string: "/v1/phone/blobs/\(id)", relativeTo: base)!.absoluteURL)
+        req.setValue(c.phoneId, forHTTPHeaderField: "X-Orch-Phone")
+        req.setValue("Bearer \(c.token)", forHTTPHeaderField: "Authorization")
+        let bytes: URLSession.AsyncBytes, resp: URLResponse
+        do { (bytes, resp) = try await session.bytes(for: req) } catch { throw RelayError.network("Could not reach your workspace server. Check your connection.") }
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else { throw RelayError.api(status: status, code: "error", message: "Image not available.") }
+        if resp.expectedContentLength > Int64(BlobID.maxBytes) { throw RelayError.api(status: 413, code: "too_large", message: "Image too large.") }
+        var d = Data()
+        for try await b in bytes {
+            d.append(b)
+            if d.count > BlobID.maxBytes { throw RelayError.api(status: 413, code: "too_large", message: "Image too large.") }   // stop reading
+        }
         return d
     }
 }
@@ -136,4 +150,14 @@ enum SafeLink {
         return u
     }
     static func host(_ raw: String?) -> String? { url(raw)?.host }
+}
+
+/// Decodes an image as a bounded thumbnail (never the full-size bitmap).
+enum Thumbnail {
+    static func image(from data: Data, maxPixel: Int = 2048) -> UIImage? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                                     kCGImageSourceThumbnailMaxPixelSize: maxPixel, kCGImageSourceShouldCacheImmediately: true]
+        return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary).map { UIImage(cgImage: $0) }
+    }
 }

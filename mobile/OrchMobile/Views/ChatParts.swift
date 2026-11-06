@@ -15,8 +15,9 @@ struct Avatar: View {
 
 struct KeyTag: View {
     let key: String?
+    @ScaledMetric(relativeTo: .caption) private var size: CGFloat = 12
     var body: some View {
-        if let key { Text(key).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.muted) }
+        if let key { Text(key).font(.system(size: size, design: .monospaced)).foregroundStyle(Theme.muted) }
     }
 }
 
@@ -232,7 +233,7 @@ struct BlobImage: View {
             if let image { Image(uiImage: image).resizable().scaledToFill() }
             else { Image(systemName: "photo").font(.system(size: 28)).foregroundStyle(Theme.muted) }
         }.clipped().task(id: id) {
-            if let d = await model.blob(id) { image = UIImage(data: d) }
+            if let d = await model.blob(id) { image = Thumbnail.image(from: d) }
         }
     }
 }

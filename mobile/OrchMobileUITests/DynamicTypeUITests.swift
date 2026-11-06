@@ -10,6 +10,9 @@ import XCTest
         sleep(2)
         // The tab bar is deliberately capped at xxxLarge (like system tab bars); everything else must scale.
         let tabBar: Set<String> = ["Chats", "Settings"]
-        try app.performAccessibilityAudit(for: .dynamicType) { issue in tabBar.contains(issue.element?.label ?? "") }
+        try app.performAccessibilityAudit(for: .dynamicType) { issue in
+            let l = issue.element?.label ?? ""
+            return tabBar.contains(l) || Int(l) != nil   // system tab bar and its unread badge (drawn by UIKit, capped like the bar)
+        }
     }
 }

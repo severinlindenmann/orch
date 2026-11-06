@@ -162,6 +162,29 @@ final class ChatTests: XCTestCase {
         XCTAssertEqual(reloaded.outbox.map(\.id), ["m1"])
     }
 
+    func testOverlappingRefreshesSendAQueuedTextOnce() async throws {
+        defer { cleanup() }
+        let first = await pairedOffline()
+        let r = await first.sendChat(to: MockRelay.pilatus, text: "only once", ticket: nil)
+        XCTAssertEqual(r, .queued); XCTAssertEqual(first.outbox.count, 1); XCTAssertNotNil(Keychain.load())
+        UserDefaults.standard.removeObject(forKey: "mockFail")
+        let model = AppModel(useMock: true)      // the phone comes back online: same credentials and outbox from disk
+        XCTAssertEqual(model.outbox.count, 1)
+        async let a: Void = model.refresh(); async let b: Void = model.refresh(); async let c: Void = model.refresh()
+        _ = await (a, b, c)
+        XCTAssertTrue(model.outbox.isEmpty)
+        let sent = model.messages.filter { $0.fromPhone && $0.message.body.text == "only once" }
+        XCTAssertEqual(sent.count, 1)
+    }
+
+    func testThumbnailIsBounded() throws {
+        let r = UIGraphicsImageRenderer(size: CGSize(width: 4000, height: 3000))
+        let big = r.pngData { c in UIColor.red.setFill(); c.fill(CGRect(x: 0, y: 0, width: 4000, height: 3000)) }
+        let t = try XCTUnwrap(Thumbnail.image(from: big))
+        XCTAssertLessThanOrEqual(max(t.size.width * t.scale, t.size.height * t.scale), 2048)
+        XCTAssertNil(Thumbnail.image(from: Data([1, 2, 3])))
+    }
+
     func testOnlyWebLinksOpenAndImagesNeedABlob() {
         XCTAssertNotNil(SafeLink.url("https://docs.pilatus.ch/board"))
         XCTAssertNotNil(SafeLink.url("http://example.com"))

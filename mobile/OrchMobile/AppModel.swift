@@ -37,7 +37,6 @@ final class AppModel {
     private(set) var answerTick = 0
     private(set) var sendTick = 0
     private(set) var errorTick = 0
-    private(set) var lastSent: SentNote?
     var message: String?            // plain error / info line
 
     // Navigation
@@ -63,7 +62,6 @@ final class AppModel {
     }()
     var notificationsEnabled = true
 
-    struct SentNote: Equatable { let workspaceName: String; let text: String; var messageId: String = "" }
 
     let useMock: Bool
     private let mock: MockRelay?
@@ -167,7 +165,6 @@ final class AppModel {
         guard !sendingAnswers.contains(q.id) else { return }
         undoTimers[q.id]?.cancel(); undoTimers[q.id] = nil; pendingAnswers[q.id] = nil
     }
-    func tickets(_ status: Ticket.Status) -> [Ticket] { tickets.filter { $0.status == status } }
     /// The "Got it" line the workspace sent for a text of this phone.
     func ack(for messageId: String) -> TicketUpdate? { updates.first { $0.replyTo == messageId && $0.kind == "ack" } }
     var openQuestionCount: Int { questions.filter { answers[$0.id] == nil }.count }
@@ -231,11 +228,14 @@ final class AppModel {
     }
 
     func answer(_ q: Question, with option: String) async {
+        let me = credentials?.phoneId
         do {
             _ = try await client.answer(questionMessageId: q.id, answer: option)
+            guard credentials?.phoneId == me, me != nil || useMock else { return }   // signed out meanwhile: drop the late result
             answers[q.id] = option; answerTick += 1; announcement = "Answer sent: \(option)"
             await refresh()
         } catch let RelayError.api(status, code, text) where status == 409 && code == "already_answered" {
+            guard credentials?.phoneId == me else { return }
             answers[q.id] = text; answeredElsewhere.insert(q.id)
             message = nil
             await refresh()
@@ -245,19 +245,6 @@ final class AppModel {
     /// Only the "Got it" lines, for the sent screen.
     func refreshUpdates() async {
         if let u = try? await client.updates() { updates = u }
-    }
-
-    func send(to workspaceId: String, text: String, ticket: String? = nil) async -> Bool {
-        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return false }
-        do {
-            let id = try await client.send(to: workspaceId, text: clean, ticket: ticket)
-            if let m = try? await client.messages() { messages = m }
-            if let u = try? await client.updates() { updates = u }
-            lastSent = SentNote(workspaceName: workspaces.first { $0.id == workspaceId }?.displayName ?? "your workspace", text: clean, messageId: id)
-            message = nil; sendTick += 1; announcement = "Message sent to \(lastSent?.workspaceName ?? "your workspace")"
-            return true
-        } catch { handle(error); return false }
     }
 
     /// Chat composer: a failed send because of the network keeps the text on the phone and sends it later.
@@ -284,13 +271,16 @@ final class AppModel {
         return false
     }
 
+    private var flushing = false
     private func flushOutbox() async {
-        guard !outbox.isEmpty else { return }
+        guard !outbox.isEmpty, !flushing else { return }
+        flushing = true; defer { flushing = false }
         let mine = credentials?.phoneId ?? ""
         if outbox.contains(where: { $0.phone != mine }) { outbox.removeAll { $0.phone != mine }; saveOutbox() }   // never send another phone's text
         for q in outbox {
-            guard (try? await client.send(to: q.workspace, text: q.text, ticket: q.ticket)) != nil else { return }
-            outbox.removeAll { $0.id == q.id }; saveOutbox()
+            guard outbox.contains(where: { $0.id == q.id }) else { continue }     // removed meanwhile (sign-out)
+            outbox.removeAll { $0.id == q.id }; saveOutbox()                  // take it out before sending: an overlapping call can never send it twice
+            guard (try? await client.send(to: q.workspace, text: q.text, ticket: q.ticket)) != nil else { if credentials?.phoneId == mine { outbox.insert(q, at: 0); saveOutbox() }; return }
         }
         if let m = try? await client.messages() { messages = m }
         if let u = try? await client.updates() { updates = u }
@@ -354,7 +344,7 @@ final class AppModel {
         outbox = []; Self.wipeOutbox(); UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
         readState = ReadState(); blobCache = [:]
         credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answeredElsewhere = []; hasLoaded = false
-        pairedWorkspaces = []; lastSent = nil; lastUpdated = nil; message = nil; tab = .chats; phase = .onboarding
+        pairedWorkspaces = []; lastUpdated = nil; message = nil; tab = .chats; phase = .onboarding
     }
 
     private func handle(_ error: Error) {
