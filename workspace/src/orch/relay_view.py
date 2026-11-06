@@ -152,6 +152,12 @@ def _peers(root: Path) -> list[dict]:
     return rows
 
 
+def _arg(name: str) -> str:
+    """A name as one shell word in a hint (quoted when it has spaces)."""
+    name = plain(name, 60)
+    return f'"{name}"' if any(c in name for c in " '") else name
+
+
 def _stamp(iso) -> str:
     return net.when(iso) if isinstance(iso, str) else ""
 
@@ -228,7 +234,11 @@ def view(root: Path) -> dict:
     items = [r for _, r in rows[:20]] or [
         {
             "title": "No messages yet",
-            "subtitle": 'Try: orch relay send <workspace> "Hello"'.replace("<", "").replace(">", ""),
+            "subtitle": (
+                "Try: orch relay send " + _arg(peers[0]["title"]) + ' "Hello"'
+                if peers
+                else "First add a workspace you can talk to (ask your admin)."
+            ),
         }
     ]
     out["blocks"].append(

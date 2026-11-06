@@ -159,3 +159,22 @@ def test_agent_line_with_the_status_shapes_core_really_returns():
     assert after_stop["state"] == "resume" and after_stop["status"].startswith("last worked") and after_stop["primary"]["label"] == "Continue"
     dead = call("agentLine", t, {"ticket": "t_a", "running": False, "state": "dead", "claim": {"agent": "claude"}}, now, None)
     assert dead["state"] == "failed"
+
+
+@node
+def test_history_lines_name_the_task_and_the_addon():
+    tasks = [{"id": "c1", "text": "Ask about the currency"}]
+    assert call("historyLine", {"text": "Added check c1"}, tasks) == "Added a task: Ask about the currency"
+    assert call("historyLine", {"text": "Check c1 done"}, tasks) == "Finished a task: Ask about the currency"
+    assert call("historyLine", {"text": "Set ext.automation"}) == "Updated Automation settings"
+    assert call("historyLine", {"text": "Removed ext.automation.repeat"}) == "Removed Automation settings"
+
+
+@node
+def test_last_worked_just_now_has_no_ago():
+    from datetime import UTC, datetime
+
+    now = 1793923200000
+    used = datetime.fromtimestamp(now / 1000 - 20, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")  # 20 s earlier
+    t = {"id": "t_a", "questions": [], "sessions": [{"agent": "claude", "last_used": used}]}
+    assert call("agentLine", t, None, now)["status"] == "last worked just now"

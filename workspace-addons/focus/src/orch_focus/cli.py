@@ -100,6 +100,23 @@ def _serve(args, root: Path) -> int:
     return 0
 
 
+def _by_key(root: Path, ref: str) -> str:
+    """A ticket key (DM1-12, any case) gives that ticket's id; anything else is returned as it is."""
+    want = ref.strip().upper()
+    for p in sorted((root / ".orch" / "tickets").glob("t_*.json")):
+        try:
+            t = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (
+            isinstance(t, dict)
+            and str(t.get("key") or "").upper() == want
+            and TID_RE.fullmatch(str(t.get("id")))
+        ):
+            return t["id"]
+    return ref
+
+
 def _service(args, root: Path) -> int:
     def out(data: dict, text: str, as_json: bool) -> None:
         print(json.dumps(data) if as_json else text)
@@ -116,8 +133,9 @@ def _service(args, root: Path) -> int:
             return 2
         u = service.url(cur["port"])
         if args.cmd == "open":
+            args.ticket = _by_key(root, args.ticket)
             if not TID_RE.fullmatch(args.ticket):
-                print("Give a ticket id like t_ab12cd.", file=sys.stderr)
+                print("Give a ticket id like t_ab12cd or its key like DM1-12.", file=sys.stderr)
                 return 2
             page = f"{u}/t/{args.ticket}"
             out({"running": True, "pid": cur["pid"], "url": page}, page, as_json)

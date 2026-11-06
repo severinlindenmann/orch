@@ -12,9 +12,16 @@
 
   /* One plain line for a history entry. The common words the CLI writes become sentences; anything else is shown as
      written (the caller still strips ids). */
-  function historyLine(entry) {
+  function historyLine(entry, checklist) {
     const text = String((entry && entry.text) ?? '').trim();
     let m;
+    // the lines orch writes itself (same words as the CLI): a task line names the task, add-on settings their add-on
+    const task = id => { const c = (Array.isArray(checklist) ? checklist : []).find(x => x && x.id === id); return c && c.text ? ': ' + c.text : ''; };
+    const addon = key => key.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase());
+    if ((m = /^Added check (c\d+)$/.exec(text))) return 'Added a task' + task(m[1]);
+    if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a task' + task(m[1]);
+    if ((m = /^Set ext\.([a-z][a-z0-9-]*)$/.exec(text))) return 'Updated ' + addon(m[1]) + ' settings';
+    if ((m = /^Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?$/.exec(text))) return 'Removed ' + addon(m[1]) + ' settings';
     if (/^Created/.test(text)) return /under /.test(text) ? 'Created as a sub-ticket' : 'Ticket created';
     if ((m = /^Edited (.+)$/.exec(text))) {
       const parts = m[1].split(/,\s*/).map(f => FIELD_WORD[f.trim()] || f.trim());
@@ -120,7 +127,7 @@
     if (asks) return {state: 'needs', agent, status: 'waiting for your answer', primary: {label: 'Answer', op: 'answer'}, items: [fresh]};
     if (sessions[0]) {
       const when = Date.parse(sessions[0].last_used);
-      return {state: 'resume', agent, status: 'last worked ' + (Number.isNaN(when) ? 'earlier' : span(nowMs - when) + ' ago'),
+      return {state: 'resume', agent, status: 'last worked ' + (Number.isNaN(when) ? 'earlier' : span(nowMs - when) === 'just now' ? 'just now' : span(nowMs - when) + ' ago'),
         primary: start('Continue'), items: [fresh]};
     }
     return {state: 'new', agent, status: 'not started yet', primary: start('Start'), items: []};
