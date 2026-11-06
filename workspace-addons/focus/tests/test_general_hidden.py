@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from orch_focus import cli, livedata  # noqa: E402
+from orch_focus import cli, livedata
 
 
 def _ticket(root, tid, **kw):
