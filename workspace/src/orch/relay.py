@@ -355,6 +355,9 @@ def _message(
         msg["reply_to"] = reply_to
     raw = json.dumps(msg).encode("utf-8")
     path = _write_outbox(root, msg["id"], raw)
+    from orch import relay_view
+
+    relay_view.record_sent(root, msg)
     try:
         _post_message(root, raw)
     except Refused as e:

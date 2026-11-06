@@ -3,17 +3,28 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
+import shutil
+import subprocess
+import tempfile
+import time
+import uuid
 from pathlib import Path
 
 from orch import adapters, config
 from orch.errors import Refused
 
 KEYS = ("workspace.agent", "workspace.code")
+TEST_PROMPT = "Reply with the word ok"
+TEST_TIMEOUT = 60  # seconds
 
 
 def add_parsers(sub, common) -> None:
-    sub.add_parser("agents", parents=[common], help=argparse.SUPPRESS)
+    ag = sub.add_parser("agents", parents=[common], help=argparse.SUPPRESS).add_subparsers(dest="sub")
+    t = ag.add_parser("test", parents=[common], help="run an agent once with a trivial prompt")
+    t.add_argument("name")
     c = sub.add_parser("config", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
     g = c.add_parser("get", parents=[common])
     g.add_argument("key", nargs="?", choices=KEYS)
@@ -90,6 +101,71 @@ def _agents(args, root: Path) -> None:
     _out(args, rows, "\n".join(lines))
 
 
+def test_agent(root: Path, name: str) -> dict:
+    """Run the agent once with a trivial prompt: {ok, name, reason}. Writes no ticket or run state."""
+    a = adapters.load(name, root)
+    label = a["label"]
+
+    def result(ok: bool, reason: str) -> dict:
+        return {"name": name, "ok": ok, "reason": reason}
+
+    argv = adapters.render(
+        name, "fresh", "oneshot", {"prompt": TEST_PROMPT, "new_session": str(uuid.uuid4())}, root
+    )
+    if argv is None:
+        return result(False, f"{label} cannot be started this way.")
+    if not shutil.which(argv[0]):
+        return result(False, f"{label} is not installed.")
+    stdin = TEST_PROMPT if adapters.prompt_via_stdin(name, root) else None
+    t0 = time.monotonic()
+    scratch = tempfile.mkdtemp(prefix="orch-agent-test-")  # empty: agent can't touch the workspace
+    try:
+        return _run_test(argv, stdin, scratch, label, t0, result)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _run_test(argv, stdin, scratch, label, t0, result) -> dict:
+    try:
+        proc = subprocess.Popen(
+            argv,
+            cwd=scratch,
+            stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",
+            start_new_session=os.name != "nt",
+        )
+    except OSError as e:
+        return result(False, f"The command failed: {str(e).splitlines()[0] if str(e) else 'could not start'}")
+    try:
+        out, err = proc.communicate(stdin, timeout=TEST_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(Exception):
+            from orch import runs
+
+            runs.kill_tree(proc.pid)
+        with contextlib.suppress(Exception):
+            proc.kill()
+        with contextlib.suppress(Exception):
+            proc.communicate(timeout=5)
+        return result(False, f"No answer within {TEST_TIMEOUT} s.")
+    took = max(1, round(time.monotonic() - t0))
+    if proc.returncode != 0:
+        first = next((ln.strip() for ln in (err or out or "").splitlines() if ln.strip()), "")
+        return result(False, f"The command failed: {first or f'it stopped with code {proc.returncode}'}")
+    if not (out or "").strip():
+        return result(False, f"{label} gave no answer.")
+    return result(True, f"{label} answered in {took} s.")
+
+
+def _test(args, root: Path) -> int:
+    r = test_agent(root, args.name)
+    _out(args, r, r["reason"])
+    return 0 if r["ok"] else 1
+
+
 def _config(args, root: Path) -> None:
     if args.sub == "get":
         cur = {"workspace.agent": config.agent_name(root), "workspace.code": config.workspace_code(root)}
@@ -133,6 +209,8 @@ def _config(args, root: Path) -> None:
 
 def dispatch(args, root: Path) -> bool:
     if args.cmd == "agents":
+        if getattr(args, "sub", None) == "test":
+            raise SystemExit(_test(args, root))
         _agents(args, root)
     elif args.cmd == "config":
         _config(args, root)

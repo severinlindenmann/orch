@@ -102,17 +102,6 @@ prompt = "stdin"            # optional: the task goes on stdin instead of the co
 - A ticket's sessions live in the ticket (`ticket.sessions[] {agent, id, host, last_used}`), keyed by this agent name and the
   host; the run record (`.orch/run/tickets/`) holds only the claim.
 
-## Automation rename (scheduler → automation)
-
-The scheduler add-on becomes `automation` (owner Q1). Until W2-L7-P4 both ext schemas exist: `addons/scheduler.ext.schema.json`
-(today's code and e2e) and `addons/automation/ext.schema.json` (new keys `tz`, `agent` = an agent name never a command,
-`each_run`, and the sub-ticket keys `run`/`at`/`occurrence`). The rename PR, after a data snapshot of `.orch/`:
-1. moves every ticket's `ext.scheduler` to `ext.automation` unchanged (one `orch ext set --if-revision` per ticket; a ticket that
-   already has `ext.automation` keeps it and only loses `ext.scheduler`), `[scheduler]` → `[automation]` in `.orch/config.toml`,
-   `.orch/addons/scheduler/` → `.orch/addons/automation/`, `.orch/run/scheduler/` is dropped (the process restarts);
-2. keeps `orch scheduler …` as an alias for one release that prints `Now called: orch automation …`;
-3. deletes `addons/scheduler.ext.schema.json` and its examples. Running the migration twice changes nothing.
-
 ## AGENTS.md block
 
 One block per skill, between markers. Tools replace the whole block on update and never touch text outside it.
