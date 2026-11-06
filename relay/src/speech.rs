@@ -7,8 +7,9 @@ use async_trait::async_trait;
 use axum::http::StatusCode;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub const MAX_CHARS: usize = 900;
 /// USD per 1,000 spoken characters.
@@ -157,6 +158,8 @@ impl Speaker for Aura {
 pub struct FakeSpeaker {
     pub calls: Mutex<Vec<(String, String, String)>>,
     pub result: Mutex<Result<Vec<u8>, String>>,
+    /// Milliseconds each call takes (for concurrency tests).
+    pub delay_ms: Mutex<u64>,
 }
 
 impl Default for FakeSpeaker {
@@ -164,6 +167,7 @@ impl Default for FakeSpeaker {
         FakeSpeaker {
             calls: Mutex::new(vec![]),
             result: Mutex::new(Ok(b"ID3fake-mp3".to_vec())),
+            delay_ms: Mutex::new(0),
         }
     }
 }
@@ -175,6 +179,10 @@ impl Speaker for FakeSpeaker {
             .lock()
             .unwrap()
             .push((api_key.into(), text.into(), voice.into()));
+        let d = *self.delay_ms.lock().unwrap();
+        if d > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(d)).await;
+        }
         self.result.lock().unwrap().clone()
     }
 }
@@ -294,7 +302,7 @@ pub async fn generate(
     if settings.speak == "never" {
         return Err(none());
     }
-    let (text, lang, api_key) = {
+    let (text, lang) = {
         let c = db.lock().unwrap();
         let since: i64 = c
             .query_row(
@@ -336,9 +344,51 @@ pub async fn generate(
                 .filter(|l| *l == "de" || *l == "en"))
             .unwrap_or("en")
             .to_string();
+        (text, lang)
+    };
+    // One generation per (message, language) at a time: a second caller waits, then finds the cache.
+    let gate = {
+        let mut m = inflight().lock().unwrap();
+        m.entry(format!("{msg_id}:{lang}")).or_default().clone()
+    };
+    let _turn = gate.lock().await;
+    let result = make(
+        db, key, data_dir, speaker, phone, settings, msg_id, &text, &lang, at,
+    )
+    .await;
+    drop(_turn);
+    let mut m = inflight().lock().unwrap();
+    if Arc::strong_count(&gate) <= 2 {
+        m.remove(&format!("{msg_id}:{lang}"));
+    }
+    result
+}
+
+fn inflight() -> &'static Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
+    static M: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    M.get_or_init(Default::default)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn make(
+    db: &Mutex<Connection>,
+    key: &Key,
+    data_dir: &Path,
+    speaker: &dyn Speaker,
+    phone: &str,
+    settings: &Settings,
+    msg_id: &str,
+    text: &str,
+    lang: &str,
+    at: i64,
+) -> Res<Vec<u8>> {
+    let cost = cost_usd(text.chars().count());
+    let month = month_of(at);
+    let api_key = {
+        let c = db.lock().unwrap();
         // cached audio is free and always served
-        if let Ok(raw) = std::fs::read(cache_path(data_dir, msg_id, &lang)) {
-            if let Some(mp3) = crypto::open(key, &cache_aad(msg_id, &lang), &raw) {
+        if let Ok(raw) = std::fs::read(cache_path(data_dir, msg_id, lang)) {
+            if let Some(mp3) = crypto::open(key, &cache_aad(msg_id, lang), &raw) {
                 return Ok(mp3);
             }
         }
@@ -348,30 +398,35 @@ pub async fn generate(
             None
         };
         let api_key = api_key.ok_or_else(tts_off)?;
-        let cost = cost_usd(text.chars().count());
+        init(&c)?;
+        // cap check and reservation in one locked section, so parallel requests cannot share the same budget
         if used_usd_month(&c, phone, at) + cost > settings.tts_cap_usd + 1e-9 {
             return Err(tts_cap_reached());
         }
-        (text, lang, api_key)
-    };
-    let mp3 = speaker
-        .speak(&api_key, &text, voice(&lang))
-        .await
-        .map_err(tts_failed)?;
-    {
-        let c = db.lock().unwrap();
-        init(&c)?;
         c.execute(
             "INSERT INTO tts_usage(phone_id,month,usd) VALUES(?1,?2,?3)
              ON CONFLICT(phone_id,month) DO UPDATE SET usd=usd+?3",
-            params![phone, month_of(at), cost_usd(text.chars().count())],
+            params![phone, month, cost],
         )?;
-    }
-    let p = cache_path(data_dir, msg_id, &lang);
+        api_key
+    };
+    let mp3 = match speaker.speak(&api_key, text, voice(lang)).await {
+        Ok(m) => m,
+        Err(e) => {
+            // refund the reservation
+            let c = db.lock().unwrap();
+            let _ = c.execute(
+                "UPDATE tts_usage SET usd=MAX(0, usd-?3) WHERE phone_id=?1 AND month=?2",
+                params![phone, month, cost],
+            );
+            return Err(tts_failed(e));
+        }
+    };
+    let p = cache_path(data_dir, msg_id, lang);
     if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     // a failed cache write only costs a second generation next time
-    let _ = std::fs::write(p, crypto::seal(key, &cache_aad(msg_id, &lang), &mp3));
+    let _ = std::fs::write(p, crypto::seal(key, &cache_aad(msg_id, lang), &mp3));
     Ok(mp3)
 }

@@ -321,3 +321,52 @@ async fn real_deepgram_makes_german_and_english_mp3() {
         std::fs::write(format!("{out}/speech-{lang}.mp3"), mp3).unwrap();
     }
 }
+
+#[tokio::test]
+async fn concurrent_requests_never_pass_the_cap_and_one_generation_per_message() {
+    let r = Arc::new(rig().await);
+    r.key();
+    *r.sp.delay_ms.lock().unwrap() = 100;
+    // 8 different messages of 500 chars (0.015 USD each), cap 0.045: at most 3 may be made
+    let ids: Vec<String> = (0..8)
+        .map(|i| {
+            r.speak_text(
+                json!({"text": format!("{i}{}", "x".repeat(499)), "speak": {"lang": "en"}}),
+            )
+        })
+        .collect();
+    let mut hs = vec![];
+    for id in ids {
+        let r = r.clone();
+        hs.push(tokio::spawn(async move {
+            r.get(&id, None, 0.045, "auto").await
+        }));
+    }
+    let mut ok = 0;
+    for h in hs {
+        match h.await.unwrap() {
+            Ok(_) => ok += 1,
+            Err(e) => assert_eq!(e, (402, "tts_cap_reached".into())),
+        }
+    }
+    assert_eq!(ok, 3);
+    assert!(r.used() <= 0.045 + 1e-9, "{}", r.used());
+    assert_eq!(r.sp.calls.lock().unwrap().len(), 3);
+
+    // the same message asked 5 times at once: one paid generation, the rest get the cache
+    let before = r.used();
+    let id = r.speak_text(json!({"text": "Hallo.", "speak": {"lang": "de"}}));
+    let mut hs = vec![];
+    for _ in 0..5 {
+        let r = r.clone();
+        let id = id.clone();
+        hs.push(tokio::spawn(
+            async move { r.get(&id, None, 10.0, "auto").await },
+        ));
+    }
+    for h in hs {
+        assert_eq!(h.await.unwrap().unwrap(), b"ID3fake-mp3");
+    }
+    assert_eq!(r.sp.calls.lock().unwrap().len(), 4);
+    assert!((r.used() - before - 6.0 * 0.030 / 1000.0).abs() < 1e-9);
+}
