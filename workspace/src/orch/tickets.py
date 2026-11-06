@@ -320,7 +320,7 @@ def history_line(text: str) -> str:
     """Plain words for the history lines orch itself writes (what a person reads in the CLI). The stored text
     stays as it is; anything else, such as a line someone logged by hand, is shown as written."""
     t = text.strip()
-    if re.fullmatch(r"Asked q\d+( on c\d+| on the phone)?, waiting", t):
+    if re.fullmatch(r"Asked q\d+, waiting", t):
         return "Asked a question"
     if m := re.fullmatch(r"Answered q\d+: (.*)", t, re.DOTALL):
         return f"Answered a question: {m.group(1)}"

@@ -321,7 +321,7 @@ def test_new_with_bad_ext_makes_no_ticket(proj, run, bad):
     [
         ("Created", "Created"),
         ("Asked q1, waiting", "Asked a question"),
-        ("Asked q1 on c2, waiting", "Asked a question"),
+        ("Asked q1 on c2, waiting", "Asked q1 on c2, waiting"),
         ("Answered q1: Yes please", "Answered a question: Yes please"),
         ("Edited due, owner", "Changed the due date and owner"),
         ("Edited title", "Changed the title"),
