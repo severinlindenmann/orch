@@ -1,6 +1,7 @@
 import json
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -271,3 +272,18 @@ def test_a_linked_folder_is_not_followed(art, ws, tmp_path):
 def test_file_reads_refuse_foreign_origins(art):
     assert _get(art, "/api/file?t=t_other000x&k=artifacts&n=notes.md", {"Sec-Fetch-Site": "cross-site"})[0] == 403
     assert _get(art, "/api/artifacts/t_other000x", {"Sec-Fetch-Site": "cross-site"})[0] == 403
+
+
+def test_hard_links_and_pipes_are_not_served(art, ws):
+    import os
+    d = ws / ".orch" / "tickets" / "t_other000x" / "artifacts"
+    os.link(ws / "secret.txt", d / "hard.txt")
+    assert _get(art, "/api/file?t=t_other000x&k=artifacts&n=hard.txt")[0] == 404
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(d / "pipe.txt")
+        assert _get(art, "/api/file?t=t_other000x&k=artifacts&n=pipe.txt")[0] == 404  # answers at once, no hang
+
+
+def test_file_reads_go_through_the_one_core_reader():
+    src = (Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "ticketfiles.py").read_text()
+    assert "safefile.read_ticket_file" in src and "os.open" not in src and "lstat" not in src
