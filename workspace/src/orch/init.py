@@ -14,16 +14,61 @@ def init(root: Path) -> list[str]:
     src = skills.packaged_skills_dir() / "orch"
     skills.install_skill(root, "orch", src)
     skills.set_block(root, "orch", skills.read_block(src, "orch"))
-    skills.link_claude_skills(root)
-    skills.ensure_claude_md(root)
+    linked = skills.apply_agent_files(root)
     skills.ensure_gitignore(root)
-    return [
+    lines = [
         "Skill       .agents/skills/orch/SKILL.md",
         "AGENTS.md   orch entry",
-        "Claude      .claude/skills -> .agents/skills, CLAUDE.md reads AGENTS.md",
+    ]
+    if linked:
+        lines.append("Linked for: " + ", ".join(linked))
+    lines += [
         "Gitignore   .orch/secrets/ and other local files",
         "Tickets     .orch/tickets/",
+        "Your agent can now use tickets.",
     ]
+    return lines
+
+
+def has_recommended(root: Path) -> bool:
+    from orch import addons
+
+    return any(r["recommended"] and not r["active"] for r in addons.listing(root))
+
+
+def recommended(root: Path, yes: bool = False, interactive: bool = False) -> list[str]:
+    """Turn on the add-ons whose manifest says recommended = true: one prompt lists what each brings, each
+    keeps its own consent record. If one fails, none of them stays on. Returns the names turned on."""
+    import contextlib
+    import io
+    import sys
+
+    from orch import addons
+
+    rows = [r for r in addons.listing(root) if r["recommended"] and not r["active"]]
+    if not rows:
+        return []
+    mans = addons.discover()
+    text = "\n\n".join(addons.consent_text(mans[r["name"]], False) for r in rows)
+    if not yes:
+        if not interactive:
+            raise Refused(f"{text}\nTo turn these on run it again with --yes.")
+        sys.stderr.write(text + "\nTurn these on? [y/N] ")
+        sys.stderr.flush()
+        if sys.stdin.readline().strip().lower() not in ("y", "yes"):
+            raise Refused("Not confirmed. Nothing was changed.")
+    done: list[str] = []
+    try:
+        for r in rows:
+            with contextlib.redirect_stdout(io.StringIO()):
+                addons.add(root, r["name"], yes=True)
+            done.append(r["name"])
+    except Exception as e:
+        for n in reversed(done):
+            with contextlib.suppress(Exception):
+                addons.remove(root, n)
+        raise Refused(f"Could not turn on {', '.join(r['name'] for r in rows)}: {e} Nothing was changed.") from e
+    return done
 
 
 def choose_agent(root: Path, yes: bool = False, interactive: bool = False) -> str:

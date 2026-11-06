@@ -151,7 +151,7 @@ def auth_headers(cfg: dict) -> dict:
 def connect_service(root: Path, name: str, skill: str, url: str, workspace: str, token: str, prefix: str):
     """Shared part of `orch publish|relay connect`: init if needed, check token, save."""
     from orch import init as init_mod
-    from orch import skills
+    from orch import skillrender, skills
 
     url = clean_url(url)
     if not token.startswith(prefix):
@@ -162,6 +162,9 @@ def connect_service(root: Path, name: str, skill: str, url: str, workspace: str,
     _, who = call_json("GET", url + "/v1/whoami", hdrs, timeout=30)
     write_json(secrets_dir(root) / f"{name}.json", {"url": url, "workspace": workspace, "token": token}, True)
     skills.ensure_gitignore(root)  # the skill and AGENTS block come from `orch addon add <name>`
+    if name == "publish":
+        skillrender.remember_rights(root, who)
+    skillrender.refresh_skills(root)
     return who
 
 

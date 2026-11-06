@@ -4,7 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from orch import skills
+from orch import adapters, skills
+
+
+@pytest.fixture(autouse=True)
+def claude_found(monkeypatch):
+    """Claude is on this machine (the files entry of a found agent is applied; CI has none)."""
+    monkeypatch.setattr(
+        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+    )
 
 
 def test_init_creates_everything(proj, run):
@@ -95,3 +103,78 @@ def test_refuses_skills_dir_pointing_outside(proj, run, tmp_path_factory):
     code, _, err = run("init")
     assert code == 2 and "outside" in err
     assert list(outside.iterdir()) == []
+
+
+def test_init_says_what_it_linked_and_what_is_next(proj, run):
+    code, out, _ = run("init")
+    assert code == 0 and "Linked for: Claude" in out and "Your agent can now use tickets." in out
+
+
+def test_no_agent_found_links_nothing(proj, run, monkeypatch):
+    monkeypatch.setattr(adapters, "detect", lambda: [])
+    code, out, _ = run("init")
+    assert code == 0 and "Linked for" not in out
+    assert not (proj / ".claude").exists() and not (proj / "CLAUDE.md").exists()
+    assert (proj / "AGENTS.md").is_file()
+
+
+def test_codex_only_needs_only_agents_md(proj, run, monkeypatch):
+    monkeypatch.setattr(
+        adapters, "detect", lambda: [{"name": "codex", "label": "Codex", "found": True, "version": None}]
+    )
+    code, out, _ = run("init")
+    assert code == 0 and "Linked for" not in out and not (proj / "CLAUDE.md").exists()
+
+
+def test_files_entries_come_from_the_data(proj, monkeypatch):
+    reg = adapters._registry()
+    monkeypatch.setitem(
+        reg["codex"], "files", {"instructions_link": {"OTHER.md": "@AGENTS.md"}, "skills_link": ".other/skills"}
+    )
+    monkeypatch.setattr(
+        adapters, "detect", lambda: [{"name": "codex", "label": "Codex", "found": True, "version": None}]
+    )
+    assert skills.apply_agent_files(proj) == ["Codex"]
+    assert (proj / "OTHER.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
+    assert (proj / ".other/skills").is_symlink()
+
+
+def test_recommended_turns_on_marked_addons_or_none(proj, run, monkeypatch):
+    from orch import addons, init
+
+    rows = [
+        {"name": "a1", "recommended": True, "active": False},
+        {"name": "a2", "recommended": True, "active": False},
+        {"name": "a3", "recommended": False, "active": False},
+    ]
+    monkeypatch.setattr(addons, "listing", lambda root: rows)
+    man = {"name": "x", "version": "1", "description": "d", "background": False}
+    monkeypatch.setattr(addons, "discover", lambda: {r["name"]: man | {"name": r["name"]} for r in rows})
+    seen = []
+    monkeypatch.setattr(addons, "add", lambda root, n, yes=False: seen.append(n))
+    assert init.recommended(proj, yes=True) == ["a1", "a2"] and seen == ["a1", "a2"]
+    seen.clear()
+    with pytest.raises(skills.Refused):  # not asked and no --yes: nothing happens
+        init.recommended(proj, yes=False, interactive=False)
+    assert seen == []
+
+
+def test_recommended_failure_turns_none_on(proj, monkeypatch):
+    from orch import addons, init
+
+    rows = [{"name": "a1", "recommended": True, "active": False}, {"name": "a2", "recommended": True, "active": False}]
+    monkeypatch.setattr(addons, "listing", lambda root: rows)
+    man = {"version": "1", "description": "d", "background": False}
+    monkeypatch.setattr(addons, "discover", lambda: {r["name"]: man | {"name": r["name"]} for r in rows})
+    on, off = [], []
+
+    def add(root, n, yes=False):
+        if n == "a2":
+            raise skills.Refused("boom")
+        on.append(n)
+
+    monkeypatch.setattr(addons, "add", add)
+    monkeypatch.setattr(addons, "remove", lambda root, n, purge=False: off.append(n))
+    with pytest.raises(skills.Refused, match="Nothing was changed"):
+        init.recommended(proj, yes=True)
+    assert on == ["a1"] and off == ["a1"]

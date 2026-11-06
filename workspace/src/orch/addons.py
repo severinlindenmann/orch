@@ -25,7 +25,7 @@ import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import skills
+from orch import skillrender, skills
 from orch.errors import Refused
 
 DEFAULT_REPO = "https://github.com/severinlindenmann/orch"
@@ -825,6 +825,7 @@ def _activate(root: Path, name: str) -> None:
     prev = a.get(name, {})
     a[name] = {"version": m["version"], "activated_at": prev.get("activated_at") or _now()}
     _save_active(root, a)
+    skillrender.refresh_skills(root)
 
 
 def _now() -> str:
@@ -837,7 +838,8 @@ def _apply_project(root: Path, m: dict) -> None:
     skills.install_skill(root, f"orch-{name}", skill)
     body = skills.read_block(skill, f"orch-{name}", base / m["agents_block"])
     skills.set_block(root, name, body, addon=True)
-    skills.link_claude_skills(root)
+    skillrender.render_installed(root, name, skill)
+    skills.apply_agent_files(root)
 
 
 def _gi_markers(name: str) -> tuple[str, str]:
@@ -893,6 +895,7 @@ def remove(root: Path, name: str, purge: bool = False) -> None:
     drop_consent(root, name)
     if purge:
         _purge(root, name)
+    skillrender.refresh_skills(root)
 
 
 def _safe_addons_dir(root: Path) -> Path:
