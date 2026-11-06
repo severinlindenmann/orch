@@ -11,12 +11,16 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 REPO="${ORCH_REPO:-https://github.com/severinlindenmann/orch}"
 REF="${ORCH_REF:-main}"
+R="${REPO%.git}"
 if [ -d "$REPO" ]; then
   SPEC="$REPO/workspace"
 else
-  SPEC="git+${REPO%.git}@${REF}#subdirectory=workspace"
+  case "$R" in
+    https://github.com/*) SPEC="$R/archive/$REF.zip#subdirectory=workspace" ;;  # a zip download: no git needed
+    *) SPEC="git+$R@$REF#subdirectory=workspace" ;;
+  esac
 fi
-uv tool install --reinstall "$SPEC"
+uv tool install --reinstall --refresh "$SPEC"
 BIN="$HOME/.local/bin"
 # Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
 TOOL_BIN="$(uv tool dir --bin 2>/dev/null || echo "$BIN")"

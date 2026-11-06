@@ -74,6 +74,9 @@ def _install_origin() -> dict:
     url, sub = d.get("url"), d.get("subdirectory") or ""
     if not isinstance(url, str):
         return {}
+    if isinstance(d.get("archive_info"), dict) and sub == "workspace":
+        m = _GITHUB_ZIP.match(url)
+        return {"repo": m["repo"], "ref": m["ref"]} if m else {}
     vcs = d.get("vcs_info")
     if isinstance(vcs, dict) and vcs.get("vcs") == "git" and sub == "workspace":
         out = {"repo": url}
@@ -109,11 +112,21 @@ def _is_local(r: str) -> bool:
     return bool(o.get("local")) and r == o["repo"] and Path(r).is_dir()
 
 
+# A GitHub source zip (what spec() installs), as uv records it: .../archive/[refs/heads/|refs/tags/]<ref>.zip
+_GITHUB_ZIP = re.compile(
+    r"^(?P<repo>https://github\.com/[^/]+/[^/]+)/archive/(?:refs/(?:heads|tags)/)?(?P<ref>.+)\.zip$"
+)
+
+
 def spec(subdir: str) -> str:
+    """What uv installs. GitHub sources come as a zip download, so no git is needed: Windows PCs often have
+    none, and their users may not be allowed to install it. Other hosts keep git."""
     r = repo()
     if _is_local(r):
         return str((Path(r) / subdir).resolve())
     r = r.removesuffix(".git")
+    if r.startswith("https://github.com/"):
+        return f"{r}/archive/{ref()}.zip#subdirectory={subdir}"
     return f"git+{r}@{ref()}#subdirectory={subdir}"
 
 
@@ -230,10 +243,18 @@ def run_uv(args: list[str]) -> None:
         raise Refused(f"uv failed: {(r.stderr or r.stdout).strip()[-600:]}")
 
 
+def _same_python() -> list[str]:
+    """On Windows a reinstall keeps the Python orch runs on. On Windows on ARM the installer chose an x64
+    Python (cryptography has no ARM64 Windows wheel); uv's own pick would try to compile it and fail."""
+    base = getattr(sys, "_base_executable", None)
+    return ["--python", base] if sys.platform == "win32" and base else []
+
+
 def _install_tool(entries: list[dict]) -> None:
     """Install orch with these add-ons in one uv tool env. An entry that can not be installed any more is
     left out with a note (it stays in the registry), so one stale entry never blocks the rest."""
-    args = ["tool", "install", "--reinstall", spec("workspace")]
+    # --refresh: a branch zip has the same URL after every push, so never take it from uv's cache
+    args = ["tool", "install", "--reinstall", "--refresh", *_same_python(), spec("workspace")]
     for e in entries:
         why = _missing_source(e)
         if why:

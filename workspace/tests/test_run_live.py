@@ -517,6 +517,7 @@ def _notice(proj, run_id, payload):
     )  # fmt: skip
 
 
+@needs_tmux
 def test_claude_idle_notice_lets_input_in_but_a_permission_notice_never_does(
     proj, run, lab, tmp_path, monkeypatch
 ):
