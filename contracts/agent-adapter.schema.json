@@ -104,7 +104,7 @@
         "permissions": {
           "type": "object", "additionalProperties": false,
           "propertyNames": { "enum": ["ask", "auto", "full"] },
-          "description": "Optional. Flags for the workspace's permission mode ([workspace] permissions in .orch/config.toml: ask | auto (default) | full), added to every oneshot and live start. An adapter without this ignores the mode. A mode that is missing adds nothing.",
+          "description": "Optional. Flags for the workspace's permission mode (kept per machine in the orch home (permissions.json), set by orch config set workspace.permissions, never read from .orch/config.toml: ask | auto (default) | full), added to every oneshot and live start. An adapter without this ignores the mode. A mode that is missing adds nothing.",
           "additionalProperties": {
             "oneOf": [
               { "type": "array", "items": { "$ref": "#/$defs/arg" }, "description": "The flags (empty = the tool's own default)." },
@@ -168,7 +168,7 @@
       "properties": {
         "workspace": {
           "type": "object",
-          "properties": { "agent": { "$ref": "#/$defs/name", "description": "Which agent does the work here: an adapter name or an [agents.<name>] entry." }, "permissions": { "enum": ["ask", "auto", "full"], "description": "What agents may do without asking (default auto). The adapter's `permissions` maps it to the tool's flags; an agent without a mapping ignores it. Changed with orch config set workspace.permissions." }, "live_idle_minutes": { "type": "integer", "minimum": 1, "maximum": 10080, "description": "A live session idle (or waiting for a person), or on a ticket that has been Done, this long is closed on the next orch run call; its session id stays, so Continue resumes. Default 60." }, "code": { "type": "string", "pattern": "^[A-Z0-9]{2,4}$", "description": "Workspace code for ticket keys (<code>-<n>, e.g. DM1-12): 2-4 uppercase letters or digits. Set by orch init (suggested from the folder name, or --code), changed with orch config set workspace.code; a change never rewrites old keys." } }
+          "properties": { "agent": { "$ref": "#/$defs/name", "description": "Which agent does the work here: an adapter name or an [agents.<name>] entry." }, "live_idle_minutes": { "type": "integer", "minimum": 1, "maximum": 10080, "description": "A live session idle (or waiting for a person), or on a ticket that has been Done, this long is closed on the next orch run call; its session id stays, so Continue resumes. Default 60." }, "code": { "type": "string", "pattern": "^[A-Z0-9]{2,4}$", "description": "Workspace code for ticket keys (<code>-<n>, e.g. DM1-12): 2-4 uppercase letters or digits. Set by orch init (suggested from the folder name, or --code), changed with orch config set workspace.code; a change never rewrites old keys." } }
         },
         "agents": {
           "type": "object",

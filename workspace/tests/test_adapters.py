@@ -117,9 +117,33 @@ def test_permission_mode_comes_from_the_workspace_config(proj, claude_help, run)
     assert "--dangerously-skip-permissions" in argv and "acceptEdits" not in argv
     code, _, err = run("config", "set", "workspace.permissions", "yolo")
     assert code != 0 and "ask, auto, full" in err
-    assert config.read(proj)["workspace"]["permissions"] == "full"
-    config.set_key(proj, "workspace", "permissions", "bogus")  # a hand-edited bad value is the default
+    assert config.permissions(proj) == "full"
+    assert "permissions" not in (config.read(proj).get("workspace") or {})  # not kept in the repo
+    config.set_permissions(proj, "auto")
+    config.set_key(proj, "workspace", "permissions", "full")  # a repo config cannot raise it
     assert config.permissions(proj) == "auto"
+    assert "--dangerously-skip-permissions" not in adapters.render(
+        "claude", "fresh", "live", {"new_session": NEW, "orch_hooks_file": "h"}, proj
+    )
+
+
+def test_an_agent_may_lower_the_mode_never_raise_it(proj, run, monkeypatch):
+    monkeypatch.delenv("ORCH_AGENT", raising=False)
+    assert run("config", "set", "workspace.permissions", "full", "--by", "human:me")[0] == 0
+    code, _, err = run("config", "set", "workspace.permissions", "ask", "--by", "agent:claude")
+    assert code == 0 and config.permissions(proj) == "ask"
+    code, _, err = run("config", "set", "workspace.permissions", "full", "--by", "agent:claude")
+    assert code != 0 and "Only a person" in err and config.permissions(proj) == "ask"
+    monkeypatch.setenv("ORCH_AGENT", "claude")  # an agent in the environment counts, whatever --by says
+    code, _, err = run("config", "set", "workspace.permissions", "auto", "--by", "human:me")
+    assert code != 0 and config.permissions(proj) == "ask"
+
+
+def test_the_mode_is_per_workspace(proj, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    config.set_permissions(proj, "full")
+    assert config.permissions(other) == "auto"
 
 
 def test_agents_without_a_mapping_ignore_the_mode(proj):

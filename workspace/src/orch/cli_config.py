@@ -13,7 +13,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, config
+from orch import adapters, config, tickets
 from orch.errors import Refused
 
 KEYS = ("workspace.agent", "workspace.code", "workspace.permissions", "workspace.live_idle_minutes")
@@ -37,6 +37,13 @@ def add_parsers(sub, common) -> None:
     a.add_argument("--command", help="the command that does the work; {prompt} is where the task goes")
     a.add_argument("--prompt-via", choices=("arg", "stdin"), help="how the task reaches the command")
     a.add_argument("--interactive", help="optional: the command that starts it for a live session")
+
+
+def _actor(args) -> str:
+    """Who runs this: --by, else the agent tool seen in the environment, else the person. An agent in the
+    environment counts as an agent whatever --by says."""
+    who = tickets.current_actor(getattr(args, "by", None))
+    return "agent:" + str(tickets.agent_tool()) if tickets.agent_tool() else who
 
 
 def _out(args, data, text: str) -> None:
@@ -186,7 +193,7 @@ def _config(args, root: Path) -> None:
             f"Saved: workspace.code = {code}. New tickets get {code}-<n>; existing keys stay as they are.",
         )
     elif args.sub == "set" and args.key == "workspace.permissions":
-        mode = config.set_permissions(root, args.value)
+        mode = config.set_permissions(root, args.value, _actor(args))
         _out(
             args,
             {"workspace.permissions": mode},

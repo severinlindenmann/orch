@@ -44,21 +44,52 @@ DEFAULT_PERMISSIONS = "auto"
 DEFAULT_LIVE_IDLE_MINUTES = 60
 
 
+def _perm_file() -> Path:
+    from orch import addons
+
+    return addons.home() / "permissions.json"
+
+
+def _perm_key(root: Path) -> str:
+    return hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()[:32]
+
+
 def permissions(root: Path | None) -> str:
-    """[workspace] permissions: ask | auto | full. Anything else (or nothing) is the default, auto."""
+    """What agents may do here without asking: ask | auto | full. Kept per machine in the orch home, keyed by
+    the workspace's real path, never in the workspace: a committed config.toml (a cloned repo, or an agent
+    editing it) cannot raise it. A permissions key in .orch/config.toml is ignored. Default: auto."""
     if root is None:
         return DEFAULT_PERMISSIONS
     try:
-        v = (read(root).get("workspace") or {}).get("permissions")
-    except Refused:
+        v = json.loads(_perm_file().read_text(encoding="utf-8")).get(_perm_key(root))
+    except (OSError, ValueError, AttributeError):
         return DEFAULT_PERMISSIONS
     return v if v in PERMISSION_MODES else DEFAULT_PERMISSIONS
 
 
-def set_permissions(root: Path, value: str) -> str:
+def set_permissions(root: Path, value: str, by: str = "human:owner") -> str:
+    """Save the mode for this machine. An agent may lower it, never raise it."""
     if value not in PERMISSION_MODES:
         raise Refused(f"'{value}' is not a mode. Pick one of: {', '.join(PERMISSION_MODES)}.")
-    set_key(root, "workspace", "permissions", value)
+    if by.startswith("agent:") and PERMISSION_MODES.index(value) > PERMISSION_MODES.index(permissions(root)):
+        raise Refused(
+            "Only a person can allow an agent more. Ask them to run: "
+            f"orch config set workspace.permissions {value}"
+        )
+    p = _perm_file()
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8"))
+        doc = doc if isinstance(doc, dict) else {}
+    except (OSError, ValueError):
+        doc = {}
+    doc[_perm_key(root)] = value
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        tmp.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+        os.replace(tmp, p)
+    finally:
+        tmp.unlink(missing_ok=True)
     return value
 
 
