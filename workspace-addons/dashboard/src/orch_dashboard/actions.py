@@ -138,6 +138,39 @@ def _check_add(a):
     return ["check", "add", _tid(a.get("ticket"))], [], [text.strip()]
 
 
+def _url(v) -> str:
+    if not (isinstance(v, str) and re.fullmatch(r"https?://[^\s<>\"'`\x00-\x1f\x7f]{1,1990}", v, re.IGNORECASE)):
+        raise BadRequest("A link must be a web address that starts with https:// or http://.")
+    return v
+
+
+def _link_add(a):
+    _only(a, ("ticket", "url", "title"))
+    flags = [f"--title={_text(a['title'], 'title')}"] if a.get("title") else []
+    if flags and ("\n" in a["title"] or len(a["title"]) > 200):
+        raise BadRequest("A link title is one line of at most 200 characters.")
+    return ["link", "add", _tid(a.get("ticket"))], flags, [_url(a.get("url"))]
+
+
+def _link_remove(a):
+    _only(a, ("ticket", "url"))
+    return ["link", "remove", _tid(a.get("ticket"))], [], [_url(a.get("url"))]
+
+
+def _ticket_field(a):
+    """One add-on field: `orch ticket set <id> <addon>.<field> -- <value>` (core types and checks it; empty clears).
+    The add-on must be on here (checked in run_op)."""
+    _only(a, ("ticket", "addon", "field", "value", "if_revision"))
+    addon, field = a.get("addon"), a.get("field")
+    if not (isinstance(addon, str) and ADDON.fullmatch(addon) and addon not in RESERVED):
+        raise BadRequest("That is not an add-on.")
+    if not (isinstance(field, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", field)):
+        raise BadRequest("That is not a field.")
+    rev = _rev(a.get("if_revision"))
+    flags = [f"--if-revision={rev}"] if rev is not None else []
+    return ["ticket", "set", _tid(a.get("ticket")), f"{addon}.{field}"], flags, [_text(a.get("value"), "value", empty=True)]
+
+
 def _log(a):
     _only(a, ("ticket", "text"))
     return ["log", _tid(a.get("ticket"))], [], [_text(a.get("text"))]
@@ -235,7 +268,8 @@ def _addon_set(a):
 OPS = {"answer": _answer, "ticket.new": _ticket_new, "ticket.patch": _ticket_patch, "ticket.edit": _ticket_edit,
        "log": _log, "check.add": _check_add, "run.start": _run_start, "run.stop": _run_stop, "addon.start": _addon_start,
        "addon.act": _addon_act, "config.agent": _config_agent, "config.agent.add": _config_agent_add, "config.agent.test": _config_agent_test,
-       "config.permissions": _config_permissions, "addon.set": _addon_set}
+       "config.permissions": _config_permissions, "addon.set": _addon_set,
+       "link.add": _link_add, "link.remove": _link_remove, "ticket.field": _ticket_field}
 
 
 def actor() -> str:
@@ -296,7 +330,7 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
     argv = build_argv(op, args)
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
-    if op == "addon.act" and not _addon_is_on(root, orch_bin, args["addon"]):
+    if op in ("addon.act", "ticket.field") and not _addon_is_on(root, orch_bin, args["addon"]):
         raise BadRequest("That add-on is not on in this workspace.")
     if op == "addon.set" and not _addon_known(root, orch_bin, args["name"]):
         raise BadRequest("That add-on is not installed.")
