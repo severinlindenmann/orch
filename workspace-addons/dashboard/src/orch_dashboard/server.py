@@ -12,8 +12,9 @@ from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
+from urllib.parse import parse_qs
 
-from . import actions
+from . import actions, ticketfiles
 from .data import load_addons, load_services, load_state
 from .views import ViewPuller
 
@@ -141,6 +142,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/state":
             return self._send(200, json.dumps(load_state(self.root, orch_bin=self.orch_bin, with_settings=True)).encode(),
                               "application/json")
+        m = re.fullmatch(r"/api/artifacts/(t_[a-z0-9]{6,16})", path)
+        if m:  # the file list of one ticket (orch lists them); no file content here
+            return self._send(200, json.dumps(ticketfiles.listing(self.root, self.orch_bin, m.group(1))).encode(), "application/json")
+        if path == "/api/file":  # one file of a ticket's artifacts or evidence folder: plain text and pictures only
+            q = parse_qs(query, keep_blank_values=True)
+            one = lambda k: (q.get(k) or [""])[0]  # noqa: E731
+            code, body, ctype, extra = ticketfiles.read_file(self.root, one("t"), one("k"), one("n"), one("dl") == "1")
+            return self._send(code, body, ctype, extra, csp="default-src 'none'; img-src 'self'; sandbox")
         if path.startswith("/api/addon/"):  # only names that are active here and have a tab
             name = path[len("/api/addon/"):]
             if not any(a["name"] == name and a["dashboard"] for a in load_addons(self.root, self.orch_bin)):
