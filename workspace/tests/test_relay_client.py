@@ -798,6 +798,8 @@ def test_send_update_sets_body_update_with_ticket_title(proj, run, new_ticket, r
     )  # fmt: skip
     assert code == 0
     sent = rel.sent[0]
+    view = sent["body"].pop("ticket_view")  # a result to a phone brings the snapshot
+    assert view["title"] == "Prepare the Q3 summary"
     assert sent["body"] == {
         "text": "Done, see the file",
         "update": {"kind": "result", "title": "Prepare the Q3 summary"},

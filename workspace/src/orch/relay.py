@@ -431,8 +431,15 @@ def send_text(
     ticket: str | None = None,
     update: str | None = None,
     reply_to: str | None = None,
+    view: bool | None = None,
 ) -> dict:
+    """view: add the ticket snapshot for the phone (body.ticket_view); default for result, failure,
+    stopped and question updates to a phone. A snapshot the relay refuses never blocks the text:
+    it goes again without one."""
+    from orch import phone_view
+
     body: dict = {"text": text}
+    to = resolve(root, target)
     if update:
         if update not in UPDATE_KINDS:
             raise Refused(f"--update is one of: {', '.join(UPDATE_KINDS)}.")
@@ -441,7 +448,19 @@ def send_text(
         body["update"] = {"kind": update}
         if title := _update_title(root, ticket):
             body["update"]["title"] = title
-    return _message(root, resolve(root, target), "text", body, ticket, reply_to)
+    to_phone = to == "phones" or to.startswith("ph_")
+    if view is None:
+        view = to_phone and update in phone_view.SEND_KINDS
+    if update and ticket and view and (tv := phone_view.view_for(root, ticket)):
+        try:
+            msg = _message(root, to, "text", {**body, "ticket_view": tv}, ticket, reply_to)
+        except Refused:
+            msg = _message(root, to, "text", body, ticket, reply_to)
+    else:
+        msg = _message(root, to, "text", body, ticket, reply_to)
+    if update and ticket and to_phone:
+        phone_view.remember(root, ticket, to)
+    return msg
 
 
 def send_file(root: Path, target: str, path: Path, text: str | None, ticket: str | None = None) -> dict:
@@ -496,6 +515,9 @@ def send_question(root: Path, ticket: dict, q: dict) -> dict:
     asked = net.read_json(_asked_path(root), {})
     asked[msg["id"]] = {"ticket": ticket["id"], "question_id": q["id"], "to": "phones"}
     net.write_json(_asked_path(root), asked, True)
+    # the ticket chat gets the snapshot too (a question carries none): quietly, never pushed
+    with contextlib.suppress(Refused):
+        send_text(root, "phones", "Waiting for your answer", ticket["id"], "note", view=True)
     return msg
 
 
@@ -859,10 +881,19 @@ def _allow_history(root: Path, msg: dict) -> str | None:
     return None
 
 
+def _sync_phone_views(root: Path) -> None:
+    """Best effort: task changes of tickets the phone follows go out quietly (phone_view.sync)."""
+    from orch import phone_view
+
+    with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
+        phone_view.sync(root)
+
+
 def inbox(root: Path, wait: int = 0) -> list[dict]:
     """Pull, save, journal, ack, then handle the ones not seen. Returns [{message, note, allowed}]."""
     with contextlib.suppress(Refused):
         apply_allow_answers(root)
+    _sync_phone_views(root)
     _, arrival = _pull(root, wait)
     d = root / ".orch" / "inbox"
     pending = []
@@ -925,6 +956,7 @@ def since(root: Path, seq: int, wait: int = 0) -> dict:
     warning = None
     with contextlib.suppress(Refused):
         apply_allow_answers(root)
+    _sync_phone_views(root)
     try:
         _pull(root, 0 if [e for e in _read_arrivals(root) if e["seq"] > seq] else wait)
     except Refused as e:  # best effort: the journal on disk is still true

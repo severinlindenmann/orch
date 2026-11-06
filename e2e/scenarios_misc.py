@@ -125,3 +125,51 @@ def f1(e):
 
 
 
+
+
+@scenario("V2-M1")
+def v2_m1(e):
+    """Mobile chat (fake phone): a text becomes a ticket; the workspace's result brings the ticket snapshot (tasks,
+    history lines, proof image as a blob the phone can read); a question is answered from the phone."""
+    ids, ph = pair(e, ["Pilatus"], label="V2-M1 iPhone")
+    r = phone(e, ph, "POST", "/v1/phone/send", {"to": ids["Pilatus"], "text": "Make the Q3 chart"})
+    check(r.status == 201, f"phone send: {r}")
+    e.orch("Pilatus", "relay", "inbox")  # the text becomes a ticket, the phone gets "Got it" (ack)
+    all_t = [json.loads(p.read_text()) for p in sorted((e.ws("Pilatus") / ".orch/tickets").glob("t_*.json"))]
+    made = [t for t in all_t if "Make the Q3 chart" in json.dumps(t)]
+    check(len(made) == 1, f"the phone text did not become one ticket: {[t.get('title') for t in all_t]}")
+    tid = made[0]["id"]
+    ws = e.ws("Pilatus")
+    (ws / "out").mkdir(exist_ok=True)
+    (ws / "out" / "q3-chart.png").write_bytes(b"\x89PNG V2-M1 chart")
+    (ws / "out" / "scratch.txt").write_text("stays local")
+    e.orch("Pilatus", "check", "add", tid, "Read the Q3 sheet")
+    e.orch("Pilatus", "check", "add", tid, "Draw the chart")
+    e.orch("Pilatus", "check", "done", tid, "c1", "--file", "out/scratch.txt", "--role", "support", "--by", "agent:claude")
+    e.orch("Pilatus", "check", "done", tid, "c2", "--file", "out/q3-chart.png", "--title", "Q3 chart", "--role", "result", "--by", "agent:claude")
+    e.orch("Pilatus", "relay", "send", "phones", "The chart is ready.", "--ticket", tid, "--update", "result")
+    items = phone(e, ph, "GET", "/v1/phone/updates").json()["items"]
+    mine = [i for i in items if i["ticket"] == tid]
+    check(len(mine) == 1 and mine[0]["kind"] == "result", f"updates: {items}")
+    tv = mine[0]["ticket_view"]
+    check(tv and (tv["done"], tv["total"]) == (2, 2) and [c["text"] for c in tv["checklist"]] == ["Read the Q3 sheet", "Draw the chart"], f"ticket_view: {tv}")
+    check(any(h["text"] == "Finished a task: Draw the chart" and h["who"] == "Claude" for h in tv["history_tail"]), f"history: {tv['history_tail']}")
+    imgs = [a for a in tv["attachments"] if a["kind"] == "image"]
+    check(len(imgs) == 1 and imgs[0]["title"] == "Q3 chart" and not [a for a in tv["attachments"] if a.get("name") == "scratch.txt"], f"attachments: {tv['attachments']}")
+    b = phone(e, ph, "GET", f"/v1/phone/blobs/{imgs[0]['blob_id']}")
+    check(b.status == 200 and b.body == b"\x89PNG V2-M1 chart", f"phone blob: {b}")
+    # a phone that does not follow Pilatus cannot read it
+    _, other = pair(e, ["Home"], label="V2-M1 other")
+    check(phone(e, other, "GET", f"/v1/phone/blobs/{imgs[0]['blob_id']}").status == 404, "another phone read the blob")
+    # question -> answer from the phone; the ticket chat got a fresh snapshot with the question
+    e.orch("Pilatus", "ask", tid, "Use last year's colours?", "--option", "yes", "--option", "no", "--phone")
+    qs = [q for q in phone(e, ph, "GET", "/v1/phone/questions").json()["items"] if q["message"].get("ticket") == tid]
+    check(len(qs) == 1, f"phone questions: {qs}")
+    one = phone(e, ph, "GET", f"/v1/phone/updates?workspace={ids['Pilatus']}&ticket={tid}").json()["items"]
+    check(one[0]["kind"] == "note" and one[0]["ticket_view"] and any(h["text"] == "Asked a question" for h in one[0]["ticket_view"]["history_tail"]), f"ticket updates: {one[:1]}")
+    a = phone(e, ph, "POST", "/v1/phone/answer", {"question_message_id": qs[0]["message"]["id"], "answer": "yes"})
+    check(a.status == 201, f"answer: {a}")
+    e.orch("Pilatus", "relay", "inbox")
+    q = tload(ws, tid)["questions"][0]
+    check(q["answer"] == "yes" and q["via"] == "phone", f"question: {q}")
+    return "the chat screens themselves: mobile lane (SwiftUI)"
