@@ -319,7 +319,7 @@ struct ChatItemView: View {
 
 /// What a link card says it is (one rule for every link card; the dashboard has the same one).
 /// - Type: an allowlist. Each " · " part is a known site name (shown only on that site's own host) or a plain
-///   label of letters, digits, spaces and "-" (ASCII and precomposed Latin letters, at most 24) naming no site; else it
+///   label of ASCII letters, digits, spaces and "-" (at most 24) naming no site, even squeezed; else it
 ///   is dropped, and with nothing left the type is "Link".
 /// - Host: the registrable domain (evil.example) in its own text that never truncates, the rest of the host
 ///   before it, truncated from the head.
@@ -370,18 +370,20 @@ enum LinkFace {
         return (siteHosts[key] ?? []).contains { $0.hasPrefix(".") ? h.hasSuffix($0) : (h == $0 || h.hasSuffix("." + $0)) }
     }
 
+    /// A free label: only ASCII letters, digits, space and "-", 1 to 24 characters.
     static func plainLabel(_ s: String) -> Bool {
-        guard (1...24).contains(s.count), s.trimmingCharacters(in: .whitespaces) == s, !s.contains("  ") else { return false }
-        return s.unicodeScalars.allSatisfy { u in
+        (1...24).contains(s.count) && s.unicodeScalars.allSatisfy { u in
             let v = u.value
             return (0x30...0x39).contains(v) || (0x41...0x5A).contains(v) || (0x61...0x7A).contains(v) || v == 0x20 || v == 0x2D
-                || ((0xC0...0x24F).contains(v) && v != 0xD7 && v != 0xF7)  // precomposed Latin letters, no × ÷
         }
     }
 
+    static func squeezed(_ s: String) -> String { s.lowercased().replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "-", with: "") }
+
+    /// A site name anywhere in the label once spaces and "-" are gone ("G i t-Hub" names GitHub).
     static func namesASite(_ s: String) -> Bool {
-        let words = " " + s.lowercased().replacingOccurrences(of: "-", with: " ") + " "
-        return siteNames.keys.contains { words.contains(" " + $0 + " ") }
+        let q = squeezed(s)
+        return siteNames.keys.contains { q.contains(squeezed($0)) }
     }
 
     /// The link type as shown. Never contains a dot, a host or anything that is not on the allowlist.

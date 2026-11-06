@@ -249,7 +249,10 @@ final class ChatTests: XCTestCase {
         XCTAssertEqual(LinkFace.type("My GitHub PR", url: evil), "Link"); XCTAssertEqual(LinkFace.type("GitHub-PR", url: evil), "Link")
         XCTAssertEqual(LinkFace.type("Pull\u{202E}request", url: evil), "Link")
         XCTAssertEqual(LinkFace.type(String(repeating: "a", count: 25), url: evil), "Link")
-        XCTAssertEqual(LinkFace.type("Kampagne Zürich", url: evil), "Kampagne Zürich")
+        for label in ["Git-Hub", "G i t h u b", "G\u{00ED}thub", "\u{01C0}github", "Kampagne Zürich", "mygooglesheets"] {
+            XCTAssertEqual(LinkFace.type(label, url: evil), "Link", label)
+        }
+        XCTAssertEqual(LinkFace.type("Campaign 2026", url: evil), "Campaign 2026")
         XCTAssertTrue(LinkFace.hostParts(evil) == ("github.com.", "evil.example"))
         XCTAssertTrue(LinkFace.hostParts("https://shop.example.co.uk/") == ("shop.", "example.co.uk"))
         XCTAssertEqual(LinkFace.domain("shop.example.co.uk"), "example.co.uk")
