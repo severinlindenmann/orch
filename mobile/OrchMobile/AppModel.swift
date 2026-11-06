@@ -87,19 +87,21 @@ final class AppModel {
         self.voiceMode = voiceMode
         self.outboxDirectory = outboxDirectory
         let creds = Keychain.load()
-        if let c = creds { credentials = c; phase = .ready }
-        outbox = Outbox(directory: outboxDirectory, phone: creds?.phoneId ?? "")
+        // Every stored property is set first; only then is `self` used (the Observation macros need that).
         let holder = ClientHolder()
-        speech = SpeechPlayer(fetch: { id, lang in try await holder.client().speech(messageId: id, lang: lang) }, cacheDirectory: speechCache, systemControls: systemAudioControls)
-        holder.make = { [weak self] in await MainActor.run { self?.client } }
-        if creds == nil { outbox.wipe() }
+        let box = Outbox(directory: outboxDirectory, phone: creds?.phoneId ?? "")
+        self.outbox = box
+        self.speech = SpeechPlayer(fetch: { id, lang in try await holder.client().speech(messageId: id, lang: lang) },
+                                   cacheDirectory: speechCache, systemControls: systemAudioControls)
+        if let c = creds { credentials = c; phase = .ready } else { box.wipe() }
+        holder.make = { [weak self] in self?.client }
     }
 
     /// Lets the (Sendable) speech fetch reach the current client, which changes with sign-in.
     private final class ClientHolder: @unchecked Sendable {
-        var make: (@Sendable () async -> (any RelayAPI)?)?
+        var make: (@MainActor @Sendable () -> (any RelayAPI)?)?
         func client() async throws -> any RelayAPI {
-            guard let c = await make?() else { throw RelayError.unauthorized }
+            guard let make, let c = await make() else { throw RelayError.unauthorized }
             return c
         }
     }
