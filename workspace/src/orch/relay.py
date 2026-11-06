@@ -624,7 +624,8 @@ def _answer_asked(root: Path, msg: dict) -> tuple[dict | None, str]:
     frm, b = str(msg.get("from", "")), msg.get("body", {})
     if not isinstance(asked, dict):
         return None, "ignored: not an answer to a question this workspace sent"
-    if not (frm.startswith("ph_") if asked["to"] == "phones" else frm == asked["to"]):
+    # Questions to the phones: answered by a phone, or by a relay subscriber allowed to answer (sub_).
+    if not (frm.startswith(("ph_", "sub_")) if asked["to"] == "phones" else frm == asked["to"]):
         return None, f"ignored: {frm} was not asked"
     if b.get("question_id") != asked["question_id"]:
         return None, "ignored: answer is for another question"
@@ -636,10 +637,14 @@ def _answer_by(msg: dict) -> tuple[str, str]:
     by = b.get("answered_by")
     if isinstance(by, str):  # untrusted: it is pasted to the agent as "From <by>: ..."
         by = " ".join(clean_untrusted(by, 100).split())
-    ok_prefix = "human:" if frm.startswith("ph_") else ("human:", "agent:")
+    # A subscriber is another system: always agent:, never a person.
+    ok_prefix = (
+        "human:" if frm.startswith("ph_") else "agent:" if frm.startswith("sub_") else ("human:", "agent:")
+    )
     if not (isinstance(by, str) and by.startswith(ok_prefix)):
         by = f"human:{frm}" if frm.startswith("ph_") else f"agent:{frm}"
-    return by, ("phone" if frm.startswith("ph_") else "relay")
+    via = "phone" if frm.startswith("ph_") else "subscriber" if frm.startswith("sub_") else "relay"
+    return by, via
 
 
 def _applied_ticket(root: Path, msg: dict) -> str | None:

@@ -17,6 +17,12 @@ from .plain import daily_or_slower, workspace_tz, zone
 from .runner import history, load_config, load_state, sdir, update_state
 
 OPEN = ("open", "active", "waiting")
+
+
+def scheduled(t: dict) -> bool:
+    """An open ticket, or a finished one that repeats (its next run opens it again)."""
+    rec = ((t.get("ext") or {}).get("automation") or {}).get("recurring") is True
+    return t.get("status") in OPEN or (rec and t.get("status") == "done")
 FAST_FAIL_SECONDS = 10
 KIND = "automation:failure"
 KINDS = (KIND,)
@@ -179,7 +185,7 @@ class Scheduler:
         state = load_state(self.root)
         for t in read_tickets(self.root):
             tid = t["id"]
-            if t["status"] not in OPEN or tid in started:
+            if not scheduled(t) or tid in started:  # a finished repeat runs again
                 continue
             w = t.get("waiting_on") or {}
             until = parse(w.get("until")) if w.get("kind") == "time" else None
@@ -204,6 +210,9 @@ class Scheduler:
                     run_tid: str | None = tid
                     if sched.get("each_run") == "sub-ticket" and daily_or_slower(cron):
                         run_tid = self.occurrence(t, last_due(cron, now, tz), tz)
+                    if run_tid == tid and t["status"] == "done":  # the agent finished the last one: open it again
+                        orchcli.call(self.root, "ticket", "status", tid, "open")
+                        orchcli.log(self.root, tid, "Opened again for the next run of this repeat.")
                     res = self.start_run(run_tid, f"cron {cron}", now) if run_tid else "failed"
                     if run_tid:  # a sub-ticket that could not be made is tried again next pass
                         record_last_run(self.root, t, now)  # also after a failure: the next planned time retries

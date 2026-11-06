@@ -235,6 +235,13 @@ def test_fresh_prompt_has_title_summary_and_what_changed(proj, new_ticket, run):
     assert "Invoice export" in prompt and "Half done" in prompt and "Anna sent the numbers" in prompt
 
 
+def test_fresh_prompt_carries_the_persons_note(proj):
+    t = tickets.create(proj, "Write hello.txt", "human:me", fields={"note": "Ask me first: Hello or Hi?"})
+    prompt = runs.fresh_prompt(t, [])
+    assert "The person's note on this ticket: Ask me first: Hello or Hi?" in prompt
+    assert prompt.index("note on this ticket") < prompt.index("SKILL.md")  # read before anything else
+
+
 # ---------------------------------------------------------------- the footer
 
 

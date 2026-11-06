@@ -172,7 +172,7 @@ def orch(root: Path, orch_bin: str | None, argv: list[str], timeout: int = 60) -
     try:
         r = subprocess.run(
             [orch_bin, *argv], check=False, cwd=root, capture_output=True, text=True, timeout=timeout,
-            stdin=subprocess.DEVNULL, env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin},
+            stdin=subprocess.DEVNULL, env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "focus"},
         )  # fmt: skip
     except subprocess.TimeoutExpired:
         return 124, "", "That took too long. Please try again."

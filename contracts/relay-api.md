@@ -6,6 +6,7 @@ Messages follow `message.schema.json` (`orch.msg/1`). Times, IDs, errors and lis
 **Workspace auth:** `X-Orch-Workspace: ws_…` + `Authorization: Bearer orn_<43 chars>`.
 **Phone auth:** `X-Orch-Phone: ph_…` + `Authorization: Bearer orn_<43 chars>`.
 Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1/phone/`.
+**Subscriber auth:** the `sub_…` token in the path or as `Authorization: Bearer` (see Subscribers); it works only on `/v1/sub/`.
 
 ## Rules the relay checks on every message
 
@@ -168,6 +169,67 @@ writes `.orch/secrets/relay.json`, copies the `orch-relay` skill (shipped inside
 Phone onboarding link (from the admin portal, also as QR code, valid 24 h, one use):
 `orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_<22 chars>`
 
+## Subscribers (other systems that listen)
+
+A **subscriber** is another system or agent (a team chat bot, a script, a monitoring tool, another AI agent) that the admin
+adds in the portal. It sees what a paired phone with the same workspace list would see from workspaces to people, nothing
+else: never workspace-to-workspace traffic, shared tools, secrets, webhook payloads, or texts a workspace sent to one
+phone (`to: ph_…`). Workspaces change nothing: agents keep sending to `phones`. Event shape: `subscriber-event.schema.json`;
+test vectors (events and signatures): `vectors/subscriber-v1.json`.
+
+**Scope (checked on every call).** The workspaces a subscriber sees = its `workspaces` plus the **current** members of its
+`groups`, worked out at read time: a workspace that leaves a group or is removed from the list disappears at once,
+including from catch-up and from an open stream. Only events stored at or after the subscriber's creation are shown.
+
+**Auth.** The link `https://relay.severin.io/v1/sub/<token>` carries the token: `sub_` + 43 characters (32 random bytes,
+base64url), shown once, stored only as its SHA-256 hash. Every route also accepts the token as `Authorization: Bearer sub_…`
+with the literal `-` in its place (`/v1/sub/-/events`), so it need not sit in URL logs. Unknown, rotated or removed token →
+`401 unauthorized`. At most **60 calls a minute** per subscriber (every route, opening a stream included) → `429 rate_limited`.
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| GET | `/v1/sub/<token>/events?after=&limit=` | – | `{items: [event…], next}`: events in the subscriber's view **oldest first**, after the event `after` (an event `id`; left out = from the start), at most `limit` (1–100, default 100). `next` = the id to pass as `after` for the next page when the page is full or the relay stopped looking (it looks at a bounded number of stored messages per call, so `next` can come with fewer than `limit` items); `null` = the end was reached. An `after` that is no stored message → `422 invalid` |
+| GET | `/v1/sub/<token>/stream` | `Last-Event-ID` header (or `?after=`) | `200 text/event-stream` (Server-Sent Events). Each event: `id: <event id>`, `event: <type>`, `data: <event JSON on one line>`. A comment line `: ping` every 25 s. With `Last-Event-ID` the stream first replays everything after that id (the same view as `/events`), then stays live; without it, only new events. The relay closes the stream when the token is rotated or the subscriber removed. At most **2 open streams** per subscriber; a third → `429 too_many_streams` |
+| GET | `/v1/sub/<token>/files/<blob_id>` | – | Raw bytes (`application/octet-stream`) of a proof file named in an event the subscriber can see (`ticket_view.files`), only when **Files** is on and the admin allowed downloads (`can_download`); anything else → `404` |
+| POST | `/v1/sub/<token>/answer` | `{question_id: "m_…", answer: "1–2000 chars"}` (`question_id` = the question event's `id`) | `201 {id}`. Only when the admin allowed answering (`can_answer`) and the subscriber receives **Questions**, else `403 not_allowed` ("This subscriber may only read. In the relay admin, open Subscribers and turn on Can answer questions."). A question not in its view → `404`. First answer wins, from a phone or a subscriber: a later one → `409 already_answered`. The relay builds the `answer` message `from: sub_…` (the subscriber id) to the asking workspace, `answered_by: "agent:<name> (system)"`, `ticket`, `key` and `question_id` copied from the question. The workspace records it like a phone answer, as from that system, never as a person |
+
+**Event (v1)**, `subscriber-event.schema.json`. `v` is the format version: fields may be added, never renamed. `id` = the
+stored message id (the cursor). Text is plain text, never HTML.
+
+| `type` | From | Shown when the subscriber receives |
+|---|---|---|
+| `update` | a text with `body.update` a workspace sent to `phones`; `kind` = `started` (the update kind `ack`), `working`, `note` | **Updates** |
+| `update` | the same, `kind` = `result`, `failure`, `stopped` | **Results** |
+| `update` | the same, `kind` = `question` | **Questions** |
+| `question` | a `question` a workspace sent to `phones` | **Questions** |
+| `answered` | the `answer` to such a question (from a phone or a subscriber) | **Questions** |
+| `text` | a text without `body.update` a workspace sent to `phones` | always |
+
+Fields: `{v, id, type, workspace: {id, name}, ticket, key, at}` on every event (`ticket`/`key` may be `null`), plus:
+`update` → `kind, title, text, ticket_view`; `text` → `text`; `question` → `question_id` (= `id`), `text`, `title`,
+`options`, `answerable` (this subscriber may answer and no one has yet), `answered` (`null`, or `{answer, answered_by}`
+at read time); `answered` → `question_id` (the question's id), `answer`, `answered_by` (a display name: the phone's name,
+or `<name> (system)`). `ticket_view` = a smaller copy of the message's `body.ticket_view`, else `null`: `{title, status,
+agent, summary, done, total, links: [{kind, title, url}], files}`, no checklist and no history; `files` (`[{name, size,
+blob_id}]`, the image and file attachments) only when **Files** is on, else `[]`.
+
+**Push (optional).** With a `push_url` the relay also POSTs every event, oldest first, one at a time, as the JSON body with
+`Content-Type: application/json` and:
+- `X-Orch-Event-Id: <event id>`, `X-Orch-Timestamp: <unix seconds>`,
+- `X-Orch-Signature: v1=<lowercase hex HMAC-SHA256(push secret, timestamp + "." + body)>` (the push secret is
+  `whsec_` + 43 characters, shown once when push is turned on; the receiver should refuse a timestamp older than 5 minutes).
+
+A `2xx` within 10 s counts as delivered. Anything else (other status, timeout, refused address) is retried after 1 min,
+5 min, 30 min, 2 h and 6 h, in order (later events wait). After the last retry fails the push state becomes `failing` and the
+relay stops trying until the admin presses **Try again now** (`POST …/push/retry`). Pull keeps working all the time.
+**Address checks, on every request:** the URL must be `https://` with a host name or a public IP; the host is looked up and
+every address must be public (no loopback, private, shared/carrier-grade `100.64.0.0/10`, link-local, multicast, reserved,
+documentation or unspecified ranges, IPv4 and IPv6 incl. mapped/6to4/Teredo/NAT64 forms); the request goes to exactly the
+checked address; redirects are never followed; connect timeout 5 s, total 10 s; the response body is not read.
+
+**Activity log.** The relay logs every pull call, stream, file, answer, push attempt and admin change per subscriber
+(`GET /admin/api/subscribers/<id>/log`): the newest 200 entries, kept 30 days.
+
 ## Public routes
 
 | Method | Path | What |
@@ -210,6 +272,13 @@ Auth: `X-Orch-Admin: <admin token>` (file `/etc/orch-relay/admin-token`); the po
 | GET / POST | `/admin/api/phones` | POST: `{name, workspaces: [ws…]}` | list / `201 {phone_id, link, qr_svg}` |
 | PATCH | `/admin/api/phones/<id>` | `{workspaces: [ws…]}` | `200`. Workspaces added or removed get a refresh-hint |
 | DELETE | `/admin/api/phones/<id>` | – | `204` (same effect as sign-out). Its workspaces get a refresh-hint |
+| GET / POST | `/admin/api/subscribers` | POST: `{name, workspaces?: [ws…], groups?: [grp…], kinds?: {updates?, questions?, results?, files?}, can_answer?, can_download?, push_url?}` | `{items: [subscriber], next: null}` by name / `201 {subscriber, token, link, push_secret}`. subscriber = `{id: "sub_…", name, workspaces, groups, kinds: {updates, questions, results, files}, can_answer, can_download, push: null \| {url, state: ok\|retrying\|failing, fails, next_try_at, last_ok_at}, created_at, last_seen, streams}` (`streams` = open streams now). `name`: one line of plain text (description rule), 1–40 characters. At least one workspace or group, all existing (else `422`). `kinds` default: questions and results on, updates and files off; `can_answer` and `can_download` default `false` (read-only). `can_answer: true` needs `kinds.questions` on (else `422`, also on PATCH). `link` = `<public origin>/v1/sub/<token>` and `token` are shown once; `push_secret` (`whsec_…`) only when `push_url` is set, else `null`. A `push_url` that is not `https://`, has a user name or password, or names a non-public IP → `422 invalid` (host names are checked on every delivery, see Subscribers) |
+| PATCH | `/admin/api/subscribers/<id>` | any of the POST fields; `push_url: null` turns push off | `200 {subscriber, push_secret}`. `push_secret` is new and shown once only when push goes from off to on (it starts with the next new event), else `null`; a changed URL keeps the secret and resets the state to `ok`. Scope changes apply on the next call and to open streams at once. `404` unknown |
+| DELETE | `/admin/api/subscribers/<id>` | – | `204`. The token stops at once, open streams close, the log is deleted |
+| POST | `/admin/api/subscribers/<id>/token` | – | `200 {token, link}`: a new link; the old one stops at once (open streams close) |
+| POST | `/admin/api/subscribers/<id>/push/retry` | – | `200 subscriber`: state `ok`, the next delivery is tried now. `422` when push is off |
+| POST | `/admin/api/subscribers/<id>/push/test` | – | `200 {ok, status, ms, detail}`: one signed test event `{v: 1, id: "test_…", type: "test", text, at}` sent now (same headers, address checks and timeouts); `status` = the HTTP status or `null`, `detail` = a plain sentence. Does not change the push state. `422` when push is off |
+| GET | `/admin/api/subscribers/<id>/log?failed=` | – | `{items: [{at, what, event, result, ok}], next: null}`, newest first (at most 200). `what`: `created`, `changed`, `rotated`, `events`, `stream`, `file`, `answer`, `push`, `test`, `retry`; `event` = e.g. `DM1-12 result` or `null`; `result` = a short plain line (`200 in 140 ms`, `502 · next try 21:09`, `refused: private address`); `failed=1` = only entries with `ok: false` |
 
 Every change under `/admin/api/shared/`, to a workspace's name/description/tags/group, to a group's `talk` or defaults, or to the rules raises `version` by 1 and sends a `refresh-hint` to each affected workspace.
 

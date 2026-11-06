@@ -496,6 +496,8 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]
+    if ticket.get("note"):  # what the person asked for, in their words (not only in `orch ticket show`)
+        out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")
     if ticket.get("summary"):
         out.append(f"Where things stand: {_clip(ticket['summary'], 1500)}")
     todo = [c for c in ticket.get("checklist") or [] if not c.get("done")]
@@ -709,6 +711,12 @@ def start(
 # ---------------------------------------------------------------- the wrapper (runs detached)
 
 
+def _agent_environ() -> dict:
+    """The agent's environment: ours without ORCH_VIA. A page that started the run is not where the agent's
+    own changes come from."""
+    return {k: v for k, v in os.environ.items() if k != "ORCH_VIA"}
+
+
 def open_log(path: Path):
     """A run's output file: private (0600) from the first byte, appended to; an old one is made private."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -817,7 +825,7 @@ def wrap(
     if not rec or rec["run"] != run:
         return 1
     set_process(root, tid, run, os.getpid())
-    env = {**os.environ, "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
+    env = {**_agent_environ(), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
     log = root / (rec.get("log") or f".orch/run/logs/{tid}-{run}.log")
     mode = rec.get("mode") or "oneshot"
     current: dict = {}
@@ -872,7 +880,7 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
     if not rec or rec["run"] != run:
         return 1
     set_process(root, tid, run, os.getpid())
-    env = {**os.environ, "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
+    env = {**_agent_environ(), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
     current: dict = {}
     _on_term(root, tid, run, current)
     if os.name != "nt":
