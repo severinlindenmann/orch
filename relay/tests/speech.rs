@@ -573,3 +573,25 @@ async fn a_phone_may_run_three_generations_at_once_and_slots_come_back() {
     // slots are free again
     assert!(r.get(&ids[3], None, 10.0, "auto").await.is_ok());
 }
+
+#[tokio::test]
+async fn in_flight_entries_and_phone_slots_are_removed_after_success_and_after_a_panic() {
+    let r = rig().await;
+    r.key();
+    let id = r.speak_text(json!({"text": "Hallo.", "speak": {"lang": "de"}}));
+    r.get(&id, None, 10.0, "auto").await.unwrap();
+    assert!(
+        !speech::inflight_has(&id),
+        "entry removed after a generation"
+    );
+    let id2 = r.speak_text(json!({"text": "Zwei.", "speak": {"lang": "de"}}));
+    *r.sp.panic.lock().unwrap() = true;
+    assert_eq!(r.get(&id2, None, 10.0, "auto").await.unwrap_err().0, 500);
+    assert!(!speech::inflight_has(&id2), "entry removed after a panic");
+    *r.sp.panic.lock().unwrap() = false;
+    // the phone's slots came back: three more can run
+    for i in 0..3 {
+        let id = r.speak_text(json!({"text": format!("Nr {i}."), "speak": {"lang": "en"}}));
+        r.get(&id, None, 10.0, "auto").await.unwrap();
+    }
+}

@@ -160,6 +160,8 @@ pub struct FakeSpeaker {
     pub result: Mutex<Result<Vec<u8>, String>>,
     /// Milliseconds each call takes (for concurrency tests).
     pub delay_ms: Mutex<u64>,
+    /// Panic inside the call (to test cleanup).
+    pub panic: Mutex<bool>,
 }
 
 impl Default for FakeSpeaker {
@@ -168,6 +170,7 @@ impl Default for FakeSpeaker {
             calls: Mutex::new(vec![]),
             result: Mutex::new(Ok(b"ID3fake-mp3".to_vec())),
             delay_ms: Mutex::new(0),
+            panic: Mutex::new(false),
         }
     }
 }
@@ -179,6 +182,9 @@ impl Speaker for FakeSpeaker {
             .lock()
             .unwrap()
             .push((api_key.into(), text.into(), voice.into()));
+        if *self.panic.lock().unwrap() {
+            panic!("fake speaker panic");
+        }
         let d = *self.delay_ms.lock().unwrap();
         if d > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(d)).await;
@@ -388,11 +394,9 @@ pub async fn generate(
             .entry(key.clone())
             .or_default()
             .clone();
-        let _entry = GateEntry {
-            key,
-            gate: gate.clone(),
-        };
-        let _turn = gate.lock().await;
+        let entry = GateEntry { key, gate };
+        // locked through the guard: the live references are the map's and the guard's (a clone would break the count)
+        let _turn = entry.gate.lock().await;
         make(&app, &phone, settings, &msg_id, &text, &lang_owned).await
     })
     .await
@@ -452,6 +456,15 @@ impl Drop for GateEntry {
             m.remove(&self.key);
         }
     }
+}
+
+/// True while a generation of this message is in the in-flight map (tests check it empties).
+pub fn inflight_has(msg_id: &str) -> bool {
+    inflight()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .keys()
+        .any(|k| k.starts_with(&format!("{msg_id}:")))
 }
 
 fn inflight() -> &'static Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
