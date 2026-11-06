@@ -11,6 +11,7 @@
     terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m6 8 4 4-4 4M13 16h5"/>',
     folder: '<path d="M3 5h6l2 3h10v12H3z"/>',
     app: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/>',
+    group: '<circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20c0-3.5 2.7-6 6-6s6 2.5 6 6M15.5 14.2c3 0 5.5 2.2 5.5 5.8"/>',
     workspace: '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 4V2M16 4V2M3 10h18M9 10v11"/>',
     key: '<circle cx="8" cy="8" r="5"/><path d="m12 12 9 9M16 16l3-3M19 19l3-3"/>',
     trash: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',
