@@ -17,6 +17,8 @@ from orch import (
     cli_needs,
     cli_run,
     cli_status,
+    fields,
+    links,
     net,
     relay,
     runs_live,
@@ -158,7 +160,7 @@ def _show(t: dict, root: Path | None = None) -> str:
                 "Waiting for: " + ("an answer" if w["kind"] == "question" else f"{w['kind']} {w['ref']}")
             )
     for ln in t["links"]:
-        if ln["type"] == "ticket":
+        if links.kind_of(ln) == "ticket":
             out.append(f"Came from: {ln.get('title') or ln['url']}")
     if open_q:
         out.append("\nNeeds an answer:")
@@ -175,10 +177,14 @@ def _show(t: dict, root: Path | None = None) -> str:
         out.append("\nAnswered:")
         for q in answered:
             out.append(f"  {q['text']} - {q['answer']} ({q['answered_by']})")
-    links = [ln for ln in t["links"] if ln["type"] != "ticket"]
-    if links:
+    rows = links.numbered(t)
+    if rows:
+        kinds = links.active_kinds(root)
         out.append("\nLinks:")
-        out += [f"  {ln.get('title') or ln['type']}: {ln['url']}" for ln in links]
+        for n, ln in rows:
+            d = links.describe(ln, kinds)
+            st = f" ({d['status']})" if d["status"] else ""
+            out.append(f"  {n}  {d['type']}: {d['title']}{st}  {ln['url']}")
     if t["history"]:
         out.append("\nRecent:")
         out += [
@@ -312,6 +318,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--due", metavar="YYYY-MM-DD", help="due day (empty clears)")
     x.add_argument("--note", help="a free note (empty clears)")
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
+    x = t.add_parser("set", parents=[common], help="set an add-on field, e.g. marketing.budget 2400")
+    x.add_argument("id")
+    x.add_argument("field", metavar="ADDON.FIELD")
+    x.add_argument("value", help="the new value (empty clears it)")
+    x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     x = t.add_parser("summary", parents=[common], help="where things stand, one or two sentences")
     x.add_argument("id")
     x.add_argument("text")
@@ -389,12 +400,19 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("answer")
     x.add_argument("--via", default="cli", metavar="WORD", help="where the answer comes from (default cli)")
 
-    lk = sub.add_parser("link", help="links").add_subparsers(dest="sub", required=True)
-    x = lk.add_parser("add", parents=[common])
+    lk = sub.add_parser("link", help="links to pages outside orch").add_subparsers(dest="sub", required=True)
+    x = lk.add_parser("add", parents=[common], help="link a web page to the ticket")
     x.add_argument("id")
-    x.add_argument("--type", required=True)
-    x.add_argument("--url", required=True)
+    x.add_argument("url", nargs="?", help="https:// or http:// address")
+    x.add_argument("--kind", help="a link type of an add-on (found from the address when left out)")
     x.add_argument("--title")
+    x.add_argument("--url", dest="url_opt", help=argparse.SUPPRESS)
+    x.add_argument("--type", dest="kind_opt", help=argparse.SUPPRESS)
+    x = lk.add_parser("list", parents=[common], help="the ticket's links, numbered")
+    x.add_argument("id")
+    x = lk.add_parser("remove", parents=[common], help="remove a link (kept in the history)")
+    x.add_argument("id")
+    x.add_argument("link", help="its number in orch link list, or its address")
 
     e = sub.add_parser("ext", help="add-on data on a ticket").add_subparsers(dest="sub", required=True)
     x = e.add_parser("set", parents=[common])
@@ -545,6 +563,8 @@ def run(args: argparse.Namespace) -> None:
             raise Refused("Say what to change: --title, --owner, --due or --note.")
         t = tickets.edit(root, args.id, args.title, by(), fields, args.if_revision)
         _out(args, t, f"Saved (revision {t['revision']}).")
+    elif cmd == "ticket" and sub == "set":
+        _ticket_set(args, root, by)
     elif cmd == "ticket" and sub == "summary":
         t = tickets.set_summary(root, args.id, args.text, by())
         _out(args, t, "Summary saved.")
@@ -649,8 +669,7 @@ def run(args: argparse.Namespace) -> None:
         note = _addon_note(root, q)
         _out(args, q, f"Answered: {q['answer']}" + (f"\n{note}" if note else ""))
     elif cmd == "link":
-        t = tickets.link_add(root, args.id, args.type, args.url, args.title, by())
-        _out(args, t["links"][-1], f"Linked {args.title or args.type}: {args.url}")
+        _link(args, root, by)
     elif cmd == "publish":
         cli_clients.run_publish(args, root, _out)
     elif cmd == "relay":
@@ -672,6 +691,79 @@ def run(args: argparse.Namespace) -> None:
             addons.active_ext_schema(root, args.addon),
         )
         _out(args, t["ext"][args.addon], f"ext.{args.addon} set on {t['id']}")
+
+
+def _link(args, root: Path, by) -> None:
+    kinds = links.active_kinds(root)
+    if args.sub == "add":
+        url = args.url or args.url_opt
+        if not url:
+            raise Refused(
+                "Say which page to link, e.g.: orch link add DM1-12 https://github.com/acme/app/pull/4"
+            )
+        kind = args.kind or (args.kind_opt if args.kind_opt and args.kind_opt != "link" else None)
+        t, ln, added = tickets.link_add(root, args.id, url, by(), kind, args.title, kinds)
+        d = links.describe(ln, kinds)
+        what = d["type"] + (f' "{ln["title"]}"' if ln.get("title") else f" {d['short']}")
+        st = f" ({d['status']})" if d["status"] else ""
+        key = t.get("key") or t["id"]
+        _out(args, ln, f"Linked {key} → {what}{st}" if added else f"{key} already has this link: {what}{st}")
+    elif args.sub == "list":
+        t = tickets.load(root, args.id)
+        rows = links.numbered(t)
+        if args.json:
+            _out(args, [{"n": n, **ln, "view": links.describe(ln, kinds)} for n, ln in rows], "")
+            return
+        if not rows:
+            key = t.get("key") or t["id"]
+            print(f"{key} has no links yet. Add one: orch link add {key} <url>")
+            return
+        ds = [(n, links.describe(ln, kinds)) for n, ln in rows]
+        w1 = max(len(d["type"]) for _, d in ds)
+        w2 = min(48, max(len(d["title"]) for _, d in ds))
+        for n, d in ds:
+            title = d["title"] if len(d["title"]) <= 48 else d["title"][:47] + "…"
+            print(f"  {n}  {d['type']:<{w1}}  {title:<{w2}}  {d['status'] or ''}".rstrip())
+    else:
+        t, ln = tickets.link_remove(root, args.id, args.link, by())
+        _out(args, ln, f"Removed link {args.link} from {t.get('key') or t['id']}")
+
+
+def _ticket_set(args, root: Path, by) -> None:
+    """`orch ticket set <id> <add-on>.<field> <value>`: one add-on field, typed and checked in plain words."""
+    addon, _, key = args.field.partition(".")
+    m = addons.active_manifests(root).get(addon)
+    sec = fields.section(m) if m else None
+    if sec is None:
+        if addon in addons.discover():
+            raise Refused(addons.not_on_message(root, addon))
+        raise Refused(
+            f"There is no add-on field {args.field}. "
+            "Fields look like <add-on>.<field>, e.g. marketing.budget."
+        )
+    f = next((x for x in sec["fields"] if x["key"] == key), None)
+    if f is None:
+        names = ", ".join(
+            f"{addon}.{x['key']}" for x in sec["fields"] if not x["read_only"] and not x["hidden"]
+        )
+        raise Refused(f"{sec['section']} has no field {key}. Fields: {names}.")
+    who = (m.get("dashboard") or {}).get("label") or addon.capitalize()
+    if f["read_only"]:
+        shown = tickets.load(root, args.id).get("key") or args.id
+        hint = f" Run: orch {addon} act refresh -- {shown}" if "refresh" in m["acts"] else ""
+        raise Refused(f"{f['title']} is filled in by the {who} add-on.{hint}")
+    schema = addons.active_ext_schema(root, addon) or {}
+    value = fields.parse_value(f, args.value, (schema.get("properties") or {}).get(key) or {})
+    if value is None:
+        t = tickets.ext_unset(root, args.id, f"{addon}.{key}", by(), args.if_revision, schema)
+    else:
+        t = tickets.ext_set(root, args.id, addon, json.dumps({key: value}), by(), args.if_revision, schema)
+    cur = ((t.get("ext") or {}).get(addon) or {}).get(key)
+    _out(
+        args,
+        (t.get("ext") or {}).get(addon, {}),
+        f"{t.get('key') or t['id']} {sec['section']} · {f['title']}: {fields.shown(f, cur)}",
+    )
 
 
 # The arguments that really name a ticket: (command, argument). Only these take a key; an `id` of another

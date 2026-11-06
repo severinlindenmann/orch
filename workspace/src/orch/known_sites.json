@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "hosts": [
+    {
+      "match": "github.com",
+      "name": "GitHub",
+      "icon": "github",
+      "mono": "GH"
+    },
+    {
+      "match": "gitlab.com",
+      "name": "GitLab",
+      "icon": "gitlab",
+      "mono": "GL"
+    },
+    {
+      "match": "*.atlassian.net/wiki",
+      "name": "Confluence",
+      "icon": "confluence",
+      "mono": "Cf"
+    },
+    {
+      "match": "*.atlassian.net/browse",
+      "name": "Jira",
+      "icon": "jira",
+      "mono": "Ji"
+    },
+    {
+      "match": "linear.app",
+      "name": "Linear",
+      "icon": "linear",
+      "mono": "Ln"
+    },
+    {
+      "match": "notion.so",
+      "name": "Notion",
+      "icon": "notion",
+      "mono": "N"
+    },
+    {
+      "match": "figma.com",
+      "name": "Figma",
+      "icon": "figma",
+      "mono": "Fg"
+    },
+    {
+      "match": "miro.com",
+      "name": "Miro",
+      "icon": "miro",
+      "mono": "Mi"
+    },
+    {
+      "match": "docs.google.com/document",
+      "name": "Google Docs",
+      "icon": "gdocs",
+      "mono": "Gd"
+    },
+    {
+      "match": "docs.google.com/spreadsheets",
+      "name": "Google Sheets",
+      "icon": "gsheets",
+      "mono": "Gs"
+    },
+    {
+      "match": "docs.google.com/presentation",
+      "name": "Google Slides",
+      "icon": "gslides",
+      "mono": "Gp"
+    },
+    {
+      "match": "drive.google.com",
+      "name": "Google Drive",
+      "icon": "gdrive",
+      "mono": "Dr"
+    },
+    {
+      "match": "youtube.com, youtu.be",
+      "name": "YouTube",
+      "icon": "youtube",
+      "mono": "YT"
+    },
+    {
+      "match": "loom.com",
+      "name": "Loom",
+      "icon": "loom",
+      "mono": "Lo"
+    },
+    {
+      "match": "*.slack.com",
+      "name": "Slack",
+      "icon": "slack",
+      "mono": "Sl"
+    },
+    {
+      "match": "teams.microsoft.com",
+      "name": "Teams",
+      "icon": "teams",
+      "mono": "Te"
+    },
+    {
+      "match": "*.sharepoint.com",
+      "name": "SharePoint",
+      "icon": "sharepoint",
+      "mono": "Sp"
+    },
+    {
+      "match": "trello.com",
+      "name": "Trello",
+      "icon": "trello",
+      "mono": "Tr"
+    },
+    {
+      "match": "dropbox.com",
+      "name": "Dropbox",
+      "icon": "dropbox",
+      "mono": "Db"
+    }
+  ],
+  "fallback": {
+    "name": "Link",
+    "icon": "link"
+  }
+}

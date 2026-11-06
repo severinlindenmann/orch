@@ -66,7 +66,7 @@ Static apps take store none or markdown. The folder name is the app name.
     orch publish restart <app>
     orch publish delete <f_id or app> # gone for everyone
 
-Record every link on its ticket: `orch link add <id> --type publish --url "<link>"`.
+Record every link on its ticket: `orch link add <id> "<link>" --title "<what it is>"`.
 
 **Describe this workspace (once, after connecting)**
 

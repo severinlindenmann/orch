@@ -25,7 +25,7 @@ import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import skillrender, skills
+from orch import fields, skillrender, skills
 from orch.errors import Refused
 
 DEFAULT_REPO = "https://github.com/severinlindenmann/orch"
@@ -47,7 +47,8 @@ GITIGNORE_RE = re.compile(r"(?!/)(?![A-Za-z]:)(?!.*\.\.)(?!.*\\)[A-Za-z0-9_./* -
 PAGE_PATH_RE = re.compile(r"/[A-Za-z0-9_./-]{0,200}")
 TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
-    "ticket_view recommended gitignore runs_agents requires needs page".split()
+    "ticket_view recommended gitignore runs_agents requires needs page "
+    "ticket_links ticket_fields acts".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -295,6 +296,94 @@ def _remote_ref(node) -> bool:
     return False
 
 
+def _ext_schema(base: Path, rel, key: str) -> dict:
+    f = _inside(base, rel, key, "file")
+    if f.stat().st_size > EXT_SCHEMA_MAX:
+        raise _bad(f"{key} is larger than 32 KB")
+    try:
+        schema = json.loads(f.read_text(encoding="utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        raise _bad(f"{key} is not JSON") from None
+    if not isinstance(schema, dict) or _remote_ref(schema):
+        raise _bad(f"{key} must be a JSON Schema object without remote $ref")
+    return schema
+
+
+LINK_KIND_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+LINK_ICON_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+LINK_STATUS_RE = re.compile(r"[a-z0-9][a-z0-9 -]{0,23}")
+LINK_MATCH_RE = re.compile(r"https?://[^\s<>\"'`]{1,300}")
+FIELD_KEY_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def _ticket_links_fields_acts(base: Path, m: dict) -> None:
+    """[[ticket_links]] (link types), [ticket_fields] (fields under the ticket's Details) and [acts] (what
+    `orch <name> act <verb>` offers; core knows only `refresh`)."""
+    tl = m.setdefault("ticket_links", [])
+    if not isinstance(tl, list) or len(tl) > 16:
+        raise _bad("ticket_links has at most 16 link types")
+    kinds = set()
+    for k in tl:
+        match = k.get("match") if isinstance(k, dict) else None
+        if isinstance(match, str):
+            match = [match]
+        ok = (
+            isinstance(k, dict)
+            and not set(k) - {"kind", "label", "icon", "match", "statuses", "preview"}
+            and isinstance(k.get("kind"), str)
+            and LINK_KIND_RE.fullmatch(k["kind"])
+            and k["kind"] != "link"
+            and k["kind"] not in kinds
+            and _text_ok(k.get("label"), 24)
+            and isinstance(k.get("icon"), str)
+            and LINK_ICON_RE.fullmatch(k["icon"])
+            and isinstance(match, list)
+            and 0 < len(match) <= 8
+            and all(isinstance(x, str) and LINK_MATCH_RE.fullmatch(x) for x in match)
+            and isinstance(k.setdefault("statuses", []), list)
+            and len(k["statuses"]) <= 12
+            and all(isinstance(x, str) and LINK_STATUS_RE.fullmatch(x) for x in k["statuses"])
+            and k.get("preview") in (None, "thumb")
+        )
+        if not ok:
+            raise _bad("a [[ticket_links]] entry needs kind, label, icon and match (https:// pattern)")
+        kinds.add(k["kind"])
+        k["match"] = match
+    tf = m.get("ticket_fields")
+    if tf is not None:
+        ok = (
+            isinstance(tf, dict)
+            and not set(tf) - {"section", "schema", "show_on_card"}
+            and _text_ok(tf.get("section"), 24)
+            and isinstance(tf.setdefault("show_on_card", []), list)
+            and len(tf["show_on_card"]) <= 3
+            and all(isinstance(x, str) and FIELD_KEY_RE.fullmatch(x) for x in tf["show_on_card"])
+        )
+        if not ok:
+            raise _bad("[ticket_fields] has section, schema and show_on_card (at most 3 fields)")
+        tf.setdefault("schema", m.get("ticket_ext"))
+        if not isinstance(tf["schema"], str):
+            raise _bad("[ticket_fields] needs a schema (or ticket_ext)")
+        if "ticket_ext" in m and tf["schema"] != m["ticket_ext"]:
+            raise _bad("[ticket_fields] schema and ticket_ext must be the same file")
+        _ext_schema(base, tf["schema"], "ticket_fields schema")
+    acts = m.setdefault("acts", {})
+    if not isinstance(acts, dict) or len(acts) > 16:
+        raise _bad("[acts] has at most 16 entries")
+    for verb, a in acts.items():
+        ok = (
+            re.fullmatch(r"[a-z][a-z-]{0,20}", verb)
+            and isinstance(a, dict)
+            and not set(a) - {"summary", "who", "writes"}
+            and _text_ok(a.get("summary"), 80)
+            and a.setdefault("who", "anyone") in ("anyone", "people")
+            and isinstance(a.setdefault("writes", []), list)
+            and all(x == "links" or x == f"ext.{m.get('name')}" for x in a["writes"])
+        )
+        if not ok:
+            raise _bad(f"[acts.{verb}] has summary, who (anyone or people) and writes (links, ext.<name>)")
+
+
 def parse_manifest(file: Path, core: bool = False) -> dict:
     """Validate orch-addon.toml (addon-manifest.schema.json) and the paths it names. Never runs add-on code.
     Returns the manifest plus `dir` (its folder). Refused when anything is off."""
@@ -327,15 +416,8 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
     m["agents_block"] = block
     _inside(base, block, "agents_block", "file")
     if "ticket_ext" in m:
-        f = _inside(base, m["ticket_ext"], "ticket_ext", "file")
-        if f.stat().st_size > EXT_SCHEMA_MAX:
-            raise _bad("ticket_ext is larger than 32 KB")
-        try:
-            schema = json.loads(f.read_text(encoding="utf-8"))
-        except (ValueError, UnicodeDecodeError):
-            raise _bad("ticket_ext is not JSON") from None
-        if not isinstance(schema, dict) or _remote_ref(schema):
-            raise _bad("ticket_ext must be a JSON Schema object without remote $ref")
+        _ext_schema(base, m["ticket_ext"], "ticket_ext")
+    _ticket_links_fields_acts(base, m)
     bg = m.get("background", False)
     if not isinstance(bg, bool):
         raise _bad("background is true or false")
@@ -654,9 +736,10 @@ def not_on_message(root: Path, name: str) -> str:
 def active_ext_schema(root: Path, name: str) -> dict | None:
     """The ticket_ext schema of an ACTIVE add-on, else None."""
     m = active_manifests(root).get(name)
-    if not m or "ticket_ext" not in m:
+    rel = m and (m.get("ticket_ext") or (m.get("ticket_fields") or {}).get("schema"))
+    if not rel:
         return None
-    return json.loads((m["dir"] / m["ticket_ext"]).read_text(encoding="utf-8"))
+    return json.loads((m["dir"] / rel).read_text(encoding="utf-8"))
 
 
 def _running_here(root: Path) -> set[str]:
@@ -694,6 +777,9 @@ def listing(root: Path) -> list[dict]:
                 "recommended": m["recommended"],
                 "page": m.get("page"),
                 "running": name in up,
+                "ticket_links": [dict(x) for x in m["ticket_links"]],
+                "ticket_fields": fields.section(m),
+                "acts": sorted(m["acts"]),
             }
         )
     return out
@@ -718,7 +804,49 @@ def dispatch(root: Path, name: str, argv: list[str]) -> int:
         raise Refused(f"The {name} add-on is turned on here but is not installed. Run: orch addon add {name}")
     env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin()}
     # -P: the folder we run in is never put on the import path (a planted module there cannot take over)
-    return subprocess.run([sys.executable, "-P", "-m", m["run"], *argv], cwd=root, env=env).returncode
+    cmd = [sys.executable, "-P", "-m", m["run"], *argv]
+    if argv[:2] == ["act", "refresh"] and "refresh" in m.get("acts", {}):
+        return _refresh(root, name, cmd, env, argv)
+    return subprocess.run(cmd, cwd=root, env=env).returncode
+
+
+def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) -> int:
+    """`orch <name> act refresh [--by X] [--json] -- <ticket>`: the add-on looks its links up and prints
+    ONE JSON object `{ticket, links: [{url, title?, status?, thumb?}], ext?: {<name>: {...}}, say?}`; core
+    merges it into the ticket (tickets.merge_refresh) and says what changed.
+    The add-on never writes the ticket itself."""
+    from orch import tickets
+
+    rest = argv[argv.index("--") + 1 :] if "--" in argv else []
+    if len(rest) != 1:
+        raise Refused(f"Say which ticket: orch {name} act refresh -- <ticket>")
+    tid = tickets.resolve(root, rest[0])
+    by = tickets.current_actor(argv[argv.index("--by") + 1] if "--by" in argv[:-1] else None)
+    r = subprocess.run(cmd, cwd=root, env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8")
+    if r.returncode != 0:
+        sys.stdout.write(r.stdout)
+        return r.returncode
+    try:
+        out = json.loads(r.stdout)
+    except ValueError:
+        raise Refused(f"The {name} add-on answered something orch cannot read.") from None
+    if isinstance(out, dict) and out.get("ticket") and tickets.resolve(root, str(out["ticket"])) != tid:
+        raise Refused(f"The {name} add-on answered for another ticket.")
+    t, changes = tickets.merge_refresh(root, tid, name, out, by, active_ext_schema(root, name))
+    say = out.get("say") if isinstance(out.get("say"), str) else ""
+    say = re.sub(r"[\x00-\x1f\x7f]", " ", say)[:300]
+    key = t.get("key") or t["id"]
+    if "--json" in argv:
+        print(json.dumps({"ticket": t["id"], "key": key, "changes": changes, "say": say}, ensure_ascii=False))
+        return 0
+    if not changes:
+        print(f"{key}  {say or 'Nothing to update.'}")
+        return 0
+    for c in changes:
+        print(f"{key}  {c['name']}  {c['field']}: {c['old'] or '-'} → {c['new'] or '-'}")
+    if say:
+        print(say)
+    return 0
 
 
 def help_lines(root: Path) -> list[str]:
@@ -738,8 +866,10 @@ def consent_text(m: dict, local: bool) -> str:
         lines.append("Source: local folder (not checked by orch). It runs code on this computer.")
     lines.append(f"Adds the command: orch {m['name']}")
     lines.append(f"Adds a skill and an entry in AGENTS.md: orch-{m['name']}")
-    if "ticket_ext" in m:
+    if "ticket_ext" in m or m.get("ticket_fields"):
         lines.append(f"Stores data on tickets under: ext.{m['name']}")
+    if m.get("ticket_links"):
+        lines.append("Knows these links: " + ", ".join(k["label"] for k in m["ticket_links"]))
     if m.get("dashboard"):
         lines.append(f"Adds a dashboard tab: {m['dashboard']['label']}")
     if m["background"]:
