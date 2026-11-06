@@ -44,12 +44,12 @@ def adapter(root: Path, agent: str) -> dict:
 
 
 def events_kind(root: Path, agent: str, mode: str) -> str | None:
-    """The mapper the adapter names: live -> live.events, oneshot -> `stream` when it can stream (claude-stream-json/1)."""
+    """The mapper the adapter names: live -> live.events, oneshot -> `<adapter>-stream-json/1` when it can stream."""
     a = adapter(root, agent)
     if mode == "live":
         return (a.get("live") or {}).get("events")
     if (a.get("oneshot") or {}).get("stream_args"):
-        return "claude-stream-json/1"
+        return f"{base_name(root, agent)}-stream-json/1"
     return None
 
 

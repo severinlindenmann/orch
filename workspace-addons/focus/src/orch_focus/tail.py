@@ -7,18 +7,29 @@ Events pass through events.make() (redacted, clipped) and are appended to the ru
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
 from pathlib import Path
 
 from . import adapterdata
-from .adapters.claude import ClaudeMapper, transcript_path
 from .events import RUN_ID, EventLog
 
 MAX_READ = 256 * 1024
 TID = re.compile(r"t_[a-z0-9]{6,16}")
-MAPPERS = ("claude-stream-json/1", "claude-transcript/1")
+
+
+def _module(kind: str | None):
+    """The mapper module for an adapter's events name: `<adapter>-<format>/<n>` -> orch_focus.adapters.<adapter>."""
+    name = (kind or "").split("-")[0]
+    if not re.fullmatch(r"[a-z]{2,16}", name):
+        return None
+    try:
+        mod = importlib.import_module(f"{__package__}.adapters.{name}")
+    except ImportError:
+        return None
+    return mod if kind in getattr(mod, "KINDS", ()) else None
 
 
 class Tail:
@@ -28,7 +39,8 @@ class Tail:
         self.root, self.tid, self.run, self.agent, self.mode = root, tid, run, agent, mode
         self.session = session  # callable -> session id or None (asked lazily, live runs only)
         self.kind = adapterdata.events_kind(root, agent, mode) if RUN_ID.fullmatch(run) else None
-        self.mapper = ClaudeMapper(run, tid) if self.kind in MAPPERS else None
+        self.mod = _module(self.kind)
+        self.mapper = self.mod.make(run, tid) if self.mod else None
         self.offset = 0
         self.skipping = False
         self.log = EventLog(root, run) if RUN_ID.fullmatch(run) else None
@@ -36,7 +48,7 @@ class Tail:
     def _path(self) -> Path | None:
         if self.mode == "live":
             sid = self.session() if callable(self.session) else None
-            return transcript_path(sid) if sid else None
+            return self.mod.transcript_path(sid) if sid and self.mod else None
         if not TID.fullmatch(self.tid):
             return None
         d = self.root
