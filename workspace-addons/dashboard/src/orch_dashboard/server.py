@@ -1,4 +1,4 @@
-"""Stdlib HTTP server on 127.0.0.1. GET only; every other method is refused."""
+"""Stdlib HTTP server on 127.0.0.1. GET reads; the only POST is /api/act (the fixed op table in actions.py)."""
 from __future__ import annotations
 
 import hashlib
@@ -11,10 +11,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 
+from . import actions
 from .data import load_addons, load_state
 from .views import ViewPuller
 
 DEFAULT_PORT = 8420
+MAX_BODY = 16384
 TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
          ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png"}
 
@@ -24,6 +26,7 @@ def web_file(name: str) -> bytes:
 
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = 10  # a short body must not hold a thread
     def __init__(self, *a, root: Path, orch_bin: str | None, puller: ViewPuller, **kw):
         self.root, self.orch_bin, self.puller = root, orch_bin, puller
         self.nonce = os.environ.get("ORCH_DASHBOARD_NONCE", "")
@@ -32,12 +35,14 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
         pass
 
-    def _send(self, code, body: bytes, ctype: str):
+    def _send(self, code, body: bytes, ctype: str, extra: dict | None = None):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
         self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'")
         self.end_headers()
         self.wfile.write(body)
@@ -85,7 +90,49 @@ class Handler(BaseHTTPRequestHandler):
     def _refuse(self):
         self._send(405, b"read only", "text/plain")
 
-    do_POST = do_PUT = do_DELETE = do_PATCH = _refuse
+    do_PUT = do_DELETE = do_PATCH = _refuse
+
+    def _fence(self) -> str | None:
+        """Host + Origin check of orch_ui.origin on every POST. A missing Origin is refused too: the
+        dashboard page always sends one, so only a script outside the browser lacks it."""
+        try:
+            from orch_ui.origin import check_request
+        except ImportError:
+            return "Actions are not available in this install."
+        if self.headers.get("Origin") is None:
+            return "This request was refused (no origin)."
+        if self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
+            return "This request came from another website and was refused."
+        return check_request("POST", self.headers, self.server.server_address[1], api=True)
+
+    def do_POST(self):
+        path = self.path.split("?", 1)[0]
+        if path != "/api/act":
+            return self._refuse()
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._send(415, b"send JSON", "text/plain")
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= MAX_BODY:
+                raise ValueError
+            body = json.loads(self.rfile.read(n))
+            if not isinstance(body, dict) or set(body) - {"op", "args"}:
+                raise ValueError
+        except (ValueError, RecursionError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        try:
+            code, text, extra = actions.run_op(self.root, self.orch_bin, body.get("op"), body.get("args", {}))
+        except actions.BadRequest as e:
+            return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
+        except actions.Unavailable as e:
+            return self._send(503, str(e).encode(), "text/plain; charset=utf-8")
+        if code != 200:
+            hdr = {"X-Revision": str(extra["revision"])} if extra else None
+            return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
+        self._send(200, json.dumps(load_state(self.root, orch_bin=self.orch_bin, fresh=True)).encode(), "application/json")
 
 
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:

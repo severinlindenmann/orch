@@ -250,7 +250,7 @@ def a12(e):
         st = get("/api/state")[1]
         check(any(t["id"] == d1 for t in st["tickets"]), "a finished (dropped) ticket is missing from the dashboard")
         check(not [a for a in st["addons"] if a["dashboard"]], f"tabs with no add-on on: {st['addons']}")
-        check(not st["relay"], "Inbox shown without relay")
+        check(not st.get("inbox"), "Inbox shown without relay")
     return t
 
 

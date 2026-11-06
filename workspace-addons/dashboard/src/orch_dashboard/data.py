@@ -6,6 +6,8 @@ import json
 import os
 import re
 import subprocess
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -99,73 +101,55 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
     return out
 
 
-def load_names(root: Path) -> dict[str, str]:
-    """Workspace id -> display name, from the directory the relay refresh wrote (empty if missing)."""
-    d = _load(root / ".agents" / "skills" / "orch-relay" / "workspaces.json")
-    out: dict[str, str] = {}
-    if isinstance(d, dict) and isinstance(d.get("self"), str):
-        out[d["self"]] = root.name
-    for w in (d.get("workspaces") if isinstance(d, dict) else None) or []:
-        if isinstance(w, dict) and isinstance(w.get("id"), str) and isinstance(w.get("name"), str):
-            out[w["id"]] = w["name"]
-    return out
+def load_services(root: Path, orch_bin: str | None) -> list[dict]:
+    """Background add-ons of this workspace, running or not. Source: `orch status --json` only (rows: addon, running, url)."""
+    raw = run_orch(orch_bin, ["status", "--json"], root)
+    here = str(root.resolve())
+    for w in raw if isinstance(raw, list) else []:
+        if isinstance(w, dict) and w.get("workspace") == here and isinstance(w.get("addons"), list):
+            return [r for r in w["addons"] if isinstance(r, dict) and isinstance(r.get("addon"), str)]
+    return []
 
 
-def _who(sender: str, names: dict[str, str]) -> str:
-    if sender in names:
-        return names[sender]
-    if sender.startswith("ph_"):
-        return "Your phone"
-    if sender.startswith("ws_"):
-        return "Another workspace"
-    if sender == "admin":
-        return "Admin"
-    return "Unknown sender"
+_RUNS: dict[tuple[str, str], tuple[float, dict | None]] = {}
+RUNS_TTL = 5.0
+RUNS_MAX = 30
 
 
-def load_inbox(root: Path, names: dict[str, str] | None = None) -> list[dict]:
-    seen = _load(root / ".orch" / "inbox-seen.json")
-    seen = seen if isinstance(seen, dict) else {}
-    out = []
-    for f in _json_files(root / ".orch" / "inbox"):
-        m = _load(f)
-        if not (isinstance(m, dict) and isinstance(m.get("id"), str)):
-            continue
-        body = m.get("body") if isinstance(m.get("body"), dict) else {}
-        out.append({
-            "id": m["id"], "from": _who(str(m.get("from", "")), names or {}), "type": str(m.get("type", "")),
-            "created_at": m.get("created_at"), "ticket": m.get("ticket"),
-            "title": body.get("title") or body.get("name") or "",
-            "text": body.get("text") or body.get("answer") or "",
-            "seen": m["id"] in seen,
-        })
-    out.sort(key=lambda m: str(m["created_at"] or ""), reverse=True)
-    return out
+def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool = False) -> dict[str, dict]:
+    """Run status for tickets that can have a run (active or waiting), from `orch run status <id> --json`.
+    Cached for a few seconds so the 3 s page poll costs nothing; an action's reply passes fresh=True."""
+    if not orch_bin:
+        return {}
+    ids = [t["id"] for t in tickets if t["status"] in ("active", "waiting")][:RUNS_MAX]
+    now = time.monotonic()
+    todo = [i for i in ids if fresh or (str(root), i) not in _RUNS or now - _RUNS[(str(root), i)][0] > RUNS_TTL]
+    if todo:
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            got = list(pool.map(lambda i: run_orch(orch_bin, ["run", "status", i, "--json"], root), todo))
+        for i, r in zip(todo, got, strict=True):
+            _RUNS[(str(root), i)] = (now, r if isinstance(r, dict) else None)
+    return {i: _RUNS[(str(root), i)][1] for i in ids if _RUNS[(str(root), i)][1]}
 
 
-def load_state(root: Path, include_inbox: bool = True, orch_bin: str | None = None, with_addons: bool = True) -> dict:
+def load_state(root: Path, orch_bin: str | None = None, with_addons: bool = True, fresh: bool = False) -> dict:
     """with_addons=False (snapshots by default): no add-on tabs, no ticket rows, `ext` dropped from tickets."""
     tickets, skipped = load_tickets(root, orch_bin)
     raw = run_orch(orch_bin, ["addon", "list", "--json"], root)
-    # the Inbox needs the relay add-on on here (and a connection); otherwise no Inbox at all
-    relay = (root / ".orch" / "secrets" / "relay.json").is_file() and any(
-        isinstance(a, dict) and a.get("name") == "relay" and a.get("active") is True
-        for a in (raw if isinstance(raw, list) else []))
-    include_inbox = include_inbox and relay
-    names = load_names(root) if include_inbox else {}
     addons = load_addons(root, orch_bin, raw) if with_addons else []
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
+    needs = run_orch(orch_bin, ["needs", "--json"], root) if with_addons else None
     state = {
         "workspace": root.name,
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "tickets": tickets,
         "skipped": skipped,
         "addons": addons,
-        "names": names if include_inbox else {},
-        "inbox": load_inbox(root, names) if include_inbox else None,
-        "relay": relay,
+        "needs": needs if isinstance(needs, list) else [],
+        "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
+        "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},
     }
     state["rev"] = hashlib.sha1(
         json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()).hexdigest()[:12]

@@ -30,14 +30,6 @@ def test_scheduler_is_not_a_dashboard_concept(ws):
     assert "scheduler" not in s and s["addons"] == []  # no orch command, no add-ons: no trace of any add-on
 
 
-def test_inbox_seen_flag_and_no_secrets(ws, fake_orch):
-    s = load_state(ws, orch_bin=str(fake_orch))
-    first = next(m for m in s["inbox"] if m["id"] == "m_a1b2c3d4e5f6g7h8")
-    assert first["seen"] is True and "weekly report" in first["text"]
-    assert any(not m["seen"] for m in s["inbox"])
-    assert "orn_SECRET" not in json.dumps(s)
-    assert s["relay"] is True
-
 
 def test_http_state_and_static(server):
     code, body, _h = get(server + "/api/state")
@@ -45,7 +37,7 @@ def test_http_state_and_static(server):
     for p in ("/", "/app.js", "/style.css", "/tokens.css", "/logo.svg", "/favicon.svg", "/apple-touch-icon.png"):
         assert get(server + p)[0] == 200, p
     assert get(server + "/../../etc/passwd")[0] == 404
-    assert get(server + "/.orch/secrets/relay.json")[0] == 404
+    assert get(server + "/.orch/secrets/x.json")[0] == 404
 
 
 def test_read_only_server_refuses_writes(server):
@@ -78,21 +70,6 @@ def test_rejects_foreign_host_header(server):
         assert c.getresponse().status == want, host
 
 
-def test_inbox_shows_display_names_not_ids(ws, fake_orch):
-    state = load_state(ws, orch_bin=str(fake_orch))
-    senders = {m["from"] for m in state["inbox"]}
-    assert "Your phone" in senders and "Another workspace" in senders or "Reports" in senders
-    assert not any(s.startswith(("ws_", "ph_")) for s in senders)
-    assert state["names"]["ws_reports001"] == "Reports"
-
-
-def test_snapshot_state_has_no_names_and_unknown_sender_is_not_admin(tmp_path):
-    from orch_dashboard.data import _who, load_state
-
-    (tmp_path / ".orch" / "tickets").mkdir(parents=True)
-    assert load_state(tmp_path, include_inbox=False)["names"] == {}
-    assert _who("admin", {}) == "Admin"
-    assert _who("someone", {}) == "Unknown sender"
 
 
 def test_addon_endpoint_serves_only_active_tabs(ws, fake_orch):
@@ -157,12 +134,3 @@ def test_foreign_origin_never_triggers_a_pull(ws, fake_orch):
         srv.shutdown()
         srv.server_close()
 
-
-def test_no_inbox_unless_the_relay_addon_is_on(ws, fake_orch):
-    """relay.json and inbox files are there, but the relay add-on is off (or unknown): no Inbox at all."""
-    s = load_state(ws)
-    assert s["relay"] is False and s["inbox"] is None and s["names"] == {}
-    rows = [a for a in json.loads((fake_orch.parent / "addons.json").read_text()) if a["name"] != "relay"]
-    (fake_orch.parent / "addons.json").write_text(json.dumps(rows))
-    s = load_state(ws, orch_bin=str(fake_orch))
-    assert s["relay"] is False and s["inbox"] is None
