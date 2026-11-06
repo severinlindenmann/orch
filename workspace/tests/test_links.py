@@ -291,7 +291,7 @@ def test_ticket_set_fields(proj, run, hello, tid):  # noqa: F811
     code, _, err = run("ticket", "set", tid, "hello.pr_status", "merged")
     assert code == 2 and "filled in by the Hello add-on. Run: orch hello act refresh -- " in err
     for field, value, words in (
-        ("budget", "lots", "Budget must be a number."),
+        ("budget", "lots", "Budget must be a number"),
         ("budget", "-1", "at least 0"),
         ("launch_date", "1 Dec", "a day like"),
         ("brief", "notion.so/x", "web address"),
@@ -426,3 +426,43 @@ def test_text_field_escapes_are_cut(proj, run, hello, tid):  # noqa: F811
     assert code == 0 and _clean(out) and _clean(tickets.load(proj, tid)["ext"]["hello"]["audience"])
     code, _, err = run("ticket", "set", tid, "hello.channel", f"x{C1}{ESC}")
     assert code == 2 and _clean(err.replace("\n", " "))
+
+
+def test_numbers_refuse_commas_and_not_finite(proj, run, hello, tid):  # noqa: F811
+    install(run, hello)
+    for bad in ("2,5", "nan", "inf", "1e400"):
+        code, _, err = run("ticket", "set", tid, "hello.budget", bad)
+        assert code == 2 and "must be a number" in err, bad
+    assert run("ticket", "set", tid, "hello.budget", "2’400.5")[0] == 0
+    assert tickets.load(proj, tid)["ext"]["hello"]["budget"] == 2400.5
+
+
+def test_trailing_star_needs_something_and_subdomains_count():
+    kinds = [
+        {"kind": "pr", "label": "PR", "icon": "x", "match": ["https://github.com/*/*/pull/*"], "addon": "a"}
+    ]
+    assert links.kind_for("https://github.com/a/b/pull/", kinds) == "link"
+    assert links.site("https://gist.github.com/x")["name"] == "GitHub"
+
+
+def test_old_type_flag_sets_the_kind_and_link_is_plain(proj, run, tid):  # noqa: F811
+    run("link", "add", tid, "--type", "github", "--url", "https://example.com/a")
+    run("link", "add", tid, "--type", "link", "--url", "https://example.com/b")
+    assert [ln["kind"] for ln in tickets.load(proj, tid)["links"]] == ["github", "link"]
+
+
+def test_refresh_who_people_refuses_agents(proj, run, hello, tid, monkeypatch):  # noqa: F811
+    m = hello / "src" / "orch_hello" / "orch-addon.toml"
+    m.write_text(
+        m.read_text().replace(
+            'summary = "Update link titles and status"', 'summary = "Update"\nwho = "people"'
+        )
+    )
+    install(run, hello)
+    code, _, err = run("hello", "act", "refresh", "--by", "agent:claude", "--", tid)
+    assert code == 2 and "Only a person" in err
+    monkeypatch.setenv("ORCH_AGENT", "claude")  # an agent saying it is a person
+    code, _, err = run("hello", "act", "refresh", "--by", "human:anna", "--", tid)
+    assert code == 2 and "Only a person" in err
+    monkeypatch.delenv("ORCH_AGENT")
+    assert run("hello", "act", "refresh", "--by", "human:anna", "--", tid)[0] == 0
