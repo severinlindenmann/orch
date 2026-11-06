@@ -127,12 +127,18 @@ def locked(root: Path, tid: str):
             with os.fdopen(fd, "w") as f:
                 f.write(procs.own_token())
             break
-        except FileExistsError:
+        except (
+            FileExistsError,
+            PermissionError,
+        ):  # Windows: a lock being deleted refuses with PermissionError
+            if time.monotonic() > end:
+                raise Refused(f"Ticket {tid} is busy (retried for 10 s). Try again.") from None
             if _break_dead(lock):
                 continue
             try:
                 stale = time.time() - lock.stat().st_mtime > LOCK_STALE_SECONDS
             except OSError:
+                time.sleep(0.01)
                 continue
             if stale and not _lock_text(lock) and tickets._break_stale(lock):
                 continue  # nobody is named in it (its writer died before writing): the age rule
@@ -637,14 +643,15 @@ def start(
             kw["creationflags"] = 0x00000200 | 0x00000008  # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
         else:
             kw["start_new_session"] = True
-        proc = subprocess.Popen(
-            cmd,
-            cwd=root,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            **kw,
-        )
+        with open(root / log_rel, "ab") as errlog:  # a wrapper that dies leaves its traceback in the run log
+            proc = subprocess.Popen(
+                cmd,
+                cwd=root,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=errlog,
+                **kw,
+            )
         set_process(root, tid, rec["run"], proc.pid, log=log_rel)
     except BaseException:
         release(root, tid, rec["run"])

@@ -157,10 +157,16 @@ def _locked(root: Path, tid: str):
             with os.fdopen(fd, "w") as f:
                 f.write(procs.own_token())
             break
-        except FileExistsError:
+        except (
+            FileExistsError,
+            PermissionError,
+        ):  # Windows: a lock being deleted refuses with PermissionError
+            if time.monotonic() > end:
+                raise Refused(f"Ticket {tid} is busy (retried for 5 s). Try again.") from None
             try:
                 stale = time.time() - lock.stat().st_mtime > 30
             except OSError:
+                time.sleep(0.02)
                 continue
             if stale and _break_stale(lock):
                 continue
