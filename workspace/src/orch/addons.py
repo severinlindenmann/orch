@@ -843,11 +843,9 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
         print(f"{key}  {say or 'Nothing to update.'}")
         return 0
     for c in changes:
-        shown = [
-            links.one_line(x if x is not None and x != "" else "-", 120)
-            for x in (c["name"], c["old"], c["new"])
-        ]
-        print(f"{key}  {shown[0]}  {c['field']}: {shown[1]} → {shown[2]}")
+        old, new = (links.one_line("-" if x in (None, "") else x, 120) for x in (c["old"], c["new"]))
+        what = f"{links.one_line(c['name'])}  {c['field']}" if c["what"] == "link" else c["field"]
+        print(f"{key}  {what}: {old} → {new}")
     if say:
         print(say)
     return 0
