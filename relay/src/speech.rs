@@ -426,14 +426,14 @@ async fn make(
     _at: i64,
 ) -> Res<Vec<u8>> {
     let cost = cost_usd(text.chars().count());
+    // cached audio is free and always served (read before the database lock is taken)
+    if let Ok(raw) = std::fs::read(cache_path(data_dir, msg_id, lang)) {
+        if let Some(mp3) = crypto::open(key, &cache_aad(msg_id, lang), &raw) {
+            return Ok(mp3);
+        }
+    }
     let api_key: (String, i64) = {
         let c = db.lock().unwrap();
-        // cached audio is free and always served
-        if let Ok(raw) = std::fs::read(cache_path(data_dir, msg_id, lang)) {
-            if let Some(mp3) = crypto::open(key, &cache_aad(msg_id, lang), &raw) {
-                return Ok(mp3);
-            }
-        }
         let api_key = if enabled(&c) {
             crate::transcribe::get_key(&c, key)
         } else {

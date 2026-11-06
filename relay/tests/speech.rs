@@ -542,3 +542,21 @@ async fn client_disconnect_during_deepgram_gives_the_reservation_back() {
     let _ = h.await;
     assert_eq!(r.used(), 0.0, "the reservation is back");
 }
+
+#[test]
+fn purge_removes_only_old_cached_audio() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("tts")).unwrap();
+    let f = d.path().join("tts").join("m_x.en.mp3");
+    std::fs::write(&f, b"x").unwrap();
+    let now = util::now();
+    assert_eq!(speech::purge(d.path(), now, 500), 0);
+    assert!(f.exists(), "fresh audio stays");
+    assert_eq!(speech::purge(d.path(), now + 1000, 500), 1);
+    assert!(!f.exists(), "old audio is gone");
+    assert_eq!(
+        speech::purge(d.path(), now + 1000, 500),
+        0,
+        "nothing left, no error"
+    );
+}

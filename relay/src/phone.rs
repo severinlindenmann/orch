@@ -766,9 +766,9 @@ async fn send(
 pub const MAX_PHONE_BLOB: usize = 25 * 1024 * 1024;
 /// Most bytes one phone may upload in 24 hours: 1 GB.
 const PHONE_UPLOAD_DAY: i64 = 1024 * 1024 * 1024;
-/// Whole body at most this long (else 408).
-/// Slowest average upload speed (bytes per second) allowed after the grace time.
+/// Slowest average upload speed (bytes per second) allowed after the grace time (else 408).
 const MIN_UPLOAD_BPS: f64 = 16.0 * 1024.0;
+/// Whole body at most this long (else 408).
 const UPLOAD_TOTAL: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// The phone's one upload in flight; freed when the request ends, however it ends.
