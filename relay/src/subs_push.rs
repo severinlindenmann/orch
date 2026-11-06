@@ -40,7 +40,8 @@ impl Outcome {
 
 #[async_trait::async_trait]
 pub trait Deliver: Send + Sync {
-    async fn post(&self, url: &str, headers: Vec<(&'static str, String)>, body: Vec<u8>) -> Outcome;
+    async fn post(&self, url: &str, headers: Vec<(&'static str, String)>, body: Vec<u8>)
+        -> Outcome;
 }
 
 // ---------- signing ----------
@@ -58,7 +59,10 @@ pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
         ipad[i] ^= k[i];
         opad[i] ^= k[i];
     }
-    let inner = Sha256::new().chain_update(ipad).chain_update(msg).finalize();
+    let inner = Sha256::new()
+        .chain_update(ipad)
+        .chain_update(msg)
+        .finalize();
     Sha256::new()
         .chain_update(opad)
         .chain_update(inner)
@@ -142,10 +146,14 @@ pub fn check_url(raw: &str) -> Result<reqwest::Url, String> {
     match u.host() {
         None => return Err("The push address needs a host name.".into()),
         Some(url::Host::Ipv4(a)) if !public_v4(a) => {
-            return Err("The push address must be a public address, not a private or local one.".into())
+            return Err(
+                "The push address must be a public address, not a private or local one.".into(),
+            )
         }
         Some(url::Host::Ipv6(a)) if !public_v6(a) => {
-            return Err("The push address must be a public address, not a private or local one.".into())
+            return Err(
+                "The push address must be a public address, not a private or local one.".into(),
+            )
         }
         _ => {}
     }
@@ -173,7 +181,12 @@ pub struct Https;
 
 #[async_trait::async_trait]
 impl Deliver for Https {
-    async fn post(&self, url: &str, headers: Vec<(&'static str, String)>, body: Vec<u8>) -> Outcome {
+    async fn post(
+        &self,
+        url: &str,
+        headers: Vec<(&'static str, String)>,
+        body: Vec<u8>,
+    ) -> Outcome {
         let u = match check_url(url) {
             Ok(u) => u,
             Err(_) => return Outcome::refused("not a public https address"),
@@ -229,8 +242,18 @@ struct PushRow {
     fails: i64,
 }
 
+/// push_url, push_secret (sealed), push_state, push_cursor, push_fails, push_next_at
+type PushCols = (
+    Option<String>,
+    Option<Vec<u8>>,
+    Option<String>,
+    Option<i64>,
+    i64,
+    Option<i64>,
+);
+
 fn push_row(app: &AppState, c: &rusqlite::Connection, id: &str, due_only: bool) -> Option<PushRow> {
-    let row: Option<(Option<String>, Option<Vec<u8>>, Option<String>, Option<i64>, i64, Option<i64>)> = c
+    let row: Option<PushCols> = c
         .query_row(
             "SELECT push_url,push_secret,push_state,push_cursor,push_fails,push_next_at FROM subscribers WHERE id=?1",
             [id],
@@ -285,9 +308,15 @@ pub async fn round(app: &AppState, id: &str) {
     for _ in 0..ROUND {
         let (p, seq, event) = {
             let c = app.db.lock().unwrap();
-            let Some(p) = push_row(app, &c, id, true) else { return };
-            let Ok(Some(s)) = subs::load(&c, id) else { return };
-            let Ok(page) = read_events(&c, &app.key, &s, p.cursor, 1) else { return };
+            let Some(p) = push_row(app, &c, id, true) else {
+                return;
+            };
+            let Ok(Some(s)) = subs::load(&c, id) else {
+                return;
+            };
+            let Ok(page) = read_events(&c, &app.key, &s, p.cursor, 1) else {
+                return;
+            };
             match page.items.into_iter().next() {
                 Some((seq, e)) => (p, seq, e),
                 None => {
@@ -311,7 +340,15 @@ pub async fn round(app: &AppState, id: &str) {
         let out = app
             .subs
             .deliver()
-            .post(&p.url, headers(event["id"].as_str().unwrap_or(""), ts, sign(&p.secret, ts, &body)), body)
+            .post(
+                &p.url,
+                headers(
+                    event["id"].as_str().unwrap_or(""),
+                    ts,
+                    sign(&p.secret, ts, &body),
+                ),
+                body,
+            )
             .await;
         let ms = t0.elapsed().as_millis();
         let c = app.db.lock().unwrap();
@@ -336,7 +373,14 @@ pub async fn round(app: &AppState, id: &str) {
                 "UPDATE subscribers SET push_state='failing', push_fails=?2, push_next_at=NULL WHERE id=?1",
                 params![id, fails],
             );
-            subs::log(&c, id, "push", Some(&label), &format!("{line} · stopped"), false);
+            subs::log(
+                &c,
+                id,
+                "push",
+                Some(&label),
+                &format!("{line} · stopped"),
+                false,
+            );
         } else {
             let wait = BACKOFF[fails as usize - 1];
             let _ = c.execute(
@@ -344,7 +388,14 @@ pub async fn round(app: &AppState, id: &str) {
                 params![id, fails, now() + wait],
             );
             let next = fmt_time(now() + wait);
-            subs::log(&c, id, "push", Some(&label), &format!("{line} · next try {} UTC", &next[11..16]), false);
+            subs::log(
+                &c,
+                id,
+                "push",
+                Some(&label),
+                &format!("{line} · next try {} UTC", &next[11..16]),
+                false,
+            );
         }
         return;
     }
@@ -401,7 +452,15 @@ pub async fn send_test(app: &AppState, id: &str) -> Res<Value> {
     let out = app
         .subs
         .deliver()
-        .post(&p.url, headers(ev["id"].as_str().unwrap_or(""), ts, sign(&p.secret, ts, &body)), body)
+        .post(
+            &p.url,
+            headers(
+                ev["id"].as_str().unwrap_or(""),
+                ts,
+                sign(&p.secret, ts, &body),
+            ),
+            body,
+        )
         .await;
     let ms = t0.elapsed().as_millis();
     let line = result_line(&out, ms);
@@ -435,7 +494,10 @@ mod tests {
     #[test]
     fn hmac_long_key_rfc4231_case_6() {
         let key = [0xaau8; 131];
-        let mac = hmac_sha256(&key, b"Test Using Larger Than Block-Size Key - Hash Key First");
+        let mac = hmac_sha256(
+            &key,
+            b"Test Using Larger Than Block-Size Key - Hash Key First",
+        );
         assert_eq!(
             hex::encode(mac),
             "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
@@ -445,15 +507,51 @@ mod tests {
     #[test]
     fn private_addresses_are_not_public() {
         for a in [
-            "0.0.0.0", "10.1.2.3", "100.64.0.1", "100.127.255.254", "127.0.0.1", "169.254.169.254",
-            "172.16.0.1", "172.31.255.255", "192.0.0.8", "192.0.2.1", "192.168.1.1", "198.18.0.1",
-            "198.51.100.7", "203.0.113.9", "224.0.0.1", "240.0.0.1", "255.255.255.255", "::", "::1",
-            "::ffff:10.0.0.1", "::ffff:127.0.0.1", "64:ff9b::a00:1", "fc00::1", "fd12::1", "fe80::1",
-            "ff02::1", "2001:db8::1", "2001::1", "2002:a00:1::1", "::127.0.0.1",
+            "0.0.0.0",
+            "10.1.2.3",
+            "100.64.0.1",
+            "100.127.255.254",
+            "127.0.0.1",
+            "169.254.169.254",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.0.0.8",
+            "192.0.2.1",
+            "192.168.1.1",
+            "198.18.0.1",
+            "198.51.100.7",
+            "203.0.113.9",
+            "224.0.0.1",
+            "240.0.0.1",
+            "255.255.255.255",
+            "::",
+            "::1",
+            "::ffff:10.0.0.1",
+            "::ffff:127.0.0.1",
+            "64:ff9b::a00:1",
+            "fc00::1",
+            "fd12::1",
+            "fe80::1",
+            "ff02::1",
+            "2001:db8::1",
+            "2001::1",
+            "2002:a00:1::1",
+            "::127.0.0.1",
         ] {
-            assert!(!public_ip(a.parse().unwrap()), "{a} must not count as public");
+            assert!(
+                !public_ip(a.parse().unwrap()),
+                "{a} must not count as public"
+            );
         }
-        for a in ["1.1.1.1", "8.8.8.8", "100.128.0.1", "172.32.0.1", "2606:4700::1111", "::ffff:8.8.8.8", "64:ff9b::808:808"] {
+        for a in [
+            "1.1.1.1",
+            "8.8.8.8",
+            "100.128.0.1",
+            "172.32.0.1",
+            "2606:4700::1111",
+            "::ffff:8.8.8.8",
+            "64:ff9b::808:808",
+        ] {
             assert!(public_ip(a.parse().unwrap()), "{a} is public");
         }
     }
@@ -478,9 +576,17 @@ mod tests {
 
     #[tokio::test]
     async fn https_transport_refuses_local_hosts() {
-        for u in ["https://localhost:9/x", "https://127.0.0.1:9/", "http://example.com/", "https://[::1]:9/"] {
+        for u in [
+            "https://localhost:9/x",
+            "https://127.0.0.1:9/",
+            "http://example.com/",
+            "https://[::1]:9/",
+        ] {
             let o = Https.post(u, vec![], b"{}".to_vec()).await;
-            assert!(o.status.is_none() && o.detail.starts_with("refused"), "{u}: {o:?}");
+            assert!(
+                o.status.is_none() && o.detail.starts_with("refused"),
+                "{u}: {o:?}"
+            );
         }
     }
 }

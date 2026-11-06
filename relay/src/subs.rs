@@ -122,7 +122,9 @@ fn too_many_streams() -> ApiError {
     ApiError {
         status: StatusCode::TOO_MANY_REQUESTS,
         code: "too_many_streams",
-        message: format!("This subscriber already has {MAX_STREAMS} open live streams. Close one first."),
+        message: format!(
+            "This subscriber already has {MAX_STREAMS} open live streams. Close one first."
+        ),
     }
 }
 
@@ -382,16 +384,19 @@ fn first_answer(c: &Connection, qid: &str) -> rusqlite::Result<Option<Msg>> {
 }
 
 /// The event a stored message makes for this subscriber, or `None` when its kinds leave it out.
-fn event_of(c: &Connection, key: &crypto::Key, m: &Msg, s: &Sub) -> rusqlite::Result<Option<Value>> {
+fn event_of(
+    c: &Connection,
+    key: &crypto::Key,
+    m: &Msg,
+    s: &Sub,
+) -> rusqlite::Result<Option<Value>> {
     let (body, extra) = store::open_payload(key, m);
     let tkey = extra
         .get("key")
         .and_then(crate::rules::ticket_key)
         .map(Value::from)
         .unwrap_or(Value::Null);
-    let base = |typ: &str, ws: &str| {
-        json!({"v": 1, "id": m.id, "type": typ, "workspace": ws_json(c, ws), "ticket": m.ticket, "key": tkey, "at": m.created_at})
-    };
+    let base = |typ: &str, ws: &str| json!({"v": 1, "id": m.id, "type": typ, "workspace": ws_json(c, ws), "ticket": m.ticket, "key": tkey, "at": m.created_at});
     let k = s.kinds;
     Ok(match m.typ.as_str() {
         "text" => {
@@ -429,7 +434,11 @@ fn event_of(c: &Connection, key: &crypto::Key, m: &Msg, s: &Sub) -> rusqlite::Re
             e["question_id"] = m.id.clone().into();
             e["text"] = body["text"].as_str().unwrap_or("").into();
             e["title"] = body.get("title").cloned().unwrap_or(Value::Null);
-            e["options"] = body["options"].as_array().cloned().unwrap_or_default().into();
+            e["options"] = body["options"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into();
             e["answerable"] = (s.can_answer && answered.is_none()).into();
             e["answered"] = answered.unwrap_or(Value::Null);
             Some(e)
@@ -492,7 +501,14 @@ async fn events(
     };
     let page = read_events(&c, &app.key, &s, after, limit)?;
     let n = page.items.len();
-    log(&c, &s.id, "events", None, &format!("{n} event{}", if n == 1 { "" } else { "s" }), true);
+    log(
+        &c,
+        &s.id,
+        "events",
+        None,
+        &format!("{n} event{}", if n == 1 { "" } else { "s" }),
+        true,
+    );
     let next = if page.more { page.last_id } else { None };
     let items: Vec<Value> = page.items.into_iter().map(|(_, e)| e).collect();
     Ok(Json(json!({"items": items, "next": next})))
@@ -515,7 +531,9 @@ async fn stream(
         let s = authed(&app, &c, &h, &tok)?;
         let start = match resume {
             Some(a) => seq_of(&c, &a)?,
-            None => c.query_row("SELECT COALESCE(MAX(seq),0) FROM messages", [], |r| r.get(0))?,
+            None => c.query_row("SELECT COALESCE(MAX(seq),0) FROM messages", [], |r| {
+                r.get(0)
+            })?,
         };
         (s, start)
     };
@@ -620,7 +638,8 @@ async fn file(
     let raw = tokio::fs::read(app.blob_path(&id))
         .await
         .map_err(|_| none())?;
-    let plain = crypto::open(&app.key, &id, &raw).ok_or_else(|| internal("blob does not decrypt"))?;
+    let plain =
+        crypto::open(&app.key, &id, &raw).ok_or_else(|| internal("blob does not decrypt"))?;
     Ok((
         [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
         plain,
@@ -637,7 +656,8 @@ async fn answer(
     let id = {
         let c = app.db.lock().unwrap();
         let s = authed(&app, &c, &h, &tok)?;
-        if !s.can_answer {
+        // Answering needs Questions on too: a subscriber that does not see questions cannot answer them.
+        if !s.can_answer || !s.kinds.questions {
             return Err(not_allowed(
                 "This subscriber may only read. In the relay admin, open Subscribers and turn on Can answer questions.",
             ));
@@ -646,14 +666,18 @@ async fn answer(
         let qid = v["question_id"].as_str().unwrap_or("");
         let text = v["answer"].as_str().unwrap_or("");
         if text.trim().is_empty() || text.chars().count() > MAX_ANSWER {
-            return Err(invalid(format!("`answer` must be 1 to {MAX_ANSWER} characters.")));
+            return Err(invalid(format!(
+                "`answer` must be 1 to {MAX_ANSWER} characters."
+            )));
         }
         let sc = scope(&c, &s);
         let q = store::get_msg(&c, qid)?
             .filter(|q| q.typ == "question" && q.to == "phones" && sc.contains(&q.from))
             .ok_or_else(|| not_found("No such question."))?;
         let stored_at: i64 =
-            c.query_row("SELECT stored_at FROM messages WHERE id=?1", [qid], |r| r.get(0))?;
+            c.query_row("SELECT stored_at FROM messages WHERE id=?1", [qid], |r| {
+                r.get(0)
+            })?;
         if stored_at < s.created_at {
             return Err(not_found("No such question."));
         }
@@ -828,6 +852,13 @@ fn check_flag(v: &Value, k: &str, d: bool) -> Res<bool> {
     }
 }
 
+fn need_questions(k: Kinds, can_answer: bool) -> Res<()> {
+    if can_answer && !k.questions {
+        return Err(invalid("Can answer questions needs Questions turned on."));
+    }
+    Ok(())
+}
+
 fn need_scope(ws: &[String], gs: &[String]) -> Res<()> {
     if ws.is_empty() && gs.is_empty() {
         return Err(invalid("Pick at least one group or workspace."));
@@ -836,7 +867,9 @@ fn need_scope(ws: &[String], gs: &[String]) -> Res<()> {
 }
 
 fn max_seq(c: &Connection) -> rusqlite::Result<i64> {
-    c.query_row("SELECT COALESCE(MAX(seq),0) FROM messages", [], |r| r.get(0))
+    c.query_row("SELECT COALESCE(MAX(seq),0) FROM messages", [], |r| {
+        r.get(0)
+    })
 }
 
 fn link(app: &AppState, token: &str) -> String {
@@ -878,6 +911,7 @@ async fn create(
     )?;
     let can_answer = check_flag(&v, "can_answer", false)?;
     let can_download = check_flag(&v, "can_download", false)?;
+    need_questions(kinds, can_answer)?;
     let id = rand_id("sub_", 10);
     let token = rand_token("sub_", 32);
     let (secret, sealed) = match push_url {
@@ -910,7 +944,9 @@ async fn create(
     let sub = card(&app, &c, &id)?;
     Ok((
         StatusCode::CREATED,
-        Json(json!({"subscriber": sub, "token": token, "link": link(&app, &token), "push_secret": secret})),
+        Json(
+            json!({"subscriber": sub, "token": token, "link": link(&app, &token), "push_secret": secret}),
+        ),
     ))
 }
 
@@ -940,11 +976,11 @@ async fn edit(
     let kinds = check_kinds(v.get("kinds").unwrap_or(&Value::Null), cur.kinds)?;
     let can_answer = check_flag(&v, "can_answer", cur.can_answer)?;
     let can_download = check_flag(&v, "can_download", cur.can_download)?;
-    let old_url: Option<String> = c.query_row(
-        "SELECT push_url FROM subscribers WHERE id=?1",
-        [&id],
-        |r| r.get(0),
-    )?;
+    need_questions(kinds, can_answer)?;
+    let old_url: Option<String> =
+        c.query_row("SELECT push_url FROM subscribers WHERE id=?1", [&id], |r| {
+            r.get(0)
+        })?;
     let tx = c.transaction()?;
     tx.execute(
         "UPDATE subscribers SET name=?2, workspaces=?3, groups=?4, kinds=?5, can_answer=?6, can_download=?7 WHERE id=?1",
@@ -1042,11 +1078,15 @@ async fn rotate(
 
 fn push_on(c: &Connection, id: &str) -> Res<()> {
     let url: Option<Option<String>> = c
-        .query_row("SELECT push_url FROM subscribers WHERE id=?1", [id], |r| r.get(0))
+        .query_row("SELECT push_url FROM subscribers WHERE id=?1", [id], |r| {
+            r.get(0)
+        })
         .optional()?;
     match url {
         None => Err(not_found("No such subscriber.")),
-        Some(None) => Err(invalid("Push is off for this subscriber. Add your https address first.")),
+        Some(None) => Err(invalid(
+            "Push is off for this subscriber. Add your https address first.",
+        )),
         Some(Some(_)) => Ok(()),
     }
 }

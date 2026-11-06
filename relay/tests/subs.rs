@@ -13,7 +13,9 @@ struct Sub {
 }
 
 async fn add_sub(t: &T, body: Value) -> Sub {
-    let (s, v) = t.admin_json("POST", "/admin/api/subscribers", Some(body)).await;
+    let (s, v) = t
+        .admin_json("POST", "/admin/api/subscribers", Some(body))
+        .await;
     assert_eq!(s, 201, "{v}");
     let token = v["token"].as_str().unwrap().to_string();
     assert_eq!(v["link"], format!("https://relay.test/v1/sub/{token}"));
@@ -25,7 +27,12 @@ async fn add_sub(t: &T, body: Value) -> Sub {
 }
 
 async fn get(t: &T, path: &str) -> (u16, Value) {
-    let r = t.http.get(format!("{}{path}", t.base)).send().await.unwrap();
+    let r = t
+        .http
+        .get(format!("{}{path}", t.base))
+        .send()
+        .await
+        .unwrap();
     let s = r.status().as_u16();
     (s, r.json().await.unwrap_or(Value::Null))
 }
@@ -75,26 +82,52 @@ fn schema() -> jsonschema::JSONSchema {
 #[tokio::test]
 async fn scope_by_workspace_and_group_is_read_at_call_time() {
     let t = start().await;
-    let (a, b, c) = (t.add_ws("A").await, t.add_ws("B").await, t.add_ws("C").await);
+    let (a, b, c) = (
+        t.add_ws("A").await,
+        t.add_ws("B").await,
+        t.add_ws("C").await,
+    );
     let (_, g) = t
-        .admin_json("POST", "/admin/api/groups", Some(json!({"name": "Finance"})))
+        .admin_json(
+            "POST",
+            "/admin/api/groups",
+            Some(json!({"name": "Finance"})),
+        )
         .await;
     let gid = g["id"].as_str().unwrap();
-    t.admin_json("PATCH", &format!("/admin/api/workspaces/{}", b.id), Some(json!({"group": gid})))
-        .await;
-    let s = add_sub(&t, json!({"name": "Bot", "workspaces": [a.id], "groups": [gid]})).await;
+    t.admin_json(
+        "PATCH",
+        &format!("/admin/api/workspaces/{}", b.id),
+        Some(json!({"group": gid})),
+    )
+    .await;
+    let s = add_sub(
+        &t,
+        json!({"name": "Bot", "workspaces": [a.id], "groups": [gid]}),
+    )
+    .await;
     let ea = update(&t, &a, "result", "a done").await;
     let eb = update(&t, &b, "result", "b done").await;
     let _ec = update(&t, &c, "result", "c done").await;
     // workspace-to-workspace and to one phone never show
-    t.rules(json!([rule(&a, &c, [true, false, false, false])])).await;
+    t.rules(json!([rule(&a, &c, [true, false, false, false])]))
+        .await;
     let (st, _) = t
-        .send(&a, &c.id, "text", json!({"text": "private between workspaces"}))
+        .send(
+            &a,
+            &c.id,
+            "text",
+            json!({"text": "private between workspaces"}),
+        )
         .await;
     assert_eq!(st, 201);
     let (st, v) = events(&t, &s, "").await;
     assert_eq!(st, 200, "{v}");
-    assert_eq!(ids(&v), vec![ea.clone(), eb.clone()], "only A and the group member B, oldest first");
+    assert_eq!(
+        ids(&v),
+        vec![ea.clone(), eb.clone()],
+        "only A and the group member B, oldest first"
+    );
     let sc = schema();
     for e in v["items"].as_array().unwrap() {
         assert!(sc.is_valid(e), "event matches the schema: {e}");
@@ -102,7 +135,8 @@ async fn scope_by_workspace_and_group_is_read_at_call_time() {
         assert_eq!(e["key"], "DM1-12");
     }
     // B leaves the group (group deleted): its events disappear at once, catch-up included
-    t.admin_json("DELETE", &format!("/admin/api/groups/{gid}"), None).await;
+    t.admin_json("DELETE", &format!("/admin/api/groups/{gid}"), None)
+        .await;
     assert_eq!(ids(&events(&t, &s, "").await.1), vec![ea]);
 }
 
@@ -116,14 +150,21 @@ async fn kinds_filter_and_history_before_creation_is_hidden() {
         .db
         .lock()
         .unwrap()
-        .execute("UPDATE messages SET stored_at=stored_at-10 WHERE id=?1", [&old])
+        .execute(
+            "UPDATE messages SET stored_at=stored_at-10 WHERE id=?1",
+            [&old],
+        )
         .unwrap();
     let s = add_sub(&t, json!({"name": "Bot", "workspaces": [a.id]})).await;
     let _ack = update(&t, &a, "ack", "started").await;
     let res = update(&t, &a, "result", "done").await;
     let q = question(&t, &a).await;
     let (_, v) = events(&t, &s, "").await;
-    assert_eq!(ids(&v), vec![res.clone(), q.clone()], "default kinds: results and questions");
+    assert_eq!(
+        ids(&v),
+        vec![res.clone(), q.clone()],
+        "default kinds: results and questions"
+    );
     let qe = &v["items"][1];
     assert_eq!(qe["type"], "question");
     assert_eq!(qe["question_id"], q);
@@ -154,7 +195,12 @@ async fn paging_with_after_and_next() {
     let next = p1["next"].as_str().unwrap();
     let (_, p2) = events(&t, &s, &format!("?limit=2&after={next}")).await;
     assert_eq!(ids(&p2), all[2..4]);
-    let (_, p3) = events(&t, &s, &format!("?limit=2&after={}", p2["next"].as_str().unwrap())).await;
+    let (_, p3) = events(
+        &t,
+        &s,
+        &format!("?limit=2&after={}", p2["next"].as_str().unwrap()),
+    )
+    .await;
     assert_eq!(ids(&p3), all[4..]);
     assert_eq!(p3["next"], Value::Null);
     assert_eq!(events(&t, &s, "?after=m_nosuchmessage000").await.0, 422);
@@ -171,11 +217,18 @@ async fn token_is_stored_hashed_and_rotate_and_remove_stop_it() {
         .db
         .lock()
         .unwrap()
-        .query_row("SELECT token_hash FROM subscribers WHERE id=?1", [&s.id], |r| r.get(0))
+        .query_row(
+            "SELECT token_hash FROM subscribers WHERE id=?1",
+            [&s.id],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(stored, orch_relay::util::token_hash(&s.token));
     let (_, list) = t.admin_json("GET", "/admin/api/subscribers", None).await;
-    assert!(!list.to_string().contains(&s.token), "the token is never listed");
+    assert!(
+        !list.to_string().contains(&s.token),
+        "the token is never listed"
+    );
     // Bearer form with "-"
     let r = t
         .http
@@ -189,7 +242,11 @@ async fn token_is_stored_hashed_and_rotate_and_remove_stop_it() {
     assert_eq!(get(&t, "/v1/sub/sub_wrong/events").await.0, 401);
     // rotate: old stops, new works
     let (st, v) = t
-        .admin_json("POST", &format!("/admin/api/subscribers/{}/token", s.id), None)
+        .admin_json(
+            "POST",
+            &format!("/admin/api/subscribers/{}/token", s.id),
+            None,
+        )
         .await;
     assert_eq!(st, 200);
     let new = Sub {
@@ -224,13 +281,34 @@ async fn admin_input_is_checked() {
         (json!({"name": "", "workspaces": [a.id]}), 422),
         (json!({"name": "Bot", "workspaces": ["ws_nosuchwork"]}), 422),
         (json!({"name": "Bot", "groups": ["grp_nosuchgrp"]}), 422),
-        (json!({"name": "Bot", "workspaces": [a.id], "push_url": "http://hooks.example.com/x"}), 422),
-        (json!({"name": "Bot", "workspaces": [a.id], "push_url": "https://127.0.0.1/x"}), 422),
-        (json!({"name": "Bot", "workspaces": [a.id], "push_url": "https://10.0.0.8/x"}), 422),
-        (json!({"name": "Bot", "workspaces": [a.id], "push_url": "https://u:p@hooks.example.com/"}), 422),
-        (json!({"name": "Bot", "workspaces": [a.id], "kinds": {"files": "yes"}}), 422),
+        (
+            json!({"name": "Bot", "workspaces": [a.id], "push_url": "http://hooks.example.com/x"}),
+            422,
+        ),
+        (
+            json!({"name": "Bot", "workspaces": [a.id], "push_url": "https://127.0.0.1/x"}),
+            422,
+        ),
+        (
+            json!({"name": "Bot", "workspaces": [a.id], "push_url": "https://10.0.0.8/x"}),
+            422,
+        ),
+        (
+            json!({"name": "Bot", "workspaces": [a.id], "push_url": "https://u:p@hooks.example.com/"}),
+            422,
+        ),
+        (
+            json!({"name": "Bot", "workspaces": [a.id], "kinds": {"files": "yes"}}),
+            422,
+        ),
+        (
+            json!({"name": "Bot", "workspaces": [a.id], "kinds": {"questions": false}, "can_answer": true}),
+            422,
+        ),
     ] {
-        let (s, v) = t.admin_json("POST", "/admin/api/subscribers", Some(body.clone())).await;
+        let (s, v) = t
+            .admin_json("POST", "/admin/api/subscribers", Some(body.clone()))
+            .await;
         assert_eq!(s, want, "{body} -> {v}");
     }
 }
@@ -240,7 +318,11 @@ async fn answer_only_when_allowed_first_answer_wins() {
     let t = start().await;
     let a = t.add_ws("A").await;
     let ro = add_sub(&t, json!({"name": "Reader", "workspaces": [a.id]})).await;
-    let rw = add_sub(&t, json!({"name": "Night monitor", "workspaces": [a.id], "can_answer": true})).await;
+    let rw = add_sub(
+        &t,
+        json!({"name": "Night monitor", "workspaces": [a.id], "can_answer": true}),
+    )
+    .await;
     let other = t.add_ws("Other").await;
     let q = question(&t, &a).await;
     let q_other = question(&t, &other).await;
@@ -251,14 +333,24 @@ async fn answer_only_when_allowed_first_answer_wins() {
             json!({"question_id": qid, "answer": text}),
         );
         async move {
-            let r = t.http.post(format!("{}{url}", t.base)).json(&body).send().await.unwrap();
+            let r = t
+                .http
+                .post(format!("{}{url}", t.base))
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
             let s = r.status().as_u16();
             (s, r.json::<Value>().await.unwrap_or(Value::Null))
         }
     };
     let (s, v) = ans(&ro, &q, "Other").await;
     assert_eq!((s, v["error"].as_str()), (403, Some("not_allowed")));
-    assert_eq!(ans(&rw, &q_other, "Other").await.0, 404, "outside its scope");
+    assert_eq!(
+        ans(&rw, &q_other, "Other").await.0,
+        404,
+        "outside its scope"
+    );
     assert_eq!(ans(&rw, &q, "").await.0, 422);
     let (s, v) = ans(&rw, &q, "Other").await;
     assert_eq!(s, 201, "{v}");
@@ -274,15 +366,63 @@ async fn answer_only_when_allowed_first_answer_wins() {
     // a phone is too late now, and the readers see it answered
     let p = t.pair_phone(&[&a]).await;
     let (s, _) = t
-        .phone(&p, "POST", "/v1/phone/answer", Some(json!({"question_message_id": q, "answer": "x"})))
+        .phone(
+            &p,
+            "POST",
+            "/v1/phone/answer",
+            Some(json!({"question_message_id": q, "answer": "x"})),
+        )
         .await;
     assert_eq!(s, 409);
     let (_, v) = events(&t, &ro, "").await;
-    let qe = v["items"].as_array().unwrap().iter().find(|e| e["id"] == q).unwrap().clone();
-    assert_eq!(qe["answered"], json!({"answer": "Other", "answered_by": "Night monitor (system)"}));
-    let ae = v["items"].as_array().unwrap().iter().find(|e| e["type"] == "answered").unwrap().clone();
-    assert_eq!((ae["question_id"].clone(), ae["answer"].clone()), (json!(q), json!("Other")));
+    let qe = v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == q)
+        .unwrap()
+        .clone();
+    assert_eq!(
+        qe["answered"],
+        json!({"answer": "Other", "answered_by": "Night monitor (system)"})
+    );
+    let ae = v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["type"] == "answered")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (ae["question_id"].clone(), ae["answer"].clone()),
+        (json!(q), json!("Other"))
+    );
     assert!(schema().is_valid(&ae));
+    // turning Questions off while it may answer is refused; a row that has it anyway cannot answer
+    let (st, _) = t
+        .admin_json(
+            "PATCH",
+            &format!("/admin/api/subscribers/{}", rw.id),
+            Some(json!({"kinds": {"questions": false}})),
+        )
+        .await;
+    assert_eq!(st, 422);
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE subscribers SET kinds='{\"results\":true}' WHERE id=?1",
+            [&rw.id],
+        )
+        .unwrap();
+    let q2 = question(&t, &a).await;
+    let (s, v) = ans(&rw, &q2, "Other").await;
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (403, Some("not_allowed")),
+        "no Questions, no answers"
+    );
 }
 
 #[tokio::test]
@@ -298,10 +438,21 @@ async fn files_metadata_only_unless_downloads_allowed() {
         .send()
         .await
         .unwrap();
-    let bid = r.json::<Value>().await.unwrap()["blob_id"].as_str().unwrap().to_string();
+    let bid = r.json::<Value>().await.unwrap()["blob_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let no_files = add_sub(&t, json!({"name": "A", "workspaces": [a.id]})).await;
-    let meta = add_sub(&t, json!({"name": "B", "workspaces": [a.id], "kinds": {"files": true}})).await;
-    let dl = add_sub(&t, json!({"name": "C", "workspaces": [a.id], "kinds": {"files": true}, "can_download": true})).await;
+    let meta = add_sub(
+        &t,
+        json!({"name": "B", "workspaces": [a.id], "kinds": {"files": true}}),
+    )
+    .await;
+    let dl = add_sub(
+        &t,
+        json!({"name": "C", "workspaces": [a.id], "kinds": {"files": true}, "can_download": true}),
+    )
+    .await;
     let view = json!({"title": "T", "status": "done", "running": false, "checklist": [{"text": "x", "done": true}],
         "done": 1, "total": 1, "history_tail": [{"at": "2026-11-06T09:00:00Z", "who": "Claude", "role": "agent", "text": "secret-ish history"}],
         "attachments": [{"kind": "file", "title": "r.csv", "blob_id": bid, "name": "r.csv", "size": 5, "at": "2026-11-06T09:39:00Z"},
@@ -317,9 +468,23 @@ async fn files_metadata_only_unless_downloads_allowed() {
     assert!(v0.get("history_tail").is_none() && v0.get("checklist").is_none());
     assert!(!v0.to_string().contains("secret-ish"));
     let v1 = tv(&events(&t, &meta, "").await.1);
-    assert_eq!(v1["files"], json!([{"name": "r.csv", "size": 5, "blob_id": bid}]));
-    assert_eq!(get(&t, &format!("/v1/sub/{}/files/{bid}", no_files.token)).await.0, 404);
-    assert_eq!(get(&t, &format!("/v1/sub/{}/files/{bid}", meta.token)).await.0, 404, "metadata only");
+    assert_eq!(
+        v1["files"],
+        json!([{"name": "r.csv", "size": 5, "blob_id": bid}])
+    );
+    assert_eq!(
+        get(&t, &format!("/v1/sub/{}/files/{bid}", no_files.token))
+            .await
+            .0,
+        404
+    );
+    assert_eq!(
+        get(&t, &format!("/v1/sub/{}/files/{bid}", meta.token))
+            .await
+            .0,
+        404,
+        "metadata only"
+    );
     let r = t
         .http
         .get(format!("{}/v1/sub/{}/files/{bid}", t.base, dl.token))
@@ -328,7 +493,12 @@ async fn files_metadata_only_unless_downloads_allowed() {
         .unwrap();
     assert_eq!(r.status(), 200);
     assert_eq!(r.bytes().await.unwrap().to_vec(), vec![9u8; 5]);
-    assert_eq!(get(&t, &format!("/v1/sub/{}/files/../../master.key", dl.token)).await.0, 404);
+    assert_eq!(
+        get(&t, &format!("/v1/sub/{}/files/../../master.key", dl.token))
+            .await
+            .0,
+        404
+    );
 }
 
 #[tokio::test]
@@ -345,7 +515,9 @@ async fn rate_limit_60_a_minute() {
 
 /// Reads Server-Sent Events frames from a response.
 struct SseReader {
-    s: std::pin::Pin<Box<dyn futures_util::Stream<Item = reqwest::Result<axum::body::Bytes>> + Send>>,
+    s: std::pin::Pin<
+        Box<dyn futures_util::Stream<Item = reqwest::Result<axum::body::Bytes>> + Send>,
+    >,
     buf: String,
 }
 
@@ -410,17 +582,27 @@ impl SseReader {
 async fn stream_live_and_resume_with_last_event_id_and_two_stream_cap() {
     let t = start().await;
     let a = t.add_ws("A").await;
-    let s = add_sub(&t, json!({"name": "Bot", "workspaces": [a.id], "kinds": {"updates": true}})).await;
+    let s = add_sub(
+        &t,
+        json!({"name": "Bot", "workspaces": [a.id], "kinds": {"updates": true}}),
+    )
+    .await;
     let first = update(&t, &a, "result", "one").await;
     let url = format!("{}/v1/sub/{}/stream", t.base, s.token);
     // without Last-Event-ID: only new events
     let r = t.http.get(&url).send().await.unwrap();
     assert_eq!(r.status(), 200);
-    assert!(r.headers()["content-type"].to_str().unwrap().starts_with("text/event-stream"));
+    assert!(r.headers()["content-type"]
+        .to_str()
+        .unwrap()
+        .starts_with("text/event-stream"));
     let mut live = SseReader::new(r);
     let second = update(&t, &a, "note", "two").await;
     let got = live.take(1).await;
-    assert_eq!((got[0].0.clone(), got[0].1.clone()), (second.clone(), "update".to_string()));
+    assert_eq!(
+        (got[0].0.clone(), got[0].1.clone()),
+        (second.clone(), "update".to_string())
+    );
     assert_eq!(got[0].2["text"], "two");
     assert!(schema().is_valid(&got[0].2));
     // resume after the first (Bearer form): replays the second, then stays live
@@ -441,7 +623,10 @@ async fn stream_live_and_resume_with_last_event_id_and_two_stream_cap() {
     assert_eq!(card["items"][0]["streams"], 2);
     let third = update(&t, &a, "result", "three").await;
     let got = resumed.take(2).await;
-    assert_eq!(vec![got[0].0.clone(), got[1].0.clone()], vec![second, third.clone()]);
+    assert_eq!(
+        vec![got[0].0.clone(), got[1].0.clone()],
+        vec![second, third.clone()]
+    );
     assert_eq!(live.take(1).await[0].0, third);
     // an unknown Last-Event-ID is refused before the stream opens
     let r = t
@@ -453,8 +638,12 @@ async fn stream_live_and_resume_with_last_event_id_and_two_stream_cap() {
         .unwrap();
     assert_eq!(r.status(), 422);
     // rotating the link closes the open streams
-    t.admin_json("POST", &format!("/admin/api/subscribers/{}/token", s.id), None)
-        .await;
+    t.admin_json(
+        "POST",
+        &format!("/admin/api/subscribers/{}/token", s.id),
+        None,
+    )
+    .await;
     assert!(live.ends().await, "the stream ends after rotate");
     assert!(resumed.ends().await);
 }
@@ -469,10 +658,18 @@ struct FakeReceiver {
 
 #[async_trait::async_trait]
 impl Deliver for FakeReceiver {
-    async fn post(&self, url: &str, headers: Vec<(&'static str, String)>, body: Vec<u8>) -> Outcome {
+    async fn post(
+        &self,
+        url: &str,
+        headers: Vec<(&'static str, String)>,
+        body: Vec<u8>,
+    ) -> Outcome {
         self.got.lock().unwrap().push((
             url.to_string(),
-            headers.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+            headers
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
             body,
         ));
         Outcome {
@@ -494,7 +691,11 @@ async fn push_signs_retries_with_backoff_and_stops_after_the_last_retry() {
     t.app.subs.set_deliver(recv.clone());
     let a = t.add_ws("A").await;
     let before = update(&t, &a, "result", "before push").await;
-    let s = add_sub(&t, json!({"name": "Hook", "workspaces": [a.id], "push_url": "https://hooks.example.com/orch"})).await;
+    let s = add_sub(
+        &t,
+        json!({"name": "Hook", "workspaces": [a.id], "push_url": "https://hooks.example.com/orch"}),
+    )
+    .await;
     let secret = s.secret.clone().unwrap();
     assert!(secret.starts_with("whsec_") && secret.len() == 6 + 43);
     let e1 = update(&t, &a, "result", "one").await;
@@ -506,7 +707,10 @@ async fn push_signs_retries_with_backoff_and_stops_after_the_last_retry() {
         assert_eq!(url, "https://hooks.example.com/orch");
         assert_eq!(header(h, "x-orch-event-id"), e1);
         let ts: i64 = header(h, "x-orch-timestamp").parse().unwrap();
-        assert_eq!(header(h, "x-orch-signature"), subs_push::sign(&secret, ts, body));
+        assert_eq!(
+            header(h, "x-orch-signature"),
+            subs_push::sign(&secret, ts, body)
+        );
         let v: Value = serde_json::from_slice(body).unwrap();
         assert_eq!(v["id"], e1);
         assert_ne!(v["id"], before);
@@ -514,8 +718,9 @@ async fn push_signs_retries_with_backoff_and_stops_after_the_last_retry() {
     // failures: retry after 1 min, 5 min, 30 min, 2 h, 6 h, then failing
     *recv.status.lock().unwrap() = 502;
     let e2 = update(&t, &a, "result", "two").await;
-    let state = |t: &T| {
-        t.app
+    let state =
+        |t: &T| {
+            t.app
             .db
             .lock()
             .unwrap()
@@ -525,17 +730,25 @@ async fn push_signs_retries_with_backoff_and_stops_after_the_last_retry() {
                 |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, Option<i64>>(2)?)),
             )
             .unwrap()
-    };
+        };
     for (i, wait) in subs_push::BACKOFF.iter().enumerate() {
         subs_push::tick(&t.app).await;
         let (st, fails, next) = state(&t);
         assert_eq!((st.as_str(), fails), ("retrying", i as i64 + 1));
-        assert!((next.unwrap() - wait).abs() <= 2, "wait {wait}, got {next:?}");
+        assert!(
+            (next.unwrap() - wait).abs() <= 2,
+            "wait {wait}, got {next:?}"
+        );
         // not due yet: nothing is sent
         let n = recv.got.lock().unwrap().len();
         subs_push::tick(&t.app).await;
         assert_eq!(recv.got.lock().unwrap().len(), n);
-        t.app.db.lock().unwrap().execute("UPDATE subscribers SET push_next_at=0", []).unwrap();
+        t.app
+            .db
+            .lock()
+            .unwrap()
+            .execute("UPDATE subscribers SET push_next_at=0", [])
+            .unwrap();
     }
     subs_push::tick(&t.app).await;
     assert_eq!(state(&t).0, "failing");
@@ -545,15 +758,29 @@ async fn push_signs_retries_with_backoff_and_stops_after_the_last_retry() {
     assert_eq!(recv.got.lock().unwrap().len(), n, "failing: no more tries");
     // the log shows it; pull still works
     let (_, log) = t
-        .admin_json("GET", &format!("/admin/api/subscribers/{}/log?failed=1", s.id), None)
+        .admin_json(
+            "GET",
+            &format!("/admin/api/subscribers/{}/log?failed=1", s.id),
+            None,
+        )
         .await;
-    assert!(log["items"][0]["result"].as_str().unwrap().contains("stopped"), "{log}");
+    assert!(
+        log["items"][0]["result"]
+            .as_str()
+            .unwrap()
+            .contains("stopped"),
+        "{log}"
+    );
     assert_eq!(log["items"][0]["event"], "DM1-12 result");
     assert!(ids(&events(&t, &s, "").await.1).contains(&e2));
     // Try again now: delivered, back to ok
     *recv.status.lock().unwrap() = 204;
     let (st, v) = t
-        .admin_json("POST", &format!("/admin/api/subscribers/{}/push/retry", s.id), None)
+        .admin_json(
+            "POST",
+            &format!("/admin/api/subscribers/{}/push/retry", s.id),
+            None,
+        )
         .await;
     assert_eq!((st, v["push"]["state"].as_str()), (200, Some("ok")));
     subs_push::tick(&t.app).await;
@@ -575,7 +802,11 @@ async fn push_test_event_and_turning_push_on_later() {
     let s = add_sub(&t, json!({"name": "Hook", "workspaces": [a.id]})).await;
     assert!(s.secret.is_none());
     let (st, _) = t
-        .admin_json("POST", &format!("/admin/api/subscribers/{}/push/test", s.id), None)
+        .admin_json(
+            "POST",
+            &format!("/admin/api/subscribers/{}/push/test", s.id),
+            None,
+        )
         .await;
     assert_eq!(st, 422, "push is off");
     let _old = update(&t, &a, "result", "before").await;
@@ -589,9 +820,16 @@ async fn push_test_event_and_turning_push_on_later() {
     assert_eq!(st, 200, "{v}");
     let secret = v["push_secret"].as_str().unwrap().to_string();
     let (st, v) = t
-        .admin_json("POST", &format!("/admin/api/subscribers/{}/push/test", s.id), None)
+        .admin_json(
+            "POST",
+            &format!("/admin/api/subscribers/{}/push/test", s.id),
+            None,
+        )
         .await;
-    assert_eq!((st, v["ok"].as_bool(), v["status"].as_u64()), (200, Some(true), Some(200)));
+    assert_eq!(
+        (st, v["ok"].as_bool(), v["status"].as_u64()),
+        (200, Some(true), Some(200))
+    );
     {
         let got = recv.got.lock().unwrap();
         let (_, h, body) = got.last().unwrap();
@@ -599,10 +837,17 @@ async fn push_test_event_and_turning_push_on_later() {
         assert_eq!(ev["type"], "test");
         assert!(schema().is_valid(&ev));
         let ts: i64 = header(h, "x-orch-timestamp").parse().unwrap();
-        assert_eq!(header(h, "x-orch-signature"), subs_push::sign(&secret, ts, body));
+        assert_eq!(
+            header(h, "x-orch-signature"),
+            subs_push::sign(&secret, ts, body)
+        );
     }
     subs_push::tick(&t.app).await;
-    assert_eq!(recv.got.lock().unwrap().len(), 1, "older events are not pushed");
+    assert_eq!(
+        recv.got.lock().unwrap().len(),
+        1,
+        "older events are not pushed"
+    );
     // same URL again: the secret stays (no new one shown)
     let (_, v) = t
         .admin_json(
@@ -613,8 +858,12 @@ async fn push_test_event_and_turning_push_on_later() {
         .await;
     assert_eq!(v["push_secret"], Value::Null);
     // off: nothing more is pushed
-    t.admin_json("PATCH", &format!("/admin/api/subscribers/{}", s.id), Some(json!({"push_url": null})))
-        .await;
+    t.admin_json(
+        "PATCH",
+        &format!("/admin/api/subscribers/{}", s.id),
+        Some(json!({"push_url": null})),
+    )
+    .await;
     update(&t, &a, "result", "after off").await;
     subs_push::tick(&t.app).await;
     assert_eq!(recv.got.lock().unwrap().len(), 1);

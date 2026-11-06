@@ -336,7 +336,7 @@ function subscriberDialog(s){
  const scope=section('Can see',sub('Groups'),pick('group',groupList,old.groups),sub('Single workspaces'),pick('workspace',workspaces,old.workspaces),el('p',{class:'hint'},'A group follows its members: a workspace that joins later is seen at once, one that leaves disappears at once.'));
  const receives=section('Receives',subscriberKinds.map(([k,label,hint])=>toggle(k,label,hint,old.kinds?old.kinds[k]:['questions','results'].includes(k))));
  const permissions=section('What it may do',toggle('can_answer','Can answer questions','First answer wins, shown as from <name> (system), never as a person',old.can_answer),toggle('can_download','Can download files','The proof files themselves, not only their names',old.can_download));
- const downloads=()=>{controls.can_download.disabled=!controls.files.checked;if(!controls.files.checked)controls.can_download.checked=false};controls.files.onchange=downloads;downloads();
+ const downloads=()=>{controls.can_download.disabled=!controls.files.checked;if(!controls.files.checked)controls.can_download.checked=false;controls.can_answer.disabled=!controls.questions.checked;if(!controls.questions.checked)controls.can_answer.checked=false};controls.files.onchange=downloads;controls.questions.onchange=downloads;downloads();
  let d;const f=form(async f=>{
   const name=nm.value.trim();if(!name)throw new FieldError('Give the subscriber a name.','name');
   const selected=k=>[...f.querySelectorAll('input[name="'+k+'"]:checked')].map(c=>c.value),groups=selected('group'),ws=selected('workspace');
