@@ -40,6 +40,7 @@ The profile change waits for the owner's approval. Then this skill is rewritten 
     orch relay done <message id>     # mark it processed BEFORE you act on it
     orch relay download <message id> # the file of a file message -> received/
     orch relay outbox                # what is saved but not sent yet (goes out with the next relay command)
+    orch relay view                  # who you can reach and the recent messages (the dashboard Relay tab)
 
 An `answer` lands in its ticket by itself. `refresh-hint` means: run `orch relay refresh`.
 {{#workspaces}}

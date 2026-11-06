@@ -1298,3 +1298,47 @@ def test_permanent_allow_crash_after_create_leaves_one_live_ticket(proj, run, re
     live = [t for t in _live(run) if t["title"].endswith(": B")]
     assert len(live) == 1 and live[0]["id"] == tid
     assert len(json.loads(run("ticket", "show", tid, "--json")[1])["history"]) >= 1
+
+
+def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports", "description": "Numbers"}]
+    connect(run, rel)
+    rel.inbox.append(msg("m_text000000000002", "text", {"text": "March numbers <b>ready</b>"}))
+    rel.inbox.append(
+        msg(
+            "m_file000000000002",
+            "file",
+            {"blob_id": "b_aaaaaaaaaaaaaaaa", "name": "march.csv", "size": 2048, "sha256": "0" * 64},
+            created_at="2026-11-04T11:00:00Z",
+        )
+    )
+    run("relay", "inbox")
+    run("relay", "send", "reports", "Thanks, got it")
+    code, out, _ = run("relay", "view", "--json")
+    assert code == 0
+    v = json.loads(out)
+    import jsonschema
+    from conftest import CONTRACTS
+
+    schema = json.loads((CONTRACTS / "addon-view.schema.json").read_text(encoding="utf-8"))
+    jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(v)
+    people, recent = v["blocks"]
+    assert v["notice"] == "Connected." and people["title"] == "Who you can reach · 1"
+    assert people["items"][0]["title"] == "Reports" and "messages and files" in people["items"][0]["subtitle"]
+    details = {d["label"]: d["value"] for d in people["items"][0]["detail"]}
+    assert details["You may give them tasks"] == "Not yet"
+    titles = [(i["title"], i["chips"][0]["label"]) for i in recent["items"]]
+    assert ("Thanks, got it", "Out · Message") in titles and ("march.csv", "In · File") in titles
+    assert any(i["title"] == "March numbers bready/b" for i in recent["items"])
+    assert any(
+        "2.0 KB" in i["subtitle"] and i["subtitle"].startswith("From Reports") for i in recent["items"]
+    )
+
+
+def test_view_not_connected_has_no_blocks(proj, run):
+    from conftest import turn_on
+
+    turn_on(proj, "relay")
+    code, out, _ = run("relay", "view", "--json")
+    v = json.loads(out)
+    assert code == 0 and v["blocks"] == [] and "Not connected" in v["notice"]
