@@ -1,5 +1,7 @@
 /* Dashboard adapters; visual primitives belong to the shared kit. */
 .hidden{display:none!important}
+.ic-wrap{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.ic-wrap>svg{display:block}
 .card-toggle{width:100%;background:transparent;border:0;color:inherit;text-align:left}
 .card-toggle.card-h{border-bottom:1px solid var(--border)}
 .card-row>.need-icon.bad{color:var(--danger)}

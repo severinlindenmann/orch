@@ -4,13 +4,38 @@
   const main = document.getElementById('content');
   const nav = document.getElementById('side-nav');
   const array = value => Array.isArray(value) ? value : [];
-  const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
   const clean = value => String(value ?? '').replace(/\b(?:ws|t|q|m|ph|wh|b|f)_[a-zA-Z0-9]{4,}\b/g, '').replace(/\s+·\s+·/g, ' · ').trim();
   const name = value => clean(String(value ?? '').replace(/^(human|agent):/, ''));
   const icon = value => {
     const svg = window.icon(String(value || 'page'));
     return /<(path|rect|circle|polyline|line|ellipse)\b/.test(svg) ? svg : window.icon('page');
   };
+  function iconEl(name) {
+    const node = document.createElement('span');
+    node.className = 'ic-wrap';
+    node.innerHTML = icon(name); // ic-wrap: only trusted kit icons use markup.
+    return node;
+  }
+  function append(node, children) {
+    for (const child of children.flat(Infinity)) {
+      if (child == null || child === false) continue;
+      node.appendChild(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+    return node;
+  }
+  function h(tag, attrs = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs)) {
+      if (value == null) continue;
+      if (key === 'href' && !/^(#|https?:)/i.test(String(value))) continue;
+      if (key.startsWith('data-')) node.dataset[key.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = String(value);
+      else if (['className', 'hidden', 'disabled'].includes(key)) node[key] = value;
+      else node.setAttribute(key, String(value));
+    }
+    return append(node, children);
+  }
+  const fragment = (...children) => append(document.createDocumentFragment(), children);
+  const capitalise = value => String(value).replace(/^./, c => c.toUpperCase());
   const el = (tag, cls, text) => {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
@@ -52,12 +77,13 @@
   const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
   const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
   const statusWord = t => questions(t).length ? 'Waiting for an answer' : ({active:'Doing', waiting:'Waiting', open:'Open', done:'Done', dropped:'Dropped'}[t.status] || 'Open');
-  const chip = (text, cls = '') => '<span class="chip ' + cls + '">' + esc(text) + '</span>';
+  const chip = (text, cls = '') => h('span', {className:'chip ' + cls}, text);
   const statusChip = t => chip(activeTicket(t) && (t.status === 'waiting' || questions(t).length) ? 'Blocked' : statusWord(t), activeTicket(t) && (t.status === 'waiting' || questions(t).length) ? 'attn' : t.status === 'active' ? 'active' : '');
-  const heading = (title, sub = '') => '<header class="page-heading" data-key="heading"><h1>' + esc(clean(title)) + '</h1>' + (sub ? '<p class="muted">' + esc(sub) + '</p>' : '') + '</header>';
-  const card = (key, title, suffix, body, chevron = false) => '<section class="card" data-key="' + esc(key) + '"' + (key === 'needs-you' ? ' id="needs-you"' : '') + '><div class="card-h">' + (chevron ? icon('down') : '') + '<h2>' + esc(title) + (suffix ? '<span class="muted"> · ' + esc(suffix) + '</span>' : '') + '</h2></div>' + body + '</section>';
-  const emptyRow = text => '<div class="card-row muted">' + esc(text) + '</div>';
-  const newButton = () => snapshot ? '' : '<button type="button" class="btn primary sm" data-action="new">New ticket</button>';
+  const heading = (title, sub = '') => h('header', {className:'page-heading', 'data-key':'heading'}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null);
+  const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);
+  const emptyRow = text => h('div', {className:'card-row muted'}, text);
+  const newButton = () => snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'new'}, 'New ticket');
+  const firstTicket = () => h('div', {className:'card-row'}, h('p', {className:'grow muted'}, 'Your first ticket starts here.'), newButton());
   function ticketRow(t) {
     const meta = [name(t.owner), t.due ? 'Due ' + date(t.due) : '', statusWord(t)].filter(Boolean);
     const parent = ticketOf(t.parent);
@@ -66,80 +92,82 @@
       const days = Math.round((Date.parse(today()) - Date.parse(t.due)) / 86400000);
       late = chip('Overdue ' + days + (days === 1 ? ' day' : ' days'), 'error');
     }
-    return '<div class="card-row ticket-row" data-key="ticket-' + esc(t.id) + '"><div class="grow"><h3><a href="' + esc(href(t.id)) + '">' + esc(clean(t.title)) + '</a></h3><p class="meta">' + esc(meta.join(' · ')) + '</p>' + (parent ? '<p class="meta">Part of ' + esc(clean(parent.title)) + '</p>' : '') + '</div><div class="row">' + late + statusChip(t) + '</div></div>';
+    return h('div', {className:'card-row ticket-row', 'data-key':'ticket-' + t.id}, h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, meta.join(' · ')), parent ? h('p', {className:'meta'}, 'Part of ', clean(parent.title)) : null), h('div', {className:'row'}, late, statusChip(t)));
   }
   function needRow(row, newest) {
     const t = ticketOf(row.ticket);
     const claim = state.runs?.[row.ticket]?.claim;
     const by = name(row.agent || row.by || claim?.agent || claim?.by);
-    const meta = [by, t && clean(t.title)].filter(Boolean).join(' · ');
-    const answer = row.answer && row.kind !== 'overdue-wait';
+    const meta = [typeof t?.key === 'string' ? clean(t.key) : '', by, t && clean(t.title)].filter(Boolean).join(' · ');
+    const choice = window.DashHelpers.needAction(row);
     const action = snapshot
-      ? (t ? '<a class="btn outline sm" href="' + esc(href(t.id)) + '">Open</a>' : '')
-      : '<button type="button" class="btn outline sm" data-action="need" data-need="' + esc(row.id) + '">' + (answer ? 'Answer' : 'Open') + '</button>';
-    return '<div class="card-row" data-key="need-' + esc(row.id) + '" data-need-row="' + esc(row.id) + '"' + (row.id === newest ? ' data-newest' : '') + '><span class="need-icon ' + (row.tone === 'bad' ? 'bad' : row.tone === 'warn' ? 'warn' : 'muted') + '">' + icon(row.tone === 'bad' ? 'stop' : row.tone === 'warn' ? 'shield' : 'note') + '</span><div class="grow"><h3>' + esc(clean(row.title)) + '</h3><p class="meta">' + esc(meta) + '</p></div><time datetime="' + esc(row.since || '') + '">' + esc(age(row.since)) + '</time>' + action + '</div>';
+      ? (t ? h('a', {className:'btn outline sm', href:href(t.id)}, 'Open') : null)
+      : h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id}, choice.label);
+    return h('div', {className:'card-row', 'data-key':'need-' + row.id, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null}, h('span', {className:'need-icon ' + (row.tone === 'bad' ? 'bad' : row.tone === 'warn' ? 'warn' : 'muted')}, iconEl(row.tone === 'bad' ? 'stop' : row.tone === 'warn' ? 'shield' : 'note')), h('div', {className:'grow'}, h('h3', {}, clean(row.text)), h('p', {className:'meta'}, meta)), h('time', {datetime:row.since || ''}, age(row.since)), action);
   }
   function home() {
     const needs = array(state.needs);
-    const working = Object.entries(state.runs || {}).filter(([, r]) => r.running === true);
+    const rows = window.DashHelpers.agentRows(state.tickets, state.runs, Date.now());
+    const working = rows.filter(row => ['working', 'needs', 'stuck'].includes(row.state));
     const current = sorted(tickets().filter(activeTicket));
     const oldest = needs.map(n => parse(n.since)).filter(Boolean).sort((a, b) => a - b)[0];
     const newest = needs.slice().sort((a, b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-    const history = tickets().flatMap(t => array(t.history)).sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).slice(0, 5);
+    const history = tickets().flatMap(t => array(t.history).map(entry => ({entry, title:t.title}))).sort((a, b) => (Date.parse(b.entry.at) || 0) - (Date.parse(a.entry.at) || 0)).slice(0, 5);
     const stopped = array(state.services).some(s => s.running === false);
-    const banner = stopped ? '<div class="banner attn" data-key="background"><p class="grow">Background work is not running. Start it so repeating work and checks can run.</p>' + (snapshot ? '' : '<button type="button" class="btn outline sm" data-action="start">Start</button>') + '</div>' : '';
-    const agents = working.slice(0, 4).map(([id, run]) => {
-      const stale = run.state === 'maybe-stale';
-      return '<div class="card-row" data-key="run-' + esc(id) + '"><span class="dot ' + (stale ? 'needs' : 'working') + '"></span><div class="grow"><h3>' + esc(name(run.claim?.agent || run.claim?.by) || 'Agent') + ' · ' + (stale ? 'may be stuck' : 'working') + '</h3><p class="meta">' + esc([clean(ticketOf(id)?.title), age(run.claim?.started_at)].filter(Boolean).join(' · ')) + '</p></div></div>';
-    }).join('');
-    return heading('Today', now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + needs.length + ' need you · ' + working.length + (working.length === 1 ? ' agent working' : ' agents working')) + banner
-      + '<div class="columns" data-key="columns"><div class="stack" data-key="left">'
-      + card('needs-you', 'Needs you', needs.length + (oldest ? ' · oldest ' + age(oldest) : ''), needs.map(n => needRow(n, newest)).join('') || emptyRow('Nothing needs you right now.'), true)
-      + card('your-tickets', 'Your tickets', current.length + ' · ' + current.filter(overdue).length + ' overdue', current.map(ticketRow).join('') || '<div class="card-row"><p class="grow muted">Your first ticket starts here.</p>' + newButton() + '</div>', true)
-      + '</div><aside class="stack" data-key="right">'
-      + card('agents', 'Agents', working.length + ' working', agents || emptyRow('No agent is working right now.'))
-      + card('recently', 'Recently', '', history.map(h => '<div class="card-row"><div class="grow"><h3>' + esc(clean(h.text).length > 80 ? clean(h.text).slice(0, 79) + '…' : clean(h.text)) + '</h3><p class="meta">' + esc([name(h.by), age(h.at)].filter(Boolean).join(' · ')) + '</p></div></div>').join('') || emptyRow('No recent activity.'))
-      + '</aside></div>';
+    const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;
+    const agents = rows.slice(0, 5).map(row => h('div', {className:'card-row', 'data-key':'agent-' + row.agent + '-' + row.ticket}, h('span', {className:'dot ' + (row.state === 'stuck' ? 'needs' : row.state)}), h('div', {className:'grow'}, h('h3', {}, capitalise(name(row.agent) || 'Agent') + ' · ' + ({working:'working', needs:'needs you', stuck:'may be stuck', idle:'idle'}[row.state])), h('p', {className:'meta'}, row.state === 'idle' ? 'Last worked ' + age(row.since) + ' ago' : [clean(ticketOf(row.ticket)?.title), age(row.since)].filter(Boolean).join(' · ')))));
+    const links = window.DashHelpers.serviceLinks(state.services, location.origin);
+    const recent = history.map(({entry, title}) => {
+      const line = clean(window.DashHelpers.historyLine(entry));
+      return h('div', {className:'card-row'}, h('div', {className:'grow'}, h('h3', {}, line.length > 80 ? line.slice(0, 79) + '…' : line), h('p', {className:'meta'}, [name(entry.by), clean(title), age(entry.at)].filter(Boolean).join(' · '))));
+    });
+    return fragment(heading('Today', now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + needs.length + ' need you · ' + working.length + (working.length === 1 ? ' agent working' : ' agents working')), banner,
+      h('div', {className:'columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
+        card('needs-you', 'Needs you', needs.length + (oldest ? ' · oldest ' + age(oldest) : ''), needs.length ? needs.map(n => needRow(n, newest)) : emptyRow('Nothing needs you right now.'), true),
+        card('your-tickets', 'Your tickets', current.length + ' · ' + current.filter(overdue).length + ' overdue', current.length ? current.map(ticketRow) : firstTicket(), true)),
+      h('aside', {className:'stack', 'data-key':'right'},
+        card('agents', 'Agents', working.length + ' working', [agents.length ? agents : emptyRow('No agent is working right now.'), links.length ? h('div', {className:'card-row'}, links.map(link => h('a', {className:'meta', href:link.url, target:'_blank', rel:'noopener noreferrer'}, 'Open ' + capitalise(link.label) + ' →'))) : null]),
+        card('recently', 'Recently', '', recent.length ? recent : emptyRow('No recent activity.')))));
   }
   const expanded = new Set();
   function list() {
-    return heading('Tickets') + (!tickets().length ? card('empty', 'Tickets', '', '<div class="card-row"><p class="grow muted">Your first ticket starts here.</p>' + newButton() + '</div>') : ['active', 'waiting', 'open', 'done', 'dropped'].map(status => {
+    return fragment(heading('Tickets'), !tickets().length ? card('empty', 'Tickets', '', firstTicket()) : ['active', 'waiting', 'open', 'done', 'dropped'].map(status => {
       const group = sorted(tickets().filter(t => t.status === status));
-      if (!group.length) return '';
+      if (!group.length) return null;
       const title = {active:'Doing', waiting:'Waiting', open:'Open', done:'Done', dropped:'Dropped'}[status];
-      if (!['done', 'dropped'].includes(status)) return card('group-' + status, title, group.length, group.map(ticketRow).join(''));
+      if (!['done', 'dropped'].includes(status)) return card('group-' + status, title, group.length, group.map(ticketRow));
       const open = expanded.has(status);
-      return '<section class="card" data-key="group-' + status + '"><button type="button" class="card-h card-toggle" data-action="group" data-group="' + status + '" aria-expanded="' + open + '" aria-controls="group-' + status + '"><span class="chevron ' + (open ? '' : 'closed') + '">' + icon('down') + '</span><span>' + title + ' · ' + group.length + '</span></button><div id="group-' + status + '"' + (open ? '' : ' hidden') + '>' + group.map(ticketRow).join('') + '</div></section>';
-    }).join(''));
+      return h('section', {className:'card', 'data-key':'group-' + status}, h('button', {type:'button', className:'card-h card-toggle', 'data-action':'group', 'data-group':status, 'aria-expanded':open, 'aria-controls':'group-' + status}, h('span', {className:'chevron ' + (open ? '' : 'closed')}, iconEl('down')), h('span', {}, title + ' · ' + group.length)), h('div', {id:'group-' + status, hidden:!open}, group.map(ticketRow)));
+    }));
   }
   function addonValue(row, value) {
     if (value == null || value === '' || (Array.isArray(value) && !value.length)) return '';
-    if (row.format === 'time') return esc([date(value), time(value)].filter(Boolean).join(' '));
-    if (row.format === 'cron-human') return esc(value);
+    if (row.format === 'time') return [date(value), time(value)].filter(Boolean).join(' ');
+    if (row.format === 'cron-human') return String(value);
     if (row.format === 'yes-no') return value === true ? 'Yes' : value === false ? 'No' : '';
-    if (row.format === 'chips') return '<div class="chips">' + array(value).map(v => chip(clean(v))).join('') + '</div>';
-    return typeof value === 'object' ? '' : esc(clean(value));
+    if (row.format === 'chips') return h('div', {className:'chips'}, array(value).map(v => chip(clean(v))));
+    return typeof value === 'object' ? '' : clean(value);
   }
   function addonRows(ticket) {
     const rows = addons().flatMap(a => array(a.ticket_view).map(r => [r, (ticket.ext || {})[a.name]]))
       .map(([r, ext]) => [r, ext && typeof ext === 'object' ? addonValue(r, ext[r.field]) : '']).filter(([, v]) => v);
-    return rows.length ? '<dl class="addon-rows">' + rows.map(([r, v]) => '<dt>' + esc(r.label) + '</dt><dd>' + v + '</dd>').join('') + '</dl>' : '';
+    return rows.length ? h('dl', {className:'addon-rows'}, rows.map(([r, v]) => [h('dt', {}, r.label), h('dd', {}, v)])) : null;
   }
   function detail(t) {
-    if (!t) return heading('Ticket not found') + '<a href="#tickets">All tickets</a>';
+    if (!t) return fragment(heading('Ticket not found'), h('a', {href:'#tickets'}, 'All tickets'));
     const qs = questions(t).map(q => snapshot
-      ? card('question-' + q.id, clean(q.text), '', '<div class="card-row"><div class="grow"><p class="muted">Waiting for an answer</p><div class="row">' + array(q.options).map(o => chip(clean(o), o === q.recommended ? 'attn' : '')).join('') + '</div></div></div>')
-      : '<div data-key="question-' + esc(q.id) + '" data-question="' + esc(q.id) + '" data-ticket="' + esc(t.id) + '"></div>').join('');
+      ? card('question-' + q.id, clean(q.text), '', h('div', {className:'card-row'}, h('div', {className:'grow'}, h('p', {className:'muted'}, 'Waiting for an answer'), h('div', {className:'row'}, array(q.options).map(o => chip(clean(o), o === q.recommended ? 'attn' : ''))))))
+      : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
     // Evidence.chip produces preview buttons; without a preview URL, plain proof chips are clearer.
-    const tasks = array(t.checklist).map(task => '<div class="card-row"><span class="muted" aria-hidden="true">' + icon(task.done ? 'check' : 'more') + '</span><div class="grow"><h3>' + esc(clean(task.text)) + '</h3><p class="meta">' + (task.done ? 'Done' : 'Not done') + '</p><div class="row">' + array(task.evidence).map(ev => chip(clean(ev.summary || ev.text || ev.ref || 'Proof'))).join('') + '</div></div></div>').join('');
-    const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(h => '<div class="card-row"><p>' + esc([clean(h.text), name(h.by), age(h.at)].filter(Boolean).join(' · ')) + '</p></div>').join('');
-    return '<a href="#tickets" data-key="back">All tickets</a>' + heading(t.title)
-      + '<div class="row" data-key="ticket-meta">' + statusChip(t) + (t.owner ? chip(name(t.owner)) : '') + (t.due ? chip('Due ' + date(t.due)) : '') + (snapshot ? '' : '<button type="button" class="btn outline sm" data-action="edit" data-ticket="' + esc(t.id) + '">Edit</button>') + '</div>'
-      + (t.summary ? '<p data-key="summary" class="preserve-lines">' + esc(clean(t.summary)) + '</p>' : '')
-      + qs + card('tasks', 'Tasks', array(t.checklist).length, tasks || emptyRow('No tasks yet.'))
-      + card('history', 'History', '', history || emptyRow('No history yet.'))
-      + addonRows(t)
-      + '<details data-key="more"><summary>More details</summary><dl class="ticket-details"><div><dt>Ticket</dt><dd class="mono">' + esc(t.id) + '</dd></div><div><dt>Created</dt><dd>' + esc(date(t.created_at)) + '</dd></div><div><dt>Updated</dt><dd>' + esc(date(t.updated_at)) + '</dd></div>' + (t.note ? '<div><dt>Note</dt><dd class="preserve-lines">' + esc(clean(t.note)) + '</dd></div>' : '') + '</dl></details>';
+    const tasks = array(t.checklist).map(task => h('div', {className:'card-row'}, h('span', {className:'muted', 'aria-hidden':'true'}, iconEl(task.done ? 'check' : 'more')), h('div', {className:'grow'}, h('h3', {}, clean(task.text)), h('p', {className:'meta'}, task.done ? 'Done' : 'Not done'), h('div', {className:'row'}, array(task.evidence).map(ev => chip(clean(ev.summary || ev.text || ev.ref || 'Proof')))))));
+    const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => h('div', {className:'card-row'}, h('p', {}, [clean(entry.text), name(entry.by), age(entry.at)].filter(Boolean).join(' · '))));
+    const field = (label, value, cls = '') => h('div', {}, h('dt', {}, label), h('dd', {className:cls}, value));
+    return fragment(h('a', {href:'#tickets', 'data-key':'back'}, 'All tickets'), heading(t.title),
+      h('div', {className:'row', 'data-key':'ticket-meta'}, statusChip(t), t.owner ? chip(name(t.owner)) : null, t.due ? chip('Due ' + date(t.due)) : null, snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'edit', 'data-ticket':t.id}, 'Edit')),
+      t.summary ? h('p', {'data-key':'summary', className:'preserve-lines'}, clean(t.summary)) : null,
+      qs, card('tasks', 'Tasks', array(t.checklist).length, tasks.length ? tasks : emptyRow('No tasks yet.')),
+      card('history', 'History', '', history.length ? history : emptyRow('No history yet.')), addonRows(t),
+      h('details', {'data-key':'more'}, h('summary', {}, 'More details'), h('dl', {className:'ticket-details'}, field('Ticket', t.id, 'mono'), field('Created', date(t.created_at)), field('Updated', date(t.updated_at)), t.note ? field('Note', clean(t.note), 'preserve-lines') : null)));
   }
 
   // Reconcile matching DOM nodes so polling cannot replace a focused control or a draft.
@@ -172,11 +200,6 @@
     }
     for (const node of old) if (!used.has(node) && !locks.has(node.dataset?.key)) node.remove();
   }
-  function patch(target, html) {
-    const template = document.createElement('template');
-    template.innerHTML = html;
-    reconcile(target, template.content);
-  }
   const seenNeeds = new Set();
   function accept(next) {
     const first = !state;
@@ -206,14 +229,14 @@
     document.getElementById('workspace-name').textContent = clean(state.workspace || 'Workspace');
     document.getElementById('workspace-mode').textContent = snapshot ? 'Shared copy' : 'Local workspace';
     document.getElementById('crumb').textContent = pageName;
-    const navLink = (url, text, glyph, tail = '') => '<a class="nav-item" href="' + esc(url) + '"' + ((r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.hash) === url ? ' aria-current="page"' : '') + '>' + icon(glyph) + esc(text) + tail + '</a>';
-    patch(nav, navLink('#home', 'Home', 'page', array(state.needs).length ? '<span class="count">' + array(state.needs).length + '</span>' : '') + navLink('#tickets', 'Tickets', 'table')
-      + '<p class="eyebrow">Add-ons</p>' + addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon, '<span class="addon-tag" aria-label="Add-on">A</span>')).join(''));
+    const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
+    reconcile(nav, fragment(navLink('#home', 'Home', 'page', array(state.needs).length ? h('span', {className:'count'}, array(state.needs).length) : null), navLink('#tickets', 'Tickets', 'table'),
+      h('p', {className:'eyebrow'}, 'Add-ons'), addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon, h('span', {className:'addon-tag', 'aria-label':'Add-on'}, 'A')))));
     if (changed) {
       for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
       main.replaceChildren();
     }
-    patch(main, r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : addonTab(r.id));
+    reconcile(main, r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : addonTab(r.id));
     for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
     main.querySelectorAll('[data-question]').forEach(host => {
       if (!mounts.has(host)) {
@@ -242,31 +265,28 @@
   let addonTimer, activeAddon = null;
   const addonLabel = a => a?.dashboard?.label || a?.label || a?.name || 'Add-on';
   function addonTab(id) {
-    return heading(addonLabel(addons().find(a => a.name === id))) + '<div id="addon-body" class="stack" data-name="' + esc(id) + '"></div>';
+    return fragment(heading(addonLabel(addons().find(a => a.name === id))), h('div', {id:'addon-body', className:'stack', 'data-name':id}));
   }
   function addonBody(a, res) {
-    if (!res) return '<div class="skeleton addon-loading" role="status" aria-label="Loading"></div>';
-    const retry = snapshot ? '' : '<button type="button" class="btn outline sm" data-action="retry-addon">Try again</button>';
-    if (res.state === 'error' || !res.view) return '<section class="card pad stack"><h2>Can’t show ' + esc(addonLabel(a)) + ' right now.</h2><p>' + esc(res.message || 'No answer.') + ' Nothing here was changed.</p>' + retry + '</section>';
-    return '<p class="meta">As of ' + esc(time(res.as_of)) + '</p>'
-      + (res.state === 'stale' ? '<div class="banner attn" role="status"><p class="grow">Not up to date. Showing the last answer from ' + esc(time(res.as_of)) + '.</p>' + retry + '</div>' : '')
-      + (res.view.notice ? '<p class="banner ' + (res.view.notice_tone === 'bad' ? 'error' : ['warn', 'needs-you'].includes(res.view.notice_tone) ? 'attn' : '') + '">' + esc(clean(res.view.notice)) + '</p>' : '') + '<div id="addon-blocks"></div>';
+    if (!res) return fragment(h('div', {className:'skeleton addon-loading', role:'status', 'aria-label':'Loading'}));
+    const retry = snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'retry-addon'}, 'Try again');
+    if (res.state === 'error' || !res.view) return fragment(h('section', {className:'card pad stack'}, h('h2', {}, 'Can’t show ', addonLabel(a), ' right now.'), h('p', {}, res.message || 'No answer.', ' Nothing here was changed.'), retry));
+    return fragment(h('p', {className:'meta'}, 'As of ', time(res.as_of)),
+      res.state === 'stale' ? h('div', {className:'banner attn', role:'status'}, h('p', {className:'grow'}, 'Not up to date. Showing the last answer from ', time(res.as_of), '.'), retry) : null,
+      res.view.notice ? h('p', {className:'banner ' + (res.view.notice_tone === 'bad' ? 'error' : ['warn', 'needs-you'].includes(res.view.notice_tone) ? 'attn' : '')}, clean(res.view.notice)) : null, h('div', {id:'addon-blocks'}));
   }
   function paintAddon(id) {
     const host = document.getElementById('addon-body'), a = addons().find(a => a.name === id);
     if (!host || host.dataset.name !== id || !a) return;
     const scroll = [window.scrollX, window.scrollY];
-    const template = document.createElement('div');
-    template.innerHTML = addonBody(a, addonViews[id]);
+    const template = addonBody(a, addonViews[id]);
     const blocks = template.querySelector('#addon-blocks');
     if (blocks) {
       blocks.append(OrchBlocks.render(addonViews[id].view.blocks));
-      if (!blocks.childNodes.length) blocks.innerHTML = '<section class="card pad muted">Nothing to show yet.</section>';
+      if (!blocks.childNodes.length) blocks.append(h('section', {className:'card pad muted'}, 'Nothing to show yet.'));
       blocks.querySelectorAll('.blk').forEach(n => n.classList.add('card'));
       blocks.querySelectorAll('svg').forEach(n => {
-        const replacement = el('span');
-        replacement.innerHTML = icon('external');
-        n.replaceWith(replacement);
+        n.replaceWith(iconEl('external'));
       });
       // Block text is supplied by add-ons; keep internal keys out of visible copy.
       const walker = document.createTreeWalker(blocks, NodeFilter.SHOW_TEXT);
@@ -360,8 +380,19 @@
         if (lock) locks.add(lock);
         const result = await act('answer', {ticket:q.ticket, question:q.id, answer});
         if (!result.ok) {
+          let fresh = result.state;
+          try {
+            if (!fresh) {
+              const res = await fetch('/api/state', {cache:'no-store'});
+              if (res.ok) fresh = await res.json();
+            }
+          } catch (_) { /* Keep the original send error if the refresh also fails. */ }
+          const win = window.DashHelpers.winningAnswer(fresh?.tickets, q.ticket, q.id);
+          // Keep the mounted card and any open dialog intact while accepting the refresh.
+          if (fresh) { mutation++; accept(fresh); }
           if (lock && !context.dialog) locks.delete(lock);
-          return {status:result.status === 409 ? 409 : 0, message:result.text, other:{text:result.text}};
+          if (win !== null) return {status:409, other:{text:win.text, who:name(win.who), via:win.via}};
+          return {status:0, message:result.text};
         }
         const answered = array(ticketOf(q.ticket)?.questions).find(x => x.id === q.id);
         const who = name(answered?.answered_by || result.state.who) || 'You';
@@ -390,15 +421,24 @@
     if (label) label.textContent = clean(ticketOf(q.ticket)?.title) || 'Ticket';
     mounts.set(host, mounted);
   }
-  function openNeed(row, trigger) {
+  async function openNeed(row, trigger) {
     if (!row) return;
-    if (row.answer && row.kind !== 'overdue-wait') {
+    const action = window.DashHelpers.needAction(row);
+    if (action.kind === 'run') {
+      if (trigger.disabled) return;
+      trigger.disabled = true;
+      const result = await act('run.start', {ticket:row.ticket});
+      trigger.disabled = false;
+      window.orch.toast(result.ok ? 'Started again' : result.text, result.ok ? 'ok' : 'error');
+      return;
+    }
+    if (action.kind === 'answer' || action.kind === 'review') {
       const {d, actions} = dialog(row.title, 'dialog', 'needs-you');
       const host = el('div');
       d.append(host, actions);
       mountQuestion(host, {ticket:row.ticket, id:row.answer.question, title:row.title, text:row.text, options:array(row.answer.options).map(o => ({text:o, suggested:o === row.answer.recommended}))}, {dialog:d, row:trigger.closest('[data-need-row]'), lock:'needs-you'});
       window.orch.open(d);
-    } else if (ticketOf(row.ticket)) location.hash = href(row.ticket);
+    } else if (row.ticket) location.hash = href(row.ticket);
     else {
       const a = addons().find(a => a.dashboard && (a.name === row.source || String(row.kind).startsWith(a.name + ':')));
       if (a) location.hash = '#addon/' + encodeURIComponent(a.name);
@@ -494,10 +534,8 @@
       if (locks.has('background')) return;
       locks.add('background');
       control.disabled = true;
-      for (const service of array(state.services).filter(s => s.running === false)) {
-        const result = await act('addon.start', {addon:service.addon});
-        if (!result.ok) { window.orch.toast(result.text, 'error'); break; }
-      }
+      const result = await act('addon.start', {});
+      if (!result.ok) window.orch.toast(result.text, 'error');
       locks.delete('background');
       control.disabled = false;
       render();
