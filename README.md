@@ -81,7 +81,7 @@ irm https://raw.githubusercontent.com/severinlindenmann/orch/main/install.ps1 | 
 ```
 
 This installs [uv](https://docs.astral.sh/uv/) if you do not have it, then the `orch` command. If it asks you to add a line to
-your shell file, do that and open a new terminal.
+your shell file, do that and open a new terminal. No admin rights and no git are needed (Windows too).
 
 ## First steps
 

@@ -11,12 +11,24 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 REPO="${ORCH_REPO:-https://github.com/severinlindenmann/orch}"
 REF="${ORCH_REF:-main}"
+R="${REPO%.git}"
+# A ref is a plain git ref name: in a zip URL a '../' or '#' could reach another repository or folder.
+case "$REF" in
+  *..*|-*|/*|*.lock|*/|"") echo "'$REF' is not a branch, tag or commit name (check ORCH_REF)." >&2; exit 1 ;;
+esac
+# Any other character (newlines too: the "!" end mark keeps $(...) from dropping trailing ones)
+if [ "$(printf '%s!' "$REF" | tr -d 'A-Za-z0-9._/-')" != "!" ]; then
+  echo "'$REF' is not a branch, tag or commit name (check ORCH_REF)." >&2; exit 1
+fi
 if [ -d "$REPO" ]; then
   SPEC="$REPO/workspace"
 else
-  SPEC="git+${REPO%.git}@${REF}#subdirectory=workspace"
+  case "$R" in
+    https://github.com/*) SPEC="$R/archive/$REF.zip#subdirectory=workspace" ;;  # a zip download: no git needed
+    *) SPEC="git+$R@$REF#subdirectory=workspace" ;;
+  esac
 fi
-uv tool install --reinstall "$SPEC"
+uv tool install --reinstall --refresh "$SPEC"
 BIN="$HOME/.local/bin"
 # Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
 TOOL_BIN="$(uv tool dir --bin 2>/dev/null || echo "$BIN")"

@@ -12,6 +12,7 @@ jobs:
     outputs:
       contracts: ${{ steps.f.outputs.contracts }}
       workspace: ${{ steps.f.outputs.workspace }}
+      install: ${{ steps.f.outputs.install }}
       addons: ${{ steps.f.outputs.addons }}
       publish: ${{ steps.f.outputs.publish }}
       relay: ${{ steps.f.outputs.relay }}
@@ -23,7 +24,8 @@ jobs:
         with:
           filters: |
             contracts: ['contracts/**', '.github/workflows/contracts.yml']
-            workspace: ['workspace/**', 'contracts/**', '.github/workflows/workspace.yml']
+            workspace: ['workspace/**', 'contracts/**', 'install.ps1', 'install.sh', 'e2e/windows/**', '.github/workflows/workspace.yml']
+            install: ['install.ps1', 'install.sh', 'e2e/windows/**', 'workspace/src/orch/addons.py', 'workspace/src/orch/term.py']
             addons: ['workspace-addons/**', 'workspace/**', 'contracts/**', '.github/workflows/addons.yml']
             publish: ['publish/**', 'contracts/**', '.github/workflows/publish.yml']
             relay: ['relay/**', 'contracts/**', '.github/workflows/relay.yml']
@@ -39,6 +41,8 @@ jobs:
     with:
       # PRs into develop: Linux only. Everything else (push to develop/main, PRs into main, manual): + macOS, Windows.
       full: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
+      # the Windows standard-user install also on PRs that change the install path
+      install: ${{ needs.changes.outputs.install == 'true' }}
   addons:
     needs: changes
     if: needs.changes.outputs.addons == 'true'

@@ -75,7 +75,7 @@ def _run(folder: Path, data: Path):
         "STORE": m["store"],
     }
     cmd = m["start"].split()
-    if cmd[0] == "python":
+    if cmd[0] in ("python", "python3"):  # Windows has no python3 (the publish host, Linux, does)
         cmd[0] = sys.executable
     proc = subprocess.Popen(cmd, cwd=folder, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return proc, f"http://127.0.0.1:{port}"
