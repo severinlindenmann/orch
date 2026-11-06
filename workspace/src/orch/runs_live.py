@@ -409,8 +409,8 @@ def cleanup(root: Path) -> list[str]:
 
 def _claim_close(root: Path, rec: dict) -> bool:
     """Right before an idle close: under the run lock, the run must still be the same, still idle (or waiting
-    for a person) since the same moment, with nothing waiting to go in. It is then marked closing, so deliver()
-    pastes nothing more into it; a message sent meanwhile stays waiting for the next start."""
+    for a person) since the same moment, with nothing waiting to go in. It is then marked closing, so
+    deliver() pastes nothing more into it; a message sent meanwhile stays waiting for the next start."""
     tid = rec["ticket"]
     with runs.locked(root, tid):
         now = runs.read(root, tid)
