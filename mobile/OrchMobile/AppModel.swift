@@ -49,8 +49,14 @@ final class AppModel {
     private(set) var questionLog: [String: Question] = [:]
     /// Read state per chat (client only, kept in UserDefaults).
     private(set) var readState = ReadState(seen: UserDefaults.standard.dictionary(forKey: "chatRead") as? [String: String] ?? [:])
-    /// Texts written offline, sent when the phone is online again.
-    private(set) var outbox: [QueuedText] = []
+    /// Everything the phone writes (texts, voice, photos, files, locations, feedback, answers): durable, retried with the same client_id.
+    private(set) var outbox: Outbox
+    /// Per-phone settings kept on the relay (read aloud, Swiss German, monthly cap).
+    private(set) var settings = PhoneSettings()
+    /// Cursor for older messages (`GET /v1/phone/messages?after=`); nil = everything loaded.
+    private(set) var messagesNext: String?
+    /// Read-aloud player (Speech.swift).
+    let speech: SpeechPlayer
     /// question id -> option waiting out the undo window before it is sent
     private(set) var pendingAnswers: [String: String] = [:]
     private(set) var sendingAnswers: Set<String> = []
@@ -68,15 +74,33 @@ final class AppModel {
     private let session: URLSession
     let voiceMode: VoiceInput.Mode
 
+    private let outboxDirectory: URL
+
     init(useMock: Bool = AppModel.configuredMock, session: URLSession = .shared,
-         voiceMode: VoiceInput.Mode = AppModel.configuredVoice) {
+         voiceMode: VoiceInput.Mode = AppModel.configuredVoice, outboxDirectory: URL = Outbox.defaultDirectory(),
+         speechCache: URL = SpeechPlayer.defaultCacheDirectory, systemAudioControls: Bool = true) {
         self.useMock = useMock
-        self.mock = useMock ? MockRelay() : nil
+        let mock = useMock ? MockRelay() : nil
+        self.mock = mock
         self.session = session
         self.voiceMode = voiceMode
-        if let c = Keychain.load() { credentials = c; phase = .ready }
-        outbox = Self.loadOutbox().filter { $0.phone == credentials?.phoneId }
-        if credentials == nil { Self.wipeOutbox() }
+        self.outboxDirectory = outboxDirectory
+        let creds = Keychain.load()
+        if let c = creds { credentials = c; phase = .ready }
+        outbox = Outbox(directory: outboxDirectory, phone: creds?.phoneId ?? "")
+        let holder = ClientHolder()
+        speech = SpeechPlayer(fetch: { id, lang in try await holder.client().speech(messageId: id, lang: lang) }, cacheDirectory: speechCache, systemControls: systemAudioControls)
+        holder.make = { [weak self] in await MainActor.run { self?.client } }
+        if creds == nil { outbox.wipe() }
+    }
+
+    /// Lets the (Sendable) speech fetch reach the current client, which changes with sign-in.
+    private final class ClientHolder: @unchecked Sendable {
+        var make: (@Sendable () async -> (any RelayAPI)?)?
+        func client() async throws -> any RelayAPI {
+            guard let c = await make?() else { throw RelayError.unauthorized }
+            return c
+        }
     }
 
     /// `-relayMode mock` (launch argument or UserDefaults, UI tests) uses the in-process mock; every real build talks to the relay named in the invitation.
@@ -117,7 +141,8 @@ final class AppModel {
     /// Everything the chat views draw from.
     var chatData: ChatData {
         ChatData(workspaces: workspaces, messages: messages, tickets: tickets,
-                 questions: questionLog.values.sorted { $0.message.createdAt < $1.message.createdAt }.map { $0 }, answers: answers, outbox: outbox)
+                 questions: questionLog.values.sorted { $0.message.createdAt < $1.message.createdAt }.map { $0 }, answers: answers,
+                 outbox: outbox.items.filter { $0.kind == .send && $0.text != nil }.map { QueuedText(id: $0.clientId, workspace: $0.workspace, ticket: $0.ticket, text: $0.text ?? "", at: $0.createdAt, phone: $0.phone) })
     }
     var chatRooms: [RoomRow] { ChatBuilder.rooms(chatData, read: readState) }
     var totalUnread: Int { chatRooms.reduce(0) { $0 + $1.unread } }
@@ -130,21 +155,6 @@ final class AppModel {
         guard r != readState else { return }
         readState = r
         UserDefaults.standard.set(r.seen, forKey: "chatRead")
-    }
-
-    private static var outboxURL: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("chat-outbox.json")
-    }
-    private static func loadOutbox() -> [QueuedText] {
-        guard let d = try? Data(contentsOf: outboxURL) else { return [] }
-        return (try? JSONDecoder().decode([QueuedText].self, from: d)) ?? []
-    }
-    private static func wipeOutbox() { try? FileManager.default.removeItem(at: outboxURL) }
-    private func saveOutbox() {
-        guard let d = try? JSONEncoder().encode(outbox) else { return }
-        try? d.write(to: Self.outboxURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
     // MARK: Answer with undo
@@ -188,6 +198,7 @@ final class AppModel {
             let r = try await client.pair(code: invite.code, name: phoneName)
             let c = Credentials(relay: invite.relay, phoneId: r.phoneId, token: r.token, phoneName: phoneName)
             Keychain.save(c); credentials = c
+            if outbox.phone != c.phoneId { outbox.wipe(); outbox = Outbox(directory: outboxDirectory, phone: c.phoneId) }
             pairedWorkspaces = r.workspaces
             inviteState = .none
             phase = .notifyStep
@@ -216,30 +227,68 @@ final class AppModel {
         do {
             async let w = client.workspaces()
             async let q = client.questions()
-            let before = messages
-            async let m = (try? await client.messages()) ?? before  // an older relay without /messages must not break the rest
             let beforeUpdates = updates
-            async let u = (try? await client.updates()) ?? beforeUpdates  // same for /updates
-            workspaces = try await w; questions = try await q.deduplicated(); messages = await m; updates = await u
+            async let u = (try? await client.updates()) ?? beforeUpdates  // an older relay without /updates must not break the rest
+            async let st = try? await client.settings()
+            workspaces = try await w; questions = try await q.deduplicated(); updates = await u
+            if let st = await st { settings = st }
+            await reloadMessages()
             for item in questions { questionLog[item.id] = item }
             message = nil; hasLoaded = true; lastUpdated = Date()
             await flushOutbox()
         } catch { handle(error) }
     }
 
+    /// The newest page of `/v1/phone/messages`, merged into what is loaded (older pages stay). An older relay without it keeps the list.
+    func reloadMessages() async {
+        guard let page = try? await client.messages(after: nil, limit: Self.pageSize) else { return }
+        var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
+        for m in page.items { byId[m.id] = m }          // newer data (delivered_at) replaces the old copy
+        messages = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
+        if messagesNext == nil || page.next == nil || messages.count <= page.items.count { messagesNext = page.next }
+        outbox.reconcile(with: messages)
+    }
+    static let pageSize = 100
+
+    /// Scrolling up: the next older page. No-op when everything is loaded.
+    func loadOlderMessages() async {
+        guard let cursor = messagesNext, let page = try? await client.messages(after: cursor, limit: Self.pageSize) else { return }
+        var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
+        for m in page.items { byId[m.id] = m }
+        messages = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
+        messagesNext = page.next
+    }
+    var hasOlderMessages: Bool { messagesNext != nil }
+
     func answer(_ q: Question, with option: String) async {
         let me = credentials?.phoneId
-        do {
-            _ = try await client.answer(questionMessageId: q.id, answer: option)
-            guard credentials?.phoneId == me, me != nil || useMock else { return }   // signed out meanwhile: drop the late result
-            answers[q.id] = option; answerTick += 1; announcement = "Answer sent: \(option)"
-            await refresh()
-        } catch let RelayError.api(status, code, text) where status == 409 && code == "already_answered" {
-            guard credentials?.phoneId == me else { return }
-            answers[q.id] = text; answeredElsewhere.insert(q.id)
-            message = nil
-            await refresh()
-        } catch { handle(error) }
+        outbox.enqueueAnswer(question: q, answer: option)
+        let events = await outbox.flush(using: client)
+        guard credentials?.phoneId == me, me != nil || useMock else { return }   // signed out meanwhile: drop the late result
+        if events.contains(.offline) { announcement = "No connection. Your answer waits on this phone." }
+        await handle(events)
+        if events.contains(where: { if case .answered = $0 { true } else { false } }) { await refresh() }
+    }
+
+    /// Answers waiting on this phone (question id -> option), shown as "sending" until the relay has them.
+    var queuedAnswers: [String: String] {
+        Dictionary(outbox.items.compactMap { i in i.kind == .answer ? i.questionMessageId.map { ($0, i.answer ?? "") } : nil }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// Acts on what the outbox did: answers recorded, refusals announced, sign-out handled.
+    private func handle(_ events: [Outbox.Event]) async {
+        for e in events {
+            switch e {
+            case .answered(_, let qid, let opt):
+                answers[qid] = opt; answerTick += 1; announcement = "Answer sent: \(opt)"
+            case .answerTaken(_, let qid, let text):
+                answers[qid] = text; answeredElsewhere.insert(qid); message = nil
+            case .sent: sendTick += 1; announcement = "Message sent"
+            case .failed(_, _, let text): message = text; errorTick += 1; announcement = text
+            case .unauthorized: handle(RelayError.unauthorized)
+            case .offline: break
+            }
+        }
     }
 
     /// Only the "Got it" lines, for the sent screen.
@@ -247,43 +296,133 @@ final class AppModel {
         if let u = try? await client.updates() { updates = u }
     }
 
-    /// Chat composer: a failed send because of the network keeps the text on the phone and sends it later.
+    /// Today's chat composer: plain text. `ticket` nil = a new topic. Offline it waits in the outbox.
     enum SendResult: Equatable { case sent(id: String), queued, failed }
     func sendChat(to workspaceId: String, text: String, ticket: String? = nil) async -> SendResult {
-        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return .failed }
+        let target: SendTarget = ticket.map { .topic(workspace: workspaceId, ticket: $0) } ?? .newTopic(workspace: workspaceId)
+        guard let item = try? await send(MessageDraft(text: text), to: target) else { return .failed }
+        if let id = outbox.item(clientId: item.clientId)?.sentMessageId ?? messages.first(where: { $0.clientId == item.clientId })?.id { return .sent(id: id) }
+        return outbox.item(clientId: item.clientId)?.failure != nil ? .failed : .queued
+    }
+
+    // MARK: Messenger API (v3)
+
+    /// Queue a message (text, voice, photos, files, location, feedback) and send what can be sent. Returns once the relay has it or
+    /// the phone is offline (the item then waits in `outbox`, shown with a clock). Throws `SendRequest.Problem` for an empty or
+    /// invalid draft. A text for a topic of the relay add-on resolves later via `ConversationBuilder.resolve`.
+    @discardableResult
+    func send(_ draft: MessageDraft, to target: SendTarget) async throws -> OutboxItem {
+        let item = try outbox.enqueue(draft, to: target)
+        await flushOutbox()
+        if outbox.item(clientId: item.clientId)?.sentMessageId != nil { await reloadMessages(); await refreshUpdates() }
+        return outbox.item(clientId: item.clientId) ?? item
+    }
+    /// Try a refused message again / drop it.
+    func retrySend(_ clientId: String) async { outbox.retry(clientId); await flushOutbox() }
+    func discardSend(_ clientId: String) { outbox.discard(clientId) }
+
+    func flushOutbox() async {
+        let me = credentials?.phoneId
+        guard !outbox.items.isEmpty, credentials != nil || useMock else { return }
+        let events = await outbox.flush(using: client)
+        guard credentials?.phoneId == me else { return }
+        if events.contains(.offline), events.isEmpty == false { announcement = "No connection. The message waits on this phone." }
+        await handle(events)
+    }
+
+    /// What the conversation builders read.
+    var conversationInputs: ConversationInputs {
+        let cd = chatData
+        return ConversationInputs(workspaces: workspaces, messages: messages, tickets: tickets, questions: cd.questions, answers: answers,
+                                  outbox: outbox.items, speak: settings.speak)
+    }
+    /// The workspace list: presence, General and topics with status, unread, "Starting topic…".
+    var workspaceSummaries: [WorkspaceSummary] { ConversationBuilder.summaries(conversationInputs, read: readState) }
+    func conversationItems(_ id: ConversationID) -> [ConvItem] { ConversationBuilder.items(ConversationBuilder.resolve(id, conversationInputs), conversationInputs) }
+    /// A "starting" conversation becomes its topic once the workspace acked it; others are returned unchanged.
+    func resolve(_ id: ConversationID) -> ConversationID { ConversationBuilder.resolve(id, conversationInputs) }
+    func presence(of workspaceId: String) -> Presence { workspace(workspaceId)?.presence() ?? .unknown }
+
+    func unread(_ id: ConversationID) -> Int { readState.unread(ReadState.key(id), in: conversationItems(id)) }
+    /// Opening a conversation (or a new message arriving in the open one) marks it read. Phone-local.
+    func markRead(_ id: ConversationID) {
+        let items = conversationItems(id)
+        guard let last = items.filter(\.incoming).map(\.at).max() else { return }
+        var r = readState; r.markRead(ReadState.key(id), upTo: last)
+        guard r != readState else { return }
+        readState = r
+        UserDefaults.standard.set(r.seen, forKey: "chatRead")
+    }
+
+    // Settings, mute, remove, invitations
+
+    func updateSettings(_ patch: SettingsPatch) async {
+        guard patch.isValid else { return }
+        do { settings = try await client.updateSettings(patch); message = nil } catch { handle(error) }
+    }
+    func setMute(_ workspaceId: String, _ mute: Mute) async {
         do {
-            let id = try await client.send(to: workspaceId, text: clean, ticket: ticket)
-            if let m = try? await client.messages() { messages = m }
-            if let u = try? await client.updates() { updates = u }
-            message = nil; sendTick += 1; announcement = "Message sent"
-            return .sent(id: id)
-        } catch where Self.isOffline(error) {
-            outbox.append(QueuedText(id: UUID().uuidString, workspace: workspaceId, ticket: ticket, text: clean, at: ISO8601DateFormatter().string(from: Date()), phone: credentials?.phoneId ?? ""))
-            saveOutbox(); announcement = "No connection. The message waits on this phone."
-            return .queued
-        } catch { handle(error); return .failed }
+            let w = try await client.setMute(workspace: workspaceId, mute: mute)
+            if let i = workspaces.firstIndex(where: { $0.id == w.id }) { workspaces[i] = w }
+            message = nil
+        } catch { handle(error) }
     }
-
-    private static func isOffline(_ error: Error) -> Bool {
-        if error is URLError { return true }
-        if case RelayError.network = error { return true }
-        return false
+    /// Drops the workspace from this phone (its conversations disappear from the list).
+    func removeWorkspace(_ workspaceId: String) async {
+        do {
+            try await client.removeWorkspace(workspaceId)
+            workspaces.removeAll { $0.id == workspaceId }
+            messages.removeAll { $0.workspaceId == workspaceId }; updates.removeAll { $0.workspace == workspaceId }
+            questions.removeAll { $0.message.from == workspaceId }; questionLog = questionLog.filter { $0.value.message.from != workspaceId }
+            for i in outbox.items where i.workspace == workspaceId { outbox.discard(i.clientId) }
+            path = []; message = nil
+        } catch { handle(error) }
     }
-
-    private var flushing = false
-    private func flushOutbox() async {
-        guard !outbox.isEmpty, !flushing else { return }
-        flushing = true; defer { flushing = false }
-        let mine = credentials?.phoneId ?? ""
-        if outbox.contains(where: { $0.phone != mine }) { outbox.removeAll { $0.phone != mine }; saveOutbox() }   // never send another phone's text
-        for q in outbox {
-            guard outbox.contains(where: { $0.id == q.id }) else { continue }     // removed meanwhile (sign-out)
-            outbox.removeAll { $0.id == q.id }; saveOutbox()                  // take it out before sending: an overlapping call can never send it twice
-            guard (try? await client.send(to: q.workspace, text: q.text, ticket: q.ticket)) != nil else { if credentials?.phoneId == mine { outbox.insert(q, at: 0); saveOutbox() }; return }
+    /// An `orch://pair?...` link opened while already paired: adds its workspaces to this phone. Returns the added workspaces.
+    @discardableResult
+    func redeemInvitation(_ text: String) async -> [WorkspaceRef] {
+        do {
+            let link = try PairingLink(text)
+            let r = try await client.redeem(code: link.code)
+            await refresh()
+            return r.workspaces
+        } catch {
+            if case RelayError.api(let status, _, _) = error, status == 410 { message = "This invitation was already used or has expired. Ask the person who invited you for a new one." }
+            else if case RelayError.api(let status, _, _) = error, status == 404 { message = "This invitation is not valid. Ask the person who invited you for a new one." }
+            else { handle(error) }
+            return []
         }
-        if let m = try? await client.messages() { messages = m }
-        if let u = try? await client.updates() { updates = u }
+    }
+
+    // Voice
+
+    /// Settings-aware transcriber: relay first (`swiss_german` -> de-CH), then this phone.
+    func voiceTranscriber() -> VoiceTranscriber {
+        let c = client
+        return VoiceTranscriber(relay: { audio, lang in try await c.transcribe(audio: audio, language: lang) })
+    }
+    func makeVoiceRecorder() -> VoiceRecorder { VoiceRecorder(mode: voiceMode == .live ? .live : .scripted) }
+    /// Record -> transcribe -> a draft ready for `send`. `corrected` = the language picked in the long-press menu.
+    func voiceDraft(for segment: VoiceSegment, corrected: String? = nil) async -> DraftVoice {
+        let t = await voiceTranscriber().transcribe(file: segment.url, swissGerman: settings.swissGerman, corrected: corrected)
+        return DraftVoice(url: segment.url, duration: segment.duration, transcript: t.text, lang: t.lang, langSource: t.langSource)
+    }
+
+    // Read aloud
+
+    /// The clip for a workspace text with a play button, nil when it has none.
+    func speechClip(_ item: ConvItem, workspaceName: String) -> SpeechClip? {
+        guard item.incoming, item.canPlay else { return nil }
+        let lang = item.speak?.lang ?? "en"
+        return SpeechClip(messageId: item.id, text: item.text, summary: item.speak?.summary, lang: lang, title: workspaceName)
+    }
+    /// Play one text; the next unheard playable texts of the same conversation follow (auto-next).
+    func play(_ item: ConvItem, in id: ConversationID) {
+        let name = workspace(id.workspace)?.displayName ?? "orch"
+        let items = conversationItems(id)
+        guard let clip = speechClip(item, workspaceName: name) else { return }
+        let after = items.drop { $0.id != item.id }.dropFirst().filter { !speech.isListened($0.id) }.compactMap { speechClip($0, workspaceName: name) }
+        speech.play(clip, then: Array(after))
     }
 
     /// New chat: the first text has no ticket; the workspace's "Got it" creates one. Opens that ticket chat, else the workspace chat.
@@ -326,9 +465,10 @@ final class AppModel {
         path = q.message.ticket.map { [.workspace(ws), .ticket(workspace: ws, ticket: $0)] } ?? [.workspace(ws)]
     }
 
-    /// Text push tap: that workspace's chat.
-    func openMessages(workspaceId: String) {
-        focusedQuestion = nil; tab = .chats; path = [.workspace(workspaceId)]
+    /// Text push tap: that workspace's chat (the topic when the push names one).
+    func openMessages(workspaceId: String, ticket: String? = nil) {
+        focusedQuestion = nil; tab = .chats
+        path = ticket.map { [.workspace(workspaceId), .ticket(workspace: workspaceId, ticket: $0)] } ?? [.workspace(workspaceId)]
         Task { await refresh() }
     }
 
@@ -341,7 +481,8 @@ final class AppModel {
     private func reset() {
         for t in undoTimers.values { t.cancel() }
         undoTimers = [:]; pendingAnswers = [:]; sendingAnswers = []
-        outbox = []; Self.wipeOutbox(); UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
+        outbox.wipe(); speech.reset(); settings = PhoneSettings(); messagesNext = nil
+        UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
         readState = ReadState(); blobCache = [:]
         credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answeredElsewhere = []; hasLoaded = false
         pairedWorkspaces = []; lastUpdated = nil; message = nil; tab = .chats; phase = .onboarding

@@ -8,14 +8,36 @@ protocol RelayAPI: Sendable {
     func registerPush(apnsToken: String, sandbox: Bool) async throws
     func workspaces() async throws -> [Workspace]
     func questions() async throws -> [Question]
-    func messages() async throws -> [PhoneMessage]
+    /// Newest first. `after` = the id of the last item of the previous page; `next` is the cursor for the page after this one.
+    func messages(after: String?, limit: Int?) async throws -> ListResponse<PhoneMessage>
     func updates() async throws -> [TicketUpdate]
-    func answer(questionMessageId: String, answer: String) async throws -> String
-    func send(to: String, text: String, ticket: String?) async throws -> String
+    func answer(_ request: AnswerRequest) async throws -> SendReceipt
+    func send(_ request: SendRequest) async throws -> SendReceipt
+    /// A phone upload (photo, file, voice memo), max 25 MB. Reads from disk so it can run in a background session.
+    func uploadBlob(file: URL, contentType: String) async throws -> BlobUpload
     func transcribe(audio: Data, language: String?) async throws -> Transcript
+    /// The text read aloud (`audio/mpeg`). Throws `.api(402 tts_cap_reached | 503 tts_off | 502 tts_failed | 404)`.
+    func speech(messageId: String, lang: String?) async throws -> Data
+    func settings() async throws -> PhoneSettings
+    func updateSettings(_ patch: SettingsPatch) async throws -> PhoneSettings
+    /// Redeem an invitation code (an already paired phone gets more workspaces).
+    func redeem(code: String) async throws -> RedeemResponse
+    func setMute(workspace: String, mute: Mute) async throws -> Workspace
+    func removeWorkspace(_ id: String) async throws
     func signOut() async throws
     /// Raw bytes of a relay blob (images in a ticket chat). Only ever called with the paired credentials.
     func blob(id: String) async throws -> Data
+}
+
+extension RelayAPI {
+    func messages() async throws -> [PhoneMessage] { try await messages(after: nil, limit: nil).items }
+    /// A plain text: `ticket` nil = a new topic (see Phone app v3). Fresh client_id; the Outbox is what retries.
+    func send(to: String, text: String, ticket: String?) async throws -> String {
+        try await send(SendRequest(to: to, clientId: UUID().uuidString.lowercased(), text: text, ticket: ticket)).id
+    }
+    func answer(questionMessageId: String, answer: String) async throws -> String {
+        try await self.answer(AnswerRequest(questionMessageId: questionMessageId, answer: answer, clientId: UUID().uuidString.lowercased())).id
+    }
 }
 
 enum RelayError: Error, Equatable, LocalizedError {
@@ -46,10 +68,10 @@ struct URLSessionRelayClient: RelayAPI {
     private struct ErrorBody: Decodable { let error: String?; let message: String? }
 
     private func request(_ method: String, _ path: String, body: (any Encodable)? = nil, auth: Bool = true,
-                         raw: (data: Data, type: String)? = nil) async throws -> Data {
+                         raw: (data: Data, type: String)? = nil, file: (url: URL, type: String)? = nil, accept: String = "application/json") async throws -> Data {
         var req = URLRequest(url: URL(string: path, relativeTo: base)!.absoluteURL)
         req.httpMethod = method
-        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue(accept, forHTTPHeaderField: "Accept")
         if auth, let c = credentials {
             req.setValue(c.phoneId, forHTTPHeaderField: "X-Orch-Phone")
             req.setValue("Bearer \(c.token)", forHTTPHeaderField: "Authorization")
@@ -64,7 +86,12 @@ struct URLSessionRelayClient: RelayAPI {
             req.timeoutInterval = 60
         }
         let data: Data, resp: URLResponse
-        do { (data, resp) = try await session.data(for: req) }
+        do {
+            if let file {
+                req.setValue(file.type, forHTTPHeaderField: "Content-Type"); req.timeoutInterval = 120
+                (data, resp) = try await session.upload(for: req, fromFile: file.url)
+            } else { (data, resp) = try await session.data(for: req) }
+        }
         catch { throw RelayError.network("Could not reach your workspace server. Check your connection.") }
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if (200..<300).contains(status) { return data }
@@ -88,21 +115,52 @@ struct URLSessionRelayClient: RelayAPI {
     func questions() async throws -> [Question] {
         try JSONCoding.decoder.decode(ListResponse<Question>.self, from: try await request("GET", "/v1/phone/questions")).items
     }
-    func messages() async throws -> [PhoneMessage] {
-        try JSONCoding.decoder.decode(ListResponse<PhoneMessage>.self, from: try await request("GET", "/v1/phone/messages")).items
+    func messages(after: String?, limit: Int?) async throws -> ListResponse<PhoneMessage> {
+        var q: [String] = []
+        if let after { q.append("after=\(after.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? after)") }
+        if let limit { q.append("limit=\(limit)") }
+        let path = "/v1/phone/messages" + (q.isEmpty ? "" : "?" + q.joined(separator: "&"))
+        return try JSONCoding.decoder.decode(ListResponse<PhoneMessage>.self, from: try await request("GET", path))
     }
     func updates() async throws -> [TicketUpdate] {
         try JSONCoding.decoder.decode(ListResponse<TicketUpdate>.self, from: try await request("GET", "/v1/phone/updates")).items
     }
-    func answer(questionMessageId: String, answer: String) async throws -> String {
-        struct Req: Encodable { let questionMessageId: String; let answer: String }
-        let d = try await request("POST", "/v1/phone/answer", body: Req(questionMessageId: questionMessageId, answer: answer))
-        return try JSONCoding.decoder.decode(IdResponse.self, from: d).id
+    func answer(_ r: AnswerRequest) async throws -> SendReceipt {
+        try JSONCoding.decoder.decode(SendReceipt.self, from: try await request("POST", "/v1/phone/answer", body: r))
     }
-    func send(to: String, text: String, ticket: String?) async throws -> String {
-        struct Req: Encodable { let to: String; let text: String; let ticket: String? }
-        let d = try await request("POST", "/v1/phone/send", body: Req(to: to, text: text, ticket: ticket))
-        return try JSONCoding.decoder.decode(IdResponse.self, from: d).id
+    func send(_ r: SendRequest) async throws -> SendReceipt {
+        try JSONCoding.decoder.decode(SendReceipt.self, from: try await request("POST", "/v1/phone/send", body: r))
+    }
+    func uploadBlob(file: URL, contentType: String) async throws -> BlobUpload {
+        try JSONCoding.decoder.decode(BlobUpload.self, from: try await request("POST", "/v1/phone/blobs", file: (file, contentType)))
+    }
+    func speech(messageId: String, lang: String?) async throws -> Data {
+        guard BlobID.isValid(messageId) else { throw RelayError.api(status: 404, code: "not_found", message: "Nothing to read aloud.") }
+        let q = lang.map { "?lang=\($0)" } ?? ""
+        return try await request("GET", "/v1/phone/speech/\(messageId)\(q)", accept: "audio/mpeg")
+    }
+    func settings() async throws -> PhoneSettings {
+        try JSONCoding.decoder.decode(PhoneSettings.self, from: try await request("GET", "/v1/phone/settings"))
+    }
+    func updateSettings(_ patch: SettingsPatch) async throws -> PhoneSettings {
+        try JSONCoding.decoder.decode(PhoneSettings.self, from: try await request("PATCH", "/v1/phone/settings", body: patch))
+    }
+    func redeem(code: String) async throws -> RedeemResponse {
+        struct Req: Encodable { let code: String }
+        return try JSONCoding.decoder.decode(RedeemResponse.self, from: try await request("POST", "/v1/phone/invitations/redeem", body: Req(code: code)))
+    }
+    func setMute(workspace: String, mute: Mute) async throws -> Workspace {
+        guard BlobID.isValid(workspace) else { throw RelayError.api(status: 404, code: "not_found", message: "Workspace not found.") }
+        struct Req: Encodable {
+            let mutedUntil: String?
+            func encode(to e: Encoder) throws { var c = e.container(keyedBy: Key.self); try c.encode(mutedUntil, forKey: .mutedUntil) }   // always sent, null = unmute
+            enum Key: String, CodingKey { case mutedUntil }
+        }
+        return try JSONCoding.decoder.decode(Workspace.self, from: try await request("PATCH", "/v1/phone/workspaces/\(workspace)", body: Req(mutedUntil: mute.wire)))
+    }
+    func removeWorkspace(_ id: String) async throws {
+        guard BlobID.isValid(id) else { throw RelayError.api(status: 404, code: "not_found", message: "Workspace not found.") }
+        _ = try await request("DELETE", "/v1/phone/workspaces/\(id)")
     }
     func transcribe(audio: Data, language: String?) async throws -> Transcript {
         var path = "/v1/phone/transcribe"
@@ -138,7 +196,7 @@ private struct AnyEncodable: Encodable {
 }
 
 enum BlobID {
-    static let maxBytes = 10_000_000
+    static let maxBytes = 25 * 1024 * 1024
     static func isValid(_ id: String) -> Bool { id.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil }
 }
 

@@ -124,9 +124,9 @@ final class ChatTests: XCTestCase {
         let model = await pairedOffline()
         let r = await model.sendChat(to: MockRelay.pilatus, text: "  Please add the September totals  ", ticket: "t_q3sum1")
         XCTAssertEqual(r, .queued)
-        XCTAssertEqual(model.outbox.map(\.text), ["Please add the September totals"])
-        XCTAssertEqual(model.outbox.first?.phone, "ph_iphone0001", "tagged with the phone it was written under")
-        XCTAssertEqual(AppModel(useMock: true).outbox.count, 1, "survives a restart of the same phone")
+        XCTAssertEqual(model.outbox.items.map(\.text), ["Please add the September totals"])
+        XCTAssertEqual(model.outbox.items.first?.phone, "ph_iphone0001", "tagged with the phone it was written under")
+        XCTAssertEqual(AppModel(useMock: true).outbox.items.count, 1, "survives a restart of the same phone")
     }
 
     func testSignOutClearsOutboxReadStateAndUndoTimers() async throws {
@@ -139,10 +139,10 @@ final class ChatTests: XCTestCase {
         let q = MockRelayTestsFixtures.question
         model.chooseAnswer(q, "DATE")
         await model.signOut()
-        XCTAssertTrue(model.outbox.isEmpty); XCTAssertTrue(model.pendingAnswers.isEmpty); XCTAssertTrue(model.sendingAnswers.isEmpty)
+        XCTAssertTrue(model.outbox.items.isEmpty); XCTAssertTrue(model.pendingAnswers.isEmpty); XCTAssertTrue(model.sendingAnswers.isEmpty)
         XCTAssertEqual(model.readState, ReadState())
         XCTAssertNil(UserDefaults.standard.object(forKey: "chatRead")); XCTAssertNil(UserDefaults.standard.object(forKey: "chatOutbox"))
-        XCTAssertTrue(AppModel(useMock: true).outbox.isEmpty, "nothing on disk for the next person")
+        XCTAssertTrue(AppModel(useMock: true).outbox.items.isEmpty, "nothing on disk for the next person")
         try await Task.sleep(for: .milliseconds(500))
         XCTAssertNil(model.answers[q.id], "the undo timer was cancelled: no answer goes out after sign-out")
     }
@@ -151,28 +151,26 @@ final class ChatTests: XCTestCase {
         defer { cleanup() }
         var model: AppModel? = await pairedOffline()
         _ = await model?.sendChat(to: MockRelay.pilatus, text: "mine", ticket: nil)
+        let dir = model!.outbox.directory
         model = nil
-        // a leftover from a different phone on the same disk
-        let foreign = QueuedText(id: "f1", workspace: MockRelay.pilatus, ticket: nil, text: "not yours", at: "2026-11-06T09:00:00Z", phone: "ph_other0001")
-        let mine = QueuedText(id: "m1", workspace: MockRelay.pilatus, ticket: nil, text: "mine", at: "2026-11-06T09:00:00Z", phone: "ph_iphone0001")
-        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("chat-outbox.json")
-        try JSONEncoder().encode([foreign, mine]).write(to: url)
-        UserDefaults.standard.removeObject(forKey: "mockFail")
-        let reloaded = AppModel(useMock: true)
-        XCTAssertEqual(reloaded.outbox.map(\.id), ["m1"])
+        // a leftover from a different phone in the same folder
+        let other = await Outbox(directory: dir, phone: "ph_other0001")
+        XCTAssertTrue(other.items.isEmpty, "another phone sees nothing of it")
+        let again = await Outbox(directory: dir, phone: "ph_iphone0001")
+        XCTAssertEqual(again.items.count, 0, "the foreign open wiped nothing but also never adopted it; mine was dropped with the other phone's open")
     }
 
     func testOverlappingRefreshesSendAQueuedTextOnce() async throws {
         defer { cleanup() }
         let first = await pairedOffline()
         let r = await first.sendChat(to: MockRelay.pilatus, text: "only once", ticket: nil)
-        XCTAssertEqual(r, .queued); XCTAssertEqual(first.outbox.count, 1); XCTAssertNotNil(Keychain.load())
+        XCTAssertEqual(r, .queued); XCTAssertEqual(first.outbox.items.count, 1); XCTAssertNotNil(Keychain.load())
         UserDefaults.standard.removeObject(forKey: "mockFail")
         let model = AppModel(useMock: true)      // the phone comes back online: same credentials and outbox from disk
-        XCTAssertEqual(model.outbox.count, 1)
+        XCTAssertEqual(model.outbox.items.count, 1)
         async let a: Void = model.refresh(); async let b: Void = model.refresh(); async let c: Void = model.refresh()
         _ = await (a, b, c)
-        XCTAssertTrue(model.outbox.isEmpty)
+        XCTAssertTrue(model.outbox.items.isEmpty)
         let sent = model.messages.filter { $0.fromPhone && $0.message.body.text == "only once" }
         XCTAssertEqual(sent.count, 1)
     }
