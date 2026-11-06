@@ -213,5 +213,11 @@ final class ChatTests: XCTestCase {
         XCTAssertEqual(ChatBuilder.timeText("2026-11-05T11:20:00Z", now: now, calendar: cal), "Yesterday")
         XCTAssertEqual(ChatBuilder.timeText("2026-11-01T11:20:00Z", now: now, calendar: cal).isEmpty, false)
     }
-}
 
+    /// An image shows its proof title ("Q3 chart"), like files and links; the file name only without one.
+    func testAttachmentLabelPrefersTheTitle() {
+        XCTAssertEqual(TicketSnapshot.Attachment(kind: "image", title: "Q3 chart", name: "bright.png").label, "Q3 chart")
+        XCTAssertEqual(TicketSnapshot.Attachment(kind: "image", name: "bright.png").label, "bright.png")
+        XCTAssertEqual(TicketSnapshot.Attachment(kind: "image").label, nil)
+    }
+}
