@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from orch import services
+from orch import services, term
 from orch.errors import Refused
 
 
@@ -46,7 +46,7 @@ def _service_line(r: dict) -> str:
 def _pick(running: list[dict]) -> list[Path]:
     if not running:
         return []
-    if not sys.stdin.isatty():
+    if not term.is_terminal(sys.stdin):
         raise Refused(
             "Say which workspace to stop: orch stop <folder|name>, or orch stop --all. "
             "See what runs: orch status"
@@ -77,7 +77,7 @@ def _services_cmd(args, root: Path) -> None:
             print("\n".join(_service_line(r) for r in rows))
             print("Stop: orch stop")
         url = next((services.local_url(r.get("url")) for r in rows if services.local_url(r.get("url"))), None)
-        if url and not args.no_open and not args.json and sys.stdout.isatty():
+        if url and not args.no_open and not args.json and term.is_terminal(sys.stdout):
             import webbrowser
 
             webbrowser.open(url)

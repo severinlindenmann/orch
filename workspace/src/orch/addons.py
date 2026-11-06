@@ -25,7 +25,7 @@ import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import skillrender, skills
+from orch import skillrender, skills, term
 from orch.errors import Refused
 
 DEFAULT_REPO = "https://github.com/severinlindenmann/orch"
@@ -773,7 +773,7 @@ def _confirm(m: dict, local: bool, yes: bool) -> None:
     if yes:
         print(text)
         return
-    if not sys.stdin.isatty():
+    if not term.is_terminal(sys.stdin):
         raise Refused(f"{text}\nTo continue run it again with --yes.")
     sys.stderr.write(text + "\nAdd it? [y/N] ")
     sys.stderr.flush()
@@ -862,7 +862,7 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
                 _confirm(m, False, yes)
             elif yes:
                 m = None
-            elif not sys.stdin.isatty():
+            elif not term.is_terminal(sys.stdin):
                 raise Refused(f"Installing the built-in add-on {name}: run it again with --yes.")
             else:
                 m = preview_builtin(name)

@@ -1,8 +1,9 @@
 # Run standard-user-flow.ps1 as a new standard (non-admin) local user, with git hidden and the execution policy at
 # Windows' default (Restricted). Needs an admin shell on a THROWAWAY machine (CI runner, winvm clone): it creates a
 # user, grants it "log on as a batch job" and sets the machine policy.
-#   run-as-standard-user.ps1 -Ref <branch|sha> [-Installer <path to install.ps1>]
-param([Parameter(Mandatory)] [string]$Ref, [string]$Installer = "$PSScriptRoot\..\..\install.ps1", [int]$MaxSec = 1500)
+#   run-as-standard-user.ps1 -Ref <branch|sha> [-Installer <path to install.ps1>] [-Repo <local source folder>]
+param([Parameter(Mandatory)] [string]$Ref, [string]$Installer = "$PSScriptRoot\..\..\install.ps1", [string]$Repo = "",
+    [int]$MaxSec = 1500)
 $ErrorActionPreference = "Stop"
 $user = "orchsmoke"; $pass = "Smoke-$([guid]::NewGuid().ToString('N').Substring(0, 12))!"
 $pw = ConvertTo-SecureString $pass -AsPlainText -Force
@@ -31,7 +32,8 @@ $installerName = Split-Path $Installer -Leaf
 $path = ([Environment]::GetEnvironmentVariable("Path", "Machine") -split ";" |
     Where-Object { $_ -and -not (Test-Path (Join-Path $_ "git.exe")) }) -join ";"
 # Passed as a command, not -File: a .ps1 file would itself be refused under Restricted (irm | iex is not).
-$cmd = "`$env:Path = '$path'; `$env:ORCH_REF = '$Ref'; `$env:ORCH_INSTALL_PS1 = '$pub\$installerName'; " +
+$repoSet = if ($Repo) { "`$env:ORCH_REPO = '$Repo'; " } else { "" }
+$cmd = "`$env:Path = '$path'; $repoSet`$env:ORCH_REF = '$Ref'; `$env:ORCH_INSTALL_PS1 = '$pub\$installerName'; " +
     "Invoke-Expression (Get-Content '$pub\standard-user-flow.ps1' -Raw)"
 $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
 $a = New-ScheduledTaskAction -Execute powershell.exe -Argument "-NoProfile -NonInteractive -EncodedCommand $enc"

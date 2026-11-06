@@ -1,7 +1,8 @@
 # A standard Windows user's first steps with orch, exactly as the README says: the one-line install (no admin, no
 # git, default execution policy), then orch init, a ticket, an add-on and an update. Every result goes to the log;
 # the last line is "RESULT ok" or "RESULT fail: <what>". Started by run-as-standard-user.ps1, never by hand.
-# ORCH_REF (env) picks the branch or commit to install; ORCH_INSTALL_PS1 (env) is the installer file to run.
+# ORCH_REF (env) picks the branch or commit to install (or ORCH_REPO a local source folder); ORCH_INSTALL_PS1 (env) is the
+# installer file to run.
 $ErrorActionPreference = "Continue"
 $log = "$env:USERPROFILE\orch-flow.log"
 $fails = @()
@@ -32,7 +33,7 @@ Check ($before -eq (Get-ChildItem -Recurse -Force -File | Get-FileHash | Out-Str
 L "--- ticket"; $t = orch ticket new "Windows smoke" --json 2>&1 | Out-String; L $t
 Check ($LASTEXITCODE -eq 0) "orch ticket new"
 
-L "--- addon add dashboard"; orch addon add dashboard *>&1 | Out-String | % { L $_ }
+L "--- addon add dashboard"; orch addon add dashboard --yes *>&1 | Out-String | % { L $_ }
 Check ($LASTEXITCODE -eq 0) "orch addon add dashboard (installs from the zip, no git)"
 L "--- update"; orch update *>&1 | Out-String | % { L $_ }
 Check ($LASTEXITCODE -eq 0) "orch update"

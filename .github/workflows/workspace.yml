@@ -6,6 +6,10 @@ on:
         description: "also run macOS and Windows (push to develop/main, PRs into main, manual runs)"
         type: boolean
         default: false
+      install:
+        description: "the install path changed: run the Windows standard-user install on PRs too"
+        type: boolean
+        default: false
 jobs:
   test:
     strategy:
@@ -41,7 +45,8 @@ jobs:
           $item = Get-Item "$env:RUNNER_TEMP\smoke\.claude\skills" -Force
           if ($item.LinkType -ne "Junction") { throw "expected a junction, got $($item.LinkType)" }
   windows-standard-user:
-    # Every workspace PR: the README's Windows install as a standard user (no admin), no git, default execution
+    if: inputs.full || inputs.install
+    # The README's Windows install as a standard user (no admin), no git, default execution
     # policy, from this commit's GitHub zip; then init, a ticket, an add-on and an update (e2e/windows/).
     runs-on: windows-latest
     steps:
