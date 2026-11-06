@@ -241,6 +241,9 @@ def trust_folder(name: str, root: Path, environ: Mapping[str, str] | None = None
     t = ((load(name, root).get("live") or {}).get("trust")) if name else None
     if not t:
         return "none"
+    # only the workspace the person set up with `orch init` (its consent), never any other folder
+    if not (root / ".orch" / "tickets").is_dir() or (root / ".orch").is_symlink():
+        return "skipped"
     env = os.environ if environ is None else environ
     base = Path(env.get(t.get("dir_env") or "", "") or env.get("HOME") or Path.home())
     f = base / t["file"]

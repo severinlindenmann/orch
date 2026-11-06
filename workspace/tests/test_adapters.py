@@ -41,7 +41,12 @@ def test_argv_rule_checker_finds_bad_templates():
     assert len(adapters.argv_errors(bad)) == 2
 
 
-ORCH_OK = ["--allowedTools", "Bash(orch:*)"]  # the agent may always run orch itself (tasks, summary)
+RUN_CMDS = (
+    "check", "ask", "log", "link", "needs", "wait", "ticket show", "ticket list", "ticket tree", "ticket new",
+    "ticket summary", "ticket status", "ticket wait", "run done", "run status",
+)  # fmt: skip
+# the agent may run the orch commands a run needs (tasks, questions, summary), nothing else
+ORCH_OK = ["--allowedTools", ",".join(f"Bash(orch {c}:*)" for c in RUN_CMDS)]
 CLAUDE_FRESH = [
     "claude",
     "-p",
@@ -66,6 +71,26 @@ def test_claude_snapshots():
         "--settings", ".orch/run/hooks-r_1.json",
     ]  # fmt: skip
     assert adapters.render("claude", "resume", "live", v)[:3] == ["claude", "--resume", OLD]
+
+
+def test_no_blanket_orch_permission_in_any_argv():
+    v = {"prompt": "p", "new_session": NEW, "session": OLD, "orch_hooks_file": "h.json", "stream": True}
+    for name in adapters.builtin_names():
+        for mode in ("oneshot", "live"):
+            for kind in ("fresh", "resume"):
+                try:
+                    argv = adapters.render(name, kind, mode, v) or []
+                except Refused:
+                    continue
+                for item in argv:
+                    for rule in item.split(","):
+                        assert rule not in ("Bash(orch:*)", "Bash(orch *)", "Bash(orch)", "Bash"), (
+                            name,
+                            rule,
+                        )
+                        if rule.startswith("Bash(orch"):
+                            sub = rule[len("Bash(orch ") : -len(":*)")]
+                            assert sub in RUN_CMDS, rule  # never config, addon, run start, answer, init, ...
 
 
 def test_codex_snapshots():

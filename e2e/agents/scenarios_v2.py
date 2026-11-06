@@ -154,6 +154,10 @@ def r7(e):
     check(rc == 2 and (w.claim(tb) or {}).get("run") == c["run"], f"start must not take over a hand-started claim: rc={rc}")
 
 
+# a live tool asks before shell commands other than orch (by design: the person answers in the live session)
+TITLE = "A tiny giraffe fact page: giraffe.html and giraffe.json (file tools and orch only, no other shell commands)"
+
+
 def _dashboard_start(e, sid: str, tmux: bool) -> str:
     """The owner's flow: init --recommended, the dashboard, a ticket with no tasks, Start in the dashboard. The real
     agent must make at least one task and a summary within a few minutes. The folder is NOT pre-trusted."""
@@ -166,7 +170,13 @@ def _dashboard_start(e, sid: str, tmux: bool) -> str:
         cfg.write_text(json.dumps({"hasCompletedOnboarding": True, "theme": "dark"}))
     w.o("init", "--recommended", "--yes", by=None)
     w.o("start", "--no-open", by=None)
-    e.cleanup.append(lambda: w.sh(["orch", "stop"]))
+    try:
+        return _dashboard_flow(e, w, tmux)
+    finally:
+        w.sh(["orch", "stop"])  # free the dashboard's port before the next scenario starts its own
+
+
+def _dashboard_flow(e, w: W, tmux: bool) -> str:
     rows = w.j("status", by=None)[0]["addons"]
     base = next(r["url"] for r in rows if r["addon"] == "dashboard").rstrip("/")
 
@@ -175,7 +185,7 @@ def _dashboard_start(e, sid: str, tmux: bool) -> str:
         check(r.status == 200, f"dashboard {op}: {r.status} {r.body[:300]!r}")
         return r.json()
 
-    tid = next(t["id"] for t in act("ticket.new", {"title": "A tiny giraffe fact page: giraffe.html and giraffe.json"})["tickets"])
+    tid = next(t["id"] for t in act("ticket.new", {"title": TITLE})["tickets"])
     claim = act("run.start", {"ticket": tid})["runs"][tid]["claim"]
     check(claim["mode"] == ("live" if tmux else "oneshot"), f"Start picked {claim['mode']}")
 

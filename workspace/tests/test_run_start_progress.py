@@ -54,7 +54,11 @@ def test_a_one_shot_claude_streams_and_may_run_orch(proj, run):
     argv = runs.plan(proj, tid, mode="oneshot")["argv"]
     head = argv[: argv.index("--")]
     assert head[head.index("--output-format") + 1] == "stream-json"
-    assert head[head.index("--allowedTools") + 1] == "Bash(orch:*)"
+    rules = head[head.index("--allowedTools") + 1].split(",")
+    assert "Bash(orch check:*)" in rules and "Bash(orch ticket summary:*)" in rules
+    assert not [
+        r for r in rules if r.startswith(("Bash(orch config", "Bash(orch addon", "Bash(orch run start"))
+    ]
 
 
 def test_a_tool_without_a_stream_gets_no_stream_args(proj, run):
@@ -70,7 +74,17 @@ def _cfg(proj):
     return proj.parent / f"{proj.name}_home" / ".claude.json"
 
 
-def test_trust_sets_only_the_one_key_and_keeps_the_rest(proj):
+def test_trust_only_for_a_folder_set_up_with_orch_init(proj, tmp_path):
+    f = _cfg(proj)
+    f.write_text(json.dumps({"theme": "dark"}))
+    other = tmp_path / "not-a-workspace"
+    other.mkdir()
+    assert adapters.trust_folder("claude", other) == "skipped"
+    assert json.loads(f.read_text()) == {"theme": "dark"}
+
+
+def test_trust_sets_only_the_one_key_and_keeps_the_rest(proj, run):
+    run("init", "--yes")
     f = _cfg(proj)
     f.write_text(json.dumps({"theme": "dark", "projects": {"/other": {"x": 1}}}))
     f.chmod(0o600)
@@ -83,14 +97,16 @@ def test_trust_sets_only_the_one_key_and_keeps_the_rest(proj):
     assert not [p for p in f.parent.iterdir() if p.name.endswith(".tmp")]
 
 
-def test_trust_never_touches_a_missing_or_unreadable_file(proj):
+def test_trust_never_touches_a_missing_or_unreadable_file(proj, run):
+    run("init", "--yes")
     f = _cfg(proj)
     assert adapters.trust_folder("claude", proj) == "skipped" and not f.exists()
     f.write_text("{not json")
     assert adapters.trust_folder("claude", proj) == "skipped" and f.read_text() == "{not json"
 
 
-def test_trust_never_clobbers_a_write_by_the_tool(proj, monkeypatch):
+def test_trust_never_clobbers_a_write_by_the_tool(proj, run, monkeypatch):
+    run("init", "--yes")
     f = _cfg(proj)
     f.write_text(json.dumps({"n": 0}))
     real_dump = json.dump
