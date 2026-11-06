@@ -592,6 +592,26 @@ fn portal_blur_validation_skips_submit_button() {
 }
 
 #[test]
+fn portal_narrow_network_uses_connections_list() {
+    let css = include_str!("../web/style.css");
+    let narrow = css
+        .split("@media(max-width:720px){")
+        .skip(1)
+        .filter_map(|block| block.split("}}").next())
+        .find(|block| block.contains(".network{display:none}"))
+        .expect("hide the network diagram inside the narrow-screen media rule");
+    assert!(narrow.contains(".network-legend{display:none}"));
+    assert!(narrow.contains(".mobile-connections{display:block}"));
+    assert!(css.contains(".mobile-connections{display:none}"));
+}
+
+#[test]
+fn portal_has_no_inline_styles() {
+    let page = include_str!("../web/portal.html");
+    assert!(!page.to_lowercase().contains("style="));
+}
+
+#[test]
 fn portal_has_no_technical_details_fold() {
     let page = include_str!("../web/portal.html");
     assert!(!page.to_lowercase().contains("technical details"));
