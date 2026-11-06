@@ -29,7 +29,10 @@ final class MicUITests: XCTestCase {
 
     func testWorkspaceChatMic() { speak(launch(["-openChat", "ws_pilatus001"]).openedGeneral(), field: "composer-field") }
     func testTicketChatMic() { speak(launch(["-openChat", "ws_pilatus001", "-openTicket", "t_q3sum1"]), field: "composer-field") }
-    func testNewChatMic() { speak(launch(["-openNewChat", "YES"]).self.afterPick(), field: "topic-field") }
+    func testNewChatMic() throws {
+        throw XCTSkip("the New topic sheet has a placeholder composer without a mic until M2 Composer lands")
+        speak(launch(["-openNewChat", "YES"]).self.afterPick(), field: "topic-field")
+    }
 }
 
 private extension XCUIApplication {

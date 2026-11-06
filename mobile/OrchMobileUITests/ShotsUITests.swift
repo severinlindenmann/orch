@@ -40,6 +40,7 @@ final class ShotsUITests: XCTestCase {
         try shot(app, "4-question-undo"); app.terminate()
 
         app = launch(["-mockAllow", "YES", "-openChat", "ws_pilatus001"])
+        let generalAllow = app.buttons["general-ws_pilatus001"]; if generalAllow.waitForExistence(timeout: 15) { generalAllow.tap() }
         XCTAssertTrue(app.buttons["answer-Once"].waitForExistence(timeout: 15))
         try shot(app, "5-allow"); app.terminate()
 
