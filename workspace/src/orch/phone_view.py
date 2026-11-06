@@ -15,15 +15,13 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
-import os
 import re
-import stat
 import time
 import urllib.parse
 from datetime import datetime
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
-from orch import net, runs, tickets
+from orch import links, net, runs, safefile, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -119,74 +117,17 @@ def phone_proof(root: Path, ticket: dict) -> list[dict]:
     return out
 
 
-_DIR_FD = True  # tests turn it off to run the Windows path on POSIX
-
-
 def _proof_file(root: Path, tid: str, ev: dict) -> tuple[str, bytes] | None:
     """(name, bytes) of a copied proof file of this ticket, .orch/tickets/<tid>/evidence/<name>, never
-    anything else: the ref has exactly that shape; the folders are opened one by one from the workspace
-    without following links (dir_fd), the file too (O_NOFOLLOW, O_NONBLOCK: never a FIFO); it must be a
-    regular file with one link (no hard link to a secret) and at most 25 MB, read from that handle."""
-    ref = str(ev.get("ref", ""))
-    parts = ref.split("/")
-    name = parts[4] if len(parts) == 5 else ""
-    if (
-        len(parts) != 5
-        or parts[:4] != [".orch", "tickets", tid, "evidence"]
-        or name in ("", ".", "..")
-        or ":" in ref  # Windows streams and drives
-        or PureWindowsPath(name).drive
-        or PureWindowsPath(name).anchor
-        or "/" in name
-        or "\\" in ref
-        or "\0" in ref
-        or not tickets._ID_RE.fullmatch(tid)
-    ):
+    anything else: the ref has exactly that shape and the read goes through orch.safefile (the one reader)."""
+    parts = str(ev.get("ref", "")).split("/")
+    if len(parts) != 5 or parts[:4] != [".orch", "tickets", tid, "evidence"]:
         return None
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-    dir_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_DIRECTORY", 0)
-    fds: list[int] = []
     try:
-        if _DIR_FD and os.open in os.supports_dir_fd and hasattr(os, "O_DIRECTORY"):
-            # walk folder by folder from the workspace, each opened relative to the last one and never
-            # through a link: a folder swapped for a link while we look is refused, not followed
-            fds.append(os.open(os.path.realpath(root), os.O_RDONLY | os.O_DIRECTORY))
-            for part in parts[:4]:
-                fds.append(os.open(part, dir_flags, dir_fd=fds[-1]))
-            fd = os.open(name, flags, dir_fd=fds[-1])
-        else:  # Windows: no dir_fd. Check every part for links, contain the real path, re-check after open
-            base = Path(os.path.realpath(root))
-            cur = base
-            for part in parts:
-                cur = cur / part
-                if cur.is_symlink():
-                    return None
-            real = Path(os.path.realpath(cur))
-            secrets = Path(os.path.realpath(base / ".orch" / "secrets"))
-            if real.parent != base / ".orch" / "tickets" / tid / "evidence" or secrets in real.parents:
-                return None
-            before = os.lstat(real)
-            if not stat.S_ISREG(before.st_mode):
-                return None
-            fd = os.open(real, flags)
-            st = os.fstat(fd)
-            if (st.st_dev, st.st_ino) != (before.st_dev, before.st_ino):
-                os.close(fd)
-                return None
-    except OSError:
+        data = safefile.read_ticket_file(root, tid, "evidence", parts[4], tickets.MAX_PROOF_BYTES)
+    except safefile.TooLarge:
         return None
-    finally:
-        for d in fds:
-            os.close(d)
-    with os.fdopen(fd, "rb") as f:
-        st = os.fstat(f.fileno())
-        # a regular file with exactly one name: a hard link to e.g. .orch/secrets/relay.json is refused
-        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_size > tickets.MAX_PROOF_BYTES:
-            return None
-        data = f.read(tickets.MAX_PROOF_BYTES + 1)
-    if len(data) > tickets.MAX_PROOF_BYTES:
-        return None
-    return name, data
+    return (parts[4], data) if data is not None else None
 
 
 def _state_path(root: Path) -> Path:
@@ -253,11 +194,19 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
             out.append(
                 {"kind": "link", "title": _clip(ev.get("title") or url, 200) or "Link", "url": url, "at": at}
             )
+    kinds = links.active_kinds(root) if ticket.get("links") else []
     for ln in ticket.get("links") or []:
-        if url := safe_url(ln.get("url", "")):
-            out.append(
-                {"kind": "link", "title": _clip(ln.get("title") or url, 200) or "Link", "url": url, "at": at0}
-            )
+        if not isinstance(ln, dict) or not (url := safe_url(ln.get("url", ""))):
+            continue
+        d = links.describe(ln, kinds)  # same label, icon and status as the dashboard and CLI
+        at = ln["at"] if _TIME.fullmatch(str(ln.get("at"))) else at0
+        a = {"kind": "link", "title": _clip(ln.get("title") or url, 200) or "Link", "url": url, "at": at}
+        a.update(label=_clip(d["label"], 60) or "Link", icon=d["icon"])
+        if d["mono"]:
+            a["mono"] = d["mono"][:3]
+        if d["status"]:
+            a["status"] = d["status"]
+        out.append(a)
     out.sort(key=lambda a: a["at"], reverse=True)
     return out[:ATTACHMENTS]
 

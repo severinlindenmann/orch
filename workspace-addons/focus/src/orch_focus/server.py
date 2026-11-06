@@ -14,8 +14,9 @@ from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
+from urllib.parse import parse_qs
 
-from . import actions, adapterdata, chat, runfiles
+from . import actions, adapterdata, chat, proofs, runfiles
 from .board import Board, TicketWatcher
 from .events import RUN_ID, EventLog, for_display
 from .permissions import Permissions
@@ -30,7 +31,7 @@ TYPES = {
 }  # fmt: skip
 KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js")  # fmt: skip
-WEB_FILES = ("index.html", "focus.js", "focus.css", "logo.svg")
+WEB_FILES = ("index.html", "focus.js", "proof.js", "focus.css", "logo.svg")
 PREFIX = re.compile(r"/addon/[a-z][a-z0-9-]{1,31}")  # set by the dashboard when it shows this page under its own address
 CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'none'; base-uri 'none'"
 
@@ -265,7 +266,7 @@ class Tracker:
 
     def tickets_list(self) -> list[dict]:
         try:
-            code, out, _ = actions.orch(self.root, self.orch_bin, ["ticket", "list", "--json"], timeout=15)
+            code, out, _ = actions.orch(self.root, self.orch_bin, ["ticket", "list", "--all", "--json"], timeout=15)
             rows = json.loads(out) if code == 0 else []
         except (actions.Unavailable, ValueError, RecursionError):
             rows = []
@@ -274,7 +275,7 @@ class Tracker:
             if (
                 isinstance(t, dict)
                 and TID_RE.fullmatch(str(t.get("id")))
-                and t.get("status") in ("open", "active", "waiting")
+                and t.get("status") in ("open", "active", "waiting", "done")  # a done ticket opens as a read-only board
             ):
                 out.append(
                     {
@@ -304,7 +305,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", CSP)
+        if "Content-Security-Policy" not in (extra or {}):
+            self.send_header("Content-Security-Policy", CSP)
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -343,6 +345,11 @@ class Handler(BaseHTTPRequestHandler):
         if m:
             v = self.tracker.view(m.group(1))
             return self._json(200, v) if v else self._send(404, b"no such ticket", "text/plain")
+        if path == "/api/file":  # one proof file of a ticket, read by orch.safefile only (proofs.py)
+            q = parse_qs(self.path.partition("?")[2], keep_blank_values=True)
+            one = lambda k: (q.get(k) or [""])[0]
+            code, body, ctype, extra = proofs.read(self.root, one("t"), one("n"), one("m") or "view")
+            return self._send(code, body, ctype, {"Cross-Origin-Resource-Policy": "same-origin", **extra})
         if path == "/" or re.fullmatch(r"(/t)?/t/t_[a-z0-9]{6,16}", path):
             pre = (self.headers.get("X-Forwarded-Prefix") or "")
             pre = pre if PREFIX.fullmatch(pre) else ""

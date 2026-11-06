@@ -10,10 +10,10 @@
 <script src="/admin/kit.js"></script>
 <script>
 'use strict';
-const screens=[['overview','Overview'],['add','Add workspace'],['rules','Who can do what'],['messages','Messages'],['config','Shared tools'],['webhooks','Webhooks'],['phones','Phones']];
-function uiIcon(k){const span=document.createElement('span');span.innerHTML=window.icon(({overview:'home',add:'plus',rules:'swap',messages:'message',config:'tools',webhooks:'webhook',phones:'phone'})[k]||k,16);return span.firstElementChild}
+const screens=[['overview','Overview'],['add','Add workspace'],['groups','Groups'],['rules','Who can do what'],['messages','Messages'],['config','Shared tools'],['webhooks','Webhooks'],['phones','Phones']];
+function uiIcon(k){const span=document.createElement('span');span.innerHTML=window.icon(({overview:'home',add:'plus',groups:'group',rules:'swap',messages:'message',config:'tools',webhooks:'webhook',phones:'phone'})[k]||k,16);return span.firstElementChild}
 const $=s=>document.querySelector(s), app=$('#app'), enc=encodeURIComponent;
-let token='', epoch=0, workspaces=[], phoneList=[], toastTimer;
+let token='', epoch=0, workspaces=[], phoneList=[], groupList=[], mapGroup='', toastTimer;
 try{token=sessionStorage.getItem('orch_admin')||''}catch{}
 // All API text goes through text nodes. SVG pairing codes use a restricted SVG parser below.
 function el(tag,attrs={},...children){
@@ -108,9 +108,9 @@ function wsData(f){return {name:f.elements.name.value.trim(),description:f.eleme
 function wsFields(w={}){return [field('Workspace name',chk(input('name',w.name||'',{maxLength:100,placeholder:'e.g. Studio',autocomplete:'off'}),needs('Give the workspace a name.'))),field('Description (optional)',el('textarea',{name:'description',value:w.description||'',maxLength:280})),field('Tags',input('tags',(w.tags||[]).join(', ')))]}
 function checkName(f){if(!f.elements.name.value.trim())throw new FieldError('Give the workspace a name.','name')}
 async function copy(value){try{await navigator.clipboard.writeText(value)}catch{const t=el('textarea',{value,readOnly:true});document.body.append(t);t.select();const ok=document.execCommand('copy');t.remove();if(!ok)throw Error('Copy is not available here. Select the text and copy it.')}toast('Copied')}
-function promptResult(r,title){
+function promptResult(r,title,extra){
  document.querySelectorAll('dialog[open]').forEach(d=>orch.close(d));
- show(...head('',title),el('section',{class:'card form-body'},el('p',{},'Copy this and paste it into your agent, in the project that should use this workspace.'),el('div',{class:'copy-wrap'},el('pre',{class:'copy-box',id:'install-prompt'},r.prompt||''),button('Copy',()=>copy(r.prompt||''))),el('p',{class:'meta muted'},'This is shown only once. Copy it before you leave this page.'),el('a',{href:'#overview',class:'btn ghost',onclick:e=>{if(location.hash==='#overview'){e.preventDefault();route()}}},'Done')));
+ show(...head('',title),el('section',{class:'card form-body'},extra||null,el('p',{},'Copy this and paste it into your agent, in the project that should use this workspace.'),el('div',{class:'copy-wrap'},el('pre',{class:'copy-box',id:'install-prompt'},r.prompt||''),button('Copy',()=>copy(r.prompt||''))),el('p',{class:'meta muted'},'This is shown only once. Copy it before you leave this page.'),el('a',{href:'#overview',class:'btn ghost',onclick:e=>{if(location.hash==='#overview'){e.preventDefault();route()}}},'Done')));
 }
 let lastSeenShown='';
 function status(w){let t='Online';if(!w.online){t=w.last_seen?'Last seen '+ago(w.last_seen):'Not connected yet';const full=t;if(t===lastSeenShown)t='Offline';else lastSeenShown=t;return el('span',{class:'status',title:full},el('span',{class:'dot idle'}),t)}return el('span',{class:'status running'},el('span',{class:'dot live'}),t)}
@@ -157,7 +157,51 @@ async function overview(v){
  const net=panel('Your network',el('div',{id:'network-host'},network()));net.firstChild.append(button('Add connection',()=>edgeSheet(),'outline'));
  show(el('header',{class:'page-heading'},el('h1',{tabindex:'-1'},'Overview'),workspaces.length?sub((off?off+(off===1?' workspace is':' workspaces are')+' offline':'All workspaces are online')+' · '+wait+(wait===1?' message':' messages')+' waiting'):null),el('section',{class:'card',id:'reviews',hidden:true}),workspaces.length?net:panel('Your network',empty('No workspaces yet','',el('a',{class:'button primary',href:'#add'},'Add workspace'))),panel('Recent activity',...(feed.length?feed.map(f=>feedRow(f.m,f.n)):[empty('Nothing yet','Messages between your workspaces show up here.')]),el('div',{class:'form-body'},link('All messages →','#messages'))));renderReviews();
 }
-function add(){show(...head('Connection setup','Add a workspace','Give it a name. You can change everything later.'),el('section',{class:'card form-body form-card'},form(async f=>{checkName(f);const r=await api('/workspaces','POST',wsData(f));promptResult(r,'Your workspace is ready')},...wsFields({},false),el('div',{class:'actions'},submit('Create workspace'),link('Cancel','#overview')))))}
+// ---------- groups ----------
+const KIND_WORDS={skills:['skill','skills'],credentials:['secret','secrets'],mcp:['MCP','MCP']};
+const groupById=id=>groupList.find(g=>g.id===id);
+const gClass=g=>'g-'+(g?.colour||'none');
+function gChip(id){const g=groupById(id);return el('span',{class:'gchip '+gClass(g)},el('span',{class:'gdot'}),g?g.name:'No group')}
+function givesText(counts){const parts=['skills','credentials','mcp'].map(k=>[k,Number(counts?.[k])||0]).filter(([,n])=>n>0).map(([k,n])=>n+' '+KIND_WORDS[k][n===1?0:1]);return parts.length?parts.join(', '):'no shared tools yet'}
+function groupOptions(sel,current,withNew){sel.replaceChildren(...groupList.map(g=>el('option',{value:g.id,selected:g.id===current},g.name)));if(withNew)sel.append(el('option',{value:'__new'},'New group…'));return sel}
+async function add(v){
+ const data=await api('/shared');if(v!==epoch)return;
+ const all={skills:(data.skills||[]).length,credentials:(data.credentials||[]).length,mcp:(data.mcp||[]).length};
+ const sel=groupOptions(el('select',{name:'group'}),'',true);if(!groupList.length)sel.value='__new';else sel.prepend(el('option',{value:'',selected:true,disabled:true},'Choose a group'));
+ const newName=input('newGroup','',{maxLength:40,placeholder:'e.g. Marketing team',autocomplete:'off'}),newField=field('New group name',newName),gets=el('p',{class:'gets',role:'status'});
+ function update(){newField.hidden=sel.value!=='__new';const g=groupById(sel.value);gets.replaceChildren();if(!sel.value){gets.append('Its group decides which shared tools it gets.');return}
+  gets.append(el('b',{},'Gets: '+givesText(g?g.gives:all)),' · tools added later follow the group');if(sel.value==='__new')gets.append(' (all kinds; change it under Groups)')}
+ sel.onchange=update;update();
+ show(...head('Connection setup','Add a workspace','Give it a name. You can change everything later.'),el('section',{class:'card form-body form-card'},form(async f=>{checkName(f);
+  const d=wsData(f);if(!sel.value)throw new FieldError('Choose a group for the workspace.','group');
+  if(sel.value==='__new'){const n=newName.value.trim();if(!n)throw new FieldError('Give the new group a name.','newGroup');d.new_group=n}else d.group=sel.value;
+  const r=await api('/workspaces','POST',d);try{groupList=(await api('/groups')).items||[]}catch{}
+  promptResult(r,'Your workspace is ready',el('div',{class:'ready-summary'},gChip(r.group),el('span',{class:'meta muted'},'Shared with it: '+givesText(r.shared))))},
+  ...wsFields({},false),el('div',{class:'group-pick'},field('Group',sel),newField),gets,el('div',{class:'actions'},submit('Create workspace'),link('Cancel','#overview')))))}
+const COLOURS=['teal','violet','amber','blue','pink'];
+async function groupsPage(v){
+ const save=async(g,patch,msg)=>{await api('/groups/'+enc(g.id),'PATCH',patch);if(msg)toast(msg);await route()};
+ const newForm=form(async f=>{const n=f.elements.groupName.value.trim();if(!n)throw new FieldError('Give the group a name.','groupName');await api('/groups','POST',{name:n});toast('Group created');await route();focusMain()},field(groupList.length?'New group':'Group name',chk(input('groupName','',{maxLength:40,placeholder:'e.g. Work',autocomplete:'off'}),needs('Give the group a name.'))),submit('Create group'));newForm.classList.add('compact-add');
+ const card=g=>{
+  const members=workspaces.filter(w=>w.group===g.id);
+  const moveSel=w=>{const s=el('select',{'aria-label':'Move '+w.name+' to another group'},el('option',{value:''},'Move to…'),groupList.filter(x=>x.id!==g.id).map(x=>el('option',{value:x.id},x.name)));s.onchange=async()=>{if(!s.value)return;s.disabled=true;try{await api('/workspaces/'+enc(w.id),'PATCH',{group:s.value});toast(w.name+' moved to '+groupById(s.value).name+'. It keeps the tools it has.');await route()}catch(e){s.disabled=false;showError(null,e)}};return groupList.length>1?s:null};
+  const addSel=el('select',{'aria-label':'Add a workspace to '+g.name},el('option',{value:''},'Add a workspace…'),workspaces.filter(w=>w.group!==g.id).map(w=>el('option',{value:w.id},w.name)));
+  addSel.onchange=async()=>{if(!addSel.value)return;addSel.disabled=true;const w=workspaces.find(x=>x.id===addSel.value);try{await api('/workspaces/'+enc(w.id),'PATCH',{group:g.id});toast(w.name+' joined '+g.name+'.');await route()}catch(e){addSel.disabled=false;showError(null,e)}};
+  const kinds=[['skills','All skills'],['credentials','All secrets'],['mcp','All MCP']].map(([k,l])=>{const c=input('def-'+k,'',{type:'checkbox',checked:!!g.defaults[k]});c.onchange=async()=>{c.disabled=true;try{await save(g,{defaults:{[k]:c.checked}},c.checked?'Members now get '+l.toLowerCase().replace('mcp','MCP')+'.':'New members no longer get '+l.slice(4).toLowerCase().replace('mcp','MCP')+'. Nobody loses anything.')}catch(e){c.checked=!c.checked;c.disabled=false;showError(null,e)}};return el('label',{class:'check'},c,l)});
+  const talk=input('talk','',{type:'checkbox',class:'toggle',role:'switch',checked:!!g.talk,'aria-label':'Workspaces in '+g.name+' may message each other'});talk.onchange=async()=>{talk.disabled=true;try{await save(g,{talk:talk.checked},'Saved')}catch(e){talk.checked=!talk.checked;talk.disabled=false;showError(null,e)}};
+  const nameIn=input('rename',g.name,{maxLength:40,'aria-label':'Group name'});let colour=g.colour;
+  const sw=COLOURS.map(c=>{const b=el('button',{type:'button',class:'swatch g-'+c,'aria-label':c,'aria-pressed':String(c===g.colour),onclick:()=>{colour=c;sw.forEach(x=>x.setAttribute('aria-pressed',String(x===b)))}});b.classList.remove('btn','sm');return b});
+  const rename=el('div',{class:'rename-row',hidden:true},nameIn,el('div',{class:'swatches',role:'group','aria-label':'Colour'},sw),button('Save',async()=>{const n=nameIn.value.trim();if(!n)throw Error('Give the group a name.');await save(g,{name:n,colour},'Saved')},'primary'),button('Cancel',()=>{rename.hidden=true},'ghost'));
+  const menu=moreMenu(g.name,el('div',{},button('Rename or colour',()=>{rename.hidden=false;nameIn.focus();menu.querySelector('.menu-items').hidden=true},'ghost'),button('Delete group',async()=>{if(!await confirmDialog('Delete the group '+g.name+'?',members.length?'Its '+members.length+(members.length===1?' workspace stays':' workspaces stay')+' and keeps the tools it has. Only the group goes.':'It has no workspaces.','Delete group'))return;await api('/groups/'+enc(g.id),'DELETE');toast('Group deleted');await route();focusMain()},'ghost danger')));
+  return el('section',{class:'card group-card '+gClass(g)},el('div',{class:'card-h'},el('h2',{tabindex:'-1'},uiIcon('group'),g.name,el('span',{class:'gcount'},'· '+members.length+(members.length===1?' workspace':' workspaces'))),menu),rename,
+   el('div',{class:'group-body'},el('section',{},el('h3',{},'Members'),members.length?members.map(w=>el('div',{class:'member-row'},uiIcon('workspace'),el('span',{class:'grow'},w.name),moveSel(w))):el('p',{class:'meta muted'},'No workspaces yet.'),addSel.options.length>1?addSel:null),
+    el('section',{},el('h3',{},'Members get'),el('div',{class:'defaults'},kinds),el('p',{class:'meta muted'},'Now: '+givesText(g.gives)),el('label',{class:'talk-row'},talk,el('span',{},'Workspaces in this group may message each other',el('small',{},'Messages and files, both ways. Tasks and Start work stay under Who can do what.'))))),
+   el('div',{class:'group-foot'},'A tool you add later goes to every member when its kind is ticked. Leaving a group takes nothing away.'))};
+ const loose=workspaces.filter(w=>!w.group);
+ show(...head('','Groups'),sub('Put workspaces together, like Private, Work or Marketing team. Members get the group’s shared tools.'),
+  el('section',{class:'card'},newForm),...(groupList.length?groupList.map(card):[panel('Groups',empty('No groups yet','A new workspace always goes into a group. Create one here or when you add a workspace.'))]),
+  loose.length?panel('Not in a group · '+loose.length,...loose.map(w=>{const s=el('select',{'aria-label':'Move '+w.name+' to a group'},el('option',{value:''},'Move to group…'),groupList.map(x=>el('option',{value:x.id},x.name)));s.onchange=async()=>{if(!s.value)return;s.disabled=true;try{await api('/workspaces/'+enc(w.id),'PATCH',{group:s.value});toast(w.name+' moved to '+groupById(s.value).name+'.');await route()}catch(e){s.disabled=false;showError(null,e)}};return el('div',{class:'card-row member-row'},uiIcon('workspace'),el('span',{class:'grow'},w.name),groupList.length?s:null)})):null);
+}
 const flagLabels=[['text','Send messages and files'],['files','Send files'],['delegate','Give tasks'],['start','Start work']];
 async function rules(v){
  const [r,allows]=await Promise.all([api('/rules'),all('/allows')]);if(v!==epoch)return;
@@ -221,13 +265,26 @@ function messages(v){
 }
 function checks(selected=[]){return el('fieldset',{},el('legend',{},'Can reach'),el('div',{class:'checks workspace-pills'},workspaces.map(w=>el('label',{},input('workspace',w.id,{type:'checkbox',checked:selected.includes(w.id)}),w.name))))}
 const selected=f=>[...f.querySelectorAll('input[name="workspace"]:checked')].map(c=>c.value);
+// One block per group: a header row (group icon, colour, how many use it) and its workspaces beneath. A block where
+// only some members have the tool starts open; "whole group" and "none" stay folded.
+function usedBy(data,kind,itemName,saved,kinds){
+ const has=w=>(data.assign?.[w.id]?.[kind]||[]).includes(itemName);
+ async function put(w,on){const old=data.assign?.[w.id]||{},payload={};for(const [k]of kinds)payload[k]=[...(old[k]||[])];payload[kind]=on?[...new Set([...payload[kind],itemName])]:payload[kind].filter(n=>n!==itemName);await api('/shared/assign/'+enc(w.id),'PUT',payload);data.assign??={};data.assign[w.id]=payload}
+ const box=el('div',{class:'used-by'});
+ async function run(fn){const controls=[...box.querySelectorAll('input')];controls.forEach(x=>x.disabled=true);saved.className='save-state';saved.textContent='Saving…';try{await fn();saved.textContent='Saved'}catch(e){saved.className='save-state form-error';saved.setAttribute('role','alert');saved.textContent='Couldn’t save. Try again.'}finally{controls.forEach(x=>x.disabled=false);render()}}
+ function block(g,members){
+  const n=members.filter(has).length,state=!n?'none':n===members.length?'whole group':n+' of '+members.length;
+  const whole=input('whole','',{type:'checkbox',checked:n===members.length,'aria-label':(g?g.name:'No group')+': whole group'});whole.indeterminate=n>0&&n<members.length;
+  whole.onclick=e=>e.stopPropagation();whole.onchange=()=>run(async()=>{for(const w of members)if(has(w)!==whole.checked)await put(w,whole.checked)});
+  const rows=members.map(w=>{const c=input('assign','',{type:'checkbox',checked:has(w)});c.onchange=()=>run(()=>put(w,c.checked));return el('label',{},c,uiIcon('workspace'),w.name)});
+  return el('details',{class:'used-group '+gClass(g),open:n>0&&n<members.length},el('summary',{},el('span',{class:'chev'},uiIcon('chevron-right')),whole,el('span',{class:'ghead'},uiIcon('group'),g?g.name:'No group'),el('span',{class:'used-state'+(state==='whole group'?' whole':'')},'· '+members.length+(members.length===1?' workspace':' workspaces')+' · '+state)),el('div',{class:'used-ws'},rows))}
+ function render(){const open=new Set([...box.querySelectorAll('details[open]')].map(d=>d.dataset.k));box.replaceChildren(...[...groupList.map(g=>[g,workspaces.filter(w=>w.group===g.id)]),[null,workspaces.filter(w=>!w.group)]].filter(([,m])=>m.length).map(([g,m])=>{const d=block(g,m);d.dataset.k=g?g.id:'none';if(open.has(d.dataset.k))d.open=true;return d}))}
+ render();return box}
 async function config(v){
  const data=await api('/shared');if(v!==epoch)return;const groups=[['credentials','Secrets'],['mcp','MCP'],['skills','Skills']],cards={credentials:[],mcp:[],skills:[]};
  for(const [kind,label] of groups)for(const item of data[kind]||[]){const itemName=typeof item==='string'?item:item.name;
- const saved=el('span',{class:'save-state',role:'status'});const assignments=el('div',{class:'checks workspace-pills'},workspaces.map(w=>{const c=input('assign','',{type:'checkbox',checked:(data.assign?.[w.id]?.[kind]||[]).includes(itemName)});
- c.onchange=async()=>{const before=!c.checked;const controls=[...assignments.querySelectorAll('input[name="assign"]')];controls.forEach(x=>x.disabled=true);saved.className='save-state';saved.textContent='Saving…';try{const old=data.assign?.[w.id]||{},payload={};for(const [k]of groups)payload[k]=[...(old[k]||[])];payload[kind]=c.checked?[...new Set([...payload[kind],itemName])]:payload[kind].filter(n=>n!==itemName);await api('/shared/assign/'+enc(w.id),'PUT',payload);data.assign??={};data.assign[w.id]=payload;saved.textContent='Saved'}catch(e){c.checked=before;saved.className='save-state form-error';saved.setAttribute('role','alert');saved.textContent='Couldn’t save. Try again.'}finally{controls.forEach(x=>x.disabled=false)}};
- return el('label',{},c,w.name)}));
- cards[kind].push(el('div',{class:'card-row tool-row'},el('div',{class:'grow'},el('h3',{},itemName+(kind==='credentials'?' · ••••':'')),el('div',{class:'row-meta'},sub('Used by'),assignments,saved)),moreMenu(itemName,button('Remove',async()=>{if(!await confirmDialog('Remove '+itemName+'?','It is taken away from all workspaces.','Remove'))return;await api('/shared/'+kind+'/'+enc(itemName),'DELETE');toast(itemName+' removed');await route();focusMain()},'ghost danger'))));
+ const saved=el('span',{class:'save-state',role:'status'}),assignments=usedBy(data,kind,itemName,saved,groups);
+ cards[kind].push(el('div',{class:'card-row tool-row with-groups'},el('div',{class:'grow'},el('h3',{},itemName+(kind==='credentials'?' · ••••':'')),el('div',{class:'row-meta'},sub('Used by'),assignments,saved)),moreMenu(itemName,button('Remove',async()=>{if(!await confirmDialog('Remove '+itemName+'?','It is taken away from all workspaces.','Remove'))return;await api('/shared/'+kind+'/'+enc(itemName),'DELETE');toast(itemName+' removed');await route();focusMain()},'ghost danger'))));
  }
  // One small form per card: a problem in one never blocks the others.
  const skillForm=form(async f=>{const n=f.elements.skillName.value.trim();if(!n)throw new FieldError('Give the skill a name.','skillName');const file=f.elements.archive.files[0];if(!file)throw new FieldError('Choose a .tar.gz file.','archive');if(!file.name.endsWith('.tar.gz'))throw new FieldError('This needs to be a .tar.gz file.','archive');await api('/shared/skills/'+enc(n),'PUT',file,true);f.reset();toast('Skill saved');await route();focusMain()},field('Name',chk(input('skillName'),needs('Give the skill a name.'))),field('Skill file',input('archive','',{type:'file',accept:'.tar.gz,application/gzip'})),submit('Add skill'));
@@ -271,12 +328,22 @@ function enhance(root){
 function moreMenu(label,action){const items=el('div',{class:'menu-items',hidden:true},action),b=button('⋯',()=>{items.hidden=!items.hidden;b.setAttribute('aria-expanded',String(!items.hidden))},'ghost icon');b.setAttribute('aria-label','More actions for '+label);b.setAttribute('aria-expanded','false');const menu=el('div',{class:'more-menu'},b,items);menu.addEventListener('keydown',e=>{if(e.key==='Escape'){items.hidden=true;b.setAttribute('aria-expanded','false');b.focus();e.stopPropagation()}});return menu}
 function sheet(title,...content){const d=el('dialog',{class:'sheet','aria-label':title},el('div',{class:'row'},el('h2',{class:'grow'},title),button('Close',()=>orch.close(d),'ghost')),el('div',{class:'stack'},content));d.addEventListener('close',()=>d.remove());document.body.append(d);enhance(d);orch.open(d);return d}
 function permissionLabel(r){return [r.text||r.files?'Messages':'',r.delegate?'Tasks':'',r.start?'Start':''].filter(Boolean).join(' · ')}
+function networkPairs(){
+ const valid=new Set(workspaces.map(w=>w.id)),pairs=new Map(),order=new Map(workspaces.map((w,i)=>[w.id,i]));
+ for(const r of networkRules){if(!permissionLabel(r)||!valid.has(r.from)||!valid.has(r.to)||r.from===r.to)continue;
+  const [a,b]=order.get(r.from)<order.get(r.to)?[r.from,r.to]:[r.to,r.from],key=JSON.stringify([a,b]);
+  if(!pairs.has(key))pairs.set(key,{a,b,rules:[]});pairs.get(key).rules.push(r);
+ }return [...pairs.values()];
+}
+function networkPairLabel(p){return name(p.a)+' and '+name(p.b)+': '+p.rules.map(r=>name(r.from)+' to '+name(r.to)+' '+permissionLabel(r)).join('; ')}
+function networkPhoneStatus(p){const n=workspaces.filter(w=>(p.workspaces||[]).includes(w.id)).length;return p.paired===false?'Waiting for first scan':n===workspaces.length&&n?'Reaches all workspaces':'Reaches '+n+(n===1?' workspace':' workspaces')}
 function connectionList(id,badges=false){
- const rows=networkRules.filter(r=>permissionLabel(r)&&(!id||r.from===id||r.to===id)&&workspaces.some(w=>w.id===r.from)&&workspaces.some(w=>w.id===r.to));
- return rows.length?rows.map(r=>{
-  const from=name(r.from),to=name(r.to),permission=permissionLabel(r);
-  if(!badges)return button(from+' → '+to+' · '+permission,()=>edgeSheet(r.from,r.to),'ghost connection-row');
-  return el('button',{type:'button',class:'ghost connection-row','aria-label':from+' to '+to+': '+permission,onclick:()=>edgeSheet(r.from,r.to)},el('span',{class:'connection-names'},from+' → '+to),el('span',{class:'badge active'},permission));
+ const pairs=networkPairs().filter(p=>!id||p.a===id||p.b===id);
+ return pairs.length?pairs.map(p=>{
+  const both=p.rules.some(r=>r.from===p.a)&&p.rules.some(r=>r.from===p.b),r=p.rules[0];
+  return el('button',{type:'button',class:'ghost connection-row network-pair-row','data-ws-pair':p.a+' '+p.b,'aria-label':networkPairLabel(p),onclick:()=>edgeSheet(p.a,p.b)},
+   el('span',{class:'connection-names'},both?name(p.a)+' ⇄ '+name(p.b):name(r.from)+' → '+name(r.to)),
+   (badges&&both&&p.rules.every(v=>['text','files','delegate','start'].every(k=>!!v[k]===!!r[k]))?[el('span',{class:'connection-direction'},el('span',{},'Both ways'),el('span',{class:'badge active'},permissionLabel(r)))]:p.rules.map(r=>el('span',{class:'connection-direction'},both?el('span',{},name(r.from)+' → '+name(r.to)):null,el('span',{class:'badge active'},permissionLabel(r))))))
  }):[sub('No connections yet')];
 }
 function edgeSheet(from,to){
@@ -289,59 +356,217 @@ function edgeSheet(from,to){
 async function removePhone(p){if(!await confirmDialog('Remove '+p.name+'?','It will be signed out.','Remove phone'))return;await api('/phones/'+enc(p.id),'DELETE');toast(p.name+' removed');await route();focusMain()}
 function phoneEditor(p,after){return form(async f=>{await api('/phones/'+enc(p.id),'PATCH',{workspaces:selected(f)});p.workspaces=selected(f);toast('Saved');if(after)await after()},checks(p.workspaces||[]),submit('Save access'))}
 function phoneSheet(p){let d;d=sheet(p.name,sub(p.paired===false?'Waiting for first scan':p.online?'Online':'Connected'),phoneEditor(p,async()=>{await orch.close(d);await route()}),button('Remove phone',()=>removePhone(p),'danger'))}
-function workspaceSheet(w){let d;const edit=form(async f=>{checkName(f);await api('/workspaces/'+enc(w.id),'PATCH',wsData(f));toast('Saved');await refreshRow(w.id,'Saved. The new details are in use.',false);await orch.close(d)},...wsFields(w),submit('Save changes'));
+function workspaceSheet(w){let d;const gsel=groupOptions(el('select',{name:'group'}),w.group,false);if(!w.group)gsel.prepend(el('option',{value:'',selected:true},'No group'));const edit=form(async f=>{checkName(f);const data=wsData(f);if(gsel.value&&gsel.value!==w.group)data.group=gsel.value;await api('/workspaces/'+enc(w.id),'PATCH',data);if(data.group)await route();toast('Saved');await refreshRow(w.id,'Saved. The new details are in use.',false);await orch.close(d)},...wsFields(w),groupList.length?field('Group',gsel,'Moving keeps the tools it has and adds the new group’s tools.'):null,submit('Save changes'));
  const connections=el('div',{},networkRules.filter(r=>(r.from===w.id||r.to===w.id)&&permissionLabel(r)).map(r=>button(name(r.from)+' → '+name(r.to),async()=>{await orch.close(d);edgeSheet(r.from,r.to)},'ghost connection-row')));
  d=sheet(w.name,status(w),sub((Number(w.unread)||0)+' waiting'),el('h3',{},'Connections'),connections,edit,el('div',{class:'danger-zone'},button('New access key',async()=>{if(!await confirmDialog('Make a new access key?','The current key for '+w.name+' stops working and you must reconnect it.','Make new key'))return;const r=await api('/workspaces/'+enc(w.id)+'/token','POST');await orch.close(d);promptResult(r,'New access key')}),button('Remove workspace',async()=>{if(!await confirmDialog('Delete “'+w.name+'”?','Its messages and permissions are removed. This cannot be undone.','Delete workspace'))return;await api('/workspaces/'+enc(w.id),'DELETE');await orch.close(d);toast(w.name+' removed');await route();focusMain()},'danger')));
 }
 function svgEl(tag,attrs={},...children){const n=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [k,v]of Object.entries(attrs))n.setAttribute(k,String(v));for(const c of children.flat())if(c!==null&&c!==undefined)n.append(typeof c==='object'?c:document.createTextNode(String(c)));return n}
+// Layout uses measured text at its final size; SVG coordinates are CSS pixels.
+function networkTextWidth(text,size=12){const canvas=networkTextWidth.canvas||(networkTextWidth.canvas=document.createElement('canvas')),ctx=canvas.getContext('2d');ctx.font=size+'px '+getComputedStyle(document.body).fontFamily;return ctx.measureText(String(text)).width}
+function networkShort(text,width,size=13){text=String(text||'');if(networkTextWidth(text,size)<=width)return text;while(text.length&&networkTextWidth(text+'…',size)>width)text=text.slice(0,-1);return text+'…'}
+function networkStatus(w){return w.online?'Online':w.last_seen?'Last seen '+ago(w.last_seen):'Not connected yet'}
+function networkStatusLines(text,width=190){const lines=[''];for(const word of text.split(' ')){const i=lines.length-1,next=lines[i]?lines[i]+' '+word:word;if(lines[i]&&networkTextWidth(next)>width)lines.push(word);else lines[i]=next}return lines}
 function network(){
- const compact=workspaces.length>9,list=el('section',{class:compact?'connections':'mobile-connections'},el('div',{class:'card-h'},'Connections'),connectionList(undefined,!compact));
- if(compact){list.append(el('div',{class:'card-h'},'Workspaces'),...workspaces.map(w=>button(w.name,()=>workspaceSheet(w),'ghost connection-row')),...phoneList.map(p=>button(p.name,()=>phoneSheet(p),'ghost connection-row')));return list}
- const cols=workspaces.length<=4?2:3,rows=Math.ceil(workspaces.length/cols),gridHeight=(rows-1)*210+72,phoneHeight=Math.max(0,(phoneList.length-1)*90+48);
- const height=Math.max(gridHeight,phoneHeight)+80,width=80+(cols-1)*330+190+(phoneList.length?310:0);
- const svg=svgEl('svg',{class:'network',viewBox:`0 0 ${width} ${height}`,'aria-label':'Workspace and phone connections'}),positions=new Map();
- const edges=networkRules.filter(r=>permissionLabel(r)&&workspaces.some(w=>w.id===r.from)&&workspaces.some(w=>w.id===r.to)&&r.from!==r.to);
- const weight=(a,b)=>edges.filter(r=>(r.from===a&&r.to===b)||(r.from===b&&r.to===a)).length;
- const degree=id=>edges.filter(r=>r.from===id||r.to===id).length;
- const ordered=workspaces.map((w,i)=>({w,i})).sort((a,b)=>degree(b.w.id)-degree(a.w.id)||a.i-b.i);
- const cells=Array.from({length:rows*cols},(_,i)=>({x:40+i%cols*330,y:(height-gridHeight)/2+Math.floor(i/cols)*210,w:190,h:72}));
- for(const {w} of ordered){let anchor=null,best=0;for(const [id,p]of positions){const count=weight(w.id,id);if(count>best){best=count;anchor=p}}
-  let cell=0;if(anchor)for(let i=1;i<cells.length;i++)if(Math.hypot(cells[i].x-anchor.x,cells[i].y-anchor.y)<Math.hypot(cells[cell].x-anchor.x,cells[cell].y-anchor.y))cell=i;
-  positions.set(w.id,cells.splice(cell,1)[0]);
+ const root=el('div',{class:'network-wrap'}),pairs=networkPairs(),cards=workspaces.length<=6&&phoneList.length<=3;
+ const list=el('section',{class:'mobile-connections'});
+ if(groupList.length){list.append(el('div',{class:'card-h'},'Workspaces by group'));for(const g of [...groupList,null]){const ms=workspaces.filter(w=>g?w.group===g.id:!groupById(w.group));if(!ms.length)continue;
+  list.append(el('div',{class:'list-group-head '+gClass(g),'data-ws-group':g?g.id:'none'},uiIcon('group'),el('span',{class:'grow'},(g?g.name:'No group')+' · '+ms.length+(ms.length===1?' workspace':' workspaces')),g?.talk?el('span',{class:'talk-note'},'⇄ may message each other'):null),
+   ...ms.map(w=>el('button',{type:'button',class:'ghost connection-row list-ws-row','data-ws':w.id,onclick:()=>workspaceSheet(w)},uiIcon('workspace'),el('span',{class:'connection-names'},w.name),el('span',{class:'connection-direction'},networkStatus(w)))))}}
+ list.append(el('div',{class:'card-h'},'Connections'),...[connectionList(undefined,true)].flat());
+ if(phoneList.length)list.append(el('div',{class:'card-h'},'Phones'),...phoneList.map(p=>el('button',{type:'button',class:'ghost connection-row network-phone-row',onclick:()=>phoneSheet(p)},el('span',{class:'connection-names'},p.name),el('span',{class:'connection-direction'},networkPhoneStatus(p)))));
+ const isolated=workspaces.filter(w=>!pairs.some(p=>p.a===w.id||p.b===w.id));
+ if(isolated.length)list.append(el('p',{class:'network-note'},'Not connected to others: '+isolated.map(w=>w.name).join(', ')));
+ // Groups: each group's workspaces stay together, with a soft outline (cards) or band (ring) in the group colour.
+ const gIndex=w=>{const i=groupList.findIndex(g=>g.id===w.group);return i<0?groupList.length:i},grouped=groupList.length>0&&workspaces.some(w=>groupById(w.group));
+ const groupBreaks=list=>grouped?list.reduce((n,w,i)=>n+(i&&gIndex(w)!==gIndex(list[i-1])?1:0),0):0,GROUP_HEAD=30;
+ const blocks=()=>{const out=[];for(const w of ordered){const g=groupById(w.group)||null,last=out[out.length-1];if(last&&last.g===g)last.ws.push(w);else out.push({g,ws:[w]})}return out};
+ const chips=groupList.length?el('div',{class:'group-filter',role:'group','aria-label':'Show one group'},[{id:'',name:'All'},...groupList,...(workspaces.some(w=>!groupById(w.group))?[{id:'none',name:'No group'}]:[])].map(g=>el('button',{type:'button',class:'ghost '+(g.id&&g.id!=='none'?gClass(g):g.id?'g-none':''),'aria-pressed':String(mapGroup===g.id),onclick:e=>{mapGroup=g.id;e.currentTarget.parentElement.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b===e.currentTarget)));applyGroupFilter()}},g.id?el('span',{class:'gdot'}):null,g.name,g.talk?el('span',{class:'talk-mark',title:'Members may message each other','aria-label':', members may message each other'},' ⇄'):null))):null;
+ function applyGroupFilter(){
+  const members=new Set(workspaces.filter(w=>mapGroup==='none'?!groupById(w.group):w.group===mapGroup).map(w=>'w:'+w.id));
+  for(const p of phoneList)if((p.workspaces||[]).some(id=>members.has('w:'+id)))members.add('p:'+p.id);
+  root.querySelectorAll('.network .graph-item,.network .group-outline').forEach(g=>{const links=JSON.parse(g.dataset.links||'[]');g.classList.toggle('group-out',!!mapGroup&&!links.some(k=>members.has(k)))});
+  root.querySelectorAll('.mobile-connections [data-ws]').forEach(r=>{r.hidden=!!mapGroup&&!members.has('w:'+r.dataset.ws)});
+  root.querySelectorAll('.mobile-connections [data-ws-group]').forEach(r=>{r.hidden=!!mapGroup&&r.dataset.wsGroup!==mapGroup});
+  root.querySelectorAll('.mobile-connections [data-ws-pair]').forEach(r=>{r.hidden=!!mapGroup&&!r.dataset.wsPair.split(' ').some(id=>members.has('w:'+id))});
  }
- phoneList.forEach((p,i)=>positions.set(p.id,{x:width-210,y:(height-phoneHeight)/2+i*90,w:170,h:48}));
- // Intersect the ray between box centres with the nearest box side.
- function side(a,b){const dx=b.x+b.w/2-a.x-a.w/2,dy=b.y+b.h/2-a.y-a.h/2,t=1/Math.max(Math.abs(dx)/(a.w/2),Math.abs(dy)/(a.h/2));return {x:a.x+a.w/2+dx*t,y:a.y+a.h/2+dy*t}}
- const labels=[];
+ const ordered=[],remaining=[...workspaces];
+ while(remaining.length){const score=w=>pairs.reduce((n,p)=>n+((p.a===w.id||p.b===w.id)&&(!ordered.length||ordered.some(v=>v.id===(p.a===w.id?p.b:p.a)))?p.rules.length:0),0);let best=0;for(let i=1;i<remaining.length;i++)if(score(remaining[i])>score(remaining[best]))best=i;ordered.push(remaining.splice(best,1)[0])}
+ // With at most six cards, choose the stable order with the shortest pair spans.
+ if(cards&&ordered.length>1){let best=Infinity,bestOrder=ordered.slice();function visit(prefix,rest){if(rest.length){for(let i=0;i<rest.length;i++)visit([...prefix,rest[i]],rest.filter((_,j)=>i!==j));return}const at=new Map(prefix.map((w,i)=>[w.id,i])),score=pairs.reduce((sum,p)=>sum+(at.get(p.a)-at.get(p.b))**2,0)+groupBreaks(prefix)*1e6;if(score<best){best=score;bestOrder=prefix}}visit([],ordered);ordered.splice(0,ordered.length,...bestOrder)}
+ if(grouped){const at=new Map(ordered.map((w,i)=>[w.id,i]));ordered.sort((a,b)=>gIndex(a)-gIndex(b)||at.get(a.id)-at.get(b.id))}
+ const emptyNote=()=>!pairs.length&&workspaces.length?el('p',{class:'network-note'},'No connections yet. Use Add connection to let two workspaces work together.'):null;
  const overlaps=(a,b)=>a.x<b.x+b.w+6&&a.x+a.w>b.x-6&&a.y<b.y+b.h+6&&a.y+a.h>b.y-6;
- svg.append(svgEl('defs',{},svgEl('marker',{id:'network-arrow',viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:6,markerHeight:6,orient:'auto-start-reverse'},svgEl('path',{d:'M0 0 L10 5 L0 10 Z',fill:'var(--brand)'}))));
- function interactive(g,ids,label,fn){g.setAttribute('tabindex','0');g.setAttribute('role','button');g.setAttribute('aria-label',label);g.dataset.links=ids.join(' ');g.addEventListener('click',fn);g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fn()}});return g}
- for(const p of phoneList)for(const id of p.workspaces||[]){const a=positions.get(p.id),b=positions.get(id);if(!b)continue;const end=side(b,a);svg.append(svgEl('path',{class:'phone-link graph-item','data-links':p.id+' '+id,d:`M${a.x} ${a.y+24} Q${a.x-65} ${end.y} ${end.x} ${end.y}`,...(p.paired===false?{'stroke-dasharray':'5 5'}:{})}))}
- const edgeGroups=[];
- for(const r of edges){const a=positions.get(r.from),b=positions.get(r.to),start=side(a,b),end=side(b,a);
-  const dx=end.x-start.x,dy=end.y-start.y,len=Math.hypot(dx,dy)||1,nx=-dy/len,ny=dx/len;
-  // Reversing direction reverses the normal, giving reciprocal edges opposite bows.
-  const reciprocal=edges.some(e=>e.from===r.to&&e.to===r.from),offset=reciprocal?22:14,cx=(start.x+end.x)/2+nx*offset*2,cy=(start.y+end.y)/2+ny*offset*2;
-  const path=`M${start.x} ${start.y} Q${cx} ${cy} ${end.x} ${end.y}`,label=permissionLabel(r),lw=Math.max(90,label.length*6+24);
-  let lx=(start.x+2*cx+end.x)/4+nx*18,ly=(start.y+2*cy+end.y)/4+ny*18,box;
-  for(let step=0;step<200;step++){box={x:lx-lw/2,y:ly-13,w:lw,h:26};if(![...positions.values(),...labels].some(p=>overlaps(box,p)))break;lx+=nx*6;ly+=ny*6}
-  labels.push(box);
-  const g=svgEl('g',{class:'graph-item graph-edge'},svgEl('path',{class:'edge-hit',d:path}),svgEl('path',{class:'edge-line',d:path,'marker-end':'url(#network-arrow)'}));
-  edgeGroups.push({g,label,lx,ly,lw});svg.append(interactive(g,[r.from,r.to],name(r.from)+' to '+name(r.to)+': '+label,()=>edgeSheet(r.from,r.to)));
+ let lastWidth=0,timer,observer;
+ function draw(width){
+  lastWidth=width;if(window.innerWidth<=599){root.replaceChildren(...(chips?[chips]:[]),list);const note=emptyNote();if(note)root.append(note);applyGroupFilter();return}const W=width,positions=new Map(),phones=new Map(),edges=[],labelBoxes=[],nodeBoxes=[];
+  const below=!cards&&W<900,radius=below&&workspaces.length>20?7:workspaces.length>16?9:12,laneWidth=phoneList.length&&!below?212:0;
+  const rx=Math.max(156,Math.min((W-laneWidth-280)/2,520));let ry=Math.max(120,Math.min(rx/1.3,workspaces.length>12?240:260,150+Math.max(0,workspaces.length-7)*7));
+  let H=2*ry+112,cx=(W-laneWidth)/2,cy=H/2;
+  const svg=svgEl('svg',{class:'network '+(cards?'network-cards':'network-ring'),viewBox:`0 0 ${W} ${H}`,'aria-label':'Workspace and phone connections'});
+  svg.append(svgEl('defs',{},svgEl('marker',{id:'network-arrow',viewBox:'0 0 10 10',refX:10,refY:5,markerUnits:'userSpaceOnUse',markerWidth:8,markerHeight:8,orient:'auto-start-reverse'},svgEl('path',{class:'network-arrow',d:'M0 0 L10 5 L0 10 Z'}))));
+  const groupLayer=svgEl('g',{class:'group-layer'}),lineLayer=svgEl('g'),phoneLayer=svgEl('g'),nodeLayer=svgEl('g'),chipLayer=svgEl('g');svg.append(groupLayer,lineLayer,phoneLayer,nodeLayer,chipLayer);
+  function interactive(g,ids,label,fn,key){g.setAttribute('tabindex','0');g.setAttribute('role','button');g.setAttribute('aria-label',label);g.dataset.links=JSON.stringify(ids);g.dataset.key=key;g.addEventListener('click',fn);g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fn()}});return g}
+  const wsKey=id=>'w:'+id,phKey=id=>'p:'+id;
+  function texts(p,a,b){const forward=p.rules.find(r=>r.from===p.a),reverse=p.rules.find(r=>r.from===p.b);if(!forward||!reverse||permissionLabel(forward)===permissionLabel(reverse))return [permissionLabel(forward||reverse)];const horizontal=Math.abs(b.x-a.x)>Math.abs(b.y-a.y),positive=horizontal?b.x>=a.x:b.y>=a.y,arrows=horizontal?['→','←']:['↓','↑'];return [(positive?arrows[0]:arrows[1])+' '+permissionLabel(forward),(positive?arrows[1]:arrows[0])+' '+permissionLabel(reverse)]}
+  const ringLabels=new Map();
+  // Open segment/box intersection: touching the label at its attachment is allowed.
+  function segmentHits(box,{a,b}){
+   let lo=0,hi=1;
+   for(const [axis,size]of [['x','w'],['y','h']]){const d=b[axis]-a[axis],min=box[axis]+.01,max=box[axis]+box[size]-.01;if(Math.abs(d)<1e-9){if(a[axis]<=min||a[axis]>=max)return false}else{const t0=(min-a[axis])/d,t1=(max-a[axis])/d;lo=Math.max(lo,Math.min(t0,t1));hi=Math.min(hi,Math.max(t0,t1));if(lo>=hi)return false}}
+   return lo<hi;
+  }
+  function placeRingLabels(shorten=false){
+   ringLabels.clear();const placed=[];
+   for(const w of ordered){const p=positions.get(w.id);
+    const status=networkStatus(w),count=Math.max(0,Number(w.unread)||0);
+    const cos=Math.cos(p.angle),sin=Math.sin(p.angle),vertical=Math.abs(cos)<=.5,two=workspaces.length<=12,suffix=count?' · '+count+(two?' waiting':''):'';
+    const preferred=vertical?'middle':cos>0?'start':'end',variants=[preferred,...['start','end','middle'].filter(a=>a!==preferred)];
+    const obstacles=[...placed.map(v=>v.box),...[...positions.values()].map(p=>({x:p.x-radius,y:p.y-radius,w:radius*2,h:radius*2})),...phones.values()];
+    let chosen,best,least=Infinity;
+    const forms=[{label:w.name,lines:two?2:1,suffix},{label:w.name,lines:1,suffix:''},{label:Array.from(w.name).slice(0,12).join('')+(Array.from(w.name).length>12?'…':''),lines:1,suffix:''}];
+    for(const form of shorten?forms:forms.slice(0,1)){
+     for(let step=0;step<=2&&!chosen;step++)for(const anchor of variants){
+      const dist=Math.min(40,radius+8+step*10),lw=Math.max(networkTextWidth(form.label,12)+(form.lines===1?networkTextWidth(form.suffix,12):0),form.lines>1?networkTextWidth(status+form.suffix,11):0),lh=form.lines*16;
+      // Side anchors stay vertically centred; top/bottom anchors stay above/below the dot.
+      const x=p.x+(anchor==='middle'?0:anchor==='start'?dist:-dist),top=anchor==='middle'?(sin<0?p.y-dist-lh:p.y+dist):p.y-lh/2;
+      const box={x:x-(anchor==='end'?lw:anchor==='middle'?lw/2:0),y:top,w:lw,h:lh};
+      const collision=obstacles.reduce((n,b)=>n+Math.max(0,Math.min(box.x+box.w,b.x+b.w+2)-Math.max(box.x,b.x-2))*Math.max(0,Math.min(box.y+box.h,b.y+b.h+2)-Math.max(box.y,b.y-2)),0),overflow=Math.max(0,8-box.x)+Math.max(0,box.x+box.w-W+8);
+      const link={a:p,b:{x:Math.max(box.x,Math.min(p.x,box.x+box.w)),y:Math.max(box.y,Math.min(p.y,box.y+box.h))}};
+      const crossed=placed.some(v=>segmentHits(box,v.link)||segmentHits(v.box,link));
+      const candidate={...form,anchor,x,y:top+12,box,link},score=collision+overflow*1000+(crossed?100000:0);
+      if((!shorten||form===forms[2])&&score<least){least=score;best=candidate}
+      if(!score){chosen=candidate;break}
+     }
+     if(chosen)break;
+    }
+    const result=chosen||best;ringLabels.set(w.id,result);placed.push(result);
+   }
+   // Verify the complete placement, independent of hover/highlight state.
+   const dots=[...positions.values()].map(p=>({x:p.x-radius,y:p.y-radius,w:radius*2,h:radius*2}));
+   const touches=(a,b)=>a.x<b.x+b.w+2&&a.x+a.w>b.x-2&&a.y<b.y+b.h+2&&a.y+a.h>b.y-2;
+   return placed.every((v,i)=>v.box.x>=8&&v.box.x+v.box.w<=W-8&&![...dots,...phones.values()].some(b=>touches(v.box,b))&&!segmentHits(v.box,v.link)&&!placed.some((other,j)=>i!==j&&(touches(v.box,other.box)||segmentHits(v.box,other.link))));
+  }
+  if(cards){
+   const index=new Map(ordered.map((w,i)=>[w.id,i])),sorted=[...pairs].sort((a,b)=>Math.abs(index.get(a.a)-index.get(a.b))-Math.abs(index.get(b.a)-index.get(b.b))||Math.min(index.get(a.a),index.get(a.b))-Math.min(index.get(b.a),index.get(b.b)));
+   const inset=(box,n)=>({x:box.x-n,y:box.y-n,w:box.w+2*n,h:box.h+2*n}),inside=(q,b)=>q.x>b.x&&q.x<b.x+b.w&&q.y>b.y&&q.y<b.y+b.h,intersects=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
+   const clamp=(n,min,max)=>Math.max(min,Math.min(max,n)),cardWidth=clamp(W*.22,188,248),phoneWidth=Math.min(Math.max(150,...phoneList.map(p=>Math.max(networkTextWidth(p.name,13),networkTextWidth(networkPhoneStatus(p),11))+28)),Math.max(150,W-cardWidth-88));
+   // Reserve the right lane first, allowing one chip width plus a bend step per pair on the left.
+   const desiredRoom=Math.max(0,...pairs.flatMap(p=>p.rules.map(r=>networkTextWidth('↓ '+permissionLabel(r))+40)))+Math.max(0,pairs.length-1)*16;
+   const gap=phoneList.length?clamp(W-cardWidth-phoneWidth-desiredRoom-12,64,260):0,room=W-cardWidth-(phoneList.length?phoneWidth+gap:0)-12;
+   let y=24;
+   let prevGroup;for(const [i,w]of ordered.entries()){if(grouped&&(!i||(groupById(w.group)||null)!==prevGroup)){y+=GROUP_HEAD;prevGroup=groupById(w.group)||null}const h=(hasChange(w)?84:64)+(networkStatusLines(networkStatus(w),cardWidth-42).length-1)*16;positions.set(w.id,{x:0,y,w:cardWidth,h});y+=h+20}
+   const columnHeight=ordered.length?y-44:0,phoneHeight=phoneList.length?phoneList.length*72-20:0;
+   H=Math.max(columnHeight,phoneHeight)+76;
+   for(const p of positions.values())p.y+=(H-columnHeight)/2-24;
+   const attachments=new Map();for(const w of ordered){const p=positions.get(w.id),neighbors=sorted.filter(e=>e.a===w.id||e.b===w.id).sort((a,b)=>{const ay=positions.get(a.a===w.id?a.b:a.a).y,by=positions.get(b.a===w.id?b.b:b.a).y;return Number(ay>p.y)-Number(by>p.y)||by-ay});for(const above of [true,false]){const group=neighbors.filter(e=>(positions.get(e.a===w.id?e.b:e.a).y<p.y)===above);group.forEach((e,i)=>{const start=above?12:p.h/2+4,end=above?p.h/2-4:p.h-12,t=group.length===1?(above?0:1):i/(group.length-1);attachments.set(w.id+':'+sorted.indexOf(e),p.y+start+(end-start)*t)})}}
+   for(const [i,p]of sorted.entries()){
+    const a=positions.get(p.a),b=positions.get(p.b),ay=attachments.get(p.a+':'+i),by=attachments.get(p.b+':'+i),full=texts(p,a,b),short=full.length>1?['⇅ '+[...new Set(p.rules.flatMap(r=>permissionLabel(r).split(' · ')))].join(' · ')]:full;
+    const visible=edges.filter(e=>!e.blocked),enclosed=visible.filter(e=>Math.min(e.ay,e.by)>=Math.min(ay,by)&&Math.max(e.ay,e.by)<=Math.max(ay,by));
+    function candidate(lines,bend,t=.5){
+     const w=Math.max(...lines.map(t=>networkTextWidth(t)))+24,h=lines.length*16+12,point=t=>({x:-3*(1-t)*t*bend,y:ay+(by-ay)*(3*t*t-2*t*t*t)}),q=point(t),box={x:q.x-w/2,y:q.y-h/2,w,h},steps=Math.ceil((2*bend+Math.abs(by-ay))/6),samples=Array.from({length:steps+1},(_,j)=>point(j/steps));
+     return {p,lines,box,bend,ay,by,point,samples};
+    }
+    // Ignore only the first/last 10 px at the attachments when checking card clearance.
+    const borderClear=e=>e.samples.every(q=>Math.hypot(q.x,q.y-ay)<=10||Math.hypot(q.x,q.y-by)<=10||q.x<=-10);
+    let minBend=32;while(!borderClear(candidate(short,minBend)))minBend+=16;
+    const curveClear=e=>borderClear(e)&&!visible.some(v=>e.samples.some(q=>inside(q,inset(v.box,4))));
+    const fits=e=>e.box.x>=-room&&!visible.some(v=>intersects(inset(e.box,6),v.box))&&![...positions.values()].some(c=>intersects(inset(e.box,6),c))&&curveClear(e)&&!edges.some(v=>v.samples.some(q=>inside(q,inset(e.box,4))));
+    let chosen,lastBend=minBend;
+    for(const lines of full.length>1?[full,short]:[full]){
+     const w=Math.max(...lines.map(t=>networkTextWidth(t)))+24;
+     // At the midpoint the cubic reaches 3/4 of its control-point bend.
+     const outerBend=Math.max(0,...enclosed.map(e=>-e.box.x+16+w/2))/.75;
+     for(let bend=Math.max(minBend,(w/2+8)/.75,outerBend);.75*bend+w/2<=room;bend+=16){lastBend=Math.max(lastBend,bend);const e=candidate(lines,bend);if(fits(e)){chosen=e;break}}
+     if(chosen)break;
+    }
+    if(!chosen)for(const t of [.35,.65]){const e=candidate(short,lastBend,t);if(fits(e)){chosen=e;break}}
+    if(!chosen){
+     // Hidden chips do not obstruct later curves; every curve still obstructs visible chips.
+     for(let bend=lastBend;;bend=Math.max(minBend,bend-16)){const e=candidate(short,bend);if(curveClear(e)||bend===minBend){chosen={...e,blocked:true};break}}
+    }
+    edges.push(chosen);
+   }
+   const arcRoom=Math.max(0,...edges.flatMap(e=>[...(e.blocked?[]:[-e.box.x]),...e.samples.map(q=>-q.x)])),total=arcRoom+cardWidth+(phoneList.length?gap+phoneWidth:0),x=(W-total)/2+arcRoom;
+   for(const p of positions.values()){p.x=x;p.w=cardWidth;nodeBoxes.push(p)}
+   for(const e of edges){e.box.x+=x;const point=e.point;e.point=t=>{const q=point(t);return {x:q.x+x,y:q.y}};e.d=`M${x} ${e.ay} C${x-e.bend} ${e.ay} ${x-e.bend} ${e.by} ${x} ${e.by}`}
+   phoneList.forEach((p,i)=>phones.set(p.id,{x:x+cardWidth+gap,y:(H-phoneHeight)/2+i*72,w:phoneWidth,h:52}));
+  }else{
+   // Keep full names for the initial placement and all eight height retries.
+   for(let attempt=0;attempt<=8;attempt++){
+    H=Math.max(2*ry+112,below?0:phoneList.length*64+64);cy=H/2;
+    positions.clear();phones.clear();nodeBoxes.length=0;
+    // Integrate ds / w at segment midpoints: w is the required spacing, not dot density.
+    // Start at the top clockwise; high normal weight leaves more room for horizontal labels.
+    const steps=4096,arc=[0],angles=[];
+    let previous={x:0,y:-ry};
+    for(let i=1;i<=steps;i++){const a=-Math.PI/2+2*Math.PI*i/steps,mid=a-Math.PI/steps,q={x:rx*Math.cos(a),y:ry*Math.sin(a)},nx=Math.cos(mid)/rx,ny=Math.sin(mid)/ry,weight=1+4*Math.abs(ny/Math.hypot(nx,ny))**3;arc.push(arc[i-1]+Math.hypot(q.x-previous.x,q.y-previous.y)/weight);previous=q}
+    let segment=1;
+    for(let i=0;i<ordered.length;i++){const target=arc[steps]*i/ordered.length;while(arc[segment]<target)segment++;angles.push(-Math.PI/2+2*Math.PI*(segment-1+(target-arc[segment-1])/(arc[segment]-arc[segment-1]))/steps)}
+    ordered.forEach((w,i)=>{const angle=angles[i],x=cx+rx*Math.cos(angle),y=cy+ry*Math.sin(angle);positions.set(w.id,{x,y,angle});nodeBoxes.push({x:x-radius-4,y:y-radius-4,w:2*radius+8,h:2*radius+8})});
+    if(below&&phoneList.length){
+     const rows=[[]];let used=0;
+     for(const p of phoneList){const w=Math.min(W-24,Math.max(176,networkTextWidth(p.name,13)+28,networkTextWidth(networkPhoneStatus(p),11)+28));if(used&&used+12+w>W-24){rows.push([]);used=0}rows[rows.length-1].push({p,w});used+=(used?12:0)+w}
+     const top=H+24;
+     rows.forEach((row,i)=>{let x=(W-row.reduce((n,b)=>n+b.w,0)-(row.length-1)*12)/2;for(const b of row){phones.set(b.p.id,{x,y:top+i*56,w:b.w,h:44});x+=b.w+12}});
+     H=top+rows.length*56;
+    }else phoneList.forEach((p,i)=>phones.set(p.id,{x:W-188,y:(H-phoneList.length*64+20)/2+i*64,w:176,h:44}));
+    if(placeRingLabels())break;
+    if(attempt===8){placeRingLabels(true);break}
+    ry+=24;
+   }
+   for(const p of pairs){const a=positions.get(p.a),b=positions.get(p.b),control={x:(a.x+b.x)/2*.65+cx*.35,y:(a.y+b.y)/2*.65+cy*.35};const end=(v)=>{const dx=control.x-v.x,dy=control.y-v.y,len=Math.hypot(dx,dy)||1;return {x:v.x+dx/len*(radius+3),y:v.y+dy/len*(radius+3)}};const start=end(a),finish=end(b),lines=texts(p,a,b),box={x:0,y:0,w:Math.max(...lines.map(t=>networkTextWidth(t)))+24,h:lines.length*16+12};edges.push({p,lines,box,d:`M${start.x} ${start.y} Q${control.x} ${control.y} ${finish.x} ${finish.y}`,point:t=>({x:(1-t)**2*start.x+2*(1-t)*t*control.x+t*t*finish.x,y:(1-t)**2*start.y+2*(1-t)*t*control.y+t*t*finish.y})})}
+  }
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  nodeBoxes.push(...phones.values());
+  if(grouped)for(const b of blocks()){
+   const links=JSON.stringify(b.ws.map(w=>wsKey(w.id))),talk=!!b.g?.talk,title=(b.g?b.g.name:'No group')+': '+b.ws.length+(b.ws.length===1?' workspace':' workspaces')+(talk?', members may message each other':'');
+   const g=svgEl('g',{class:'group-outline '+gClass(b.g)+(talk?' talk':''),'data-links':links},svgEl('title',{},title));
+   if(cards){const f=positions.get(b.ws[0].id),l=positions.get(b.ws[b.ws.length-1].id),x=f.x-10,y=f.y-GROUP_HEAD+2,w=f.w+20,h=l.y+l.h-f.y+GROUP_HEAD+6;
+    if(b.g)g.append(svgEl('rect',{class:'group-box',x,y,width:w,height:h,rx:16}));
+    const label=svgEl('text',{class:'group-label',x:x+12,y:y+19},networkShort(b.g?b.g.name:'No group',talk?w*.42:w-24,12));if(talk)label.append(svgEl('tspan',{class:'group-talk'},' · ⇄ '+(networkTextWidth(b.g.name,12)+networkTextWidth(' · ⇄ may message each other',11)<=w-24?'may message each other':'message each other')));g.append(label);
+   }else if(b.g){const a0=positions.get(b.ws[0].id).angle,a1=positions.get(b.ws[b.ws.length-1].id).angle+(positions.get(b.ws[b.ws.length-1].id).angle<a0?2*Math.PI:0),pad=Math.min(.12,Math.PI/Math.max(ordered.length,3)*.55),n=Math.max(8,Math.ceil((a1-a0+2*pad)*40));
+    const d=Array.from({length:n+1},(_,i)=>{const a=a0-pad+(a1-a0+2*pad)*i/n;return (i?'L':'M')+(cx+rx*Math.cos(a)).toFixed(1)+' '+(cy+ry*Math.sin(a)).toFixed(1)}).join(' ');
+    g.append(svgEl('path',{class:'group-band',d,'stroke-width':2*radius+14}));if(talk)g.append(svgEl('path',{class:'group-talk-line',d}));const mid=(a0+a1)/2,inset=radius+30,lx=cx+(rx-inset)*Math.cos(mid),ly=cy+(ry-inset)*Math.sin(mid)+4,anchor=Math.abs(Math.cos(mid))<.35?'middle':Math.cos(mid)>0?'end':'start';g.append(svgEl('text',{class:'group-label ring-group-label',x:lx,y:ly,'text-anchor':anchor},b.g.name+(talk?' ⇄':'')))}
+   groupLayer.append(g);
+  }
+  const degree=new Map(ordered.map(w=>[w.id,pairs.filter(p=>p.a===w.id||p.b===w.id).length]));
+  for(const e of edges){const ids=[wsKey(e.p.a),wsKey(e.p.b)],attrs={class:'edge-line',d:e.d};if(e.p.rules.some(r=>r.to===e.p.a))attrs['marker-start']='url(#network-arrow)';if(e.p.rules.some(r=>r.to===e.p.b))attrs['marker-end']='url(#network-arrow)';if(!cards){if(degree.get(e.p.a)>6)attrs.class+=' crowded-start';if(degree.get(e.p.b)>6)attrs.class+=' crowded-end'}const label=networkPairLabel(e.p),key='e:'+JSON.stringify(ids);
+   e.g=interactive(svgEl('g',{class:'graph-item graph-edge'},svgEl('path',{class:'edge-hit',d:e.d}),svgEl('path',attrs)),ids,label,()=>edgeSheet(e.p.a,e.p.b),key);lineLayer.append(e.g);
+   e.chip=interactive(svgEl('g',{class:'graph-item edge-label'+(e.blocked?' chip-blocked':'')},svgEl('title',{},label),svgEl('rect',{width:e.box.w,height:e.box.h,rx:10}),e.lines.map((t,i)=>svgEl('text',{x:e.box.w/2,y:18+i*16,'text-anchor':'middle'},t))),ids,label,()=>edgeSheet(e.p.a,e.p.b),'c:'+key);chipLayer.append(e.chip);
+   if(!cards){const q=e.point(.5);e.box.x=q.x-e.box.w/2;e.box.y=q.y-e.box.h/2}e.chip.setAttribute('transform',`translate(${e.box.x} ${e.box.y})`);
+  }
+  for(const p of phoneList){const a=phones.get(p.id);for(const id of p.workspaces||[]){const b=positions.get(id);if(!b)continue;let end;if(cards){const incoming=phoneList.filter(p=>(p.workspaces||[]).includes(id)),index=incoming.indexOf(p);end={x:b.x+b.w,y:b.y+12+(b.h-24)*(incoming.length===1?.5:index/(incoming.length-1))}}else{const dx=(below?a.x+a.w/2:a.x)-b.x,dy=(below?a.y:a.y+a.h/2)-b.y,len=Math.hypot(dx,dy)||1;end={x:b.x+dx/len*radius,y:b.y+dy/len*radius}}const connected=(p.workspaces||[]).filter(id=>positions.has(id)).sort((x,y)=>positions.get(x).y-positions.get(y).y),j=connected.indexOf(id),startY=cards?a.y+12+(a.h-24)*(connected.length===1?.5:j/(connected.length-1)):a.y+a.h/2,mid=(a.x+end.x)/2;
+    phoneLayer.append(svgEl('path',{class:'phone-link graph-item'+(p.paired===false?' unpaired':''),'data-links':JSON.stringify([phKey(p.id),wsKey(id)]),d:below?`M${a.x+a.w/2} ${a.y} C${a.x+a.w/2} ${(a.y+end.y)/2} ${end.x} ${(a.y+end.y)/2} ${end.x} ${end.y}`:`M${a.x} ${startY} C${mid} ${startY} ${mid} ${end.y} ${end.x} ${end.y}`}));
+   }}
+  function badge(g,x,y,text,review=false){const w=networkTextWidth(text,11)+16;g.append(svgEl('rect',{class:review?'review-badge':'waiting-badge',x,y,width:w,height:18,rx:9}),svgEl('text',{class:review?'review-text':'waiting-count',x:x+8,y:y+13},text))}
+  const outside=[];
+  for(const [i,w]of ordered.entries()){const p=positions.get(w.id),status=networkStatus(w),count=Math.max(0,Number(w.unread)||0),review=hasChange(w),g=svgEl('g',{class:'graph-item graph-node'},svgEl('title',{},w.name+': '+status+(count?' · '+count+' waiting':'')+(review?' · needs review':'')));
+   if(cards){let countText=count+' waiting',countWidth=count?networkTextWidth(countText,11)+24:0;if(count&&networkTextWidth(w.name,13)>p.w-28-countWidth){countText=String(count);countWidth=networkTextWidth(countText,11)+24}g.append(svgEl('rect',{class:'node-shape',x:p.x,y:p.y,width:p.w,height:p.h,rx:12}),svgEl('rect',{class:'focus-ring',x:p.x-4,y:p.y-4,width:p.w+8,height:p.h+8,rx:16}),svgEl('text',{class:'node-name',x:p.x+14,y:p.y+23},networkShort(w.name,p.w-28-countWidth)),svgEl('circle',{class:w.online?'online':'offline',cx:p.x+18,cy:p.y+43,r:4}),...networkStatusLines(status,p.w-42).map((line,i)=>svgEl('text',{class:'node-status',x:p.x+30,y:p.y+47+i*16},line)));if(count)badge(g,p.x+p.w-countWidth,p.y+9,countText);if(review)badge(g,p.x+12,p.y+p.h-24,'Needs your review',true);
+   }else{g.append(svgEl('circle',{class:'node-shape '+(w.online?'online-ring':'offline-ring'),cx:p.x,cy:p.y,r:radius}),svgEl('circle',{class:'focus-ring',cx:p.x,cy:p.y,r:radius+4}));
+    const {label,lines,suffix:shownSuffix,anchor,x,y,box}=ringLabels.get(w.id);
+    outside.push(box);const title=svgEl('text',{class:'ring-name',x,y,'text-anchor':anchor},label);if(lines===1&&shownSuffix)title.append(svgEl('tspan',{class:'ring-waiting'},shownSuffix));g.append(title);
+    if(lines>1){const sub=svgEl('text',{class:'ring-status',x,y:y+16,'text-anchor':anchor},status);if(shownSuffix)sub.append(svgEl('tspan',{class:'ring-waiting'},shownSuffix));g.append(sub)}
+    if(review)g.append(svgEl('circle',{class:'review-dot',cx:p.x+radius*Math.sin(Math.PI/6),cy:p.y-radius*Math.cos(Math.PI/6),r:4}));
+    const hitX=Math.min(p.x-radius-4,box.x),hitY=Math.min(p.y-radius-4,box.y);g.prepend(svgEl('rect',{class:'node-hit',x:hitX,y:hitY,width:Math.max(p.x+radius+4,box.x+box.w)-hitX,height:Math.max(p.y+radius+4,box.y+box.h)-hitY}));
+   }
+   nodeLayer.append(interactive(g,[wsKey(w.id)],w.name+': '+status+(count?', '+count+' waiting':'')+(review?', Needs your review':''),()=>workspaceSheet(w),wsKey(w.id)));
+  }
+  for(const p of phoneList){const b=phones.get(p.id),text=networkPhoneStatus(p),g=svgEl('g',{class:'graph-item graph-node phone-node'+(p.paired===false?' unpaired':'')},svgEl('title',{},p.name+': '+text),svgEl('rect',{class:'node-shape',x:b.x,y:b.y,width:b.w,height:b.h,rx:b.h/2}),svgEl('rect',{class:'focus-ring',x:b.x-4,y:b.y-4,width:b.w+8,height:b.h+8,rx:b.h/2+4}),svgEl('text',{class:'node-name',x:b.x+14,y:b.y+19},networkShort(p.name,b.w-28)),svgEl('text',{class:'phone-status',x:b.x+14,y:b.y+35},networkShort(text,b.w-28,11)));nodeLayer.append(interactive(g,[phKey(p.id)],p.name+': '+text,()=>phoneSheet(p),phKey(p.id)))}
+  if(phoneList.length){const first=phones.get(phoneList[0].id);nodeLayer.append(svgEl('text',{class:'phone-lane-title',x:below?W/2:first.x+14,y:first.y-14,'text-anchor':below?'middle':'start'},'PHONES'))}
+  function highlight(target){const ids=target?JSON.parse(target.dataset.links):[];if(target?.classList.contains('phone-node')){const phone=phoneList.find(p=>phKey(p.id)===ids[0]);ids.push(...(phone?.workspaces||[]).map(wsKey))}const related=new Set(ids),items=[...svg.querySelectorAll('.graph-item')];for(const g of items){const links=JSON.parse(g.dataset.links||'[]');if(links.length>1&&links.some(id=>ids.includes(id)))links.forEach(id=>related.add(id))}svg.classList.toggle('is-highlighting',!!target);for(const g of items){const links=JSON.parse(g.dataset.links||'[]');g.classList.toggle('highlight',links.length===1?related.has(links[0]):links.some(id=>ids.includes(id)))}
+   if(!cards){const used=[];for(const e of edges){if(!e.chip.classList.contains('highlight'))continue;let found=false;for(const t of [.5,.4,.6,.3,.7]){const q=e.point(t),box={...e.box,x:q.x-e.box.w/2,y:q.y-e.box.h/2};if([...nodeBoxes,...outside,...used].some(b=>overlaps(box,b)))continue;e.box=box;used.push(box);found=true;break}e.chip.classList.toggle('chip-blocked',!found);e.chip.setAttribute('transform',`translate(${e.box.x} ${e.box.y})`)}}
+  }
+  svg.addEventListener('mouseover',e=>highlight(e.target.closest('[role=button]')||svg.querySelector(':focus')));svg.addEventListener('mouseleave',()=>highlight(svg.querySelector(':focus')));svg.addEventListener('focusin',e=>highlight(e.target.closest('[role=button]')));svg.addEventListener('focusout',e=>highlight(e.relatedTarget?.closest?.('.network [role=button]')));
+  const legend=el('div',{class:'network-legend'});
+  function sample(kind){const s=svgEl('svg',{width:28,height:20,viewBox:'0 0 42 20','aria-hidden':'true'});if(kind==='online'||kind==='offline')s.append(svgEl('circle',{class:cards?kind:'node-shape '+kind+'-ring',cx:21,cy:10,r:cards?4:6}));else{s.append(svgEl('path',{class:kind==='phone'||kind==='unpaired'?'legend-phone '+kind:'edge-line',d:'M4 10 H38'}));if(kind==='one'||kind==='both')s.append(svgEl('path',{class:'network-arrow',d:'M32 6 L39 10 L32 14 Z'}));if(kind==='both')s.append(svgEl('path',{class:'network-arrow',d:'M10 6 L3 10 L10 14 Z'}))}return s}
+  for(const [kind,label]of [['one','One way'],['both','Both ways'],['allowed','What is allowed'],['phone','Phone can reach'],['unpaired','Phone not set up yet'],['online','Online'],['offline','Offline']]){const art=kind==='allowed'?svgEl('svg',{width:158,height:24,viewBox:'0 0 158 24',class:'edge-label','aria-hidden':'true'},svgEl('rect',{x:1,y:1,width:156,height:22,rx:10}),svgEl('text',{x:79,y:16,'text-anchor':'middle'},'Messages · Tasks · Start')):sample(kind);legend.append(el('span',{class:'network-legend-item'},art,label))}if(grouped){const box=svgEl('svg',{width:28,height:20,viewBox:'0 0 28 20','aria-hidden':'true',class:'g-violet'},svgEl('rect',{class:'group-box',x:1,y:2,width:26,height:16,rx:6}));legend.append(el('span',{class:'network-legend-item'},box,'Group'));if(groupList.some(g=>g.talk))legend.append(el('span',{class:'network-legend-item'},el('span',{class:'talk-key'},'⇄'),'Members of the group may message each other'))}if(!cards)legend.append(el('span',{},'Point at a workspace to see its connections'));
+  if(!cards){const top=Math.min(0,...outside.map(b=>b.y-12)),bottom=Math.max(H,...outside.map(b=>b.y+b.h+12));if(top<0){for(const layer of [groupLayer,lineLayer,phoneLayer,nodeLayer,chipLayer])layer.setAttribute('transform',`translate(0 ${-top})`)}H=bottom-top;svg.setAttribute('viewBox',`0 0 ${W} ${H}`)}
+  const viewport=el('div',{class:'network-viewport'},svg);
+  const focusKey=root.querySelector(':focus')?.dataset.key;root.replaceChildren(...(chips?[chips]:[]),viewport,legend,list);const note=emptyNote();if(note)root.append(note);applyGroupFilter();if(focusKey){const match=[...svg.querySelectorAll('[data-key]')].find(g=>g.dataset.key===focusKey);match?.focus()}
  }
- // Paint chips above all paths, so no later edge can cross their text.
- for(const {g,label,lx,ly,lw}of edgeGroups){const chip=svgEl('g',{class:'graph-item edge-label'},svgEl('rect',{x:lx-lw/2,y:ly-13,width:lw,height:26,rx:13}),svgEl('text',{x:lx,y:ly+4,'text-anchor':'middle'},label));svg.append(interactive(chip,g.dataset.links.split(' '),g.getAttribute('aria-label'),()=>g.dispatchEvent(new Event('click'))))}
- for(const [items,phone]of [[workspaces,false],[phoneList,true]])for(const w of items){const p=positions.get(w.id),text=phone?(w.paired===false?'Waiting for first scan':w.online?'Online':'Connected'):(w.online?'Online':w.last_seen?'Last seen '+ago(w.last_seen):'Not connected yet'),count=!phone&&Number(w.unread)>0?w.unread+' waiting':'';
-  const maxStatus=count?Math.max(4,Math.floor((p.w-45-count.length*6)/6)):24,short=text.length>maxStatus?text.slice(0,maxStatus-1)+'…':text;
-  const g=svgEl('g',{class:'graph-item graph-node'},svgEl('title',{},w.name+': '+text+(count?' · '+count:'')),svgEl('rect',{x:p.x,y:p.y,width:p.w,height:p.h,rx:phone?24:12}),svgEl('text',{class:'node-name',x:p.x+15,y:p.y+22},w.name.length>23?w.name.slice(0,22)+'…':w.name),svgEl('text',{x:p.x+(phone?15:30),y:p.y+(phone?38:42)},short));
-  if(!phone){g.append(svgEl('circle',{class:w.online?'online':'offline',cx:p.x+18,cy:p.y+38,r:4}));if(count)g.append(svgEl('text',{class:'waiting-count',x:p.x+p.w-12,y:p.y+42,'text-anchor':'end'},count));if(hasChange(w))g.append(svgEl('rect',{class:'review-badge',x:p.x+12,y:p.y+50,width:135,height:18,rx:8}),svgEl('text',{class:'review-text',x:p.x+21,y:p.y+63},'Needs your review'))}
-  svg.append(interactive(g,[w.id],w.name+': '+text,()=>phone?phoneSheet(w):workspaceSheet(w)));
- }
- const left=Math.min(0,...labels.map(b=>b.x-12)),top=Math.min(0,...labels.map(b=>b.y-12)),right=Math.max(width,...labels.map(b=>b.x+b.w+12)),bottom=Math.max(height,...labels.map(b=>b.y+b.h+12));
- svg.setAttribute('viewBox',`${left} ${top} ${right-left} ${bottom-top}`);
- function highlight(target){const ids=target?.dataset.links?.split(' ')||[];svg.classList.toggle('is-highlighting',!!target);svg.querySelectorAll('.graph-item').forEach(g=>g.classList.toggle('highlight',g===target||(g.dataset.links||'').split(' ').some(id=>ids.includes(id))))}
- svg.addEventListener('mouseover',e=>highlight(e.target.closest('[role=button]')));svg.addEventListener('mouseleave',()=>highlight(null));svg.addEventListener('focusin',e=>highlight(e.target.closest('[role=button]')));svg.addEventListener('focusout',()=>highlight(null));
- return el('div',{},svg,el('p',{class:'network-legend muted'},'Arrow = direction · Messages = messages and files · Tasks = give tasks · Start = start work'),list);
+ draw(document.querySelector('#network-host')?.getBoundingClientRect().width||900);
+ requestAnimationFrame(()=>{if(!root.isConnected)return;const host=root.closest('#network-host')||root.parentElement,width=host.getBoundingClientRect().width;if(width&&Math.abs(width-lastWidth)>8)draw(width);if(typeof ResizeObserver==='undefined')return;host._networkResizeCleanup?.();host._networkResizeCleanup=()=>{observer?.disconnect();clearTimeout(timer)};observer=new ResizeObserver(entries=>{if(!root.isConnected){observer.disconnect();clearTimeout(timer);return}const width=entries[0].contentRect.width;if(!width||Math.abs(width-lastWidth)<=8)return;clearTimeout(timer);timer=setTimeout(()=>{if(root.isConnected)draw(width);else observer.disconnect()},120)});observer.observe(host)});
+ return root;
 }
 
 let lastRoute=null,loadingTimer;
@@ -352,7 +577,7 @@ document.body.classList.remove('menu-open');$('#menu').setAttribute('aria-expand
  if(!token){auth();return}document.body.classList.remove('signedout');const v=++epoch;
  $('#top-add').hidden=key!=='overview';document.querySelectorAll('dialog[open]').forEach(d=>orch.close(d));const changed=lastRoute!==null&&lastRoute!==key;lastRoute=key;
  const slow=loadingTimer=setTimeout(()=>{if(v===epoch)app.replaceChildren(skeleton())},300);
- try{const ws=await all('/workspaces');if(v!==epoch)return;workspaces=ws;phoneList=await all('/phones');if(v!==epoch)return;await ({overview,add,rules,messages,config,webhooks,phones}[key])(v);if(v===epoch){touched();if(changed)orch.enter(app)}}catch(e){if(v!==epoch||!token)return;show(panel('This page could not be loaded',empty('Could not load this page',e.message,button('Try again',()=>route()))))}finally{clearTimeout(slow)}
+ try{const ws=await all('/workspaces');if(v!==epoch)return;workspaces=ws;phoneList=await all('/phones');if(v!==epoch)return;groupList=(await api('/groups')).items||[];if(v!==epoch)return;await ({overview,add,groups:groupsPage,rules,messages,config,webhooks,phones}[key])(v);if(v===epoch){touched();if(changed)orch.enter(app)}}catch(e){if(v!==epoch||!token)return;show(panel('This page could not be loaded',empty('Could not load this page',e.message,button('Try again',()=>route()))))}finally{clearTimeout(slow)}
 }
 for(const [key,title,hidden]of screens)if(!hidden)$('#nav').append(el('a',{href:'#'+key,class:'nav-item'},uiIcon(key),title));
 $('#menu').addEventListener('click',()=>{const o=document.body.classList.toggle('menu-open');$('#menu').setAttribute('aria-expanded',String(o))});

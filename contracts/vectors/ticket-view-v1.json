@@ -1570,6 +1570,106 @@
      }
     }
    }
+  },
+  {
+   "name": "link-kind",
+   "ok": true,
+   "why": "a ticket link carries label, icon, mono and status",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_links01",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "T",
+      "status": "open",
+      "running": false,
+      "checklist": [],
+      "done": 0,
+      "total": 0,
+      "history_tail": [],
+      "attachments": [
+       {
+        "kind": "link",
+        "title": "Add CSV export for invoices",
+        "url": "https://github.com/acme/billing/pull/418",
+        "at": "2026-11-06T09:38:00Z",
+        "label": "GitHub · Pull request",
+        "icon": "github",
+        "mono": "GH",
+        "status": "review"
+       },
+       {
+        "kind": "link",
+        "title": "intranet.acme.local/runbooks/42",
+        "url": "https://intranet.acme.local/runbooks/42",
+        "at": "2026-11-06T09:37:00Z",
+        "label": "Link",
+        "icon": "link"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "link-bad-icon",
+   "ok": false,
+   "why": "icon is a lowercase key",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_links01",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "T",
+      "status": "open",
+      "running": false,
+      "checklist": [],
+      "done": 0,
+      "total": 0,
+      "history_tail": [],
+      "attachments": [
+       {
+        "kind": "link",
+        "title": "Add CSV export for invoices",
+        "url": "https://github.com/acme/billing/pull/418",
+        "at": "2026-11-06T09:38:00Z",
+        "label": "GitHub · Pull request",
+        "icon": "<svg>",
+        "mono": "GH",
+        "status": "review"
+       },
+       {
+        "kind": "link",
+        "title": "intranet.acme.local/runbooks/42",
+        "url": "https://intranet.acme.local/runbooks/42",
+        "at": "2026-11-06T09:37:00Z",
+        "label": "Link",
+        "icon": "link"
+       }
+      ]
+     }
+    }
+   }
   }
  ]
 }

@@ -135,7 +135,8 @@ def allow_patterns(patterns) -> list[str]:
 def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None) -> list[str] | None:
     """The argv for kind fresh|resume in mode oneshot|live, or None when this agent cannot do it.
 
-    v: prompt, session, new_session, orch_hooks_file, allow (list of tool patterns), stream (bool).
+    v: prompt, session, new_session, orch_hooks_file, allow (list of tool patterns), stream (bool),
+    permissions (ask|auto|full; default: the workspace's setting).
     A oneshot argv without {prompt} gets the prompt appended (prompt_via arg); with stdin the caller sends it.
     """
     a = load(name, root)
@@ -175,7 +176,7 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
         return _PLACEHOLDER.sub(sub, item)
 
     out = [fill(i) for i in items]
-    extra: list[str] = []
+    extra: list[str] = permission_args(name, root, v.get("permissions"))
     if mode == "oneshot":
         if v.get("stream") and sect.get("stream_args"):
             extra += sect["stream_args"]
@@ -190,6 +191,48 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
             out.append("--")
         out.append(str(v["prompt"]))
     return out
+
+
+@functools.cache
+def _help_text(binary: str) -> str:
+    try:
+        r = subprocess.run(
+            [binary, "--help"], capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return (r.stdout or "") + (r.stderr or "")
+
+
+def permission_args(name: str, root: Path | None = None, mode: str | None = None) -> list[str]:
+    """The tool's flags for the workspace's permission mode (ask | auto | full), from the adapter's
+    `permissions`. An agent without that data (a generic command, Codex) gets none: it ignores the mode.
+    An entry may depend on the installed tool: `if_help_has` (text in its --help), else `else`."""
+    a = load(name, root)
+    table = a.get("permissions")
+    if not table:
+        return []
+    entry = table.get(mode or config.permissions(root))
+    if entry is None:
+        return []
+    if isinstance(entry, list):
+        return list(entry)
+    binary = (a.get("detect") or {}).get("binary")
+    path = shutil.which(binary) if binary else None
+    if path and entry.get("if_help_has") in _help_text(path):
+        return list(entry["args"])
+    return list(entry.get("else") or [])
+
+
+def permission_line(root: Path) -> str:
+    """One plain line saying what agents may do without asking here."""
+    mode = config.permissions(root)
+    words = {
+        "ask": "agents ask before editing files or running commands",
+        "auto": "agents work on their own and the tool checks risky steps",
+        "full": "agents never ask, even for risky steps",
+    }
+    return f"Permissions {mode}: {words[mode]} (change: orch config set workspace.permissions ask|auto|full)"
 
 
 def command_notice(name: str, mode: str = "oneshot", root: Path | None = None) -> str | None:

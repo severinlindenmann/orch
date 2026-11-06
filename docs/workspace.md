@@ -78,7 +78,14 @@ To pause a ticket until a time: `orch wait <id> --until 2026-12-01T08:00:00+01:0
 ## Links and history
 
 ```sh
-$ orch link add <id> --type github --url https://example.com/pr/1
+$ orch link add DM1-12 https://github.com/acme/billing/pull/418
+Linked DM1-12 → Pull request github.com/acme/billing/pull/418
+$ orch link add DM1-12 https://www.figma.com/design/k2Lq9/Billing --title "Export button states"
+$ orch link list DM1-12
+  1  Pull request  github.com/acme/billing/pull/418  open
+  2  Figma         Export button states
+$ orch link remove DM1-12 2
+$ orch ticket set MK2-7 marketing.budget 2400        # an add-on field (shown under Details)
 $ orch log <id> "Waiting for the new price list"
 ```
 
@@ -107,7 +114,7 @@ questions and answers, history. Relay and publish ship in the same package as bu
 | `orch ticket new\|list\|show\|tree\|edit\|summary\|status\|wait\|patch` | Tickets. `done` is refused while a ticked task lacks proof |
 | `orch check add\|edit\|move\|remove\|reopen\|start\|stop\|done` | Tasks and proof |
 | `orch ask` / `answer` / `needs` | Questions and the list of what needs a person |
-| `orch link add`, `orch log`, `orch ext set\|unset` | Links, history, add-on data (`ext.<addon>`; `ext unset <id> <addon>[.<key>] [--if-revision N]` removes it) |
+| `orch link add\|list\|remove`, `orch ticket set`, `orch log`, `orch ext set\|unset` | Links (https/http; kind from the active add-ons, else the known-sites table, else Link), add-on fields, history, add-on data (`ext.<addon>`; `ext unset <id> <addon>[.<key>] [--if-revision N]` removes it) |
 | `orch agents`, `orch config`, `orch run ...` | Agents and runs: [agents.md](agents.md) |
 | `orch addon add\|list\|remove\|uninstall`, `orch start\|stop\|status`, `orch update` | Add-ons: [addons.md](addons.md) |
 
@@ -120,11 +127,20 @@ The core never names an add-on: no scheduler/dashboard words in core code or cor
 ## Tests
 - T0: `uv run pytest tests/test_<area>.py -x -q` (e.g. `test_tickets.py -k evidence`).
 - Contract tests: every `contracts/examples/ticket/*` loads/validates as expected; `vectors/publish-blob-v1.json` decrypts.
-- Fake publish/relay servers in-process for client tests. CI: `workspace/**`, `contracts/**`; matrix ubuntu, macos, windows.
+- Fake publish/relay servers in-process for client tests. CI: `workspace/**`, `contracts/**`; matrix ubuntu, macos, windows
+  (PRs into develop: Linux, plus the Windows standard-user install when the install path changed).
 
 ## Install
 One line from GitHub (public repo): `install.sh` / `install.ps1` in the repo root install `uv` if missing, then
-`uv tool install git+https://github.com/severinlindenmann/orch#subdirectory=workspace`. Then `orch init` per project.
+`uv tool install https://github.com/severinlindenmann/orch/archive/<ref>.zip#subdirectory=workspace` (a zip download:
+no git needed). Then `orch init` per project. Add-ons and `orch update` install from the same place.
+
+Windows: works for a standard user (no admin rights), without git and with the default execution policy (the uv
+installer runs with a bypass for that one process only). On Windows on ARM the installer picks an x64 Python
+(`cryptography` has no ARM64 Windows build). Windows can not replace a running program's files, so `orch addon add`,
+`orch addon uninstall` and `orch update` finish in the background right after the command ends (about a minute; log:
+`finish.log` in orch's home, `orch addon list` shows the result). CI runs `e2e/windows/run-as-standard-user.ps1` on
+develop pushes and on PRs that change the install path; on a winvm clone run the same script.
 
 ## Not included
 Signing, approvals, planning gates, fixed requirements, durations, a server.

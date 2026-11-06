@@ -43,34 +43,124 @@ def test_argv_rule_checker_finds_bad_templates():
 
 RUN_CMDS = (
     "check", "ask", "log", "link", "needs", "wait", "ticket show", "ticket list", "ticket tree", "ticket new",
-    "ticket summary", "ticket status", "ticket wait", "run done", "run status",
+    "ticket summary", "ticket status", "ticket artifacts", "ticket artifacts-dir", "ticket wait",
+    "ticket set", "run done", "run status",
 )  # fmt: skip
 # the agent may run the orch commands a run needs (tasks, questions, summary), nothing else
 ORCH_OK = ["--allowedTools", ",".join(f"Bash(orch {c}:*)" for c in RUN_CMDS)]
-CLAUDE_FRESH = [
-    "claude",
-    "-p",
-    "--session-id",
-    NEW,
-    "--permission-mode",
-    "acceptEdits",
-    *ORCH_OK,
-    "--",
-    "Do it",
-]
-CLAUDE_RESUME = ["claude", "-p", "--resume", OLD, "--permission-mode", "acceptEdits", *ORCH_OK, "--", "Do it"]
+CLAUDE_FRESH = ["claude", "-p", "--session-id", NEW, *ORCH_OK, "--", "Do it"]
+CLAUDE_RESUME = ["claude", "-p", "--resume", OLD, *ORCH_OK, "--", "Do it"]
 
 
 def test_claude_snapshots():
-    v = {"prompt": "Do it", "new_session": NEW, "session": OLD}
+    v = {"prompt": "Do it", "new_session": NEW, "session": OLD, "permissions": "ask"}
     assert adapters.render("claude", "fresh", "oneshot", v) == CLAUDE_FRESH
     assert adapters.render("claude", "resume", "oneshot", v) == CLAUDE_RESUME
     v["orch_hooks_file"] = ".orch/run/hooks-r_1.json"
     assert adapters.render("claude", "fresh", "live", v) == [
-        "claude", "--session-id", NEW, "--permission-mode", "acceptEdits", *ORCH_OK,
+        "claude", "--session-id", NEW, *ORCH_OK,
         "--settings", ".orch/run/hooks-r_1.json",
     ]  # fmt: skip
     assert adapters.render("claude", "resume", "live", v)[:3] == ["claude", "--resume", OLD]
+
+
+@pytest.fixture
+def claude_help(monkeypatch, tmp_path):
+    """A fake `claude` on PATH whose --help does (or does not) list the auto mode."""
+    adapters._help_text.cache_clear()
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    exe = bindir / "claude"
+    exe.write_text('#!/bin/sh\necho \'choices: "acceptEdits", "plan"\'\n')
+    exe.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    yield exe
+    adapters._help_text.cache_clear()
+
+
+@pytest.mark.parametrize("mode", ["oneshot", "live"])
+def test_permission_modes_for_claude(claude_help, mode):
+    v = {"prompt": "p", "new_session": NEW, "orch_hooks_file": "h.json"}
+
+    def flags(perm):
+        argv = adapters.render("claude", "fresh", mode, {**v, "permissions": perm})
+        assert "--allowedTools" in argv  # the orch list stays in every mode
+        if mode == "oneshot":
+            assert argv[-2:] == ["--", "p"]  # the prompt stays last
+        i = argv.index("--permission-mode") if "--permission-mode" in argv else None
+        return (
+            ("--permission-mode", argv[i + 1])
+            if i is not None
+            else (("--dangerously-skip-permissions",) if "--dangerously-skip-permissions" in argv else ())
+        )
+
+    assert flags("ask") == ()
+    assert flags("full") == ("--dangerously-skip-permissions",)
+    assert flags("auto") == ("--permission-mode", "acceptEdits")  # this claude does not list auto
+    claude_help.write_text('#!/bin/sh\necho \'choices: "acceptEdits", "auto"\'\n')
+    adapters._help_text.cache_clear()
+    assert flags("auto") == ("--permission-mode", "auto")
+
+
+def test_permission_mode_comes_from_the_workspace_config(proj, claude_help, run):
+    assert config.permissions(proj) == "auto"  # the default
+    assert (
+        adapters.render("claude", "fresh", "oneshot", {"prompt": "p", "new_session": NEW}, proj).count(
+            "acceptEdits"
+        )
+        == 1
+    )
+    code, out, _ = run("config", "set", "workspace.permissions", "full")
+    assert code == 0 and "workspace.permissions = full" in out
+    assert run("config", "get", "workspace.permissions")[1].strip() == "full"
+    argv = adapters.render("claude", "fresh", "live", {"new_session": NEW, "orch_hooks_file": "h"}, proj)
+    assert "--dangerously-skip-permissions" in argv and "acceptEdits" not in argv
+    code, _, err = run("config", "set", "workspace.permissions", "yolo")
+    assert code != 0 and "ask, auto, full" in err
+    assert config.permissions(proj) == "full"
+    assert "permissions" not in (config.read(proj).get("workspace") or {})  # not kept in the repo
+    config.set_permissions(proj, "auto")
+    config.set_key(proj, "workspace", "permissions", "full")  # a repo config cannot raise it
+    assert config.permissions(proj) == "auto"
+    assert "--dangerously-skip-permissions" not in adapters.render(
+        "claude", "fresh", "live", {"new_session": NEW, "orch_hooks_file": "h"}, proj
+    )
+
+
+def test_an_agent_may_lower_the_mode_never_raise_it(proj, run, monkeypatch):
+    monkeypatch.delenv("ORCH_AGENT", raising=False)
+    assert run("config", "set", "workspace.permissions", "full", "--by", "human:me")[0] == 0
+    code, _, err = run("config", "set", "workspace.permissions", "ask", "--by", "agent:claude")
+    assert code == 0 and config.permissions(proj) == "ask"
+    code, _, err = run("config", "set", "workspace.permissions", "full", "--by", "agent:claude")
+    assert code != 0 and "Only a person" in err and config.permissions(proj) == "ask"
+    monkeypatch.setenv("ORCH_AGENT", "claude")  # an agent in the environment counts, whatever --by says
+    code, _, err = run("config", "set", "workspace.permissions", "auto", "--by", "human:me")
+    assert code != 0 and config.permissions(proj) == "ask"
+
+
+def test_the_mode_is_per_workspace(proj, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    config.set_permissions(proj, "full")
+    assert config.permissions(other) == "auto"
+
+
+def test_agents_without_a_mapping_ignore_the_mode(proj):
+    for perm in ("ask", "auto", "full"):
+        assert adapters.render("codex", "fresh", "oneshot", {"prompt": "p", "permissions": perm}) == [
+            "codex", "exec", "--json", "--", "p",
+        ]  # fmt: skip
+    _agent(proj, "mine", command="mine {prompt}")
+    config.set_permissions(proj, "full")
+    assert adapters.permission_args("mine", proj) == []
+    assert adapters.render("mine", "fresh", "oneshot", {"prompt": "p"}, proj) == ["mine", "p"]
+
+
+def test_permission_line_names_the_mode(proj):
+    assert adapters.permission_line(proj).startswith("Permissions auto:")
+    config.set_permissions(proj, "ask")
+    assert adapters.permission_line(proj).startswith("Permissions ask:")
 
 
 def test_no_blanket_orch_permission_in_any_argv():

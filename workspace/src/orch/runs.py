@@ -479,6 +479,8 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
         f"Mark the task you work on with orch check start {tid} <task id> and finish each with proof: "
         f'orch check done {tid} <task id> --note "<what you did>". '
         f'When you stop, write where things stand: orch ticket summary {tid} "<summary>".',
+        f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
+        f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]
     if ticket.get("summary"):
         out.append(f"Where things stand: {_clip(ticket['summary'], 1500)}")

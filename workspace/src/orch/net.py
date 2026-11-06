@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from orch import term
 from orch.errors import Refused
 
 RETRY_DELAYS = (1, 2, 4)  # seconds; connection-level failures only
@@ -216,7 +217,7 @@ def working(text: str):
 
     @contextlib.contextmanager
     def _cm():
-        shown = sys.stderr.isatty()
+        shown = term.is_terminal(sys.stderr)
         if shown:
             print(text + "...", end="", file=sys.stderr, flush=True)
         try:

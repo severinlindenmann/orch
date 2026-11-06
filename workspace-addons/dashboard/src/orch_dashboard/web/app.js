@@ -84,6 +84,14 @@
     if (questions(t).length) return chip('Waiting for you', 'attn');
     return t.status === 'waiting' ? chip('Blocked', 'attn') : chip(statusWord(t), t.status === 'active' ? 'active' : '');
   };
+  // A status chip with a small menu: To do / Doing / Waiting / Done (Done -> back included). Read-only in a shared copy.
+  const STATUS_CHOICES = [['open', 'To do'], ['active', 'Doing'], ['waiting', 'Waiting'], ['done', 'Done']];
+  const statusItems = (t, scope) => STATUS_CHOICES.map(([value, label]) => h('button', {type:'button', className:'menu-item' + (t.status === value ? ' sel' : ''), role:'menuitemradio', 'aria-checked':t.status === value, 'data-action':'status-set', 'data-ticket':t.id, 'data-status':value, 'data-key':'status-' + scope + '-' + t.id + '-' + value}, label));
+  const statusControl = (t, scope) => {
+    if (snapshot) return statusChip(t);
+    const items = statusItems(t, scope);
+    return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'status-sum', title:'Change the status', 'aria-label':'Change the status. Now: ' + statusWord(t)}, statusChip(t), iconEl('down')), h('div', {className:'menu-pop', role:'menu'}, items));
+  };
   const heading = (title, sub = '') => h('header', {className:'page-heading', 'data-key':'heading'}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null);
   const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);
   const emptyRow = text => h('div', {className:'card-row muted'}, text);
@@ -97,7 +105,7 @@
       const days = Math.round((Date.parse(today()) - Date.parse(t.due)) / 86400000);
       late = chip('Overdue ' + days + (days === 1 ? ' day' : ' days'), 'error');
     }
-    return h('div', {className:'card-row ticket-row', 'data-key':'ticket-' + t.id}, h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, meta.join(' · ')), parent ? h('p', {className:'meta'}, 'Part of ', clean(parent.title)) : null), h('div', {className:'row'}, late, statusChip(t)));
+    return h('div', {className:'card-row ticket-row', 'data-key':'ticket-' + t.id}, h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, meta.join(' · ')), parent ? h('p', {className:'meta'}, 'Part of ', clean(parent.title)) : null), h('div', {className:'row'}, late, statusControl(t, 'row')));
   }
   function needRow(row, newest) {
     const t = ticketOf(row.ticket);
@@ -148,13 +156,59 @@
     return fragment(h('div', {className:'card-row ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
       row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, h('span', {className:'chevron ' + (open ? '' : 'closed')}, iconEl('down'))) : null,
       h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, [typeof t.key === 'string' ? t.key : '', name(t.owner), t.due ? 'Due ' + date(t.due) : '', row.children ? row.done + ' of ' + row.children + ' done' : ''].filter(Boolean).join(' · ')),
-        !row.depth && row.parentMissing ? h('p', {className:'meta'}, 'Part of a ticket that is not here') : null), statusChip(t)),
+        !row.depth && row.parentMissing ? h('p', {className:'meta'}, 'Part of a ticket that is not here') : null), statusControl(t, 'tree')),
       open ? children.filter(i => !rows[i].late || treeAll.has(t.id)).map(i => treeBranch(rows, i)) : null,
       open && late.length && !treeAll.has(t.id) ? h('div', {className:'card-row child', 'data-key':'tree-all-' + t.id}, h('button', {type:'button', className:'btn ghost sm', 'data-action':'tree-all', 'data-ticket':t.id}, 'Show all ' + children.length)) : null);
   }
+  // List or Board (remembered in this browser only).
+  let ticketView = 'list';
+  try { if (localStorage.getItem('orch.tickets.view') === 'board') ticketView = 'board'; } catch (_) { /* no storage: the list */ }
+  const boardMore = new Set();
+  const viewToggle = () => snapshot || !tickets().length ? null : h('div', {className:'board-tools row', 'data-key':'board-tools'},
+    h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))),
+    ticketView === 'board' ? h('span', {className:'board-hint'}, 'Drag a card to move it, or use its ⋯ button') : null);
+  const initials = value => String(name(value) || '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+  // a width through the style object: the page's CSP refuses style attributes
+  const widthSpan = pct => { const node = h('span', {}); node.style.width = pct + '%'; return node; };
+  function boardCard(t) {
+    const tasks = array(t.checklist), done = tasks.filter(task => task.done).length;
+    const who = name(t.owner), running = state.runs?.[t.id]?.running === true;
+    return h('article', {className:'card ticket-card', draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
+      h('div', {className:'row'}, h('span', {className:'mono key grow'}, typeof t.key === 'string' ? t.key : ''), running ? h('span', {className:'dot working', 'aria-label':'An agent is working'}) : null,
+        snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'btn ghost icon sm move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card')))),
+      h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))),
+      h('div', {className:'owner-line'}, who ? [h('span', {className:'avatar', 'aria-hidden':'true'}, initials(who)), who] : null, t.due ? h('span', {className:'due' + (overdue(t) ? ' bad' : '')}, date(t.due)) : null),
+      cardLinks(t),
+      tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':'0', 'aria-valuemax':String(tasks.length), 'aria-valuenow':String(done), 'aria-label':'Tasks done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, done + '/' + tasks.length)) : null);
+  }
+  function board() {
+    const visible = sorted(tickets().filter(t => t.status !== 'dropped'));
+    const cols = STATUS_CHOICES.map(([status, label]) => {
+      const mine = visible.filter(t => t.status === status);
+      const cap = status === 'done' && !boardMore.has('done') ? 3 : mine.length;
+      return h('section', {className:'kanban-col', 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + mine.length},
+        h('div', {className:'col-head'}, h('span', {className:'dot ' + ({active:'working', waiting:'needs', open:'idle', done:'idle'}[status])}), h('h2', {}, label), h('span', {className:'status-count'}, String(mine.length))),
+        mine.slice(0, cap).map(boardCard), !mine.length ? h('p', {className:'meta board-none'}, 'Nothing here') : null,
+        status === 'done' && mine.length > 3 ? h('button', {type:'button', className:'btn ghost sm show-done', 'data-action':'board-more', 'data-key':'board-more'}, boardMore.has('done') ? 'Show fewer' : 'Show ' + (mine.length - 3) + ' more') : null);
+    });
+    return h('div', {className:'board', 'data-key':'board'},
+      h('div', {className:'status-jumps', 'data-key':'status-jumps'}, STATUS_CHOICES.map(([status, label]) => h('button', {type:'button', 'data-action':'board-jump', 'data-status':status, 'aria-pressed':'false'}, label))),
+      h('div', {className:'board-track'}, cols));
+  }
+  async function moveTicket(id, status) {
+    const t = ticketOf(id), lock = 'status-' + id;
+    if (!t || t.status === status || locks.has(lock)) return;
+    locks.add(lock);
+    const result = await act('ticket.patch', {ticket:t.id, data:{status}, if_revision:t.revision});
+    locks.delete(lock);
+    render();
+    const label = STATUS_CHOICES.find(([value]) => value === status)?.[1] || status;
+    window.orch.toast(result.ok ? 'Moved to ' + label : result.text + (result.status === 409 ? ' Reload the page and try again.' : ''), result.ok ? 'ok' : 'error');
+  }
   function list() {
     const rows = window.DashHelpers.treeRows(tickets());
-    return fragment(heading('Tickets'), !tickets().length ? card('empty', 'Tickets', '', firstTicket()) : ['active', 'waiting', 'open', 'done', 'dropped'].map(status => {
+    if (ticketView === 'board' && tickets().length) return fragment(heading('Tickets'), viewToggle(), board());
+    return fragment(heading('Tickets'), viewToggle(), !tickets().length ? card('empty', 'Tickets', '', firstTicket()) : ['active', 'waiting', 'open', 'done', 'dropped'].map(status => {
       const group = rows.map((row, i) => ({row, i})).filter(({row}) => row.depth === 0 && row.ticket.status === status);
       if (!group.length) return null;
       const title = {active:'Doing', waiting:'Waiting', open:'To do', done:'Done', dropped:'Dropped'}[status];
@@ -193,6 +247,7 @@
         const target = ticketOf(url);
         return target ? h('a', {className:'chip outline', href:href(url)}, clean(target.title)) : null;
       }
+      if (link.view) return null;  // web links are in the Links card
       if (!/^https:\/\/[^\s<>"'`]+$/.test(url)) return null;
       try { const parsed = new URL(url); return h('a', {className:'chip outline', href:parsed.href, target:'_blank', rel:'noopener noreferrer'}, clean(link.title) || parsed.host); } catch (_) { return null; }
     }).filter(Boolean);
@@ -211,6 +266,176 @@
       .map(([r, ext, addon]) => [r, ext && typeof ext === 'object' ? (r.format === 'open-page' ? addonLink(addon, ext[r.field], r.label, r.label) : addonValue(r, ext[r.field])) : '']).filter(([, v]) => v);
     return rows.length ? h('dl', {className:'addon-rows'}, rows.map(([r, v]) => [h('dt', {}, r.label), h('dd', {}, v)])) : null;
   }
+  // ---- Ticket links and add-on fields. Each web link carries `view` from the core's one link module (orch/links.py):
+  // label, icon key, monogram, title, status (only while its add-on is on) and the Artifacts group. Fields come typed
+  // from `orch addon list` (ticket_fields) and are saved with `orch ticket set` (op ticket.field).
+  const KEY = /^[a-z0-9][a-z0-9-]{0,31}$/;
+  const safeHref = url => { try { const u = new URL(url); return /^https?:$/.test(u.protocol) ? u.href : null; } catch (_) { return null; } };
+  const webLinks = t => array(t.links).filter(l => l && typeof l.url === 'string' && /^https?:\/\/[^\s<>"'`]+$/i.test(l.url) && l.view && typeof l.view === 'object' && safeHref(l.url));
+  function linkTile(v, size = '') {
+    const key = KEY.test(String(v.icon)) ? v.icon : 'link';
+    const node = h('span', {className:'li h-' + key + (size ? ' ' + size : ''), 'aria-hidden':'true'});
+    if (v.mono && key !== 'link') node.textContent = String(v.mono).slice(0, 3); else node.append(iconEl('link'));
+    return node;
+  }
+  const linkStatus = status => typeof status === 'string' && KEY.test(status.replace(/ /g, '-')) ? h('span', {className:'st st-' + status.replace(/ /g, '-')}, status) : null;
+  // what a link row says it is comes from the server (data.shown_type / host_parts): an allowlisted type, the
+  // registrable domain (never cut, its own style) and the rest of the host before it (cut from the head)
+  const oneLine = (text, max) => String(text ?? '').replace(/\p{Cf}/gu, '').replace(/[\p{Cc}\u2028\u2029]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+  const linkType = v => typeof v.shown_type === 'string' && v.shown_type ? v.shown_type : 'Link';
+  const linkHost = v => (typeof v.host_head === 'string' ? v.host_head : '') + (typeof v.domain === 'string' ? v.domain : '');
+  const linkSub = v => h('span', {className:'lk-sub'}, h('span', {className:'lk-type'}, linkType(v) + ' · '),
+    v.host_head ? h('span', {className:'lk-head'}, '\u200E' + String(v.host_head) + '\u200E') : null, h('span', {className:'lk-dom'}, String(v.domain || '')));
+  function linkRow(t, link, removable) {
+    const v = link.view, url = safeHref(link.url);
+    return h('div', {className:'lk-row', 'data-key':'link-' + link.url},
+      h('a', {className:'lk', href:url, target:'_blank', rel:'noopener noreferrer', title:url}, linkTile(v), h('span', {className:'t'}, h('b', {}, oneLine(clean(v.title), 200)), linkSub(v)), linkStatus(v.status), h('span', {className:'ext'}, iconEl('external'))),
+      removable && !snapshot ? h('button', {type:'button', className:'btn ghost icon xs lk-x', title:'Remove this link', 'aria-label':'Remove link ' + clean(v.title), 'data-action':'link-remove', 'data-ticket':t.id, 'data-url':link.url}, iconEl('x')) : null);
+  }
+  // add-ons that are on, have a refresh act and own a link on this ticket
+  const refreshers = t => addons().filter(a => array(a.acts).includes('refresh') && webLinks(t).some(l => l.view.addon === a.name));
+  function linksCard(t) {
+    const rows = webLinks(t).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+    if (snapshot && !rows.length) return null;
+    const refresh = snapshot ? [] : refreshers(t);
+    return h('section', {className:'card links-card', 'data-key':'links-card'},
+      h('div', {className:'card-h'}, h('h2', {className:'grow'}, 'Links'), rows.length ? h('span', {className:'meta'}, String(rows.length)) : null,
+        refresh.map(a => h('button', {type:'button', className:'btn ghost xs', title:'Update titles and status (' + addonLabel(a) + ')', 'data-action':'link-refresh', 'data-addon':a.name, 'data-ticket':t.id, 'data-key':'link-refresh-' + a.name}, iconEl('refresh'), refresh.length > 1 ? addonLabel(a) : 'Refresh'))),
+      h('div', {className:'links'}, rows.map(l => linkRow(t, l, true)),
+        snapshot ? null : h('div', {className:'add-link', 'data-key':'add-link-' + t.id}, h('button', {type:'button', className:'add-row', 'data-action':'link-add', 'data-ticket':t.id}, iconEl('plus'), 'Add a link'))));
+  }
+  function startLinkAdd(control) {
+    const t = ticketOf(control.dataset.ticket), host = control.parentElement;
+    if (!t || !host || locks.has(host.dataset.key)) return;
+    const key = host.dataset.key;
+    locks.add(key);
+    const input = el('input', 'input inline-input');
+    Object.assign(input, {type:'url', placeholder:'https://…', maxLength:2000});
+    input.setAttribute('aria-label', 'Link');
+    host.replaceChildren(input, el('span', 'hint', 'Paste a web address · Enter adds · Esc cancels'));
+    input.focus();
+    let done = false;
+    const finish = async save => {
+      if (done) return;
+      done = true;
+      const url = input.value.trim();
+      if (save && url) {
+        const result = await act('link.add', {ticket:t.id, url});
+        if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+      }
+      locks.delete(key);
+      render();
+    };
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+      else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(!!input.value.trim()));
+  }
+  async function removeLink(control) {
+    const lock = 'link-x-' + control.dataset.url;
+    if (locks.has(lock)) return;
+    locks.add(lock); control.disabled = true;
+    const result = await act('link.remove', {ticket:control.dataset.ticket, url:control.dataset.url});
+    locks.delete(lock);
+    if (!result.ok) { control.disabled = false; window.orch.toast(result.text || 'That did not work.', 'error'); return; }
+    window.orch.toast('Link removed. The history keeps it.', 'ok');
+  }
+  async function refreshLinks(control) {
+    const lock = 'link-refresh-' + control.dataset.ticket;
+    if (locks.has(lock)) return;
+    locks.add(lock); control.disabled = true; control.classList.add('busy');
+    const result = await act('addon.act', {addon:control.dataset.addon, verb:'refresh', target:control.dataset.ticket});
+    locks.delete(lock); control.disabled = false; control.classList.remove('busy');
+    if (!result.ok) { window.orch.toast(result.text || 'That did not work.', 'error'); return; }
+    const r = result.state?.act_result, t = ticketOf(control.dataset.ticket);
+    const key = typeof t?.key === 'string' ? t.key + ': ' : '';
+    window.orch.toast(key + (clean(r?.say) || (r?.changes ? r.changes + (r.changes === 1 ? ' change' : ' changes') : 'Nothing to update.')), 'ok');
+    render();
+  }
+  const fieldText = (f, value) => {
+    if (value == null || value === '') return '';
+    if (f.type === 'choice') return clean(array(f.options).find(o => o.value === value)?.label ?? value);
+    if (f.type === 'date') return parse(value)?.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short', year:'numeric'}) || clean(value);
+    if (f.type === 'number' && typeof value === 'number') return value.toLocaleString('de-CH');
+    return typeof value === 'object' ? '' : clean(value);
+  };
+  function fieldSections(t) {
+    return addons().filter(a => a.ticket_fields && array(a.ticket_fields.fields).some(f => !f.hidden)).map(a => {
+      const tf = a.ticket_fields, ext = (t.ext || {})[a.name] || {};
+      const rows = array(tf.fields).filter(f => !f.hidden).map(f => {
+        const shown = fieldText(f, ext[f.key]);
+        let value;
+        if (f.read_only || snapshot) value = h('span', {className:'ed-ro' + (shown ? '' : ' empty-v'), title:f.read_only ? 'Filled in by the ' + addonLabel(a) + ' add-on' : null}, f.read_only && f.key && ext[f.key] && KEY.test(String(ext[f.key])) ? linkStatus(String(ext[f.key])) : shown || '—');
+        else {
+          const node = h('button', {type:'button', className:'ed' + (shown ? '' : ' empty-v'), title:'Click to change', 'data-action':'field', 'data-ticket':t.id, 'data-addon':a.name, 'data-field':f.key}, shown || 'Add');
+          value = h('span', {className:'inline-host', 'data-key':'field-' + a.name + '-' + f.key + '-' + t.id}, node);
+        }
+        return h('div', {}, h('dt', {}, clean(f.title)), h('dd', {}, value));
+      });
+      return h('section', {className:'card ticket-aside addon-fields', 'data-key':'fields-' + a.name},
+        h('div', {className:'card-h'}, h('h2', {className:'grow'}, clean(tf.section)), h('span', {className:'addon-pill'}, 'add-on')),
+        h('dl', {className:'ticket-details ed-list'}, rows));
+    });
+  }
+  async function saveAddonField(t, addon, field, value) {
+    const result = await act('ticket.field', {ticket:t.id, addon, field, value:String(value), if_revision:t.revision});
+    if (!result.ok) window.orch.toast(result.text + (result.status === 409 ? ' Reload the page and try again.' : ''), 'error');
+  }
+  function startAddonField(control) {
+    const t = ticketOf(control.dataset.ticket), host = control.parentElement;
+    const a = addons().find(x => x.name === control.dataset.addon), f = array(a?.ticket_fields?.fields).find(x => x.key === control.dataset.field);
+    if (!t || !host || !f || locks.has(host.dataset.key)) return;
+    const key = host.dataset.key, before = (t.ext || {})[a.name]?.[f.key];
+    const beforeText = before == null ? '' : String(before);
+    locks.add(key);
+    const end = async value => { if (value !== null && value !== beforeText) await saveAddonField(t, a.name, f.key, value); locks.delete(key); render(); };
+    if (f.type === 'date') { pickDate(control, beforeText, end); return; }
+    if (f.type === 'choice') {
+      const pop = h('div', {className:'menu-pop sel-pop', role:'menu'}, array(f.options).map(o => h('button', {type:'button', className:'menu-item' + (o.value === before ? ' sel' : ''), role:'menuitemradio', 'aria-checked':o.value === before, 'data-value':o.value}, clean(o.label))),
+        before != null ? h('button', {type:'button', className:'menu-item muted', role:'menuitem', 'data-value':''}, 'Clear') : null);
+      let closed = false;
+      const close = value => { if (closed) return; closed = true; document.removeEventListener('mousedown', outside, true); document.removeEventListener('keydown', esc, true); pop.remove(); end(value); };
+      const outside = event => { if (!pop.contains(event.target)) close(null); };
+      const esc = event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(null); } };
+      pop.addEventListener('click', event => { const b = event.target.closest('[data-value]'); if (b) close(b.dataset.value); });
+      document.addEventListener('mousedown', outside, true); document.addEventListener('keydown', esc, true);
+      const r = control.getBoundingClientRect();  // on the page, not inside the card (a card clips what sticks out)
+      pop.style.setProperty('top', Math.round(r.bottom + 4) + 'px');
+      pop.style.setProperty('left', Math.round(Math.min(r.left, window.innerWidth - 196)) + 'px');
+      document.body.append(pop);
+      pop.querySelector('button')?.focus();
+      return;
+    }
+    const input = el('input', 'input inline-input');
+    input.type = f.type === 'number' ? 'text' : f.type === 'url' ? 'url' : 'text';
+    if (f.type === 'number') input.inputMode = 'decimal';
+    input.value = beforeText;
+    input.setAttribute('aria-label', f.title);
+    host.replaceChildren(input, el('span', 'hint', 'Enter saves · Esc cancels'));
+    input.focus();
+    let done = false;
+    const finish = save => { if (done) return; done = true; end(save ? input.value.trim() : null); };
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+      else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
+  }
+  // board card: up to 2 link tiles (add-on status as a chip), "+N", and the add-on fields listed in show_on_card
+  function cardLinks(t) {
+    // add-on links first (they carry a status), then the newest
+    const rows = webLinks(t).slice().sort((a, b) => Number(!!b.view.addon) - Number(!!a.view.addon) || (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+    const shown = rows.slice(0, 2);
+    const chips = addons().flatMap(a => array(a.ticket_fields?.show_on_card).map(k => {
+      const f = array(a.ticket_fields.fields).find(x => x.key === k), v = (t.ext || {})[a.name]?.[k];
+      if (!f || v == null || v === '') return null;
+      return f.read_only && KEY.test(String(v)) ? linkStatus(String(v)) : h('span', {className:'st'}, f.type === 'date' ? date(v) : fieldText(f, v));
+    })).filter(Boolean);
+    if (!shown.length && !chips.length) return null;
+    return h('div', {className:'card-links', 'data-key':'card-links'}, shown.map(l => h('span', {className:'lnk', title:linkType(l.view) + ' · ' + linkHost(l.view) + ': ' + oneLine(clean(l.view.title), 200)}, linkTile(l.view, 'sm'), linkStatus(l.view.status))),
+      rows.length > 2 ? h('span', {className:'more'}, '+' + (rows.length - 2)) : null, chips.length ? h('span', {className:'gap'}) : null, chips);
+  }
   function liveLinkFor(t) {
     const a = addons().find(a => a.page && array(state.services).some(s => s.addon === a.name && s.running === true));
     if (!a) return null;
@@ -218,7 +443,8 @@
     return {label:addonLabel(a), url:pageHash(a.name, typeof own === 'string' && /^[A-Za-z0-9_./-]+$/.test(own) && !own.includes('..') ? own : a.page.path)};
   }
   function agentBar(t) {
-    const line = window.DashHelpers.agentLine(t, state.runs?.[t.id], Date.now(), liveLinkFor(t));
+    const liveLink = liveLinkFor(t);
+    const line = window.DashHelpers.agentLine(t, state.runs?.[t.id], Date.now(), liveLink);
     const action = (item, primary) => {
       const attrs = {className:primary ? 'btn sm ' + (['working', 'starting', 'background'].includes(line.state) ? 'outline' : 'primary') : 'menu-item', role:primary ? null : 'menuitem', 'data-key':primary ? 'agent-primary' : 'agent-' + item.label};
       if (item.op === 'open') return /^#open\//.test(item.url) ? h('a', {...attrs, href:item.url}, item.label) : null;
@@ -226,16 +452,16 @@
     };
     return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'}, h('span', {className:'dot ' + ({working:'working', starting:'starting', background:'bg', needs:'needs', stuck:'needs', failed:'error', stopped:'stopped'}[line.state] || 'idle')}),
       h('span', {className:'ab-text grow'}, h('strong', {}, name(line.agent)), h('span', {className:'muted'}, ' · ' + clean(line.status))),
-      h('span', {className:'ab-actions'}, action(line.primary, true), line.items.length ? h('details', {className:'menu', 'data-key':'agent-menu'}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More agent actions'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, line.items.map(item => action(item, false)))) : null));
+      h('span', {className:'ab-actions'}, !activeTicket(t) && liveLink && !snapshot ? h('a', {className:'btn outline sm', href:liveLink.url, 'data-key':'agent-open-done'}, 'Open ' + liveLink.label) : null, action(line.primary, true), line.items.length ? h('details', {className:'menu', 'data-key':'agent-menu'}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More agent actions'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, line.items.map(item => action(item, false)))) : null));
   }
   const surface = via => clean(via === 'cli' ? 'terminal' : via);
-  function proofChip(ev) {
+  function proofLabel(ev) {
     const kind = ev.type || ev.kind;
     let label = ev.title || ev.text || String(ev.ref || '').split(/[\\/]/).pop() || 'Proof';
     if (kind === 'pr') {
       const number = ev.number || /(?:pull\/|#|^)(\d+)\b/.exec(String(ev.ref || ev.text || ''))?.[1];
       label = number ? 'PR #' + number : 'PR';
-    } else if (kind === 'file') label = window.DashHelpers.fileProofLabel(ev);
+    } else if (kind === 'file') label = window.DashHelpers.fileProofLabel(ev, Date.now());
     else if (kind === 'commit') label = 'Code updated';
     else if (kind === 'command') {
       const passed = /(\d+) passed/.exec([ev.text, ev.summary, ev.ref].filter(Boolean).join(' '));
@@ -244,8 +470,81 @@
     if (kind === 'note') label = ev.text || ev.title || ev.summary || ev.ref || 'Note';
     label = clean(label);
     if (kind === 'note' && label.length > 100) label = label.slice(0, 99) + '…';
-    const mark = window.DashHelpers.proofMark(ev);
+    return label;
+  }
+  function proofChip(ev) {
+    const label = proofLabel(ev), mark = window.DashHelpers.proofMark(ev);
     return h('span', {className:'chip proof-chip'}, h('small', {className:'muted'}, mark.mark + ' ' + mark.label), ' ', label, ev.missing === true ? ' · on another computer' : null);
+  }
+  // ---- Artifacts tab: files (orch ticket artifacts), proof, links. Files are read through /api/file (text and pictures only).
+  const artifactData = new Map();
+  const PREVIEW_EXT = {text:/\.(txt|md|csv|tsv|json|log|html?|xml|ya?ml|toml|py|js|css|ini)$/i, image:/\.(png|jpe?g|gif|webp)$/i};
+  const previewable = fileName => PREVIEW_EXT.text.test(fileName) || PREVIEW_EXT.image.test(fileName);
+  const fileIcon = fileName => PREVIEW_EXT.image.test(fileName) ? 'image' : /\.(csv|tsv)$/i.test(fileName) ? 'table' : /\.(html?|js|py|css|json|xml)$/i.test(fileName) ? 'code' : 'file';
+  const sizeText = n => n < 1024 ? n + ' B' : n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+  function loadArtifacts(t, selected) {
+    if (snapshot) return;
+    const hit = artifactData.get(t.id), age = hit ? Date.now() - hit.at : Infinity;
+    if (hit?.busy || age < (selected ? 2500 : 30000)) return;
+    artifactData.set(t.id, {...hit, busy:true});
+    fetch('/api/artifacts/' + encodeURIComponent(t.id)).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
+      const before = JSON.stringify(artifactData.get(t.id)?.data);
+      artifactData.set(t.id, {at:Date.now(), data});
+      if (JSON.stringify(data) !== before && route().kind === 'ticket' && ticketOf(route().id)?.id === t.id) render();
+    });
+  }
+  const proofRows = t => array(t.checklist).flatMap(task => array(task.evidence).map(ev => ({task, ev})))
+    .sort((a, b) => (Date.parse(b.ev.at) || 0) - (Date.parse(a.ev.at) || 0));
+  const linkRows = t => webLinks(t);
+  const artifactCount = t => (artifactData.get(t.id)?.data?.files?.length || 0) + proofRows(t).length + linkRows(t).length;
+  // Artifacts tab: add-on link types first (by their label), then plain and known-site links as "Links"
+  function linkGroups(links) {
+    const groups = new Map();
+    for (const l of links.slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0))) {
+      const g = typeof l.view.group === 'string' && l.view.group ? l.view.group : 'Links';
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(l);
+    }
+    return [...groups].sort(([a], [b]) => Number(a === 'Links') - Number(b === 'Links'));
+  }
+  function artifactsPanel(t) {
+    const files = array(artifactData.get(t.id)?.data?.files), proofs = proofRows(t), links = linkRows(t), stamp = window.DashHelpers.stamp;
+    const section = (title, count, body, extra) => h('section', {className:'artifact-section', 'data-key':'artifacts-' + title}, h('div', {className:'artifact-heading'}, h('h2', {}, title), count ? h('span', {className:'meta'}, String(count)) : null), extra, body);
+    if (!files.length && !proofs.length && !links.length) return h('div', {className:'card artifacts-empty', 'data-key':'artifacts-empty'}, iconEl('file'), h('h2', {}, 'Nothing here yet'), h('p', {className:'meta'}, 'Files, proof and links from this ticket show up here.'));
+    const folder = '.orch/tickets/' + t.id + '/artifacts/';
+    return h('div', {className:'stack artifact-stack'},
+      files.length ? section('Files', files.length, h('div', {className:'card'}, files.map(f => h(snapshot ? 'div' : 'button', {type:snapshot ? null : 'button', className:'file-line card-row', 'data-action':snapshot ? null : 'file-preview', 'data-ticket':t.id, 'data-kind':'artifacts', 'data-name':f.name, 'data-key':'file-' + f.name},
+        iconEl(fileIcon(f.name)), h('span', {className:'grow'}, h('span', {className:'file-name'}, clean(f.name)), h('span', {className:'meta'}, ' · ' + [sizeText(f.size), f.mtime ? stamp(f.mtime, Date.now()) : ''].filter(Boolean).join(' · '))),
+        snapshot ? null : h('span', {className:'file-arrow'}, iconEl('expand'))))),
+        h('div', {className:'artifact-path'}, h('code', {}, folder), snapshot ? null : h('button', {type:'button', className:'btn ghost xs', 'aria-label':'Copy the folder path', 'data-copy':folder}, 'Copy'))) : null,
+      proofs.length ? section('Proof', proofs.length, h('div', {className:'card'}, proofs.map(({task, ev}, i) => {
+        const mark = window.DashHelpers.proofMark(ev), base = String(ev.ref || '').split('/').pop();
+        const here = (ev.type || ev.kind) === 'file' && ev.missing !== true && String(ev.ref || '').startsWith('.orch/tickets/' + t.id + '/evidence/') && previewable(base);
+        return h('div', {className:'card-row proof-line', 'data-key':'proof-' + i},
+          h('span', {className:'proof-by' + (mark.label === 'You' ? '' : ' muted')}, mark.mark + ' ' + mark.label),
+          h('div', {className:'grow'}, h('p', {}, proofLabel(ev), ev.missing === true ? ' · on another computer' : null), h('a', {className:'proof-task', href:'#ticket/' + encodeURIComponent(t.id), 'data-action':'ticket-tab', 'data-tab':'tasks', 'data-ticket':t.id}, clean(task.text))),
+          here && !snapshot ? h('button', {type:'button', className:'btn ghost xs', 'data-action':'file-preview', 'data-ticket':t.id, 'data-kind':'evidence', 'data-name':base}, 'Preview') : null,
+          ev.at ? h('time', {datetime:ev.at}, stamp(ev.at, Date.now())) : null);
+      }))) : null,
+      linkGroups(links).map(([group, rows]) => section(clean(group), rows.length, h('div', {className:'card links'}, rows.map(l => linkRow(t, l, false))))));
+  }
+  async function previewFile(tid, kind, fileName) {
+    if (snapshot || !tid || !fileName) return;
+    const {d, actions} = dialog(fileName, 'sheet');
+    actions.firstChild.textContent = 'Close';
+    const q = '?t=' + encodeURIComponent(tid) + '&k=' + encodeURIComponent(kind) + '&n=' + encodeURIComponent(fileName);
+    const stage = el('div', 'preview-stage');
+    const dl = h('a', {className:'btn outline', href:'/api/file' + q + '&dl=1', download:fileName.split('/').pop()}, 'Download');
+    actions.append(dl);
+    d.append(stage, actions);
+    window.orch.open(d);
+    if (PREVIEW_EXT.image.test(fileName)) { const img = el('img'); img.alt = fileName; img.src = '/api/file' + q; stage.append(img); return; }
+    try {
+      const r = await fetch('/api/file' + q);
+      if (!r.ok) throw new Error('no');
+      const pre = el('pre'); pre.textContent = (await r.text()).slice(0, 200000);
+      stage.append(pre);
+    } catch (_) { stage.append(el('p', 'meta pad', 'This file cannot be shown here.')); }
   }
   function taskRows(t) {
     return array(t.checklist).map((task, i) => {
@@ -254,6 +553,35 @@
         h('div', {className:'grow'}, h('h3', {}, clean(task.text)), meta ? h('p', {className:'meta'}, meta) : null,
           array(task.evidence).length ? h('div', {className:'chips task-proofs'}, array(task.evidence).map(proofChip)) : null), chip(task.done ? 'Done' : task.state === 'doing' ? 'Doing' : 'To do', task.done ? 'success' : task.state === 'doing' ? 'active' : ''));
     });
+  }
+  // "+ Add task": one line, Enter adds it (orch check add). The draft is kept while the page refreshes.
+  function addTaskRow(t, scope) {
+    if (snapshot) return null;
+    const key = 'add-task-' + scope + '-' + t.id;
+    const input = el('input', 'input');
+    Object.assign(input, {type:'text', placeholder:'+ Add task', maxLength:500, name:'task'});
+    input.setAttribute('aria-label', 'Add a task');
+    const form = el('form', 'card-row add-task');
+    form.dataset.key = key;
+    const send = button('Add', 'outline sm', null);
+    send.type = 'submit';
+    form.append(input, send);
+    input.addEventListener('focusin', () => locks.add(key));
+    input.addEventListener('blur', () => { if (!input.value.trim()) { locks.delete(key); setTimeout(render, 0); } });
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const text = input.value.trim();
+      if (!text || send.disabled) return;
+      send.disabled = true;
+      const result = await act('check.add', {ticket:t.id, text});
+      send.disabled = false;
+      if (!result.ok) { window.orch.toast(result.text, 'error'); return; }
+      input.value = '';
+      locks.delete(key);
+      render();
+      window.orch.toast('Task added', 'ok');
+    });
+    return form;
   }
   function selectTicketTab(id, tab, focusQuestion = false) {
     ticketTabs.set(id, tab);
@@ -271,10 +599,11 @@
     const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => h('div', {className:'card-row'}, h('p', {className:'grow'}, [clean(window.DashHelpers.historyLine(entry, t.checklist)), name(entry.by), surface(entry.via)].filter(Boolean).join(' · ')), h('time', {datetime:entry.at || ''}, age(entry.at))));
     const field = (label, value, cls = '') => h('div', {}, h('dt', {}, label), h('dd', {className:cls}, value));
     const total = array(t.checklist).length, done = array(t.checklist).filter(task => task.done).length;
-    const tasksCard = key => card(key, total && done === total ? 'All done' : 'Tasks', done + ' of ' + total + (total && done === total ? '' : ' done'), total ? taskRows(t) : emptyRow('No tasks yet.'));
+    const tasksCard = key => card(key, total && done === total ? 'All done' : 'Tasks', done + ' of ' + total + (total && done === total ? '' : ' done'), [total ? taskRows(t) : emptyRow('No tasks yet.'), addTaskRow(t, key)]);
     const parent = ticketOf(t.parent), children = tickets().filter(child => child.parent === t.id);
     const selected = ticketTabs.get(t.id) || 'overview';
-    const tabs = [['overview', 'Overview'], ['tasks', 'Tasks ' + done + '/' + total], ['questions', 'Questions' + (qs.length ? ' (' + qs.length + ')' : '')], ['history', 'History']];
+    loadArtifacts(t, selected === 'artifacts');
+    const tabs = [['overview', 'Overview'], ['tasks', 'Tasks ' + done + '/' + total], ['questions', 'Questions' + (qs.length ? ' (' + qs.length + ')' : '')], ['artifacts', 'Artifacts' + (artifactCount(t) ? ' ' + artifactCount(t) : '')], ['history', 'History']];
     const panel = (id, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, capitalise(id)) : null, body);
     const sessions = array(t.sessions).slice().sort((a, b) => (Date.parse(b.last_used) || 0) - (Date.parse(a.last_used) || 0));
     const agent = sessions.length ? capitalise(name(sessions[0].agent) || 'Agent') + ' · continues its session' : capitalise(name(state.runs?.[t.id]?.claim?.agent)) || 'Not chosen yet';
@@ -284,17 +613,17 @@
     });
     return fragment(h('header', {className:'stack', 'data-key':'ticket-heading'},
       parent ? h('a', {href:href(parent.id), className:'muted'}, 'Part of ' + clean(parent.title)) : null,
-      h('div', {className:'row'}, typeof t.key === 'string' ? h('span', {className:'mono'}, t.key) : null, chip('Ticket', 'outline'), statusChip(t)),
+      h('div', {className:'row'}, typeof t.key === 'string' ? h('span', {className:'mono'}, t.key) : null, chip('Ticket', 'outline'), statusControl(t, 'head')),
       h('div', {className:'row', 'data-key':'ticket-meta'}, h('h1', {className:'grow'}, inlineField(t, 'title')), snapshot ? null : agentBar(t)),
       h('div', {className:'columns ticket-columns', 'data-key':'ticket-columns'}, h('div', {className:'stack'},
         snapshot ? null : h('div', {className:'tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label]) => h('button', {type:'button', id:'ticket-tab-' + id, role:'tab', 'aria-selected':selected === id, 'aria-controls':'ticket-panel-' + id, tabindex:selected === id ? '0' : '-1', 'data-action':'ticket-tab', 'data-tab':id, 'data-ticket':t.id}, label))),
         panel('overview', [t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null,
           qs.length ? h('div', {className:'banner attn'}, h('p', {className:'grow'}, qs.length + (qs.length === 1 ? ' question needs you' : ' questions need you')), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'answer-tab', 'data-ticket':t.id}, 'Answer')) : null,
           tasksCard('overview-tasks'), addonRows(t), ticketLinks(t), children.length ? card('sub-tickets', 'Sub-tickets', children.filter(child => child.status === 'done').length + ' of ' + children.length + ' done', children.map(child => h('div', {className:'card-row'}, h('a', {className:'grow', href:href(child.id)}, clean(child.title)), statusChip(child)))) : null]),
-        panel('tasks', tasksCard('tasks')), panel('questions', [qs.length ? qs : emptyRow('No open questions'), answered]),
+        panel('tasks', tasksCard('tasks')), panel('questions', [qs.length ? qs : emptyRow('No open questions'), answered]), panel('artifacts', artifactsPanel(t)),
         panel('history', card('history', 'History', '', history.length ? history : emptyRow('No history yet.')))),
-      h('aside', {className:'card ticket-aside'}, h('div', {className:'card-h'}, h('h2', {}, 'Details')),
-        h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', h('span', {className:'ed-ro'}, agent)), field('Created', h('span', {className:'ed-ro'}, date(t.created_at))), field('Updated', h('span', {className:'ed-ro'}, t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : '')), field('Ticket', h('span', {className:'ed-ro mono'}, t.id)))))));
+      h('div', {className:'stack ticket-side'}, linksCard(t), h('aside', {className:'card ticket-aside'}, h('div', {className:'card-h'}, h('h2', {}, 'Details')),
+        h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', h('span', {className:'ed-ro'}, agent)), field('Created', h('span', {className:'ed-ro'}, date(t.created_at))), field('Updated', h('span', {className:'ed-ro'}, t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : '')), field('Ticket', h('span', {className:'ed-ro mono'}, t.id)))), fieldSections(t)))));
   }
 
   const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note'};
@@ -389,7 +718,12 @@
       pop.append(head, grid, foot);
     };
     draw();
-    document.body.append(pop);
+    // Inside a dialog the calendar must live in the dialog and in the top layer, or the dialog hides it.
+    const host = anchor.closest('dialog');
+    if (host) {
+      host.append(pop);
+      try { pop.setAttribute('popover', 'manual'); pop.showPopover(); } catch (_) { pop.removeAttribute('popover'); }
+    } else document.body.append(pop);
     const r = anchor.getBoundingClientRect();
     pop.style.top = Math.min(r.bottom + 6, Math.max(8, innerHeight - pop.offsetHeight - 8)) + 'px';
     pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + 'px';
@@ -422,6 +756,20 @@
     const ws = array(d.workspaces);
     if (ws.length) rows.push(row('Can talk to', ws.map(w => h('span', {className:w.online ? 'on-dot' : 'off-dot', title:w.online ? 'online' : 'offline'}, settingsText('span', {}, w.name)))));
     return h('dl', {}, rows);
+  }
+  const FULL_WARNING = 'Full: the agent can change or delete anything in this folder and run any command without asking.';
+  const PERMISSION_CHOICES = [['ask', 'Ask', 'The agent asks before it changes anything.'], ['auto', 'Auto', 'The agent works on its own and asks only for risky things.'], ['full', 'Full', 'The agent never asks.']];
+  function permissionsCard(settings) {
+    const current = PERMISSION_CHOICES.some(([value]) => value === settings.permissions) ? settings.permissions : 'auto';
+    const rows = PERMISSION_CHOICES.map(([value, label, hint]) => {
+      const radio = h('input', {type:'radio', name:'settings-permissions', value, 'data-key':'settings-permissions-' + value, 'data-settings-permissions':value, disabled:snapshot || settingsBusy.has('permissions')});
+      radio.checked = value === current;
+      return h('label', {className:'card-row agent-opt' + (value === current ? ' sel' : ''), 'data-key':'settings-permissions-row-' + value}, radio,
+        h('div', {className:'grow'}, settingsText('h3', {}, label), settingsText('p', {className:'meta'}, hint)));
+    });
+    return h('div', {className:'stack', 'data-key':'settings-permissions'}, h('h2', {className:'set-sub'}, 'What the agent may do'),
+      h('div', {className:'card'}, h('div', {role:'radiogroup', 'aria-label':'What the agent may do'}, rows),
+        current === 'full' ? h('p', {className:'card-row bad', role:'note'}, FULL_WARNING) : null));
   }
   function settingsPage() {
     const settings = state.settings;
@@ -456,7 +804,8 @@
         h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
         h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), settingsText('p', {className:'grow set-ctl mono'}, settings.folder)))),
       panel('agent', [h('p', {className:'meta'}, 'Pick the default. It is saved right away.'), h('div', {className:'card'}, h('div', {role:'radiogroup', 'aria-label':'Default agent'}, agents),
-        snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own agent')))]),
+        snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own agent'))),
+        permissionsCard(settings)]),
       panel('addons', h('div', {className:'card'}, array(settings.addons).map(addonRow))));
   }
   // An agent that is started with a command: a small form that opens in the list; the command is shown before it is added.
@@ -546,7 +895,7 @@
       if (target.getAttribute(attr.name) !== attr.value) target.setAttribute(attr.name, attr.value);
     }
     reconcile(target, source);
-    if (target.matches('[data-settings-agent]')) target.checked = source.checked;
+    if (target.matches('[data-settings-agent],[data-settings-permissions]')) target.checked = source.checked;
     if (target.matches('[data-settings-field]')) {
       if (target.type === 'checkbox') target.checked = source.checked;
       else if (target.value !== source.value) target.value = source.value;
@@ -859,8 +1208,16 @@
     const error = el('p', 'bad'); error.setAttribute('role', 'alert');
     const reload = button('Reload ticket', 'outline sm', async () => { await refresh(); await window.orch.close(d); const latest = ticketOf(t?.id); if (latest) ticketForm(latest); });
     reload.hidden = true;
-    const submit = el('button', 'btn primary', t ? 'Save changes' : 'Create ticket'); submit.type = 'submit';
-    actions.append(submit);
+    const submit = el('button', 'btn primary', t ? 'Save changes' : 'Create & Start'); submit.type = 'submit';
+    let startAfter = !t;
+    const plain = t ? null : el('button', 'btn outline', 'Create');
+    if (plain) { plain.type = 'button'; plain.addEventListener('click', () => { startAfter = false; form.requestSubmit(); }); submit.addEventListener('click', () => { startAfter = true; }); }
+    actions.append(...(plain ? [plain, submit] : [submit]));
+    const startNow = async () => {
+      if (t || !startAfter || !created) return;
+      const run = await act('run.start', {ticket:created.id});
+      window.orch.toast(run.ok ? 'Agent started' : 'The ticket was created, but the agent did not start: ' + run.text, run.ok ? 'ok' : 'error');
+    };
     form.append(fields, error, reload, actions); d.append(form);
     let created = null, creationUnresolved = false;
     form.addEventListener('submit', async event => {
@@ -888,6 +1245,7 @@
           window.orch.close(d);
           const details = await act('ticket.edit', {ticket:created.id, ...Object.fromEntries(['owner', 'due', 'note'].filter(k => values[k]).map(k => [k, values[k]]))});  // only what was filled in
           if (!details.ok) window.orch.toast('The ticket was created, but its details were not saved: ' + details.text, 'error');
+          await startNow();
           return;
         }
       }
@@ -895,11 +1253,12 @@
       if (!result.ok) {
         error.textContent = result.text + (result.status === 409 ? ' Reload the ticket before trying again.' : '');
         reload.hidden = !(t && result.status === 409);
-        if (created) { inputs.title.disabled = true; submit.textContent = 'Save details'; }
+        if (created) { inputs.title.disabled = true; submit.textContent = 'Save details'; if (plain) plain.hidden = true; }
         return;
       }
       window.orch.toast(t ? 'Ticket updated' : 'Ticket created', 'ok');
       await window.orch.close(d);
+      await startNow();
     });
     window.orch.open(d);
   }
@@ -938,7 +1297,47 @@
     try { await navigator.clipboard.writeText(control.dataset.copy); window.orch.toast('Copied', 'ok'); }
     catch (_) { window.orch.toast('Could not copy. Select the text and copy it.', 'error'); }
   }
+  let dragging = '';
+  const columnOf = event => event.target.closest?.('.kanban-col');
+  main.addEventListener('dragstart', event => {
+    const card = event.target.closest?.('.ticket-card');
+    if (!card || snapshot) return;
+    dragging = card.dataset.ticket;
+    event.dataTransfer.setData('text/plain', dragging);
+    event.dataTransfer.effectAllowed = 'move';
+    card.classList.add('dragging');
+  });
+  main.addEventListener('dragend', () => { dragging = ''; main.querySelectorAll('.dragging,.drop-target').forEach(n => n.classList.remove('dragging', 'drop-target')); });
+  main.addEventListener('dragover', event => {
+    const col = columnOf(event);
+    if (!col || !dragging) return;
+    event.preventDefault();
+    main.querySelectorAll('.drop-target').forEach(n => { if (n !== col) n.classList.remove('drop-target'); });
+    col.classList.add('drop-target');
+  });
+  main.addEventListener('drop', event => {
+    const col = columnOf(event);
+    if (!col || !dragging) return;
+    event.preventDefault();
+    const id = dragging;
+    dragging = '';
+    main.querySelectorAll('.dragging,.drop-target').forEach(n => n.classList.remove('dragging', 'drop-target'));
+    moveTicket(id, col.dataset.status);
+  });
   main.addEventListener('change', async event => {
+    const perm = event.target.closest('[data-settings-permissions]');
+    if (perm) {
+      if (snapshot || settingsBusy.has('permissions')) return;
+      const mode = perm.dataset.settingsPermissions;
+      const send = async () => {
+        const result = await settingsSend('config.permissions', mode === 'full' ? {mode, confirm:true} : {mode}, 'permissions');
+        if (result.ok) window.orch.toast('Saved. New agent runs use ' + capitalise(mode) + '.', 'ok');
+      };
+      if (mode !== 'full') { await send(); return; }
+      perm.checked = false;  // stays on the old choice until the person says Yes
+      settingsConfirm('Let the agent do everything?', FULL_WARNING, '', 'Yes, use Full', send);
+      return;
+    }
     const control = event.target.closest('[data-settings-agent]');
     if (!control || snapshot || settingsBusy.has('agent')) return;
     const agent = array(state.settings?.agents).find(agent => agent.name === control.dataset.settingsAgent);
@@ -1016,8 +1415,21 @@
       window.orch.toast(result.ok ? (op === 'run.start' ? 'Started' : 'Stopped') : result.text, result.ok ? 'ok' : 'error');
       return;
     }
+    if (action === 'status-set') { await moveTicket(control.dataset.ticket, control.dataset.status); return; }
+    if (action === 'view') {
+      ticketView = control.dataset.view === 'board' ? 'board' : 'list';
+      try { localStorage.setItem('orch.tickets.view', ticketView); } catch (_) { /* fine without storage */ }
+      render(); return;
+    }
+    if (action === 'board-more') { if (boardMore.has('done')) boardMore.delete('done'); else boardMore.add('done'); render(); return; }
+    if (action === 'board-jump') { main.querySelector('.kanban-col[data-status="' + control.dataset.status + '"]')?.scrollIntoView({behavior:'smooth', inline:'start', block:'nearest'}); return; }
+    if (action === 'file-preview') { previewFile(control.dataset.ticket, control.dataset.kind, control.dataset.name); return; }
     if (action === 'new') ticketForm();
     if (action === 'inline') startInline(control);
+    if (action === 'link-add') startLinkAdd(control);
+    if (action === 'link-remove') { event.preventDefault(); removeLink(control); return; }
+    if (action === 'link-refresh') { refreshLinks(control); return; }
+    if (action === 'field') startAddonField(control);
     if (action === 'agent-add') openAgentForm(control);
     if (action === 'agent-test') {
       event.preventDefault();

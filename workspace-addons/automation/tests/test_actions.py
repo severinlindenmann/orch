@@ -98,3 +98,21 @@ def test_list_says_the_repeat_in_plain_words_with_local_time_and_zone(ws, capsys
     out = capsys.readouterr().out
     assert "Mondays at 08:00, next " in out and "* *" not in out and "Z " not in out
     assert out.split("next ")[1].split("  ")[0].split()[-1].isalpha()  # a zone name, not a UTC stamp
+
+
+def test_act_accepts_by_and_passes_it_to_every_orch_call(ws, capsys):
+    """The add-on act contract: `act <verb> --by <actor> --json -- <ticket>` (the dashboard sends exactly this)."""
+    sched(ws)
+    me = "human:lume"
+    for verb in ("toggle", "run", "delete"):
+        assert main(["--dir", str(ws), "act", verb, "--by", me, "--json", "--", "t_rec00001"]) == 0, verb
+        assert "error" not in json.loads(capsys.readouterr().out)
+    writes = [c for c in calls(ws) if c["args"][:1] in (["ext"], ["run"])]
+    assert [c["args"][:2] for c in writes] == [["ext", "set"], ["run", "start"], ["ext", "unset"]]
+    assert {c["by"] for c in writes} == {me}
+
+
+def test_act_without_by_is_recorded_as_the_scheduler(ws):
+    sched(ws)
+    act(ws, "off", "t_rec00001")
+    assert [c["by"] for c in calls(ws) if c["args"][:2] == ["ext", "set"]] == ["agent:automation"]

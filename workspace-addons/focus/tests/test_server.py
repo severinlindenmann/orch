@@ -104,6 +104,7 @@ def test_ops_build_exact_argv(server, fake_orch):
         == 200
     )
     assert go("answer", {"ticket": TID, "question": "q1", "answer": "CHF"})[0] == 200
+    assert go("check.add", {"ticket": TID, "text": "--new task"})[0] == 200
     got = [
         c
         for c in calls(fake_orch)
@@ -116,6 +117,7 @@ def test_ops_build_exact_argv(server, fake_orch):
     assert got[4][:4] == ["check", "move", TID, "c2"] and "--after=c1" in got[4]
     assert got[5][-2:] == ["--", "New name"] and "--if-revision=3" in got[5]
     assert got[6][0] == "answer" and "--via" in got[6]
+    assert got[7][:3] == ["check", "add", TID] and got[7][-2:] == ["--", "--new task"]
 
 
 @pytest.mark.parametrize(
@@ -123,7 +125,8 @@ def test_ops_build_exact_argv(server, fake_orch):
     [("shell", {}), ("run.start", {"ticket": "../x"}), ("run.start", {"ticket": TID, "agent": "x"}),
      ("run.send", {"ticket": TID, "text": ""}), ("run.send", {"ticket": TID, "text": "x" * 2001}),
      ("check.remove", {"ticket": TID, "check": "c1; ls"}), ("check.edit", {"ticket": TID, "check": "c1", "text": "a\x00b"}),
-     ("run.start", {"ticket": TID, "allow": ["Bash"]})],
+     ("run.start", {"ticket": TID, "allow": ["Bash"]}), ("check.add", {"ticket": TID, "text": "x" * 501}),
+     ("check.add", {"ticket": TID, "text": "  "}), ("check.add", {"ticket": TID, "text": "a", "check": "c1"})],
 )  # fmt: skip
 def test_bad_ops_are_400_and_run_nothing(server, fake_orch, op, args):
     st, _, _ = req(server, "POST", "/api/act", {"op": op, "args": args})
@@ -329,3 +332,15 @@ def test_ticket_key_in_view_and_list(server, ws):
     assert json.loads(req(server, "GET", f"/api/t/{TID}")[1])["ticket"]["key"] == "MEC-4"
     rows = json.loads(req(server, "GET", "/api/tickets")[1])
     assert [r["key"] for r in rows if r["id"] == TID] == ["MEC-4"]
+
+
+def test_a_done_ticket_is_listed_and_opens_as_a_board(server, ws):
+    p = ws / ".orch" / "tickets" / f"{TID}.json"
+    t = json.loads(p.read_text())
+    t["status"] = "done"
+    p.write_text(json.dumps(t))
+    rows = json.loads(req(server, "GET", "/api/tickets")[1])
+    assert [r["status"] for r in rows if r["id"] == TID] == ["done"]
+    st, body, _ = req(server, "GET", f"/api/t/{TID}")
+    v = json.loads(body)
+    assert st == 200 and v["state"] == "done" and v["run"]["running"] is False and v["ticket"]["history"]

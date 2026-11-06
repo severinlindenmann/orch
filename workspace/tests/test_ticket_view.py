@@ -9,7 +9,7 @@ import jsonschema
 import pytest
 from fakes import WS
 
-from orch import phone_view, tickets
+from orch import phone_view, safefile, tickets
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 PHONE = "ph_iphone0001"
@@ -302,7 +302,7 @@ def test_fallback_without_dir_fd_refuses_escapes(proj, run, new_ticket, conn, mo
     """The Windows path (no dir_fd) on POSIX: ../, secrets, a linked folder, drive names refused."""
     import os
 
-    monkeypatch.setattr(phone_view, "_DIR_FD", False)
+    monkeypatch.setattr(safefile, "_DIR_FD", False)
     tid = new_ticket("Fallback")
     run("check", "add", tid, "a")
     sec = proj / ".orch/secrets"
@@ -321,7 +321,7 @@ def test_fallback_without_dir_fd_refuses_escapes(proj, run, new_ticket, conn, mo
 
 
 def test_fallback_without_dir_fd_still_sends_a_real_proof(proj, run, new_ticket, conn, monkeypatch):
-    monkeypatch.setattr(phone_view, "_DIR_FD", False)
+    monkeypatch.setattr(safefile, "_DIR_FD", False)
     tid = new_ticket("Fallback ok")
     run("check", "add", tid, "a")
     (proj / "out.png").write_bytes(b"png")

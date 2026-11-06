@@ -223,9 +223,11 @@ def _schedules(tickets: list[dict], now: datetime) -> list[dict]:
                   {"label": "Next run", "value": f"Off · would run {nxt_s}" if paused else nxt_s},
                   {"label": "Last run", "value": last.astimezone().strftime("%a %d %b, %H:%M") if last else "Not yet"},
                   {"label": "Agent", "value": clean(sched.get("agent") or "The workspace agent", 60)}]
-        what = t.get("summary") or t.get("note")
-        if what:
-            detail.append({"label": "What it does", "value": clean(what, 200)})
+        # a plain sentence made from the schedule itself (the ticket's own note may hold command text)
+        own = " Every run gets its own sub-ticket." if sched.get("each_run") == "sub-ticket" else ""
+        detail.append({"label": "What it does", "value": clean(
+            f"Starts an agent on this ticket, {words[:1].lower()}{words[1:]}.{own}" if not paused
+            else f"Switched off. When it is on, it starts an agent on this ticket, {words[:1].lower()}{words[1:]}.{own}", 300)})
         rows.append((nxt or now, {
             "title": _name(t), "subtitle": clean(f"{words} · " + ("off" if paused else f"next {_in(nxt - now)}" if nxt else "never"), 200),
             "toggle": {"on": not paused, "label": clean(t["title"], 40) + " on or off", "action": _act("toggle", t["id"])},

@@ -17,7 +17,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import procs
+from orch import procs, term
 from orch.errors import Refused
 
 STATUSES = ("open", "active", "waiting", "done", "dropped")
@@ -70,7 +70,7 @@ def require_human(question: str, what: str) -> None:
     """Human-only step. Under an agent it needs a yes typed at a terminal; otherwise refused (exit 2)."""
     if agent_tool() is None:
         return
-    if sys.stdin.isatty():
+    if term.is_terminal(sys.stdin):
         sys.stderr.write(f"{question} [y/N] ")
         sys.stderr.flush()
         if sys.stdin.readline().strip().lower() in ("y", "yes"):
@@ -773,20 +773,147 @@ def log(root: Path, tid: str, text: str, by: str) -> dict:
     return apply_op(root, tid, lambda t: add_history(t, by, text.strip()))[0]
 
 
-def link_add(root: Path, tid: str, type_: str, url: str, title: str | None, by: str) -> dict:
-    if not re.fullmatch(r"[a-z0-9-]{1,32}", type_):
-        raise Refused("A link type is lowercase letters, digits and dashes, e.g. github, jira, teams.")
-    if not url.strip():
-        raise Refused("A link needs a url.")
+def link_add(
+    root: Path, tid: str, url: str, by: str, kind: str | None = None, title: str | None = None, kinds=()
+) -> tuple[dict, dict, bool]:
+    """Add a web link to the ticket (kind from the active add-ons' patterns unless given). The same address
+    twice is one link: a new title or kind updates it. Returns (ticket, link, added)."""
+    from orch import links
+
+    url = links.check_url(url)
+    if kind is not None and not links.KIND_RE.fullmatch(kind):
+        raise Refused("A link kind is lowercase letters, digits and dashes, e.g. github-pr.")
+    if isinstance(title, str) and len(title) > 200:
+        raise Refused("A link title is one line of at most 200 characters.")
+    title = links.one_line(title) if isinstance(title, str) else None
+    # an explicit kind is kept as given (an add-on that is off shows it as a plain link until it is on again)
+    kind = kind or links.kind_for(url, list(kinds))
+    added = [True]
 
     def op(t):
-        link = {"type": type_, "url": url.strip()}
+        cur = next((ln for ln in t["links"] if isinstance(ln, dict) and ln.get("url") == url), None)
+        if cur is not None:
+            added[0] = False
+            change = {}
+            if title and cur.get("title") != title:
+                change["title"] = title
+            if kind != "link" and links.kind_of(cur) != kind:
+                change["kind"] = kind
+            if not change:
+                return NO_WRITE
+            cur.update(change)
+            cur.pop("type", None)
+            add_history(t, by, f"Changed link {title or cur.get('title') or links.short_url(url)}")
+            return cur
+        link = {"kind": kind, "url": url}
         if title:
             link["title"] = title
+        link.update(at=now(), by=by)
         t["links"].append(link)
-        add_history(t, by, f"Linked {title or type_}")
+        add_history(t, by, f"Linked {title or links.short_url(url)}")
+        return link
 
-    return apply_op(root, tid, op)[0]
+    t, link = apply_op(root, tid, op)
+    if link is None:  # nothing changed: the existing entry
+        link = next(ln for ln in t["links"] if isinstance(ln, dict) and ln.get("url") == url)
+    return t, link, added[0]
+
+
+def link_remove(root: Path, tid: str, ref: str, by: str) -> tuple[dict, dict]:
+    """Remove a link by its number in `orch link list` (1, 2, …) or its address. History keeps the record."""
+    from orch import links
+
+    def op(t):
+        nums = links.numbered(t)
+        hit = None
+        if ref.strip().isdigit():
+            hit = next((ln for n, ln in nums if n == int(ref)), None)
+        else:
+            try:
+                canon = links.check_url(ref)
+            except Refused:
+                canon = ref.strip()
+            hit = next((ln for _, ln in nums if ln["url"] in (ref.strip(), canon)), None)
+        if hit is None:
+            raise Refused(
+                f"{t.get('key') or t['id']} has no link {ref}. See: orch link list {t.get('key') or t['id']}"
+            )
+        t["links"].remove(hit)
+        add_history(t, by, f"Removed link {hit.get('title') or links.short_url(hit['url'])} ({hit['url']})")
+        return hit
+
+    return apply_op(root, tid, op)
+
+
+def merge_refresh(
+    root: Path, tid: str, addon: str, out: dict, by: str, schema: dict | None
+) -> tuple[dict, list]:
+    """Merge what an add-on's refresh act printed: links matched by url change only title, status and thumb;
+    ext only under the add-on's own name (checked with its schema). One history line per change.
+    Returns (ticket, changes) with changes = [{what, url?, field, old, new}]."""
+    from orch import links
+
+    if not isinstance(out, dict):
+        raise Refused(f"The {addon} add-on did not say what to update.")
+    upd = out.get("links") or []
+    ext = out.get("ext") or {}
+    if not isinstance(upd, list) or not isinstance(ext, dict) or set(ext) - {addon}:
+        raise Refused(f"The {addon} add-on may only update links and ext.{addon}.")
+    mine = ext.get(addon) or {}
+    if not isinstance(mine, dict):
+        raise Refused(f"The {addon} add-on sent ext.{addon} that is not an object.")
+
+    def op(t):
+        changes = []
+        for u in upd:
+            if not isinstance(u, dict) or not isinstance(u.get("url"), str):
+                continue
+            cur = next((ln for ln in t["links"] if isinstance(ln, dict) and ln.get("url") == u["url"]), None)
+            if cur is None:
+                continue
+            name = links.one_line(cur.get("title") or links.short_url(cur["url"]))
+            for f in ("title", "status", "thumb"):
+                v = u.get(f)
+                if f not in u or v == cur.get(f):
+                    continue
+                if v is not None and not isinstance(v, str):
+                    continue
+                if f == "title" and v is not None:
+                    v = links.one_line(v) or None
+                    if v == cur.get(f):
+                        continue
+                if f == "status" and v is not None and not links.STATUS_RE.fullmatch(v):
+                    continue
+                if f == "thumb" and v is not None and not re.fullmatch(r"artifacts/[A-Za-z0-9_.-]{1,100}", v):
+                    continue
+                changes.append(
+                    {"what": "link", "url": cur["url"], "name": name, "field": f, "old": cur.get(f), "new": v}
+                )
+                if v is None:
+                    cur.pop(f, None)
+                else:
+                    cur[f] = v
+        if mine:
+            old = (t.get("ext") or {}).get(addon)
+            old = old if isinstance(old, dict) else {}
+            merged = {**old, **mine}
+            if schema is not None:
+                validate_ext(schema, merged, addon)
+            for k, v in mine.items():
+                if old.get(k) != v:
+                    changes.append({"what": "ext", "name": k, "field": k, "old": old.get(k), "new": v})
+            if merged != old:
+                t.setdefault("ext", {})[addon] = merged
+        if not changes:
+            return NO_WRITE
+        for c in changes:
+            what = f"{c['name']} {c['field']}" if c["what"] == "link" else c["field"]
+            old, new = (links.one_line("-" if v in (None, "") else v, 120) for v in (c["old"], c["new"]))
+            add_history(t, by, f"{addon} refresh: {what} {old} -> {new}")
+        return changes
+
+    t, changes = apply_op(root, tid, op)
+    return t, changes or []
 
 
 def validate_ext(schema: dict, obj: dict, addon: str) -> None:
@@ -1192,6 +1319,50 @@ def proof_present(root: Path, ev: dict) -> bool:
     if ev.get("type") != "file" or not ref.startswith(".orch/tickets/") or "/evidence/" not in ref:
         return True
     return (root / ref).is_file()
+
+
+# ---------------------------------------------------------------- artifacts
+
+
+def artifacts_path(root: Path, tid: str) -> Path:
+    """.orch/tickets/<id>/artifacts/ : where the files a ticket produces go (next to evidence/)."""
+    load(root, tid)
+    return tickets_dir(root) / tid / "artifacts"
+
+
+def artifacts_dir(root: Path, tid: str) -> Path:
+    """The ticket's artifacts folder, created. A link anywhere on the way is refused."""
+    d = artifacts_path(root, tid)
+    cur = root / ".orch"
+    for part in ("tickets", tid, "artifacts"):
+        cur = cur / part
+        if cur.is_symlink():
+            raise Refused("The artifacts folder of this ticket is a link. orch will not use it.")
+        if cur.exists() and not cur.is_dir():
+            raise Refused("The artifacts folder of this ticket is blocked by a file. Move that file away.")
+        if not cur.exists():
+            cur.mkdir()
+    return d
+
+
+def artifacts_list(root: Path, tid: str) -> list[dict]:
+    """The files in the ticket's artifacts folder (sub-folders included): name, size, mtime, path."""
+    d = artifacts_path(root, tid)
+    out = []
+    if d.is_dir() and not d.is_symlink():
+        for f in sorted(d.rglob("*")):
+            if f.is_symlink() or not f.is_file():
+                continue
+            st = f.stat()
+            out.append(
+                {
+                    "name": f.relative_to(d).as_posix(),
+                    "size": st.st_size,
+                    "mtime": datetime.fromtimestamp(st.st_mtime, UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "path": f.relative_to(root).as_posix(),
+                }
+            )
+    return out
 
 
 # ---------------------------------------------------------------- sub-tickets
