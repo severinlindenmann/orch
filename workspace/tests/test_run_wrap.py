@@ -323,3 +323,32 @@ def test_a_continued_conversation_counts_as_used_now(proj, run, tmp_path, monkey
     _wait(proj, tid)
     s = tickets.load(proj, tid)["sessions"][0]
     assert s["id"] == old and s["last_used"] > "2026-01-01T00:00:00Z"
+
+
+def test_a_stop_we_asked_for_is_not_logged_as_an_error(proj, run, tmp_path, monkeypatch):
+    """Windows has no SIGTERM handler: a non-zero end after `orch run stop` is a normal end."""
+    d = tmp_path / "clbin"
+    d.mkdir()
+    f = d / "claude"
+    f.write_text("#!/bin/sh\nsleep 2\nexit 1\n")
+    f.chmod(f.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ["PATH"])
+    config.set_key(proj, "workspace", "agent", "claude")
+    tid = _ticket_with_check(proj, run)
+    assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
+    deadline = time.time() + 10
+    while time.time() < deadline and not (runs.read(proj, tid) or {}).get("agent_pid"):
+        time.sleep(0.05)
+    with runs.locked(proj, tid):
+        rec = runs.read(proj, tid)
+        rec["stop_requested"] = tickets.now()
+        runs._write(proj, rec)
+    _wait(proj, tid)
+    assert not any("stopped with an error" in h["text"] for h in tickets.load(proj, tid)["history"])
+
+
+def test_run_messages_name_the_ticket_by_its_key(proj, run):
+    tid = _ticket_with_check(proj, run)
+    key = tickets.load(proj, tid)["key"]
+    assert key and run("run", "stop", tid)[1].strip() == f"Nothing is running on {key}."
+    assert f"Claimed {key} " in run("run", "claim", tid, "--by", "agent:t")[1]

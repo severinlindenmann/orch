@@ -722,3 +722,15 @@ fn not_available_is_visitor_page() {
         "the visitor page must not say what the server is"
     );
 }
+
+#[tokio::test]
+async fn admin_root_goes_to_the_portal() {
+    let t = start().await;
+    let c = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let r = c.get(format!("{}/", t.admin)).send().await.unwrap();
+    assert!(r.status().is_redirection());
+    assert_eq!(r.headers()["location"], "/admin");
+}

@@ -13,6 +13,10 @@ use serde_json::{json, Value};
 
 pub fn router(st: State) -> Router {
     Router::new()
+        .route(
+            "/",
+            get(|| async { axum::response::Redirect::to("/admin") }),
+        )
         .route("/admin", get(portal))
         .route("/admin/", get(portal))
         .route("/admin/style.css", get(css))

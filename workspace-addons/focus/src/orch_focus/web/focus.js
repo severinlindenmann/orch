@@ -185,7 +185,7 @@
   }
 
   // The ticket lines orch writes itself, in the same plain words as the CLI and the dashboard.
-  const STATUS_WORD = {open: 'Open', active: 'Doing', waiting: 'Waiting', done: 'Done', dropped: 'Dropped'};
+  const STATUS_WORD = {open: 'To do', active: 'Doing', waiting: 'Waiting', done: 'Done', dropped: 'Dropped'};
   function plainLine(text, checklist) {
     const task = id => { const c = (checklist || []).find(x => x.id === id); return c && c.text ? ': ' + c.text : ''; };
     const addon = k => k.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase());

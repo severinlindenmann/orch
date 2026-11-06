@@ -17,7 +17,7 @@ from pathlib import Path
 
 from . import actions, adapterdata, chat, runfiles
 from .board import Board, TicketWatcher
-from .events import RUN_ID, EventLog
+from .events import RUN_ID, EventLog, for_display
 from .permissions import Permissions
 from .tail import Tail
 
@@ -232,7 +232,7 @@ class Tracker:
             "why": str((claim.get("live") or {}).get("why") or "")[:400] if attention else "",
             "live": claim.get("mode") == "live",
             "board": board,
-            "events": events[-60:],
+            "events": for_display(events[-60:]),
             "done": sum(1 for c in checks if c.get("done")),
             "total": len(checks),
         }  # fmt: skip
