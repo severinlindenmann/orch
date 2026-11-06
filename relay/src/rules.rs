@@ -119,8 +119,17 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
             if prev.is_some() {
                 return Err(already_answered("This question was already answered."));
             }
-            let (qbody, _) = open_payload(key, &q);
+            let (qbody, qextra) = open_payload(key, &q);
             msg["ticket"] = q.ticket.clone().map(Value::from).unwrap_or(Value::Null);
+            // the asker's display key travels with its ticket id; never trusted from the answerer
+            match qextra.get("key") {
+                Some(k) => msg["key"] = k.clone(),
+                None => {
+                    if let Some(o) = msg.as_object_mut() {
+                        o.remove("key");
+                    }
+                }
+            }
             if let Some(qid) = qbody.get("question_id") {
                 msg["body"]["question_id"] = qid.clone();
             }
