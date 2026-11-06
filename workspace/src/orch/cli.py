@@ -180,7 +180,8 @@ def _show(t: dict, root: Path | None = None) -> str:
     if t["history"]:
         out.append("\nRecent:")
         out += [
-            f"  {net.when(h['at'])}  {h['by']}: {tickets.history_line(h['text'])}" for h in t["history"][-3:]
+            f"  {net.when(h['at'])}  {h['by']}: {tickets.history_line(h['text'], t['checklist'])}"
+            for h in t["history"][-3:]
         ]
     return "\n".join(out)
 
@@ -600,7 +601,7 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "log":
         t = tickets.log(root, args.id, args.text, by())
         h = t["history"][-1]
-        _out(args, h, f"{h['at']} {h['by']}: {tickets.history_line(h['text'])}")
+        _out(args, h, f"{h['at']} {h['by']}: {tickets.history_line(h['text'], t['checklist'])}")
     elif cmd == "ask":
         if args.phone and "relay" not in addons.active(root):
             raise Refused(addons.not_on_message(root, "relay"))
