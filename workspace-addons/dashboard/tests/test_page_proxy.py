@@ -152,7 +152,7 @@ def test_agent_test_op_argv_and_reply(act_orch, ws):
     from orch_dashboard import actions
     src = act_orch.read_text().replace(
         'if a[:2] in (["addon", "list"]',
-        'if a[:2] == ["agents", "test"]:\n    print(json.dumps({"name": a[2], "ok": False, "reason": "Codex is not installed."}))\n    sys.exit(0)\n'
+        'if a[:2] == ["agents", "test"]:\n    print(json.dumps({"name": a[2], "ok": False, "reason": "Codex is not installed."}))\n    sys.exit(1)\n'
         'if a[:1] == ["agents"]:\n    print(json.dumps([{"name": "codex"}]))\n    sys.exit(0)\nif a[:2] in (["addon", "list"]', 1)
     act_orch.write_text(src)
     assert actions.build_argv("config.agent.test", {"name": "codex"}) == ["agents", "test", "codex", "--json"]

@@ -57,7 +57,7 @@
   function agentRows(tickets, runs, nowMs) {
     const out = [], busy = new Set();
     for (const [tid, run] of Object.entries(runs || {})) {
-      if (!run || run.running !== true) continue;
+      if (!run || (run.running !== true && run.state !== 'maybe-stale')) continue;
       const t = arr(tickets).find(x => x.id === tid);
       const agent = (run.claim && (run.claim.agent || run.claim.by)) || 'agent';
       const asks = arr(t && t.questions).some(q => q && q.answer == null);
@@ -100,10 +100,11 @@
     const stop = {label: 'Stop', op: 'run.stop', args: {ticket: id}};
     const fresh = {label: 'Start fresh', op: 'run.start', args: {ticket: id, fresh: true}};
     const since = claim.started_at ? ' · ' + span(nowMs - Date.parse(claim.started_at)) : '';
+    // core: running is state == "alive"; a claim nobody renewed for a while is state "maybe-stale" with running false
+    if (r && r.state === 'maybe-stale') return {state: 'stuck', agent, status: 'may be stuck · quiet for a while' + since,
+      primary: start('Start anyway', {take_over: true}), items: [stop]};
     if (r && r.running === true) {
       const by = claim.by ? ' · started by ' + noPrefix(claim.by) : '';
-      if (r.state === 'maybe-stale') return {state: 'stuck', agent, status: 'may be stuck · quiet for a while' + since,
-        primary: start('Start anyway', {take_over: true}), items: [stop]};
       if (asks) return {state: 'needs', agent, status: 'waiting for your answer' + since, primary: {label: 'Answer', op: 'answer'}, items: [stop, fresh]};
       const waits = claim.live && claim.live.state === 'attention' ? String(claim.live.why || 'waiting for your OK in the live session') : '';
       if (waits) return {state: 'needs', agent, status: waits, primary: liveLink ? {label: 'Open ' + liveLink.label, op: 'open', url: liveLink.url} : stop,
@@ -117,10 +118,6 @@
     if (r && r.state === 'dead') return {state: 'failed', agent, status: 'the last run ended without finishing',
       primary: start('Try again'), items: [fresh]};
     if (asks) return {state: 'needs', agent, status: 'waiting for your answer', primary: {label: 'Answer', op: 'answer'}, items: [fresh]};
-    if (sessions[0] && r && r.state === 'stopped') {
-      const when = Date.parse(sessions[0].last_used);
-      return {state: 'stopped', agent, status: 'Stopped' + (Number.isNaN(when) ? '' : ' · ' + span(nowMs - when) + ' ago'), primary: start('Continue'), items: [fresh]};
-    }
     if (sessions[0]) {
       const when = Date.parse(sessions[0].last_used);
       return {state: 'resume', agent, status: 'last worked ' + (Number.isNaN(when) ? 'earlier' : span(nowMs - when) + ' ago'),

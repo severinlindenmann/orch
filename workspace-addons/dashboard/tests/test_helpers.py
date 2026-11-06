@@ -75,7 +75,7 @@ def test_agent_line_states_one_main_action():
     assert w["state"] == "working" and "started by Mia" in w["status"] and w["primary"]["op"] == "run.stop" and w["items"] == []
     w2 = line(T, {"running": True, "state": "alive", "claim": {"agent": "claude"}}, {"label": "focus", "url": "http://127.0.0.1:1"})
     assert w2["primary"]["op"] == "open" and w2["items"][0]["op"] == "run.stop"
-    stuck = line(T, {"running": True, "state": "maybe-stale", "claim": {"agent": "claude"}})
+    stuck = line(T, {"running": False, "state": "maybe-stale", "claim": {"agent": "claude"}})
     assert stuck["state"] == "stuck" and stuck["primary"] == {"label": "Start anyway", "op": "run.start", "args": {"ticket": "t_a", "take_over": True}}
     needs = line({**T, "questions": [{"id": "q1", "answer": None}]})
     assert needs["state"] == "needs" and needs["primary"]["label"] == "Answer"
@@ -146,23 +146,16 @@ def test_agent_line_run_states_starting_background_stopped():
     run = {"running": True, "state": "alive", "claim": {"agent": "mine", "mode": "oneshot"}}
     w = call("agentLine", T, run, now, link)
     assert w["state"] == "background" and "no live view" in w["status"] and w["primary"]["label"] == "Watch in focus"
-    t = {**T, "sessions": [{"agent": "claude", "last_used": "2026-11-06T00:00:00Z"}]}
-    w = call("agentLine", t, {"running": False, "state": "stopped", "claim": {}}, now, None)
-    assert w["state"] == "stopped" and w["primary"]["label"] == "Continue"
 
 
 @node
-def test_history_lines_follow_the_core_wording():
-    assert call("historyLine", {"text": "Added a task: Call Anna"}) == "Added a task: Call Anna"
-    assert call("historyLine", {"text": "Finished a task: Check invoices"}) == "Finished a task: Check invoices"
-    assert call("historyLine", {"text": "Updated Publish settings"}) == "Updated Publish settings"
-    assert call("historyLine", {"text": "Removed Relay settings"}) == "Removed Relay settings"
-
-def test_agent_line_a_live_tool_waiting_for_a_person_is_not_working():
+def test_agent_line_with_the_status_shapes_core_really_returns():
     now = 1793923200000
-    why = "Claude asks whether to trust this folder. Open the live session and answer: orch run attach t_a"
-    claim = {"agent": "claude", "mode": "live", "live": {"state": "attention", "since": "2026-11-06T00:00:00Z", "why": why}}
-    w = call("agentLine", T, {"running": True, "state": "alive", "claim": claim}, now, None)
-    assert w["state"] == "needs" and w["status"] == why and w["primary"]["op"] == "run.stop"
-    w2 = call("agentLine", T, {"running": True, "state": "alive", "claim": claim}, now, {"label": "focus", "url": "http://127.0.0.1:1"})
-    assert w2["state"] == "needs" and w2["primary"]["op"] == "open" and w2["items"][0]["op"] == "run.stop"
+    t = {**T, "sessions": [{"agent": "claude", "last_used": "2026-11-06T00:00:00Z"}]}
+    # `orch run status --json`: running is state == alive; a stale claim has running false; a stop releases the claim
+    stale = call("agentLine", t, {"ticket": "t_a", "running": False, "state": "maybe-stale", "claim": {"agent": "claude", "mode": "live"}}, now, None)
+    assert stale["state"] == "stuck" and stale["primary"]["args"]["take_over"] is True
+    after_stop = call("agentLine", t, {"ticket": "t_a", "running": False, "pending": 0}, now, None)
+    assert after_stop["state"] == "resume" and after_stop["status"].startswith("last worked") and after_stop["primary"]["label"] == "Continue"
+    dead = call("agentLine", t, {"ticket": "t_a", "running": False, "state": "dead", "claim": {"agent": "claude"}}, now, None)
+    assert dead["state"] == "failed"

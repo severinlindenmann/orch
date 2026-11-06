@@ -281,7 +281,7 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
     if op == "config.agent.add" and _agent_exists(root, orch_bin, args["name"]):
         raise BadRequest("An agent with that name is already set up. Pick another name (changing one is done in the terminal).")
     try:
-        r = subprocess.run([orch_bin, *argv], check=False, cwd=root, capture_output=True, text=True, timeout=60,
+        r = subprocess.run([orch_bin, *argv], check=False, cwd=root, capture_output=True, text=True, timeout=75 if op == "config.agent.test" else 60,
                            stdin=subprocess.DEVNULL, env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin})
     except subprocess.TimeoutExpired:
         return 504, "That took too long. Please try again.", None
@@ -292,6 +292,8 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
         out = json.loads(r.stdout)
     except ValueError:
         pass
+    if op == "config.agent.test" and isinstance(out, dict) and isinstance(out.get("ok"), bool):
+        return 200, "", out  # `orch agents test` exits 1 when the agent does not work; the JSON is the answer either way
     if r.returncode == 0:
         if op in ("config.agent.add", "addon.set", "config.agent"):
             _audit(root, op, args)
