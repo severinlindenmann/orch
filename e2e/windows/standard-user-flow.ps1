@@ -28,12 +28,17 @@ Check ("$v" -match "^orch ") "orch --version"
 function O { cmd /c "orch $($args -join ' ') < NUL 2>&1" }
 # Windows can not replace orch while it runs: add-on installs and updates finish in the background once the
 # command has ended (winfinish.py). Wait for the finisher's RESULT line in the log the command printed.
-function WaitFinish($out, $what) {
+# Only RESULT lines after $since (the log's RESULT count before the command) count: the log is shared.
+function Results($out) {
     $m = [regex]::Match("$out", 'Log: (\S+)')
-    if (-not $m.Success) { return $true }  # finished in the command itself
+    if (-not $m.Success) { return @() }
+    @(Get-Content $m.Groups[1].Value -ErrorAction SilentlyContinue | Select-String '^\S+ \S+ RESULT ')
+}
+function WaitFinish($out, $what, $since) {
+    if (-not [regex]::IsMatch("$out", 'Log: (\S+)')) { return $true }  # finished in the command itself
     $t0 = Get-Date
     while (((Get-Date) - $t0).TotalSeconds -lt 600) {
-        $last = Get-Content $m.Groups[1].Value -ErrorAction SilentlyContinue | Select-String '^\S+ \S+ RESULT ' | Select -Last 1
+        $last = Results $out | Select -Skip $since | Select -Last 1
         if ($last) { L "finisher ($what): $last"; return ("$last" -match 'RESULT ok') }
         Start-Sleep 3
     }
@@ -53,10 +58,11 @@ Check ($LASTEXITCODE -eq 0) "orch ticket new"
 
 L "--- addon add dashboard"; $out = O addon add dashboard --yes | Out-String; L $out
 Check ($LASTEXITCODE -eq 0) "orch addon add dashboard (installs from the zip, no git)"
-Check (WaitFinish $out "addon add") "dashboard install finished"
+Check (WaitFinish $out "addon add" 0) "dashboard install finished"
+$since = (Results $out).Count
 L "--- update"; $out = O update | Out-String; L $out
 Check ($LASTEXITCODE -eq 0) "orch update"
-Check (WaitFinish $out "update") "update finished"
+Check (WaitFinish $out "update" $since) "update finished"
 Check ("$(O --version)" -match "^orch ") "orch still runs after the update"
 $list = O addon list | Out-String; L $list
 Check ($list -match "dashboard") "dashboard still installed after the update"
