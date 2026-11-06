@@ -177,34 +177,30 @@ def add_link_views(tickets: list[dict], kinds: list[dict]) -> None:
         for ln in t.get("links") or []:
             if isinstance(ln, dict) and isinstance(ln.get("url"), str):
                 ln["view"] = links.describe(ln, kinds)
-                ln["view"].update(shown_type=shown_type(ln["view"].get("label"), ln["url"], links),
+                ln["view"].update(shown_type=shown_type(ln["view"].get("label"), ln["url"], links, kinds),
                                   **dict(zip(("host_head", "domain"), host_parts(ln["url"]))))
 
 
 # What a link row says it is: one rule (the phone app has the same one, LinkFace in ChatParts.swift).
-# Type: an allowlist. Each " · " part is a known site's name, kept only on that site's own address, or a plain
-# label of ASCII letters, digits, spaces and "-", at most 24, naming no site even with spaces and "-" taken out; else
-# dropped, and with nothing left the type is "Link". Host: the registrable domain (never cut) and the rest before it.
-_PLAIN = re.compile(r"[A-Za-z0-9 -]{1,24}")
+# Type: only labels from the fixed known-site table, each only on that site's own address, and the labels the
+# active add-ons declare in [[ticket_links]], each only on an address its own `match` takes. Every other label,
+# free text included, is "Link". Host: the registrable domain (never cut) and the rest before it.
 TWO_PART_SUFFIXES = frozenset({
     "co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "ne.jp", "or.jp",
     "com.br", "com.cn", "com.mx", "co.in", "co.za", "com.tr", "com.sg", "com.hk", "co.kr", "github.io", "gitlab.io"})
 
 
-def _squeeze(s: str) -> str:
-    return s.lower().replace(" ", "").replace("-", "")
-
-
-def shown_type(label, url: str, links) -> str:
+def shown_type(label, url: str, links, kinds=()) -> str:
     names = {h["name"].lower() for h in links.known_sites()["hosts"]}
     on = (links.site(url) or {}).get("name", "").lower()
+    declared = {k["label"] for k in kinds if links.kind_for(url, [k]) == k["kind"]}
     parts = []
     for p in (label if isinstance(label, str) else "").split(" · "):
         if p.lower() in names:
             if p.lower() == on:
                 parts.append(p)
-        elif _PLAIN.fullmatch(p) and not any(_squeeze(n) in _squeeze(p) for n in names):
-            parts.append(p)  # a free label that names no site, even squeezed ("G i t-Hub PR" is just "Link")
+        elif p in declared:
+            parts.append(p)
     return " · ".join(parts) or "Link"
 
 
