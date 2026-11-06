@@ -216,10 +216,13 @@ struct AgentMemoBubble: View {
                         .accessibilityIdentifier("voice-play")
                         .accessibilityLabel("Play voice message" + (duration > 0 ? ", \(voiceDurationText(duration))" : ""))
                         .accessibilityValue(playing ? "Pause" : "Play").accessibilityHint(workspaceName)
-                    // TODO(M0): SpeechPlayer.seek
-                    TimelineView(.periodic(from: .now, by: 0.1)) { context in
-                        Waveform(seed: item.id, progress: progress(at: context.date))
-                    }
+                    GeometryReader { proxy in
+                        Waveform(seed: item.id, progress: current ? model.speech.progress : 0).frame(height: 44)
+                            .contentShape(Rectangle())
+                            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                                if current { model.speech.seek(to: value.location.x / max(1, proxy.size.width)) }
+                            })
+                    }.frame(height: 44).accessibilityIdentifier("voice-scrub")
                     Button { model.speech.cycleRate() } label: {
                         Text(voiceRateText(model.speech.rate)).themeFont(13).frame(width: 44, height: 44)
                             .background(Theme.surface3, in: RoundedRectangle(cornerRadius: 12))

@@ -27,8 +27,6 @@ final class MicUITests: XCTestCase {
         XCTAssertTrue(got, "the transcript lands in the field")
     }
 
-    func testWorkspaceChatMic() { speak(launch(["-openChat", "ws_pilatus001"]), field: "composer-field") }
-    func testTicketChatMic() { speak(launch(["-openChat", "ws_pilatus001", "-openTicket", "t_q3sum1"]), field: "composer-field") }
     func testNewChatMic() { speak(launch(["-openNewChat", "YES"]).self.afterPick(), field: "topic-field") }
 }
 

@@ -171,7 +171,7 @@ final class RealRelayUITests: XCTestCase {
         for (n, id) in ids.enumerated() {
             app.buttons["ticket-\(ws)|\(id)"].tap()
             XCTAssertTrue(app.staticTexts["composer-note"].waitForExistence(timeout: 10))
-            XCTAssertTrue(app.buttons["mic"].exists, "mic in the ticket chat")
+            XCTAssertTrue(app.descendants(matching: .any)["composer-mic"].exists, "mic in the ticket chat")
             sleep(1); shot("2\(n + 1)-ticket-chat-\(n + 1)")
             app.navigationBars.buttons.element(boundBy: 0).tap()
             XCTAssertTrue(app.buttons["ticket-\(ws)|\(id)"].waitForExistence(timeout: 10))
