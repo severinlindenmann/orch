@@ -11,6 +11,8 @@ pub mod rules;
 pub mod shared;
 pub mod state;
 pub mod store;
+pub mod subs;
+pub mod subs_push;
 pub mod transcribe;
 pub mod util;
 pub mod webhooks;
@@ -28,6 +30,7 @@ pub fn spawn_purge(app: state::AppState) {
                     Err(e) => tracing::warn!("purge failed: {e}"),
                     _ => {}
                 }
+                let _ = subs::purge(&c, util::now());
             }
             tokio::time::sleep(Duration::from_secs(3600)).await;
         }

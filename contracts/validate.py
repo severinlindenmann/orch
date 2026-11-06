@@ -434,6 +434,22 @@ for case in pvec["artifact_ids"]:
     if got != case["id"] or not re.fullmatch(_msg_schema["$defs"]["artifact_id"]["pattern"], got):
         fails.append(f"phone-v3 vector artifact_ids {case['ref']}: got {got}")
 
+# Subscriber events and push signatures (relay-api.md, Subscribers).
+import hmac as _hmac
+
+_sub_v = validator("subscriber-event")
+svec = json.loads((HERE / "vectors" / "subscriber-v1.json").read_text())
+for ev in svec["valid_events"]:
+    for e in _sub_v.iter_errors(ev):
+        fails.append(f"subscriber vector {ev['id']}: {e.message}")
+for case in svec["invalid_events"]:
+    if not list(_sub_v.iter_errors(case["event"])):
+        fails.append(f"subscriber vector invalid {case['name']}: accepted")
+for case in svec["signatures"]:
+    mac = _hmac.new(case["secret"].encode(), f"{case['timestamp']}.{case['body']}".encode(), hashlib.sha256).hexdigest()
+    if "v1=" + mac != case["signature"]:
+        fails.append(f"subscriber vector signature {case['name']}: got v1={mac}")
+
 if fails:
     print("\n".join("FAIL " + f for f in fails))
     sys.exit(1)

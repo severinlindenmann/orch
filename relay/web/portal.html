@@ -10,10 +10,10 @@
 <script src="/admin/kit.js"></script>
 <script>
 'use strict';
-const screens=[['overview','Overview'],['add','Add workspace'],['groups','Groups'],['rules','Who can do what'],['messages','Messages'],['config','Shared tools'],['webhooks','Webhooks'],['phones','Phones']];
-function uiIcon(k){const span=document.createElement('span');span.innerHTML=window.icon(({overview:'home',add:'plus',groups:'group',rules:'swap',messages:'message',config:'tools',webhooks:'webhook',phones:'phone'})[k]||k,16);return span.firstElementChild}
+const screens=[['overview','Overview'],['add','Add workspace'],['groups','Groups'],['rules','Who can do what'],['messages','Messages'],['config','Shared tools'],['webhooks','Webhooks'],['subscribers','Subscribers'],['phones','Phones']];
+function uiIcon(k){const span=document.createElement('span');span.innerHTML=window.icon(({overview:'home',add:'plus',groups:'group',rules:'swap',messages:'message',config:'tools',webhooks:'webhook',subscribers:'antenna',phones:'phone'})[k]||k,16);return span.firstElementChild}
 const $=s=>document.querySelector(s), app=$('#app'), enc=encodeURIComponent;
-let token='', epoch=0, workspaces=[], phoneList=[], groupList=[], mapGroup='', toastTimer;
+let token='', epoch=0, workspaces=[], phoneList=[], subList=[], groupList=[], mapGroup='', toastTimer;
 try{token=sessionStorage.getItem('orch_admin')||''}catch{}
 // All API text goes through text nodes. SVG pairing codes use a restricted SVG parser below.
 function el(tag,attrs={},...children){
@@ -65,8 +65,8 @@ function panel(title,...body){return el('section',{class:'card'},el('div',{class
 function head(k,t,p,action){return [el('header',{class:'page-heading'},el('h1',{tabindex:'-1'},t))]}
 function show(...nodes){clearTimeout(loadingTimer);app.replaceChildren(...nodes.flat().filter(Boolean));document.body.classList.toggle('signedout',!token);document.body.classList.toggle('has-shell',!!token);enhance(app)}
 function skeleton(){return el('div',{'aria-busy':'true','aria-label':'Loading',class:'stack'},el('div',{class:'loading-bar'}),el('div',{class:'skeleton skeleton-heading'}),el('section',{class:'card form-body'},el('div',{class:'skeleton skeleton-line'}),...Array.from({length:3},()=>el('div',{class:'skeleton skeleton-row'}))))}
-const isKnown=id=>!id||id==='admin'||id==='phones'||/^(webhook|human|agent):/.test(id)||workspaces.some(w=>w.id===id)||phoneList.some(p=>p.id===id);
-function name(id){if(!id)return '—';if(id==='admin')return 'Admin';if(id==='phones')return 'Your phones';if(/^webhook:/.test(id))return 'Webhook';if(/^human:/.test(id))return id.slice(6)||'A person';const w=workspaces.find(w=>w.id===id)||phoneList.find(p=>p.id===id);if(w)return w.name;return /^ph_/.test(id)?'A removed phone':/^ws_/.test(id)?'A removed workspace':id}
+const isKnown=id=>!id||id==='admin'||id==='phones'||/^sub_/.test(id)||/^(webhook|human|agent):/.test(id)||workspaces.some(w=>w.id===id)||phoneList.some(p=>p.id===id);
+function name(id){if(!id)return '—';if(/^sub_/.test(id))return subList.find(s=>s.id===id)?.name||'A removed subscriber';if(id==='admin')return 'Admin';if(id==='phones')return 'Your phones';if(/^webhook:/.test(id))return 'Webhook';if(/^human:/.test(id))return id.slice(6)||'A person';const w=workspaces.find(w=>w.id===id)||phoneList.find(p=>p.id===id);if(w)return w.name;return /^ph_/.test(id)?'A removed phone':/^ws_/.test(id)?'A removed workspace':id}
 const typeLabel={text:'Message',question:'Question',file:'File',answer:'Answer',delegate:'Task handed over',start:'Task started',allow:'Permission','refresh-hint':'Shared tools updated',webhook:'Webhook'};
 const noise=m=>m.type==='refresh-hint';
 function bytes(n){n=Number(n);if(!isFinite(n))return '';return n<1024?n+' B':n<1048576?Math.round(n/1024)+' KB':(n/1048576).toFixed(1)+' MB'}
@@ -79,7 +79,7 @@ function readable(m){const b=body(m);
  switch(m.type){
  case 'text':return txt(b)||'(no text)';
  case 'question':return (txt(b)||'A question')+(b?.options?.length?'\n'+b.options.map(o=>'• '+(typeof o==='string'?o:o?.label||o?.text||'')).join('\n'):'');
- case 'answer':{const a=txt(b)||b?.answer||'';const who=m.answered_by?String(m.answered_by).replace(/^human:/,''):name(m.from);return 'Answered: '+(a||'—')+(who?' ('+who+')':'')}
+ case 'answer':{const a=txt(b)||b?.answer||'';const source=String(m.answered_by||m.from||''),clean=source.replace(/^(human|agent):/,'');const who=/^sub_/.test(clean)?name(clean)+' (system)':m.answered_by?clean:name(m.from);return 'Answered: '+(a||'—')+(who?' ('+who+')':'')}
  case 'file':return (b?.name||b?.filename||'A file')+(b?.size!==undefined?' · '+bytes(b.size):'');
  case 'delegate':return 'Handed over a task'+(txt(b?.task)||txt(b?.title)?': '+(txt(b.task)||txt(b.title)):'');
  case 'start':return 'Started a task'+(txt(b?.task)||txt(b?.title)?': '+(txt(b.task)||txt(b.title)):'');
@@ -88,7 +88,7 @@ function readable(m){const b=body(m);
  default:return typeLabel[m.type]||'Update'}}
 function persist(){try{sessionStorage.setItem('orch_admin',token)}catch{}}
 function auth(msg){
- epoch++;document.querySelectorAll('dialog[open]').forEach(d=>orch.close(d));workspaces=[];phoneList=[];$('#crumb').textContent='Sign in';
+ epoch++;document.querySelectorAll('dialog[open]').forEach(d=>orch.close(d));workspaces=[];phoneList=[];subList=[];$('#crumb').textContent='Sign in';
  const f=form(async f=>{const t=f.elements.token.value.trim();if(!t)throw new FieldError('Enter your access key.','token');token=t;api.quiet=1;try{await api('/workspaces')}catch(e){token='';if(e.status===401)throw new FieldError('That access key didn’t work. Check it and try again.','token');throw e}finally{api.quiet=0}persist();await route()},
   field('Access key',chk(input('token','',{type:'password',autocomplete:'current-password'}),needs('Enter your access key.'))),submit('Sign in'));
  show(el('section',{class:'card auth-page'},el('div',{class:'card-h'},el('h2',{},'Sign in')),el('div',{class:'form-body'},el('p',{},'Sign in to manage your workspaces and phones.'),f)));
@@ -154,8 +154,8 @@ async function overview(v){
  const [recent,r]=await Promise.all([api('/messages?limit=40'),api('/rules')]);if(v!==epoch)return;networkRules=r.rules||[];
  const feed=[];for(const m of (recent.items||[]).filter(m=>!noise(m)&&isKnown(m.from)&&isKnown(m.to))){const k=readable(m).split('\n')[0]+'|'+m.from+'|'+m.to+'|'+m.type,p=feed[feed.length-1];if(p&&p.k===k){p.n++;continue}if(feed.length<5)feed.push({m,k,n:1});else break}
  reviewNotes={};const off=workspaces.filter(w=>!w.online).length,wait=workspaces.reduce((s,w)=>s+(Number(w.unread)||0),0);
- const net=panel('Your network',el('div',{id:'network-host'},network()));net.firstChild.append(button('Add connection',()=>edgeSheet(),'outline'));
- show(el('header',{class:'page-heading'},el('h1',{tabindex:'-1'},'Overview'),workspaces.length?sub((off?off+(off===1?' workspace is':' workspaces are')+' offline':'All workspaces are online')+' · '+wait+(wait===1?' message':' messages')+' waiting'):null),el('section',{class:'card',id:'reviews',hidden:true}),workspaces.length?net:panel('Your network',empty('No workspaces yet','',el('a',{class:'button primary',href:'#add'},'Add workspace'))),panel('Recent activity',...(feed.length?feed.map(f=>feedRow(f.m,f.n)):[empty('Nothing yet','Messages between your workspaces show up here.')]),el('div',{class:'form-body'},link('All messages →','#messages'))));renderReviews();
+ const net=panel('Your network',el('div',{id:'network-host'},network()));net.firstChild.append(el('span',{class:'meta muted'},workspaces.length+' workspaces · '+phoneList.length+' phones · '+subList.length+' subscribers'),button('Add connection',()=>edgeSheet(),'outline'));
+ show(el('header',{class:'page-heading'},el('h1',{tabindex:'-1'},'Overview'),workspaces.length?sub((off?off+(off===1?' workspace is':' workspaces are')+' offline':'All workspaces are online')+' · '+wait+(wait===1?' message':' messages')+' waiting'):null),el('section',{class:'card',id:'reviews',hidden:true}),workspaces.length||subList.length?net:panel('Your network',empty('No workspaces yet','',el('a',{class:'button primary',href:'#add'},'Add workspace'))),panel('Recent activity',...(feed.length?feed.map(f=>feedRow(f.m,f.n)):[empty('Nothing yet','Messages between your workspaces show up here.')]),el('div',{class:'form-body'},link('All messages →','#messages'))));renderReviews();
 }
 // ---------- groups ----------
 const KIND_WORDS={skills:['skill','skills'],credentials:['secret','secrets'],mcp:['MCP','MCP']};
@@ -301,6 +301,89 @@ async function webhooks(v){
  function render(){const items=hooks.filter(h=>isKnown(h.workspace)&&(!filter.value||h.workspace===filter.value));rows.replaceChildren(...(items.length?items.map(h=>el('div',{class:'card-row'},el('div',{class:'grow'},el('h3',{},name(h.workspace)),sub((h.last_call_at?'Last event '+ago(h.last_call_at):'No events yet')+' · Made '+time(h.created_at)+(h.ticket?' · for ticket '+h.ticket:''))),el('span',{class:'chip'},h.mode==='once'?'One time':'Ongoing'),moreMenu(name(h.workspace),button('Delete webhook',async()=>{if(!await confirmDialog('Delete this webhook?','Outside services using it stop working.','Delete webhook'))return;await api('/webhooks/'+enc(h.id),'DELETE');hooks.splice(hooks.indexOf(h),1);render();toast('Webhook deleted');focusMain()},'ghost danger')))):[empty('No webhooks','Your agents create these when an outside service should wake a workspace.')]))}
  filter.onchange=render;render();show(...head('','Webhooks'),el('div',{class:'filters'},field('Workspace',filter)),list);
 }
+
+// ---------- subscribers ----------
+const subscriberKinds=[['updates','Updates','Started, working, notes — can be a lot'],['questions','Questions','Asked by agents'],['results','Results','Done, failed, stopped'],['files','Files','Proof files attached to results']];
+const subscriberPath=s=>'/subscribers/'+enc(s.id);
+const subscriberMembers=s=>[...new Set([...(s.workspaces||[]),...groupList.filter(g=>(s.groups||[]).includes(g.id)).flatMap(g=>g.members||[])])];
+function subscriberKindsText(s){const kinds=['updates','results','questions','files'].filter(k=>s.kinds?.[k]);return (kinds.length===4?'All kinds':kinds.map(k=>subscriberKinds.find(x=>x[0]===k)[1]).join(' · ')||'No kinds')+(s.can_answer?' · Answers':'')}
+function subscriberStatus(s,map=false){return s.push?(map?'Push · ':'')+({ok:'Delivering',retrying:'Retrying',failing:'Failing'}[s.push.state]||'Not used yet'):s.streams>0?(map?'Connected · live':'Connected'):s.last_seen?'Last call '+ago(s.last_seen):'Not used yet'}
+function subscriberScope(s){return [...(s.groups||[]).map(gChip),...(s.workspaces||[]).map(id=>el('span',{class:'chip'},name(id)))]}
+function subscriberModal(title,...body){const d=el('dialog',{class:'dialog sub-dialog','aria-label':title},el('div',{class:'row'},el('h2',{class:'grow'},title),button('×',()=>orch.close(d),'ghost icon')), ...body);d.querySelector('button').setAttribute('aria-label','Close');d.addEventListener('close',()=>d.remove());document.body.append(d);enhance(d);orch.open(d);return d}
+function subscriberCurl(link='<your link>',access='<your token>'){
+ const base=link.replace(/\/events(?:\?.*)?$/,'').replace(/\/$/,'');
+ const quote=v=>"'"+String(v).replace(/'/g,"'\\''")+"'";
+ const commands=[['Missed messages','curl -s '+quote(base+'/events?after=')],['Live','curl -N '+quote(base+'/stream')],['Token in a header','curl -N -H '+quote('Authorization: Bearer '+access)+' '+quote(location.origin+'/v1/sub/-/stream')]];
+ const code=el('pre',{class:'sub-code',tabindex:0},commands[0][1]),tabs=el('div',{class:'tabs','aria-label':'Example commands'});
+ commands.forEach(([label,command],i)=>tabs.append(el('button',{type:'button','aria-pressed':String(i===0),onclick:e=>{tabs.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b===e.currentTarget)));code.textContent=command}},label)));
+ return el('div',{class:'sub-try-body'},tabs,code);
+}
+function subscriberReady(s,r,rotated=false){
+ const secret=(label,value)=>el('div',{class:'sub-secret'},el('h3',{},label),el('div',{class:'secret-line'},el('pre',{class:'sub-code',tabindex:0},value),button('Copy',()=>copy(value))));
+ let d;d=subscriberModal(rotated?'New link for '+s.name:s.name+' is ready',
+  el('div',{class:'banner attn'},r.link?'Copy this link now. It is shown only once.':'Copy this signing secret now. It is shown only once.'),
+  r.link?el('p',{class:'meta muted'},'Lost it? Use Rotate link: you get a new one and the old one stops.'):null,
+  r.link?secret('Your link',r.link):null,
+  r.push_secret?[secret('Signing secret',r.push_secret),sub('Your system checks the X-Orch-Signature header with this secret.')]:null,
+  r.link?[el('h3',{class:'sub-kicker'},'Try it'),subscriberCurl(r.link,r.token)]:null,
+  el('div',{class:'actions'},button('Done',()=>orch.close(d),'primary')));
+}
+function subscriberDialog(s){
+ const editing=!!s,old=s||{},nm=input('name',old.name||'',{placeholder:'e.g. Team chat bot',maxLength:100,autocomplete:'off'}),url=input('push_url',old.push?.url||'',{placeholder:'https://hooks.example.com/orch',type:'url'});
+ const section=(title,...body)=>el('fieldset',{},el('legend',{},title),...body),controls={};
+ const toggle=(key,label,hint,checked)=>{const c=input(key,'',{type:'checkbox',class:'toggle',role:'switch',checked:!!checked});controls[key]=c;return el('label',{class:'sub-switch'},el('span',{},label,el('small',{},hint)),c)};
+ const pick=(key,items,chosen)=>el('div',{class:'checks sub-scope'},items.map(x=>el('label',{class:'pill-check '+(key==='group'?gClass(x):'')},input(key,x.id,{type:'checkbox',checked:(chosen||[]).includes(x.id)}),key==='group'?el('span',{class:'gdot'}):null,x.name,key==='group'?' · '+(x.members||[]).length:null)));
+ const scope=section('Can see',sub('Groups'),pick('group',groupList,old.groups),sub('Single workspaces'),pick('workspace',workspaces,old.workspaces),el('p',{class:'hint'},'A group follows its members: a workspace that joins later is seen at once, one that leaves disappears at once.'));
+ const receives=section('Receives',subscriberKinds.map(([k,label,hint])=>toggle(k,label,hint,old.kinds?old.kinds[k]:['questions','results'].includes(k))));
+ const permissions=section('What it may do',toggle('can_answer','Can answer questions','First answer wins, shown as from <name> (system), never as a person',old.can_answer),toggle('can_download','Can download files','The proof files themselves, not only their names',old.can_download));
+ const downloads=()=>{controls.can_download.disabled=!controls.files.checked;if(!controls.files.checked)controls.can_download.checked=false};controls.files.onchange=downloads;downloads();
+ let d;const f=form(async f=>{
+  const name=nm.value.trim();if(!name)throw new FieldError('Give the subscriber a name.','name');
+  const selected=k=>[...f.querySelectorAll('input[name="'+k+'"]:checked')].map(c=>c.value),groups=selected('group'),ws=selected('workspace');
+  if(!groups.length&&!ws.length){const error=el('p',{class:'field-error',role:'alert',tabindex:-1},'Pick at least one group or workspace.');scope.append(error);error.focus();return}
+  const push=url.value.trim();if(push){let u;try{u=new URL(push)}catch{}if(!u||u.protocol!=='https:'||u.username||u.password)throw new FieldError('Enter a public https address.','push_url')}
+  const data={name,groups,workspaces:ws,kinds:Object.fromEntries(subscriberKinds.map(([k])=>[k,controls[k].checked])),can_answer:controls.can_answer.checked,can_download:controls.files.checked&&controls.can_download.checked};
+  if(editing)data.push_url=push||null;else if(push)data.push_url=push;
+  const r=await api(editing?subscriberPath(s):'/subscribers',editing?'PATCH':'POST',data);
+  if(editing)subList=subList.map(x=>x.id===s.id?r.subscriber:x);else subList.push(r.subscriber);
+  await orch.close(d);subscribersPage();if(!editing||r.push_secret)subscriberReady(r.subscriber,r);else toast('Saved');
+ },field('Name',nm),scope,receives,permissions,section('Send to my URL (optional)',field('Your https address',url,'Leave empty to let it fetch events itself. The address must be public (https).')),el('div',{class:'actions'},button('Cancel',()=>orch.close(d),'ghost'),submit(editing?'Save':'Add subscriber')));
+ d=subscriberModal(editing?'Edit '+s.name:'Add subscriber',sub('Choose what this system can see and do.'),f);nm.focus();
+}
+function subscribersPage(){
+ const activity=el('div',{id:'subscriber-activity'});
+ const rows=subList.map(s=>{
+  const menu=moreMenu(s.name,el('div',{},
+   button('Edit',()=>subscriberDialog(s),'ghost'),
+   button('Rotate link',async()=>{if(!await confirmDialog('Rotate link for '+s.name+'?','You get a new link. The old one stops at once.','Rotate link'))return;const r=await api(subscriberPath(s)+'/token','POST');subscriberReady(s,r,true)},'ghost'),
+   s.push?button('Send test event',async()=>{const r=await api(subscriberPath(s)+'/push/test','POST');toast(r.detail,r.ok?'ok':'error')},'ghost'):null,
+   button('Remove',async()=>{if(!await confirmDialog('Remove '+s.name+'?','Its link stops working at once.','Remove'))return;await api(subscriberPath(s),'DELETE');subList=subList.filter(x=>x.id!==s.id);subscribersPage();toast('Subscriber removed')},'ghost danger')));
+  const warn=s.push&&s.push.state!=='ok',live=s.push?s.push.state==='ok':s.streams>0;
+  return el('article',{class:'subscriber-row'},el('span',{class:'subscriber-icon'},uiIcon('antenna')),el('div',{class:'grow stack'},
+   el('div',{class:'row'},el('h3',{},s.name),el('span',{class:'badge'+(s.can_answer?' active':'')},s.can_answer?'Can answer questions':'Read-only')),
+   el('div',{class:'row'},el('span',{class:'sub-row-label'},'Can see'),subscriberScope(s)),
+   el('div',{class:'row'},el('span',{class:'sub-row-label'},'Receives'),subscriberKinds.filter(([k])=>s.kinds?.[k]).map(([,label])=>el('span',{class:'chip'},label))),
+   el('div',{class:'row meta muted'},el('span',{class:'status '+(warn?'sub-warn':live?'sub-ok':'')},el('span',{class:'dot '+(warn?'needs':live?'live':'idle')}),subscriberStatus(s)),s.push?' · Push to '+s.push.url:s.streams>0?' · Live now':null),
+   s.push?.state==='retrying'?sub('Next try '+(time(s.push.next_try_at)||'soon')):null,
+   s.push?.state==='failing'?el('p',{class:'meta sub-warn'},'Deliveries stopped after repeated failures.'):null,
+   warn?button('Try again now',async()=>{const updated=await api(subscriberPath(s)+'/push/retry','POST');subList=subList.map(x=>x.id===s.id?updated:x);subscribersPage();toast('Retry requested')}):null),
+   el('div',{class:'sub-actions'},button('Activity',()=>subscriberActivity(s,activity),'ghost'),menu));
+ });
+ const curl=el('details',{class:'card sub-try'},el('summary',{},'Try it with curl'),subscriberCurl());
+ show(el('header',{class:'page-heading'},el('h1',{tabindex:-1},'Subscribers'),el('p',{class:'muted'},'Other systems and agents that listen to your relay. They see what your phones would see for the workspaces you pick.')),panel('Your subscribers · '+subList.length,...(rows.length?rows:[empty('No subscribers yet','Add one to let a chat bot, a script or another agent follow your workspaces.',button('Add subscriber',()=>subscriberDialog(),'primary'))])),curl,activity);
+}
+async function subscriberActivity(s,host){
+ const v=epoch,card=panel('Activity · '+s.name),content=el('div'),filters=el('div',{class:'row'});let revision=0;
+ card.firstChild.append(filters);card.append(sub('Times shown in your time zone · Kept for 30 days'),content);host.replaceChildren(card);card.scrollIntoView({block:'nearest'});focusSoon(card.querySelector('h2'));
+ const labels={created:'Created',changed:'Changed',rotated:'Rotated link',events:'Fetched events',stream:'Live stream',file:'File',answer:'Answered',push:'Push',test:'Test event',retry:'Try again'};
+ async function load(failed){const rev=++revision;filters.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',String(!!i===failed)));content.replaceChildren(sub('Loading…'));
+  try{const r=await api(subscriberPath(s)+'/log'+(failed?'?failed=1':''));if(v!==epoch||rev!==revision||!card.isConnected)return;
+   const headers=['Time','What','Event','Result'];content.replaceChildren(r.items?.length?el('table',{class:'sub-log'},el('thead',{},el('tr',{},headers.map(t=>el('th',{scope:'col'},t)))),el('tbody',{},r.items.map(row=>el('tr',{},[time(row.at),labels[row.what]||row.what,row.event||'—',row.result||'—'].map((value,i)=>el('td',{'data-label':headers[i],class:i===3?(row.ok?'sub-ok':'sub-warn'):''},value)))))):empty('No activity yet',failed?'No failed activity for this subscriber.':'Calls and changes will appear here.'));
+  }catch(e){if(v===epoch&&rev===revision&&card.isConnected)content.replaceChildren(empty('Could not load activity',e.message,button('Try again',()=>load(failed))))}
+ }
+ [false,true].forEach(failed=>filters.append(el('button',{type:'button',class:'chip','aria-pressed':String(!failed),onclick:()=>load(failed)},failed?'Failed':'All')));await load(false);
+}
+
 // Only static SVG geometry and paint are admitted; scripts, events, links and foreign content are discarded.
 function qr(svg){
  const doc=new DOMParser().parseFromString(svg,'image/svg+xml');if(doc.querySelector('parsererror')||doc.documentElement.localName!=='svg')throw Error('The code could not be shown. Use the link instead.');
@@ -339,12 +422,14 @@ function networkPairLabel(p){return name(p.a)+' and '+name(p.b)+': '+p.rules.map
 function networkPhoneStatus(p){const n=workspaces.filter(w=>(p.workspaces||[]).includes(w.id)).length;return p.paired===false?'Waiting for first scan':n===workspaces.length&&n?'Reaches all workspaces':'Reaches '+n+(n===1?' workspace':' workspaces')}
 function connectionList(id,badges=false){
  const pairs=networkPairs().filter(p=>!id||p.a===id||p.b===id);
- return pairs.length?pairs.map(p=>{
+ const rows=pairs.map(p=>{
   const both=p.rules.some(r=>r.from===p.a)&&p.rules.some(r=>r.from===p.b),r=p.rules[0];
   return el('button',{type:'button',class:'ghost connection-row network-pair-row','data-ws-pair':p.a+' '+p.b,'aria-label':networkPairLabel(p),onclick:()=>edgeSheet(p.a,p.b)},
    el('span',{class:'connection-names'},both?name(p.a)+' ⇄ '+name(p.b):name(r.from)+' → '+name(r.to)),
    (badges&&both&&p.rules.every(v=>['text','files','delegate','start'].every(k=>!!v[k]===!!r[k]))?[el('span',{class:'connection-direction'},el('span',{},'Both ways'),el('span',{class:'badge active'},permissionLabel(r)))]:p.rules.map(r=>el('span',{class:'connection-direction'},both?el('span',{},name(r.from)+' → '+name(r.to)):null,el('span',{class:'badge active'},permissionLabel(r))))))
- }):[sub('No connections yet')];
+ });
+ for(const s of subList.filter(s=>!id||subscriberMembers(s).includes(id)))rows.push(el('button',{type:'button',class:'ghost connection-row subscriber-connection','data-ws-pair':subscriberMembers(s).join(' '),onclick:()=>{location.hash='subscribers'}},el('span',{class:'connection-names'},uiIcon('antenna'),' '+s.name),el('span',{class:'connection-direction'},subscriberScope(s),s.can_answer?' ↔ ':' → ',subscriberKindsText(s)),el('span',{class:'connection-direction'+(s.push&&s.push.state!=='ok'?' sub-warn':'')},subscriberStatus(s,true))));
+ return rows.length?rows:[sub('No connections yet')];
 }
 function edgeSheet(from,to){
  const adding=!from;let a=from||workspaces[0]?.id,b=to||workspaces[1]?.id;const controls=el('div'),rows=[];
@@ -398,7 +483,7 @@ function network(){
  const overlaps=(a,b)=>a.x<b.x+b.w+6&&a.x+a.w>b.x-6&&a.y<b.y+b.h+6&&a.y+a.h>b.y-6;
  let lastWidth=0,timer,observer;
  function draw(width){
-  lastWidth=width;if(window.innerWidth<=599){root.replaceChildren(...(chips?[chips]:[]),list);const note=emptyNote();if(note)root.append(note);applyGroupFilter();return}const W=width,positions=new Map(),phones=new Map(),edges=[],labelBoxes=[],nodeBoxes=[];
+  lastWidth=width;if(window.innerWidth<=599){root.replaceChildren(...(chips?[chips]:[]),list);const note=emptyNote();if(note)root.append(note);if(subList.length)root.append(el('p',{class:'network-note subscriber-legend'},'Dashed card = subscriber (another system) · one arrow = read-only · two arrows = may answer'));applyGroupFilter();return}const W=subList.length?Math.max(600,width-424):width,positions=new Map(),phones=new Map(),groupAnchors=new Map(),edges=[],labelBoxes=[],nodeBoxes=[];
   const below=!cards&&W<900,radius=below&&workspaces.length>20?7:workspaces.length>16?9:12,laneWidth=phoneList.length&&!below?212:0;
   const rx=Math.max(156,Math.min((W-laneWidth-280)/2,520));let ry=Math.max(120,Math.min(rx/1.3,workspaces.length>12?240:260,150+Math.max(0,workspaces.length-7)*7));
   let H=2*ry+112,cx=(W-laneWidth)/2,cy=H/2;
@@ -522,9 +607,9 @@ function network(){
    const links=JSON.stringify(b.ws.map(w=>wsKey(w.id))),talk=!!b.g?.talk,title=(b.g?b.g.name:'No group')+': '+b.ws.length+(b.ws.length===1?' workspace':' workspaces')+(talk?', members may message each other':'');
    const g=svgEl('g',{class:'group-outline '+gClass(b.g)+(talk?' talk':''),'data-links':links},svgEl('title',{},title));
    if(cards){const f=positions.get(b.ws[0].id),l=positions.get(b.ws[b.ws.length-1].id),x=f.x-10,y=f.y-GROUP_HEAD+2,w=f.w+20,h=l.y+l.h-f.y+GROUP_HEAD+6;
-    if(b.g)g.append(svgEl('rect',{class:'group-box',x,y,width:w,height:h,rx:16}));
+    if(b.g){g.append(svgEl('rect',{class:'group-box',x,y,width:w,height:h,rx:16}));groupAnchors.set(b.g.id,{x:x+w,y:y+h/2})}
     const label=svgEl('text',{class:'group-label',x:x+12,y:y+19},networkShort(b.g?b.g.name:'No group',talk?w*.42:w-24,12));if(talk)label.append(svgEl('tspan',{class:'group-talk'},' · ⇄ '+(networkTextWidth(b.g.name,12)+networkTextWidth(' · ⇄ may message each other',11)<=w-24?'may message each other':'message each other')));g.append(label);
-   }else if(b.g){const a0=positions.get(b.ws[0].id).angle,a1=positions.get(b.ws[b.ws.length-1].id).angle+(positions.get(b.ws[b.ws.length-1].id).angle<a0?2*Math.PI:0),pad=Math.min(.12,Math.PI/Math.max(ordered.length,3)*.55),n=Math.max(8,Math.ceil((a1-a0+2*pad)*40));
+   }else if(b.g){const right=b.ws.map(w=>positions.get(w.id)).reduce((a,b)=>a.x>b.x?a:b);groupAnchors.set(b.g.id,{x:right.x+radius+7,y:right.y});const a0=positions.get(b.ws[0].id).angle,a1=positions.get(b.ws[b.ws.length-1].id).angle+(positions.get(b.ws[b.ws.length-1].id).angle<a0?2*Math.PI:0),pad=Math.min(.12,Math.PI/Math.max(ordered.length,3)*.55),n=Math.max(8,Math.ceil((a1-a0+2*pad)*40));
     const d=Array.from({length:n+1},(_,i)=>{const a=a0-pad+(a1-a0+2*pad)*i/n;return (i?'L':'M')+(cx+rx*Math.cos(a)).toFixed(1)+' '+(cy+ry*Math.sin(a)).toFixed(1)}).join(' ');
     g.append(svgEl('path',{class:'group-band',d,'stroke-width':2*radius+14}));if(talk)g.append(svgEl('path',{class:'group-talk-line',d}));const mid=(a0+a1)/2,inset=radius+30,lx=cx+(rx-inset)*Math.cos(mid),ly=cy+(ry-inset)*Math.sin(mid)+4,anchor=Math.abs(Math.cos(mid))<.35?'middle':Math.cos(mid)>0?'end':'start';g.append(svgEl('text',{class:'group-label ring-group-label',x:lx,y:ly,'text-anchor':anchor},b.g.name+(talk?' ⇄':'')))}
    groupLayer.append(g);
@@ -561,6 +646,32 @@ function network(){
   function sample(kind){const s=svgEl('svg',{width:28,height:20,viewBox:'0 0 42 20','aria-hidden':'true'});if(kind==='online'||kind==='offline')s.append(svgEl('circle',{class:cards?kind:'node-shape '+kind+'-ring',cx:21,cy:10,r:cards?4:6}));else{s.append(svgEl('path',{class:kind==='phone'||kind==='unpaired'?'legend-phone '+kind:'edge-line',d:'M4 10 H38'}));if(kind==='one'||kind==='both')s.append(svgEl('path',{class:'network-arrow',d:'M32 6 L39 10 L32 14 Z'}));if(kind==='both')s.append(svgEl('path',{class:'network-arrow',d:'M10 6 L3 10 L10 14 Z'}))}return s}
   for(const [kind,label]of [['one','One way'],['both','Both ways'],['allowed','What is allowed'],['phone','Phone can reach'],['unpaired','Phone not set up yet'],['online','Online'],['offline','Offline']]){const art=kind==='allowed'?svgEl('svg',{width:158,height:24,viewBox:'0 0 158 24',class:'edge-label','aria-hidden':'true'},svgEl('rect',{x:1,y:1,width:156,height:22,rx:10}),svgEl('text',{x:79,y:16,'text-anchor':'middle'},'Messages · Tasks · Start')):sample(kind);legend.append(el('span',{class:'network-legend-item'},art,label))}if(grouped){const box=svgEl('svg',{width:28,height:20,viewBox:'0 0 28 20','aria-hidden':'true',class:'g-violet'},svgEl('rect',{class:'group-box',x:1,y:2,width:26,height:16,rx:6}));legend.append(el('span',{class:'network-legend-item'},box,'Group'));if(groupList.some(g=>g.talk))legend.append(el('span',{class:'network-legend-item'},el('span',{class:'talk-key'},'⇄'),'Members of the group may message each other'))}if(!cards)legend.append(el('span',{},'Point at a workspace to see its connections'));
   if(!cards){const top=Math.min(0,...outside.map(b=>b.y-12)),bottom=Math.max(H,...outside.map(b=>b.y+b.h+12));if(top<0){for(const layer of [groupLayer,lineLayer,phoneLayer,nodeLayer,chipLayer])layer.setAttribute('transform',`translate(0 ${-top})`)}H=bottom-top;svg.setAttribute('viewBox',`0 0 ${W} ${H}`)}
+
+  if(subList.length){
+   const laneX=W+216,cardW=192,top=48,offset=Number((nodeLayer.getAttribute('transform')||'').match(/translate\(0 ([^)]+)\)/)?.[1]||0);
+   svg.querySelector('defs').append(svgEl('marker',{id:'subscriber-arrow',viewBox:'0 0 10 10',refX:10,refY:5,markerUnits:'userSpaceOnUse',markerWidth:7,markerHeight:7,orient:'auto-start-reverse'},svgEl('path',{class:'subscriber-arrow',d:'M0 0 L10 5 L0 10 Z'})));
+   // The existing workspace and phone geometry is unchanged; extend its right edge.
+   const subEdges=svgEl('g'),subNodes=svgEl('g');svg.insertBefore(subEdges,nodeLayer);svg.append(subNodes);
+   subNodes.append(svgEl('text',{class:'phone-lane-title',x:laneX,y:top-16},'OTHER SYSTEMS'));
+   let subscriberY=top;
+   subList.forEach(s=>{
+    const y=subscriberY,key='s:'+s.id,ids=[key,...subscriberMembers(s).map(wsKey)],state=subscriberStatus(s,true);
+    const sources=[...(s.groups||[]).map(id=>({p:groupAnchors.get(id),ids:(groupById(id)?.members||[]).map(wsKey)})),...(s.workspaces||[]).map(id=>{const p=positions.get(id);return {p:p?{x:p.x+(cards?p.w:radius),y:p.y+(cards?p.h/2:0)}:null,ids:[wsKey(id)]}})].filter(x=>x.p);
+    const cardH=Math.max(88,40+sources.length*40);subscriberY+=cardH+48;
+    sources.forEach(({p:source,ids:sourceIds},j)=>{
+     const p={x:source.x,y:source.y+offset};
+     const endY=y+48+j*40,bend=W+12,d='M'+p.x+' '+p.y+' C'+bend+' '+p.y+' '+bend+' '+endY+' '+(W+32)+' '+endY+' H'+laneX;
+     const attrs={class:'subscriber-edge',d,'marker-end':'url(#subscriber-arrow)'};if(s.can_answer)attrs['marker-start']='url(#subscriber-arrow)';
+     subEdges.append(svgEl('g',{class:'graph-item','data-links':JSON.stringify([key,...sourceIds])},svgEl('title',{},subscriberKindsText(s)),svgEl('path',attrs),...networkStatusLines(subscriberKindsText(s),180).map((line,n)=>svgEl('text',{class:'subscriber-flow',x:laneX-10,y:endY-9+n*14,'text-anchor':'end'},line))));
+    });
+    const g=svgEl('g',{class:'graph-item subscriber-node'},svgEl('title',{},s.name+': '+state+' · '+subscriberKindsText(s)),svgEl('rect',{class:'subscriber-shape',x:laneX,y,width:cardW,height:cardH,rx:8}),svgEl('text',{class:'subscriber-label',x:laneX+40,y:y+24},'Subscriber'),svgEl('text',{class:'node-name',x:laneX+12,y:y+47},networkShort(s.name,cardW-24)),svgEl('circle',{cx:laneX+16,cy:y+66,r:3,fill:s.push?(s.push.state==='ok'?'var(--success)':'var(--warning)'):s.streams>0?'var(--success)':'var(--text-faint)'}),svgEl('text',{class:'phone-status'+(s.push&&s.push.state!=='ok'?' subscriber-warning':''),x:laneX+26,y:y+70},networkShort(state,cardW-38,11)));
+    const icon=uiIcon('antenna');icon.setAttribute('x',laneX+12);icon.setAttribute('y',y+9);icon.classList.add('subscriber-label');g.append(icon);
+    subNodes.append(interactive(g,ids,s.name+': '+state,()=>{location.hash='subscribers'},key));
+
+   });
+   H=Math.max(H,subscriberY);svg.setAttribute('viewBox',`0 0 ${laneX+cardW+16} ${H}`);
+   legend.append(el('span',{class:'subscriber-legend'},'Dashed card = subscriber (another system) · one arrow = read-only · two arrows = may answer'));
+  }
   const viewport=el('div',{class:'network-viewport'},svg);
   const focusKey=root.querySelector(':focus')?.dataset.key;root.replaceChildren(...(chips?[chips]:[]),viewport,legend,list);const note=emptyNote();if(note)root.append(note);applyGroupFilter();if(focusKey){const match=[...svg.querySelectorAll('[data-key]')].find(g=>g.dataset.key===focusKey);match?.focus()}
  }
@@ -575,9 +686,9 @@ document.body.classList.remove('menu-open');$('#menu').setAttribute('aria-expand
  const key=screens.some(([k])=>k===location.hash.slice(1))?location.hash.slice(1):'overview',title=screens.find(([k])=>k===key)[1];
  document.title='orch relay · '+title;$('#crumb').textContent=title;for(const a of $('#nav').children){a.classList.toggle('active',a.hash==='#'+key);if(a.hash==='#'+key)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')}
  if(!token){auth();return}document.body.classList.remove('signedout');const v=++epoch;
- $('#top-add').hidden=key!=='overview';document.querySelectorAll('dialog[open]').forEach(d=>orch.close(d));const changed=lastRoute!==null&&lastRoute!==key;lastRoute=key;
+ const topAdd=$('#top-add');topAdd.hidden=!['overview','subscribers'].includes(key);topAdd.textContent=key==='subscribers'?'Add subscriber':'Add workspace';topAdd.href=key==='subscribers'?'#subscribers':'#add';topAdd.onclick=key==='subscribers'?e=>{e.preventDefault();subscriberDialog()}:null;document.querySelectorAll('dialog[open]').forEach(d=>orch.close(d));const changed=lastRoute!==null&&lastRoute!==key;lastRoute=key;
  const slow=loadingTimer=setTimeout(()=>{if(v===epoch)app.replaceChildren(skeleton())},300);
- try{const ws=await all('/workspaces');if(v!==epoch)return;workspaces=ws;phoneList=await all('/phones');if(v!==epoch)return;groupList=(await api('/groups')).items||[];if(v!==epoch)return;await ({overview,add,groups:groupsPage,rules,messages,config,webhooks,phones}[key])(v);if(v===epoch){touched();if(changed)orch.enter(app)}}catch(e){if(v!==epoch||!token)return;show(panel('This page could not be loaded',empty('Could not load this page',e.message,button('Try again',()=>route()))))}finally{clearTimeout(slow)}
+ try{const ws=await all('/workspaces');if(v!==epoch)return;workspaces=ws;phoneList=await all('/phones');if(v!==epoch)return;groupList=(await api('/groups')).items||[];if(v!==epoch)return;const subs=await api('/subscribers').catch(e=>{if(e.status===404)return {items:[]};throw e});if(v!==epoch)return;subList=subs.items||[];await ({overview,add,groups:groupsPage,rules,messages,config,webhooks,subscribers:subscribersPage,phones}[key])(v);if(v===epoch){touched();if(changed)orch.enter(app)}}catch(e){if(v!==epoch||!token)return;show(panel('This page could not be loaded',empty('Could not load this page',e.message,button('Try again',()=>route()))))}finally{clearTimeout(slow)}
 }
 for(const [key,title,hidden]of screens)if(!hidden)$('#nav').append(el('a',{href:'#'+key,class:'nav-item'},uiIcon(key),title));
 $('#menu').addEventListener('click',()=>{const o=document.body.classList.toggle('menu-open');$('#menu').setAttribute('aria-expanded',String(o))});

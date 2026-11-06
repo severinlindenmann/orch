@@ -73,6 +73,8 @@ pub struct App {
     pub transcribe_rate: Mutex<HashMap<String, (i64, u32)>>,
     /// "workspace|phone" -> text-push budget state
     pub push_budget: Mutex<HashMap<String, PushBudget>>,
+    /// Subscribers: open streams, rate limits, push rounds (subs.rs).
+    pub subs: crate::subs::Live,
 }
 
 /// Text pushes per (workspace, phone): at most 1 per 10 s and 30 per hour. Extra texts are stored, not pushed.
@@ -126,6 +128,7 @@ impl App {
             transcriber,
             transcribe_rate: Mutex::new(HashMap::new()),
             push_budget: Mutex::new(HashMap::new()),
+            subs: Default::default(),
         }))
     }
 

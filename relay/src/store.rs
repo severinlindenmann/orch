@@ -55,6 +55,7 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
     // When the phone paired (L3): broadcasts to `phones` from before are not shown to it.
     let _ = c.execute("ALTER TABLE phones ADD COLUMN paired_at INTEGER", []);
     crate::groups::init(c)?;
+    crate::subs::init(c)?;
     Ok(())
 }
 

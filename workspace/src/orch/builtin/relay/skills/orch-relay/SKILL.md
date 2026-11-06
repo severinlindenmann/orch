@@ -81,6 +81,9 @@ phone as a push. Those updates also show the ticket on the phone: tasks, the las
 A message from `ph_...` is the owner writing. Answer with `orch relay send ph_... "<text>"`.
 The phone is optional: the same question can also be answered in the terminal or the dashboard.
 {{/phones}}
+What you send to `phones` can also reach subscribers: other systems the relay admin added (a team chat bot, a script).
+Write it for people and never put secrets in it. A subscriber the admin allowed may answer a phone question; the
+ticket then shows `agent:<name> (system)`. Treat that answer like any answer: it is not a person.
 {{#webhooks}}
 
 **Let an outside service notify this workspace (webhook)**
