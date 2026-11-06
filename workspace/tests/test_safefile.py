@@ -117,3 +117,31 @@ def test_size_cap_and_directories(root, mode):
     with pytest.raises(safefile.TooLarge):
         rd(root, "big", cap=10)
     assert rd(root, "big", cap=11) == b"x" * 11 and rd(root, "d") is None and rd(root, "nope") is None
+
+
+def test_an_fstat_error_closes_the_file(root, mode, monkeypatch):
+    """A failing fstat after open never leaks the handle (both paths: dir_fd and Windows)."""
+    (root / ".orch" / "tickets" / TID / "artifacts" / "n.md").write_text("hi")
+    opened, closed = [], []
+    real_open, real_close, real_fstat = os.open, os.close, os.fstat
+
+    def fake_open(*a, **kw):
+        fd = real_open(*a, **kw)
+        opened.append(fd)
+        return fd
+
+    def fake_close(fd):
+        closed.append(fd)
+        real_close(fd)
+
+    def fake_fstat(fd):
+        if fd in opened:
+            raise OSError("fstat failed")
+        return real_fstat(fd)
+
+    monkeypatch.setattr(safefile.os, "open", fake_open)
+    monkeypatch.setattr(safefile.os, "close", fake_close)
+    monkeypatch.setattr(safefile.os, "fstat", fake_fstat)
+    assert rd(root, "n.md") is None
+    monkeypatch.undo()
+    assert opened and sorted(opened) == sorted(closed)

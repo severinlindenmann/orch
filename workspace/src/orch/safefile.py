@@ -72,7 +72,11 @@ def read_ticket_file(root: Path, tid: str, folder: str, name, max_bytes: int) ->
             if not stat.S_ISREG(before.st_mode):
                 return None
             fd = os.open(real, flags)
-            st = os.fstat(fd)
+            try:
+                st = os.fstat(fd)
+            except OSError:
+                os.close(fd)
+                raise
             if (st.st_dev, st.st_ino) != (before.st_dev, before.st_ino):
                 os.close(fd)
                 return None
@@ -81,7 +85,11 @@ def read_ticket_file(root: Path, tid: str, folder: str, name, max_bytes: int) ->
     finally:
         for d in fds:
             os.close(d)
-    st = os.fstat(fd)
+    try:
+        st = os.fstat(fd)
+    except OSError:
+        os.close(fd)
+        return None
     if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:  # a folder, a FIFO, a device, a hard link: refused
         os.close(fd)
         return None
