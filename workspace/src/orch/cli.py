@@ -649,15 +649,26 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t["ext"][args.addon], f"ext.{args.addon} set on {t['id']}")
 
 
+# The arguments that really name a ticket: (command, argument). Only these take a key; an `id` of another
+# command (a publish file or app, a relay message, a webhook) is passed through untouched.
+_TICKET_ARGS = {
+    *{(c, "id") for c in ("ticket", "check", "log", "ask", "answer", "link", "ext", "wait")},
+    ("ticket", "parent"),
+    ("run", "ticket"),
+    ("relay", "ticket"),
+}
+
+
 def _resolve_keys(args: argparse.Namespace, root: Path | None) -> None:
     """A ticket key (DM1-12, any case) works wherever a ticket id does: turned into the id here, once."""
-    if root is None or getattr(args, "cmd", None) == "init":
+    cmd = getattr(args, "cmd", None)
+    if root is None:
         return
-    for name in ("id", "parent", "ticket"):
-        if isinstance(getattr(args, name, None), str):
+    for c, name in _TICKET_ARGS:
+        if c == cmd and isinstance(getattr(args, name, None), str):
             setattr(args, name, tickets.resolve(root, getattr(args, name)))
     on = getattr(args, "on", None)
-    if isinstance(on, str) and on.startswith("ticket:"):
+    if cmd in ("ticket", "wait") and isinstance(on, str) and on.startswith("ticket:"):
         args.on = "ticket:" + tickets.resolve(root, on[len("ticket:") :])
 
 
