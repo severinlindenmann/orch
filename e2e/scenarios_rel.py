@@ -403,7 +403,7 @@ def r16(e):
     e.cleanup.append(srv.shutdown)
 
     def update(text, kind="result"):
-        m = e.msg(wid, "phones", "text", {"text": text, "update": {"kind": kind, "title": "R16 export"}})
+        m = e.msg(wid, "phones", "text", {"text": text, "update": {"kind": kind, "title": "R16 export"}}, ticket="t_r16sub")
         r = e.rapi("Pilatus", "POST", "/v1/messages", m)
         check(r.status == 201, f"post update: {r}")
         return m["id"]
