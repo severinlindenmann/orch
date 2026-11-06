@@ -200,6 +200,46 @@ pub async fn files_delete(
     }
 }
 
+pub async fn files_patch(
+    St(st): St<State>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> ApiResult<Json<Value>> {
+    let w = auth(&st, &h)?;
+    if !w.rights.files {
+        return Err(ApiError::forbidden("This workspace may not upload files."));
+    }
+    let b: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    let days = b
+        .get("days")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| ApiError::invalid("Send {\"days\": N}."))?;
+    Ok(Json(files::extend(&st, &w, &id, days)?))
+}
+
+pub async fn files_put(
+    St(st): St<State>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    body: Body,
+) -> ApiResult<Json<Value>> {
+    let w = auth(&st, &h)?;
+    if !w.rights.files {
+        return Err(ApiError::forbidden("This workspace may not upload files."));
+    }
+    files::own_live(&st, &w, &id)?;
+    let bytes: Bytes = axum::body::to_bytes(body, st.cfg.max_blob_bytes())
+        .await
+        .map_err(|_| {
+            ApiError::too_large(format!(
+                "The file is larger than {} MB.",
+                st.cfg.max_file_mb
+            ))
+        })?;
+    Ok(Json(files::replace(&st, &w, &id, bytes)?))
+}
+
 pub async fn apps_put(
     St(st): St<State>,
     h: HeaderMap,

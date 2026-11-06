@@ -16,17 +16,88 @@ fn blob_path(st: &State, id: &str) -> std::path::PathBuf {
     st.cfg.blobs_dir().join(id)
 }
 
+fn check_blob(blob: &Bytes) -> ApiResult<()> {
+    if blob.len() < 32 || &blob[0..4] != b"OPF1" {
+        return Err(ApiError::invalid(
+            "The body is not an encrypted orch file (it must start with OPF1 and be at least 32 bytes).",
+        ));
+    }
+    Ok(())
+}
+
+/// Your own, unexpired file (others and missing -> 404, expired -> 410, never revived).
+pub fn own_live(st: &State, w: &Workspace, id: &str) -> ApiResult<FileRow> {
+    let f = db::get_file(&st.db.lock().unwrap(), id)?;
+    match f {
+        Some(f) if f.workspace == w.id => {
+            if f.expires_at
+                .as_deref()
+                .is_some_and(|e| e <= util::now().as_str())
+            {
+                return Err(ApiError::gone("This link has expired."));
+            }
+            Ok(f)
+        }
+        _ => Err(ApiError::not_found("No such file.")),
+    }
+}
+
+/// PATCH: new expiry = now + days, never earlier than the current one; a permanent file stays permanent.
+pub fn extend(st: &State, w: &Workspace, id: &str, days: i64) -> ApiResult<Value> {
+    if days < 1 || days > st.cfg.max_days {
+        return Err(ApiError::invalid(format!(
+            "days must be between 1 and {}.",
+            st.cfg.max_days
+        )));
+    }
+    let f = own_live(st, w, id)?;
+    let new = match f.expires_at {
+        None => None,
+        Some(cur) => {
+            let n = util::in_days(days);
+            Some(if n > cur { n } else { cur })
+        }
+    };
+    if let Some(n) = &new {
+        db::update_file_expiry(&st.db.lock().unwrap(), id, n)?;
+    }
+    Ok(json!({"id": id, "expires_at": new}))
+}
+
+/// PUT: swap the blob behind the same id and expiry (write a temp file, then rename).
+pub fn replace(st: &State, w: &Workspace, id: &str, blob: Bytes) -> ApiResult<Value> {
+    check_blob(&blob)?;
+    let f = own_live(st, w, id)?;
+    let tmp = blob_path(st, &format!("{id}.{}.tmp", util::rand_id(12)));
+    std::fs::write(&tmp, &blob)?;
+    if let Err(e) = std::fs::rename(&tmp, blob_path(st, id)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
+    // a delete or sweep may have removed the row meanwhile: do not leave an orphan blob
+    {
+        let c = st.db.lock().unwrap();
+        if db::get_file(&c, id)?.is_none() {
+            let _ = std::fs::remove_file(blob_path(st, id));
+            return Err(ApiError::not_found("No such file."));
+        }
+        db::update_file_size(&c, id, blob.len() as i64)?;
+    }
+    Ok(json!({
+        "id": id,
+        "url": format!("{}/f/{}", st.cfg.public_url, id),
+        "size": blob.len(),
+        "expires_at": f.expires_at,
+    }))
+}
+
 pub fn upload(
     st: &State,
     w: &Workspace,
     blob: Bytes,
     expires_at: Option<String>,
 ) -> ApiResult<Value> {
-    if blob.len() < 32 || &blob[0..4] != b"OPF1" {
-        return Err(ApiError::invalid(
-            "The body is not an encrypted orch file (it must start with OPF1 and be at least 32 bytes).",
-        ));
-    }
+    check_blob(&blob)?;
     let id = format!("f_{}", util::rand_id(16));
     std::fs::write(blob_path(st, &id), &blob)?;
     let row = FileRow {

@@ -1,0 +1,32 @@
+# workspace-addons/automation/src/orch_automation/orch-addon.toml (inside the Python package, next to __init__.py)
+schema = "orch.addon/1"
+orch_api = 1
+name = "automation"
+version = "0.2.0"
+description = "Starts agent runs at a set time, on a repeat, and when the phone or another workspace sends work."
+run = "orch_automation"                     # orch automation <args>  ->  python -m orch_automation <args>
+skill = "skills/orch-automation"
+agents_block = "skills/orch-automation/AGENTS-block.md"
+ticket_ext = "ext.schema.json"             # byte-identical copy of contracts/addons/automation/ext.schema.json
+needs = true                               # orch automation needs --json
+background = true                          # has `orch automation start|stop`
+
+[dashboard]
+label = "Automation"
+icon = "clock"
+order = 10
+
+[[ticket_view]]
+field = "cron"
+label = "Repeats"
+format = "cron-human"
+
+[[ticket_view]]
+field = "agent"
+label = "Runs with"
+format = "text"
+
+[[ticket_view]]
+field = "last_run"
+label = "Last run"
+format = "time"

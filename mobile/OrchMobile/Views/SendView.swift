@@ -19,6 +19,12 @@ struct SendView: View {
         workspaceID.isEmpty ? "Pick a workspace first." : "Write or say a message first."
     }
 
+    private var askTitle: String {
+        if let sent { return "Ask \(sent.workspaceName)." }
+        guard let ws = model.workspaces.first(where: { $0.id == workspaceID }) else { return "Ask for something." }
+        return "Ask \(ws.displayName)."
+    }
+    @State private var openTicket: Ticket?
     private var recording: Bool { voice?.isRecording == true }
     private var transcribing: Bool { voice?.isTranscribing == true }
     private var micLabel: String { recording ? "Recording your voice… tap to stop" : transcribing ? "Writing it down…" : "Tap to speak" }
@@ -26,7 +32,7 @@ struct SendView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if !editing || sent != nil { ScreenHeading(title: "Ask for something.", subtitle: "A thought, a request, a next step.").padding(.top, 14) }
+                if !editing || sent != nil { ScreenHeading(title: askTitle, subtitle: "A thought, a request, a next step.").padding(.top, 14) }
                 if let sent { sentState(sent) }
                 else if model.workspaces.isEmpty && model.message != nil { offlineState }
                 else if model.workspaces.isEmpty && model.hasLoaded { emptyState }
@@ -56,6 +62,7 @@ struct SendView: View {
         .sensoryFeedback(.success, trigger: model.sendTick)
         .sensoryFeedback(.error, trigger: model.errorTick)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: sent)
+        .sheet(item: $openTicket) { TicketView(ticket: $0).presentationDetents([.large]) }
     }
 
     private var offlineState: some View {
@@ -214,6 +221,11 @@ struct SendView: View {
             }.padding(.leading, 12).frame(maxWidth: .infinity, alignment: .leading)
                 .overlay(alignment: .leading) { Rectangle().fill(Theme.brand).frame(width: 3) }
                 .padding(.vertical, 16)
+            if let ack = model.ack(for: note.messageId),
+               let t = model.tickets.first(where: { $0.ticket == ack.ticket && $0.workspace == ack.workspace }) {
+                Button("See ticket") { openTicket = t }.buttonStyle(PrimaryButtonStyle(muted: false))
+                    .accessibilityIdentifier("see-ticket")
+            }
             Button("Send another message") { sent = nil; text = "" }.buttonStyle(SecondaryButtonStyle())
             Button("See your tickets →") { model.tab = .home }
                 .buttonStyle(WideButtonStyle(color: Theme.muted)).themeFont(13)

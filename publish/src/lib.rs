@@ -62,7 +62,12 @@ pub fn public_router(st: State) -> Router {
             "/v1/files",
             post(api::files_post).get(api::files_list).layer(big),
         )
-        .route("/v1/files/:id", axum::routing::delete(api::files_delete))
+        .route(
+            "/v1/files/:id",
+            axum::routing::delete(api::files_delete)
+                .patch(api::files_patch)
+                .put(axum::handler::Handler::layer(api::files_put, big)),
+        )
         .route("/v1/apps", get(api::apps_list))
         .route(
             "/v1/apps/:name",

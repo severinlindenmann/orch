@@ -1,0 +1,27 @@
+[project]
+name = "orch-automation"
+version = "0.2.0"
+description = "orch automation add-on: starts agent runs at a set time, by cron and from the relay inbox"
+requires-python = ">=3.11"
+dependencies = ["croniter>=2"]
+
+[project.scripts]
+orch-automation = "orch_automation.cli:main"
+
+# Module only: orch finds orch-addon.toml next to it (find_spec) and never imports it.
+[project.entry-points."orch.addons"]
+automation = "orch_automation"
+scheduler = "orch_scheduler"   # the old name: prints one line, then runs orch automation
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6", "jsonschema>=4", "rfc3339-validator"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/orch_automation", "src/orch_scheduler"]
+
+[tool.ruff]
+line-length = 110

@@ -4,5 +4,4 @@ workspace/src/orch/skills.py 14
 workspace/src/orch/addons.py 1
 workspace/src/orch/relay.py 1
 workspace/src/orch/init.py 5
-workspace-addons/scheduler/src/orch_scheduler/runner.py 1
-workspace-addons/scheduler/src/orch_scheduler/skills/orch-scheduler/SKILL.md 5
+workspace-addons/automation/src/orch_automation/skills/orch-automation/SKILL.md 5

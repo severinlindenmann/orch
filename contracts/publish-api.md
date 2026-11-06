@@ -22,6 +22,8 @@ Rights per workspace (set by the admin): `files` (temporary files), `apps` (temp
 | POST | `/v1/files?days=7` or `?permanent=1` | body = encrypted blob (`application/octet-stream`, crypto.md) | `201 {id, url, size, expires_at\|null}`. `url` has no key; the CLI adds `#k=<key>`. `days` 1–90, default 7 |
 | GET | `/v1/files` | – | list of `{id, size, created_at, expires_at}` |
 | DELETE | `/v1/files/<id>` | – | `204` |
+| PATCH | `/v1/files/<id>` | `{days}` (1–90) | `200 {id, expires_at\|null}`. New expiry = now + days, never earlier than the current one; a permanent file stays permanent. Needs the `files` right. An expired file → `410` (never revived); other workspace's file → `404`. Bad `days` → `422` |
+| PUT | `/v1/files/<id>` | body = encrypted blob (as POST) | `200 {id, url, size, expires_at\|null}`. Swaps the blob behind the same id and expiry (same OPF1 check and size cap). Needs the `files` right. Expired → `410`; other workspace's file → `404` |
 | PUT | `/v1/apps/<name>?days=7` or `?permanent=1` | body = `.tar.gz` of the app folder (has `app.toml`), max 100 MB | `200 {name, url, status, expires_at\|null, view_token\|null}`. Runs `test`, starts, checks `health`. On failure the old version keeps running: `422 test_failed\|health_failed` with `output`. A redeploy keeps the existing `view_token` unless `?new_token=1` |
 | GET | `/v1/apps` | – | list of `{name, stack, store, public, status: running\|stopped\|failed, url, expires_at, updated_at}` |
 | POST | `/v1/apps/<name>/restart` | – | `200 {name, status}` |

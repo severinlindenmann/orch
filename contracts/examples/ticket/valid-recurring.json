@@ -16,5 +16,5 @@
     { "at": "2026-11-03T07:00:12Z", "by": "agent:codex", "text": "Run done, report published" }
   ],
   "waiting_on": null,
-  "ext": { "scheduler": { "recurring": true, "cron": "0 7 * * 1", "agent": "codex" } }
+  "ext": { "automation": { "recurring": true, "cron": "0 7 * * 1", "agent": "codex" } }
 }
