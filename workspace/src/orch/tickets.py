@@ -353,7 +353,7 @@ _FIELD_WORDS = {
     "waiting_on": "wait",
 }
 _STATUS_WORDS = {
-    "open": "Open",
+    "open": "To do",
     "active": "Doing",
     "waiting": "Waiting",
     "done": "Done",

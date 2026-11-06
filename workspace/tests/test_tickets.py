@@ -328,6 +328,7 @@ def test_new_with_bad_ext_makes_no_ticket(proj, run, bad):
         ("Edited note, summary, due", "Changed the note, summary and due date"),
         ("Patched owner, status (status open -> active)", "Changed the owner and status (now Doing)"),
         ("Status open -> done", "Moved to Done"),
+        ("Status done -> open", "Moved to To do"),
         ("Added check c1", "Added a task"),
         ("Check c1 done", "Finished a task"),
         ("Set ext.focus", "Updated Focus settings"),

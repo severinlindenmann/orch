@@ -162,3 +162,28 @@ class EventLog:
             if isinstance(e, dict) and e.get("kind") in KINDS:
                 out.append(e)
         return out, since + end
+
+
+NOISE = re.compile(r"^\s*(New on t_[a-z0-9]+ since you looked|Base directory for this skill|---\s*name:)", re.I)
+
+
+def for_display(events: list[dict]) -> list[dict]:
+    """What the page's feed shows (the log itself stays whole): no raw tool output (a step that worked shows
+    only its start line; a failed one shows its first words), no orch's own "New on t_x since you looked"
+    lines, and no line twice in a row."""
+    out: list[dict] = []
+    last = None
+    for e in events:
+        kind, text = e.get("kind"), str(e.get("text") or "")
+        if kind == "tool.end":
+            if (e.get("data") or {}).get("ok") is not False or NOISE.match(text):
+                continue
+            e = {**e, "text": "Failed: " + text[:100]}
+        elif NOISE.match(text):
+            continue
+        key = (e.get("agent"), e.get("kind"), e.get("text"))
+        if key == last:
+            continue
+        last = key
+        out.append(e)
+    return out

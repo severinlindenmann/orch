@@ -346,3 +346,11 @@ fn portal_markup_respects_csp() {
     assert!(html.contains("src=\"/admin/kit.js\" defer"));
     assert!(html.contains("src=\"/admin/portal.js\" defer"));
 }
+
+#[tokio::test]
+async fn admin_root_goes_to_the_portal() {
+    let t = setup();
+    let r = call(&t.admin, "GET", "/", &[], vec![]).await;
+    assert!(r.status.is_redirection());
+    assert_eq!(r.headers["location"], "/admin");
+}

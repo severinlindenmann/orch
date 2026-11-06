@@ -29,6 +29,22 @@ def find_workspace(start: Path) -> Path | None:
     return None
 
 
+def local_text(at: str | None) -> str | None:
+    """A UTC time as the computer's local time with its zone: "Fri 07 Nov 09:00 CET"."""
+    try:
+        return datetime.fromisoformat(at.replace("Z", "+00:00")).astimezone().strftime("%a %d %b %H:%M %Z") if at else None
+    except (ValueError, AttributeError):
+        return None
+
+
+def list_line(x: dict) -> str:
+    name = x["key"] or x["ticket"]
+    if x["kind"] == "wake":
+        return f"{name}  Wakes {x.get('local') or x['at']}  {x['title']}"
+    nxt = "switched off" if x.get("off") else f"next {x.get('local') or x['at'] or 'unknown'}"
+    return f"{name}  {x['when']}, {nxt}  {x['title']}"
+
+
 def describe(root: Path) -> list[dict]:
     """Next wake-ups and repeats, soonest first."""
     state = load_state(root)
@@ -38,15 +54,18 @@ def describe(root: Path) -> list[dict]:
             continue
         w = t.get("waiting_on") or {}
         if w.get("kind") == "time" and w.get("until"):
-            rows.append({"ticket": t["id"], "key": t.get("key"), "title": t["title"], "kind": "wake", "at": w["until"]})
+            rows.append({"ticket": t["id"], "key": t.get("key"), "title": t["title"], "kind": "wake", "at": w["until"],
+                         "local": local_text(w["until"])})
         s = (t.get("ext") or {}).get("automation") or {}
         if s.get("recurring") is True and s.get("cron"):
             if s.get("paused") is True:  # switched off: listed, no next time
-                rows.append({"ticket": t["id"], "key": t.get("key"), "title": t["title"], "kind": "repeat", "cron": s["cron"], "at": None, "off": True})
+                rows.append({"ticket": t["id"], "key": t.get("key"), "title": t["title"], "kind": "repeat", "cron": s["cron"], "at": None, "off": True,
+                             "when": cron_human(s["cron"], plain.zone(s.get("tz")))})
                 continue
             nxt = next_after(s["cron"], datetime.now(UTC), plain.zone(s.get("tz")))
+            at = fmt(nxt) if nxt else state.get(t["id"], {}).get("next_run")
             rows.append({"ticket": t["id"], "key": t.get("key"), "title": t["title"], "kind": "repeat", "cron": s["cron"],
-                         "at": fmt(nxt) if nxt else state.get(t["id"], {}).get("next_run")})
+                         "at": at, "when": cron_human(s["cron"], plain.zone(s.get("tz"))), "local": local_text(at)})
     return sorted(rows, key=lambda r: r["at"] or "")
 
 
@@ -173,7 +192,7 @@ def _run(args, root: Path) -> int:
         out(rs, "\n".join(f"{r['title']}: {r['text']}" for r in rs) or "Nothing needs you here.")
     elif args.cmd == "list":
         rows = describe(root)
-        out(rows, "\n".join(f"{x['key'] or x['ticket']}  {x['kind']} {x.get('cron', '')} {x['at'] or 'off'}  {x['title']}" for x in rows) or "Nothing scheduled.")
+        out(rows, "\n".join(list_line(x) for x in rows) or "Nothing scheduled.")
     elif args.cmd == "view":
         from .view import build
         print(json.dumps(build(root)))

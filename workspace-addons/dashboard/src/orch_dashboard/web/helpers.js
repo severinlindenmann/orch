@@ -6,7 +6,7 @@
   else root.DashHelpers = api;
 })(typeof self !== 'undefined' ? self : this, function () {
   const arr = v => Array.isArray(v) ? v : [];
-  const STATUS_WORD = {open: 'Open', active: 'Doing', waiting: 'Waiting', done: 'Done', dropped: 'Dropped'};
+  const STATUS_WORD = {open: 'To do', active: 'Doing', waiting: 'Waiting', done: 'Done', dropped: 'Dropped'};
   const FIELD_WORD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary',
     status: 'the status'};
 

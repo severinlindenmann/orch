@@ -146,10 +146,18 @@ def _chosen_or_generic(root: Path) -> str:
         return "generic"  # a hand-started agent we know nothing about
 
 
-def _holder_line(rec: dict, tid: str) -> str:
+def _name(root: Path, tid: str) -> str:
+    """How a person calls the ticket in a message: its key (DM1-12) when it has one, else the id."""
+    try:
+        return str(tickets.load(root, tid).get("key") or tid)
+    except Exception:
+        return tid
+
+
+def _holder_line(rec: dict, tid: str, root: Path | None = None) -> str:
     who = adapters.load(rec["agent"])["label"] if rec["agent"] in adapters.builtin_names() else rec["agent"]
     since = rec.get("started_at", "")[11:16]
-    return f"{tid} is being worked on by {rec['by']} ({who}) since {since}."
+    return f"{_name(root, tid) if root else tid} is being worked on by {rec['by']} ({who}) since {since}."
 
 
 def _status(args, root: Path) -> None:
@@ -171,14 +179,14 @@ def _status(args, root: Path) -> None:
     st = runs.state(rec)
     data = {"ticket": tid, "running": st == "alive", "state": st, "pending": waiting, "claim": rec}
     if st == "dead":
-        text = f"The earlier run on {tid} ended without finishing. Start it again: orch run start {tid}"
+        text = f"The earlier run on {_name(root, tid)} ended without finishing. Start it again: orch run start {tid}"
     elif st == "maybe-stale":
         text = (
-            f"{_holder_line(rec, tid)} Nobody has written to the ticket for a while, so it may be stuck. "
+            f"{_holder_line(rec, tid, root)} Nobody has written to the ticket for a while, so it may be stuck. "
             f"Take it over: orch run start {tid} --take-over"
         )
     else:
-        text = _holder_line(rec, tid) + (f" {waiting} more waiting." if waiting else "")
+        text = _holder_line(rec, tid, root) + (f" {waiting} more waiting." if waiting else "")
         if rec.get("mode") == "live":
             text += " " + runs_live.line(rec)
     _out(args, data, text)
@@ -263,7 +271,9 @@ def dispatch(args, root: Path) -> bool:
         _out(
             args,
             {"stopped": ok},
-            f"Stopped {tid}. The work done so far is kept." if ok else f"Nothing is running on {tid}.",
+            f"Stopped {_name(root, tid)}. The work done so far is kept."
+            if ok
+            else f"Nothing is running on {_name(root, tid)}.",
         )
     elif sub == "claim":
         name = args.agent or adapters.detect_env(os.environ) or _chosen_or_generic(root)
@@ -276,7 +286,7 @@ def dispatch(args, root: Path) -> bool:
             raise
         if args.session:
             tickets.record_session(root, tid, name, args.session, runs.host())
-        _out(args, {"claimed": True, "run": rec["run"]}, f"Claimed {tid} (run {rec['run']}).")
+        _out(args, {"claimed": True, "run": rec["run"]}, f"Claimed {_name(root, tid)} (run {rec['run']}).")
     elif sub == "release":
         run_id = args.run or os.environ.get("ORCH_RUN")
         rec = runs.read(root, tid)

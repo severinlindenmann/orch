@@ -76,7 +76,7 @@
   const overdue = t => activeTicket(t) && t.due && t.due < today();
   const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
   const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
-  const statusWord = t => questions(t).length ? 'Waiting for an answer' : ({active:'Doing', waiting:'Waiting', open:'Open', done:'Done', dropped:'Dropped'}[t.status] || 'Open');
+  const statusWord = t => questions(t).length ? 'Waiting for an answer' : ({active:'Doing', waiting:'Waiting', open:'To do', done:'Done', dropped:'Dropped'}[t.status] || 'To do');
   const chip = (text, cls = '') => h('span', {className:'chip ' + cls}, text);
   // Only waiting for the person's answer is "Waiting for you", not a fault; "Blocked" is a ticket waiting on something else.
   const statusChip = t => {
@@ -157,7 +157,7 @@
     return fragment(heading('Tickets'), !tickets().length ? card('empty', 'Tickets', '', firstTicket()) : ['active', 'waiting', 'open', 'done', 'dropped'].map(status => {
       const group = rows.map((row, i) => ({row, i})).filter(({row}) => row.depth === 0 && row.ticket.status === status);
       if (!group.length) return null;
-      const title = {active:'Doing', waiting:'Waiting', open:'Open', done:'Done', dropped:'Dropped'}[status];
+      const title = {active:'Doing', waiting:'Waiting', open:'To do', done:'Done', dropped:'Dropped'}[status];
       const body = group.map(({i}) => treeBranch(rows, i));
       if (!['done', 'dropped'].includes(status)) return card('group-' + status, title, group.length, body);
       const open = expanded.has(status);

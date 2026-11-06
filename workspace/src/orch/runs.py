@@ -836,6 +836,9 @@ def wrap(
             tickets.record_session(root, tid, name, sid, host())
         turns += 1
         why = failure_text(rc, out)
+        now = read(root, tid)
+        if why is not None and now and now["run"] == run and now.get("stop_requested"):
+            why = None  # we stopped it ourselves (Windows has no SIGTERM handler): a normal end
         if why is not None:  # a person sees why nothing happened (in the ticket's history, Home and Focus)
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, f"The agent stopped with an error: {why}", f"agent:{name}")
