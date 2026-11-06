@@ -125,4 +125,22 @@ def test_a_link_always_shows_its_real_host_and_no_borrowed_site_icon():
     v = t["links"][0]["view"]
     assert (v["label"], v["icon"], v["host"]) == ("GitHub PR", "link", "evil.example")
     src = (data.Path(data.__file__).parent / "web" / "app.js").read_text()
-    assert "const linkSub = (v, url) => clean(v.label) + ' · ' + hostOf(url);" in src
+    assert "h('span', {className:'lk-host'}, hostOf(url))" in src and ".lk .t .lk-host{flex:none" in (src_css := (
+        data.Path(data.__file__).parent / "web" / "style.css").read_text())
+    assert src_css
+
+
+def test_link_type_is_one_short_line_and_never_an_address():
+    """Runs the page's own oneLine/linkType in node: a long type with github.com is dropped, bidi and breaks go."""
+    import shutil
+    import subprocess
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    src = (data.Path(data.__file__).parent / "web" / "app.js").read_text()
+    lines = [ln for ln in src.splitlines() if ln.strip().startswith(("const clean =", "const oneLine =", "const linkType ="))]
+    assert len(lines) == 3
+    js = "\n".join(lines) + """
+console.log(JSON.stringify([linkType({label: 'GitHub PR github.com and a very long tail to push the host out'}),
+  linkType({label: 'Pull\\u202E\\nrequest\\u200B'}), linkType({label: 'a'.repeat(80)}).length, linkType({label: 'github\\uFF0Ecom'})]));"""
+    out = subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout
+    assert json.loads(out) == ["", "Pull request", 32, ""]

@@ -281,11 +281,16 @@
   const linkStatus = status => typeof status === 'string' && KEY.test(status.replace(/ /g, '-')) ? h('span', {className:'st st-' + status.replace(/ /g, '-')}, status) : null;
   // the real host is always shown next to the type: a link type's label alone could vouch for any address
   const hostOf = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch (_) { return ''; } };
-  const linkSub = (v, url) => clean(v.label) + ' · ' + hostOf(url);
+  // workspace text on one line: format (bidi, invisible) characters go, control characters and line breaks become spaces
+  const oneLine = (text, max) => String(text ?? '').replace(/\p{Cf}/gu, '').replace(/[\p{Cc}\u2028\u2029]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+  // the type, at most 32 characters; none when it looks like an address (a dot), so it can not pass for the host
+  const linkType = v => { const t = oneLine(clean(v.label), 32); return t && !/[.\uFF0E\u3002]/.test(t) ? t : ''; };
+  // the host has its own span that never shrinks: a long type is cut first
+  const linkSub = (v, url) => { const t = linkType(v); return h('span', {className:'lk-sub'}, t ? h('span', {className:'lk-type'}, t + ' · ') : null, h('span', {className:'lk-host'}, hostOf(url))); };
   function linkRow(t, link, removable) {
     const v = link.view, url = safeHref(link.url);
     return h('div', {className:'lk-row', 'data-key':'link-' + link.url},
-      h('a', {className:'lk', href:url, target:'_blank', rel:'noopener noreferrer', title:url}, linkTile(v), h('span', {className:'t'}, h('b', {}, clean(v.title)), h('span', {}, linkSub(v, url))), linkStatus(v.status), h('span', {className:'ext'}, iconEl('external'))),
+      h('a', {className:'lk', href:url, target:'_blank', rel:'noopener noreferrer', title:url}, linkTile(v), h('span', {className:'t'}, h('b', {}, oneLine(clean(v.title), 200)), linkSub(v, url)), linkStatus(v.status), h('span', {className:'ext'}, iconEl('external'))),
       removable && !snapshot ? h('button', {type:'button', className:'btn ghost icon xs lk-x', title:'Remove this link', 'aria-label':'Remove link ' + clean(v.title), 'data-action':'link-remove', 'data-ticket':t.id, 'data-url':link.url}, iconEl('x')) : null);
   }
   // add-ons that are on, have a refresh act and own a link on this ticket
@@ -429,7 +434,7 @@
       return f.read_only && KEY.test(String(v)) ? linkStatus(String(v)) : h('span', {className:'st'}, f.type === 'date' ? date(v) : fieldText(f, v));
     })).filter(Boolean);
     if (!shown.length && !chips.length) return null;
-    return h('div', {className:'card-links', 'data-key':'card-links'}, shown.map(l => h('span', {className:'lnk', title:clean(l.view.label + ' · ' + hostOf(l.url) + ': ' + l.view.title)}, linkTile(l.view, 'sm'), linkStatus(l.view.status))),
+    return h('div', {className:'card-links', 'data-key':'card-links'}, shown.map(l => h('span', {className:'lnk', title:hostOf(l.url) + (linkType(l.view) ? ' · ' + linkType(l.view) : '') + ': ' + oneLine(clean(l.view.title), 200)}, linkTile(l.view, 'sm'), linkStatus(l.view.status))),
       rows.length > 2 ? h('span', {className:'more'}, '+' + (rows.length - 2)) : null, chips.length ? h('span', {className:'gap'}) : null, chips);
   }
   function liveLinkFor(t) {
