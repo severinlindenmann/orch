@@ -507,3 +507,46 @@ def test_the_pane_keeps_its_own_terminal_variables(proj, run, lab, tmp_path, mon
     _until(lambda: out.exists() and out.read_text().strip(), what="agent env")
     line = out.read_text().strip()
     assert "TERM=" in line and "TERM= " not in line and "TMUX=set" in line and "X=from-starter" in line
+
+
+@needs_tmux
+def test_the_waiting_for_input_notice_after_a_turn_keeps_the_agent_idle(proj, run, lab):
+    """Claude's Notification hook also fires ~60 s after a finished turn ("waiting for your input"). That must
+    not block input: a message or an answer still goes in. A notice during a turn still means attention."""
+    _generic_live(proj)
+    tid = _ticket(run)
+    r = json.loads(run("run", "start", tid, "--json")[1])
+    _until(lambda: runs.read(proj, tid)["live"]["state"] == "idle" and len(_lines(lab, "input")) == 1)
+    run("run", "event", "--run", r["run"], "--kind", "attention")
+    assert runs.read(proj, tid)["live"]["state"] == "idle"
+    code, out, _ = run("run", "send", tid, "Also October")
+    assert out.strip() == "Sent."
+    _until(lambda: len(_lines(lab, "input")) == 2, what="the message after the notice")
+    rec = runs.read(proj, tid)
+    rec["live"]["state"] = "working"
+    runs._write(proj, rec)
+    run("run", "event", "--run", r["run"], "--kind", "attention")
+    assert runs.read(proj, tid)["live"]["state"] == "attention"
+
+
+@needs_tmux
+def test_a_persons_answer_goes_to_the_agent_that_waits_for_it(proj, run, lab):
+    _generic_live(proj)
+    tid = _ticket(run)
+    run("run", "start", tid)
+    _until(lambda: runs.read(proj, tid)["live"]["state"] == "idle" and len(_lines(lab, "input")) == 1)
+    qid = json.loads(
+        run("ask", tid, "Use CHF?", "--option", "Yes", "--option", "No", "--json", "--by", "agent:fake")[1]
+    )["id"]
+    code, out, _ = run("answer", tid, qid, "Yes", "--by", "human:anna")
+    assert code == 0 and out.strip() == "Answered: Yes"
+    _until(lambda: len(_lines(lab, "input")) == 2, what="the answer")
+    assert _lines(lab, "input")[1] == f"From human:anna: Answer to your question {qid} (Use CHF?): Yes"
+    assert runs.undelivered(proj, tid) == []
+
+
+def test_an_answer_without_a_run_sends_nothing(proj, run):
+    tid = _ticket(run)
+    qid = json.loads(run("ask", tid, "Use CHF?", "--json", "--by", "agent:fake")[1])["id"]
+    assert run("answer", tid, qid, "Yes", "--by", "human:anna")[0] == 0
+    assert runs.undelivered(proj, tid) == []

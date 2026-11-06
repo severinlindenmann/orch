@@ -18,6 +18,7 @@ from orch import (
     cli_status,
     net,
     relay,
+    runs_live,
     services,
     tickets,
 )
@@ -622,6 +623,7 @@ def run(args: argparse.Namespace) -> None:
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
         t, q = tickets.answer(root, args.id, args.question, args.answer, who, args.via)
+        runs_live.pass_answer(root, t["id"], q, who)
         note = _addon_note(root, q)
         _out(args, q, f"Answered: {q['answer']}" + (f"\n{note}" if note else ""))
     elif cmd == "link":

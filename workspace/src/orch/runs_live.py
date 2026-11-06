@@ -245,10 +245,25 @@ def event(root: Path, kind: str, run: str | None, tid: str | None, session_id: s
         _set_state(root, tid, run, "idle")  # the tool is up and waiting for its first input
     elif kind == "idle":
         _set_state(root, tid, run, "idle")
+    elif (rec.get("live") or {}).get("state") == "idle":
+        # The tool's "still waiting for your input" notice after a finished turn: it is at its prompt, so it
+        # stays idle and input may go in. Only a notice during a turn (a permission prompt) needs a person.
+        return deliver(root, tid)
     else:
         _set_state(root, tid, run, "attention")
         return 0
     return deliver(root, tid)
+
+
+def pass_answer(root: Path, tid: str, q: dict, by: str) -> None:
+    """A person answered while an agent works on the ticket: the answer goes to it like a message
+    (live: pasted when it is idle). An agent's own answer, or no run, sends nothing."""
+    if by.startswith("agent:"):
+        return
+    rec = runs.read(root, tid)
+    if not rec or runs.state(rec) != "alive":
+        return
+    send(root, tid, by, f"Answer to your question {q['id']} ({q['text']}): {q['answer']}", "answer")
 
 
 def send(root: Path, tid: str, by: str, text: str, kind: str = "message") -> dict:
