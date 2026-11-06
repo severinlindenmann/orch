@@ -143,4 +143,38 @@ final class RealRelayUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Waiting to send"].exists, "the waiting text did not go out")
         shot("13-offline-sent")
     }
+
+    /// Tickets made on the host (never texted from the phone) show nested under the workspace; each opens its ticket chat.
+    func test6ThreeTicketsNested() {
+        let app = launch(reset: true)
+        XCTAssertTrue(app.buttons["Paste invitation link"].waitForExistence(timeout: 15))
+        app.buttons["Paste invitation link"].tap()
+        let f = app.textFields["invite-field"]
+        XCTAssertTrue(f.waitForExistence(timeout: 5))
+        f.tap(); f.typeText(env["ORCH_PAIR_LINK"] ?? "")
+        app.buttons["invite-continue"].tap()
+        app.buttons["Connect this phone"].tap()
+        XCTAssertTrue(app.buttons["Not now"].waitForExistence(timeout: 20)); app.buttons["Not now"].tap()
+        let ws = env["ORCH_WS"] ?? ""
+        XCTAssertTrue(app.buttons["room-\(ws)"].waitForExistence(timeout: 20))
+        // the host refreshes its phone list and syncs its open tickets once this phone is paired (handshake files)
+        let sig = URL(fileURLWithPath: env["ORCH_SIGNAL"] ?? NSTemporaryDirectory())
+        try? Data().write(to: sig.appendingPathComponent("paired"))
+        var waited = 0
+        while !FileManager.default.fileExists(atPath: sig.appendingPathComponent("synced").path) && waited < 120 { sleep(1); waited += 1 }
+        app.terminate(); app.launchArguments = ["-undoSeconds", "4"]; app.launch()   // the app reads the feed again when it opens
+        let ids = (env["ORCH_TICKETS"] ?? "").split(separator: ",").map(String.init)
+        XCTAssertEqual(ids.count, 3)
+        _ = app.buttons["ticket-\(ws)|\(ids[0])"].waitForExistence(timeout: 25); shot("19-chats-after-pair")
+        for id in ids { XCTAssertTrue(app.buttons["ticket-\(ws)|\(id)"].waitForExistence(timeout: 25), "ticket \(id) nested") }
+        shot("20-chats-three-tickets")
+        for (n, id) in ids.enumerated() {
+            app.buttons["ticket-\(ws)|\(id)"].tap()
+            XCTAssertTrue(app.staticTexts["composer-note"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.buttons["mic"].exists, "mic in the ticket chat")
+            sleep(1); shot("2\(n + 1)-ticket-chat-\(n + 1)")
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+            XCTAssertTrue(app.buttons["ticket-\(ws)|\(id)"].waitForExistence(timeout: 10))
+        }
+    }
 }

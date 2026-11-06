@@ -505,6 +505,11 @@ def _allow_start(run, mid):
     assert run("relay", "allow", mid, "--once")[0] == 0
 
 
+def _replies(rel):
+    """What went out, without the quiet note that tells the phone a ticket exists."""
+    return [m for m in rel.sent if m["type"] == "text" and m["body"]["text"] != "Ticket on your workspace"]
+
+
 def _tickets(run):
     return json.loads(run("ticket", "list", "--json")[1])
 
@@ -1046,7 +1051,7 @@ def test_phone_text_on_a_ticket_continues_it(proj, run, rel, new_ticket):
     lines = [h["text"] for h in t["history"]]
     assert lines.count("From Marco's iPhone: Also add the totals") == 1
     assert len(runs.undelivered(proj, tid)) == 1
-    assert len(_tickets(run)) == 1 and not rel.sent, "no new ticket, no second agent, no ack"
+    assert len(_tickets(run)) == 1 and not _replies(rel), "no new ticket, no second agent, no ack"
 
 
 def test_phone_text_with_unknown_ticket_makes_a_new_one(proj, run, rel):
@@ -1135,7 +1140,7 @@ def test_phone_text_added_to_a_ticket_is_not_acked_on_rerun(proj, run, rel, new_
     monkeypatch.setattr(relay, "_mark_seen", real)
     out = run("relay", "inbox")[1]
     assert f"added to {tid}" in out and "new ticket" not in out
-    assert not rel.sent, "no Got it for a text that continued a ticket"
+    assert not _replies(rel), "no Got it for a text that continued a ticket"
 
 
 def test_phone_ack_is_marked_before_it_is_sent(proj, run, rel, monkeypatch):
@@ -1156,7 +1161,7 @@ def test_phone_ack_is_marked_before_it_is_sent(proj, run, rel, monkeypatch):
     monkeypatch.setattr(relay, "send_text", real)
     assert seen_flag == [[True]]
     run("relay", "inbox")
-    assert not [m for m in rel.sent if m["type"] == "text"], "the marker was written first: no second Got it"
+    assert not _replies(rel), "the marker was written first: no second Got it"
 
 
 def test_allow_entry_saved_before_the_message_and_history_once(proj, run, rel, monkeypatch):

@@ -66,6 +66,8 @@ enum TicketBuilder {
             let key = "\(u.workspace)|\(u.ticket)"
             var st = status(forKind: u.kind)
             if st == .needsYou { st = .working }   // only a real open question counts (below)
+            // A quiet sync note carries the ticket's own status: a finished ticket is Done whatever the note's kind.
+            if st == .working, ["done", "dropped"].contains(u.ticketView?.status ?? "") { st = .done }
             byKey[key] = Ticket(id: key, workspace: u.workspace, workspaceName: u.workspaceName, ticket: u.ticket,
                                 title: u.ticketView?.title ?? u.title ?? u.text, text: u.text, status: st, kind: u.kind, at: u.at, question: nil,
                                 key: u.key, view: u.ticketView)

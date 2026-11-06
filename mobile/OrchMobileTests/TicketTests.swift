@@ -33,6 +33,20 @@ final class TicketTests: XCTestCase {
         XCTAssertEqual(TicketBuilder.build(updates: [qu], questions: [], answers: [:]).map(\.status), [.working])
     }
 
+    func testQuietSyncNotesMakeEveryTicketAChatAndKeepTheirStatus() {
+        func u(_ id: String, _ t: String, _ st: String) -> TicketUpdate {
+            TicketUpdate(id: id, workspace: "ws_a", workspaceName: "A", ticket: t, kind: "note", title: t, text: "Tasks: 0 of 1 done", replyTo: nil,
+                         at: "2026-11-06T10:00:0\(id.count)Z", ticketView: TicketSnapshot(title: "Ticket " + t, status: st))
+        }
+        let t = TicketBuilder.build(updates: [u("a", "t_1", "open"), u("bb", "t_2", "active"), u("ccc", "t_3", "done")], questions: [], answers: [:])
+        XCTAssertEqual(Set(t.compactMap(\.ticket)), ["t_1", "t_2", "t_3"])
+        XCTAssertEqual(t.first { $0.ticket == "t_3" }?.status, .done)
+        XCTAssertEqual(t.first { $0.ticket == "t_1" }?.status, .working)
+        // each one is a sub-chat under its workspace
+        let d = ChatData(workspaces: [Workspace(id: "ws_a", name: "A", description: nil, tags: [], online: true, lastSeen: nil, openQuestions: 0)], messages: [], tickets: t, questions: [], answers: [:], outbox: [])
+        XCTAssertEqual(ChatBuilder.rooms(d, read: ReadState()).first?.tickets.count, 3)
+    }
+
     func testFailureAndStoppedAreDoneWithOwnSign() {
         func t(_ k: String) -> Ticket {
             TicketBuilder.build(updates: [TicketUpdate(id: "m", workspace: "ws_a", workspaceName: "A", ticket: "t_1", kind: k, title: "X", text: "x", replyTo: nil, at: "2026-11-05T10:00:00Z")],
