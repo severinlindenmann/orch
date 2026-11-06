@@ -167,7 +167,7 @@ try {
   });
   const port = 18000 + Math.floor(Math.random() * 900);
   await step('dashboard-list', 'Dashboard: start it and open the ticket list', async () => {
-    dash = spawn('orch', ['dashboard', 'serve', '--port', String(port)], { cwd: dirs.Pilatus, env, stdio: 'ignore' });
+    dash = spawn('orch', ['dashboard', 'serve', '--port', String(port)], { cwd: dirs.Pilatus, env, stdio: 'ignore', detached: true });
     for (let i = 0; i < 40; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/`)).ok) break; } catch {} await new Promise(r => setTimeout(r, 250)); }
     await page.goto(`http://127.0.0.1:${port}/#tickets`);
     await page.waitForSelector('a.card');
@@ -301,7 +301,7 @@ try {
   console.error('fatal:', scrub(e.message));
   results.push({ n: ++n, name: 'fatal', text: 'Setup or run aborted', status: 'fail', note: scrub(e.message).slice(0, 300), file: '' });
 } finally {
-  if (dash) dash.kill();
+  if (dash) { try { process.kill(-dash.pid, 'SIGKILL'); } catch {} }  // the server is a child of orch: end the group
   // ---------- cleanup: delete every "Walk ..." workspace on both servers (removes its files and apps) ----------
   for (const [base, tok] of [[PUB_ADMIN, PT], [REL_ADMIN, RT]]) {
     const r = await adminApi(base, tok, 'GET', '/workspaces?limit=100');
