@@ -166,7 +166,7 @@ def test_page_has_no_inline_code_and_loads_the_kit():
 
 
 def test_page_code_names_no_addon_and_has_no_blinking_needs():
-    js = ((WEBDIR / "app.js").read_text() + (WEBDIR / "style.css").read_text()).replace(".focus(", ".(")
+    js = ((WEBDIR / "app.js").read_text() + (WEBDIR / "style.css").read_text()).replace(".focus(", ".(").replace(":focus", ":")
     for name in ("scheduler", "automation", "relay", "focus", "publish", "wiki"):
         assert not re.search(rf"\b{name}\b", js, re.IGNORECASE), name
     assert "needs-pulse" not in js and "infinite" not in js
@@ -221,3 +221,12 @@ def test_bad_accordion_fields_break_the_view(mutate):
     v = _acc_view()
     mutate(v["blocks"][0]["items"][0])
     assert check_view(v) is None
+
+
+def test_addon_links_pass_only_with_a_plain_name_and_path():
+    def v(link):
+        return {"schema": "orch.addon-view/1", "generated_at": "2026-11-06T08:00:00Z",
+                "blocks": [{"type": "list", "title": "T", "items": [{"title": "x", "link": link}]}]}
+    assert check_view(v("addon:panel/board")) and check_view(v("addon:panel"))
+    for bad in ("addon:../x", "addon:Panel/x", "addon:panel/a b", "addon:panel/<b>", "addon:", "ftp://x"):
+        assert check_view(v(bad)) is None, bad
