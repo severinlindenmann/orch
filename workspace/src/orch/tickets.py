@@ -902,9 +902,9 @@ def merge_refresh(
         if not changes:
             return NO_WRITE
         for c in changes:
-            add_history(
-                t, by, f"{addon} refresh: {c['name']} {c['field']} {c['old'] or '-'} -> {c['new'] or '-'}"
-            )
+            what = f"{c['name']} {c['field']}" if c["what"] == "link" else c["field"]
+            old, new = (links.one_line("-" if v in (None, "") else v, 120) for v in (c["old"], c["new"]))
+            add_history(t, by, f"{addon} refresh: {what} {old} -> {new}")
         return changes
 
     t, changes = apply_op(root, tid, op)
