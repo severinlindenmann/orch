@@ -96,6 +96,26 @@ def _who(by: str) -> tuple[str, str]:
     return name, "person"
 
 
+_ADMIN_NOTE = re.compile(
+    r"(?:Set|Removed) ext\."
+)  # add-on settings notes: admin business, not for a phone chat
+_FROM_PREFIX = re.compile(r"From [^:\n]{1,100}: ")
+_RELAY_BY = re.compile(r"agent:relay from (\S+)")
+
+
+def _phone_line(root: Path, h: dict) -> tuple[str, str, str] | None:
+    """(who, role, text) of a text that came from a phone: its name (never the raw ph_ id), as a person."""
+    from orch import relay
+
+    m = _RELAY_BY.fullmatch(str(h.get("by", "")))
+    if not m:
+        return None
+    text = str(h.get("text", ""))
+    if h.get("via") == "phone":
+        text = _FROM_PREFIX.sub("", text, count=1)
+    return _clip(relay.name_of(root, m.group(1)), 64) or "Phone", "person", text
+
+
 def _agent(root: Path, ticket: dict) -> tuple[str | None, bool]:
     """(agent display name, running now)."""
     rec = runs.read(root, ticket["id"])
@@ -217,13 +237,17 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
     agent, running = _agent(root, ticket)
     hist = []
     for h in (ticket.get("history") or [])[-HISTORY:]:
-        text = _clip(tickets.history_line(str(h.get("text", "")), checklist), 1000)
+        if _ADMIN_NOTE.match(str(h.get("text", ""))):
+            continue
+        pl = _phone_line(root, h)
+        raw = pl[2] if pl else str(h.get("text", ""))
+        text = _clip(tickets.history_line(raw, checklist), 1000)
         if not text:
             continue
         at = str(h.get("at") or "")
         if not _TIME.fullmatch(at):
             continue
-        who, role = _who(h.get("by", ""))
+        who, role = pl[:2] if pl else _who(h.get("by", ""))
         hist.append({"at": at, "who": who, "role": role, "text": text})
     view: dict = {
         "title": _clip(ticket.get("title", ""), 200) or "Ticket",

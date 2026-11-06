@@ -17,6 +17,7 @@ private struct ChatScroll: View {
                 }.padding(.horizontal, 14).padding(.vertical, 12)
             }
             .scrollDismissesKeyboard(.interactively).defaultScrollAnchor(.bottom)
+            .task { await model.watchWhileOpen() }
             .task(id: items.count) {
                 model.markRead(chatKey, items: items)
                 if let f = model.focusedQuestion, items.contains(where: { $0.id == f }) {
@@ -231,7 +232,8 @@ struct ChatInfoView: View {
                 if let t {
                     Text(t.displayTitle).themeFont(24, .semibold)
                     HStack { KeyTag(key: t.key); StatusPill(status: t.status, kind: t.kind) }
-                    detail("Agent", t.view?.agent ?? "Agent"); detail("Workspace", w?.displayName ?? t.workspaceName)
+                    if let a = t.view?.agent { detail("Agent", a) }
+                    detail("Workspace", w?.displayName ?? t.workspaceName)
                     detail("Updated", ChatBuilder.timeText(t.at))
                     if let s = t.view?.summary ?? Optional(t.text), !s.isEmpty {
                         VStack(alignment: .leading, spacing: 4) { Eyebrow(text: "WHERE IT STANDS"); Text(s).themeFont(15) }

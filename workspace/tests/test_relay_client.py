@@ -379,6 +379,16 @@ def test_refresh_hint_is_shown_not_applied(proj, run, rel):
     assert "orch relay refresh" in run("relay", "inbox")[1]
 
 
+def test_refresh_hint_is_quiet_once_refresh_ran(proj, run, rel):
+    connect(run, rel)
+    rel.snapshot.update(version=8)
+    rel.inbox.append(msg("m_refresh000000002", "refresh-hint", {"version": 8}, frm="admin"))
+    assert run("relay", "refresh")[0] == 0
+    assert "orch relay refresh" not in run("relay", "inbox")[1]
+    rel.inbox.append(msg("m_refresh000000003", "refresh-hint", {"version": 9}, frm="admin"))
+    assert "orch relay refresh" in run("relay", "inbox")[1]
+
+
 def test_answer_rejected_unless_it_matches_a_question_we_sent(proj, run, new_ticket, rel):
     connect(run, rel)
     tid = new_ticket()
