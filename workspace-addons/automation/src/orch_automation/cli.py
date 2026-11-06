@@ -9,7 +9,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import orchcli, plain, service
+from . import actions, orchcli, plain, service
 from .cron import fmt, next_after, valid
 from .listen import NOT_LISTENING
 from .loop import OPEN, Scheduler
@@ -41,6 +41,9 @@ def describe(root: Path) -> list[dict]:
             rows.append({"ticket": t["id"], "title": t["title"], "kind": "wake", "at": w["until"]})
         s = (t.get("ext") or {}).get("automation") or {}
         if s.get("recurring") is True and s.get("cron"):
+            if s.get("paused") is True:  # switched off: listed, no next time
+                rows.append({"ticket": t["id"], "title": t["title"], "kind": "repeat", "cron": s["cron"], "at": None, "off": True})
+                continue
             nxt = next_after(s["cron"], datetime.now(UTC), plain.zone(s.get("tz")))
             rows.append({"ticket": t["id"], "title": t["title"], "kind": "repeat", "cron": s["cron"],
                          "at": fmt(nxt) if nxt else state.get(t["id"], {}).get("next_run")})
@@ -107,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--tz", help="time zone of the times (default: this computer's, e.g. Europe/Zurich)")
     rp.add_argument("--each-run", choices=("sub-ticket",), help="give every run its own sub-ticket (daily or slower)")
     rp.add_argument("--off", action="store_true")
+    ac = sub.add_parser("act", parents=[common], help="what the dashboard buttons do: on, off, toggle, run, delete")
+    ac.add_argument("verb", choices=actions.VERBS)
+    ac.add_argument("target", help="ticket id")
     args = ap.parse_args(argv)
     try:
         root = find_workspace(Path(args.dir))
@@ -172,10 +178,16 @@ def _run(args, root: Path) -> int:
         out(rs, "\n".join(f"{r['title']}: {r['text']}" for r in rs) or "Nothing needs you here.")
     elif args.cmd == "list":
         rows = describe(root)
-        out(rows, "\n".join(f"{x['ticket']}  {x['kind']} {x.get('cron', '')} {x['at']}  {x['title']}" for x in rows) or "Nothing scheduled.")
+        out(rows, "\n".join(f"{x['ticket']}  {x['kind']} {x.get('cron', '')} {x['at'] or 'off'}  {x['title']}" for x in rows) or "Nothing scheduled.")
     elif args.cmd == "view":
         from .view import build
         print(json.dumps(build(root)))
+    elif args.cmd == "act":
+        try:
+            res = actions.act(root, args.verb, args.target)
+        except actions.Bad as e:
+            raise Refused(str(e)) from None
+        out(res, res["text"])
     elif args.cmd == "repeat":
         res = repeat(root, args.ticket, args.when, args.off, args.agent, args.tz, bool(args.each_run))
         if res.get("until"):

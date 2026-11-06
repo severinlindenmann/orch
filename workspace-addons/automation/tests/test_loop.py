@@ -248,3 +248,13 @@ def test_phone_answer_to_own_failure_question_starts_once(ws):
                                                  "body": {"question_id": "q1", "answer": "Try again"}}]))
     Scheduler(ws).tick(T(8))
     assert runs_started(ws) == ["t_ask00030"]
+
+
+def test_paused_repeat_does_not_start_runs(ws):
+    from conftest import T, add_ticket, runs_started
+
+    from orch_automation.loop import Scheduler
+
+    add_ticket(ws, "t_rec00001", ext={"automation": {"recurring": True, "cron": "0 8 * * *", "paused": True}})
+    Scheduler(ws).tick(T(9))
+    assert runs_started(ws) == []
