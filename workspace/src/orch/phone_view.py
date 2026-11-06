@@ -147,7 +147,10 @@ def _proof_file(root: Path, tid: str, ev: dict) -> tuple[str, bytes] | None:
     if real.parent != folder or real == secrets or secrets in real.parents:
         return None
     try:
-        fd = os.open(real, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        if not stat.S_ISREG(os.lstat(cur).st_mode):  # a planted FIFO or device is never opened
+            return None
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        fd = os.open(real, flags)
     except OSError:
         return None
     with os.fdopen(fd, "rb") as f:

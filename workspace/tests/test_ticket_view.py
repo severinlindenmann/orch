@@ -221,7 +221,7 @@ def test_redact_and_safe_url_units():
 
 
 @pytest.mark.parametrize(
-    "kind", ["dotdot", "absolute", "secrets", "linked_folder", "linked_file", "other_ticket"]
+    "kind", ["dotdot", "absolute", "secrets", "linked_folder", "linked_file", "other_ticket", "fifo"]
 )
 def test_proof_refs_that_leave_the_evidence_folder_are_never_uploaded(proj, run, new_ticket, conn, kind):
     import os
@@ -247,6 +247,11 @@ def test_proof_refs_that_leave_the_evidence_folder_are_never_uploaded(proj, run,
     elif kind == "linked_file":
         ev_dir.mkdir(parents=True, exist_ok=True)
         os.symlink(sec / "token.txt", ev_dir / "x.png")
+    elif kind == "fifo":
+        if not hasattr(os, "mkfifo"):
+            pytest.skip("no FIFOs here")
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        os.mkfifo(ev_dir / "x.png")
     elif kind == "other_ticket":
         d = proj / ".orch/tickets" / other / "evidence"
         d.mkdir(parents=True)
