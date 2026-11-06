@@ -232,21 +232,27 @@ final class ChatTests: XCTestCase {
 
     func testLinkCardAlwaysShowsTheRealHostAndNoBorrowedSiteIcon() {
         let evil = "https://evil.example/acme/pull/1"
-        XCTAssertEqual(LinkFace.subtitle(type: "GitHub PR", url: evil), "GitHub PR · evil.example")
+        XCTAssertEqual(LinkFace.subtitle(type: "GitHub · Pull request", url: evil), "Pull request · evil.example")
         XCTAssertEqual(LinkFace.icon("github", url: evil), "link")
         XCTAssertEqual(LinkFace.icon("github", url: "https://github.com.evil.example/x"), "link")
         XCTAssertEqual(LinkFace.icon("github", url: "https://www.github.com/a/b/pull/1"), "github")
         XCTAssertEqual(LinkFace.icon("jira", url: "https://acme.atlassian.net/browse/X-1"), "jira")
         XCTAssertEqual(LinkFace.subtitle(type: "GitHub · Pull request", url: "https://github.com/a/b/pull/1"), "GitHub · Pull request · github.com")
-        XCTAssertEqual(LinkFace.subtitle(type: nil, url: evil), "evil.example")
+        XCTAssertEqual(LinkFace.subtitle(type: nil, url: evil), "Link · evil.example")
     }
 
-    func testLinkTypeCanNotPassForTheHost() {
-        let evil = "https://evil.example/x"
-        XCTAssertEqual(LinkFace.subtitle(type: "GitHub PR github.com and a very long tail to push the host out", url: evil), "evil.example")
-        XCTAssertNil(LinkFace.type("github\u{FF0E}com"))
-        XCTAssertEqual(LinkFace.type("Pull\u{202E}\nrequest\u{200B}"), "Pull request")
-        XCTAssertEqual(LinkFace.type(String(repeating: "a", count: 80))?.count, 32)
+    func testLinkTypeIsAnAllowlistAndTheDomainIsTheRegistrablePart() {
+        let evil = "https://github.com.evil.example/x"
+        XCTAssertEqual(LinkFace.type("github\u{0323}com", url: evil), "Link")  // combining dot
+        XCTAssertEqual(LinkFace.type("github\u{FF0E}com", url: evil), "Link")  // fullwidth dot
+        XCTAssertEqual(LinkFace.type("GitHub", url: evil), "Link")  // a site name off its host
+        XCTAssertEqual(LinkFace.type("My GitHub PR", url: evil), "Link"); XCTAssertEqual(LinkFace.type("GitHub-PR", url: evil), "Link")
+        XCTAssertEqual(LinkFace.type("Pull\u{202E}request", url: evil), "Link")
+        XCTAssertEqual(LinkFace.type(String(repeating: "a", count: 25), url: evil), "Link")
+        XCTAssertEqual(LinkFace.type("Kampagne Zürich", url: evil), "Kampagne Zürich")
+        XCTAssertTrue(LinkFace.hostParts(evil) == ("github.com.", "evil.example"))
+        XCTAssertTrue(LinkFace.hostParts("https://shop.example.co.uk/") == ("shop.", "example.co.uk"))
+        XCTAssertEqual(LinkFace.domain("shop.example.co.uk"), "example.co.uk")
         XCTAssertEqual(LinkFace.oneLine("Fix\u{1B}[31m\nbug", max: 200), "Fix [31m bug")
     }
 }

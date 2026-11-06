@@ -217,10 +217,14 @@ struct AttachmentTile: View {
             LinkTile(icon: LinkFace.icon(a.icon, url: a.url), mono: a.mono)
             VStack(alignment: .leading, spacing: 2) {
                 Text(LinkFace.oneLine(a.title, max: 200) ?? host).themeFont(14, .semibold).lineLimit(1)
-                HStack(spacing: 0) {  // the host never truncates: the type gives way first
-                    if let t = LinkFace.type(a.linkType) { Text(t + " · ").lineLimit(1).truncationMode(.tail) }
-                    Text(LinkFace.host(a.url)).lineLimit(1).fixedSize().layoutPriority(1)
+                HStack(spacing: 0) {  // the registrable domain never truncates; the type gives way first, then the host's head
+                    let (sub, dom) = LinkFace.hostParts(a.url)
+                    Text(LinkFace.type(a.linkType, url: a.url) + " · ").lineLimit(1).truncationMode(.tail)
+                    if !sub.isEmpty { Text(sub).lineLimit(1).truncationMode(.head).layoutPriority(1) }
+                    Text(dom).fontWeight(.semibold).foregroundStyle(Theme.text).lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false).layoutPriority(2)
                 }.themeFont(12).foregroundStyle(Theme.muted)
+                .accessibilityElement(children: .ignore).accessibilityLabel(LinkFace.subtitle(type: a.linkType, url: a.url))
             }
             Spacer(minLength: 0)
             if let s = a.status, !s.isEmpty { LinkStatus(text: s) }
@@ -313,10 +317,15 @@ struct ChatItemView: View {
 }
 
 
-/// What a link card says it is. The real host is always shown next to the type, and a site's icon only on that
-/// site's own host: the workspace names the type, so "GitHub PR" on evil.example must not look like GitHub.
+/// What a link card says it is (one rule for every link card; the dashboard has the same one).
+/// - Type: an allowlist. Each " · " part is a known site name (shown only on that site's own host) or a plain
+///   label of letters, digits, spaces and "-" (ASCII and precomposed Latin letters, at most 24) naming no site; else it
+///   is dropped, and with nothing left the type is "Link".
+/// - Host: the registrable domain (evil.example) in its own text that never truncates, the rest of the host
+///   before it, truncated from the head.
+/// - Icon: a site's icon only on that site's own host.
 enum LinkFace {
-    /// icon key -> the hosts of that site (a leading "." means any subdomain), as in the core's known_sites.json
+    /// icon key -> the hosts of that site (a leading "." means any subdomain), mirrored from the core's known_sites.json
     static let siteHosts: [String: [String]] = [
         "github": ["github.com"], "gitlab": ["gitlab.com"], "confluence": [".atlassian.net"], "jira": [".atlassian.net"],
         "linear": ["linear.app"], "notion": ["notion.so"], "figma": ["figma.com"], "miro": ["miro.com"],
@@ -324,10 +333,70 @@ enum LinkFace {
         "youtube": ["youtube.com", "youtu.be"], "loom": ["loom.com"], "slack": [".slack.com"], "teams": ["teams.microsoft.com"],
         "sharepoint": [".sharepoint.com"], "trello": ["trello.com"], "dropbox": ["dropbox.com"],
     ]
+    /// site name (lowercased) -> icon key, mirrored from known_sites.json
+    static let siteNames: [String: String] = [
+        "github": "github", "gitlab": "gitlab", "confluence": "confluence", "jira": "jira", "linear": "linear",
+        "notion": "notion", "figma": "figma", "miro": "miro", "google docs": "gdocs", "google sheets": "gsheets",
+        "google slides": "gslides", "google drive": "gdrive", "youtube": "youtube", "loom": "loom", "slack": "slack",
+        "teams": "teams", "sharepoint": "sharepoint", "trello": "trello", "dropbox": "dropbox",
+    ]
+    /// two-part public suffixes common enough to matter (no full list on the phone)
+    static let twoPartSuffixes: Set<String> = [
+        "co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "ne.jp", "or.jp",
+        "com.br", "com.cn", "com.mx", "co.in", "co.za", "com.tr", "com.sg", "com.hk", "co.kr", "github.io", "gitlab.io",
+    ]
 
     static func host(_ url: String?) -> String {
         let h = (SafeLink.host(url) ?? "").lowercased()
         return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
+    }
+
+    /// The registrable part of a host (eTLD+1): "github.com.evil.example" -> "evil.example". An IP stays whole.
+    static func domain(_ host: String) -> String {
+        let parts = host.split(separator: ".").map(String.init)
+        if parts.count <= 2 || parts.allSatisfy({ Int($0) != nil }) || host.contains(":") { return host }
+        let n = twoPartSuffixes.contains(parts.suffix(2).joined(separator: ".")) ? 3 : 2
+        return parts.suffix(n).joined(separator: ".")
+    }
+
+    /// (the host before the domain, e.g. "gist.", the domain)
+    static func hostParts(_ url: String?) -> (String, String) {
+        let h = host(url), d = domain(h)
+        return (String(h.dropLast(d.count)), d)
+    }
+
+    static func onSite(_ key: String, url: String?) -> Bool {
+        let h = host(url)
+        return (siteHosts[key] ?? []).contains { $0.hasPrefix(".") ? h.hasSuffix($0) : (h == $0 || h.hasSuffix("." + $0)) }
+    }
+
+    static func plainLabel(_ s: String) -> Bool {
+        guard (1...24).contains(s.count), s.trimmingCharacters(in: .whitespaces) == s, !s.contains("  ") else { return false }
+        return s.unicodeScalars.allSatisfy { u in
+            let v = u.value
+            return (0x30...0x39).contains(v) || (0x41...0x5A).contains(v) || (0x61...0x7A).contains(v) || v == 0x20 || v == 0x2D
+                || ((0xC0...0x24F).contains(v) && v != 0xD7 && v != 0xF7)  // precomposed Latin letters, no × ÷
+        }
+    }
+
+    static func namesASite(_ s: String) -> Bool {
+        let words = " " + s.lowercased().replacingOccurrences(of: "-", with: " ") + " "
+        return siteNames.keys.contains { words.contains(" " + $0 + " ") }
+    }
+
+    /// The link type as shown. Never contains a dot, a host or anything that is not on the allowlist.
+    static func type(_ raw: String?, url: String?) -> String {
+        let parts = (raw ?? "").components(separatedBy: " · ").compactMap { p -> String? in
+            if let key = siteNames[p.lowercased()] { return onSite(key, url: url) ? p : nil }
+            return plainLabel(p) && !namesASite(p) ? p : nil  // "GitHub PR" off GitHub is just "Link"
+        }
+        return parts.isEmpty ? "Link" : parts.joined(separator: " · ")
+    }
+
+    /// One line for tests and accessibility: "<type> · <host>".
+    static func subtitle(type raw: String?, url: String?) -> String {
+        let h = host(url)
+        return h.isEmpty ? type(raw, url: url) : "\(type(raw, url: url)) · \(h)"
     }
 
     /// Text from the workspace on one line: control, format (bidi, invisible) and line-break characters go, at most `max`.
@@ -345,28 +414,12 @@ enum LinkFace {
         return t.isEmpty ? nil : String(t.prefix(max))
     }
 
-    /// The link type as shown: one line, at most 32 characters; none when it looks like an address (a dot, so
-    /// no "github.com" in a type that could pass for the host).
-    static func type(_ raw: String?) -> String? {
-        guard let t = oneLine(raw, max: 32), !t.contains("."), !t.contains("\u{FF0E}"), !t.contains("\u{3002}") else { return nil }
-        return t
-    }
-
-    /// "<type> · <host>", or the host alone when there is no (usable) type.
-    static func subtitle(type raw: String?, url: String?) -> String {
-        let h = host(url)
-        guard let t = type(raw) else { return h }
-        return h.isEmpty ? t : "\(t) · \(h)"
-    }
-
-    /// The icon key to draw: a site's key only when the address is on that site, else "link". Other keys (an
-    /// add-on's own icon) are not a site and pass.
+    /// The icon key to draw: a site's key only on that site's own host, else "link". An add-on's own icon (not a
+    /// site's) passes.
     static func icon(_ icon: String?, url: String?) -> String {
         guard let key = icon, !key.isEmpty else { return "link" }
-        guard let hosts = siteHosts[key] else { return LinkTile.colors[key] == nil ? key : "link" }
-        let h = host(url)
-        let ok = hosts.contains { $0.hasPrefix(".") ? h.hasSuffix($0) : (h == $0 || h.hasSuffix("." + $0)) }
-        return ok ? key : "link"
+        guard siteHosts[key] != nil else { return LinkTile.colors[key] == nil ? key : "link" }
+        return onSite(key, url: url) ? key : "link"
     }
 }
 
