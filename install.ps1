@@ -1,7 +1,9 @@
 # orch installer (Windows): installs uv if missing, then orch.
 # ORCH_REPO / ORCH_REF override the source (default: GitHub main).
 # Works for a standard user: no admin rights, no git, no change to the execution policy.
-$ErrorActionPreference = "Stop"
+# Not "Stop": Windows PowerShell turns a native tool's stderr (uv's progress lines) into errors when the output is
+# redirected, which would abort the install. Every native call is checked by its exit code instead.
+$ErrorActionPreference = "Continue"
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Write-Host "Installing uv ..."
     # A fresh Windows refuses scripts (execution policy Restricted); allow them for this one process only.
