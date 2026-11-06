@@ -96,8 +96,8 @@ struct HTMLSurface: UIViewRepresentable {
             }
         }
 
-        nonisolated func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            MainActor.assumeIsolated {
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            do {
                 guard parent.commentMode, message.frameInfo.isMainFrame else { return }
                 if let body = message.body as? [String: Any], body["kind"] as? String == "edit",
                    let n = body["n"] as? Int { parent.store.edit(n) }
@@ -107,13 +107,13 @@ struct HTMLSurface: UIViewRepresentable {
             }
         }
 
-        nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            MainActor.assumeIsolated { sync(webView, force: true) }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            do { sync(webView, force: true) }
         }
 
-        nonisolated func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            MainActor.assumeIsolated {
+            do {
                 // Only the decrypted local document: the orch-page scheme and about:blank. Everything else (links in the page) is refused.
                 let url = navigationAction.request.url
                 let local = url?.scheme?.lowercased() == NetworkBlock.scheme || url?.absoluteString == "about:blank"
@@ -121,8 +121,8 @@ struct HTMLSurface: UIViewRepresentable {
             }
         }
 
-        nonisolated func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
-            MainActor.assumeIsolated {
+        func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
+            do {
                 guard let url = urlSchemeTask.request.url else { return }
                 let path = String(url.path.drop(while: { $0 == "/" }))
                 var file: PublishBundle.File?
@@ -134,7 +134,7 @@ struct HTMLSurface: UIViewRepresentable {
                 urlSchemeTask.didFinish()
             }
         }
-        nonisolated func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {}
+        func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {}
     }
 }
 
@@ -363,9 +363,7 @@ struct QuickLookPreview: UIViewControllerRepresentable {
     @MainActor final class Coordinator: NSObject, QLPreviewControllerDataSource {
         var url: URL
         init(url: URL) { self.url = url }
-        nonisolated func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
-        nonisolated func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> any QLPreviewItem {
-            MainActor.assumeIsolated { url as NSURL }
-        }
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> any QLPreviewItem { url as NSURL }
     }
 }
