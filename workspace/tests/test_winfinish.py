@@ -95,17 +95,18 @@ def test_a_second_install_waits_for_the_first(proj, monkeypatch, uv_calls):
     """Each job carries the whole add-on list: a second one could undo the first (security review)."""
     monkeypatch.setattr(winfinish, "needed", lambda: True)
     addons.home().mkdir(parents=True, exist_ok=True)
-    (addons.home() / "finish.pending").write_text("1")
+    (addons.home() / "finish.pending").write_text("starting")
     with pytest.raises(Refused, match="still finishing"):
         addons._reinstall([], save=True, then=[], root=proj, done="x")
 
 
 def test_start_writes_its_files_in_orchs_home_and_marks_pending(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(winfinish, "_popen", lambda *a, **k: calls.append(a[0]))
+    monkeypatch.setattr(winfinish, "_popen", lambda argv, **k: calls.append(argv) or 4242)
     monkeypatch.setattr(winfinish.sys, "_base_executable", "/base/python", raising=False)
     log = winfinish.start(tmp_path, ["uv", "tool"], [["update", "--project-only"]], tmp_path, "done")
-    assert log == tmp_path / "finish.log" and (tmp_path / "finish.pending").exists()
+    assert log == tmp_path / "finish.log"
+    assert (tmp_path / "finish.pending").read_text() == "4242"  # the finisher's pid
     assert calls[0][:2] == ["/base/python", "-I"] and calls[0][2] == str(tmp_path / "finish" / "finish.py")
     job = json.loads((tmp_path / "finish" / "job.json").read_text())
     assert job["then"][0]["argv"][1:] == ["-P", "-m", "orch", "update", "--project-only"]
@@ -156,3 +157,33 @@ def test_other_systems_reinstall_at_once(proj, monkeypatch, uv_calls):
     assert addons._reinstall(entries, save=True, then=[["update", "--project-only"]], root=proj, done="x")
     assert uv_calls and reexecs == [["update", "--project-only"]]
     assert addons.registry() == entries
+
+
+def test_a_dead_finisher_does_not_block(tmp_path):
+    """It died with the SSH session that started it: its mark must not block the next install."""
+    import subprocess as sp
+
+    p = sp.Popen([sys.executable, "-c", "pass"])
+    p.wait()
+    (tmp_path / "finish.pending").write_text(str(p.pid))
+    assert winfinish.pending(tmp_path) is False
+    (tmp_path / "finish.pending").write_text(str(__import__("os").getpid()))  # alive
+    assert winfinish.pending(tmp_path) is True
+    (tmp_path / "finish.pending").write_text("starting")
+    assert winfinish.pending(tmp_path) is True
+
+
+def test_start_falls_back_when_breaking_away_is_not_allowed(tmp_path, monkeypatch):
+    seen = []
+
+    def popen(argv, creationflags=0, **kw):
+        seen.append(creationflags)
+        if creationflags & 0x01000000:
+            raise PermissionError("not allowed")
+        return 77
+
+    monkeypatch.setattr(winfinish, "_popen", popen)
+    monkeypatch.setattr(winfinish.sys, "_base_executable", "/base/python", raising=False)
+    winfinish.start(tmp_path, ["uv"], [], tmp_path, "done")
+    assert seen[0] & 0x01000000 and not seen[1] & 0x01000000
+    assert (tmp_path / "finish.pending").read_text() == "77"
