@@ -23,8 +23,11 @@
         "events": "claude-transcript/1",
         "trust": { "file": ".claude.json", "dir_env": "CLAUDE_CONFIG_DIR", "path": ["projects", "{folder}", "hasTrustDialogAccepted"] },
         "screens": [
-          { "match": "trust this folder|Do you trust the files", "say": "{label} asks whether to trust this folder. Open the live session and answer: orch run attach {ticket}" },
-          { "match": "Choose the text style|Select login method|Log in to", "say": "{label} wants its first-time setup or a login. Open the live session to finish it: orch run attach {ticket}" }
+          { "match": "Select login method|Log in to", "say": "{label} wants a login. Open the live session to finish it: orch run attach {ticket}" },
+          { "match": "Choose the text style", "answer": ["Enter"], "what": "theme", "say": "{label} wants its first-time setup. Open the live session to finish it: orch run attach {ticket}" },
+          { "match": "Security notes:[\\s\\S]*Press Enter to continue", "answer": ["Enter"], "what": "notes", "say": "{label} shows its security notes. Open the live session to go on: orch run attach {ticket}" },
+          { "match": "Is this a project you created or one you trust[\\s\\S]*❯\\s*No, exit[\\s\\S]*Yes, I trust this folder", "answer": ["Down", "Enter"], "what": "folder trust", "folder": true, "say": "{label} asks whether to trust this folder. Open the live session and answer: orch run attach {ticket}" },
+          { "match": "trust this folder|Do you trust the files", "say": "{label} asks whether to trust this folder. Open the live session and answer: orch run attach {ticket}" }
         ]
       },
       "permissions": {

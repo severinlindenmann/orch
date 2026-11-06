@@ -209,6 +209,8 @@ class Tracker:
         attention = running and (claim.get("live") or {}).get("state") == "attention"
         if open_q or attention:
             state = "needs"
+        elif running and (claim.get("live") or {}).get("state") == "idle":
+            state = "waiting"  # a live session that waits for a message: not working
         elif running:
             state = "working"
         elif ticket.get("status") == "done":

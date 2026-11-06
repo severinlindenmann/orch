@@ -224,9 +224,34 @@ final class AppModel {
 
     // MARK: Data
 
-    func refresh() async {
+    /// Wait before the one automatic retry of a first load that found the network not ready yet (tests shorten it).
+    var retryDelay: Duration = .seconds(1)
+
+    /// Keeps an open chat current: refreshes every `interval` until the calling task is cancelled (the chat closes).
+    func watchWhileOpen(every interval: Duration = .seconds(4)) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: interval)
+            if Task.isCancelled { break }
+            await refresh(retry: false, quiet: true)
+        }
+    }
+
+    /// `quiet`: the background poll of an open chat, it must not flip `isLoading`.
+    func refresh(retry: Bool = true, quiet: Bool = false) async {
         guard phase == .ready || phase == .notifyStep, credentials != nil else { return }
-        isLoading = true; defer { isLoading = false }
+        if !quiet { isLoading = true }
+        defer { if !quiet { isLoading = false } }
+        do {
+            do { try await load() }
+            catch where retry && !useMock && Self.isOffline(error) {
+                // Cold start: the first request can run before the network is ready. Once more before the banner.
+                try await Task.sleep(for: retryDelay)
+                try await load()
+            }
+        } catch { handle(error) }
+    }
+
+    private func load() async throws {
         do {
             async let w = client.workspaces()
             async let q = client.questions()
@@ -239,7 +264,7 @@ final class AppModel {
             for item in questions { questionLog[item.id] = item }
             message = nil; hasLoaded = true; lastUpdated = Date()
             await flushOutbox()
-        } catch { handle(error) }
+        }
     }
 
     /// The newest page of `/v1/phone/messages`, merged into what is loaded (older pages stay). An older relay without it keeps the list.

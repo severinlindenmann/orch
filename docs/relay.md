@@ -37,6 +37,21 @@ While an agent works, it can send short updates for a ticket: `orch relay send p
 
 The phone shows one line per ticket (the newest update) and the whole list when you open it.
 
+## Other systems that listen (subscribers)
+
+In the relay admin, **Subscribers** lets another system follow your workspaces: a team chat bot, a script, a monitoring
+tool or another agent. You pick what it can see (groups and/or single workspaces), what it receives (Updates, Questions,
+Results, Files) and whether it may answer questions (off by default: read-only). It sees what your phones would see from
+those workspaces, nothing else. You get a link with a secret token once; **Rotate link** replaces it, **Remove** stops it.
+- **Pull:** `curl -s "<link>/events"` gives what it missed (oldest first, `next` for the next page); `curl -N "<link>/stream"`
+  stays open and gets each new event live. After a break it sends `Last-Event-ID` and gets what it missed.
+- **Push (optional):** give it a public `https://` address and the relay sends each event there, signed with a secret
+  shown once (`X-Orch-Signature`). It retries after 1 min, 5 min, 30 min, 2 h and 6 h, then marks it **Failing** until you
+  press **Try again now**. **Send test event** checks the address. Private or local addresses are refused.
+- **Activity** shows every call, stream, answer and push attempt of the last 30 days.
+
+Details and the event format: `contracts/relay-api.md` (Subscribers), `contracts/subscriber-event.schema.json`.
+
 ## Hand work to another workspace
 
 `orch relay delegate <workspace> "<title>"` makes a ticket in the other workspace. It starts only after a person there allows it:
@@ -104,6 +119,17 @@ Each workspace is in one group (Private, Work, ...). A group's defaults say whic
 (skills, secrets, MCP), and `talk` lets members message each other. Turning a default on grants all items of that kind to
 every member, including items you took away from one of them before; turning it off takes nothing away. A new version of
 an item you took away from a workspace does not give it back. Details: `contracts/relay-api.md` (Groups).
+
+## Subscribers (reference)
+Tables `subscribers` (token as SHA-256 hash, push secret encrypted with the master key, push state and cursor) and
+`sub_log` (newest 200 per subscriber, 30 days). Events are a read view over `messages` (texts and questions to `phones`
+from workspaces in scope, plus their answers), worked out per call (`src/subs.rs`); the stream waits on the relay's new-message
+signal. Streams and push read each event only right before they send it (`subs::next_event`: token, scope and kinds
+checked again), so nothing is built ahead of a slow reader and a rotate or scope edit applies to the very next event. Push (`src/subs_push.rs`) is one background worker: per subscriber one event at a time, HMAC-SHA256 signed, every
+request checks the address again (https, public IPs only after the lookup, connects to the checked address, no redirects,
+5 s connect / 10 s total, response body never read; only a test relay started with `ORCH_RELAY_TEST_PUSH_LOOPBACK=1`,
+like the local e2e suite, may also push to `http://127.0.0.1:<port>`). Limits: 60 calls a minute and 2 open streams per subscriber.
+T0: `cargo test --test subs`.
 
 ## Not included
 End-to-end encryption between workspaces, key rotation, teams with their own admins, several admins, message edit/delete by users,

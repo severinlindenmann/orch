@@ -295,6 +295,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = t.add_parser("new", parents=[common])
     x.add_argument("title")
     x.add_argument("--parent", metavar="ID", help="make it a sub-ticket of this ticket")
+    x.add_argument("--owner", help="who owns it (a name)")
+    x.add_argument("--due", metavar="YYYY-MM-DD", help="due day")
+    x.add_argument("--note", help="a free note")
     x.add_argument(
         "--ext",
         action="append",
@@ -392,6 +395,14 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--option", action="append", default=[])
     x.add_argument("--recommend", "--recommended", dest="recommend")
     x.add_argument("--phone", action="store_true", help="also send the question to the phones via relay")
+    x.add_argument(
+        "--preview",
+        action="append",
+        default=[],
+        metavar="OPTION=ID",
+        help="with --phone: show an attachment next to an option",
+    )
+    x.add_argument("--scope", help='with --phone, options Once/Always/No: what "Always" covers')
     x.add_argument("--kind", metavar="KIND", help="plain (default) or <add-on>:<name>")
     x.add_argument("--action", metavar="JSON", help="data for the add-on that acts on the answer")
     x.add_argument("--check", metavar="CID", help="the task this question belongs to")
@@ -513,6 +524,7 @@ def run(args: argparse.Namespace) -> None:
             by(),
             args.parent,
             tickets.parse_ext_args(args.ext, lambda a: addons.active_ext_schema(root, a)),
+            {k: getattr(args, k) for k in ("owner", "due", "note") if getattr(args, k)},
         )
         part = f" (part of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -647,11 +659,13 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ask":
         if args.phone and "relay" not in addons.active(root):
             raise Refused(addons.not_on_message(root, "relay"))
+        if (args.preview or args.scope) and not args.phone:
+            raise Refused("--preview and --scope go with --phone.")
         t, q = tickets.ask(
             root, args.id, args.text, args.option, args.recommend, by(), args.kind, args.action, args.check
         )
         if args.phone:
-            cli_clients.send_phone_question(root, t["id"], q)
+            cli_clients.send_phone_question(root, t["id"], q, args.preview, args.scope)
         _out(
             args,
             q,

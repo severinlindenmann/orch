@@ -3,6 +3,7 @@
 (function () {
   const P = {
     home: '<path d="m3 10 9-7 9 7v11h-6v-7H9v7H3z"/>',
+    antenna: '<circle cx="12" cy="9" r="2"/><path d="M12 11v10m-4 0h8M7 4a7 7 0 0 0 0 10m10-10a7 7 0 0 1 0 10M4 1a11 11 0 0 0 0 16M20 1a11 11 0 0 1 0 16"/>',
     phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
     webhook: '<circle cx="12" cy="5" r="3"/><path d="m10 8-5 9h14l-4-7"/><circle cx="5" cy="17" r="3"/><circle cx="19" cy="17" r="3"/>',
     swap: '<path d="M3 7h18l-4-4M21 17H3l4 4"/>',

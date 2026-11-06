@@ -28,7 +28,7 @@
       return 'Changed ' + (parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0]);
     }
     if (/^Asked\b/.test(text)) return 'Asked a question';
-    if (/^Answered\b/.test(text)) return 'Answered a question';
+    if (/^Answered q\d+/.test(text)) return 'Answered a question';
     if ((m = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
     if (/^Summary/.test(text)) return 'Updated the summary';
     if ((m = /^Added (?:task|check)[:\s]+(.+)$/i.exec(text))) return 'Added a task: ' + m[1];
@@ -221,5 +221,37 @@
     return raw;
   }
 
-  return {cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, treeRows, proofMark, fileProofLabel, stamp, ago};
+  /* A text from the phone, as the workspace wrote it into the history (relay `_describe`), split into parts the page can
+     show: {head, text, parts:[{type:'voice'|'photo'|'sound'|'file'|'location'|'feedback'|'pin'|'note', ...}]}.
+     Files are only trusted when they sit in this ticket's files folder. */
+  function phoneParts(text, tid) {
+    const lines = String(text ?? '').split('\n');
+    const first = /^From ([^:]{1,100}): (.*)$/.exec(lines[0] || '');
+    if (!first) return null;
+    const folder = '.orch/tickets/' + tid + '/files/';
+    const out = {who: first[1], text: '', parts: []};
+    const fileOf = rel => rel.startsWith(folder) && !rel.slice(folder.length).includes('..') && rel.length < 300 ? rel.slice(folder.length) : null;
+    let m;
+    for (const [i, raw] of [first[2], ...lines.slice(1)].entries()) {
+      const line = raw.trimEnd();
+      if (!line.trim()) continue;
+      if ((m = /^Voice message \(([^)]*)\): "([\s\S]*)"$/.exec(line))) out.parts.push({type:'voice', lang:m[1], transcript:m[2]});
+      else if (/^Voice message \(nothing could be understood\)$/.test(line)) out.parts.push({type:'voice', lang:'', transcript:''});
+      else if ((m = /^(Photo|Voice recording|File): (\.orch\/\S.*)$/.exec(line)) && fileOf(m[2])) {
+        const name = fileOf(m[2]);
+        out.parts.push({type:m[1] === 'Photo' ? 'photo' : m[1] === 'Voice recording' ? 'sound' : 'file', name});
+      } else if ((m = /^(Photo|Voice recording|File)(?: .*)?: could not be downloaded\.$/.exec(line)) || line === 'A file could not be saved.') out.parts.push({type:'note', text:'A file could not be loaded.'});
+      else if ((m = /^Location: (-?[\d.]+), (-?[\d.]+)(?: \((.*)\))? - (https:\/\/maps\.apple\.com\/\?\S+)$/.exec(line))) out.parts.push({type:'location', lat:m[1], lon:m[2], label:m[3] || '', url:m[4]});
+      else if ((m = /^Feedback on (.*?)(?: \(([A-Za-z0-9._:-]{1,12})\))?: (?:(\u{1F44D}) Looks good|changes wanted)$/u.exec(line))) out.parts.push({type:'feedback', title:m[1], rev:m[2] || '', approve:!!m[3]});
+      else if ((m = /^ {2}(\d+|-)\. (.*)$/.exec(line))) {
+        const w = /^(".*?"(?=: |$)|the page|page \d+|a page|the picture[^:]*)(?:: (.*))?$/.exec(m[2]);
+        out.parts.push({type:'pin', n:m[1], where:w ? w[1] : '', said:w ? w[2] || '' : m[2]});
+      } else if (/^ {2}\(\+\d+ more .* not shown\)$/.test(line) || /^\(Phone message /.test(line) || /^ {2}\(the rest is not shown\)$/.test(line)) continue;
+      else if (i === 0) out.text = line === '(empty)' ? '' : line;  // the words the person typed
+      else out.parts.push({type:'note', text:line.trim()});
+    }
+    return out;
+  }
+
+  return {phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

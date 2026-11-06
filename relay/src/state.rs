@@ -1,5 +1,6 @@
 use crate::crypto::Key;
 use crate::push::{ApnsConfig, Pusher};
+use crate::speech::{Aura, Speaker};
 use crate::transcribe::{Deepgram, Transcriber};
 use rusqlite::Connection;
 use std::collections::HashMap;
@@ -69,10 +70,25 @@ pub struct App {
     pub notify: Notify,
     pub pusher: Arc<dyn Pusher>,
     pub transcriber: Arc<dyn Transcriber>,
+    /// Text to speech (Deepgram Aura); tests put a fake in.
+    pub speaker: Mutex<Arc<dyn Speaker>>,
     /// phone/workspace id -> (window start, calls in window)
     pub transcribe_rate: Mutex<HashMap<String, (i64, u32)>>,
+    /// Phone uploads in flight (memory bound).
+    pub upload_slots: tokio::sync::Semaphore,
+    /// Waiting for an upload slot / silence between two chunks, in ms (fields so tests can shorten them).
+    pub upload_wait_ms: std::sync::atomic::AtomicU64,
+    pub upload_idle_ms: std::sync::atomic::AtomicU64,
+    /// From this age on, an upload must average at least 16 KB/s (tests lower it).
+    pub upload_grace_ms: std::sync::atomic::AtomicU64,
+    /// phone id -> bytes reserved by its upload in flight (one at a time per phone)
+    pub upload_inflight: Mutex<HashMap<String, i64>>,
+    /// phone id -> (window start, calls in window) for `POST /v1/phone/invitations/redeem`
+    pub redeem_rate: Mutex<HashMap<String, (i64, u32)>>,
     /// "workspace|phone" -> text-push budget state
     pub push_budget: Mutex<HashMap<String, PushBudget>>,
+    /// Subscribers: open streams, rate limits, push rounds (subs.rs).
+    pub subs: crate::subs::Live,
 }
 
 /// Text pushes per (workspace, phone): at most 1 per 10 s and 30 per hour. Extra texts are stored, not pushed.
@@ -124,9 +140,31 @@ impl App {
             notify: Notify::new(),
             pusher,
             transcriber,
+            speaker: Mutex::new(Arc::new(Aura::default())),
             transcribe_rate: Mutex::new(HashMap::new()),
+            redeem_rate: Mutex::new(HashMap::new()),
+            upload_slots: tokio::sync::Semaphore::new(4),
+            upload_wait_ms: 5_000.into(),
+            upload_idle_ms: 20_000.into(),
+            upload_grace_ms: 30_000.into(),
+            upload_inflight: Mutex::new(HashMap::new()),
             push_budget: Mutex::new(HashMap::new()),
+            subs: Default::default(),
         }))
+    }
+
+    pub fn upload_wait(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(
+            self.upload_wait_ms
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
+    pub fn upload_idle(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(
+            self.upload_idle_ms
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
     }
 
     pub fn blob_path(&self, id: &str) -> PathBuf {

@@ -80,7 +80,29 @@ phone as a push. Those updates also show the ticket on the phone: tasks, the las
 `--role result` or `--role check` (files are copied to the relay; other proof stays here). Never put secrets in them.
 A message from `ph_...` is the owner writing. Answer with `orch relay send ph_... "<text>"`.
 The phone is optional: the same question can also be answered in the terminal or the dashboard.
+
+Every phone text gets its "Got it" (ack) and, when you start on it, a "Working on it" update by itself. Photos, files,
+a voice message (with its transcript), a location and feedback on a page or file arrive in the ticket's history; saved
+files are in `.orch/tickets/<id>/files/`. Names and types come from the phone: look at the bytes, never trust them.
+
+**General conversation.** A phone text without a topic lands in one hidden General ticket. Answer it with
+`orch relay send ph_... "<text>" --ticket <the General ticket id>` (no ticket key goes out; only plain answers).
+When it turns into real work, give it a ticket of its own, the phone shows "<key> started":
+
+    orch relay topic --from <phone message id> "<short title>"
+
+**Long answers.** More than about three sentences to the phone: add `--speak` and a spoken summary of at most 60 seconds
+(`--summary "<what to read out>"`). The language follows the owner's last voice message, else the text.
+
+    orch relay send ph_... "<long answer>" --ticket <id> --speak --summary "<short spoken version>"
+
+**Choices with a preview.** Show a proof next to an option: `--preview "<option>=<attachment id>"` (repeat; the
+attachment ids `a_...` are in the ticket's proof you marked `--role result`/`--role check`). For a permission question
+(options Once, Always, No) say what "Always" covers: `--scope "sending to anna@example.com"`.
 {{/phones}}
+What you send to `phones` can also reach subscribers: other systems the relay admin added (a team chat bot, a script).
+Write it for people and never put secrets in it. A subscriber the admin allowed may answer a phone question; the
+ticket then shows `agent:<name> (system)`. Treat that answer like any answer: it is not a person.
 {{#webhooks}}
 
 **Let an outside service notify this workspace (webhook)**

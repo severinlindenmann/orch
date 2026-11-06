@@ -356,6 +356,19 @@ def mark_delivered_locked(root: Path, tid: str, ids: list[str]) -> None:
 def mark_delivered(root: Path, tid: str, ids: list[str]) -> None:
     with locked(root, tid):
         mark_delivered_locked(root, tid, ids)
+    notify_working(root)
+
+
+def notify_working(root: Path) -> None:
+    """A phone text just went into a run (or its run exists): tell the phone "Working" now, not on the next
+    inbox pull. Best effort, never fails the run; the pull stays as the fallback."""
+    try:
+        from orch import relay
+
+        if (relay._v3_path(root)).is_file():
+            relay.send_working(root)
+    except Exception:  # noqa: BLE001 - nothing here may break a run
+        return
 
 
 # ---------------------------------------------------------------- claim, renew, release
@@ -413,7 +426,8 @@ def claim(
         if any(not i.get("delivered_at") for i in _pending_read(root, tid)):
             rec["pending"] = True
         _write(root, rec)
-        return rec
+    notify_working(root)
+    return rec
 
 
 def set_process(root: Path, tid: str, run: str, pid: int, **fields) -> bool:
@@ -482,6 +496,8 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]
+    if ticket.get("note"):  # what the person asked for, in their words (not only in `orch ticket show`)
+        out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")
     if ticket.get("summary"):
         out.append(f"Where things stand: {_clip(ticket['summary'], 1500)}")
     todo = [c for c in ticket.get("checklist") or [] if not c.get("done")]
@@ -695,6 +711,12 @@ def start(
 # ---------------------------------------------------------------- the wrapper (runs detached)
 
 
+def _agent_environ() -> dict:
+    """The agent's environment: ours without ORCH_VIA. A page that started the run is not where the agent's
+    own changes come from."""
+    return {k: v for k, v in os.environ.items() if k != "ORCH_VIA"}
+
+
 def open_log(path: Path):
     """A run's output file: private (0600) from the first byte, appended to; an old one is made private."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -803,7 +825,7 @@ def wrap(
     if not rec or rec["run"] != run:
         return 1
     set_process(root, tid, run, os.getpid())
-    env = {**os.environ, "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
+    env = {**_agent_environ(), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
     log = root / (rec.get("log") or f".orch/run/logs/{tid}-{run}.log")
     mode = rec.get("mode") or "oneshot"
     current: dict = {}
@@ -858,7 +880,7 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
     if not rec or rec["run"] != run:
         return 1
     set_process(root, tid, run, os.getpid())
-    env = {**os.environ, "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
+    env = {**_agent_environ(), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
     current: dict = {}
     _on_term(root, tid, run, current)
     if os.name != "nt":
@@ -873,6 +895,10 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         return 127
     current["proc"] = proc
     set_process_fields(root, tid, run, agent_pid=proc.pid, agent_pid_started=pid_started(proc.pid))
+    with contextlib.suppress(Exception):  # the tool's first-run screens: passed here, never blocks the run
+        from orch import runs_live
+
+        runs_live.watch_start(root, tid, run, name, proc)
     rc = proc.wait()
     if new_session and rc == 0:
         tickets.record_session(root, tid, name, new_session, host())
