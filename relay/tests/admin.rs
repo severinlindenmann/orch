@@ -595,14 +595,29 @@ fn portal_blur_validation_skips_submit_button() {
 fn portal_narrow_network_uses_connections_list() {
     let css = include_str!("../web/style.css");
     let narrow = css
-        .split("@media(max-width:720px){")
+        .split("@media(max-width:599px){")
         .skip(1)
         .filter_map(|block| block.split("}}").next())
         .find(|block| block.contains(".network{display:none}"))
         .expect("hide the network diagram inside the narrow-screen media rule");
     assert!(narrow.contains(".network-legend{display:none}"));
-    assert!(narrow.contains(".mobile-connections{display:block}"));
+    assert!(narrow.contains(".mobile-connections{display:block"));
     assert!(css.contains(".mobile-connections{display:none}"));
+}
+
+#[test]
+fn portal_network_map_draws_one_edge_per_pair() {
+    let page = include_str!("../web/portal.html");
+    let css = include_str!("../web/style.css");
+    // Rules are grouped per workspace pair; both directions share one line and one chip.
+    assert!(page.contains("function networkPairs()"));
+    assert!(page.contains("marker-start"));
+    // Phones have their own lane; the map lays out to the real width and the focus ring follows the node shape.
+    assert!(page.contains("'PHONES'") || page.contains("\"PHONES\"") || page.contains(">PHONES<"));
+    assert!(page.contains("ResizeObserver"));
+    assert!(css.contains(".focus-ring"));
+    // Many workspaces get the ring map instead of the list-only fallback.
+    assert!(!page.contains("compact=workspaces.length>9"));
 }
 
 #[test]

@@ -618,7 +618,7 @@ def test_default_repo_is_never_a_folder(proj, monkeypatch):
     planted = proj / "https:" / "github.com" / "severinlindenmann" / "orch"
     planted.mkdir(parents=True)
     assert not addons._is_local(addons.DEFAULT_REPO)
-    assert addons.spec("workspace").startswith("git+https://github.com/severinlindenmann/orch@")
+    assert addons.spec("workspace").startswith("https://github.com/severinlindenmann/orch/archive/")
     monkeypatch.setenv("ORCH_REPO", "relative/dir")  # relative: not local either
     (proj / "relative" / "dir").mkdir(parents=True)
     assert not addons._is_local("relative/dir")
@@ -789,19 +789,51 @@ def test_addons_install_from_where_orch_came_from(proj, monkeypatch, uv_calls):
     monkeypatch.setattr(
         addons, "_install_origin", lambda: {"repo": "https://github.com/someone/orch", "ref": "develop"}
     )
+    monkeypatch.setattr(addons, "_same_python", lambda: [])  # the Windows pin has its own test
     addons._save_registry([{"name": "dashboard", "source": "built-in", "version": "0.0.0"}])
     addons._install_tool(addons.registry() + [{"name": "focus", "source": "built-in", "version": "0.0.0"}])
     args = uv_calls[0]
     assert all(isinstance(a, str) for a in args)
-    assert args[3] == "git+https://github.com/someone/orch@develop#subdirectory=workspace"
-    assert args[4:] == [
+    zip_ = "https://github.com/someone/orch/archive/develop.zip"
+    assert args[:5] == ["tool", "install", "--reinstall", "--refresh", f"{zip_}#subdirectory=workspace"]
+    assert args[5:] == [
         "--with",
-        "git+https://github.com/someone/orch@develop#subdirectory=workspace-addons/dashboard",
+        f"{zip_}#subdirectory=workspace-addons/dashboard",
         "--with",
-        "git+https://github.com/someone/orch@develop#subdirectory=workspace-addons/focus",
+        f"{zip_}#subdirectory=workspace-addons/focus",
     ]
     monkeypatch.setenv("ORCH_REF", "v1")  # an explicit override still wins
-    assert addons.spec("workspace").endswith("@v1#subdirectory=workspace")
+    assert addons.spec("workspace").endswith("/archive/v1.zip#subdirectory=workspace")
+
+
+def test_windows_reinstall_keeps_its_python(monkeypatch):
+    monkeypatch.setattr(addons.sys, "platform", "win32")
+    monkeypatch.setattr(addons.sys, "_base_executable", r"C:\uv\cpython-3.13-windows-x86_64-none\python.exe")
+    assert addons._same_python() == ["--python", r"C:\uv\cpython-3.13-windows-x86_64-none\python.exe"]
+    monkeypatch.setattr(addons.sys, "platform", "darwin")
+    assert addons._same_python() == []
+
+
+def test_github_sources_install_without_git(monkeypatch):
+    """Windows PCs (and minimal Linux) often have no git, and users may not be allowed to install it:
+    GitHub sources come as a zip download. Other hosts keep git."""
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    for repo, ref, want in [
+        (
+            "https://github.com/a/orch",
+            "main",
+            "https://github.com/a/orch/archive/main.zip#subdirectory=workspace",
+        ),
+        (
+            "https://github.com/a/orch.git",
+            "fix/win",
+            "https://github.com/a/orch/archive/fix/win.zip#subdirectory=workspace",
+        ),
+        ("https://gitlab.com/a/orch", "main", "git+https://gitlab.com/a/orch@main#subdirectory=workspace"),
+    ]:
+        monkeypatch.setattr(addons, "_install_origin", lambda r=repo, f=ref: {"repo": r, "ref": f})
+        monkeypatch.delenv("ORCH_REF", raising=False)
+        assert addons.spec("workspace") == want
 
 
 def test_install_origin_reads_direct_url(monkeypatch, tmp_path):
@@ -826,6 +858,31 @@ def test_install_origin_reads_direct_url(monkeypatch, tmp_path):
         ({"url": (tmp_path / "workspace").as_uri(), "dir_info": {}}, {"repo": str(tmp_path), "local": True}),
         ({"url": (tmp_path / "workspace").as_uri(), "dir_info": {"editable": True}}, {}),
         ({"url": "https://x/y.whl", "archive_info": {}}, {}),
+        (
+            {
+                "url": "https://github.com/a/orch/archive/develop.zip",
+                "archive_info": {},
+                "subdirectory": "workspace",
+            },
+            {"repo": "https://github.com/a/orch", "ref": "develop"},
+        ),
+        (
+            {
+                "url": "https://github.com/a/orch/archive/refs/heads/fix/win.zip",
+                "archive_info": {},
+                "subdirectory": "workspace",
+            },
+            {"repo": "https://github.com/a/orch", "ref": "fix/win"},
+        ),
+        (
+            {
+                "url": "https://github.com/a/orch/archive/refs/tags/v1.2.zip",
+                "archive_info": {},
+                "subdirectory": "workspace",
+            },
+            {"repo": "https://github.com/a/orch", "ref": "v1.2"},
+        ),
+        ({"url": "https://github.com/a/orch/archive/main.zip", "archive_info": {}, "subdirectory": "x"}, {}),
     ]
     for data, want in cases:
         monkeypatch.setattr(md, "distribution", lambda _n, d=data: D(d))
@@ -890,3 +947,34 @@ def test_core_addon_names_stay_reserved_for_others(tmp_path, run, proj, uv_calls
     folder = make_addon(tmp_path / "x", mutate=lambda t: t.replace('name = "hello"', 'name = "relay"'))
     with pytest.raises(Refused, match="core command"):
         addons.folder_manifest(folder)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["../../evil/x/archive/main", "main#subdirectory=x", "a b", "-x", 'm"--index-url', "/abs", "x.lock"],
+)
+def test_install_ref_is_a_plain_ref_name(monkeypatch, bad):
+    """In a zip URL a '../' would reach another repository (security review of the zip installs)."""
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    monkeypatch.setattr(addons, "_install_origin", lambda: {})
+    monkeypatch.setenv("ORCH_REF", bad)
+    with pytest.raises(Refused):
+        addons.spec("workspace")
+
+
+@pytest.mark.parametrize(
+    "good", ["main", "fix/windows-install", "v1.2.3", "ae5bb70c633d4a543d73a247d68449fac9d98150"]
+)
+def test_install_ref_accepts_branches_tags_commits(monkeypatch, good):
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    monkeypatch.setattr(addons, "_install_origin", lambda: {})
+    monkeypatch.setenv("ORCH_REF", good)
+    assert addons.spec("workspace").endswith(f"/archive/{good}.zip#subdirectory=workspace")
+
+
+def test_install_repo_with_quotes_or_spaces_is_refused(monkeypatch):
+    monkeypatch.setattr(addons, "_install_origin", lambda: {})
+    monkeypatch.delenv("ORCH_REF", raising=False)
+    monkeypatch.setenv("ORCH_REPO", 'https://github.com/a/orch" --index-url x')
+    with pytest.raises(Refused):
+        addons.spec("workspace")
