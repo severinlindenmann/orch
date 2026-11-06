@@ -1,6 +1,7 @@
 name: ci
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches: [develop, main]
 permissions:
@@ -35,6 +36,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.workspace == 'true'
     uses: ./.github/workflows/workspace.yml
+    with:
+      # PRs into develop: Linux only. Everything else (push to develop/main, PRs into main, manual): + macOS, Windows.
+      full: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
   addons:
     needs: changes
     if: needs.changes.outputs.addons == 'true'
