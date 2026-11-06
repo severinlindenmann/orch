@@ -59,7 +59,7 @@ def test_live_and_one_run_lists_with_page_links(ws, fake_orch):
     assert lists["Live now"][0]["title"] == "Close March books"
     assert lists["Live now"][0]["link"] == f"addon:t/{TID}"
     assert lists["Working now"][0]["title"] == "Other b"  # no markup survives
-    assert lists["Working now"][0]["subtitle"] == "claude · one run"
+    assert lists["Working now"][0]["subtitle"] == "Claude · one run"
     assert "notice" not in v
 
 
@@ -163,3 +163,12 @@ def test_manifest_validates_against_the_contract_schema_and_ext_copy_is_identica
 
 def test_stat_is_running_now(ws, fake_orch):
     assert build(ws, str(fake_orch))["blocks"][0]["label"] == "Running now"
+
+
+def test_rows_show_the_ticket_key(ws, fake_orch):
+    claim(ws)
+    d = ws / ".orch" / "tickets"
+    t = json.loads((d / f"{TID}.json").read_text())
+    (d / f"{TID}.json").write_text(json.dumps({**t, "key": "DM1-12"}))
+    lists = {b["title"]: b["items"] for b in build(ws, str(fake_orch))["blocks"] if b["type"] == "list"}
+    assert lists["Live now"][0]["title"] == "DM1-12 · Close March books"

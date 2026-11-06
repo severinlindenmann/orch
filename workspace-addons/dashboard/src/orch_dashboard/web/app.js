@@ -90,7 +90,7 @@
   const newButton = () => snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'new'}, 'New ticket');
   const firstTicket = () => h('div', {className:'card-row'}, h('p', {className:'grow muted'}, 'Your first ticket starts here.'), newButton());
   function ticketRow(t) {
-    const meta = [name(t.owner), t.due ? 'Due ' + date(t.due) : '', statusWord(t)].filter(Boolean);
+    const meta = [typeof t.key === 'string' ? t.key : '', name(t.owner), t.due ? 'Due ' + date(t.due) : ''].filter(Boolean);
     const parent = ticketOf(t.parent);
     let late = '';
     if (overdue(t)) {
@@ -117,19 +117,19 @@
     const current = sorted(tickets().filter(activeTicket));
     const oldest = needs.map(n => parse(n.since)).filter(Boolean).sort((a, b) => a - b)[0];
     const newest = needs.slice().sort((a, b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-    const history = tickets().flatMap(t => array(t.history).map(entry => ({entry, title:t.title}))).sort((a, b) => (Date.parse(b.entry.at) || 0) - (Date.parse(a.entry.at) || 0)).slice(0, 5);
+    const history = tickets().flatMap(t => array(t.history).map(entry => ({entry, title:t.title, checklist:t.checklist}))).sort((a, b) => (Date.parse(b.entry.at) || 0) - (Date.parse(a.entry.at) || 0)).slice(0, 5);
     const stopped = array(state.services).some(s => s.running === false);
     const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;
     const agents = rows.slice(0, 5).map(row => h('div', {className:'card-row', 'data-key':'agent-' + row.agent + '-' + row.ticket}, h('span', {className:'dot ' + (row.state === 'stuck' ? 'needs' : row.state)}), h('div', {className:'grow'}, h('h3', {}, capitalise(name(row.agent) || 'Agent') + ' · ' + ({working:'working', needs:'needs you', stuck:'may be stuck', idle:'idle'}[row.state])), h('p', {className:'meta'}, row.state === 'idle' ? 'Last worked ' + age(row.since) + ' ago' : [clean(ticketOf(row.ticket)?.title), age(row.since)].filter(Boolean).join(' · ')))));
     const links = pageLinks();
-    const recent = history.map(({entry, title}) => {
-      const line = clean(window.DashHelpers.historyLine(entry));
+    const recent = history.map(({entry, title, checklist}) => {
+      const line = clean(window.DashHelpers.historyLine(entry, checklist));
       return h('div', {className:'card-row'}, h('div', {className:'grow'}, h('h3', {}, line.length > 80 ? line.slice(0, 79) + '…' : line), h('p', {className:'meta'}, [name(entry.by), clean(title), age(entry.at)].filter(Boolean).join(' · '))));
     });
     return fragment(heading('Today', now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + needs.length + ' need you · ' + working.length + (working.length === 1 ? ' agent working' : ' agents working')), banner,
       h('div', {className:'columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
         card('needs-you', 'Needs you', needs.length + (oldest ? ' · oldest ' + age(oldest) : ''), needs.length ? needs.map(n => needRow(n, newest)) : emptyRow('Nothing needs you right now.'), true),
-        card('your-tickets', 'Your tickets', current.length + ' · ' + current.filter(overdue).length + ' overdue', current.length ? current.map(ticketRow) : firstTicket(), true)),
+        card('your-tickets', 'Your tickets', current.length + (current.some(overdue) ? ' · ' + current.filter(overdue).length + ' overdue' : ''), current.length ? current.map(ticketRow) : firstTicket(), true)),
       h('aside', {className:'stack', 'data-key':'right'},
         card('agents', 'Agents', working.length + ' working', [agents.length ? agents : emptyRow('No agent is working right now.'), links.length ? h('div', {className:'card-row'}, links.map(link => h('a', {className:'meta', href:link.url}, 'Open ' + capitalise(link.label) + ' →'))) : null]),
         card('recently', 'Recently', '', recent.length ? recent : emptyRow('No recent activity.')))));
@@ -147,7 +147,7 @@
     const late = children.filter(i => rows[i].late);
     return fragment(h('div', {className:'card-row ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
       row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, h('span', {className:'chevron ' + (open ? '' : 'closed')}, iconEl('down'))) : null,
-      h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, [name(t.owner), t.due ? 'Due ' + date(t.due) : '', row.children ? row.done + ' of ' + row.children + ' done' : ''].filter(Boolean).join(' · ')),
+      h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, [typeof t.key === 'string' ? t.key : '', name(t.owner), t.due ? 'Due ' + date(t.due) : '', row.children ? row.done + ' of ' + row.children + ' done' : ''].filter(Boolean).join(' · ')),
         !row.depth && row.parentMissing ? h('p', {className:'meta'}, 'Part of a ticket that is not here') : null), statusChip(t)),
       open ? children.filter(i => !rows[i].late || treeAll.has(t.id)).map(i => treeBranch(rows, i)) : null,
       open && late.length && !treeAll.has(t.id) ? h('div', {className:'card-row child', 'data-key':'tree-all-' + t.id}, h('button', {type:'button', className:'btn ghost sm', 'data-action':'tree-all', 'data-ticket':t.id}, 'Show all ' + children.length)) : null);
@@ -249,9 +249,9 @@
   function taskRows(t) {
     return array(t.checklist).map((task, i) => {
       const meta = [name(task.owner || task.by), clean(task.summary)].filter(Boolean).join(' · ');
-      return h('div', {className:'card-row', 'data-key':'task-' + (task.id || i)}, task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot idle'}),
+      return h('div', {className:'card-row', 'data-key':'task-' + (task.id || i)}, task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot ' + (task.state === 'doing' ? 'working' : 'idle')}),
         h('div', {className:'grow'}, h('h3', {}, clean(task.text)), meta ? h('p', {className:'meta'}, meta) : null,
-          array(task.evidence).length ? h('div', {className:'chips task-proofs'}, array(task.evidence).map(proofChip)) : null), chip(task.done ? 'Done' : 'To do', task.done ? 'success' : ''));
+          array(task.evidence).length ? h('div', {className:'chips task-proofs'}, array(task.evidence).map(proofChip)) : null), chip(task.done ? 'Done' : task.state === 'doing' ? 'Doing' : 'To do', task.done ? 'success' : task.state === 'doing' ? 'active' : ''));
     });
   }
   function selectTicketTab(id, tab, focusQuestion = false) {
@@ -267,7 +267,7 @@
     const qs = questions(t).map(q => snapshot
       ? card('question-' + q.id, clean(q.text), '', h('div', {className:'card-row'}, h('div', {className:'grow'}, h('p', {className:'muted'}, 'Waiting for an answer'), h('div', {className:'row'}, array(q.options).map(o => chip(clean(o), o === q.recommended ? 'attn' : ''))))))
       : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
-    const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => h('div', {className:'card-row'}, h('p', {className:'grow'}, [clean(window.DashHelpers.historyLine(entry)), name(entry.by), surface(entry.via)].filter(Boolean).join(' · ')), h('time', {datetime:entry.at || ''}, age(entry.at))));
+    const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => h('div', {className:'card-row'}, h('p', {className:'grow'}, [clean(window.DashHelpers.historyLine(entry, t.checklist)), name(entry.by), surface(entry.via)].filter(Boolean).join(' · ')), h('time', {datetime:entry.at || ''}, age(entry.at))));
     const field = (label, value, cls = '') => h('div', {}, h('dt', {}, label), h('dd', {className:cls}, value));
     const total = array(t.checklist).length, done = array(t.checklist).filter(task => task.done).length;
     const tasksCard = key => card(key, total && done === total ? 'All done' : 'Tasks', done + ' of ' + total + (total && done === total ? '' : ' done'), total ? taskRows(t) : emptyRow('No tasks yet.'));
@@ -293,7 +293,7 @@
         panel('tasks', tasksCard('tasks')), panel('questions', [qs.length ? qs : emptyRow('No open questions'), answered]),
         panel('history', card('history', 'History', '', history.length ? history : emptyRow('No history yet.')))),
       h('aside', {className:'card ticket-aside'}, h('div', {className:'card-h'}, h('h2', {}, 'Details')),
-        h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', h('span', {className:'ed-ro'}, agent)), field('Created', h('span', {className:'ed-ro'}, date(t.created_at))), field('Updated', h('span', {className:'ed-ro'}, age(t.updated_at))), field('Ticket', h('span', {className:'ed-ro mono'}, t.id)))))));
+        h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', h('span', {className:'ed-ro'}, agent)), field('Created', h('span', {className:'ed-ro'}, date(t.created_at))), field('Updated', h('span', {className:'ed-ro'}, t.updated_at ? age(t.updated_at) + ' ago' : '')), field('Ticket', h('span', {className:'ed-ro mono'}, t.id)))))));
   }
 
   const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note'};
@@ -404,7 +404,7 @@
     return node;
   };
   const addonOpen = new Set(), agentTests = Object.create(null);
-  const short = text => { const first = String(text || '').split(/(?<=[.!?])\s/)[0]; return first.length > 70 ? first.slice(0, 67) + '…' : first; };
+  const short = text => { const first = String(text || '').split(/(?<=[.!?])\s/)[0]; return first.length > 70 ? first.slice(0, 67).replace(/\s+\S*$/, '') + '…' : first; };
   function addonSummary(addon) {
     if (addon.name === 'dashboard') return 'This page';
     const d = addon.detail;
@@ -600,7 +600,8 @@
       const tk = ticketOf(r.id);
       crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' / ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || 'Ticket');
     } else if (r.kind === 'page') {
-      crumb.replaceChildren(pageName, ' › ', r.path.split('/').filter(Boolean).pop() || '');
+      const last = r.path.split('/').filter(Boolean).pop() || '', tk = /^t_[A-Za-z0-9]+$/.test(last) ? ticketOf(last) : null;
+      crumb.replaceChildren(pageName, ' › ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || last);
     } else crumb.textContent = pageName;
     const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
     reconcile(nav, fragment(navLink('#home', 'Home', 'page', array(state.needs).length ? h('span', {className:'count'}, array(state.needs).length) : null), navLink('#tickets', 'Tickets', 'table'),
@@ -615,7 +616,7 @@
     main.querySelectorAll('[data-question]').forEach(host => {
       if (!mounts.has(host)) {
         const t = ticketOf(host.dataset.ticket), q = array(t?.questions).find(q => q.id === host.dataset.question);
-        if (q) mountQuestion(host, {ticket:t.id, id:q.id, title:q.text, text:'', options:array(q.options).map(o => ({text:o, suggested:o === q.recommended}))});
+        if (q) mountQuestion(host, {ticket:t.id, key:typeof t.key === 'string' ? t.key : undefined, id:q.id, title:q.text, text:'', options:array(q.options).map(o => ({text:o, suggested:o === q.recommended}))});
       }
     });
     if (r.kind === 'addon') {
@@ -661,7 +662,7 @@
     const template = addonBody(a, addonViews[id]);
     const blocks = template.querySelector('#addon-blocks');
     if (blocks) {
-      blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id}));
+      blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id, inApp:name => addons().some(a => a.name === name && a.page) ? path => pageHash(name, path) : null}));
       if (!blocks.childNodes.length) blocks.append(h('section', {className:'card pad muted'}, 'Nothing to show yet.'));
       blocks.querySelectorAll('.blk').forEach(n => n.classList.add('card'));
       blocks.querySelectorAll('svg').forEach(n => {
@@ -884,7 +885,7 @@
           // The ticket exists: close now, save the optional details behind the scenes.
           window.orch.toast('Ticket created', 'ok');
           window.orch.close(d);
-          const details = await act('ticket.edit', {ticket:created.id, owner:values.owner, due:values.due, note:values.note});
+          const details = await act('ticket.edit', {ticket:created.id, ...Object.fromEntries(['owner', 'due', 'note'].filter(k => values[k]).map(k => [k, values[k]]))});  // only what was filled in
           if (!details.ok) window.orch.toast('The ticket was created, but its details were not saved: ' + details.text, 'error');
           return;
         }

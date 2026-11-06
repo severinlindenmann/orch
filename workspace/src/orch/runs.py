@@ -763,6 +763,25 @@ def _on_term(root: Path, tid: str, run: str, current: dict) -> None:
     signal.signal(signal.SIGTERM, handler)
 
 
+def failure_text(rc: int, out: str) -> str | None:
+    """Why a one-step run failed, in the tool's own words (its error result, else its last line); None when it
+    did not fail. A stream line with `"is_error": true` counts even with exit code 0."""
+    for line in reversed(out.strip().splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except ValueError:
+            return line[:200] if rc != 0 else None
+        if isinstance(d, dict) and d.get("is_error") is True:
+            msg = d.get("result")
+            return (msg if isinstance(msg, str) and msg.strip() else "no reason given")[:200]
+        if rc == 0 or not isinstance(d, dict) or d.get("type") == "result":
+            return None if rc == 0 else f"exit code {rc}"
+    return f"exit code {rc}" if rc != 0 else None
+
+
 def wrap(
     root: Path,
     run: str,
@@ -811,9 +830,15 @@ def wrap(
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
             rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc)
         sid = new_session or adapters.parse_session(name, out, root)
+        if not sid and resumed and rc == 0:  # a continued conversation: it was used now ("last worked")
+            sid = tickets.sessions_for(tickets.load(root, tid), name, host())
         if sid:
             tickets.record_session(root, tid, name, sid, host())
         turns += 1
+        why = failure_text(rc, out)
+        if why is not None:  # a person sees why nothing happened (in the ticket's history, Home and Focus)
+            with contextlib.suppress(Exception):
+                tickets.log(root, tid, f"The agent stopped with an error: {why}", f"agent:{name}")
         if release(root, tid, run, keep_if_pending=turns <= MAX_DRAIN_TURNS)["released"]:
             return 0 if rc == 0 else rc
         p = plan(root, tid, mode=mode, allow=allow, agent=name)  # input came in meanwhile: one more turn
