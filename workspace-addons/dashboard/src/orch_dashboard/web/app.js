@@ -256,7 +256,7 @@
   function addonValue(row, value) {
     if (value == null || value === '' || (Array.isArray(value) && !value.length)) return '';
     if (row.format === 'time') return [date(value), time(value)].filter(Boolean).join(' ');
-    if (row.format === 'cron-human') return String(value);
+    if (row.format === 'cron-human') return window.DashHelpers.cronHuman(value);
     if (row.format === 'yes-no') return value === true ? 'Yes' : value === false ? 'No' : '';
     if (row.format === 'chips') return h('div', {className:'chips'}, array(value).map(v => chip(clean(v))));
     return typeof value === 'object' ? '' : clean(value);

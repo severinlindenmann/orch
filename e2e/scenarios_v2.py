@@ -483,6 +483,11 @@ def fake_claude(e, w_name: str) -> tuple[Path, Path]:
     return d, calls
 
 
+def _runs(calls) -> list[str]:
+    """The fake tool's calls that were runs: `claude --help` (orch probes it for the permission flags) is not one."""
+    return [ln for ln in calls.read_text().splitlines() if ln.strip() and not ln.startswith("--help")]
+
+
 @scenario("V2-S1")
 def s1(e):
     """Session resume and --fresh (fake claude): second run resumes by id, --fresh starts a new one, a vanished session starts fresh."""
@@ -492,10 +497,10 @@ def s1(e):
     tid = w.ticket("Continue me", "step")
 
     def last_call() -> list[str]:
-        return calls.read_text().strip().splitlines()[-1].split()
+        return _runs(calls)[-1].split()
 
     def run_once(*flags):
-        n = len(calls.read_text().splitlines()) if calls.exists() else 0
+        n = len(_runs(calls)) if calls.exists() else 0
         r = w.j("run", "start", tid, *flags)
         w.wait_done(tid)
         return r, n
@@ -515,10 +520,10 @@ def s1(e):
     check(sid2 != sid1 and w.j("ticket", "show", tid)["sessions"][0]["id"] == sid2, "the fresh session did not replace the old id")
     # the tool no longer knows the session: one fresh run with the same input, not a failure
     (d / "gone").write_text("")
-    n = len(calls.read_text().splitlines())
+    n = len(_runs(calls))
     w.j("run", "start", tid)
     w.wait_done(tid)
-    new = calls.read_text().splitlines()[n:]
+    new = _runs(calls)[n:]
     check(len(new) == 2 and "--resume" in new[0] and "--session-id" in new[1], f"lost session did not fall back to fresh: {new}")
 
 
@@ -876,16 +881,16 @@ def f2_focus(e):
     v = _until_view(fx, tid, lambda v: any(q.get("kind") == "focus:permission" and q.get("answer") is None for q in v["ticket"]["questions"]), 30, "a focus:permission question")
     q = next(q for q in v["ticket"]["questions"] if q.get("kind") == "focus:permission")
     check(q["options"] == ["Allow and retry", "Not now"] and "WebFetch" in q["text"], f"permission question {q}")
-    check(len(calls.read_text().splitlines()) == 1, "more than one run before the answer")
+    check(len(_runs(calls)) == 1, f"more than one run before the answer: {_runs(calls)}")
     w.wait_done(tid, 40)
     fx.act_ok("answer", {"ticket": tid, "question": q["id"], "answer": "Allow and retry"})
-    check(wait_for(lambda: len(calls.read_text().splitlines()) == 2, 30), f"Allow and retry did not start a new run: {calls.read_text()!r}")
-    second = calls.read_text().splitlines()[1]
+    check(wait_for(lambda: len(_runs(calls)) == 2, 30), f"Allow and retry did not start a new run: {calls.read_text()!r}")
+    second = _runs(calls)[1]
     check("--allowedTools" in second and "WebFetch" in second, f"second run lacks --allow: {second!r}")
     w.wait_done(tid, 40)
     fx.view(tid)  # looking again must not start a third run
     time.sleep(3)
-    check(len(calls.read_text().splitlines()) == 2, f"Allow and retry started more than one run: {calls.read_text()!r}")
+    check(len(_runs(calls)) == 2, f"Allow and retry started more than one run: {calls.read_text()!r}")
     check(not [x for x in fx.view(tid)["ticket"]["questions"] if x.get("answer") is None], "a question is still open")
 
 
