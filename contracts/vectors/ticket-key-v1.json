@@ -1,0 +1,17 @@
+{
+  "about": "Ticket keys (ticket.schema.json key, local-files.md 'Ticket keys'). suggest: folder name -> suggested workspace code (validate.py has the reference rule; workspace/src/orch/config.py must give the same). keys: valid and invalid display keys.",
+  "suggest": [
+    ["Month-end close", "MEC"],
+    ["orch-demo-workspace-1", "ODW1"],
+    ["demo-1", "D1"],
+    ["invoices", "INV"],
+    ["q3", "Q3"],
+    ["a", "AW"],
+    ["Zürich Büro", "ZB"],
+    ["my_big_data_lake_project", "MBDL"],
+    ["日本", "WS"],
+    ["", "WS"]
+  ],
+  "valid_keys": ["DM1-12", "MEC-1", "AB-999999999", "1234-7"],
+  "invalid_keys": ["dm1-12", "DM1-0", "DM1-012", "A-1", "ABCDE-1", "DM1_12", "DM1-", "t_7k3f9q"]
+}

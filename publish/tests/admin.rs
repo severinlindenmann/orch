@@ -322,6 +322,12 @@ async fn admin_assets_served() {
 }
 
 #[test]
+fn portal_shows_small_sizes_in_bytes_like_the_public_page() {
+    let js = include_str!("../web/portal.js");
+    assert!(js.contains("value === 1 ? 'byte' : 'bytes'"));
+}
+
+#[test]
 fn portal_markup_respects_csp() {
     let html = include_str!("../web/portal.html");
     let js = include_str!("../web/portal.js");

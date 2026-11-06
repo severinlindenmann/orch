@@ -245,11 +245,11 @@ def share_file(
     if replace:
         # same key, so the link keeps working; a fresh random IV for the new content
         blob, key = encrypt(content, name, mime, key=key, note=note)
-        res = _api(root, "PUT", f"/v1/files/{replace}", blob)
+        res = _api(root, "PUT", f"/v1/files/{replace}?size={len(content)}", blob)
     else:
         q = _life(days, permanent)
         blob, key = encrypt(content, name, mime, note=note)
-        res = _api(root, "POST", "/v1/files" + (f"?{q}" if q else ""), blob)
+        res = _api(root, "POST", "/v1/files" + (f"?{q}&" if q else "?") + f"size={len(content)}", blob)
     k = b64u(key)
     keys = net.read_json(_keys_path(root), {})
     keys[res["id"]] = k

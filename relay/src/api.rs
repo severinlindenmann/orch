@@ -214,7 +214,8 @@ async fn post_message(
     h: HeaderMap,
     body: Bytes,
 ) -> Res<(StatusCode, Json<Value>)> {
-    let msg = parse_body(&body)?;
+    let mut msg = parse_body(&body)?;
+    rules::clean_ticket_key(&mut msg);
     let (stored, push) = {
         let c = app.db.lock().unwrap();
         let me = auth::workspace(&c, &h)?;

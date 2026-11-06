@@ -17,6 +17,11 @@ $ orch ticket summary <id> "Export works, the check is left"
 $ orch ticket show <id>
 ```
 
+Every ticket gets a short key such as `INV-12`: the workspace code and a running number. Use the key anywhere a
+command wants a ticket (`orch check add inv-12 "Export the file"`); the id `t_…` keeps working too. `orch init` picks
+the code from the folder name (`--code INV` to choose it); `orch config set workspace.code INV` changes it for new
+tickets, old keys stay as they are. Numbers are never reused.
+
 Owner, due day and note are free text for people. orch never acts on them. The summary is one or two sentences on
 where things stand; it is what you see first on the dashboard and the phone.
 
@@ -98,7 +103,7 @@ questions and answers, history. Relay and publish ship in the same package as bu
 ## Commands
 | Command | Does |
 |---|---|
-| `orch init` | Sets up the project folder, asks which agent to use. Safe to run again |
+| `orch init [--code XY]` | Sets up the project folder, asks which agent to use, sets the ticket key code. Safe to run again |
 | `orch ticket new\|list\|show\|tree\|edit\|summary\|status\|wait\|patch` | Tickets. `done` is refused while a ticked task lacks proof |
 | `orch check add\|edit\|move\|remove\|reopen\|start\|stop\|done` | Tasks and proof |
 | `orch ask` / `answer` / `needs` | Questions and the list of what needs a person |
