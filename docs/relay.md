@@ -124,9 +124,11 @@ an item you took away from a workspace does not give it back. Details: `contract
 Tables `subscribers` (token as SHA-256 hash, push secret encrypted with the master key, push state and cursor) and
 `sub_log` (newest 200 per subscriber, 30 days). Events are a read view over `messages` (texts and questions to `phones`
 from workspaces in scope, plus their answers), worked out per call (`src/subs.rs`); the stream waits on the relay's new-message
-signal. Push (`src/subs_push.rs`) is one background worker: per subscriber one event at a time, HMAC-SHA256 signed, every
+signal. Streams and push read each event only right before they send it (`subs::next_event`: token, scope and kinds
+checked again), so nothing is built ahead of a slow reader and a rotate or scope edit applies to the very next event. Push (`src/subs_push.rs`) is one background worker: per subscriber one event at a time, HMAC-SHA256 signed, every
 request checks the address again (https, public IPs only after the lookup, connects to the checked address, no redirects,
-5 s connect / 10 s total, response body never read). Limits: 60 calls a minute and 2 open streams per subscriber.
+5 s connect / 10 s total, response body never read; only a test relay started with `ORCH_RELAY_TEST_PUSH_LOOPBACK=1`,
+like the local e2e suite, may also push to `http://127.0.0.1:<port>`). Limits: 60 calls a minute and 2 open streams per subscriber.
 T0: `cargo test --test subs`.
 
 ## Not included

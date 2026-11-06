@@ -4,7 +4,7 @@
 //! exactly the checked address, without following redirects.
 use crate::error::*;
 use crate::state::AppState;
-use crate::subs::{self, event_label, read_events};
+use crate::subs::{self, event_label};
 use crate::util::*;
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
@@ -129,9 +129,41 @@ fn public_v6(a: Ipv6Addr) -> bool {
         || s[0] == 0x3fff) // documentation (2024)
 }
 
+/// Test relays only (the local e2e suite): `ORCH_RELAY_TEST_PUSH_LOOPBACK=1` also allows push to
+/// `http://127.0.0.1:<port>/…`, so a scenario can run its own receiver. Read once; a real relay never sets it.
+pub fn test_loopback() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        let on = std::env::var("ORCH_RELAY_TEST_PUSH_LOOPBACK").as_deref() == Ok("1");
+        if on {
+            tracing::warn!("subscriber push may reach http://127.0.0.1 (test relay only)");
+        }
+        on
+    })
+}
+
+/// `http://127.0.0.1:<port>/…` with the test switch on, nothing else (no other loopback form, no host name).
+fn loopback_url(raw: &str, allow: bool) -> Option<reqwest::Url> {
+    let u = reqwest::Url::parse(raw).ok()?;
+    (allow
+        && u.scheme() == "http"
+        && u.host() == Some(url::Host::Ipv4(Ipv4Addr::LOCALHOST))
+        && u.port().is_some()
+        && u.username().is_empty()
+        && u.password().is_none())
+    .then_some(u)
+}
+
 /// The syntax check (also at save time): https, a host, no user name or password, no fragment; an IP literal must be
 /// public. Host names are looked up on every delivery (`resolve_public`).
 pub fn check_url(raw: &str) -> Result<reqwest::Url, String> {
+    check_url_with(raw, test_loopback())
+}
+
+fn check_url_with(raw: &str, loopback: bool) -> Result<reqwest::Url, String> {
+    if let Some(u) = loopback_url(raw, loopback) {
+        return Ok(u);
+    }
     let u = reqwest::Url::parse(raw)
         .map_err(|_| "The push address must be a full https:// address.".to_string())?;
     if u.scheme() != "https" {
@@ -192,10 +224,11 @@ impl Deliver for Https {
             Err(_) => return Outcome::refused("not a public https address"),
         };
         let port = u.port_or_known_default().unwrap_or(443);
+        let local = u.scheme() == "http"; // only possible through loopback_url (test relays)
         let mut b = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
-            .https_only(true)
+            .https_only(!local)
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(TIMEOUT);
         if let Some(url::Host::Domain(host)) = u.host() {
@@ -311,10 +344,8 @@ pub async fn round(app: &AppState, id: &str) {
             let Some(p) = push_row(app, &c, id, true) else {
                 return;
             };
-            let Ok(Some(s)) = subs::load(&c, id) else {
-                return;
-            };
-            let Ok(page) = read_events(&c, &app.key, &s, p.cursor, 1) else {
+            // Read right before this delivery: the current scope and kinds decide (subs::next_event).
+            let Ok(Some(page)) = subs::next_event(&c, &app.key, id, None, p.cursor) else {
                 return;
             };
             match page.items.into_iter().next() {
@@ -571,6 +602,23 @@ mod tests {
             "not a url",
         ] {
             assert!(check_url(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn test_loopback_switch_allows_only_plain_127_0_0_1_with_a_port() {
+        assert!(check_url_with("http://127.0.0.1:18123/hook", false).is_err());
+        assert!(check_url_with("http://127.0.0.1:18123/hook", true).is_ok());
+        for bad in [
+            "http://localhost:18123/",
+            "http://127.0.0.2:18123/",
+            "http://127.0.0.1/",
+            "http://[::1]:18123/",
+            "http://u:p@127.0.0.1:18123/",
+            "http://10.0.0.5:18123/",
+            "http://hooks.example.com/x",
+        ] {
+            assert!(check_url_with(bad, true).is_err(), "{bad}");
         }
     }
 
