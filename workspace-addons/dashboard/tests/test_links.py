@@ -142,4 +142,21 @@ def test_link_type_is_an_allowlist_and_the_domain_is_the_registrable_part():
     assert data.host_parts("http://10.0.0.5:8080/") == ("", "10.0.0.5")
     src = (data.Path(data.__file__).parent / "web" / "app.js").read_text()
     css = (data.Path(data.__file__).parent / "web" / "style.css").read_text()
-    assert "h('span', {className:'lk-dom'}" in src and ".lk .t .lk-dom{flex:none" in css and "direction:rtl" in css
+    assert "if (bh !== linkHost(v)) return" in src and "h('span', {className:'lk-dom'}" in src and ".lk .t .lk-dom{flex:none" in css and "direction:rtl" in css
+
+
+def test_a_host_the_browser_reads_differently_is_shown_as_a_plain_link():
+    """Parser differential: Python reads evil.example, the browser github.com; the page then shows the browser's."""
+    import shutil
+    import subprocess
+
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    url = "https://github.com\\@evil.example/"
+    head, dom = data.host_parts(url)
+    src = (data.Path(data.__file__).parent / "web" / "app.js").read_text()
+    lines = [ln for ln in src.splitlines() if ln.strip().startswith(("const browserHost =", "const linkHost ="))]
+    assert len(lines) == 2
+    js = "\n".join(lines) + f"\nconsole.log(JSON.stringify([browserHost({json.dumps(url)}), linkHost({json.dumps({'host_head': head, 'domain': dom})})]))"
+    browser, ours = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout)
+    assert browser == "github.com" and ours == "evil.example"  # differ -> linkSub shows "Link · github.com"

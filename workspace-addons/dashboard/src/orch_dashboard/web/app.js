@@ -284,12 +284,18 @@
   const oneLine = (text, max) => String(text ?? '').replace(/\p{Cf}/gu, '').replace(/[\p{Cc}\u2028\u2029]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
   const linkType = v => typeof v.shown_type === 'string' && v.shown_type ? v.shown_type : 'Link';
   const linkHost = v => (typeof v.host_head === 'string' ? v.host_head : '') + (typeof v.domain === 'string' ? v.domain : '');
-  const linkSub = v => h('span', {className:'lk-sub'}, h('span', {className:'lk-type'}, linkType(v) + ' · '),
-    v.host_head ? h('span', {className:'lk-head'}, '\u200E' + String(v.host_head) + '\u200E') : null, h('span', {className:'lk-dom'}, String(v.domain || '')));
+  // the browser's own reading of the address must give the same host; if not, it is a plain Link with the browser's host
+  const browserHost = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch (_) { return ''; } };
+  const linkSub = (v, url) => {
+    const bh = browserHost(url);
+    if (bh !== linkHost(v)) return h('span', {className:'lk-sub'}, h('span', {className:'lk-type'}, 'Link · '), h('span', {className:'lk-dom'}, bh));
+    return h('span', {className:'lk-sub'}, h('span', {className:'lk-type'}, linkType(v) + ' · '),
+      v.host_head ? h('span', {className:'lk-head'}, '\u200E' + String(v.host_head) + '\u200E') : null, h('span', {className:'lk-dom'}, String(v.domain || '')));
+  };
   function linkRow(t, link, removable) {
     const v = link.view, url = safeHref(link.url);
     return h('div', {className:'lk-row', 'data-key':'link-' + link.url},
-      h('a', {className:'lk', href:url, target:'_blank', rel:'noopener noreferrer', title:url}, linkTile(v), h('span', {className:'t'}, h('b', {}, oneLine(clean(v.title), 200)), linkSub(v)), linkStatus(v.status), h('span', {className:'ext'}, iconEl('external'))),
+      h('a', {className:'lk', href:url, target:'_blank', rel:'noopener noreferrer', title:url}, linkTile(v), h('span', {className:'t'}, h('b', {}, oneLine(clean(v.title), 200)), linkSub(v, url)), linkStatus(v.status), h('span', {className:'ext'}, iconEl('external'))),
       removable && !snapshot ? h('button', {type:'button', className:'btn ghost icon xs lk-x', title:'Remove this link', 'aria-label':'Remove link ' + clean(v.title), 'data-action':'link-remove', 'data-ticket':t.id, 'data-url':link.url}, iconEl('x')) : null);
   }
   // add-ons that are on, have a refresh act and own a link on this ticket
@@ -433,7 +439,7 @@
       return f.read_only && KEY.test(String(v)) ? linkStatus(String(v)) : h('span', {className:'st'}, f.type === 'date' ? date(v) : fieldText(f, v));
     })).filter(Boolean);
     if (!shown.length && !chips.length) return null;
-    return h('div', {className:'card-links', 'data-key':'card-links'}, shown.map(l => h('span', {className:'lnk', title:linkType(l.view) + ' · ' + linkHost(l.view) + ': ' + oneLine(clean(l.view.title), 200)}, linkTile(l.view, 'sm'), linkStatus(l.view.status))),
+    return h('div', {className:'card-links', 'data-key':'card-links'}, shown.map(l => h('span', {className:'lnk', title:(browserHost(l.url) === linkHost(l.view) ? linkType(l.view) + ' · ' + linkHost(l.view) : 'Link · ' + browserHost(l.url)) + ': ' + oneLine(clean(l.view.title), 200)}, linkTile(l.view, 'sm'), linkStatus(l.view.status))),
       rows.length > 2 ? h('span', {className:'more'}, '+' + (rows.length - 2)) : null, chips.length ? h('span', {className:'gap'}) : null, chips);
   }
   function liveLinkFor(t) {
