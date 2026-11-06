@@ -38,3 +38,23 @@
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 @media(max-width:720px){.ticket-row>.grow{flex-basis:100%}.addon-rows{grid-template-columns:minmax(0,1fr)}.tl{flex-wrap:wrap}}
 
+
+.acc-li{display:flex;align-items:flex-start;gap:12px}
+.acc-li>.grow{min-width:0}
+.acc-li>.switch{margin:10px 12px 0 0}
+.acc>summary{list-style:none;cursor:pointer}
+.acc>summary::-webkit-details-marker{display:none}
+.chev{width:7px;height:7px;border-right:1.5px solid var(--text-muted);border-bottom:1.5px solid var(--text-muted);transform:rotate(-45deg);flex:none;margin:0 4px;transition:transform 150ms var(--ease-out)}
+.acc[open]>summary .chev{transform:rotate(45deg)}
+.acc-panel{padding:0 12px 12px 36px;display:grid;gap:12px}
+.acc-detail{display:grid;gap:0;margin:0}
+.acc-detail>div{display:grid;grid-template-columns:minmax(90px,1fr) minmax(0,3fr);gap:12px;padding:8px 0;border-bottom:1px solid var(--border)}
+.acc-detail dd{margin:0;overflow-wrap:anywhere}
+.acc-line{margin:0}
+.acc-tickets{display:grid;gap:0;border:1px solid var(--border);border-radius:var(--radius)}
+.acc-ticket{display:flex;align-items:center;gap:12px;padding:8px 12px;text-decoration:none;color:var(--text)}
+.acc-ticket+.acc-ticket{border-top:1px solid var(--border)}
+.acc-ticket .li-title{flex:1;min-width:0}
+.acc-ticket:hover .li-title{text-decoration:underline}
+.acc-actions{margin-top:4px}
+@media(max-width:720px){.acc-panel{padding-left:12px}.acc-detail>div{grid-template-columns:minmax(0,1fr)}}
