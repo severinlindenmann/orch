@@ -67,7 +67,8 @@ pushed as before. The filter runs in the relay, not in the sender.
 **Text push budget** (per sending workspace and phone, kept in the relay's memory): at most 1 text push per 10 s and 30 per hour
 window (the window starts with the first push after the last one ended) for each (workspace, phone) pair; a text over the budget is still stored and listed, only its push is skipped.
 Questions are not limited by it. The budget applies after the update-kind filter (quiet kinds never use it up).
-**Ticket key**: a message may carry `key` (the display key of its `ticket`, e.g. `DM1-12`, message.schema.json). The relay keeps it
+**Ticket key**: a message may carry `key` (the display key of its `ticket`, e.g. `DM1-12`, message.schema.json). A `key` that does not match `^[A-Z0-9]{2,4}-[1-9][0-9]{0,8}$` is dropped
+on intake (the message is kept, without a key). The relay keeps a valid key
 like any top-level field (so `/v1/phone/questions` and `/v1/phone/messages` show it in `message.key`), copies the question's
 `key` onto every answer together with `ticket` (an answerer's own `key` is dropped), lists it in `/v1/phone/updates` items, and
 puts it first in the push body: `"DM1-12 · <body as above>"` (still max 120 chars). Pushes with a ticket also carry `"ticket"`

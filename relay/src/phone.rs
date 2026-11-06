@@ -333,7 +333,11 @@ async fn updates(
             }
             let mut body = body;
             // the ticket's display key (message `key`, e.g. DM1-12) rides along for the item
-            body["__key"] = top.get("key").cloned().unwrap_or(Value::Null);
+            body["__key"] = top
+                .get("key")
+                .and_then(crate::rules::ticket_key)
+                .map(Value::from)
+                .unwrap_or(Value::Null);
             if ticket.is_some() {
                 if out.len() == limit {
                     more = true;
@@ -426,7 +430,7 @@ async fn answer(
         }
         let (qb, qextra) = store::open_payload(&app.key, &q);
         let m = store::system_message_with_key(
-            qextra.get("key").and_then(Value::as_str),
+            qextra.get("key").and_then(crate::rules::ticket_key),
             &c,
             &app.key,
             &pid,
@@ -562,7 +566,8 @@ pub async fn push_message(app: &AppState, q: &Value) {
         _ => body_text.to_string(),
     };
     // "DM1-12 · title": the ticket's display key first when the workspace sent one
-    let text: String = match q["key"].as_str() {
+    let key = crate::rules::ticket_key(&q["key"]);
+    let text: String = match key {
         Some(k) => format!("{k} · {text}"),
         None => text,
     }
@@ -573,7 +578,7 @@ pub async fn push_message(app: &AppState, q: &Value) {
         "workspace": q["from"]});
     if q["ticket"].is_string() {
         payload["ticket"] = q["ticket"].clone();
-        payload["key"] = q["key"].clone();
+        payload["key"] = key.map(Value::from).unwrap_or(Value::Null);
     }
     if q["type"] == "question" {
         payload["message_id"] = q["id"].clone();

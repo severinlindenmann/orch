@@ -123,3 +123,39 @@ async fn workspace_answer_takes_the_askers_key_not_its_own() {
         (json!("t_7k3f9q"), json!("AB-7"))
     );
 }
+
+#[tokio::test]
+async fn a_bad_key_is_dropped_never_listed_or_pushed() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    push_on(&t, &p).await;
+    let long = format!("DM1-{}", "1".repeat(115));
+    let bad = [
+        json!({"k": "DM1-1"}),
+        json!(12),
+        json!("DM1-1\u{0007}\n"),
+        json!(long),
+        json!("dm1-1"),
+        json!("DM1-0"),
+    ];
+    for (i, k) in bad.iter().enumerate() {
+        let tid = format!("t_bad00{i}");
+        let m = json!({"schema": "orch.msg/1", "id": mid(), "from": a.id, "to": p.0, "type": "text",
+            "created_at": "2026-11-05T10:00:00Z", "ticket": tid, "key": k,
+            "body": {"text": "Done.", "update": {"kind": "result", "title": "Export"}}});
+        let (s, v) = t.call(&a, "POST", "/v1/messages", Some(m)).await;
+        assert_eq!(s, 201, "the message is kept: {v}");
+        let q = format!("/v1/phone/updates?workspace={}&ticket={tid}", a.id);
+        let item = t.phone(&p, "GET", &q, None).await.1["items"][0].clone();
+        assert_eq!(item["key"], json!(null), "{k}");
+        let inbox = t.inbox(&a).await;
+        assert!(inbox.iter().all(|m| m.get("key").is_none()));
+        // the push budget lets only the first text push through: check that one
+        if i == 0 {
+            let sent = t.push.sent.lock().unwrap();
+            assert_eq!(sent[0].2["aps"]["alert"]["body"], "Export: Done.");
+            assert_eq!(sent[0].2["key"], json!(null));
+        }
+    }
+}
