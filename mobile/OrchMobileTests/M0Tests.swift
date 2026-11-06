@@ -469,7 +469,7 @@ final class SpeechPlayerTests: XCTestCase {
         let c = Counter(), a = FakeAudio(), v = FakeVoice(), p = make(c, audio: a, voice: v, dir: dir)
         p.play(clip("m_aaaaaaaaaaaaaaaa"), then: [clip("m_bbbbbbbbbbbbbbbb")])
         await until { a.started.count == 1 }
-        XCTAssertEqual(p.state, .playing("m_aaaaaaaaaaaaaaaa")); XCTAssertEqual(a.started[0], Data("mp3-m_a".utf8))
+        XCTAssertEqual(p.state, .playing("m_aaaaaaaaaaaaaaaa")); XCTAssertEqual(a.started[0], Data("mp3-m_aaaaaaaaaaaaaaaa".utf8))
         p.cycleRate(); XCTAssertEqual(p.rate, 1.5); p.cycleRate(); XCTAssertEqual(p.rate, 2); p.cycleRate(); XCTAssertEqual(p.rate, 1)
         a.onFinish?()
         await until { a.started.count == 2 }
