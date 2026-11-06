@@ -1228,12 +1228,8 @@ async fn speech(
         let s = crate::speech::Settings::of(&c, &pid);
         (pid, ws, s)
     };
-    let speaker = app.speaker.lock().unwrap().clone();
     let mp3 = crate::speech::generate(
-        &app.db,
-        &app.key,
-        &app.cfg.data_dir,
-        &*speaker,
+        &app,
         &pid,
         &ws,
         &settings,

@@ -38,12 +38,9 @@ async fn rig() -> Rig {
     let t = start().await;
     let ws = t.add_ws("Alpha").await;
     let phone = t.pair_phone(&[&ws]).await;
-    Rig {
-        t,
-        ws,
-        phone,
-        sp: Arc::new(FakeSpeaker::default()),
-    }
+    let sp = Arc::new(FakeSpeaker::default());
+    *t.app.speaker.lock().unwrap() = sp.clone();
+    Rig { t, ws, phone, sp }
 }
 
 impl Rig {
@@ -70,12 +67,9 @@ impl Rig {
             tts_cap_usd: cap,
         };
         speech::generate(
-            &self.t.app.db,
-            &self.t.app.key,
-            &self.t.app.cfg.data_dir,
-            &*self.sp,
+            &self.t.app,
             &self.phone.0,
-            &[self.ws.id.clone()],
+            std::slice::from_ref(&self.ws.id),
             &s,
             id,
             lang,
@@ -263,7 +257,8 @@ fn month_is_utc_calendar_month() {
 async fn aura_client_sends_model_encoding_and_key() {
     use axum::{extract::Query, http::HeaderMap, routing::post, Router};
     use std::collections::HashMap;
-    let seen: Arc<Mutex<Vec<(HashMap<String, String>, String, String)>>> = Arc::default();
+    type Seen = Vec<(HashMap<String, String>, String, String)>;
+    let seen: Arc<Mutex<Seen>> = Arc::default();
     let s2 = seen.clone();
     let app = Router::new().route(
         "/v1/speak",
@@ -287,7 +282,7 @@ async fn aura_client_sends_model_encoding_and_key() {
         .await
         .unwrap();
     assert_eq!(out, b"MP3DATA");
-    let s = seen.lock().unwrap();
+    let s = seen.lock().unwrap().clone();
     assert_eq!(s[0].0["model"], "aura-2-julius-de");
     assert_eq!(s[0].0["encoding"], "mp3");
     assert_eq!(s[0].1, "Token KEY1");
@@ -295,7 +290,6 @@ async fn aura_client_sends_model_encoding_and_key() {
         serde_json::from_str::<Value>(&s[0].2).unwrap(),
         json!({"text": "Guten Tag."})
     );
-    drop(s);
     // unreachable service
     assert!(Aura::new("http://127.0.0.1:1")
         .speak("K", "x", "v")
@@ -508,12 +502,9 @@ async fn stale_request_time_cannot_reset_the_current_month() {
     };
     // a request that carries a time from an old month still books into the current month
     speech::generate(
-        &r.t.app.db,
-        &r.t.app.key,
-        &r.t.app.cfg.data_dir,
-        &*r.sp,
+        &r.t.app,
         &r.phone.0,
-        &[r.ws.id.clone()],
+        std::slice::from_ref(&r.ws.id),
         &s,
         &id,
         None,
@@ -529,18 +520,44 @@ async fn stale_request_time_cannot_reset_the_current_month() {
 }
 
 #[tokio::test]
-async fn client_disconnect_during_deepgram_gives_the_reservation_back() {
+async fn client_disconnect_keeps_the_charge_caches_the_audio_and_the_next_call_is_free() {
     let r = Arc::new(rig().await);
     r.key();
-    *r.sp.delay_ms.lock().unwrap() = 600;
+    *r.sp.delay_ms.lock().unwrap() = 400;
     let id = r.speak_text(json!({"text": "Hallo Welt.", "speak": {"lang": "de"}}));
-    let r2 = r.clone();
-    let h = tokio::spawn(async move { r2.get(&id, None, 10.0, "auto").await });
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    assert!(r.used() > 0.0, "reserved while Deepgram works");
-    h.abort(); // the phone hung up
+    let (r2, id2) = (r.clone(), id.clone());
+    let h = tokio::spawn(async move { r2.get(&id2, None, 10.0, "auto").await });
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    h.abort(); // the phone hung up while Deepgram works
     let _ = h.await;
-    assert_eq!(r.used(), 0.0, "the reservation is back");
+    // the generation finishes anyway: charged, cached
+    let want = 11.0 * 0.030 / 1000.0;
+    let mut cached = false;
+    for _ in 0..50 {
+        if r.t
+            .app
+            .cfg
+            .data_dir
+            .join("tts")
+            .read_dir()
+            .map(|d| d.count())
+            .unwrap_or(0)
+            == 1
+        {
+            cached = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(cached, "the audio is cached after the client left");
+    assert!((r.used() - want).abs() < 1e-9, "charge stays: {}", r.used());
+    // the next request is served from the cache: no new Deepgram call, no new cost
+    assert_eq!(
+        r.get(&id, None, 10.0, "auto").await.unwrap(),
+        b"ID3fake-mp3"
+    );
+    assert_eq!(r.sp.calls.lock().unwrap().len(), 1);
+    assert!((r.used() - want).abs() < 1e-9);
 }
 
 #[test]

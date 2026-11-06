@@ -1,7 +1,7 @@
 //! Read-aloud: a workspace text becomes an mp3 through Deepgram Aura-2 (one relay-wide Deepgram key).
 //! The core is `generate`, a plain function over the database and a `Speaker`, so tests never touch the network.
 //! Audio is cached per (message, language) and sealed like blobs; the cost counter is per phone and UTC month.
-use crate::crypto::{self, Key};
+use crate::crypto;
 use crate::error::*;
 use async_trait::async_trait;
 use axum::http::StatusCode;
@@ -267,6 +267,10 @@ pub struct Settings {
 }
 
 impl Settings {
+    fn cap(&self) -> f64 {
+        self.tts_cap_usd
+    }
+
     /// The phone's stored settings (defaults when it never changed them).
     pub fn of(c: &Connection, phone: &str) -> Settings {
         let v = crate::store::phone_settings(c, phone);
@@ -308,16 +312,13 @@ pub fn purge(data_dir: &Path, now: i64, max_age: i64) -> usize {
 /// `lang_q` = the `?lang=` value. Never holds the database lock across the Deepgram call.
 #[allow(clippy::too_many_arguments)]
 pub async fn generate(
-    db: &Mutex<Connection>,
-    key: &Key,
-    data_dir: &Path,
-    speaker: &dyn Speaker,
+    app: &crate::state::AppState,
     phone: &str,
     workspaces: &[String],
     settings: &Settings,
     msg_id: &str,
     lang_q: Option<&str>,
-    at: i64,
+    _at: i64,
 ) -> Res<Vec<u8>> {
     let none = || not_found("No audio for this message.");
     if let Some(l) = lang_q {
@@ -328,6 +329,7 @@ pub async fn generate(
     if settings.speak == "never" {
         return Err(none());
     }
+    let (db, key) = (&app.db, &app.key);
     let (text, lang) = {
         let c = db.lock().unwrap();
         let since: i64 = c
@@ -372,22 +374,29 @@ pub async fn generate(
             .to_string();
         (text, lang)
     };
-    // One generation per (message, language) at a time: a second caller waits, then finds the cache.
-    let gate = {
+    // The generation runs detached: once Deepgram is called it finishes, caches and keeps the charge even if the
+    // phone hangs up (Deepgram bills us anyway). Per (message, language) one at a time; a second caller waits, then
+    // finds the cache. Only an explicit Deepgram error gives the reservation back.
+    let (app, phone, settings) = (app.clone(), phone.to_string(), settings.cap());
+    let (msg_id, lang_owned) = (msg_id.to_string(), lang.clone());
+    tokio::spawn(async move {
+        let gate = {
+            let mut m = inflight().lock().unwrap();
+            m.entry(format!("{msg_id}:{lang_owned}"))
+                .or_default()
+                .clone()
+        };
+        let turn = gate.lock().await;
+        let result = make(&app, &phone, settings, &msg_id, &text, &lang_owned).await;
+        drop(turn);
         let mut m = inflight().lock().unwrap();
-        m.entry(format!("{msg_id}:{lang}")).or_default().clone()
-    };
-    let _turn = gate.lock().await;
-    let result = make(
-        db, key, data_dir, speaker, phone, settings, msg_id, &text, &lang, at,
-    )
-    .await;
-    drop(_turn);
-    let mut m = inflight().lock().unwrap();
-    if Arc::strong_count(&gate) <= 2 {
-        m.remove(&format!("{msg_id}:{lang}"));
-    }
-    result
+        if Arc::strong_count(&gate) <= 2 {
+            m.remove(&format!("{msg_id}:{lang_owned}"));
+        }
+        result
+    })
+    .await
+    .map_err(internal)?
 }
 
 fn inflight() -> &'static Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
@@ -395,36 +404,15 @@ fn inflight() -> &'static Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
     M.get_or_init(Default::default)
 }
 
-struct Reservation<'a> {
-    db: &'a Mutex<Connection>,
-    phone: &'a str,
-    month: String,
-    cost: f64,
-    keep: bool,
-}
-
-impl Drop for Reservation<'_> {
-    fn drop(&mut self) {
-        if !self.keep {
-            let c = self.db.lock().unwrap_or_else(|e| e.into_inner());
-            let _ = refund_usage(&c, self.phone, &self.month, self.cost);
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
 async fn make(
-    db: &Mutex<Connection>,
-    key: &Key,
-    data_dir: &Path,
-    speaker: &dyn Speaker,
+    app: &crate::state::AppState,
     phone: &str,
-    settings: &Settings,
+    cap_usd: f64,
     msg_id: &str,
     text: &str,
     lang: &str,
-    _at: i64,
 ) -> Res<Vec<u8>> {
+    let (db, key, data_dir) = (&app.db, &app.key, &app.cfg.data_dir);
     let cost = cost_usd(text.chars().count());
     // cached audio is free and always served (read before the database lock is taken)
     if let Ok(raw) = std::fs::read(cache_path(data_dir, msg_id, lang)) {
@@ -432,7 +420,7 @@ async fn make(
             return Ok(mp3);
         }
     }
-    let api_key: (String, i64) = {
+    let (api_key, at) = {
         let c = db.lock().unwrap();
         let api_key = if enabled(&c) {
             crate::transcribe::get_key(&c, key)
@@ -443,26 +431,22 @@ async fn make(
         // the time is taken here, under the lock: a request that waited cannot book into a month that is over
         let at = crate::util::now();
         // cap check and reservation in one locked section, so parallel requests cannot share the same budget
-        if used_usd_month(&c, phone, at) + cost > settings.tts_cap_usd + 1e-9 {
+        if used_usd_month(&c, phone, at) + cost > cap_usd + 1e-9 {
             return Err(tts_cap_reached());
         }
         add_usage(&c, phone, at, cost)?;
         (api_key, at)
     };
-    let (api_key, at) = api_key;
-    // gives the reservation back unless the audio was made, also when the client disconnects (future dropped)
-    let mut hold = Reservation {
-        db,
-        phone,
-        month: month_of(at),
-        cost,
-        keep: false,
+    let speaker = app.speaker.lock().unwrap().clone();
+    let mp3 = match speaker.speak(&api_key, text, voice(lang)).await {
+        Ok(m) => m,
+        Err(e) => {
+            // Deepgram said no: nothing was made, give the reservation back
+            let c = db.lock().unwrap();
+            let _ = refund_usage(&c, phone, &month_of(at), cost);
+            return Err(tts_failed(e));
+        }
     };
-    let mp3 = speaker
-        .speak(&api_key, text, voice(lang))
-        .await
-        .map_err(tts_failed)?;
-    hold.keep = true;
     let p = cache_path(data_dir, msg_id, lang);
     if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);
