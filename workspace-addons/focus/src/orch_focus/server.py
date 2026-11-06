@@ -265,7 +265,7 @@ class Tracker:
 
     def tickets_list(self) -> list[dict]:
         try:
-            code, out, _ = actions.orch(self.root, self.orch_bin, ["ticket", "list", "--json"], timeout=15)
+            code, out, _ = actions.orch(self.root, self.orch_bin, ["ticket", "list", "--all", "--json"], timeout=15)
             rows = json.loads(out) if code == 0 else []
         except (actions.Unavailable, ValueError, RecursionError):
             rows = []
@@ -274,7 +274,7 @@ class Tracker:
             if (
                 isinstance(t, dict)
                 and TID_RE.fullmatch(str(t.get("id")))
-                and t.get("status") in ("open", "active", "waiting")
+                and t.get("status") in ("open", "active", "waiting", "done")  # a done ticket opens as a read-only board
             ):
                 out.append(
                     {

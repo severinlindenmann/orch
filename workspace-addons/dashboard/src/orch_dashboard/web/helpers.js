@@ -29,7 +29,7 @@
     }
     if (/^Asked\b/.test(text)) return 'Asked a question';
     if (/^Answered\b/.test(text)) return 'Answered a question';
-    if ((m = /^Status \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
+    if ((m = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
     if (/^Summary/.test(text)) return 'Updated the summary';
     if ((m = /^Added (?:task|check)[:\s]+(.+)$/i.exec(text))) return 'Added a task: ' + m[1];
     if ((m = /^Finished a task[:\s]+(.+)$/i.exec(text))) return 'Finished a task: ' + m[1];
@@ -166,10 +166,22 @@
     const s = span(nowMs - when);
     return s === 'just now' ? s : s + ' ago';
   }
-  /* A file proof: its title or file name, then the size core saved in `text` ("hello.txt · 1 KB"). */
-  function fileProofLabel(ev) {
+  /* When something was added, in the person's own time: "today 16:05", "yesterday 09:12", "5 Nov 09:12". */
+  function stamp(iso, nowMs) {
+    const d = new Date(iso), now = new Date(nowMs);
+    if (!iso || Number.isNaN(d.getTime()) || Number.isNaN(now.getTime())) return '';
+    const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const diff = Math.round((day(now) - day(d)) / 86400000);
+    const two = n => String(n).padStart(2, '0'), time = two(d.getHours()) + ':' + two(d.getMinutes());
+    if (diff === 0) return 'today ' + time;
+    if (diff === 1) return 'yesterday ' + time;
+    const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
+    return d.getDate() + ' ' + month + (d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : '') + ' ' + time;
+  }
+  /* A file proof: its title or file name, the size core saved in `text`, and when it was added ("hello.txt · 1 KB · today 16:05"). */
+  function fileProofLabel(ev, nowMs) {
     const e = ev || {}, base = String(e.ref || '').split(/[\\/]/).pop();
-    return [e.title || base || 'File', e.text].filter(Boolean).join(' · ');
+    return [e.title || base || 'File', e.text, e.at && nowMs != null ? stamp(e.at, nowMs) : ''].filter(Boolean).join(' · ');
   }
   /* FO-14: who stands behind a proof. */
   function proofMark(ev) {
@@ -188,5 +200,5 @@
     }
     return n;
   }
-  return {flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, treeRows, proofMark, fileProofLabel, ago};
+  return {flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

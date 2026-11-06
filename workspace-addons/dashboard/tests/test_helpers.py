@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -12,7 +13,7 @@ node = pytest.mark.skipif(shutil.which("node") is None, reason="node not install
 
 def call(fn, *args):
     out = subprocess.run(["node", str(HARNESS), str(WEB / "helpers.js"), json.dumps({"fn": fn, "args": list(args)})],
-                         capture_output=True, text=True, check=True)
+                         capture_output=True, text=True, check=True, env={**os.environ, "TZ": "UTC"})
     return json.loads(out.stdout)
 
 
@@ -22,6 +23,7 @@ def call(fn, *args):
     ("Edited due, owner", "Changed the due day and the owner"), ("Edited title", "Changed the title"),
     ("Asked q1, waiting", "Asked a question"), ("Answered q1: Yes", "Answered a question"),
     ("Status open -> active", "Moved to Doing"), ("Check c2 done", "Finished a task"), ("Status active -> done", "Moved to Done"),
+    ("Patched status (status done -> open)", "Moved to To do"),
     ("Something the agent wrote", "Something the agent wrote")])
 def test_history_lines_are_plain_words(raw, want):
     assert call("historyLine", {"text": raw}) == want
@@ -115,6 +117,18 @@ def test_a_file_proof_shows_its_name_and_size():
     assert call("fileProofLabel", ev) == "hello.txt · 1 KB"
     assert call("fileProofLabel", {**ev, "title": "Q3 chart"}) == "Q3 chart · 1 KB"
     assert call("fileProofLabel", {"type": "file", "ref": "out/a.png"}) == "a.png"
+
+
+@node
+def test_a_file_proof_shows_when_it_was_added():
+    now = 1793980800000  # 2026-11-06T16:00:00Z
+    ev = {"type": "file", "ref": "evidence/hello.txt", "text": "1 KB", "at": "2026-11-06T16:05:00Z"}
+    assert call("fileProofLabel", ev, now) == "hello.txt · 1 KB · today 16:05"
+    assert call("fileProofLabel", {**ev, "at": "2026-11-05T09:12:00Z"}, now) == "hello.txt · 1 KB · yesterday 09:12"
+    assert call("fileProofLabel", {**ev, "at": "2026-10-30T09:12:00Z"}, now) == "hello.txt · 1 KB · 30 Oct 09:12"
+    assert call("fileProofLabel", {**ev, "at": "2025-12-24T07:00:00Z"}, now) == "hello.txt · 1 KB · 24 Dec 2025 07:00"
+    assert call("fileProofLabel", {**ev, "at": "nonsense"}, now) == "hello.txt · 1 KB"
+    assert call("fileProofLabel", {k: v for k, v in ev.items() if k != "at"}, now) == "hello.txt · 1 KB"
 
 
 @node

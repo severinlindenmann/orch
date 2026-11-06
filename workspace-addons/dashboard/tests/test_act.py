@@ -2,6 +2,7 @@ import getpass
 import http.client
 import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -25,7 +26,7 @@ def calls(act_orch):
 
 
 def acts(act_orch):
-    return [c for c in calls(act_orch) if c[0] not in ("addon", "needs", "status", "agents") and c[:2] not in (["run", "status"], ["ticket", "list"])]
+    return [c for c in calls(act_orch) if c[0] not in ("addon", "needs", "status", "agents") and c[:2] not in (["run", "status"], ["ticket", "list"], ["config", "get"])]
 
 
 def test_foreign_or_missing_origin_and_wrong_host_are_refused(act_server, act_orch):
@@ -86,6 +87,11 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         ({"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "take_over": True}},
          ["run", "start", "t_abcdef", "--fresh", "--take-over", *common]),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
+        ({"op": "check.add", "args": {"ticket": "t_abcdef", "text": "--draft the page"}},
+         ["check", "add", "t_abcdef", *common, "--", "--draft the page"]),
+        ({"op": "config.permissions", "args": {"mode": "full", "confirm": True}}, ["config", "set", "workspace.permissions", "full", *common]),
+        ({"op": "ticket.patch", "args": {"ticket": "t_abcdef", "data": {"status": "done"}, "if_revision": 4}},
+         ["ticket", "patch", "t_abcdef", "--if-revision=4", *common, "--", '{"status": "done"}']),
         ({"op": "addon.start", "args": {}}, ["start", "--no-open", *common]),
     ]
     for body, want in cases:
@@ -263,7 +269,7 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
             code, text, _ = post(base, body)
             assert code == 200, (body, text)
             last = [c for c in calls(act_orch) if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"])
-                    and c[0] not in ("needs", "status", "agents")][-1]
+                    and c[0] not in ("needs", "status", "agents") and c[:2] != ["config", "get"]][-1]
             assert last == want, body
         n = len(calls(act_orch))
         bad = [
@@ -394,3 +400,41 @@ def test_audit_log_is_private_and_never_follows_a_symlink(act_orch, ws):
     d.symlink_to(ws.parent)                          # the folder itself is a symlink
     _audit(ws, "config.agent", {"name": "codex"})
     assert not (ws.parent / "actions.log").exists()
+
+
+def test_check_add_and_permissions_are_checked(act_server, act_orch):
+    bad = [("check.add", {"ticket": "t_abcdef", "text": "x" * 501}), ("check.add", {"ticket": "t_abcdef", "text": "  "}),
+           ("check.add", {"ticket": "../x", "text": "a"}), ("check.add", {"ticket": "t_abcdef", "text": "a", "check": "c1"}),
+           ("config.permissions", {"mode": "bypass"}), ("config.permissions", {"mode": "Full"}),
+           ("config.permissions", {"mode": "full"}), ("config.permissions", {"mode": "full", "confirm": False}),
+           ("config.permissions", {"mode": "full", "confirm": "yes"}), ("config.permissions", {}),
+           ("config.permissions", {"mode": "ask", "x": 1}), ("ticket.patch", {"ticket": "t_abcdef", "data": {"status": "finished"}, "if_revision": 1}),
+           ("ticket.patch", {"ticket": "t_abcdef", "data": {"status": "done"}})]
+    for op, args in bad:
+        assert post(act_server, {"op": op, "args": args})[0] == 400, (op, args)
+    assert acts(act_orch) == []
+    assert post(act_server, {"op": "check.add", "args": {"ticket": "t_abcdef", "text": "x" * 500}})[0] == 200
+
+
+def test_permissions_setting_is_read_and_logged(ws, act_orch):
+    from orch_dashboard.actions import run_op
+    from orch_dashboard.data import load_settings
+    assert load_settings(ws, str(act_orch))["permissions"] == "auto"  # the fake cannot answer: the default
+    src = act_orch.read_text().replace(
+        "mode = (d", 'if a[:2] == ["config", "get"]:\n    print(json.dumps({"workspace.permissions": "full"}))\n    sys.exit(0)\nmode = (d')
+    act_orch.write_text(src)
+    assert load_settings(ws, str(act_orch))["permissions"] == "full"
+    assert run_op(ws, str(act_orch), "config.permissions", {"mode": "ask"})[0] == 200
+    log = (ws / ".orch" / "run" / "dashboard" / "actions.log").read_text().splitlines()
+    assert json.loads(log[-1])["mode"] == "ask"
+
+
+def test_full_is_only_sent_after_the_yes_dialog():
+    """The page asks (Yes/No) before it sends Full, and the op itself refuses Full without confirm."""
+    js = (Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "web" / "app.js").read_text()
+    sender = js[js.index("const mode = perm.dataset.settingsPermissions;"):]
+    sender = sender[:sender.index("return;\n    }")]
+    assert "settingsConfirm(" in sender and "confirm:true" in sender
+    assert sender.index("settingsConfirm(") < sender.rindex("send") and "if (mode !== 'full') { await send(); return; }" in sender
+    assert actions.build_argv("config.permissions", {"mode": "ask"})[:3] == ["config", "set", "workspace.permissions"]
+    assert "confirm" not in " ".join(actions.build_argv("config.permissions", {"mode": "full", "confirm": True}))

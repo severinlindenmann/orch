@@ -84,6 +84,13 @@
     if (questions(t).length) return chip('Waiting for you', 'attn');
     return t.status === 'waiting' ? chip('Blocked', 'attn') : chip(statusWord(t), t.status === 'active' ? 'active' : '');
   };
+  // A status chip with a small menu: To do / Doing / Waiting / Done (Done -> back included). Read-only in a shared copy.
+  const STATUS_CHOICES = [['open', 'To do'], ['active', 'Doing'], ['waiting', 'Waiting'], ['done', 'Done']];
+  const statusControl = (t, scope) => {
+    if (snapshot) return statusChip(t);
+    const items = STATUS_CHOICES.map(([value, label]) => h('button', {type:'button', className:'menu-item' + (t.status === value ? ' sel' : ''), role:'menuitemradio', 'aria-checked':t.status === value, 'data-action':'status-set', 'data-ticket':t.id, 'data-status':value, 'data-key':'status-' + scope + '-' + t.id + '-' + value}, label));
+    return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'status-sum', title:'Change the status', 'aria-label':'Change the status. Now: ' + statusWord(t)}, statusChip(t), iconEl('down')), h('div', {className:'menu-pop', role:'menu'}, items));
+  };
   const heading = (title, sub = '') => h('header', {className:'page-heading', 'data-key':'heading'}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null);
   const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);
   const emptyRow = text => h('div', {className:'card-row muted'}, text);
@@ -97,7 +104,7 @@
       const days = Math.round((Date.parse(today()) - Date.parse(t.due)) / 86400000);
       late = chip('Overdue ' + days + (days === 1 ? ' day' : ' days'), 'error');
     }
-    return h('div', {className:'card-row ticket-row', 'data-key':'ticket-' + t.id}, h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, meta.join(' · ')), parent ? h('p', {className:'meta'}, 'Part of ', clean(parent.title)) : null), h('div', {className:'row'}, late, statusChip(t)));
+    return h('div', {className:'card-row ticket-row', 'data-key':'ticket-' + t.id}, h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, meta.join(' · ')), parent ? h('p', {className:'meta'}, 'Part of ', clean(parent.title)) : null), h('div', {className:'row'}, late, statusControl(t, 'row')));
   }
   function needRow(row, newest) {
     const t = ticketOf(row.ticket);
@@ -148,7 +155,7 @@
     return fragment(h('div', {className:'card-row ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
       row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, h('span', {className:'chevron ' + (open ? '' : 'closed')}, iconEl('down'))) : null,
       h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, [typeof t.key === 'string' ? t.key : '', name(t.owner), t.due ? 'Due ' + date(t.due) : '', row.children ? row.done + ' of ' + row.children + ' done' : ''].filter(Boolean).join(' · ')),
-        !row.depth && row.parentMissing ? h('p', {className:'meta'}, 'Part of a ticket that is not here') : null), statusChip(t)),
+        !row.depth && row.parentMissing ? h('p', {className:'meta'}, 'Part of a ticket that is not here') : null), statusControl(t, 'tree')),
       open ? children.filter(i => !rows[i].late || treeAll.has(t.id)).map(i => treeBranch(rows, i)) : null,
       open && late.length && !treeAll.has(t.id) ? h('div', {className:'card-row child', 'data-key':'tree-all-' + t.id}, h('button', {type:'button', className:'btn ghost sm', 'data-action':'tree-all', 'data-ticket':t.id}, 'Show all ' + children.length)) : null);
   }
@@ -218,7 +225,8 @@
     return {label:addonLabel(a), url:pageHash(a.name, typeof own === 'string' && /^[A-Za-z0-9_./-]+$/.test(own) && !own.includes('..') ? own : a.page.path)};
   }
   function agentBar(t) {
-    const line = window.DashHelpers.agentLine(t, state.runs?.[t.id], Date.now(), liveLinkFor(t));
+    const liveLink = liveLinkFor(t);
+    const line = window.DashHelpers.agentLine(t, state.runs?.[t.id], Date.now(), liveLink);
     const action = (item, primary) => {
       const attrs = {className:primary ? 'btn sm ' + (['working', 'starting', 'background'].includes(line.state) ? 'outline' : 'primary') : 'menu-item', role:primary ? null : 'menuitem', 'data-key':primary ? 'agent-primary' : 'agent-' + item.label};
       if (item.op === 'open') return /^#open\//.test(item.url) ? h('a', {...attrs, href:item.url}, item.label) : null;
@@ -226,7 +234,7 @@
     };
     return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'}, h('span', {className:'dot ' + ({working:'working', starting:'starting', background:'bg', needs:'needs', stuck:'needs', failed:'error', stopped:'stopped'}[line.state] || 'idle')}),
       h('span', {className:'ab-text grow'}, h('strong', {}, name(line.agent)), h('span', {className:'muted'}, ' · ' + clean(line.status))),
-      h('span', {className:'ab-actions'}, action(line.primary, true), line.items.length ? h('details', {className:'menu', 'data-key':'agent-menu'}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More agent actions'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, line.items.map(item => action(item, false)))) : null));
+      h('span', {className:'ab-actions'}, !activeTicket(t) && liveLink && !snapshot ? h('a', {className:'btn outline sm', href:liveLink.url, 'data-key':'agent-open-done'}, 'Open ' + liveLink.label) : null, action(line.primary, true), line.items.length ? h('details', {className:'menu', 'data-key':'agent-menu'}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More agent actions'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, line.items.map(item => action(item, false)))) : null));
   }
   const surface = via => clean(via === 'cli' ? 'terminal' : via);
   function proofChip(ev) {
@@ -235,7 +243,7 @@
     if (kind === 'pr') {
       const number = ev.number || /(?:pull\/|#|^)(\d+)\b/.exec(String(ev.ref || ev.text || ''))?.[1];
       label = number ? 'PR #' + number : 'PR';
-    } else if (kind === 'file') label = window.DashHelpers.fileProofLabel(ev);
+    } else if (kind === 'file') label = window.DashHelpers.fileProofLabel(ev, Date.now());
     else if (kind === 'commit') label = 'Code updated';
     else if (kind === 'command') {
       const passed = /(\d+) passed/.exec([ev.text, ev.summary, ev.ref].filter(Boolean).join(' '));
@@ -255,6 +263,35 @@
           array(task.evidence).length ? h('div', {className:'chips task-proofs'}, array(task.evidence).map(proofChip)) : null), chip(task.done ? 'Done' : task.state === 'doing' ? 'Doing' : 'To do', task.done ? 'success' : task.state === 'doing' ? 'active' : ''));
     });
   }
+  // "+ Add task": one line, Enter adds it (orch check add). The draft is kept while the page refreshes.
+  function addTaskRow(t, scope) {
+    if (snapshot) return null;
+    const key = 'add-task-' + scope + '-' + t.id;
+    const input = el('input', 'input');
+    Object.assign(input, {type:'text', placeholder:'+ Add task', maxLength:500, name:'task'});
+    input.setAttribute('aria-label', 'Add a task');
+    const form = el('form', 'card-row add-task');
+    form.dataset.key = key;
+    const send = button('Add', 'outline sm', null);
+    send.type = 'submit';
+    form.append(input, send);
+    input.addEventListener('focusin', () => locks.add(key));
+    input.addEventListener('blur', () => { if (!input.value.trim()) { locks.delete(key); setTimeout(render, 0); } });
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const text = input.value.trim();
+      if (!text || send.disabled) return;
+      send.disabled = true;
+      const result = await act('check.add', {ticket:t.id, text});
+      send.disabled = false;
+      if (!result.ok) { window.orch.toast(result.text, 'error'); return; }
+      input.value = '';
+      locks.delete(key);
+      render();
+      window.orch.toast('Task added', 'ok');
+    });
+    return form;
+  }
   function selectTicketTab(id, tab, focusQuestion = false) {
     ticketTabs.set(id, tab);
     render();
@@ -271,7 +308,7 @@
     const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => h('div', {className:'card-row'}, h('p', {className:'grow'}, [clean(window.DashHelpers.historyLine(entry, t.checklist)), name(entry.by), surface(entry.via)].filter(Boolean).join(' · ')), h('time', {datetime:entry.at || ''}, age(entry.at))));
     const field = (label, value, cls = '') => h('div', {}, h('dt', {}, label), h('dd', {className:cls}, value));
     const total = array(t.checklist).length, done = array(t.checklist).filter(task => task.done).length;
-    const tasksCard = key => card(key, total && done === total ? 'All done' : 'Tasks', done + ' of ' + total + (total && done === total ? '' : ' done'), total ? taskRows(t) : emptyRow('No tasks yet.'));
+    const tasksCard = key => card(key, total && done === total ? 'All done' : 'Tasks', done + ' of ' + total + (total && done === total ? '' : ' done'), [total ? taskRows(t) : emptyRow('No tasks yet.'), addTaskRow(t, key)]);
     const parent = ticketOf(t.parent), children = tickets().filter(child => child.parent === t.id);
     const selected = ticketTabs.get(t.id) || 'overview';
     const tabs = [['overview', 'Overview'], ['tasks', 'Tasks ' + done + '/' + total], ['questions', 'Questions' + (qs.length ? ' (' + qs.length + ')' : '')], ['history', 'History']];
@@ -284,7 +321,7 @@
     });
     return fragment(h('header', {className:'stack', 'data-key':'ticket-heading'},
       parent ? h('a', {href:href(parent.id), className:'muted'}, 'Part of ' + clean(parent.title)) : null,
-      h('div', {className:'row'}, typeof t.key === 'string' ? h('span', {className:'mono'}, t.key) : null, chip('Ticket', 'outline'), statusChip(t)),
+      h('div', {className:'row'}, typeof t.key === 'string' ? h('span', {className:'mono'}, t.key) : null, chip('Ticket', 'outline'), statusControl(t, 'head')),
       h('div', {className:'row', 'data-key':'ticket-meta'}, h('h1', {className:'grow'}, inlineField(t, 'title')), snapshot ? null : agentBar(t)),
       h('div', {className:'columns ticket-columns', 'data-key':'ticket-columns'}, h('div', {className:'stack'},
         snapshot ? null : h('div', {className:'tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label]) => h('button', {type:'button', id:'ticket-tab-' + id, role:'tab', 'aria-selected':selected === id, 'aria-controls':'ticket-panel-' + id, tabindex:selected === id ? '0' : '-1', 'data-action':'ticket-tab', 'data-tab':id, 'data-ticket':t.id}, label))),
@@ -389,7 +426,12 @@
       pop.append(head, grid, foot);
     };
     draw();
-    document.body.append(pop);
+    // Inside a dialog the calendar must live in the dialog and in the top layer, or the dialog hides it.
+    const host = anchor.closest('dialog');
+    if (host) {
+      host.append(pop);
+      try { pop.setAttribute('popover', 'manual'); pop.showPopover(); } catch (_) { pop.removeAttribute('popover'); }
+    } else document.body.append(pop);
     const r = anchor.getBoundingClientRect();
     pop.style.top = Math.min(r.bottom + 6, Math.max(8, innerHeight - pop.offsetHeight - 8)) + 'px';
     pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + 'px';
@@ -422,6 +464,20 @@
     const ws = array(d.workspaces);
     if (ws.length) rows.push(row('Can talk to', ws.map(w => h('span', {className:w.online ? 'on-dot' : 'off-dot', title:w.online ? 'online' : 'offline'}, settingsText('span', {}, w.name)))));
     return h('dl', {}, rows);
+  }
+  const FULL_WARNING = 'Full: the agent can change or delete anything in this folder and run any command without asking.';
+  const PERMISSION_CHOICES = [['ask', 'Ask', 'The agent asks before it changes anything.'], ['auto', 'Auto', 'The agent works on its own and asks only for risky things.'], ['full', 'Full', 'The agent never asks.']];
+  function permissionsCard(settings) {
+    const current = PERMISSION_CHOICES.some(([value]) => value === settings.permissions) ? settings.permissions : 'auto';
+    const rows = PERMISSION_CHOICES.map(([value, label, hint]) => {
+      const radio = h('input', {type:'radio', name:'settings-permissions', value, 'data-key':'settings-permissions-' + value, 'data-settings-permissions':value, disabled:snapshot || settingsBusy.has('permissions')});
+      radio.checked = value === current;
+      return h('label', {className:'card-row agent-opt' + (value === current ? ' sel' : ''), 'data-key':'settings-permissions-row-' + value}, radio,
+        h('div', {className:'grow'}, settingsText('h3', {}, label), settingsText('p', {className:'meta'}, hint)));
+    });
+    return h('div', {className:'stack', 'data-key':'settings-permissions'}, h('h2', {className:'set-sub'}, 'What the agent may do'),
+      h('div', {className:'card'}, h('div', {role:'radiogroup', 'aria-label':'What the agent may do'}, rows),
+        current === 'full' ? h('p', {className:'card-row bad', role:'note'}, FULL_WARNING) : null));
   }
   function settingsPage() {
     const settings = state.settings;
@@ -456,7 +512,8 @@
         h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
         h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), settingsText('p', {className:'grow set-ctl mono'}, settings.folder)))),
       panel('agent', [h('p', {className:'meta'}, 'Pick the default. It is saved right away.'), h('div', {className:'card'}, h('div', {role:'radiogroup', 'aria-label':'Default agent'}, agents),
-        snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own agent')))]),
+        snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own agent'))),
+        permissionsCard(settings)]),
       panel('addons', h('div', {className:'card'}, array(settings.addons).map(addonRow))));
   }
   // An agent that is started with a command: a small form that opens in the list; the command is shown before it is added.
@@ -546,7 +603,7 @@
       if (target.getAttribute(attr.name) !== attr.value) target.setAttribute(attr.name, attr.value);
     }
     reconcile(target, source);
-    if (target.matches('[data-settings-agent]')) target.checked = source.checked;
+    if (target.matches('[data-settings-agent],[data-settings-permissions]')) target.checked = source.checked;
     if (target.matches('[data-settings-field]')) {
       if (target.type === 'checkbox') target.checked = source.checked;
       else if (target.value !== source.value) target.value = source.value;
@@ -859,8 +916,16 @@
     const error = el('p', 'bad'); error.setAttribute('role', 'alert');
     const reload = button('Reload ticket', 'outline sm', async () => { await refresh(); await window.orch.close(d); const latest = ticketOf(t?.id); if (latest) ticketForm(latest); });
     reload.hidden = true;
-    const submit = el('button', 'btn primary', t ? 'Save changes' : 'Create ticket'); submit.type = 'submit';
-    actions.append(submit);
+    const submit = el('button', 'btn primary', t ? 'Save changes' : 'Create & Start'); submit.type = 'submit';
+    let startAfter = !t;
+    const plain = t ? null : el('button', 'btn outline', 'Create');
+    if (plain) { plain.type = 'button'; plain.addEventListener('click', () => { startAfter = false; form.requestSubmit(); }); submit.addEventListener('click', () => { startAfter = true; }); }
+    actions.append(...(plain ? [plain, submit] : [submit]));
+    const startNow = async () => {
+      if (t || !startAfter || !created) return;
+      const run = await act('run.start', {ticket:created.id});
+      window.orch.toast(run.ok ? 'Agent started' : 'The ticket was created, but the agent did not start: ' + run.text, run.ok ? 'ok' : 'error');
+    };
     form.append(fields, error, reload, actions); d.append(form);
     let created = null, creationUnresolved = false;
     form.addEventListener('submit', async event => {
@@ -888,6 +953,7 @@
           window.orch.close(d);
           const details = await act('ticket.edit', {ticket:created.id, ...Object.fromEntries(['owner', 'due', 'note'].filter(k => values[k]).map(k => [k, values[k]]))});  // only what was filled in
           if (!details.ok) window.orch.toast('The ticket was created, but its details were not saved: ' + details.text, 'error');
+          await startNow();
           return;
         }
       }
@@ -895,11 +961,12 @@
       if (!result.ok) {
         error.textContent = result.text + (result.status === 409 ? ' Reload the ticket before trying again.' : '');
         reload.hidden = !(t && result.status === 409);
-        if (created) { inputs.title.disabled = true; submit.textContent = 'Save details'; }
+        if (created) { inputs.title.disabled = true; submit.textContent = 'Save details'; if (plain) plain.hidden = true; }
         return;
       }
       window.orch.toast(t ? 'Ticket updated' : 'Ticket created', 'ok');
       await window.orch.close(d);
+      await startNow();
     });
     window.orch.open(d);
   }
@@ -939,6 +1006,19 @@
     catch (_) { window.orch.toast('Could not copy. Select the text and copy it.', 'error'); }
   }
   main.addEventListener('change', async event => {
+    const perm = event.target.closest('[data-settings-permissions]');
+    if (perm) {
+      if (snapshot || settingsBusy.has('permissions')) return;
+      const mode = perm.dataset.settingsPermissions;
+      const send = async () => {
+        const result = await settingsSend('config.permissions', mode === 'full' ? {mode, confirm:true} : {mode}, 'permissions');
+        if (result.ok) window.orch.toast('Saved. New agent runs use ' + capitalise(mode) + '.', 'ok');
+      };
+      if (mode !== 'full') { await send(); return; }
+      perm.checked = false;  // stays on the old choice until the person says Yes
+      settingsConfirm('Let the agent do everything?', FULL_WARNING, '', 'Yes, use Full', send);
+      return;
+    }
     const control = event.target.closest('[data-settings-agent]');
     if (!control || snapshot || settingsBusy.has('agent')) return;
     const agent = array(state.settings?.agents).find(agent => agent.name === control.dataset.settingsAgent);
@@ -1014,6 +1094,17 @@
       locks.delete('agent-bar'); control.disabled = false;
       render();
       window.orch.toast(result.ok ? (op === 'run.start' ? 'Started' : 'Stopped') : result.text, result.ok ? 'ok' : 'error');
+      return;
+    }
+    if (action === 'status-set') {
+      const t = ticketOf(control.dataset.ticket), status = control.dataset.status, lock = 'status-' + control.dataset.ticket;
+      if (!t || t.status === status || locks.has(lock)) return;
+      locks.add(lock);
+      const result = await act('ticket.patch', {ticket:t.id, data:{status}, if_revision:t.revision});
+      locks.delete(lock);
+      render();
+      const label = STATUS_CHOICES.find(([value]) => value === status)?.[1] || status;
+      window.orch.toast(result.ok ? 'Moved to ' + label : result.text + (result.status === 409 ? ' Reload the page and try again.' : ''), result.ok ? 'ok' : 'error');
       return;
     }
     if (action === 'new') ticketForm();
