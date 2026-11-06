@@ -116,3 +116,17 @@ def test_gitignore_keeps_crlf_and_is_idempotent(proj):
     assert raw == b"a/\r\nb/\r\n# orch:addon:hello\r\nx/\r\n# /orch:addon:hello\r\n"
     addons._set_gitignore(proj, "hello", [])
     assert (proj / ".gitignore").read_bytes() == b"a/\r\nb/\r\n"
+
+
+def test_shipped_local_addons_are_recommended_and_server_ones_are_not():
+    """`orch init --recommended` only does something when manifests say so: dashboard, automation, focus."""
+    import tomllib
+    from pathlib import Path
+
+    base = Path(__file__).resolve().parents[2] / "workspace-addons"
+    got = {}
+    for f in sorted(base.glob("*/src/*/orch-addon.toml")):
+        m = tomllib.loads(f.read_text(encoding="utf-8"))
+        got[m["name"]] = m.get("recommended", False)
+    assert got["dashboard"] and got["automation"] and got["focus"], got
+    assert not any(v for k, v in got.items() if k not in ("dashboard", "automation", "focus")), got

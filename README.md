@@ -97,7 +97,7 @@ $ orch needs
 
 1. `orch init` creates `.orch/`, asks which agent to use, and teaches that agent about orch.
 2. Make a ticket, add tasks, and start your agent on it. `orch needs` lists what waits for you.
-3. More, when you want it: `orch addon add dashboard`, `focus` or `automation` ([docs/addons.md](docs/addons.md)).
+3. More, when you want it: `orch init --recommended` turns on the dashboard, focus and automation add-ons in one step; or add them one by one with `orch addon add <name>` ([docs/addons.md](docs/addons.md)).
 4. Optional: publish and relay. Your admin clicks **Add workspace** on the admin page and gets a short text for your agent.
 5. Later: `orch update` brings orch and the add-ons up to date.
 
