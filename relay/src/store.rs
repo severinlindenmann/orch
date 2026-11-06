@@ -54,6 +54,7 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
     }
     // When the phone paired (L3): broadcasts to `phones` from before are not shown to it.
     let _ = c.execute("ALTER TABLE phones ADD COLUMN paired_at INTEGER", []);
+    crate::groups::init(c)?;
     Ok(())
 }
 
@@ -413,15 +414,25 @@ pub fn valid_tags(a: &[Value]) -> Result<Vec<String>, &'static str> {
         .collect()
 }
 
+/// What `from` may send to `to`: its pair rule, plus messages and files when both are in one group that lets its
+/// members message each other. `None` = no rule and no such group.
 pub fn rule_flags(c: &Connection, from: &str, to: &str) -> Option<[bool; 4]> {
-    c.query_row(
-        "SELECT text,files,delegate,start FROM rules WHERE from_id=?1 AND to_id=?2",
-        [from, to],
-        |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?]),
-    )
-    .optional()
-    .ok()
-    .flatten()
+    let rule = c
+        .query_row(
+            "SELECT text,files,delegate,start FROM rules WHERE from_id=?1 AND to_id=?2",
+            [from, to],
+            |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?]),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    if crate::groups::may_talk(c, from, to) {
+        let mut f = rule.unwrap_or([false; 4]);
+        f[0] = true;
+        f[1] = true;
+        return Some(f);
+    }
+    rule
 }
 
 fn can(f: Option<[bool; 4]>) -> Value {
@@ -432,9 +443,12 @@ fn can(f: Option<[bool; 4]>) -> Value {
 /// workspaces.schema.json: every workspace with a pair rule to or from `me`.
 pub fn directory(c: &Connection, me: &str) -> rusqlite::Result<Value> {
     let mut st = c.prepare(&format!(
-        "SELECT {WS_CARD_COLS} FROM workspaces WHERE id!=?1 AND (
-           id IN (SELECT to_id FROM rules WHERE from_id=?1) OR id IN (SELECT from_id FROM rules WHERE to_id=?1))
-         ORDER BY name"
+        "SELECT {} FROM workspaces WHERE id!=?1 AND (
+           id IN (SELECT to_id FROM rules WHERE from_id=?1) OR id IN (SELECT from_id FROM rules WHERE to_id=?1)
+           OR id IN ({}))
+         ORDER BY name",
+        WS_CARD_COLS,
+        crate::groups::TALK_PEERS_SQL
     ))?;
     let cards: Vec<Value> = st.query_map([me], ws_card)?.collect::<Result<_, _>>()?;
     let items: Vec<Value> = cards
@@ -493,7 +507,7 @@ pub fn phone_workspaces(c: &Connection, pid: &str) -> Vec<String> {
     .unwrap_or_default()
 }
 
-/// `me` plus every workspace connected to it by a pair rule.
+/// `me` plus every workspace connected to it by a pair rule or a group that lets its members message each other.
 pub fn related(c: &Connection, me: &str) -> Vec<String> {
     let mut v = vec![me.to_string()];
     if let Ok(mut st) = c.prepare(
@@ -503,6 +517,7 @@ pub fn related(c: &Connection, me: &str) -> Vec<String> {
             v.extend(rows.flatten());
         }
     }
+    v.extend(crate::groups::talk_peers(c, me));
     v
 }
 

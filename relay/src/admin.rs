@@ -4,7 +4,7 @@ use crate::error::*;
 use crate::state::AppState;
 use crate::store::{self, msg_from_row, msg_json, MSG_COLS};
 use crate::util::*;
-use crate::{auth, shared};
+use crate::{auth, groups, shared};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -58,6 +58,11 @@ pub fn router(app: AppState) -> Router {
         .route(
             "/admin/api/workspaces/:id/profile/reject",
             post(reject_profile),
+        )
+        .route("/admin/api/groups", get(list_groups).post(add_group))
+        .route(
+            "/admin/api/groups/:id",
+            axum::routing::patch(edit_group).delete(del_group),
         )
         .route("/admin/api/rules", get(get_rules).put(put_rules))
         .route("/admin/api/messages", get(messages))
@@ -140,6 +145,7 @@ async fn list_ws(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> 
         )?;
         w["unread"] = n.into();
         w["pending"] = store::pending(&c, w["id"].as_str().unwrap());
+        w["group"] = groups::group_of(&c, w["id"].as_str().unwrap()).into();
     }
     Ok(Json(json!({"items": items, "next": null})))
 }
@@ -165,15 +171,42 @@ async fn add_ws(
     let desc = parse_description(&v["description"])?;
     let id = rand_id("ws_", 10);
     let token = rand_token("orn_", 32);
-    app.db.lock().unwrap().execute(
+    let mut c = app.db.lock().unwrap();
+    // One transaction: a bad group (or a taken new group name) creates nothing.
+    let tx = c.transaction()?;
+    let grp = match (v.get("group"), v.get("new_group")) {
+        (Some(g), None) if !g.is_null() => {
+            let g = g.as_str().unwrap_or("");
+            if !groups::exists(&tx, g) {
+                return Err(invalid("No such group."));
+            }
+            Some(g.to_string())
+        }
+        (None, Some(n)) if !n.is_null() => Some(
+            groups::create(&tx, &json!({"name": n}))?["id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        ),
+        (None, None) => None,
+        _ => return Err(invalid("Send either `group` or `new_group`, not both.")),
+    };
+    tx.execute(
         "INSERT INTO workspaces(id,name,description,tags,token_hash,created_at,description_by,tags_by) VALUES(?1,?2,?3,?4,?5,?6,'admin','admin')",
         params![id, name, desc, serde_json::to_string(&tags).unwrap(), token_hash(&token), now()],
     )?;
-    let p = prompt(&app.cfg.public_url, &id, &token, !desc.is_empty());
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({"id": id, "token": token, "prompt": p})),
-    ))
+    let mut out = json!({"id": id, "token": token, "group": null});
+    if let Some(g) = &grp {
+        let affected = groups::join(&tx, &id, g)?;
+        store::bump_and_hint(&tx, &app.key, &affected)?;
+        out["group"] = g.clone().into();
+        out["shared"] = groups::gives(&tx, g)?;
+    }
+    tx.commit()?;
+    drop(c);
+    app.notify.notify_waiters();
+    out["prompt"] = prompt(&app.cfg.public_url, &id, &token, !desc.is_empty()).into();
+    Ok((StatusCode::CREATED, Json(out)))
 }
 
 async fn edit_ws(
@@ -188,6 +221,13 @@ async fn edit_ws(
     if !store::ws_exists(&c, &id) {
         return Err(not_found("No such workspace."));
     }
+    let new_group = match v.get("group") {
+        None => None,
+        Some(g) => match g.as_str() {
+            Some(g) if groups::exists(&c, g) => Some(g.to_string()),
+            _ => return Err(invalid("No such group.")),
+        },
+    };
     if let Some(n) = v.get("name") {
         let n = n.as_str().unwrap_or("").trim();
         if n.is_empty() {
@@ -208,7 +248,12 @@ async fn edit_ws(
             params![id, serde_json::to_string(&t).unwrap()],
         )?;
     }
-    let rel = store::related(&c, &id);
+    let mut rel = store::related(&c, &id);
+    if let Some(g) = new_group {
+        if groups::group_of(&c, &id).as_deref() != Some(g.as_str()) {
+            rel.extend(groups::join(&c, &id, &g)?);
+        }
+    }
     store::bump_and_hint(&c, &app.key, &rel)?;
     drop(c);
     app.notify.notify_waiters();
@@ -327,6 +372,7 @@ async fn del_ws(
         "DELETE FROM workspaces WHERE id=?1",
         "DELETE FROM rules WHERE from_id=?1 OR to_id=?1",
         "DELETE FROM assign WHERE ws=?1",
+        "DELETE FROM ws_group WHERE ws=?1",
         "DELETE FROM webhooks WHERE workspace=?1",
     ] {
         c.execute(sql, [&id])?;
@@ -346,6 +392,61 @@ async fn del_ws(
         }
     }
     store::bump_and_hint(&c, &app.key, &rel)?;
+    drop(c);
+    app.notify.notify_waiters();
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------- groups ----------
+
+async fn list_groups(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {
+    guard(&app, &h)?;
+    let c = app.db.lock().unwrap();
+    Ok(Json(groups::list(&c)?))
+}
+
+async fn add_group(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    body: Bytes,
+) -> Res<(StatusCode, Json<Value>)> {
+    guard(&app, &h)?;
+    let v = parse_body(&body)?;
+    let c = app.db.lock().unwrap();
+    Ok((StatusCode::CREATED, Json(groups::create(&c, &v)?)))
+}
+
+async fn edit_group(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Res<Json<Value>> {
+    guard(&app, &h)?;
+    let v = parse_body(&body)?;
+    let mut c = app.db.lock().unwrap();
+    let tx = c.transaction()?;
+    let (card, affected) = groups::edit(&tx, &id, &v)?;
+    if !affected.is_empty() {
+        store::bump_and_hint(&tx, &app.key, &affected)?;
+    }
+    tx.commit()?;
+    drop(c);
+    app.notify.notify_waiters();
+    Ok(Json(card))
+}
+
+async fn del_group(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Res<StatusCode> {
+    guard(&app, &h)?;
+    let c = app.db.lock().unwrap();
+    let affected = groups::delete(&c, &id)?;
+    if !affected.is_empty() {
+        store::bump_and_hint(&c, &app.key, &affected)?;
+    }
     drop(c);
     app.notify.notify_waiters();
     Ok(StatusCode::NO_CONTENT)
@@ -593,7 +694,19 @@ async fn put_shared(
         }
     };
     let c = app.db.lock().unwrap();
+    let is_new: bool = c.query_row(
+        &format!(
+            "SELECT NOT EXISTS(SELECT 1 FROM {} WHERE name=?1)",
+            shared::table(&kind)
+        ),
+        [&name],
+        |r| r.get(0),
+    )?;
     let ver = shared::put_item(&c, &app.key, &kind, &name, &value)?;
+    // A new tool goes to the members of every group whose defaults include its kind (an update changes no one's access).
+    if is_new {
+        groups::grant_new_item(&c, &kind, &name)?;
+    }
     let affected = shared::assigned_ws(&c, &kind, &name);
     store::bump_and_hint(&c, &app.key, &affected)?;
     drop(c);
