@@ -1670,6 +1670,246 @@
      }
     }
    }
+  },
+  {
+   "name": "artifact-kinds",
+   "ok": true,
+   "why": "html, pr and commit are url kinds; id + rev name an artifact revision for feedback",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_artif01",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "T",
+      "status": "open",
+      "running": false,
+      "checklist": [],
+      "done": 0,
+      "total": 0,
+      "history_tail": [],
+      "attachments": [
+       {
+        "kind": "html",
+        "title": "Q3 board page",
+        "url": "https://pages.example.ch/f/f_0123456789abcdef",
+        "at": "2026-11-06T09:38:00Z",
+        "id": "a_ee3652384f1b",
+        "rev": "f_0123456789abcdef",
+        "label": "Published page",
+        "icon": "link"
+       },
+       {
+        "kind": "pr",
+        "title": "Add CSV export for invoices",
+        "url": "https://github.com/acme/pilatus/pull/42",
+        "at": "2026-11-06T09:38:00Z",
+        "id": "a_9b27f17f5357",
+        "rev": "9fceb02d0ae598e95dc970b74767f19372d61af8",
+        "label": "GitHub · Pull request",
+        "icon": "github",
+        "mono": "GH",
+        "status": "open"
+       },
+       {
+        "kind": "commit",
+        "title": "Fix rounding in totals",
+        "url": "https://github.com/acme/pilatus/commit/9fceb02d0ae598e95dc970b74767f19372d61af8",
+        "at": "2026-11-06T09:38:00Z",
+        "id": "a_b77e8c387339",
+        "rev": "9fceb02d0ae598e95dc970b74767f19372d61af8"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:38:00Z",
+        "id": "a_74db4d487faf",
+        "rev": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "pr-with-blob",
+   "ok": false,
+   "why": "url kinds never carry blob_id",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_artif01",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "T",
+      "status": "open",
+      "running": false,
+      "checklist": [],
+      "done": 0,
+      "total": 0,
+      "history_tail": [],
+      "attachments": [
+       {
+        "kind": "pr",
+        "title": "Add CSV export for invoices",
+        "url": "https://github.com/acme/pilatus/pull/42",
+        "at": "2026-11-06T09:38:00Z",
+        "id": "a_9b27f17f5357",
+        "rev": "9fceb02d0ae598e95dc970b74767f19372d61af8",
+        "label": "GitHub · Pull request",
+        "icon": "github",
+        "mono": "GH",
+        "status": "open",
+        "blob_id": "b_abcdef0123456789"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "html-without-url",
+   "ok": false,
+   "why": "html needs url",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_artif01",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "T",
+      "status": "open",
+      "running": false,
+      "checklist": [],
+      "done": 0,
+      "total": 0,
+      "history_tail": [],
+      "attachments": [
+       {
+        "kind": "html",
+        "title": "Q3 board page",
+        "at": "2026-11-06T09:38:00Z",
+        "id": "a_ee3652384f1b",
+        "rev": "f_0123456789abcdef",
+        "label": "Published page",
+        "icon": "link"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "artifact-id-bad",
+   "ok": false,
+   "why": "id is a_ + 12 hex characters",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_artif01",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "T",
+      "status": "open",
+      "running": false,
+      "checklist": [],
+      "done": 0,
+      "total": 0,
+      "history_tail": [],
+      "attachments": [
+       {
+        "kind": "commit",
+        "title": "Fix rounding in totals",
+        "url": "https://github.com/acme/pilatus/commit/9fceb02d0ae598e95dc970b74767f19372d61af8",
+        "at": "2026-11-06T09:38:00Z",
+        "id": "a_XYZ",
+        "rev": "9fceb02d0ae598e95dc970b74767f19372d61af8"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "rev-with-space",
+   "ok": false,
+   "why": "rev is one word",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_artif01",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "T",
+      "status": "open",
+      "running": false,
+      "checklist": [],
+      "done": 0,
+      "total": 0,
+      "history_tail": [],
+      "attachments": [
+       {
+        "kind": "file",
+        "title": "q3-summary.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:38:00Z",
+        "id": "a_74db4d487faf",
+        "rev": "two words"
+       }
+      ]
+     }
+    }
+   }
   }
  ]
 }
