@@ -359,3 +359,24 @@ def test_mac_ticket_reaches_the_phone_and_caps_and_done_window(proj, run, new_ti
     assert 1 <= len(sent) <= 2 and old not in sent and set(sent) <= set(made)
     assert phone_view.sync_open(proj) == made[:0] or True
     assert old not in {m["ticket"] for m in conn.sent}
+
+
+def test_phone_chat_hides_settings_notes_and_names_the_phone(proj, new_ticket, monkeypatch):
+    from orch import relay
+
+    tid = new_ticket("Chart")
+    monkeypatch.setattr(relay, "name_of", lambda root, i: "My iPhone" if i == PHONE else i)
+
+    def op(t):
+        tickets.add_history(t, f"agent:relay from {PHONE}", "Set ext.relay", "cli")
+        tickets.add_history(t, f"agent:relay from {PHONE}", "Removed ext.relay", "cli")
+        tickets.add_history(t, f"agent:relay from {PHONE}", "From My iPhone: Make the Q3 chart", "phone")
+
+    tickets.apply_op(proj, tid, op)
+    hist = phone_view.build(proj, tickets.load(proj, tid), [])["history_tail"]
+    shown = [
+        (h["who"], h["role"], h["text"]) for h in hist if "relay" in h["who"].lower() or "iPhone" in h["who"]
+    ]
+    assert shown == [("My iPhone", "person", "Make the Q3 chart")]
+    assert not any("settings" in h["text"] for h in hist)
+    assert not any(PHONE in h["who"] for h in hist)

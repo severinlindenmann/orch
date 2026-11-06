@@ -908,6 +908,18 @@ def sync_phone_views(root: Path) -> None:
         phone_view.sync(root)
 
 
+def _hint_applied(root: Path, m: dict) -> bool:
+    """A refresh-hint for a version `orch relay refresh` has already installed (or an older one)."""
+    v = (m.get("body") or {}).get("version")
+    have = net.read_json(net.secrets_dir(root) / "shared.json", {})
+    return (
+        isinstance(v, int)
+        and isinstance(have, dict)
+        and isinstance(have.get("version"), int)
+        and v <= have["version"]
+    )
+
+
 def inbox(root: Path, wait: int = 0) -> list[dict]:
     """Pull, save, journal, ack, then handle the ones not seen. Returns [{message, note, allowed}]."""
     with contextlib.suppress(Refused):
@@ -945,6 +957,10 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                         note, applied = _phone_text(root, m)
                         auto = True
                         _mark_seen(root, m["id"])  # last
+            elif typ == "refresh-hint" and _hint_applied(root, m):
+                with locked(root):
+                    _mark_seen(root, m["id"])  # the refresh already ran for this version: nothing to tell
+                continue
             elif typ in ("delegate", "start") and not _allowed_or_made(root, m):
                 with locked(root):
                     applied = _ensure_allow_question(root, m)
