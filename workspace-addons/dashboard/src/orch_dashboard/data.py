@@ -10,6 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 STATUS_ORDER = ["active", "waiting", "open", "done", "dropped"]
 _NAME = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
@@ -176,6 +177,50 @@ def add_link_views(tickets: list[dict], kinds: list[dict]) -> None:
         for ln in t.get("links") or []:
             if isinstance(ln, dict) and isinstance(ln.get("url"), str):
                 ln["view"] = links.describe(ln, kinds)
+                ln["view"].update(shown_type=shown_type(ln["view"].get("label"), ln["url"], links),
+                                  **dict(zip(("host_head", "domain"), host_parts(ln["url"]))))
+
+
+# What a link row says it is: one rule (the phone app has the same one, LinkFace in ChatParts.swift).
+# Type: an allowlist. Each " · " part is a known site's name, kept only on that site's own address, or a plain
+# label of letters, digits, spaces and "-" (ASCII and precomposed Latin letters), at most 24, naming no site; else
+# dropped, and with nothing left the type is "Link". Host: the registrable domain (never cut) and the rest before it.
+_WORD = r"[A-Za-z0-9\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F-]+"
+_PLAIN = re.compile(rf"{_WORD}(?: {_WORD})*")
+TWO_PART_SUFFIXES = frozenset({
+    "co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "ne.jp", "or.jp",
+    "com.br", "com.cn", "com.mx", "co.in", "co.za", "com.tr", "com.sg", "com.hk", "co.kr", "github.io", "gitlab.io"})
+
+
+def shown_type(label, url: str, links) -> str:
+    names = {h["name"].lower() for h in links.known_sites()["hosts"]}
+    on = (links.site(url) or {}).get("name", "").lower()
+    parts = []
+    for p in (label if isinstance(label, str) else "").split(" · "):
+        if p.lower() in names:
+            if p.lower() == on:
+                parts.append(p)
+        elif len(p) <= 24 and _PLAIN.fullmatch(p) and not any(re.search(rf"\b{re.escape(n)}\b", p.lower()) for n in names):
+            parts.append(p)  # a plain label that names no site ("GitHub PR" off GitHub is just "Link")
+    return " · ".join(parts) or "Link"
+
+
+def domain(host: str) -> str:
+    """The registrable part of a host (eTLD+1): github.com.evil.example -> evil.example. An IP stays whole."""
+    parts = host.split(".")
+    if len(parts) <= 2 or all(x.isdigit() for x in parts) or ":" in host:
+        return host
+    return ".".join(parts[-3:] if ".".join(parts[-2:]) in TWO_PART_SUFFIXES else parts[-2:])
+
+
+def host_parts(url: str) -> tuple[str, str]:
+    """(the host before the domain, e.g. "gist.", the domain)."""
+    try:
+        host = (urlsplit(url).hostname or "").lower().removeprefix("www.")
+    except ValueError:
+        host = ""
+    d = domain(host)
+    return host[: len(host) - len(d)], d
 
 
 def _consent(r: dict) -> str:

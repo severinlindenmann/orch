@@ -124,23 +124,22 @@ def test_a_link_always_shows_its_real_host_and_no_borrowed_site_icon():
     data.add_link_views([t], kinds)
     v = t["links"][0]["view"]
     assert (v["label"], v["icon"], v["host"]) == ("GitHub PR", "link", "evil.example")
-    src = (data.Path(data.__file__).parent / "web" / "app.js").read_text()
-    assert "h('span', {className:'lk-host'}, hostOf(url))" in src and ".lk .t .lk-host{flex:none" in (src_css := (
-        data.Path(data.__file__).parent / "web" / "style.css").read_text())
-    assert src_css
+    assert (v["shown_type"], v["host_head"], v["domain"]) == ("Link", "", "evil.example")
 
 
-def test_link_type_is_one_short_line_and_never_an_address():
-    """Runs the page's own oneLine/linkType in node: a long type with github.com is dropped, bidi and breaks go."""
-    import shutil
-    import subprocess
-    if not shutil.which("node"):
-        pytest.skip("node is not installed")
+def test_link_type_is_an_allowlist_and_the_domain_is_the_registrable_part():
+    from orch import links
+
+    evil = "https://github.com.evil.example/x"
+    for label in ("github\u0323com", "github\uff0ecom", "GitHub", "Pull\u202erequest", "a" * 25, "x.y", "a  b", "My GitHub PR", "GitHub-PR"):
+        assert data.shown_type(label, evil, links) == "Link", label
+    assert data.shown_type("GitHub · Pull request", evil, links) == "Pull request"
+    assert data.shown_type("GitHub · Pull request", "https://github.com/a/b/pull/1", links) == "GitHub · Pull request"
+    assert data.shown_type("Kampagne Zürich", evil, links) == "Kampagne Zürich"
+    assert data.host_parts(evil) == ("github.com.", "evil.example")
+    assert data.host_parts("https://www.github.com/a") == ("", "github.com")
+    assert data.host_parts("https://shop.example.co.uk/") == ("shop.", "example.co.uk")
+    assert data.host_parts("http://10.0.0.5:8080/") == ("", "10.0.0.5")
     src = (data.Path(data.__file__).parent / "web" / "app.js").read_text()
-    lines = [ln for ln in src.splitlines() if ln.strip().startswith(("const clean =", "const oneLine =", "const linkType ="))]
-    assert len(lines) == 3
-    js = "\n".join(lines) + """
-console.log(JSON.stringify([linkType({label: 'GitHub PR github.com and a very long tail to push the host out'}),
-  linkType({label: 'Pull\\u202E\\nrequest\\u200B'}), linkType({label: 'a'.repeat(80)}).length, linkType({label: 'github\\uFF0Ecom'})]));"""
-    out = subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout
-    assert json.loads(out) == ["", "Pull request", 32, ""]
+    css = (data.Path(data.__file__).parent / "web" / "style.css").read_text()
+    assert "h('span', {className:'lk-dom'}" in src and ".lk .t .lk-dom{flex:none" in css and "direction:rtl" in css
