@@ -143,6 +143,8 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         var size: Int? = nil
         var at: String? = nil
         var id: String { [kind, blobId ?? url ?? name ?? title ?? "", at ?? ""].joined(separator: "|") }
+        /// What a person reads: the proof title, else the file name.
+        var label: String? { title ?? name }
         init(kind: String = "file", title: String? = nil, url: String? = nil, blobId: String? = nil, name: String? = nil, size: Int? = nil, at: String? = nil) {
             self.kind = kind; self.title = title; self.url = url; self.blobId = blobId; self.name = name; self.size = size; self.at = at
         }

@@ -198,16 +198,16 @@ struct AttachmentTile: View {
             if let id = attachment.blobId, BlobID.isValid(id) {
                 VStack(alignment: .leading, spacing: 6) {
                     BlobImage(id: id).frame(maxWidth: .infinity).frame(height: large ? 140 : 84).clipShape(RoundedRectangle(cornerRadius: 8))
-                    Text(attachment.name ?? attachment.title ?? "Image").themeFont(12).foregroundStyle(Theme.text).lineLimit(1)
+                    Text(attachment.label ?? "Image").themeFont(12).foregroundStyle(Theme.text).lineLimit(1)
                 }
             } else {
                 // A picture that only has an address is a link card: nothing loads until the person taps it.
-                row(symbol: "photo", title: attachment.title ?? attachment.name ?? "Image", sub: SafeLink.host(attachment.url) ?? "")
+                row(symbol: "photo", title: attachment.label ?? "Image", sub: SafeLink.host(attachment.url) ?? "")
             }
         case "link":
             row(symbol: "link", title: attachment.title ?? SafeLink.host(attachment.url) ?? "Link", sub: SafeLink.host(attachment.url) ?? "")
         default:
-            row(symbol: "doc", title: attachment.title ?? attachment.name ?? "File", sub: attachment.size.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "")
+            row(symbol: "doc", title: attachment.label ?? "File", sub: attachment.size.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "")
         }
     }
     private func row(symbol: String, title: String, sub: String) -> some View {
