@@ -14,7 +14,7 @@
     },
 
     "send_request": {
-      "type": "object", "required": ["to", "client_id"],
+      "type": "object", "required": ["to"],
       "anyOf": [{ "required": ["text"] }, { "required": ["attachments"] }, { "required": ["voice"] }, { "required": ["location"] }, { "required": ["feedback"] }],
       "properties": {
         "to": { "$ref": "#/$defs/ws_id" },
@@ -34,12 +34,12 @@
       ]
     },
     "send_response": {
-      "type": "object", "required": ["id", "client_id"], "additionalProperties": false,
-      "properties": { "id": { "$ref": "#/$defs/msg_id" }, "client_id": { "$ref": "#/$defs/client_id" }, "duplicate": { "const": true } }
+      "type": "object", "required": ["id"], "additionalProperties": false,
+      "properties": { "id": { "$ref": "#/$defs/msg_id" }, "client_id": { "oneOf": [{ "$ref": "#/$defs/client_id" }, { "type": "null" }] }, "duplicate": { "const": true } }
     },
 
     "answer_request": {
-      "type": "object", "required": ["question_message_id", "answer", "client_id"],
+      "type": "object", "required": ["question_message_id", "answer"],
       "properties": {
         "question_message_id": { "$ref": "#/$defs/msg_id" },
         "answer": { "type": "string", "minLength": 1 },
