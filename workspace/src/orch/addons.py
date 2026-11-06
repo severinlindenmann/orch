@@ -815,7 +815,7 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
     ONE JSON object `{ticket, links: [{url, title?, status?, thumb?}], ext?: {<name>: {...}}, say?}`; core
     merges it into the ticket (tickets.merge_refresh) and says what changed.
     The add-on never writes the ticket itself."""
-    from orch import tickets
+    from orch import links, tickets
 
     rest = argv[argv.index("--") + 1 :] if "--" in argv else []
     if len(rest) != 1:
@@ -834,7 +834,7 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
         raise Refused(f"The {name} add-on answered for another ticket.")
     t, changes = tickets.merge_refresh(root, tid, name, out, by, active_ext_schema(root, name))
     say = out.get("say") if isinstance(out.get("say"), str) else ""
-    say = re.sub(r"[\x00-\x1f\x7f]", " ", say)[:300]
+    say = links.one_line(say, 300)
     key = t.get("key") or t["id"]
     if "--json" in argv:
         print(json.dumps({"ticket": t["id"], "key": key, "changes": changes, "say": say}, ensure_ascii=False))
@@ -843,7 +843,11 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
         print(f"{key}  {say or 'Nothing to update.'}")
         return 0
     for c in changes:
-        print(f"{key}  {c['name']}  {c['field']}: {c['old'] or '-'} → {c['new'] or '-'}")
+        shown = [
+            links.one_line(x if x is not None and x != "" else "-", 120)
+            for x in (c["name"], c["old"], c["new"])
+        ]
+        print(f"{key}  {shown[0]}  {c['field']}: {shown[1]} → {shown[2]}")
     if say:
         print(say)
     return 0

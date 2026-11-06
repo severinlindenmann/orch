@@ -385,3 +385,44 @@ def test_phone_view_link_carries_label_icon_status(proj, run, hello, tid):  # no
     )
     plain = by_url["https://intranet.acme.local/x"]
     assert (plain["label"], plain["icon"]) == ("Link", "link") and "status" not in plain
+
+
+# ---- no terminal escapes from titles, add-on answers or fields -------------------------------------------
+
+ESC = "\x1b]8;;https://evil.example\x07click\x1b[2J"
+C1 = "\x9b31m"
+
+
+def _clean(text: str) -> bool:
+    return not any((ord(c) < 32 and c != "\n") or 0x7F <= ord(c) <= 0x9F or c in "\u202e\u200b" for c in text)
+
+
+def test_link_title_escapes_are_cut_on_write_and_show(proj, run, tid):  # noqa: F811
+    code, out, _ = run("link", "add", tid, "https://example.com/a", "--title", f"Spec{ESC}{C1}\u202e end")
+    assert code == 0 and _clean(out)
+    title = tickets.load(proj, tid)["links"][0]["title"]
+    assert _clean(title) and title.startswith("Spec") and title.endswith("end")
+    t = tickets.load(proj, tid)
+    t["links"].append(
+        {"kind": "link", "url": "https://example.com/b", "title": f"old{ESC}{C1}"}
+    )  # an old file
+    tickets.save(proj, t)
+    for argv in (("link", "list", tid), ("ticket", "show", tid)):
+        assert _clean(run(*argv)[1].replace("\n", " "))
+    assert run("link", "add", tid, f"https://example.com/{C1}x")[0] == 2
+
+
+def test_refresh_title_and_say_escapes_are_cut(proj, tid):
+    tickets.link_add(proj, tid, "https://github.com/a/b/pull/1", "human:x", "github-pr")
+    out = {"links": [{"url": "https://github.com/a/b/pull/1", "title": f"PR{ESC}{C1}"}], "say": ESC}
+    t, changes = tickets.merge_refresh(proj, tid, "hello", out, "human:x", None)
+    assert _clean(t["links"][0]["title"]) and _clean(changes[0]["new"]) and _clean(t["history"][-1]["text"])
+    assert _clean(links.one_line(ESC + C1))
+
+
+def test_text_field_escapes_are_cut(proj, run, hello, tid):  # noqa: F811
+    install(run, hello)
+    code, out, _ = run("ticket", "set", tid, "hello.audience", f"a\x1b[2J{C1}b")
+    assert code == 0 and _clean(out) and _clean(tickets.load(proj, tid)["ext"]["hello"]["audience"])
+    code, _, err = run("ticket", "set", tid, "hello.channel", f"x{C1}{ESC}")
+    assert code == 2 and _clean(err.replace("\n", " "))

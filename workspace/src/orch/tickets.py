@@ -783,9 +783,9 @@ def link_add(
     url = links.check_url(url)
     if kind is not None and not links.KIND_RE.fullmatch(kind):
         raise Refused("A link kind is lowercase letters, digits and dashes, e.g. github-pr.")
-    title = title.strip() if isinstance(title, str) else None
-    if title and (len(title) > 200 or "\n" in title):
+    if isinstance(title, str) and len(title) > 200:
         raise Refused("A link title is one line of at most 200 characters.")
+    title = links.one_line(title) if isinstance(title, str) else None
     kind = kind or links.kind_for(url, list(kinds))
     added = [True]
 
@@ -866,13 +866,17 @@ def merge_refresh(
             cur = next((ln for ln in t["links"] if isinstance(ln, dict) and ln.get("url") == u["url"]), None)
             if cur is None:
                 continue
-            name = cur.get("title") or links.short_url(cur["url"])
+            name = links.one_line(cur.get("title") or links.short_url(cur["url"]))
             for f in ("title", "status", "thumb"):
                 v = u.get(f)
                 if f not in u or v == cur.get(f):
                     continue
-                if v is not None and not (isinstance(v, str) and 0 < len(v) <= 200 and "\n" not in v):
+                if v is not None and not isinstance(v, str):
                     continue
+                if f == "title" and v is not None:
+                    v = links.one_line(v) or None
+                    if v == cur.get(f):
+                        continue
                 if f == "status" and v is not None and not links.STATUS_RE.fullmatch(v):
                     continue
                 if f == "thumb" and v is not None and not re.fullmatch(r"artifacts/[A-Za-z0-9_.-]{1,100}", v):

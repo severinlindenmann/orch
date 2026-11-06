@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from orch.errors import Refused
+from orch.text import clean_untrusted
 
 KIND_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
 STATUS_RE = re.compile(r"[a-z0-9][a-z0-9 -]{0,23}")
@@ -33,6 +34,7 @@ def check_url(url) -> str:
     """An http(s) address with a host, one line, at most 2000 characters. Returns it stripped."""
     u = url.strip() if isinstance(url, str) else ""
     bad = not u or len(u) > MAX_URL or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in u)
+    bad = bad or clean_untrusted(u, MAX_URL) != u  # C1, bidi and invisible characters
     if not bad:
         try:
             p = urlsplit(u)
@@ -42,6 +44,14 @@ def check_url(url) -> str:
     if bad:
         raise Refused("A link must be a web address that starts with https:// or http://.")
     return u
+
+
+def one_line(text, limit: int = 200) -> str:
+    """Text shown on one line (a link title, a status, an add-on's
+    `say`): control characters (C0, DEL, C1, so no terminal escapes), bidi and invisible characters go, line
+    breaks become spaces, cut to `limit`. Used on write and again when shown."""
+    t = clean_untrusted(str(text), limit * 2)
+    return " ".join(t.split())[:limit]
 
 
 def short_url(url: str) -> str:
@@ -124,13 +134,13 @@ def describe(link: dict, kinds: list[dict]) -> dict:
     name, for lists), icon key and monogram, title (stored, else the short address), status (only while
     the add-on that set it is on), group (Artifacts tab: the add-on label, else "Links") and preview."""
     url = link.get("url") if isinstance(link.get("url"), str) else ""
-    title = link.get("title") if isinstance(link.get("title"), str) and link["title"].strip() else None
+    title = one_line(link["title"]) if isinstance(link.get("title"), str) else ""
     k = next((x for x in kinds if x["kind"] == kind_of(link)), None)
     s = site(url)
     out = {
         "kind": kind_of(link),
-        "title": title or short_url(url) or "Link",
-        "short": short_url(url),
+        "title": title or one_line(short_url(url), 300) or "Link",
+        "short": one_line(short_url(url), 300),
         "status": None,
         "preview": None,
         "addon": None,

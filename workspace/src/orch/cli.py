@@ -184,7 +184,7 @@ def _show(t: dict, root: Path | None = None) -> str:
         for n, ln in rows:
             d = links.describe(ln, kinds)
             st = f" ({d['status']})" if d["status"] else ""
-            out.append(f"  {n}  {d['type']}: {d['title']}{st}  {ln['url']}")
+            out.append(f"  {n}  {d['type']}: {d['title']}{st}  {links.one_line(ln['url'], 2000)}")
     if t["history"]:
         out.append("\nRecent:")
         out += [
@@ -704,7 +704,7 @@ def _link(args, root: Path, by) -> None:
         kind = args.kind or (args.kind_opt if args.kind_opt and args.kind_opt != "link" else None)
         t, ln, added = tickets.link_add(root, args.id, url, by(), kind, args.title, kinds)
         d = links.describe(ln, kinds)
-        what = d["type"] + (f' "{ln["title"]}"' if ln.get("title") else f" {d['short']}")
+        what = d["type"] + (f' "{d["title"]}"' if ln.get("title") else f" {d['short']}")
         st = f" ({d['status']})" if d["status"] else ""
         key = t.get("key") or t["id"]
         _out(args, ln, f"Linked {key} → {what}{st}" if added else f"{key} already has this link: {what}{st}")

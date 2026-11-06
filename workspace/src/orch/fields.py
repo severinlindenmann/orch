@@ -14,6 +14,7 @@ import re
 from datetime import date
 
 from orch.errors import Refused
+from orch.links import one_line
 
 KEY_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
@@ -40,7 +41,7 @@ def field_list(schema: dict) -> list[dict]:
             continue  # objects, lists, yes/no: kept in the file, not shown as a field
         f = {
             "key": key,
-            "title": str(p.get("title") or key.replace("_", " ").capitalize())[:40],
+            "title": one_line(p.get("title") or key.replace("_", " ").capitalize(), 40),
             "type": typ,
             "read_only": p.get("readOnly") is True,
             "hidden": p.get("x-hidden") is True,
@@ -48,7 +49,7 @@ def field_list(schema: dict) -> list[dict]:
         if typ == "choice":
             labels = p.get("x-labels") if isinstance(p.get("x-labels"), dict) else {}
             f["options"] = [
-                {"value": v, "label": str(labels.get(v, v))} for v in p["enum"] if isinstance(v, str)
+                {"value": v, "label": one_line(labels.get(v, v), 40)} for v in p["enum"] if isinstance(v, str)
             ]
         out.append(f)
     return out
@@ -89,7 +90,7 @@ def parse_value(f: dict, raw: str, schema_prop: dict):
             if v.lower() in (o["value"].lower(), o["label"].lower()):
                 return o["value"]
         picks = ", ".join(o["label"] for o in f["options"])
-        raise Refused(f'Can\'t set {name} to "{v}". Pick one of: {picks}.')
+        raise Refused(f'Can\'t set {name} to "{one_line(v, 60)}". Pick one of: {picks}.')
     if f["type"] == "date":
         try:
             date.fromisoformat(v)
@@ -105,6 +106,7 @@ def parse_value(f: dict, raw: str, schema_prop: dict):
             return links.check_url(v)
         except Refused:
             raise Refused(f"{name} must be a web address that starts with https:// or http://.") from None
+    v = one_line(v, 2000)  # no control characters (terminal escapes), bidi or invisible ones
     ml = schema_prop.get("maxLength")
     if "\n" in v or (isinstance(ml, int) and len(v) > ml):
         raise Refused(f"{name} is one line of at most {ml if isinstance(ml, int) else 2000} characters.")
@@ -116,7 +118,7 @@ def shown(f: dict, value) -> str:
     if value is None:
         return "-"
     if f["type"] == "choice":
-        return next((o["label"] for o in f["options"] if o["value"] == value), str(value))
+        return next((o["label"] for o in f["options"] if o["value"] == value), one_line(value))
     if isinstance(value, float) and value.is_integer():
         value = int(value)
-    return str(value)
+    return one_line(value, 2000)
