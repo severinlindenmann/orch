@@ -48,6 +48,13 @@ To continue a ticket when a service calls: `orch relay webhook new --permanent -
 {{/webhooks}}
 {{/relay}}
 
+**Switch a repeat off, on, or remove it** (the dashboard buttons run these)
+
+    orch automation act off -- <ticket>      # stop repeating, keep the schedule listed
+    orch automation act on -- <ticket>
+    orch automation act run -- <ticket>      # start a run now
+    orch automation act delete -- <ticket>   # removes the schedule; the ticket stays
+
 **See what is planned**
 
     orch automation list       # next wake-ups and repeats
