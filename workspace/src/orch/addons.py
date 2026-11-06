@@ -260,9 +260,10 @@ def _same_python() -> list[str]:
     return ["--python", base] if sys.platform == "win32" and base else []
 
 
-def _install_tool(entries: list[dict]) -> None:
-    """Install orch with these add-ons in one uv tool env. An entry that can not be installed any more is
-    left out with a note (it stays in the registry), so one stale entry never blocks the rest."""
+def _tool_args(entries: list[dict]) -> list[str]:
+    """uv arguments that install orch with these add-ons in one uv tool env. An entry that can not be
+    installed any more is left out with a note (it stays in the registry), so one stale entry never blocks
+    the rest."""
     # --refresh: a branch zip has the same URL after every push, so never take it from uv's cache
     args = ["tool", "install", "--reinstall", "--refresh", *_same_python(), spec("workspace")]
     for e in entries:
@@ -274,7 +275,39 @@ def _install_tool(entries: list[dict]) -> None:
             )
             continue
         args += ["--with", _entry_spec(e)]
-    run_uv(args)
+    return args
+
+
+def _install_tool(entries: list[dict]) -> None:
+    run_uv(_tool_args(entries))
+
+
+def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: Path, done: str) -> bool:
+    """Reinstall orch with these add-ons, then (if `save`) store them as the registry and run the orch
+    commands in `then` with the new code. Returns False when that happens later: on Windows orch can not
+    replace its own files while it runs, so a finisher does it once this command has exited (winfinish.py).
+    """
+    from orch import winfinish
+
+    if not winfinish.needed():
+        _install_tool(entries)
+        if save:
+            _save_registry(entries)
+        for t in then:
+            reexec(t)
+        return True
+    uv = _which_uv()
+    if not uv:
+        raise Refused("uv is not installed. Run the orch install script first.")
+    reg = None
+    if save:
+        reg = (registry_path(), json.dumps(sorted(entries, key=lambda e: e["name"]), indent=2))
+    log = winfinish.start(home(), [uv, *_tool_args(entries)], then, root, done, reg)
+    print(
+        f"Windows can not replace orch while it runs, so this finishes in the background once this command "
+        f"has ended (about a minute): {done}.\nCheck with: orch addon list   Log: {log}"
+    )
+    return False
 
 
 # ---------------------------------------------------------------- manifest
@@ -583,8 +616,8 @@ def folder_hash(folder: Path) -> str:
     return h.hexdigest()
 
 
-def _record_for(root: Path, name: str, wid: str) -> dict:
-    src = next((e["source"] for e in registry() if e["name"] == name), "built-in")
+def _record_for(root: Path, name: str, wid: str, reg: list[dict] | None = None) -> dict:
+    src = next((e["source"] for e in (registry() if reg is None else reg) if e["name"] == name), "built-in")
     rec = {
         "workspace_id": wid,
         "workspace": str(root.resolve()),
@@ -597,10 +630,11 @@ def _record_for(root: Path, name: str, wid: str) -> dict:
     return rec
 
 
-def record_consent(root: Path, name: str) -> None:
-    """The user turned `name` on in this workspace, on THIS machine (not from a file that arrived by git)."""
+def record_consent(root: Path, name: str, reg: list[dict] | None = None) -> None:
+    """The user turned `name` on in this workspace, on THIS machine (not from a file that arrived by git).
+    reg: the add-on list as it will be once a pending install is done (default: as it is now)."""
     wid = workspace_id(root, create=True)
-    rec = _record_for(root, name, wid)
+    rec = _record_for(root, name, wid, reg)
     # replace this workspace's record; prune records of workspaces that no longer exist
     keep = [
         e
@@ -878,11 +912,14 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
                 m = preview_builtin(name)
                 _confirm(m, False, False)
             entry = {"name": name, "source": "built-in", "version": m["version"] if m else "0.0.0"}
+    then = [["addon", "add", entry["name"], "--project-only"]]
     if entry not in reg or entry["name"] not in discover():  # new, changed, or its package is gone
-        _install_tool([e for e in reg if e["name"] != entry["name"]] + [entry])
-        _save_registry([e for e in reg if e["name"] != entry["name"]] + [entry])
+        new = [e for e in reg if e["name"] != entry["name"]] + [entry]
+        record_consent(root, entry["name"], new)
+        _reinstall(new, save=True, then=then, root=root, done=f"{entry['name']} installed and turned on")
+        return
     record_consent(root, entry["name"])
-    reexec(["addon", "add", entry["name"], "--project-only"])
+    reexec(then[0])
 
 
 def _check_requires(root: Path, m: dict) -> None:
@@ -1048,8 +1085,7 @@ def uninstall(root: Path, name: str) -> None:
     if name not in [e["name"] for e in reg]:
         raise Refused(f"The add-on '{name}' is not installed.")
     rest = [e for e in reg if e["name"] != name]
-    _install_tool(rest)
-    _save_registry(rest)
+    _reinstall(rest, save=True, then=[], root=root, done=f"{name} removed from this computer")
 
 
 # ---------------------------------------------------------------- update
@@ -1061,13 +1097,14 @@ def update(root: Path, project_only: bool = False, after_install: bool = False) 
     if after_install:
         reg = registry()
         if reg:
-            _install_tool(reg)
-            _save_registry(reg)
-            print("Add-ons installed again: " + ", ".join(e["name"] for e in reg))
+            names = ", ".join(e["name"] for e in reg)
+            if _reinstall(reg, save=True, then=[], root=root, done=f"add-ons installed again: {names}"):
+                print("Add-ons installed again: " + names)
         return []
     if not project_only:
-        _install_tool(registry())
-        reexec(["update", "--project-only"])
+        _reinstall(
+            registry(), save=False, then=[["update", "--project-only"]], root=root, done="orch updated"
+        )
         return []
     done = []
     if (root / ".agents" / "skills" / "orch").is_dir():

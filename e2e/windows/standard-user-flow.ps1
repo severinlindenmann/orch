@@ -26,6 +26,20 @@ Check ("$v" -match "^orch ") "orch --version"
 # console, so orch would rightly ask its questions there, where nobody can answer.) NUL must never count as
 # a person at a terminal: that is the Windows hang term.is_terminal fixes.
 function O { cmd /c "orch $($args -join ' ') < NUL 2>&1" }
+# Windows can not replace orch while it runs: add-on installs and updates finish in the background once the
+# command has ended (winfinish.py). Wait for the finisher's RESULT line in the log the command printed.
+function WaitFinish($out, $what) {
+    $m = [regex]::Match("$out", 'Log: (\S+)')
+    if (-not $m.Success) { return $true }  # finished in the command itself
+    $t0 = Get-Date
+    while (((Get-Date) - $t0).TotalSeconds -lt 600) {
+        $last = Get-Content $m.Groups[1].Value -ErrorAction SilentlyContinue | Select-String '^\S+ \S+ RESULT ' | Select -Last 1
+        if ($last) { L "finisher ($what): $last"; return ("$last" -match 'RESULT ok') }
+        Start-Sleep 3
+    }
+    L "finisher ($what): no RESULT after 10 min"; return $false
+}
+$env:ORCH_AGENT = "claude"  # links .claude\skills (no agent is installed here; CI does the same)
 $p = "$env:USERPROFILE\orch-smoke"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
 L "--- init"; O init | Out-String | % { L $_ }
 Check (Test-Path "$p\.agents\skills\orch\SKILL.md") "orch init wrote the skill"
@@ -37,11 +51,15 @@ Check ($before -eq (Get-ChildItem -Recurse -Force -File | Get-FileHash | Out-Str
 L "--- ticket"; $t = O ticket new '"Windows smoke"' --json | Out-String; L $t
 Check ($LASTEXITCODE -eq 0) "orch ticket new"
 
-L "--- addon add dashboard"; O addon add dashboard --yes | Out-String | % { L $_ }
+L "--- addon add dashboard"; $out = O addon add dashboard --yes | Out-String; L $out
 Check ($LASTEXITCODE -eq 0) "orch addon add dashboard (installs from the zip, no git)"
-L "--- update"; O update | Out-String | % { L $_ }
+Check (WaitFinish $out "addon add") "dashboard install finished"
+L "--- update"; $out = O update | Out-String; L $out
 Check ($LASTEXITCODE -eq 0) "orch update"
+Check (WaitFinish $out "update") "update finished"
+Check ("$(O --version)" -match "^orch ") "orch still runs after the update"
 $list = O addon list | Out-String; L $list
 Check ($list -match "dashboard") "dashboard still installed after the update"
+Check (Test-Path "$p\.agents\skills\orch-dashboard") "dashboard skill in the workspace"
 
 if ($fails.Count) { L "RESULT fail: $($fails -join '; ')" } else { L "RESULT ok" }
