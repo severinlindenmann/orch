@@ -1,6 +1,7 @@
 """Runtime files of a background process in .orch/run/<name>/ (gitignored). A repo can still force-add files there,
 so nothing read from them is trusted alone: no symlinks are followed, a pid counts only when > 1, and the caller checks
 the process's identity before it signals anything. (Same file in orch_dashboard and orch_automation.)"""
+
 from __future__ import annotations
 
 import json
@@ -128,7 +129,9 @@ def proc_start(pid: int) -> str | None:
         finally:
             k.CloseHandle(h)
     try:
-        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5, check=False)
+        r = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5, check=False
+        )
     except (OSError, subprocess.TimeoutExpired):
         return None
     return r.stdout.strip() or None
@@ -139,7 +142,13 @@ def command(pid: int) -> str:
     if os.name == "nt":
         return ""
     try:
-        r = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5, check=False)
+        r = subprocess.run(
+            ["ps", "-ww", "-o", "command=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return ""
     return r.stdout.strip()

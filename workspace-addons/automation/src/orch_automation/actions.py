@@ -2,6 +2,7 @@
 
 Delete removes the repeat (ext.automation) and keeps the ticket and its history: tickets are never deleted here.
 """
+
 from __future__ import annotations
 
 import re
@@ -30,8 +31,13 @@ def act(root: Path, verb: str, target: str) -> dict:
         r = orchcli.run_start(root, target)
         if r["result"] == "failed":
             raise Bad(r["reason"])
-        return {"ticket": target, "result": r["result"],
-                "text": "Run started." if r["result"] == "started" else "The ticket is busy: your request waits for the current run."}
+        return {
+            "ticket": target,
+            "result": r["result"],
+            "text": "Run started."
+            if r["result"] == "started"
+            else "The ticket is busy: your request waits for the current run.",
+        }
     if not sched:
         raise Bad("This ticket has no automation to change.")
     if verb == "delete":

@@ -24,7 +24,9 @@ def test_start_status_stop(ws):
 
 
 def test_list(ws):
-    add_ticket(ws, "t_wake009", status="waiting", waiting_on={"kind": "time", "until": "2026-11-05T08:00:00Z"})
+    add_ticket(
+        ws, "t_wake009", status="waiting", waiting_on={"kind": "time", "until": "2026-11-05T08:00:00Z"}
+    )
     add_ticket(ws, "t_rep00001", ext={"automation": {"recurring": True, "cron": "0 7 * * 1"}})
     rows = describe(ws)
     assert {r["ticket"] for r in rows} == {"t_wake009", "t_rep00001"}
@@ -32,10 +34,30 @@ def test_list(ws):
 
 def test_repeat_sets_ext_and_off(ws, capsys):
     add_ticket(ws, "t_rep00002")
-    assert main(["--dir", str(ws), "repeat", "t_rep00002", "every monday 08:00", "--tz", "Europe/Zurich",
-                 "--agent", "codex", "--json"]) == 0
+    assert (
+        main(
+            [
+                "--dir",
+                str(ws),
+                "repeat",
+                "t_rep00002",
+                "every monday 08:00",
+                "--tz",
+                "Europe/Zurich",
+                "--agent",
+                "codex",
+                "--json",
+            ]
+        )
+        == 0
+    )
     t = json.loads((ws / ".orch/tickets/t_rep00002.json").read_text())
-    assert t["ext"]["automation"] == {"recurring": True, "cron": "0 8 * * 1", "tz": "Europe/Zurich", "agent": "codex"}
+    assert t["ext"]["automation"] == {
+        "recurring": True,
+        "cron": "0 8 * * 1",
+        "tz": "Europe/Zurich",
+        "agent": "codex",
+    }
     assert main(["--dir", str(ws), "repeat", "t_rep00002", "--off"]) == 0
     t = json.loads((ws / ".orch/tickets/t_rep00002.json").read_text())
     assert t["ext"]["automation"]["recurring"] is False and t["ext"]["automation"]["cron"] == "0 8 * * 1"
@@ -123,16 +145,27 @@ def test_command_line_must_name_exactly_this_folder(ws, kills, monkeypatch):
     from orch_automation import runfiles
 
     root = str(ws.resolve())
-    assert runfiles.runs_args(f"python -P -m orch_automation --dir {root} run", ["-m", "orch_automation", "--dir", root, "run"])
+    assert runfiles.runs_args(
+        f"python -P -m orch_automation --dir {root} run", ["-m", "orch_automation", "--dir", root, "run"]
+    )
     assert not runfiles.runs_args(f"python -P -m orch_automation --dir {root}2 run", ["--dir", root, "run"])
     assert not runfiles.runs_args(f"python -m orch_automation --dir {root} running", ["--dir", root, "run"])
     me = os.getpid()
     d = ws / ".orch/run/automation"
     d.mkdir(parents=True)
-    (d / "automation.json").write_text(json.dumps({"pid": me, "nonce": "1" * 32, "started": service.proc_start(me)}))
+    (d / "automation.json").write_text(
+        json.dumps({"pid": me, "nonce": "1" * 32, "started": service.proc_start(me)})
+    )
     monkeypatch.setattr(runfiles, "command", lambda pid: f"python -P -m orch_automation --dir {root}2 run")
     assert service.running_pid(ws, clean=False) is None
     assert service.stop(ws) == "not verified" and kills == []
-    (d / "automation.json").write_text(json.dumps({"pid": me, "nonce": "1" * 32, "started": service.proc_start(me)}))
+    (d / "automation.json").write_text(
+        json.dumps({"pid": me, "nonce": "1" * 32, "started": service.proc_start(me)})
+    )
     monkeypatch.setattr(runfiles, "command", lambda pid: f"python -P -m orch_automation --dir {root} run")
     assert service.running_pid(ws, clean=False) == me  # the exact folder does match (no signal sent here)
+
+
+def test_status_says_automation_and_exits_1_when_stopped(ws, capsys):
+    assert main(["--dir", str(ws), "status"]) == 1
+    assert "Automation is not running." in capsys.readouterr().out

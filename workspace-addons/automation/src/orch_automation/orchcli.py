@@ -1,4 +1,5 @@
 """Calls to the orch CLI (`$ORCH_BIN`, else `orch`) with --json. The scheduler touches tickets only through it."""
+
 from __future__ import annotations
 
 import json
@@ -34,8 +35,18 @@ def tickets(root: Path) -> list[dict]:
     """`orch ticket list --json` (a list, or {"tickets": [...]}); only well-formed tickets."""
     data = call(root, "ticket", "list", by=False)
     items = data.get("tickets", []) if isinstance(data, dict) else data
-    return [t for t in items if isinstance(t, dict) and isinstance(t.get("id"), str)
-            and ID_RE.match(t["id"]) and t.get("status")] if isinstance(items, list) else []
+    return (
+        [
+            t
+            for t in items
+            if isinstance(t, dict)
+            and isinstance(t.get("id"), str)
+            and ID_RE.match(t["id"])
+            and t.get("status")
+        ]
+        if isinstance(items, list)
+        else []
+    )
 
 
 def addon_on(root: Path, name: str) -> bool | None:
@@ -73,7 +84,17 @@ def run_start(root: Path, tid: str, text: str | None = None, agent: str | None =
     """`orch run start <tid> --by agent:automation`: all of resume / fresh / busy is decided inside core.
     Returns {"result": "started", "run", "log"} | {"result": "pending"} (ticket busy, text queued)
     | {"result": "failed", "reason": plain words}."""
-    cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--mode", "oneshot", "--json", "--by", BY]
+    cmd = [
+        os.environ.get("ORCH_BIN") or "orch",
+        "run",
+        "start",
+        tid,
+        "--mode",
+        "oneshot",
+        "--json",
+        "--by",
+        BY,
+    ]
     if agent and AGENT_RE.match(agent):  # only a name; core refuses one it does not know
         cmd += ["--agent", agent]
     if text:
@@ -90,7 +111,11 @@ def run_start(root: Path, tid: str, text: str | None = None, agent: str | None =
         return {"result": "started", "run": data.get("run"), "log": data.get("log")}
     if isinstance(data, dict) and data.get("pending") is True:
         return {"result": "pending"}
-    reason = str(data.get("error")) if isinstance(data, dict) and data.get("error") else (p.stderr.strip() or "unknown")
+    reason = (
+        str(data.get("error"))
+        if isinstance(data, dict) and data.get("error")
+        else (p.stderr.strip() or "unknown")
+    )
     if "No agent found" in reason:
         reason = "No agent set: orch config set workspace.agent <name>"
     return {"result": "failed", "reason": reason[:300]}
