@@ -84,6 +84,23 @@ class Tracker:
             self.started[tid] = run
             self._save_started()
 
+    def mark_page(self, tid: str) -> None:
+        """Once per ticket: ext.focus.page = t/<id>, so the ticket page can show 'Open live page'."""
+        want = f"t/{tid}"
+        cur = ((self.ticket(tid) or {}).get("ext") or {}).get("focus") or {}
+        if cur.get("page") == want:
+            return
+        try:
+            actions.orch(
+                self.root,
+                self.orch_bin,
+                ["ext", "set", tid, "focus", json.dumps({"page": want}), "--by", "agent:focus", "--json"],
+                timeout=20,
+            )
+        except actions.Unavailable:
+            pass
+        self.ticket_cache.pop(tid, None)
+
     def forget_started(self, tid: str) -> None:
         if self.started.pop(tid, None) is not None:
             self._save_started()
@@ -175,7 +192,9 @@ class Tracker:
                 self.ticket_cache.pop(tid, None)
         if run is None and claim.get("run") is not None:
             claim = {**claim, "run": None}  # an id that is not a run id is unknown
-        return self._shape(ticket, status, claim, board, events, self.is_generic(claim, tid))
+        v = self._shape(ticket, status, claim, board, events, self.is_generic(claim, tid))
+        v["retry_error"] = None if v["run"]["running"] else self.perms.failed.get(tid)
+        return v
 
     @staticmethod
     def _shape(
@@ -304,6 +323,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, b"not found", "text/plain")
             m = hmac.new(self.nonce.encode(), c.encode(), hashlib.sha256).hexdigest()
             return self._json(200, {"pid": os.getpid(), "mac": m})
+        path = re.sub(r"^/{2,}", "/", path)  # a surface may join the page path and the value with an extra /
         why = self._fence("GET", path.startswith("/api/"))
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
@@ -313,7 +333,7 @@ class Handler(BaseHTTPRequestHandler):
         if m:
             v = self.tracker.view(m.group(1))
             return self._json(200, v) if v else self._send(404, b"no such ticket", "text/plain")
-        if path == "/" or re.fullmatch(r"/t/t_[a-z0-9]{6,16}", path):
+        if path == "/" or re.fullmatch(r"(/t)?/t/t_[a-z0-9]{6,16}", path):
             return self._send(200, _web("index.html"), TYPES[".html"])
         if path.startswith("/kit/") and path[5:] in KIT_FILES:
             return self._send(200, _kit(path[5:]), TYPES["." + path.rsplit(".", 1)[1]])
@@ -355,6 +375,7 @@ class Handler(BaseHTTPRequestHandler):
         self.tracker.status_cache.clear()
         if code == 200 and body.get("op") == "run.start":
             self.tracker.note_started(args["ticket"], (extra or {}).get("run"))
+            self.tracker.mark_page(args["ticket"])
         elif code == 200 and body.get("op") == "run.stop":
             self.tracker.forget_started(args["ticket"])
         if code != 200:
