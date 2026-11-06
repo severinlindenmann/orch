@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 REGISTRY: dict[str, dict] = {}
-V2_NEEDS_SERVERS = {"V2-P6"}  # v2 scenarios that start the local relay/publish servers
+V2_NEEDS_SERVERS = {"V2-P6", "V2-M1"}  # v2 scenarios that start the local relay/publish servers
 
 
 def scenario(sid: str, slow: bool = False, local_only: bool = False):
