@@ -545,6 +545,9 @@ def test_ext_unset_missing_is_quiet_and_if_revision_is_checked(proj, run, new_ti
     assert json.loads(run("ticket", "show", tid, "--json")[1])["revision"] == before
     run("ext", "set", tid, "other", '{"a": 1}')
     assert run("ext", "unset", tid, "other.a", "--if-revision", "99")[0] == 2
+    rev = json.loads(run("ticket", "show", tid, "--json")[1])["revision"]
+    assert run("ext", "unset", tid, "other.zzz", "--if-revision", str(rev))[0] == 0  # absent + right revision
+    assert json.loads(run("ticket", "show", tid, "--json")[1])["revision"] == rev  # still no write
     assert run("ext", "unset", tid, "Bad Name")[0] == 2
 
 

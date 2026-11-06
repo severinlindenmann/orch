@@ -236,6 +236,9 @@ def _write(root: Path, ticket: dict) -> None:
         raise
 
 
+NO_WRITE = object()  # an op returns this when it changed nothing
+
+
 def apply_op(
     root: Path, tid: str, fn, *, expect: tuple[str, object] | None = None, if_revision: int | None = None
 ):
@@ -252,6 +255,8 @@ def apply_op(
             parent, _, leaf = expect[0].rpartition(".")
             raise _conflict(ticket, parent.split(".")[-1] or leaf, _get(ticket, parent or leaf))
         result = fn(ticket)
+        if result is NO_WRITE:  # the op found nothing to change: no new revision, no history
+            return ticket, None
         ticket["revision"] = revision(ticket) + 1
         ticket["updated_at"] = now()
         _write(root, ticket)
@@ -729,28 +734,25 @@ def ext_unset(
             "Name the data as <add-on> or <add-on>.<key>; the add-on is lowercase letters, digits or -."
         )
 
-    def present(ticket):
-        cur = (ticket.get("ext") or {}).get(addon)
-        return cur is not None and (not key or (isinstance(cur, dict) and key in cur))
-
-    if if_revision is None and not present(load(root, tid)):
-        return load(root, tid)
-
     def op(ticket):
-        if not present(ticket):
-            return
+        cur = (ticket.get("ext") or {}).get(addon)
+        if cur is None or (key and not (isinstance(cur, dict) and key in cur)):
+            return NO_WRITE  # checked inside the lock, after the --if-revision check
         ext = ticket["ext"]
-        if key:
-            rest = {k: v for k, v in ext[addon].items() if k != key}
-            if rest and schema is not None:
-                validate_ext(schema, rest, addon)
-            ext[addon] = rest
-            add_history(ticket, by, f"Removed ext.{addon}.{key}")
-        else:
+        if not key:
             del ext[addon]
             add_history(ticket, by, f"Removed ext.{addon}")
-        if not ext[addon] if addon in ext else False:
-            del ext[addon]
+        else:
+            rest = {k: v for k, v in cur.items() if k != key}
+            # a schema's required fields may be gone with the key: that is only checked while data remains;
+            # removing the last key just removes the add-on's data
+            if rest and schema is not None:
+                validate_ext(schema, rest, addon)
+            if rest:
+                ext[addon] = rest
+            else:
+                del ext[addon]
+            add_history(ticket, by, f"Removed ext.{addon}.{key}")
         if not ext:
             del ticket["ext"]
 
