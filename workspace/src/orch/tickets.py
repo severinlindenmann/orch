@@ -17,7 +17,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import procs
+from orch import procs, term
 from orch.errors import Refused
 
 STATUSES = ("open", "active", "waiting", "done", "dropped")
@@ -70,7 +70,7 @@ def require_human(question: str, what: str) -> None:
     """Human-only step. Under an agent it needs a yes typed at a terminal; otherwise refused (exit 2)."""
     if agent_tool() is None:
         return
-    if sys.stdin.isatty():
+    if term.is_terminal(sys.stdin):
         sys.stderr.write(f"{question} [y/N] ")
         sys.stderr.flush()
         if sys.stdin.readline().strip().lower() in ("y", "yes"):

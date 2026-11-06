@@ -21,6 +21,7 @@ from orch import (
     relay,
     runs_live,
     services,
+    term,
     tickets,
 )
 from orch import init as init_mod
@@ -457,7 +458,7 @@ def run(args: argparse.Namespace) -> None:
 
     if cmd == "init":
         root = Path.cwd()
-        asking = sys.stdin.isatty() and not args.json
+        asking = term.is_terminal(sys.stdin) and not args.json
         agent = init_mod.choose_agent(root, args.yes, asking)
         lines = init_mod.init(root, args.code)
         on = init_mod.recommended(root, args.yes, asking) if args.recommended else []
