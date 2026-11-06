@@ -171,7 +171,7 @@ def test_hooks_doc_comes_from_data():
     d = adapters.hooks_doc("claude", "r_8k2m")
     cmds = {k: v[0]["hooks"][0]["command"] for k, v in d["hooks"].items()}
     assert cmds["Stop"] == "orch run event --run r_8k2m --kind idle"
-    assert set(cmds) == {"SessionStart", "Stop", "Notification"}
+    assert set(cmds) == {"SessionStart", "Stop", "Notification", "UserPromptSubmit"}
     assert adapters.hooks_doc("codex", "r_1") is None
 
 
