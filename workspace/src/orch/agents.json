@@ -19,7 +19,7 @@
         "interrupt_keys": ["Escape"],
         "idle_signal": "hook:Stop",
         "attention_signal": "hook:Notification",
-        "idle_notice": { "fields": ["notification_type", "message"], "match": "^idle_prompt$|waiting for your input" },
+        "idle_notice": { "fields": ["notification_type", "message"], "match": "^(idle_prompt|Claude is waiting for your input)$" },
         "events": "claude-transcript/1",
         "trust": { "file": ".claude.json", "dir_env": "CLAUDE_CONFIG_DIR", "path": ["projects", "{folder}", "hasTrustDialogAccepted"] },
         "screens": [

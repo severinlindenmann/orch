@@ -236,8 +236,9 @@ def idle_notice(agent: str, root: Path, payload: dict | None) -> bool:
     rule = (adapters.load(agent, root).get("live") or {}).get("idle_notice")
     if not rule or not isinstance(payload, dict):
         return False
-    vals = [payload.get(f) for f in rule["fields"]]
-    return any(isinstance(v, str) and re.search(rule["match"], v, re.IGNORECASE) for v in vals)
+    # the first field the tool sent decides (a typed notice type wins over free message text)
+    val = next((payload[f] for f in rule["fields"] if isinstance(payload.get(f), str)), None)
+    return val is not None and re.search(rule["match"], val, re.IGNORECASE) is not None
 
 
 def event(
@@ -260,8 +261,12 @@ def event(
         if session_id and adapters.SESSION_RE.match(session_id):
             tickets.record_session(root, tid, rec["agent"], session_id, runs.host())
         _set_state(root, tid, run, "idle")  # the tool is up and waiting for its first input
-    elif kind == "idle" or (kind == "attention" and idle_notice(rec["agent"], root, payload)):
+    elif kind == "idle":
         _set_state(root, tid, run, "idle")
+    elif kind == "attention" and idle_notice(rec["agent"], root, payload):
+        # "still waiting for your input": input may go in only if the run is idle already (after Stop); in any
+        # other state (a dialog may be open) nothing changes, and the next Stop sets idle.
+        return deliver(root, tid)
     elif kind == "working":  # a prompt went in (also one a person typed in the live session): never paste now
         _set_state(root, tid, run, "working")
         return 0

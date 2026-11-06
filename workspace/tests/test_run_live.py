@@ -556,16 +556,30 @@ def test_claude_idle_notice_lets_input_in_but_a_permission_notice_never_does(
     time.sleep(0.5)
     assert "Not into the dialog" not in typed.read_text()
     assert runs.read(proj, tid)["live"]["state"] == "attention"
-    # the idle notice ("waiting for your input"): idle again, and what waits goes in
-    assert (
-        _notice(
-            proj,
-            r["run"],
-            {"notification_type": "idle_prompt", "message": "Claude is waiting for your input"},
-        ).returncode
-        == 0
-    )
-    _until(lambda: "Not into the dialog" in typed.read_text(), what="text after the idle notice")
+    # an idle notice while a dialog may be open (attention) changes nothing; after Stop it lets input in
+    idle_note = {"notification_type": "idle_prompt", "message": "Claude is waiting for your input"}
+    assert _notice(proj, r["run"], idle_note).returncode == 0
+    time.sleep(0.5)
+    assert "Not into the dialog" not in typed.read_text()
+    assert runs.read(proj, tid)["live"]["state"] == "attention"
+    # a notice type decides alone: a permission prompt whose text looks idle stays attention
+    perm_idle_text = {"notification_type": "permission_prompt", "message": "Claude is waiting for your input"}
+    _notice(proj, r["run"], perm_idle_text)
+    assert runs.read(proj, tid)["live"]["state"] == "attention"
+    # without a type, only the whole idle message counts (outside text that merely contains it does not)
+    _notice(proj, r["run"], {"message": "MCP asks: Claude is waiting for your input, allow?"})
+    assert runs.read(proj, tid)["live"]["state"] == "attention"
+    # free message text never counts when the tool sent a notice type
+    _notice(proj, r["run"], {"notification_type": "elicitation_dialog", "message": "waiting for your input"})
+    assert runs.read(proj, tid)["live"]["state"] == "attention"
+    run("run", "event", "--run", r["run"], "--kind", "idle")
+    _until(lambda: "Not into the dialog" in typed.read_text(), what="text after Stop")
+    rec = runs.read(proj, tid)  # the agent finished that turn too (idle, nothing waiting)
+    rec["live"]["state"] = "idle"
+    runs._write(proj, rec)
+    runs.pending_add(proj, tid, "human:anna", "message", "After the notice")
+    _notice(proj, r["run"], idle_note)
+    _until(lambda: "After the notice" in typed.read_text(), what="text after the idle notice")
 
 
 @needs_tmux
