@@ -229,3 +229,10 @@ def test_cron_in_plain_words():
                         ("5 * * * *", "Every hour at :05"), ("0 8 1 * *", "Every month on day 1 at 08:00"),
                         ("0 8 * 1 *", "0 8 * 1 *"), ("nonsense", "nonsense")]:
         assert call("cronHuman", cron) == words
+
+
+@node
+def test_first_run_note_is_not_shown_as_an_answer():
+    assert call("historyLine", {"text": "Answered q1: Hi"}) == "Answered a question"
+    first = "Answered Claude's first-run screens (theme, notes, folder trust)."
+    assert call("historyLine", {"text": first}) == first

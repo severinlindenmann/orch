@@ -51,7 +51,7 @@
   /* ---- skeleton ---- */
   const els = {};
   let view = null, sel = 0, firstRender = true, shownQs = new Map(), lastFeedKey = '', tab = 0, helpOpen = false;
-  const STATE = {needs: 'needs you', stopped: 'stopped', done: 'done'};
+  const STATE = {needs: 'needs you', waiting: 'waiting for a message', stopped: 'stopped', done: 'done'};
 
   function build() {
     els.rail = h('button', {class: 'btn ghost icon sm', 'data-act': 'rail', 'aria-label': 'Show or hide tasks', 'aria-expanded': 'true', title: 'Tasks ( [ )', icon: 'table'});
