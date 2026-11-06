@@ -15,12 +15,13 @@ final class MockRelayTests: XCTestCase {
     }
     func testMessagesShowReplyAndWhatThePhoneSent() async throws {
         let relay = MockRelay(latency: .milliseconds(1))
-        var ms = try await relay.messages()
-        XCTAssertEqual(ms.map(\.message.from), [MockRelay.pilatus])
+        func plain() async throws -> [PhoneMessage] { try await relay.messages().filter { $0.message.body.update == nil } }
+        var ms = try await plain()
+        XCTAssertEqual(ms.map(\.message.from).sorted(), ["ph_iphone0001", MockRelay.pilatus])
         _ = try await relay.send(to: MockRelay.pilatus, text: "hello", ticket: nil)
         await relay.deliverText(from: MockRelay.reports, text: "done")
-        ms = try await relay.messages()
-        XCTAssertEqual(ms.count, 3)
+        ms = try await plain()
+        XCTAssertEqual(ms.count, 4)
         XCTAssertEqual(Set(ms.map(\.workspaceId)), [MockRelay.pilatus, MockRelay.reports])
         XCTAssertTrue(ms.contains { $0.fromPhone && $0.message.body.text == "hello" })
     }
@@ -54,9 +55,9 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.phase, .ready); XCTAssertEqual(model.openQuestionCount, 2); XCTAssertEqual(model.workspaces.count, 2)
         await model.answer(model.questions[0], with: "TIMESTAMP")
         XCTAssertEqual(model.openQuestionCount, 1)
-        let ok = await model.send(to: MockRelay.reports, text: "  Check totals  ")
-        XCTAssertTrue(ok); XCTAssertEqual(model.lastSent, .init(workspaceName: "Reports", text: "Check totals", messageId: model.lastSent?.messageId ?? ""))
-        let empty = await model.send(to: MockRelay.reports, text: "   "); XCTAssertFalse(empty)
+        let ok = await model.sendChat(to: MockRelay.reports, text: "  Check totals  ")
+        guard case .sent = ok else { return XCTFail("not sent") }
+        let empty = await model.sendChat(to: MockRelay.reports, text: "   "); XCTAssertEqual(empty, .failed)
         await model.signOut()
         XCTAssertEqual(model.phase, .onboarding); XCTAssertNil(Keychain.load()); XCTAssertTrue(model.workspaces.isEmpty)
     }
@@ -79,7 +80,7 @@ final class AppModelTests: XCTestCase {
     func testPushTapOpensQuestion() async throws {
         let model = AppModel(useMock: true, voiceMode: .scripted)
         model.openQuestion(messageId: "m_q1date0ts0000001")
-        XCTAssertEqual(model.tab, .questions); XCTAssertEqual(model.focusedQuestion, "m_q1date0ts0000001")
+        XCTAssertEqual(model.tab, .chats); XCTAssertEqual(model.focusedQuestion, "m_q1date0ts0000001")
     }
 
     func testScriptedRecorderTranscribesViaMock() async throws {

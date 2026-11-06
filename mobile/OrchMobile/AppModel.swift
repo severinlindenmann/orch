@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-enum Tab: Hashable { case home, questions, send, settings }
+enum Tab: Hashable { case chats, settings }
 
 /// Everything the views show. Lists come from the relay; only the credentials are stored.
 @MainActor @Observable
@@ -37,17 +37,31 @@ final class AppModel {
     private(set) var answerTick = 0
     private(set) var sendTick = 0
     private(set) var errorTick = 0
-    private(set) var lastSent: SentNote?
     var message: String?            // plain error / info line
 
     // Navigation
-    var tab: Tab = .home
-    var questionFilter: String?     // workspace id, nil = all
-    /// Push tap: the one question to show on its own (nil = the list).
+    var tab: Tab = .chats
+    /// Chats navigation stack (workspace chat, ticket chat, new chat, info).
+    var path: [ChatRoute] = []
+    /// Push tap: the question the open chat scrolls to.
     var focusedQuestion: String?
+    /// Every question seen since launch, so an answered one stays in its chat.
+    private(set) var questionLog: [String: Question] = [:]
+    /// Read state per chat (client only, kept in UserDefaults).
+    private(set) var readState = ReadState(seen: UserDefaults.standard.dictionary(forKey: "chatRead") as? [String: String] ?? [:])
+    /// Texts written offline, sent when the phone is online again.
+    private(set) var outbox: [QueuedText] = []
+    /// question id -> option waiting out the undo window before it is sent
+    private(set) var pendingAnswers: [String: String] = [:]
+    private(set) var sendingAnswers: Set<String> = []
+    private var undoTimers: [String: Task<Void, Never>] = [:]
+    /// 5 s undo window; UI tests widen it with `-undoSeconds N`.
+    var undoDelay: Duration = {
+        let v = UserDefaults.standard.double(forKey: "undoSeconds")
+        return .milliseconds(Int((v > 0 ? v : 5) * 1000))
+    }()
     var notificationsEnabled = true
 
-    struct SentNote: Equatable { let workspaceName: String; let text: String; var messageId: String = "" }
 
     let useMock: Bool
     private let mock: MockRelay?
@@ -61,6 +75,8 @@ final class AppModel {
         self.session = session
         self.voiceMode = voiceMode
         if let c = Keychain.load() { credentials = c; phase = .ready }
+        outbox = Self.loadOutbox().filter { $0.phone == credentials?.phoneId }
+        if credentials == nil { Self.wipeOutbox() }
     }
 
     /// `-relayMode mock` (launch argument or UserDefaults, UI tests) uses the in-process mock; every real build talks to the relay named in the invitation.
@@ -97,7 +113,58 @@ final class AppModel {
     var phoneName: String { credentials?.phoneName ?? "This iPhone" }
     /// "Your tickets": Needs you, Working on, Done.
     var tickets: [Ticket] { TicketBuilder.build(updates: updates, questions: questions, answers: answers) }
-    func tickets(_ status: Ticket.Status) -> [Ticket] { tickets.filter { $0.status == status } }
+
+    /// Everything the chat views draw from.
+    var chatData: ChatData {
+        ChatData(workspaces: workspaces, messages: messages, tickets: tickets,
+                 questions: questionLog.values.sorted { $0.message.createdAt < $1.message.createdAt }.map { $0 }, answers: answers, outbox: outbox)
+    }
+    var chatRooms: [RoomRow] { ChatBuilder.rooms(chatData, read: readState) }
+    var totalUnread: Int { chatRooms.reduce(0) { $0 + $1.unread } }
+    func workspace(_ id: String) -> Workspace? { workspaces.first { $0.id == id } }
+    func ticket(_ ws: String, _ t: String) -> Ticket? { tickets.first { $0.workspace == ws && $0.ticket == t } }
+
+    func markRead(_ chat: String, items: [ChatItem]) {
+        guard let last = items.filter(\.incoming).map(\.at).max() else { return }
+        var r = readState; r.markRead(chat, upTo: last)
+        guard r != readState else { return }
+        readState = r
+        UserDefaults.standard.set(r.seen, forKey: "chatRead")
+    }
+
+    private static var outboxURL: URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("chat-outbox.json")
+    }
+    private static func loadOutbox() -> [QueuedText] {
+        guard let d = try? Data(contentsOf: outboxURL) else { return [] }
+        return (try? JSONDecoder().decode([QueuedText].self, from: d)) ?? []
+    }
+    private static func wipeOutbox() { try? FileManager.default.removeItem(at: outboxURL) }
+    private func saveOutbox() {
+        guard let d = try? JSONEncoder().encode(outbox) else { return }
+        try? d.write(to: Self.outboxURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    // MARK: Answer with undo
+
+    /// Tap = start the undo window; the answer is sent when it ends.
+    func chooseAnswer(_ q: Question, _ option: String) {
+        guard answers[q.id] == nil, pendingAnswers[q.id] == nil else { return }
+        pendingAnswers[q.id] = option
+        undoTimers[q.id] = Task { [undoDelay] in
+            try? await Task.sleep(for: undoDelay)
+            guard !Task.isCancelled else { return }
+            sendingAnswers.insert(q.id)
+            await answer(q, with: option)
+            sendingAnswers.remove(q.id); pendingAnswers[q.id] = nil; undoTimers[q.id] = nil
+        }
+    }
+    func undoAnswer(_ q: Question) {
+        guard !sendingAnswers.contains(q.id) else { return }
+        undoTimers[q.id]?.cancel(); undoTimers[q.id] = nil; pendingAnswers[q.id] = nil
+    }
     /// The "Got it" line the workspace sent for a text of this phone.
     func ack(for messageId: String) -> TicketUpdate? { updates.first { $0.replyTo == messageId && $0.kind == "ack" } }
     var openQuestionCount: Int { questions.filter { answers[$0.id] == nil }.count }
@@ -137,7 +204,7 @@ final class AppModel {
     func finishSetup(allowNotifications: Bool) async {
         notificationsEnabled = allowNotifications
         if allowNotifications { notificationsEnabled = await PushPermission.request() }
-        phase = .ready; tab = .home
+        phase = .ready; tab = .chats
         await refresh()
     }
 
@@ -154,16 +221,21 @@ final class AppModel {
             let beforeUpdates = updates
             async let u = (try? await client.updates()) ?? beforeUpdates  // same for /updates
             workspaces = try await w; questions = try await q.deduplicated(); messages = await m; updates = await u
+            for item in questions { questionLog[item.id] = item }
             message = nil; hasLoaded = true; lastUpdated = Date()
+            await flushOutbox()
         } catch { handle(error) }
     }
 
     func answer(_ q: Question, with option: String) async {
+        let me = credentials?.phoneId
         do {
             _ = try await client.answer(questionMessageId: q.id, answer: option)
+            guard credentials?.phoneId == me, me != nil || useMock else { return }   // signed out meanwhile: drop the late result
             answers[q.id] = option; answerTick += 1; announcement = "Answer sent: \(option)"
             await refresh()
         } catch let RelayError.api(status, code, text) where status == 409 && code == "already_answered" {
+            guard credentials?.phoneId == me else { return }
             answers[q.id] = text; answeredElsewhere.insert(q.id)
             message = nil
             await refresh()
@@ -175,17 +247,55 @@ final class AppModel {
         if let u = try? await client.updates() { updates = u }
     }
 
-    func send(to workspaceId: String, text: String, ticket: String? = nil) async -> Bool {
+    /// Chat composer: a failed send because of the network keeps the text on the phone and sends it later.
+    enum SendResult: Equatable { case sent(id: String), queued, failed }
+    func sendChat(to workspaceId: String, text: String, ticket: String? = nil) async -> SendResult {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return false }
+        guard !clean.isEmpty else { return .failed }
         do {
             let id = try await client.send(to: workspaceId, text: clean, ticket: ticket)
             if let m = try? await client.messages() { messages = m }
             if let u = try? await client.updates() { updates = u }
-            lastSent = SentNote(workspaceName: workspaces.first { $0.id == workspaceId }?.displayName ?? "your workspace", text: clean, messageId: id)
-            message = nil; sendTick += 1; announcement = "Message sent to \(lastSent?.workspaceName ?? "your workspace")"
-            return true
-        } catch { handle(error); return false }
+            message = nil; sendTick += 1; announcement = "Message sent"
+            return .sent(id: id)
+        } catch where Self.isOffline(error) {
+            outbox.append(QueuedText(id: UUID().uuidString, workspace: workspaceId, ticket: ticket, text: clean, at: ISO8601DateFormatter().string(from: Date()), phone: credentials?.phoneId ?? ""))
+            saveOutbox(); announcement = "No connection. The message waits on this phone."
+            return .queued
+        } catch { handle(error); return .failed }
+    }
+
+    private static func isOffline(_ error: Error) -> Bool {
+        if error is URLError { return true }
+        if case RelayError.network = error { return true }
+        return false
+    }
+
+    private var flushing = false
+    private func flushOutbox() async {
+        guard !outbox.isEmpty, !flushing else { return }
+        flushing = true; defer { flushing = false }
+        let mine = credentials?.phoneId ?? ""
+        if outbox.contains(where: { $0.phone != mine }) { outbox.removeAll { $0.phone != mine }; saveOutbox() }   // never send another phone's text
+        for q in outbox {
+            guard outbox.contains(where: { $0.id == q.id }) else { continue }     // removed meanwhile (sign-out)
+            outbox.removeAll { $0.id == q.id }; saveOutbox()                  // take it out before sending: an overlapping call can never send it twice
+            guard (try? await client.send(to: q.workspace, text: q.text, ticket: q.ticket)) != nil else { if credentials?.phoneId == mine { outbox.insert(q, at: 0); saveOutbox() }; return }
+        }
+        if let m = try? await client.messages() { messages = m }
+        if let u = try? await client.updates() { updates = u }
+    }
+
+    /// New chat: the first text has no ticket; the workspace's "Got it" creates one. Opens that ticket chat, else the workspace chat.
+    func startTopic(workspaceId: String, text: String) async {
+        switch await sendChat(to: workspaceId, text: text) {
+        case .sent(let id):
+            var tries = 0
+            while ack(for: id) == nil, tries < 4 { try? await Task.sleep(for: .milliseconds(700)); await refreshUpdates(); tries += 1 }
+            if let t = ack(for: id)?.ticket { path = [.ticket(workspace: workspaceId, ticket: t)] } else { path = [.workspace(workspaceId)] }
+        case .queued: path = [.workspace(workspaceId)]
+        case .failed: break
+        }
     }
 
     func transcribe(_ audio: Data) async throws -> String {
@@ -193,19 +303,32 @@ final class AppModel {
         catch RelayError.unauthorized { handle(RelayError.unauthorized); throw RelayError.unauthorized }
     }
 
+    /// Image bytes of a ticket attachment, from the relay with the paired credentials (cached for this session).
+    func blob(_ id: String) async -> Data? {
+        if let d = blobCache[id] { return d }
+        guard credentials != nil || useMock, let d = try? await client.blob(id: id) else { return nil }
+        blobCache[id] = d; return d
+    }
+    private var blobCache: [String: Data] = [:]
+
     func registerPush(token: String) async {
         try? await client.registerPush(apnsToken: token, sandbox: PushPermission.sandbox)
     }
 
-    /// Push tap.
+    /// Push tap on a question: the right chat, scrolled to the question.
     func openQuestion(messageId: String) {
-        focusedQuestion = messageId; questionFilter = nil; tab = .questions
-        Task { await refresh() }
+        focusedQuestion = messageId; tab = .chats
+        if let q = questionLog[messageId] { route(to: q) }
+        Task { await refresh(); if let q = questionLog[messageId] { route(to: q) } }
+    }
+    private func route(to q: Question) {
+        let ws = q.message.from
+        path = q.message.ticket.map { [.workspace(ws), .ticket(workspace: ws, ticket: $0)] } ?? [.workspace(ws)]
     }
 
-    /// Text push tap: the Send tab, on that workspace, with its messages.
+    /// Text push tap: that workspace's chat.
     func openMessages(workspaceId: String) {
-        focusedQuestion = nil; questionFilter = workspaceId; tab = .send
+        focusedQuestion = nil; tab = .chats; path = [.workspace(workspaceId)]
         Task { await refresh() }
     }
 
@@ -216,8 +339,12 @@ final class AppModel {
     }
 
     private func reset() {
-        credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; messages = []; updates = []; answers = [:]; answeredElsewhere = []; hasLoaded = false
-        pairedWorkspaces = []; lastSent = nil; lastUpdated = nil; message = nil; tab = .home; phase = .onboarding
+        for t in undoTimers.values { t.cancel() }
+        undoTimers = [:]; pendingAnswers = [:]; sendingAnswers = []
+        outbox = []; Self.wipeOutbox(); UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
+        readState = ReadState(); blobCache = [:]
+        credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answeredElsewhere = []; hasLoaded = false
+        pairedWorkspaces = []; lastUpdated = nil; message = nil; tab = .chats; phase = .onboarding
     }
 
     private func handle(_ error: Error) {
@@ -238,10 +365,17 @@ final class AppModel {
         if d.bool(forKey: "seedInvite"), phase == .onboarding { openSampleInvite() }
         if d.bool(forKey: "seedNotify"), phase == .onboarding, useMock { openSampleInvite(); await connect(phoneName: "Severin's iPhone") }
         if let t = d.string(forKey: "startTab"), phase == .ready {
-            tab = ["questions": .questions, "send": .send, "settings": .settings][t] ?? .home
+            tab = t == "settings" ? .settings : .chats
         }
         if phase == .ready, let id = d.string(forKey: "openQuestion") { openQuestion(messageId: id) }  // stands in for a push tap in the Simulator
         if phase == .ready, let ws = d.string(forKey: "openTextPush") { openMessages(workspaceId: ws) }  // stands in for a text push tap
-        if phase == .ready { await refresh(); if !useMock { await PushPermission.registerIfAuthorized() } }
+        if phase == .ready { await refresh() }
+        if phase == .ready, let ws = d.string(forKey: "openChat") {   // chat screens in the Simulator: -openChat ws_… [-openTicket t_…]
+            path = [.workspace(ws)]
+            if let t = d.string(forKey: "openTicket") { path.append(.ticket(workspace: ws, ticket: t)) }
+            if d.bool(forKey: "openInfo") { path.append(.info(workspace: ws, ticket: d.string(forKey: "openTicket"))) }
+        }
+        if d.bool(forKey: "openNewChat"), phase == .ready { path = [.newChat] }
+        if phase == .ready { if !useMock { await PushPermission.registerIfAuthorized() } }
     }
 }

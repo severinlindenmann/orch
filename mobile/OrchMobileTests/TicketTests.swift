@@ -19,7 +19,7 @@ final class TicketTests: XCTestCase {
         let t = TicketBuilder.build(updates: try await m.updates(), questions: try await m.questions(), answers: [:])
         XCTAssertEqual(t.filter { $0.status == .needsYou }.count, 2)
         XCTAssertEqual(t.filter { $0.status == .working }.map(\.title), ["Invoice CSV export"])
-        XCTAssertEqual(t.filter { $0.status == .done }.map(\.title), ["Q3 summary"])
+        XCTAssertEqual(t.filter { $0.status == .done }.map(\.title), ["Q3 summary for the board"])
         XCTAssertEqual(t.map(\.status), t.map(\.status).sorted(), "Needs you first, Done last")
     }
 
@@ -95,23 +95,25 @@ final class TicketModelTests: XCTestCase {
         return model
     }
 
-    func testHomeGroupsFromUpdatesAndQuestions() async {
+    private func count(_ model: AppModel, _ st: Ticket.Status) -> Int { model.tickets.filter { $0.status == st }.count }
+
+    func testTicketsGroupFromUpdatesAndQuestions() async {
         let model = await ready()
-        XCTAssertEqual(model.tickets(.needsYou).count, 2); XCTAssertEqual(model.tickets(.working).count, 1); XCTAssertEqual(model.tickets(.done).count, 1)
+        XCTAssertEqual(count(model, .needsYou), 2); XCTAssertEqual(count(model, .working), 1); XCTAssertEqual(count(model, .done), 1)
         await model.answer(model.questions[0], with: "TIMESTAMP")
-        XCTAssertEqual(model.tickets(.needsYou).count, 1)
+        XCTAssertEqual(count(model, .needsYou), 1)
     }
 
-    func testAskGetsAGotItAndReplyKeepsTheTicket() async {
+    func testNewTopicGetsAGotItAndReplyKeepsTheTicket() async {
         let model = await ready()
-        let ok1 = await model.send(to: MockRelay.reports, text: "Prepare the Q3 summary"); XCTAssertTrue(ok1)
-        let ack = model.ack(for: model.lastSent!.messageId)
+        guard case .sent(let id) = await model.sendChat(to: MockRelay.reports, text: "Prepare the Q3 summary") else { return XCTFail("not sent") }
+        let ack = model.ack(for: id)
         XCTAssertEqual(ack?.text, "Got it: Prepare the Q3 summary")
-        XCTAssertEqual(model.tickets(.working).count, 2, "the new ticket is under Working on")
-        XCTAssertTrue(model.tickets.contains { $0.ticket == ack?.ticket && $0.workspace == ack?.workspace }, "See ticket finds it")
-        let t = model.tickets(.working).first { $0.title == "Invoice CSV export" }!
-        let ok2 = await model.send(to: t.workspace, text: "Use semicolons", ticket: t.ticket); XCTAssertTrue(ok2)
-        XCTAssertEqual(model.tickets(.working).count, 2, "a reply stays on its ticket")
+        XCTAssertEqual(count(model, .working), 2, "the new ticket is a chat of its own")
+        XCTAssertTrue(model.tickets.contains { $0.ticket == ack?.ticket && $0.workspace == ack?.workspace })
+        let t = model.tickets.first { $0.title == "Invoice CSV export" }!
+        guard case .sent = await model.sendChat(to: t.workspace, text: "Use semicolons", ticket: t.ticket) else { return XCTFail("not sent") }
+        XCTAssertEqual(count(model, .working), 2, "a reply stays on its ticket")
     }
 
     func testAlreadyAnsweredShowsTheOtherAnswer() async {
