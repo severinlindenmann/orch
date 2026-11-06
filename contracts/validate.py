@@ -276,6 +276,17 @@ for case in cvec["cases"]:
     if clean_untrusted(case["in"]) != case["out"]:
         fails.append(f"clean-untrusted vector {case['name']}: output differs")
 
+# ticket_view (mobile chat): schema + the 16 KB cap on body.ticket_view as compact UTF-8 JSON.
+# The relay (relay/tests/ticket_view.rs) and the workspace (workspace/tests/test_ticket_view.py) replay the same cases.
+tvec = json.loads((HERE / "vectors" / "ticket-view-v1.json").read_text())
+for case in tvec["cases"]:
+    m = case["message"]
+    view = m["body"].get("ticket_view")
+    big = view is not None and len(json.dumps(view, separators=(",", ":"), ensure_ascii=False).encode()) > tvec["cap_bytes"]
+    ok = not errors("message", m) and not big
+    if ok != case["ok"]:
+        fails.append(f"ticket-view vector {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
+
 if fails:
     print("\n".join("FAIL " + f for f in fails))
     sys.exit(1)
