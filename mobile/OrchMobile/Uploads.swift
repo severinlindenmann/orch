@@ -80,6 +80,7 @@ final class LocationFetcher: NSObject, CLLocationManagerDelegate {
     }
     private let manager = CLLocationManager()
     private var continuation: CheckedContinuation<CLLocation, Error>?
+    private var requested = false
 
     override init() { super.init(); manager.delegate = self; manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters }
 
@@ -93,12 +94,14 @@ final class LocationFetcher: NSObject, CLLocationManagerDelegate {
         guard continuation == nil else { throw Problem.unavailable }
         switch manager.authorizationStatus {
         case .denied, .restricted: throw Problem.denied
-        case .notDetermined: manager.requestWhenInUseAuthorization()
         default: break
         }
+        requested = false
         let loc: CLLocation = try await withCheckedThrowingContinuation { c in
             continuation = c
-            manager.requestLocation()
+            if manager.authorizationStatus == .notDetermined {
+                manager.requestWhenInUseAuthorization()      // the location is requested from the authorization callback, once allowed
+            } else { requested = true; manager.requestLocation() }
         }
         return Self.share(from: loc, label: label)
     }
@@ -112,7 +115,16 @@ final class LocationFetcher: NSObject, CLLocationManagerDelegate {
         Task { @MainActor in self.continuation?.resume(throwing: denied ? Problem.denied : Problem.unavailable); self.continuation = nil }
     }
     nonisolated func locationManagerDidChangeAuthorization(_ m: CLLocationManager) {
-        let ok = m.authorizationStatus == .authorizedWhenInUse || m.authorizationStatus == .authorizedAlways
-        Task { @MainActor in if self.continuation != nil, ok { self.manager.requestLocation() } }
+        let status = m.authorizationStatus
+        Task { @MainActor in
+            guard self.continuation != nil else { return }
+            switch status {
+            case .authorizedWhenInUse, .authorizedAlways:
+                if !self.requested { self.requested = true; self.manager.requestLocation() }
+            case .denied, .restricted:
+                self.continuation?.resume(throwing: Problem.denied); self.continuation = nil
+            default: break
+            }
+        }
     }
 }

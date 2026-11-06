@@ -220,6 +220,55 @@ final class OutboxTests: XCTestCase {
         let again = await ob.flush(using: relay); XCTAssertTrue(again.isEmpty, "a failed item is not retried by itself")
         ob.discard(bad.clientId); XCTAssertNil(ob.item(clientId: bad.clientId))
     }
+    func testUpload408ThenSuccessKeepsClientIdAndNeverFailsForGood() async throws {
+        let relay = MockRelay(latency: .zero), ob = Outbox(directory: dir, phone: "ph_iphone0001")
+        let item = try ob.enqueue(MessageDraft(files: [DraftFile(url: file(scratch, "a.pdf", bytes: 50), kind: .file, name: "a.pdf", mime: "application/pdf")]), to: .general(workspace: MockRelay.pilatus))
+        await relay.queueUploadFailures([408])
+        let t0 = Date()
+        var ev = await ob.flush(using: relay, now: t0)
+        XCTAssertEqual(ev, [Outbox.Event.throttled(clientId: item.clientId, status: 408)])
+        XCTAssertNil(ob.item(clientId: item.clientId)?.failure, "408 is never a permanent failure"); XCTAssertTrue(ob.item(clientId: item.clientId)!.isWaiting)
+        ev = await ob.flush(using: relay, now: t0.addingTimeInterval(5)); XCTAssertTrue(ev.isEmpty, "backing off: not tried on every refresh")
+        let calls1 = await relay.uploadCalls; XCTAssertEqual(calls1, 1)
+        ev = await ob.flush(using: relay, now: t0.addingTimeInterval(31))
+        guard case .sent(let cid, _, _) = ev.first else { return XCTFail("\(ev)") }
+        XCTAssertEqual(cid, item.clientId)
+        let req = await relay.requests; XCTAssertEqual(req.count, 1); XCTAssertEqual(req[0].clientId, item.clientId); XCTAssertNotNil(req[0].attachments?.first?.blobId)
+        XCTAssertNil(ob.item(clientId: item.clientId)?.retryAfter)
+    }
+    func testSend429BacksOffAndDoublesUpToFiveMinutes() async throws {
+        let relay = MockRelay(latency: .zero), ob = Outbox(directory: dir, phone: "ph_iphone0001")
+        let item = try ob.enqueue(MessageDraft(text: "x"), to: .general(workspace: MockRelay.pilatus))
+        await relay.queueSendFailures([429, 503, 429, 429, 429, 429, 429])
+        var now = Date()
+        var waits: [TimeInterval] = []
+        for _ in 0..<7 {
+            let ev = await ob.flush(using: relay, now: now)
+            XCTAssertEqual(ev.count, 1); if case .throttled = ev[0] {} else { XCTFail("\(ev)") }
+            let at = ISO8601DateFormatter().date(from: ob.item(clientId: item.clientId)!.retryAfter!)!
+            waits.append(at.timeIntervalSince(now).rounded()); now = at.addingTimeInterval(1)
+        }
+        XCTAssertEqual(waits, [30, 60, 120, 240, 300, 300, 300])
+        let ev = await ob.flush(using: relay, now: now); guard case .sent = ev.first else { return XCTFail("\(ev)") }
+    }
+    func testRetryAfterABlobRefusalUploadsAgain() async throws {
+        let relay = MockRelay(latency: .zero), ob = Outbox(directory: dir, phone: "ph_iphone0001")
+        let item = try ob.enqueue(MessageDraft(files: [DraftFile(url: file(scratch, "a.pdf", bytes: 50), kind: .file, name: "a.pdf", mime: "application/pdf")]), to: .general(workspace: MockRelay.pilatus))
+        await relay.queueSendFailures([404])                   // the relay lost the upload
+        var ev = await ob.flush(using: relay)
+        XCTAssertTrue(ev.contains { if case .failed(_, 404, _) = $0 { true } else { false } })
+        XCTAssertNotNil(ob.item(clientId: item.clientId)?.files[0].blobId)
+        ob.retry(item.clientId)
+        XCTAssertNil(ob.item(clientId: item.clientId)?.files[0].blobId, "the file goes up again")
+        ev = await ob.flush(using: relay); guard case .sent = ev.first else { return XCTFail("\(ev)") }
+        let n = await relay.uploadCalls; XCTAssertEqual(n, 2)
+    }
+    func testCopiedFilesAreProtectedLikeTheIndex() throws {
+        let ob = Outbox(directory: dir, phone: "ph_iphone0001")
+        let item = try ob.enqueue(MessageDraft(files: [DraftFile(url: file(scratch, "a.pdf", bytes: 5), kind: .file, name: "a.pdf", mime: "application/pdf")]), to: .general(workspace: MockRelay.pilatus))
+        let u = ob.fileURL(item, ob.item(clientId: item.clientId)!.files[0])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: u.path)); XCTAssertNil(ob.lastSaveError)
+    }
     func testOverlappingFlushesSendOnce() async throws {
         let relay = MockRelay(latency: .milliseconds(20)), ob = Outbox(directory: dir, phone: "ph_iphone0001")
         _ = try ob.enqueue(MessageDraft(text: "solo"), to: .general(workspace: MockRelay.pilatus))
@@ -418,32 +467,57 @@ final class SpeechPlayerTests: XCTestCase {
     func testPlaysCachesRatesListenedAndAutoNext() async throws {
         let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
         let c = Counter(), a = FakeAudio(), v = FakeVoice(), p = make(c, audio: a, voice: v, dir: dir)
-        p.play(clip("m_a"), then: [clip("m_b")])
+        p.play(clip("m_aaaaaaaaaaaaaaaa"), then: [clip("m_bbbbbbbbbbbbbbbb")])
         await until { a.started.count == 1 }
-        XCTAssertEqual(p.state, .playing("m_a")); XCTAssertEqual(a.started[0], Data("mp3-m_a".utf8))
+        XCTAssertEqual(p.state, .playing("m_aaaaaaaaaaaaaaaa")); XCTAssertEqual(a.started[0], Data("mp3-m_a".utf8))
         p.cycleRate(); XCTAssertEqual(p.rate, 1.5); p.cycleRate(); XCTAssertEqual(p.rate, 2); p.cycleRate(); XCTAssertEqual(p.rate, 1)
         a.onFinish?()
         await until { a.started.count == 2 }
-        XCTAssertTrue(p.isListened("m_a")); XCTAssertFalse(p.isListened("m_b")); XCTAssertEqual(p.state, .playing("m_b"))
+        XCTAssertTrue(p.isListened("m_aaaaaaaaaaaaaaaa")); XCTAssertFalse(p.isListened("m_bbbbbbbbbbbbbbbb")); XCTAssertEqual(p.state, .playing("m_bbbbbbbbbbbbbbbb"))
         a.onFinish?(); await until { p.state == .idle }
-        XCTAssertTrue(p.isListened("m_b"))
-        p.play(clip("m_a")); await until { a.started.count == 3 }
+        XCTAssertTrue(p.isListened("m_bbbbbbbbbbbbbbbb"))
+        p.play(clip("m_aaaaaaaaaaaaaaaa")); await until { a.started.count == 3 }
         XCTAssertEqual(c.n, 2, "m_a came from the disk cache the second time")
     }
     func testCapReachedFallsBackToPhoneVoiceAndOtherErrorsStop() async throws {
         let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
         let c = Counter(), a = FakeAudio(), v = FakeVoice(), p = make(c, audio: a, voice: v, dir: dir)
-        c.mode = 402; p.play(clip("m_a")); await until { !v.spoken.isEmpty }
+        c.mode = 402; p.play(clip("m_aaaaaaaaaaaaaaaa")); await until { !v.spoken.isEmpty }
         XCTAssertEqual(v.spoken, ["Hello there link"]); XCTAssertTrue(p.usingPhoneVoice); XCTAssertNotNil(p.notice)
-        v.onFinish?(); await until { p.state == .idle }; XCTAssertTrue(p.isListened("m_a"))
-        c.mode = 404; p.play(clip("m_b")); await until { p.state == .idle && p.current == nil }
-        XCTAssertTrue(v.spoken.count == 1); XCTAssertFalse(p.isListened("m_b"))
+        v.onFinish?(); await until { p.state == .idle }; XCTAssertTrue(p.isListened("m_aaaaaaaaaaaaaaaa"))
+        c.mode = 404; p.play(clip("m_bbbbbbbbbbbbbbbb")); await until { p.state == .idle && p.current == nil }
+        XCTAssertTrue(v.spoken.count == 1); XCTAssertFalse(p.isListened("m_bbbbbbbbbbbbbbbb"))
+    }
+    func testBadMessageIdNeverTouchesTheCachePath() async throws {
+        let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let c = Counter(), a = FakeAudio(), v = FakeVoice(), p = make(c, audio: a, voice: v, dir: dir)
+        p.play(SpeechClip(messageId: "../../etc/evil", text: "x", summary: nil, lang: "en", title: "P"))
+        await until { p.state == .idle && p.current == nil }
+        XCTAssertEqual(c.n, 0, "not even fetched"); XCTAssertTrue(a.started.isEmpty); XCTAssertTrue(v.spoken.isEmpty)
+        XCTAssertTrue(SpeechPlayer.isValidMessageId("m_abcdefghij012345")); XCTAssertFalse(SpeechPlayer.isValidMessageId("m_a/b"))
+    }
+    func testCacheEvictsLeastRecentlyUsedOverTheCap() throws {
+        let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let old = file(dir, "old.mp3", bytes: 600), mid = file(dir, "mid.mp3", bytes: 600), new = file(dir, "new.mp3", bytes: 600)
+        let fm = FileManager.default
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -300)], ofItemAtPath: old.path)
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -200)], ofItemAtPath: mid.path)
+        SpeechPlayer.evict(dir, limit: 1300, keep: new)
+        XCTAssertFalse(fm.fileExists(atPath: old.path)); XCTAssertTrue(fm.fileExists(atPath: mid.path)); XCTAssertTrue(fm.fileExists(atPath: new.path))
+        XCTAssertEqual(SpeechPlayer.cacheLimitBytes, 50 * 1024 * 1024)
+    }
+    func testPausingThePhoneVoiceKeepsTheQueue() async throws {
+        let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let c = Counter(), a = FakeAudio(), v = FakeVoice(), p = make(c, audio: a, voice: v, dir: dir)
+        c.mode = 402; p.play(clip("m_aaaaaaaaaaaaaaaa"), then: [clip("m_bbbbbbbbbbbbbbbb")]); await until { !v.spoken.isEmpty }
+        p.pause()
+        XCTAssertEqual(p.state, .idle); XCTAssertNil(p.current); XCTAssertEqual(p.queue.map(\.messageId), ["m_bbbbbbbbbbbbbbbb"]); XCTAssertFalse(p.usingPhoneVoice)
     }
     func testPauseResume() async throws {
         let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
         let c = Counter(), a = FakeAudio(), v = FakeVoice(), p = make(c, audio: a, voice: v, dir: dir)
-        p.play(clip("m_a")); await until { a.started.count == 1 }
-        p.pause(); XCTAssertEqual(p.state, .paused("m_a")); XCTAssertTrue(a.paused); p.resume(); XCTAssertEqual(p.state, .playing("m_a")); p.stop(); XCTAssertEqual(p.state, .idle)
+        p.play(clip("m_aaaaaaaaaaaaaaaa")); await until { a.started.count == 1 }
+        p.pause(); XCTAssertEqual(p.state, .paused("m_aaaaaaaaaaaaaaaa")); XCTAssertTrue(a.paused); p.resume(); XCTAssertEqual(p.state, .playing("m_aaaaaaaaaaaaaaaa")); p.stop(); XCTAssertEqual(p.state, .idle)
     }
 }
 
@@ -531,6 +605,22 @@ final class AppModelV3Tests: XCTestCase {
         let again = await m.redeemInvitation(PairingLink.sample.link); XCTAssertTrue(again.isEmpty); XCTAssertNotNil(m.message)
         await m.removeWorkspace(MockRelay.reports)
         XCTAssertNil(m.workspace(MockRelay.reports)); XCTAssertTrue(m.messages.allSatisfy { $0.workspaceId != MockRelay.reports })
+    }
+    func testUnauthorizedOnMessagesSignsOut() async throws {
+        let m = await paired()
+        try await m.mock!.signOut()
+        await m.reloadMessages()
+        XCTAssertEqual(m.phase, .onboarding)
+    }
+    func testSentMessageBeyondPageOneIsStillReconciled() async throws {
+        let m = await paired(); m.pageSize = 2
+        let relay = m.mock!
+        let item = try m.outbox.enqueue(MessageDraft(text: "buried"), to: .general(workspace: MockRelay.pilatus))
+        await m.outbox.flush(using: relay)
+        XCTAssertNotNil(m.outbox.item(clientId: item.clientId)?.sentMessageId)
+        for i in 0..<4 { await relay.deliverText(from: MockRelay.pilatus, text: "later \(i)"); try await Task.sleep(for: .milliseconds(1100)) }
+        await m.reloadMessages()
+        XCTAssertNil(m.outbox.item(clientId: item.clientId), "found by paging on, so it left the outbox")
     }
     func testPaginationLoadsOlderPages() async throws {
         let relay = MockRelay(latency: .zero)

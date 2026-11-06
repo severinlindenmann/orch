@@ -242,22 +242,42 @@ final class AppModel {
 
     /// The newest page of `/v1/phone/messages`, merged into what is loaded (older pages stay). An older relay without it keeps the list.
     func reloadMessages() async {
-        guard let page = try? await client.messages(after: nil, limit: Self.pageSize) else { return }
-        var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
-        for m in page.items { byId[m.id] = m }          // newer data (delivered_at) replaces the old copy
-        messages = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
+        let page: ListResponse<PhoneMessage>
+        do { page = try await client.messages(after: nil, limit: pageSize) }
+        catch RelayError.unauthorized { handle(RelayError.unauthorized); return }
+        catch { return }
+        merge(page.items)
         if messagesNext == nil || page.next == nil || messages.count <= page.items.count { messagesNext = page.next }
+        // A message we sent can be beyond the first page (lots of other traffic): page on until it is listed, at most 5 more pages.
+        var cursor = page.next, extra = 0
+        while extra < 5, let c = cursor, !unlistedSentClientIds().isEmpty {
+            do {
+                let p = try await client.messages(after: c, limit: pageSize)
+                merge(p.items); cursor = p.next; messagesNext = p.next; extra += 1
+            } catch RelayError.unauthorized { handle(RelayError.unauthorized); return } catch { break }
+        }
         outbox.reconcile(with: messages)
     }
-    static let pageSize = 100
+    private func merge(_ items: [PhoneMessage]) {
+        var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
+        for m in items { byId[m.id] = m }          // newer data (delivered_at) replaces the old copy
+        messages = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
+    }
+    /// client_ids of messages the relay stored (first tick) that `/messages` has not listed yet.
+    private func unlistedSentClientIds() -> Set<String> {
+        let listed = Set(messages.compactMap { $0.clientId ?? $0.message.body.clientId })
+        return Set(outbox.items.filter { $0.kind == .send && $0.sentMessageId != nil && !listed.contains($0.clientId) }.map(\.clientId))
+    }
+    /// Messages per page (tests make it small).
+    var pageSize = 100
 
     /// Scrolling up: the next older page. No-op when everything is loaded.
     func loadOlderMessages() async {
-        guard let cursor = messagesNext, let page = try? await client.messages(after: cursor, limit: Self.pageSize) else { return }
-        var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
-        for m in page.items { byId[m.id] = m }
-        messages = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
-        messagesNext = page.next
+        guard let cursor = messagesNext else { return }
+        do {
+            let page = try await client.messages(after: cursor, limit: pageSize)
+            merge(page.items); messagesNext = page.next
+        } catch RelayError.unauthorized { handle(RelayError.unauthorized) } catch {}
     }
     var hasOlderMessages: Bool { messagesNext != nil }
 
@@ -287,6 +307,7 @@ final class AppModel {
             case .sent: sendTick += 1; announcement = "Message sent"
             case .failed(_, _, let text): message = text; errorTick += 1; announcement = text
             case .unauthorized: handle(RelayError.unauthorized)
+            case .throttled: announcement = "Try again later"
             case .offline: break
             }
         }
