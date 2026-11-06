@@ -10,7 +10,7 @@ from croniter import croniter
 
 from . import listen, needs, orchcli, service
 from .cron import fmt, next_after, parse
-from .loop import OPEN
+from .loop import scheduled
 from .plain import zone
 
 DAYS = ("Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays")  # cron 0 = Sunday
@@ -127,7 +127,7 @@ def _events(tickets: list[dict], now: datetime, horizon: datetime) -> list[tuple
     """The next start of each ticket (time wait or cron repeat) until `horizon`, soonest first."""
     out: list[tuple[datetime, dict, str]] = []
     for t in tickets:
-        if t["status"] not in OPEN:
+        if not scheduled(t):
             continue
         w = t.get("waiting_on") or {}
         until = parse(w.get("until")) if w.get("kind") == "time" else None
@@ -145,7 +145,7 @@ def _day_items(tickets: list[dict], now: datetime, day_start: datetime, day_end:
     "next 15:05 · 288 runs/day"); hourly or less shows each time."""
     items: list[tuple[datetime, dict]] = []
     for t in tickets:
-        if t["status"] not in OPEN:
+        if not scheduled(t):
             continue
         w = t.get("waiting_on") or {}
         until = parse(w.get("until")) if w.get("kind") == "time" else None
@@ -209,7 +209,7 @@ def _linked(t: dict, tickets: list[dict]) -> list[dict]:
 def _schedules(tickets: list[dict], now: datetime) -> list[dict]:
     rows = []
     for t in tickets:
-        if t["status"] not in OPEN or not (cron := _repeats(t, True)):
+        if not scheduled(t) or not (cron := _repeats(t, True)):
             continue
         sched = (t.get("ext") or {}).get("automation") or {}
         paused = sched.get("paused") is True

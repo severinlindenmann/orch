@@ -407,8 +407,14 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
     return t
 
 
-def add_history(ticket: dict, by: str, text: str, via: str = "cli") -> None:
-    ticket["history"].append({"at": now(), "by": by, "via": via, "text": text})
+def _env_via() -> str:
+    """Where a change comes from: ORCH_VIA (a page that runs orch sets it, e.g. dashboard), else cli."""
+    v = os.environ.get("ORCH_VIA", "")
+    return v if re.fullmatch(r"[a-z][a-z0-9-]{1,23}", v) else "cli"
+
+
+def add_history(ticket: dict, by: str, text: str, via: str | None = None) -> None:
+    ticket["history"].append({"at": now(), "by": by, "via": via or _env_via(), "text": text})
 
 
 def parse_ext_args(pairs: list[str] | None, schema_for=None) -> dict[str, dict]:
@@ -460,7 +466,7 @@ def create(
         "links": [],
         "questions": [],
         "history": [
-            {"at": t, "by": by, "via": "cli", "text": "Created" + (f" under {parent}" if parent else "")}
+            {"at": t, "by": by, "via": _env_via(), "text": "Created" + (f" under {parent}" if parent else "")}
         ],
     }
     if parent is not None:
