@@ -45,7 +45,9 @@ do {
     $s = (Get-ScheduledTask orchsmoke).State; $r = (Get-ScheduledTaskInfo orchsmoke).LastTaskResult
 } while (($s -eq "Running" -or $r -eq 267011) -and ((Get-Date) - $t0).TotalSeconds -lt $MaxSec)
 Unregister-ScheduledTask orchsmoke -Confirm:$false
-$logFile = "C:\Users\$user\orch-flow.log"
+# The profile folder can be C:\Users\<user>.<PC> when an old one is left over: ask Windows where it is.
+$profileDir = (Get-CimInstance Win32_UserProfile | Where-Object SID -eq $sid).LocalPath
+$logFile = Join-Path $profileDir "orch-flow.log"
 if (-not (Test-Path $logFile)) { throw "the flow wrote no log (task state $s, result $r)" }
 Get-Content $logFile
 if (-not ((Get-Content $logFile)[-1] -eq "RESULT ok")) { exit 1 }

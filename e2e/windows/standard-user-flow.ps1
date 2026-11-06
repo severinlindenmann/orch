@@ -22,22 +22,26 @@ $v = orch --version 2>&1
 L "version: $v"
 Check ("$v" -match "^orch ") "orch --version"
 
+# orch runs here as a script or an agent tool runs it: stdin is NUL. (The task's own hidden console is a real
+# console, so orch would rightly ask its questions there, where nobody can answer.) NUL must never count as
+# a person at a terminal: that is the Windows hang term.is_terminal fixes.
+function O { cmd /c "orch $($args -join ' ') < NUL 2>&1" }
 $p = "$env:USERPROFILE\orch-smoke"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
-L "--- init"; orch init *>&1 | Out-String | % { L $_ }
+L "--- init"; O init | Out-String | % { L $_ }
 Check (Test-Path "$p\.agents\skills\orch\SKILL.md") "orch init wrote the skill"
 Check ((Get-Item "$p\.claude\skills" -Force -ErrorAction SilentlyContinue).LinkType -eq "Junction") ".claude\skills is a junction"
 $before = (Get-ChildItem -Recurse -Force -File | Get-FileHash | Out-String)
-orch init *>&1 | Out-Null
+O init | Out-Null
 Check ($before -eq (Get-ChildItem -Recurse -Force -File | Get-FileHash | Out-String)) "a second orch init changes nothing"
 
-L "--- ticket"; $t = orch ticket new "Windows smoke" --json 2>&1 | Out-String; L $t
+L "--- ticket"; $t = O ticket new '"Windows smoke"' --json | Out-String; L $t
 Check ($LASTEXITCODE -eq 0) "orch ticket new"
 
-L "--- addon add dashboard"; orch addon add dashboard --yes *>&1 | Out-String | % { L $_ }
+L "--- addon add dashboard"; O addon add dashboard --yes | Out-String | % { L $_ }
 Check ($LASTEXITCODE -eq 0) "orch addon add dashboard (installs from the zip, no git)"
-L "--- update"; orch update *>&1 | Out-String | % { L $_ }
+L "--- update"; O update | Out-String | % { L $_ }
 Check ($LASTEXITCODE -eq 0) "orch update"
-$list = orch addon list 2>&1 | Out-String; L $list
+$list = O addon list | Out-String; L $list
 Check ($list -match "dashboard") "dashboard still installed after the update"
 
 if ($fails.Count) { L "RESULT fail: $($fails -join '; ')" } else { L "RESULT ok" }
