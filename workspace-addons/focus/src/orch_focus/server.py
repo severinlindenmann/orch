@@ -373,6 +373,7 @@ class Handler(BaseHTTPRequestHandler):
         except actions.Unavailable as e:
             return self._send(503, str(e).encode(), "text/plain; charset=utf-8")
         self.tracker.status_cache.clear()
+        self.tracker.ticket_cache.clear()  # the view sent back must show what this action just did
         if code == 200 and body.get("op") == "run.start":
             self.tracker.note_started(args["ticket"], (extra or {}).get("run"))
             self.tracker.mark_page(args["ticket"])

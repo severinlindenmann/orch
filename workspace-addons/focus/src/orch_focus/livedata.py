@@ -10,7 +10,7 @@ import json
 import os
 import re
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import actions, runfiles
@@ -29,10 +29,22 @@ def _time(s) -> float | None:
         return None
 
 
+def _core_start(lstart: str) -> str | None:
+    """`ps -o lstart=` text as core writes a process start in claim records: UTC, 2026-11-05T10:00:00Z."""
+    try:
+        return datetime.fromtimestamp(time.mktime(time.strptime(lstart, "%a %b %d %H:%M:%S %Y")), UTC).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+    except (ValueError, OverflowError):
+        return None
+
+
 def _running(pid, started) -> bool:
     if not runfiles.valid_pid(pid) or not runfiles.alive(pid):
         return False
-    return not (started and runfiles.proc_start(pid) not in (None, started))  # a reused pid is not the run
+    now = runfiles.proc_start(pid)
+    # a reused pid is not the run; the record holds core's UTC form, ps prints local text: compare in core's form
+    return not (started and now not in (None, started) and _core_start(now) != started)
 
 
 def alive(rec: dict, now: float | None = None) -> bool:
