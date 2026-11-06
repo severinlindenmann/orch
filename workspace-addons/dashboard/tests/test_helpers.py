@@ -220,3 +220,12 @@ def test_a_live_session_waiting_for_a_message_is_idle_not_working():
     assert w["state"] == "idle" and "waiting for a message" in w["status"] and w["primary"]["op"] == "open"
     rows = call("agentRows", [T], {"t_a": run}, now)
     assert rows[0]["state"] == "idle" and rows[0]["since"] == "2026-11-06T00:05:00Z"
+
+
+@node
+def test_cron_in_plain_words():
+    for cron, words in [("30 7 * * *", "Every day at 07:30"), ("0 9 * * 1-5", "Weekdays at 09:00"),
+                        ("15 18 * * 5", "Every Friday at 18:15"), ("*/2 * * * *", "Every 2 minutes"),
+                        ("5 * * * *", "Every hour at :05"), ("0 8 1 * *", "Every month on day 1 at 08:00"),
+                        ("0 8 * 1 *", "0 8 * 1 *"), ("nonsense", "nonsense")]:
+        assert call("cronHuman", cron) == words

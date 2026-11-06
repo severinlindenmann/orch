@@ -202,5 +202,24 @@
     }
     return n;
   }
-  return {flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, treeRows, proofMark, fileProofLabel, stamp, ago};
+
+  /* A cron line in plain words for the common shapes (else the line itself): "30 7 * * *" -> "Every day at 07:30". */
+  function cronHuman(value) {
+    const raw = String(value == null ? '' : value).trim(), f = raw.split(/\s+/);
+    if (f.length !== 5) return raw;
+    const [mi, hr, dom, mon, dow] = f, num = x => /^\d{1,2}$/.test(x);
+    const at = () => String(hr).padStart(2, '0') + ':' + String(mi).padStart(2, '0');
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const every = /^\*\/(\d{1,2})$/.exec(mi);
+    if (every && hr === '*' && dom === '*' && mon === '*' && dow === '*') return 'Every ' + every[1] + ' minutes';
+    if (num(mi) && hr === '*' && dom === '*' && mon === '*' && dow === '*') return 'Every hour at :' + String(mi).padStart(2, '0');
+    if (!num(mi) || !num(hr) || mon !== '*') return raw;
+    if (dom === '*' && dow === '*') return 'Every day at ' + at();
+    if (dom === '*' && dow === '1-5') return 'Weekdays at ' + at();
+    if (dom === '*' && /^[0-7]$/.test(dow)) return 'Every ' + days[+dow] + ' at ' + at();
+    if (num(dom) && dow === '*') return 'Every month on day ' + dom + ' at ' + at();
+    return raw;
+  }
+
+  return {cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, treeRows, proofMark, fileProofLabel, stamp, ago};
 });
