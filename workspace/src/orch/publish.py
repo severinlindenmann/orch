@@ -101,7 +101,12 @@ def _api(root: Path, method: str, path: str, body=None):
 
 
 def whoami(root: Path) -> dict:
-    return _api(root, "GET", "/v1/whoami")
+    who = _api(root, "GET", "/v1/whoami")
+    from orch import skillrender
+
+    skillrender.remember_rights(root, who)  # the skill lists what this workspace may share
+    skillrender.refresh_skills(root)
+    return who
 
 
 def profile(root: Path, description: str | None, tags: list[str] | None) -> dict:

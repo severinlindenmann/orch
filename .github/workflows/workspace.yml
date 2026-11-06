@@ -23,7 +23,7 @@ jobs:
           uv build --wheel -o "$RUNNER_TEMP/dist"
           uv tool install --reinstall "$RUNNER_TEMP"/dist/orch_workspace-*.whl
           d="$RUNNER_TEMP/smoke"; mkdir -p "$d"; cd "$d"
-          orch init
+          ORCH_AGENT=claude orch init  # no agent is installed on the runner; this one links its skills folder
           orch ticket new "smoke" --json
           test -f .agents/skills/orch/SKILL.md
           test -f .claude/skills/orch/SKILL.md

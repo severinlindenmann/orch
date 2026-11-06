@@ -115,11 +115,19 @@ def secrets_dir(root: Path) -> Path:
 
 def write_atomic(path: Path, data: bytes, private: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600 if private else 0o644)
-    with os.fdopen(fd, "wb") as f:
-        f.write(data)
-    os.replace(tmp, path)
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )  # never follows a link
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.chmod(tmp, 0o600 if private else 0o644)
+        os.replace(tmp, path)  # replaces a planted link, does not write through it
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def write_json(path: Path, obj, private: bool = False) -> None:
@@ -151,7 +159,7 @@ def auth_headers(cfg: dict) -> dict:
 def connect_service(root: Path, name: str, skill: str, url: str, workspace: str, token: str, prefix: str):
     """Shared part of `orch publish|relay connect`: init if needed, check token, save."""
     from orch import init as init_mod
-    from orch import skills
+    from orch import skillrender, skills
 
     url = clean_url(url)
     if not token.startswith(prefix):
@@ -162,6 +170,9 @@ def connect_service(root: Path, name: str, skill: str, url: str, workspace: str,
     _, who = call_json("GET", url + "/v1/whoami", hdrs, timeout=30)
     write_json(secrets_dir(root) / f"{name}.json", {"url": url, "workspace": workspace, "token": token}, True)
     skills.ensure_gitignore(root)  # the skill and AGENTS block come from `orch addon add <name>`
+    if name == "publish":
+        skillrender.remember_rights(root, who)
+    skillrender.refresh_skills(root)
     return who
 
 

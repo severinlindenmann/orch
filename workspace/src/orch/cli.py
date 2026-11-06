@@ -272,6 +272,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
 
     x = sub.add_parser("init", parents=[common], help="set up this folder (safe to repeat)")
     x.add_argument("--yes", action="store_true", help="do not ask; take the first agent found")
+    x.add_argument("--recommended", action="store_true", help="also turn on the recommended add-ons")
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
 
@@ -443,13 +444,23 @@ def run(args: argparse.Namespace) -> None:
 
     if cmd == "init":
         root = Path.cwd()
-        lines = init_mod.init(root)
         asking = sys.stdin.isatty() and not args.json
         agent = init_mod.choose_agent(root, args.yes, asking)
+        lines = init_mod.init(root)
+        on = init_mod.recommended(root, args.yes, asking) if args.recommended else []
         _out(
             args,
-            {"ok": True, "root": str(root), "details": lines, "agent": agent},
-            f"orch is ready in this folder. {agent}",
+            {"ok": True, "root": str(root), "details": lines, "agent": agent, "recommended": on},
+            "orch is ready in this folder. "
+            + agent
+            + "\n"
+            + "\n".join(lines)
+            + (f"\nTurned on: {', '.join(on)}" if on else "")
+            + (
+                "\nNext: orch init --recommended"
+                if not args.recommended and init_mod.has_recommended(root)
+                else ""
+            ),
         )
     elif cmd == "update":
         done = addons.update(root, args.project_only)

@@ -24,17 +24,27 @@ GITIGNORE_LINES = [
 GITIGNORE_HEADER = "# orch (local only)"
 
 
+def _instruction_files() -> tuple[str, ...]:
+    """AGENTS.md plus the instruction files the agents.json `files` entries name (they may point at it)."""
+    from orch import adapters
+
+    names = ["AGENTS.md"]
+    for n in adapters.builtin_names():
+        for fn in (adapters.load(n).get("files") or {}).get("instructions_link") or {}:
+            if fn not in names:
+                names.append(fn)
+    return tuple(names)
+
+
 def _project_file(root: Path, path: Path) -> Path:
-    """The file behind AGENTS.md, CLAUDE.md or .gitignore. A link is followed only from AGENTS.md or
-    CLAUDE.md and only to exactly the project's AGENTS.md or CLAUDE.md (CLAUDE.md -> AGENTS.md is common).
-    Any other link (to .git/config, a git hook, ...) is refused; .gitignore never follows a link."""
+    """The file behind AGENTS.md, an agent's instruction file or .gitignore. A link is followed only from
+    those instruction files and only to exactly one of them in the project (a file reading AGENTS.md is
+    common). Any other link (to .git/config, a git hook, ...) is refused; .gitignore never follows a link."""
     if path.is_symlink():
         top = root.resolve()
         target = path.resolve()
-        if path.name not in ("AGENTS.md", "CLAUDE.md") or target not in (
-            top / "AGENTS.md",
-            top / "CLAUDE.md",
-        ):
+        names = _instruction_files()
+        if path.name not in names or target not in tuple(top / n for n in names):
             raise Refused(
                 f"{path} is a link orch does not write through. Make it a plain file and try again."
             )
@@ -94,7 +104,7 @@ def install_skill(root: Path, name: str, source: Path) -> None:
     check_inside(root, dest)
     if dest.exists():
         shutil.rmtree(dest)
-    shutil.copytree(source, dest, ignore=shutil.ignore_patterns(*BLOCK_FILES))
+    shutil.copytree(source, dest, ignore=shutil.ignore_patterns(*BLOCK_FILES, "description.toml"))
 
 
 def remove_skill(root: Path, name: str) -> None:
@@ -198,41 +208,83 @@ def _unlink_dir(p: Path) -> None:
         p.unlink()
 
 
-def link_claude_skills(root: Path) -> None:
-    """.claude/skills -> ../.agents/skills. If .claude/skills is a real folder, link each skill inside it."""
+def _link_skills(root: Path, where: str) -> None:
+    """<where> -> .agents/skills. If <where> is a real folder, link each skill inside it."""
     agents = root / ".agents" / "skills"
     agents.mkdir(parents=True, exist_ok=True)
-    cl = root / ".claude" / "skills"
+    cl = root / where
     if _is_link(cl):
         return
     if not cl.exists():
-        _link(cl, agents, os.path.join("..", ".agents", "skills"))
+        _link(cl, agents, os.path.relpath(agents, cl.parent))
         return
     for sk in sorted(p for p in agents.iterdir() if p.is_dir()):
         dest = cl / sk.name
         if dest.exists() or _is_link(dest):
             continue
-        _link(dest, sk, os.path.join("..", "..", ".agents", "skills", sk.name))
+        _link(dest, sk, os.path.relpath(sk, cl))
 
 
-def unlink_skill(root: Path, name: str) -> None:
-    """Remove a per-skill link inside a real .claude/skills folder (the whole-folder link needs no change)."""
-    cl = root / ".claude" / "skills"
-    if _is_link(cl):
-        return
-    dest = cl / name
-    if _is_link(dest):
-        _unlink_dir(dest)
-
-
-def ensure_claude_md(root: Path) -> None:
-    path = root / "CLAUDE.md"
+def _ensure_line(root: Path, name: str, line: str) -> None:
+    path = root / name
     text = _read_project_file(root, path)
-    if any(line.strip() == "@AGENTS.md" for line in text.splitlines()):
+    if any(x.strip() == line for x in text.splitlines()):
         return
     if text and not text.endswith("\n"):
         text += "\n"
-    _write_project_file(root, path, text + "@AGENTS.md\n")
+    _write_project_file(root, path, text + line + "\n")
+
+
+def _skills_link_paths() -> list[str]:
+    from orch import adapters
+
+    out = []
+    for n in adapters.builtin_names():
+        w = (adapters.load(n).get("files") or {}).get("skills_link")
+        if w and w not in out:
+            out.append(w)
+    return out
+
+
+def detected_agents(root: Path) -> list[str]:
+    """Built-in agents this machine or folder uses: found on the PATH, running us, or chosen here."""
+    from orch import adapters, config
+
+    names = {r["name"] for r in adapters.detect() if r["found"]}
+    for n in (adapters.detect_env(os.environ), config.agent_name(root)):
+        if n:
+            names.add(n)
+    return [n for n in adapters.builtin_names() if n in names]
+
+
+def apply_agent_files(root: Path) -> list[str]:
+    """Do the `files` entry of every detected agent (agents.json): link the skills folder, add the
+    instructions line. AGENTS.md stays the one file orch writes. Returns the labels it linked for."""
+    from orch import adapters
+
+    done = []
+    for n in detected_agents(root):
+        a = adapters.load(n)
+        f = a.get("files") or {}
+        if not (f.get("skills_link") or f.get("instructions_link")):
+            continue
+        for fn, line in (f.get("instructions_link") or {}).items():
+            _ensure_line(root, fn, line)
+        if f.get("skills_link"):
+            _link_skills(root, f["skills_link"])
+        done.append(a["label"])
+    return done
+
+
+def unlink_skill(root: Path, name: str) -> None:
+    """Remove a per-skill link inside a real agent skills folder (the whole-folder link needs no change)."""
+    for where in _skills_link_paths():
+        cl = root / where
+        if _is_link(cl):
+            continue
+        dest = cl / name
+        if _is_link(dest):
+            _unlink_dir(dest)
 
 
 def ensure_gitignore(root: Path) -> None:

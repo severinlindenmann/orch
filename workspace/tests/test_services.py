@@ -255,9 +255,10 @@ def test_project_files_never_written_through_a_link_outside(proj, tmp_path, name
     victim.write_text("keep me", encoding="utf-8")
     (proj / name).symlink_to(victim)
     with pytest.raises(Refused, match="link orch does not write through"):
-        {".gitignore": skills.ensure_gitignore, "CLAUDE.md": skills.ensure_claude_md}.get(
-            name, lambda r: skills.set_block(r, "x", "body")
-        )(proj)
+        {
+            ".gitignore": skills.ensure_gitignore,
+            "CLAUDE.md": lambda r: skills._ensure_line(r, "CLAUDE.md", "@AGENTS.md"),
+        }.get(name, lambda r: skills.set_block(r, "x", "body"))(proj)
     assert victim.read_text(encoding="utf-8") == "keep me"
 
 
@@ -276,7 +277,12 @@ def test_start_refuses_a_gitignore_link_outside(svc, proj, run, tmp_path):
 
 
 @NO_WIN_LINKS
-def test_claude_md_linked_to_agents_md_inside_still_works(proj, run):
+def test_claude_md_linked_to_agents_md_inside_still_works(proj, run, monkeypatch):
+    from orch import adapters
+
+    monkeypatch.setattr(
+        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+    )
     (proj / "AGENTS.md").write_text("# mine\n", encoding="utf-8")
     (proj / "CLAUDE.md").symlink_to("AGENTS.md")
     assert run("init")[0] == 0
@@ -299,9 +305,10 @@ def test_links_inside_the_project_to_other_files_are_refused(proj, name, target)
     t.write_text("keep me\n", encoding="utf-8")
     (proj / name).symlink_to(t)
     with pytest.raises(Refused, match="link orch does not write through"):
-        {".gitignore": skills.ensure_gitignore, "CLAUDE.md": skills.ensure_claude_md}.get(
-            name, lambda r: skills.set_block(r, "x", "body")
-        )(proj)
+        {
+            ".gitignore": skills.ensure_gitignore,
+            "CLAUDE.md": lambda r: skills._ensure_line(r, "CLAUDE.md", "@AGENTS.md"),
+        }.get(name, lambda r: skills.set_block(r, "x", "body"))(proj)
     assert t.read_text(encoding="utf-8") == "keep me\n"
 
 

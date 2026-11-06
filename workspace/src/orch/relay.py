@@ -17,7 +17,7 @@ import unicodedata
 import urllib.parse
 from pathlib import Path
 
-from orch import net, runs, skills, tickets
+from orch import net, runs, skillrender, skills, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -1134,6 +1134,7 @@ def refresh(root: Path) -> str:
         _commit(root, stage, snap, names)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
+    skillrender.refresh_skills(root)
     n = len(snap.get("workspaces", {}).get("workspaces", []))
     p = len(snap.get("workspaces", {}).get("phones", []))
     msg = (
@@ -1213,7 +1214,7 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str]) -> None:
                 skills.unlink_skill(root, d.name)
     os.replace(stage / "credentials.json", sec / "credentials.json")
     os.replace(stage / "mcp.json", sec / "mcp.json")
-    skills.link_claude_skills(root)
+    skills.apply_agent_files(root)
     os.replace(stage / "shared.json", sec / "shared.json")
 
 

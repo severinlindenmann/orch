@@ -292,7 +292,12 @@ def skill_snapshot(files):
     return {"name": "acme-sql", "version": 2, "files": {k: b64(v) for k, v in files.items()}}
 
 
-def test_refresh_installs_and_removes_shared_skills(proj, run, rel):
+def test_refresh_installs_and_removes_shared_skills(proj, run, rel, monkeypatch):
+    from orch import adapters
+
+    monkeypatch.setattr(
+        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+    )
     connect(run, rel)
     rel.snapshot.update(
         version=7,
