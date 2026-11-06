@@ -115,7 +115,7 @@
     "redeem_request": {
       "description": "At most 10 calls a minute per phone (429 rate_limited).",
       "type": "object", "required": ["code"],
-      "properties": { "code": { "type": "string", "pattern": "^pc_[A-Za-z0-9]{22}$" } }
+      "properties": { "code": { "type": "string", "pattern": "^pc_[A-Za-z0-9_-]{22}$" } }
     },
     "redeem_response": {
       "type": "object", "required": ["workspaces"], "additionalProperties": false,
