@@ -28,7 +28,7 @@
       return 'Changed ' + (parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0]);
     }
     if (/^Asked\b/.test(text)) return 'Asked a question';
-    if (/^Answered\b/.test(text)) return 'Answered a question';
+    if (/^Answered q\d+/.test(text)) return 'Answered a question';
     if ((m = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
     if (/^Summary/.test(text)) return 'Updated the summary';
     if ((m = /^Added (?:task|check)[:\s]+(.+)$/i.exec(text))) return 'Added a task: ' + m[1];
