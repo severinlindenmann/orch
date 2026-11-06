@@ -221,7 +221,18 @@ def test_redact_and_safe_url_units():
 
 
 @pytest.mark.parametrize(
-    "kind", ["dotdot", "absolute", "secrets", "linked_folder", "linked_file", "other_ticket", "fifo"]
+    "kind",
+    [
+        "dotdot",
+        "absolute",
+        "secrets",
+        "linked_folder",
+        "linked_file",
+        "other_ticket",
+        "fifo",
+        "hardlink",
+        "linked_tickets_folder",
+    ],
 )
 def test_proof_refs_that_leave_the_evidence_folder_are_never_uploaded(proj, run, new_ticket, conn, kind):
     import os
@@ -252,6 +263,19 @@ def test_proof_refs_that_leave_the_evidence_folder_are_never_uploaded(proj, run,
             pytest.skip("no FIFOs here")
         ev_dir.mkdir(parents=True, exist_ok=True)
         os.mkfifo(ev_dir / "x.png")
+    elif kind == "hardlink":
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        os.link(sec / "token.txt", ev_dir / "x.png")
+    elif kind == "linked_tickets_folder":
+        # .orch/tickets itself is a link to a look-alike tree whose evidence file is a secret copy
+        fake = proj / "fake-tickets"
+        (fake / tid / "evidence").mkdir(parents=True)
+        (fake / tid / "evidence" / "x.png").write_text("orn_SECRET")
+        real = proj / ".orch" / "tickets"
+        for f in real.iterdir():
+            os.replace(f, fake / f.name) if f.is_file() else None
+        real.rmdir() if not any(real.iterdir()) else None
+        os.symlink(fake, real)
     elif kind == "other_ticket":
         d = proj / ".orch/tickets" / other / "evidence"
         d.mkdir(parents=True)

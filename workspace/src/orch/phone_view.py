@@ -120,9 +120,9 @@ def phone_proof(root: Path, ticket: dict) -> list[dict]:
 
 def _proof_file(root: Path, tid: str, ev: dict) -> tuple[str, bytes] | None:
     """(name, bytes) of a copied proof file of this ticket, .orch/tickets/<tid>/evidence/<name>, never
-    anything else: the ref has exactly that shape, no part on the way is a link, the real path stays in
-    the ticket's evidence folder (never .orch/secrets), and the file is opened without following links
-    and read from that handle (at most 25 MB)."""
+    anything else: the ref has exactly that shape; the folders are opened one by one from the workspace
+    without following links (dir_fd), the file too (O_NOFOLLOW, O_NONBLOCK: never a FIFO); it must be a
+    regular file with one link (no hard link to a secret) and at most 25 MB, read from that handle."""
     ref = str(ev.get("ref", ""))
     parts = ref.split("/")
     name = parts[4] if len(parts) == 5 else ""
@@ -135,33 +135,35 @@ def _proof_file(root: Path, tid: str, ev: dict) -> tuple[str, bytes] | None:
         or not tickets._ID_RE.fullmatch(tid)
     ):
         return None
-    base = Path(os.path.realpath(root))
-    cur = base
-    for part in parts:
-        cur = cur / part
-        if cur.is_symlink():
-            return None
-    folder = base / ".orch" / "tickets" / tid / "evidence"
-    real = Path(os.path.realpath(cur))
-    secrets = Path(os.path.realpath(net.secrets_dir(base)))
-    if real.parent != folder or real == secrets or secrets in real.parents:
-        return None
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    dir_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_DIRECTORY", 0)
+    fds: list[int] = []
     try:
-        if not stat.S_ISREG(os.lstat(cur).st_mode):  # a planted FIFO or device is never opened
-            return None
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-        fd = os.open(real, flags)
+        if os.open in os.supports_dir_fd and hasattr(os, "O_DIRECTORY"):
+            # walk folder by folder from the workspace, each opened relative to the last one and never
+            # through a link: a folder swapped for a link while we look is refused, not followed
+            fds.append(os.open(os.path.realpath(root), os.O_RDONLY | os.O_DIRECTORY))
+            for part in parts[:4]:
+                fds.append(os.open(part, dir_flags, dir_fd=fds[-1]))
+            fd = os.open(name, flags, dir_fd=fds[-1])
+        else:  # Windows: no dir_fd; check every part for links, then open
+            cur = Path(os.path.realpath(root))
+            for part in parts:
+                cur = cur / part
+                if cur.is_symlink():
+                    return None
+            if not stat.S_ISREG(os.lstat(cur).st_mode):
+                return None
+            fd = os.open(cur, flags)
     except OSError:
         return None
+    finally:
+        for d in fds:
+            os.close(d)
     with os.fdopen(fd, "rb") as f:
         st = os.fstat(f.fileno())
-        try:
-            same = os.lstat(cur)  # still the file we checked (not swapped while we looked)
-        except OSError:
-            return None
-        if (st.st_dev, st.st_ino) != (same.st_dev, same.st_ino):
-            return None
-        if not stat.S_ISREG(st.st_mode) or st.st_size > tickets.MAX_PROOF_BYTES:
+        # a regular file with exactly one name: a hard link to e.g. .orch/secrets/relay.json is refused
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_size > tickets.MAX_PROOF_BYTES:
             return None
         data = f.read(tickets.MAX_PROOF_BYTES + 1)
     if len(data) > tickets.MAX_PROOF_BYTES:
