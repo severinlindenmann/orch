@@ -41,6 +41,9 @@ def describe(root: Path) -> list[dict]:
             rows.append({"ticket": t["id"], "title": t["title"], "kind": "wake", "at": w["until"]})
         s = (t.get("ext") or {}).get("automation") or {}
         if s.get("recurring") is True and s.get("cron"):
+            if s.get("paused") is True:  # switched off: listed, no next time
+                rows.append({"ticket": t["id"], "title": t["title"], "kind": "repeat", "cron": s["cron"], "at": None, "off": True})
+                continue
             nxt = next_after(s["cron"], datetime.now(UTC), plain.zone(s.get("tz")))
             rows.append({"ticket": t["id"], "title": t["title"], "kind": "repeat", "cron": s["cron"],
                          "at": fmt(nxt) if nxt else state.get(t["id"], {}).get("next_run")})
@@ -175,7 +178,7 @@ def _run(args, root: Path) -> int:
         out(rs, "\n".join(f"{r['title']}: {r['text']}" for r in rs) or "Nothing needs you here.")
     elif args.cmd == "list":
         rows = describe(root)
-        out(rows, "\n".join(f"{x['ticket']}  {x['kind']} {x.get('cron', '')} {x['at']}  {x['title']}" for x in rows) or "Nothing scheduled.")
+        out(rows, "\n".join(f"{x['ticket']}  {x['kind']} {x.get('cron', '')} {x['at'] or 'off'}  {x['title']}" for x in rows) or "Nothing scheduled.")
     elif args.cmd == "view":
         from .view import build
         print(json.dumps(build(root)))

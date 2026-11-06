@@ -35,7 +35,8 @@ def act(root: Path, verb: str, target: str) -> dict:
     if not sched:
         raise Bad("This ticket has no automation to change.")
     if verb == "delete":
-        if not orchcli.set_ext(root, t, remove=tuple(sched)):
+        # core `ext set` merges and cannot drop a key: switching the repeat off is what removes it from every view and the loop
+        if not orchcli.set_ext(root, t, recurring=False, paused=False):
             raise Bad("The ticket changed or the change was not accepted. Try again.")
         return {"ticket": target, "deleted": True, "text": "Removed. The ticket stays."}
     paused = (verb == "off") if verb != "toggle" else sched.get("paused") is not True
