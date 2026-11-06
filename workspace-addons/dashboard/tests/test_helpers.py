@@ -102,6 +102,14 @@ def test_tree_rows_children_counts_collapse_and_missing_parent():
 
 
 @node
+def test_ago_says_just_now_under_a_minute():
+    now = 1_762_437_600_000  # 2025-11-06T14:00:00Z
+    assert call("ago", "2025-11-06T13:59:40Z", now) == "just now"
+    assert call("ago", "2025-11-06T13:55:00Z", now) == "5 min ago"
+    assert call("ago", "not a date", now) == ""
+
+
+@node
 def test_a_file_proof_shows_its_name_and_size():
     ev = {"type": "file", "ref": ".orch/tickets/t_x/evidence/hello.txt", "text": "1 KB"}
     assert call("fileProofLabel", ev) == "hello.txt · 1 KB"
