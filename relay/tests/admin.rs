@@ -595,7 +595,7 @@ fn portal_blur_validation_skips_submit_button() {
 fn portal_narrow_network_uses_connections_list() {
     let css = include_str!("../web/style.css");
     let narrow = css
-        .split("@media(max-width:720px){")
+        .split("@media(max-width:599px){")
         .skip(1)
         .filter_map(|block| block.split("}}").next())
         .find(|block| block.contains(".network{display:none}"))

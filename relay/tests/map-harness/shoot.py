@@ -34,9 +34,11 @@ with sync_playwright() as p:
             if width == 1440 and key != "empty":
                 node = page.locator(".network .graph-node").first
                 if node.count():
-                    node.hover()
+                    box = node.bounding_box()
+                    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
                     page.wait_for_timeout(250)
                     page.locator(".network").screenshot(path=OUT / f"{TAG}-{key}-{width}-hover.png")
+                    page.mouse.move(0, 0)
                     node.focus()
                     page.wait_for_timeout(250)
                     page.locator(".network").screenshot(path=OUT / f"{TAG}-{key}-{width}-focus.png")
