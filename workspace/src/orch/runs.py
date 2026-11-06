@@ -669,7 +669,7 @@ def start(
             kw["creationflags"] = 0x00000200 | 0x00000008  # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
         else:
             kw["start_new_session"] = True
-        with open(root / log_rel, "ab") as errlog:  # a wrapper that dies leaves its traceback in the run log
+        with open_log(root / log_rel) as errlog:  # a wrapper that dies leaves its traceback in the run log
             proc = subprocess.Popen(
                 cmd,
                 cwd=root,
@@ -693,13 +693,24 @@ def start(
 # ---------------------------------------------------------------- the wrapper (runs detached)
 
 
+def open_log(path: Path):
+    """A run's output file: private (0600) from the first byte, appended to; an old one is made private."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o600)
+    if hasattr(os, "fchmod"):
+        with contextlib.suppress(OSError):
+            os.fchmod(fd, 0o600)
+    return os.fdopen(fd, "ab")
+
+
 def _run_turn(
     argv: list[str], root: Path, stdin: str | None, log: Path, env: dict, on_started=None, on_proc=None
 ):
     """One agent process. Returns (exit code, the output of this turn)."""
     log.parent.mkdir(parents=True, exist_ok=True)
     start = log.stat().st_size if log.exists() else 0
-    with open(log, "ab") as out:
+    with open_log(log) as out:
         try:
             proc = subprocess.Popen(
                 argv,

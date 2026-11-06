@@ -396,4 +396,4 @@ def test_the_wrapper_errors_go_to_the_run_log_not_nowhere(proj, new_ticket, run,
     monkeypatch.setattr(runs.subprocess, "Popen", popen)
     assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     assert seen["stderr"] not in (subprocess.DEVNULL, subprocess.STDOUT, None)
-    assert seen["stderr"].name.endswith(".log")
+    assert seen["stderr"].mode == "ab" and list((proj / ".orch" / "run" / "logs").glob(f"{tid}-*.log"))

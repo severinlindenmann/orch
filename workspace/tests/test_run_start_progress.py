@@ -240,3 +240,24 @@ def test_start_without_tmux_says_how_to_get_a_live_session(proj, run, monkeypatc
     while runs.read(proj, tid) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert tickets.load(proj, tid)["id"] == tid
+
+
+def test_trust_never_replaces_a_linked_settings_file(proj, run, tmp_path):
+    run("init", "--yes")
+    real = tmp_path / "elsewhere.json"
+    real.write_text(json.dumps({"theme": "dark"}))
+    _cfg(proj).symlink_to(real)
+    assert adapters.trust_folder("claude", proj) == "skipped"
+    assert _cfg(proj).is_symlink() and json.loads(real.read_text()) == {"theme": "dark"}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="file modes")
+def test_a_run_log_is_private_and_an_old_one_is_made_private(proj):
+    log = proj / ".orch" / "run" / "logs" / "t_abcdef-r_abcdefgh.log"
+    with runs.open_log(log) as f:
+        f.write(b"one\n")
+    assert oct(log.stat().st_mode & 0o777) == "0o600"
+    log.chmod(0o644)
+    with runs.open_log(log) as f:
+        f.write(b"two\n")
+    assert oct(log.stat().st_mode & 0o777) == "0o600" and log.read_bytes() == b"one\ntwo\n"

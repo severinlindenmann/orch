@@ -249,6 +249,8 @@ def trust_folder(name: str, root: Path, environ: Mapping[str, str] | None = None
     f = base / t["file"]
     folder = str(root.resolve())
     keys = [folder if k == "{folder}" else k for k in t["path"]]
+    if f.is_symlink():
+        return "skipped"  # never replace a link with a file
     for _ in range(3):
         try:
             raw = f.read_bytes()
