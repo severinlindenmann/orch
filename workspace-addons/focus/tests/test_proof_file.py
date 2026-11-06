@@ -3,12 +3,11 @@
 import os
 import sys
 
+import orch.safefile  # noqa: F401  (added by PR #160; fails until it is merged)
 import pytest
 
 from .conftest import TID
 from .test_server import req
-
-import orch.safefile  # noqa: E402,F401  (PR #160 adds it; until then these tests fail on purpose)
 
 
 @pytest.fixture
