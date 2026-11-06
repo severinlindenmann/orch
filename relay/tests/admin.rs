@@ -483,7 +483,8 @@ async fn public_root_and_unknown_pages_are_branded_dark_pages() {
     let r = t.http.get(format!("{}/", t.base)).send().await.unwrap();
     assert_eq!(r.status(), 200);
     let body = r.text().await.unwrap();
-    assert!(body.contains("This page isn’t available") && !body.to_lowercase().contains("relay"));
+    assert!(body.contains("This page isn’t available") && body.contains("orch"));
+    assert!(body.contains("Private connections, shared work."));
     let r = t.http.get(format!("{}/nope", t.base)).send().await.unwrap();
     assert_eq!(r.status(), 404);
     assert!(r.text().await.unwrap().contains("isn’t available"));
@@ -657,4 +658,43 @@ async fn labels_prompt_skips_describe_line_when_admin_described() {
         .as_str()
         .unwrap()
         .contains("describe this workspace"));
+}
+
+#[tokio::test]
+async fn admin_kit_served() {
+    let t = start().await;
+    let r = t
+        .http
+        .get(format!("{}/admin/kit.js", t.admin))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(
+        r.headers()["content-type"],
+        "text/javascript; charset=utf-8"
+    );
+    let js = r.text().await.unwrap();
+    assert!(js.contains("window.icon") && js.contains("window.orch"));
+    let r = t
+        .http
+        .get(format!("{}/admin/style.css", t.admin))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert!(r.text().await.unwrap().contains("#a78bfa"));
+}
+
+#[test]
+fn portal_has_no_agent_view() {
+    let page = include_str!("../web/portal.html");
+    assert!(!page.contains("'terminal'") && !page.contains("What your agent sees"));
+}
+
+#[test]
+fn not_available_is_visitor_page() {
+    let page = include_str!("../web/not-available.html");
+    assert!(page.contains("This page isn’t available"));
+    assert!(!page.contains("admin-shell") && !page.contains("sidebar"));
 }
