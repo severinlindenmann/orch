@@ -10,6 +10,7 @@ const OrchBlocks = (() => {
   const HTTPS = /^https:\/\/[^\s<>"'`]+$/;
   const arr = v => Array.isArray(v) ? v : [];
   const ADDON = /^addon:([a-z][a-z0-9-]{1,31})(\/[A-Za-z0-9_./-]{0,100})?$/;
+  const OWN = /^addon:(?![/\\])(?!.*\.\.)([A-Za-z0-9_./?=&%-]{0,300})$/;   // a page of the add-on whose view this is
   const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/;
   let opts = {};   // {addonUrl(name) -> local page address or null}, set per render()
   const VERB = /^[a-z][a-z-]{0,20}$/;
@@ -31,7 +32,8 @@ const OrchBlocks = (() => {
   // Wrap `child` in a link when `link` is a ticket id or an https URL; otherwise return it as is.
   function linked(cls, link, child) {
     const l = typeof link === 'string' ? link : '';
-    const am = ADDON.exec(l);
+    const own = opts.self ? OWN.exec(l) : null;
+    const am = own ? [l, opts.self, own[1] ? '/' + own[1] : ''] : ADDON.exec(l);
     if (am && !am[2]?.includes('..')) {
       // `addon:<name>/<path>`: that add-on's own page when it runs here, else a Start button (the page starts it).
       const base = typeof opts.addonUrl === 'function' ? opts.addonUrl(am[1]) : null;

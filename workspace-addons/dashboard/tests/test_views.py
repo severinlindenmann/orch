@@ -223,10 +223,31 @@ def test_bad_accordion_fields_break_the_view(mutate):
     assert check_view(v) is None
 
 
-def test_addon_links_pass_only_with_a_plain_name_and_path():
+def test_addon_links_pass_only_with_a_plain_path():
     def v(link):
         return {"schema": "orch.addon-view/1", "generated_at": "2026-11-06T08:00:00Z",
                 "blocks": [{"type": "list", "title": "T", "items": [{"title": "x", "link": link}]}]}
     assert check_view(v("addon:panel/board")) and check_view(v("addon:panel"))
-    for bad in ("addon:../x", "addon:Panel/x", "addon:panel/a b", "addon:panel/<b>", "addon:", "ftp://x"):
+    for bad in ("addon:../x", "addon:/x", "addon:panel/a b", "addon:panel/<b>", "ftp://x"):
         assert check_view(v(bad)) is None, bad
+
+
+FOCUS_VIEW = {
+    "schema": "orch.addon-view/1", "generated_at": "2026-11-06T08:00:00Z",
+    "blocks": [
+        {"type": "stat", "label": "Running now", "value": 1, "tone": "good"},
+        {"type": "list", "title": "Working now", "items": [
+            {"title": "Fix invoice export", "subtitle": "claude · one run", "link": "addon:t/t_abc12345", "tone": "good"}]},
+    ],
+}
+
+
+def test_focus_view_with_a_run_is_accepted():
+    assert not list(VALIDATOR.iter_errors(FOCUS_VIEW))
+    assert check_view(FOCUS_VIEW) is not None
+    assert check_view(FOCUS_VIEW)["blocks"] == FOCUS_VIEW["blocks"]
+
+
+def test_link_regex_is_the_schema_pattern():
+    from orch_dashboard.views import _LINK
+    assert _LINK.pattern == SCHEMA["$defs"]["link"]["pattern"]

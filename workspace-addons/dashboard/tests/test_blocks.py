@@ -12,10 +12,10 @@ HARNESS = Path(__file__).parent / "blocks_harness.js"
 node = pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 
 
-def run(tmp_path, view, urls=None):
+def run(tmp_path, view, urls=None, own=None):
     f = tmp_path / "v.json"
     f.write_text(json.dumps(view))
-    out = subprocess.run(["node", str(HARNESS), str(WEB / "blocks.js"), str(f), json.dumps(urls or {})], capture_output=True,
+    out = subprocess.run(["node", str(HARNESS), str(WEB / "blocks.js"), str(f), json.dumps(urls or {}), *([own] if own else [])], capture_output=True,
                          text=True, check=True)
     return json.loads(out.stdout)
 
@@ -159,3 +159,13 @@ def test_addon_link_never_points_off_this_computer(tmp_path):
         assert not any(n["tag"] == "a" for n in walk(t)), bad
     traversal = {"blocks": [{"type": "list", "title": "T", "items": [{"title": "x", "link": "addon:panel/../../etc"}]}]}
     assert not any(n["tag"] == "a" and n["attrs"].get("href", "").startswith("http") for n in walk(run(tmp_path, traversal, {"panel": "http://127.0.0.1:1"})))
+
+
+@node
+def test_own_page_link_resolves_against_this_addon(tmp_path):
+    """Focus emits `addon:t/<ticket>`: a page of the add-on whose view this is (schema), not an add-on named `t`."""
+    view = {"blocks": [{"type": "list", "title": "T", "items": [{"title": "Run", "link": "addon:t/t_abc12345"}]}]}
+    a = [n for n in walk(run(tmp_path, view, {"focus": "http://127.0.0.1:8500"}, own="focus")) if n["tag"] == "a"]
+    assert a and a[0]["attrs"]["href"] == "http://127.0.0.1:8500/t/t_abc12345"
+    off = run(tmp_path, view, own="focus")
+    assert "Start focus" in texts(off)

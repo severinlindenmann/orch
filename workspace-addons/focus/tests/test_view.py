@@ -144,7 +144,7 @@ def test_manifest_flags(field):
     from importlib import resources
 
     m = tomllib.loads((resources.files("orch_focus") / "orch-addon.toml").read_text())
-    assert m[field] is True and m["page"]["path"] == "/" and m["dashboard"]["label"] == "Live"
+    assert m[field] is True and m["page"]["path"] == "/" and m["dashboard"]["label"] == "Focus"
     assert (resources.files("orch_focus") / "skills" / "orch-focus" / "SKILL.md").is_file()
     assert (resources.files("orch_focus") / "skills" / "orch-focus" / "AGENTS-block.md").is_file()
 
@@ -156,7 +156,7 @@ def test_manifest_validates_against_the_contract_schema_and_ext_copy_is_identica
     m = tomllib.loads((resources.files("orch_focus") / "orch-addon.toml").read_text())
     jsonschema.validate(m, json.loads((CONTRACTS / "addon-manifest.schema.json").read_text()))
     assert m["ticket_ext"] == "ext.schema.json"
-    assert m["ticket_view"] == [{"field": "page", "label": "Live page", "format": "open-page"}]
+    assert m["ticket_view"] == [{"field": "page", "label": "Focus page", "format": "open-page"}]
     ours = (resources.files("orch_focus") / "ext.schema.json").read_bytes()
     assert ours == (CONTRACTS / "addons" / "focus" / "ext.schema.json").read_bytes()
 

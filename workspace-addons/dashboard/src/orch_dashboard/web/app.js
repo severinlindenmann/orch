@@ -78,7 +78,12 @@
   const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
   const statusWord = t => questions(t).length ? 'Waiting for an answer' : ({active:'Doing', waiting:'Waiting', open:'Open', done:'Done', dropped:'Dropped'}[t.status] || 'Open');
   const chip = (text, cls = '') => h('span', {className:'chip ' + cls}, text);
-  const statusChip = t => chip(activeTicket(t) && (t.status === 'waiting' || questions(t).length) ? 'Blocked' : statusWord(t), activeTicket(t) && (t.status === 'waiting' || questions(t).length) ? 'attn' : t.status === 'active' ? 'active' : '');
+  // Only waiting for the person's answer is "Waiting for you", not a fault; "Blocked" is a ticket waiting on something else.
+  const statusChip = t => {
+    if (!activeTicket(t)) return chip(statusWord(t));
+    if (questions(t).length) return chip('Waiting for you', 'attn');
+    return t.status === 'waiting' ? chip('Blocked', 'attn') : chip(statusWord(t), t.status === 'active' ? 'active' : '');
+  };
   const heading = (title, sub = '') => h('header', {className:'page-heading', 'data-key':'heading'}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null);
   const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);
   const emptyRow = text => h('div', {className:'card-row muted'}, text);
@@ -197,7 +202,7 @@
   }
   function addonRows(ticket) {
     const rows = addons().flatMap(a => array(a.ticket_view).map(r => [r, (ticket.ext || {})[a.name], a.name]))
-      .map(([r, ext, addon]) => [r, ext && typeof ext === 'object' ? (r.format === 'open-page' ? addonLink(addon, ext[r.field], 'Open live', r.label) : addonValue(r, ext[r.field])) : '']).filter(([, v]) => v);
+      .map(([r, ext, addon]) => [r, ext && typeof ext === 'object' ? (r.format === 'open-page' ? addonLink(addon, ext[r.field], r.label, r.label) : addonValue(r, ext[r.field])) : '']).filter(([, v]) => v);
     return rows.length ? h('dl', {className:'addon-rows'}, rows.map(([r, v]) => [h('dt', {}, r.label), h('dd', {}, v)])) : null;
   }
   function agentBar(t) {
@@ -475,7 +480,7 @@
     const template = addonBody(a, addonViews[id]);
     const blocks = template.querySelector('#addon-blocks');
     if (blocks) {
-      blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl}));
+      blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id}));
       if (!blocks.childNodes.length) blocks.append(h('section', {className:'card pad muted'}, 'Nothing to show yet.'));
       blocks.querySelectorAll('.blk').forEach(n => n.classList.add('card'));
       blocks.querySelectorAll('svg').forEach(n => {
@@ -519,7 +524,7 @@
     writing++;
     mutation++;
     try {
-      const res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op, args})});
+      const res = await fetch('/api/act', {method:'POST', keepalive:true, headers:{'Content-Type':'application/json'}, body:JSON.stringify({op, args})});
       if (res.status !== 200) return {ok:false, status:res.status, text:await res.text()};
       const next = await res.json();
       accept(next);
@@ -566,9 +571,17 @@
     document.body.append(d);
     return {d, actions};
   }
+  // An answer still in its Undo window is sent at once when the page is left, so it is not lost.
+  const sends = new WeakMap();
+  function flushPending() {
+    window.DashHelpers.flushPending([...mounts.values()].map(m => ({state:m.state, send:sends.get(m)})));
+  }
+  addEventListener('pagehide', flushPending);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushPending(); });
   function mountQuestion(host, q, context = {}) {
+    let sendAnswer;
     const mounted = window.QuestionCard.mount(host, {...q, title:clean(q.title), text:clean(q.text)}, {
-      send: async answer => {
+      send: sendAnswer = async answer => {
         const lock = context.lock || host.dataset.key;
         if (lock) locks.add(lock);
         const result = await act('answer', {ticket:q.ticket, question:q.id, answer});
@@ -613,6 +626,7 @@
     const label = host.querySelector('.qmeta .muted');
     if (label) label.textContent = clean(ticketOf(q.ticket)?.title) || 'Ticket';
     mounts.set(host, mounted);
+    sends.set(mounted, sendAnswer);
   }
   async function openNeed(row, trigger) {
     if (!row) return;
@@ -681,7 +695,12 @@
           }
         } else result = {ok:true};
         if (result.ok && created && (values.owner || values.due || values.note)) {
-          result = await act('ticket.edit', {ticket:created.id, owner:values.owner, due:values.due, note:values.note});
+          // The ticket exists: close now, save the optional details behind the scenes.
+          window.orch.toast('Ticket created', 'ok');
+          window.orch.close(d);
+          const details = await act('ticket.edit', {ticket:created.id, owner:values.owner, due:values.due, note:values.note});
+          if (!details.ok) window.orch.toast('The ticket was created, but its details were not saved: ' + details.text, 'error');
+          return;
         }
       }
       submit.disabled = creationUnresolved;

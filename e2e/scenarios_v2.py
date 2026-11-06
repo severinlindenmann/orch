@@ -801,6 +801,16 @@ def f1_focus(e):
     rows = w.j("needs", by=None)
     qrow = [r for r in rows if r["ticket"] == tid and r["kind"] == "question"]
     check(len(qrow) == 1 and qrow[0]["text"] == "Use CHF?", f"question not in orch needs: {rows}")
+    # The dashboard accepts the Focus view while a run is active (its links are `addon:t/<ticket>`).
+    rc, out, err = w.sh(["orch", "addon", "add", "dashboard", "--yes"], timeout=600)
+    check(rc == 0, f"addon add dashboard: {(err or out)[-300:]}")
+    w.o("start", by=None)  # core starts the new background add-on too
+    dbase = w.j("dashboard", "status", by=None)["url"].rstrip("/")
+    wait_http(dbase + "/")
+    r = http("GET", dbase + "/api/addon/focus", timeout=15)
+    status, pulled = r.status, r.json()
+    check(status == 200 and pulled.get("state") == "ok" and pulled.get("view"), f"dashboard refused the Focus view of a running ticket: {pulled}")
+    check(any(i.get("link") == f"addon:t/{tid}" for b in pulled["view"]["blocks"] for i in b.get("items", [])), f"run missing in the Focus view: {pulled['view']}")
     qid = next(q["id"] for q in v["ticket"]["questions"] if q.get("answer") is None)
     r = fx.act_ok("answer", {"ticket": tid, "question": qid, "answer": "Yes"})
     q = next(q for q in r["view"]["ticket"]["questions"] if q["id"] == qid)
