@@ -3,6 +3,7 @@
 The scheduler never runs an agent itself: every run is `orch run start` (core decides resume / fresh / busy)."""
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -10,8 +11,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import orchcli
-from .cron import fmt, is_due, next_after, parse
+from .cron import fmt, is_due, last_due, next_after, parse
 from .orchcli import tickets as read_tickets
+from .plain import daily_or_slower, workspace_tz, zone
 from .runner import history, load_config, load_state, sdir, update_state
 
 OPEN = ("open", "active", "waiting")
@@ -47,7 +49,8 @@ class Scheduler:
         if note:
             orchcli.log(self.root, tid, note)
         t = orchcli.ticket(self.root, tid)
-        res = orchcli.run_start(self.root, tid, BUSY_TEXT if note else f"The scheduler asked for another run ({reason}).")
+        res = orchcli.run_start(self.root, tid, BUSY_TEXT if note else f"The scheduler asked for another run ({reason}).",
+                                self.agent_of(t))
         if res["result"] == "started":
             orchcli.log(self.root, tid, f"Scheduler started an agent run ({reason}).")
             starts = (load_state(self.root).get(tid, {}).get("starts") or [])[-49:]
@@ -57,6 +60,34 @@ class Scheduler:
         elif res["result"] == "failed":
             self.fail(tid, res["reason"])
         return res["result"]
+
+    def agent_of(self, t: dict | None) -> str | None:
+        """X-07 a: the agent named on the ticket (or on the repeat it belongs to). Core decides if it knows it."""
+        sched = ((t or {}).get("ext") or {}).get("scheduler") or {}
+        if sched.get("agent"):
+            return sched["agent"]
+        parent = orchcli.ticket(self.root, t["parent"]) if (t or {}).get("parent") else None
+        return (((parent or {}).get("ext") or {}).get("scheduler") or {}).get("agent")
+
+    def tz_of(self, sched: dict):
+        """The zone a repeat is read in: its own tz, else [workspace] tz, else UTC."""
+        return zone(sched.get("tz")) or zone(workspace_tz(self.root)) or UTC
+
+    def occurrence(self, t: dict, planned: datetime, tz) -> str | None:
+        """ST-05 c: the sub-ticket for one planned run; found again (never made twice) after a crash."""
+        occ = f"{t['id']}:{fmt(planned)}"
+        title = f"{t['title']} · {planned.astimezone(tz):%Y-%m-%d %H:%M}"[:200]
+        mark = {"run": True, "at": fmt(planned), "occurrence": occ}
+        kids = [c for c in read_tickets(self.root) if c.get("parent") == t["id"]]
+        for c in kids:
+            if ((c.get("ext") or {}).get("scheduler") or {}).get("occurrence") == occ:
+                return c["id"]
+        made = orchcli.call(self.root, "ticket", "new", title, "--parent", t["id"], "--ext",
+                            "scheduler=" + json.dumps(mark))  # one write: never a child without its occurrence id
+        if not isinstance(made, dict) or not made.get("id"):
+            return None
+        orchcli.log(self.root, made["id"], f"One run of the repeat {t['id']} ({t['title']}). Do what that ticket says.")
+        return made["id"]
 
     def fail(self, tid: str, reason: str) -> None:
         """A run that did not work becomes one question (kind scheduler:failure), asked once."""
@@ -157,16 +188,21 @@ class Scheduler:
             sched = (t.get("ext") or {}).get("scheduler") or {}
             cron = sched.get("cron")
             if sched.get("recurring") is True and isinstance(cron, str):
+                tz = self.tz_of(sched)
                 since = (max(filter(None, [parse(sched.get("last_run")), parse(state.get(tid, {}).get("last_run"))]),
                              default=None) or parse(t.get("created_at")) or now)
                 upd: dict = {}
-                if is_due(cron, since, now):
-                    res = self.start_run(tid, f"cron {cron}", now)
-                    upd["last_run"] = fmt(now)  # also after a failure: the next planned time retries, not every pass
-                    orchcli.set_ext(self.root, t, last_run=fmt(now))
+                if is_due(cron, since, now, tz):
+                    run_tid: str | None = tid
+                    if sched.get("each_run") == "sub-ticket" and daily_or_slower(cron):
+                        run_tid = self.occurrence(t, last_due(cron, now, tz), tz)
+                    res = self.start_run(run_tid, f"cron {cron}", now) if run_tid else "failed"
+                    if run_tid:  # a sub-ticket that could not be made is tried again next pass
+                        upd["last_run"] = fmt(now)  # also after a failure: the next planned time retries
+                        orchcli.set_ext(self.root, t, last_run=fmt(now))
                     if res == "started":
-                        started.append(tid)
-                nxt = next_after(cron, now)
+                        started.append(run_tid)
+                nxt = next_after(cron, now, tz)
                 upd["next_run"] = fmt(nxt) if nxt else None
                 update_state(self.root, tid, **upd)
         force = self.wake.is_set()

@@ -294,7 +294,29 @@ def add_history(ticket: dict, by: str, text: str, via: str = "cli") -> None:
     ticket["history"].append({"at": now(), "by": by, "via": via, "text": text})
 
 
-def create(root: Path, title: str, by: str, parent: str | None = None) -> dict:
+def parse_ext_args(pairs: list[str] | None, schema_for=None) -> dict[str, dict]:
+    """`--ext <addon>=<json object>` (repeatable) -> {addon: object}; checked like `orch ext set`."""
+    out: dict[str, dict] = {}
+    for pair in pairs or []:
+        addon, _, data = pair.partition("=")
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", addon):
+            raise Refused("--ext needs <add-on>=<json>, the add-on key is lowercase letters, digits or -.")
+        try:
+            obj = json.loads(data)
+        except ValueError:
+            obj = None
+        if not isinstance(obj, dict):
+            raise Refused("ext data must be a JSON object.")
+        schema = schema_for(addon) if schema_for else None
+        if schema is not None:
+            validate_ext(schema, obj, addon)
+        out[addon] = obj
+    return out
+
+
+def create(
+    root: Path, title: str, by: str, parent: str | None = None, ext: dict[str, dict] | None = None
+) -> dict:
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
@@ -317,6 +339,8 @@ def create(root: Path, title: str, by: str, parent: str | None = None) -> dict:
     }
     if parent is not None:
         ticket["parent"] = parent
+    if ext:  # add-on data in the same write as the ticket (no half-made ticket)
+        ticket["ext"] = ext
     save(root, ticket)
     return ticket
 

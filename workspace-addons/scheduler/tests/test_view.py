@@ -50,9 +50,9 @@ def test_next_runs_calendar_and_list(ws):
     assert blocks(v, "stat")[0]["value"] == "in 1 d"
     (lst,) = blocks(v, "list", "Next runs")
     assert [i["link"] for i in lst["items"]] == ["t_wake001", "t_rec00001"]
-    assert lst["items"][1]["subtitle"] == "Mondays at 07:00 · next Mon 07:00" and "<" not in lst["items"][1]["title"]
-    (rep,) = blocks(v, "list", "Repeating")
-    assert [(i["link"], i["subtitle"]) for i in rep["items"]] == [("t_rec00001", "Mondays at 07:00")]
+    assert lst["items"][1]["subtitle"] == "Mondays at 07:00 UTC · next Mon 07:00" and "<" not in lst["items"][1]["title"]
+    (rep,) = blocks(v, "list", "Repeats")
+    assert [(i["link"], i["subtitle"]) for i in rep["items"]] == [("t_rec00001", "Mondays at 07:00 UTC · next in 4 d")]
     days = blocks(v, "calendar")[0]["days"]
     assert sum(len(d["items"]) for d in days) == 2
 
@@ -137,15 +137,47 @@ def test_hourly_shows_times(ws):
     ("0 9 1 1 *", "On a custom plan (0 9 1 1 *, UTC)"),
 ])
 def test_cron_in_plain_words(cron, words):
-    from orch_scheduler.view import cron_human
-
-    assert cron_human(cron) == words
-
-
-def test_cron_words_use_local_time_and_shift_the_day():
-    from datetime import timedelta, timezone
+    from zoneinfo import ZoneInfo
 
     from orch_scheduler.view import cron_human
 
-    assert cron_human("0 23 * * 1", timezone(timedelta(hours=2))) == "Tuesdays at 01:00"
-    assert cron_human("0 7 * * *", timezone(timedelta(hours=1))) == "Every day at 08:00"
+    assert cron_human(cron, ZoneInfo("UTC")) == words.replace(", UTC)", ")")
+
+
+def test_cron_words_say_utc_only_when_no_zone():
+    from zoneinfo import ZoneInfo
+
+    from orch_scheduler.view import cron_human
+
+    assert cron_human("0 7 * * *") == "Every day at 07:00 UTC"
+    assert cron_human("0 7 * * *", ZoneInfo("Europe/Zurich")) == "Every day at 07:00"
+
+
+def test_repeats_are_one_row_each_sorted_and_monthly_stays(ws):
+    add_ticket(ws, "t_mon00001", title="Close", ext={"scheduler": {"recurring": True, "cron": "0 9 1 * *", "tz": "Europe/Zurich"}})
+    add_ticket(ws, "t_day00001", title="Daily", ext={"scheduler": {"recurring": True, "cron": "30 7 * * *", "tz": "Europe/Zurich"}})
+    v = build(ws, T(8))
+    check(v)
+    (rep,) = blocks(v, "list", "Repeats")
+    assert [i["link"] for i in rep["items"]] == ["t_day00001", "t_mon00001"]
+    assert rep["items"][1]["subtitle"] == "Every month on day 1 at 09:00 · next in 27 d"
+
+
+def test_listen_section_shows_state_and_arrivals(ws):
+    from orch_scheduler import listen, service
+
+    service_pid = lambda root, clean=False: 1
+    import pytest as _p
+    mp = _p.MonkeyPatch()
+    mp.setattr(service, "running_pid", service_pid)
+    try:
+        listen._write(ws, listening=True, note="", recent=[
+            {"id": "m_1", "type": "start", "at": "2026-11-04T07:00:00Z", "seen": True, "allowed": True},
+            {"id": "m_2", "type": "delegate", "at": "2026-11-04T07:30:00Z", "seen": False, "allowed": False}])
+        v = build(ws, T(8))
+    finally:
+        mp.undo()
+    check(v)
+    assert {b["label"]: b["value"] for b in blocks(v, "stat")}["Listening"] == "yes"
+    (arr,) = blocks(v, "list", "What arrived")
+    assert [i["chips"][0]["label"] for i in arr["items"]] == ["Waiting for you", "Started a run"]

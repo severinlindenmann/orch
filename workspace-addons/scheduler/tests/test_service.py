@@ -32,19 +32,20 @@ def test_list(ws):
 
 def test_repeat_sets_ext_and_off(ws, capsys):
     add_ticket(ws, "t_rep00002")
-    assert main(["--dir", str(ws), "repeat", "t_rep00002", "--cron", "0 7 * * 1", "--agent", "codex", "--json"]) == 0
+    assert main(["--dir", str(ws), "repeat", "t_rep00002", "every monday 08:00", "--tz", "Europe/Zurich",
+                 "--agent", "codex", "--json"]) == 0
     t = json.loads((ws / ".orch/tickets/t_rep00002.json").read_text())
-    assert t["ext"]["scheduler"] == {"recurring": True, "cron": "0 7 * * 1", "agent": "codex"}
+    assert t["ext"]["scheduler"] == {"recurring": True, "cron": "0 8 * * 1", "tz": "Europe/Zurich", "agent": "codex"}
     assert main(["--dir", str(ws), "repeat", "t_rep00002", "--off"]) == 0
     t = json.loads((ws / ".orch/tickets/t_rep00002.json").read_text())
-    assert t["ext"]["scheduler"]["recurring"] is False and t["ext"]["scheduler"]["cron"] == "0 7 * * 1"
+    assert t["ext"]["scheduler"]["recurring"] is False and t["ext"]["scheduler"]["cron"] == "0 8 * * 1"
 
 
 def test_repeat_refuses_plainly(ws, capsys):
     add_ticket(ws, "t_rep00003")
     assert main(["--dir", str(ws), "repeat", "t_rep00003", "nonsense", "--json"]) == 2
-    assert "cron" in json.loads(capsys.readouterr().out)["error"]
-    assert main(["--dir", str(ws), "repeat", "t_nothere1", "0 7 * * 1"]) == 2
+    assert "every monday 08:00" in json.loads(capsys.readouterr().out)["error"]
+    assert main(["--dir", str(ws), "repeat", "t_nothere1", "daily 07:00"]) == 2
     assert capsys.readouterr().err.startswith("Refused: ")
 
 
