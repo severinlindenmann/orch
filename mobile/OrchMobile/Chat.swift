@@ -17,12 +17,14 @@ struct QueuedText: Codable, Equatable, Identifiable, Sendable {
     let ticket: String?
     let text: String
     let at: String
+    /// The phone id (credential) this text was written under; a different phone never sends it.
+    var phone: String = ""
 }
 
 struct ChatItem: Identifiable, Equatable {
     enum Kind: Equatable {
         case mine(String, queued: Bool)
-        case theirs(String, label: String?)     // label: "RESULT" etc.
+        case theirs(String, label: String?, sender: String? = nil)     // label: "RESULT" etc.; sender: "Claude · agent"
         case system(String)
         case card(Ticket)
         case question(Question)
@@ -105,8 +107,8 @@ enum ChatBuilder {
         switch kind { case "result": "RESULT"; case "failure": "DID NOT WORK"; case "stopped": "STOPPED"; default: nil }
     }
 
-    private static func isMine(_ by: String?) -> Bool {
-        ["person", "you", "human", "me"].contains((by ?? "").lowercased())
+    private static func isMine(_ line: TicketSnapshot.Line) -> Bool {
+        ["person", "you", "human", "me"].contains((line.role ?? line.by ?? "").lowercased())
     }
 
     // MARK: Workspace chat
@@ -149,7 +151,7 @@ enum ChatBuilder {
         // History from the snapshot (last 30), without repeating a line an update text already shows.
         for (i, line) in (t?.view?.historyTail ?? []).suffix(30).enumerated() where !seenText.contains(line.text) {
             let at = line.at ?? "0000"
-            out.append(ChatItem(id: "h\(i)-" + line.id, at: at, kind: isMine(line.by) ? .mine(line.text, queued: false) : .theirs(line.text, label: nil)))
+            out.append(ChatItem(id: "h\(i)-" + line.id, at: at, kind: isMine(line) ? .mine(line.text, queued: false) : .theirs(line.text, label: nil, sender: line.by.map { "\($0) · \(line.role ?? "agent")" })))
         }
         for a in t?.view?.attachments ?? [] { out.append(ChatItem(id: "a-" + a.id, at: (a.at ?? t?.at ?? "0000") + "~", kind: .attachment(a))) }
         for q in d.questions where q.message.from == ws && q.message.ticket == ticketId { out.append(ChatItem(id: q.id, at: q.message.createdAt, kind: .question(q))) }
@@ -170,7 +172,7 @@ enum ChatBuilder {
             let line: String, at: String?
             if let q = open.last { line = q.message.body.text; at = q.message.createdAt }
             else if let last = items.last(where: { if case .theirs = $0.kind { return true }; if case .mine = $0.kind { return true }; return false }) {
-                switch last.kind { case .theirs(let t, _), .mine(let t, _): line = t; default: line = "" }
+                switch last.kind { case .theirs(let t, _, _): line = t; case .mine(let t, _): line = t; default: line = "" }
                 at = last.at
             } else { line = lastSeenText(w.lastSeen, online: w.online); at = nil }
             let unread = read.unread(ReadState.workspaceKey(w.id), in: items)

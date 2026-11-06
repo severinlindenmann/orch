@@ -13,14 +13,14 @@ final class ChatTests: XCTestCase {
         let old = #"{"id":"m_1","workspace":"ws_a","workspace_name":"A","ticket":"t_1","kind":"working","title":"T","text":"x","reply_to":null,"at":"2026-11-05T10:00:00Z"}"#
         let u0 = try JSONCoding.decoder.decode(TicketUpdate.self, from: Data(old.utf8))
         XCTAssertNil(u0.key); XCTAssertNil(u0.ticketView)
-        let new = #"{"id":"m_1","workspace":"ws_a","workspace_name":"A","ticket":"t_1","key":"PIL-12","kind":"working","title":"T","text":"x","reply_to":null,"at":"2026-11-05T10:00:00Z","ticket_view":{"title":"T","running":true,"checklist":[{"text":"a","done":true},{"text":"b"}],"attachments":[{"kind":"image","title":"p.png","blob_id":"b_1"}],"history_tail":[{"by":"agent","text":"hi"}],"extra":1}}"#
+        let new = #"{"id":"m_1","workspace":"ws_a","workspace_name":"A","ticket":"t_1","key":"PIL-12","kind":"working","title":"T","text":"x","reply_to":null,"at":"2026-11-05T10:00:00Z","ticket_view":{"title":"T","running":true,"checklist":[{"text":"a","done":true},{"text":"b"}],"attachments":[{"kind":"image","title":"p.png","blob_id":"b_1"}],"history_tail":[{"who":"Claude","role":"agent","text":"hi"}],"extra":1}}"#
         let u1 = try JSONCoding.decoder.decode(TicketUpdate.self, from: Data(new.utf8))
         XCTAssertEqual(u1.key, "PIL-12")
         XCTAssertEqual(u1.ticketView?.running, true)
         XCTAssertEqual(u1.ticketView?.doneCount, 1)       // no explicit "done": counted from the checklist
         XCTAssertEqual(u1.ticketView?.checklist.map(\.done), [true, false])
         XCTAssertEqual(u1.ticketView?.attachments.first?.blobId, "b_1")
-        XCTAssertEqual(u1.ticketView?.historyTail.first?.text, "hi")
+        XCTAssertEqual(u1.ticketView?.historyTail.first?.text, "hi"); XCTAssertEqual(u1.ticketView?.historyTail.first?.by, "Claude"); XCTAssertEqual(u1.ticketView?.historyTail.first?.role, "agent")
     }
 
     func testWorkspaceChatGroupsMyTextsSystemLinesCardsAndQuestions() async throws {
@@ -28,7 +28,7 @@ final class ChatTests: XCTestCase {
         let items = ChatBuilder.workspaceItems(MockRelay.pilatus, d)
         XCTAssertEqual(items.map(\.at), items.map(\.at).sorted(), "oldest first")
         XCTAssertTrue(items.contains { if case .mine(let t, false) = $0.kind { return t.hasPrefix("Can you make the Q3") }; return false })
-        XCTAssertTrue(items.contains { if case .theirs(let t, _) = $0.kind { return t.hasPrefix("Yes, I can answer") }; return false })
+        XCTAssertTrue(items.contains { if case .theirs(let t, _, _) = $0.kind { return t.hasPrefix("Yes, I can answer") }; return false })
         XCTAssertTrue(items.contains { if case .card(let t) = $0.kind { return t.key == "PIL-12" }; return false })
         XCTAssertTrue(items.contains { if case .question = $0.kind { return true }; return false })
         XCTAssertFalse(items.contains { if case .question(let q) = $0.kind { return q.message.from != MockRelay.pilatus }; return false }, "no other workspace's question")
@@ -38,9 +38,9 @@ final class ChatTests: XCTestCase {
         var d = try await data(MockRelay(latency: .zero))
         d.outbox = [QueuedText(id: "o1", workspace: MockRelay.pilatus, ticket: "t_q3sum1", text: "Please add September", at: "2026-11-06T09:00:00Z")]
         let items = ChatBuilder.ticketItems(MockRelay.pilatus, "t_q3sum1", d)
-        let texts = items.compactMap { i -> String? in if case .theirs(let t, _) = i.kind { return t }; return nil }
+        let texts = items.compactMap { i -> String? in if case .theirs(let t, _, _) = i.kind { return t }; return nil }
         XCTAssertTrue(texts.contains("Pulled the numbers from the Q3 sheet."))
-        XCTAssertTrue(items.contains { if case .theirs(_, "RESULT") = $0.kind { return true }; return false })
+        XCTAssertTrue(items.contains { if case .theirs(_, "RESULT", _) = $0.kind { return true }; return false })
         XCTAssertEqual(items.filter { if case .attachment = $0.kind { return true }; return false }.count, 3)
         XCTAssertEqual(items.last.map { if case .mine(let t, true) = $0.kind { return t }; return "" }, "Please add September", "queued text stays last and marked")
     }
@@ -110,14 +110,78 @@ final class ChatTests: XCTestCase {
         XCTAssertNil(model.pendingAnswers[q.id])
     }
 
-    func testOfflineSendIsQueuedAndKept() async throws {
-        UserDefaults.standard.removeObject(forKey: "chatOutbox")
-        UserDefaults.standard.set(true, forKey: "mockFail"); defer { UserDefaults.standard.removeObject(forKey: "mockFail"); UserDefaults.standard.removeObject(forKey: "chatOutbox") }
+    private func pairedOffline() async -> AppModel {
+        Keychain.delete(); UserDefaults.standard.removeObject(forKey: "chatOutbox")
+        UserDefaults.standard.set(true, forKey: "mockFail")
         let model = AppModel(useMock: true)
+        model.openSampleInvite(); await model.connect(phoneName: "Test phone"); await model.finishSetup(allowNotifications: false)
+        return model
+    }
+    private func cleanup() { UserDefaults.standard.removeObject(forKey: "mockFail"); UserDefaults.standard.removeObject(forKey: "chatRead"); Keychain.delete() }
+
+    func testOfflineSendIsQueuedAndKept() async throws {
+        defer { cleanup() }
+        let model = await pairedOffline()
         let r = await model.sendChat(to: MockRelay.pilatus, text: "  Please add the September totals  ", ticket: "t_q3sum1")
         XCTAssertEqual(r, .queued)
         XCTAssertEqual(model.outbox.map(\.text), ["Please add the September totals"])
-        XCTAssertEqual(AppModel(useMock: true).outbox.count, 1, "survives a restart")
+        XCTAssertEqual(model.outbox.first?.phone, "ph_iphone0001", "tagged with the phone it was written under")
+        XCTAssertEqual(AppModel(useMock: true).outbox.count, 1, "survives a restart of the same phone")
+    }
+
+    func testSignOutClearsOutboxReadStateAndUndoTimers() async throws {
+        defer { cleanup() }
+        let model = await pairedOffline()
+        _ = await model.sendChat(to: MockRelay.pilatus, text: "waits", ticket: nil)
+        model.markRead("ws:x", items: [ChatItem(id: "i", at: "2026-11-05T10:00:00Z", kind: .theirs("a", label: nil))])
+        XCTAssertFalse(UserDefaults.standard.dictionary(forKey: "chatRead")?.isEmpty ?? true)
+        model.undoDelay = .milliseconds(200)
+        let q = MockRelayTestsFixtures.question
+        model.chooseAnswer(q, "DATE")
+        await model.signOut()
+        XCTAssertTrue(model.outbox.isEmpty); XCTAssertTrue(model.pendingAnswers.isEmpty); XCTAssertTrue(model.sendingAnswers.isEmpty)
+        XCTAssertEqual(model.readState, ReadState())
+        XCTAssertNil(UserDefaults.standard.object(forKey: "chatRead")); XCTAssertNil(UserDefaults.standard.object(forKey: "chatOutbox"))
+        XCTAssertTrue(AppModel(useMock: true).outbox.isEmpty, "nothing on disk for the next person")
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertNil(model.answers[q.id], "the undo timer was cancelled: no answer goes out after sign-out")
+    }
+
+    func testAnotherPhonesQueuedTextIsDroppedNotSent() async throws {
+        defer { cleanup() }
+        var model: AppModel? = await pairedOffline()
+        _ = await model?.sendChat(to: MockRelay.pilatus, text: "mine", ticket: nil)
+        model = nil
+        // a leftover from a different phone on the same disk
+        let foreign = QueuedText(id: "f1", workspace: MockRelay.pilatus, ticket: nil, text: "not yours", at: "2026-11-06T09:00:00Z", phone: "ph_other0001")
+        let mine = QueuedText(id: "m1", workspace: MockRelay.pilatus, ticket: nil, text: "mine", at: "2026-11-06T09:00:00Z", phone: "ph_iphone0001")
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("chat-outbox.json")
+        try JSONEncoder().encode([foreign, mine]).write(to: url)
+        UserDefaults.standard.removeObject(forKey: "mockFail")
+        let reloaded = AppModel(useMock: true)
+        XCTAssertEqual(reloaded.outbox.map(\.id), ["m1"])
+    }
+
+    func testOnlyWebLinksOpenAndImagesNeedABlob() {
+        XCTAssertNotNil(SafeLink.url("https://docs.pilatus.ch/board"))
+        XCTAssertNotNil(SafeLink.url("http://example.com"))
+        for bad in ["tel:+41790000000", "file:///etc/passwd", "orch://pair?code=x", "javascript:alert(1)", "sms:1", "https://", "//evil.com", "", "not a url"] {
+            XCTAssertNil(SafeLink.url(bad), bad)
+        }
+        XCTAssertEqual(SafeLink.host("https://docs.pilatus.ch/board"), "docs.pilatus.ch")
+        XCTAssertTrue(BlobID.isValid("b_chart-1")); XCTAssertFalse(BlobID.isValid("../x")); XCTAssertFalse(BlobID.isValid("a/b")); XCTAssertFalse(BlobID.isValid(""))
+    }
+
+    func testBlobRequestUsesPairedCredentialsOnTheRelayOnly() async throws {
+        StubProtocol.handler = { _ in (200, Data([1, 2, 3])) }
+        let base = URL(string: "https://relay.severin.io")!
+        let c = URLSessionRelayClient(base: base, credentials: Credentials(relay: base, phoneId: "ph_iphone0001", token: "orn_x", phoneName: "P"), session: StubProtocol.session())
+        let d = try await c.blob(id: "b_chart")
+        XCTAssertEqual(d.count, 3)
+        let seen = StubProtocol.seen.last
+        XCTAssertEqual(seen?.url?.host, "relay.severin.io"); XCTAssertEqual(seen?.url?.path, "/v1/phone/blobs/b_chart")
+        XCTAssertEqual(seen?.value(forHTTPHeaderField: "X-Orch-Phone"), "ph_iphone0001")
+        do { _ = try await c.blob(id: "https://evil.example/x"); XCTFail("must refuse") } catch {}
     }
 
     func testTimeText() {

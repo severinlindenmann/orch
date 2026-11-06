@@ -12,6 +12,8 @@ protocol RelayAPI: Sendable {
     func send(to: String, text: String, ticket: String?) async throws -> String
     func transcribe(audio: Data, language: String?) async throws -> Transcript
     func signOut() async throws
+    /// Raw bytes of a relay blob (images in a ticket chat). Only ever called with the paired credentials.
+    func blob(id: String) async throws -> Data
 }
 
 enum RelayError: Error, Equatable, LocalizedError {
@@ -107,10 +109,31 @@ struct URLSessionRelayClient: RelayAPI {
         return try JSONCoding.decoder.decode(Transcript.self, from: d)
     }
     func signOut() async throws { _ = try await request("POST", "/v1/phone/signout") }
+    func blob(id: String) async throws -> Data {
+        guard BlobID.isValid(id) else { throw RelayError.api(status: 404, code: "not_found", message: "Image not found.") }
+        let d = try await request("GET", "/v1/phone/blobs/\(id)")
+        guard d.count <= BlobID.maxBytes else { throw RelayError.api(status: 413, code: "too_large", message: "Image too large.") }
+        return d
+    }
 }
 
 private struct AnyEncodable: Encodable {
     let wrapped: any Encodable
     init(_ w: any Encodable) { wrapped = w }
     func encode(to encoder: Encoder) throws { try wrapped.encode(to: encoder) }
+}
+
+enum BlobID {
+    static let maxBytes = 10_000_000
+    static func isValid(_ id: String) -> Bool { id.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil }
+}
+
+/// Links from a workspace are only opened when they are plain web addresses (never tel:, file:, custom schemes).
+enum SafeLink {
+    static func url(_ raw: String?) -> URL? {
+        guard let raw, let u = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let scheme = u.scheme?.lowercased(), scheme == "https" || scheme == "http", let host = u.host, !host.isEmpty else { return nil }
+        return u
+    }
+    static func host(_ raw: String?) -> String? { url(raw)?.host }
 }

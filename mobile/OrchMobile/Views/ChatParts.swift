@@ -187,25 +187,24 @@ struct AttachmentBubble: View {
     }
 }
 
-/// Image (drawn from the blob or the url when there is one), link or file.
+/// Image (only from the relay blob, never from an arbitrary address), link or file.
 struct AttachmentTile: View {
     let attachment: TicketSnapshot.Attachment
     var large = false
     var body: some View {
         switch attachment.kind {
         case "image":
-            VStack(alignment: .leading, spacing: 6) {
-                Group {
-                    if let u = attachment.url.flatMap(URL.init(string:)) {
-                        AsyncImage(url: u) { $0.resizable().scaledToFill() } placeholder: { Theme.surface3 }
-                    } else {
-                        ZStack { Theme.surface3; Image(systemName: "photo").font(.system(size: 28)).foregroundStyle(Theme.muted) }
-                    }
-                }.frame(maxWidth: .infinity).frame(height: large ? 140 : 84).clipShape(RoundedRectangle(cornerRadius: 8))
-                Text(attachment.name ?? attachment.title ?? "Image").themeFont(12).foregroundStyle(Theme.text).lineLimit(1)
+            if let id = attachment.blobId, BlobID.isValid(id) {
+                VStack(alignment: .leading, spacing: 6) {
+                    BlobImage(id: id).frame(maxWidth: .infinity).frame(height: large ? 140 : 84).clipShape(RoundedRectangle(cornerRadius: 8))
+                    Text(attachment.name ?? attachment.title ?? "Image").themeFont(12).foregroundStyle(Theme.text).lineLimit(1)
+                }
+            } else {
+                // A picture that only has an address is a link card: nothing loads until the person taps it.
+                row(symbol: "photo", title: attachment.title ?? attachment.name ?? "Image", sub: SafeLink.host(attachment.url) ?? "")
             }
         case "link":
-            row(symbol: "link", title: attachment.title ?? attachment.url ?? "Link", sub: attachment.url.flatMap { URL(string: $0)?.host } ?? "")
+            row(symbol: "link", title: attachment.title ?? SafeLink.host(attachment.url) ?? "Link", sub: SafeLink.host(attachment.url) ?? "")
         default:
             row(symbol: "doc", title: attachment.title ?? attachment.name ?? "File", sub: attachment.size.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "")
         }
@@ -217,7 +216,23 @@ struct AttachmentTile: View {
             Spacer(minLength: 0)
         }.foregroundStyle(Theme.text)
         return Group {
-            if attachment.kind == "link", let u = attachment.url.flatMap(URL.init(string:)) { Link(destination: u) { inner } } else { inner }
+            if attachment.kind != "file", let u = SafeLink.url(attachment.url) { Link(destination: u) { inner } } else { inner }
+        }
+    }
+}
+
+/// Loads an image through the relay (paired credentials); a failure or a non-image shows a plain placeholder.
+struct BlobImage: View {
+    @Environment(AppModel.self) private var model
+    let id: String
+    @State private var image: UIImage?
+    var body: some View {
+        ZStack {
+            Theme.surface3
+            if let image { Image(uiImage: image).resizable().scaledToFill() }
+            else { Image(systemName: "photo").font(.system(size: 28)).foregroundStyle(Theme.muted) }
+        }.clipped().task(id: id) {
+            if let d = await model.blob(id) { image = UIImage(data: d) }
         }
     }
 }
@@ -269,7 +284,7 @@ struct ChatItemView: View {
     var body: some View {
         switch item.kind {
         case .mine(let t, let queued): TextBubble(text: t, mine: true, queued: queued, at: item.at)
-        case .theirs(let t, let label): TextBubble(text: t, label: label, sender: workspaceName, at: item.at)
+        case .theirs(let t, let label, let sender): TextBubble(text: t, label: label, sender: sender ?? workspaceName, at: item.at)
         case .system(let t): SystemLine(text: t)
         case .card(let t): TicketCardBubble(ticket: t)
         case .question(let q): QuestionBubble(question: q)

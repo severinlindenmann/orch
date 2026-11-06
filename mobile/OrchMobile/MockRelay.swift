@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// In-process fake of the phone endpoints with the shared dataset (Pilatus Workspace + Reports).
 /// Same rules as the real relay: first answer wins (409 already_answered), `send` only to reachable workspaces.
@@ -52,19 +53,19 @@ actor MockRelay: RelayAPI {
         title: "Q3 summary for the board", status: "done", agent: "Claude", summary: "Pulled the numbers, drew the charts, the board deck is ready.",
         checklist: ["Read the Q3 sheet", "Check the totals", "Prepare the summary", "Draw the charts", "Review the board deck"].map { .init(text: $0, done: true) },
         running: false,
-        attachments: [.init(kind: "image", title: "q3-chart.png", name: "q3-chart.png", size: 48_000, at: "2026-11-05T11:19:00Z"),
+        attachments: [.init(kind: "image", title: "q3-chart.png", blobId: "b_chart", name: "q3-chart.png", size: 48_000, at: "2026-11-05T11:19:00Z"),
                       .init(kind: "link", title: "Board deck draft", url: "https://docs.pilatus.ch/board-q3", at: "2026-11-05T11:19:30Z"),
                       .init(kind: "file", title: "test-report.pdf", name: "test-report.pdf", size: 84_000, at: "2026-11-05T11:19:40Z")],
-        historyTail: [.init(at: "2026-11-05T10:34:00Z", by: "agent", text: "Pulled the numbers from the Q3 sheet."),
-                      .init(at: "2026-11-05T10:37:00Z", by: "agent", text: "Draft is ready, charts next.")])
+        historyTail: [.init(at: "2026-11-05T10:34:00Z", by: "Claude", role: "agent", text: "Pulled the numbers from the Q3 sheet."),
+                      .init(at: "2026-11-05T10:37:00Z", by: "Claude", role: "agent", text: "Draft is ready, charts next.")])
     static let invoiceView = TicketSnapshot(
         title: "Invoice CSV export", status: "working", agent: "Claude", summary: "Writing the export.",
         checklist: [.init(text: "Read the invoice table", done: true), .init(text: "Choose the columns", done: true), .init(text: "Write the export", done: false),
                     .init(text: "Add a test", done: false)],
         running: true,
         attachments: [.init(kind: "link", title: "Fix invoice export #142", url: "https://github.com/pilatus/reports/pull/142", at: "2026-11-05T15:10:00Z")],
-        historyTail: [.init(at: "2026-11-05T15:05:00Z", by: "person", text: "Please add an export for the invoices."),
-                      .init(at: "2026-11-05T15:08:00Z", by: "agent", text: "Reading the invoice table first.")])
+        historyTail: [.init(at: "2026-11-05T15:05:00Z", by: "You", role: "person", text: "Please add an export for the invoices."),
+                      .init(at: "2026-11-05T15:08:00Z", by: "Claude", role: "agent", text: "Reading the invoice table first.")])
 
     /// Work updates per (workspace, ticket), newest per ticket is what the feed returns.
     private var updateLog: [TicketUpdate] = [
@@ -190,4 +191,17 @@ actor MockRelay: RelayAPI {
         return Transcript(text: Self.transcript, language: language ?? "en", duration: 3.2)
     }
     func signOut() async throws { try await check(); signedOut = true }
+    /// A small bar chart for the fake `b_chart` blob; anything else is not found.
+    func blob(id: String) async throws -> Data {
+        try await check()
+        guard id == "b_chart" else { throw RelayError.api(status: 404, code: "not_found", message: "Image not found.") }
+        let r = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 140))
+        return r.pngData { c in
+            UIColor(red: 0.08, green: 0.09, blue: 0.11, alpha: 1).setFill(); c.fill(CGRect(x: 0, y: 0, width: 240, height: 140))
+            for (i, h) in [40.0, 60, 52, 95].enumerated() {
+                (i == 3 ? UIColor(red: 0.18, green: 0.78, blue: 0.64, alpha: 1) : UIColor(red: 0.12, green: 0.3, blue: 0.27, alpha: 1)).setFill()
+                c.fill(CGRect(x: 20 + CGFloat(i) * 55, y: 120 - h, width: 40, height: h))
+            }
+        }
+    }
 }

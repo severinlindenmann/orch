@@ -157,10 +157,23 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
     }
     struct Line: Codable, Sendable, Equatable, Identifiable {
         var at: String? = nil
-        var by: String? = nil
+        var by: String? = nil      // who (a name)
+        var role: String? = nil    // agent | person
         var text: String
         var id: String { (at ?? "") + "|" + (by ?? "") + "|" + text }
-        init(at: String? = nil, by: String? = nil, text: String) { self.at = at; self.by = by; self.text = text }
+        init(at: String? = nil, by: String? = nil, role: String? = nil, text: String) { self.at = at; self.by = by; self.role = role; self.text = text }
+        init(from d: Decoder) throws {
+            let c = try d.container(keyedBy: CodingKeys.self)
+            at = try? c.decodeIfPresent(String.self, forKey: .at)
+            let who = try? c.decodeIfPresent(String.self, forKey: .who), b = try? c.decodeIfPresent(String.self, forKey: .by)
+            by = who ?? b; role = try? c.decodeIfPresent(String.self, forKey: .role)
+            text = try c.decode(String.self, forKey: .text)
+        }
+        enum CodingKeys: String, CodingKey { case at, by, who, role, text }
+        func encode(to e: Encoder) throws {
+            var c = e.container(keyedBy: CodingKeys.self)
+            try c.encodeIfPresent(at, forKey: .at); try c.encodeIfPresent(by, forKey: .who); try c.encodeIfPresent(role, forKey: .role); try c.encode(text, forKey: .text)
+        }
     }
     var title: String? = nil
     var status: String? = nil

@@ -45,7 +45,7 @@ final class ShotsUITests: XCTestCase {
         app = launch(["-openChat", "ws_reports001", "-openTicket", "t_9k2m4q"])
         XCTAssertTrue(app.descendants(matching: .any)["tasks-card"].waitForExistence(timeout: 15))
         try shot(app, "6-ticket-chat-running")
-        app.buttons["tasks-toggle"].tap(); try shot(app, "7-ticket-tasks-open"); app.terminate()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Tasks'")).firstMatch.tap(); try shot(app, "7-ticket-tasks-open"); app.terminate()
 
         app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_q3sum1"])
         XCTAssertTrue(app.descendants(matching: .any)["tasks-card"].waitForExistence(timeout: 15))

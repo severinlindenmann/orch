@@ -51,7 +51,7 @@ final class AppModel {
     /// Read state per chat (client only, kept in UserDefaults).
     private(set) var readState = ReadState(seen: UserDefaults.standard.dictionary(forKey: "chatRead") as? [String: String] ?? [:])
     /// Texts written offline, sent when the phone is online again.
-    private(set) var outbox: [QueuedText] = AppModel.loadOutbox()
+    private(set) var outbox: [QueuedText] = []
     /// question id -> option waiting out the undo window before it is sent
     private(set) var pendingAnswers: [String: String] = [:]
     private(set) var sendingAnswers: Set<String> = []
@@ -77,6 +77,8 @@ final class AppModel {
         self.session = session
         self.voiceMode = voiceMode
         if let c = Keychain.load() { credentials = c; phase = .ready }
+        outbox = Self.loadOutbox().filter { $0.phone == credentials?.phoneId }
+        if credentials == nil { Self.wipeOutbox() }
     }
 
     /// `-relayMode mock` (launch argument or UserDefaults, UI tests) uses the in-process mock; every real build talks to the relay named in the invitation.
@@ -132,11 +134,20 @@ final class AppModel {
         UserDefaults.standard.set(r.seen, forKey: "chatRead")
     }
 
+    private static var outboxURL: URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("chat-outbox.json")
+    }
     private static func loadOutbox() -> [QueuedText] {
-        guard let d = UserDefaults.standard.data(forKey: "chatOutbox") else { return [] }
+        guard let d = try? Data(contentsOf: outboxURL) else { return [] }
         return (try? JSONDecoder().decode([QueuedText].self, from: d)) ?? []
     }
-    private func saveOutbox() { UserDefaults.standard.set(try? JSONEncoder().encode(outbox), forKey: "chatOutbox") }
+    private static func wipeOutbox() { try? FileManager.default.removeItem(at: outboxURL) }
+    private func saveOutbox() {
+        guard let d = try? JSONEncoder().encode(outbox) else { return }
+        try? d.write(to: Self.outboxURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
 
     // MARK: Answer with undo
 
@@ -261,7 +272,7 @@ final class AppModel {
             message = nil; sendTick += 1; announcement = "Message sent"
             return .sent(id: id)
         } catch where Self.isOffline(error) {
-            outbox.append(QueuedText(id: UUID().uuidString, workspace: workspaceId, ticket: ticket, text: clean, at: ISO8601DateFormatter().string(from: Date())))
+            outbox.append(QueuedText(id: UUID().uuidString, workspace: workspaceId, ticket: ticket, text: clean, at: ISO8601DateFormatter().string(from: Date()), phone: credentials?.phoneId ?? ""))
             saveOutbox(); announcement = "No connection. The message waits on this phone."
             return .queued
         } catch { handle(error); return .failed }
@@ -275,6 +286,8 @@ final class AppModel {
 
     private func flushOutbox() async {
         guard !outbox.isEmpty else { return }
+        let mine = credentials?.phoneId ?? ""
+        if outbox.contains(where: { $0.phone != mine }) { outbox.removeAll { $0.phone != mine }; saveOutbox() }   // never send another phone's text
         for q in outbox {
             guard (try? await client.send(to: q.workspace, text: q.text, ticket: q.ticket)) != nil else { return }
             outbox.removeAll { $0.id == q.id }; saveOutbox()
@@ -299,6 +312,14 @@ final class AppModel {
         do { return try await client.transcribe(audio: audio, language: nil).text }
         catch RelayError.unauthorized { handle(RelayError.unauthorized); throw RelayError.unauthorized }
     }
+
+    /// Image bytes of a ticket attachment, from the relay with the paired credentials (cached for this session).
+    func blob(_ id: String) async -> Data? {
+        if let d = blobCache[id] { return d }
+        guard credentials != nil || useMock, let d = try? await client.blob(id: id) else { return nil }
+        blobCache[id] = d; return d
+    }
+    private var blobCache: [String: Data] = [:]
 
     func registerPush(token: String) async {
         try? await client.registerPush(apnsToken: token, sandbox: PushPermission.sandbox)
@@ -328,6 +349,10 @@ final class AppModel {
     }
 
     private func reset() {
+        for t in undoTimers.values { t.cancel() }
+        undoTimers = [:]; pendingAnswers = [:]; sendingAnswers = []
+        outbox = []; Self.wipeOutbox(); UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
+        readState = ReadState(); blobCache = [:]
         credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answeredElsewhere = []; hasLoaded = false
         pairedWorkspaces = []; lastSent = nil; lastUpdated = nil; message = nil; tab = .chats; phase = .onboarding
     }
