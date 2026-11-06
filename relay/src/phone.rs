@@ -1235,7 +1235,6 @@ async fn speech(
         &settings,
         &id,
         q.get("lang").map(String::as_str),
-        now(),
     )
     .await?;
     Ok(([(axum::http::header::CONTENT_TYPE, "audio/mpeg")], mp3).into_response())

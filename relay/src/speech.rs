@@ -318,7 +318,6 @@ pub async fn generate(
     settings: &Settings,
     msg_id: &str,
     lang_q: Option<&str>,
-    _at: i64,
 ) -> Res<Vec<u8>> {
     let none = || not_found("No audio for this message.");
     if let Some(l) = lang_q {
@@ -377,26 +376,82 @@ pub async fn generate(
     // The generation runs detached: once Deepgram is called it finishes, caches and keeps the charge even if the
     // phone hangs up (Deepgram bills us anyway). Per (message, language) one at a time; a second caller waits, then
     // finds the cache. Only an explicit Deepgram error gives the reservation back.
+    let slot = PhoneSlot::take(phone)?;
     let (app, phone, settings) = (app.clone(), phone.to_string(), settings.cap());
     let (msg_id, lang_owned) = (msg_id.to_string(), lang.clone());
     tokio::spawn(async move {
-        let gate = {
-            let mut m = inflight().lock().unwrap();
-            m.entry(format!("{msg_id}:{lang_owned}"))
-                .or_default()
-                .clone()
+        let _slot = slot; // freed when the task ends, also on a panic
+        let key = format!("{msg_id}:{lang_owned}");
+        let gate = inflight()
+            .lock()
+            .unwrap()
+            .entry(key.clone())
+            .or_default()
+            .clone();
+        let _entry = GateEntry {
+            key,
+            gate: gate.clone(),
         };
-        let turn = gate.lock().await;
-        let result = make(&app, &phone, settings, &msg_id, &text, &lang_owned).await;
-        drop(turn);
-        let mut m = inflight().lock().unwrap();
-        if Arc::strong_count(&gate) <= 2 {
-            m.remove(&format!("{msg_id}:{lang_owned}"));
-        }
-        result
+        let _turn = gate.lock().await;
+        make(&app, &phone, settings, &msg_id, &text, &lang_owned).await
     })
     .await
     .map_err(internal)?
+}
+
+/// Most generations one phone may have running at once.
+const MAX_PER_PHONE: usize = 3;
+
+fn per_phone() -> &'static Mutex<HashMap<String, usize>> {
+    static M: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
+    M.get_or_init(Default::default)
+}
+
+/// One of a phone's generation places; given back on drop.
+struct PhoneSlot(String);
+
+impl PhoneSlot {
+    fn take(phone: &str) -> Res<PhoneSlot> {
+        let mut m = per_phone().lock().unwrap();
+        let n = m.entry(phone.to_string()).or_insert(0);
+        if *n >= MAX_PER_PHONE {
+            return Err(ApiError {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                code: "rate_limited",
+                message: "Too many readings at once. Try again in a moment.".into(),
+            });
+        }
+        *n += 1;
+        Ok(PhoneSlot(phone.to_string()))
+    }
+}
+
+impl Drop for PhoneSlot {
+    fn drop(&mut self) {
+        let mut m = per_phone().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = m.get_mut(&self.0) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                m.remove(&self.0);
+            }
+        }
+    }
+}
+
+/// Removes the in-flight entry of a (message, language) when nobody else waits on it; also on a panic.
+struct GateEntry {
+    key: String,
+    gate: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl Drop for GateEntry {
+    fn drop(&mut self) {
+        let mut m = inflight().lock().unwrap_or_else(|e| e.into_inner());
+        // the map holds one reference, this guard one
+        if Arc::strong_count(&self.gate) <= 2 {
+            m.remove(&self.key);
+        }
+    }
 }
 
 fn inflight() -> &'static Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {

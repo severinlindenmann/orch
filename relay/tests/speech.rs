@@ -73,7 +73,6 @@ impl Rig {
             &s,
             id,
             lang,
-            util::now(),
         )
         .await
         .map_err(|e| (e.status.as_u16(), e.code.to_string()))
@@ -329,29 +328,32 @@ async fn concurrent_requests_never_pass_the_cap_and_one_generation_per_message()
             )
         })
         .collect();
-    let mut hs = vec![];
-    for id in ids {
-        let r = r.clone();
-        hs.push(tokio::spawn(async move {
-            r.get(&id, None, 0.045, "auto").await
-        }));
-    }
+    // three at a time (a phone may run 3 generations at once)
     let mut ok = 0;
-    for h in hs {
-        match h.await.unwrap() {
-            Ok(_) => ok += 1,
-            Err(e) => assert_eq!(e, (402, "tts_cap_reached".into())),
+    for batch in ids.chunks(3) {
+        let mut hs = vec![];
+        for id in batch {
+            let (r, id) = (r.clone(), id.clone());
+            hs.push(tokio::spawn(async move {
+                r.get(&id, None, 0.045, "auto").await
+            }));
+        }
+        for h in hs {
+            match h.await.unwrap() {
+                Ok(_) => ok += 1,
+                Err(e) => assert_eq!(e, (402, "tts_cap_reached".into())),
+            }
         }
     }
     assert_eq!(ok, 3);
     assert!(r.used() <= 0.045 + 1e-9, "{}", r.used());
     assert_eq!(r.sp.calls.lock().unwrap().len(), 3);
 
-    // the same message asked 5 times at once: one paid generation, the rest get the cache
+    // the same message asked 3 times at once: one paid generation, the rest get the cache
     let before = r.used();
     let id = r.speak_text(json!({"text": "Hallo.", "speak": {"lang": "de"}}));
     let mut hs = vec![];
-    for _ in 0..5 {
+    for _ in 0..3 {
         let r = r.clone();
         let id = id.clone();
         hs.push(tokio::spawn(
@@ -488,38 +490,6 @@ async fn refund_never_touches_another_month() {
 }
 
 #[tokio::test]
-async fn stale_request_time_cannot_reset_the_current_month() {
-    let r = rig().await;
-    r.key();
-    {
-        let c = r.t.app.db.lock().unwrap();
-        speech::add_usage(&c, &r.phone.0, util::now(), 0.5).unwrap();
-    }
-    let id = r.speak_text(json!({"text": "Hallo.", "speak": {"lang": "de"}}));
-    let s = Settings {
-        speak: "auto".into(),
-        tts_cap_usd: 10.0,
-    };
-    // a request that carries a time from an old month still books into the current month
-    speech::generate(
-        &r.t.app,
-        &r.phone.0,
-        std::slice::from_ref(&r.ws.id),
-        &s,
-        &id,
-        None,
-        1_793_404_800 - 86_400 * 40,
-    )
-    .await
-    .unwrap();
-    assert!(
-        (r.used() - 0.5 - 6.0 * 0.030 / 1000.0).abs() < 1e-9,
-        "{}",
-        r.used()
-    );
-}
-
-#[tokio::test]
 async fn client_disconnect_keeps_the_charge_caches_the_audio_and_the_next_call_is_free() {
     let r = Arc::new(rig().await);
     r.key();
@@ -576,4 +546,30 @@ fn purge_removes_only_old_cached_audio() {
         0,
         "nothing left, no error"
     );
+}
+
+#[tokio::test]
+async fn a_phone_may_run_three_generations_at_once_and_slots_come_back() {
+    let r = Arc::new(rig().await);
+    r.key();
+    *r.sp.delay_ms.lock().unwrap() = 400;
+    let ids: Vec<String> = (0..4)
+        .map(|i| r.speak_text(json!({"text": format!("Text {i}."), "speak": {"lang": "en"}})))
+        .collect();
+    let mut hs = vec![];
+    for id in &ids {
+        let (r, id) = (r.clone(), id.clone());
+        hs.push(tokio::spawn(
+            async move { r.get(&id, None, 10.0, "auto").await },
+        ));
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    }
+    let mut res = vec![];
+    for h in hs {
+        res.push(h.await.unwrap());
+    }
+    assert_eq!(res[3].clone().unwrap_err(), (429, "rate_limited".into()));
+    assert!(res[..3].iter().all(|x| x.is_ok()));
+    // slots are free again
+    assert!(r.get(&ids[3], None, 10.0, "auto").await.is_ok());
 }
