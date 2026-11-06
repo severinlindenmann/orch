@@ -146,6 +146,8 @@ def add_agent(
     for k, v in (("command", command), ("interactive", interactive)):
         if v is not None and not (1 <= len(v) <= 500 and "\n" not in v and "\r" not in v):
             raise Refused(f"The {k} must be one line of at most 500 characters.")
+    if isinstance((read(root).get("agents") or {}).get(name), dict):
+        raise Refused(f"An agent called '{name}' is already set up here. Pick another name.")
     set_key(root, f"agents.{name}", "adapter", adapter)
     set_key(root, f"agents.{name}", "command", command)
     if interactive:

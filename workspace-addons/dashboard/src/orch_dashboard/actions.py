@@ -13,6 +13,7 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
+from . import runfiles
 from .data import run_orch
 
 MAX_TEXT = 2000
@@ -238,7 +239,10 @@ def _addon_known(root: Path, orch_bin: str, name: str) -> bool:
 
 
 def _agent_exists(root: Path, orch_bin: str, name: str) -> bool:
+    """Fails closed: when the list cannot be read, the name counts as taken (core refuses an existing name too)."""
     rows = run_orch(orch_bin, ["agents", "--json"], root)
+    if not isinstance(rows, list):
+        return True
     return any(isinstance(r, dict) and r.get("name") == name for r in (rows if isinstance(rows, list) else []))
 
 
@@ -248,11 +252,10 @@ def _audit(root: Path, op: str, args: dict) -> None:
     line = json.dumps({"at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), "by": actor(), "via": "dashboard", "op": op, **keep},
                       ensure_ascii=False)
     try:
-        d = root / ".orch" / "run" / "dashboard"
-        d.mkdir(parents=True, exist_ok=True)
-        with open(d / "actions.log", "a", encoding="utf-8") as f:
+        # .orch/run/dashboard (0700), no symlink at any level, the file opened with O_NOFOLLOW (0600)
+        with runfiles.open_append(runfiles.run_dir(root, "dashboard") / "actions.log") as f:
             f.write(line + "\n")
-    except OSError:
+    except (OSError, RuntimeError):
         pass  # the change is done; a missing log must not turn it into an error
 
 

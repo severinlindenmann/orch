@@ -168,3 +168,10 @@ def test_init_other_asks_a_name_and_keeps_existing(proj, run, fake_path, monkeyp
     code, _, err = run("init")
     assert code == 2 and "already an agent called 'my-agent'" in err
     assert config.agent_entries(proj)["my-agent"]["command"] == "old {prompt}"
+
+
+def test_cannot_add_an_agent_that_already_exists(proj, run):
+    assert run("config", "agent", "add", "my-agent", "--command", "first {prompt}")[0] == 0
+    code, _, err = run("config", "agent", "add", "my-agent", "--command", "second {prompt}")
+    assert code == 2 and "already set up" in err
+    assert config.agent_entries(proj)["my-agent"]["command"] == "first {prompt}"

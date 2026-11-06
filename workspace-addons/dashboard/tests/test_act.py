@@ -233,6 +233,7 @@ def test_addon_act_runs_one_generic_argv_for_an_active_addon(act_orch, ws):
 def _fake_with_addons(act_orch):
     src = act_orch.read_text().replace(
         'if a[:2] in (["addon", "list"]',
+        'if a[:1] == ["agents"]:\n    print(json.dumps([{"name": "claude"}]))\n    sys.exit(0)\n'
         'if a[:2] == ["addon", "list"]:\n    print(json.dumps([{"name": "alpha", "active": True}, {"name": "beta", "active": False},'
         ' {"name": "dashboard", "active": True}]))\n    sys.exit(0)\nif a[:2] in (["addon", "list"]')
     act_orch.write_text(src)
@@ -362,3 +363,34 @@ def test_agent_add_never_overwrites_and_is_logged(act_orch, ws):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_agent_exists_check_fails_closed(act_orch, ws):
+    """When `orch agents` cannot be read, the name counts as taken: nothing is added."""
+    from orch_dashboard.actions import _agent_exists
+    assert _agent_exists(ws, str(act_orch), "anything") is True  # the fake exits 2 for `agents`
+    assert _agent_exists(ws, "/nonexistent/orch", "anything") is True
+
+
+def test_audit_log_is_private_and_never_follows_a_symlink(act_orch, ws):
+    import os
+    import stat
+
+    from orch_dashboard.actions import _audit
+    _audit(ws, "config.agent", {"name": "codex"})
+    log = ws / ".orch" / "run" / "dashboard" / "actions.log"
+    assert stat.S_IMODE(os.stat(log).st_mode) == 0o600 and stat.S_IMODE(os.stat(log.parent).st_mode) == 0o700
+    target = ws.parent / "victim.txt"
+    target.write_text("keep")
+    log.unlink()
+    log.symlink_to(target)
+    _audit(ws, "config.agent", {"name": "codex"})   # refused quietly; the target stays untouched
+    assert target.read_text() == "keep"
+    log.unlink()
+    d = log.parent
+    for p in d.iterdir():
+        p.unlink()
+    d.rmdir()
+    d.symlink_to(ws.parent)                          # the folder itself is a symlink
+    _audit(ws, "config.agent", {"name": "codex"})
+    assert not (ws.parent / "actions.log").exists()
