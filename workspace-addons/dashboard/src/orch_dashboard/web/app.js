@@ -69,7 +69,7 @@
   };
   const tickets = () => array(state?.tickets);
   const addons = () => array(state?.addons);
-  const ticketOf = id => tickets().find(t => String(t.id) === String(id));
+  const ticketOf = id => tickets().find(t => String(t.id) === String(id) || (typeof t.key === 'string' && t.key.toUpperCase() === String(id).toUpperCase()));
   const href = id => '#ticket/' + encodeURIComponent(id);
   const questions = t => array(t.questions).filter(q => q.answer == null);
   const activeTicket = t => !['done', 'dropped'].includes(t.status);

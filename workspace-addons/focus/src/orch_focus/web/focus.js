@@ -39,7 +39,7 @@
     fetch('/api/tickets').then(r => r.json()).then(list => {
       const box = root.querySelector('.fx-pick');
       if (!list.length) box.append(h('p', {class: 'muted', text: 'No open tickets.'}));
-      for (const t of list) box.append(h('a', {href: '/t/' + t.id}, h('span', {class: 'mono key', text: t.id}), h('span', {class: 'grow', text: t.title}), h('span', {class: 'meta', text: t.status})));
+      for (const t of list) box.append(h('a', {href: '/t/' + t.id}, h('span', {class: 'mono key', text: t.key || t.id}), h('span', {class: 'grow', text: t.title}), h('span', {class: 'meta', text: t.status})));
     });
     return;
   }
@@ -108,6 +108,7 @@
     const t = v.ticket;
     document.title = t.title + ' · Focus';
     els.title.textContent = t.title || '';
+    els.key.textContent = typeof t.key === 'string' && t.key ? t.key : TID;  /* the short key people use, e.g. DM1-12 */
     root.dataset.state = v.state;
     if (prev && !root.hasAttribute('data-live')) root.setAttribute('data-live', '');  /* motion only after a live change */
     els.agent.textContent = v.run.agent === 'agent' ? 'Agent' : v.run.agent.charAt(0).toUpperCase() + v.run.agent.slice(1);

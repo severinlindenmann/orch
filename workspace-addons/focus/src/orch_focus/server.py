@@ -216,7 +216,8 @@ class Tracker:
         agent = claim.get("agent") or "agent"
         return {
             "ticket": {
-                "id": ticket.get("id"), "title": ticket.get("title"), "status": ticket.get("status"),
+                "id": ticket.get("id"), "key": ticket.get("key"), "title": ticket.get("title"),
+                "status": ticket.get("status"),
                 "revision": ticket.get("revision", 0), "checklist": checks, "questions": questions,
                 "history": (ticket.get("history") or [])[-80:],
             },
@@ -274,7 +275,14 @@ class Tracker:
                 and TID_RE.fullmatch(str(t.get("id")))
                 and t.get("status") in ("open", "active", "waiting")
             ):
-                out.append({"id": t["id"], "title": str(t.get("title", ""))[:200], "status": t["status"]})
+                out.append(
+                    {
+                        "id": t["id"],
+                        "key": t.get("key"),
+                        "title": str(t.get("title", ""))[:200],
+                        "status": t["status"],
+                    }
+                )
         return out[:200]
 
 
