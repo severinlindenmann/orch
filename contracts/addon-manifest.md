@@ -131,6 +131,19 @@ Add-ons without `background` are ignored by all three. The core never starts any
   `{"configured": true, "url", "workspace"}`; it never touches the network (the dashboard shows Inbox when `configured`).
 - Errors with `--json` on stdout: `{"error": "<plain words>"}`, exit 2.
 
+## Act (the buttons and switches of a dashboard tab)
+
+A view action `{"op": "addon.act", "args": {"verb", "target"}}` becomes one generic call. An add-on that has such actions
+**must** have this subcommand, with exactly these arguments (the dashboard sends nothing else):
+
+`orch <name> act <verb> --by <actor> --json -- <ticket id>`
+
+- `--by <actor>` is required to be accepted: the person who pressed the button (`human:<user>`). The add-on records it on every
+  `orch` call it makes for this action (`orch ext set … --by <actor>`, `orch run start … --by <actor>`, `orch log … --by <actor>`).
+  Without `--by` it uses its own actor (`agent:<name>`).
+- `--json` is accepted too. Exit codes and error text are the CLI contract above (`2` = refused, `{"error": "<plain words>"}`).
+- The dashboard has tests that run `addon.act` against the real `automation` add-on, so a mismatch fails the build.
+
 ## Views (dashboard tab)
 
 The dashboard (itself an optional add-on, the host) never imports add-on code. For each active add-on with `[dashboard]` it
