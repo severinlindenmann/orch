@@ -216,8 +216,11 @@ struct AttachmentTile: View {
         let inner = HStack(spacing: 10) {
             LinkTile(icon: LinkFace.icon(a.icon, url: a.url), mono: a.mono)
             VStack(alignment: .leading, spacing: 2) {
-                Text(a.title ?? host).themeFont(14, .semibold).lineLimit(1)
-                Text(LinkFace.subtitle(type: a.linkType, url: a.url)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1)
+                Text(LinkFace.oneLine(a.title, max: 200) ?? host).themeFont(14, .semibold).lineLimit(1)
+                HStack(spacing: 0) {  // the host never truncates: the type gives way first
+                    if let t = LinkFace.type(a.linkType) { Text(t + " · ").lineLimit(1).truncationMode(.tail) }
+                    Text(LinkFace.host(a.url)).lineLimit(1).fixedSize().layoutPriority(1)
+                }.themeFont(12).foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 0)
             if let s = a.status, !s.isEmpty { LinkStatus(text: s) }
@@ -327,10 +330,32 @@ enum LinkFace {
         return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
     }
 
-    /// "<type> · <host>", or the host alone when the workspace sent no type.
-    static func subtitle(type: String?, url: String?) -> String {
+    /// Text from the workspace on one line: control, format (bidi, invisible) and line-break characters go, at most `max`.
+    static func oneLine(_ text: String?, max: Int) -> String? {
+        guard let text else { return nil }
+        var kept = String.UnicodeScalarView()
+        for u in text.unicodeScalars {
+            switch u.properties.generalCategory {
+            case .format: continue
+            case .control, .lineSeparator, .paragraphSeparator: kept.append(" ")
+            default: kept.append(u)
+            }
+        }
+        let t = String(kept).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return t.isEmpty ? nil : String(t.prefix(max))
+    }
+
+    /// The link type as shown: one line, at most 32 characters; none when it looks like an address (a dot, so
+    /// no "github.com" in a type that could pass for the host).
+    static func type(_ raw: String?) -> String? {
+        guard let t = oneLine(raw, max: 32), !t.contains("."), !t.contains("\u{FF0E}"), !t.contains("\u{3002}") else { return nil }
+        return t
+    }
+
+    /// "<type> · <host>", or the host alone when there is no (usable) type.
+    static func subtitle(type raw: String?, url: String?) -> String {
         let h = host(url)
-        guard let t = type, !t.isEmpty else { return h }
+        guard let t = type(raw) else { return h }
         return h.isEmpty ? t : "\(t) · \(h)"
     }
 

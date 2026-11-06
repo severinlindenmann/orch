@@ -240,4 +240,13 @@ final class ChatTests: XCTestCase {
         XCTAssertEqual(LinkFace.subtitle(type: "GitHub · Pull request", url: "https://github.com/a/b/pull/1"), "GitHub · Pull request · github.com")
         XCTAssertEqual(LinkFace.subtitle(type: nil, url: evil), "evil.example")
     }
+
+    func testLinkTypeCanNotPassForTheHost() {
+        let evil = "https://evil.example/x"
+        XCTAssertEqual(LinkFace.subtitle(type: "GitHub PR github.com and a very long tail to push the host out", url: evil), "evil.example")
+        XCTAssertNil(LinkFace.type("github\u{FF0E}com"))
+        XCTAssertEqual(LinkFace.type("Pull\u{202E}\nrequest\u{200B}"), "Pull request")
+        XCTAssertEqual(LinkFace.type(String(repeating: "a", count: 80))?.count, 32)
+        XCTAssertEqual(LinkFace.oneLine("Fix\u{1B}[31m\nbug", max: 200), "Fix [31m bug")
+    }
 }
