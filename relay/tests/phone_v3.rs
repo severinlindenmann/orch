@@ -1082,3 +1082,109 @@ async fn redeem_clears_old_mutes_of_added_workspaces() {
         .unwrap();
     assert_eq!(bw["muted_until"], Value::Null);
 }
+
+/// An upload whose body the test feeds by hand: send chunks through the returned sender, drop it to finish.
+fn slow_upload(
+    t: &T,
+    p: &P,
+    len: usize,
+) -> (
+    tokio::sync::mpsc::Sender<Vec<u8>>,
+    tokio::task::JoinHandle<(u16, Value)>,
+) {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(4);
+    let body = reqwest::Body::wrap_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|c| (Ok::<_, std::io::Error>(c), rx))
+    }));
+    let req = t
+        .http
+        .post(format!("{}/v1/phone/blobs", t.base))
+        .header("X-Orch-Phone", &p.0)
+        .header("Authorization", format!("Bearer {}", p.1))
+        .header("Content-Length", len.to_string())
+        .body(body);
+    let h = tokio::spawn(async move {
+        match req.send().await {
+            Ok(r) => (r.status().as_u16(), r.json().await.unwrap_or(Value::Null)),
+            Err(_) => (0, Value::Null),
+        }
+    });
+    (tx, h)
+}
+
+#[tokio::test]
+async fn parallel_uploads_never_pass_the_quota_one_in_flight_per_phone() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    // 30 MB of room left today
+    fake_blob(
+        &t,
+        &p.0,
+        "b_quota00000000000",
+        1024 * 1024 * 1024 - 30 * 1024 * 1024,
+    );
+    let (tx, first) = slow_upload(&t, &p, 20 * 1024 * 1024);
+    tx.send(vec![1u8; 1024]).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    // the first is in flight: a second one (of any size) is refused at once, before its body
+    let (s, v) = upload(&t, &p, vec![2u8; 10]).await;
+    assert_eq!((s, v["error"].as_str()), (429, Some("rate_limited")));
+    tx.send(vec![1u8; 20 * 1024 * 1024 - 1024]).await.unwrap();
+    drop(tx);
+    assert_eq!(first.await.unwrap().0, 201);
+    // 20 MB used; 25 MB announced would pass the day's limit, 10 MB fits
+    let (tx, over) = slow_upload(&t, &p, 25 * 1024 * 1024);
+    drop(tx);
+    // refused before the body: the answer is 429 (a client may see the closed connection instead, 0)
+    assert!(matches!(over.await.unwrap().0, 429 | 0));
+    let n: i64 = t
+        .app
+        .db
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM blobs WHERE uploader=?1",
+            [&p.0],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 2, "the fake row and the first upload only");
+    assert_eq!(upload(&t, &p, vec![2u8; 10]).await.0, 201, "slot was freed");
+}
+
+#[tokio::test]
+async fn stalled_upload_frees_its_slot_and_a_full_relay_answers_busy() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    let p2 = t.pair_phone(&[&a]).await;
+    t.app
+        .upload_idle_ms
+        .store(300, std::sync::atomic::Ordering::Relaxed);
+    t.app
+        .upload_wait_ms
+        .store(300, std::sync::atomic::Ordering::Relaxed);
+    // a body that goes quiet after one chunk: 408, and the permit and the phone's slot come back
+    let (tx, stalled) = slow_upload(&t, &p, 100);
+    tx.send(vec![1u8; 10]).await.unwrap();
+    let (s, v) = stalled.await.unwrap();
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (408, Some("request_timeout")),
+        "{v}"
+    );
+    drop(tx);
+    assert_eq!(t.app.upload_slots.available_permits(), 4);
+    assert_eq!(upload(&t, &p, vec![1u8; 10]).await.0, 201);
+    // all permits taken: waiting is short, then 503 busy
+    let held = t.app.upload_slots.acquire_many(4).await.unwrap();
+    let (s, v) = upload(&t, &p2, vec![1u8; 10]).await;
+    assert_eq!((s, v["error"].as_str()), (503, Some("busy")), "{v}");
+    drop(held);
+    assert_eq!(
+        upload(&t, &p2, vec![1u8; 10]).await.0,
+        201,
+        "slot of p2 was released on 503"
+    );
+}

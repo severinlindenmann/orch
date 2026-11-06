@@ -73,6 +73,11 @@ pub struct App {
     pub transcribe_rate: Mutex<HashMap<String, (i64, u32)>>,
     /// Phone uploads in flight (memory bound).
     pub upload_slots: tokio::sync::Semaphore,
+    /// Waiting for an upload slot / silence between two chunks, in ms (fields so tests can shorten them).
+    pub upload_wait_ms: std::sync::atomic::AtomicU64,
+    pub upload_idle_ms: std::sync::atomic::AtomicU64,
+    /// phone id -> bytes reserved by its upload in flight (one at a time per phone)
+    pub upload_inflight: Mutex<HashMap<String, i64>>,
     /// phone id -> (window start, calls in window) for `POST /v1/phone/invitations/redeem`
     pub redeem_rate: Mutex<HashMap<String, (i64, u32)>>,
     /// "workspace|phone" -> text-push budget state
@@ -131,8 +136,25 @@ impl App {
             transcribe_rate: Mutex::new(HashMap::new()),
             redeem_rate: Mutex::new(HashMap::new()),
             upload_slots: tokio::sync::Semaphore::new(4),
+            upload_wait_ms: 5_000.into(),
+            upload_idle_ms: 20_000.into(),
+            upload_inflight: Mutex::new(HashMap::new()),
             push_budget: Mutex::new(HashMap::new()),
         }))
+    }
+
+    pub fn upload_wait(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(
+            self.upload_wait_ms
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
+    pub fn upload_idle(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(
+            self.upload_idle_ms
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
     }
 
     pub fn blob_path(&self, id: &str) -> PathBuf {

@@ -765,6 +765,20 @@ async fn send(
 pub const MAX_PHONE_BLOB: usize = 25 * 1024 * 1024;
 /// Most bytes one phone may upload in 24 hours: 1 GB.
 const PHONE_UPLOAD_DAY: i64 = 1024 * 1024 * 1024;
+/// Whole body at most this long (else 408).
+const UPLOAD_TOTAL: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// The phone's one upload in flight; freed when the request ends, however it ends.
+struct UploadSlot {
+    app: AppState,
+    pid: String,
+}
+
+impl Drop for UploadSlot {
+    fn drop(&mut self) {
+        self.app.upload_inflight.lock().unwrap().remove(&self.pid);
+    }
+}
 
 /// `POST /v1/phone/blobs`: raw bytes, stored like workspace blobs (encrypted), uploader = this phone.
 async fn upload_blob(
@@ -787,28 +801,54 @@ async fn upload_blob(
     if announced.is_some_and(|n| n > MAX_PHONE_BLOB) {
         return Err(too_big());
     }
-    // Daily budget per phone, checked before a body byte is read.
-    {
+    // One upload at a time per phone, and a daily budget that counts what is in flight: the check and the
+    // reservation happen together under the database lock, before a body byte is read.
+    let _slot = {
         let c = app.db.lock().unwrap();
         let used: i64 = c.query_row(
             "SELECT COALESCE(SUM(size),0) FROM blobs WHERE uploader=?1 AND created_at>?2",
             params![pid, now() - 86400],
             |r| r.get(0),
         )?;
-        if used + announced.unwrap_or(MAX_PHONE_BLOB) as i64 > PHONE_UPLOAD_DAY {
+        let want = announced.unwrap_or(MAX_PHONE_BLOB) as i64;
+        let mut live = app.upload_inflight.lock().unwrap();
+        if live.contains_key(&pid) || used + want > PHONE_UPLOAD_DAY {
             return Err(ApiError {
                 status: StatusCode::TOO_MANY_REQUESTS,
                 code: "rate_limited",
-                message: "Too many uploads today. Try again tomorrow.".into(),
+                message: "Too many uploads. Try again later.".into(),
             });
         }
-    }
-    // At most a few uploads in flight per relay (memory).
-    let _permit = app.upload_slots.acquire().await.map_err(internal)?;
+        live.insert(pid.clone(), want);
+        UploadSlot {
+            app: app.clone(),
+            pid: pid.clone(),
+        }
+    };
+    // A few uploads in flight per relay (memory); do not wait for ever.
+    let _permit = tokio::time::timeout(app.upload_wait(), app.upload_slots.acquire())
+        .await
+        .map_err(|_| ApiError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "busy",
+            message: "The relay is busy. Try again in a moment.".into(),
+        })?
+        .map_err(internal)?;
     let mut buf: Vec<u8> = Vec::new();
     let mut hasher = Sha256::new();
     let mut stream = body.into_data_stream();
-    while let Some(chunk) = stream.next().await {
+    let started = std::time::Instant::now();
+    let timeout = || ApiError {
+        status: StatusCode::REQUEST_TIMEOUT,
+        code: "request_timeout",
+        message: "The upload took too long.".into(),
+    };
+    loop {
+        let left = UPLOAD_TOTAL.saturating_sub(started.elapsed());
+        let next = tokio::time::timeout(left.min(app.upload_idle()), stream.next())
+            .await
+            .map_err(|_| timeout())?;
+        let Some(chunk) = next else { break };
         let chunk = chunk.map_err(|_| invalid("Upload was interrupted."))?;
         if buf.len() + chunk.len() > MAX_PHONE_BLOB {
             return Err(too_big());
