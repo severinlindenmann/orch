@@ -30,8 +30,11 @@ def transcript_path(session: str) -> Path | None:
     """Claude's transcript of a session: ~/.claude/projects/<folder>/<session>.jsonl (exact file name only)."""
     if not isinstance(session, str) or not SESSION.fullmatch(session):
         return None
-    for p in (Path.home() / ".claude" / "projects").glob(f"*/{session}.jsonl"):
-        if p.is_file() and not p.is_symlink():
+    base = Path.home() / ".claude" / "projects"
+    if base.is_symlink() or not base.is_dir():
+        return None
+    for p in base.glob(f"*/{session}.jsonl"):
+        if p.is_file() and not p.is_symlink() and not p.parent.is_symlink():
             return p
     return None
 

@@ -64,6 +64,8 @@ elif a[:2] == ["run", "session"]:
     print(json.dumps({{"agent": a[3], "session": None}}))
 elif a[:2] == ["run", "send"]:
     print(json.dumps({{"id": "p1", "delivered": 0, "state": "none"}}))
+elif a[0] == "ask":
+    print(json.dumps({{"id": "q7", "text": a[2], "answer": None}}))
 elif a[:2] == ["run", "start"]:
     print(json.dumps({{"ok": True, "run": "r_start001"}}))
 else:

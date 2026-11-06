@@ -30,6 +30,7 @@ class Tail:
         self.kind = adapterdata.events_kind(root, agent, mode) if RUN_ID.fullmatch(run) else None
         self.mapper = ClaudeMapper(run, tid) if self.kind in MAPPERS else None
         self.offset = 0
+        self.skipping = False
         self.log = EventLog(root, run) if RUN_ID.fullmatch(run) else None
 
     def _path(self) -> Path | None:
@@ -38,7 +39,12 @@ class Tail:
             return transcript_path(sid) if sid else None
         if not TID.fullmatch(self.tid):
             return None
-        return self.root / ".orch" / "run" / "logs" / f"{self.tid}-{self.run}.log"
+        d = self.root
+        for part in (".orch", "run", "logs"):
+            d = d / part
+            if d.is_symlink():
+                return None  # a linked folder on the way: not followed
+        return d / f"{self.tid}-{self.run}.log"
 
     def poll(self) -> list[dict]:
         if self.mapper is None or self.log is None:
@@ -54,10 +60,21 @@ class Tail:
             return []
         with os.fdopen(fd, "rb") as f:
             if self.offset > os.fstat(f.fileno()).st_size:
-                self.offset = 0  # the file started over
+                self.offset, self.skipping = 0, False  # the file started over
             f.seek(self.offset)
             raw = f.read(MAX_READ)
+        if self.skipping:  # inside a line that was too long: drop it up to its end
+            nl = raw.find(b"\n")
+            if nl < 0:
+                self.offset += len(raw)
+                return []
+            self.offset += nl + 1
+            raw, self.skipping = raw[nl + 1 :], False
         end = raw.rfind(b"\n") + 1  # a half-written last line waits
+        if end == 0 and len(raw) >= MAX_READ:  # one line longer than we read: drop it, never stall
+            self.offset += len(raw)
+            self.skipping = True
+            return []
         events: list[dict] = []
         for line in raw[:end].decode("utf-8", "replace").splitlines():
             if not line.startswith("{"):
@@ -75,6 +92,6 @@ class Tail:
         if events:
             try:
                 self.log.append(*events)
-            except OSError:
+            except (OSError, ValueError):
                 pass
         return events
