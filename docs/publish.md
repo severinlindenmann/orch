@@ -50,6 +50,14 @@ Several admins, custom domains per app, app logs view, own databases beyond SQLi
 
 A workspace proposes its own description and tags with `PATCH /v1/me` (see contracts/publish-api.md); the owner approves it or keeps the current text (Approve / Keep current) in the admin portal (overview banner, "Waiting for your approval" badge, a card with current vs proposed text), and the old values stay in effect until then. Approve / Keep current are bound to the exact proposal (`rev`); a new access key drops a pending change. Same text rules as the relay. The admin "connect your agent" text ends with a line asking the agent to do this.
 
+## Keeping, replacing and noting a file
+
+- `orch publish extend f_… --days N` keeps a file longer (`PATCH /v1/files/<id>`); the link stays the same and an expired file is never revived.
+- `orch publish file <path> --replace f_…` swaps the content behind the same link (`PUT /v1/files/<id>`). It reuses the key saved in `.orch/secrets/files/keys.json`, so it only works on the computer that shared the file; the expiry stays.
+- `orch publish file <path> --note "…"` adds a one-line note (up to 280 characters) to the **encrypted** header (`crypto.md`, vector `good_with_note`). The server never sees it; the browser shows it as text.
+- `orch publish list` follows the server's paging, so it shows every file, not only the first 100.
+- `orch publish view --json` is the read-only "Shared" tab of the dashboard: files and apps with name and expiry, links **without** a key, and a hint to use the CLI for copy, extend and delete.
+
 ## Previews
 
 After the browser decrypts a file, `/f/<id>` shows it by type (by file name ending, not by the type the sender

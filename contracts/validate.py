@@ -174,12 +174,16 @@ def decrypt(key_b64, blob):
 
 vec = json.loads((HERE / "vectors" / "publish-blob-v1.json").read_text())
 g = vec["good"]
-try:
-    h, body = decrypt(g["key_b64url"], bytes.fromhex(g["blob_hex"]))
-    if body.decode() != g["content_utf8"]:
-        fails.append("vector good: content differs")
-except Exception as e:  # noqa: BLE001
-    fails.append(f"vector good: {e!r}")
+for gname in ("good", "good_with_note"):
+    g = vec[gname]
+    try:
+        h, body = decrypt(g["key_b64url"], bytes.fromhex(g["blob_hex"]))
+        if body.decode() != g["content_utf8"]:
+            fails.append(f"vector {gname}: content differs")
+        if json.dumps(h, ensure_ascii=False, separators=(",", ":")) != g["header_json"]:
+            fails.append(f"vector {gname}: header differs")
+    except Exception as e:  # noqa: BLE001
+        fails.append(f"vector {gname}: {e!r}")
 for case in vec["must_fail"]:
     try:
         decrypt(case["key_b64url"], bytes.fromhex(case["blob_hex"]))
