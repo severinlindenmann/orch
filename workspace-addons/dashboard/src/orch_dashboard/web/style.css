@@ -262,7 +262,7 @@ iframe.embed{display:block;width:100%;height:calc(100vh - 96px);min-height:480px
 .lk .t{min-width:0;flex:1;display:grid}
 .lk .t b{font-weight:500;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lk .t span{font-size:11px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lk .t .lk-sub{display:flex;min-width:0;white-space:pre}.lk .t .lk-type{min-width:0;flex:0 100 auto}
+.lk .t .lk-sub{display:flex;min-width:0}.lk .t .lk-type{min-width:0;flex:0 100 auto}
 .lk .t .lk-head{min-width:0;flex:0 1 auto;direction:rtl;text-align:left}.lk .t .lk-dom{flex:none;overflow:visible;font-weight:600;color:var(--text)}
 .lk .ext{color:var(--text-faint);flex:none;opacity:0}.lk:hover .ext,.lk:focus-visible .ext{opacity:1}
 .lk-x{opacity:0}.lk-row:hover .lk-x,.lk-x:focus-visible{opacity:1}

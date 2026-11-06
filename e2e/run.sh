@@ -29,7 +29,8 @@ if [ "$MODE" = local ]; then
       export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
       ( cd "$REPO/publish" && cargo build --release -j 4 -q )
       ( cd "$REPO/relay" && cargo build --release -j 4 -q )
-      BINS="{\"publish\": \"$REPO/publish/target/release/orch-publish\", \"relay\": \"$REPO/relay/target/release/orch-relay\"}" ;;
+      PT=${CARGO_TARGET_DIR:-$REPO/publish/target}; RT=${CARGO_TARGET_DIR:-$REPO/relay/target}  # a shared build folder is respected
+      BINS="{\"publish\": \"$PT/release/orch-publish\", \"relay\": \"$RT/release/orch-relay\"}" ;;
   esac
 fi
 
