@@ -8,7 +8,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from lib import check, free_port, http, scenario
+from lib import check, free_port, http, kill_group, scenario
 from scenarios_ws import tload
 
 FIXTURE = Path(__file__).parent / "fixtures" / "hello-world"
@@ -28,7 +28,7 @@ def _dashboard(e, ws: Path):
     """`orch dashboard serve` on a free port; yields (base url, get(path) -> (status, json))."""
     port = free_port(e.used_ports)
     p = subprocess.Popen(["orch", "dashboard", "serve", "--port", str(port)], cwd=ws, env=e.env,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     e.pids.append(p.pid)
     base = f"http://127.0.0.1:{port}"
     try:
@@ -48,11 +48,8 @@ def _dashboard(e, ws: Path):
 
         yield base, get
     finally:
-        p.terminate()
-        try:
-            p.wait(5)
-        except subprocess.TimeoutExpired:
-            p.kill()
+        # `orch dashboard serve` runs the server as a child: end the whole process group, or the server stays behind
+        kill_group(p)
 
 
 def _help(e, ws) -> str:

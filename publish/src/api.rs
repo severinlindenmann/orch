@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 #[derive(Deserialize, Default)]
 pub struct Q {
     pub days: Option<i64>,
+    pub size: Option<i64>,
     pub permanent: Option<String>,
     pub new_token: Option<String>,
     pub limit: Option<usize>,
@@ -145,7 +146,7 @@ pub async fn files_post(
                 st.cfg.max_file_mb
             ))
         })?;
-    let v = files::upload(&st, &w, bytes, expires)?;
+    let v = files::upload(&st, &w, bytes, expires, q.size)?;
     Ok((StatusCode::CREATED, Json(v)).into_response())
 }
 
@@ -222,6 +223,7 @@ pub async fn files_put(
     St(st): St<State>,
     h: HeaderMap,
     Path(id): Path<String>,
+    Query(q): Query<Q>,
     body: Body,
 ) -> ApiResult<Json<Value>> {
     let w = auth(&st, &h)?;
@@ -237,7 +239,7 @@ pub async fn files_put(
                 st.cfg.max_file_mb
             ))
         })?;
-    Ok(Json(files::replace(&st, &w, &id, bytes)?))
+    Ok(Json(files::replace(&st, &w, &id, bytes, q.size)?))
 }
 
 pub async fn apps_put(

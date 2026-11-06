@@ -369,10 +369,19 @@ def _fields_text(raw: str) -> str | None:
     return "the " + (", ".join(words[:-1]) + " and " + words[-1] if len(words) > 1 else words[0])
 
 
-def history_line(text: str) -> str:
+def history_line(text: str, checklist: list[dict] | None = None) -> str:
     """Plain words for the history lines orch itself writes (what a person reads in the CLI). The stored text
-    stays as it is; anything else, such as a line someone logged by hand, is shown as written."""
+    stays as it is; anything else, such as a line someone logged by hand, is shown as written.
+    checklist: the ticket's tasks, so a task line can say what the task was."""
     t = text.strip()
+
+    def task(cid: str) -> str:
+        item = next((c for c in checklist or [] if c.get("id") == cid), None)
+        return f": {item['text']}" if item and item.get("text") else ""
+
+    def addon(key: str) -> str:
+        return key.replace("-", " ").capitalize()
+
     if re.fullmatch(r"Asked q\d+, waiting", t):
         return "Asked a question"
     if m := re.fullmatch(r"Answered q\d+: (.*)", t, re.DOTALL):
@@ -388,13 +397,13 @@ def history_line(text: str) -> str:
                 "Changed " + f + (f" (now {_STATUS_WORDS.get(m.group(2), m.group(2))})" if m.group(2) else "")
             )
     if m := re.fullmatch(r"Added check (c\d+)", t):
-        return f"Added task {m.group(1)}"
+        return "Added a task" + task(m.group(1))
     if m := re.fullmatch(r"Check (c\d+) done", t):
-        return f"Finished task {m.group(1)}"
+        return "Finished a task" + task(m.group(1))
     if m := re.fullmatch(r"Set ext\.([a-z][a-z0-9-]*)", t):
-        return f"Updated the data of the {m.group(1)} add-on"
+        return f"Updated {addon(m.group(1))} settings"
     if m := re.fullmatch(r"Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?", t):
-        return f"Removed data of the {m.group(1)} add-on"
+        return f"Removed {addon(m.group(1))} settings"
     return t
 
 

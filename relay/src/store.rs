@@ -215,10 +215,29 @@ pub fn system_message(
     reply_to: Option<&str>,
     body: Value,
 ) -> rusqlite::Result<Value> {
+    system_message_with_key(None, c, key, from, to, typ, ticket, reply_to, body)
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Same, with the ticket's display key (`key`, e.g. DM1-12) next to `ticket`.
+pub fn system_message_with_key(
+    ticket_key: Option<&str>,
+    c: &Connection,
+    key: &Key,
+    from: &str,
+    to: &str,
+    typ: &str,
+    ticket: Option<&str>,
+    reply_to: Option<&str>,
+    body: Value,
+) -> rusqlite::Result<Value> {
     let mut m = json!({"schema": "orch.msg/1", "id": rand_id("m_", 16), "from": from, "to": to,
         "type": typ, "created_at": fmt_time(now()), "body": body});
     if let Some(t) = ticket {
         m["ticket"] = t.into();
+        if let Some(k) = ticket_key {
+            m["key"] = k.into();
+        }
     }
     if let Some(t) = reply_to {
         m["reply_to"] = t.into();

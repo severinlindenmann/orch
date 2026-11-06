@@ -31,6 +31,7 @@ TYPES = {
 KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js")  # fmt: skip
 WEB_FILES = ("index.html", "focus.js", "focus.css", "logo.svg")
+PREFIX = re.compile(r"/addon/[a-z][a-z0-9-]{1,31}")  # set by the dashboard when it shows this page under its own address
 CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'none'; base-uri 'none'"
 
 
@@ -343,7 +344,9 @@ class Handler(BaseHTTPRequestHandler):
             v = self.tracker.view(m.group(1))
             return self._json(200, v) if v else self._send(404, b"no such ticket", "text/plain")
         if path == "/" or re.fullmatch(r"(/t)?/t/t_[a-z0-9]{6,16}", path):
-            return self._send(200, _web("index.html"), TYPES[".html"])
+            pre = (self.headers.get("X-Forwarded-Prefix") or "")
+            pre = pre if PREFIX.fullmatch(pre) else ""
+            return self._send(200, _web("index.html").replace(b"__P__", pre.encode()), TYPES[".html"])
         if path.startswith("/kit/") and path[5:] in KIT_FILES:
             return self._send(200, _kit(path[5:]), TYPES["." + path.rsplit(".", 1)[1]])
         if path.startswith("/web/") and path[5:] in WEB_FILES:

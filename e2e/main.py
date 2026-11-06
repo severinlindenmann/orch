@@ -297,6 +297,10 @@ def main() -> int:
                 os.kill(pid, signal.SIGKILL)
             except OSError:
                 pass
+    leaked = leaked_servers(tmp)
+    if leaked:
+        print(f"LEAK: {len(leaked)} add-on server(s) still running in {tmp}; ended: {leaked}")
+        res["LEAK"] = "FAIL"
     n = {k: sum(1 for v in res.values() if v == k) for k in ("PASS", "FAIL", "SKIP")}
     summary = f"\nSUMMARY {a.mode}: {n['PASS']} pass, {n['FAIL']} fail, {n['SKIP']} skip"
     print(summary)
@@ -304,6 +308,26 @@ def main() -> int:
         f.write(summary + "\n")
     print(f"results: {out_md}")
     return 1 if n["FAIL"] else 0
+
+
+def leaked_servers(tmp: Path) -> list[int]:
+    """Add-on servers (orch_dashboard, orch_focus ...) whose folder is under this run's temp root; they are ended here."""
+    out = subprocess.run(["ps", "-axo", "pid,command"], capture_output=True, text=True).stdout
+    found = []
+    for ln in out.splitlines():
+        pid_s, _, cmd = ln.strip().partition(" ")
+        if " -m orch_" not in cmd or not pid_s.isdigit():
+            continue
+        lsof = subprocess.run([shutil.which("lsof") or "/usr/sbin/lsof", "-a", "-d", "cwd", "-p", pid_s, "-Fn"], capture_output=True, text=True).stdout
+        cwd = next((x[1:] for x in lsof.splitlines() if x.startswith("n")), "")
+        if cwd and (cwd == str(tmp) or cwd.startswith(str(tmp) + os.sep)):
+            found.append(int(pid_s))
+    for pid in found:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    return found
 
 
 def stop_automation(e: E) -> None:
