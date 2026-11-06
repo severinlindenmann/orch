@@ -160,8 +160,8 @@ try {
     must(`orch check add ${tid} "Check the totals"`, d);
     must(`orch check done ${tid} c1 --evidence '{"type":"command","ref":"pytest -q"}'`, d);
     must(`orch ask ${tid} "Which format?" --option CSV --option XLSX --recommend CSV`, d);
-    must(`orch link add ${tid} --type jira --url https://example.com/browse/WALK-1 --title "WALK-1"`, d);
-    must(`orch link add ${tid} --type file --url file:///tmp/walk.txt --title "notes"`, d);
+    must(`orch link add ${tid} https://example.com/browse/WALK-1 --title "WALK-1"`, d);
+    must(`orch link add ${tid} https://notes.example.com/walk --title "notes"`, d);
     must(`orch log ${tid} "Started the walkthrough"`, d);
     return tid;
   });
