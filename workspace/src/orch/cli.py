@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -623,7 +624,10 @@ def run(args: argparse.Namespace) -> None:
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
         t, q = tickets.answer(root, args.id, args.question, args.answer, who, args.via)
-        runs_live.pass_answer(root, t["id"], q, who)
+        with contextlib.suppress(
+            Refused
+        ):  # the answer is saved; a busy run only delays it reaching the agent
+            runs_live.pass_answer(root, t["id"], q, who)
         note = _addon_note(root, q)
         _out(args, q, f"Answered: {q['answer']}" + (f"\n{note}" if note else ""))
     elif cmd == "link":

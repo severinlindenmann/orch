@@ -509,24 +509,63 @@ def test_the_pane_keeps_its_own_terminal_variables(proj, run, lab, tmp_path, mon
     assert "TERM=" in line and "TERM= " not in line and "TMUX=set" in line and "X=from-starter" in line
 
 
-@needs_tmux
-def test_the_waiting_for_input_notice_after_a_turn_keeps_the_agent_idle(proj, run, lab):
-    """Claude's Notification hook also fires ~60 s after a finished turn ("waiting for your input"). That must
-    not block input: a message or an answer still goes in. A notice during a turn still means attention."""
-    _generic_live(proj)
+def _notice(proj, run_id, payload):
+    return subprocess.run(
+        [sys.executable, "-m", "orch", "run", "event", "--run", run_id, "--kind", "attention"],
+        input=json.dumps(payload), text=True, cwd=proj, capture_output=True,
+    )  # fmt: skip
+
+
+def test_claude_idle_notice_lets_input_in_but_a_permission_notice_never_does(
+    proj, run, lab, tmp_path, monkeypatch
+):
+    """Claude's Notification hook fires for "waiting for your input" (idle, ~60 s after a turn) and for a
+    permission prompt. Only the first lets input in: a paste into a permission prompt could allow a tool."""
+    calls, typed = _fake_claude(tmp_path, monkeypatch)
+    _claude_live(proj)
     tid = _ticket(run)
     r = json.loads(run("run", "start", tid, "--json")[1])
-    _until(lambda: runs.read(proj, tid)["live"]["state"] == "idle" and len(_lines(lab, "input")) == 1)
-    run("run", "event", "--run", r["run"], "--kind", "attention")
-    assert runs.read(proj, tid)["live"]["state"] == "idle"
-    code, out, _ = run("run", "send", tid, "Also October")
-    assert out.strip() == "Sent."
-    _until(lambda: len(_lines(lab, "input")) == 2, what="the message after the notice")
-    rec = runs.read(proj, tid)
-    rec["live"]["state"] = "working"
-    runs._write(proj, rec)
-    run("run", "event", "--run", r["run"], "--kind", "attention")
+    hooks = json.loads((proj / ".orch" / "run" / f"hooks-{r['run']}.json").read_text())["hooks"]
+    assert (
+        hooks["UserPromptSubmit"][0]["hooks"][0]["command"]
+        == f"orch run event --run {r['run']} --kind working"
+    )
+    run("run", "event", "--run", r["run"], "--kind", "session")
+    _until(lambda: typed.exists() and "Do the thing" in typed.read_text(), what="prompt typed")
+    run("run", "event", "--run", r["run"], "--kind", "idle")
+    # a person types in the live session: the prompt hook says working; a permission notice = attention
+    run("run", "event", "--run", r["run"], "--kind", "working")
+    assert runs.read(proj, tid)["live"]["state"] == "working"
+    run("run", "send", tid, "Use CHF")
+    perm = {"notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash"}
+    assert _notice(proj, r["run"], perm).returncode == 0
     assert runs.read(proj, tid)["live"]["state"] == "attention"
+    time.sleep(0.5)
+    assert "Use CHF" not in typed.read_text() and len(runs.undelivered(proj, tid)) == 1
+    # even right after a Stop (state idle), a permission notice never pastes
+    run("run", "event", "--run", r["run"], "--kind", "idle")  # delivers the waiting text
+    _until(lambda: "Use CHF" in typed.read_text(), what="text after idle")
+    run("run", "event", "--run", r["run"], "--kind", "idle")
+    run("run", "send", tid, "Also October")  # goes in at once (idle)
+    _until(lambda: "Also October" in typed.read_text(), what="sent while idle")
+    rec = runs.read(proj, tid)
+    rec["live"]["state"] = "idle"
+    runs._write(proj, rec)
+    runs.pending_add(proj, tid, "human:anna", "message", "Not into the dialog")
+    _notice(proj, r["run"], {"message": "Claude needs your permission to use Write"})
+    time.sleep(0.5)
+    assert "Not into the dialog" not in typed.read_text()
+    assert runs.read(proj, tid)["live"]["state"] == "attention"
+    # the idle notice ("waiting for your input"): idle again, and what waits goes in
+    assert (
+        _notice(
+            proj,
+            r["run"],
+            {"notification_type": "idle_prompt", "message": "Claude is waiting for your input"},
+        ).returncode
+        == 0
+    )
+    _until(lambda: "Not into the dialog" in typed.read_text(), what="text after the idle notice")
 
 
 @needs_tmux

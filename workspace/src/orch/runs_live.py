@@ -33,7 +33,7 @@ MAX_LIVE = 4
 IDLE_SECONDS = 60 * 60
 PASTE_DELAY = 0.3
 STARTUP_SECONDS = 60
-KINDS = ("session", "idle", "attention")
+KINDS = ("session", "idle", "working", "attention")
 
 
 def idle_seconds() -> float:
@@ -231,8 +231,25 @@ def find_run(root: Path, run: str | None, tid: str | None) -> dict | None:
     return None
 
 
-def event(root: Path, kind: str, run: str | None, tid: str | None, session_id: str | None) -> int:
-    """From a tool hook (session | idle | attention). Quiet when nothing matches: a hook must never fail."""
+def idle_notice(agent: str, root: Path, payload: dict | None) -> bool:
+    """True when an attention hook's input says the tool waits at its prompt (adapter `live.idle_notice`)."""
+    rule = (adapters.load(agent, root).get("live") or {}).get("idle_notice")
+    if not rule or not isinstance(payload, dict):
+        return False
+    vals = [payload.get(f) for f in rule["fields"]]
+    return any(isinstance(v, str) and re.search(rule["match"], v, re.IGNORECASE) for v in vals)
+
+
+def event(
+    root: Path,
+    kind: str,
+    run: str | None,
+    tid: str | None,
+    session_id: str | None,
+    payload: dict | None = None,
+) -> int:
+    """From a tool hook (session | idle | working | attention). Quiet when nothing matches: a hook must never
+    fail. An attention hook that is the tool's own "waiting for your input" notice counts as idle."""
     if kind not in KINDS:
         raise Refused(f"The event kind must be one of: {', '.join(KINDS)}.")
     rec = find_run(root, run, tid)
@@ -243,13 +260,12 @@ def event(root: Path, kind: str, run: str | None, tid: str | None, session_id: s
         if session_id and adapters.SESSION_RE.match(session_id):
             tickets.record_session(root, tid, rec["agent"], session_id, runs.host())
         _set_state(root, tid, run, "idle")  # the tool is up and waiting for its first input
-    elif kind == "idle":
+    elif kind == "idle" or (kind == "attention" and idle_notice(rec["agent"], root, payload)):
         _set_state(root, tid, run, "idle")
-    elif (rec.get("live") or {}).get("state") == "idle":
-        # The tool's "still waiting for your input" notice after a finished turn: it is at its prompt, so it
-        # stays idle and input may go in. Only a notice during a turn (a permission prompt) needs a person.
-        return deliver(root, tid)
-    else:
+    elif kind == "working":  # a prompt went in (also one a person typed in the live session): never paste now
+        _set_state(root, tid, run, "working")
+        return 0
+    else:  # a permission prompt or any other notice: a person answers it; nothing is pasted
         _set_state(root, tid, run, "attention")
         return 0
     return deliver(root, tid)
