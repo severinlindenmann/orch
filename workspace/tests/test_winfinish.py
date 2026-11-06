@@ -208,3 +208,14 @@ def test_a_dead_mark_is_taken_over(tmp_path, monkeypatch):
     monkeypatch.setattr(winfinish.sys, "_base_executable", "/base/python", raising=False)
     winfinish.start(tmp_path, ["uv"], [], tmp_path, "done")
     assert (tmp_path / "finish.pending").read_text() == "99"
+
+
+def test_any_start_failure_frees_the_mark(tmp_path, monkeypatch):
+    def boom(argv, **kw):
+        raise ValueError("bad argument")
+
+    monkeypatch.setattr(winfinish, "_popen", boom)
+    monkeypatch.setattr(winfinish.sys, "_base_executable", "/base/python", raising=False)
+    with pytest.raises(RuntimeError):
+        winfinish.start(tmp_path, ["uv"], [], tmp_path, "done")
+    assert not (tmp_path / "finish.pending").exists()

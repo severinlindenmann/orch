@@ -213,7 +213,7 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
         except OSError:  # the job does not allow breaking away: start it inside the job
             pid = _popen(argv, creationflags=flags, **kw)
         mark.write_text(str(pid), encoding="utf-8")
-    except OSError as e:
+    except Exception as e:  # any failure: free the mark, or it would block installs for 10 minutes
         mark.unlink(missing_ok=True)
         raise RuntimeError(f"could not start the finisher: {e}") from e
     return log_path(home)

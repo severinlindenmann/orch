@@ -6,6 +6,7 @@
 param([Parameter(Mandatory)] [string]$Ref, [string]$Installer = "$PSScriptRoot\..\..\install.ps1", [string]$Repo = "",
     [string[]]$Flows = @("standard-user", "scheduler"), [int]$MaxSec = 1800)
 $ErrorActionPreference = "Stop"
+$Flows = @($Flows | ForEach-Object { $_ -split "," } | Where-Object { $_ })  # "-Flows a,b" also from powershell -File
 $user = "orchsmoke"; $pass = "Smoke-$([guid]::NewGuid().ToString('N').Substring(0, 12))!"
 $pw = ConvertTo-SecureString $pass -AsPlainText -Force
 if (Get-LocalUser $user -ErrorAction SilentlyContinue) { Set-LocalUser $user -Password $pw } else {

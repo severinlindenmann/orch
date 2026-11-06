@@ -58,7 +58,7 @@ Check ($LASTEXITCODE -eq 0) "a repeat: every 1 minutes"
 
 $one = ((O ticket new '"Wake-up smoke"' --json --by human:owner) | ConvertFrom-Json).id
 O check add $one '"Say hello"' --by human:owner | Out-Null
-$zurich = [TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date).AddMinutes(2), "W. Europe Standard Time")
+$zurich = [TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date).AddMinutes(3), "W. Europe Standard Time")
 $at = $zurich.ToString("HH:mm")
 L (O automation repeat $one ('"today ' + $at + '"') --tz Europe/Zurich | Out-String)
 Check ($LASTEXITCODE -eq 0) "a one-time wake-up in a named time zone (today $at Europe/Zurich)"
