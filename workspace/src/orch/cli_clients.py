@@ -119,7 +119,6 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--token", required=True)
     rel.add_parser("whoami", parents=[common], help="show who you are and which phones are paired")
     rel.add_parser("status", parents=[common], help="is this folder connected to a relay (no network)")
-    rel.add_parser("view", parents=[common], help="the Relay tab of the dashboard (read-only, no network)")
     _add_profile(rel)
     x = rel.add_parser("inbox", parents=[common], help="pull new messages")
     x.add_argument("--wait", type=int, default=0, help="wait up to N seconds (max 30)")
@@ -258,7 +257,7 @@ def run_relay(args, root: Path, out) -> None:
     if sub == "profile":
         return _run_profile(args, relay, out)
     t = getattr(args, "ticket", None)
-    if sub not in ("connect", "status", "outbox", "view"):
+    if sub not in ("connect", "status", "outbox"):
         _resend_waiting(root)
     if sub == "connect":
         who, line = relay.connect(root, args.url, args.workspace, args.token)
@@ -279,12 +278,6 @@ def run_relay(args, root: Path, out) -> None:
             st,
             f"Connected to {_host(st['url'])}." if st["configured"] else "Not connected to a relay.",
         )
-    elif sub == "view":
-        from orch import relay_view
-
-        v = relay_view.view(root)
-        rows = [f"{i['title']}  {i['subtitle']}" for b in v["blocks"] for i in b["items"]]
-        out(args, v, "\n".join([v.get("notice", ""), *rows]).strip())
     elif sub == "whoami":
         w = relay.whoami(root)
         n = w["phones"]
