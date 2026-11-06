@@ -1,0 +1,1575 @@
+{
+ "name": "ticket-view-v1",
+ "cap_bytes": 16384,
+ "description": "body.ticket_view (message.schema.json): every case is checked against the schema AND the size cap (compact JSON, no spaces, UTF-8, of body.ticket_view alone, at most cap_bytes). ok=true: the relay stores it (201) and the workspace may send it; ok=false: the relay answers 422 invalid. Replayed by contracts/validate.py, relay/tests/ticket_view.rs and workspace/tests/test_ticket_view.py.",
+ "cases": [
+  {
+   "name": "full",
+   "ok": true,
+   "why": "",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "Read the Q3 sheet",
+        "done": true
+       },
+       {
+        "text": "Write the charts",
+        "done": false
+       }
+      ],
+      "done": 1,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "minimal",
+   "ok": true,
+   "why": "",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "T",
+      "status": "open",
+      "running": false,
+      "checklist": [],
+      "done": 0,
+      "total": 0,
+      "history_tail": [],
+      "attachments": []
+     }
+    }
+   }
+  },
+  {
+   "name": "at-cap",
+   "ok": true,
+   "why": "exactly 16384 bytes as compact UTF-8 JSON",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       }
+      ],
+      "done": 1,
+      "total": 99,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "over-cap",
+   "ok": false,
+   "why": "16385 bytes: over the 16 KB cap",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       },
+       {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "done": false
+       }
+      ],
+      "done": 1,
+      "total": 99,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "without-update",
+   "ok": false,
+   "why": "ticket_view only next to body.update",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "Read the Q3 sheet",
+        "done": true
+       },
+       {
+        "text": "Write the charts",
+        "done": false
+       }
+      ],
+      "done": 1,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "unknown-field",
+   "ok": false,
+   "why": "additionalProperties false",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "Read the Q3 sheet",
+        "done": true
+       },
+       {
+        "text": "Write the charts",
+        "done": false
+       }
+      ],
+      "done": 1,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ],
+      "secret": "x"
+     }
+    }
+   }
+  },
+  {
+   "name": "history-31",
+   "ok": false,
+   "why": "history_tail at most 30",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "Read the Q3 sheet",
+        "done": true
+       },
+       {
+        "text": "Write the charts",
+        "done": false
+       }
+      ],
+      "done": 1,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "attachments-51",
+   "ok": false,
+   "why": "attachments at most 50",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "Read the Q3 sheet",
+        "done": true
+       },
+       {
+        "text": "Write the charts",
+        "done": false
+       }
+      ],
+      "done": 1,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "link-with-blob",
+   "ok": false,
+   "why": "a link has a url, never a blob",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "Read the Q3 sheet",
+        "done": true
+       },
+       {
+        "text": "Write the charts",
+        "done": false
+       }
+      ],
+      "done": 1,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z",
+        "blob_id": "b_0123456789abcdef"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "image-without-blob",
+   "ok": false,
+   "why": "image/file need blob_id, name, size",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "Read the Q3 sheet",
+        "done": true
+       },
+       {
+        "text": "Write the charts",
+        "done": false
+       }
+      ],
+      "done": 1,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "link-not-http",
+   "ok": false,
+   "why": "only http(s) links",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "Read the Q3 sheet",
+        "done": true
+       },
+       {
+        "text": "Write the charts",
+        "done": false
+       }
+      ],
+      "done": 1,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "javascript:alert(1)",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "history-bad-role",
+   "ok": false,
+   "why": "role agent or person",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "Read the Q3 sheet",
+        "done": true
+       },
+       {
+        "text": "Write the charts",
+        "done": false
+       }
+      ],
+      "done": 1,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "admin",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ]
+     }
+    }
+   }
+  }
+ ]
+}
