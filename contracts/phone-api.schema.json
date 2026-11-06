@@ -60,7 +60,7 @@
     "message_item": {
       "type": "object", "required": ["message", "workspace_name", "delivered_at", "client_id"],
       "properties": {
-        "message": { "$ref": "message.schema.json" },
+        "message": { "$ref": "message.schema.json", "description": "With ticket: a topic text. Without ticket: General (workspace texts carry body.general true; an ack/working update there, with reply_to = the phone's General text, is the Started/Working receipt)." },
         "workspace_name": { "type": "string" },
         "delivered_at": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }], "description": "The phone's own texts: when the receiving workspace acked it (POST /v1/inbox/ack), else null. Always null on workspace texts." },
         "client_id": { "oneOf": [{ "$ref": "#/$defs/client_id" }, { "type": "null" }], "description": "The phone's own texts: body.client_id. Null on workspace texts." }
@@ -113,6 +113,7 @@
     },
 
     "redeem_request": {
+      "description": "At most 10 calls a minute per phone (429 rate_limited).",
       "type": "object", "required": ["code"],
       "properties": { "code": { "type": "string", "pattern": "^pc_[A-Za-z0-9]{22}$" } }
     },

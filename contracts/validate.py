@@ -426,6 +426,9 @@ for case in pvec["speech_text"]:
     got = speech_text(case["body"], pvec["speech_max_chars"])
     if got != case["spoken"]:
         fails.append(f"phone-v3 vector speech_text {case['name']}: got {got!r}")
+for case in pvec["general_updates"]:
+    if (not errors("message", case["message"])) != case["ok"]:
+        fails.append(f"phone-v3 vector general_updates {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
 for case in pvec["artifact_ids"]:
     got = "a_" + hashlib.sha256(f"{case['source']}\n{case['ref']}".encode()).hexdigest()[:12]
     if got != case["id"] or not re.fullmatch(_msg_schema["$defs"]["artifact_id"]["pattern"], got):

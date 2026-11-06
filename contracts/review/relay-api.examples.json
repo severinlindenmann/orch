@@ -2022,10 +2022,10 @@
     }
   },
   {
-    "_note": "Phone v3: General and a new topic. The phone's own texts carry delivered_at + client_id. The workspace answered in General (general: true, no ticket), then acked the new-topic text with the new ticket + key and reply_to = the phone text (Started), and marked a long answer speak.",
+    "_note": "Phone v3: General and a new topic. The phone's own texts carry delivered_at + client_id. The workspace answered in General (general: true, no ticket), then acked the new-topic text with the new ticket + key and reply_to = the phone text (Started), and marked a long answer speak. In General the workspace first marked the phone's text as Working (general: true, update working, reply_to).",
     "request": {
       "method": "GET",
-      "path": "/v1/phone/messages?limit=4",
+      "path": "/v1/phone/messages?limit=5",
       "headers": {
         "X-Orch-Phone": "ph_iphone0001",
         "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
@@ -2101,6 +2101,27 @@
             "workspace_name": "Pilatus Workspace",
             "delivered_at": "2026-11-06T20:02:04Z",
             "client_id": "0b7a4c1e-9d2f-4e6a-8b3c-5d6e7f809a1b"
+          },
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_g3n3ralw0rk00001",
+              "from": "ws_pilatus001",
+              "to": "ph_iphone0001",
+              "type": "text",
+              "created_at": "2026-11-06T19:58:05Z",
+              "reply_to": "m_g3n3ral0000000a1",
+              "body": {
+                "text": "Looking at yesterday's numbers",
+                "general": true,
+                "update": {
+                  "kind": "working"
+                }
+              }
+            },
+            "workspace_name": "Pilatus Workspace",
+            "delivered_at": null,
+            "client_id": null
           },
           {
             "message": {

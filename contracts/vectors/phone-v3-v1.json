@@ -1,6 +1,6 @@
 {
  "name": "phone-v3-v1",
- "description": "Phone app v3 (relay-api.md, Phone API). send: POST /v1/phone/send bodies (phone-api.schema.json send_request); ok=true cases also give `built`, the text message the relay stores (message.schema.json; the relay adds id and created_at, from = the calling phone ph_iphone0001), ok=false = 422 invalid. answer, settings_patch, workspace_patch: request bodies, ok=false = 422. speech_text: the text GET /v1/phone/speech speaks for a text body (relay-api.md, Speech). artifact_ids: ticket_view attachment ids (message.schema.json). Replayed by contracts/validate.py; the relay (R1, R2) and the workspace relay add-on (WS) replay the parts they build.",
+ "description": "Phone app v3 (relay-api.md, Phone API). send: POST /v1/phone/send bodies (phone-api.schema.json send_request); ok=true cases also give `built`, the text message the relay stores (message.schema.json; the relay adds id and created_at, from = the calling phone ph_iphone0001), ok=false = 422 invalid. answer, settings_patch, workspace_patch: request bodies, ok=false = 422. speech_text: the text GET /v1/phone/speech speaks for a text body (relay-api.md, Speech). general_updates: whole messages (message.schema.json), ok=false = 422 invalid. artifact_ids: ticket_view attachment ids (message.schema.json). Replayed by contracts/validate.py; the relay (R1, R2) and the workspace relay add-on (WS) replay the parts they build.",
  "phone": "ph_iphone0001",
  "send": [
   {
@@ -836,6 +836,164 @@
    "source": "commit",
    "ref": "9fceb02d0ae598e95dc970b74767f19372d61af8",
    "id": "a_b77e8c387339"
+  }
+ ],
+ "general_updates": [
+  {
+   "name": "general-ack",
+   "ok": true,
+   "why": "Started receipt in General",
+   "message": {
+    "schema": "orch.msg/1",
+    "created_at": "2026-11-06T19:58:05Z",
+    "from": "ws_pilatus001",
+    "to": "ph_iphone0001",
+    "type": "text",
+    "id": "m_g3n3ralack000001",
+    "reply_to": "m_g3n3ral0000000a1",
+    "body": {
+     "text": "Got it",
+     "general": true,
+     "update": {
+      "kind": "ack"
+     }
+    }
+   }
+  },
+  {
+   "name": "general-working",
+   "ok": true,
+   "why": "Working receipt in General",
+   "message": {
+    "schema": "orch.msg/1",
+    "created_at": "2026-11-06T19:58:05Z",
+    "from": "ws_pilatus001",
+    "to": "ph_iphone0001",
+    "type": "text",
+    "id": "m_g3n3ralw0rk00001",
+    "reply_to": "m_g3n3ral0000000a1",
+    "body": {
+     "text": "Looking at it",
+     "general": true,
+     "update": {
+      "kind": "working"
+     }
+    }
+   }
+  },
+  {
+   "name": "general-result",
+   "ok": false,
+   "why": "only ack and working in General",
+   "message": {
+    "schema": "orch.msg/1",
+    "created_at": "2026-11-06T19:58:05Z",
+    "from": "ws_pilatus001",
+    "to": "ph_iphone0001",
+    "type": "text",
+    "id": "m_g3n3ralbad000002",
+    "reply_to": "m_g3n3ral0000000a1",
+    "body": {
+     "text": "Done",
+     "general": true,
+     "update": {
+      "kind": "result"
+     }
+    }
+   }
+  },
+  {
+   "name": "general-ack-no-reply-to",
+   "ok": false,
+   "why": "reply_to = the phone's General text",
+   "message": {
+    "schema": "orch.msg/1",
+    "created_at": "2026-11-06T19:58:05Z",
+    "from": "ws_pilatus001",
+    "to": "ph_iphone0001",
+    "type": "text",
+    "id": "m_g3n3ralbad000003",
+    "body": {
+     "text": "Got it",
+     "general": true,
+     "update": {
+      "kind": "ack"
+     }
+    }
+   }
+  },
+  {
+   "name": "general-ack-with-ticket",
+   "ok": false,
+   "why": "General has no ticket",
+   "message": {
+    "schema": "orch.msg/1",
+    "created_at": "2026-11-06T19:58:05Z",
+    "from": "ws_pilatus001",
+    "to": "ph_iphone0001",
+    "type": "text",
+    "id": "m_g3n3ralbad000005",
+    "reply_to": "m_g3n3ral0000000a1",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Got it",
+     "general": true,
+     "update": {
+      "kind": "ack"
+     }
+    }
+   }
+  },
+  {
+   "name": "general-with-ticket-view",
+   "ok": false,
+   "why": "no ticket_view in General",
+   "message": {
+    "schema": "orch.msg/1",
+    "created_at": "2026-11-06T19:58:05Z",
+    "from": "ws_pilatus001",
+    "to": "ph_iphone0001",
+    "type": "text",
+    "id": "m_g3n3ralbad000006",
+    "reply_to": "m_g3n3ral0000000a1",
+    "body": {
+     "text": "Got it",
+     "general": true,
+     "update": {
+      "kind": "ack"
+     },
+     "ticket_view": {
+      "title": "T",
+      "status": "open",
+      "running": false,
+      "checklist": [],
+      "done": 0,
+      "total": 0,
+      "history_tail": [],
+      "attachments": []
+     }
+    }
+   }
+  },
+  {
+   "name": "topic-ack-without-reply-to-still-valid",
+   "ok": true,
+   "why": "existing acks stay valid",
+   "message": {
+    "schema": "orch.msg/1",
+    "created_at": "2026-11-06T19:58:05Z",
+    "from": "ws_pilatus001",
+    "to": "ph_iphone0001",
+    "type": "text",
+    "id": "m_t0p1cack00000001",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "On it",
+     "update": {
+      "kind": "ack"
+     }
+    }
+   }
   }
  ]
 }

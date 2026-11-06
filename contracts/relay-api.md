@@ -67,7 +67,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | GET | `/v1/phone/speech/<message_id>` | optional `?lang=de\|en` | `200` `audio/mpeg`: the text read aloud (see Speech). `404` unless the message is a text to this phone or to `phones` from a workspace on its list (the `/v1/phone/messages` filter) **and** (it has `body.speak` and the phone's `speak` setting is not `never`, or the setting is `always`). `402 tts_cap_reached`, `503 tts_off`, `502 tts_failed` |
 | GET | `/v1/phone/settings` | – | `{speak, swiss_german, tts_cap_usd, tts_used_usd_month}`. Defaults: `auto`, `false`, `10`. `tts_used_usd_month` = read-aloud cost of this phone in the current calendar month (UTC) |
 | PATCH | `/v1/phone/settings` | `{speak?: auto\|always\|never, swiss_german?: bool, tts_cap_usd?: 0..100}` (at least one) | `200` the settings as for GET. Other fields or values → `422 invalid` |
-| POST | `/v1/phone/invitations/redeem` | `{code}` (phone auth) | `200 {workspaces: [{id, name}]}` = the invitation's workspaces, now all on this phone's list (ones already there stay). The code comes from the same `orch://pair?relay=…&code=pc_…` link or QR as pairing and works once: unknown → `404 not_found`, used or expired → `410 gone`. The phone entry the admin made with that invitation is removed (it was never paired); the added workspaces get a refresh-hint |
+| POST | `/v1/phone/invitations/redeem` | `{code}` (phone auth) | `200 {workspaces: [{id, name}]}` = the invitation's workspaces, now all on this phone's list (ones already there stay). The code comes from the same `orch://pair?relay=…&code=pc_…` link or QR as pairing and works once: unknown → `404 not_found`, used or expired → `410 gone`. The phone entry the admin made with that invitation is removed (it was never paired); the added workspaces get a refresh-hint. At most 10 calls a minute per phone, else `429 rate_limited` |
 
 ## Phone app v3 (messenger)
 
@@ -99,8 +99,10 @@ new-topic text has neither until the workspace's ack names its ticket.
 **Receipts.** ✓ = the relay stored it (`201`/`200`). ✓✓ = `delivered_at` is set (the workspace acked it from its inbox).
 **Started** = a workspace text with `body.update.kind` `ack` or `working` and `reply_to` = the phone text's id. The
 workspace **must** set `reply_to` on the ack (and on `working`) for a phone text; the ack of a new topic carries the new
-`ticket` and its `key`, which moves the phone's text into that topic. General texts carry no `update` (no ticket), so
-they show ✓/✓✓ only.
+`ticket` and its `key`, which moves the phone's text into that topic. **In General** the same receipts work without a
+ticket: a workspace text with `body.general: true`, no `ticket`, `reply_to` = the phone's General text and `body.update.kind`
+`ack` or `working` (only those two; no `title` needed, no `ticket_view`). These are stored and listed in
+`/v1/phone/messages`, never pushed, and not part of `/v1/phone/updates` (that view is per ticket).
 
 **Speech** (`GET /v1/phone/speech/<message_id>`). A workspace marks a text worth hearing with
 `body.speak = {lang: de|en, summary?: ≤ 600}`. Spoken text = `summary` if set, else `text`; URLs become "link", `*`, `` ` `` and

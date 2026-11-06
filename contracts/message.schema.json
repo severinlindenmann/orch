@@ -19,7 +19,8 @@
   },
   "allOf": [
     { "if": { "properties": { "type": { "const": "text" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/text" } } } },
-    { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["update"] } } }, "then": { "required": ["ticket"] } },
+    { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["update"], "not": { "required": ["general"], "properties": { "general": { "const": true } } } } } }, "then": { "required": ["ticket"] } },
+    { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["update", "general"], "properties": { "general": { "const": true } } } } }, "then": { "required": ["reply_to"], "properties": { "body": { "not": { "required": ["ticket_view"] }, "properties": { "update": { "properties": { "kind": { "enum": ["ack", "working"] } } } } } } } },
     { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["general"], "properties": { "general": { "const": true } } } } }, "then": { "not": { "required": ["ticket"] } } },
     { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["feedback"] } } }, "then": { "required": ["ticket"] } },
     { "if": { "properties": { "type": { "const": "file" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/file" } } } },
@@ -92,7 +93,7 @@
       "properties": {
         "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
         "client_id": { "$ref": "#/$defs/client_id" },
-        "general": { "type": "boolean", "description": "true = the workspace's General conversation (no ticket; a text with general true must not carry ticket, so it never carries update either). Both ways: the phone sends it (POST /v1/phone/send general: true) and the workspace sets it on its replies in General. A text without ticket and without general from a phone asks for a new topic." },
+        "general": { "type": "boolean", "description": "true = the workspace's General conversation (no ticket; a text with general true must not carry ticket). Its only update kinds are ack and working, with reply_to = the phone's General text (the Started / Working receipt, relay-api.md). Both ways: the phone sends it (POST /v1/phone/send general: true) and the workspace sets it on its replies in General. A text without ticket and without general from a phone asks for a new topic." },
         "speak": {
           "type": "object", "additionalProperties": false, "required": ["lang"],
           "description": "Workspace texts only: worth hearing. The phone may fetch audio for it (GET /v1/phone/speech/<message id>). Spoken text = summary if set, else text (relay-api.md, Speech).",
