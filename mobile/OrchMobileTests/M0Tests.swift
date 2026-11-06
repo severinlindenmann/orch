@@ -240,7 +240,7 @@ final class OutboxTests: XCTestCase {
         let relay = MockRelay(latency: .zero), ob = Outbox(directory: dir, phone: "ph_iphone0001")
         let item = try ob.enqueue(MessageDraft(text: "x"), to: .general(workspace: MockRelay.pilatus))
         await relay.queueSendFailures([429, 503, 429, 429, 429, 429, 429])
-        var now = Date()
+        var now = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))   // whole seconds: the stored time has none
         var waits: [TimeInterval] = []
         for _ in 0..<7 {
             let ev = await ob.flush(using: relay, now: now)
