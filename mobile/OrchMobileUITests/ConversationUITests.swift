@@ -10,12 +10,16 @@ final class ConversationUITests: XCTestCase {
         app.launch()
         return app
     }
+    /// Waits for an element; on failure the message carries the screen's accessibility tree (CI logs are quiet).
+    private func must(_ app: XCUIApplication, _ e: XCUIElement, _ what: String, timeout: TimeInterval = 20) {
+        if !e.waitForExistence(timeout: timeout) { XCTFail("\(what) missing. Screen: " + String(app.debugDescription.prefix(3500))) }
+    }
     private func el(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
 
     func testTextSendShowsReceiptAndBubble() {
         let app = launch(["-openChat", "ws_pilatus001"])
         let field = el(app, "composer-field")
-        XCTAssertTrue(field.waitForExistence(timeout: 20))
+        must(app, field, "composer-field")
         field.tap(); field.typeText("Please check the totals")
         el(app, "composer-send").tap()
         XCTAssertTrue(app.staticTexts["Please check the totals"].waitForExistence(timeout: 10), "my bubble")
@@ -41,7 +45,7 @@ final class ConversationUITests: XCTestCase {
     func testHoldToRecordSendsVoiceNote() {
         let app = launch(["-openChat", "ws_pilatus001"])
         let mic = el(app, "composer-mic")
-        XCTAssertTrue(mic.waitForExistence(timeout: 20))
+        must(app, mic, "composer-mic")
         mic.press(forDuration: 1.6)
         XCTAssertTrue(el(app, "voice-play").waitForExistence(timeout: 20), "the voice note bubble appears")
     }
@@ -49,7 +53,7 @@ final class ConversationUITests: XCTestCase {
     func testAttachSheetOffersEveryKind() {
         let app = launch(["-openChat", "ws_pilatus001"])
         let plus = el(app, "composer-attach")
-        XCTAssertTrue(plus.waitForExistence(timeout: 20))
+        must(app, plus, "composer-attach")
         plus.tap()
         for kind in ["camera", "scan", "photos", "files", "location"] {
             XCTAssertTrue(el(app, "attach-\(kind)").waitForExistence(timeout: 5), kind)
