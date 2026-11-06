@@ -15,6 +15,10 @@ if (Test-Path $repo) {
 }
 uv tool install --reinstall $spec
 if ($LASTEXITCODE -ne 0) { throw "uv tool install failed" }
+# Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
+$toolBin = (uv tool dir --bin)
+& (Join-Path $toolBin "orch.exe") update --after-install
+if ($LASTEXITCODE -ne 0) { Write-Host "Note: your add-ons could not be installed again. Run: orch update" }
 Write-Host "orch is installed."
 $bin = "$env:USERPROFILE\.local\bin"
 if (($env:Path -split ";") -notcontains $bin) {

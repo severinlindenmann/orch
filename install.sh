@@ -18,6 +18,9 @@ else
 fi
 uv tool install --reinstall "$SPEC"
 BIN="$HOME/.local/bin"
+# Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
+TOOL_BIN="$(uv tool dir --bin 2>/dev/null || echo "$BIN")"
+"$TOOL_BIN/orch" update --after-install || echo "Note: your add-ons could not be installed again. Run: orch update"
 case "$(basename "${SHELL:-sh}")" in
   zsh)  RC="~/.zshrc";  LINE="export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
   bash) RC="~/.bashrc"; LINE="export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;

@@ -473,11 +473,11 @@ def test_consent_is_tied_to_workspace_and_folder_content(proj, run, hello, tmp_p
 
 def test_builtin_also_needs_local_record(proj, run, tmp_path, monkeypatch):
     (proj / ".orch").mkdir()
-    (proj / ".orch/addons.json").write_text('{"active": {"scheduler": {"version": "0.2.0"}}}')
+    (proj / ".orch/addons.json").write_text('{"active": {"focus": {"version": "0.2.0"}}}')
     monkeypatch.setattr(addons, "_entry_points", lambda: {})
     assert addons.active(proj) == {}
-    addons.record_consent(proj, "scheduler")  # built-in: no registry entry = built-in
-    assert list(addons.active(proj)) == ["scheduler"]
+    addons.record_consent(proj, "focus")  # built-in: no registry entry = built-in
+    assert list(addons.active(proj)) == ["focus"]
 
 
 def test_remove_rejects_path_names(proj, run):
@@ -787,9 +787,7 @@ def test_addons_install_from_where_orch_came_from(proj, monkeypatch, uv_calls):
         addons, "_install_origin", lambda: {"repo": "https://github.com/someone/orch", "ref": "develop"}
     )
     addons._save_registry([{"name": "dashboard", "source": "built-in", "version": "0.0.0"}])
-    addons._install_tool(
-        addons.registry() + [{"name": "scheduler", "source": "built-in", "version": "0.0.0"}]
-    )
+    addons._install_tool(addons.registry() + [{"name": "focus", "source": "built-in", "version": "0.0.0"}])
     args = uv_calls[0]
     assert all(isinstance(a, str) for a in args)
     assert args[3] == "git+https://github.com/someone/orch@develop#subdirectory=workspace"
@@ -797,7 +795,7 @@ def test_addons_install_from_where_orch_came_from(proj, monkeypatch, uv_calls):
         "--with",
         "git+https://github.com/someone/orch@develop#subdirectory=workspace-addons/dashboard",
         "--with",
-        "git+https://github.com/someone/orch@develop#subdirectory=workspace-addons/scheduler",
+        "git+https://github.com/someone/orch@develop#subdirectory=workspace-addons/focus",
     ]
     monkeypatch.setenv("ORCH_REF", "v1")  # an explicit override still wins
     assert addons.spec("workspace").endswith("@v1#subdirectory=workspace")

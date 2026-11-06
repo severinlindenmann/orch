@@ -275,6 +275,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--recommended", action="store_true", help="also turn on the recommended add-ons")
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
+    u.add_argument("--after-install", action="store_true", help=argparse.SUPPRESS)
 
     cli_status.add_parsers(sub, common)
     cli_addons.add_parsers(sub, common)
@@ -467,8 +468,10 @@ def run(args: argparse.Namespace) -> None:
             ),
         )
     elif cmd == "update":
-        done = addons.update(root, args.project_only)
-        if args.project_only:
+        done = addons.update(root, args.project_only, args.after_install)
+        if args.after_install:
+            pass
+        elif args.project_only:
             _out(args, {"ok": True, "refreshed": done}, "Refreshed: " + ", ".join(done or ["nothing"]))
         elif not args.json:
             print("orch is up to date.")
