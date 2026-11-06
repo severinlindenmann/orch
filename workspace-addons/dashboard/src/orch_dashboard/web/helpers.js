@@ -69,8 +69,9 @@
       const agent = (run.claim && (run.claim.agent || run.claim.by)) || 'agent';
       const asks = arr(t && t.questions).some(q => q && q.answer == null);
       busy.add(String(agent).replace(/^(agent|human):/, ''));
-      out.push({agent: String(agent).replace(/^(agent|human):/, ''), state: run.state === 'maybe-stale' ? 'stuck' : asks ? 'needs' : 'working',
-        ticket: tid, since: run.claim && run.claim.started_at});
+      const idle = !asks && run.state !== 'maybe-stale' && run.claim && run.claim.live && run.claim.live.state === 'idle';  // a live session waiting for a message
+      out.push({agent: String(agent).replace(/^(agent|human):/, ''), state: run.state === 'maybe-stale' ? 'stuck' : asks ? 'needs' : idle ? 'idle' : 'working',
+        ticket: tid, since: idle ? run.claim.live.since : run.claim && run.claim.started_at});
     }
     const last = new Map();
     for (const t of arr(tickets)) for (const s of arr(t.sessions)) {
@@ -120,6 +121,7 @@
       if (claim.live && claim.live.state === 'starting') return {state: 'starting', agent, status: 'Starting…', primary: live || stop, items: live ? [stop] : []};
       if (claim.mode === 'oneshot') return {state: 'background', agent, status: 'works in the background (no live view)' + since,
         primary: live ? {...live, label: 'Watch in ' + liveLink.label} : stop, items: live ? [stop] : []};
+      if (claim.live && claim.live.state === 'idle') return {state: 'idle', agent, status: 'live session open, waiting for a message' + by, primary: live || stop, items: live ? [stop] : []};
       return {state: 'working', agent, status: 'working' + by + since, primary: live || stop, items: live ? [stop] : []};
     }
     if (r && r.state === 'dead') return {state: 'failed', agent, status: 'the last run ended without finishing',

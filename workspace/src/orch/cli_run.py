@@ -190,9 +190,11 @@ def _status(args, root: Path) -> None:
             f"Take it over: orch run start {tid} --take-over"
         )
     else:
-        text = _holder_line(rec, tid, root) + (f" {waiting} more waiting." if waiting else "")
+        text = _holder_line(rec, tid, root) + (
+            f" {waiting} message{'s' if waiting != 1 else ''} waiting to go in." if waiting else ""
+        )
         if rec.get("mode") == "live":
-            text += " " + runs_live.line(rec)
+            text += " " + runs_live.line(rec, root)
     _out(args, data, text)
 
 
@@ -335,7 +337,7 @@ def dispatch(args, root: Path) -> bool:
             args,
             r,
             f"{how} ({r['agent']}). Run {r['run']}. {where}"
-            + (f" See it: orch run attach {tid}" if r["mode"] == "live" else ""),
+            + (f" See it: orch run attach {runs_live.ref(root, tid)}" if r["mode"] == "live" else ""),
         )
     return True
 

@@ -149,8 +149,10 @@ def test_a_trust_question_is_shown_instead_of_working(proj, run, monkeypatch):
     _valid_run(rec)
     assert rec["live"]["state"] == "attention"
     assert rec["live"]["why"].startswith("Claude asks whether to trust this folder")
-    assert f"orch run attach {tid}" in rec["live"]["why"]
+    key = tickets.load(proj, tid)["key"]
+    assert f"orch run attach {key}" in rec["live"]["why"]  # the key a person knows, not the internal id
     out = run("run", "status", tid)[1]
+    assert f"orch run attach {key}" in out
     assert "trust this folder" in out and "working" not in out
     # the tool's own hook, once it is up, takes over again
     run("run", "event", "--run", rec["run"], "--kind", "idle")

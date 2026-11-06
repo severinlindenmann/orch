@@ -458,7 +458,7 @@
     };
     return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'}, h('span', {className:'dot ' + ({working:'working', starting:'starting', background:'bg', needs:'needs', stuck:'needs', failed:'error', stopped:'stopped'}[line.state] || 'idle')}),
       h('span', {className:'ab-text grow'}, h('strong', {}, name(line.agent)), h('span', {className:'muted'}, ' · ' + clean(line.status))),
-      h('span', {className:'ab-actions'}, !activeTicket(t) && liveLink && !snapshot ? h('a', {className:'btn outline sm', href:liveLink.url, 'data-key':'agent-open-done'}, 'Open ' + liveLink.label) : null, action(line.primary, true), line.items.length ? h('details', {className:'menu', 'data-key':'agent-menu'}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More agent actions'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, line.items.map(item => action(item, false)))) : null));
+      h('span', {className:'ab-actions'}, !activeTicket(t) && liveLink && !snapshot && line.primary.op !== 'open' ? h('a', {className:'btn outline sm', href:liveLink.url, 'data-key':'agent-open-done'}, 'Open ' + liveLink.label) : null, action(line.primary, true), line.items.length ? h('details', {className:'menu', 'data-key':'agent-menu'}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More agent actions'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, line.items.map(item => action(item, false)))) : null));
   }
   const surface = via => clean(via === 'cli' ? 'terminal' : via);
   function proofLabel(ev) {
