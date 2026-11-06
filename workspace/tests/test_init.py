@@ -124,6 +124,9 @@ def test_codex_only_needs_only_agents_md(proj, run, monkeypatch):
     )
     code, out, _ = run("init")
     assert code == 0 and "Linked for" not in out and not (proj / "CLAUDE.md").exists()
+    # Codex reads AGENTS.md and .agents/skills itself: both are there without any link
+    assert "orch:begin orch" in (proj / "AGENTS.md").read_text(encoding="utf-8")
+    assert (proj / ".agents/skills/orch/SKILL.md").is_file() and not (proj / ".claude").exists()
 
 
 def test_files_entries_come_from_the_data(proj, monkeypatch):

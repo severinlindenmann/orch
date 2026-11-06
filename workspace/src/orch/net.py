@@ -115,11 +115,19 @@ def secrets_dir(root: Path) -> Path:
 
 def write_atomic(path: Path, data: bytes, private: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600 if private else 0o644)
-    with os.fdopen(fd, "wb") as f:
-        f.write(data)
-    os.replace(tmp, path)
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )  # never follows a link
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.chmod(tmp, 0o600 if private else 0o644)
+        os.replace(tmp, path)  # replaces a planted link, does not write through it
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def write_json(path: Path, obj, private: bool = False) -> None:
