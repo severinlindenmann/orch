@@ -31,6 +31,15 @@ pub fn router(app: AppState) -> Router {
                 )
             }),
         )
+        .route(
+            "/admin/kit.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("../web/kit.js"),
+                )
+            }),
+        )
         .merge(crate::api::icon_routes())
         .route("/admin/api/workspaces", get(list_ws).post(add_ws))
         .route(

@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from conftest import CONTRACTS
 
+from orch import tickets
 from orch.errors import Refused
 
 
@@ -313,3 +314,36 @@ def test_new_with_bad_ext_makes_no_ticket(proj, run, bad):
     code, _, err = run("ticket", "new", "Nope", "--ext", bad)
     assert code == 2 and "ext" in err.lower()
     assert not list((proj / ".orch" / "tickets").glob("t_*.json"))
+
+
+@pytest.mark.parametrize(
+    "stored,shown",
+    [
+        ("Created", "Created"),
+        ("Asked q1, waiting", "Asked a question"),
+        ("Asked q1 on c2, waiting", "Asked q1 on c2, waiting"),
+        ("Answered q1: Yes please", "Answered a question: Yes please"),
+        ("Edited due, owner", "Changed the due date and owner"),
+        ("Edited title", "Changed the title"),
+        ("Edited note, summary, due", "Changed the note, summary and due date"),
+        ("Patched owner, status (status open -> active)", "Changed the owner and status (now Doing)"),
+        ("Status open -> done", "Moved to Done"),
+        ("Added check c1", "Added task c1"),
+        ("Check c1 done", "Finished task c1"),
+        ("Set ext.focus", "Updated the data of the focus add-on"),
+        ("Removed ext.focus.a", "Removed data of the focus add-on"),
+        ("Something the agent wrote", "Something the agent wrote"),
+    ],
+)
+def test_history_line_is_plain_words(stored, shown):
+    assert tickets.history_line(stored) == shown
+
+
+def test_cli_shows_plain_history_but_stores_the_machine_text(proj, run, new_ticket):
+    tid = new_ticket()
+    run("ticket", "edit", tid, "--due", "2026-12-01", "--owner", "Anna")
+    out = run("ticket", "show", tid)[1]
+    assert "Changed the due date and owner" in out and "Edited due, owner" not in out
+    assert read(proj, tid)["history"][-1]["text"] == "Edited due, owner"
+    code, out, _ = run("log", tid, "Edited by hand")
+    assert code == 0 and "Edited by hand" in out

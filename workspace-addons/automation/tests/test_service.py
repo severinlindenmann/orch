@@ -136,3 +136,8 @@ def test_command_line_must_name_exactly_this_folder(ws, kills, monkeypatch):
     (d / "automation.json").write_text(json.dumps({"pid": me, "nonce": "1" * 32, "started": service.proc_start(me)}))
     monkeypatch.setattr(runfiles, "command", lambda pid: f"python -P -m orch_automation --dir {root} run")
     assert service.running_pid(ws, clean=False) == me  # the exact folder does match (no signal sent here)
+
+
+def test_status_says_automation_and_exits_1_when_stopped(ws, capsys):
+    assert main(["--dir", str(ws), "status"]) == 1
+    assert "Automation is not running." in capsys.readouterr().out

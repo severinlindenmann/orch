@@ -167,3 +167,13 @@ def test_file_proof_symlink_and_absolute_path_outside_the_workspace_count_as_mis
     (ws / ".orch" / "tickets" / "t_proof0002.json").write_text(_json.dumps(ex))
     t = next(x for x in load_tickets(ws)[0] if x["id"] == "t_proof0002")
     assert [e["missing"] for e in t["checklist"][0]["evidence"]] == [True, True, True]
+
+
+def test_many_parallel_loads_never_reset(server):
+    """The page fetches a dozen files at once; a small listen backlog used to reset some of them."""
+    from concurrent.futures import ThreadPoolExecutor
+    paths = ["/", "/app.js", "/style.css", "/helpers.js", "/blocks.js", "/kit/tokens.css", "/kit/components.css", "/kit/motion.css",
+             "/kit/motion.js", "/kit/icons.js", "/kit/question-card.js", "/api/state"] * 6
+    with ThreadPoolExecutor(max_workers=36) as pool:
+        codes = list(pool.map(lambda p: get(server + p)[0], paths))
+    assert set(codes) == {200}

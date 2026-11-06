@@ -220,7 +220,9 @@ def test_only_local_urls_are_printed_or_opened(svc, proj, run, monkeypatch, url)
     opened = []
     monkeypatch.setattr("webbrowser.open", lambda u: opened.append(u))
     code, out, _ = run("start")
-    assert code == 0 and "running (pid " in out and str(url) not in out and "\x1b" not in out
+    assert code == 0 and "running (pid " in out and "\x1b" not in out
+    # a non-text url (42) is checked by shape: its digits can legitimately occur in a pid or a path
+    assert "://" not in out and (not isinstance(url, str) or url not in out)
     assert opened == [] and all("url" not in a for w in services.status() for a in w["addons"])
 
 

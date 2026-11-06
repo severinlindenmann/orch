@@ -17,6 +17,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from orch import procs
 from orch.errors import Refused
 
 STATUSES = ("open", "active", "waiting", "done", "dropped")
@@ -129,8 +130,6 @@ def _break_stale(lock: Path) -> bool:
     except OSError:
         return False
     try:
-        from orch import procs
-
         try:
             holder = mine.read_text(encoding="utf-8")
         except OSError:
@@ -156,14 +155,18 @@ def _locked(root: Path, tid: str):
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             with os.fdopen(fd, "w") as f:
-                from orch import procs
-
                 f.write(procs.own_token())
             break
-        except FileExistsError:
+        except (
+            FileExistsError,
+            PermissionError,
+        ):  # Windows: a lock being deleted refuses with PermissionError
+            if time.monotonic() > end:
+                raise Refused(f"Ticket {tid} is busy (retried for 5 s). Try again.") from None
             try:
                 stale = time.time() - lock.stat().st_mtime > 30
             except OSError:
+                time.sleep(0.02)
                 continue
             if stale and _break_stale(lock):
                 continue
@@ -174,7 +177,7 @@ def _locked(root: Path, tid: str):
         yield
     finally:
         with contextlib.suppress(OSError):
-            lock.unlink()
+            procs.unlink(lock)
 
 
 def revision(ticket: dict) -> int:
@@ -229,7 +232,7 @@ def _write(root: Path, ticket: dict) -> None:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(ticket, f, indent=2, ensure_ascii=False)
             f.write("\n")
-        os.replace(tmp, p)
+        procs.replace(tmp, p)
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
@@ -293,6 +296,61 @@ def list_all(root: Path) -> list[dict]:
                 continue
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
+
+
+_FIELD_WORDS = {
+    "title": "title",
+    "owner": "owner",
+    "due": "due date",
+    "note": "note",
+    "summary": "summary",
+    "status": "status",
+    "waiting_on": "wait",
+}
+_STATUS_WORDS = {
+    "open": "Open",
+    "active": "Doing",
+    "waiting": "Waiting",
+    "done": "Done",
+    "dropped": "Dropped",
+}
+
+
+def _fields_text(raw: str) -> str | None:
+    keys = [k.strip() for k in raw.split(",")]
+    if any(k not in _FIELD_WORDS for k in keys):
+        return None  # free text someone logged by hand: shown as written
+    words = [_FIELD_WORDS[k] for k in keys]
+    return "the " + (", ".join(words[:-1]) + " and " + words[-1] if len(words) > 1 else words[0])
+
+
+def history_line(text: str) -> str:
+    """Plain words for the history lines orch itself writes (what a person reads in the CLI). The stored text
+    stays as it is; anything else, such as a line someone logged by hand, is shown as written."""
+    t = text.strip()
+    if re.fullmatch(r"Asked q\d+, waiting", t):
+        return "Asked a question"
+    if m := re.fullmatch(r"Answered q\d+: (.*)", t, re.DOTALL):
+        return f"Answered a question: {m.group(1)}"
+    if m := re.fullmatch(r"Status (\w+) -> (\w+)", t):
+        return f"Moved to {_STATUS_WORDS.get(m.group(2), m.group(2))}"
+    if m := re.fullmatch(r"Edited ([a-z_, ]+)", t):
+        if (f := _fields_text(m.group(1))) is not None:
+            return "Changed " + f
+    if m := re.fullmatch(r"Patched ([a-z_, ]+?)(?: \(status \w+ -> (\w+)\))?", t):
+        if (f := _fields_text(m.group(1))) is not None:
+            return (
+                "Changed " + f + (f" (now {_STATUS_WORDS.get(m.group(2), m.group(2))})" if m.group(2) else "")
+            )
+    if m := re.fullmatch(r"Added check (c\d+)", t):
+        return f"Added task {m.group(1)}"
+    if m := re.fullmatch(r"Check (c\d+) done", t):
+        return f"Finished task {m.group(1)}"
+    if m := re.fullmatch(r"Set ext\.([a-z][a-z0-9-]*)", t):
+        return f"Updated the data of the {m.group(1)} add-on"
+    if m := re.fullmatch(r"Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?", t):
+        return f"Removed data of the {m.group(1)} add-on"
+    return t
 
 
 def add_history(ticket: dict, by: str, text: str, via: str = "cli") -> None:

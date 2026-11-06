@@ -270,6 +270,52 @@ fn files_vector_decrypts_with_rust_aes_gcm() {
 }
 
 #[tokio::test]
+async fn files_note_vector_decrypts_and_the_server_stores_it_opaque() {
+    use aes_gcm::aead::{Aead, KeyInit, Payload};
+    use aes_gcm::{Aes256Gcm, Nonce};
+    use base64::Engine;
+    let v: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../contracts/vectors/publish-blob-v1.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let g = &v["good_with_note"];
+    let key = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(g["key_b64url"].as_str().unwrap())
+        .unwrap();
+    let blob: Vec<u8> = (0..g["blob_hex"].as_str().unwrap().len() / 2)
+        .map(|i| {
+            u8::from_str_radix(&g["blob_hex"].as_str().unwrap()[2 * i..2 * i + 2], 16).unwrap()
+        })
+        .collect();
+    let plain = Aes256Gcm::new_from_slice(&key)
+        .unwrap()
+        .decrypt(
+            Nonce::from_slice(&blob[4..16]),
+            Payload {
+                msg: &blob[16..],
+                aad: b"OPF1",
+            },
+        )
+        .unwrap();
+    let n = u32::from_be_bytes(plain[0..4].try_into().unwrap()) as usize;
+    assert_eq!(
+        &plain[4..4 + n],
+        g["header_json"].as_str().unwrap().as_bytes()
+    );
+    assert!(g["header_json"].as_str().unwrap().contains("\"note\""));
+    // the server accepts the blob like any other and never sees the note
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let r = t.api(&ws, "POST", "/v1/files", blob.clone()).await;
+    assert_eq!(r.status, 201);
+    assert!(!String::from_utf8_lossy(&blob).contains("Anna"));
+}
+
+#[tokio::test]
 async fn files_page_csp_allows_previews_but_no_inline_or_eval() {
     let t = setup();
     let ws = t.workspace("A", basic_rights()).await;

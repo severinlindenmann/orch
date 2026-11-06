@@ -85,6 +85,13 @@ def add_parsers(sub, common) -> None:
     life.add_argument("--permanent", action="store_true")
     x = pub.add_parser("file", parents=[common, life], help="encrypt and share a file or a page folder")
     x.add_argument("path")
+    x.add_argument("--note", help="a short message for the person who opens the link (up to 280 characters)")
+    x.add_argument(
+        "--replace", metavar="ID", help="swap the content of this file (f_...), the link stays the same"
+    )
+    x = pub.add_parser("extend", parents=[common], help="keep a shared file longer (same link)")
+    x.add_argument("id")
+    x.add_argument("--days", type=int, required=True, help="from today, 1-90 (never shorter than now)")
     x = pub.add_parser("app", parents=[common, life], help="deploy a folder that has app.toml")
     x.add_argument("folder")
     g = x.add_mutually_exclusive_group()
@@ -96,6 +103,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("folder")
     x.add_argument("--store", choices=templates.STORES, default="none")
     pub.add_parser("list", parents=[common], help="list shared files and apps")
+    pub.add_parser("view", parents=[common], help="the Shared tab of the dashboard (read-only, no keys)")
     for n in ("restart", "stop"):
         x = pub.add_parser(n, parents=[common], help=f"{n} a deployed app")
         x.add_argument("name")
@@ -183,14 +191,24 @@ def run_publish(args, root: Path, out) -> None:
         )
     elif sub == "file":
         with net.working(f"Encrypting and uploading {Path(args.path).name}"):
-            r = publish.share_file(root, Path(args.path), args.days, args.permanent)
+            r = publish.share_file(root, Path(args.path), args.days, args.permanent, args.note, args.replace)
         out(
             args,
             r,
-            f"Shared {r['name']} ({_size(r['size'])}), {_exp(r['expires_at'])}. Open this link:\n{r['link']}"
+            f"{'Replaced' if args.replace else 'Shared'} {r['name']} ({_size(r['size'])}), "
+            f"{_exp(r['expires_at'])}. Open this link:\n{r['link']}"
             + (f"\nFiles: {', '.join(r['files'])}" if r.get("files") else "")
             + (f"\nLeft out (look like secrets): {', '.join(r['skipped'])}" if r.get("skipped") else ""),
         )
+    elif sub == "extend":
+        r = publish.extend(root, args.id, args.days)
+        out(args, r, f"{r.get('name') or args.id} now {_exp(r['expires_at'])}. Same link.")
+    elif sub == "view":
+        v = publish.view(root)
+        rows = [
+            f"{i['title']}  {i['subtitle']}" for b in v["blocks"] if b["type"] == "list" for i in b["items"]
+        ]
+        out(args, v, "\n".join(rows) or "Nothing shared yet.")
     elif sub == "app":
         pub = True if args.public else False if args.private else None
         with net.working(f"Deploying {Path(args.folder).name}"):

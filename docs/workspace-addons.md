@@ -1,5 +1,7 @@
 # orch-workspace-addons (dashboard, scheduler, publish, relay, your own)
 
+> Older spec. For using the add-ons, start with [addons.md](addons.md). The scheduler is now called automation.
+
 Add-ons are split from the core but feel like one product once turned on. The core knows no add-on by name; everything
 goes through the add-on contract: `contracts/addon-manifest.md` (manifest, activation, CLI rules, views, skills, ticket data).
 

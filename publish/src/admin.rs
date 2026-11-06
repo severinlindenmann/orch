@@ -17,6 +17,7 @@ pub fn router(st: State) -> Router {
         .route("/admin/", get(portal))
         .route("/admin/style.css", get(css))
         .route("/admin/portal.js", get(js))
+        .route("/admin/kit.js", get(kit_js))
         .route("/_/favicon.svg", get(web::favicon_svg))
         .route("/_/apple-touch-icon.png", get(web::touch_icon))
         .route("/admin/api/workspaces", get(ws_list).post(ws_create))
@@ -67,7 +68,13 @@ async fn portal(St(st): St<State>) -> Response {
 async fn css() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        web::style(),
+        include_str!("../web/admin.css"),
+    )
+}
+async fn kit_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../web/admin-kit.js"),
     )
 }
 async fn js() -> impl IntoResponse {

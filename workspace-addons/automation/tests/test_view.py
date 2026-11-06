@@ -51,8 +51,8 @@ def test_next_runs_calendar_and_list(ws):
     (lst,) = blocks(v, "list", "Next runs")
     assert [i["link"] for i in lst["items"]] == ["t_wake001", "t_rec00001"]
     assert lst["items"][1]["subtitle"] == "Mondays at 07:00 UTC · next Mon 07:00" and "<" not in lst["items"][1]["title"]
-    (rep,) = blocks(v, "list", "Repeats")
-    assert [(i["link"], i["subtitle"]) for i in rep["items"]] == [("t_rec00001", "Mondays at 07:00 UTC · next in 4 d")]
+    (rep,) = blocks(v, "list", "Schedules")
+    assert [(i["title"], i["subtitle"]) for i in rep["items"]] == [("Weekly breport/b", "Mondays at 07:00 UTC · next in 4 d")]
     days = blocks(v, "calendar")[0]["days"]
     assert sum(len(d["items"]) for d in days) == 2
 
@@ -158,8 +158,8 @@ def test_repeats_are_one_row_each_sorted_and_monthly_stays(ws):
     add_ticket(ws, "t_day00001", title="Daily", ext={"automation": {"recurring": True, "cron": "30 7 * * *", "tz": "Europe/Zurich"}})
     v = build(ws, T(8))
     check(v)
-    (rep,) = blocks(v, "list", "Repeats")
-    assert [i["link"] for i in rep["items"]] == ["t_day00001", "t_mon00001"]
+    (rep,) = blocks(v, "list", "Schedules")
+    assert [i["tickets"][0]["id"] for i in rep["items"]] == ["t_day00001", "t_mon00001"]
     assert rep["items"][1]["subtitle"] == "Every month on day 1 at 09:00 · next in 27 d"
 
 
@@ -179,5 +179,40 @@ def test_listen_section_shows_state_and_arrivals(ws):
         mp.undo()
     check(v)
     assert {b["label"]: b["value"] for b in blocks(v, "stat")}["Listening"] == "yes"
-    (arr,) = blocks(v, "list", "What arrived")
-    assert [i["chips"][0]["label"] for i in arr["items"]] == ["Waiting for you", "Started a run"]
+    (arr,) = blocks(v, "list", "Listen")
+    (relay,) = arr["items"]
+    assert relay["title"] == "Phone and other workspaces"
+    assert [r.split(" · ")[-1] for r in relay["detail"][0]["lines"]] == ["Waiting for you", "Started a run"]
+
+
+def test_schedule_row_is_an_accordion_with_actions_and_linked_tickets(ws):
+    add_ticket(ws, "t_rec00001", title="Month-end check", status="active",
+               ext={"automation": {"recurring": True, "cron": "0 8 * * 1-5", "tz": "Europe/Zurich", "agent": "claude"}})
+    add_ticket(ws, "t_kid00001", title="Run of Monday", status="done", parent="t_rec00001")
+    v = build(ws, T(8))
+    check(v)
+    (sch,) = blocks(v, "list", "Schedules")
+    (row,) = sch["items"]
+    assert row["toggle"]["on"] is True and row["toggle"]["action"] == {"op": "addon.act", "args": {"verb": "toggle", "target": "t_rec00001"}}
+    assert {d["label"] for d in row["detail"]} >= {"Repeats", "Time zone", "Next run", "Last run", "Agent"}
+    assert [(t["id"], t["status"]["label"]) for t in row["tickets"]] == [("t_rec00001", "Doing"), ("t_kid00001", "Done")]
+    assert [a["label"] for a in row["actions"]] == ["Run now", "Delete"]
+    assert row["actions"][1]["confirm"] == "Stop and remove this schedule? Its tickets stay."
+
+
+def test_paused_schedule_stays_listed_but_is_not_planned(ws):
+    add_ticket(ws, "t_rec00001", title="Close", ext={"automation": {"recurring": True, "cron": "0 8 * * *", "paused": True}})
+    v = build(ws, T(7))
+    check(v)
+    assert blocks(v, "stat")[0]["value"] == "none planned"
+    (row,) = blocks(v, "list", "Schedules")[0]["items"]
+    assert row["toggle"]["on"] is False and row["subtitle"].endswith("off")
+    assert next(d for d in row["detail"] if d["label"] == "Next run")["value"].startswith("Off")
+
+
+def test_webhook_source_has_a_copy_field(ws):
+    add_ticket(ws, "t_hook0001", title="Pay suppliers", status="waiting", waiting_on={"kind": "external", "ref": "wh_abc123"})
+    v = build(ws, T(7))
+    check(v)
+    items = blocks(v, "list", "Listen")[0]["items"]
+    assert items[1]["detail"][0] == {"label": "Webhook address", "value": "wh_abc123", "copy": True}

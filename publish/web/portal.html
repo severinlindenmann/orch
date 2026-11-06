@@ -9,30 +9,29 @@
   <link rel="icon" href="/_/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/_/apple-touch-icon.png">
   <link rel="stylesheet" href="/admin/style.css">
+  <script src="/admin/kit.js" defer></script>
   <script src="/admin/portal.js" defer></script>
 </head>
-<body>
-  <div class="shell admin-shell">
-    <aside class="admin-sidebar">
-      <a class="brand" href="#workspaces" aria-label="orch publish home">
-        <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="20" fill="none" stroke="#e8eaed" stroke-width="6"/><circle cx="32" cy="32" r="6" fill="#2fc6a3"/><circle cx="47" cy="17" r="7" fill="#2fc6a3" stroke="#0a0c0f" stroke-width="3"/></svg>
-        orch <em>publish</em>
-      </a>
-      <div class="side-label">MANAGE</div>
-      <nav class="side-nav" aria-label="Admin">
-        <a href="#workspaces"><span aria-hidden="true">▦</span> Workspaces <span class="count" id="count-workspaces"></span></a>
-        <a href="#files"><span aria-hidden="true">▤</span> Files <span class="count" id="count-files"></span></a>
-        <a href="#apps"><span aria-hidden="true">◫</span> Apps <span class="count" id="count-apps"></span></a>
+<body class="has-shell" data-portal="publish">
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="sidebar-top"><a class="brand" href="#workspaces" aria-label="orch publish home">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="20" fill="none" stroke="#e8eaed" stroke-width="6"/><circle cx="32" cy="32" r="6" class="brand-dot"/><circle cx="47" cy="17" r="7" class="brand-dot" stroke="#0a0c0f" stroke-width="3"/></svg>
+        orch <span class="product">publish</span>
+      </a><button type="button" class="btn ghost mobile-menu" id="menu-toggle" aria-expanded="false" aria-controls="main-nav">Menu</button></div>
+      <nav id="main-nav" class="side-nav" aria-label="Admin">
+        <a class="nav-item" href="#workspaces"><span data-icon="workspace"></span> Workspaces <span class="nav-total" id="count-workspaces"></span></a>
+        <a class="nav-item" href="#files"><span data-icon="file"></span> Files <span class="nav-total" id="count-files"></span></a>
+        <a class="nav-item" href="#apps"><span data-icon="app"></span> Apps <span class="nav-total" id="count-apps"></span></a>
       </nav>
-      <div class="side-footer"><span class="dot" aria-hidden="true"></span>Private network only</div>
+      <div class="side-foot"><p class="meta"><span data-icon="lock"></span> Private network only</p><p class="meta">Admin</p></div>
     </aside>
     <div>
-      <header class="topbar admin-topbar"><span><strong id="crumb">Workspaces</strong></span><span id="updated" class="updated" role="status"></span><span class="owner"><span class="owner-avatar" aria-hidden="true">A</span> Admin</span></header>
-      <div class="content alert-wrap"><p id="alert" class="alert" role="alert" hidden></p></div>
-      <main class="content" id="view" tabindex="-1"><noscript>Enable JavaScript to manage your workspaces.</noscript></main>
-      <footer class="content page-foot"><a href="#api">For developers: API reference</a></footer>
+      <header class="topbar"><span id="crumb">Workspaces</span><span id="updated" class="muted updated" role="status"></span><a id="add-workspace" class="btn primary sm" href="#add" hidden>Add workspace</a></header>
+      <div class="alert-wrap"><p id="alert" class="alert" role="alert" hidden></p></div>
+      <main class="page" id="view" tabindex="-1"><noscript>Enable JavaScript to manage your workspaces.</noscript></main>
+      <footer class="portal-footer"><a href="#api">For developers: API reference</a></footer>
     </div>
   </div>
-  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

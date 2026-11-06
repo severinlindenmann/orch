@@ -35,3 +35,15 @@ jobs:
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run pytest -q
+  tool-name-scan:
+    # The cross-tree scan lives in the workspace tests but also reads workspace-addons/,
+    # so it must run on add-on-only changes, where the workspace job is skipped.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workspace
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run pytest -q tests/test_adapters.py::test_no_tool_names_outside_the_adapter

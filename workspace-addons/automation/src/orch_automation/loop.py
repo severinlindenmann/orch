@@ -192,7 +192,7 @@ class Scheduler:
                 continue
             sched = (t.get("ext") or {}).get("automation") or {}
             cron = sched.get("cron")
-            if sched.get("recurring") is True and isinstance(cron, str):
+            if sched.get("recurring") is True and sched.get("paused") is not True and isinstance(cron, str):
                 tz = self.tz_of(sched)
                 since = (max(filter(None, [parse(sched.get("last_run")), parse(state.get(tid, {}).get("last_run"))]),
                              default=None) or parse(t.get("created_at")) or now)

@@ -144,8 +144,15 @@ def test_two_concurrent_takeovers_of_a_stale_claim_have_one_winner(proj, new_tic
         assert runs.read(proj, tid)["by"] in ("x", "y")
 
 
-def test_status_without_a_runner_says_nobody_will_start_it(proj, new_ticket, run):
+def test_status_without_a_run_says_none_is_active(proj, new_ticket, run):
     tid = new_ticket()
+    code, out, _ = run("run", "status", tid)
+    assert code == 0 and out.strip() == f"No run is active for this ticket. Start one: orch run start {tid}"
+
+
+def test_status_with_queued_input_and_no_runner_says_queued(proj, new_ticket, run):
+    tid = new_ticket()
+    runs.pending_add(proj, tid, "phone", "message", "hello")
     code, out, _ = run("run", "status", tid)
     assert code == 0 and out.strip() == (
         f"Queued. Nothing will start it: no background add-on is running here. Start it: orch run start {tid}"
@@ -309,3 +316,84 @@ def test_orch_writes_of_a_hand_started_agent_renew_its_claim(proj, new_ticket, r
     assert runs.state(runs.read(proj, tid)) == "maybe-stale"
     run("log", tid, "mine", "--by", "agent:hand")
     assert runs.state(runs.read(proj, tid)) == "alive"
+
+
+def test_a_reader_holding_the_record_open_does_not_break_a_write_or_delete(proj, new_ticket, monkeypatch):
+    """Windows refuses os.replace/unlink on a file another process has open for a moment: wait it out."""
+    from orch import procs
+
+    monkeypatch.setattr(procs, "_FILE_BUSY", True)
+    tid = new_ticket()
+    rec = runs.claim(proj, tid, "agent:a", "fake", "oneshot")
+    real_replace, real_unlink = os.replace, runs.Path.unlink
+    busy = {"replace": 2, "unlink": 2}
+
+    def replace(a, b):
+        if busy["replace"]:
+            busy["replace"] -= 1
+            raise PermissionError(13, "in use")
+        return real_replace(a, b)
+
+    def unlink(self, *a, **k):
+        if busy["unlink"] and self.name.endswith(".json"):
+            busy["unlink"] -= 1
+            raise PermissionError(13, "in use")
+        return real_unlink(self, *a, **k)
+
+    monkeypatch.setattr(procs.os, "replace", replace)
+    monkeypatch.setattr(procs.Path, "unlink", unlink)
+    assert runs.set_process(proj, tid, rec["run"], os.getpid())
+    assert runs.release(proj, tid, rec["run"])["released"]
+    assert runs.read(proj, tid) is None and busy == {"replace": 0, "unlink": 0}
+
+
+def test_permission_errors_are_not_retried_off_windows(monkeypatch):
+    from orch import procs
+
+    monkeypatch.setattr(procs, "_FILE_BUSY", False)
+    calls = []
+
+    def op():
+        calls.append(1)
+        raise PermissionError(13, "no")
+
+    with pytest.raises(PermissionError):
+        procs._wait_free(op)
+    assert calls == [1]
+
+
+def test_a_lock_that_refuses_with_permission_error_is_waited_for_then_taken(proj, new_ticket, monkeypatch):
+    """Windows 'delete pending': creating a lock being removed raises PermissionError."""
+    tid = new_ticket()
+    real, left = os.open, [2]
+
+    def fake_open(path, flags, *a, **k):
+        if str(path).endswith(".lock") and left[0]:
+            left[0] -= 1
+            raise PermissionError(13, "delete pending")
+        return real(path, flags, *a, **k)
+
+    monkeypatch.setattr(runs.os, "open", fake_open)
+    with runs.locked(proj, tid):
+        pass
+    assert left[0] == 0
+
+
+def test_the_wrapper_errors_go_to_the_run_log_not_nowhere(proj, new_ticket, run, monkeypatch):
+    tid = new_ticket()
+    config.add_agent(proj, "x", f"{sys.executable} -c pass {{prompt}}")
+    config.set_key(proj, "workspace", "agent", "x")
+    seen = {}
+
+    class P:
+        pid = os.getpid()
+
+    def popen(cmd, **kw):
+        if "_wrap" in cmd:
+            seen.update(kw)
+        return P()
+
+    monkeypatch.setattr(runs.subprocess, "Popen", popen)
+    assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
+    assert seen["stderr"] not in (subprocess.DEVNULL, subprocess.STDOUT, None)
+    assert seen["stderr"].name.endswith(".log")

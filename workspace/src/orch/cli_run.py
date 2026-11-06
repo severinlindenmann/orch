@@ -159,12 +159,14 @@ def _status(args, root: Path) -> None:
     waiting = len(runs.undelivered(root, tid))
     if not rec:
         data = {"ticket": tid, "running": False, "pending": waiting}
-        _out(
-            args,
-            data,
-            "Queued. Nothing will start it: no background add-on is running here. "
-            f"Start it: orch run start {tid}",
-        )
+        if waiting:  # input is really queued for a run
+            text = (
+                "Queued. Nothing will start it: no background add-on is running here. "
+                f"Start it: orch run start {tid}"
+            )
+        else:
+            text = f"No run is active for this ticket. Start one: orch run start {tid}"
+        _out(args, data, text)
         return
     st = runs.state(rec)
     data = {"ticket": tid, "running": st == "alive", "state": st, "pending": waiting, "claim": rec}
