@@ -214,10 +214,10 @@ struct AttachmentTile: View {
     private var linkCard: some View {
         let a = attachment, host = SafeLink.host(a.url) ?? ""
         let inner = HStack(spacing: 10) {
-            LinkTile(icon: a.icon, mono: a.mono)
+            LinkTile(icon: LinkFace.icon(a.icon, url: a.url), mono: a.mono)
             VStack(alignment: .leading, spacing: 2) {
                 Text(a.title ?? host).themeFont(14, .semibold).lineLimit(1)
-                Text(a.linkType.map { $0 == "Link" ? "Link · \(host)" : $0 } ?? host).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1)
+                Text(LinkFace.subtitle(type: a.linkType, url: a.url)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1)
             }
             Spacer(minLength: 0)
             if let s = a.status, !s.isEmpty { LinkStatus(text: s) }
@@ -309,6 +309,41 @@ struct ChatItemView: View {
     }
 }
 
+
+/// What a link card says it is. The real host is always shown next to the type, and a site's icon only on that
+/// site's own host: the workspace names the type, so "GitHub PR" on evil.example must not look like GitHub.
+enum LinkFace {
+    /// icon key -> the hosts of that site (a leading "." means any subdomain), as in the core's known_sites.json
+    static let siteHosts: [String: [String]] = [
+        "github": ["github.com"], "gitlab": ["gitlab.com"], "confluence": [".atlassian.net"], "jira": [".atlassian.net"],
+        "linear": ["linear.app"], "notion": ["notion.so"], "figma": ["figma.com"], "miro": ["miro.com"],
+        "gdocs": ["docs.google.com"], "gsheets": ["docs.google.com"], "gslides": ["docs.google.com"], "gdrive": ["drive.google.com"],
+        "youtube": ["youtube.com", "youtu.be"], "loom": ["loom.com"], "slack": [".slack.com"], "teams": ["teams.microsoft.com"],
+        "sharepoint": [".sharepoint.com"], "trello": ["trello.com"], "dropbox": ["dropbox.com"],
+    ]
+
+    static func host(_ url: String?) -> String {
+        let h = (SafeLink.host(url) ?? "").lowercased()
+        return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
+    }
+
+    /// "<type> · <host>", or the host alone when the workspace sent no type.
+    static func subtitle(type: String?, url: String?) -> String {
+        let h = host(url)
+        guard let t = type, !t.isEmpty else { return h }
+        return h.isEmpty ? t : "\(t) · \(h)"
+    }
+
+    /// The icon key to draw: a site's key only when the address is on that site, else "link". Other keys (an
+    /// add-on's own icon) are not a site and pass.
+    static func icon(_ icon: String?, url: String?) -> String {
+        guard let key = icon, !key.isEmpty else { return "link" }
+        guard let hosts = siteHosts[key] else { return LinkTile.colors[key] == nil ? key : "link" }
+        let h = host(url)
+        let ok = hosts.contains { $0.hasPrefix(".") ? h.hasSuffix($0) : (h == $0 || h.hasSuffix("." + $0)) }
+        return ok ? key : "link"
+    }
+}
 
 /// The tile of a link: a known site's colour and letters, else the link symbol (same keys as the dashboard).
 struct LinkTile: View {

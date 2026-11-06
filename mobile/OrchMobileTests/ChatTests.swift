@@ -229,4 +229,15 @@ final class ChatTests: XCTestCase {
         XCTAssertEqual(TicketSnapshot.Attachment(kind: "image", name: "bright.png").label, "bright.png")
         XCTAssertEqual(TicketSnapshot.Attachment(kind: "image").label, nil)
     }
+
+    func testLinkCardAlwaysShowsTheRealHostAndNoBorrowedSiteIcon() {
+        let evil = "https://evil.example/acme/pull/1"
+        XCTAssertEqual(LinkFace.subtitle(type: "GitHub PR", url: evil), "GitHub PR · evil.example")
+        XCTAssertEqual(LinkFace.icon("github", url: evil), "link")
+        XCTAssertEqual(LinkFace.icon("github", url: "https://github.com.evil.example/x"), "link")
+        XCTAssertEqual(LinkFace.icon("github", url: "https://www.github.com/a/b/pull/1"), "github")
+        XCTAssertEqual(LinkFace.icon("jira", url: "https://acme.atlassian.net/browse/X-1"), "jira")
+        XCTAssertEqual(LinkFace.subtitle(type: "GitHub · Pull request", url: "https://github.com/a/b/pull/1"), "GitHub · Pull request · github.com")
+        XCTAssertEqual(LinkFace.subtitle(type: nil, url: evil), "evil.example")
+    }
 }
