@@ -100,7 +100,7 @@ _ADMIN_NOTE = re.compile(
     r"(?:Set|Removed) ext\."
 )  # add-on settings notes: admin business, not for a phone chat
 _FROM_PREFIX = re.compile(r"From [^:\n]{1,100}: ")
-_RELAY_BY = re.compile(r"agent:relay from (\S+)")
+_RELAY_BY = re.compile(r"agent:relay from (ph_\S+)")  # a phone only; a workspace keeps its own label
 
 
 def _phone_line(root: Path, h: dict) -> tuple[str, str, str] | None:
