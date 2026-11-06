@@ -87,4 +87,20 @@
 .task-proofs{margin-top:6px;gap:6px}
 .proof-chip{white-space:normal;overflow-wrap:anywhere;gap:4px}
 .child{padding-left:28px}
+.settings{max-width:1024px;gap:20px}
+.settings .page-heading{margin-bottom:0}
+.settings .set-sec{display:flex;flex-direction:column;gap:10px;min-width:0}
+.settings .set-label{width:96px;flex:none;color:var(--text-muted);font-size:12px}
+.settings .set-ctl{min-width:0;overflow-wrap:anywhere}
+.settings .set-ctl .input{width:100%;max-width:360px;min-height:32px;padding:5px 10px;font-size:13px}
+.settings .agent-opt{cursor:pointer;align-items:flex-start}
+.settings .agent-opt input{margin-top:3px;flex:none}
+.settings .agent-opt.sel{background:rgb(47 198 163 / .05)}
+.settings .grow{min-width:0;overflow-wrap:anywhere}
+.settings .other-cmd{margin-top:12px;display:grid;gap:10px}
+.settings .other-cmd .stack{gap:4px}
+.settings .card-row{flex-wrap:nowrap}
+.settings form.card-row{border-top:1px solid var(--border)}
+dialog.dialog pre.preserve-lines{overflow-wrap:anywhere;margin-top:16px}
+@media(max-width:720px){.settings{gap:16px}.settings .card-row .grow{flex-basis:auto}.settings .card-row.name-row{flex-wrap:wrap}.settings .card-row.name-row .set-ctl{flex-basis:100%}.settings .set-label{width:auto}.settings .agent-opt .def{margin-left:auto}.settings .set-ctl .input{min-height:44px}}
 @media(max-width:720px){.agent-bar{flex-wrap:wrap;padding:8px 12px}.agent-bar .ab-text{white-space:normal;flex:1 1 140px}.ab-actions{margin-left:auto}.menu-item{min-height:44px}.ticket-columns .tabs{flex-wrap:wrap}.ticket-row.child>.grow{flex-basis:calc(100% - 60px)}}

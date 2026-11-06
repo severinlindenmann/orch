@@ -25,7 +25,7 @@ def calls(act_orch):
 
 
 def acts(act_orch):
-    return [c for c in calls(act_orch) if c[0] not in ("addon", "needs", "status") and c[:2] not in (["run", "status"], ["ticket", "list"])]
+    return [c for c in calls(act_orch) if c[0] not in ("addon", "needs", "status", "agents") and c[:2] not in (["run", "status"], ["ticket", "list"])]
 
 
 def test_foreign_or_missing_origin_and_wrong_host_are_refused(act_server, act_orch):
@@ -228,3 +228,169 @@ def test_addon_act_runs_one_generic_argv_for_an_active_addon(act_orch, ws):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def _fake_with_addons(act_orch):
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:1] == ["agents"]:\n    print(json.dumps([{"name": "claude"}]))\n    sys.exit(0)\n'
+        'if a[:2] == ["addon", "list"]:\n    print(json.dumps([{"name": "alpha", "active": True}, {"name": "beta", "active": False},'
+        ' {"name": "dashboard", "active": True}]))\n    sys.exit(0)\nif a[:2] in (["addon", "list"]')
+    act_orch.write_text(src)
+
+
+def test_settings_ops_argv_and_checks(act_orch, ws):
+    import threading
+
+    from orch_dashboard.server import make_server
+    _fake_with_addons(act_orch)
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    me = actions.actor()
+    common = ["--by", me, "--json"]
+    try:
+        cases = [
+            ({"op": "config.agent", "args": {"name": "codex"}}, ["config", "set", "workspace.agent", "codex", *common]),
+            ({"op": "config.agent.add", "args": {"name": "my-agent", "command": "mytool --yes {prompt}"}},
+             ["config", "agent", "add", "my-agent", "--command=mytool --yes {prompt}", *common]),
+            ({"op": "config.agent.add", "args": {"name": "x1", "command": "--evil -x 'a b' \"c\" $(d)", "prompt_via": "stdin"}},
+             ["config", "agent", "add", "x1", "--command=--evil -x 'a b' \"c\" $(d)", "--prompt-via=stdin", *common]),
+            ({"op": "addon.set", "args": {"name": "beta", "on": True}}, ["addon", "add", "beta", "--yes", *common]),
+            ({"op": "addon.set", "args": {"name": "alpha", "on": False}}, ["addon", "remove", "alpha", *common]),
+        ]
+        for body, want in cases:
+            code, text, _ = post(base, body)
+            assert code == 200, (body, text)
+            last = [c for c in calls(act_orch) if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"])
+                    and c[0] not in ("needs", "status", "agents")][-1]
+            assert last == want, body
+        n = len(calls(act_orch))
+        bad = [
+            {"op": "config.agent", "args": {"name": "Bad Name"}}, {"op": "config.agent", "args": {"name": "a"}},
+            {"op": "config.agent", "args": {"name": "codex\n"}}, {"op": "config.agent", "args": {"name": "codex", "x": 1}},
+            {"op": "config.agent.add", "args": {"name": "ok-name", "command": "a\nb"}},
+            {"op": "config.agent.add", "args": {"name": "ok-name", "command": "a\rb"}},
+            {"op": "config.agent.add", "args": {"name": "ok-name", "command": "a\u0000b"}},
+            {"op": "config.agent.add", "args": {"name": "ok-name", "command": "x" * 501}},
+            {"op": "config.agent.add", "args": {"name": "ok-name", "command": "   "}},
+            {"op": "config.agent.add", "args": {"name": "ok-name", "command": ""}},
+            {"op": "config.agent.add", "args": {"name": "ok-name"}},
+            {"op": "config.agent.add", "args": {"name": "../x", "command": "ok"}},
+            {"op": "config.agent.add", "args": {"name": "ok-name", "command": "ok", "prompt_via": "file"}},
+            {"op": "config.agent.add", "args": {"name": "ok-name", "command": "ok", "interactive": "x"}},
+            {"op": "addon.set", "args": {"name": "gamma", "on": True}},          # not installed
+            {"op": "addon.set", "args": {"name": "dashboard", "on": False}},      # never from itself
+            {"op": "addon.set", "args": {"name": "ticket", "on": True}},
+            {"op": "addon.set", "args": {"name": "alpha", "on": "yes"}},
+            {"op": "addon.set", "args": {"name": "alpha"}},
+        ]
+        for body in bad:
+            assert post(base, body)[0] == 400, body
+        assert not [c for c in calls(act_orch)[n:] if c[0] in ("config", "addon") and c[1] in ("set", "agent", "add", "remove")]
+        assert actions.MAX_COMMAND == 500
+        # a command that starts with a dash is still one argv value that begins with --command=
+        argv = actions.build_argv("config.agent.add", {"name": "x1", "command": "-rf /"})
+        assert "--command=-rf /" in argv and argv.count("--command=-rf /") == 1
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_settings_state_has_agents_and_every_addon(ws, act_orch):
+    from orch_dashboard.data import load_state
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:1] == ["agents"]:\n    print(json.dumps([{"name": "claude", "label": "Claude", "adapter": "claude", "found": True,'
+        ' "version": "2.1", "can": "x", "status": "found 2.1", "chosen": True, "secret": "no"}]))\n    sys.exit(0)\n'
+        'if a[:2] == ["addon", "list"]:\n    print(json.dumps([{"name": "alpha", "description": "A", "active": True},'
+        ' {"name": "beta", "description": "B", "active": False}]))\n    sys.exit(0)\nif a[:2] in (["addon", "list"]')
+    act_orch.write_text(src)
+    s = load_state(ws, orch_bin=str(act_orch), with_settings=True)["settings"]
+    assert s["agents"] == [{"name": "claude", "label": "Claude", "adapter": "claude", "found": True, "version": "2.1",
+                            "can": "x", "status": "found 2.1", "chosen": True}]
+    assert [(a["name"], a["active"]) for a in s["addons"]] == [("alpha", True), ("beta", False)]
+    assert s["folder"] == str(ws)
+    assert load_state(ws, orch_bin=str(act_orch))["settings"] is None  # only the live server asks for it
+    assert load_state(ws, orch_bin=str(act_orch), with_addons=False, with_settings=False)["settings"] is None
+    assert "consent" in s["addons"][0] and s["addons"][0]["consent"].startswith("alpha")
+
+
+def test_snapshots_carry_no_settings_and_no_folder_path(ws, act_orch):
+    from orch_dashboard.snapshot import render_snapshot
+    for with_addons in (False, True):
+        html = render_snapshot(ws, with_addons=with_addons, orch_bin=str(act_orch))
+        assert '"settings"' not in html.replace('"settings": null', "").replace('"settings":null', "")
+        assert str(ws) not in html and str(ws.parent) not in html
+
+
+def test_settings_state_only_from_the_live_server(ws, act_orch):
+    import threading
+
+    from orch_dashboard.server import make_server
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        import urllib.request
+        st = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{srv.server_address[1]}/api/state").read())
+        assert isinstance(st["settings"], dict) and st["settings"]["folder"] == str(ws)
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_agent_add_never_overwrites_and_is_logged(act_orch, ws):
+    import threading
+
+    from orch_dashboard.server import make_server
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:1] == ["agents"]:\n    print(json.dumps([{"name": "claude"}, {"name": "mine"}]))\n    sys.exit(0)\nif a[:2] in (["addon", "list"]')
+    act_orch.write_text(src)
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        code, text, _ = post(base, {"op": "config.agent.add", "args": {"name": "mine", "command": "tool {prompt}"}})
+        assert code == 400 and "already set up" in text
+        assert not [c for c in calls(act_orch) if c[:3] == ["config", "agent", "add"]]
+        code, text, _ = post(base, {"op": "config.agent.add", "args": {"name": "fresh", "command": "tool {prompt}"}})
+        assert code == 200, text
+        log = (ws / ".orch" / "run" / "dashboard" / "actions.log").read_text().splitlines()
+        rec = json.loads(log[-1])
+        assert rec["op"] == "config.agent.add" and rec["name"] == "fresh" and rec["command"] == "tool {prompt}"
+        assert rec["via"] == "dashboard" and rec["by"].startswith("human:")
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_agent_exists_check_fails_closed(act_orch, ws):
+    """When `orch agents` cannot be read, the name counts as taken: nothing is added."""
+    from orch_dashboard.actions import _agent_exists
+    assert _agent_exists(ws, str(act_orch), "anything") is True  # the fake exits 2 for `agents`
+    assert _agent_exists(ws, "/nonexistent/orch", "anything") is True
+
+
+def test_audit_log_is_private_and_never_follows_a_symlink(act_orch, ws):
+    import os
+    import stat
+
+    from orch_dashboard.actions import _audit
+    _audit(ws, "config.agent", {"name": "codex"})
+    log = ws / ".orch" / "run" / "dashboard" / "actions.log"
+    assert stat.S_IMODE(os.stat(log).st_mode) == 0o600 and stat.S_IMODE(os.stat(log.parent).st_mode) == 0o700
+    target = ws.parent / "victim.txt"
+    target.write_text("keep")
+    log.unlink()
+    log.symlink_to(target)
+    _audit(ws, "config.agent", {"name": "codex"})   # refused quietly; the target stays untouched
+    assert target.read_text() == "keep"
+    log.unlink()
+    d = log.parent
+    for p in d.iterdir():
+        p.unlink()
+    d.rmdir()
+    d.symlink_to(ws.parent)                          # the folder itself is a symlink
+    _audit(ws, "config.agent", {"name": "codex"})
+    assert not (ws.parent / "actions.log").exists()

@@ -116,7 +116,7 @@ d = pathlib.Path(__file__).parent
 a = sys.argv[1:]
 with open(d / "calls.jsonl", "a") as f:
     f.write(json.dumps(a) + "\\n")
-if a[:2] in (["addon", "list"], ["run", "status"]) or a[:1] in (["needs"], ["status"], ["ticket"]) and a[1:2] == ["list"]:
+if a[:2] in (["addon", "list"], ["run", "status"]) or a[:1] in (["needs"], ["status"], ["agents"], ["ticket"]) and a[1:2] == ["list"]:
     sys.exit(2)
 mode = (d / "mode.txt").read_text().strip()
 if mode == "conflict":
