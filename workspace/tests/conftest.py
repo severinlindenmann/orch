@@ -21,6 +21,8 @@ def proj(tmp_path, monkeypatch):
     fake_home.mkdir(exist_ok=True)
     monkeypatch.setattr(addons, "real_home", lambda: fake_home)
     monkeypatch.setenv("ORCH_HOME", str(fake_home / "orchhome"))
+    # an agent tool's own settings (a live start marks the folder trusted there): never the real ones
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(fake_home))
     return tmp_path
 
 

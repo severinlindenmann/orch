@@ -41,7 +41,8 @@
       "type": "object", "additionalProperties": false, "required": ["state", "since"],
       "properties": {
         "state": { "enum": ["starting", "idle", "working", "attention"], "description": "What the live agent last said: idle comes from its tool's hook or `orch run done`; input is pasted only while idle." },
-        "since": { "$ref": "#/$defs/time" }
+        "since": { "$ref": "#/$defs/time" },
+        "why": { "type": "string", "minLength": 1, "maxLength": 400, "description": "Optional, with attention: plain words on what the tool waits for (a screen it shows before it is up, or not up after a minute)." }
       },
       "description": "Optional, live runs only."
     },

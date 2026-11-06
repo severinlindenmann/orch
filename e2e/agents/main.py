@@ -20,7 +20,7 @@ spec.loader.exec_module(base)
 import lib  # noqa: E402
 
 ORDER = ["AG-W2", "AG-W7", "AG-R12", "AG-W5", "AG-R6", "AG-A45", "AG-F1"]
-V2_REAL = ["V2-R3", "V2-R4", "V2-R5", "V2-R7"]  # opt-in: only when named (or `v2real`), never part of `agents`
+V2_REAL = ["V2-R3", "V2-R4", "V2-R5", "V2-R7", "V2-R8", "V2-R9"]  # opt-in: only when named (or `v2real`), never part of `agents`
 
 
 def main() -> int:

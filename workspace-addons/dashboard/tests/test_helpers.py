@@ -134,3 +134,14 @@ console.log(JSON.stringify([n, sent]));
 """
     out = subprocess.run(["node", "-e", js, str(WEB / "helpers.js")], capture_output=True, text=True, check=True).stdout
     assert json.loads(out) == [1, ["Yes"]]
+
+
+@node
+def test_agent_line_a_live_tool_waiting_for_a_person_is_not_working():
+    now = 1793923200000
+    why = "Claude asks whether to trust this folder. Open the live session and answer: orch run attach t_a"
+    claim = {"agent": "claude", "mode": "live", "live": {"state": "attention", "since": "2026-11-06T00:00:00Z", "why": why}}
+    w = call("agentLine", T, {"running": True, "state": "alive", "claim": claim}, now, None)
+    assert w["state"] == "needs" and w["status"] == why and w["primary"]["op"] == "run.stop"
+    w2 = call("agentLine", T, {"running": True, "state": "alive", "claim": claim}, now, {"label": "focus", "url": "http://127.0.0.1:1"})
+    assert w2["state"] == "needs" and w2["primary"]["op"] == "open" and w2["items"][0]["op"] == "run.stop"

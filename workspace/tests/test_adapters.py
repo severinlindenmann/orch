@@ -41,8 +41,19 @@ def test_argv_rule_checker_finds_bad_templates():
     assert len(adapters.argv_errors(bad)) == 2
 
 
-CLAUDE_FRESH = ["claude", "-p", "--session-id", NEW, "--permission-mode", "acceptEdits", "--", "Do it"]
-CLAUDE_RESUME = ["claude", "-p", "--resume", OLD, "--permission-mode", "acceptEdits", "--", "Do it"]
+ORCH_OK = ["--allowedTools", "Bash(orch:*)"]  # the agent may always run orch itself (tasks, summary)
+CLAUDE_FRESH = [
+    "claude",
+    "-p",
+    "--session-id",
+    NEW,
+    "--permission-mode",
+    "acceptEdits",
+    *ORCH_OK,
+    "--",
+    "Do it",
+]
+CLAUDE_RESUME = ["claude", "-p", "--resume", OLD, "--permission-mode", "acceptEdits", *ORCH_OK, "--", "Do it"]
 
 
 def test_claude_snapshots():
@@ -51,7 +62,7 @@ def test_claude_snapshots():
     assert adapters.render("claude", "resume", "oneshot", v) == CLAUDE_RESUME
     v["orch_hooks_file"] = ".orch/run/hooks-r_1.json"
     assert adapters.render("claude", "fresh", "live", v) == [
-        "claude", "--session-id", NEW, "--permission-mode", "acceptEdits",
+        "claude", "--session-id", NEW, "--permission-mode", "acceptEdits", *ORCH_OK,
         "--settings", ".orch/run/hooks-r_1.json",
     ]  # fmt: skip
     assert adapters.render("claude", "resume", "live", v)[:3] == ["claude", "--resume", OLD]
@@ -121,7 +132,7 @@ def test_user_entry_picks_a_builtin_adapter(proj):
 def test_allow_goes_in_only_where_the_adapter_can_retry(proj):
     v = {"prompt": "p", "new_session": NEW, "allow": ["Bash(git push:*)", "Edit"]}
     argv = adapters.render("claude", "fresh", "oneshot", v)
-    i = argv.index("--allowedTools")
+    i = len(argv) - 1 - argv[::-1].index("--allowedTools")  # the run's own, after the built-in orch one
     assert argv[i + 1] == "Bash(git push:*),Edit" and i < argv.index("--")
     assert "--allowedTools" not in (adapters.render("codex", "fresh", "oneshot", v) or [])
     _agent(proj, "gen", command="gen {prompt}")

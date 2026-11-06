@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 from agentlib import codex_home, run_agent
-from lib import Skip, check, scenario
+from lib import Skip, check, http, scenario
 
 # the core v2 scenarios have the same module name (e2e/scenarios_v2.py): load that file under another name
 _spec = importlib.util.spec_from_file_location("v2core", Path(__file__).resolve().parent.parent / "scenarios_v2.py")
@@ -152,3 +152,62 @@ def r7(e):
     check(not w.load(tb).get("sessions"), "a session was invented for a claim without an id")
     rc, out, err = w.o("run", "start", tb, "--json", ok=False)
     check(rc == 2 and (w.claim(tb) or {}).get("run") == c["run"], f"start must not take over a hand-started claim: rc={rc}")
+
+
+def _dashboard_start(e, sid: str, tmux: bool) -> str:
+    """The owner's flow: init --recommended, the dashboard, a ticket with no tasks, Start in the dashboard. The real
+    agent must make at least one task and a summary within a few minutes. The folder is NOT pre-trusted."""
+    w = real_w(e, sid, "claude", tmux=tmux)
+    if tmux and not shutil.which("tmux", path=w.env["PATH"]):
+        raise Skip("tmux is not installed")
+    home = Path(e.env["HOME"])
+    cfg = home / ".claude.json"
+    if not cfg.exists():  # someone who uses Claude Code already: onboarding done, this folder never trusted
+        cfg.write_text(json.dumps({"hasCompletedOnboarding": True, "theme": "dark"}))
+    w.o("init", "--recommended", "--yes", by=None)
+    w.o("start", "--no-open", by=None)
+    e.cleanup.append(lambda: w.sh(["orch", "stop"]))
+    rows = w.j("status", by=None)[0]["addons"]
+    base = next(r["url"] for r in rows if r["addon"] == "dashboard").rstrip("/")
+
+    def act(op, args):
+        r = http("POST", base + "/api/act", {"Origin": base, "Sec-Fetch-Site": "same-origin"}, {"op": op, "args": args})
+        check(r.status == 200, f"dashboard {op}: {r.status} {r.body[:300]!r}")
+        return r.json()
+
+    tid = next(t["id"] for t in act("ticket.new", {"title": "A tiny giraffe fact page: giraffe.html and giraffe.json"})["tickets"])
+    claim = act("run.start", {"ticket": tid})["runs"][tid]["claim"]
+    check(claim["mode"] == ("live" if tmux else "oneshot"), f"Start picked {claim['mode']}")
+
+    def progress():
+        t = w.load(tid)
+        return bool(t.get("checklist")) and bool(t.get("summary"))
+
+    ok = wait_for(progress, 420, 3)
+    t = w.load(tid)
+    rec = w.claim(tid) or {}
+    where = ""
+    if tmux and rec.get("tmux"):
+        where = _pane(w, rec["tmux"]["socket"], tid)[-600:]
+    elif claim.get("log"):
+        where = (w.root / claim["log"]).read_text(errors="replace")[-600:]
+    check(ok, f"no task + summary after 7 min: checklist {t.get('checklist')}, summary {t.get('summary')!r}, "
+              f"claim {rec.get('live') or rec.get('mode')}; tail: {where!r}")
+    if not tmux and claim.get("log"):
+        log = (w.root / claim["log"]).read_text(errors="replace")
+        check('"type":' in log, "the one-shot log has no stream lines (Focus cannot show steps)")
+    if tmux:
+        w.o("run", "stop", tid)
+    return f"{len(t['checklist'])} task(s), summary {t['summary'][:60]!r}"
+
+
+@scenario("V2-R8", slow=True)
+def r8(e):
+    """Dashboard Start, live in tmux, real Claude, folder not trusted before: tasks and a summary appear."""
+    return _dashboard_start(e, "V2-R8", tmux=True)
+
+
+@scenario("V2-R9", slow=True)
+def r9(e):
+    """Dashboard Start without tmux (one step at a time), real Claude: tasks and a summary appear, the log streams."""
+    return _dashboard_start(e, "V2-R9", tmux=False)

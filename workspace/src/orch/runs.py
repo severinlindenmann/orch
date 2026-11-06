@@ -287,6 +287,15 @@ def undelivered(root: Path, tid: str) -> list[dict]:
     return [i for i in _pending_read(root, tid) if not i.get("delivered_at")]
 
 
+def _drop_start_prompts_locked(root: Path, tid: str) -> None:
+    """A live run's first prompt waits in the pending file until the tool is up. When that run ends before
+    it went in, it is removed: the next start writes its own prompt from the ticket (no nested prompt)."""
+    items = _pending_read(root, tid)
+    keep = [i for i in items if i.get("delivered_at") or i.get("via") != "start"]
+    if len(keep) != len(items):
+        _pending_write(root, tid, keep)
+
+
 def _pending_add_locked(
     root: Path, tid: str, by: str, kind: str, text: str, via: str | None, pid: str | None
 ) -> dict:
@@ -397,6 +406,7 @@ def claim(
                     _write(root, cur)
                 raise _busy(cur, why, queued)
             # dead pid, or maybe-stale with --take-over: the old claim is replaced
+        _drop_start_prompts_locked(root, tid)
         rec = _new_record(tid, by, agent, mode, ticket, reason)
         if pid:
             rec["pid"], rec["pid_started"] = pid, pid_started(pid)
@@ -436,9 +446,10 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
     """End a claim. With keep_if_pending the claim stays while input waits (the wrapper runs once more)."""
     with locked(root, tid):
         rec = read(root, tid)
-        waiting = bool(undelivered(root, tid))
         if not rec or (run and rec["run"] != run):
-            return {"released": False, "pending": waiting}
+            return {"released": False, "pending": bool(undelivered(root, tid))}
+        _drop_start_prompts_locked(root, tid)
+        waiting = bool(undelivered(root, tid))
         if keep_if_pending and waiting:
             return {"released": False, "pending": True}
         _delete(root, tid)
@@ -464,6 +475,10 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
     out = [
         f"Work on orch ticket {tid}: {_clip(ticket.get('title', ''), 200)}.",
         "Read .agents/skills/orch/SKILL.md first, then follow it for this ticket.",
+        f'Before you start, add one task per piece of work: orch check add {tid} "<task>". '
+        f"Mark the task you work on with orch check start {tid} <task id> and finish each with proof: "
+        f'orch check done {tid} <task id> --note "<what you did>". '
+        f'When you stop, write where things stand: orch ticket summary {tid} "<summary>".',
     ]
     if ticket.get("summary"):
         out.append(f"Where things stand: {_clip(ticket['summary'], 1500)}")
@@ -521,7 +536,13 @@ def plan(
     a = adapters.load(name, root)
     items = undelivered(root, tid) if items is None else items
     sid = None if fresh else tickets.sessions_for(ticket, name, host())
-    v = {"allow": adapters.allow_patterns(allow), "session": sid, "orch_hooks_file": hooks_file}
+    # a one-shot run streams its steps into its log (Focus shows them; the log is never empty until the end)
+    v = {
+        "allow": adapters.allow_patterns(allow),
+        "session": sid,
+        "orch_hooks_file": hooks_file,
+        "stream": mode == "oneshot",
+    }
     argv = None
     resumed = False
     if sid and a["capabilities"]["resume"]:
@@ -586,6 +607,11 @@ def start(
     live_ok = runs_live.available(a)
     if mode is None:
         mode = "live" if live_ok else "oneshot"
+        if not live_ok and a["capabilities"].get("interactive_tmux") and os.name != "nt":
+            notes.append(
+                "tmux is not installed, so the agent works one step at a time: watch it in Focus. "
+                "For a live session you can open, install tmux (on a Mac: brew install tmux)."
+            )
     elif mode == "live" and not live_ok:
         notes.append(
             "A live session needs tmux and an agent that can run interactively; working one turn at a time."

@@ -39,7 +39,7 @@ def rows(root: Path, orch_bin: str | None = None, now: datetime | None = None) -
         since = str((rec.get("live") or {}).get("since") or rec.get("renewed_at") or now)
         if (rec.get("live") or {}).get("state") == "attention":
             out.append({"id": f"focus:waiting-{tid}", "source": "focus", "kind": "focus:waiting", "ticket": tid,
-                        "title": livedata.title(t), "text": "Waiting for your OK in the live session.",
+                        "title": livedata.title(t), "text": str((rec.get("live") or {}).get("why") or "Waiting for your OK in the live session.")[:400],
                         "tone": "needs-you", "since": since, "cli": f"orch run attach {tid}"})  # fmt: skip
         asked = {
             (q.get("action") or {}).get("tool") for q in t.get("questions") or [] if q.get("kind") == KIND
