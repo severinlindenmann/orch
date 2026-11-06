@@ -56,6 +56,7 @@ SCENARIOS = {
         title="S2: 3 workspaces + 1 phone (like the owner's)", n=3,
         rules=[r(0, 1, tasks=True), r(1, 0), r(2, 0)],
         phones=[(PHONE, [0, 1, 2], True)], offline={1: 9}, unread={0: 2},
+        groups=[("Work", [0, 1], True), ("Private", [2], False)],
     ),
     "s3": dict(
         title="S3: 6 workspaces + 2 phones, mixed rules both ways", n=6,
@@ -63,12 +64,14 @@ SCENARIOS = {
                r(3, 0), r(4, 1, mf=False, tasks=True), r(5, 4), r(4, 5, tasks=True), r(2, 3)],
         phones=[(PHONE, [0, 1, 2, 3], True), ("Office iPad", [4, 5], False)],
         offline={1: 9, 5: 50}, never=[3], unread={0: 3, 4: 12}, pending=[2],
+        groups=[("Work", [0, 1, 2], True), ("Marketing team", [3, 4], False)],
     ),
     "s4": dict(
         title="S4: 12 workspaces + 1 phone", n=12,
         rules=[r(0, i, tasks=i % 2 == 0) for i in range(1, 8)] + [r(i, 0) for i in (1, 3, 5)]
         + [r(8, 9), r(9, 8, tasks=True), r(10, 11), r(2, 8)],
         phones=[(PHONE, list(range(0, 12, 2)), True)], offline={3: 9, 7: 30}, unread={0: 1, 9: 4},
+        groups=[("Work", [0, 1, 2, 3, 4], True), ("Private", [5, 6, 7], False), ("Marketing team", [8, 9], True)],
     ),
     "s5": dict(
         title="S5: 25 workspaces + 3 phones", n=25,
@@ -77,6 +80,8 @@ SCENARIOS = {
                                                r(5, 12), r(18, 3, tasks=True)],
         phones=[(PHONE, list(range(25)), True), ("Office iPad", [0, 12, 20], True), ("Spare phone", [5], False)],
         offline={2: 9, 7: 26, 14: 3, 19: 72}, never=[24], unread={0: 5, 12: 1, 20: 9}, pending=[6],
+        groups=[("Work", list(range(0, 10)), True), ("Marketing team", list(range(10, 18)), False),
+                ("Private", [18, 19, 20, 21], True)],
     ),
 }
 
@@ -147,6 +152,16 @@ class Relay:
                  for a, b, mf, t, st in s["rules"]]
         if rules:
             call(self.admin, "PUT", "/admin/api/rules", {"rules": rules})
+        # A few shared tools first, so group members get them (Shared tools page, "Gets: ..." in Add workspace).
+        if s.get("groups"):
+            for n in ("BANK_EXPORT_LOGIN", "OPENAI_API_KEY"):
+                call(self.admin, "PUT", f"/admin/api/shared/credentials/{n}", {"value": "harness-only"})
+            call(self.admin, "PUT", "/admin/api/shared/mcp/project-files", {"config": {"command": "project-files"}})
+        # Groups: (name, [workspace idx], members may message each other); the rest stay in no group.
+        for gname, idx, talk in s.get("groups", []):
+            g = call(self.admin, "POST", "/admin/api/groups", {"name": gname, "talk": talk})
+            for i in idx:
+                call(self.admin, "PATCH", f"/admin/api/workspaces/{ws[i]['id']}", {"group": g["id"]})
         # Unread messages: send along an allowed rule when one exists, else leave the count out.
         for idx, count in s.get("unread", {}).items():
             src = next((a for a, b, mf, *_ in s["rules"] if b == idx and mf), None)

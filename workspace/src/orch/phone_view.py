@@ -20,7 +20,7 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from orch import net, runs, safefile, tickets
+from orch import links, net, runs, safefile, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -193,11 +193,19 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
             out.append(
                 {"kind": "link", "title": _clip(ev.get("title") or url, 200) or "Link", "url": url, "at": at}
             )
+    kinds = links.active_kinds(root) if ticket.get("links") else []
     for ln in ticket.get("links") or []:
-        if url := safe_url(ln.get("url", "")):
-            out.append(
-                {"kind": "link", "title": _clip(ln.get("title") or url, 200) or "Link", "url": url, "at": at0}
-            )
+        if not isinstance(ln, dict) or not (url := safe_url(ln.get("url", ""))):
+            continue
+        d = links.describe(ln, kinds)  # same label, icon and status as the dashboard and CLI
+        at = ln["at"] if _TIME.fullmatch(str(ln.get("at"))) else at0
+        a = {"kind": "link", "title": _clip(ln.get("title") or url, 200) or "Link", "url": url, "at": at}
+        a.update(label=_clip(d["label"], 60) or "Link", icon=d["icon"])
+        if d["mono"]:
+            a["mono"] = d["mono"][:3]
+        if d["status"]:
+            a["status"] = d["status"]
+        out.append(a)
     out.sort(key=lambda a: a["at"], reverse=True)
     return out[:ATTACHMENTS]
 

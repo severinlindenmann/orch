@@ -82,7 +82,9 @@ Read the parent first, work only in yours, keep it at most 3 levels deep. Close 
 **Keep context**
 
     orch log <id> "<what changed in the plan>"
-    orch link add <id> --type <tool> --url <url>
+    orch link add <id> <https url> [--title "<name>"]   # PR, wiki page, design, video …
+    orch link list <id>   /   orch link remove <id> <n>
+    orch ticket set <id> <addon>.<field> <value>   # an add-on field under Details
     orch ticket edit <id> --owner <name> --due YYYY-MM-DD --note "<text>"
     orch ext set <id> <addon> '<json object>'       # data an add-on keeps on the ticket
     orch ext unset <id> <addon>[.<key>]               # remove that data again

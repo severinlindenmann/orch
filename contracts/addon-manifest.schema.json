@@ -61,6 +61,46 @@
       "description": "Add-on names that must be active first. `orch addon add` refuses with the missing names; nothing is turned on by itself."
     },
     "needs": { "type": "boolean", "default": false, "description": "true = the add-on has `orch <name> needs --json` (rows of needs.schema.json) for `orch needs`." },
+    "ticket_links": {
+      "type": "array", "maxItems": 16,
+      "description": "Link types this add-on knows (ticket links, workspace/src/orch/links.py). While the add-on is on, `orch link add` gives a matching address this kind, and its links show with label, icon and status; off, they show as known site or plain Link. Kinds are unique in the manifest; 'link' is reserved.",
+      "items": {
+        "type": "object", "required": ["kind", "label", "icon", "match"], "additionalProperties": false,
+        "properties": {
+          "kind": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$", "not": { "const": "link" } },
+          "label": { "$ref": "#/$defs/text", "maxLength": 24 },
+          "icon": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$", "description": "Icon name; the page shows the known site's tile when the address is a known site, else a tile with the label's first letters." },
+          "match": {
+            "oneOf": [ { "$ref": "#/$defs/link_pattern" }, { "type": "array", "minItems": 1, "maxItems": 8, "items": { "$ref": "#/$defs/link_pattern" } } ],
+            "description": "Address pattern; * = one part of the address (no / ? #), a * at the end also takes the rest."
+          },
+          "statuses": { "type": "array", "maxItems": 12, "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9 -]{0,23}$" } },
+          "preview": { "const": "thumb", "description": "Artifacts tab and phone show the link's thumb picture." }
+        }
+      }
+    },
+    "ticket_fields": {
+      "type": "object", "required": ["section"], "additionalProperties": false,
+      "description": "Fields under the ticket's Details, stored in ext.<name> and edited in place (`orch ticket set <id> <name>.<field> <value>`). Field types come from the schema: enum = choice, number/integer = number, format date = date, format uri = url, string = text; readOnly = filled in by the add-on; x-hidden = not shown.",
+      "properties": {
+        "section": { "$ref": "#/$defs/text", "maxLength": 24 },
+        "schema": { "$ref": "#/$defs/path", "description": "JSON Schema of ext.<name> (default and must equal ticket_ext when both are set)." },
+        "show_on_card": { "type": "array", "maxItems": 3, "items": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" }, "description": "Fields shown as a quiet chip on board cards." }
+      }
+    },
+    "acts": {
+      "type": "object", "maxProperties": 16,
+      "propertyNames": { "pattern": "^[a-z][a-z-]{0,20}$" },
+      "description": "What `orch <name> act <verb> [--by X] --json -- <ticket>` offers. Core knows `refresh` (addon-manifest.md, Act: refresh).",
+      "additionalProperties": {
+        "type": "object", "required": ["summary"], "additionalProperties": false,
+        "properties": {
+          "summary": { "$ref": "#/$defs/text", "maxLength": 80 },
+          "who": { "enum": ["anyone", "people"], "default": "anyone" },
+          "writes": { "type": "array", "items": { "type": "string", "pattern": "^(links|ext\\.[a-z][a-z0-9-]{1,31})$" } }
+        }
+      }
+    },
     "page": {
       "type": "object",
       "required": ["path"],
@@ -74,6 +114,7 @@
   },
   "$defs": {
     "text": { "type": "string", "minLength": 1, "pattern": "^[^<>]*$", "description": "Plain text, no HTML." },
-    "path": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9_./-]{1,200}$" }
+    "path": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9_./-]{1,200}$" },
+    "link_pattern": { "type": "string", "pattern": "^https?://[^\\s<>\"'`]{1,300}$" }
   }
 }

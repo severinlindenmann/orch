@@ -217,6 +217,9 @@ def test_add_needs_consent_then_installs_and_activates(proj, run, hello, uv_call
             "recommended": False,
             "page": None,
             "running": False,
+            "ticket_links": [],
+            "ticket_fields": None,
+            "acts": [],
         }
     ]
 

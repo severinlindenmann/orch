@@ -10,7 +10,8 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 ## Rules the relay checks on every message
 
 1. **Sender = caller.** `from` must equal the authenticated workspace, else `403`. Phones never post raw messages; the relay builds them.
-2. **Pair rule** (one-way: Pilatus → Reports does not imply Reports → Pilatus). Phones need no pair rule: pairing a phone with
+2. **Pair rule** (one-way: Pilatus → Reports does not imply Reports → Pilatus). Members of one group with `talk` on also
+   count as having `text` and `files` both ways (see "Groups" under the Admin API). Phones need no pair rule: pairing a phone with
    workspaces (admin "Add phone", or editing its list) is the rule both ways. The phone may send to those workspaces, and they may
    send it text and questions:
 
@@ -102,8 +103,11 @@ Auth: `X-Orch-Admin: <admin token>` (file `/etc/orch-relay/admin-token`); the po
 | Method | Path | Request | Response |
 |---|---|---|---|
 | GET | `/admin` | – | Portal HTML |
-| GET / POST | `/admin/api/workspaces` | POST: `{name, description, tags: []}` | list of `{id, name, description, tags, description_by, tags_by, online, last_seen, unread, pending}` (`last_seen` null until the workspace first calls; `pending` as in whoami, or `null`) / `201 {id, token, prompt}` |
-| PATCH | `/admin/api/workspaces/<id>` | `{name?, description?, tags?}` | `200` (shows up in the next refresh). Admin-set description/tags are marked `description_by` / `tags_by` = `admin` |
+| GET / POST | `/admin/api/workspaces` | POST: `{name, description, tags: [], group?: "grp_…", new_group?: "<name>"}` (at most one of `group` / `new_group`) | list of `{id, name, description, tags, description_by, tags_by, online, last_seen, unread, pending, group}` (`last_seen` null until the workspace first calls; `pending` as in whoami, or `null`; `group` = `grp_…` or `null`) / `201 {id, token, prompt, group, shared?}`. With `group` (an existing group) or `new_group` (creates a group with the defaults of `POST /admin/api/groups`), the workspace joins it and gets the group's tools at once (see Groups); `shared` = `{skills, mcp, credentials}` counts it got. Unknown group or both fields → `422`, a taken `new_group` name → `409`; nothing is created then. Without either, the workspace is in no group and gets no tools (the admin portal always sends one) |
+| PATCH | `/admin/api/workspaces/<id>` | `{name?, description?, tags?, group?: "grp_…"}` | `200` (shows up in the next refresh). Admin-set description/tags are marked `description_by` / `tags_by` = `admin`. `group` moves it to that group (unknown → `422`): it gets the new group's tools and keeps the ones it has |
+| GET / POST | `/admin/api/groups` | POST: `{name, colour?, defaults?: {skills?, mcp?, credentials?}, talk?}` | `{items: [group]}` by name / `201 group`. group = `{id: "grp_…", name, colour, defaults: {skills, mcp, credentials}, talk, members: [ws…], gives: {skills, mcp, credentials}}`. `name`: one line of plain text (description rule), 1–40 characters, unique ignoring case (else `409 conflict`). `colour`: one of `teal, violet, amber, blue, pink`; left out = the one used least. `defaults` (each `true` when left out) = the kinds of shared tools members get; `talk` (default `true`) = members may send each other messages and files. `gives` = how many shared items of each kind a member gets now |
+| PATCH | `/admin/api/groups/<id>` | `{name?, colour?, defaults?: {…}, talk?}` | `200 group`. A default kind turned on is given to the current members at once; turned off takes nothing away. `404` unknown group |
+| DELETE | `/admin/api/groups/<id>` | – | `204`. Members stay, keep their tools and are in no group |
 | POST | `/admin/api/workspaces/<id>/profile/approve` | `{rev}`: the `rev` of the proposal the owner looked at | `200` the workspace card. The pending description/tags become live (marked `workspace`), the version is raised and refresh-hints go out. `404` when nothing is pending, `409 conflict` ("This change was replaced, review again.") when `rev` no longer matches |
 | POST | `/admin/api/workspaces/<id>/profile/reject` | `{rev}` | `204`. The pending change is dropped, old values stay. `404` / `409` as for approve |
 | POST | `/admin/api/workspaces/<id>/token` | – | `200 {token, prompt}`. Also drops a pending profile change |
@@ -124,5 +128,20 @@ Auth: `X-Orch-Admin: <admin token>` (file `/etc/orch-relay/admin-token`); the po
 | PATCH | `/admin/api/phones/<id>` | `{workspaces: [ws…]}` | `200`. Workspaces added or removed get a refresh-hint |
 | DELETE | `/admin/api/phones/<id>` | – | `204` (same effect as sign-out). Its workspaces get a refresh-hint |
 
-Every change under `/admin/api/shared/`, to a workspace's name/description/tags, or to the rules raises `version` by 1 and sends a `refresh-hint` to each affected workspace.
+Every change under `/admin/api/shared/`, to a workspace's name/description/tags/group, to a group's `talk` or defaults, or to the rules raises `version` by 1 and sends a `refresh-hint` to each affected workspace.
+
+### Groups
+
+Each workspace is in at most one group (the admin portal makes the owner pick one when adding a workspace). A group only
+writes the normal per-workspace assignments (`/admin/api/shared/assign`), so the refresh snapshot and every check stay as
+they are:
+- **Joining** (create with `group`/`new_group`, or `PATCH … {group}`): the workspace is assigned every shared item of the
+  kinds in the group's `defaults`. **Leaving** (moving, group deleted) takes nothing away.
+- **A new shared item** (`PUT /admin/api/shared/<kind>/<name>` for a name that did not exist) is assigned to every member
+  of each group whose `defaults` include that kind. Replacing an existing item changes no assignment.
+- Single items can still be taken away from one workspace with `/admin/api/shared/assign/<ws>`.
+- **`talk`**: two members of the same group with `talk` on count as having a pair rule with `text` and `files` both
+  ways (added to any pair rule they have; `delegate` and `start` still come only from the rules). They show in each
+  other's directory, and messages and files between them pass rule 2 (Pair rule) above. `/admin/api/rules`
+  lists only the rules the owner set.
 So do pairing a phone (`POST /v1/phone/pair`), signing it out, and editing or deleting it: its workspaces refresh their `phones` list.
