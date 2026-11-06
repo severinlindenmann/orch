@@ -214,6 +214,8 @@ class Handler(BaseHTTPRequestHandler):
         state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
         if body.get("op") == "config.agent.test" and isinstance(extra, dict):  # the answer of the try, plain words only
             state["test"] = {"name": str(extra.get("name"))[:40], "ok": extra.get("ok") is True, "reason": str(extra.get("reason") or "")[:300]}
+        if body.get("op") == "addon.act" and isinstance(extra, dict) and isinstance(extra.get("changes"), list):  # refresh
+            state["act_result"] = {"changes": len(extra["changes"]), "say": str(extra.get("say") or "")[:300]}
         self._send(200, json.dumps(state).encode(), "application/json")
 
 

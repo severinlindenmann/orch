@@ -119,12 +119,63 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
         pg = a.get("page") if isinstance(a.get("page"), dict) else None
         if pg and not (isinstance(pg.get("path"), str) and re.fullmatch(r"/[A-Za-z0-9_./-]*", pg["path"]) and ".." not in pg["path"]):
             pg = None
-        if d or tv:
+        tf = _ticket_fields(a.get("ticket_fields"))
+        acts = [v for v in a.get("acts") or [] if isinstance(v, str) and re.fullmatch(r"[a-z][a-z-]{0,20}", v)]
+        kinds = [k.get("kind") for k in a.get("ticket_links") or [] if isinstance(k, dict) and isinstance(k.get("kind"), str)]
+        if d or tv or tf or acts or kinds:
             out.append({"name": a["name"], "dashboard": d and {"label": d["label"][:16], "icon": d["icon"],
                                                                "order": d.get("order", 50)}, "ticket_view": tv,
-                        "page": pg and {"path": pg["path"], "label": str(pg.get("label") or "")[:40]}})
+                        "page": pg and {"path": pg["path"], "label": str(pg.get("label") or "")[:40]},
+                        "ticket_fields": tf, "acts": acts, "link_kinds": kinds})
     out.sort(key=lambda a: (a["dashboard"] or {}).get("order", 50))
     return out
+
+
+FIELD_TYPES = ("text", "number", "date", "choice", "url")
+
+
+def _ticket_fields(tf) -> dict | None:
+    """`ticket_fields` of `orch addon list --json` (core already typed the schema): section, show_on_card, fields."""
+    if not (isinstance(tf, dict) and isinstance(tf.get("section"), str) and isinstance(tf.get("fields"), list)):
+        return None
+    fields = []
+    for f in tf["fields"]:
+        if not (isinstance(f, dict) and isinstance(f.get("key"), str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", f["key"])
+                and f.get("type") in FIELD_TYPES and isinstance(f.get("title"), str)):
+            continue
+        out = {"key": f["key"], "title": f["title"][:40], "type": f["type"], "read_only": f.get("read_only") is True,
+               "hidden": f.get("hidden") is True}
+        if f["type"] == "choice":
+            out["options"] = [{"value": o["value"], "label": str(o.get("label") or o["value"])[:40]}
+                              for o in f.get("options") or [] if isinstance(o, dict) and isinstance(o.get("value"), str)]
+        fields.append(out)
+    card = [k for k in tf.get("show_on_card") or [] if isinstance(k, str)][:3]
+    return {"section": tf["section"][:24], "show_on_card": card, "fields": fields}
+
+
+def link_kinds(raw) -> list[dict]:
+    """The link types of the active add-ons (`orch addon list --json` rows), for orch.links.describe."""
+    out, seen = [], set()
+    for a in sorted((a for a in raw if isinstance(a, dict) and a.get("active") is True) if isinstance(raw, list) else [],
+                    key=lambda a: str(a.get("name"))):
+        for k in a.get("ticket_links") or []:
+            if (isinstance(k, dict) and isinstance(k.get("kind"), str) and k["kind"] not in seen
+                    and isinstance(k.get("label"), str) and isinstance(k.get("icon"), str) and isinstance(k.get("match"), list)):
+                seen.add(k["kind"])
+                out.append({**k, "addon": a["name"]})
+    return out
+
+
+def add_link_views(tickets: list[dict], kinds: list[dict]) -> None:
+    """Each ticket link gets `view` (label, icon, mono, title, status, group) from the core's one link module."""
+    try:
+        from orch import links
+    except ImportError:  # standalone use without orch: the page shows plain links
+        return
+    for t in tickets:
+        for ln in t.get("links") or []:
+            if isinstance(ln, dict) and isinstance(ln.get("url"), str):
+                ln["view"] = links.describe(ln, kinds)
 
 
 def _consent(r: dict) -> str:
@@ -224,6 +275,7 @@ def load_state(root: Path, orch_bin: str | None = None, with_addons: bool = True
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
+    add_link_views(tickets, link_kinds(raw) if with_addons else [])  # snapshots: known sites only, no add-on names
     needs = run_orch(orch_bin, ["needs", "--json"], root) if with_addons else None
     state = {
         "workspace": root.name,

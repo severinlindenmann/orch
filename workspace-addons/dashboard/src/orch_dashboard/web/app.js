@@ -168,6 +168,8 @@
     h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))),
     ticketView === 'board' ? h('span', {className:'board-hint'}, 'Drag a card to move it, or use its ⋯ button') : null);
   const initials = value => String(name(value) || '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+  // a width through the style object: the page's CSP refuses style attributes
+  const widthSpan = pct => { const node = h('span', {}); node.style.width = pct + '%'; return node; };
   function boardCard(t) {
     const tasks = array(t.checklist), done = tasks.filter(task => task.done).length;
     const who = name(t.owner), running = state.runs?.[t.id]?.running === true;
@@ -176,7 +178,8 @@
         snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'btn ghost icon sm move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card')))),
       h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))),
       h('div', {className:'owner-line'}, who ? [h('span', {className:'avatar', 'aria-hidden':'true'}, initials(who)), who] : null, t.due ? h('span', {className:'due' + (overdue(t) ? ' bad' : '')}, date(t.due)) : null),
-      tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':'0', 'aria-valuemax':String(tasks.length), 'aria-valuenow':String(done), 'aria-label':'Tasks done'}, h('span', {style:'width:' + Math.round(done / tasks.length * 100) + '%'})), h('span', {className:'meta'}, done + '/' + tasks.length)) : null);
+      cardLinks(t),
+      tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':'0', 'aria-valuemax':String(tasks.length), 'aria-valuenow':String(done), 'aria-label':'Tasks done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, done + '/' + tasks.length)) : null);
   }
   function board() {
     const visible = sorted(tickets().filter(t => t.status !== 'dropped'));
@@ -244,6 +247,7 @@
         const target = ticketOf(url);
         return target ? h('a', {className:'chip outline', href:href(url)}, clean(target.title)) : null;
       }
+      if (link.view) return null;  // web links are in the Links card
       if (!/^https:\/\/[^\s<>"'`]+$/.test(url)) return null;
       try { const parsed = new URL(url); return h('a', {className:'chip outline', href:parsed.href, target:'_blank', rel:'noopener noreferrer'}, clean(link.title) || parsed.host); } catch (_) { return null; }
     }).filter(Boolean);
@@ -261,6 +265,170 @@
     const rows = addons().flatMap(a => array(a.ticket_view).map(r => [r, (ticket.ext || {})[a.name], a.name]))
       .map(([r, ext, addon]) => [r, ext && typeof ext === 'object' ? (r.format === 'open-page' ? addonLink(addon, ext[r.field], r.label, r.label) : addonValue(r, ext[r.field])) : '']).filter(([, v]) => v);
     return rows.length ? h('dl', {className:'addon-rows'}, rows.map(([r, v]) => [h('dt', {}, r.label), h('dd', {}, v)])) : null;
+  }
+  // ---- Ticket links and add-on fields. Each web link carries `view` from the core's one link module (orch/links.py):
+  // label, icon key, monogram, title, status (only while its add-on is on) and the Artifacts group. Fields come typed
+  // from `orch addon list` (ticket_fields) and are saved with `orch ticket set` (op ticket.field).
+  const KEY = /^[a-z0-9][a-z0-9-]{0,31}$/;
+  const safeHref = url => { try { const u = new URL(url); return /^https?:$/.test(u.protocol) ? u.href : null; } catch (_) { return null; } };
+  const webLinks = t => array(t.links).filter(l => l && typeof l.url === 'string' && /^https?:\/\/[^\s<>"'`]+$/i.test(l.url) && l.view && typeof l.view === 'object' && safeHref(l.url));
+  function linkTile(v, size = '') {
+    const key = KEY.test(String(v.icon)) ? v.icon : 'link';
+    const node = h('span', {className:'li h-' + key + (size ? ' ' + size : ''), 'aria-hidden':'true'});
+    if (v.mono && key !== 'link') node.textContent = String(v.mono).slice(0, 3); else node.append(iconEl('link'));
+    return node;
+  }
+  const linkStatus = status => typeof status === 'string' && KEY.test(status.replace(/ /g, '-')) ? h('span', {className:'st st-' + status.replace(/ /g, '-')}, status) : null;
+  const linkSub = v => v.label === 'Link' ? 'Link · ' + clean(String(v.short || '').split('/')[0]) : clean(v.label);
+  function linkRow(t, link, removable) {
+    const v = link.view, url = safeHref(link.url);
+    return h('div', {className:'lk-row', 'data-key':'link-' + link.url},
+      h('a', {className:'lk', href:url, target:'_blank', rel:'noopener noreferrer', title:url}, linkTile(v), h('span', {className:'t'}, h('b', {}, clean(v.title)), h('span', {}, linkSub(v))), linkStatus(v.status), h('span', {className:'ext'}, iconEl('external'))),
+      removable && !snapshot ? h('button', {type:'button', className:'btn ghost icon xs lk-x', title:'Remove this link', 'aria-label':'Remove link ' + clean(v.title), 'data-action':'link-remove', 'data-ticket':t.id, 'data-url':link.url}, iconEl('x')) : null);
+  }
+  // add-ons that are on, have a refresh act and own a link on this ticket
+  const refreshers = t => addons().filter(a => array(a.acts).includes('refresh') && webLinks(t).some(l => l.view.addon === a.name));
+  function linksCard(t) {
+    const rows = webLinks(t).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+    if (snapshot && !rows.length) return null;
+    const refresh = snapshot ? [] : refreshers(t);
+    return h('section', {className:'card links-card', 'data-key':'links-card'},
+      h('div', {className:'card-h'}, h('h2', {className:'grow'}, 'Links'), rows.length ? h('span', {className:'meta'}, String(rows.length)) : null,
+        refresh.map(a => h('button', {type:'button', className:'btn ghost xs', title:'Update titles and status (' + addonLabel(a) + ')', 'data-action':'link-refresh', 'data-addon':a.name, 'data-ticket':t.id, 'data-key':'link-refresh-' + a.name}, iconEl('refresh'), refresh.length > 1 ? addonLabel(a) : 'Refresh'))),
+      h('div', {className:'links'}, rows.map(l => linkRow(t, l, true)),
+        snapshot ? null : h('div', {className:'add-link', 'data-key':'add-link-' + t.id}, h('button', {type:'button', className:'add-row', 'data-action':'link-add', 'data-ticket':t.id}, iconEl('plus'), 'Add a link'))));
+  }
+  function startLinkAdd(control) {
+    const t = ticketOf(control.dataset.ticket), host = control.parentElement;
+    if (!t || !host || locks.has(host.dataset.key)) return;
+    const key = host.dataset.key;
+    locks.add(key);
+    const input = el('input', 'input inline-input');
+    Object.assign(input, {type:'url', placeholder:'https://…', maxLength:2000});
+    input.setAttribute('aria-label', 'Link');
+    host.replaceChildren(input, el('span', 'hint', 'Paste a web address · Enter adds · Esc cancels'));
+    input.focus();
+    let done = false;
+    const finish = async save => {
+      if (done) return;
+      done = true;
+      const url = input.value.trim();
+      if (save && url) {
+        const result = await act('link.add', {ticket:t.id, url});
+        if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+      }
+      locks.delete(key);
+      render();
+    };
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+      else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(!!input.value.trim()));
+  }
+  async function removeLink(control) {
+    const lock = 'link-x-' + control.dataset.url;
+    if (locks.has(lock)) return;
+    locks.add(lock); control.disabled = true;
+    const result = await act('link.remove', {ticket:control.dataset.ticket, url:control.dataset.url});
+    locks.delete(lock);
+    if (!result.ok) { control.disabled = false; window.orch.toast(result.text || 'That did not work.', 'error'); return; }
+    window.orch.toast('Link removed. The history keeps it.', 'ok');
+  }
+  async function refreshLinks(control) {
+    const lock = 'link-refresh-' + control.dataset.ticket;
+    if (locks.has(lock)) return;
+    locks.add(lock); control.disabled = true; control.classList.add('busy');
+    const result = await act('addon.act', {addon:control.dataset.addon, verb:'refresh', target:control.dataset.ticket});
+    locks.delete(lock); control.disabled = false; control.classList.remove('busy');
+    if (!result.ok) { window.orch.toast(result.text || 'That did not work.', 'error'); return; }
+    const r = result.state?.act_result, t = ticketOf(control.dataset.ticket);
+    const key = typeof t?.key === 'string' ? t.key + ': ' : '';
+    window.orch.toast(key + (clean(r?.say) || (r?.changes ? r.changes + (r.changes === 1 ? ' change' : ' changes') : 'Nothing to update.')), 'ok');
+    render();
+  }
+  const fieldText = (f, value) => {
+    if (value == null || value === '') return '';
+    if (f.type === 'choice') return clean(array(f.options).find(o => o.value === value)?.label ?? value);
+    if (f.type === 'date') return parse(value)?.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short', year:'numeric'}) || clean(value);
+    if (f.type === 'number' && typeof value === 'number') return value.toLocaleString('de-CH');
+    return typeof value === 'object' ? '' : clean(value);
+  };
+  function fieldSections(t) {
+    return addons().filter(a => a.ticket_fields && array(a.ticket_fields.fields).some(f => !f.hidden)).map(a => {
+      const tf = a.ticket_fields, ext = (t.ext || {})[a.name] || {};
+      const rows = array(tf.fields).filter(f => !f.hidden).map(f => {
+        const shown = fieldText(f, ext[f.key]);
+        let value;
+        if (f.read_only || snapshot) value = h('span', {className:'ed-ro' + (shown ? '' : ' empty-v'), title:f.read_only ? 'Filled in by the ' + addonLabel(a) + ' add-on' : null}, f.read_only && f.key && ext[f.key] && KEY.test(String(ext[f.key])) ? linkStatus(String(ext[f.key])) : shown || '—');
+        else {
+          const node = h('button', {type:'button', className:'ed' + (shown ? '' : ' empty-v'), title:'Click to change', 'data-action':'field', 'data-ticket':t.id, 'data-addon':a.name, 'data-field':f.key}, shown || 'Add');
+          value = h('span', {className:'inline-host', 'data-key':'field-' + a.name + '-' + f.key + '-' + t.id}, node);
+        }
+        return h('div', {}, h('dt', {}, clean(f.title)), h('dd', {}, value));
+      });
+      return h('section', {className:'card ticket-aside addon-fields', 'data-key':'fields-' + a.name},
+        h('div', {className:'card-h'}, h('h2', {className:'grow'}, clean(tf.section)), h('span', {className:'addon-pill'}, 'add-on')),
+        h('dl', {className:'ticket-details ed-list'}, rows));
+    });
+  }
+  async function saveAddonField(t, addon, field, value) {
+    const result = await act('ticket.field', {ticket:t.id, addon, field, value:String(value), if_revision:t.revision});
+    if (!result.ok) window.orch.toast(result.text + (result.status === 409 ? ' Reload the page and try again.' : ''), 'error');
+  }
+  function startAddonField(control) {
+    const t = ticketOf(control.dataset.ticket), host = control.parentElement;
+    const a = addons().find(x => x.name === control.dataset.addon), f = array(a?.ticket_fields?.fields).find(x => x.key === control.dataset.field);
+    if (!t || !host || !f || locks.has(host.dataset.key)) return;
+    const key = host.dataset.key, before = (t.ext || {})[a.name]?.[f.key];
+    const beforeText = before == null ? '' : String(before);
+    locks.add(key);
+    const end = async value => { if (value !== null && value !== beforeText) await saveAddonField(t, a.name, f.key, value); locks.delete(key); render(); };
+    if (f.type === 'date') { pickDate(control, beforeText, end); return; }
+    if (f.type === 'choice') {
+      const pop = h('div', {className:'menu-pop sel-pop', role:'menu'}, array(f.options).map(o => h('button', {type:'button', className:'menu-item' + (o.value === before ? ' sel' : ''), role:'menuitemradio', 'aria-checked':o.value === before, 'data-value':o.value}, clean(o.label))),
+        before != null ? h('button', {type:'button', className:'menu-item muted', role:'menuitem', 'data-value':''}, 'Clear') : null);
+      let closed = false;
+      const close = value => { if (closed) return; closed = true; document.removeEventListener('mousedown', outside, true); document.removeEventListener('keydown', esc, true); pop.remove(); end(value); };
+      const outside = event => { if (!pop.contains(event.target)) close(null); };
+      const esc = event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(null); } };
+      pop.addEventListener('click', event => { const b = event.target.closest('[data-value]'); if (b) close(b.dataset.value); });
+      document.addEventListener('mousedown', outside, true); document.addEventListener('keydown', esc, true);
+      const r = control.getBoundingClientRect();  // on the page, not inside the card (a card clips what sticks out)
+      pop.style.setProperty('top', Math.round(r.bottom + 4) + 'px');
+      pop.style.setProperty('left', Math.round(Math.min(r.left, window.innerWidth - 196)) + 'px');
+      document.body.append(pop);
+      pop.querySelector('button')?.focus();
+      return;
+    }
+    const input = el('input', 'input inline-input');
+    input.type = f.type === 'number' ? 'text' : f.type === 'url' ? 'url' : 'text';
+    if (f.type === 'number') input.inputMode = 'decimal';
+    input.value = beforeText;
+    input.setAttribute('aria-label', f.title);
+    host.replaceChildren(input, el('span', 'hint', 'Enter saves · Esc cancels'));
+    input.focus();
+    let done = false;
+    const finish = save => { if (done) return; done = true; end(save ? input.value.trim() : null); };
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+      else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
+  }
+  // board card: up to 2 link tiles (add-on status as a chip), "+N", and the add-on fields listed in show_on_card
+  function cardLinks(t) {
+    // add-on links first (they carry a status), then the newest
+    const rows = webLinks(t).slice().sort((a, b) => Number(!!b.view.addon) - Number(!!a.view.addon) || (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+    const shown = rows.slice(0, 2);
+    const chips = addons().flatMap(a => array(a.ticket_fields?.show_on_card).map(k => {
+      const f = array(a.ticket_fields.fields).find(x => x.key === k), v = (t.ext || {})[a.name]?.[k];
+      if (!f || v == null || v === '') return null;
+      return f.read_only && KEY.test(String(v)) ? linkStatus(String(v)) : h('span', {className:'st'}, f.type === 'date' ? date(v) : fieldText(f, v));
+    })).filter(Boolean);
+    if (!shown.length && !chips.length) return null;
+    return h('div', {className:'card-links', 'data-key':'card-links'}, shown.map(l => h('span', {className:'lnk', title:clean(l.view.label + ': ' + l.view.title)}, linkTile(l.view, 'sm'), linkStatus(l.view.status))),
+      rows.length > 2 ? h('span', {className:'more'}, '+' + (rows.length - 2)) : null, chips.length ? h('span', {className:'gap'}) : null, chips);
   }
   function liveLinkFor(t) {
     const a = addons().find(a => a.page && array(state.services).some(s => s.addon === a.name && s.running === true));
@@ -321,12 +489,18 @@
   }
   const proofRows = t => array(t.checklist).flatMap(task => array(task.evidence).map(ev => ({task, ev})))
     .sort((a, b) => (Date.parse(b.ev.at) || 0) - (Date.parse(a.ev.at) || 0));
-  const linkRows = t => array(t.links).map(link => {
-    const url = link.url;
-    if (typeof url !== 'string' || !/^https:\/\/[^\s<>"'`]+$/.test(url)) return null;
-    try { const parsed = new URL(url); return {href:parsed.href, label:clean(link.title) || parsed.host}; } catch (_) { return null; }
-  }).filter(Boolean);
+  const linkRows = t => webLinks(t);
   const artifactCount = t => (artifactData.get(t.id)?.data?.files?.length || 0) + proofRows(t).length + linkRows(t).length;
+  // Artifacts tab: add-on link types first (by their label), then plain and known-site links as "Links"
+  function linkGroups(links) {
+    const groups = new Map();
+    for (const l of links.slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0))) {
+      const g = typeof l.view.group === 'string' && l.view.group ? l.view.group : 'Links';
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(l);
+    }
+    return [...groups].sort(([a], [b]) => Number(a === 'Links') - Number(b === 'Links'));
+  }
   function artifactsPanel(t) {
     const files = array(artifactData.get(t.id)?.data?.files), proofs = proofRows(t), links = linkRows(t), stamp = window.DashHelpers.stamp;
     const section = (title, count, body, extra) => h('section', {className:'artifact-section', 'data-key':'artifacts-' + title}, h('div', {className:'artifact-heading'}, h('h2', {}, title), count ? h('span', {className:'meta'}, String(count)) : null), extra, body);
@@ -346,7 +520,7 @@
           here && !snapshot ? h('button', {type:'button', className:'btn ghost xs', 'data-action':'file-preview', 'data-ticket':t.id, 'data-kind':'evidence', 'data-name':base}, 'Preview') : null,
           ev.at ? h('time', {datetime:ev.at}, stamp(ev.at, Date.now())) : null);
       }))) : null,
-      links.length ? section('Links', links.length, h('div', {className:'card'}, links.map(l => h('a', {className:'card-row artifact-link', href:l.href, target:'_blank', rel:'noopener noreferrer'}, iconEl('link'), h('span', {className:'grow'}, l.label), iconEl('external'))))) : null);
+      linkGroups(links).map(([group, rows]) => section(clean(group), rows.length, h('div', {className:'card links'}, rows.map(l => linkRow(t, l, false))))));
   }
   async function previewFile(tid, kind, fileName) {
     if (snapshot || !tid || !fileName) return;
@@ -442,8 +616,8 @@
           tasksCard('overview-tasks'), addonRows(t), ticketLinks(t), children.length ? card('sub-tickets', 'Sub-tickets', children.filter(child => child.status === 'done').length + ' of ' + children.length + ' done', children.map(child => h('div', {className:'card-row'}, h('a', {className:'grow', href:href(child.id)}, clean(child.title)), statusChip(child)))) : null]),
         panel('tasks', tasksCard('tasks')), panel('questions', [qs.length ? qs : emptyRow('No open questions'), answered]), panel('artifacts', artifactsPanel(t)),
         panel('history', card('history', 'History', '', history.length ? history : emptyRow('No history yet.')))),
-      h('aside', {className:'card ticket-aside'}, h('div', {className:'card-h'}, h('h2', {}, 'Details')),
-        h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', h('span', {className:'ed-ro'}, agent)), field('Created', h('span', {className:'ed-ro'}, date(t.created_at))), field('Updated', h('span', {className:'ed-ro'}, t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : '')), field('Ticket', h('span', {className:'ed-ro mono'}, t.id)))))));
+      h('div', {className:'stack ticket-side'}, linksCard(t), h('aside', {className:'card ticket-aside'}, h('div', {className:'card-h'}, h('h2', {}, 'Details')),
+        h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', h('span', {className:'ed-ro'}, agent)), field('Created', h('span', {className:'ed-ro'}, date(t.created_at))), field('Updated', h('span', {className:'ed-ro'}, t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : '')), field('Ticket', h('span', {className:'ed-ro mono'}, t.id)))), fieldSections(t)))));
   }
 
   const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note'};
@@ -1246,6 +1420,10 @@
     if (action === 'file-preview') { previewFile(control.dataset.ticket, control.dataset.kind, control.dataset.name); return; }
     if (action === 'new') ticketForm();
     if (action === 'inline') startInline(control);
+    if (action === 'link-add') startLinkAdd(control);
+    if (action === 'link-remove') { event.preventDefault(); removeLink(control); return; }
+    if (action === 'link-refresh') { refreshLinks(control); return; }
+    if (action === 'field') startAddonField(control);
     if (action === 'agent-add') openAgentForm(control);
     if (action === 'agent-test') {
       event.preventDefault();
