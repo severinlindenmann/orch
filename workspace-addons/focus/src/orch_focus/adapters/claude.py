@@ -1,6 +1,6 @@
-"""Optional mapper `claude-transcript/1`: Claude's transcript / stream-json lines -> run events.
+"""Optional mapper `claude-transcript/1`: the tool's transcript / stream-json lines -> run events.
 
-Claude-specific details live only in this file. Feed it one decoded JSON line at a time with `feed`.
+Tool-specific details live only in this file. Feed it one decoded JSON line at a time with `feed`.
 """
 
 from __future__ import annotations
@@ -23,11 +23,12 @@ _WORDS = {
 }
 
 
+KINDS = ("claude-stream-json/1", "claude-transcript/1")  # the mapper names an adapter's data may give
 SESSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{7,63}")
 
 
 def transcript_path(session: str) -> Path | None:
-    """Claude's transcript of a session: ~/.claude/projects/<folder>/<session>.jsonl (exact file name only)."""
+    """The tool's transcript of a session under its projects folder (exact file name only)."""
     if not isinstance(session, str) or not SESSION.fullmatch(session):
         return None
     base = Path.home() / ".claude" / "projects"
@@ -195,3 +196,7 @@ class ClaudeMapper:
                            state="failed" if failed else "idle", turns=line.get("num_turns"),
                            denials=len(line.get("permission_denials") or [])))  # fmt: skip
         return out
+
+
+def make(run: str, ticket: str) -> ClaudeMapper:
+    return ClaudeMapper(run, ticket)

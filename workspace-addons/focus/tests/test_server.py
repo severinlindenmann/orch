@@ -107,7 +107,7 @@ def test_ops_build_exact_argv(server, fake_orch):
     got = [
         c
         for c in calls(fake_orch)
-        if c[:2] not in (["run", "status"], ["ticket", "show"], ["run", "session"])
+        if c[:2] not in (["run", "status"], ["ticket", "show"], ["run", "session"], ["ext", "set"])
     ]
     assert got[0][:4] == ["run", "start", TID, "--by"] and got[0][4] == "focus"
     assert "--fresh" in got[1]
@@ -284,3 +284,29 @@ def test_oneshot_denial_asks_and_run_send_note(server, ws, fake_orch):
         server, "POST", "/api/act", {"op": "run.send", "args": {"ticket": TID, "text": "hello"}}
     )
     assert json.loads(body)["note"] == "Goes in after this step."
+
+
+def test_run_start_marks_the_ticket_page_once(server, fake_orch, ws):
+    req(server, "POST", "/api/act", {"op": "run.start", "args": {"ticket": TID}})
+    ext = [c for c in calls(fake_orch) if c[:2] == ["ext", "set"]]
+    assert ext == [
+        ["ext", "set", TID, "focus", json.dumps({"page": f"t/{TID}"}), "--by", "agent:focus", "--json"]
+    ]
+    p = ws / ".orch" / "tickets" / f"{TID}.json"
+    t = json.loads(p.read_text())
+    t["ext"] = {"focus": {"page": f"t/{TID}"}}
+    p.write_text(json.dumps(t))
+    server.RequestHandlerClass.keywords["tracker"].ticket_cache.clear()
+    req(server, "POST", "/api/act", {"op": "run.start", "args": {"ticket": TID}})
+    assert len([c for c in calls(fake_orch) if c[:2] == ["ext", "set"]]) == 1  # already set: not again
+
+
+@pytest.mark.parametrize("path", [f"/t/{TID}", f"//t/{TID}", f"/t/t/{TID}"])
+def test_page_route_tolerates_how_a_surface_joins_the_path(server, path):
+    assert req(server, "GET", path)[0] == 200
+
+
+def test_retry_error_shows_on_the_view(server):
+    tr = server.RequestHandlerClass.keywords["tracker"]
+    tr.perms.failed[TID] = "Busy now."
+    assert json.loads(req(server, "GET", f"/api/t/{TID}")[1])["retry_error"] == "Busy now."

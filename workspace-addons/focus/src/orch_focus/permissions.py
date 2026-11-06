@@ -29,6 +29,7 @@ class Permissions:
     def __init__(self, root: Path, orch_bin: str | None):
         self.root, self.orch_bin = root, orch_bin
         self.state = self._load()
+        self.failed: dict[str, str] = {}  # ticket -> why the retry did not start (shown on the page)
 
     def _file(self) -> Path:
         return runfiles.run_dir(self.root, "focus") / "permissions.json"  # plain folders only
@@ -39,10 +40,17 @@ class Permissions:
         except RuntimeError:
             d = {}
         qs = d.get("qs") if isinstance(d.get("qs"), dict) else {}
+        good = {
+            k: v for k, v in qs.items()
+            if isinstance(k, str) and isinstance(v, dict) and isinstance(v.get("run"), str) and isinstance(v.get("tool"), str)
+        }  # fmt: skip
+        keys = lambda name: (
+            [x for x in d.get(name, []) if isinstance(x, str)] if isinstance(d.get(name), list) else []
+        )
         return {
-            "asked": list(d.get("asked", []))[-60:],
-            "done": list(d.get("done", []))[-60:],
-            "qs": dict(list(qs.items())[-60:]),
+            "asked": keys("asked")[-60:],
+            "done": keys("done")[-60:],
+            "qs": dict(list(good.items())[-60:]),
         }
 
     def _save(self) -> None:
@@ -109,10 +117,15 @@ class Permissions:
                 and rec.get("mode") == "oneshot"
                 and adapterdata.permission_retry(self.root, rec.get("agent") or "")
             ):
-                code, _, _ = self._run(
+                code, _, err = self._run(
                     ["run", "start", tid, f"--allow={rec['tool']}", "--by", "focus", "--json"]
                 )
                 restarted = code == 0
+                if restarted:
+                    self.failed.pop(tid, None)
+                else:
+                    first = (err.strip().splitlines() or [""])[0].removeprefix("Refused: ")[:200]
+                    self.failed[tid] = first or "The run could not be started again."
         if changed:
             try:
                 self._save()
