@@ -284,6 +284,13 @@ def a13(e):
         st2, v = get("/api/addon/automation")
         check(st2 == 200 and v["state"] == "ok" and v["view"]["schema"] == "orch.addon-view/1", f"automation view: {v}")
         check(get("/api/addon/nope")[0] == 404, "unknown add-on tab not 404")
+        # the dashboard buttons: addon.act run / toggle / delete reach the real automation CLI and are accepted
+        tid = e.orchj(ws, "ticket", "new", "A13 repeating")["id"]
+        e.orch(ws, "automation", "repeat", tid, "0 7 * * 1")
+        for verb in ("toggle", "run", "delete"):
+            r = http("POST", base + "/api/act", headers={"Origin": base, "Content-Type": "application/json"},
+                     body={"op": "addon.act", "args": {"addon": "automation", "verb": verb, "target": tid}})
+            check(r.status == 200, f"addon.act automation {verb}: {r.status} {r.body[:200]!r}")
     check(before_help != _help(e, ws), "help unchanged")
 
 

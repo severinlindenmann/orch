@@ -1,4 +1,4 @@
-"""`orch automation act <verb> <ticket>`: what the dashboard's switch and buttons do (one verb, one ticket).
+"""`orch automation act <verb> <ticket> [--by <actor>]`: what the dashboard's switch and buttons do (one verb, one ticket).
 
 Delete removes the whole ext.automation entry (orch ext unset) and keeps the ticket and its history: tickets are never deleted here.
 """
@@ -17,7 +17,7 @@ class Bad(Exception):
     """The request is not allowed or could not be done (plain words)."""
 
 
-def act(root: Path, verb: str, target: str) -> dict:
+def act(root: Path, verb: str, target: str, by: str | None = None) -> dict:
     if verb not in VERBS:
         raise Bad("That is not something automation can do.")
     if not isinstance(target, str) or not TID.fullmatch(target):
@@ -27,7 +27,7 @@ def act(root: Path, verb: str, target: str) -> dict:
         raise Bad(f"There is no ticket {target}.")
     sched = (t.get("ext") or {}).get("automation") or {}
     if verb == "run":
-        r = orchcli.run_start(root, target)
+        r = orchcli.run_start(root, target, by=by)
         if r["result"] == "failed":
             raise Bad(r["reason"])
         return {"ticket": target, "result": r["result"],
@@ -35,10 +35,10 @@ def act(root: Path, verb: str, target: str) -> dict:
     if not sched:
         raise Bad("This ticket has no automation to change.")
     if verb == "delete":
-        if not orchcli.ext_unset(root, t):
+        if not orchcli.ext_unset(root, t, by=by):
             raise Bad("The ticket changed or the change was not accepted. Try again.")
         return {"ticket": target, "deleted": True, "text": "Removed. The ticket stays."}
     paused = (verb == "off") if verb != "toggle" else sched.get("paused") is not True
-    if not orchcli.set_ext(root, t, paused=paused):
+    if not orchcli.set_ext(root, t, by=by, paused=paused):
         raise Bad("The ticket changed or the change was not accepted. Try again.")
     return {"ticket": target, "paused": paused, "text": "Switched off." if paused else "Switched on."}

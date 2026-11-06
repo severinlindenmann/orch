@@ -11,9 +11,11 @@ BY = "agent:automation"
 ID_RE = re.compile(r"^t_[a-z0-9]{6,16}$")
 
 
-def call(root: Path, *args: str, by: bool = True):
-    """Run `orch <args> --json`. Returns parsed JSON, or None on failure / no JSON."""
-    cmd = [os.environ.get("ORCH_BIN") or "orch", *args, "--json"] + (["--by", BY] if by else [])
+def call(root: Path, *args: str, by: bool | str = True):
+    """Run `orch <args> --json`. Returns parsed JSON, or None on failure / no JSON.
+    `by`: True = the scheduler (BY), a string = that actor (a person pressing a dashboard button), False = no --by."""
+    actor = by if isinstance(by, str) else BY
+    cmd = [os.environ.get("ORCH_BIN") or "orch", *args, "--json"] + (["--by", actor] if by else [])
     try:
         p = subprocess.run(cmd, check=False, cwd=root, capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.TimeoutExpired):
@@ -54,7 +56,7 @@ def is_active(root: Path) -> bool | None:
     return addon_on(root, "automation")
 
 
-def set_ext(root: Path, t: dict, remove: tuple = (), **changes) -> bool:
+def set_ext(root: Path, t: dict, remove: tuple = (), by: str | None = None, **changes) -> bool:
     """Write ext.automation (merged with what is there); checked against the ticket revision when it has one."""
     cur = dict((t.get("ext") or {}).get("automation") or {})
     cur.update(changes)
@@ -63,25 +65,25 @@ def set_ext(root: Path, t: dict, remove: tuple = (), **changes) -> bool:
     args = ["ext", "set", t["id"], "automation", json.dumps(cur)]
     if isinstance(t.get("revision"), int):
         args += ["--if-revision", str(t["revision"])]
-    return call(root, *args) is not None
+    return call(root, *args, by=by or True) is not None
 
 
-def ext_unset(root: Path, t: dict) -> bool:
+def ext_unset(root: Path, t: dict, by: str | None = None) -> bool:
     """`orch ext unset <id> automation`: remove the whole entry; checked against the ticket revision when it has one."""
     args = ["ext", "unset", t["id"], "automation"]
     if isinstance(t.get("revision"), int):
         args += ["--if-revision", str(t["revision"])]
-    return call(root, *args) is not None
+    return call(root, *args, by=by or True) is not None
 
 
 AGENT_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 
 
-def run_start(root: Path, tid: str, text: str | None = None, agent: str | None = None) -> dict:
+def run_start(root: Path, tid: str, text: str | None = None, agent: str | None = None, by: str | None = None) -> dict:
     """`orch run start <tid> --by agent:automation`: all of resume / fresh / busy is decided inside core.
     Returns {"result": "started", "run", "log"} | {"result": "pending"} (ticket busy, text queued)
     | {"result": "failed", "reason": plain words}."""
-    cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--mode", "oneshot", "--json", "--by", BY]
+    cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--mode", "oneshot", "--json", "--by", by or BY]
     if agent and AGENT_RE.match(agent):  # only a name; core refuses one it does not know
         cmd += ["--agent", agent]
     if text:
