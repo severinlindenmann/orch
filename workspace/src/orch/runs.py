@@ -873,6 +873,10 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         return 127
     current["proc"] = proc
     set_process_fields(root, tid, run, agent_pid=proc.pid, agent_pid_started=pid_started(proc.pid))
+    with contextlib.suppress(Exception):  # the tool's first-run screens: passed here, never blocks the run
+        from orch import runs_live
+
+        runs_live.watch_start(root, tid, run, name, proc)
     rc = proc.wait()
     if new_session and rc == 0:
         tickets.record_session(root, tid, name, new_session, host())
