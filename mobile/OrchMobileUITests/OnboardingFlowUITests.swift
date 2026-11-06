@@ -33,6 +33,8 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(room.waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["ticket-ws_pilatus001|t_q3sum1"].exists, "topics live one level down, in the workspace")
         room.tap()
+        XCTAssertTrue(app.buttons["segment-done"].waitForExistence(timeout: 10))
+        app.buttons["segment-done"].tap()
         XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_q3sum1"].waitForExistence(timeout: 10), "topic row with its key")
         app.buttons["general-ws_pilatus001"].tap()
         let answer = app.buttons["answer-TIMESTAMP"]
