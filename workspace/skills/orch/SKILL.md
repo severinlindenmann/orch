@@ -5,6 +5,8 @@ description: Track every piece of work as an orch ticket with a step list, proof
 # orch: tickets with proof
 
 One ticket per piece of work, in `.orch/tickets/<id>.json`. Every command takes `--json`.
+Each ticket has an id (`t_7k3f9q`) and a short key people use (`DM1-12`). Wherever `<id>` is written below, the key
+works too, any case: `orch check add DM1-12 "<step>"`. Say the key when you talk to a person.
 Exit code 0 = ok, 2 = refused (the reason is in plain words). Works on local files; no server needed.
 
 ## When to use

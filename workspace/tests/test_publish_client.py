@@ -87,7 +87,9 @@ def test_file_share_roundtrip_and_link(proj, run, pub):
     assert b"hello report" not in blob and blob[:4] == b"OPF1"
     header, content = publish.decrypt(blob, publish.b64u_decode(res["link"].split("#k=")[1]))
     assert (header["name"], header["size"], content) == ("report.txt", 12, b"hello report")
-    assert any(c[1] == "/v1/files?days=3" for c in pub.calls)
+    assert any(c[1] == "/v1/files?days=3&size=12" for c in pub.calls)
+    assert res["size"] == 12
+    assert "12 B" in run("publish", "list")[1]
     assert json.loads((proj / ".orch/secrets/files/keys.json").read_text())[res["id"]]
 
 
@@ -424,17 +426,21 @@ def test_replace_swaps_content_and_keeps_the_link(proj, run, pub):
     (proj / "b.txt").write_text("two two")
 
     def put(m, q, body):
+        assert q == {"size": ["7"]}
         pub.files[m.group(1)] = body
+        pub.file_sizes[m.group(1)] = int(q["size"][0])
         return 200, {
             "id": m.group(1),
             "url": f"{pub.url}/f/{m.group(1)}",
-            "size": len(body),
+            "size": pub.file_sizes[m.group(1)],
             "expires_at": None,
         }
 
     pub.route("PUT", r"/v1/files/(f_[a-z0-9]+)", put)
     again = json.loads(run("publish", "file", "b.txt", "--replace", first["id"], "--note", "v2", "--json")[1])
     assert again["link"] == first["link"] and again["name"] == "b.txt"
+    assert again["size"] == 7
+    assert any(c[0] == "PUT" and c[1] == f"/v1/files/{first['id']}?size=7" for c in pub.calls)
     key = publish.b64u_decode(first["link"].split("#k=")[1])
     header, content = publish.decrypt(pub.files[first["id"]], key)
     assert content == b"two two" and header["note"] == "v2"
@@ -469,7 +475,7 @@ def test_list_follows_paging_beyond_100_files(proj, run, pub):
 
 def test_view_json_lists_files_without_any_key(proj, run, pub):
     connect(run, pub)
-    (proj / "a.txt").write_text("x")
+    (proj / "a.txt").write_text("hello report")
     link = json.loads(run("publish", "file", "a.txt", "--json")[1])["link"]
     key = link.split("#k=")[1]
     code, out, _ = run("publish", "view", "--json")
@@ -479,6 +485,7 @@ def test_view_json_lists_files_without_any_key(proj, run, pub):
     assert (
         files["items"][0]["title"] == "a.txt" and "link" not in files["items"][0]
     )  # http test server: no https link
+    assert "12 B" in files["items"][0]["subtitle"]
     assert "orch publish" in v["notice"]
 
 

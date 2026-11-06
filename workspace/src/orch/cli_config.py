@@ -16,7 +16,7 @@ from pathlib import Path
 from orch import adapters, config
 from orch.errors import Refused
 
-KEYS = ("workspace.agent",)
+KEYS = ("workspace.agent", "workspace.code")
 TEST_PROMPT = "Reply with the word ok"
 TEST_TIMEOUT = 60  # seconds
 
@@ -168,11 +168,18 @@ def _test(args, root: Path) -> int:
 
 def _config(args, root: Path) -> None:
     if args.sub == "get":
-        cur = {"workspace.agent": config.agent_name(root)}
+        cur = {"workspace.agent": config.agent_name(root), "workspace.code": config.workspace_code(root)}
         if args.key:
             _out(args, {args.key: cur[args.key]}, cur[args.key] or "(not set)")
         else:
             _out(args, cur, "\n".join(f"{k} = {v}" for k, v in cur.items() if v) or "Nothing is set.")
+    elif args.sub == "set" and args.key == "workspace.code":
+        code = config.set_code(root, args.value)
+        _out(
+            args,
+            {"workspace.code": code},
+            f"Saved: workspace.code = {code}. New tickets get {code}-<n>; existing keys stay as they are.",
+        )
     elif args.sub == "set":
         name = _choose(root, args.value)
         _out(

@@ -325,6 +325,13 @@ def _write_outbox(root: Path, mid: str, raw: bytes) -> Path:
     return p
 
 
+def _own_key(root: Path, tid: str) -> str | None:
+    try:
+        return tickets.load(root, tid).get("key")
+    except (Refused, OSError, ValueError):
+        return None
+
+
 def _message(
     root: Path, to: str, type_: str, body: dict, ticket: str | None = None, reply_to: str | None = None
 ) -> dict:
@@ -341,6 +348,9 @@ def _message(
     }
     if ticket:
         msg["ticket"] = ticket
+        key = _own_key(root, ticket) if type_ != "answer" else None  # an answer's ticket is the asker's
+        if key:
+            msg["key"] = key  # display key next to the id (relay-api.md): phones show it
     if reply_to:
         msg["reply_to"] = reply_to
     raw = json.dumps(msg).encode("utf-8")

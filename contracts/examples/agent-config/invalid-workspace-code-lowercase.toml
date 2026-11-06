@@ -1,0 +1,3 @@
+[workspace]
+agent = "my-agent"
+code = "mec"
