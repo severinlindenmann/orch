@@ -9,6 +9,7 @@ skill = "skills/orch-focus"
 agents_block = "skills/orch-focus/AGENTS-block.md"
 background = true                           # orch focus start|stop|status --json (orch start / orch stop)
 runs_agents = true                          # starts and stops runs only through `orch run start|send|stop`
+ticket_ext = "ext.schema.json"             # byte-identical copy of contracts/addons/focus/ext.schema.json
 needs = true                                # orch focus needs --json
 
 [dashboard]
@@ -19,3 +20,8 @@ order = 20
 [page]
 path = "/"
 label = "Open Focus"
+
+[[ticket_view]]
+field = "page"
+label = "Live page"
+format = "open-page"

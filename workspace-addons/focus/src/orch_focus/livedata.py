@@ -17,7 +17,9 @@ from . import actions, runfiles
 
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 MAX_RECORD = 64 * 1024
-STALE_SECONDS = 30 * 60
+STALE_SECONDS = (
+    30 * 60
+)  # same rule as core: a claim without a pid is 'maybe stale' after 30 min without an orch write
 
 
 def _time(s) -> float | None:
