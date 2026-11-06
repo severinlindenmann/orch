@@ -11,10 +11,12 @@ from pathlib import Path
 from .data import run_orch
 
 TID = re.compile(r"t_[a-z0-9]{6,16}")
-KINDS = ("artifacts", "evidence")
+KINDS = ("artifacts", "evidence", "files")  # files: what a phone sent to the ticket
 MAX_BYTES = 2 * 1024 * 1024
+MAX_PHONE = 25 * 1024 * 1024  # a voice note or photo from the phone
 MAX_NAME = 240
 TEXT = {"txt", "md", "csv", "tsv", "json", "log", "html", "htm", "xml", "yml", "yaml", "toml", "py", "js", "css", "ini"}
+AUDIO = {"m4a": "audio/mp4", "mp4": "audio/mp4", "aac": "audio/aac", "mp3": "audio/mpeg", "wav": "audio/wav", "caf": "audio/x-caf"}
 IMAGES = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
 
 
@@ -48,10 +50,11 @@ def read_file(root: Path, tid: str, kind: str, name, download: bool = False) -> 
         return nope
     last = name.rsplit("/", 1)[-1]
     ext = last.rsplit(".", 1)[-1].lower() if "." in last else ""
-    if not download and ext not in TEXT and ext not in IMAGES:
+    phone = kind == "files"
+    if not download and ext not in TEXT and ext not in IMAGES and not (phone and ext in AUDIO):
         return nope
     try:
-        data = safefile.read_ticket_file(root, tid, kind, name, MAX_BYTES)
+        data = safefile.read_ticket_file(root, tid, kind, name, MAX_PHONE if phone else MAX_BYTES)
     except safefile.TooLarge:
         return 413, b"That file is too large to show.", "text/plain", {}
     if data is None:
@@ -59,5 +62,7 @@ def read_file(root: Path, tid: str, kind: str, name, download: bool = False) -> 
     if download:
         safe = re.sub(r"[^A-Za-z0-9._-]", "_", last)[:100] or "file"
         return 200, data, "application/octet-stream", {"Content-Disposition": f'attachment; filename="{safe}"'}
+    if phone and ext in AUDIO:
+        return 200, data, AUDIO[ext], {}
     ctype = IMAGES.get(ext) or "text/plain; charset=utf-8"  # a page or a picture format that can run code is shown as text
     return 200, data, ctype, {}
