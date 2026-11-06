@@ -72,3 +72,16 @@ def test_admin_made_folder_gives_a_plain_message(tmp_path, monkeypatch):
         msg = str(e.value)
         assert "made by orch running as administrator" in msg and ".orch\\run\\x" in msg
         assert "PermissionError" not in msg
+
+
+def test_admin_made_folder_is_reported_when_it_is_opened(tmp_path, monkeypatch):
+    monkeypatch.setattr(runfiles, "WINDOWS", True)
+    monkeypatch.setattr(runfiles, "grant_user", lambda d: None)
+    (tmp_path / ".orch" / "run" / "x").mkdir(parents=True)
+
+    def deny(*a, **k):
+        raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(runfiles.os, "scandir", deny)
+    with pytest.raises(RuntimeError, match=r"made by orch running as administrator.*\.orch\\run\\x"):
+        runfiles.run_dir(tmp_path, "x")

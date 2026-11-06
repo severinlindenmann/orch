@@ -22,8 +22,13 @@ def run_dir(root: Path, name: str) -> Path:
     for p in (orch, run, d):
         if p.is_symlink():
             raise RuntimeError(f"{p} is a symbolic link; orch does not use it. Remove it and try again.")
-        if p is not orch:
-            mkdir_private(p)
+        if p is not orch and not mkdir_private(p) and WINDOWS and p is d:
+            try:
+                os.scandir(
+                    p
+                ).close()  # an admin-made folder: the same user without elevation can not even list it
+            except PermissionError as e:
+                raise _denied(p, e) from e
         if not p.is_dir():
             raise RuntimeError(f"{p} is not a folder.")
     return d
@@ -99,12 +104,12 @@ def mkdir_private(p: Path) -> bool:
     return True
 
 
-def _denied(p: Path, e: PermissionError) -> RuntimeError:
+def _denied(d: Path, e: OSError) -> RuntimeError:
     if not WINDOWS:
-        return RuntimeError(f"{p.parent} is not writable: {e}")
+        return RuntimeError(f"{d} is not writable: {e}")
     return RuntimeError(
-        f"{p.parent} was made by orch running as administrator. Run the same command once in an administrator "
-        f"window, or delete the .orch\\run\\{p.parent.name} folder there."
+        f"{d} was made by orch running as administrator. Run the same command once in an administrator "
+        f"window, or delete the .orch\\run\\{d.name} folder there."
     )
 
 
@@ -131,7 +136,7 @@ def write_json(p: Path, data: dict) -> None:
     try:
         fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
     except PermissionError as e:
-        raise _denied(p, e) from e
+        raise _denied(p.parent, e) from e
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f)
     os.replace(tmp, p)
@@ -139,12 +144,12 @@ def write_json(p: Path, data: dict) -> None:
 
 def open_append(p: Path):
     """Append to a log file; refuses a symlink."""
-    if p.is_symlink():
-        raise RuntimeError(f"{p} is a symbolic link; orch does not write to it.")
     try:
+        if p.is_symlink():
+            raise RuntimeError(f"{p} is a symbolic link; orch does not write to it.")
         fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND | NOFOLLOW, 0o600)
     except PermissionError as e:
-        raise _denied(p, e) from e
+        raise _denied(p.parent, e) from e
     return os.fdopen(fd, "a", encoding="utf-8")
 
 
