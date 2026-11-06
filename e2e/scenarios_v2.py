@@ -1044,7 +1044,7 @@ def s2_dashboard_start_makes_tasks(e):
     w.wait_done(tid, 40)
 
 
-OLD_REF = "142ec615"  # the last orch before the add-on registry fixes of 6 Nov: add-ons dashboard + scheduler
+OLD_REF = "142ec615ba554aae0f29efde8d9fcdcde794d1f8"  # the last orch before the add-on registry fixes of 6 Nov: add-ons dashboard + scheduler
 
 
 @scenario("V2-U1", slow=True, local_only=True)
