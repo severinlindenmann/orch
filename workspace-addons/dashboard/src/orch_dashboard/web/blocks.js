@@ -9,6 +9,7 @@ const OrchBlocks = (() => {
   const TICKET = /^t_[a-z0-9]{6,16}$/;
   const HTTPS = /^https:\/\/[^\s<>"'`]+$/;
   const arr = v => Array.isArray(v) ? v : [];
+  const VERB = /^[a-z][a-z-]{0,20}$/;
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -60,6 +61,68 @@ const OrchBlocks = (() => {
     return td;
   }
 
+  // An action is only drawn when it is the one generic add-on op with a plain verb and a ticket id as target.
+  // The page (not this file) turns the data attributes into a request: the DOM carries no code.
+  function actionAttrs(node, a, label) {
+    const args = a && a.args, ok = a && a.op === 'addon.act' && args && VERB.test(String(args.verb)) && TICKET.test(String(args.target));
+    if (!ok) return false;
+    node.dataset.addonAct = 'true'; node.dataset.verb = String(args.verb); node.dataset.target = String(args.target);
+    if (label) node.dataset.label = label;
+    return true;
+  }
+  function toggleEl(t) {
+    const b = el('button', 'switch'); b.type = 'button';
+    b.setAttribute('role', 'switch'); b.setAttribute('aria-checked', t.on ? 'true' : 'false'); b.setAttribute('aria-label', String(t.label));
+    return actionAttrs(b, t.action, t.label) ? b : null;
+  }
+  function detailList(rows) {
+    const dl = el('dl', 'acc-detail');
+    for (const r of rows) {
+      const d = el('div'), dt = el('dt', '', r.label), dd = el('dd', r.tone ? 't-' + tone(r.tone) : '');
+      if (arr(r.lines).length) arr(r.lines).forEach(l => dd.append(el('p', 'acc-line', l)));
+      else dd.append(String(r.value ?? ''));  // Copy only exists for the value that is shown
+      if (r.copy && r.value && !arr(r.lines).length) {
+        const c = el('button', 'btn ghost xs', 'Copy'); c.type = 'button'; c.dataset.copy = String(r.value);
+        c.setAttribute('aria-label', 'Copy ' + r.label); dd.append(' ', c);
+      }
+      d.append(dt, dd); dl.append(d);
+    }
+    return dl;
+  }
+  function ticketLinks(items) {
+    const box = el('div', 'acc-tickets');
+    for (const t of items) {
+      const a = el('a', 'acc-ticket'); a.href = '#ticket/' + encodeURIComponent(t.id);
+      a.append(el('span', 'li-title', t.title));
+      if (t.key) a.append(el('span', 'mono', t.key));
+      if (t.status) a.append(chip(t.status));
+      box.append(a);
+    }
+    return box;
+  }
+  function accordionItem(it, key) {
+    const li = el('li', 'acc-li'), sw = it.toggle ? toggleEl(it.toggle) : null;
+    const buttons = arr(it.actions).map(a => {
+      const b = el('button', 'btn outline sm' + (a.tone === 'bad' ? ' danger' : ''), a.label); b.type = 'button';
+      if (a.confirm) b.dataset.confirm = String(a.confirm);
+      return actionAttrs(b, a.action, a.label) ? b : null;
+    }).filter(Boolean);
+    const expandable = arr(it.detail).length || arr(it.tickets).length || buttons.length;
+    const main = el('span', 'li-main'); main.append(el('span', 'li-title', it.title));
+    if (it.subtitle) main.append(el('small', 'li-sub', it.subtitle));
+    if (arr(it.chips).length) { const c = el('span', 'tags'); c.append(...it.chips.map(chip)); main.append(c); }
+    if (!expandable) { const row = el('div', 'li-row grow'); row.append(toneDot(it.tone), main); li.append(row); if (sw) li.append(sw); return li; }
+    const d = el('details', 'acc grow'); d.dataset.key = key;
+    const sum = el('summary', 'li-row'); sum.append(el('span', 'chev'), toneDot(it.tone), main);
+    const panel = el('div', 'acc-panel');
+    if (arr(it.detail).length) panel.append(detailList(it.detail));
+    if (arr(it.tickets).length) panel.append(ticketLinks(it.tickets));
+    if (buttons.length) { const row = el('div', 'row acc-actions'); row.append(...buttons); panel.append(row); }
+    d.append(sum, panel); li.append(d);
+    if (sw) li.append(sw);
+    return li;
+  }
+
   const draw = {
     stat(b) {
       const d = el('div', 'stat t-' + tone(b.tone));
@@ -70,14 +133,17 @@ const OrchBlocks = (() => {
       const s = el('section', 'blk'); s.append(el('h2', 'blk-title', b.title));
       const ul = el('ul', 'blk-list');
       if (!arr(b.items).length) ul.append(el('li', 'blk-none', 'Nothing here.'));
-      for (const it of arr(b.items)) {
+      arr(b.items).forEach((it, n) => {
+        if (arr(it.detail).length || arr(it.tickets).length || arr(it.actions).length || it.toggle) {
+          ul.append(accordionItem(it, 'acc-' + String(b.title).slice(0, 30) + '-' + n)); return;
+        }
         const body = el('span', 'li-main'); body.append(el('span', 'li-title', it.title));
         if (it.subtitle) body.append(el('small', 'li-sub', it.subtitle));
         if (arr(it.chips).length) { const c = el('span', 'tags'); c.append(...it.chips.map(chip)); body.append(c); }
         const li = el('li'), row = linked('li-row t-' + tone(it.tone), it.link, [toneDot(it.tone), body]);
         if (row.tagName === 'A') row.append(icon('chevron', 'go'));
         li.append(row); ul.append(li);
-      }
+      });
       s.append(ul);
       if (b.more > 0) s.append(el('p', 'blk-more', `+${b.more} more`));
       return s;
