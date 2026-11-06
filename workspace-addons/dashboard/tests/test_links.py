@@ -115,3 +115,14 @@ def test_page_renders_links_with_text_only_and_safe_hrefs():
         assert fn in src
     body = src[src.index("// ---- Ticket links and add-on fields"):src.index("function liveLinkFor")]
     assert "innerHTML" not in body and "safeHref" in body and "rel:'noopener noreferrer'" in body
+
+
+def test_a_link_always_shows_its_real_host_and_no_borrowed_site_icon():
+    kinds = data.link_kinds([{"name": "gamma", "active": True, "ticket_links": [
+        {"kind": "gh-like", "label": "GitHub PR", "icon": "github", "match": ["https://github.com/*"]}]}])
+    t = {"links": [{"kind": "gh-like", "url": "https://evil.example/acme/pull/1"}]}
+    data.add_link_views([t], kinds)
+    v = t["links"][0]["view"]
+    assert (v["label"], v["icon"], v["host"]) == ("GitHub PR", "link", "evil.example")
+    src = (data.Path(data.__file__).parent / "web" / "app.js").read_text()
+    assert "const linkSub = (v, url) => clean(v.label) + ' · ' + hostOf(url);" in src

@@ -279,11 +279,13 @@
     return node;
   }
   const linkStatus = status => typeof status === 'string' && KEY.test(status.replace(/ /g, '-')) ? h('span', {className:'st st-' + status.replace(/ /g, '-')}, status) : null;
-  const linkSub = v => v.label === 'Link' ? 'Link · ' + clean(String(v.short || '').split('/')[0]) : clean(v.label);
+  // the real host is always shown next to the type: a link type's label alone could vouch for any address
+  const hostOf = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch (_) { return ''; } };
+  const linkSub = (v, url) => clean(v.label) + ' · ' + hostOf(url);
   function linkRow(t, link, removable) {
     const v = link.view, url = safeHref(link.url);
     return h('div', {className:'lk-row', 'data-key':'link-' + link.url},
-      h('a', {className:'lk', href:url, target:'_blank', rel:'noopener noreferrer', title:url}, linkTile(v), h('span', {className:'t'}, h('b', {}, clean(v.title)), h('span', {}, linkSub(v))), linkStatus(v.status), h('span', {className:'ext'}, iconEl('external'))),
+      h('a', {className:'lk', href:url, target:'_blank', rel:'noopener noreferrer', title:url}, linkTile(v), h('span', {className:'t'}, h('b', {}, clean(v.title)), h('span', {}, linkSub(v, url))), linkStatus(v.status), h('span', {className:'ext'}, iconEl('external'))),
       removable && !snapshot ? h('button', {type:'button', className:'btn ghost icon xs lk-x', title:'Remove this link', 'aria-label':'Remove link ' + clean(v.title), 'data-action':'link-remove', 'data-ticket':t.id, 'data-url':link.url}, iconEl('x')) : null);
   }
   // add-ons that are on, have a refresh act and own a link on this ticket
@@ -427,7 +429,7 @@
       return f.read_only && KEY.test(String(v)) ? linkStatus(String(v)) : h('span', {className:'st'}, f.type === 'date' ? date(v) : fieldText(f, v));
     })).filter(Boolean);
     if (!shown.length && !chips.length) return null;
-    return h('div', {className:'card-links', 'data-key':'card-links'}, shown.map(l => h('span', {className:'lnk', title:clean(l.view.label + ': ' + l.view.title)}, linkTile(l.view, 'sm'), linkStatus(l.view.status))),
+    return h('div', {className:'card-links', 'data-key':'card-links'}, shown.map(l => h('span', {className:'lnk', title:clean(l.view.label + ' · ' + hostOf(l.url) + ': ' + l.view.title)}, linkTile(l.view, 'sm'), linkStatus(l.view.status))),
       rows.length > 2 ? h('span', {className:'more'}, '+' + (rows.length - 2)) : null, chips.length ? h('span', {className:'gap'}) : null, chips);
   }
   function liveLinkFor(t) {
