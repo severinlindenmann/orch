@@ -1194,6 +1194,50 @@ def proof_present(root: Path, ev: dict) -> bool:
     return (root / ref).is_file()
 
 
+# ---------------------------------------------------------------- artifacts
+
+
+def artifacts_path(root: Path, tid: str) -> Path:
+    """.orch/tickets/<id>/artifacts/ : where the files a ticket produces go (next to evidence/)."""
+    load(root, tid)
+    return tickets_dir(root) / tid / "artifacts"
+
+
+def artifacts_dir(root: Path, tid: str) -> Path:
+    """The ticket's artifacts folder, created. A link anywhere on the way is refused."""
+    d = artifacts_path(root, tid)
+    cur = root / ".orch"
+    for part in ("tickets", tid, "artifacts"):
+        cur = cur / part
+        if cur.is_symlink():
+            raise Refused("The artifacts folder of this ticket is a link. orch will not use it.")
+        if cur.exists() and not cur.is_dir():
+            raise Refused("The artifacts folder of this ticket is blocked by a file. Move that file away.")
+        if not cur.exists():
+            cur.mkdir()
+    return d
+
+
+def artifacts_list(root: Path, tid: str) -> list[dict]:
+    """The files in the ticket's artifacts folder (sub-folders included): name, size, mtime, path."""
+    d = artifacts_path(root, tid)
+    out = []
+    if d.is_dir() and not d.is_symlink():
+        for f in sorted(d.rglob("*")):
+            if f.is_symlink() or not f.is_file():
+                continue
+            st = f.stat()
+            out.append(
+                {
+                    "name": f.relative_to(d).as_posix(),
+                    "size": st.st_size,
+                    "mtime": datetime.fromtimestamp(st.st_mtime, UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "path": f.relative_to(root).as_posix(),
+                }
+            )
+    return out
+
+
 # ---------------------------------------------------------------- sub-tickets
 
 

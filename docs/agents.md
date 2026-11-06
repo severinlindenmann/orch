@@ -30,6 +30,19 @@ add `--interactive "my-agent"`.
 You see no live steps, and no helper, usage or permission lines. The tasks it ticks off and the questions it asks still
 show up everywhere, because it talks to orch through the same `orch` commands as every other agent.
 
+## What the agent may do without asking
+
+```sh
+$ orch config get workspace.permissions        # ask, auto (default) or full
+$ orch config set workspace.permissions ask
+```
+
+`ask`: the agent asks before it edits files or runs commands. `auto`: it works on its own and the tool checks risky
+steps. `full`: it never asks. An agent orch has no setting for ignores this. It applies the next time an agent starts.
+
+Live sessions close by themselves after an hour of waiting (or an hour after the ticket is Done); Continue picks the
+conversation up again. Change the hour: `orch config set workspace.live_idle_minutes 120`.
+
 ## Start, watch and stop work
 
 ```sh

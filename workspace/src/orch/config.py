@@ -39,6 +39,48 @@ def agent_name(root: Path) -> str | None:
     return v if isinstance(v, str) and v else None
 
 
+PERMISSION_MODES = ("ask", "auto", "full")
+DEFAULT_PERMISSIONS = "auto"
+DEFAULT_LIVE_IDLE_MINUTES = 60
+
+
+def permissions(root: Path | None) -> str:
+    """[workspace] permissions: ask | auto | full. Anything else (or nothing) is the default, auto."""
+    if root is None:
+        return DEFAULT_PERMISSIONS
+    try:
+        v = (read(root).get("workspace") or {}).get("permissions")
+    except Refused:
+        return DEFAULT_PERMISSIONS
+    return v if v in PERMISSION_MODES else DEFAULT_PERMISSIONS
+
+
+def set_permissions(root: Path, value: str) -> str:
+    if value not in PERMISSION_MODES:
+        raise Refused(f"'{value}' is not a mode. Pick one of: {', '.join(PERMISSION_MODES)}.")
+    set_key(root, "workspace", "permissions", value)
+    return value
+
+
+def live_idle_minutes(root: Path | None) -> int:
+    """[workspace] live_idle_minutes: how long a live session may sit idle (or the ticket stay Done) before
+    it is closed. Default 60; a value that is not a whole number above 0 is the default."""
+    if root is None:
+        return DEFAULT_LIVE_IDLE_MINUTES
+    try:
+        v = (read(root).get("workspace") or {}).get("live_idle_minutes")
+    except Refused:
+        return DEFAULT_LIVE_IDLE_MINUTES
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else DEFAULT_LIVE_IDLE_MINUTES
+
+
+def set_live_idle_minutes(root: Path, value: str) -> int:
+    if not value.isdigit() or not 1 <= int(value) <= 10080:
+        raise Refused("Give a whole number of minutes, from 1 to 10080 (one week).")
+    set_key(root, "workspace", "live_idle_minutes", int(value))
+    return int(value)
+
+
 CODE_RE = re.compile(r"^[A-Z0-9]{2,4}$")
 
 
@@ -83,7 +125,9 @@ def agent_entries(root: Path) -> dict[str, dict]:
     return out
 
 
-def _value(v: str) -> str:
+def _value(v: str | int) -> str:
+    if isinstance(v, int):
+        return str(v)
     # a JSON string is a valid TOML basic string, except that TOML forbids a raw DEL
     return json.dumps(v, ensure_ascii=False).replace("\x7f", "\\u007f")
 
@@ -123,7 +167,7 @@ def _headers(lines: list[str]) -> list[tuple[int, str]]:
     return out
 
 
-def set_key(root: Path, table: str, key: str, value: str) -> None:
+def set_key(root: Path, table: str, key: str, value: str | int) -> None:
     """Set `key = "value"` inside [table], creating the table (and file) when needed."""
     p = path(root)
     p.parent.mkdir(parents=True, exist_ok=True)

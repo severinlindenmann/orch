@@ -5,7 +5,8 @@
 orch owns that tmux server (own socket), so a person's own tmux is never touched. The claim's pid is the pane
 process (the wrapper). Input waits in the pending file and is pasted (bracketed paste, then Enter) only when
 the agent says it is idle: the tool's own hooks call `orch run event --kind idle`, a generic agent calls
-`orch run done`. At most 4 live sessions per workspace. A session idle for an hour is closed on the next
+`orch run done`. At most 4 live sessions per workspace. A session idle (or waiting for a person) for an
+hour (workspace.live_idle_minutes), or on a ticket Done for that long, is closed on the next
 `orch run` call (there is no daemon); its session id stays on the ticket, so the next start continues it.
 Nothing here reads the screen to decide anything, with one exception that only explains: a run still
 "starting" (no hook has fired) is checked against the adapter's live.screens (a question the tool asks
@@ -36,11 +37,15 @@ STARTUP_SECONDS = 60
 KINDS = ("session", "idle", "working", "attention")
 
 
-def idle_seconds() -> float:
+def idle_seconds(root: Path | None = None) -> float:
+    """How long a live session may wait before it is closed: [workspace] live_idle_minutes (default 60).
+    ORCH_RUN_IDLE_SECONDS overrides it (tests)."""
+    from orch import config
+
     try:
-        return float(os.environ.get("ORCH_RUN_IDLE_SECONDS", IDLE_SECONDS))
-    except ValueError:
-        return IDLE_SECONDS
+        return float(os.environ["ORCH_RUN_IDLE_SECONDS"])
+    except (KeyError, ValueError):
+        return config.live_idle_minutes(root) * 60.0
 
 
 def available(adapter: dict) -> bool:
@@ -367,8 +372,11 @@ def stop(root: Path, tid: str) -> bool:
 
 
 def cleanup(root: Path) -> list[str]:
-    """Close live sessions idle for more than an hour (no daemon: this runs on every `orch run` call), and
-    remove tmux sessions whose claim is gone."""
+    """Close live sessions that have waited (idle, or for a person) for more than the limit, or whose ticket
+    has been Done that long (no daemon: this runs on every `orch run` call), and remove tmux sessions whose
+    claim is gone. The limit is [workspace] live_idle_minutes, an hour by default: the tool's prompt cache
+    is gone by then. The session id stays on the ticket, so Continue resumes."""
+    limit = idle_seconds(root)
     closed = []
     for rec in records(root):
         if rec.get("mode") != "live":
@@ -383,18 +391,27 @@ def cleanup(root: Path) -> list[str]:
         if st == "alive" and live.get("state") == "starting":
             check_starting(root, rec)
             continue
-        if st != "alive" or live.get("state") != "idle" or runs.undelivered(root, tid):
+        if st != "alive" or live.get("state") not in ("idle", "attention") or runs.undelivered(root, tid):
             continue
         try:
             idle = time.time() - runs._parse(live["since"])
         except (KeyError, ValueError):
             continue
-        if idle > idle_seconds():
+        if idle > limit or _done_for(root, tid, limit):
             _close(root, rec, interrupt=False)
             closed.append(tid)
     if closed:
         start_waiting(root)
     return closed
+
+
+def _done_for(root: Path, tid: str, limit: float) -> bool:
+    """True when the ticket has been Done for longer than limit seconds."""
+    with contextlib.suppress(Exception):
+        t = tickets.load(root, tid)
+        if t.get("status") == "done":
+            return time.time() - runs._parse(t["updated_at"]) > limit
+    return False
 
 
 def check_starting(root: Path, rec: dict, now: float | None = None) -> str | None:

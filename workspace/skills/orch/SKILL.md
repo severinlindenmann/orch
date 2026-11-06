@@ -38,6 +38,14 @@ See what a run is doing with `orch run status <id>`; a person can send you a mes
 Proof flags: `--command`, `--note`, `--pr`, `--commit`, `--file <path>`, `--url` (one or more). A file is copied
 into the ticket (workspace files, at most 25 MB). Record what really happened. Never invent proof.
 
+**Files you make**
+
+    orch ticket artifacts-dir <id>        # prints the folder (.orch/tickets/<id>/artifacts/) and creates it
+    orch ticket artifacts <id> [--json]   # what is there: name, size, time, path
+
+Write reports, exports, drafts and other output files for a ticket into that folder, unless the person
+explicitly asks for a file in the project. Proof can point at them: `orch check done <id> c1 --file <path>`.
+
 **Change the step list**
 
     orch check edit <id> <c> "<new text>"
