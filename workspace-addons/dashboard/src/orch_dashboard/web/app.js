@@ -235,7 +235,8 @@
     if (kind === 'pr') {
       const number = ev.number || /(?:pull\/|#|^)(\d+)\b/.exec(String(ev.ref || ev.text || ''))?.[1];
       label = number ? 'PR #' + number : 'PR';
-    } else if (kind === 'commit') label = 'Code updated';
+    } else if (kind === 'file') label = window.DashHelpers.fileProofLabel(ev);
+    else if (kind === 'commit') label = 'Code updated';
     else if (kind === 'command') {
       const passed = /(\d+) passed/.exec([ev.text, ev.summary, ev.ref].filter(Boolean).join(' '));
       if (passed) label = passed[1] + ' checks OK';

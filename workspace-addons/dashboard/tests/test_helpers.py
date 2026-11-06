@@ -102,6 +102,14 @@ def test_tree_rows_children_counts_collapse_and_missing_parent():
 
 
 @node
+def test_a_file_proof_shows_its_name_and_size():
+    ev = {"type": "file", "ref": ".orch/tickets/t_x/evidence/hello.txt", "text": "1 KB"}
+    assert call("fileProofLabel", ev) == "hello.txt · 1 KB"
+    assert call("fileProofLabel", {**ev, "title": "Q3 chart"}) == "Q3 chart · 1 KB"
+    assert call("fileProofLabel", {"type": "file", "ref": "out/a.png"}) == "a.png"
+
+
+@node
 def test_proof_mark_you_or_agent_says():
     assert call("proofMark", {"by": "human:Mia"})["label"] == "You"
     assert call("proofMark", {"by": "agent:claude"})["label"] == "Agent says" and call("proofMark", {})["mark"] == "○"
