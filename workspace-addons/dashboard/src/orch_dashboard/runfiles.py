@@ -1,6 +1,6 @@
 """Runtime files of a background process in .orch/run/<name>/ (gitignored). A repo can still force-add files there,
 so nothing read from them is trusted alone: no symlinks are followed, a pid counts only when > 1, and the caller checks
-the process's identity before it signals anything. (Same file in orch_dashboard and orch_scheduler.)"""
+the process's identity before it signals anything. (Same file in orch_automation and orch_focus.)"""
 
 from __future__ import annotations
 
