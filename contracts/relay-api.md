@@ -72,11 +72,15 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 ## Phone app v3 (messenger)
 
 Shapes: `phone-api.schema.json` (requests and responses), `message.schema.json` (the stored text). Test vector:
-`vectors/phone-v3-v1.json`. Every phone write carries a `client_id` (a UUID the phone keeps for that message on every
-retry). One namespace per phone across `send` and `answer`: a `client_id` this phone already used on either route answers
+`vectors/phone-v3-v1.json`. Every phone write from app v3 carries a `client_id` (a UUID the phone keeps for that message on every
+retry). It is optional so the app before v3 keeps working: a write without `client_id` is stored as before, never
+deduplicated, and its response has `client_id: null`. One namespace per phone across `send` and `answer`: a `client_id` this phone already used on either route answers
 `200 {id, client_id, duplicate: true}` with the stored message's id, whatever the new body says (nothing is compared or
 stored), for as long as the relay keeps that message. Rate limits in v3: only redeem (10 a minute per phone) and transcribe
-(30 a minute); there is no send or upload rate limit and no storage cap besides 25 MB per blob.
+(30 a minute); there is no send rate limit. Uploads: max 25 MB per blob, at most 1 GB per phone in 24 h (else
+`429 rate_limited`) and at most 4 uploads in progress at once per relay (others wait); a blob the phone uploaded but
+never named in a sent text is deleted after 24 h. Blob downloads carry `X-Content-Type-Options: nosniff` and
+`Content-Disposition: attachment`.
 
 **Send → stored text.** The relay builds a `text` message `from: ph_…`, `to` from the request, `ticket` and `reply_to` when
 set (not null), and `body` = `{client_id, general: true (only when sent true), text, attachments, voice, location, feedback}`

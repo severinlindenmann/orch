@@ -378,7 +378,7 @@ def build_phone_text(phone, req):
         m["ticket"] = req["ticket"]
     if req.get("reply_to"):
         m["reply_to"] = req["reply_to"]
-    body = {"client_id": req["client_id"]}
+    body = {"client_id": req["client_id"]} if "client_id" in req else {}
     if req.get("general") is True:
         body["general"] = True
     for k in ("text", "attachments", "voice", "location", "feedback"):
