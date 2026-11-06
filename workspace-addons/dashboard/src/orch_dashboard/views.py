@@ -63,6 +63,9 @@ def _action(a):
 
 
 def _detail_ok(d):
+    # Copy copies `value`: a row that shows `lines` instead must not carry a hidden value to copy.
+    if isinstance(d, dict) and d.get("copy") and ("lines" in d or "value" not in d):
+        return False
     return _keys_only(d, ("label", "value", "lines", "tone", "copy")) and _text(d.get("label"), 30) \
         and _opt(d, "value", _text) and _opt(d, "tone", _tone) and _opt(d, "copy", lambda v: isinstance(v, bool)) \
         and _opt(d, "lines", lambda v: isinstance(v, list) and len(v) <= 5 and all(_text(x) for x in v))

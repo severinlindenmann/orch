@@ -80,8 +80,8 @@ const OrchBlocks = (() => {
     for (const r of rows) {
       const d = el('div'), dt = el('dt', '', r.label), dd = el('dd', r.tone ? 't-' + tone(r.tone) : '');
       if (arr(r.lines).length) arr(r.lines).forEach(l => dd.append(el('p', 'acc-line', l)));
-      else dd.append(String(r.value ?? ''));
-      if (r.copy && r.value) {
+      else dd.append(String(r.value ?? ''));  // Copy only exists for the value that is shown
+      if (r.copy && r.value && !arr(r.lines).length) {
         const c = el('button', 'btn ghost xs', 'Copy'); c.type = 'button'; c.dataset.copy = String(r.value);
         c.setAttribute('aria-label', 'Copy ' + r.label); dd.append(' ', c);
       }
