@@ -206,3 +206,14 @@ def test_repeat_takes_a_key_and_list_shows_it(ws):
     add_ticket(ws, "t_rec00003", title="Bank check", key="MEC-9")
     assert repeat(ws, "mec-9", "0 7 * * 1", False)["ticket"] == "t_rec00003"
     assert [r["key"] for r in describe(ws) if r["ticket"] == "t_rec00003"] == ["MEC-9"]
+
+
+def test_what_it_does_is_a_plain_sentence_without_commands(ws):
+    from conftest import T, add_ticket
+
+    from orch_automation.view import _schedules
+    t = add_ticket(ws, "t_rec00002", status="open", summary="Repeats every 10 min. Stop: orch automation repeat DEM-6 --off.",
+                   ext={"automation": {"recurring": True, "cron": "*/10 * * * *", "tz": "UTC"}})
+    rows = _schedules([t], T(10, 0))
+    text = next(d["value"] for d in rows[0]["detail"] if d["label"] == "What it does")
+    assert "--" not in text and "orch " not in text and text.startswith("Starts an agent on this ticket")
