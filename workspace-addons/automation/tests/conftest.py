@@ -57,6 +57,11 @@ elif args[:2] == ["ext", "set"]:
     if "--if-revision" in args and t.get("revision") != int(args[args.index("--if-revision") + 1]):
         sys.exit(2)
     t.setdefault("ext", {{}})[args[3]] = json.loads(args[4]); note(t, "Set ext"); save(t); print("{{}}")
+elif args[:2] == ["ext", "unset"]:
+    t = load(args[2])
+    if "--if-revision" in args and t.get("revision") != int(args[args.index("--if-revision") + 1]):
+        sys.exit(2)
+    t.get("ext", {{}}).pop(args[3], None); note(t, "Unset ext"); save(t); print("{{}}")
 elif args[:2] == ["run", "start"]:
     tid = args[2]
     if (root / "noagent").exists():

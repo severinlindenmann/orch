@@ -32,11 +32,13 @@ def test_run_now_starts_one_run(ws):
 def test_delete_removes_the_schedule_and_keeps_the_ticket(ws):
     sched(ws)
     assert act(ws, "delete", "t_rec00001")["deleted"] is True
-    assert ext(ws, "t_rec00001")["recurring"] is False  # core cannot drop the key; it no longer repeats
+    assert ext(ws, "t_rec00001") is None  # the key is gone
+    assert any(c["args"][:2] == ["ext", "unset"] and "--if-revision" in c["args"] for c in calls(ws))
+    t = json.loads((ws / ".orch" / "tickets" / "t_rec00001.json").read_text())
+    assert t["title"] and t["history"]  # ticket and history stay
     from orch_automation.cli import describe
 
     assert describe(ws) == []
-    assert (ws / ".orch" / "tickets" / "t_rec00001.json").exists()
 
 
 @pytest.mark.parametrize("verb,target", [("rm", "t_rec00001"), ("on", "../x"), ("on", "t_nothere1")])
