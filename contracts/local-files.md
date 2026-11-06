@@ -13,6 +13,9 @@ CLAUDE.md                         gets the line "@AGENTS.md" if it lacks it (Cla
   tickets/<id>.json               one ticket per file (ticket.schema.json). Can be committed
   tickets/<id>/evidence/<name>    proof files copied by `orch check done --file` (workspace files only, max 25 MB each). GITIGNORED.
                                   The ticket keeps the path; on another computer the file shows as "file on another computer"
+  tickets/<id>/artifacts/<name>   files a ticket produces (reports, exports, drafts): the agent writes them here unless the person asks for a
+                                  project file. `orch ticket artifacts-dir <id>` prints and creates the folder, `orch ticket artifacts <id>` lists
+                                  it. NOT gitignored (they are the work); proof (`--file`) may point at them
   secrets/                        GITIGNORED
     publish.json                  {"url": "https://publish.severin.io", "workspace": "ws_…", "token": "orp_…"}
     relay.json                    {"url": "https://relay.severin.io", "workspace": "ws_…", "token": "orn_…"}
@@ -82,6 +85,7 @@ People read a short key, e.g. `DM1-12`; the id (`t_…`) stays the identity ever
 [workspace]
 agent = "my-agent"          # who does the work here: a built-in adapter (agents.json) or an [agents.<name>] entry
 code = "MEC"                # ticket keys MEC-1, MEC-2, … (Ticket keys, above)
+live_idle_minutes = 60      # default 60: a live session idle this long, or on a ticket Done this long, is closed (Continue resumes)
 
 [agents.my-agent]
 adapter = "generic"         # whose rules apply (agent-adapter.schema.json)
@@ -90,6 +94,10 @@ interactive = "my-agent"    # optional: start it interactively, so runs can be l
 prompt = "stdin"            # optional: the task goes on stdin instead of the command line (default "arg")
 ```
 
+- **Permissions**: the mode (ask | auto | full, default auto) is NOT in config.toml (a committed or agent-edited file could raise it; a `permissions` key there is ignored). It is kept per machine in the orch home, `permissions.json`, keyed by the workspace's real path, and set by `orch config set workspace.permissions <mode>`; an agent (`--by agent:*` or an agent tool in the environment) may lower it, never raise it. It is mapped to tool flags only by the adapter's `permissions` data (agents.json). Claude:
+  ask = the tool's default mode (it asks), auto = `--permission-mode auto` when the installed tool's `--help` lists it, else
+  `--permission-mode acceptEdits`, full = `--dangerously-skip-permissions`. The orch `--allowedTools` list stays in every mode.
+  An agent without that data (generic, Codex) ignores the setting. Applies to oneshot and live starts. `orch init` prints the mode.
 - Shape: `agent-adapter.schema.json` `$defs/user_config`. Only `adapter`, `command`, `interactive` and `prompt`; nothing else.
 - `orch init` asks once which agent works here (found adapters + Other). Add-ons never ask.
 - A command from a folder's `.orch/config.toml` is used **without confirmation**. Its first use on a machine prints one

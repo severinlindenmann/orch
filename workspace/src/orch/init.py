@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from orch import skills
+from orch import adapters, skills
 from orch.errors import Refused
 
 
@@ -33,6 +33,7 @@ def init(root: Path, code: str | None = None) -> list[str]:
         "Gitignore   .orch/secrets/ and other local files",
         "Tickets     .orch/tickets/",
         f"Ticket keys {code}-1, {code}-2, ... (change the code: orch config set workspace.code <code>)",
+        adapters.permission_line(root),
         "Your agent can now use tickets.",
         "Your agent will be allowed to work in this folder.",  # consent for a live start's folder trust
     ]

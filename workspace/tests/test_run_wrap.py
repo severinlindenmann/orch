@@ -140,6 +140,7 @@ def _fake_claude(tmp_path, monkeypatch, resume_works):
     f = d / "claude"
     f.write_text(
         "#!/bin/sh\n"
+        '[ "$1" = "--help" ] && { echo "choices: auto"; exit 0; }\n'  # orch asks which modes it knows
         f'echo "$*" | tr "\\n" " " >> {shlex.quote(str(out))}; echo >> {shlex.quote(str(out))}\n'
         + (
             ""
@@ -157,6 +158,7 @@ def _fake_claude(tmp_path, monkeypatch, resume_works):
 def test_resume_is_used_when_there_is_a_session_and_allow_goes_to_argv_only(proj, run, tmp_path, monkeypatch):
     calls = _fake_claude(tmp_path, monkeypatch, resume_works=True)
     config.set_key(proj, "workspace", "agent", "claude")
+    config.set_permissions(proj, "ask")  # no `claude --help` probe in the fake's call log
     tid = _ticket_with_check(proj, run)
     old = "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
     tickets.record_session(proj, tid, "claude", old, runs.host())
@@ -179,6 +181,7 @@ def test_resume_is_used_when_there_is_a_session_and_allow_goes_to_argv_only(proj
 def test_failed_resume_falls_back_to_fresh_once_and_records_the_new_id(proj, run, tmp_path, monkeypatch):
     calls = _fake_claude(tmp_path, monkeypatch, resume_works=False)
     config.set_key(proj, "workspace", "agent", "claude")
+    config.set_permissions(proj, "ask")  # no `claude --help` probe in the fake's call log
     tid = _ticket_with_check(proj, run)
     old = "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
     tickets.record_session(proj, tid, "claude", old, runs.host())
@@ -237,6 +240,7 @@ def test_a_plain_failure_does_not_fall_back_to_fresh(proj, run, tmp_path, monkey
     f.chmod(f.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ["PATH"])
     config.set_key(proj, "workspace", "agent", "claude")
+    config.set_permissions(proj, "ask")  # no `claude --help` probe in the fake's call log
     tid = _ticket_with_check(proj, run)
     old = "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
     tickets.record_session(proj, tid, "claude", old, runs.host())
@@ -249,6 +253,7 @@ def test_a_plain_failure_does_not_fall_back_to_fresh(proj, run, tmp_path, monkey
 def test_the_fresh_fallback_carries_the_pending_input(proj, run, tmp_path, monkeypatch):
     calls = _fake_claude(tmp_path, monkeypatch, resume_works=False)
     config.set_key(proj, "workspace", "agent", "claude")
+    config.set_permissions(proj, "ask")  # no `claude --help` probe in the fake's call log
     tid = _ticket_with_check(proj, run)
     tickets.record_session(proj, tid, "claude", "f88ec2ca-0930-42dd-9d5e-00fbbd59067d", runs.host())
     runs.pending_add(proj, tid, "phone", "message", "Also add October")
@@ -288,6 +293,7 @@ def test_a_failed_step_says_why_in_the_ticket_history(proj, run, tmp_path, monke
     f.chmod(f.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ["PATH"])
     config.set_key(proj, "workspace", "agent", "claude")
+    config.set_permissions(proj, "ask")  # no `claude --help` probe in the fake's call log
     tid = _ticket_with_check(proj, run)
     assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     _wait(proj, tid)
@@ -311,6 +317,7 @@ def test_failure_text_reads_the_tool_error_or_the_last_line():
 def test_a_continued_conversation_counts_as_used_now(proj, run, tmp_path, monkeypatch):
     _fake_claude(tmp_path, monkeypatch, resume_works=True)
     config.set_key(proj, "workspace", "agent", "claude")
+    config.set_permissions(proj, "ask")  # no `claude --help` probe in the fake's call log
     tid = _ticket_with_check(proj, run)
     old = "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
     tickets.record_session(proj, tid, "claude", old, runs.host())
@@ -334,6 +341,7 @@ def test_a_stop_we_asked_for_is_not_logged_as_an_error(proj, run, tmp_path, monk
     f.chmod(f.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ["PATH"])
     config.set_key(proj, "workspace", "agent", "claude")
+    config.set_permissions(proj, "ask")  # no `claude --help` probe in the fake's call log
     tid = _ticket_with_check(proj, run)
     assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     deadline = time.time() + 10

@@ -93,6 +93,7 @@ def _ticket(run, title="Do the thing"):
 
 def _claude_live(proj):
     config.set_key(proj, "workspace", "agent", "claude")
+    config.set_permissions(proj, "ask")  # no flag, and no `claude --help` probe in the fake's call log
 
 
 def _hook(run, *args, stdin=None, monkeypatch=None):
@@ -183,7 +184,7 @@ def test_claude_live_hooks_session_idle_close_and_resume(proj, run, lab, tmp_pat
     _until(lambda: calls.exists() and calls.read_text().strip(), what="claude argv")
     line = calls.read_text().strip()  # the fake joins argv with spaces; the allow rules contain spaces
     argv = line.split()
-    assert argv[0] == "--session-id" and argv[2:5] == ["--permission-mode", "acceptEdits", "--allowedTools"]
+    assert argv[0] == "--session-id" and argv[2] == "--allowedTools" and "--permission-mode" not in argv
     assert "Bash(orch check:*)," in line and line.endswith(f" --settings {hooks}")
     # the tool's SessionStart hook: records the id on the ticket and the prompt goes in
     proc = subprocess.run(
