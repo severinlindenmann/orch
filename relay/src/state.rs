@@ -79,6 +79,8 @@ pub struct App {
     /// Waiting for an upload slot / silence between two chunks, in ms (fields so tests can shorten them).
     pub upload_wait_ms: std::sync::atomic::AtomicU64,
     pub upload_idle_ms: std::sync::atomic::AtomicU64,
+    /// From this age on, an upload must average at least 16 KB/s (tests lower it).
+    pub upload_grace_ms: std::sync::atomic::AtomicU64,
     /// phone id -> bytes reserved by its upload in flight (one at a time per phone)
     pub upload_inflight: Mutex<HashMap<String, i64>>,
     /// phone id -> (window start, calls in window) for `POST /v1/phone/invitations/redeem`
@@ -142,6 +144,7 @@ impl App {
             upload_slots: tokio::sync::Semaphore::new(4),
             upload_wait_ms: 5_000.into(),
             upload_idle_ms: 20_000.into(),
+            upload_grace_ms: 30_000.into(),
             upload_inflight: Mutex::new(HashMap::new()),
             push_budget: Mutex::new(HashMap::new()),
         }))

@@ -767,7 +767,9 @@ pub const MAX_PHONE_BLOB: usize = 25 * 1024 * 1024;
 /// Most bytes one phone may upload in 24 hours: 1 GB.
 const PHONE_UPLOAD_DAY: i64 = 1024 * 1024 * 1024;
 /// Whole body at most this long (else 408).
-const UPLOAD_TOTAL: std::time::Duration = std::time::Duration::from_secs(600);
+/// Slowest average upload speed (bytes per second) allowed after the grace time.
+const MIN_UPLOAD_BPS: f64 = 16.0 * 1024.0;
+const UPLOAD_TOTAL: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// The phone's one upload in flight; freed when the request ends, however it ends.
 struct UploadSlot {
@@ -851,6 +853,17 @@ async fn upload_blob(
             .map_err(|_| timeout())?;
         let Some(chunk) = next else { break };
         let chunk = chunk.map_err(|_| invalid("Upload was interrupted."))?;
+        // too slow on average (below 16 KB/s once past the grace time): free the slot
+        let age = started.elapsed();
+        if age
+            >= std::time::Duration::from_millis(
+                app.upload_grace_ms
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            )
+            && (buf.len() as f64) < MIN_UPLOAD_BPS * age.as_secs_f64()
+        {
+            return Err(timeout());
+        }
         if buf.len() + chunk.len() > MAX_PHONE_BLOB {
             return Err(too_big());
         }

@@ -474,3 +474,21 @@ async fn swiss_german_setting_sends_de_ch_to_transcription() {
     assert_eq!(calls[0].3.as_deref(), Some("de-CH"));
     assert_eq!(calls[1].3.as_deref(), Some("en"));
 }
+
+#[tokio::test]
+async fn refund_never_touches_another_month() {
+    let t = start().await;
+    let ws = t.add_ws("Alpha").await;
+    let p = t.pair_phone(&[&ws]).await;
+    let c = t.app.db.lock().unwrap();
+    let (a, b) = (1_793_404_800, 1_793_404_800 + 86_400); // 31 Oct and 1 Nov 2026 (UTC)
+    speech::add_usage(&c, &p.0, a, 0.5).unwrap(); // reserve in month A
+    speech::add_usage(&c, &p.0, b, 0.2).unwrap(); // month rolls to B (a reservation there)
+    speech::refund_usage(&c, &p.0, &speech::month_of(a), 0.5).unwrap(); // the late refund for A
+    assert!(
+        (speech::used_usd_month(&c, &p.0, b) - 0.2).abs() < 1e-9,
+        "B unchanged"
+    );
+    speech::refund_usage(&c, &p.0, &speech::month_of(b), 0.2).unwrap();
+    assert_eq!(speech::used_usd_month(&c, &p.0, b), 0.0);
+}

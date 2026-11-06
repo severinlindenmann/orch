@@ -208,8 +208,17 @@ pub fn used_usd_month(c: &Connection, phone: &str, at: i64) -> f64 {
     .unwrap_or(0.0)
 }
 
-/// Add `delta` (may be negative: a refund) to the phone's usage of the month of `at`; a new month starts at 0.
-fn add_usage(c: &Connection, phone: &str, at: i64, delta: f64) -> rusqlite::Result<()> {
+/// Give back a reservation, only while the stored month is still the month it was made in.
+pub fn refund_usage(c: &Connection, phone: &str, month: &str, amount: f64) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE phone_settings SET tts_used_usd = MAX(0, tts_used_usd - ?3) WHERE phone = ?1 AND tts_month = ?2",
+        params![phone, month, amount],
+    )?;
+    Ok(())
+}
+
+/// Add `delta` to the phone's usage of the month of `at`; a new month starts at 0.
+pub fn add_usage(c: &Connection, phone: &str, at: i64, delta: f64) -> rusqlite::Result<()> {
     c.execute(
         "INSERT OR IGNORE INTO phone_settings(phone) VALUES(?1)",
         [phone],
@@ -426,7 +435,7 @@ async fn make(
         Err(e) => {
             // refund the reservation
             let c = db.lock().unwrap();
-            let _ = add_usage(&c, phone, at, -cost);
+            let _ = refund_usage(&c, phone, &month_of(at), cost);
             return Err(tts_failed(e));
         }
     };

@@ -1228,3 +1228,33 @@ async fn client_dropping_mid_body_frees_the_slot_and_leaves_no_blob() {
         1
     );
 }
+
+#[tokio::test]
+async fn trickling_upload_below_16kb_per_s_loses_its_slot() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    // the 30 s grace shortened to 0.5 s for the test; ~100 B/s is far below 16 KB/s
+    t.app
+        .upload_grace_ms
+        .store(500, std::sync::atomic::Ordering::Relaxed);
+    let (tx, h) = slow_upload(&t, &p, 100_000);
+    let feeder = tokio::spawn(async move {
+        for _ in 0..100 {
+            if tx.send(vec![1u8; 10]).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    });
+    let (s, v) = h.await.unwrap();
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (408, Some("request_timeout")),
+        "{v}"
+    );
+    feeder.abort();
+    assert!(t.app.upload_inflight.lock().unwrap().is_empty());
+    assert_eq!(t.app.upload_slots.available_permits(), 4);
+    assert_eq!(upload(&t, &p, vec![1u8; 10]).await.0, 201);
+}
