@@ -34,7 +34,7 @@ def test_scheduler_is_not_a_dashboard_concept(ws):
 def test_http_state_and_static(server):
     code, body, _h = get(server + "/api/state")
     assert code == 200 and json.loads(body)["workspace"] == "Pilatus"
-    for p in ("/", "/app.js", "/style.css", "/tokens.css", "/logo.svg", "/favicon.svg", "/apple-touch-icon.png"):
+    for p in ("/", "/app.js", "/style.css", "/kit/tokens.css", "/logo.svg", "/favicon.svg", "/apple-touch-icon.png"):
         assert get(server + p)[0] == 200, p
     assert get(server + "/../../etc/passwd")[0] == 404
     assert get(server + "/.orch/secrets/x.json")[0] == 404

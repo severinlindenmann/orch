@@ -17,6 +17,8 @@ from .views import ViewPuller
 
 DEFAULT_PORT = 8420
 MAX_BODY = 16384
+KIT = ("tokens.css", "components.css", "motion.css", "motion.js", "icons.js", "question-card-state.js",
+       "question-card.js", "evidence.js")
 TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
          ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png"}
 
@@ -82,7 +84,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, b"not found", "text/plain")
             return self._send(200, json.dumps(self.puller.pull(name)).encode(), "application/json")
         name = {"/": "index.html"}.get(path, path.lstrip("/"))
-        if name in ("index.html", "app.js", "blocks.js", "style.css", "tokens.css", "logo.svg", "favicon.svg",
+        if name.startswith("kit/") and name[4:] in KIT:  # the orch_ui kit, copied next to the page (a test keeps it in sync)
+            return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
+        if name in ("index.html", "app.js", "blocks.js", "style.css", "logo.svg", "favicon.svg",
                     "apple-touch-icon.png"):
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         self._send(404, b"not found", "text/plain")

@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -137,3 +138,45 @@ print(open({str(fake_orch.parent / "view.json")!r}).read())
         results = list(ex.map(lambda _: p.pull("scheduler"), range(5)))
     assert all(r["state"] == "ok" for r in results)
     assert counter.read_text() == "x"
+
+
+# ---- P2: the page uses the shared kit and stays calm ----
+from pathlib import Path
+
+WEBDIR = Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "web"
+KITDIR = Path(__file__).resolve().parents[3] / "workspace" / "src" / "orch_ui" / "static"
+
+
+def test_kit_copy_is_in_sync_with_orch_ui():
+    if not KITDIR.is_dir():
+        pytest.skip("workspace kit not next to this add-on")
+    from orch_dashboard.server import KIT
+    for name in KIT:
+        assert (WEBDIR / "kit" / name).read_bytes() == (KITDIR / name).read_bytes(), f"copy kit/{name} again"
+
+
+def test_page_has_no_inline_code_and_loads_the_kit():
+    html = (WEBDIR / "index.html").read_text()
+    assert " style=" not in html and "<style" not in html and "onclick=" not in html
+    assert all(s.strip().startswith("src=") for s in re.findall(r"<script([^>]*)>", html))
+    for name in ("kit/tokens.css", "kit/components.css", "kit/motion.css", "kit/motion.js", "app.js"):
+        assert name in html
+
+
+def test_page_code_names_no_addon_and_has_no_blinking_needs():
+    js = ((WEBDIR / "app.js").read_text() + (WEBDIR / "style.css").read_text()).replace(".focus(", ".(")
+    for name in ("scheduler", "automation", "relay", "focus", "publish", "wiki"):
+        assert not re.search(rf"\b{name}\b", js, re.IGNORECASE), name
+    assert "needs-pulse" not in js and "infinite" not in js
+    # needs-in is only ever applied through orch.needsIn (live arrivals), never as a class on render
+    assert "classList.add('needs-in'" not in js and 'class="needs-in' not in js
+
+
+def test_server_serves_the_kit_files_and_nothing_else_under_kit(server):
+    import urllib.error
+    import urllib.request
+    for name in ("tokens.css", "components.css", "motion.js", "question-card.js"):
+        assert urllib.request.urlopen(f"{server}/kit/{name}").status == 200
+    for bad in ("../app.js", "nothing.css", "x/../tokens.css"):
+        with pytest.raises(urllib.error.HTTPError):
+            urllib.request.urlopen(f"{server}/kit/{bad}")

@@ -3,62 +3,39 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
 <title>orch · Dashboard</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="kit/tokens.css">
+<link rel="stylesheet" href="kit/components.css">
+<link rel="stylesheet" href="kit/motion.css">
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
-<symbol id="i-list" viewBox="0 0 24 24"><rect x="4" y="3.5" width="16" height="17" rx="3"/><path d="M8.5 9h7M8.5 13h7M8.5 17h4"/></symbol>
-<symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
-<symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3.5 13.5 6.2 6.2A2 2 0 0 1 8.1 5h7.8a2 2 0 0 1 1.9 1.2l2.7 7.3V18a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2z"/><path d="M3.5 13.5h4.7a1 1 0 0 1 1 .8 2.9 2.9 0 0 0 5.6 0 1 1 0 0 1 1-.8h4.7"/></symbol>
-<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
-<symbol id="i-x" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/></symbol>
-<symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></symbol>
-<symbol id="i-half" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></symbol>
-<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
-<symbol id="i-question" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.7 9.6a2.4 2.4 0 1 1 3.4 2.2c-.7.4-1.1.9-1.1 1.7M12 16.7v.1"/></symbol>
-<symbol id="i-repeat" viewBox="0 0 24 24"><path d="M5 11V9.5A2.5 2.5 0 0 1 7.5 7H19M16 4l3 3-3 3M19 13v1.5a2.5 2.5 0 0 1-2.5 2.5H5M8 20l-3-3 3-3"/></symbol>
-<symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.8 2.5 5.1 5.6.8-4 4 .9 5.6L12 16.6 7 19.3l1-5.6-4.1-4 5.6-.8z"/></symbol>
-<symbol id="i-commit" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M3.5 12h5M15.5 12h5"/></symbol>
-<symbol id="i-pr" viewBox="0 0 24 24"><circle cx="6.5" cy="6" r="2.2"/><circle cx="6.5" cy="18" r="2.2"/><circle cx="17.5" cy="18" r="2.2"/><path d="M6.5 8.2v7.6M17.5 15.8V10a3 3 0 0 0-3-3H12m2-2.5L11.5 7 14 9.5"/></symbol>
-<symbol id="i-test" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.3 2.4 2.4 4.6-4.9"/></symbol>
-<symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3.5h6.5L18.5 8.5v10a2 2 0 0 1-2 2h-9.5a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2z"/><path d="M13.5 3.5v5h5"/></symbol>
-<symbol id="i-note" viewBox="0 0 24 24"><path d="M5 5.5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2V14l-5 6H7a2 2 0 0 1-2-2z"/><path d="M14 20v-4a2 2 0 0 1 2-2h3M8.5 8.5h7M8.5 12h4"/></symbol>
-<symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14 19 5M13 5h6v6M17 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 5 18.5v-9A1.5 1.5 0 0 1 6.5 8H11"/></symbol>
-<symbol id="i-chat" viewBox="0 0 24 24"><path d="M4.5 6.5a2.5 2.5 0 0 1 2.5-2.5h10a2.5 2.5 0 0 1 2.5 2.5v7a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 4v-4H7a2.5 2.5 0 0 1-2.5-2.5z"/></symbol>
-<symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
-<symbol id="i-spark" viewBox="0 0 24 24"><path d="M4 18v-5M9 18V8M14 18v-8M19 18V5"/></symbol>
-<symbol id="i-hourglass" viewBox="0 0 24 24"><path d="M7 3.5h10M7 20.5h10M8 3.5c0 4 4 5.5 4 8.5s-4 4.5-4 8.5M16 3.5c0 4-4 5.5-4 8.5s4 4.5 4 8.5"/></symbol>
-<symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 18h2"/></symbol>
-<symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 18v-5M9 18V8M14 18v-8M19 18V5"/></symbol>
-<symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l1.5 2h-15zM10 21h4"/></symbol>
-<symbol id="i-book" viewBox="0 0 24 24"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/></symbol>
-<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.5 3.5 5.3 3.5 8.5s-1 6-3.5 8.5c-2.5-2.5-3.5-5.300-3.500-8.5s1-6 3.500-8.5z"/></symbol>
-<symbol id="i-box" viewBox="0 0 24 24"><path d="M12 3.5 20 8v8l-8 4.500L4 16V8zM4 8l8 4.500L20 8M12 12.500v8"/></symbol>
-<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.500 7.500a2 2 0 0 1 2-2H10l2 2.500h6.500a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
-<symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.500" r="3.500"/><path d="M5 20a7 7 0 0 1 14 0"/></symbol>
-<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3 5.500 13.500H12L11 21l7.500-10.500H12z"/></symbol>
-</defs></svg>
+<body class="has-shell">
 <div class="shell">
-<aside>
-<a class="brand" href="#tickets" aria-label="orch dashboard"><img src="logo.svg" alt="orch">orch</a>
-<div class="workspace"><div class="eyebrow">Workspace</div><strong id="workspace-name">Workspace</strong></div>
-<nav class="side-nav" id="side-nav" aria-label="Workspace">
-<a href="#tickets"><svg class="ic" aria-hidden="true"><use href="#i-list"/></svg>Tickets<span class="count" id="ticket-count"></span></a>
-<a href="#inbox" id="inbox-nav"><svg class="ic" aria-hidden="true"><use href="#i-inbox"/></svg>Inbox<span class="count" id="inbox-count"></span></a>
-</nav>
-<div class="sidebar-foot"><span class="dot"></span><span id="workspace-mode">Local workspace</span></div>
+<aside class="sidebar">
+<div class="sidebar-top">
+<a class="brand" href="#home" aria-label="orch dashboard"><img src="logo.svg" alt="">orch</a>
+<button type="button" class="btn ghost mobile-menu" id="menu-toggle" aria-expanded="false" aria-controls="side-nav">Menu</button>
+</div>
+<div class="workspace"><span id="workspace-name">Workspace</span><p class="meta">Workspace</p></div>
+<nav id="side-nav" aria-label="Main"></nav>
+<div class="side-foot"><p class="meta" id="workspace-mode"></p></div>
 </aside>
-<div class="main-shell">
-<header class="topline"><span><span id="top-workspace">Workspace</span><span class="divider">/</span><span id="crumb">Tickets</span></span><span class="owner" title="You can look here but not change anything. Ask your agent to make changes.">View only<span id="updated"></span></span></header>
-<p id="connection" role="status" hidden><span id="connection-text"></span> <button type="button" id="retry" class="retry">Try again</button></p>
-<main id="content" aria-label="Dashboard"><div class="skeleton-page" aria-busy="true" aria-label="Loading"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div></div></main>
+<div>
+<header class="topbar"><span id="crumb">Home</span><button type="button" class="btn primary sm" id="new-ticket" hidden>New ticket</button></header>
+<div id="connection" class="banner attn" role="status" hidden></div>
+<main id="content" class="page" aria-label="Dashboard"></main>
 </div>
 </div>
+<script src="kit/icons.js"></script>
+<script src="kit/motion.js"></script>
+<script src="kit/question-card-state.js"></script>
+<script src="kit/question-card.js"></script>
+<script src="kit/evidence.js"></script>
 <script src="blocks.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
+
