@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -18,6 +19,7 @@ from orch import (
     cli_status,
     net,
     relay,
+    runs_live,
     services,
     tickets,
 )
@@ -49,7 +51,7 @@ def _progress(t: dict) -> str:
 
 def _line(t: dict) -> str:
     bits = [t["status"]] + ([_progress(t)] if _progress(t) else [])
-    return f"{t['title']}  ({', '.join(bits)})  [{t['id']}]"
+    return (f"{t['key']}  " if t.get("key") else "") + f"{t['title']}  ({', '.join(bits)})  [{t['id']}]"
 
 
 def _ago(iso: str) -> str:
@@ -122,7 +124,7 @@ def _lookup(root: Path | None, tid: str) -> dict | None:
 
 def _show(t: dict, root: Path | None = None) -> str:
     open_q = [q for q in t["questions"] if q["answer"] is None]
-    head = f"{t['title']}  [{t['id']}]"
+    head = (f"{t['key']}  " if t.get("key") else "") + f"{t['title']}  [{t['id']}]"
     out = [head]
     if t.get("summary"):
         out.append(t["summary"])
@@ -274,6 +276,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = sub.add_parser("init", parents=[common], help="set up this folder (safe to repeat)")
     x.add_argument("--yes", action="store_true", help="do not ask; take the first agent found")
     x.add_argument("--recommended", action="store_true", help="also turn on the recommended add-ons")
+    x.add_argument("--code", help="code for ticket keys, e.g. MEC gives MEC-1 (default: from the folder)")
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--after-install", action="store_true", help=argparse.SUPPRESS)
@@ -452,7 +455,7 @@ def run(args: argparse.Namespace) -> None:
         root = Path.cwd()
         asking = sys.stdin.isatty() and not args.json
         agent = init_mod.choose_agent(root, args.yes, asking)
-        lines = init_mod.init(root)
+        lines = init_mod.init(root, args.code)
         on = init_mod.recommended(root, args.yes, asking) if args.recommended else []
         _out(
             args,
@@ -492,8 +495,8 @@ def run(args: argparse.Namespace) -> None:
         _out(
             args,
             t,
-            f'Created "{t["title"]}" [{t["id"]}]{part}\n'
-            f'Next: add one checklist item per step: orch check add {t["id"]} "<step>"',
+            f'Created {t["key"]} "{t["title"]}" [{t["id"]}]{part}\n'
+            f'Next: add one checklist item per step: orch check add {t["key"]} "<step>"',
         )
     elif cmd == "ticket" and sub == "tree":
         top = _visible(root, tickets.load(root, args.id))
@@ -621,6 +624,10 @@ def run(args: argparse.Namespace) -> None:
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
         t, q = tickets.answer(root, args.id, args.question, args.answer, who, args.via)
+        with contextlib.suppress(
+            Refused
+        ):  # the answer is saved; a busy run only delays it reaching the agent
+            runs_live.pass_answer(root, t["id"], q, who)
         note = _addon_note(root, q)
         _out(args, q, f"Answered: {q['answer']}" + (f"\n{note}" if note else ""))
     elif cmd == "link":
@@ -647,6 +654,29 @@ def run(args: argparse.Namespace) -> None:
             addons.active_ext_schema(root, args.addon),
         )
         _out(args, t["ext"][args.addon], f"ext.{args.addon} set on {t['id']}")
+
+
+# The arguments that really name a ticket: (command, argument). Only these take a key; an `id` of another
+# command (a publish file or app, a relay message, a webhook) is passed through untouched.
+_TICKET_ARGS = {
+    *{(c, "id") for c in ("ticket", "check", "log", "ask", "answer", "link", "ext", "wait")},
+    ("ticket", "parent"),
+    ("run", "ticket"),
+    ("relay", "ticket"),
+}
+
+
+def _resolve_keys(args: argparse.Namespace, root: Path | None) -> None:
+    """A ticket key (DM1-12, any case) works wherever a ticket id does: turned into the id here, once."""
+    cmd = getattr(args, "cmd", None)
+    if root is None:
+        return
+    for c, name in _TICKET_ARGS:
+        if c == cmd and isinstance(getattr(args, name, None), str):
+            setattr(args, name, tickets.resolve(root, getattr(args, name)))
+    on = getattr(args, "on", None)
+    if cmd in ("ticket", "wait") and isinstance(on, str) and on.startswith("ticket:"):
+        args.on = "ticket:" + tickets.resolve(root, on[len("ticket:") :])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -678,6 +708,7 @@ def main(argv: list[str] | None = None) -> int:
             if argv[0] in addons.active(root) or argv[0] in addons.discover():
                 return addons.dispatch(root, argv[0], argv[1:])
         args = parser.parse_args(argv)
+        _resolve_keys(args, root)
         run(args)
         cli_run.after_command(args, root, want_json)
     except Refused as e:

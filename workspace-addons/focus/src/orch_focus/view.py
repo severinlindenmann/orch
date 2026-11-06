@@ -13,9 +13,10 @@ from . import livedata
 def _item(rec: dict, ticket: dict | None, attention: bool) -> dict:
     live = rec.get("mode") == "live"
     agent = str(rec.get("agent") or "agent")
+    key = (ticket or {}).get("key")
     item = {
-        "title": livedata.title(ticket),
-        "subtitle": f"{agent} · {'live session' if live else 'one run'}",
+        "title": (f"{key} · " if isinstance(key, str) and key else "") + livedata.title(ticket),
+        "subtitle": f"{agent[:1].upper() + agent[1:]} · {'live session' if live else 'one run'}",
         "link": f"addon:t/{rec['ticket']}",
     }
     if attention:

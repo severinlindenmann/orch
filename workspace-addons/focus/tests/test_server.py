@@ -319,3 +319,13 @@ def test_retry_error_shows_on_the_view(server):
     tr = server.RequestHandlerClass.keywords["tracker"]
     tr.perms.failed[TID] = "Busy now."
     assert json.loads(req(server, "GET", f"/api/t/{TID}")[1])["retry_error"] == "Busy now."
+
+
+def test_ticket_key_in_view_and_list(server, ws):
+    p = ws / ".orch" / "tickets" / f"{TID}.json"
+    t = json.loads(p.read_text())
+    t["key"] = "MEC-4"
+    p.write_text(json.dumps(t))
+    assert json.loads(req(server, "GET", f"/api/t/{TID}")[1])["ticket"]["key"] == "MEC-4"
+    rows = json.loads(req(server, "GET", "/api/tickets")[1])
+    assert [r["key"] for r in rows if r["id"] == TID] == ["MEC-4"]

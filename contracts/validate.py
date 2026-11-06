@@ -276,6 +276,42 @@ for case in cvec["cases"]:
     if clean_untrusted(case["in"]) != case["out"]:
         fails.append(f"clean-untrusted vector {case['name']}: output differs")
 
+# ticket_view (mobile chat): schema + the 16 KB cap on body.ticket_view as compact UTF-8 JSON.
+# The relay (relay/tests/ticket_view.rs) and the workspace (workspace/tests/test_ticket_view.py) replay the same cases.
+tvec = json.loads((HERE / "vectors" / "ticket-view-v1.json").read_text())
+for case in tvec["cases"]:
+    m = case["message"]
+    view = m["body"].get("ticket_view")
+    big = view is not None and len(json.dumps(view, separators=(",", ":"), ensure_ascii=False).encode()) > tvec["cap_bytes"]
+    ok = not errors("message", m) and not big
+    if ok != case["ok"]:
+        fails.append(f"ticket-view vector {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
+
+
+# Ticket keys: reference rule for the code suggested from a folder name (workspace/src/orch/config.py
+# suggest_code gives the same) and the key pattern of ticket.schema.json.
+def suggest_code(name):
+    """Initials of the words (up to 4); one word gives its first 3 characters. ASCII letters and digits only,
+    uppercase; fewer than 2 characters are filled up with W, S (empty name -> WS)."""
+    words = re.findall(r"[A-Za-z0-9]+", unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode())
+    code = ("".join(w[0] for w in words[:4]) if len(words) > 1 else (words[0][:3] if words else "")).upper()
+    return (code + "WS")[:2] if len(code) < 2 else code
+
+
+kvec = json.loads((HERE / "vectors" / "ticket-key-v1.json").read_text())
+_ts = json.loads((HERE / "ticket.schema.json").read_text())["$defs"]
+_KEY, _CODE = re.compile(_ts["key"]["pattern"]), re.compile(_ts["code"]["pattern"])
+for name, want in kvec["suggest"]:
+    got = suggest_code(name)
+    if got != want or not _CODE.match(got):
+        fails.append(f"ticket-key vector suggest {name!r}: got {got!r}, want {want!r}")
+for k in kvec["valid_keys"]:
+    if not _KEY.match(k):
+        fails.append(f"ticket-key vector: {k!r} must be a valid key")
+for k in kvec["invalid_keys"]:
+    if _KEY.match(k):
+        fails.append(f"ticket-key vector: {k!r} must be refused")
+
 if fails:
     print("\n".join("FAIL " + f for f in fails))
     sys.exit(1)

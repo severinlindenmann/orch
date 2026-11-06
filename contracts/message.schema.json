@@ -13,6 +13,7 @@
     "type": { "enum": ["text", "file", "question", "answer", "delegate", "start", "allow", "refresh-hint", "webhook"] },
     "created_at": { "type": "string", "format": "date-time", "pattern": "Z$" },
     "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "Ticket in the workspace that owns the thread: question and answer = the asking workspace (the relay copies it from reply_to); text/file/delegate/start = the sender's; phone send and webhook = the receiving workspace's." },
+    "key": { "type": "string", "pattern": "^[A-Z0-9]{2,4}-[1-9][0-9]{0,8}$", "description": "Optional display key of `ticket` (ticket.schema.json key, e.g. DM1-12), set by the workspace that owns that ticket on text/file/question/delegate/start. The relay copies it with `ticket` onto answers and shows it to phones next to `ticket`. For people only; `ticket` stays the reference." },
     "reply_to": { "type": "string", "pattern": "^m_[a-z0-9]{16}$" },
     "body": { "type": "object" }
   },
@@ -50,6 +51,59 @@
             }
           },
           "description": "Optional. A work update about the message's ticket. Old clients ignore it and show the text as before."
+        },
+        "ticket_view": { "$ref": "#/$defs/ticket_view" }
+      },
+      "if": { "required": ["ticket_view"] }, "then": { "required": ["update"] }
+    },
+    "ticket_view": {
+      "type": "object", "additionalProperties": false,
+      "required": ["title", "status", "running", "checklist", "done", "total", "history_tail", "attachments"],
+      "description": "Optional, only next to body.update: a snapshot of the ticket for the phone's ticket chat (title, tasks, the last history lines, proof and links). Written by the sending workspace; the relay stores it with the text, never interprets it, and refuses a text whose ticket_view is over 16384 bytes as compact UTF-8 JSON (422 invalid). The newest one of a ticket wins. Plain text everywhere, never HTML; secrets are removed by the workspace before sending.",
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "status": { "enum": ["open", "active", "waiting", "done", "dropped"] },
+        "agent": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The agent working on it now or last, as a display name (e.g. Claude)." },
+        "summary": { "type": "string", "maxLength": 200 },
+        "running": { "type": "boolean", "description": "An agent runs on the ticket now (the phone says \"Goes in after this step\"), else \"Saved for the next run\"." },
+        "checklist": {
+          "type": "array", "maxItems": 200,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["text", "done"],
+            "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 500 }, "done": { "type": "boolean" } }
+          }
+        },
+        "done": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 },
+        "history_tail": {
+          "type": "array", "maxItems": 30, "description": "The ticket's last history lines (at most 30), oldest first, in plain words.",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["at", "who", "role", "text"],
+            "properties": {
+              "at": { "type": "string", "format": "date-time", "pattern": "Z$" },
+              "who": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Display name: the person's name or the agent's (e.g. Claude)." },
+              "role": { "enum": ["agent", "person"] },
+              "text": { "type": "string", "minLength": 1, "maxLength": 1000 }
+            }
+          }
+        },
+        "attachments": {
+          "type": "array", "maxItems": 50, "description": "Newest first. image/file: proof files the agent marked as result or check, uploaded with POST /v1/blobs (fetched by the phone with GET /v1/phone/blobs/<blob_id>). link: proof URLs, PRs and ticket links.",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["kind", "title", "at"],
+            "properties": {
+              "kind": { "enum": ["image", "link", "file"] },
+              "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "url": { "type": "string", "minLength": 1, "maxLength": 2000, "pattern": "^https?://" },
+              "blob_id": { "type": "string", "pattern": "^b_[a-z0-9]{16}$" },
+              "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+              "size": { "type": "integer", "minimum": 0, "maximum": 104857600 },
+              "at": { "type": "string", "format": "date-time", "pattern": "Z$" }
+            },
+            "if": { "properties": { "kind": { "const": "link" } } },
+            "then": { "required": ["url"], "not": { "required": ["blob_id"] } },
+            "else": { "required": ["blob_id", "name", "size"], "not": { "required": ["url"] } }
+          }
         }
       }
     },

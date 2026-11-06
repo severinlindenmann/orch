@@ -20,6 +20,29 @@ fn schema() -> &'static jsonschema::JSONSchema {
     })
 }
 
+/// The ticket's display key when it follows the contract pattern `^[A-Z0-9]{2,4}-[1-9][0-9]{0,8}$`
+/// (message.schema.json `key`, e.g. DM1-12); anything else is no key.
+pub fn ticket_key(v: &Value) -> Option<&str> {
+    let k = v.as_str()?;
+    let (code, n) = k.split_once('-')?;
+    let code_ok = (2..=4).contains(&code.len())
+        && code
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
+    let n_ok =
+        (1..=9).contains(&n.len()) && n.bytes().all(|b| b.is_ascii_digit()) && !n.starts_with('0');
+    (code_ok && n_ok).then_some(k)
+}
+
+/// A `key` that is not a valid display key is dropped (never stored, listed or pushed); the message itself is kept.
+pub fn clean_ticket_key(msg: &mut Value) {
+    if msg.get("key").is_some() && ticket_key(&msg["key"]).is_none() {
+        if let Some(o) = msg.as_object_mut() {
+            o.remove("key");
+        }
+    }
+}
+
 /// Err(text of the first problems) when `msg` is not a valid orch.msg/1.
 pub fn validate_schema(msg: &Value) -> Result<(), String> {
     match schema().validate(msg) {
@@ -100,6 +123,9 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
         if typ == "file" {
             check_blob(c, sender, &msg)?;
         }
+        if typ == "text" {
+            check_ticket_view(c, sender, &msg)?;
+        }
         return Ok(msg);
     }
     match typ.as_str() {
@@ -119,8 +145,17 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
             if prev.is_some() {
                 return Err(already_answered("This question was already answered."));
             }
-            let (qbody, _) = open_payload(key, &q);
+            let (qbody, qextra) = open_payload(key, &q);
             msg["ticket"] = q.ticket.clone().map(Value::from).unwrap_or(Value::Null);
+            // the asker's display key travels with its ticket id; never trusted from the answerer
+            match qextra.get("key").and_then(ticket_key) {
+                Some(k) => msg["key"] = k.into(),
+                None => {
+                    if let Some(o) = msg.as_object_mut() {
+                        o.remove("key");
+                    }
+                }
+            }
             if let Some(qid) = qbody.get("question_id") {
                 msg["body"]["question_id"] = qid.clone();
             }
@@ -145,6 +180,45 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
         }
         _ => Err(forbidden("Only the relay makes this kind of message.")),
     }
+}
+
+/// Largest `body.ticket_view` the relay keeps: compact UTF-8 JSON bytes (message.schema.json).
+pub const MAX_TICKET_VIEW: usize = 16384;
+
+/// `body.ticket_view` (schema-checked already): at most 16 KB, and every attachment blob is one the sender
+/// uploaded, with its size. A blob of someone else answers exactly like a missing one (no existence oracle).
+fn check_ticket_view(c: &Connection, sender: &str, msg: &Value) -> Res<()> {
+    let view = &msg["body"]["ticket_view"];
+    if view.is_null() {
+        return Ok(());
+    }
+    if serde_json::to_vec(view).map_or(usize::MAX, |v| v.len()) > MAX_TICKET_VIEW {
+        return Err(invalid(
+            "ticket_view is bigger than 16 KB. Send fewer lines or attachments.",
+        ));
+    }
+    for a in view["attachments"].as_array().into_iter().flatten() {
+        let Some(id) = a["blob_id"].as_str() else {
+            continue;
+        };
+        let size: Option<i64> = c
+            .query_row(
+                "SELECT size FROM blobs WHERE id=?1 AND uploader=?2",
+                [id, sender],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match size {
+            Some(n) if Some(n) == a["size"].as_i64() => {}
+            Some(_) => {
+                return Err(invalid(
+                    "An attachment's size does not match the uploaded file.",
+                ))
+            }
+            None => return Err(not_found("Upload the attachment first (POST /v1/blobs).")),
+        }
+    }
+    Ok(())
 }
 
 fn reply_target(c: &Connection, msg: &Value) -> Res<store::Msg> {

@@ -8,9 +8,16 @@ from orch import skills
 from orch.errors import Refused
 
 
-def init(root: Path) -> list[str]:
+def init(root: Path, code: str | None = None) -> list[str]:
     """Returns plain-words lines about what is in place."""
+    from orch import config
+
+    if code is not None:
+        code = config.clean_code(code)  # refused before anything is written
     (root / ".orch" / "tickets").mkdir(parents=True, exist_ok=True)
+    if code is not None or not config.workspace_code(root):
+        code = config.set_code(root, code or config.suggest_code(root.resolve().name))
+    code = config.workspace_code(root)
     src = skills.packaged_skills_dir() / "orch"
     skills.install_skill(root, "orch", src)
     skills.set_block(root, "orch", skills.read_block(src, "orch"))
@@ -25,6 +32,7 @@ def init(root: Path) -> list[str]:
     lines += [
         "Gitignore   .orch/secrets/ and other local files",
         "Tickets     .orch/tickets/",
+        f"Ticket keys {code}-1, {code}-2, ... (change the code: orch config set workspace.code <code>)",
         "Your agent can now use tickets.",
         "Your agent will be allowed to work in this folder.",  # consent for a live start's folder trust
     ]

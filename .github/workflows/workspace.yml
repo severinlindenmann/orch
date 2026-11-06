@@ -1,11 +1,17 @@
 name: workspace
-on: workflow_call
+on:
+  workflow_call:
+    inputs:
+      full:
+        description: "also run macOS and Windows (push to develop/main, PRs into main, manual runs)"
+        type: boolean
+        default: false
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ fromJSON(inputs.full && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:

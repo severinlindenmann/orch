@@ -798,11 +798,26 @@ def test_send_update_sets_body_update_with_ticket_title(proj, run, new_ticket, r
     )  # fmt: skip
     assert code == 0
     sent = rel.sent[0]
+    view = sent["body"].pop("ticket_view")  # a result to a phone brings the snapshot
+    assert view["title"] == "Prepare the Q3 summary"
     assert sent["body"] == {
         "text": "Done, see the file",
         "update": {"kind": "result", "title": "Prepare the Q3 summary"},
     }
     assert sent["ticket"] == tid and sent["reply_to"] == "m_ask0000000000001"
+
+
+def test_send_carries_ticket_key_and_takes_key_as_ticket(proj, run, new_ticket, rel):
+    from orch import tickets
+
+    connect(run, rel)
+    tid = new_ticket("Prepare the Q3 summary")
+    key = tickets.load(proj, tid)["key"]
+    code, _, _ = run(
+        "relay", "send", "ph_iphone0001", "Done", "--ticket", key.lower(), "--update", "result", "--json"
+    )  # fmt: skip
+    assert code == 0
+    assert rel.sent[0]["ticket"] == tid and rel.sent[0]["key"] == key
 
 
 def test_send_update_needs_a_ticket_and_a_known_kind(proj, run, rel):
@@ -1367,3 +1382,60 @@ def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):
     (proj / ".orch/run/relay").symlink_to(elsewhere)
     assert run("relay", "send", "ws_reports001", "second")[0] == 0
     assert list(elsewhere.iterdir()) == []
+
+
+def test_view_without_messages_names_a_workspace_to_try(proj, run, rel):
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports", "description": "Numbers"}]
+    connect(run, rel)
+    v = json.loads(run("relay", "view", "--json")[1])
+    assert v["blocks"][1]["items"][0]["subtitle"] == 'Try: orch relay send Reports "Hello"'
+
+
+@pytest.mark.parametrize(
+    "frm, answered_by, who",
+    [("ph_iphone0001", "human:severin", "human:severin"), (PEER, "agent:Reports", "agent:Reports")],
+)
+def test_relay_answer_reaches_the_agent_that_waits(
+    proj, run, new_ticket, rel, monkeypatch, frm, answered_by, who
+):
+    """A phone's or another workspace's answer goes into the running agent's queue, like orch answer."""
+    from orch import runs
+
+    connect(run, rel)
+    tid = new_ticket()
+    to = "--phone" if frm.startswith("ph_") else None
+    run("ask", tid, "Use CHF?", "--option", "Yes", "--option", "No", *([to] if to else []), "--by", "agent:x")
+    if to:
+        reply = next(m for m in rel.sent if m["type"] == "question")["id"]
+    else:  # a question this workspace sent to Reports
+        reply = run("relay", "send", PEER, "Use CHF?", "--ticket", tid, "--json")[1]
+        reply = json.loads(reply)["id"]
+        from orch import net
+
+        p = net.secrets_dir(proj) / "questions-sent.json"
+        net.write_json(p, {reply: {"ticket": tid, "question_id": "q1", "to": PEER}}, True)
+    monkeypatch.setattr(
+        runs, "read", lambda root, t: {"run": "r1", "ticket": t, "mode": "oneshot", "agent": "x"}
+    )
+    monkeypatch.setattr(runs, "state", lambda rec, at=None: "alive")
+    body = {"question_id": "q1", "answer": "Yes", "answered_by": answered_by}
+    rel.inbox.append(msg("m_answer0000000009", "answer", body, frm=frm, ticket=tid, reply_to=reply))
+    assert "answered q1" in run("relay", "inbox")[1]
+    (item,) = runs.undelivered(proj, tid)
+    assert item["kind"] == "answer" and item["by"] == who
+    assert item["text"] == "Answer to your question q1 (Use CHF?): Yes"
+
+
+def test_relay_answer_without_a_run_queues_nothing(proj, run, new_ticket, rel):
+    from orch import runs
+
+    connect(run, rel)
+    tid = new_ticket()
+    run("ask", tid, "Q?", "--phone", "--by", "agent:x")
+    reply = next(m for m in rel.sent if m["type"] == "question")["id"]
+    body = {"question_id": "q1", "answer": "ok", "answered_by": "human:severin"}
+    rel.inbox.append(
+        msg("m_answer0000000010", "answer", body, frm="ph_iphone0001", ticket=tid, reply_to=reply)
+    )
+    assert "answered q1" in run("relay", "inbox")[1]
+    assert runs.undelivered(proj, tid) == []

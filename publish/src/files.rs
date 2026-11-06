@@ -25,6 +25,13 @@ fn check_blob(blob: &Bytes) -> ApiResult<()> {
     Ok(())
 }
 
+// Old clients omit the original size; invalid claims fall back to the stored blob length.
+fn content_size(blob: &Bytes, original_size: Option<i64>) -> i64 {
+    original_size
+        .filter(|&n| n >= 0 && n <= blob.len() as i64)
+        .unwrap_or(blob.len() as i64)
+}
+
 /// Your own, unexpired file (others and missing -> 404, expired -> 410, never revived).
 pub fn own_live(st: &State, w: &Workspace, id: &str) -> ApiResult<FileRow> {
     let f = db::get_file(&st.db.lock().unwrap(), id)?;
@@ -65,8 +72,15 @@ pub fn extend(st: &State, w: &Workspace, id: &str, days: i64) -> ApiResult<Value
 }
 
 /// PUT: swap the blob behind the same id and expiry (write a temp file, then rename).
-pub fn replace(st: &State, w: &Workspace, id: &str, blob: Bytes) -> ApiResult<Value> {
+pub fn replace(
+    st: &State,
+    w: &Workspace,
+    id: &str,
+    blob: Bytes,
+    original_size: Option<i64>,
+) -> ApiResult<Value> {
     check_blob(&blob)?;
+    let size = content_size(&blob, original_size);
     let f = own_live(st, w, id)?;
     let tmp = blob_path(st, &format!("{id}.{}.tmp", util::rand_id(12)));
     std::fs::write(&tmp, &blob)?;
@@ -81,12 +95,12 @@ pub fn replace(st: &State, w: &Workspace, id: &str, blob: Bytes) -> ApiResult<Va
             let _ = std::fs::remove_file(blob_path(st, id));
             return Err(ApiError::not_found("No such file."));
         }
-        db::update_file_size(&c, id, blob.len() as i64)?;
+        db::update_file_size(&c, id, size)?;
     }
     Ok(json!({
         "id": id,
         "url": format!("{}/f/{}", st.cfg.public_url, id),
-        "size": blob.len(),
+        "size": size,
         "expires_at": f.expires_at,
     }))
 }
@@ -96,14 +110,16 @@ pub fn upload(
     w: &Workspace,
     blob: Bytes,
     expires_at: Option<String>,
+    original_size: Option<i64>,
 ) -> ApiResult<Value> {
     check_blob(&blob)?;
+    let size = content_size(&blob, original_size);
     let id = format!("f_{}", util::rand_id(16));
     std::fs::write(blob_path(st, &id), &blob)?;
     let row = FileRow {
         id: id.clone(),
         workspace: w.id.clone(),
-        size: blob.len() as i64,
+        size,
         created_at: util::now(),
         expires_at: expires_at.clone(),
     };

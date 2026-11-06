@@ -15,4 +15,4 @@ const B = require(process.argv[2]);
 const dump = n => ({tag: n.tag, cls: n.className, text: n._text, attrs: n.attrs, data: n.dataset, kids: n.kids.map(dump)});
 const view = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 const urls = process.argv[4] ? JSON.parse(process.argv[4]) : {};
-console.log(JSON.stringify(dump(B.render(view.blocks, {addonUrl: n => urls[n] || null, self: process.argv[5] || undefined}))));
+console.log(JSON.stringify(dump(B.render(view.blocks, {addonUrl: n => urls[n] || null, self: process.argv[5] || undefined, inApp: process.argv[6] === 'inapp' ? n => p => '#open/' + n + '/' + String(p).replace(/^\/+/, '') : undefined}))));

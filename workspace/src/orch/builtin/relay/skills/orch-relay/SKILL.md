@@ -76,7 +76,8 @@ Read `.agents/skills/orch-relay/workspaces.json` (next to this file). Pick by de
 
 Send `--update ack` when you start on a phone request and `--update result` when it is done
 (`orch relay send phones "<text>" --ticket <id> --update result`); only result, question, failure and stopped reach the
-phone as a push.
+phone as a push. Those updates also show the ticket on the phone: tasks, the last history lines, and proof you marked
+`--role result` or `--role check` (files are copied to the relay; other proof stays here). Never put secrets in them.
 A message from `ph_...` is the owner writing. Answer with `orch relay send ph_... "<text>"`.
 The phone is optional: the same question can also be answered in the terminal or the dashboard.
 {{/phones}}

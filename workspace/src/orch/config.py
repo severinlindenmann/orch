@@ -39,6 +39,39 @@ def agent_name(root: Path) -> str | None:
     return v if isinstance(v, str) and v else None
 
 
+CODE_RE = re.compile(r"^[A-Z0-9]{2,4}$")
+
+
+def suggest_code(name: str) -> str:
+    """Workspace code from a folder name: initials of up to 4 words, one word gives its first 3 characters
+    (reference: contracts/validate.py, vectors/ticket-key-v1.json). "Month-end close" -> MEC."""
+    import unicodedata
+
+    plain = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    words = re.findall(r"[A-Za-z0-9]+", plain)
+    code = ("".join(w[0] for w in words[:4]) if len(words) > 1 else (words[0][:3] if words else "")).upper()
+    return (code + "WS")[:2] if len(code) < 2 else code
+
+
+def clean_code(value: str) -> str:
+    code = value.strip().upper()
+    if not CODE_RE.match(code):
+        raise Refused(f"'{value}' can't be a workspace code. Use 2 to 4 letters or digits, e.g. MEC.")
+    return code
+
+
+def workspace_code(root: Path) -> str | None:
+    """[workspace] code, or None when it is not set (or not valid)."""
+    v = (read(root).get("workspace") or {}).get("code")
+    return v if isinstance(v, str) and CODE_RE.match(v) else None
+
+
+def set_code(root: Path, value: str) -> str:
+    code = clean_code(value)
+    set_key(root, "workspace", "code", code)
+    return code
+
+
 def agent_entries(root: Path) -> dict[str, dict]:
     """The user's [agents.<name>] entries, only well-formed ones."""
     out = {}
