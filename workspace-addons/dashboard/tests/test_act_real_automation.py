@@ -53,7 +53,7 @@ def test_run_toggle_and_delete_are_accepted_by_the_real_automation_cli(ws, tmp_p
             assert code == 200, (verb, text)
         calls = [json.loads(x) for x in (d / "calls.jsonl").read_text().splitlines()]
         inner = [c for c in calls if c[0] in ("ext", "run")]
-        assert [c[:2] for c in inner] == [["ext", "set"], ["run", "start"], ["ext", "unset"]]
+        assert [c[:2] for c in inner] == [["ext", "set"], ["run", "start"], ["ext", "set"], ["ext", "unset"]]  # Run now also records the last run
         assert all(c[c.index("--by") + 1] == me for c in inner), inner  # the person, not the scheduler
     finally:
         srv.shutdown()

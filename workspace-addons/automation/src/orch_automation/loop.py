@@ -35,6 +35,13 @@ def others(t: dict | None) -> int:
     return sum(h.get("by") != orchcli.BY for h in (t or {}).get("history") or [])
 
 
+def record_last_run(root: Path, t: dict, now: datetime, by: str | None = None) -> None:
+    """The one writer of "last run" (ext.automation.last_run, read by the dashboard view and by the due check);
+    used by the scheduled loop and by Run now."""
+    orchcli.set_ext(root, t, by=by, last_run=fmt(now))
+    update_state(root, t["id"], last_run=fmt(now))
+
+
 class Scheduler:
     def __init__(self, root: Path):
         self.root = root
@@ -199,8 +206,7 @@ class Scheduler:
                         run_tid = self.occurrence(t, last_due(cron, now, tz), tz)
                     res = self.start_run(run_tid, f"cron {cron}", now) if run_tid else "failed"
                     if run_tid:  # a sub-ticket that could not be made is tried again next pass
-                        upd["last_run"] = fmt(now)  # also after a failure: the next planned time retries
-                        orchcli.set_ext(self.root, t, last_run=fmt(now))
+                        record_last_run(self.root, t, now)  # also after a failure: the next planned time retries
                     if res == "started":
                         started.append(run_tid)
                 nxt = next_after(cron, now, tz)

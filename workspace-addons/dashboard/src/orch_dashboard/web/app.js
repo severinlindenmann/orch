@@ -1236,7 +1236,7 @@
       else {
         if (!created) {
           const previous = new Set(tickets().map(t => t.id));
-          result = await act('ticket.new', {title:values.title});
+          result = await act('ticket.new', {title:values.title, ...Object.fromEntries(['owner', 'due', 'note'].filter(k => values[k]).map(k => [k, values[k]]))});  // one write, one history line
           if (result.ok) {
             created = tickets().filter(t => t.title === values.title && !previous.has(t.id)).sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0))[0];
             if (!created) {
@@ -1245,12 +1245,9 @@
             }
           }
         } else result = {ok:true};
-        if (result.ok && created && (values.owner || values.due || values.note)) {
-          // The ticket exists: close now, save the optional details behind the scenes.
+        if (result.ok && created) {
           window.orch.toast('Ticket created', 'ok');
           window.orch.close(d);
-          const details = await act('ticket.edit', {ticket:created.id, ...Object.fromEntries(['owner', 'due', 'note'].filter(k => values[k]).map(k => [k, values[k]]))});  // only what was filled in
-          if (!details.ok) window.orch.toast('The ticket was created, but its details were not saved: ' + details.text, 'error');
           await startNow();
           return;
         }
