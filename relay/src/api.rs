@@ -54,6 +54,7 @@ pub fn router(app: AppState) -> Router {
                 .layer(DefaultBodyLimit::max(crate::transcribe::MAX_AUDIO + 1024)),
         )
         .merge(crate::phone::router())
+        .merge(crate::subs::router())
         .merge(icon_routes())
         .fallback(not_found_page)
         .layer(DefaultBodyLimit::max(MAX_JSON))

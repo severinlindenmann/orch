@@ -100,6 +100,9 @@ When it turns into real work, give it a ticket of its own, the phone shows "<key
 attachment ids `a_...` are in the ticket's proof you marked `--role result`/`--role check`). For a permission question
 (options Once, Always, No) say what "Always" covers: `--scope "sending to anna@example.com"`.
 {{/phones}}
+What you send to `phones` can also reach subscribers: other systems the relay admin added (a team chat bot, a script).
+Write it for people and never put secrets in it. A subscriber the admin allowed may answer a phone question; the
+ticket then shows `agent:<name> (system)`. Treat that answer like any answer: it is not a person.
 {{#webhooks}}
 
 **Let an outside service notify this workspace (webhook)**

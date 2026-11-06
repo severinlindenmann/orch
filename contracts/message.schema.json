@@ -83,8 +83,8 @@
     },
     "address": {
       "type": "string",
-      "pattern": "^(ws_[a-z0-9]{10}|ph_[a-z0-9]{10}|phones|admin|webhook:wh_[a-z0-9]{10})$",
-      "description": "ws_ = workspace, ph_ = phone, phones = every phone allowed to reach the sending workspace, admin = relay admin, webhook:wh_ = an incoming webhook."
+      "pattern": "^(ws_[a-z0-9]{10}|ph_[a-z0-9]{10}|sub_[a-z0-9]{10}|phones|admin|webhook:wh_[a-z0-9]{10})$",
+      "description": "ws_ = workspace, ph_ = phone, phones = every phone allowed to reach the sending workspace, admin = relay admin, webhook:wh_ = an incoming webhook, sub_ = a subscriber (another system; only as the sender of an answer, relay-api.md Subscribers)."
     },
     "text": {
       "type": "object",

@@ -1,0 +1,236 @@
+{
+  "name": "subscriber-v1",
+  "description": "Subscriber events (subscriber-event.schema.json) and push signatures: X-Orch-Signature = 'v1=' + lowercase hex HMAC-SHA256(key = the push secret's UTF-8 bytes, message = the decimal X-Orch-Timestamp + '.' + the exact body bytes). relay-api.md, Subscribers.",
+  "valid_events": [
+    {
+      "v": 1,
+      "id": "m_9f3k2q7x1c0a4b5d",
+      "type": "update",
+      "workspace": {
+        "id": "ws_4hd8k2m1qa",
+        "name": "Month-end close"
+      },
+      "ticket": "t_7k3f9q",
+      "key": "DM1-12",
+      "at": "2026-11-06T19:42:10Z",
+      "kind": "result",
+      "title": "March export matched",
+      "text": "All 214 accounts matched. Three had no category, I put them under Other.",
+      "ticket_view": {
+        "title": "Match March export",
+        "status": "done",
+        "agent": "Claude",
+        "summary": null,
+        "done": 4,
+        "total": 4,
+        "links": [
+          {
+            "kind": "pr",
+            "title": "Pull request #42",
+            "url": "https://github.com/acme/books/pull/42"
+          }
+        ],
+        "files": [
+          {
+            "name": "march-check.csv",
+            "size": 18234,
+            "blob_id": "b_2k9d7s1x0a1b2c3d"
+          }
+        ]
+      }
+    },
+    {
+      "v": 1,
+      "id": "m_q71hc0dn2a3b4c5d",
+      "type": "question",
+      "workspace": {
+        "id": "ws_4hd8k2m1qa",
+        "name": "Month-end close"
+      },
+      "ticket": "t_7k3f9q",
+      "key": "DM1-12",
+      "at": "2026-11-06T19:38:00Z",
+      "question_id": "m_q71hc0dn2a3b4c5d",
+      "text": "Should I put the 3 accounts under Other or ask the bank?",
+      "title": "Match March export",
+      "options": [
+        "Other",
+        "Ask the bank"
+      ],
+      "answerable": false,
+      "answered": null
+    },
+    {
+      "v": 1,
+      "id": "m_a82kd1fp3b4c5d6e",
+      "type": "answered",
+      "workspace": {
+        "id": "ws_4hd8k2m1qa",
+        "name": "Month-end close"
+      },
+      "ticket": "t_7k3f9q",
+      "key": "DM1-12",
+      "at": "2026-11-06T19:39:00Z",
+      "question_id": "m_q71hc0dn2a3b4c5d",
+      "answer": "Other",
+      "answered_by": "Anna's iPhone"
+    },
+    {
+      "v": 1,
+      "id": "m_t5x8c2v9b1n3m4k7",
+      "type": "text",
+      "workspace": {
+        "id": "ws_4hd8k2m1qa",
+        "name": "Month-end close"
+      },
+      "ticket": null,
+      "key": null,
+      "at": "2026-11-06T19:40:00Z",
+      "text": "Good morning. Two tickets are waiting for you."
+    },
+    {
+      "v": 1,
+      "id": "test_k2j4h6g8f0",
+      "type": "test",
+      "text": "Test event from your orch relay.",
+      "at": "2026-11-06T19:41:00Z"
+    }
+  ],
+  "invalid_events": [
+    {
+      "name": "update-without-kind",
+      "event": {
+        "v": 1,
+        "id": "m_9f3k2q7x1c0a4b5d",
+        "type": "update",
+        "workspace": {
+          "id": "ws_4hd8k2m1qa",
+          "name": "Month-end close"
+        },
+        "ticket": "t_7k3f9q",
+        "key": "DM1-12",
+        "at": "2026-11-06T19:42:10Z",
+        "title": "March export matched",
+        "text": "All 214 accounts matched. Three had no category, I put them under Other.",
+        "ticket_view": {
+          "title": "Match March export",
+          "status": "done",
+          "agent": "Claude",
+          "summary": null,
+          "done": 4,
+          "total": 4,
+          "links": [
+            {
+              "kind": "pr",
+              "title": "Pull request #42",
+              "url": "https://github.com/acme/books/pull/42"
+            }
+          ],
+          "files": [
+            {
+              "name": "march-check.csv",
+              "size": 18234,
+              "blob_id": "b_2k9d7s1x0a1b2c3d"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "ticket-view-with-history",
+      "event": {
+        "v": 1,
+        "id": "m_9f3k2q7x1c0a4b5d",
+        "type": "update",
+        "workspace": {
+          "id": "ws_4hd8k2m1qa",
+          "name": "Month-end close"
+        },
+        "ticket": "t_7k3f9q",
+        "key": "DM1-12",
+        "at": "2026-11-06T19:42:10Z",
+        "kind": "result",
+        "title": "March export matched",
+        "text": "All 214 accounts matched. Three had no category, I put them under Other.",
+        "ticket_view": {
+          "title": "Match March export",
+          "status": "done",
+          "agent": "Claude",
+          "summary": null,
+          "done": 4,
+          "total": 4,
+          "links": [
+            {
+              "kind": "pr",
+              "title": "Pull request #42",
+              "url": "https://github.com/acme/books/pull/42"
+            }
+          ],
+          "files": [
+            {
+              "name": "march-check.csv",
+              "size": 18234,
+              "blob_id": "b_2k9d7s1x0a1b2c3d"
+            }
+          ],
+          "history_tail": []
+        }
+      }
+    },
+    {
+      "name": "unknown-type",
+      "event": {
+        "v": 1,
+        "id": "m_t5x8c2v9b1n3m4k7",
+        "type": "file",
+        "workspace": {
+          "id": "ws_4hd8k2m1qa",
+          "name": "Month-end close"
+        },
+        "ticket": null,
+        "key": null,
+        "at": "2026-11-06T19:40:00Z",
+        "text": "Good morning. Two tickets are waiting for you."
+      }
+    },
+    {
+      "name": "version-2",
+      "event": {
+        "v": 2,
+        "id": "m_t5x8c2v9b1n3m4k7",
+        "type": "text",
+        "workspace": {
+          "id": "ws_4hd8k2m1qa",
+          "name": "Month-end close"
+        },
+        "ticket": null,
+        "key": null,
+        "at": "2026-11-06T19:40:00Z",
+        "text": "Good morning. Two tickets are waiting for you."
+      }
+    }
+  ],
+  "signatures": [
+    {
+      "name": "update",
+      "secret": "whsec_dGVzdC1zZWNyZXQtZm9yLW9yY2gtc3Vic2NyaWJlcnMx",
+      "timestamp": 1762458130,
+      "body": "{\"v\":1,\"id\":\"m_9f3k2q7x1c0a4b5d\",\"type\":\"update\",\"workspace\":{\"id\":\"ws_4hd8k2m1qa\",\"name\":\"Month-end close\"},\"ticket\":\"t_7k3f9q\",\"key\":\"DM1-12\",\"at\":\"2026-11-06T19:42:10Z\",\"kind\":\"result\",\"title\":\"March export matched\",\"text\":\"All 214 accounts matched. Three had no category, I put them under Other.\",\"ticket_view\":{\"title\":\"Match March export\",\"status\":\"done\",\"agent\":\"Claude\",\"summary\":null,\"done\":4,\"total\":4,\"links\":[{\"kind\":\"pr\",\"title\":\"Pull request #42\",\"url\":\"https://github.com/acme/books/pull/42\"}],\"files\":[{\"name\":\"march-check.csv\",\"size\":18234,\"blob_id\":\"b_2k9d7s1x0a1b2c3d\"}]}}",
+      "signature": "v1=2ff332327262189bce40093797b26acf6fb360491273c96451cb00662cf508a2"
+    },
+    {
+      "name": "test",
+      "secret": "whsec_dGVzdC1zZWNyZXQtZm9yLW9yY2gtc3Vic2NyaWJlcnMx",
+      "timestamp": 1762458160,
+      "body": "{\"v\":1,\"id\":\"test_k2j4h6g8f0\",\"type\":\"test\",\"text\":\"Test event from your orch relay.\",\"at\":\"2026-11-06T19:41:00Z\"}",
+      "signature": "v1=1b9798153dbd2217ae9b06a086854baa279c48b38fe61fe9962fe546513c4240"
+    },
+    {
+      "name": "empty-body",
+      "secret": "whsec_dGVzdC1zZWNyZXQtZm9yLW9yY2gtc3Vic2NyaWJlcnMx",
+      "timestamp": 1700000000,
+      "body": "",
+      "signature": "v1=fb216f7fa64f075ceb735ba6c370b0fde6b256cdb8840582fdb80188215460f4"
+    }
+  ]
+}
