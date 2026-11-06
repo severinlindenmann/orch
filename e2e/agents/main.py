@@ -20,6 +20,7 @@ spec.loader.exec_module(base)
 import lib  # noqa: E402
 
 ORDER = ["AG-W2", "AG-W7", "AG-R12", "AG-W5", "AG-R6", "AG-A45", "AG-F1"]
+V2_REAL = ["V2-R3", "V2-R4", "V2-R5", "V2-R7"]  # opt-in: only when named (or `v2real`), never part of `agents`
 
 
 def main() -> int:
@@ -30,11 +31,14 @@ def main() -> int:
     ap.add_argument("--repo", required=True)
     a = ap.parse_args()
     import scenarios  # noqa: F401,E402
+    # same file name as e2e/scenarios_v2.py: load the agents one by its path
+    v2 = importlib.util.spec_from_file_location("agents_scenarios_v2", Path(__file__).resolve().parent / "scenarios_v2.py")
+    v2.loader.exec_module(importlib.util.module_from_spec(v2))
 
-    ids = ORDER if a.what in ("agents", "all") else a.what.split(",")
+    ids = ORDER if a.what in ("agents", "all") else V2_REAL if a.what == "v2real" else a.what.split(",")
     for s in ids:
         if s not in lib.REGISTRY:
-            print(f"unknown scenario {s}; known: {', '.join(ORDER)}")
+            print(f"unknown scenario {s}; known: {', '.join(ORDER + V2_REAL)}")
             return 2
     tmp, repo = Path(a.tmp), Path(a.repo)
     e = base.E(a.mode, tmp, repo, tmp.name.rsplit("-", 1)[-1].lower())
@@ -50,10 +54,11 @@ def main() -> int:
         if r.returncode:
             print("orch install failed:", r.stderr[-400:])
             return 1
-        e.pub, e.rel = base.live_servers(e)
-        if e.pub is None:
-            print("live servers are not up")
-            return 1
+        if any(not s.startswith("V2-") for s in ids):  # the V2 real-agent scenarios need no servers
+            e.pub, e.rel = base.live_servers(e)
+            if e.pub is None:
+                print("live servers are not up")
+                return 1
         res = base.run_scenarios(e, ids, out_md)
     finally:
         for fn in reversed(e.cleanup):
