@@ -25,10 +25,20 @@ The link lasts 7 days unless you say `--days N` (up to 90) or `--permanent`. Put
 
 ## Keep a link, change what is behind it
 
-Two things keep the same link: **extend** (the file lives longer; never shorter, and a permanent file stays permanent) and
-**replace** (new content under the same link and the same end date). Redeploying an app (`orch publish app <folder>`) keeps its address
-and private view link; the old version keeps running if the new one fails its test. The server side is in
-[publish-api.md](../contracts/publish-api.md) (`PATCH` and `PUT /v1/files/<id>`).
+```sh
+$ orch publish file report.csv --days 7 --note "Draft, numbers for March"  # server
+$ orch publish list  # server
+$ orch publish view --json  # server
+```
+
+- **Extend:** `orch publish extend <file id> --days 30` keeps the file longer under the same link. It is never shorter than now,
+  and a permanent file stays permanent.
+- **Replace:** `orch publish file report.csv --replace <file id>` puts new content under the same link and the same end date.
+- **Note:** `--note "..."` (up to 280 characters) is shown to the person who opens the link.
+- **Shared tab:** `orch publish view --json` is what the dashboard shows under Shared: your files and apps, no keys.
+
+Redeploying an app (`orch publish app <folder>`) keeps its address and private view link; the old version keeps running if the
+new one fails its test.
 
 ---
 
