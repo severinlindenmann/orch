@@ -395,6 +395,23 @@ fn inflight() -> &'static Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
     M.get_or_init(Default::default)
 }
 
+struct Reservation<'a> {
+    db: &'a Mutex<Connection>,
+    phone: &'a str,
+    month: String,
+    cost: f64,
+    keep: bool,
+}
+
+impl Drop for Reservation<'_> {
+    fn drop(&mut self) {
+        if !self.keep {
+            let c = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = refund_usage(&c, self.phone, &self.month, self.cost);
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn make(
     db: &Mutex<Connection>,
@@ -406,10 +423,10 @@ async fn make(
     msg_id: &str,
     text: &str,
     lang: &str,
-    at: i64,
+    _at: i64,
 ) -> Res<Vec<u8>> {
     let cost = cost_usd(text.chars().count());
-    let api_key = {
+    let api_key: (String, i64) = {
         let c = db.lock().unwrap();
         // cached audio is free and always served
         if let Ok(raw) = std::fs::read(cache_path(data_dir, msg_id, lang)) {
@@ -423,22 +440,29 @@ async fn make(
             None
         };
         let api_key = api_key.ok_or_else(tts_off)?;
+        // the time is taken here, under the lock: a request that waited cannot book into a month that is over
+        let at = crate::util::now();
         // cap check and reservation in one locked section, so parallel requests cannot share the same budget
         if used_usd_month(&c, phone, at) + cost > settings.tts_cap_usd + 1e-9 {
             return Err(tts_cap_reached());
         }
         add_usage(&c, phone, at, cost)?;
-        api_key
+        (api_key, at)
     };
-    let mp3 = match speaker.speak(&api_key, text, voice(lang)).await {
-        Ok(m) => m,
-        Err(e) => {
-            // refund the reservation
-            let c = db.lock().unwrap();
-            let _ = refund_usage(&c, phone, &month_of(at), cost);
-            return Err(tts_failed(e));
-        }
+    let (api_key, at) = api_key;
+    // gives the reservation back unless the audio was made, also when the client disconnects (future dropped)
+    let mut hold = Reservation {
+        db,
+        phone,
+        month: month_of(at),
+        cost,
+        keep: false,
     };
+    let mp3 = speaker
+        .speak(&api_key, text, voice(lang))
+        .await
+        .map_err(tts_failed)?;
+    hold.keep = true;
     let p = cache_path(data_dir, msg_id, lang);
     if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);

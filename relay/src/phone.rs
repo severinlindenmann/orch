@@ -860,7 +860,7 @@ async fn upload_blob(
                 app.upload_grace_ms
                     .load(std::sync::atomic::Ordering::Relaxed),
             )
-            && (buf.len() as f64) < MIN_UPLOAD_BPS * age.as_secs_f64()
+            && ((buf.len() + chunk.len()) as f64) < MIN_UPLOAD_BPS * age.as_secs_f64()
         {
             return Err(timeout());
         }

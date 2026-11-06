@@ -492,3 +492,53 @@ async fn refund_never_touches_another_month() {
     speech::refund_usage(&c, &p.0, &speech::month_of(b), 0.2).unwrap();
     assert_eq!(speech::used_usd_month(&c, &p.0, b), 0.0);
 }
+
+#[tokio::test]
+async fn stale_request_time_cannot_reset_the_current_month() {
+    let r = rig().await;
+    r.key();
+    {
+        let c = r.t.app.db.lock().unwrap();
+        speech::add_usage(&c, &r.phone.0, util::now(), 0.5).unwrap();
+    }
+    let id = r.speak_text(json!({"text": "Hallo.", "speak": {"lang": "de"}}));
+    let s = Settings {
+        speak: "auto".into(),
+        tts_cap_usd: 10.0,
+    };
+    // a request that carries a time from an old month still books into the current month
+    speech::generate(
+        &r.t.app.db,
+        &r.t.app.key,
+        &r.t.app.cfg.data_dir,
+        &*r.sp,
+        &r.phone.0,
+        &[r.ws.id.clone()],
+        &s,
+        &id,
+        None,
+        1_793_404_800 - 86_400 * 40,
+    )
+    .await
+    .unwrap();
+    assert!(
+        (r.used() - 0.5 - 6.0 * 0.030 / 1000.0).abs() < 1e-9,
+        "{}",
+        r.used()
+    );
+}
+
+#[tokio::test]
+async fn client_disconnect_during_deepgram_gives_the_reservation_back() {
+    let r = Arc::new(rig().await);
+    r.key();
+    *r.sp.delay_ms.lock().unwrap() = 600;
+    let id = r.speak_text(json!({"text": "Hallo Welt.", "speak": {"lang": "de"}}));
+    let r2 = r.clone();
+    let h = tokio::spawn(async move { r2.get(&id, None, 10.0, "auto").await });
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(r.used() > 0.0, "reserved while Deepgram works");
+    h.abort(); // the phone hung up
+    let _ = h.await;
+    assert_eq!(r.used(), 0.0, "the reservation is back");
+}
