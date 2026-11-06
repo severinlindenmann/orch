@@ -26,11 +26,19 @@ HUMAN_ONLY = {
     "addon",
     "agents",
     "config",
+    "ticket patch",  # raw ticket operations for tools; agents use the commands above
+    "run release",
+    "run session",
+    "run argv",
+    "run attach",
+    "run stop",
+    "run event",
+    "run _wrap",
+    "publish view",  # feeds the dashboard's Shared tab
 }
 
 
-# Rewritten in the next PR (v2/skills-rewrite); that PR empties this set.
-PENDING = {"orch", "orch-automation", "orch-dashboard", "orch-focus"}
+PENDING: set[str] = set()
 
 
 def skill_dirs() -> dict[str, Path]:
@@ -90,7 +98,7 @@ def test_agents_block_is_short(name):
     if name in PENDING:
         pytest.skip("rewritten in the next PR")
     for f, _, block in rendered(name):
-        lines = [x for x in block.strip().splitlines() if x.strip()]
+        lines = [x for x in block.strip().splitlines() if x.strip() and not x.startswith("<!--")]
         assert block.strip(), f"{name} has no AGENTS block"
         assert lines[0].startswith("## ")
         assert len(lines) <= 4, f"{name} {f}: AGENTS block is {len(lines)} lines (heading + 3 at most)"
@@ -106,8 +114,6 @@ def test_skill_has_the_three_parts(name):
 
 
 def test_core_skill_names_no_addon():
-    if "orch" in PENDING:
-        pytest.skip("rewritten in the next PR")
     text = (SKILLS["orch"] / "SKILL.md").read_text(encoding="utf-8")
     block = (SKILLS["orch"] / "AGENTS-block.md").read_text(encoding="utf-8")
     for word in ("relay", "publish", "automation", "dashboard", "focus", "phone", "webhook"):
@@ -167,7 +173,9 @@ def _check_line(line: str, core) -> str | None:
             break
     flags = {re.sub(r"[\]\[,;)(]", "", t).split("=")[0] for t in toks if t.startswith(("--", "[--"))}
     flags = {f.lstrip("[") for f in flags if f.startswith(("--", "[--")) and "|" not in f}
-    first = words[0] if words else ""
+    if not words:
+        return None  # `orch <add-on> ...`: the add-on is a placeholder
+    first = words[0]
     if first in ADDON_SRC:
         src = ADDON_SRC[first].read_text(encoding="utf-8")
         for w in words[1:]:
@@ -217,14 +225,14 @@ def _leaves(parser, prefix=()):
 
 
 def test_every_user_command_is_in_some_skill():
-    if "orch" in PENDING:
-        pytest.skip("rewritten in the next PR")
     core = cli.build_parser(show_all=True)
     text = "\n".join(b + blk for n in SKILLS for _, b, blk in rendered(n) if skillrender.possible(n, _))
     missing = [
         c
         for c in _leaves(core)
-        if c.split()[0] not in HUMAN_ONLY and not re.search(rf"\borch {re.escape(c)}\b", text)
+        if c.split()[0] not in HUMAN_ONLY
+        and c not in HUMAN_ONLY
+        and not re.search(rf"\borch {re.escape(c)}\b", text)
     ]
     assert not missing, f"commands no skill mentions (add them or put them in HUMAN_ONLY): {missing}"
 
@@ -304,6 +312,17 @@ def test_skills_folder_link_is_refused(proj, tmp_path):
     with pytest.raises(Refused, match="is a link"):
         skillrender.refresh_skills(proj)
     assert (moved / "SKILL.md").read_text(encoding="utf-8") == "old"
+
+
+def test_automation_and_dashboard_follow_the_facts():
+    auto = SKILLS["orch-automation"]
+    off = skillrender.render_skill(auto, {"relay": False, "webhooks": False})[0]
+    on = skillrender.render_skill(auto, {"relay": True, "webhooks": True})[0]
+    assert "webhook" not in off and "relay" not in off.lower()
+    assert "orch relay webhook new" in on
+    dash = SKILLS["orch-dashboard"]
+    assert "--publish" not in skillrender.render_skill(dash, {"publish": False})[0]
+    assert "--publish" in skillrender.render_skill(dash, {"publish": True})[0]
 
 
 def test_write_atomic_replaces_a_planted_link(tmp_path):

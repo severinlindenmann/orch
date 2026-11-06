@@ -1,22 +1,51 @@
 ---
 name: orch-dashboard
-description: Use when the user wants to see their orch tickets in a browser, or share a read-only view of them. The dashboard only shows; it never changes tickets.
+description: "{{description}}"
 ---
-
 # orch dashboard
 
-A light, read-only web page that shows the tickets (active, waiting, open, done), the ticket details, the relay inbox
-(only when the relay is set up) and one tab for every add-on that is turned on in this workspace and has a page
-(for example Schedule). Add-on tabs and ticket rows appear when the add-on is turned on and go when it is turned off.
+The dashboard shows your work on one page: tickets (active, waiting, open, done) with steps, proof and questions, and
+one tab for every add-on that is turned on and has a page. It follows changes by itself.
 
-## Commands
-- `orch start` starts it in the background with the other add-ons and prints the link (this computer only); `orch stop` stops them.
-  Tell the user the link. `orch dashboard` runs it in the foreground on http://127.0.0.1:8420. It follows changes by itself.
-- `orch dashboard snapshot` writes one static HTML file `dashboard-snapshot.html` (no inbox, no add-on tabs).
-- Add `--with-addons` to a snapshot only when the user asks to include add-on tabs and their ticket rows.
-- `orch dashboard snapshot --publish` publishes that snapshot as a private publish app and prints the link.
+- "Needs you" is the inbox. A person answers there or with `orch answer <ticket> <q> <answer>`; the answer shows as
+  "Answered - <name> - dashboard".
+- Every button is one `orch` command with `--by human:<user>`, never through a shell: answer, create a ticket, edit
+  owner/due/note, log, start or stop a run (fresh, take over), start background work, choose the default agent, add
+  an agent, turn add-ons on or off. These are the person's own clicks; you never click for them.
+- An add-on's page shows what its view says. Its switches and buttons send one fixed verb
+  (`orch <add-on> act <verb> -- <ticket>`).
+- The ticket page has one agent line (Start, Continue, Start fresh, Stop, Start anyway, Try again). A ticket keeps its
+  agent session.
+- Proof is marked "You" (the person checked it) or "Agent says"; a missing file reads "on another computer".
+
+## When to use
+- The user wants to see the tickets, progress or proof in a browser, or asks for "the dashboard" or "the link".
+- The user wants a read-only copy to send to someone.
+- Not for changing tickets: use the `orch` commands (see the orch skill).
+
+## Recipes
+
+**Open it**
+
+    orch start               # starts it in the background with the other add-ons and prints the link
+    orch dashboard start     # only the dashboard
+    orch dashboard status    # is it running, and where?
+    orch dashboard stop
+
+`orch dashboard` runs it in the foreground on http://127.0.0.1:8420. The link works on this computer only. Give the
+user the printed link.
+
+**A read-only copy**
+
+    orch dashboard snapshot                  # writes dashboard-snapshot.html
+    orch dashboard snapshot --with-addons    # include add-on tabs, only when the user asks
+{{#publish}}
+    orch dashboard snapshot --publish        # shares it as a private link, only when the user asks
+{{/publish}}
+
+A snapshot contains ticket titles, steps and history, never settings or the folder path. Make or share one only when
+the user asked. Settings changes are logged to `.orch/run/dashboard/actions.log`.
 
 ## Rules
-- You change tickets with the `orch` commands, never through the dashboard: it has no buttons that change data.
-- Keep tickets clear: short title, checklist items with evidence, questions with options. The dashboard shows exactly that.
-- Do not publish a snapshot unless the user asked for it: it contains ticket titles, checklists and history.
+- Keep tickets clear: short title, steps with proof, questions with options. The dashboard shows exactly that.
+- Never click for a person: answers and approvals in the page are theirs.

@@ -1,0 +1,21 @@
+schema = "orch.skill-description/1"
+
+[online]
+lead = "Start agent runs by themselves with orch automation."
+not_for = "Not for waiting on a person (use orch ask)."
+
+[[online.part]]
+when = []
+text = "wake a ticket at a time"
+
+[[online.part]]
+when = []
+text = "repeat a ticket every day, week or month"
+
+[[online.part]]
+when = ["relay"]
+text = "start work when another workspace or the owner's phone sends it"
+
+[[online.part]]
+when = ["webhooks"]
+text = "continue a ticket when a webhook is called"
