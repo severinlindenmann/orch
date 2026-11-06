@@ -34,7 +34,7 @@ with sync_playwright() as p:
             if width == 1440 and key != "empty":
                 node = page.locator(".network .graph-node").first
                 if node.count():
-                    box = node.bounding_box()
+                    box = node.locator("rect, circle").first.bounding_box()
                     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
                     page.wait_for_timeout(250)
                     page.locator(".network").screenshot(path=OUT / f"{TAG}-{key}-{width}-hover.png")
