@@ -91,7 +91,7 @@ def add_profile(f: Fake, extra: dict) -> None:
 
 def make_publish() -> Fake:
     f = Fake()
-    f.files, f.apps = {}, {}
+    f.files, f.apps, f.file_sizes = {}, {}, {}
     add_profile(
         f,
         {
@@ -107,10 +107,12 @@ def make_publish() -> Fake:
             return 403, {"error": "forbidden", "message": "This workspace may not make permanent files."}
         fid = "f_" + hashlib.sha256(body).hexdigest()[:16]
         f.files[fid] = body
+        size = int(q.get("size", [len(body)])[0])
+        f.file_sizes[fid] = size if 0 <= size <= len(body) else len(body)
         return 201, {
             "id": fid,
             "url": f"{f.url}/f/{fid}",
-            "size": len(body),
+            "size": f.file_sizes[fid],
             "expires_at": "2026-11-11T10:05:00Z",
         }
 
@@ -122,7 +124,12 @@ def make_publish() -> Fake:
             200,
             {
                 "items": [
-                    {"id": i, "size": len(v), "created_at": "2026-11-04T10:05:00Z", "expires_at": None}
+                    {
+                        "id": i,
+                        "size": f.file_sizes[i],
+                        "created_at": "2026-11-04T10:05:00Z",
+                        "expires_at": None,
+                    }
                     for i, v in f.files.items()
                 ],
                 "next": None,
