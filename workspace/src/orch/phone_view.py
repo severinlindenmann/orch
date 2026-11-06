@@ -20,7 +20,7 @@ import re
 import stat
 import time
 import urllib.parse
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from orch import net, runs, tickets
 from orch.errors import Refused
@@ -118,6 +118,9 @@ def phone_proof(root: Path, ticket: dict) -> list[dict]:
     return out
 
 
+_DIR_FD = True  # tests turn it off to run the Windows path on POSIX
+
+
 def _proof_file(root: Path, tid: str, ev: dict) -> tuple[str, bytes] | None:
     """(name, bytes) of a copied proof file of this ticket, .orch/tickets/<tid>/evidence/<name>, never
     anything else: the ref has exactly that shape; the folders are opened one by one from the workspace
@@ -130,6 +133,10 @@ def _proof_file(root: Path, tid: str, ev: dict) -> tuple[str, bytes] | None:
         len(parts) != 5
         or parts[:4] != [".orch", "tickets", tid, "evidence"]
         or name in ("", ".", "..")
+        or ":" in ref  # Windows streams and drives
+        or PureWindowsPath(name).drive
+        or PureWindowsPath(name).anchor
+        or "/" in name
         or "\\" in ref
         or "\0" in ref
         or not tickets._ID_RE.fullmatch(tid)
@@ -139,22 +146,32 @@ def _proof_file(root: Path, tid: str, ev: dict) -> tuple[str, bytes] | None:
     dir_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_DIRECTORY", 0)
     fds: list[int] = []
     try:
-        if os.open in os.supports_dir_fd and hasattr(os, "O_DIRECTORY"):
+        if _DIR_FD and os.open in os.supports_dir_fd and hasattr(os, "O_DIRECTORY"):
             # walk folder by folder from the workspace, each opened relative to the last one and never
             # through a link: a folder swapped for a link while we look is refused, not followed
             fds.append(os.open(os.path.realpath(root), os.O_RDONLY | os.O_DIRECTORY))
             for part in parts[:4]:
                 fds.append(os.open(part, dir_flags, dir_fd=fds[-1]))
             fd = os.open(name, flags, dir_fd=fds[-1])
-        else:  # Windows: no dir_fd; check every part for links, then open
-            cur = Path(os.path.realpath(root))
+        else:  # Windows: no dir_fd. Check every part for links, contain the real path, re-check after open
+            base = Path(os.path.realpath(root))
+            cur = base
             for part in parts:
                 cur = cur / part
                 if cur.is_symlink():
                     return None
-            if not stat.S_ISREG(os.lstat(cur).st_mode):
+            real = Path(os.path.realpath(cur))
+            secrets = Path(os.path.realpath(base / ".orch" / "secrets"))
+            if real.parent != base / ".orch" / "tickets" / tid / "evidence" or secrets in real.parents:
                 return None
-            fd = os.open(cur, flags)
+            before = os.lstat(real)
+            if not stat.S_ISREG(before.st_mode):
+                return None
+            fd = os.open(real, flags)
+            st = os.fstat(fd)
+            if (st.st_dev, st.st_ino) != (before.st_dev, before.st_ino):
+                os.close(fd)
+                return None
     except OSError:
         return None
     finally:

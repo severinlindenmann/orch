@@ -287,3 +287,39 @@ def test_proof_refs_that_leave_the_evidence_folder_are_never_uploaded(proj, run,
     run("relay", "send", "phones", "x", "--ticket", tid, "--update", "result")
     assert not conn.blobs, kind
     assert views(conn)[0]["body"]["ticket_view"]["attachments"] == []
+
+
+@pytest.mark.parametrize(
+    "ref",
+    ["{ev}/../../../secrets/token.txt", ".orch/secrets/token.txt", "{ev}/token.txt", "{ev}/C:token.txt"],
+)
+def test_fallback_without_dir_fd_refuses_escapes(proj, run, new_ticket, conn, monkeypatch, ref):
+    """The Windows path (no dir_fd) on POSIX: ../, secrets, a linked folder, drive names refused."""
+    import os
+
+    monkeypatch.setattr(phone_view, "_DIR_FD", False)
+    tid = new_ticket("Fallback")
+    run("check", "add", tid, "a")
+    sec = proj / ".orch/secrets"
+    sec.mkdir(parents=True, exist_ok=True)
+    (sec / "token.txt").write_text("orn_SECRET")
+    ev = f".orch/tickets/{tid}/evidence"
+    (proj / ev).parent.mkdir(parents=True, exist_ok=True)
+    os.symlink(sec, proj / ev)  # the evidence folder is a link to the secrets
+    t = tickets.load(proj, tid)
+    t["checklist"][0].update(
+        done=True, evidence=[{"type": "file", "ref": ref.format(ev=ev), "role": "result"}]
+    )
+    tickets.save(proj, t)
+    run("relay", "send", "phones", "x", "--ticket", tid, "--update", "result")
+    assert not conn.blobs
+
+
+def test_fallback_without_dir_fd_still_sends_a_real_proof(proj, run, new_ticket, conn, monkeypatch):
+    monkeypatch.setattr(phone_view, "_DIR_FD", False)
+    tid = new_ticket("Fallback ok")
+    run("check", "add", tid, "a")
+    (proj / "out.png").write_bytes(b"png")
+    run("check", "done", tid, "c1", "--file", "out.png", "--role", "result", "--by", "agent:claude")
+    run("relay", "send", "phones", "x", "--ticket", tid, "--update", "result")
+    assert list(conn.blobs.values()) == [b"png"]
