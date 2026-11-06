@@ -299,6 +299,19 @@ pub fn get_file(c: &Connection, id: &str) -> rusqlite::Result<Option<FileRow>> {
     .optional()
 }
 
+pub fn update_file_expiry(c: &Connection, id: &str, expires_at: &str) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE files SET expires_at=?2 WHERE id=?1",
+        params![id, expires_at],
+    )?;
+    Ok(())
+}
+
+pub fn update_file_size(c: &Connection, id: &str, size: i64) -> rusqlite::Result<()> {
+    c.execute("UPDATE files SET size=?2 WHERE id=?1", params![id, size])?;
+    Ok(())
+}
+
 pub fn delete_file(c: &Connection, id: &str) -> rusqlite::Result<()> {
     c.execute("DELETE FROM files WHERE id=?1", [id])?;
     Ok(())

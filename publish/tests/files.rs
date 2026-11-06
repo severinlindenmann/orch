@@ -343,3 +343,152 @@ async fn favicons_on_public_and_admin() {
     let nf = call(&t.public, "GET", "/nope", &[], vec![]).await.text();
     assert!(nf.contains("rel=\"apple-touch-icon\""));
 }
+
+fn expire_all(t: &T) {
+    t.st.db
+        .lock()
+        .unwrap()
+        .execute("UPDATE files SET expires_at='2000-01-01T00:00:00Z'", [])
+        .unwrap();
+}
+
+#[tokio::test]
+async fn replace_keeps_id_and_expiry_and_swaps_blob() {
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let j = t
+        .api(&ws, "POST", "/v1/files?days=3", vector_blob())
+        .await
+        .json();
+    let id = j["id"].as_str().unwrap().to_string();
+    let mut nb = b"OPF1".to_vec();
+    nb.resize(80, 7);
+    let r = t
+        .api(&ws, "PUT", &format!("/v1/files/{id}"), nb.clone())
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    assert_eq!(r.json()["id"], id.as_str());
+    assert_eq!(r.json()["expires_at"], j["expires_at"]);
+    let b = call(&t.public, "GET", &format!("/f/{id}/blob"), &[], vec![]).await;
+    assert_eq!(b.body, nb);
+    let l = t.api(&ws, "GET", "/v1/files", vec![]).await.json();
+    assert_eq!(l["items"][0]["size"], 80);
+    // same OPF1 check
+    let bad = t
+        .api(&ws, "PUT", &format!("/v1/files/{id}"), vec![1u8; 64])
+        .await;
+    assert_eq!(bad.status, 422);
+    assert_eq!(
+        call(&t.public, "GET", &format!("/f/{id}/blob"), &[], vec![])
+            .await
+            .body,
+        nb
+    );
+}
+
+#[tokio::test]
+async fn replace_only_by_owner_and_never_revives_expired() {
+    let t = setup();
+    let a = t.workspace("A", basic_rights()).await;
+    let b = t.workspace("B", basic_rights()).await;
+    let id = t.api(&a, "POST", "/v1/files", vector_blob()).await.json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let uri = format!("/v1/files/{id}");
+    assert_eq!(t.api(&b, "PUT", &uri, vector_blob()).await.status, 404);
+    assert_eq!(
+        t.api(&b, "PATCH", &uri, br#"{"days":5}"#.to_vec())
+            .await
+            .status,
+        404
+    );
+    expire_all(&t);
+    assert_eq!(t.api(&a, "PUT", &uri, vector_blob()).await.status, 410);
+    assert_eq!(
+        t.api(&a, "PATCH", &uri, br#"{"days":5}"#.to_vec())
+            .await
+            .status,
+        410
+    );
+}
+
+#[tokio::test]
+async fn replace_too_large_is_413() {
+    let t = setup_with(|c| c.max_file_mb = 0);
+    let ws = t.workspace("A", basic_rights()).await;
+    let id = t.api(&ws, "POST", "/v1/files", vector_blob()).await.json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut big = b"OPF1".to_vec();
+    big.resize(64 * 1024 + 37, 1);
+    let r = t.api(&ws, "PUT", &format!("/v1/files/{id}"), big).await;
+    assert_eq!(r.status, 413);
+}
+
+#[tokio::test]
+async fn extend_sets_new_expiry_and_checks_days() {
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let j = t
+        .api(&ws, "POST", "/v1/files?days=1", vector_blob())
+        .await
+        .json();
+    let id = j["id"].as_str().unwrap();
+    let uri = format!("/v1/files/{id}");
+    let r = t.api(&ws, "PATCH", &uri, br#"{"days":30}"#.to_vec()).await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    assert!(r.json()["expires_at"].as_str().unwrap() > j["expires_at"].as_str().unwrap());
+    // never shortens
+    let r2 = t.api(&ws, "PATCH", &uri, br#"{"days":2}"#.to_vec()).await;
+    assert_eq!(r2.json()["expires_at"], r.json()["expires_at"]);
+    for body in [&br#"{"days":0}"#[..], br#"{"days":91}"#, b"{}", b"nope"] {
+        assert_eq!(t.api(&ws, "PATCH", &uri, body.to_vec()).await.status, 422);
+    }
+    let l = t.api(&ws, "GET", "/v1/files", vec![]).await.json();
+    assert_eq!(l["items"][0]["expires_at"], r.json()["expires_at"]);
+}
+
+#[tokio::test]
+async fn patch_needs_files_right_and_has_small_body_limit() {
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let id = t.api(&ws, "POST", "/v1/files", vector_blob()).await.json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let uri = format!("/v1/files/{id}");
+    // PATCH keeps axum's default 2 MB body limit
+    let mut big = br#"{"days":5,"x":""#.to_vec();
+    big.resize(3 * 1024 * 1024, b'a');
+    big.extend_from_slice(b"\"}");
+    assert_eq!(t.api(&ws, "PATCH", &uri, big).await.status, 413);
+    // a workspace whose files right was removed may not extend
+    t.st.db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE workspaces SET rights=REPLACE(rights,'\"files\":true','\"files\":false')",
+            [],
+        )
+        .unwrap();
+    let r = t.api(&ws, "PATCH", &uri, br#"{"days":5}"#.to_vec()).await;
+    assert_eq!(r.status, 403, "{}", r.text());
+}
+
+#[tokio::test]
+async fn replace_leaves_no_temp_files() {
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let id = t.api(&ws, "POST", "/v1/files", vector_blob()).await.json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    t.api(&ws, "PUT", &format!("/v1/files/{id}"), vector_blob())
+        .await;
+    let n = std::fs::read_dir(t.dir.path().join("files"))
+        .unwrap()
+        .count();
+    assert_eq!(n, 1);
+}
