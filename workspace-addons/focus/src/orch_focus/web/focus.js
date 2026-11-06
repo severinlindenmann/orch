@@ -25,6 +25,7 @@
   }
   const STATUS_WORD = {open: 'To do', active: 'Doing', waiting: 'Waiting', done: 'Done', dropped: 'Dropped'};
   const toast = (text, kind) => (window.orch ? window.orch.toast(text, kind) : null);
+  const proof = window.FocusProof.create({h, ic, P, TID, toast});
 
   async function act(op, args) {
     let r;
@@ -262,15 +263,15 @@
 
   function renderProof(v) {
     const done = v.ticket.checklist.filter(c => c.done);
-    const chips = [];
-    for (const c of done) for (const ev of c.evidence || []) chips.push({c, ev});
-    const key = keyOf(chips.map(x => [x.c.id, x.ev.ref, x.ev.summary, x.ev.at]));
+    const list = [];
+    for (const c of done) for (const ev of c.evidence || []) list.push({c, ev});
+    const key = keyOf(list.map(x => [x.c.id, x.ev.ref, x.ev.title, x.ev.text, x.ev.by, x.ev.at]));
     els.tabs[1].textContent = 'Proof';
-    if (chips.length) els.tabs[1].append(h('sup', {text: ' ' + chips.length}));
+    if (list.length) els.tabs[1].append(h('sup', {text: ' ' + list.length}));
     if (key === els.paneProof.dataset.k) return;
     els.paneProof.dataset.k = key;
-    els.paneProof.replaceChildren(chips.length
-      ? h('div', {class: 'fx-chips'}, chips.map(({c, ev}) => { const wrap = h('div', {title: c.text}); wrap.innerHTML = window.Evidence ? window.Evidence.chip(ev, {}) : ''; const when = stamp(ev.at); if (when) wrap.append(h('span', {class: 'fx-when meta', text: when})); return wrap; }))
+    els.paneProof.replaceChildren(list.length
+      ? h('div', {class: 'fx-chips'}, list.map((item, i) => proof.tile(item, from => proof.open(list, i, from))))
       : h('p', {class: 'fx-empty muted', text: 'Proof shows here when a task is done.'}));
   }
 
@@ -352,7 +353,7 @@
     });
     let cur = 0;
     document.addEventListener('keydown', e => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || proof.isOpen()) return;
       if (e.target.closest('input,textarea,select')) return;
       const k = e.key;
       if (k === 'Escape') { if (!els.help.hidden) toggleHelp(false); else if (root.classList.contains('is-full')) setFull(false); return; }
