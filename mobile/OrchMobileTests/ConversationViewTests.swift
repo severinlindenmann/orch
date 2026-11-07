@@ -112,6 +112,20 @@ final class ConversationModelTests: XCTestCase {
         m.openSampleInvite(); await m.connect(phoneName: "T"); await m.finishSetup(allowNotifications: false); return m
     }
 
+    /// The scripted recorder (UI tests) must not ask this phone's speech recognition: that raises a system alert and the memo bubble
+    /// waits for the transcript (W7: test08 never saw its bubble).
+    func testScriptedVoiceMemoNeverUsesOnDeviceSpeech() async throws {
+        let m = await paired()
+        let url = dir.appendingPathComponent("scripted.m4a")
+        try Data("scripted-audio".utf8).write(to: url)
+        let started = Date()
+        let draft = await m.voiceDraft(for: VoiceSegment(url: url, duration: 2))
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5, "no waiting for speech permission or assets")
+        XCTAssertFalse(draft.url.path.isEmpty)
+        let t = m.voiceTranscriber()
+        do { _ = try await t.onDevice(url, "en"); XCTFail("on-device speech must be off for scripted audio") } catch {}
+    }
+
     func testThrottledSendShowsTryAgainLater() async throws {
         let m = await paired()
         await m.mock!.queueSendFailures([429])

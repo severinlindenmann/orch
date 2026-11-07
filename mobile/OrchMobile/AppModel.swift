@@ -501,6 +501,12 @@ final class AppModel {
     /// Settings-aware transcriber: relay first (`swiss_german` -> de-CH), then this phone.
     func voiceTranscriber() -> VoiceTranscriber {
         let c = client
+        // The scripted recorder (UI tests, mock) writes bytes that are not audio: asking this phone's speech recognition would only
+        // raise the system permission alert or download speech assets, and the memo bubble waits for the transcript.
+        if voiceMode == .scripted {
+            return VoiceTranscriber(relay: { audio, lang in try await c.transcribe(audio: audio, language: lang) },
+                                    onDevice: { _, _ in throw RelayError.network("scripted audio") })
+        }
         return VoiceTranscriber(relay: { audio, lang in try await c.transcribe(audio: audio, language: lang) })
     }
     func makeVoiceRecorder() -> VoiceRecorder { VoiceRecorder(mode: voiceMode == .live ? .live : .scripted) }

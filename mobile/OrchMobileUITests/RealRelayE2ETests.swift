@@ -351,7 +351,14 @@ final class RealRelayE2ETests: XCTestCase {
         """)
         let app = launch(extra: ["-fakeVoice", "YES"])
         openGeneral(app)
+        // A system permission alert (speech, microphone) never blocks the test: answer it whenever it shows.
+        addUIInterruptionMonitor(withDescription: "permission") { alert in
+            for name in ["Allow", "OK", "Allow While Using App"] where alert.buttons[name].exists { alert.buttons[name].tap(); return true }
+            return false
+        }
         let mic = el(app, "composer-mic"); must(app, mic, "mic")
+        XCTAssertTrue(mic.waitForExistence(timeout: 10))
+        for _ in 0..<20 where !mic.isHittable { usleep(500_000) }
         mic.press(forDuration: 3.5)   // recording starts ~0.25 s after the touch and under load can take a second more; < 1 s is dropped
         must(app, el(app, "voice-play"), "my voice note bubble", timeout: 30); sleep(1); shot("80-voice-note")
         host("ws_send('Here is a long answer you can listen to instead of reading it.', '--speak')")
