@@ -30,4 +30,4 @@ show_on_card = ["pr_status"]
 [acts.refresh]
 summary = "Update link titles and status"
 who = "anyone"
-writes = ["links", "ext.github"]
+writes = ["refs", "ext.github"]
