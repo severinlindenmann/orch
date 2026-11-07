@@ -16,6 +16,7 @@ from pathlib import Path
 
 from . import runfiles
 from .data import run_orch
+from .mobile import MOBILE_OPS
 
 MAX_TEXT = 2000
 TID = re.compile(r"t_[a-z0-9]{6,16}")
@@ -333,6 +334,7 @@ OPS = {
     "config.agent.test": _config_agent_test,
     "config.permissions": _config_permissions,
     "addon.set": _addon_set,
+    **MOBILE_OPS,
     "ref.add": _ref_add,
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,

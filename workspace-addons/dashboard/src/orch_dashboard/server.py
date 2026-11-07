@@ -239,6 +239,7 @@ class Handler(BaseHTTPRequestHandler):
         if name in (
             "index.html",
             "app.js",
+            "mobile-mode.js",
             "blocks.js",
             "helpers.js",
             "style.css",
