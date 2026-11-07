@@ -378,3 +378,22 @@ def test_ticket_details_hide_raw_id_and_home_badge_is_named():
     js = (WEBDIR / "app.js").read_text()
     assert "field('Ticket', h('span', {className:'ed-ro mono'}, t.id))" not in js
     assert "' waiting for you', 'aria-label'" in js
+
+
+def test_settings_wording_and_one_toast_at_a_time():
+    js = (WEBDIR / "app.js").read_text()
+    for text in (
+        "Off: agents send finished work to Review and you decide when it is Done.",
+        "'Workflow'",
+        "Shared. Your team can now see this workspace.",
+        "The agent is not signed in yet.",
+        "Type the command you use to start your tool. {prompt} is where the ticket text goes.",
+        "Only use this if you trust it.",
+        "Stored on this computer",
+        "'Details'",
+    ):
+        assert text in js, text
+    assert "AGENTS.md has the orch entry" not in js.split("settings-share")[1][:400]
+    motion = (WEBDIR / "kit" / "motion.js").read_text()
+    assert "toastQueue" not in motion and "host.replaceChildren()" in motion and "remaining=4000" in motion
+    assert ".mm-hours .btn.ghost:hover{background:transparent" in (WEBDIR / "style.css").read_text()

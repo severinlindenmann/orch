@@ -395,7 +395,9 @@ def host_parts(url: str) -> tuple[str, str]:
 def _consent(r: dict) -> str:
     """What turning an add-on on does, in the same words as `orch addon add` asks (built from `orch addon list`)."""
     name, d = r["name"], r.get("dashboard") if isinstance(r.get("dashboard"), dict) else None
-    lines = [f"{name} {r.get('version', '')}: {r.get('description', '')}".replace("  ", " ")]
+    desc = str(r.get("description") or "").strip()
+    head = f"{name} {r.get('version', '')}".replace("  ", " ").strip()
+    lines = [desc, head] if desc else [head]
     if r.get("source") == "local":
         lines.append("Source: local folder (not checked by orch). It runs code on this computer.")
     lines.append(f"Adds the command: orch {name}")

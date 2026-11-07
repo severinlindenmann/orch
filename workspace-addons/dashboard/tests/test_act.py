@@ -460,7 +460,7 @@ def test_settings_state_has_agents_and_every_addon(ws, act_orch):
     assert s["folder"] == str(ws)
     assert load_state(ws, orch_bin=str(act_orch))["settings"] is None  # only the live server asks for it
     assert load_state(ws, orch_bin=str(act_orch), with_addons=False, with_settings=False)["settings"] is None
-    assert "consent" in s["addons"][0] and s["addons"][0]["consent"].startswith("alpha")
+    assert "consent" in s["addons"][0] and s["addons"][0]["consent"].splitlines()[1].startswith("alpha")
 
 
 def test_snapshots_carry_no_settings_and_no_folder_path(ws, act_orch):

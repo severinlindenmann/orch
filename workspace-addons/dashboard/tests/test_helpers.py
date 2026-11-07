@@ -530,3 +530,31 @@ def test_first_column_with_tickets(counts, want):
 @pytest.mark.parametrize("label,n,want", [("Working", 2, "Working 2"), ("Backlog", 0, "Backlog")])
 def test_column_chip_label(label, n, want):
     assert call("columnChipLabel", label, n) == want
+
+
+@node
+def test_question_preview_is_one_short_line_of_the_open_question():
+    t = {"questions": [{"answer": "Yes", "text": "old"}, {"answer": None, "text": "Which   date\nfor launch?"}]}
+    assert call("questionPreview", t) == "Which date for launch?"
+    assert call("questionPreview", {"questions": [{"answer": "x", "text": "q"}]}) == ""
+    assert call("questionPreview", {}) == ""
+    long = call("questionPreview", {"questions": [{"answer": None, "text": "w" * 200}]})
+    assert len(long) == 90 and long.endswith("\u2026")
+
+
+@node
+def test_agent_line_waiting_text_has_no_command():
+    run = {"running": True, "claim": {"agent": "claude", "live": {"state": "attention",
+           "why": "Claude wants a login. Open the live session to finish it: orch run attach PIL-3"}}}
+    line = call("agentLine", {"id": "t1"}, run, 0, None)
+    assert line["status"] == "Claude needs you to sign in" and "orch run" not in line["status"]
+
+
+def test_ticket_screens_use_plain_wording_and_one_chip():
+    src = (WEB / "app.js").read_text()
+    assert "Open a ticket and press Start" in src and "No agent is working right now" not in src
+    assert "plainWhy(row.text" in src  # Needs-you rows carry no command text
+    assert "seconds + ' s ago'" not in src  # one calm time format
+    assert "'Not chosen yet'" not in src.split("const agent = sessions.length")[1].split("\n")[0]
+    assert "New tickets start here." in src and "Finished tickets appear here." in src
+    assert "hideStatus = t => !snapshot && !!activityText(t)" in src
