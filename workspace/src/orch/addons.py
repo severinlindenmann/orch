@@ -216,6 +216,28 @@ def _missing_source(e: dict) -> str | None:
     return None if Path(e["source"]).is_dir() else f"its folder {e['source']} is gone"
 
 
+def _no_longer_ships(e: dict) -> bool:
+    """A built-in add-on this orch version does not ship (an older install registered it, e.g. 'scheduler').
+    orch update drops it from the registry instead of failing on a folder the repository no longer has."""
+    if e["source"] != "built-in":
+        return False
+    if _is_local(repo()):
+        return not (Path(repo()) / "workspace-addons" / e["name"]).is_dir()
+    return e["name"] not in SHIPPED_ADDONS
+
+
+def _current_registry() -> list[dict]:
+    """The registry without built-ins that no longer ship; saved back when one was dropped."""
+    reg = registry()
+    keep = [e for e in reg if not _no_longer_ships(e)]
+    for e in reg:
+        if e not in keep:
+            print(f"Add-on {e['name']} removed: it no longer ships with orch.")
+    if len(keep) < len(reg):
+        _save_registry(keep)
+    return keep
+
+
 def _save_registry(entries: list[dict]) -> None:
     registry_path().parent.mkdir(parents=True, exist_ok=True)
     entries = sorted(entries, key=lambda e: e["name"])
@@ -1259,7 +1281,7 @@ def update(root: Path, project_only: bool = False, after_install: bool = False) 
     """Reinstall orch + every installed add-on together, then refresh this project's skills and blocks.
     after_install: the install script just put a bare orch in place; put the registered add-ons back."""
     if after_install:
-        reg = registry()
+        reg = _current_registry()
         if reg:
             names = ", ".join(e["name"] for e in reg)
             if _reinstall(reg, save=True, then=[], root=root, done=f"add-ons installed again: {names}"):
@@ -1267,7 +1289,11 @@ def update(root: Path, project_only: bool = False, after_install: bool = False) 
         return []
     if not project_only:
         _reinstall(
-            registry(), save=False, then=[["update", "--project-only"]], root=root, done="orch updated"
+            _current_registry(),
+            save=False,
+            then=[["update", "--project-only"]],
+            root=root,
+            done="orch updated",
         )
         return []
     done = []
