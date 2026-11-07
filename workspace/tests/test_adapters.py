@@ -4,6 +4,7 @@ import json
 import os
 import re
 import stat
+import sys
 from pathlib import Path
 
 import jsonschema
@@ -70,12 +71,25 @@ def claude_help(monkeypatch, tmp_path):
     adapters._help_text.cache_clear()
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    exe = bindir / "claude"
-    exe.write_text('#!/bin/sh\necho \'choices: "acceptEdits", "plan"\'\n')
-    exe.chmod(0o755)
+    exe = FakeHelp(bindir)
+    exe.say('choices: "acceptEdits", "plan"')
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
     yield exe
     adapters._help_text.cache_clear()
+
+
+class FakeHelp:
+    """`claude` whose --help prints one line: a sh script, or a .cmd on Windows (it runs no sh script)."""
+
+    def __init__(self, bindir):
+        self.path = bindir / ("claude.cmd" if sys.platform == "win32" else "claude")
+
+    def say(self, line: str) -> None:
+        if sys.platform == "win32":
+            self.path.write_text(f"@echo off\r\necho {line}\r\n")
+        else:
+            self.path.write_text(f"#!/bin/sh\necho '{line}'\n")
+            self.path.chmod(0o755)
 
 
 @pytest.mark.parametrize("mode", ["oneshot", "live"])
@@ -97,7 +111,7 @@ def test_permission_modes_for_claude(claude_help, mode):
     assert flags("ask") == ()
     assert flags("full") == ("--dangerously-skip-permissions",)
     assert flags("auto") == ("--permission-mode", "acceptEdits")  # this claude does not list auto
-    claude_help.write_text('#!/bin/sh\necho \'choices: "acceptEdits", "auto"\'\n')
+    claude_help.say('choices: "acceptEdits", "auto"')
     adapters._help_text.cache_clear()
     assert flags("auto") == ("--permission-mode", "auto")
 
