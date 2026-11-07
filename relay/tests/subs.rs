@@ -492,6 +492,8 @@ async fn files_metadata_only_unless_downloads_allowed() {
         .await
         .unwrap();
     assert_eq!(r.status(), 200);
+    assert_eq!(r.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(r.headers()["content-disposition"], "attachment");
     assert_eq!(r.bytes().await.unwrap().to_vec(), vec![9u8; 5]);
     assert_eq!(
         get(&t, &format!("/v1/sub/{}/files/../../master.key", dl.token))

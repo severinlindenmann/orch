@@ -24,7 +24,7 @@ struct NewTopicScreen: View {
                 HStack(spacing: 8) {
                     Text("To:").themeFont(15).foregroundStyle(Theme.muted)
                     if model.workspaceSummaries.count > 1 {
-                        Button { focused = false; picking = true } label: { recipientPill }
+                        Button { picking = true } label: { recipientPill }
                             .buttonStyle(PressStyle()).accessibilityLabel("Choose workspace, \(name)").accessibilityIdentifier("workspace-picker")
                     } else { recipientPill }
                 }
@@ -41,7 +41,10 @@ struct NewTopicScreen: View {
         .task {
             if selectedId == nil { selectedId = selected?.id }
         }
-        .sheet(isPresented: $picking) {
+        .sheet(isPresented: $picking, onDismiss: {
+            // The picker took the keyboard with it: give the field focus back once it is gone.
+            if !UserDefaults.standard.bool(forKey: "autoMic") { focused = true }
+        }) {
             ShellWorkspacePicker(selectedId: selected?.id) { id in selectedId = id }
         }
     }
