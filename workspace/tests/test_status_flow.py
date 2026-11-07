@@ -116,8 +116,20 @@ def test_actor_from_environment_and_explicit_override(proj, run, new_ticket, mon
     monkeypatch.setattr(tickets, "agent_tool", lambda: "generic")
     assert run("ticket", "status", tid, "done")[1] == tickets.REVIEW_MESSAGE + "\n"
     assert tickets.load(proj, tid)["status"] == "review"
+    # an agent in the environment counts as an agent whatever --by says
+    assert run("ticket", "status", tid, "done", "--by", "human:tester")[1] == tickets.REVIEW_MESSAGE + "\n"
+    assert tickets.load(proj, tid)["status"] == "review"
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
     assert run("ticket", "status", tid, "done", "--by", "human:tester")[0] == 0
     assert tickets.load(proj, tid)["status"] == "done"
+
+
+def test_agent_cannot_turn_the_switch_on(proj, run, monkeypatch):
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "generic")
+    code, out, err = run("config", "set", "workflow.agents_may_finish", "on", "--by", "human:tester")
+    assert code != 0 and "Only a person" in err + out
+    assert not config.agents_may_finish(proj)
+    assert run("config", "set", "workflow.agents_may_finish", "off")[0] == 0
 
 
 def test_list_order_and_closed_filter(proj, run, new_ticket):

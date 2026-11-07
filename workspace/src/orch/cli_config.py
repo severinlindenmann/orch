@@ -203,6 +203,11 @@ def _config(args, root: Path) -> None:
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
+        if args.value == "on" and _actor(args).startswith("agent:"):
+            raise Refused(
+                "Only a person can allow agents to mark tickets Done. Ask them to run: "
+                "orch config set workflow.agents_may_finish on"
+            )
         value = config.set_agents_may_finish(root, args.value == "on")
         _out(args, {"workflow.agents_may_finish": value}, f"Agents may mark tickets Done: {args.value}.")
     elif args.sub == "set" and args.key == "workspace.code":

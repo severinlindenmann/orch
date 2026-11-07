@@ -540,6 +540,8 @@ def _check_can_finish(ticket: dict) -> None:
 
 
 def _finish_status(root: Path, ticket: dict, status: str, by: str) -> str:
+    if agent_tool():  # an agent in the environment counts as an agent whatever --by says
+        by = "agent:" + str(agent_tool())
     if status == "done" and by.startswith("agent:"):
         _check_can_finish(ticket)
         if not config.agents_may_finish(root):
