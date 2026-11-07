@@ -8,6 +8,8 @@ final class ConversationUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-fakeVoice", "YES"] + extra
         app.launch()
+        // -openChat lands on the workspace page (General row + topics): open General when that is what we asked for.
+        if !extra.contains("-openTicket"), let g = Optional(app.buttons["general-ws_pilatus001"]), g.waitForExistence(timeout: 15) { g.tap() }
         return app
     }
     /// Waits for an element; on failure the message carries the screen's accessibility tree (CI logs are quiet).

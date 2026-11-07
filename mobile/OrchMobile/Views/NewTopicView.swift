@@ -51,11 +51,23 @@ struct NewTopicScreen: View {
             if model.workspaceSummaries.count > 1 { Image(systemName: "chevron.down").themeFont(10).accessibilityHidden(true) }
         }.padding(.horizontal, 16).frame(minHeight: 44).background(Theme.surface3, in: Capsule()).foregroundStyle(Theme.text)
     }
-    /// The first message is queued or sent: leave the sheet; the workspace shows the new topic as "Starting topic…".
+    /// The first message is queued or sent: leave the sheet and show the workspace (the topic reads "Starting topic…").
+    /// When the workspace acks within a few seconds the new topic opens by itself.
     private func opened() {
         guard let ws = selected?.id else { return }
+        let before = Set(model.workspaceSummaries.first { $0.id == ws }?.topics.compactMap { $0.ticket?.ticket } ?? [])
         model.path = [.workspace(ws)]
         if asSheet { dismiss() }
+        Task { @MainActor in
+            for _ in 0..<8 {
+                try? await Task.sleep(for: .milliseconds(700))
+                await model.reloadMessages(); await model.refreshUpdates()
+                guard model.path == [.workspace(ws)] else { return }   // the person went elsewhere
+                if let t = model.workspaceSummaries.first(where: { $0.id == ws })?.topics.first(where: { $0.ticket != nil && !before.contains($0.ticket!.ticket ?? "") })?.ticket?.ticket {
+                    model.path = [.workspace(ws), .ticket(workspace: ws, ticket: t)]; return
+                }
+            }
+        }
     }
 }
 
