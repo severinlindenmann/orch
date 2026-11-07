@@ -252,7 +252,7 @@ def _tracked(root: Path, rel: str) -> bool:
             == 0
         )
     except (OSError, subprocess.SubprocessError):
-        return False
+        return True  # cannot tell: treat the file as the team's
 
 
 def _git_env() -> dict[str, str]:
@@ -273,7 +273,13 @@ def _in_git_repo(root: Path) -> bool:
             timeout=10,
         )
     except FileNotFoundError:
-        return False  # no git program: nothing can be committed
+        # no git program: fine in a plain folder, but a folder that has .git cannot be checked, so refuse
+        for d in (root.absolute(), *root.absolute().parents):
+            if os.path.lexists(d / ".git"):
+                raise Refused(
+                    "git is not installed, so orch cannot tell what is ignored here. Nothing was stored."
+                ) from None
+        return False
     except (OSError, subprocess.SubprocessError):
         raise Refused("orch cannot ask git about this folder. Nothing was stored.") from None
     if r.returncode == 0:
@@ -306,7 +312,7 @@ def _probes_ignored(root: Path) -> bool:
     can undo our rules). True outside a git repo (nothing to leak into)."""
     if not _in_git_repo(root):
         return True
-    return all(_ignored(root, p) for p in (".orch/secrets/probe", ".orch/run/probe"))
+    return all(_ignored(root, p) for p in (".orch/secrets/probe", ".orch/run/probe", ".orch/outbox/probe"))
 
 
 def check_private_path(root: Path, path: Path) -> None:
@@ -314,9 +320,11 @@ def check_private_path(root: Path, path: Path) -> None:
     git ignores this exact file and does not track it."""
     base = root / ".orch"
     try:
-        rel_in = path.absolute().relative_to(base.absolute())
+        rel_in = Path(os.path.normpath(path.absolute())).relative_to(Path(os.path.normpath(base.absolute())))
     except ValueError:
         raise Refused(f"{path} is not inside .orch; orch will not store private files there.") from None
+    if ".." in path.parts or ".." in rel_in.parts:
+        raise Refused(f"{path} is not a plain path; orch will not store private files there.")
     cur = base
     if is_link(cur):
         raise Refused(f"{cur} is a link; orch will not store private files there.")
@@ -371,11 +379,16 @@ def _is_ours_copy(dest: Path, root: Path) -> bool:
         return False
     try:
         mt = mark.stat().st_mtime
+        listed = set(mark.read_text(encoding="utf-8").splitlines()[1:])
         for dp, _dns, fns in os.walk(dest, followlinks=False):
             for fn in fns:
-                if (Path(dp) / fn).lstat().st_mtime > mt:
+                p = Path(dp) / fn
+                rel_f = p.relative_to(dest).as_posix()
+                if rel_f == COPY_MARK:
+                    continue
+                if rel_f not in listed or p.lstat().st_mtime > mt:  # a file orch did not copy is the user's
                     return False
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return False
     try:
         rel = dest.relative_to(root).as_posix()
@@ -440,6 +453,7 @@ def _link_dir(link: Path, target: Path) -> None:
 def _copy_dir(src: Path, dst: Path) -> None:
     """Where links are not allowed: a copy that orch keeps in sync (it owns it: COPY_MARK)."""
     dst.mkdir(parents=True, exist_ok=True)
+    copied: list[str] = []
     for dp, dns, fns in os.walk(src, followlinks=False):
         d = Path(dp)
         rel = d.relative_to(src)
@@ -450,7 +464,11 @@ def _copy_dir(src: Path, dst: Path) -> None:
             p = d / n
             if not is_link(p) and p.is_file():
                 shutil.copyfile(p, dst / rel / n)
-    (dst / COPY_MARK).write_text("orch keeps this copy in sync with .orch/harness/skills\n", encoding="utf-8")
+                copied.append((rel / n).as_posix())
+    (dst / COPY_MARK).write_text(
+        "\n".join(["orch keeps this copy in sync with .orch/harness/skills", *copied]) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _same(a: Path, b: Path) -> bool:

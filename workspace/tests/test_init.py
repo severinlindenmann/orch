@@ -694,3 +694,58 @@ def test_not_a_repo_still_stores_private_files(proj):
 
     net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
     assert (proj / ".orch/secrets/x.json").is_file()
+
+
+def test_no_git_program_in_a_repo_refuses_and_in_a_plain_folder_is_fine(proj, monkeypatch):
+    import subprocess
+
+    from orch import harness
+
+    def nogit(*a, **k):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(harness.subprocess, "run", nogit)
+    assert harness._in_git_repo(proj) is False  # plain folder (the test folder has no .git above it)
+    (proj / ".git").mkdir()
+    with pytest.raises(skills.Refused):
+        harness._in_git_repo(proj)
+    del subprocess
+
+
+def test_tracked_returns_true_when_git_cannot_be_run(proj, monkeypatch):
+    from orch import harness
+
+    def boom(*a, **k):
+        raise OSError("x")
+
+    monkeypatch.setattr(harness.subprocess, "run", boom)
+    assert harness._tracked(proj, "a") is True
+
+
+def test_a_copy_with_an_older_file_orch_did_not_copy_is_kept(proj):
+    from orch import harness
+
+    src, dest = _copy_setup(proj, harness)
+    extra = dest / "user-old.txt"
+    extra.write_text("mine", encoding="utf-8")
+    os.utime(extra, (1000, 1000))  # older than the marker: mtime alone would not catch it
+    os.utime(dest / harness.COPY_MARK, (time_future(), time_future()))
+    harness.sync_copies(proj, [".agents/skills"])
+    harness.unlink_skill(proj, ".agents/skills", "s1")
+    assert extra.read_text(encoding="utf-8") == "mine"
+
+
+def test_private_path_rejects_dotdot_and_other_case_orch(proj):
+    from orch import harness
+
+    with pytest.raises(skills.Refused):
+        harness.check_private_path(proj, proj / ".orch" / "secrets" / ".." / ".." / "x.json")
+    with pytest.raises(skills.Refused):
+        harness.check_private_path(proj, proj / ".ORCH" / "secrets" / "x.json")
+
+
+def test_outbox_probe_is_checked_at_protect_time(proj):
+    from orch import harness
+
+    _tracked_orch_gitignore(proj, "!/.orch/outbox/\n/.orch/outbox/*\n!/.orch/outbox/probe\n")
+    assert harness._probes_ignored(proj) is False

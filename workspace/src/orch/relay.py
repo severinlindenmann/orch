@@ -17,7 +17,7 @@ import unicodedata
 import urllib.parse
 from pathlib import Path
 
-from orch import net, runs, skillrender, skills, tickets
+from orch import harness, net, runs, skillrender, skills, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -394,6 +394,8 @@ def _write_outbox(root: Path, mid: str, raw: bytes) -> Path:
     if d.is_symlink():
         raise Refused(".orch/outbox is a link. Not sending.")
     p = d / f"{mid}.json"
+    skills.ensure_gitignore(root)
+    harness.check_private_path(root, p)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(p, flags, 0o600)
     with os.fdopen(fd, "wb") as f:
@@ -1821,6 +1823,9 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str]) -> None:
     skills.check_inside(root, agents / "orch-relay")
     sec = net.secrets_dir(root)
     sec.mkdir(parents=True, exist_ok=True)
+    skills.ensure_gitignore(root)
+    for fn in ("credentials.json", "mcp.json", "shared.json"):
+        harness.check_private_path(root, sec / fn)  # refuse before changing anything
     (agents / "orch-relay").mkdir(parents=True, exist_ok=True)
     os.replace(stage / "workspaces.json", agents / "orch-relay" / "workspaces.json")
     for n in names:
@@ -1833,10 +1838,10 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str]) -> None:
             if d.is_dir() and not skills._is_link(d) and (d / SHARED_MARK).exists() and d.name not in names:
                 shutil.rmtree(d)
                 skills.unlink_skill(root, d.name)
-    os.replace(stage / "credentials.json", sec / "credentials.json")
-    os.replace(stage / "mcp.json", sec / "mcp.json")
+    net.replace_private(stage / "credentials.json", sec / "credentials.json")
+    net.replace_private(stage / "mcp.json", sec / "mcp.json")
     skills.apply_agent_files(root)
-    os.replace(stage / "shared.json", sec / "shared.json")
+    net.replace_private(stage / "shared.json", sec / "shared.json")
 
 
 # ---- webhooks -----------------------------------------------------------------------------------
