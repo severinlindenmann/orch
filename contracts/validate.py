@@ -586,7 +586,7 @@ def look_connect(local, remote):
     """On connect: (value written to .orch/config.toml or None, PATCH /v1/me body)."""
     if local["icon"] is None and local["color"] is None and remote["look_by"] == "admin":
         adopted = {"icon": remote["icon"], "color": remote["color"]}
-        return adopted, adopted
+        return {**adopted, "set_by": "human"}, adopted
     return None, {"icon": local["icon"], "color": local["color"]}
 
 
@@ -603,6 +603,10 @@ for case in lvec["admin_patch"]:
 for case in lvec["meta"]:
     if look_meta(case["record"]) != case["meta"] or look_errors("file_meta", case["meta"]):
         fails.append(f"look vector meta {case['name']}: got {look_meta(case['record'])}")
+for case in lvec["shared_pages_set"]:
+    ok = case["caller"] == "human" and isinstance(case["request"], bool)
+    if (ok, case["request"] if ok else case["local"]) != (case["ok"], case["after"]):
+        fails.append(f"look vector shared_pages_set {case['name']}: expected the core to {'allow' if case['ok'] else 'refuse'} it")
 for case in lvec["local_set"]:
     if look_local_set(case["local"], case["caller"], case["request"]) != (case["ok"], case["after"]):
         fails.append(f"look vector local_set {case['name']}: got {look_local_set(case['local'], case['caller'], case['request'])}")
