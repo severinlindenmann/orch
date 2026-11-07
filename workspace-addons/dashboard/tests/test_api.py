@@ -201,6 +201,10 @@ def art(ws, act_orch):
     d = ws / ".orch" / "tickets" / "t_other000x"
     (d / "artifacts" / "sub").mkdir(parents=True)
     (d / "evidence").mkdir()
+    (d / "files").mkdir()
+    (d / "files" / "voice.m4a").write_bytes(b"0123456789")
+    (d / "files" / "roof.jpg").write_bytes(b"\xff\xd8jpg")
+    (d / "files" / "evil.exe").write_bytes(b"MZ")
     (d / "artifacts" / "notes.md").write_text("# hello")
     (d / "artifacts" / "page.html").write_text("<script>alert(1)</script>")
     (d / "artifacts" / "pic.png").write_bytes(b"\x89PNG")
@@ -287,3 +291,58 @@ def test_hard_links_and_pipes_are_not_served(art, ws):
 def test_file_reads_go_through_the_one_core_reader():
     src = (Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "ticketfiles.py").read_text()
     assert "safefile.read_ticket_file" in src and "os.open" not in src and "lstat" not in src
+
+
+def test_phone_files_are_shown_and_a_voice_note_plays_with_byte_ranges(art):
+    q = "/api/file?t=t_other000x&k=files&n="
+    code, body, h = _get(art, q + "voice.m4a")
+    assert code == 200 and h["Content-Type"] == "audio/mp4" and h["Accept-Ranges"] == "bytes" and body == b"0123456789"
+    code, body, h = _get(art, q + "voice.m4a", {"Range": "bytes=2-4"})
+    assert code == 206 and body == b"234" and h["Content-Range"] == "bytes 2-4/10"
+    assert _get(art, q + "roof.jpg")[2]["Content-Type"] == "image/jpeg"
+    assert _get(art, q + "evil.exe")[0] == 404  # not shown inline
+    assert _get(art, q + "evil.exe&dl=1")[2]["Content-Disposition"].startswith("attachment")
+    assert _get(art, q + "../notes.md")[0] in (404, 400)
+    assert _get(art, "/api/file?t=t_other000x&k=audio&n=voice.m4a")[0] == 404
+
+
+def test_general_conversation_is_in_the_state_but_never_a_ticket(ws):
+    from orch_dashboard.data import load_state
+    t = ws / ".orch" / "tickets"
+    skipped = load_state(ws)["skipped"]
+    g = {"schema": "orch.ticket/1", "id": "t_general01", "title": "General", "general": True, "status": "open",
+         "created_at": "2026-11-06T10:00:00Z", "updated_at": "2026-11-06T10:05:00Z", "checklist": [], "links": [], "questions": [],
+         "history": [{"at": "2026-11-06T10:00:00Z", "by": "x", "via": "cli", "text": "Created"},
+                     {"at": "2026-11-06T10:05:00Z", "by": "human:anna", "via": "phone", "text": "From Anna: hello"}]}
+    (t / "t_general01.json").write_text(json.dumps(g))
+    st = load_state(ws)
+    assert all(x["id"] != "t_general01" for x in st["tickets"]) and st["skipped"] == skipped
+    assert st["general"]["id"] == "t_general01" and [h["text"] for h in st["general"]["history"]] == ["From Anna: hello"]
+    assert load_state(ws, with_addons=False)["general"] is None
+
+
+def test_links_carry_the_phone_artifact_id_rev_and_kind(ws):
+    from orch_dashboard.data import add_artifact_marks
+    t = {"links": [{"url": "https://example.com/org/repo/pull/7"}, {"url": "https://x.example/f/abc123"}],
+         "checklist": [{"evidence": [{"type": "commit", "ref": "https://github.com/o/r/commit/abcdef1234"}]}]}
+    add_artifact_marks([t])
+    assert t["art"]["https://x.example/f/abc123"]["kind"] == "html"
+    assert t["art"]["https://github.com/o/r/commit/abcdef1234"]["kind"] == "commit"
+    assert t["art"]["https://example.com/org/repo/pull/7"]["id"].startswith("a_")
+
+
+def test_malformed_ticket_data_never_breaks_the_artifact_marks():
+    from orch_dashboard.data import add_artifact_marks
+    ts = [{"links": "x", "checklist": [1, {"evidence": "no"}, {"evidence": [3, {"type": "pr", "ref": "http://[bad"}]}]},
+          {"links": [5, {"url": "http://[bad"}, {"url": "https://ok.example/f/zz"}], "checklist": None}]
+    add_artifact_marks(ts)
+    assert ts[0]["art"] == {} and ts[1]["art"]["https://ok.example/f/zz"]["kind"] == "html"
+
+
+@pytest.mark.parametrize("rng,code", [("bytes=20-30", 416), ("bytes=-", 200), ("bytes=a-b", 200), ("bytes=5-2", 200),
+                                      ("bytes=0-99999999999999999999", 200), ("bytes=-3", 206), ("bytes=8-", 206)])
+def test_range_edge_cases_never_crash(art, rng, code):
+    r = _get(art, "/api/file?t=t_other000x&k=files&n=voice.m4a", {"Range": rng})
+    assert r[0] == code
+    if code == 416:
+        assert r[2]["Content-Range"] == "bytes */10"

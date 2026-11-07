@@ -5,9 +5,11 @@ Delete removes the whole ext.automation entry (orch ext unset) and keeps the tic
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import orchcli
+from .loop import record_last_run
 
 VERBS = ("on", "off", "toggle", "run", "delete")
 TID = re.compile(r"t_[a-z0-9]{6,16}")
@@ -30,6 +32,9 @@ def act(root: Path, verb: str, target: str, by: str | None = None) -> dict:
         r = orchcli.run_start(root, target, by=by)
         if r["result"] == "failed":
             raise Bad(r["reason"])
+        if sched:  # a manual run counts as the last run (same writer as the schedule); re-read: the run bumped the revision
+            fresh = next((x for x in orchcli.tickets(root) if x["id"] == target), t)
+            record_last_run(root, fresh, datetime.now(UTC), by=by)
         return {"ticket": target, "result": r["result"],
                 "text": "Run started." if r["result"] == "started" else "The ticket is busy: your request waits for the current run."}
     if not sched:

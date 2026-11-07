@@ -138,6 +138,13 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--file")
     x.add_argument("--update", choices=relay.UPDATE_KINDS, help="mark the text as a work update of --ticket")
     x.add_argument("--reply-to", help="id of the message this answers")
+    x.add_argument("--speak", action="store_true", help="a phone can read this out loud (long answers)")
+    x.add_argument("--summary", help="what to read out instead of the whole text (with --speak)")
+    x = rel.add_parser(
+        "topic", parents=[common], help="turn a phone message (from General) into a ticket of its own"
+    )
+    x.add_argument("--from", dest="message", required=True, help="id of the phone message")
+    x.add_argument("title")
     x = rel.add_parser("delegate", parents=[common, t], help="hand a task to another workspace")
     x.add_argument("workspace")
     x.add_argument("title")
@@ -347,15 +354,21 @@ def run_relay(args, root: Path, out) -> None:
             txt += f" Ticket: {r['ticket']}"
         out(args, r, txt)
     elif sub == "send":
-        if args.file and (args.update or args.reply_to):
-            raise Refused("--update and --reply-to go with a text, not a file.")
+        if args.file and (args.update or args.reply_to or args.speak):
+            raise Refused("--update, --reply-to and --speak go with a text, not a file.")
+        if args.summary and not args.speak:
+            raise Refused("--summary goes with --speak.")
         if args.file:
             m = relay.send_file(root, args.workspace, Path(args.file), args.text or None, t)
         elif args.text:
-            m = relay.send_text(root, args.workspace, args.text, t, args.update, args.reply_to)
+            speak = relay.speak_hint(root, t, args.text, args.summary) if args.speak else None
+            m = relay.send_text(root, args.workspace, args.text, t, args.update, args.reply_to, speak=speak)
         else:
             raise Refused("Nothing to send. Give a text or --file.")
         out(args, m, _sent_line(root, m, "Message sent to {}."))
+    elif sub == "topic":
+        r = relay.topic(root, args.message, args.title, tickets.current_actor())
+        out(args, r, f"Started {r['key'] or r['ticket']} ({r['ticket']}). The phone shows it as a topic now.")
     elif sub == "delegate":
         m = relay.send_delegate(root, args.workspace, args.title, args.text, args.check, t)
         out(args, m, _sent_line(root, m, "Task handed to {}. It starts once they allow it."))
@@ -455,9 +468,11 @@ def _inbox_line(i: dict, root: Path) -> str:
     return f"{head}: {detail}{tail}".replace(": " + tail, tail)
 
 
-def send_phone_question(root: Path, tid: str, q: dict) -> None:
+def send_phone_question(
+    root: Path, tid: str, q: dict, previews: list[str] | None = None, scope: str | None = None
+) -> None:
     try:
-        if relay.send_question(root, tickets.load(root, tid), q).get("sent") is False:
+        if relay.send_question(root, tickets.load(root, tid), q, previews, scope).get("sent") is False:
             raise Refused(NOT_SENT)
     except Refused as e:
         raise Refused(

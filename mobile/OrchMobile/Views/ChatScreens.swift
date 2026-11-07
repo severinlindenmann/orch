@@ -76,6 +76,7 @@ struct ConversationView: View {
                 }
             }
             .sheet(isPresented: $tasksShown) { tasksSheet }
+            .task { await model.watchWhileOpen() }
             .accessibilityIdentifier("conversation-view")
     }
     @ViewBuilder private var presence: some View {

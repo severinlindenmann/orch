@@ -41,6 +41,8 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var handler: ((URLRequest) -> (Int, Data))?
     nonisolated(unsafe) static var seen: [URLRequest] = []
     nonisolated(unsafe) static var seenBodies: [Data] = []
+    /// The next N requests fail like a network that is not ready yet.
+    nonisolated(unsafe) static var failNext = 0
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -52,6 +54,7 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
             s.close(); body = d
         }
         Self.seen.append(request); Self.seenBodies.append(body ?? Data())
+        if Self.failNext > 0 { Self.failNext -= 1; client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet)); return }
         let (status, data) = Self.handler?(request) ?? (500, Data())
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data)

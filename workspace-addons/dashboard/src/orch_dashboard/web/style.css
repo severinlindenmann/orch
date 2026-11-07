@@ -287,3 +287,10 @@ iframe.embed{display:block;width:100%;height:calc(100vh - 96px);min-height:480px
 .card-links .st{font-size:10px;padding:0 6px}
 .card-links .more{font-size:10px;color:var(--text-faint)}
 .card-links .gap{flex:1}
+
+.phone-entry{display:flex;flex-direction:column;gap:6px}.phone-entry p{margin:0}
+.phone-voice,.phone-file,.phone-place,.phone-feedback,.phone-pin{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.phone-audio{width:100%;max-width:320px;height:36px}
+.phone-thumb{display:block;max-width:180px;max-height:140px;border-radius:8px;border:1px solid var(--border)}
+.chat-row.chat-out{background:var(--surface-2)}
+.art-kind{font-size:11px;margin-left:6px}

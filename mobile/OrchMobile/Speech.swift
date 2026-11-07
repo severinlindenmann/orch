@@ -43,9 +43,13 @@ enum AudioSession {
     func setRate(_ rate: Float)
     var currentTime: TimeInterval { get }
     var duration: TimeInterval { get }
+<<<<<<< HEAD
     func seek(to time: TimeInterval)
 }
 extension AudioPlaying { func seek(to time: TimeInterval) {} }
+=======
+}
+>>>>>>> origin/develop
 @MainActor protocol Synthesizing: AnyObject {
     func speak(_ text: String, lang: String, rate: Float, onFinish: @escaping @MainActor () -> Void)
     func stop()
@@ -66,7 +70,10 @@ extension AudioPlaying { func seek(to time: TimeInterval) {} }
     func setRate(_ rate: Float) { player?.rate = rate }
     var currentTime: TimeInterval { player?.currentTime ?? 0 }
     var duration: TimeInterval { player?.duration ?? 0 }
+<<<<<<< HEAD
     func seek(to time: TimeInterval) { player?.currentTime = max(0, min(time, player?.duration ?? 0)) }
+=======
+>>>>>>> origin/develop
     func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully: Bool) { let f = finish; Task { @MainActor in f?() } }
 }
 
@@ -111,9 +118,12 @@ final class SpeechPlayer {
     private(set) var current: SpeechClip?
     /// Set when the relay refused with a reason a person should know ("Read-aloud budget used up. Using the phone's voice.").
     private(set) var notice: String?
+<<<<<<< HEAD
     /// 0...1 position in the current clip (updated while it plays; 0 for the phone's own voice).
     private(set) var progress: Double = 0
     private var progressTask: Task<Void, Never>?
+=======
+>>>>>>> origin/develop
 
     typealias Fetch = @Sendable (_ messageId: String, _ lang: String?) async throws -> Data
     private let fetch: Fetch
@@ -150,7 +160,13 @@ final class SpeechPlayer {
     }
     func pause() {
         guard case .playing(let id) = state else { return }
+<<<<<<< HEAD
         if usingPhoneVoice { synth.stop(); state = .idle; current = nil; return }   // the phone's voice cannot resume: it starts again
+=======
+        // The phone's own voice cannot resume: pausing it stops it and drops the current clip. The queue is kept, so "next" /
+        // a new play() still works; the lock screen entry goes away.
+        if usingPhoneVoice { synth.stop(); state = .idle; current = nil; usingPhoneVoice = false; clearNowPlaying(); return }
+>>>>>>> origin/develop
         audio.pause(); state = .paused(id); updateNowPlaying()
     }
     func resume() {
@@ -166,18 +182,25 @@ final class SpeechPlayer {
         rate = r; audio.setRate(Float(r)); updateNowPlaying()
     }
     func skipToNext() { finishCurrent(played: false) }
+<<<<<<< HEAD
     /// Scrub the current clip (fraction 0...1). No effect with the phone's own voice.
     func seek(to fraction: Double) {
         guard !usingPhoneVoice, audio.duration > 0 else { return }
         audio.seek(to: audio.duration * max(0, min(1, fraction))); progress = max(0, min(1, fraction)); updateNowPlaying()
     }
+=======
+>>>>>>> origin/develop
 
     // MARK: Playing
 
     private func stopAll(keepNotice: Bool) {
         generation += 1; job?.cancel(); job = nil
         audio.stop(); synth.stop()
+<<<<<<< HEAD
         state = .idle; usingPhoneVoice = false; progressTask?.cancel(); progress = 0
+=======
+        state = .idle; usingPhoneVoice = false
+>>>>>>> origin/develop
         if !keepNotice { notice = nil }
         clearNowPlaying()
     }
@@ -192,7 +215,11 @@ final class SpeechPlayer {
                 guard gen == self.generation, !Task.isCancelled else { return }
                 AudioSession.playback()
                 try self.audio.start(data: data, rate: Float(self.rate)) { [weak self] in self?.ended(gen) }
+<<<<<<< HEAD
                 self.state = .playing(clip.messageId); self.updateNowPlaying(); self.trackProgress(gen)
+=======
+                self.state = .playing(clip.messageId); self.updateNowPlaying()
+>>>>>>> origin/develop
             } catch {
                 guard gen == self.generation, !Task.isCancelled else { return }
                 self.fallBack(clip, because: error, gen)
@@ -201,6 +228,7 @@ final class SpeechPlayer {
     }
 
     /// Cached audio first (free, offline); else the relay.
+<<<<<<< HEAD
     private func audioData(for clip: SpeechClip) async throws -> Data {
         let url = cacheDir.appendingPathComponent("\(clip.messageId)-\(clip.lang).mp3")
         if let d = try? Data(contentsOf: url), !d.isEmpty { return d }
@@ -209,6 +237,41 @@ final class SpeechPlayer {
         return d
     }
 
+=======
+    static func isValidMessageId(_ id: String) -> Bool { id.range(of: "^m_[a-z0-9]{16}$", options: .regularExpression) != nil }
+    static let cacheLimitBytes = 50 * 1024 * 1024
+
+    private func audioData(for clip: SpeechClip) async throws -> Data {
+        // The id becomes part of a file name: only the relay's own shape is accepted (no path tricks).
+        guard Self.isValidMessageId(clip.messageId), ["de", "en"].contains(clip.lang) else { throw RelayError.api(status: 404, code: "not_found", message: "Nothing to read aloud.") }
+        let url = cacheDir.appendingPathComponent("\(clip.messageId)-\(clip.lang).mp3")
+        if let d = try? Data(contentsOf: url), !d.isEmpty {
+            try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)    // last used, for eviction
+            return d
+        }
+        let d = try await fetch(clip.messageId, clip.lang)
+        try? d.write(to: url, options: .atomic)
+        Self.evict(cacheDir, limit: Self.cacheLimitBytes, keep: url)
+        return d
+    }
+
+    /// Least recently used files go first until the folder is at most `limit` bytes. `keep` is never removed.
+    nonisolated static func evict(_ dir: URL, limit: Int, keep: URL? = nil) {
+        let fm = FileManager.default
+        guard let urls = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]) else { return }
+        var files = urls.compactMap { u -> (URL, Date, Int)? in
+            guard let v = try? u.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]) else { return nil }
+            return (u, v.contentModificationDate ?? .distantPast, v.fileSize ?? 0)
+        }.sorted { $0.1 < $1.1 }
+        var total = files.reduce(0) { $0 + $1.2 }
+        while total > limit, !files.isEmpty {
+            let f = files.removeFirst()
+            if f.0 == keep { continue }
+            try? fm.removeItem(at: f.0); total -= f.2
+        }
+    }
+
+>>>>>>> origin/develop
     /// 402 / 503 / 502 (and no network): the phone reads the same words with its own voice. Anything else (404, 401...) just stops.
     nonisolated static func shouldUsePhoneVoice(_ error: Error) -> Bool {
         switch error as? RelayError {
@@ -231,6 +294,7 @@ final class SpeechPlayer {
         updateNowPlaying()
     }
 
+<<<<<<< HEAD
     private func trackProgress(_ gen: Int) {
         progressTask?.cancel()
         progressTask = Task { [weak self] in
@@ -242,6 +306,8 @@ final class SpeechPlayer {
         }
     }
 
+=======
+>>>>>>> origin/develop
     private func ended(_ gen: Int) {
         guard gen == generation else { return }
         finishCurrent(played: true)

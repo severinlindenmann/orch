@@ -157,7 +157,7 @@ pub fn remove_key(c: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-fn get_key(c: &Connection, key: &crypto::Key) -> Option<String> {
+pub fn get_key(c: &Connection, key: &crypto::Key) -> Option<String> {
     let blob: Vec<u8> = c
         .query_row("SELECT v FROM settings WHERE k='deepgram'", [], |r| {
             r.get(0)
@@ -198,9 +198,25 @@ fn rate_ok(app: &App, who: &str) -> bool {
     e.1 <= PER_MINUTE
 }
 
+/// The language sent to Deepgram: an explicit `?language=` wins; else `de-CH` when the phone's `swiss_german`
+/// setting is on; else none (the language is detected).
+pub fn effective_language(explicit: Option<&str>, swiss_german: bool) -> Option<String> {
+    match explicit.filter(|l| !l.is_empty()) {
+        Some(l) => Some(l.to_string()),
+        None if swiss_german => Some("de-CH".into()),
+        None => None,
+    }
+}
+
+/// The phone's `swiss_german` setting (`/v1/phone/settings`).
+fn swiss_german(c: &Connection, phone: &str) -> bool {
+    crate::store::phone_settings(c, phone)["swiss_german"] == true
+}
+
 async fn run(
     app: &AppState,
     who: &str,
+    swiss: bool,
     h: &HeaderMap,
     q: &HashMap<String, String>,
     body: Bytes,
@@ -228,10 +244,8 @@ async fn run(
     if body.len() > MAX_AUDIO {
         return Err(too_large("The audio is larger than 10 MB."));
     }
-    let lang = q
-        .get("language")
-        .map(String::as_str)
-        .filter(|l| !l.is_empty());
+    let lang = effective_language(q.get("language").map(String::as_str), swiss);
+    let lang = lang.as_deref();
     if let Some(l) = lang {
         if l.len() > 12 || !l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             return Err(invalid(
@@ -268,11 +282,13 @@ pub async fn phone(
     Query(q): Query<HashMap<String, String>>,
     body: Bytes,
 ) -> Res<Json<Value>> {
-    let id = {
+    let (id, swiss) = {
         let c = app.db.lock().unwrap();
-        auth::phone(&c, &h)?.0
+        let id = auth::phone(&c, &h)?.0;
+        let swiss = swiss_german(&c, &id);
+        (id, swiss)
     };
-    run(&app, &id, &h, &q, body).await
+    run(&app, &id, swiss, &h, &q, body).await
 }
 
 pub async fn workspace(
@@ -285,5 +301,5 @@ pub async fn workspace(
         let c = app.db.lock().unwrap();
         auth::workspace(&c, &h)?
     };
-    run(&app, &id, &h, &q, body).await
+    run(&app, &id, false, &h, &q, body).await
 }

@@ -96,6 +96,26 @@ def _who(by: str) -> tuple[str, str]:
     return name, "person"
 
 
+_ADMIN_NOTE = re.compile(
+    r"(?:Set|Removed) ext\."
+)  # add-on settings notes: admin business, not for a phone chat
+_FROM_PREFIX = re.compile(r"From [^:\n]{1,100}: ")
+_RELAY_BY = re.compile(r"agent:relay from (ph_\S+)")  # a phone only; a workspace keeps its own label
+
+
+def _phone_line(root: Path, h: dict) -> tuple[str, str, str] | None:
+    """(who, role, text) of a text that came from a phone: its name (never the raw ph_ id), as a person."""
+    from orch import relay
+
+    m = _RELAY_BY.fullmatch(str(h.get("by", "")))
+    if not m:
+        return None
+    text = str(h.get("text", ""))
+    if h.get("via") == "phone":
+        text = _FROM_PREFIX.sub("", text, count=1)
+    return _clip(relay.name_of(root, m.group(1)), 64) or "Phone", "person", text
+
+
 def _agent(root: Path, ticket: dict) -> tuple[str | None, bool]:
     """(agent display name, running now)."""
     rec = runs.read(root, ticket["id"])
@@ -166,6 +186,33 @@ def _upload(root: Path, data: bytes, state: dict) -> dict | None:
     return got
 
 
+def artifact_id(source: str, ref: str) -> str:
+    """a_ + 12 hex of sha256("<source>\\n<ref>"): stable across revisions (vectors/phone-v3-v1.json).
+    source = the evidence type (pr, commit, file, url, command, note) or "link" for ticket links."""
+    return "a_" + hashlib.sha256(f"{source}\n{ref}".encode()).hexdigest()[:12]
+
+
+def _short(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+_PUBLISHED = re.compile(r"^/(?:f|a)/([A-Za-z0-9_.-]+)")
+
+
+def _url_art(source: str, url: str, kind_hint: str | None = None) -> tuple[str, str]:
+    """(kind, rev) of an artifact that is a link: a published page or app is html (rev = its publish id or app
+    name), a pull request pr, a commit commit (rev = the commit sha), anything else link."""
+    path = urllib.parse.urlsplit(url).path
+    if m := _PUBLISHED.match(path):
+        return "html", m.group(1)
+    if source == "pr" or kind_hint == "pr":
+        return "pr", _short(url)
+    if source == "commit" or kind_hint == "commit" or re.search(r"/commit/([0-9a-f]{7,40})", path):
+        c = re.search(r"/commit/([0-9a-f]{7,40})", path)
+        return "commit", c.group(1) if c else _short(url)
+    return "link", _short(url)
+
+
 def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = True) -> list[dict]:
     """Proof files (uploaded), proof links and ticket links, newest first, at most 50."""
     tid = ticket["id"]
@@ -188,19 +235,39 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
                     "name": name,
                     "size": b["size"],
                     "at": at,
+                    "id": artifact_id("file", str(ev.get("ref", ""))),
+                    "rev": hashlib.sha256(f[1]).hexdigest(),
                 }
             )
-        elif ev.get("type") in ("url", "pr") and (url := safe_url(ev.get("ref", ""))):
+        elif ev.get("type") in ("url", "pr", "commit") and (url := safe_url(ev.get("ref", ""))):
+            kind, rev = _url_art(ev["type"], url)
             out.append(
-                {"kind": "link", "title": _clip(ev.get("title") or url, 200) or "Link", "url": url, "at": at}
+                {
+                    "kind": kind,
+                    "title": _clip(ev.get("title") or url, 200) or "Link",
+                    "url": url,
+                    "at": at,
+                    "id": artifact_id(ev["type"], str(ev.get("ref", ""))),
+                    "rev": rev,
+                }
             )
+        elif ev.get("type") == "commit" and re.fullmatch(r"[0-9a-f]{7,40}", str(ev.get("ref", ""))):
+            pass  # a bare commit sha has no address to open: nothing for the phone to show
     kinds = links.active_kinds(root) if ticket.get("links") else []
     for ln in ticket.get("links") or []:
         if not isinstance(ln, dict) or not (url := safe_url(ln.get("url", ""))):
             continue
         d = links.describe(ln, kinds)  # same label, icon and status as the dashboard and CLI
         at = ln["at"] if _TIME.fullmatch(str(ln.get("at"))) else at0
-        a = {"kind": "link", "title": _clip(ln.get("title") or url, 200) or "Link", "url": url, "at": at}
+        kind, rev = _url_art("link", url)
+        a = {
+            "kind": kind,
+            "title": _clip(ln.get("title") or url, 200) or "Link",
+            "url": url,
+            "at": at,
+            "id": artifact_id("link", str(ln.get("url", ""))),
+            "rev": rev,
+        }
         a.update(label=_clip(d["label"], 60) or "Link", icon=d["icon"])
         if d["mono"]:
             a["mono"] = d["mono"][:3]
@@ -211,19 +278,34 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
     return out[:ATTACHMENTS]
 
 
+def artifact_title(root: Path, ticket: dict, aid: str) -> str | None:
+    """The title of the proof or link a phone feedback names (by artifact id), or None."""
+    for ev in phone_proof(root, ticket):
+        if artifact_id(str(ev.get("type")), str(ev.get("ref", ""))) == aid:
+            return _clip(ev.get("title") or Path(str(ev.get("ref", ""))).name, 200) or None
+    for ln in ticket.get("links") or []:
+        if isinstance(ln, dict) and artifact_id("link", str(ln.get("url", ""))) == aid:
+            return _clip(ln.get("title") or ln.get("url", ""), 200) or None
+    return None
+
+
 def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
     checklist = ticket.get("checklist") or []
     done, total = tickets.checks_done(ticket)
     agent, running = _agent(root, ticket)
     hist = []
     for h in (ticket.get("history") or [])[-HISTORY:]:
-        text = _clip(tickets.history_line(str(h.get("text", "")), checklist), 1000)
+        if _ADMIN_NOTE.match(str(h.get("text", ""))):
+            continue
+        pl = _phone_line(root, h)
+        raw = pl[2] if pl else str(h.get("text", ""))
+        text = _clip(tickets.history_line(raw, checklist), 1000)
         if not text:
             continue
         at = str(h.get("at") or "")
         if not _TIME.fullmatch(at):
             continue
-        who, role = _who(h.get("by", ""))
+        who, role = pl[:2] if pl else _who(h.get("by", ""))
         hist.append({"at": at, "who": who, "role": role, "text": text})
     view: dict = {
         "title": _clip(ticket.get("title", ""), 200) or "Ticket",

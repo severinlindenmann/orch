@@ -13,7 +13,12 @@ protocol RelayAPI: Sendable {
     func updates() async throws -> [TicketUpdate]
     func answer(_ request: AnswerRequest) async throws -> SendReceipt
     func send(_ request: SendRequest) async throws -> SendReceipt
+<<<<<<< HEAD
     /// A phone upload (photo, file, voice memo), max 25 MB. Reads from disk so it can run in a background session.
+=======
+    /// A phone upload (photo, file, voice memo), max 25 MB. Streams from a file on disk. Today it runs in the normal URLSession
+    /// (it stops when the app is suspended; the Outbox simply sends it again); a background session can replace it later.
+>>>>>>> origin/develop
     func uploadBlob(file: URL, contentType: String) async throws -> BlobUpload
     func transcribe(audio: Data, language: String?) async throws -> Transcript
     /// The text read aloud (`audio/mpeg`). Throws `.api(402 tts_cap_reached | 503 tts_off | 502 tts_failed | 404)`.

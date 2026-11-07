@@ -258,3 +258,15 @@ def test_paused_repeat_does_not_start_runs(ws):
     add_ticket(ws, "t_rec00001", ext={"automation": {"recurring": True, "cron": "0 8 * * *", "paused": True}})
     Scheduler(ws).tick(T(9))
     assert runs_started(ws) == []
+
+
+def test_a_finished_repeat_runs_again_and_is_opened(ws):
+    """The agent set the repeating ticket to Done: the next planned run opens it again and starts."""
+    add_ticket(ws, "t_rec00009", status="done", created_at="2026-11-01T00:00:00Z",
+               ext={"automation": {"recurring": True, "cron": "0 7 * * *", "last_run": "2026-11-03T07:00:00Z"}})
+    add_ticket(ws, "t_done0001", status="done")  # a plain finished ticket stays finished
+    s = Scheduler(ws)
+    assert s.tick(T(7, 1)) == ["t_rec00009"]
+    cs = [c["args"] for c in calls(ws)]
+    assert ["ticket", "status", "t_rec00009", "open"] in [a[:4] for a in cs]
+    assert not any(a[:3] == ["run", "start", "t_done0001"] for a in cs)

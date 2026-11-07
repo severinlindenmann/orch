@@ -20,7 +20,7 @@ import re
 import stat
 from pathlib import Path, PureWindowsPath
 
-FOLDERS = ("artifacts", "evidence")
+FOLDERS = ("artifacts", "evidence", "files")
 _ID_RE = re.compile(r"^t_[a-z0-9]{6,16}$")
 _DIR_FD = True  # tests turn it off to run the Windows path on POSIX
 
