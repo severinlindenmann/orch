@@ -356,18 +356,33 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
     static let linkClickGuard = """
     (function () {
       // Everything the guard reads is captured now, before any page script can shadow it; it is only ever called through `apply`.
-      var apply = Reflect.apply, URLc = URL, getNS = Element.prototype.getAttributeNS, closest = Element.prototype.closest;
+      var apply = Reflect.apply, URLc = URL, getNS = Element.prototype.getAttributeNS;
       function getter(proto, name) { return Object.getOwnPropertyDescriptor(proto, name).get; }
       var protocol = getter(URL.prototype, 'protocol');
       var nodeType = getter(Node.prototype, 'nodeType'), baseURI = getter(Node.prototype, 'baseURI'), eventType = getter(Event.prototype, 'type');
       var click = HTMLElement.prototype.click, dispatch = EventTarget.prototype.dispatchEvent, attach = Element.prototype.attachShadow;
+      var parentNode = getter(Node.prototype, 'parentNode'), localName = getter(Element.prototype, 'localName');
+      var slotE = getter(Element.prototype, 'assignedSlot'), slotT = getter(Text.prototype, 'assignedSlot'), host = getter(ShadowRoot.prototype, 'host');
+      // The event path's parent: assigned slot, else parent node; a shadow root continues at its host. Every element on it is checked.
+      function up(n) {
+        var t = apply(nodeType, n, []), s = null;
+        if (t === 1) s = apply(slotE, n, []); else if (t === 3) s = apply(slotT, n, []);
+        if (s) return s;
+        if (t === 11) { try { return apply(host, n, []); } catch (e) { return null; } }
+        return apply(parentNode, n, []);
+      }
       function external(el) {
+        try { apply(nodeType, el, []); } catch (e) { return false; }   // not a Node (window ...): cannot be inside a link
         try {
-          var a = el && apply(nodeType, el, []) === 1 ? apply(closest, el, ['a[href],area[href],a[*|href]']) : null;
-          if (!a) return false;
-          var raw = apply(getNS, a, [null, 'href']); if (raw === null) raw = apply(getNS, a, ['http://www.w3.org/1999/xlink', 'href']);
-          if (raw === null) return true;   // matched as a link but no address could be read: fail closed
-          return apply(protocol, new URLc(raw, apply(baseURI, document, [])), []) !== 'orch-page:';
+          for (var n = el, i = 0; n && i < 10000; n = up(n), i++) {
+            if (apply(nodeType, n, []) !== 1) continue;
+            var name = apply(localName, n, []);
+            if (name !== 'a' && name !== 'area') continue;
+            var raw = apply(getNS, n, [null, 'href']); if (raw === null) raw = apply(getNS, n, ['http://www.w3.org/1999/xlink', 'href']);
+            if (raw === null) continue;
+            if (apply(protocol, new URLc(raw, apply(baseURI, document, [])), []) !== 'orch-page:') return true;
+          }
+          return false;
         } catch (e) { return true; }
       }
       function lock(proto, name, value) { Object.defineProperty(proto, name, { value: value, writable: false, configurable: false }); }

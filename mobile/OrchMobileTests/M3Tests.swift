@@ -251,6 +251,12 @@ final class PublishWebViewTests: XCTestCase {
         var h = document.createElement('div'); var s = h.attachShadow({mode: 'closed'}); var sa = document.createElement('a'); sa.href = '\(base)/shadow'; s.appendChild(sa); sa.click();
         document.getElementById('att').dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
         var la = document.createElement('a'); la.href = '\(base)/span'; var sp = document.createElement('span'); la.appendChild(sp); sp.click();
+        var tn = document.createElement('a'); tn.href = '\(base)/text'; tn.textContent = 'x'; tn.firstChild.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        document.getElementById('att').firstChild.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        var da = document.createElement('a'); da.href = '\(base)/dshadow'; var dh = document.createElement('div'); da.appendChild(dh);
+        var dr = dh.attachShadow({mode: 'open'}); var ds = document.createElement('span'); dr.appendChild(ds); ds.click();
+        var sh = document.createElement('div'); var sr = sh.attachShadow({mode: 'open'}); sr.innerHTML = '<a href="\(base)/slot"><slot></slot></a>';
+        var ss = document.createElement('span'); sh.appendChild(ss); ss.click();
         document.getElementById('frag').click();
         </script></body>
         """
