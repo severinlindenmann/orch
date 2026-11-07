@@ -1,0 +1,855 @@
+{
+ "name": "look-v1",
+ "description": "Workspace look (contracts/look.md). default: Automatic colour + letter for a name. me_patch: PATCH /v1/me with look fields on relay and publish (stored/after = the workspace record's icon, color, look_by). admin_patch: the look part of PATCH /admin/api/workspaces/<id>. render: what a surface shows for raw server values (phone, portals, dashboard). connect: what the core does on connect (local = .orch/config.toml [workspace] icon/color, remote = whoami). me_patch.service: relay or publish (publish also takes show_on_shared_pages). meta: GET /f/<id>/meta on publish. local_set: `orch look set` / the dashboard against .orch/config.toml [workspace] icon, color, look_set_by (caller agent|human).",
+ "default": [
+  {
+   "name": "Finance",
+   "why": "",
+   "djb2_32": 219643257,
+   "color": "blue",
+   "letter": "F"
+  },
+  {
+   "name": "Home",
+   "why": "",
+   "djb2_32": 2089185646,
+   "color": "cyan",
+   "letter": "H"
+  },
+  {
+   "name": "website",
+   "why": "",
+   "djb2_32": 3201900952,
+   "color": "orange",
+   "letter": "W"
+  },
+  {
+   "name": "Garden club",
+   "why": "",
+   "djb2_32": 4212074140,
+   "color": "orange",
+   "letter": "G"
+  },
+  {
+   "name": "Photo book",
+   "why": "",
+   "djb2_32": 585058554,
+   "color": "pink",
+   "letter": "P"
+  },
+  {
+   "name": "Ärzte",
+   "why": "precomposed",
+   "djb2_32": 3629265777,
+   "color": "blue",
+   "letter": "Ä"
+  },
+  {
+   "name": "Ärzte",
+   "why": "decomposed: same as precomposed after NFC",
+   "djb2_32": 3629265777,
+   "color": "blue",
+   "letter": "Ä"
+  },
+  {
+   "name": "  Büro ",
+   "why": "trimmed",
+   "djb2_32": 219639335,
+   "color": "slate",
+   "letter": "B"
+  },
+  {
+   "name": " 　Kanzlei ",
+   "why": "Unicode spaces trimmed",
+   "djb2_32": 2069828979,
+   "color": "amber",
+   "letter": "K"
+  },
+  {
+   "name": "🚀 Launch",
+   "why": "symbols skipped for the letter",
+   "djb2_32": 5717417,
+   "color": "red",
+   "letter": "L"
+  },
+  {
+   "name": "2027 plans",
+   "why": "a digit is a letter",
+   "djb2_32": 3632183822,
+   "color": "lime",
+   "letter": "2"
+  },
+  {
+   "name": "ßauna",
+   "why": "upper case of ß is two characters: kept",
+   "djb2_32": 3660669068,
+   "color": "indigo",
+   "letter": "ß"
+  },
+  {
+   "name": "éclair",
+   "why": "lower case accented",
+   "djb2_32": 936383516,
+   "color": "indigo",
+   "letter": "É"
+  },
+  {
+   "name": "日本語",
+   "why": "no case",
+   "djb2_32": 3052633221,
+   "color": "blue",
+   "letter": "日"
+  },
+  {
+   "name": "",
+   "why": "",
+   "djb2_32": 5381,
+   "color": "red",
+   "letter": "?"
+  },
+  {
+   "name": "🚀🚀",
+   "why": "no letter or digit",
+   "djb2_32": 967024087,
+   "color": "violet",
+   "letter": "?"
+  }
+ ],
+ "me_patch": [
+  {
+   "name": "set both",
+   "stored": {
+    "icon": null,
+    "color": null,
+    "look_by": null
+   },
+   "body": {
+    "icon": "wallet",
+    "color": "amber"
+   },
+   "status": 200,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "service": "relay"
+  },
+  {
+   "name": "only colour, icon unchanged",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "color": "teal"
+   },
+   "status": 200,
+   "after": {
+    "icon": "wallet",
+    "color": "teal",
+    "look_by": "workspace"
+   },
+   "service": "relay"
+  },
+  {
+   "name": "back to default",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "icon": null,
+    "color": null
+   },
+   "status": 200,
+   "after": {
+    "icon": null,
+    "color": null,
+    "look_by": "workspace"
+   },
+   "service": "relay"
+  },
+  {
+   "name": "Automatic colour keeps the icon",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "color": null
+   },
+   "status": 200,
+   "after": {
+    "icon": "wallet",
+    "color": null,
+    "look_by": "workspace"
+   },
+   "service": "relay"
+  },
+  {
+   "name": "workspace takes over an admin look",
+   "stored": {
+    "icon": "code",
+    "color": "blue",
+    "look_by": "admin"
+   },
+   "body": {
+    "icon": "globe"
+   },
+   "status": 200,
+   "after": {
+    "icon": "globe",
+    "color": "blue",
+    "look_by": "workspace"
+   },
+   "service": "relay"
+  },
+  {
+   "name": "unknown icon id",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "icon": "unicorn"
+   },
+   "status": 422,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "service": "relay"
+  },
+  {
+   "name": "ids are lower case",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "icon": "Wallet"
+   },
+   "status": 422,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "service": "relay"
+  },
+  {
+   "name": "no svg",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "icon": "<svg onload=x>"
+   },
+   "status": 422,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "service": "relay"
+  },
+  {
+   "name": "no hex colour",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "color": "#ff0000"
+   },
+   "status": 422,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "service": "relay"
+  },
+  {
+   "name": "unknown colour token",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "color": "purple"
+   },
+   "status": 422,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "service": "relay"
+  },
+  {
+   "name": "wrong type",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "icon": 5
+   },
+   "status": 422,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "service": "relay"
+  },
+  {
+   "name": "all or nothing",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "icon": "house",
+    "color": "x"
+   },
+   "status": 422,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "service": "relay"
+  },
+  {
+   "name": "not mixed with description",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "icon": "house",
+    "description": "Home stuff"
+   },
+   "status": 422,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "service": "relay"
+  },
+  {
+   "name": "unknown field",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "icon": "house",
+    "emoji": "🏠"
+   },
+   "status": 422,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "service": "relay"
+  },
+  {
+   "name": "publish: switch off shared-page identity",
+   "service": "publish",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace",
+    "show_on_shared_pages": true
+   },
+   "body": {
+    "show_on_shared_pages": false
+   },
+   "status": 200,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace",
+    "show_on_shared_pages": false
+   }
+  },
+  {
+   "name": "publish: switch alone leaves look_by",
+   "service": "publish",
+   "stored": {
+    "icon": null,
+    "color": null,
+    "look_by": null,
+    "show_on_shared_pages": true
+   },
+   "body": {
+    "show_on_shared_pages": false
+   },
+   "status": 200,
+   "after": {
+    "icon": null,
+    "color": null,
+    "look_by": null,
+    "show_on_shared_pages": false
+   }
+  },
+  {
+   "name": "publish: switch is a boolean",
+   "service": "publish",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace",
+    "show_on_shared_pages": true
+   },
+   "body": {
+    "show_on_shared_pages": "no"
+   },
+   "status": 422,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace",
+    "show_on_shared_pages": true
+   }
+  },
+  {
+   "name": "relay has no shared pages",
+   "service": "relay",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "show_on_shared_pages": false
+   },
+   "status": 422,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   }
+  }
+ ],
+ "admin_patch": [
+  {
+   "name": "set before the workspace connected",
+   "stored": {
+    "icon": null,
+    "color": null,
+    "look_by": null
+   },
+   "body": {
+    "icon": "code",
+    "color": "blue"
+   },
+   "status": 200,
+   "after": {
+    "icon": "code",
+    "color": "blue",
+    "look_by": "admin"
+   }
+  },
+  {
+   "name": "change own admin look",
+   "stored": {
+    "icon": "code",
+    "color": "blue",
+    "look_by": "admin"
+   },
+   "body": {
+    "color": "cyan"
+   },
+   "status": 200,
+   "after": {
+    "icon": "code",
+    "color": "cyan",
+    "look_by": "admin"
+   }
+  },
+  {
+   "name": "admin clears its look",
+   "stored": {
+    "icon": "code",
+    "color": "blue",
+    "look_by": "admin"
+   },
+   "body": {
+    "icon": null,
+    "color": null
+   },
+   "status": 200,
+   "after": {
+    "icon": null,
+    "color": null,
+    "look_by": "admin"
+   }
+  },
+  {
+   "name": "workspace owns it now",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "icon": "code"
+   },
+   "status": 409,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   }
+  },
+  {
+   "name": "workspace owns it: reset refused too",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "color": null
+   },
+   "status": 409,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   }
+  },
+  {
+   "name": "other fields still work when the workspace owns the look",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "description": "Bills"
+   },
+   "status": 200,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   }
+  },
+  {
+   "name": "unknown id",
+   "stored": {
+    "icon": "code",
+    "color": "blue",
+    "look_by": "admin"
+   },
+   "body": {
+    "icon": "unicorn"
+   },
+   "status": 422,
+   "after": {
+    "icon": "code",
+    "color": "blue",
+    "look_by": "admin"
+   }
+  }
+ ],
+ "render": [
+  {
+   "name": "Finance",
+   "icon": "wallet",
+   "color": "amber",
+   "shown": {
+    "icon": "wallet",
+    "color": "amber",
+    "letter": "F"
+   },
+   "why": "known values"
+  },
+  {
+   "name": "Finance",
+   "icon": null,
+   "color": null,
+   "shown": {
+    "icon": null,
+    "color": "blue",
+    "letter": "F"
+   },
+   "why": "defaults"
+  },
+  {
+   "name": "Finance",
+   "icon": "rocket-2",
+   "color": "gold",
+   "shown": {
+    "icon": null,
+    "color": "blue",
+    "letter": "F"
+   },
+   "why": "unknown values (newer server): letter + Automatic colour, stored value untouched"
+  },
+  {
+   "name": "Home",
+   "missing": true,
+   "shown": {
+    "icon": null,
+    "color": "cyan",
+    "letter": "H"
+   },
+   "why": "fields missing (older relay)"
+  }
+ ],
+ "connect": [
+  {
+   "name": "local look is sent",
+   "local": {
+    "icon": "wallet",
+    "color": "amber"
+   },
+   "remote": {
+    "icon": null,
+    "color": null,
+    "look_by": null
+   },
+   "write_local": null,
+   "send": {
+    "icon": "wallet",
+    "color": "amber"
+   }
+  },
+  {
+   "name": "admin pre-set look is adopted",
+   "local": {
+    "icon": null,
+    "color": null
+   },
+   "remote": {
+    "icon": "code",
+    "color": "blue",
+    "look_by": "admin"
+   },
+   "write_local": {
+    "icon": "code",
+    "color": "blue"
+   },
+   "send": {
+    "icon": "code",
+    "color": "blue"
+   }
+  },
+  {
+   "name": "nothing anywhere: defaults are sent (takes ownership)",
+   "local": {
+    "icon": null,
+    "color": null
+   },
+   "remote": {
+    "icon": null,
+    "color": null,
+    "look_by": null
+   },
+   "write_local": null,
+   "send": {
+    "icon": null,
+    "color": null
+   }
+  },
+  {
+   "name": "local wins over an admin look",
+   "local": {
+    "icon": "house",
+    "color": null
+   },
+   "remote": {
+    "icon": "code",
+    "color": "blue",
+    "look_by": "admin"
+   },
+   "write_local": null,
+   "send": {
+    "icon": "house",
+    "color": null
+   }
+  }
+ ],
+ "meta": [
+  {
+   "name": "on (default)",
+   "record": {
+    "name": "Finance",
+    "icon": "wallet",
+    "color": "amber",
+    "show_on_shared_pages": true
+   },
+   "meta": {
+    "workspace": {
+     "name": "Finance",
+     "icon": "wallet",
+     "color": "amber"
+    }
+   }
+  },
+  {
+   "name": "on, nothing picked",
+   "record": {
+    "name": "Finance",
+    "icon": null,
+    "color": null,
+    "show_on_shared_pages": true
+   },
+   "meta": {
+    "workspace": {
+     "name": "Finance",
+     "icon": null,
+     "color": null
+    }
+   }
+  },
+  {
+   "name": "off",
+   "record": {
+    "name": "Finance",
+    "icon": "wallet",
+    "color": "amber",
+    "show_on_shared_pages": false
+   },
+   "meta": {
+    "workspace": null
+   }
+  }
+ ],
+ "local_set": [
+  {
+   "name": "agent picks at setup",
+   "local": {
+    "icon": null,
+    "color": null,
+    "set_by": null
+   },
+   "caller": "agent",
+   "request": {
+    "icon": "wallet",
+    "color": "amber"
+   },
+   "ok": true,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "set_by": "agent"
+   }
+  },
+  {
+   "name": "agent may change its own pick",
+   "local": {
+    "icon": "wallet",
+    "color": "amber",
+    "set_by": "agent"
+   },
+   "caller": "agent",
+   "request": {
+    "icon": "savings"
+   },
+   "ok": true,
+   "after": {
+    "icon": "savings",
+    "color": "amber",
+    "set_by": "agent"
+   }
+  },
+  {
+   "name": "person changes it in the dashboard",
+   "local": {
+    "icon": "wallet",
+    "color": "amber",
+    "set_by": "agent"
+   },
+   "caller": "human",
+   "request": {
+    "icon": "bank",
+    "color": "teal"
+   },
+   "ok": true,
+   "after": {
+    "icon": "bank",
+    "color": "teal",
+    "set_by": "human"
+   }
+  },
+  {
+   "name": "agent cannot override the person's pick",
+   "local": {
+    "icon": "bank",
+    "color": "teal",
+    "set_by": "human"
+   },
+   "caller": "agent",
+   "request": {
+    "icon": "wallet"
+   },
+   "ok": false,
+   "after": {
+    "icon": "bank",
+    "color": "teal",
+    "set_by": "human"
+   }
+  },
+  {
+   "name": "unknown id refused",
+   "local": {
+    "icon": null,
+    "color": null,
+    "set_by": null
+   },
+   "caller": "agent",
+   "request": {
+    "icon": "unicorn"
+   },
+   "ok": false,
+   "after": {
+    "icon": null,
+    "color": null,
+    "set_by": null
+   }
+  },
+  {
+   "name": "person resets to default",
+   "local": {
+    "icon": "bank",
+    "color": "teal",
+    "set_by": "human"
+   },
+   "caller": "human",
+   "request": {
+    "icon": null,
+    "color": null
+   },
+   "ok": true,
+   "after": {
+    "icon": null,
+    "color": null,
+    "set_by": "human"
+   }
+  }
+ ]
+}

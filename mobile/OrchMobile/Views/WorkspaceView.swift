@@ -88,9 +88,12 @@ struct WorkspaceView: View {
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(name).themeFont(17, .semibold).lineLimit(1)
-                    PresenceLine(lastSeen: summary?.workspace.lastSeen)
+                HStack(spacing: 10) {
+                    WorkspaceBadge(name: name, icon: summary?.workspace.icon, color: summary?.workspace.color, size: 32, id: "header-\(workspaceId)")
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(name).themeFont(17, .semibold).lineLimit(1)
+                        PresenceLine(lastSeen: summary?.workspace.lastSeen)
+                    }
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -126,7 +129,7 @@ struct WorkspaceView: View {
     private var generalCard: some View {
         NavigationLink { ChatRoomView(workspaceId: workspaceId).toolbar(.visible, for: .navigationBar) } label: {
             HStack(spacing: 12) {
-                ShellAvatar(name: name, size: 50)
+                WorkspaceBadge(name: name, icon: summary?.workspace.icon, color: summary?.workspace.color, size: 50)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 5) {
                         Text("General").themeFont(17, .semibold)
