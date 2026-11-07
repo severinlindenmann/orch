@@ -57,6 +57,7 @@ fn who_json(st: &State, w: &Workspace) -> Value {
     json!({
         "id": w.id, "name": w.name, "description": w.description, "tags": w.tags, "rights": w.rights,
         "pending": db::Pending::json(&w.pending),
+        "icon": w.icon, "color": w.color, "look_by": w.look_by, "show_on_shared_pages": w.show_on_shared_pages,
         "max_file_mb": st.cfg.max_file_mb, "default_days": st.cfg.default_days, "max_days": st.cfg.max_days,
     })
 }
@@ -80,6 +81,18 @@ pub async fn me_patch(
     body: Bytes,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
     let w = auth(&st, &h)?;
+    if let Ok(v) = serde_json::from_slice::<Value>(&body) {
+        if crate::look::is_look_body(&v) {
+            // Icon, colour and the shared-pages switch: applied at once, not pending (contracts/look.md).
+            let p = crate::look::parse_me(&v)?;
+            let mut c = st.db.lock().unwrap();
+            let tx = c.transaction()?;
+            crate::look::apply(&tx, &w.id, &p, "workspace")?;
+            tx.commit()?;
+            let fresh = db::get_workspace(&c, &w.id)?.ok_or_else(ApiError::unauthorized)?;
+            return Ok((StatusCode::OK, Json(who_json(&st, &fresh))));
+        }
+    }
     let b: MeBody = serde_json::from_slice(&body).map_err(|_| {
         ApiError::invalid(
             "The body must be JSON like {\"description\": \"...\", \"tags\": [\"a\"]}.",

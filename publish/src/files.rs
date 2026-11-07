@@ -198,3 +198,25 @@ pub async fn blob(St(st): St<State>, Path(id): Path<String>) -> ApiResult<Respon
     }
     Ok(r)
 }
+
+/// GET /f/<id>/meta: the sharing workspace's name and look for the file page header, or `workspace: null` when the
+/// workspace switched that off (contracts/look.md). 404 / 410 as for the blob. Never cached, no referrer.
+pub async fn meta(St(st): St<State>, Path(id): Path<String>) -> ApiResult<Response> {
+    let row = state_of(&st, &id)?;
+    let w = db::get_workspace(&st.db.lock().unwrap(), &row.workspace)?;
+    let body = match w {
+        Some(w) if w.show_on_shared_pages => {
+            json!({"workspace": {"name": w.name, "icon": w.icon, "color": w.color}})
+        }
+        _ => json!({"workspace": null}),
+    };
+    let mut r = axum::Json(body).into_response();
+    let h = r.headers_mut();
+    h.insert("cache-control", HeaderValue::from_static("no-store"));
+    h.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
+    h.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    Ok(r)
+}
