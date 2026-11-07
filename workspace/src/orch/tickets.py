@@ -112,7 +112,7 @@ def tickets_dir(root: Path) -> Path:
 
 
 def ticket_path(root: Path, tid: str) -> Path:
-    if not _ID_RE.match(tid):
+    if not _ID_RE.fullmatch(tid):
         raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
     return tickets_dir(root) / f"{tid}.json"
 
@@ -539,15 +539,15 @@ def _check_can_finish(ticket: dict) -> None:
         raise Refused(f"Not done: {', '.join(bad)} is checked without evidence.")
 
 
-def _finish_status(root: Path, ticket: dict, status: str, by: str) -> str:
+def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
         by = "agent:" + str(agent_tool())
     if status == "done" and by.startswith("agent:"):
         _check_can_finish(ticket)
         if not config.agents_may_finish(root):
             add_history(ticket, by, f"{by} finished the work and moved it to Review")
-            return "review"
-    return status
+            return "review", by
+    return status, by
 
 
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
@@ -570,13 +570,13 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
 
     def op(ticket):
-        target = _finish_status(root, ticket, status, by)
+        target, actor = _finish_status(root, ticket, status, by)
         if target != "waiting":
             ticket["waiting_on"] = None
         old = ticket["status"]
         ticket["status"] = target
         if old != target and target == status:
-            add_history(ticket, by, f"Status {old} -> {target}")
+            add_history(ticket, actor, f"Status {old} -> {target}")
 
     return apply_op(root, tid, op)[0]
 
@@ -1250,8 +1250,9 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         status = obj.get("status", ticket["status"])
         if status not in STATUSES:
             raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
+        actor = by
         if "status" in obj:
-            status = _finish_status(root, ticket, status, by)
+            status, actor = _finish_status(root, ticket, status, by)
         for k in ("owner", "due", "note", "summary"):
             if k in obj:
                 _set_field(ticket, k, obj[k])
@@ -1261,7 +1262,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
             ticket["waiting_on"] = None
         old, ticket["status"] = ticket["status"], status
         note = f" (status {old} -> {status})" if old != status else ""
-        add_history(ticket, by, "Patched " + ", ".join(sorted(obj)) + note)
+        add_history(ticket, actor, "Patched " + ", ".join(sorted(obj)) + note)
 
     return apply_op(root, tid, op, if_revision=if_revision)[0]
 

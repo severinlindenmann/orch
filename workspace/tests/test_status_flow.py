@@ -141,3 +141,22 @@ def test_list_order_and_closed_filter(proj, run, new_ticket):
 
     assert code == 0 and not err
     assert [t["status"] for t in json.loads(out)] == list(tickets.OPEN_STATUSES)
+
+
+@pytest.mark.parametrize("path", ["status", "patch"])
+@pytest.mark.parametrize("status", ["active", "done"])
+@pytest.mark.parametrize("allowed", [False, True])
+def test_status_history_uses_resolved_actor(proj, run, new_ticket, monkeypatch, path, status, allowed):
+    tid = new_ticket()
+    config.set_agents_may_finish(proj, allowed)
+    before = tickets.load(proj, tid)
+    monkeypatch.setenv("ORCH_AGENT", "generic")
+    args = (
+        ("status", tid, status)
+        if path == "status"
+        else ("patch", tid, "--if-revision", str(before["revision"]), '{"status":"' + status + '"}')
+    )
+    code, _, err = run("ticket", *args, "--by", "human:x")
+    assert code == 0, err
+    history = tickets.load(proj, tid)["history"][len(before["history"]) :]
+    assert history and all(h["by"] == "agent:generic" for h in history)

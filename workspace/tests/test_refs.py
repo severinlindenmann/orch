@@ -600,3 +600,58 @@ def test_addon_kind_survives_repeat_while_inactive(proj, run, tid):  # noqa: F81
         }
     )
     assert refs.describe(ref, kinds)["type"] == "Pull request"
+
+
+@pytest.mark.parametrize("kind", ["file", "artifact"])
+def test_stored_path_escapes_are_cleaned(proj, run, tid, kind):  # noqa: F811
+    value = "report\x1b]0;x\x07\x1b[31m.txt"
+    ref = {"kind": kind, "path": value} if kind == "file" else {"kind": kind, "ticket": tid, "name": value}
+    t = tickets.load(proj, tid)
+    t["refs"] = [ref]
+    tickets.save(proj, t)
+    for argv in (("ref", "list", tid), ("ticket", "show", tid)):
+        code, out, err = run(*argv)
+        assert code == 0, err
+        assert "report" in out and _clean(out)
+
+
+@pytest.mark.parametrize("path", ["sub/.git/config", ".orch./secrets/x", ".git /config", "sub/.GiT/config"])
+def test_private_project_paths_refused(proj, run, tid, path):  # noqa: F811
+    assert run("ref", "add", tid, path)[0] == 2
+    assert run("ref", "add", tid, str(proj / path))[0] == 2
+    assert not refs.all_refs(proj, {"id": tid, "refs": [{"kind": "file", "path": path}]})
+
+
+def test_invalid_stored_ticket_ids_and_local_symlink(proj, tid, monkeypatch):
+    with pytest.raises(Refused):
+        refs.local_path(proj, "../../../x")
+    with pytest.raises(Refused):
+        tickets.ticket_path(proj, tid + "\n")
+    path = refs.local_path(proj, tid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    outside = proj / "outside.json"
+    outside.write_text(json.dumps([{"kind": "file", "path": "private.txt"}]))
+    path.symlink_to(outside)
+    assert refs.local_refs(proj, tid) == []
+    assert refs.all_refs(proj, {"id": "../../../x", "refs": []}) == []
+
+    def forbidden(*args):
+        pytest.fail("invalid ticket id must not be loaded")
+
+    monkeypatch.setattr(tickets, "load", forbidden)
+    for kind in ("ticket", "artifact"):
+        ref = {"kind": kind, "ticket": "../../../x", "name": "report.txt"}
+        assert refs.describe(ref, [], proj)["title"] == "invalid reference"
+        assert refs.all_refs(proj, {"id": tid, "refs": [ref]}) == []
+
+
+def test_ticket_json_id_cannot_read_outside_local_refs(proj, run, tid):  # noqa: F811
+    path = tickets.ticket_path(proj, tid)
+    t = tickets.load(proj, tid)
+    t["id"] = "../../../x"
+    path.write_text(json.dumps(t))
+    (proj / "x.json").write_text(json.dumps([{"kind": "file", "path": "PRIVATE_MARKER"}]))
+    for argv in (("ref", "list", tid), ("ticket", "show", tid)):
+        code, out, err = run(*argv)
+        assert code == 0, err
+        assert "PRIVATE_MARKER" not in out

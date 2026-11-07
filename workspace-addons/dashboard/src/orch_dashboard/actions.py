@@ -409,9 +409,16 @@ def _audit(root: Path, op: str, args: dict) -> None:
 
 def human_env(root: Path, orch_bin: str) -> dict:
     """Browser actions are the person's actions, even if an agent launched the server."""
-    from orch.adapters import detect_env
+    from orch.adapters import _registry
 
-    env = {k: v for k, v in os.environ.items() if detect_env({k: v}) is None}
+    names = {"ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET"}
+    prefixes = []
+    for adapter in _registry().values():
+        detection = adapter.get("detect") or {}
+        names.update(detection.get("env_any") or [])
+        if detection.get("env_prefix"):
+            prefixes.append(detection["env_prefix"])
+    env = {k: v for k, v in os.environ.items() if k not in names and not k.startswith(tuple(prefixes))}
     return {**env, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "dashboard"}
 
 

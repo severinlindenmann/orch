@@ -640,9 +640,22 @@ def test_browser_actions_do_not_inherit_the_servers_agent_identity(ws, monkeypat
     monkeypatch.setenv("ORCH_AGENT", "claude")
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.setenv("CODEX_TEST", "1")
+    monkeypatch.setenv("ORCH_RUN", "run123")
+    monkeypatch.setenv("ORCH_TICKET", "t_abcdef")
+    from orch.adapters import _registry
+
+    removed = {"ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET"}
+    for adapter in _registry().values():
+        detection = adapter.get("detect") or {}
+        removed.update(detection.get("env_any") or [])
+        if detection.get("env_prefix"):
+            removed.add(detection["env_prefix"] + "TEST")
+    for name in removed:
+        monkeypatch.setenv(name, "")
     monkeypatch.setenv("KEEP_FOR_AGENT", "yes")
     env = actions.human_env(ws, "orch")
     assert detect_env(env) is None
+    assert removed.isdisjoint(env)
     assert env["KEEP_FOR_AGENT"] == "yes"
     assert env["ORCH_VIA"] == "dashboard"
 

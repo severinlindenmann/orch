@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import stat
 from functools import cache
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -155,9 +156,24 @@ def describe(link: dict, kinds: list[dict], root: Path | None = None) -> dict:
     """How a reference is shown: label, short label (the type
     name, for lists), icon key and monogram, title (stored, else the short address), status (only while
     the add-on that set it is on), group (Artifacts tab: the add-on label, else "References") and preview."""
+    if not valid_reference(link, root):
+        return dict(
+            kind="invalid",
+            host="",
+            title="invalid reference",
+            short="invalid reference",
+            status=None,
+            preview=None,
+            addon=None,
+            label="Reference",
+            type="Reference",
+            icon="link",
+            mono=None,
+            group="References",
+        )
     if link.get("kind") in ("ticket", "artifact", "file"):
         label = link["kind"].capitalize()
-        value = target(link)
+        value = one_line(target(link), 300)
         if root is not None and link["kind"] in ("ticket", "artifact"):
             from orch import tickets
 
@@ -174,8 +190,8 @@ def describe(link: dict, kinds: list[dict], root: Path | None = None) -> dict:
         return dict(
             kind=link["kind"],
             host="",
-            title=value,
-            short=value,
+            title=one_line(value, 300),
+            short=one_line(value, 300),
             status=None,
             preview=None,
             addon=None,
@@ -291,7 +307,9 @@ def detect(root: Path, tid: str, value: str, kind=None, title=None, kinds=(), *,
     local = absolute or path == ".." or path.startswith("../")
     if not local and not Path(os.path.realpath(root / path)).is_relative_to(root.resolve()):
         raise Refused("That project path points outside the project.")
-    if not local and (safefile._parts(path) is None or path.split("/")[0].lower() in (".orch", ".git")):
+    if (not local and safefile._parts(path) is None) or any(
+        p.rstrip(". ").lower() in (".orch", ".git") for p in path.split("/")
+    ):
         raise Refused("Choose a project file outside .orch and .git.")
     out = dict(kind="file", path=str((root / path).absolute()) if local and not absolute else path)
     if line is not None:
@@ -301,14 +319,52 @@ def detect(root: Path, tid: str, value: str, kind=None, title=None, kinds=(), *,
     return out
 
 
+def valid_reference(ref, root: Path | None = None) -> bool:
+    """Check stored targets before using them, with the same path rules as new references."""
+    from orch import safefile
+
+    if not isinstance(ref, dict):
+        return False
+    kind = ref.get("kind")
+    if kind in ("ticket", "artifact"):
+        tid = ref.get("ticket")
+        if not isinstance(tid, str) or not safefile._ID_RE.fullmatch(tid):
+            return False
+        return kind == "ticket" or safefile._parts(ref.get("name")) is not None
+    if kind == "file":
+        path = ref.get("path")
+        if not isinstance(path, str) or not path:
+            return False
+        if "line" in ref and (type(ref["line"]) is not int or ref["line"] < 1):
+            return False
+        try:
+            checked = detect(root or Path.cwd(), "", path, check_exists=False)
+            return (
+                checked["kind"] == "file"
+                and checked["path"] == path
+                and bool(checked.get("local")) == bool(ref.get("local"))
+            )
+        except (Refused, OSError, ValueError, KeyError):
+            return False
+    return isinstance(kind, str) and isinstance(ref.get("url"), str)
+
+
 def local_path(root: Path, tid: str) -> Path:
+    from orch import safefile
+
+    if not isinstance(tid, str) or not safefile._ID_RE.fullmatch(tid):
+        raise Refused("That is not a ticket id.")
     return root / ".orch" / "local" / "refs" / f"{tid}.json"
 
 
 def local_refs(root: Path, tid: str) -> list[dict]:
     try:
-        return json.loads(local_path(root, tid).read_text())
-    except FileNotFoundError:
+        path = local_path(root, tid)
+        if not stat.S_ISREG(path.lstat().st_mode):
+            return []
+        values = json.loads(path.read_text())
+        return [ref for ref in values if valid_reference(ref, root)] if isinstance(values, list) else []
+    except (Refused, OSError, ValueError):
         return []
 
 
@@ -330,7 +386,11 @@ def write_local(root: Path, tid: str, values: list[dict]) -> None:
 
 
 def all_refs(root: Path, ticket: dict) -> list[tuple[int, dict]]:
-    return numbered({"refs": ticket["refs"] + local_refs(root, ticket["id"])})
+    return [
+        (n, ref)
+        for n, ref in numbered({"refs": ticket["refs"] + local_refs(root, ticket["id"])})
+        if valid_reference(ref, root)
+    ]
 
 
 def open_file_ref(root: Path, path: str, max_bytes: int) -> bytes | None:

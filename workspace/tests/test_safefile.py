@@ -176,3 +176,30 @@ def test_project_file_reader(tmp_path, monkeypatch, fallback):
     if hasattr(os, "mkfifo"):
         os.mkfifo(root / "pipe")
         assert safefile.open_file_ref(root, "pipe", 100) is None
+
+
+@pytest.mark.parametrize("path", ["sub/.git/config", ".orch./secrets/x", ".git /config", "sub/.GiT/config"])
+def test_project_private_parts_refused(root, mode, path):
+    file = root / path
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text("secret")
+    assert safefile.open_file_ref(root, path, 100) is None
+
+
+def test_windows_short_names_refused(root, monkeypatch):
+    monkeypatch.setattr(safefile, "_DIR_FD", False)
+    (root / "ORCH~1").mkdir()
+    (root / "ORCH~1" / "secret").write_text("secret")
+    assert safefile.open_file_ref(root, "ORCH~1/secret", 100) is None
+
+
+@pytest.mark.parametrize("private", [".orch", ".git"])
+def test_windows_real_private_path_refused(root, monkeypatch, private):
+    monkeypatch.setattr(safefile, "_DIR_FD", False)
+    realpath = os.path.realpath
+    monkeypatch.setattr(
+        os.path,
+        "realpath",
+        lambda p: str(root / private / "secret") if str(p) == str(root / "alias") else realpath(p),
+    )
+    assert safefile.open_file_ref(root, "alias", 100) is None

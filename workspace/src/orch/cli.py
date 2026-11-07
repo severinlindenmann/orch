@@ -186,7 +186,7 @@ def _show(t: dict, root: Path | None = None) -> str:
         for n, ln in rows:
             d = refs.describe(ln, kinds, root)
             st = f" ({d['status']})" if d["status"] else ""
-            out.append(f"  {n}  {d['type']}: {d['title']}{st}  {refs.one_line(refs.target(ln), 2000)}")
+            out.append(f"  {n}  {d['type']}: {d['title']}{st}  {refs.one_line(refs.target(ln), 300)}")
     if t["history"]:
         out.append("\nRecent:")
         out += [
@@ -746,7 +746,7 @@ def _ref(args, root: Path, by) -> None:
         else:
             for n, ref in rows:
                 d = refs.describe(ref, kinds, root)
-                value = d["title"]
+                value = refs.one_line(d["title"], 300)
                 suffix = " (On this computer only)" if ref.get("local") else ""
                 print(f"  {n}  {d['type']}  {value}{suffix}" + (f"  {d['status']}" if d["status"] else ""))
     else:
