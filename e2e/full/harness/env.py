@@ -50,6 +50,7 @@ class Env:
         log(f"orch installed in {self.timings['install_orch_s']} s")
         e.pub, e.rel = lib.start_local(e, self.root, self.bins, e.used_ports)
         self.urls.update(relay=e.rel.url, relay_admin=e.rel.admin_url, publish=e.pub.url, publish_admin=e.pub.admin_url)
+        self.vars.update(relay_admin_token=e.rel.admin.token, publish_admin_token=e.pub.admin.token)
         self.headers["relay_admin"] = {"X-Orch-Admin": e.rel.admin.token}
         self.headers["publish_admin"] = {"X-Orch-Admin": e.pub.admin.token}
         for name in WORKSPACES:
@@ -70,7 +71,20 @@ class Env:
         for name in WORKSPACES:
             rc, out, err = e.sh(["orch", "start", "--json", "--no-open"], cwd=e.ws(name), timeout=120)
         self.refresh_urls()
+        self.fixtures()
         return self.env_json()
+
+    def fixtures(self):
+        """One ticket with a question waiting in Pilatus: the steps that need 'a ticket' use it (vars ticket_id, ticket_title)."""
+        e = self.e
+        w = e.ws("Pilatus")
+        rc, out, err = e.sh(["orch", "ticket", "new", "Plan the launch", "--note", "Fixture ticket of the full e2e", "--json"], cwd=w)
+        t = json.loads(out)
+        self.vars.update(ticket_id=t["id"], ticket_title=t["title"])
+        p = subprocess.Popen(["orch", "ask", t["id"], "Which greeting should I use?", "--option", "Hi", "--option", "Hello",
+                              "--recommend", "Hi"], cwd=w, env=e.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             stdin=subprocess.DEVNULL, start_new_session=True)
+        e.pids.append(p.pid)
 
     def refresh_urls(self):
         for name in WORKSPACES:
@@ -87,7 +101,7 @@ class Env:
                 pass
 
     def env_json(self) -> dict:
-        d = {"urls": self.urls, "vars": self.vars, "headers": self.headers, "root": str(self.root), "sha": self.sha,
+        d = {"urls": self.urls, "vars": self.vars, "headers": {}, "root": str(self.root), "sha": self.sha,
              "workspaces": {n: str(self.e.ws(n)) for n in WORKSPACES}}
         (self.root / "env.json").write_text(json.dumps(d, indent=1))
         return d

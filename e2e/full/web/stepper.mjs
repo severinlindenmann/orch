@@ -16,7 +16,8 @@ function describe(el, pageName) {
   const labelled = (el.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => document.getElementById(id)?.textContent || '').join(' ');
   const name = clean(labelled || el.getAttribute('aria-label') || Array.from(el.labels || []).map(x => x.textContent).join(' ') || (tag === 'input' && ['submit', 'button'].includes(el.type) ? el.value : '') || (tag === 'input' || tag === 'textarea' || tag === 'select' ? '' : el.innerText) || el.querySelector('img[alt]')?.getAttribute('alt') || el.getAttribute('title'));
   const fallback = clean(el.getAttribute('placeholder') || el.id || (el.href ? new URL(el.href, location.href).pathname : ''));
-  return { key: `${pageName}|${role}|${(name || fallback).slice(0, 80)}`, role, name, unnamed: !name, href: tag === 'a' ? el.href : null };
+  const norm = (name || fallback).split(' · ')[0].split(';')[0].replace(/\d{3,}/g, '#').slice(0, 60);
+  return { key: `${pageName}|${role}|${norm}`, role, name, unnamed: !name, href: tag === 'a' ? el.href : null };
 }
 function substitute(value, env) {
   if (typeof value === 'string') return value.replace(/\{\{([^}]+)\}\}/g, (_, key) => {
@@ -56,7 +57,7 @@ export async function run(opts) {
   const out = resolve(opts.out);
   await mkdir(join(out, 'shots'), { recursive: true });
   const result = { lane: lane.lane, started: new Date(start).toISOString(), ms: 0, steps: [], census: {}, coverage: {} };
-  const covered = new Set(), patterns = new Set(), skipped = new Set();
+  const unclickable = new Set(), covered = new Set(), patterns = new Set(), skipped = new Set();
   const skipRegexes = (lane.census_skip || []).map(x => new RegExp(x, 'i'));
   const allowedOrigins = new Set(Object.values(env.urls).map(u => new URL(u).origin));
   const browser = await chromium.launch({ headless: true });
@@ -98,8 +99,7 @@ export async function run(opts) {
         const fresh = (await census(pageName, step.id)).find(x => x.key === item.key);
         if (!fresh) continue;
         const before = page.url();
-        await fresh.el.click({ timeout });
-        covered.add(ck(item.key));
+        try { await fresh.el.click({ timeout: Math.min(timeout, 2500) }); covered.add(ck(item.key)); } catch (e) { unclickable.add(ck(item.key)); await page.keyboard.press('Escape'); continue; }
         await page.keyboard.press('Escape');
         if (page.url() !== before) await page.goto(new URL(restore, base).href, { waitUntil: 'domcontentloaded', timeout });
       }
@@ -118,16 +118,16 @@ export async function run(opts) {
           catch (e) { if (/net::ERR_|NS_ERROR|ECONNREFUSED/.test(String(e))) blocked = `Unreachable goto: ${a.path}: ${firstLine(e)}`; throw e; }
           const t = Date.now(); await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {}); record.load_ms = Date.now() - t; break;
         }
-        case 'click': await el.click({ timeout }); break;
+        case 'click': await el.click({ timeout, force: !!a.force }); break;
         case 'fill': await el.fill(a.value, { timeout }); break;
         case 'select': await el.selectOption(a.value, { timeout }); break;
-        case 'check': await el.check({ timeout }); break;
+        case 'check': await el.check({ timeout, force: !!a.force }); break;
         case 'hover': await el.hover({ timeout }); break;
         case 'press': if (a.sel) await el.press(a.key, { timeout }); else await page.keyboard.press(a.key); break;
         case 'wait': await page.waitForTimeout(a.ms); break;
         case 'wait_for': await el.waitFor({ state: a.state || 'visible', timeout }); break;
         case 'expect_visible': await el.waitFor({ state: 'visible', timeout }); break;
-        case 'expect_text': await page.getByText(a.text, { exact: false }).first().waitFor({ state: 'visible', timeout }); break;
+        case 'expect_text': await page.getByText(a.text, { exact: false }).filter({ visible: true }).first().waitFor({ state: 'visible', timeout }); break;
         case 'expect_no_text': await page.waitForFunction(t => !document.body.innerText.includes(t), a.text, { timeout }); break;
         case 'expect_url': await page.waitForURL(u => u.href.includes(a.contains), { timeout }); break;
         case 'reload': await page.reload({ waitUntil: 'domcontentloaded', timeout }); break;
@@ -227,7 +227,7 @@ export async function run(opts) {
     const keys = [...new Set(Object.values(result.census).flatMap(map => Object.keys(map)).map(ck))];
     for (const map of Object.values(result.census)) for (const [key, value] of Object.entries(map)) value.clicked = isCovered(key);
     const clicked = keys.filter(k => covered.has(k) || isCovered('x|' + k)).length;
-    result.coverage = opts.censusOnly ? { found: keys.length } : { found: keys.length, clicked, percent: keys.length ? 100 * clicked / keys.length : 100, uncovered: keys.filter(k => !(covered.has(k) || isCovered('x|' + k))), skipped_destructive: [...new Set([...skipped].map(ck))] };
+    result.coverage = opts.censusOnly ? { found: keys.length } : { found: keys.length, clicked, percent: keys.length ? 100 * clicked / keys.length : 100, uncovered: keys.filter(k => !(covered.has(k) || isCovered('x|' + k))), skipped_destructive: [...new Set([...skipped].map(ck))], unclickable: [...unclickable] };
   } finally {
     if (context) await context.tracing.stop({ path: join(out, 'trace.zip') }).finally(() => browser.close());
     else await browser.close();

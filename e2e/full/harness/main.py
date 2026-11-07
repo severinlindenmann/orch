@@ -94,6 +94,7 @@ def main() -> int:
     ap.add_argument("--viewports", default="1280,720,390")
     ap.add_argument("--prod", default="", help="read-only smoke: relay=URL,publish=URL")
     ap.add_argument("--no-build", action="store_true", help="reuse the relay/publish binaries in the shared cargo target (dry runs)")
+    ap.add_argument("--hold", action="store_true", help="after setup keep the environment up until <root>/stop exists (to explore by hand)")
     ap.add_argument("--keep-root", action="store_true")
     ap.add_argument("--no-history", action="store_true", help="a dry run: do not count it for the timing gate")
     ap.add_argument("--serve-port", type=int, default=8796)
@@ -126,6 +127,7 @@ def main() -> int:
     lanes: list[dict] = []
     findings: list[dict] = []
     env = None
+    rcv = None
     try:
         # S: setup
         S = Lane("S", "Setup", outdir / "S")
@@ -160,7 +162,21 @@ def main() -> int:
         if any(s["status"] == "fail" for s in sres["steps"]):
             raise RuntimeError("setup failed; later lanes blocked")
         envj = root / "env.json"
+        if a.hold:
+            log(f"HOLD: environment up, env {envj}; touch {root}/stop to end")
+            while not (root / "stop").exists():
+                time.sleep(2)
+            raise RuntimeError("hold ended")
 
+        rcv = lanes_py.Receiver()
+        rcv.start()
+        env.urls["receiver"] = rcv.url
+        env.env_json()
+        if "D" in want:
+            try:
+                lanes_py.d_prep(env)
+            except Exception as x:  # noqa: BLE001
+                log("lane D prep failed:", x)
         # parallel browser + B
         results: dict[str, dict] = {}
         threads = []
@@ -194,7 +210,7 @@ def main() -> int:
         if "W" in want:
             lanes.append({**_save(lanes_py.lane_w(env, outdir / "W")), "dir": "W"})
         if "U" in want:
-            lanes.append({**_save(lanes_py.lane_u(env, outdir / "U")), "dir": "U"})
+            lanes.append({**_save(lanes_py.lane_u(env, outdir / "U", rcv)), "dir": "U"})
         if "P" in want:
             lanes.append({**_phone_lane(env, outdir / "P"), "dir": "P"})
         if "X" in want:
@@ -207,6 +223,8 @@ def main() -> int:
         findings.append({"lane": "S", "kind": "run", "severity": "blocking", "step": "", "shots": [], "title": "Run aborted",
                          "now": f"{type(x).__name__}: {x}", "proposal": "Fix the environment bring-up, rerun."})
     finally:
+        if rcv:
+            rcv.stop()
         if env:
             env.down(log)
         if wt:

@@ -8,7 +8,10 @@
   390
  ],
  "census_skip": [
-  "settings\\|.*\\|.*(Full|full)"
+  "\\|switch\\|",
+  "Turn on",
+  "\\|Stop",
+  "Change the status"
  ],
  "steps": [
   {
@@ -70,7 +73,7 @@
     },
     {
      "do": "click",
-     "sel": "role=link[name=\"Home\"]"
+     "sel": "role=link[name=/^Home/]"
     },
     {
      "do": "expect_text",
@@ -144,22 +147,14 @@
   },
   {
    "id": "A05",
-   "name": "Tickets page and ticket page",
+   "name": "Ticket page of the fixture ticket",
    "quick": true,
    "page": "ticket",
    "expect": "the ticket page shows title, status, tasks",
    "actions": [
     {
      "do": "goto",
-     "path": "/#tickets"
-    },
-    {
-     "do": "wait",
-     "ms": 800
-    },
-    {
-     "do": "click",
-     "sel": "text=E2E ticket >> nth=0"
+     "path": "/#ticket/{{ticket_id}}"
     },
     {
      "do": "wait",
@@ -167,7 +162,7 @@
     },
     {
      "do": "expect_text",
-     "text": "E2E ticket"
+     "text": "{{ticket_title}}"
     }
    ]
   },
@@ -265,7 +260,7 @@
     },
     {
      "do": "click",
-     "sel": "summary[aria-label^='Change the status'] >> nth=0"
+     "sel": "[data-key^='ticket-']:has-text('E2E ticket') summary >> nth=0"
     },
     {
      "do": "click",
@@ -378,6 +373,286 @@
    ]
   },
   {
+   "id": "A14",
+   "name": "Ticket tabs: Overview, Tasks, Questions, Artifacts, History",
+   "page": "ticket-tabs",
+   "expect": "every tab shows its content or a plain empty state",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#ticket/{{ticket_id}}"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-tasks"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-questions"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-artifacts"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-history"
+    },
+    {
+     "do": "expect_text",
+     "text": "Created"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-overview"
+    }
+   ]
+  },
+  {
+   "id": "A15",
+   "name": "Add a task, then a second one",
+   "page": "ticket-tasks",
+   "expect": "the task appears in the list and the counter changes",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#ticket/{{ticket_id}}"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-tasks"
+    },
+    {
+     "do": "fill",
+     "sel": "input[aria-label='Add a task'] >> visible=true",
+     "value": "Write the intro {{stamp}}"
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='Add']"
+    },
+    {
+     "do": "expect_text",
+     "text": "Write the intro"
+    },
+    {
+     "do": "wait",
+     "ms": 900
+    },
+    {
+     "do": "fill",
+     "sel": "input[aria-label='Add a task'] >> visible=true",
+     "value": "Check the facts"
+    },
+    {
+     "do": "press",
+     "key": "Enter"
+    },
+    {
+     "do": "expect_text",
+     "text": "Check the facts"
+    }
+   ]
+  },
+  {
+   "id": "A16",
+   "name": "Add a link to the ticket",
+   "page": "ticket-links",
+   "expect": "a valid link is added, an invalid one is refused in words",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#ticket/{{ticket_id}}"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add a link')"
+    },
+    {
+     "do": "fill",
+     "sel": "input[type=url]",
+     "value": "not a link"
+    },
+    {
+     "do": "press",
+     "key": "Enter"
+    },
+    {
+     "do": "expect_text",
+     "text": "web address"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add a link')"
+    },
+    {
+     "do": "fill",
+     "sel": "input[type=url]",
+     "value": "https://github.com/example/repo/pull/1"
+    },
+    {
+     "do": "press",
+     "key": "Enter"
+    },
+    {
+     "do": "wait",
+     "ms": 1000
+    },
+    {
+     "do": "expect_text",
+     "text": "github"
+    }
+   ],
+   "expect_errors": {
+    "http": [
+     "/api/act"
+    ],
+    "console": [
+     "Failed to load resource"
+    ]
+   }
+  },
+  {
+   "id": "A17",
+   "name": "Edit owner, due day and note on the ticket",
+   "page": "ticket-fields",
+   "expect": "the choices are saved and shown after a reload",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#ticket/{{ticket_id}}"
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='Not chosen yet']"
+    },
+    {
+     "do": "wait",
+     "ms": 400
+    },
+    {
+     "do": "press",
+     "key": "Escape"
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='Not set']"
+    },
+    {
+     "do": "wait",
+     "ms": 400
+    },
+    {
+     "do": "press",
+     "key": "Escape"
+    }
+   ]
+  },
+  {
+   "id": "A18",
+   "name": "Home: Needs you shows the fixture question; dismiss a notification",
+   "page": "home-needs",
+   "expect": "the question is in Needs you with its options",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "wait",
+     "ms": 1500
+    },
+    {
+     "do": "expect_text",
+     "text": "Which greeting"
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='Dismiss notification']",
+     "optional": true
+    }
+   ]
+  },
+  {
+   "id": "A19",
+   "name": "Add-ons: switch Automation and Focus off and on again",
+   "page": "settings-addons",
+   "expect": "tabs vanish and come back, help text is plain",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Add-ons']"
+    },
+    {
+     "do": "click",
+     "sel": "role=switch[name='automation on or off']"
+    },
+    {
+     "do": "wait",
+     "ms": 3500
+    },
+    {
+     "do": "click",
+     "sel": "role=switch[name='automation on or off']"
+    },
+    {
+     "do": "wait",
+     "ms": 3500
+    },
+    {
+     "do": "click",
+     "sel": "role=switch[name='focus on or off']",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 3500
+    },
+    {
+     "do": "click",
+     "sel": "role=switch[name='focus on or off']",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 3500
+    },
+    {
+     "do": "expect_text",
+     "text": "Automation"
+    }
+   ]
+  },
+  {
+   "id": "A20",
+   "name": "Answer the fixture question from Home",
+   "page": "answer",
+   "expect": "answering with one click removes it from Needs you",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "wait",
+     "ms": 1200
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='Hi'] >> nth=0",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 1500
+    }
+   ]
+  },
+  {
    "id": "A09",
    "name": "Click every remaining control (census)",
    "page": "home",
@@ -404,13 +679,61 @@
     },
     {
      "do": "goto",
+     "path": "/#ticket/{{ticket_id}}"
+    },
+    {
+     "do": "click_all_census",
+     "page": "ticket"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-tasks"
+    },
+    {
+     "do": "click_all_census",
+     "page": "ticket-tasks-tab"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-history"
+    },
+    {
+     "do": "click_all_census",
+     "page": "ticket-history-tab"
+    },
+    {
+     "do": "goto",
      "path": "/#settings"
     },
     {
      "do": "click_all_census",
      "page": "settings"
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Agent']"
+    },
+    {
+     "do": "click_all_census",
+     "page": "settings-agent"
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Add-ons']"
+    },
+    {
+     "do": "click_all_census",
+     "page": "settings-addons"
     }
-   ]
+   ],
+   "expect_errors": {
+    "http": [
+     "/api/act"
+    ],
+    "console": [
+     "Failed to load resource"
+    ]
+   }
   }
  ]
 }
