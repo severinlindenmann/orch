@@ -50,6 +50,90 @@ pub fn esc(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// Find the `<tag` start (ASCII case-insensitive) where the tag name ends right after it.
+fn find_tag(h: &[u8], tag: &str) -> Option<usize> {
+    let t = tag.as_bytes();
+    let mut i = 0;
+    while i + 1 + t.len() < h.len() {
+        if h[i] == b'<'
+            && h[i + 1..i + 1 + t.len()].eq_ignore_ascii_case(t)
+            && matches!(
+                h[i + 1 + t.len()],
+                b'>' | b'/' | b' ' | b'\t' | b'\n' | b'\r'
+            )
+        {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// End (exclusive) of the tag that starts at `start`, respecting quoted attribute values.
+fn tag_end(h: &[u8], start: usize) -> Option<usize> {
+    let mut q = 0u8;
+    for (i, &c) in h.iter().enumerate().skip(start) {
+        match (q, c) {
+            (0, b'"' | b'\'') => q = c,
+            (0, b'>') => return Some(i + 1),
+            (x, y) if x != 0 && x == y => q = 0,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Serve-time default for hosted app pages: add `<title>` (the app name, escaped) when the page has
+/// none and `lang="en"` on `<html>` when it has no lang. Pages that already have them are untouched.
+pub fn with_default_head(bytes: &[u8], app_name: &str) -> Vec<u8> {
+    let mut out = bytes.to_vec();
+    // lang first (it sits before the head, so offsets of the title insert stay valid after it)
+    if let Some(h) = find_tag(&out, "html") {
+        if let Some(e) = tag_end(&out, h) {
+            let attrs = out[h + 5..e].to_ascii_lowercase();
+            let has_lang = attrs.windows(5).enumerate().any(|(i, w)| {
+                w[..4] == *b"lang"
+                    && (w[4] == b'=' || w[4] == b'>' || w[4].is_ascii_whitespace())
+                    && (i == 0
+                        || attrs[i - 1].is_ascii_whitespace()
+                        || matches!(attrs[i - 1], b'"' | b'\'' | b'/'))
+            });
+            if !has_lang {
+                let at = h + 5;
+                out.splice(at..at, b" lang=\"en\"".iter().copied());
+            }
+        }
+    }
+    if find_tag(&out, "title").is_none() {
+        let t = format!("<title>{}</title>", esc(app_name));
+        let at = [("head", true), ("html", true)]
+            .iter()
+            .find_map(|(tag, _)| find_tag(&out, tag).and_then(|s| tag_end(&out, s)))
+            .or_else(|| {
+                // fragment page: after a leading doctype if any, else at the very start
+                let bom = if out.starts_with(b"\xEF\xBB\xBF") {
+                    3
+                } else {
+                    0
+                };
+                let lead = bom + out[bom..].iter().position(|c| !c.is_ascii_whitespace())?;
+                if out[lead..].len() >= 9 && out[lead..lead + 9].eq_ignore_ascii_case(b"<!doctype")
+                {
+                    tag_end(&out, lead)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(if out.starts_with(b"\xEF\xBB\xBF") {
+                3
+            } else {
+                0
+            });
+        out.splice(at..at, t.bytes());
+    }
+    out
+}
+
 /// last `n` bytes of a string, on a char boundary
 pub fn tail(s: &str, n: usize) -> String {
     if s.len() <= n {
@@ -141,4 +225,68 @@ pub fn valid_tags(t: &[String]) -> Result<Vec<String>, &'static str> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod head_tests {
+    use super::with_default_head as f;
+    fn s(b: &str) -> String {
+        String::from_utf8(f(b.as_bytes(), "my-app")).unwrap()
+    }
+    #[test]
+    fn adds_both() {
+        assert_eq!(
+            s("<!doctype html><html><head><meta charset=utf-8></head><body>x</body></html>"),
+            "<!doctype html><html lang=\"en\"><head><title>my-app</title><meta charset=utf-8></head><body>x</body></html>"
+        );
+    }
+    #[test]
+    fn untouched_when_present() {
+        let p = "<html LANG='de'><HEAD><TITLE>Mine</TITLE></HEAD></html>";
+        assert_eq!(s(p), p);
+        let p = "<html lang=\"fr\" class=a><head><title >T</title></head></html>";
+        assert_eq!(s(p), p);
+    }
+    #[test]
+    fn lang_lookalike_attr_does_not_count() {
+        assert!(s("<html data-lang=\"x\"><head></head></html>").contains(" lang=\"en\" data-lang"));
+        assert!(
+            s("<html title=\"a>lang=b\"><head></head></html>").contains("<html lang=\"en\" title")
+        );
+    }
+    #[test]
+    fn no_panic_on_trailing_tag_and_odd_lang_spacing() {
+        for p in ["<html", "x<head", "<!doctype html><html", "<title"] {
+            let _ = f(p.as_bytes(), "my-app");
+        }
+        let p = "<html lang\t=\"de\"><head><title>T</title></head></html>";
+        assert_eq!(s(p), p);
+        let p = "<html/lang=\"de\"><head><title>T</title></head></html>";
+        assert_eq!(s(p), p);
+    }
+    #[test]
+    fn bom_stays_first() {
+        let o = f("\u{feff}<!doctype html><h1>".as_bytes(), "my-app");
+        assert_eq!(
+            String::from_utf8(o).unwrap(),
+            "\u{feff}<!doctype html><title>my-app</title><h1>"
+        );
+    }
+    #[test]
+    fn fragments() {
+        assert_eq!(s("<h1>hi</h1>"), "<title>my-app</title><h1>hi</h1>");
+        assert_eq!(
+            s("<!DOCTYPE html>\n<h1>hi</h1>"),
+            "<!DOCTYPE html><title>my-app</title>\n<h1>hi</h1>"
+        );
+        assert_eq!(s(""), "<title>my-app</title>");
+    }
+    #[test]
+    fn name_is_escaped() {
+        let o = String::from_utf8(f(b"<head></head>", "a\"><script>x</script>&")).unwrap();
+        assert_eq!(
+            o,
+            "<head><title>a&quot;&gt;&lt;script&gt;x&lt;/script&gt;&amp;</title></head>"
+        );
+    }
 }
