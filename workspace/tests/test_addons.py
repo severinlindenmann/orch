@@ -684,8 +684,6 @@ def test_update_does_not_reaccept_changed_local_folder(proj, run, hello, uv_call
 def test_stale_lock_is_claimed_by_one_waiter_only(proj, new_ticket):
     import os
 
-    from orch import tickets
-
     tid = new_ticket()
     lock = proj / ".orch" / "tickets" / f".lock-{tid}"
     lock.write_text("", encoding="utf-8")

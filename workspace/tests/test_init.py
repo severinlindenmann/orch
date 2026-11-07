@@ -55,10 +55,14 @@ def test_fresh_init_in_a_git_repo_leaves_git_status_clean(proj, run):
     # .orch/tickets, config.toml are the team's workspace state; everything of the harness is invisible
     status = _git(proj, "status", "--porcelain", "--untracked-files=all").splitlines()
     names = [x[3:] for x in status]
-    assert not any(n.startswith((".agents", ".claude", ".orch/harness")) or n == "CLAUDE.local.md" for n in names)
+    assert not any(
+        n.startswith((".agents", ".claude", ".orch/harness")) or n == "CLAUDE.local.md" for n in names
+    )
     assert (proj / "AGENTS.md").read_text(encoding="utf-8") == "# Team rules\n"
     assert (proj / ".gitignore").read_text(encoding="utf-8") == "node_modules\n"
-    assert "@AGENTS.md" in (proj / "CLAUDE.local.md").read_text(encoding="utf-8")  # team AGENTS.md, no CLAUDE.md
+    assert "@AGENTS.md" in (proj / "CLAUDE.local.md").read_text(
+        encoding="utf-8"
+    )  # team AGENTS.md, no CLAUDE.md
     ex = (proj / ".git/info/exclude").read_text(encoding="utf-8")
     assert "/.agents/skills/orch*" in ex and "/.claude/skills/orch*" in ex and "/CLAUDE.local.md" in ex
     assert run("init")[0] == 0  # again: same result, one block
@@ -72,10 +76,16 @@ def test_a_colleague_clone_without_orch_sees_no_orch_files(proj, run, tmp_path_f
     _git(proj, "add", "-A")
     _git(proj, "commit", "-qm", "work")
     tracked = _git(proj, "ls-files").split()
-    assert not any(t.startswith((".agents", ".claude", ".orch/harness")) or t == "CLAUDE.local.md" for t in tracked)
+    assert not any(
+        t.startswith((".agents", ".claude", ".orch/harness")) or t == "CLAUDE.local.md" for t in tracked
+    )
     clone = tmp_path_factory.mktemp("colleague") / "c"
     _git(proj, "clone", "-q", str(proj), str(clone))
-    files = sorted(p.relative_to(clone).as_posix() for p in clone.rglob("*") if p.is_file() and ".git/" not in p.as_posix())
+    files = sorted(
+        p.relative_to(clone).as_posix()
+        for p in clone.rglob("*")
+        if p.is_file() and ".git/" not in p.as_posix()
+    )
     assert "AGENTS.md" in files
     assert not [f for f in files if "harness" in f or f.startswith((".agents", ".claude")) or "CLAUDE" in f]
 
@@ -131,7 +141,9 @@ def test_windows_copy_fallback_is_kept_in_sync(proj, run, monkeypatch):
     assert cp.is_dir() and not cp.is_symlink() and (cp / harness.COPY_MARK).is_file()
     (proj / ".orch/harness/skills/orch/SKILL.md").write_text("changed", encoding="utf-8")
     assert run("init")[0] == 0
-    assert (cp / "SKILL.md").read_text(encoding="utf-8") == "changed" or "name: orch" in (cp / "SKILL.md").read_text(encoding="utf-8")
+    assert (cp / "SKILL.md").read_text(encoding="utf-8") == "changed" or "name: orch" in (
+        cp / "SKILL.md"
+    ).read_text(encoding="utf-8")
 
 
 def test_does_not_replace_a_users_own_orch_folder(proj, run):
@@ -159,7 +171,9 @@ def test_share_with_team_on_and_off(proj, run):
     harness.share_on(proj)
     harness.share_on(proj)  # twice: still one block
     t = (proj / "AGENTS.md").read_text(encoding="utf-8")
-    assert t.startswith("# Team rules\n") and t.count("orch:begin share") == 1 and "If it does not, ignore" in t
+    assert (
+        t.startswith("# Team rules\n") and t.count("orch:begin share") == 1 and "If it does not, ignore" in t
+    )
     assert "AGENTS.md merge=union" in (proj / ".gitattributes").read_text(encoding="utf-8")
     assert harness.share_state(proj)
     other = proj.parent / (proj.name + "_other")
@@ -197,7 +211,9 @@ def test_all_packaged_skills_have_front_matter():
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink")
 def test_unix_symlink_is_relative(proj, run):
     assert run("init")[0] == 0
-    assert os.readlink(proj / ".claude/skills/orch") == os.path.join("..", "..", ".orch", "harness", "skills", "orch")
+    assert os.readlink(proj / ".claude/skills/orch") == os.path.join(
+        "..", "..", ".orch", "harness", "skills", "orch"
+    )
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink setup")

@@ -6,6 +6,7 @@
 The places agents look are links (or, where links are not allowed, copies) to those skill folders, plus a local
 local instruction file (named in agents.json); all of them are listed in .git/info/exclude, so `git status` stays clean.
 "Share with team" is the one opt-in that writes into team files (AGENTS.md and .gitattributes)."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
@@ -167,7 +168,12 @@ def _git_exclude(root: Path) -> tuple[Path, str] | None:
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel", "--git-path", "info/exclude"],
-            cwd=root, capture_output=True, text=True, env=env, timeout=10, check=True,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+            check=True,
         ).stdout.splitlines()
     except (OSError, subprocess.SubprocessError):
         return None
@@ -194,9 +200,9 @@ def exclude_set(root: Path, tag: str, lines: list[str]) -> bool:
         raise Refused(f"{ex} is a link; orch will not write there.")
     b, e = f"{EXCLUDE_MARK[0]} {tag}", f"{EXCLUDE_MARK[1]} {tag}"
     rows = (ex.read_text(encoding="utf-8") if ex.is_file() else "").splitlines()
-    if b in rows and e in rows[rows.index(b):]:
+    if b in rows and e in rows[rows.index(b) :]:
         i = rows.index(b)
-        rows = rows[:i] + rows[rows.index(e, i) + 1:]
+        rows = rows[:i] + rows[rows.index(e, i) + 1 :]
     if lines:
         prefix = "/" + (rel + "/" if rel else "")
         rows += [b, *[prefix + ln.lstrip("/") for ln in lines], e]
@@ -359,7 +365,9 @@ def write_local_file(root: Path, fn: str, line: str | None) -> bool:
     if text and LOCAL_MARK[0] not in text and not local:
         return False  # a file somebody else owns: not ours to edit
     lines = []
-    team_file = local and (root / fn.replace(".local", "")).exists()  # the team's own file: the tool reads it already
+    team_file = (
+        local and (root / fn.replace(".local", "")).exists()
+    )  # the team's own file: the tool reads it already
     if line and (root / "AGENTS.md").is_file() and not team_file:
         lines.append(line)
     if combined(root):

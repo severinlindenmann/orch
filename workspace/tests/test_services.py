@@ -249,7 +249,6 @@ def test_start_keeps_runtime_files_out_of_git(svc, proj, run):
 @NO_WIN_LINKS
 @pytest.mark.parametrize("name", [".orch/.gitignore", "CLAUDE.local.md"])
 def test_local_files_never_written_through_a_link(proj, tmp_path, name):
-    from orch import adapters
 
     victim = tmp_path / "victim.txt"
     victim.write_text("keep", encoding="utf-8")

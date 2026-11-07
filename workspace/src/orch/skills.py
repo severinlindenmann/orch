@@ -1,4 +1,5 @@
 """Skill folders and the orch block: kept under .orch/harness/ and linked from where agents look (harness.py)."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
@@ -166,7 +167,9 @@ def _shared_skills(root: Path) -> list[Path]:
     base = root / ".agents" / "skills"
     if not base.is_dir() or harness.is_link(base):
         return []
-    return sorted(p for p in base.iterdir() if p.is_dir() and not harness.is_link(p) and (p / ".orch-shared").exists())
+    return sorted(
+        p for p in base.iterdir() if p.is_dir() and not harness.is_link(p) and (p / ".orch-shared").exists()
+    )
 
 
 def _exclude_lines(root: Path) -> list[str]:

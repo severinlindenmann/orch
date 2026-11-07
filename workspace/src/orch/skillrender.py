@@ -13,7 +13,6 @@ import tomllib
 from pathlib import Path
 
 from orch import harness, skills
-from orch.errors import Refused
 
 _SEC = re.compile(r"\{\{([#^])(\w+)\}\}(.*?)\{\{/\2\}\}", re.S)
 _TAG = re.compile(r"\{\{[#^/]\w+\}\}")
