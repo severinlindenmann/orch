@@ -23,6 +23,7 @@ struct ChatsListView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     header
                     ModelMessage()
+                    MobileModeBanner()
                     searchField
                     chips
                     content

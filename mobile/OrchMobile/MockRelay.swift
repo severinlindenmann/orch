@@ -323,6 +323,7 @@ actor MockRelay: RelayAPI {
         guard let w = try await workspaces().first(where: { $0.id == workspace }) else { throw RelayError.api(status: 404, code: "not_found", message: "Workspace not found.") }
         return w
     }
+    func turnOffMobileMode(workspace: String) async throws {}
     func removeWorkspace(_ id: String) async throws {
         try await check()
         guard reachable(id) else { throw RelayError.api(status: 404, code: "not_found", message: "Workspace not found.") }
