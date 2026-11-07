@@ -89,7 +89,7 @@ whole. A workspace that never sent a heartbeat is `{on: false}`. Any authenticat
 (`last_seen`), the heartbeat is the only call that changes the flag.
 
 Expired leases are immediately shown as off; the next sweep clears the stored flag and sends `mobile_mode_ended` with `ended: lease`, instead of an unreachable push.
-Heartbeats beyond six per rolling minute per workspace return `429 rate_limited`; `mobile_mode_ended` pushes have a ten-minute per-workspace cooldown (off transitions are still stored).
+Repeat heartbeats (same on/off state) beyond six per rolling minute per workspace return `429 rate_limited`; `mobile_mode_ended` pushes have a ten-minute per-workspace cooldown (off transitions are still stored).
 
 **Phones see it:** `GET /v1/phone/workspaces` items carry `mobile_mode: {on, since, ends_at, machine}` (all `null` but `on: false` when off).
 The phone's own mute still wins: a muted phone gets no push below and shows "muted, but <machine> is in Mobile mode".

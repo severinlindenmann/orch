@@ -22,9 +22,7 @@ pub const UNREACHABLE_SECS: i64 = 300;
 pub async fn heartbeat(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<Json<Value>> {
     let ws = {
         let c = app.db.lock().unwrap();
-        let ws = auth::workspace(&c, &h)?;
-        heartbeat_limit(&c, &ws, now())?;
-        ws
+        auth::workspace(&c, &h)?
     };
     let v = parse_body(&body)?;
     crate::phone::check("heartbeat_request", &v)?;
@@ -45,6 +43,10 @@ pub async fn heartbeat(State(app): State<AppState>, h: HeaderMap, body: Bytes) -
             [&ws],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
+        // only repeats of the same state count: a change of on/off is always accepted
+        if (was_on != 0) == on {
+            heartbeat_limit(&c, &ws, now())?;
+        }
         c.execute(
             "UPDATE workspaces SET mm_on=?2, mm_since=?3, mm_ends_at=?4, mm_machine=?5, mm_unreach=0 WHERE id=?1",
             rusqlite::params![
@@ -77,7 +79,7 @@ pub async fn heartbeat(State(app): State<AppState>, h: HeaderMap, body: Bytes) -
     Ok(Json(json!({"mobile_mode": stored})))
 }
 
-/// Keep only the six admitted requests in the rolling minute, including invalid bodies.
+/// Keep only six repeats of the same state in the rolling minute.
 fn heartbeat_limit(c: &Connection, ws: &str, at: i64) -> Res<()> {
     let stored: String = c.query_row(
         "SELECT mm_heartbeats FROM workspaces WHERE id=?1",

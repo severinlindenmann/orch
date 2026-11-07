@@ -314,17 +314,10 @@ async fn heartbeat_limit_is_rolling_and_per_workspace() {
     let t = start().await;
     let a = t.add_ws("A").await;
     let b = t.add_ws("B").await;
-    for _ in 0..6 {
+    for _ in 0..7 {
         assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
     }
-    let (status, body) = t
-        .call(
-            &a,
-            "POST",
-            "/v1/heartbeat",
-            Some(json!({"mobile_mode": {"on": false}})),
-        )
-        .await;
+    let (status, body) = t.call(&a, "POST", "/v1/heartbeat", Some(on())).await;
     assert_eq!(status, 429);
     assert_eq!(body["error"], "rate_limited");
     assert_eq!(
@@ -455,4 +448,22 @@ async fn expired_lease_is_off_before_sweep_and_pushes_lease_once() {
     )
     .await;
     assert_eq!(sent_kinds(&t).len(), 1);
+}
+
+#[tokio::test]
+async fn fast_toggling_never_refuses_the_final_off() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    for _ in 0..10 {
+        assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
+        let off = json!({"mobile_mode": {"on": false}});
+        assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(off)).await.0, 200);
+    }
+    assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
+    let off = json!({"mobile_mode": {"on": false}});
+    assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(off)).await.0, 200);
+    assert_eq!(
+        orch_relay::store::mobile_mode(&t.app.db.lock().unwrap(), &a.id)["on"],
+        false
+    );
 }
