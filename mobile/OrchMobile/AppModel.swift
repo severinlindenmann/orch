@@ -234,9 +234,13 @@ final class AppModel {
 
     /// Wait before the one automatic retry of a first load that found the network not ready yet (tests shorten it).
     var retryDelay: Duration = .seconds(1)
+    /// Unit tests of the loop against the mock set this instead of the launch argument.
+    var watchInMock = false
 
     /// Keeps lists and chats current: the app shell runs one loop while paired and active, cancelling it in the background.
-    func watchWhileOpen(every interval: Duration = .seconds(4)) async {
+    /// 10 s; nothing runs against the in-process mock unless `-watchLoop YES` (UI tests must see an idle app).
+    func watchWhileOpen(every interval: Duration = .seconds(10)) async {
+        if useMock && !UserDefaults.standard.bool(forKey: "watchLoop") && !watchInMock { return }
         while !Task.isCancelled {
             try? await Task.sleep(for: interval)
             if Task.isCancelled { break }
@@ -273,11 +277,17 @@ final class AppModel {
             let beforeUpdates = updates
             async let u = (try? await client.updates()) ?? beforeUpdates  // an older relay without /updates must not break the rest
             async let st = try? await client.settings()
-            workspaces = try await w; questions = try await q.deduplicated(); updates = await u
-            if let st = await st { settings = st }
+            // Assign only what changed: an unchanged poll must not redraw (XCUITest idle, battery).
+            let newWorkspaces = try await w, newQuestions = try await q.deduplicated(), newUpdates = await u
+            if workspaces != newWorkspaces { workspaces = newWorkspaces }
+            if questions != newQuestions { questions = newQuestions }
+            if updates != newUpdates { updates = newUpdates }
+            if let st = await st, settings != st { settings = st }
             await reloadMessages()
-            for item in questions { questionLog[item.id] = item }
-            message = nil; hasLoaded = true; lastUpdated = Date()
+            for item in questions where questionLog[item.id] != item { questionLog[item.id] = item }
+            if message != nil { message = nil }
+            if !hasLoaded { hasLoaded = true }
+            if lastUpdated == nil || Date().timeIntervalSince(lastUpdated ?? .distantPast) > 30 { lastUpdated = Date() }
             await flushOutbox()
         }
     }
@@ -303,7 +313,8 @@ final class AppModel {
     private func merge(_ items: [PhoneMessage]) {
         var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
         for m in items { byId[m.id] = m }          // newer data (delivered_at) replaces the old copy
-        messages = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
+        let merged = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
+        if merged != messages { messages = merged }
     }
     /// client_ids of messages the relay stored (first tick) that `/messages` has not listed yet.
     private func unlistedSentClientIds() -> Set<String> {

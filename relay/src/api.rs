@@ -87,6 +87,7 @@ fn whoami_body(c: &rusqlite::Connection, id: &str) -> Res<Value> {
     o.remove("tags_by");
     o.insert("pending".into(), store::pending(c, id));
     o.insert("phones".into(), n.into());
+    crate::look::add_to(c, &mut card, true);
     Ok(card)
 }
 
@@ -104,8 +105,16 @@ async fn patch_me(
     body: Bytes,
 ) -> Res<(StatusCode, Json<Value>)> {
     let v = parse_body(&body)?;
-    let c = app.db.lock().unwrap();
+    let mut c = app.db.lock().unwrap();
     let me = auth::workspace(&c, &h)?;
+    if crate::look::is_look_body(&v) {
+        // Icon and colour: applied at once, not pending (contracts/look.md).
+        let p = crate::look::parse_me(&v)?;
+        let tx = c.transaction()?;
+        crate::look::apply(&tx, "workspaces", &me, &p, "workspace")?;
+        tx.commit()?;
+        return Ok((StatusCode::OK, Json(whoami_body(&c, &me)?)));
+    }
     let desc = match v.get("description") {
         None => None,
         Some(d) => Some(

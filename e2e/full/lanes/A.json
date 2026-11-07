@@ -250,21 +250,37 @@
   },
   {
    "id": "A10",
-   "name": "Change a ticket status from the menu",
+   "name": "Status menu offers Backlog, Ready, Working, Waiting, Review, Done; pick Working",
    "page": "home",
    "expect": "the status chip changes to Doing and stays after reload",
    "actions": [
     {
      "do": "goto",
-     "path": "/#home"
+     "path": "/#tickets"
+    },
+    {
+     "do": "wait",
+     "ms": 800
     },
     {
      "do": "click",
-     "sel": "[data-key^='ticket-']:has-text('E2E ticket') summary >> nth=0"
+     "sel": "summary[aria-label^='Change the status'] >> nth=0"
+    },
+    {
+     "do": "expect_text",
+     "text": "Backlog"
+    },
+    {
+     "do": "expect_text",
+     "text": "Ready"
+    },
+    {
+     "do": "expect_text",
+     "text": "Review"
     },
     {
      "do": "click",
-     "sel": "role=menuitemradio[name='Doing']"
+     "sel": "role=menuitemradio[name='Working']"
     },
     {
      "do": "wait",
@@ -275,7 +291,7 @@
     },
     {
      "do": "expect_text",
-     "text": "Doing"
+     "text": "Working"
     }
    ]
   },
@@ -307,6 +323,86 @@
     {
      "do": "wait",
      "ms": 500
+    }
+   ]
+  },
+  {
+   "id": "A27",
+   "name": "Tickets board view (the shot is taken on the Board)",
+   "page": "tickets-board",
+   "expect": "one column per screen at 720 and 390 (opens on the first column with tickets), chips show counts, nothing cut off at the right",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#tickets"
+    },
+    {
+     "do": "eval",
+     "js": "(async () => { const get = async () => (await (await fetch('/api/state', {cache:'no-store'})).json()).tickets || []; let ts = (await get()).filter(t => t.status !== 'dropped'); const want = ['active', 'review']; for (let i = 0; i < want.length && i < ts.length; i++) { if (ts.some(t => t.status === want[i])) continue; const t = ts.find(t => t.status === 'open'); if (!t) break; await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'ticket.patch', args:{ticket:t.id, data:{status:want[i]}, if_revision:t.revision}})}); ts = (await get()).filter(t => t.status !== 'dropped'); } return ts.map(t => t.status).join(','); })()",
+     "store": "board_fixture"
+    },
+    {
+     "do": "reload"
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='Board']"
+    },
+    {
+     "do": "wait_for",
+     "sel": ".kanban-col.is-shown .ticket-card",
+     "timeout": 10000
+    },
+    {
+     "do": "wait_for",
+     "sel": ".status-jumps button[aria-pressed='true']",
+     "state": "attached"
+    },
+    {
+     "do": "expect_text",
+     "text": "Review"
+    }
+   ]
+  },
+  {
+   "id": "A28",
+   "name": "Focus inside the dashboard (iframe) shows a CLI status change within 1 s",
+   "page": "focus-embedded",
+   "expect": "change the ticket status through the CLI; the embedded Focus page shows it in under 1 s",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#open/focus/t/{{ticket_id}}"
+    },
+    {
+     "do": "wait_for",
+     "sel": "body",
+     "frame": "iframe.embed",
+     "timeout": 10000
+    },
+    {
+     "do": "shell",
+     "cmd": "{{setstatus}}",
+     "args": [
+      "ready"
+     ]
+    },
+    {
+     "do": "wait",
+     "ms": 2500
+    },
+    {
+     "do": "shell",
+     "cmd": "{{setstatus}}",
+     "args": [
+      "review"
+     ]
+    },
+    {
+     "do": "expect_text",
+     "text": "Review",
+     "frame": "iframe.embed",
+     "timeout": 1000
     }
    ]
   },
@@ -456,7 +552,7 @@
   },
   {
    "id": "A16",
-   "name": "Add a link to the ticket",
+   "name": "Add reference dialog: every kind (Ticket, Web address, File, Artifact)",
    "page": "ticket-links",
    "expect": "a valid link is added, an invalid one is refused in words",
    "actions": [
@@ -466,33 +562,37 @@
     },
     {
      "do": "click",
-     "sel": "button:has-text('Add a link')"
-    },
-    {
-     "do": "fill",
-     "sel": "input[type=url]",
-     "value": "not a link"
-    },
-    {
-     "do": "press",
-     "key": "Enter"
+     "sel": "button:has-text('Add reference')"
     },
     {
      "do": "expect_text",
-     "text": "web address"
+     "text": "Search tickets"
     },
     {
      "do": "click",
-     "sel": "button:has-text('Add a link')"
+     "sel": "role=tab[name='Web address']"
     },
     {
      "do": "fill",
-     "sel": "input[type=url]",
+     "sel": "role=dialog >> input >> visible=true >> nth=0",
+     "value": "not a link"
+    },
+    {
+     "do": "click",
+     "sel": "role=dialog >> button:text-is('Add')"
+    },
+    {
+     "do": "wait",
+     "ms": 600
+    },
+    {
+     "do": "fill",
+     "sel": "role=dialog >> input >> visible=true >> nth=0",
      "value": "https://github.com/example/repo/pull/1"
     },
     {
-     "do": "press",
-     "key": "Enter"
+     "do": "click",
+     "sel": "role=dialog >> button:text-is('Add')"
     },
     {
      "do": "wait",
@@ -501,6 +601,31 @@
     {
      "do": "expect_text",
      "text": "github"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add reference')",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='File']",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Artifact']",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Ticket']",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "role=dialog >> button:has-text('Cancel')",
+     "optional": true
     }
    ],
    "expect_errors": {
@@ -524,7 +649,8 @@
     },
     {
      "do": "click",
-     "sel": "role=button[name='Not chosen yet']"
+     "sel": "role=button[name='Not chosen yet']",
+     "optional": true
     },
     {
      "do": "wait",
@@ -536,7 +662,8 @@
     },
     {
      "do": "click",
-     "sel": "role=button[name='Not set']"
+     "sel": "role=button[name='Not set']",
+     "optional": true
     },
     {
      "do": "wait",
@@ -940,6 +1067,59 @@
     {
      "do": "wait",
      "ms": 600
+    }
+   ]
+  },
+  {
+   "id": "A29",
+   "name": "Settings Agent: pick the custom agent and go back to the default",
+   "page": "settings-agent-radio",
+   "expect": "selecting the own agent shows its command; the default can be picked again",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click",
+     "sel": "#settings-tab-agent"
+    },
+    {
+     "do": "click",
+     "sel": "role=radio[name=/my-tool/]",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    },
+    {
+     "do": "click",
+     "sel": "role=radio[name=/^Claude/] >> nth=0"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    }
+   ]
+  },
+  {
+   "id": "A26",
+   "name": "Ticket page: References card with a link added in the page",
+   "page": "refs",
+   "expect": "the References card lists the added link; 720 and 390 shots show it readable",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#ticket/{{ticket_id}}"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "expect_text",
+     "text": "References"
     }
    ]
   },

@@ -552,11 +552,50 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
 
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     def op(ticket):
-        if ticket["status"] not in ("open", "ready", "review"):
+        w = ticket.get("waiting_on") or {}
+        if ticket["status"] not in ("open", "ready", "review") and not (
+            ticket["status"] == "waiting" and w.get("start") is True
+        ):  # a start that was waiting for a sign-in (wait_for_start) is Working again
             return NO_WRITE
         ticket["status"] = "active"
         ticket["waiting_on"] = None
         add_history(ticket, by, f"{agent_label} started")
+
+    try:
+        apply_op(root, tid, op)
+    except (Refused, FileNotFoundError):
+        if ticket_path(root, tid).exists():
+            raise
+
+
+def wait_for_start(root: Path, tid: str, reason: str, by: str) -> None:
+    """The agent is not up (it needs a sign-in, or failed to start): the ticket is Waiting with that reason,
+    never Working. Only a Working ticket is moved."""
+
+    def op(ticket):
+        if ticket["status"] != "active":
+            return NO_WRITE
+        ticket["status"] = "waiting"
+        ref = (reason.strip() or "The agent did not start")[:200]
+        ticket["waiting_on"] = {"kind": "external", "ref": ref, "start": True}
+        add_history(ticket, by, "Waiting: the agent is not up")
+
+    try:
+        apply_op(root, tid, op)
+    except (Refused, FileNotFoundError):
+        if ticket_path(root, tid).exists():
+            raise
+
+
+def resume_after_start_wait(root: Path, tid: str, by: str) -> None:
+    """The agent is up now: a ticket that wait_for_start put in Waiting is Working again."""
+
+    def op(ticket):
+        if ticket["status"] != "waiting" or (ticket.get("waiting_on") or {}).get("start") is not True:
+            return NO_WRITE
+        ticket["status"] = "active"
+        ticket["waiting_on"] = None
+        add_history(ticket, by, "The agent is up")
 
     try:
         apply_op(root, tid, op)
@@ -573,6 +612,8 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
         target, actor = _finish_status(root, ticket, status, by)
         if target != "waiting":
             ticket["waiting_on"] = None
+        elif isinstance(ticket.get("waiting_on"), dict):
+            ticket["waiting_on"].pop("start", None)  # a person's choice: no hook turns it back
         old = ticket["status"]
         ticket["status"] = target
         if old != target and target == status:
@@ -901,17 +942,29 @@ def ref_remove(root: Path, tid: str, target: str, by: str) -> tuple[dict, dict]:
     from orch import refs
 
     t = load(root, tid)
-    wanted = None if target.isdigit() else refs.detect(root, t["id"], target, check_exists=False)
+    wanted = None
+    if not target.isdigit():
+        try:
+            wanted = refs.detect(root, t["id"], target, check_exists=False)
+        except Refused:  # a file that became a link is refused by detect: match its stored text instead
+            import posixpath
+
+            text = target.replace("\\", "/")
+            line = re.fullmatch(r"(.+):([0-9]+)", text)
+            wanted = dict(path=posixpath.normpath(line[1] if line else text))
+            if line:
+                wanted["line"] = int(line[2])
     result = None
 
     def op(ticket):
         nonlocal result
-        values = refs.all_refs(root, ticket)
+        values = refs.numbered({"refs": ticket["refs"] + refs.local_refs(root, ticket["id"])})
         result = next(
             (
                 r
                 for n, r in values
-                if (
+                if isinstance(r, dict)
+                and (
                     n == int(target)
                     if target.isdigit()
                     else all(r.get(k) == v for k, v in wanted.items() if k != "kind")

@@ -20,6 +20,9 @@
           "data",
           "work"
         ],
+        "icon": "chip",
+        "color": "blue",
+        "look_by": "workspace",
         "phones": 1,
         "pending": null
       }
@@ -51,6 +54,9 @@
         "tags": [
           "data"
         ],
+        "icon": "chip",
+        "color": "blue",
+        "look_by": "workspace",
         "phones": 1,
         "pending": {
           "description": "Ingestion jobs and data pipelines.",
@@ -62,6 +68,59 @@
           "rev": "k3j9x2v7b1m4"
         },
         "status": "pending"
+      }
+    }
+  },
+  {
+    "_note": "Set this workspace's icon and colour (contracts/look.md). Applied at once, not a proposal: 200 with whoami. Left out = unchanged, null = default; not mixed with description/tags.",
+    "request": {
+      "method": "PATCH",
+      "path": "/v1/me",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+      },
+      "body": {
+        "icon": "chip",
+        "color": "blue"
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "id": "ws_pilatus001",
+        "name": "Pilatus Workspace",
+        "description": "Ingestion jobs and data pipelines.",
+        "tags": [
+          "data",
+          "work"
+        ],
+        "icon": "chip",
+        "color": "blue",
+        "look_by": "workspace",
+        "phones": 1,
+        "pending": null
+      }
+    }
+  },
+  {
+    "_note": "Unknown icon id (or colour token): refused, nothing stored.",
+    "request": {
+      "method": "PATCH",
+      "path": "/v1/me",
+      "headers": {
+        "X-Orch-Workspace": "ws_pilatus001",
+        "Authorization": "Bearer orn_V8bN2mQ5wE7rT1yU4iO6pA9sD3fG0hJ2kL5zX8cV1bN"
+      },
+      "body": {
+        "icon": "unicorn"
+      }
+    },
+    "response": {
+      "status": 422,
+      "body": {
+        "error": "invalid",
+        "message": "\"unicorn\" is not an icon. See orch look list."
       }
     }
   },
@@ -500,7 +559,9 @@
             "online": true,
             "last_seen": "2026-11-04T10:41:00Z",
             "open_questions": 1,
-            "muted_until": null
+            "muted_until": null,
+            "icon": "chip",
+            "color": "blue"
           },
           {
             "id": "ws_home000001",
@@ -512,7 +573,9 @@
             "online": false,
             "last_seen": "2026-11-03T21:10:00Z",
             "open_questions": 0,
-            "muted_until": "forever"
+            "muted_until": "forever",
+            "icon": "house",
+            "color": null
           }
         ],
         "next": null
@@ -810,6 +873,9 @@
               "data",
               "work"
             ],
+            "icon": "chip",
+            "color": "blue",
+            "look_by": "workspace",
             "online": true,
             "unread": 0
           },
@@ -821,6 +887,9 @@
               "reports",
               "data"
             ],
+            "icon": null,
+            "color": null,
+            "look_by": null,
             "online": true,
             "unread": 2
           }
@@ -874,6 +943,27 @@
     "response": {
       "status": 200,
       "body": null
+    }
+  },
+  {
+    "_note": "Admin: icon/colour after the workspace chose its own (look_by = workspace): refused, and nothing in the body is stored (name included).",
+    "request": {
+      "method": "PATCH",
+      "path": "/admin/api/workspaces/ws_pilatus001",
+      "headers": {
+        "X-Orch-Admin": "adm_7Hq2Lx9Pw4Rt6Yu1Io3Pa5Sd8Fg0Hj2Kl4Zx6Cv9Bn"
+      },
+      "body": {
+        "name": "Pilatus",
+        "icon": "code"
+      }
+    },
+    "response": {
+      "status": 409,
+      "body": {
+        "error": "conflict",
+        "message": "This workspace chooses its own icon."
+      }
     }
   },
   {
@@ -2358,7 +2448,9 @@
         "online": true,
         "last_seen": "2026-11-06T20:14:00Z",
         "open_questions": 0,
-        "muted_until": "2026-11-06T21:15:00Z"
+        "muted_until": "2026-11-06T21:15:00Z",
+        "icon": "chip",
+        "color": "blue"
       }
     }
   },

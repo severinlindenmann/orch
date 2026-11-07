@@ -125,7 +125,7 @@
 
     "muted_until": { "oneOf": [{ "$ref": "#/$defs/time" }, { "const": "forever" }, { "type": "null" }] },
     "workspace_item": {
-      "type": "object", "required": ["id", "name", "description", "tags", "online", "last_seen", "open_questions", "muted_until"],
+      "type": "object", "required": ["id", "name", "description", "tags", "online", "last_seen", "open_questions", "muted_until", "icon", "color"],
       "properties": {
         "id": { "$ref": "#/$defs/ws_id" },
         "name": { "type": "string" },
@@ -134,7 +134,9 @@
         "online": { "type": "boolean" },
         "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
         "open_questions": { "type": "integer", "minimum": 0 },
-        "muted_until": { "$ref": "#/$defs/muted_until" }
+        "muted_until": { "$ref": "#/$defs/muted_until" },
+        "icon": { "type": ["string", "null"], "description": "look.md: an id; unknown ids fall back to the letter (read shape, not the allowlist)" },
+        "color": { "type": ["string", "null"], "description": "look.md: a token; unknown tokens fall back to Automatic (read shape, not the allowlist)" }
       }
     },
     "workspaces_response": {

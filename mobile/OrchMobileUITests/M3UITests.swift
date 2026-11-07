@@ -9,6 +9,13 @@ import XCTest
         return app
     }
     private func feedbackCount(_ app: XCUIApplication) -> String { app.staticTexts["demo-feedback-count"].label }
+    /// Evidence for the PR; only when the shots folder exists.
+    private func shot(_ app: XCUIApplication, _ name: String) {
+        let home = ProcessInfo.processInfo.environment["SIMULATOR_HOST_HOME"] ?? NSHomeDirectory()
+        let dir = URL(fileURLWithPath: home).appendingPathComponent("orch-dev/state/mobile-v3-messenger/build/shots/info-tabs")
+        guard FileManager.default.fileExists(atPath: dir.path) else { return }
+        try? app.screenshot().pngRepresentation.write(to: dir.appendingPathComponent("\(name).png"))
+    }
 
     func testLooksGoodOnAPageSendsApproveFeedback() throws {
         let app = launch("viewer-html")
@@ -79,14 +86,28 @@ import XCTest
         XCTAssertTrue(app.buttons["demo-open-picker"].waitForExistence(timeout: 5))
     }
 
-    func testConversationInfoGroupsAndLanguage() throws {
-        let app = launch("info")
-        XCTAssertTrue(app.buttons["demo-open-info"].waitForExistence(timeout: 20))
-        app.buttons["demo-open-info"].tap()
-        XCTAssertTrue(app.buttons["info-tab-photos"].waitForExistence(timeout: 10))
-        for t in ["photos", "files", "links", "artifacts"] { XCTAssertTrue(app.buttons["info-tab-\(t)"].exists, t) }
-        app.buttons["info-tab-photos"].tap()
-        app.buttons["info-language-row"].tap()
-        XCTAssertTrue(app.switches.firstMatch.waitForExistence(timeout: 5), "Swiss German toggle")
+    /// TF 10 + 14: the four tabs sit in one row (one line each, also with large text) and the voice row is gone
+    /// (Settings > Voice holds Swiss German; replies follow the language the person spoke).
+    func testConversationInfoTabsOneLineNoLanguageRow() throws {
+        for size in ["", "UICTContentSizeCategoryAccessibilityXXL"] {
+            let app = launch("info", extra: size.isEmpty ? [] : ["-UIPreferredContentSizeCategoryName", size])
+            XCTAssertTrue(app.buttons["demo-open-info"].waitForExistence(timeout: 20))
+            app.buttons["demo-open-info"].tap()
+            let photos = app.buttons["info-tab-photos"]
+            XCTAssertTrue(photos.waitForExistence(timeout: 10))
+            for t in ["photos", "files", "links", "artifacts"] {
+                let tab = app.buttons["info-tab-\(t)"]
+                XCTAssertTrue(tab.exists, t)
+                // one line: every tab is as tall as Photos, and all sit in the same row
+                XCTAssertEqual(tab.frame.height, photos.frame.height, accuracy: 1, "\(t) wraps (\(size))")
+                XCTAssertEqual(tab.frame.midY, photos.frame.midY, accuracy: 1, "\(t) not in one row (\(size))")
+            }
+            XCTAssertFalse(app.buttons["info-language-row"].exists, "no Voice & reply language row")
+            XCTAssertFalse(app.staticTexts["Voice & reply language"].exists)
+            app.buttons["info-tab-links"].tap()
+            XCTAssertTrue(app.buttons["info-tab-links"].isSelected, "References tab selectable (\(size))")
+            shot(app, size.isEmpty ? "info-tabs-default" : "info-tabs-xxl")
+            app.terminate()
+        }
     }
 }

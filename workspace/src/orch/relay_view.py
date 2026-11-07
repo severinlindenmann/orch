@@ -194,7 +194,7 @@ def view(root: Path) -> dict:
         out["notice"] = (
             f"{waiting} message{s} wait to be sent: {problem}"
             if problem
-            else f"{waiting} message{s} wait to be sent. They go out with the next orch relay command."
+            else f"{waiting} message{s} wait to be sent. They go out as soon as the relay can be reached."
         )
         out["notice_tone"] = "warn"
     else:
@@ -248,7 +248,7 @@ def view(root: Path) -> dict:
         {
             "title": "No messages yet",
             "subtitle": (
-                "Try: orch relay send " + _arg(peers[0]["title"]) + ' "Hello"'
+                "Send one from the phone or from another workspace."
                 if peers
                 else "First add a workspace you can talk to (ask your admin)."
             ),

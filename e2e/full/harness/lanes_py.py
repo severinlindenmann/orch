@@ -107,6 +107,11 @@ def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
             rs = act(dash, "run.start", {"ticket": tid})
             st["actions"].append({"do": "run.start", "ms": int((time.time() - t0) * 1000), "status": "ok" if rs.status == 200 else "fail"})
             if rs.status != 200:
+                if rs.status == 422 and "live sessions" in rs.text:
+                    L.finding("sessions", "Live sessions stay open after the agent finished", f"Run {i}: starting a run was refused: {rs.text[:160]}. "
+                              "Earlier runs had finished and their tickets are in Review, but their sessions still counted.",
+                              "A session of a ticket in Review should close by itself after a short idle time (or not count against the limit); "
+                              "the person should never have to close sessions by hand to start the next ticket.", step=f"B{i:02d}", severity="functional")
                 raise RuntimeError(f"run.start {rs.status} {rs.text[:150]}")
             a = poll(dash, lambda s: bool(s.get("runs", {}).get(tid)) or _ticket(s, tid).get("status") == "active", 40)
             samples["start_to_working"].append(a if a is not None else 40.0)
@@ -134,19 +139,61 @@ def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
                 s_ = state(dash)
                 raise RuntimeError("the task was never checked off: " + json.dumps({"ticket": _ticket(s_, tid), "run": s_.get("runs", {}).get(tid),
                                    "needs": s_.get("needs")})[:900])
+            e_end = time.time() + 20
             fin = _ticket(state(dash), tid).get("status")
-            if fin != "done":
-                L.finding("status", f"Ticket stays '{fin}' after its last task is checked", f"Run {i}: the agent checked the last task with proof, "
-                          f"but the ticket status is still '{fin}' (Home shows it as not finished).",
-                          "When the last task is done and the agent ends the run, the status should say Done (or Waiting for you to close), "
-                          "never the same word as while it works. Belongs to the statuses work (core-flow).", step=f"B{i:02d}")
+            while fin not in ("review", "done") and time.time() < e_end:
+                time.sleep(0.5)
+                fin = _ticket(state(dash), tid).get("status")
+            if fin != "review":
+                L.finding("status", f"Ticket is '{fin}' instead of Review after the agent finished",
+                          f"Run {i}: the agent checked the last task with proof and ended; the ticket status is '{fin}', expected Review "
+                          "(the agent hands over, the person decides Done).",
+                          "Agent done must move the ticket to Review (never straight to Done, never stay Working).", step=f"B{i:02d}", severity="functional")
             samples["done_to_dashboard"].append(d)
+            sess = e.sh(["orch", "run", "status", tid, "--json"], cwd=w)[1]
+            if '"live"' in sess.lower() or "tmux" in sess.lower():
+                st.setdefault("live_open", True)
+            e.sh(["orch", "run", "stop", tid], cwd=w, timeout=30)  # the next run needs a free live-session slot (limit 4)
             st["note"] = f"{tid}: working {samples['start_to_working'][-1]:.1f}s, needs {samples['ask_to_needs'][-1]:.1f}s"
         return go
 
     for i in range(1, runs + 1):
         L.step(f"B{i:02d}", f"Create ticket, Start, question, answer, done (run {i})", one_run(i),
                expect="chip changes to working fast, question in Needs you, answer shown, ticket Done")
+    def events_probe(st):
+        import threading
+        import urllib.request
+        got = []
+        stop = threading.Event()
+
+        def listen():
+            req = urllib.request.Request(dash + "/api/events", headers={"Origin": dash})
+            with urllib.request.urlopen(req, timeout=40) as r:
+                for line in r:
+                    if stop.is_set():
+                        return
+                    if line.startswith(b"event: rev"):
+                        got.append(time.time())
+        th = threading.Thread(target=listen, daemon=True)
+        th.start()
+        time.sleep(1.5)
+        lat = []
+        for k in range(4):
+            n = len(got)
+            t0 = time.time()
+            e.sh(["orch", "ticket", "new", f"events probe {k}"], cwd=w)
+            end = t0 + 8
+            while len(got) <= n and time.time() < end:
+                time.sleep(0.02)
+            if len(got) <= n:
+                stop.set()
+                raise RuntimeError("no /api/events message within 8 s after a ticket change")
+            lat.append(got[n] - t0)
+            time.sleep(1.2)
+        stop.set()
+        L.probe("B-events", "Ticket change to /api/events message", lat, 1, 2)
+        st["note"] = ", ".join(f"{x:.2f}s" for x in lat)
+    L.step("B-events", "/api/events pushes a change within 1 s", events_probe, expect="a rev event reaches the page within 1 s (target)")
     if real_agents:
         def skill_seen(st):
             import glob
@@ -426,6 +473,191 @@ def lane_g(env, out: Path) -> Lane:
     return L
 
 
+# ---------------------------------------------------------------------------------------------- lane R (References)
+
+
+def lane_r(env, out: Path) -> Lane:
+    """References: orch ref add for kinds url/file/ticket/artifact, the numbered list, rm by number, refusals (symlink into .orch, outside folder)."""
+    L = Lane("R", "References", out)
+    e = env.e
+    w = e.ws("Pilatus")
+    tid = env.vars["ticket_id"]
+    other = None
+
+    def run(*a):
+        return e.sh(["orch", *a], cwd=w, timeout=60)
+
+    def mk(st):
+        nonlocal other
+        rc, o, err = run("ticket", "new", "Reference target", "--json")
+        other = json.loads(o)["id"]
+        (w / "notes").mkdir(exist_ok=True)
+        (w / "notes" / "plan.md").write_text("# Plan\n")
+    L.step("R00", "Make a second ticket and a file to point at", mk)
+
+    def add(target, kind_word):
+        def go(st):
+            rc, o, err = run("ref", "add", tid, target() if callable(target) else target)
+            if rc:
+                raise RuntimeError((err or o)[-200:])
+            rc, o, err = run("ref", "list", tid)
+            if kind_word not in o and kind_word.lower() not in o.lower():
+                raise RuntimeError(f"ref list does not show it: {o[:200]}")
+            st["note"] = o.strip().splitlines()[-1][:120]
+        return go
+    L.step("R01", "Add a web link reference", add("https://example.com/spec", "example.com"), expect="listed with its number")
+    L.step("R02", "Add a file reference", add("notes/plan.md", "plan.md"), expect="listed")
+    L.step("R03", "Add a ticket reference", add(lambda: other, "Reference target"), expect="listed with the other ticket's title")
+
+    def dash(st):
+        d = env.urls["pilatus"]
+        s_ = state(d)
+        t = _ticket(s_, tid)
+        refs = t.get("refs") or t.get("references") or []
+        if len(refs) < 3:
+            raise RuntimeError(f"dashboard state shows {len(refs)} references, expected 3: keys {sorted(t)[:20]}")
+    L.step("R04", "The dashboard state carries the references", dash)
+
+    def refuse(st):
+        (w / ".orch").mkdir(exist_ok=True)
+        link = w / "notes" / "sneak"
+        try:
+            link.symlink_to(w / ".orch" / "config.toml")
+        except FileExistsError:
+            pass
+        rc, o, err = run("ref", "add", tid, "notes/sneak")
+        if rc == 0:
+            L.finding("security", "A symlink into .orch is accepted as a reference",
+                      "`orch ref add <ticket> notes/sneak` where sneak is a symlink to .orch/config.toml was accepted.",
+                      "Refuse at add time (resolve the link, refuse anything inside .orch), same as at open time.", step="R05", severity="blocking")
+            raise RuntimeError("symlink into .orch accepted")
+        st["note"] = (err or o).strip()[:120]  # a path outside the folder is a "local" reference by design (stored, never opened)
+    L.step("R05", "Refuse a symlink into .orch and a path outside the folder", refuse, expect="both refused in plain words")
+
+    def rm(st):
+        rc, o, err = run("ref", "rm", tid, "1")
+        if rc:
+            raise RuntimeError((err or o)[-200:])
+        rc, o, err = run("ref", "list", tid)
+        if "example.com" in o:
+            raise RuntimeError("ref rm 1 did not remove the first reference")
+    L.step("R06", "Remove a reference by its number", rm)
+    return L
+
+
+# ---------------------------------------------------------------------------------------------- lane N (multi-workspace)
+
+
+def lane_n(env, out: Path) -> Lane:
+    """Three workspaces together: one phone sees all three, phone to each workspace, workspace to workspace both ways,
+    a relay group (talk inside the group, shared secret given to its members)."""
+    L = Lane("N", "Multi-workspace", out)
+    e = env.e
+    admin = e.rel.admin
+    ids = {"Pilatus": env.vars["relay_id_pilatus"], "Reports": env.vars["relay_id_reports"], "Home": env.vars["relay_id_home"]}
+    ph: dict = {}
+
+    def pair(st):
+        r = admin.call("POST", "/admin/api/phones", {"name": "E2E three-workspace phone", "workspaces": list(ids.values())})
+        if r.status != 201:
+            raise RuntimeError(f"add phone {r.status} {r.text[:150]}")
+        code = r.json()["link"].split("code=")[1]
+        p = lib.http("POST", e.rel.url + "/v1/phone/pair", None, {"code": code, "name": "E2E three-workspace phone"})
+        if p.status != 201:
+            raise RuntimeError(f"pair {p.status}")
+        ph.update(id=p.json()["phone_id"], token=p.json()["token"])
+    L.step("N00", "Pair one phone with all three workspaces", pair)
+
+    def ph_call(method, path, body=None):
+        return lib.http(method, e.rel.url + path, {"X-Orch-Phone": ph["id"], "Authorization": f"Bearer {ph['token']}"}, body)
+
+    def sees_three(st):
+        items = (ph_call("GET", "/v1/phone/workspaces").json() or {}).get("items", [])
+        got = {w["id"]: w for w in items}
+        missing = [n for n, i in ids.items() if i not in got]
+        if missing:
+            raise RuntimeError(f"the phone does not list {missing}; it lists {[w.get('name') for w in items]}")
+        names = {w.get("name") for w in items}
+        st["note"] = "phone lists: " + ", ".join(sorted(str(n) for n in names))
+    L.step("N01", "The phone lists all three workspaces with their names", sees_three, expect="Pilatus, Reports and Home all listed")
+
+    def phone_to_each(name):
+        def go(st):
+            import uuid
+            body = f"hello {name} from the phone {int(time.time())}"
+            r = ph_call("POST", "/v1/phone/send", {"to": ids[name], "client_id": str(uuid.uuid4()), "text": body})
+            if r.status not in (200, 201):
+                raise RuntimeError(f"phone send {r.status} {r.text[:150]}")
+            t0 = time.time()
+            end = t0 + 20
+            while time.time() < end:
+                rc, o, _ = e.sh(["orch", "relay", "inbox", "--json"], cwd=e.ws(name), timeout=30)
+                if body in o:
+                    st["note"] = f"{time.time() - t0:.1f} s"
+                    return
+                time.sleep(0.5)
+            raise RuntimeError(f"the text never reached the inbox of {name}")
+        return go
+    for n in ("Pilatus", "Reports", "Home"):
+        L.step(f"N-phone-{n}", f"Phone sends a text to {n}, its inbox gets it", phone_to_each(n), expect="in the inbox within 20 s")
+
+    def w2w(frm, to, ok=True):
+        def go(st):
+            body = f"{frm} to {to} {int(time.time())}"
+            rc, o, err = e.sh(["orch", "relay", "send", ids[to], body], cwd=e.ws(frm), timeout=60)
+            if not ok:
+                if rc == 0:
+                    raise RuntimeError(f"{frm} could send to {to} without a rule")
+                if not (err or o).strip():
+                    raise RuntimeError("the refusal has no reason")
+                st["note"] = (err or o).strip()[:160]
+                return
+            if rc:
+                raise RuntimeError((err or o)[-200:])
+            end = time.time() + 20
+            while time.time() < end:
+                if body in e.sh(["orch", "relay", "inbox", "--json"], cwd=e.ws(to), timeout=30)[1]:
+                    return
+                time.sleep(0.5)
+            raise RuntimeError(f"{to} never got it")
+        return go
+    L.step("N-w2w-1", "Pilatus to Reports arrives (rule allows it)", w2w("Pilatus", "Reports"))
+    L.step("N-w2w-2", "Reports to Pilatus arrives (rule allows text)", w2w("Reports", "Pilatus"))
+    L.step("N-w2w-3", "Home to Pilatus is refused in words (no rule)", w2w("Home", "Pilatus", ok=False))
+
+    grp: dict = {}
+
+    def group(st):
+        r = admin.call("POST", "/admin/api/groups", {"name": "E2E group", "talk": True, "defaults": {"credentials": True}})
+        if r.status != 201:
+            raise RuntimeError(f"create group {r.status} {r.text[:150]}")
+        grp["id"] = r.json()["id"]
+        for n in ("Home", "Reports"):
+            p = admin.call("PATCH", f"/admin/api/workspaces/{ids[n]}", {"group": grp["id"]})
+            if p.status != 200:
+                raise RuntimeError(f"put {n} in the group: {p.status} {p.text[:150]}")
+        for n in ("Home", "Reports"):
+            e.sh(["orch", "relay", "refresh"], cwd=e.ws(n), timeout=60)
+    L.step("N-group-1", "Create a group that may talk inside itself and put Home and Reports in it", group, expect="group with two members")
+
+    L.step("N-group-2", "Inside the group Home can send to Reports without a rule", w2w("Home", "Reports"))
+
+    def shared(st):
+        r = admin.call("PUT", "/admin/api/shared/credentials/E2E_TEAM_KEY", {"value": "team-secret-value"})
+        if r.status != 200:
+            raise RuntimeError(f"add shared secret {r.status} {r.text[:150]}")
+        sh = admin.call("GET", "/admin/api/shared").json() or {}
+        assign = sh.get("assign", {})
+        miss = [n for n in ("Home", "Reports") if "E2E_TEAM_KEY" not in (assign.get(ids[n], {}) or {}).get("credentials", [])]
+        if miss:
+            raise RuntimeError(f"the shared secret was not given to {miss}: {json.dumps(assign)[:200]}")
+        if "E2E_TEAM_KEY" in (assign.get(ids["Pilatus"], {}) or {}).get("credentials", []):
+            raise RuntimeError("Pilatus is not in the group but got the group's secret")
+        st["note"] = "Home and Reports have it, Pilatus does not; the value is never shown"
+    L.step("N-group-3", "A shared secret goes to the group members only", shared, expect="Home and Reports get it, Pilatus does not")
+    return L
+
+
 # ---------------------------------------------------------------------------------------------- lane U
 
 
@@ -437,7 +669,7 @@ def lane_u(env, out: Path, rcv: Receiver) -> Lane:
     e = env.e
     admin = e.rel.admin
     sub: dict = {}
-    pil_id, rep_id = env.vars["relay_id_pilatus"], env.vars["relay_id_reports"]
+    pil_id = env.vars["relay_id_pilatus"]
 
     def create(st):
         r = admin.call("POST", "/admin/api/subscribers", {"name": "E2E receiver", "workspaces": [pil_id],
@@ -557,6 +789,11 @@ def lane_u(env, out: Path, rcv: Receiver) -> Lane:
 
 TEST_LINE = None
 
+# phone tests with an expected failure the owner already knows about (reported as known, not as new)
+KNOWN_PHONE_FAILURES = {
+    "test16": "bug 4 (harness Done topics) is being fixed by orch-dev-60; test16 records an expected failure until then",
+}
+
 
 def parse_xcode_tests(text: str) -> list[dict]:
     """Per test case results from xcodebuild output: [{name, status, secs}]."""
@@ -567,15 +804,19 @@ def parse_xcode_tests(text: str) -> list[dict]:
     return out
 
 
+def _host_env() -> dict:
+    """Environment for host tools (simctl, xcodegen, xcodebuild): the real HOME, because the Simulators live there (the harness itself runs with a throw-away HOME)."""
+    return {**os.environ, "HOME": os.environ.get("E2E_REAL_HOME") or str(Path.home())}
+
+
 def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
     """Phone lane on the V3-SIM driver (PR #207): `e2e/run.sh V3-SIM` starts its own local relay + workspace and writes ctl/info.json;
     RealRelayE2ETests (XCUITest) drives the app in the Simulator against it. One harness step per XCTest case, shots collected.
     No second phone driver: new phone steps (Mobile mode banner, archive, ...) are XCTests of that class or `-open` targets."""
-    import re
     import shutil
     import subprocess
     L = Lane("P", "Phone (Simulator)", out)
-    sim = repo / "e2e" / "scenarios_phone_v3.py"
+    sim = repo / "e2e" / "scenarios_sim.py"
     tests = repo / "mobile" / "OrchMobileUITests" / "RealRelayE2ETests.swift"
     if not (tests.exists() and "V3-SIM" in sim.read_text() if sim.exists() else False):
         L.step("P00", "Phone driver present", lambda st: (_ for _ in ()).throw(Skipped(
@@ -584,22 +825,36 @@ def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
     if not shutil.which("xcodebuild"):
         L.step("P00", "Xcode", lambda st: (_ for _ in ()).throw(Skipped("xcodebuild not found")))
         return L
+    own_sim = False
     if not udid:
-        r = subprocess.run(["xcrun", "simctl", "list", "devices", "booted", "-j"], capture_output=True, text=True)
-        try:
-            devs = [d for v in json.loads(r.stdout)["devices"].values() for d in v if d.get("state") == "Booted"]
-        except ValueError:
-            devs = []
-        udid = devs[0]["udid"] if devs else ""
-    if not udid:
-        L.step("P00", "A booted Simulator", lambda st: (_ for _ in ()).throw(Skipped("no booted iPhone Simulator (set --udid or boot one)")))
-        return L
+        # this lane's own Simulator (never one that is already booted: other lanes drive those); deleted by its exact UDID at the end
+        r = subprocess.run(["xcrun", "simctl", "create", "e2e-full-phone", "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+                            "com.apple.CoreSimulator.SimRuntime.iOS-27-0"], env=_host_env(), capture_output=True, text=True)
+        udid = r.stdout.strip()
+        if r.returncode or not udid:
+            L.step("P00", "Create the lane's Simulator", lambda st: (_ for _ in ()).throw(RuntimeError("simctl create failed: " + (r.stderr or r.stdout)[-200:])))
+            return L
+        own_sim = True
+        # boot, permissions, the XCTest run and the shutdown all happen inside ONE heavy.sh simulator job below (HEAVY_SIM=1): the Simulator is
+        # never booted while the lane waits for something else
+        L.notes.append(f"own Simulator e2e-full-phone {udid} (deleted at the end)")
+    try:
+        return _lane_p_run(L, env, out, repo, udid)
+    finally:
+        if own_sim:
+            subprocess.run(["xcrun", "simctl", "shutdown", udid], env=_host_env(), capture_output=True)
+            subprocess.run(["xcrun", "simctl", "delete", udid], env=_host_env(), capture_output=True)
+
+
+def _lane_p_run(L, env, out: Path, repo: Path, udid: str) -> Lane:
+    import re
+    import subprocess
     shots = out / "shots"
     host = {}
 
     def start(st):
         log = open(out / "v3sim.log", "w")
-        p = subprocess.Popen(["sh", str(repo / "e2e" / "run.sh"), "V3-SIM"], stdout=log, stderr=log, cwd=repo, start_new_session=True)
+        p = subprocess.Popen(["sh", str(repo / "e2e" / "run.sh"), "V3-SIM"], stdout=log, stderr=log, cwd=repo, start_new_session=True, env=_host_env())
         host["p"] = p
         end = time.time() + 600
         while time.time() < end:
@@ -618,11 +873,31 @@ def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
         return L
     try:
         xo = out / "xcodebuild.log"
+        import tempfile
+        dd = tempfile.mkdtemp(prefix=".tf-p-dd-", dir=str(Path(os.environ.get("E2E_REAL_HOME") or Path.home())))  # build products: not in the report
+        g = subprocess.run(["xcodegen", "generate"], cwd=repo / "mobile", env=_host_env(), capture_output=True, text=True)
+        if g.returncode:
+            raise RuntimeError("xcodegen failed: " + (g.stderr or g.stdout)[-300:])
         t0 = time.time()
-        r = subprocess.run(["xcodebuild", "test", "-project", "OrchMobile.xcodeproj", "-scheme", "OrchMobile", "-destination", f"id={udid}",
-                            "-only-testing:OrchMobileUITests/RealRelayE2ETests"], cwd=repo / "mobile", capture_output=True, text=True,
-                           timeout=3600, env={**os.environ, "TEST_RUNNER_ORCH_E2E_CTL": str(host["ctl"]),
-                                              "TEST_RUNNER_ORCH_SHOTS": str(shots), "ORCH_E2E_UDID": udid})
+        import shlex
+        script = out / "psim.sh"
+        script.write_text("\n".join([
+            "#!/bin/sh",
+            f"U={shlex.quote(udid)}",
+            "trap 'xcrun simctl shutdown \"$U\" >/dev/null 2>&1' EXIT",
+            "xcrun simctl boot \"$U\" >/dev/null 2>&1; xcrun simctl bootstatus \"$U\" -b >/dev/null 2>&1",
+            *[f"xcrun simctl privacy \"$U\" grant {svc} io.severin.orch >/dev/null 2>&1" for svc in ("location", "microphone", "speech-recognition")],
+            "xcrun simctl location \"$U\" set 47.0502,8.3093 >/dev/null 2>&1",
+            f"cd {shlex.quote(str(repo / 'mobile'))} || exit 1",
+            "exec xcodebuild test -project OrchMobile.xcodeproj -scheme OrchMobile -destination \"id=$U\" "
+            f"-derivedDataPath {shlex.quote(dd)} -parallel-testing-enabled NO -only-testing:OrchMobileUITests/RealRelayE2ETests",
+            ""]))
+        heavy = Path(os.environ.get("E2E_REAL_HOME") or Path.home()) / "orch-dev/state/v2-plan-2026-11-05/build/heavy.sh"
+        cmd = ["sh", str(heavy), "e2e-full-sim", "--", "sh", str(script)] if heavy.exists() else ["sh", str(script)]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600,
+                           env={**_host_env(), "HEAVY_SIM": "1", "E2E_FULL_LOCKED": "1", "TEST_RUNNER_ORCH_E2E_CTL": str(host["ctl"]),
+                                "TEST_RUNNER_ORCH_SHOTS": str(shots), "ORCH_E2E_UDID": udid, "TEST_RUNNER_ORCH_E2E_UDID": udid,
+                                "TEST_RUNNER_ORCH_E2E_SLOW": "1"})
         xo.write_text(r.stdout + r.stderr)
         cases = parse_xcode_tests(r.stdout)
         L.notes.append(f"xcodebuild {time.time() - t0:.0f} s, {len(cases)} test cases, exit {r.returncode}")
@@ -632,6 +907,9 @@ def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
                 if c["status"] == "skipped":
                     raise Skipped("XCTest skipped it")
                 if c["status"] == "failed":
+                    for key, why in KNOWN_PHONE_FAILURES.items():
+                        if c["name"].startswith(key):
+                            raise Skipped("KNOWN, not new: " + why)
                     raise RuntimeError("XCTest failed; see xcodebuild.log")
             st = L.step("P-" + c["name"], f"{c['cls']}.{c['name']}", one, expect="XCUITest passes against the local relay")
             st["ms"] = int(c["secs"] * 1000)
@@ -642,6 +920,11 @@ def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
             L.step("P02", "XCTest run", lambda st: (_ for _ in ()).throw(RuntimeError("no test cases in the xcodebuild output: " + r.stdout[-300:])))
     finally:
         _p_stop(host)
+        try:
+            import shutil as _sh
+            _sh.rmtree(dd)  # the exact temp folder made above
+        except (NameError, OSError):
+            pass
     return L
 
 

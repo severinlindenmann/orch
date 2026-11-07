@@ -90,7 +90,7 @@ private struct ShellWorkspacePicker: View {
                         select(summary.id); dismiss()
                     } label: {
                         HStack(spacing: 12) {
-                            ShellAvatar(name: WorkspaceAlias.name(for: summary.workspace), lastSeen: .some(summary.workspace.lastSeen))
+                            WorkspaceBadge(name: WorkspaceAlias.name(for: summary.workspace), icon: summary.workspace.icon, color: summary.workspace.color, lastSeen: .some(summary.workspace.lastSeen))
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(WorkspaceAlias.name(for: summary.workspace)).themeFont(17, .semibold)
                                 PresenceLine(lastSeen: summary.workspace.lastSeen)

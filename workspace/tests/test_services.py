@@ -91,6 +91,8 @@ def test_start_starts_only_background_addons_and_records_them(svc, proj, run):
                     "url": "http://127.0.0.1:18420",
                 }
             ],
+            "icon": None,
+            "color": None,
         }
     ]
     run("start")  # again: one entry, not two

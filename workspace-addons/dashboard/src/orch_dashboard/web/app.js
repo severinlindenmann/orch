@@ -177,6 +177,7 @@
   let ticketView = 'list';
   try { if (localStorage.getItem('orch.tickets.view') === 'board') ticketView = 'board'; } catch (_) { /* no storage: the list */ }
   const boardMore = new Set();
+  let boardCol = null;  // narrow screens: the one column shown; null = the first with tickets
   const viewToggle = () => snapshot || !tickets().length ? null : h('div', {className:'board-tools row', 'data-key':'board-tools'},
     h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))),
     ticketView === 'board' ? h('span', {className:'board-hint'}, 'Drag a card to move it, or use its ⋯ button') : null);
@@ -196,16 +197,19 @@
   }
   function board() {
     const visible = sorted(tickets().filter(t => t.status !== 'dropped'));
+    const counts = {};
+    STATUS_CHOICES.forEach(([status]) => { counts[status] = visible.filter(t => t.status === status).length; });
+    const shown = boardCol in counts ? boardCol : window.DashHelpers.firstColumnWithTickets(counts);
     const cols = STATUS_CHOICES.map(([status, label]) => {
       const mine = visible.filter(t => t.status === status);
       const cap = status === 'done' && !boardMore.has('done') ? 3 : mine.length;
-      return h('section', {className:'kanban-col', 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + mine.length},
+      return h('section', {className:'kanban-col' + (status === shown ? ' is-shown' : ''), 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + mine.length},
         h('div', {className:'col-head'}, h('span', {className:'dot idle'}), h('h2', {}, label), h('span', {className:'status-count'}, String(mine.length))),
         mine.slice(0, cap).map(boardCard), !mine.length ? h('p', {className:'meta board-none'}, 'Nothing here') : null,
         status === 'done' && mine.length > 3 ? h('button', {type:'button', className:'btn ghost sm show-done', 'data-action':'board-more', 'data-key':'board-more'}, boardMore.has('done') ? 'Show fewer' : 'Show ' + (mine.length - 3) + ' more') : null);
     });
     return h('div', {className:'board', 'data-key':'board'},
-      h('div', {className:'status-jumps', 'data-key':'status-jumps'}, STATUS_CHOICES.map(([status, label]) => h('button', {type:'button', 'data-action':'board-jump', 'data-status':status, 'aria-pressed':'false'}, label))),
+      h('div', {className:'status-jumps', 'data-key':'status-jumps'}, STATUS_CHOICES.map(([status, label]) => h('button', {type:'button', 'data-action':'board-jump', 'data-status':status, 'aria-pressed':String(status === shown)}, window.DashHelpers.columnChipLabel(label, counts[status])))),
       h('div', {className:'board-track'}, cols));
   }
   async function moveTicket(id, status) {
@@ -699,7 +703,7 @@
         panel('tasks', tasksCard('tasks')), panel('questions', [qs.length ? qs : emptyRow('No open questions'), answered]), panel('artifacts', artifactsPanel(t)),
         panel('history', card('history', 'History', '', history.length ? history : emptyRow('No history yet.')))),
       h('div', {className:'stack ticket-side'}, linksCard(t), h('aside', {className:'card ticket-aside'}, h('div', {className:'card-h'}, h('h2', {}, 'Details')),
-        h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', h('span', {className:'ed-ro'}, agent)), field('Created', h('span', {className:'ed-ro'}, date(t.created_at))), field('Updated', h('span', {className:'ed-ro'}, t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : '')), typeof t.key === 'string' ? null : field('Ticket', h('span', {className:'ed-ro mono'}, t.id)))), fieldSections(t)))));
+        h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', h('span', {className:'ed-ro'}, agent)), field('Created', h('span', {className:'ed-ro'}, date(t.created_at))), field('Updated', h('span', {className:'ed-ro'}, t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : '')))), fieldSections(t)))));
   }
 
   const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note'};
@@ -1056,7 +1060,7 @@
       crumb.replaceChildren(pageName, ' › ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || last);
     } else crumb.textContent = pageName;
     const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
-    reconcile(nav, fragment(navLink('#home', 'Home', 'page', array(state.needs).length ? h('span', {className:'count'}, array(state.needs).length) : null), navLink('#tickets', 'Tickets', 'table'), state.general ? navLink('#general', 'General', 'text') : null,
+    reconcile(nav, fragment(navLink('#home', 'Home', 'page', array(state.needs).length ? h('span', {className:'count', title:array(state.needs).length + ' waiting for you', 'aria-label':array(state.needs).length + ' waiting for you'}, array(state.needs).length) : null), navLink('#tickets', 'Tickets', 'table'), state.general ? navLink('#general', 'General', 'text') : null,
       addons().some(a => a.dashboard) ? h('p', {className:'eyebrow'}, 'Add-ons') : null, addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon))));
     reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'user') : null));
     if (changed) {
@@ -1541,7 +1545,7 @@
       render(); return;
     }
     if (action === 'board-more') { if (boardMore.has('done')) boardMore.delete('done'); else boardMore.add('done'); render(); return; }
-    if (action === 'board-jump') { main.querySelector('.kanban-col[data-status="' + control.dataset.status + '"]')?.scrollIntoView({behavior:'smooth', inline:'start', block:'nearest'}); return; }
+    if (action === 'board-jump') { boardCol = control.dataset.status; render(); return; }
     if (action === 'file-preview') { previewFile(control.dataset.ticket, control.dataset.kind, control.dataset.name); return; }
     if (action === 'new') ticketForm();
     if (action === 'inline') startInline(control);

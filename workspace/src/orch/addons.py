@@ -1003,7 +1003,9 @@ def _confirm(m: dict, local: bool, yes: bool) -> None:
         print(text)
         return
     if not term.is_terminal(sys.stdin):
-        raise Refused(f"{text}\nTo continue run it again with --yes.")
+        err = Refused(f"{text}\n\nTo add it, run it again with --yes.")
+        err.confirm = True
+        raise err
     sys.stderr.write(text + "\nAdd it? [y/N] ")
     sys.stderr.flush()
     if sys.stdin.readline().strip().lower() not in ("y", "yes"):
@@ -1092,7 +1094,9 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
             elif yes:
                 m = None
             elif not term.is_terminal(sys.stdin):
-                raise Refused(f"Installing the built-in add-on {name}: run it again with --yes.")
+                err = Refused(f"To install the built-in add-on {name}, run it again with --yes.")
+                err.confirm = True
+                raise err
             else:
                 m = preview_builtin(name)
                 _confirm(m, False, False)

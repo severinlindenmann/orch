@@ -487,7 +487,7 @@ def test_view_json_lists_files_without_any_key(proj, run, pub):
         files["items"][0]["title"] == "a.txt" and "link" not in files["items"][0]
     )  # http test server: no https link
     assert "12 B" in files["items"][0]["subtitle"]
-    assert "orch publish" in v["notice"]
+    assert "ask your agent" in v["notice"]
 
 
 def test_publish_has_a_shared_tab():

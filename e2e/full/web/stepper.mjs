@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url';
 import { lintText } from './lint.mjs';
 
 const CONTROL = 'button, a[href], input, select, textarea, [role=switch], [role=tab], [role=button], summary';
+const stepMs = () => Number(process.env.STEPPER_STEP_MS || 90000), laneMs = () => Number(process.env.STEPPER_LANE_MS || 1200000);
+const withTimeout = (p, ms, msg) => { let t; return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(msg)), ms); })]).finally(() => clearTimeout(t)); };
 const firstLine = e => String(e?.message || e).split('\n')[0];
 const height = w => w === 390 ? 844 : w === 720 ? 900 : 800;
 // This function runs in the page for both census and action attribution.
@@ -74,7 +76,7 @@ export async function run(opts) {
     page.on('pageerror', e => { if (current && !current.expected.console.some(s => e.message.includes(s))) current.console.push(e.message); });
     page.on('response', r => { if (current && r.status() >= 400 && !current.expected.http.some(s => r.url().includes(s))) current.http_errors.push({ method: r.request().method(), url: r.url(), status: r.status() }); });
     page.on('requestfailed', r => { if (current && r.failure()?.errorText !== 'net::ERR_ABORTED' && !current.expected.http.some(s => r.url().includes(s))) current.http_errors.push({ method: r.method(), url: r.url(), status: null, error: r.failure()?.errorText }); });
-    const locator = sel => sel.startsWith('label=') ? page.getByLabel(sel.slice(6)) : page.locator(sel);
+    const locator = (sel, frame) => { const root = frame ? page.frameLocator(frame) : page; return sel.startsWith('label=') ? root.getByLabel(sel.slice(6)) : root.locator(sel); };
     const ck = k => k.slice(k.indexOf('|') + 1);
     const isCovered = key => covered.has(ck(key)) || [...patterns].some(p => p.endsWith('|*') ? key.startsWith(p.slice(0, -1)) : p === key);
     async function census(pageName, id) {
@@ -101,6 +103,8 @@ export async function run(opts) {
       }
       if (await modalOpen()) await page.keyboard.press('Escape');  // a dialog a census click opened: close it for the next step
     }
+    // wait for page fade-ins, but never for an endless animation (a spinner): only finite animations, and at most 2 s
+    const settle = async () => { try { await page.evaluate(() => Promise.race([Promise.all(document.getAnimations().filter(a => { const t = a.effect && a.effect.getComputedTiming(); return t && Number.isFinite(t.endTime); }).map(a => a.finished.catch(() => {}))), new Promise(r => setTimeout(r, 2000))])); await page.waitForTimeout(150); } catch { /* page navigating */ } };
     const modalOpen = async () => (await page.locator('dialog[open], [role=dialog], [aria-modal=true]').filter({ visible: true }).count()) > 0;
     async function clickCensusOnce(pageName, step, timeout) {
       const items = await census(pageName, step.id);
@@ -123,7 +127,7 @@ export async function run(opts) {
     async function action(a, step, record) {
       const timeout = a.timeout ?? 5000;
       page.setDefaultTimeout(timeout); page.setDefaultNavigationTimeout(timeout);
-      let el = a.sel ? locator(a.sel) : null, key;
+      let el = a.sel ? locator(a.sel, a.frame) : null, key;
       if (['click', 'fill', 'select', 'check', 'press', 'hover'].includes(a.do)) {
         if (!el && a.do === 'press') el = page.locator(':focus');
         if (el && await el.count()) key = (await el.first().evaluate(describe, step.page || '')).key;
@@ -143,7 +147,7 @@ export async function run(opts) {
         case 'wait': await page.waitForTimeout(a.ms); break;
         case 'wait_for': await el.waitFor({ state: a.state || 'visible', timeout }); break;
         case 'expect_visible': await el.waitFor({ state: 'visible', timeout }); break;
-        case 'expect_text': await page.getByText(a.text, { exact: false }).filter({ visible: true }).first().waitFor({ state: 'visible', timeout }); break;
+        case 'expect_text': await (a.frame ? page.frameLocator(a.frame) : page).getByText(a.text, { exact: false }).filter({ visible: true }).first().waitFor({ state: 'visible', timeout }); break;
         case 'expect_no_text': await page.waitForFunction(t => !document.body.innerText.includes(t), a.text, { timeout }); break;
         case 'expect_url': await page.waitForURL(u => u.href.includes(a.contains), { timeout }); break;
         case 'reload': await page.reload({ waitUntil: 'domcontentloaded', timeout }); break;
@@ -154,6 +158,7 @@ export async function run(opts) {
           if (a.expect_contains !== undefined && !String(value).includes(a.expect_contains)) throw new Error(`eval did not contain ${a.expect_contains}`);
           break;
         }
+        case 'shell': { const { execFile } = await import('node:child_process'); await new Promise((ok, no) => { const c = execFile(a.cmd, a.args || [], { timeout: 30000 }, e => e ? no(e) : ok()); setTimeout(() => c.kill('SIGKILL'), stepMs()).unref(); }); break; }  // trusted lane files only: the harness writes the commands (env.json vars) it allows
         case 'shot': await shot(step, page.viewportSize().width); break;
         case 'expect_status': {
           const url = new URL(a.path, base);
@@ -190,6 +195,7 @@ export async function run(opts) {
         await writeFile(join(out, 'census', `${encodeURIComponent(name)}.json`), JSON.stringify(result.census[name], null, 2));
       }
     } else for (const step of steps) {
+      if (Date.now() - start > laneMs()) { result.steps.push({ id: step.id, name: step.name || '', status: 'blocked', error: `lane took longer than ${laneMs() / 60000} min`, ms: 0, actions: [], shots: [], console: [], http_errors: [], axe: [], lint: [], page: step.page }); continue; }
       const t = Date.now();
       const entry = { id: step.id, name: step.name || '', status: 'pass', error: '', ms: 0, actions: [], shots: [], console: [], http_errors: [], axe: [], lint: [], unnamed_controls: [], page: step.page };
       result.steps.push(entry);
@@ -203,7 +209,7 @@ export async function run(opts) {
           for (const a of step.actions) {
             const at = Date.now(), record = { do: a.do, ...(a.sel ? { sel: a.sel } : {}), ms: 0, load_ms: null, status: 'ok', error: '' };
             entry.actions.push(record);
-            try { await action(substitute(a, env), step, record); }
+            try { await withTimeout(action(substitute(a, env), step, record), stepMs(), `step took longer than ${stepMs() / 1000} s`); }
             catch (e) { record.status = a.optional ? 'skip' : 'fail'; record.error = firstLine(e); if (!a.optional) failure ||= record.error; }
             finally { record.ms = Date.now() - at; }
             if (blocked) break;
@@ -219,10 +225,11 @@ export async function run(opts) {
             const text = clone.innerText; clone.remove(); return text;
           });
           entry.lint = lintText(lintInput, { allow: step.lint_allow || lane.lint_allow || [] });
+          await settle();  // page fade-in animations make axe see half-transparent text
           const axe = await new AxeBuilder({ page }).analyze();
           entry.axe = axe.violations.filter(v => ['serious', 'critical'].includes(v.impact) && !(step.allow_axe || []).includes(v.id)).map(v => ({ id: v.id, impact: v.impact, help: v.help, count: v.nodes.length, selector: v.nodes[0]?.target?.[0] }));
           if (lane.axe_fail && entry.axe.length) failure ||= 'Accessibility violations';
-          for (const width of widths) { await page.setViewportSize({ width, height: height(width) }); await page.waitForTimeout(250); await shot(step, width); }
+          for (const width of widths) { await page.setViewportSize({ width, height: height(width) }); await page.waitForTimeout(250); await settle(); await shot(step, width); }
           await page.setViewportSize({ width: widths[0], height: height(widths[0]) });
           await page.waitForTimeout(250);
           await shot(step, widths[0]);
@@ -255,5 +262,6 @@ export async function run(opts) {
   return result;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  setTimeout(() => { console.error('stepper watchdog: the lane did not end in time'); process.exit(3); }, laneMs() + 180000).unref();  // last resort: never hang
   Promise.resolve().then(() => run(parseArgs(process.argv.slice(2)))).catch(e => { console.error(firstLine(e)); process.exitCode = 2; });
 }

@@ -6,7 +6,13 @@ import { access, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { run } from './stepper.mjs';
 import { lintText, termTable, RULES } from './lint.mjs';
+
+test('a typed orch command in the UI is flagged', () => {
+  assert.ok(lintText('Try: orch relay send Home "Hello"').some(x => x.rule === 'cli-command'));
+  assert.equal(lintText('Send one from the phone.').length, 0);
+});
 
 test('wording rules, boundaries, allowances, and purity', () => {
   for (const text of ['Connected over NetBird', 'Evidence', 'Recommended', 'undefined']) assert.ok(lintText(text).length, text);
@@ -59,4 +65,31 @@ test('browser lane continues after failure and covers controls', { timeout: 1950
     assert.ok(shot); await access(join(dir, 'full', shot.file));
   }
   await assert.rejects(access(join(dir, 'full', 'trace.zip')), 'no trace unless STEPPER_TRACE is set (traces keep typed values)');
+});
+
+test('a page with an endless animation and a hanging action does not hang the lane', { timeout: 60000 }, async t => {
+  const { chromium } = await import('playwright');
+  try { await access(chromium.executablePath()); } catch { t.skip('Chromium is not installed'); return; }
+  const dir = await mkdtemp(fileURLToPath(new URL('./test-run-', import.meta.url)));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const server = http.createServer((req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    res.end('<!doctype html><html lang="en"><title>orch</title><style>@keyframes s{to{transform:rotate(1turn)}}.sp{animation:s 1s linear infinite;width:10px;height:10px;background:#888}</style><body><main><h1>Focus</h1><div class="sp"></div></main></body></html>');
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const lane = { lane: 'F', base: 'local', steps: [
+    { id: 'F01', page: 'focus', actions: [{ do: 'goto', path: '/' }, { do: 'expect_text', text: 'Focus' }] },
+    { id: 'F02', page: 'focus', actions: [{ do: 'goto', path: '/' }, { do: 'shell', cmd: 'sleep', args: ['30'] }] },
+  ] };
+  await writeFile(join(dir, 'lane.json'), JSON.stringify(lane));
+  await writeFile(join(dir, 'env.json'), JSON.stringify({ urls: { local: `http://127.0.0.1:${server.address().port}` }, vars: {} }));
+  process.env.STEPPER_STEP_MS = '3000';
+  const t0 = Date.now();
+  const result = await run({ lane: join(dir, 'lane.json'), env: join(dir, 'env.json'), out: join(dir, 'out'), viewports: '1280' });
+  delete process.env.STEPPER_STEP_MS;
+  assert.ok(Date.now() - t0 < 40000, 'the lane ended in time');
+  assert.equal(result.steps[0].status, 'pass');
+  assert.equal(result.steps[1].status, 'fail');
+  assert.match(JSON.stringify(result.steps[1]), /longer than/);
 });

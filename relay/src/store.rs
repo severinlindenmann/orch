@@ -62,6 +62,9 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         "mm_unreach INTEGER NOT NULL DEFAULT 0",
         "mm_last_ended_push INTEGER",
         "mm_heartbeats TEXT NOT NULL DEFAULT '[]'",
+        "icon TEXT",
+        "color TEXT",
+        "look_by TEXT",
     ] {
         let _ = c.execute(&format!("ALTER TABLE workspaces ADD COLUMN {col}"), []);
     }

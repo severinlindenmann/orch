@@ -65,6 +65,10 @@ def file_ref_ok(root: Path, path) -> bool:
     parts = _parts(path)
     if parts is None or any(p.rstrip(". ").lower() in (".orch", ".git") for p in parts):
         return False
+    if not (_DIR_FD and os.open in os.supports_dir_fd and hasattr(os, "O_DIRECTORY")) and any(
+        "~" in p for p in parts
+    ):
+        return False  # Windows: a short 8.3 name (ORCH~1) could be .orch, as in _read_parts
     cur = Path(os.path.realpath(root))
     for part in parts:
         cur = cur / part
