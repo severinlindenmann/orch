@@ -522,3 +522,34 @@ def test_an_agent_that_is_up_and_asks_something_never_gets_a_login_wait(proj, ru
         assert "why" not in runs.read(proj, tid)["live"]
         run("run", "event", "--run", r, "--kind", "idle")
     assert not any("Waiting" in h.get("text", "") for h in tickets.load(proj, tid).get("history", []))
+
+
+def test_a_private_run_file_is_refused_when_a_team_gitignore_shows_it(tmp_path):
+    """env-<run>.json holds the agent's whole environment (API keys): a team .gitignore (with its own tracked
+    .orch/.gitignore) that brings that exact file back into `git status` makes the write refuse."""
+    from orch import skills
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    proj = tmp_path / "p"
+    proj.mkdir()
+
+    def git(*a):
+        subprocess.run(["git", *a], cwd=proj, env=env, capture_output=True, check=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    (proj / ".orch" / "run").mkdir(parents=True)
+    skills.ensure_gitignore(proj)  # what `orch init` does
+    runs._atomic(proj / ".orch" / "run" / "env-ok.json", '{"K": "v"}', 0o600)  # a normal project: stored
+    assert (proj / ".orch" / "run" / "env-ok.json").read_text() == '{"K": "v"}'
+    (proj / ".orch" / ".gitignore").write_text("# team\n", encoding="utf-8")
+    (proj / ".gitignore").write_text("!/.orch/run/\n/.orch/run/*\n!/.orch/run/env-*.json\n", encoding="utf-8")
+    git("add", "-f", ".orch/.gitignore", ".gitignore")
+    git("commit", "-qm", "team")
+    with pytest.raises(Exception, match="git would not leave|Nothing was stored|private"):
+        runs._atomic(proj / ".orch" / "run" / "env-r1.json", '{"SECRET": "x"}', 0o600)
+    assert not (proj / ".orch" / "run" / "env-r1.json").exists()
+    status = ["git", "status", "--porcelain", "-uall"]
+    out = subprocess.run(status, cwd=proj, env=env, capture_output=True, text=True).stdout
+    assert "env-r1.json" not in out
