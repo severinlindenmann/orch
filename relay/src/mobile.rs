@@ -22,7 +22,9 @@ pub const UNREACHABLE_SECS: i64 = 300;
 pub async fn heartbeat(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<Json<Value>> {
     let ws = {
         let c = app.db.lock().unwrap();
-        auth::workspace(&c, &h)?
+        let ws = auth::workspace(&c, &h)?;
+        heartbeat_cap(&c, &ws, now())?;
+        ws
     };
     let v = parse_body(&body)?;
     crate::phone::check("heartbeat_request", &v)?;
@@ -43,10 +45,7 @@ pub async fn heartbeat(State(app): State<AppState>, h: HeaderMap, body: Bytes) -
             [&ws],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
-        // only repeats of the same state count: a change of on/off is always accepted
-        if (was_on != 0) == on {
-            heartbeat_limit(&c, &ws, now())?;
-        }
+        heartbeat_class(&c, &ws, now(), (was_on != 0) != on)?;
         c.execute(
             "UPDATE workspaces SET mm_on=?2, mm_since=?3, mm_ends_at=?4, mm_machine=?5, mm_unreach=0 WHERE id=?1",
             rusqlite::params![
@@ -79,26 +78,52 @@ pub async fn heartbeat(State(app): State<AppState>, h: HeaderMap, body: Bytes) -
     Ok(Json(json!({"mobile_mode": stored})))
 }
 
-/// Keep only six repeats of the same state in the rolling minute.
-fn heartbeat_limit(c: &Connection, ws: &str, at: i64) -> Res<()> {
+fn too_many() -> ApiError {
+    let mut err = rate_limited();
+    err.message = "Too many heartbeats. Try again in a minute.".into();
+    err
+}
+
+/// Rolling minute of admitted heartbeats: `[time, kind]`, kind 0 = body not checked yet, 1 = same state, 2 = state change.
+fn recent_heartbeats(c: &Connection, ws: &str, at: i64) -> Res<Vec<(i64, u8)>> {
     let stored: String = c.query_row(
         "SELECT mm_heartbeats FROM workspaces WHERE id=?1",
         [ws],
         |r| r.get(0),
     )?;
-    let mut recent: Vec<i64> = serde_json::from_str(&stored).map_err(internal)?;
-    recent.retain(|t| *t > at - 60);
-    if recent.len() >= 6 {
-        let mut err = rate_limited();
-        err.message = "Too many heartbeats. Try again in a minute.".into();
-        return Err(err);
-    }
-    recent.push(at);
+    let mut recent: Vec<(i64, u8)> = serde_json::from_str(&stored).unwrap_or_default();
+    recent.retain(|(t, _)| *t > at - 60);
+    Ok(recent)
+}
+
+fn save_heartbeats(c: &Connection, ws: &str, recent: &[(i64, u8)]) -> Res<()> {
     c.execute(
         "UPDATE workspaces SET mm_heartbeats=?2 WHERE id=?1",
-        rusqlite::params![ws, serde_json::to_string(&recent).map_err(internal)?],
+        rusqlite::params![ws, serde_json::to_string(recent).map_err(internal)?],
     )?;
     Ok(())
+}
+
+/// Hard cap: 30 requests per workspace per rolling minute, counted right after auth (before the body is read).
+fn heartbeat_cap(c: &Connection, ws: &str, at: i64) -> Res<()> {
+    let mut recent = recent_heartbeats(c, ws, at)?;
+    if recent.len() >= 30 {
+        return Err(too_many());
+    }
+    recent.push((at, 0));
+    save_heartbeats(c, ws, &recent)
+}
+
+/// Same-state repeats: 6 per minute. State changes (on/off): 20 per minute, so a final off after quick toggles is accepted.
+fn heartbeat_class(c: &Connection, ws: &str, at: i64, change: bool) -> Res<()> {
+    let mut recent = recent_heartbeats(c, ws, at)?;
+    let (kind, max) = if change { (2u8, 20) } else { (1u8, 6) };
+    let current = recent.pop(); // this request, recorded by heartbeat_cap
+    if recent.iter().filter(|(_, k)| *k == kind).count() >= max {
+        return Err(too_many());
+    }
+    recent.extend(current.map(|(t, _)| (t, kind)));
+    save_heartbeats(c, ws, &recent)
 }
 
 /// Reserve the notification while holding the database lock, before sending asynchronously.

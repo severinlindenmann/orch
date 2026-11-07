@@ -333,7 +333,10 @@ async fn heartbeat_limit_is_rolling_and_per_workspace() {
         .unwrap()
         .execute(
             "UPDATE workspaces SET mm_heartbeats=?2 WHERE id=?1",
-            rusqlite::params![a.id, json!([at - 60, at, at, at, at, at]).to_string()],
+            rusqlite::params![
+                a.id,
+                json!([[at - 60, 1], [at, 1], [at, 1], [at, 1], [at, 1], [at, 1]]).to_string()
+            ],
         )
         .unwrap();
     assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
@@ -451,19 +454,30 @@ async fn expired_lease_is_off_before_sweep_and_pushes_lease_once() {
 }
 
 #[tokio::test]
-async fn fast_toggling_never_refuses_the_final_off() {
+async fn state_changes_have_their_own_limit() {
     let t = start().await;
     let a = t.add_ws("A").await;
-    for _ in 0..10 {
+    let off = || json!({"mobile_mode": {"on": false}});
+    // five quick toggles, then an off is still accepted
+    for _ in 0..2 {
         assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
-        let off = json!({"mobile_mode": {"on": false}});
-        assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(off)).await.0, 200);
+        assert_eq!(
+            t.call(&a, "POST", "/v1/heartbeat", Some(off())).await.0,
+            200
+        );
     }
     assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
-    let off = json!({"mobile_mode": {"on": false}});
-    assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(off)).await.0, 200);
     assert_eq!(
-        orch_relay::store::mobile_mode(&t.app.db.lock().unwrap(), &a.id)["on"],
-        false
+        t.call(&a, "POST", "/v1/heartbeat", Some(off())).await.0,
+        200
     );
+    // 25 alternating toggles: changes 1..=20 pass (6 already used), the 21st change is refused
+    let b = t.add_ws("B").await;
+    let mut codes = vec![];
+    for i in 0..25 {
+        let body = if i % 2 == 0 { on() } else { off() };
+        codes.push(t.call(&b, "POST", "/v1/heartbeat", Some(body)).await.0);
+    }
+    assert!(codes[..20].iter().all(|c| *c == 200), "{codes:?}");
+    assert_eq!(codes[20], 429, "{codes:?}");
 }
