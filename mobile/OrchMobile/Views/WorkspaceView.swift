@@ -28,6 +28,7 @@ struct WorkspaceView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 ModelMessage()
+                MobileModeBanner(workspaceId: workspaceId)
                 generalCard
                 segments
                 if topics.isEmpty { emptyState }

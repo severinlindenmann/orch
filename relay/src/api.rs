@@ -34,6 +34,7 @@ pub fn router(app: AppState) -> Router {
         .route("/", get(root_page))
         .route("/v1/whoami", get(whoami))
         .route("/v1/me", axum::routing::patch(patch_me))
+        .route("/v1/heartbeat", post(crate::mobile::heartbeat))
         .route("/v1/messages", post(post_message))
         .route("/v1/inbox", get(inbox))
         .route("/v1/inbox/ack", post(ack))
