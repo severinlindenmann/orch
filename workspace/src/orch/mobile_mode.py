@@ -106,12 +106,10 @@ def settle(root: Path, now: datetime | None = None) -> dict:
 
 
 def _end(root: Path, d: dict, reason: str, now: datetime | None = None, by=None) -> dict:
-    d = {
-        "default_hours": d.get("default_hours"),
-        "on": False,
-        "ended": {"at": _iso(now or _now()), "reason": reason, "text": ENDED_WORDS[reason]},
-    }
-    if by is not None:
+    d = {"default_hours": d.get("default_hours"), "on": False}
+    if reason != "off":  # a local, self-initiated off leaves no notice behind
+        d["ended"] = {"at": _iso(now or _now()), "reason": reason, "text": ENDED_WORDS[reason]}
+    if by is not None and "ended" in d:
         d["ended"]["by"] = by
     if d["default_hours"] is None:
         del d["default_hours"]
@@ -248,7 +246,16 @@ def turn_off(root: Path, reason: str = "off", if_since=None, by=None) -> dict:
             return status(root)
         if d.get("on"):
             _end(root, d, reason if reason in ENDED_WORDS else "off", by=by)
-    heartbeat(root)
+            local = reason not in ENDED_WORDS or reason == "off"
+        else:
+            local = False
+    if local:  # no notice is stored, but the relay still hears ended:"off"
+        from orch import relay
+
+        with contextlib.suppress(Exception):
+            relay.heartbeat(root, {"on": False, "ended": "off"})
+    else:
+        heartbeat(root)
     return status(root)
 
 

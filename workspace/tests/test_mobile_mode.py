@@ -105,7 +105,7 @@ def test_on_off_status(on_state, beats):
     assert d["hours"] == 8
     assert beats[-1]["on"] is True and beats[-1]["machine"]
     st = mm.turn_off(on_state)
-    assert not st["on"] and st["ended"]["reason"] == "off"
+    assert not st["on"] and st["ended"] is None  # a local off leaves no notice
     assert beats[-1] == {"on": False, "ended": "off"}
 
 
