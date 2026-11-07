@@ -362,7 +362,7 @@ def test_an_agent_that_is_starting_is_a_starting_row_not_idle_or_lost():
 def test_home_counts_a_starting_ticket_and_the_sidebar_badge_has_words():
     src = (WEB / "app.js").read_text()
     assert "agent starting" in src and "Getting started…" in src
-    assert "needsList().length + ' need you'" in src  # 5A: the badge says what it counts
+    assert "needsYou(needsList().length)" in src  # 5A: the badge says what it counts
 
 
 @node
@@ -459,7 +459,7 @@ def test_first_run_note_is_not_shown_as_an_answer():
         ("open", "Not started"),
         ("ready", "Ready to start"),
         ("active", "Working"),
-        ("waiting", "Waiting"),
+        ("waiting", "Needs you"),
         ("review", "Ready for review"),
         ("done", "Done"),
     ],
@@ -597,3 +597,17 @@ def test_in_needs_only_for_listed_questions():
     assert call("inNeeds", rows, "t_1") is True
     assert call("inNeeds", rows, "t_2") is False
     assert call("inNeeds", rows, "t_3") is False
+
+
+@node
+@pytest.mark.parametrize("n,want", [(0, "0 need you"), (1, "1 needs you"), (2, "2 need you")])
+def test_needs_you_count_words_match_the_phone(n, want):
+    assert call("needsYou", n) == want
+
+
+def test_groups_are_in_the_phone_order_and_old_phrases_are_gone():
+    src = (WEB / "app.js").read_text()
+    choices = src.split("const STATUS_CHOICES = ")[1].split("];")[0]
+    order = [w for w in ("Needs you", "Working", "Ready for review", "Not started", "Done") if w in choices]
+    assert order == sorted(order, key=choices.index) and len(order) == 5
+    assert "question needs you" not in src and "questions need you" not in src

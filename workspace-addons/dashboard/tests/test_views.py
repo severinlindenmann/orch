@@ -377,7 +377,7 @@ def test_artifacts_tab_reads_files_only_through_the_checked_endpoints():
 def test_ticket_details_hide_raw_id_and_home_badge_is_named():
     js = (WEBDIR / "app.js").read_text()
     assert "field('Ticket', h('span', {className:'ed-ro mono'}, t.id))" not in js
-    assert "' need you', 'aria-label'" in js
+    assert "needsYou(needsList().length)" in js
 
 
 def test_settings_wording_and_one_toast_at_a_time():

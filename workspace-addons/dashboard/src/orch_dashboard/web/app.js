@@ -75,11 +75,12 @@
   const overdue = t => activeTicket(t) && t.due && t.due < today();
   const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
   const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
-  const statusWord = t => ({open:'Not started', ready:'Ready to start', active:'Working', waiting:'Waiting', review:'Ready for review', done:'Done'}[t.status] || 'Not started');
+  const statusWord = t => ({open:'Not started', ready:'Ready to start', active:'Working', waiting:'Needs you', review:'Ready for review', done:'Done'}[t.status] || 'Not started');
   const chip = (text, cls = '') => h('span', {className:'chip ' + cls}, text);
   const shown = t => snapshot ? t : {...t, status: window.DashHelpers.shownStatus(t, state.runs?.[t.id])};
   const statusChip = t => { const s = shown(t); return chip(statusWord(s), s.status === 'active' ? 'active' : ''); };
-  const STATUS_CHOICES = [['open', 'Not started'], ['ready', 'Ready to start'], ['active', 'Working'], ['waiting', 'Waiting'], ['review', 'Ready for review'], ['done', 'Done']];
+  // Same order as the phone: Needs you, Working, Ready for review, Not started, Done.
+  const STATUS_CHOICES = [['waiting', 'Needs you'], ['active', 'Working'], ['review', 'Ready for review'], ['open', 'Not started'], ['ready', 'Ready to start'], ['done', 'Done']];
   // "Move to" offers four places; Ready to start counts as Not started and Waiting as Working (the agent decides Waiting).
   const MOVE_CHOICES = [['open', 'Not started'], ['active', 'Working'], ['review', 'Ready for review'], ['done', 'Done']];
   const moveHome = status => ({ready:'open', waiting:'active'}[status] || status);
@@ -160,7 +161,7 @@
       const line = clean(window.DashHelpers.historyLine(entry, checklist));
       return h('div', {className:'card-row'}, h('div', {className:'grow'}, h('h3', {}, line.length > 80 ? line.slice(0, 79) + '…' : line), h('p', {className:'meta'}, [name(entry.by), clean(title), age(entry.at)].filter(Boolean).join(' · '))));
     });
-    return fragment(heading('Today', now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + [needs.length + ' need you', working.length + (working.length === 1 ? ' agent working' : ' agents working'), startingText].filter(Boolean).join(' · ')), banner,
+    return fragment(heading('Today', now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + [window.DashHelpers.needsYou(needs.length), working.length + (working.length === 1 ? ' agent working' : ' agents working'), startingText].filter(Boolean).join(' · ')), banner,
       h('div', {className:'columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
         card('needs-you', 'Needs you', needs.length + (oldest ? ' · oldest ' + age(oldest) : ''), needs.length ? needs.map(n => needRow(n, newest)) : emptyRow('Nothing needs you right now.'), true),
         card('your-tickets', 'Your tickets', current.length + (current.some(overdue) ? ' · ' + current.filter(overdue).length + ' overdue' : ''), current.length ? current.map(ticketRow) : tickets().length ? h('div', {className:'card-row'}, h('p', {className:'grow muted'}, 'Nothing open. Finished tickets are under Tickets.'), newButton()) : firstTicket(), true)),
@@ -1102,7 +1103,7 @@
       crumb.replaceChildren(pageName, ' › ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || last);
     } else crumb.textContent = pageName;
     const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
-    reconcile(nav, fragment(navLink('#home', 'Home', 'page', needsList().length ? h('span', {className:'count', title:needsList().length + ' need you', 'aria-label':needsList().length + ' need you'}, needsList().length + ' need you') : null), navLink('#tickets', 'Tickets', 'table'), state.general ? navLink('#general', 'General', 'text') : null,
+    reconcile(nav, fragment(navLink('#home', 'Home', 'page', needsList().length ? h('span', {className:'count', title:window.DashHelpers.needsYou(needsList().length), 'aria-label':window.DashHelpers.needsYou(needsList().length)}, window.DashHelpers.needsYou(needsList().length)) : null), navLink('#tickets', 'Tickets', 'table'), state.general ? navLink('#general', 'General', 'text') : null,
       addons().some(a => a.dashboard) ? h('p', {className:'eyebrow'}, 'Add-ons') : null, addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon))));
     reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'user') : null));
     if (changed) {
