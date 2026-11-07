@@ -121,7 +121,7 @@ def p1(e):
     sec = json.loads((ws / ".orch/secrets/publish.json").read_text())
     check(sec["workspace"] == pid and sec["token"] == tok, "secrets/publish.json wrong")
     check((ws / ".agents/skills/orch-publish/SKILL.md").is_file(), "orch-publish skill missing")
-    check("<!-- orch:addon:publish -->" in (ws / "AGENTS.md").read_text(), "AGENTS.md block missing")
+    check("orch-publish" in (ws / ".orch/harness/AGENTS.orch.md").read_text(), "orch block missing")
     rc, out, _ = e.sh(["git", "check-ignore", ".orch/secrets/publish.json"], cwd=ws)
     check(rc == 0, "secrets are not gitignored")
     who = e.orchj("Pilatus", "publish", "whoami")

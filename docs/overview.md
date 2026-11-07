@@ -26,7 +26,7 @@
 1. Install orch once per machine (the repo is public):
    macOS/Linux `curl -fsSL https://raw.githubusercontent.com/severinlindenmann/orch/main/install.sh | sh` · Windows `irm https://raw.githubusercontent.com/severinlindenmann/orch/main/install.ps1 | iex`.
    It installs `uv` if missing, then `uv tool install git+https://github.com/severinlindenmann/orch#subdirectory=workspace`.
-2. `orch init` once per project folder (`.orch/`, the `orch` skill, AGENTS.md block, `.claude/skills` link, `.gitignore`).
+2. `orch init` once per project folder (`.orch/` with the local harness in `.orch/harness/`, linked skills, a local `CLAUDE.local.md`; nothing in team files, `git status` stays clean; opt-in `orch share on` writes one block into AGENTS.md).
 3. Optional add-ons: `orch addon add dashboard` / `orch addon add scheduler` (or a local folder). Later: `orch update` (orch + all add-ons together).
 4. The admin opens the portal (private network) → "Add workspace" → name, description, tags (+ rights for publish).
 5. The portal shows a prompt with `orch addon add publish --yes` + `orch publish connect …` / `orch addon add relay --yes` + `orch relay connect …` (+ the onboarding line for machines without orch). The user pastes it into any agent tool.

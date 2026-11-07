@@ -276,6 +276,14 @@ def _config_permissions(a):
     return ["config", "set", "workspace.permissions", mode], [], []
 
 
+def _share_set(a):
+    """Share with team: `orch share on|off` (AGENTS.md entry + merge=union; off removes both)."""
+    _only(a, ("on",))
+    if not isinstance(a.get("on"), bool):
+        raise BadRequest("Say on or off.")
+    return ["share", "on" if a["on"] else "off"], [], []
+
+
 def _config_agent_test(a):
     """Try an agent: `orch agents test <name> --json` answers {name, ok, reason}. Changes nothing, so no --by."""
     _only(a, ("name",))
@@ -334,6 +342,7 @@ OPS = {
     "config.agent.test": _config_agent_test,
     "config.permissions": _config_permissions,
     "addon.set": _addon_set,
+    "share.set": _share_set,
     **MOBILE_OPS,
     "ref.add": _ref_add,
     "ref.rm": _ref_rm,
@@ -466,7 +475,7 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
             out,
         )  # `orch agents test` exits 1 when the agent does not work; the JSON is the answer either way
     if r.returncode == 0:
-        if op in ("config.agent.add", "addon.set", "config.agent", "config.permissions", "workflow.set"):
+        if op in ("config.agent.add", "addon.set", "config.agent", "config.permissions", "workflow.set", "share.set"):
             _audit(root, op, args)
         return 200, "", out if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None

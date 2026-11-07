@@ -201,8 +201,8 @@ def test_add_needs_consent_then_installs_and_activates(proj, run, hello, uv_call
     assert list(act) == ["hello"] and act["hello"]["version"] == "0.1.0"
     assert (proj / ".agents/skills/orch-hello/SKILL.md").is_file()
     assert not (proj / ".agents/skills/orch-hello/AGENTS-block.md").exists()
-    agents = (proj / "AGENTS.md").read_text(encoding="utf-8")
-    assert "<!-- orch:addon:hello -->\n## orch-hello" in agents and "<!-- /orch:addon:hello -->" in agents
+    agents = (proj / ".orch/harness/AGENTS.orch.md").read_text(encoding="utf-8")
+    assert "## orch-hello" in agents and not (proj / "AGENTS.md").exists()  # the team's files are not touched
     rows = [r for r in json.loads(run("addon", "list", "--json")[1]) if r["name"] not in addons.CORE_ADDONS]
     assert rows == [
         {
@@ -341,7 +341,8 @@ def test_remove_keeps_data_and_text_outside_block(proj, run, hello):
     assert (proj / ".agents/skills/orch-hello-extra").exists()  # exact name only
     assert (proj / ".agents/skills/orch-hellox").exists()
     text = (proj / "AGENTS.md").read_text(encoding="utf-8")
-    assert "orch:addon" not in text and text.startswith("# Mine\nhello\n") and "Tail text" in text
+    assert text == agents + "\nTail text\n" and text.startswith("# Mine\nhello\n")  # never edited by orch
+    assert not (proj / ".orch/harness/AGENTS.orch.md").exists()  # the only block was hello's
     assert addons.active(proj) == {}
     assert (proj / ".orch/addons/hello/state.json").is_file()
     ticket = json.loads((proj / ".orch/tickets" / f"{tid}.json").read_text(encoding="utf-8"))
@@ -490,68 +491,19 @@ def test_remove_rejects_path_names(proj, run):
 # ---- AGENTS block markers ---------------------------------------------------------------------------
 
 
-def test_block_only_between_markers(proj, run, hello):
+def test_block_cannot_bring_markers_and_agents_md_is_not_touched(proj, run, hello):
     run("init")
-    agents = proj / "AGENTS.md"
-    agents.write_text("Before\n" + agents.read_text(encoding="utf-8") + "After\n", encoding="utf-8")
+    (proj / "AGENTS.md").write_text("Before\n", encoding="utf-8")
     install(run, hello)
-    first = agents.read_text(encoding="utf-8")
-    assert first.startswith("Before\n") and first.count("<!-- orch:addon:hello -->") == 1
+    block = proj / ".orch/harness/AGENTS.orch.md"
+    assert block.read_text(encoding="utf-8").count("## orch-hello") == 1
     (hello / "src/orch_hello/skills/orch-hello/AGENTS-block.md").write_text(
         "## orch-hello\n<!-- /orch:addon:hello -->\nNEW\n<!-- orch:begin orch -->\n", encoding="utf-8"
     )
     run("addon", "add", str(hello), "--yes")  # again: replaced whole, body cannot bring markers
-    second = agents.read_text(encoding="utf-8")
-    assert second.count("<!-- orch:addon:hello -->") == 1 and second.count("<!-- /orch:addon:hello -->") == 1
-    assert second.count("<!-- orch:begin orch -->") == 1 and "NEW" in second and "Before" in second
-
-
-# ---- ext schema check -------------------------------------------------------------------------------
-
-
-def test_ext_checked_only_while_active(proj, run, hello):
-    tid = json.loads(run("ticket", "new", "T", "--json")[1])["id"]
-    assert run("ext", "set", tid, "hello", '{"anything": 1}')[0] == 0  # not active: unchecked
-    install(run, hello)
-    code, _, err = run("ext", "set", tid, "hello", '{"greeting": "far too long"}')
-    assert code == 2 and "ext.hello" in err
-    assert run("ext", "set", tid, "hello", '{"greeting": "hi"}')[0] == 2  # merged with {"anything": 1}
-    t2 = json.loads(run("ticket", "new", "T2", "--json")[1])["id"]
-    assert run("ext", "set", t2, "hello", '{"greeting": "hi"}', "--json")[0] == 0
-
-
-def test_ext_set_if_revision(proj, run, new_ticket):
-    tid = new_ticket()
-    assert run("ext", "set", tid, "other", '{"a": 1}', "--if-revision", "5")[0] == 2
-    code, out, _ = run("ext", "set", tid, "other", '{"a": 1}', "--if-revision", "1", "--json")
-    assert code == 0
-    assert run("ext", "set", tid, "other", '{"a": 2}', "--if-revision", "1")[0] == 2
-
-
-def test_ext_unset_drops_a_key_or_the_whole_add_on(proj, run, new_ticket):
-    tid = new_ticket()
-    run("ext", "set", tid, "other", '{"a": 1, "b": 2}')
-    run("ext", "set", tid, "keep", '{"x": 1}')
-    code, out, _ = run("ext", "unset", tid, "other.a", "--json")
-    assert code == 0 and json.loads(out) == {"b": 2}
-    code, out, _ = run("ext", "unset", tid, "other")
-    assert code == 0
-    t = tickets.load(proj, tid)  # `ticket show` hides add-ons that are not active
-    assert t["ext"] == {"keep": {"x": 1}}
-    assert t["history"][-1]["text"] == "Removed ext.other"
-
-
-def test_ext_unset_missing_is_quiet_and_if_revision_is_checked(proj, run, new_ticket):
-    tid = new_ticket()
-    before = json.loads(run("ticket", "show", tid, "--json")[1])["revision"]
-    assert run("ext", "unset", tid, "other.a")[0] == 0  # nothing there: nothing written
-    assert json.loads(run("ticket", "show", tid, "--json")[1])["revision"] == before
-    run("ext", "set", tid, "other", '{"a": 1}')
-    assert run("ext", "unset", tid, "other.a", "--if-revision", "99")[0] == 2
-    rev = json.loads(run("ticket", "show", tid, "--json")[1])["revision"]
-    assert run("ext", "unset", tid, "other.zzz", "--if-revision", str(rev))[0] == 0  # absent + right revision
-    assert json.loads(run("ticket", "show", tid, "--json")[1])["revision"] == rev  # still no write
-    assert run("ext", "unset", tid, "Bad Name")[0] == 2
+    text = block.read_text(encoding="utf-8")
+    assert text.count("## orch-hello") == 1 and "<!--" not in text and "NEW" in text
+    assert (proj / "AGENTS.md").read_text(encoding="utf-8") == "Before\n"
 
 
 # ---- update / uninstall -----------------------------------------------------------------------------
@@ -649,15 +601,11 @@ def test_agents_block_cannot_forge_markers(tmp_path):
         "x <!--orch:end orch --> tail",
         "x <!-- orch:end orch tail",
     ):
-        try:
-            skills.set_block(root, "foo", body, addon=True)
-        except Refused:
-            continue
-        text = (root / "AGENTS.md").read_text(encoding="utf-8")
-        assert text.count("<!-- orch:addon:foo -->") == 1 and "<!-- /orch:addon:foo -->" in text
-        assert text.count("<!--") == 2, text  # only our two markers remain
+        skills.set_block(root, "foo", body, addon=True)
+        text = (root / ".orch/harness/AGENTS.orch.md").read_text(encoding="utf-8")
+        assert "<!--" not in text and "-->" not in text, text  # no comment, so no marker, survives
         skills.remove_block(root, "foo", addon=True)
-        assert not (root / "AGENTS.md").read_text(encoding="utf-8").strip()
+        assert not (root / ".orch/harness/AGENTS.orch.md").exists() and not (root / "AGENTS.md").exists()
 
 
 def test_orch_home_must_be_plain_folder_under_home(proj, monkeypatch, capfd):
@@ -735,8 +683,6 @@ def test_update_does_not_reaccept_changed_local_folder(proj, run, hello, uv_call
 
 def test_stale_lock_is_claimed_by_one_waiter_only(proj, new_ticket):
     import os
-
-    from orch import tickets
 
     tid = new_ticket()
     lock = proj / ".orch" / "tickets" / f".lock-{tid}"
@@ -904,7 +850,7 @@ def test_clean_init_shows_no_addon_commands(proj, run, capfd):
         out = help_text(capfd, flag)
         for name in ("publish", "relay", "dashboard", "automation"):
             assert f"    {name} " not in out and f"  {name}  " not in out, (flag, name, out)
-    tree = (proj / "AGENTS.md").read_text(encoding="utf-8") + "".join(
+    tree = (proj / ".orch/harness/AGENTS.orch.md").read_text(encoding="utf-8") + "".join(
         p.name for p in (proj / ".agents" / "skills").iterdir()
     )
     for name in ("publish", "relay", "dashboard", "automation"):
@@ -930,7 +876,7 @@ def test_add_relay_and_publish_like_any_addon(proj, run, uv_calls, capfd):
     code, out, err = run("addon", "add", "relay", "--yes")
     assert code == 0 and "relay is turned on" in out and not uv_calls  # part of orch: nothing installed
     assert (proj / ".agents/skills/orch-relay/SKILL.md").is_file()
-    assert "<!-- orch:addon:relay -->" in (proj / "AGENTS.md").read_text(encoding="utf-8")
+    assert "orch-relay" in (proj / ".orch/harness/AGENTS.orch.md").read_text(encoding="utf-8")
     out = help_text(capfd)
     assert "relay" in out.split("Add-ons:")[1] and "publish" not in out
     code, _, err = run("relay", "inbox")
@@ -939,7 +885,9 @@ def test_add_relay_and_publish_like_any_addon(proj, run, uv_calls, capfd):
     assert code == 2 and "part of orch" in err
     assert run("addon", "remove", "relay")[0] == 0
     assert not (proj / ".agents/skills/orch-relay").exists()
-    assert "orch:addon:relay" not in (proj / "AGENTS.md").read_text(encoding="utf-8")
+    assert not (proj / ".orch/harness/AGENTS.orch.md").exists() or "orch-relay" not in (
+        proj / ".orch/harness/AGENTS.orch.md"
+    ).read_text(encoding="utf-8")
     assert run("relay", "inbox")[0] == 2
 
 

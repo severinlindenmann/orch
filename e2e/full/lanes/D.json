@@ -1,0 +1,391 @@
+{
+ "lane": "D",
+ "title": "Publish walk",
+ "base": "publish_admin",
+ "viewports": [
+  1280,
+  720,
+  390
+ ],
+ "census_skip": [
+  "Delete",
+  "Remove",
+  "Sign out"
+ ],
+ "steps": [
+  {
+   "id": "D01",
+   "name": "Sign in to the publish portal",
+   "page": "pub-signin",
+   "expect": "a wrong key is refused in words, the right key opens Workspaces",
+   "expect_errors": {
+    "http": [
+     "/admin/api"
+    ],
+    "console": [
+     "Failed to load resource"
+    ]
+   },
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/"
+    },
+    {
+     "do": "fill",
+     "sel": "input[type=password]",
+     "value": "wrong-key"
+    },
+    {
+     "do": "click",
+     "sel": "button[type=submit]"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "fill",
+     "sel": "input[type=password]",
+     "value": "{{publish_admin_token}}"
+    },
+    {
+     "do": "click",
+     "sel": "button[type=submit]"
+    },
+    {
+     "do": "expect_text",
+     "text": "Workspaces"
+    }
+   ]
+  },
+  {
+   "id": "D02",
+   "name": "Workspaces tab and Add workspace",
+   "page": "pub-workspaces",
+   "expect": "the three workspaces are listed with their rights",
+   "actions": [
+    {
+     "do": "click",
+     "sel": "a:has-text('Workspaces')"
+    },
+    {
+     "do": "expect_text",
+     "text": "Pilatus"
+    },
+    {
+     "do": "click",
+     "sel": "a.add-workspace, #add-workspace, a:has-text('Add workspace') >> nth=0",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    }
+   ]
+  },
+  {
+   "id": "D03",
+   "name": "Files and Apps tabs list what Pilatus published",
+   "page": "pub-files",
+   "expect": "hello.txt and the app are listed",
+   "actions": [
+    {
+     "do": "click",
+     "sel": "a:has-text('Files')"
+    },
+    {
+     "do": "expect_text",
+     "text": "Pilatus"
+    },
+    {
+     "do": "click",
+     "sel": "a:has-text('Apps')"
+    },
+    {
+     "do": "expect_text",
+     "text": "e2e-app"
+    }
+   ]
+  },
+  {
+   "id": "D04",
+   "name": "Open the file link: note, text, Download, Copy link",
+   "page": "pub-file",
+   "expect": "the note and the text show; Download and Copy work",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "about:blank"
+    },
+    {
+     "do": "goto",
+     "path": "{{file_link}}"
+    },
+    {
+     "do": "expect_text",
+     "text": "Please read this"
+    },
+    {
+     "do": "expect_text",
+     "text": "Hello from the e2e"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Copy link')"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Copy') >> nth=-1",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Full screen')",
+     "optional": true
+    },
+    {
+     "do": "press",
+     "key": "Escape"
+    },
+    {
+     "do": "click_all_census",
+     "page": "pub-file-page"
+    }
+   ]
+  },
+  {
+   "id": "D05",
+   "name": "File link without the key or with a wrong key says why",
+   "page": "pub-file-bad",
+   "expect": "a plain message, no crash",
+   "expect_errors": {
+    "http": [
+     "/f/"
+    ],
+    "console": [
+     "Failed to load resource",
+     "decrypt",
+     "key"
+    ]
+   },
+   "actions": [
+    {
+     "do": "goto",
+     "path": "about:blank"
+    },
+    {
+     "do": "goto",
+     "path": "{{file_url}}"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "goto",
+     "path": "about:blank"
+    },
+    {
+     "do": "goto",
+     "path": "{{file_url}}#k=wrongwrongwrongwrongwrongwrongwrongwrong"
+    },
+    {
+     "do": "wait",
+     "ms": 1000
+    }
+   ]
+  },
+  {
+   "id": "D06",
+   "name": "App: with the view token it opens, without it is refused",
+   "page": "pub-app",
+   "expect": "private apps need their token",
+   "expect_errors": {
+    "http": [
+     "/a/"
+    ],
+    "console": [
+     "Failed to load resource"
+    ]
+   },
+   "actions": [
+    {
+     "do": "goto",
+     "path": "about:blank"
+    },
+    {
+     "do": "goto",
+     "path": "{{app_link}}"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "goto",
+     "path": "about:blank"
+    },
+    {
+     "do": "goto",
+     "path": "{{app_url}}"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    }
+   ]
+  },
+  {
+   "id": "D07",
+   "name": "The admin is not reachable on the public port",
+   "page": "api",
+   "noshot": true,
+   "expect": "/admin on the public address answers 404 or 403",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "about:blank"
+    },
+    {
+     "do": "expect_status",
+     "method": "GET",
+     "path": "{{url:publish}}/admin/api/workspaces",
+     "status": [
+      401,
+      403,
+      404
+     ]
+    }
+   ]
+  },
+  {
+   "id": "D09",
+   "name": "Add a workspace with rights: the commands to paste are shown",
+   "page": "pub-add",
+   "expect": "the new workspace shows a prompt to paste, with its key shown once",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/"
+    },
+    {
+     "do": "click",
+     "sel": "a:has-text('Add workspace') >> nth=0"
+    },
+    {
+     "do": "click",
+     "sel": "a:has-text('Cancel') >> visible=true >> nth=0",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "a:has-text('Add workspace') >> nth=0",
+     "optional": true
+    },
+    {
+     "do": "fill",
+     "sel": "label=Workspace name",
+     "value": "E2E extra {{stamp}}"
+    },
+    {
+     "do": "fill",
+     "sel": "label=Description (optional)",
+     "value": "made by the e2e",
+     "optional": true
+    },
+    {
+     "do": "fill",
+     "sel": "label=Add tag",
+     "value": "extra",
+     "optional": true
+    },
+    {
+     "do": "press",
+     "key": "Enter",
+     "optional": true
+    },
+    {
+     "do": "check",
+     "sel": "role=checkbox[name='Apps']",
+     "force": true,
+     "optional": true
+    },
+    {
+     "do": "check",
+     "sel": "role=checkbox[name='Permanent files']",
+     "force": true,
+     "optional": true
+    },
+    {
+     "do": "check",
+     "sel": "role=checkbox[name='Temporary files']",
+     "force": true,
+     "optional": true
+    },
+    {
+     "do": "select",
+     "sel": "label=Sharing >> nth=0",
+     "value": "",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Create workspace')"
+    },
+    {
+     "do": "wait",
+     "ms": 1200
+    },
+    {
+     "do": "expect_text",
+     "text": "orch publish connect"
+    },
+    {
+     "do": "click_all_census",
+     "page": "pub-added"
+    },
+    {
+     "do": "click",
+     "sel": "a:has-text('Done')",
+     "optional": true
+    }
+   ]
+  },
+  {
+   "id": "D08",
+   "name": "Click every remaining control (census)",
+   "page": "pub-census",
+   "tags": [
+    "census"
+   ],
+   "expect": "every portal control clicked once",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/"
+    },
+    {
+     "do": "click_all_census",
+     "page": "pub-workspaces"
+    },
+    {
+     "do": "click",
+     "sel": "a:has-text('Files')"
+    },
+    {
+     "do": "click_all_census",
+     "page": "pub-files"
+    },
+    {
+     "do": "click",
+     "sel": "a:has-text('Apps')"
+    },
+    {
+     "do": "click_all_census",
+     "page": "pub-apps"
+    }
+   ]
+  }
+ ]
+}

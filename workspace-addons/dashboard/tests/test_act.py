@@ -144,6 +144,8 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
         ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
+        ({"op": "share.set", "args": {"on": True}}, ["share", "on", *common]),
+        ({"op": "share.set", "args": {"on": False}}, ["share", "off", *common]),
         (
             {"op": "check.add", "args": {"ticket": "t_abcdef", "text": "--draft the page"}},
             ["check", "add", "t_abcdef", *common, "--", "--draft the page"],
@@ -567,6 +569,9 @@ def test_check_add_and_permissions_are_checked(act_server, act_orch):
         ("config.permissions", {"mode": "full", "confirm": "yes"}),
         ("config.permissions", {}),
         ("config.permissions", {"mode": "ask", "x": 1}),
+        ("share.set", {}),
+        ("share.set", {"on": "yes"}),
+        ("share.set", {"on": True, "x": 1}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"status": "finished"}, "if_revision": 1}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"status": "done"}}),
     ]
@@ -701,3 +706,11 @@ def test_human_env_drops_the_agent_variables(ws, monkeypatch):
     monkeypatch.setenv("CLAUDECODE", "1")
     env = actions.human_env(ws, "orch")
     assert "ORCH_AGENT" not in env and "CLAUDECODE" not in env and env["ORCH_VIA"] == "dashboard"
+
+
+def test_share_state_is_read_from_agents_md_only(ws):
+    from orch_dashboard.data import load_settings
+
+    assert load_settings(ws, None)["share"] is False
+    (ws / "AGENTS.md").write_text("# Team\n<!-- orch:begin share -->\nx\n<!-- orch:end share -->\n", encoding="utf-8")
+    assert load_settings(ws, None)["share"] is True

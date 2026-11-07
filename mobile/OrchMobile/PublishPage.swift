@@ -63,22 +63,22 @@ enum OPF1 {
     /// Decrypts and validates a blob. Any failure is `.broken` ("wrong key or broken file"); the tag is checked before any byte is used.
     static func open(_ blob: Data, key: Data) throws -> PublishedFile {
         guard blob.count >= 32, blob.prefix(4) == magic, key.count == 32 else { throw PublishError.broken }
-        let b = [UInt8](blob)
+        let start = blob.startIndex
         let plain: Data
         do {
-            let box = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: Data(b[4..<16])), ciphertext: Data(b[16..<(b.count - 16)]), tag: Data(b[(b.count - 16)...]))
+            let box = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: blob[(start + 4)..<(start + 16)]), ciphertext: blob[(start + 16)..<(blob.endIndex - 16)], tag: blob.suffix(16))
             plain = try AES.GCM.open(box, using: SymmetricKey(data: key), authenticating: magic)
         } catch { throw PublishError.broken }
         guard plain.count >= 4 else { throw PublishError.broken }
-        let p = [UInt8](plain)
-        let n = Int(p[0]) << 24 | Int(p[1]) << 16 | Int(p[2]) << 8 | Int(p[3])
-        guard n >= 1, n <= 65536, 4 + n <= p.count,
-              let obj = try? JSONSerialization.jsonObject(with: Data(p[4..<(4 + n)])) as? [String: Any],
+        let p = plain.startIndex
+        let n = Int(plain[p]) << 24 | Int(plain[p + 1]) << 16 | Int(plain[p + 2]) << 8 | Int(plain[p + 3])
+        guard n >= 1, n <= 65536, 4 + n <= plain.count,
+              let obj = try? JSONSerialization.jsonObject(with: plain[(p + 4)..<(p + 4 + n)]) as? [String: Any],
               let name = obj["name"] as? String, let type = obj["type"] as? String, let size = obj["size"] as? Int,
-              size == p.count - 4 - n else { throw PublishError.broken }
+              size == plain.count - 4 - n else { throw PublishError.broken }
         var note = (obj["note"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(280)) }
         if note?.isEmpty == true { note = nil }
-        return PublishedFile(name: name, type: type, note: note, bytes: Data(p[(4 + n)...]))
+        return PublishedFile(name: name, type: type, note: note, bytes: Data(plain[(p + 4 + n)...]))
     }
 }
 
@@ -91,24 +91,24 @@ struct PublishBundle: Equatable, Sendable {
     func file(at path: String) -> File? { files.first { $0.path == path } }
 
     static func parse(_ data: Data) throws -> PublishBundle {
-        let b = [UInt8](data)
-        guard b.count >= 4 else { throw PublishError.broken }
-        let m = Int(b[0]) << 24 | Int(b[1]) << 16 | Int(b[2]) << 8 | Int(b[3])
-        guard m >= 1, m <= 1_048_576, 4 + m <= b.count,
-              let idx = try? JSONSerialization.jsonObject(with: Data(b[4..<(4 + m)])) as? [String: Any],
+        guard data.count >= 4 else { throw PublishError.broken }
+        let start = data.startIndex
+        let m = Int(data[start]) << 24 | Int(data[start + 1]) << 16 | Int(data[start + 2]) << 8 | Int(data[start + 3])
+        guard m >= 1, m <= 1_048_576, 4 + m <= data.count,
+              let idx = try? JSONSerialization.jsonObject(with: data[(start + 4)..<(start + 4 + m)]) as? [String: Any],
               (idx["v"] as? Int) == 1, let entry = idx["entry"] as? String, let list = idx["files"] as? [[String: Any]],
               (1...2000).contains(list.count) else { throw PublishError.broken }
-        var seen = Set<String>(), out: [File] = [], at = 4 + m
+        var seen = Set<String>(), out: [File] = [], at = start + 4 + m
         var total = 0
         for f in list {
             guard let path = f["path"] as? String, let type = f["type"] as? String, let size = f["size"] as? Int, size >= 0,
                   validPath(path), seen.insert(path).inserted else { throw PublishError.broken }
-            guard size <= (b.count - 4 - m) - total else { throw PublishError.broken }   // checked before adding: no overflow
+            guard size <= (data.count - 4 - m) - total else { throw PublishError.broken }   // checked before adding: no overflow
             total += size
-            out.append(File(path: path, type: type, data: Data(b[at..<(at + size)]))); at += size
+            out.append(File(path: path, type: type, data: Data(data[at..<(at + size)]))); at += size
         }
         let lower = entry.lowercased()
-        guard total == b.count - 4 - m, seen.contains(entry), lower.hasSuffix(".html") || lower.hasSuffix(".htm") else { throw PublishError.broken }
+        guard total == data.count - 4 - m, seen.contains(entry), lower.hasSuffix(".html") || lower.hasSuffix(".htm") else { throw PublishError.broken }
         return PublishBundle(entry: entry, files: out)
     }
 

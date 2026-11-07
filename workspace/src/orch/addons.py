@@ -11,6 +11,7 @@ AGENTS block, tab and background process. Leftover files or ext data never activ
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import importlib.util
 import json
@@ -984,7 +985,7 @@ def consent_text(m: dict, local: bool) -> str:
     if local:
         lines.append("Source: local folder (not checked by orch). It runs code on this computer.")
     lines.append(f"Adds the command: orch {m['name']}")
-    lines.append(f"Adds a skill and an entry in AGENTS.md: orch-{m['name']}")
+    lines.append(f"Adds a skill and an entry in the local orch instructions: orch-{m['name']}")
     if "ticket_ext" in m or m.get("ticket_fields"):
         lines.append(f"Stores data on tickets under: ext.{m['name']}")
     if m.get("ticket_links"):
@@ -1144,35 +1145,41 @@ def _apply_project(root: Path, m: dict) -> None:
     skills.apply_agent_files(root)
 
 
-def _gi_markers(name: str) -> tuple[str, str]:
-    return f"# orch:addon:{name}", f"# /orch:addon:{name}"
+_ORCH_STATE = {"tickets", "config.toml", "addons.json", "ticket-counter.json"}  # the team's workspace state
+
+
+def _check_ignore_line(name: str, ln: str) -> None:
+    """Allowlist: the first folder or file name of the line is literal (no glob characters), so a line can
+    name a place but never sweep across the workspace; and nothing may hide .orch or the team's ticket files
+    (compared without case, as on macOS and Windows, and without surrounding spaces)."""
+    bad = Refused(
+        f"The add-on '{name}' asks to hide '{ln}' from git. That is not allowed; nothing was changed."
+    )
+    parts = [p for p in ln.strip().strip("/").split("/") if p not in ("", ".")]
+    if not parts or any(c in parts[0] for c in "*?[]\\{}") or parts[0].strip() != parts[0]:
+        raise bad
+    if parts[0].lower().strip() == ".orch":
+        seg = parts[1].lower().strip() if len(parts) > 1 else ""
+        if not seg or any(
+            fnmatch.fnmatchcase(state, seg) for state in _ORCH_STATE
+        ):  # a glob that can hit one
+            raise bad
 
 
 def _set_gitignore(root: Path, name: str, lines: list[str]) -> None:
-    """The add-on's lines live in their own block of the workspace .gitignore; no lines = block removed."""
-    path = root / ".gitignore"
-    f = skills._project_file(root, path)
-    text = f.read_bytes().decode("utf-8") if f.exists() else ""
-    eol = "\r\n" if "\r\n" in text else "\n"
-    start, end = _gi_markers(name)
-    rows = text.splitlines()
-    if start in rows and end in rows[rows.index(start) :]:
-        i = rows.index(start)
-        j = rows.index(end, i)
-        rows = rows[:i] + rows[j + 1 :]
-    if lines:
-        rows += [start, *lines, end]
-    new = eol.join(rows) + eol if rows else ""
-    if new != text:
-        skills._write_project_file(root, path, new)
+    """The add-on's lines live in their own block of .git/info/exclude (local; the team's .gitignore stays
+    untouched); no lines = block removed."""
+    from orch import harness
+
+    for ln in lines:
+        _check_ignore_line(name, ln)
+    lines = [ln.strip() for ln in lines]
+    harness.exclude_set(root, f"addon-{name}", lines)
 
 
 def _remove_skill_folders(root: Path, name: str) -> None:
     """Exactly orch-<name>: never a neighbour such as orch-<name>-x (another add-on or the user's skill)."""
-    d = root / ".agents" / "skills" / f"orch-{name}"
-    if d.exists() or d.is_symlink():
-        skills.unlink_skill(root, d.name)
-        skills.remove_skill(root, d.name)
+    skills.remove_skill(root, f"orch-{name}")
 
 
 def remove(root: Path, name: str, purge: bool = False) -> None:
@@ -1297,7 +1304,7 @@ def update(root: Path, project_only: bool = False, after_install: bool = False) 
         )
         return []
     done = []
-    if (root / ".agents" / "skills" / "orch").is_dir():
+    if (root / ".orch" / "harness" / "skills" / "orch").is_dir():
         from orch.init import init
 
         init(root)
