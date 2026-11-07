@@ -46,7 +46,10 @@ final class StatusRefsUITests: XCTestCase {
         let app = launch("ws_pilatus001")
         XCTAssertTrue(app.buttons["done-toggle"].waitForExistence(timeout: 20))
         app.buttons["done-toggle"].tap()
-        app.buttons["ticket-ws_pilatus001|t_q3sum1"].tap()
+        let q3 = app.buttons["ticket-ws_pilatus001|t_q3sum1"]
+        XCTAssertTrue(q3.waitForExistence(timeout: 5))
+        app.reveal(q3)
+        q3.tap()
         let info = el(app, "chat-info")
         XCTAssertTrue(info.waitForExistence(timeout: 10)); info.tap()
         let tab = app.buttons["info-tab-links"]
@@ -62,5 +65,21 @@ final class StatusRefsUITests: XCTestCase {
         el(app, "info-ref-ref1").tap()   // opens that topic
         XCTAssertTrue(app.descendants(matching: .any)["tasks-card"].waitForExistence(timeout: 10) || app.staticTexts["composer-note"].waitForExistence(timeout: 5))
         shot(app, "5-reference-opened")
+    }
+
+    /// Scrolled to the very bottom (Done open), the last row ends above the pinned "New topic" bar.
+    func testLastRowClearsTheNewTopicBar() {
+        let app = launch("ws_pilatus001")
+        XCTAssertTrue(app.buttons["done-toggle"].waitForExistence(timeout: 20))
+        app.buttons["done-toggle"].tap()
+        let last = app.buttons["ticket-ws_pilatus001|t_q3sum1"]
+        XCTAssertTrue(last.waitForExistence(timeout: 5))
+        for _ in 0..<5 { app.swipeUp() }
+        let bar = app.buttons["New topic"]
+        XCTAssertTrue(bar.exists)
+        XCTAssertLessThanOrEqual(last.frame.maxY, bar.frame.minY, "the last row is fully above the bar")
+        shot(app, "6-workspace-bottom")
+        last.tap()   // opens the topic, not the New topic sheet
+        XCTAssertTrue(app.descendants(matching: .any)["chat-info"].waitForExistence(timeout: 10))
     }
 }

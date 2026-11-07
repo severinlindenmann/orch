@@ -19,6 +19,10 @@ final class ArchiveUITests: XCTestCase {
         let done = app.buttons["done-toggle"]
         XCTAssertTrue(done.waitForExistence(timeout: 20), "workspace screen")
         done.tap()
+        // The workspace look and banners push the Done rows below the fold: scroll like a person would.
+        let chat = app.descendants(matching: .any)[row].firstMatch
+        XCTAssertTrue(chat.waitForExistence(timeout: 20))
+        app.reveal(chat)
         return app
     }
     /// Evidence for the PR; only when the shots folder exists.
@@ -46,6 +50,7 @@ final class ArchiveUITests: XCTestCase {
         let hittable = NSPredicate(format: "exists == true AND isHittable == true")
         wait(for: [expectation(for: hittable, evaluatedWith: back)], timeout: 15)
         back = el(app, row)
+        app.reveal(back)
         back.swipeLeft(); app.buttons["Archive"].tap()
         XCTAssertTrue(el(app, row).waitForNonExistence(timeout: 5), "the row is gone")
         let archived = el(app, "archived-row")
