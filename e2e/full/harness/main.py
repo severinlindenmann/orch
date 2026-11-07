@@ -28,7 +28,7 @@ from lane import Lane  # noqa: E402
 
 REAL_HOME = Path(os.environ.get("E2E_REAL_HOME") or Path.home())
 STATE = REAL_HOME / "orch-dev/state/e2e-full"
-BROWSER_LANES = {"A": "lanes/A.json", "C": "lanes/C.json", "D": "lanes/D.json"}
+BROWSER_LANES = {"A": "lanes/A.json", "C": "lanes/C.json", "D": "lanes/D.json", "F": "lanes/F.json"}
 
 
 def log(*a):
@@ -118,7 +118,7 @@ def main() -> int:
         repo = wt
         sha = subprocess.run(["git", "-C", str(wt), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     want = [x for x in (a.lanes.split(",") if a.lanes else
-                        (["A", "B", "G", "Z"] if quick else ["A", "B", "C", "D", "W", "G", "R", "M", "U", "Z"] + ([] if a.no_windows else ["X"])))]
+                        (["A", "B", "G", "Z"] if quick else ["A", "B", "C", "D", "F", "W", "G", "R", "M", "U", "Z"] + ([] if a.no_windows else ["X"])))]
     if a.phone and "P" not in want:
         want.append("P")
     hist = load_history()
@@ -210,7 +210,7 @@ def main() -> int:
             t.join()
         if "B" in want and a.real_agents:
             results["B"] = _save(lanes_py.lane_b(env, outdir / "B", True, 1 if quick else a.real_runs))
-        for l in ("A", "B", "C", "D"):
+        for l in ("A", "B", "C", "D", "F"):
             if l in results:
                 lanes.append({**results[l], "dir": l})
         # serial

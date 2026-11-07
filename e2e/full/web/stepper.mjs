@@ -74,7 +74,7 @@ export async function run(opts) {
     page.on('pageerror', e => { if (current && !current.expected.console.some(s => e.message.includes(s))) current.console.push(e.message); });
     page.on('response', r => { if (current && r.status() >= 400 && !current.expected.http.some(s => r.url().includes(s))) current.http_errors.push({ method: r.request().method(), url: r.url(), status: r.status() }); });
     page.on('requestfailed', r => { if (current && r.failure()?.errorText !== 'net::ERR_ABORTED' && !current.expected.http.some(s => r.url().includes(s))) current.http_errors.push({ method: r.method(), url: r.url(), status: null, error: r.failure()?.errorText }); });
-    const locator = sel => sel.startsWith('label=') ? page.getByLabel(sel.slice(6)) : page.locator(sel);
+    const locator = (sel, frame) => { const root = frame ? page.frameLocator(frame) : page; return sel.startsWith('label=') ? root.getByLabel(sel.slice(6)) : root.locator(sel); };
     const ck = k => k.slice(k.indexOf('|') + 1);
     const isCovered = key => covered.has(ck(key)) || [...patterns].some(p => p.endsWith('|*') ? key.startsWith(p.slice(0, -1)) : p === key);
     async function census(pageName, id) {
@@ -124,7 +124,7 @@ export async function run(opts) {
     async function action(a, step, record) {
       const timeout = a.timeout ?? 5000;
       page.setDefaultTimeout(timeout); page.setDefaultNavigationTimeout(timeout);
-      let el = a.sel ? locator(a.sel) : null, key;
+      let el = a.sel ? locator(a.sel, a.frame) : null, key;
       if (['click', 'fill', 'select', 'check', 'press', 'hover'].includes(a.do)) {
         if (!el && a.do === 'press') el = page.locator(':focus');
         if (el && await el.count()) key = (await el.first().evaluate(describe, step.page || '')).key;
@@ -144,7 +144,7 @@ export async function run(opts) {
         case 'wait': await page.waitForTimeout(a.ms); break;
         case 'wait_for': await el.waitFor({ state: a.state || 'visible', timeout }); break;
         case 'expect_visible': await el.waitFor({ state: 'visible', timeout }); break;
-        case 'expect_text': await page.getByText(a.text, { exact: false }).filter({ visible: true }).first().waitFor({ state: 'visible', timeout }); break;
+        case 'expect_text': await (a.frame ? page.frameLocator(a.frame) : page).getByText(a.text, { exact: false }).filter({ visible: true }).first().waitFor({ state: 'visible', timeout }); break;
         case 'expect_no_text': await page.waitForFunction(t => !document.body.innerText.includes(t), a.text, { timeout }); break;
         case 'expect_url': await page.waitForURL(u => u.href.includes(a.contains), { timeout }); break;
         case 'reload': await page.reload({ waitUntil: 'domcontentloaded', timeout }); break;
@@ -155,6 +155,7 @@ export async function run(opts) {
           if (a.expect_contains !== undefined && !String(value).includes(a.expect_contains)) throw new Error(`eval did not contain ${a.expect_contains}`);
           break;
         }
+        case 'shell': { const { execFileSync } = await import('node:child_process'); execFileSync(a.cmd, a.args || [], { timeout: 30000, stdio: 'pipe' }); break; }  // trusted lane files only: the harness writes the commands (env.json vars) it allows
         case 'shot': await shot(step, page.viewportSize().width); break;
         case 'expect_status': {
           const url = new URL(a.path, base);

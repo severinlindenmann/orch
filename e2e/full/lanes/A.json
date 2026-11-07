@@ -365,6 +365,48 @@
    ]
   },
   {
+   "id": "A28",
+   "name": "Focus inside the dashboard (iframe) shows a CLI status change within 1 s",
+   "page": "focus-embedded",
+   "expect": "change the ticket status through the CLI; the embedded Focus page shows it in under 1 s",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#open/focus/t/{{ticket_id}}"
+    },
+    {
+     "do": "wait_for",
+     "sel": "body",
+     "frame": "iframe.embed",
+     "timeout": 10000
+    },
+    {
+     "do": "shell",
+     "cmd": "{{setstatus}}",
+     "args": [
+      "ready"
+     ]
+    },
+    {
+     "do": "wait",
+     "ms": 2500
+    },
+    {
+     "do": "shell",
+     "cmd": "{{setstatus}}",
+     "args": [
+      "review"
+     ]
+    },
+    {
+     "do": "expect_text",
+     "text": "Review",
+     "frame": "iframe.embed",
+     "timeout": 1000
+    }
+   ]
+  },
+  {
    "id": "A12",
    "name": "Settings tabs: General, Agent, Add-ons",
    "page": "settings",
