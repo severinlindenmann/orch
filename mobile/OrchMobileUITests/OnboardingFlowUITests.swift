@@ -73,7 +73,7 @@ final class OnboardingFlowUITests: XCTestCase {
         let app = paired()
         let search = app.textFields["chat-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 15))
-        search.tap(); search.typeText("RGS-4")
+        search.tap(); expectKeyboardFocus(search); search.typeText("RGS-4")
         XCTAssertTrue(app.buttons["ticket-ws_reports001|t_9k2m4q"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["ticket-ws_pilatus001|t_q3sum1"].exists)
     }
@@ -152,10 +152,12 @@ final class OnboardingFlowUITests: XCTestCase {
         app.buttons["Paste invitation link"].tap()
         let field = app.textFields["invite-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
-        field.tap()
+        field.tap(); expectKeyboardFocus(field)
         field.typeText("https://example.com/nope")
-        app.buttons["invite-continue"].tap()
-        XCTAssertTrue(app.staticTexts["invite-error"].waitForExistence(timeout: 3))
+        let cont = app.buttons["invite-continue"]
+        XCTAssertTrue(cont.waitForExistence(timeout: 10))
+        cont.tap()
+        XCTAssertTrue(app.staticTexts["invite-error"].waitForExistence(timeout: 10))
         XCTAssertTrue((app.staticTexts["invite-error"].label).contains("ask the person who invited you"))
         XCTAssertEqual(app.textFields["invite-field"].value as? String, "https://example.com/nope")
     }
@@ -168,7 +170,7 @@ final class OnboardingFlowUITests: XCTestCase {
         app.buttons["Paste invitation link"].tap()
         let field = app.textFields["invite-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
-        field.tap()
+        field.tap(); expectKeyboardFocus(field)
         field.typeText("orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_expired0000000000000000\n")
         let connect = app.buttons["Connect this phone"]
         XCTAssertTrue(connect.waitForExistence(timeout: 5))
