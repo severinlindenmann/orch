@@ -11,7 +11,6 @@ import contextlib
 import os
 import platform as _platform
 import subprocess
-import sys
 import time
 import unicodedata
 from datetime import UTC, datetime, timedelta
@@ -183,7 +182,7 @@ def payload(root: Path) -> dict:
         "on": True,
         "since": d.get("since"),
         "ends_at": d.get("ends_at"),
-        "machine": d.get("machine")[:60],
+        "machine": _plain_line(d.get("machine")) or machine_name(root),
     }
 
 
@@ -259,7 +258,7 @@ def _spawn_keeper(root: Path) -> None:
     else:
         kw["start_new_session"] = True
     subprocess.Popen(
-        [sys.executable, "-m", "orch", "relay", "mobile", "keeper"],
+        procs.orch_python_argv("relay", "mobile", "keeper"),
         cwd=str(root),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
