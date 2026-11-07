@@ -24,6 +24,7 @@ final class M1ShellUITests: XCTestCase {
         app.buttons["done-toggle"].tap()
         let topic = app.buttons["ticket-ws_pilatus001|t_q3sum1"]
         XCTAssertTrue(topic.waitForExistence(timeout: 10))
+        app.reveal(topic)
         topic.tap()
         XCTAssertTrue(app.staticTexts["composer-note"].waitForExistence(timeout: 10) || app.descendants(matching: .any)["tasks-card"].waitForExistence(timeout: 5))
     }
