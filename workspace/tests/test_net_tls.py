@@ -76,13 +76,16 @@ def untrusted_server(tmp_path):
 
 def test_an_untrusted_certificate_is_refused_before_the_token_is_sent(untrusted_server, monkeypatch):
     url, seen = untrusted_server
-    monkeypatch.setattr(net.time, "sleep", lambda s: None)  # connection-level retries without waiting
+    sleeps = []
+    monkeypatch.setattr(net.time, "sleep", sleeps.append)
     net._tls.cache_clear()
-    with pytest.raises(Refused, match="reach") as e:
+    with pytest.raises(Refused, match="security certificate is not valid for 127.0.0.1") as e:
         net.call("GET", url + "/health", headers={"Authorization": "Bearer tok_secret"}, timeout=10)
     assert seen == []  # the handshake failed: the server never got a request, so never the token
     cause = e.value.__context__  # urllib's URLError; its reason is what refused the connection
     assert isinstance(getattr(cause, "reason", None), ssl.SSLCertVerificationError)  # the certificate check
+    assert "internet" not in str(e.value) and e.value.blocked is True and e.value.status is None
+    assert sleeps == []  # a wrong certificate is the same every time: never retried
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="truststore is installed on Windows only")
@@ -99,7 +102,8 @@ def test_a_windows_install_without_truststore_fails_closed_in_plain_words(monkey
     monkeypatch.setitem(sys.modules, "truststore", None)  # import raises ImportError
     net._tls.cache_clear()
     try:
-        with pytest.raises(Refused, match="Install orch again"):
+        with pytest.raises(Refused, match="Install orch again") as e:
             net.call("GET", "https://relay.example/health")
+        assert e.value.blocked is True and e.value.status is None  # kept and said in words by the relay
     finally:
         net._tls.cache_clear()

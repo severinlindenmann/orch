@@ -439,11 +439,37 @@ def _message(
         _post_message(root, raw)
     except Refused as e:
         if _unreachable(e):
+            # kept in the outbox; a problem to fix first (certificate, broken install) is said in words
+            if getattr(e, "blocked", False):
+                _set_problem(root, str(e))
+                return {**msg, "sent": False, "problem": str(e)}
             return {**msg, "sent": False}
         path.unlink(missing_ok=True)  # the relay said no: nothing to retry
         raise
     path.unlink(missing_ok=True)
+    _set_problem(root, None)  # it went out: whatever blocked it is fixed
     return msg
+
+
+def _problem_path(root: Path) -> Path:
+    return _outbox(root) / ".problem"
+
+
+def outbox_problem(root: Path) -> str | None:
+    """The problem that keeps the outbox from going out (a certificate, a broken install), else None."""
+    try:
+        return _problem_path(root).read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def _set_problem(root: Path, text: str | None) -> None:
+    p = _problem_path(root)
+    if text:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+    else:
+        p.unlink(missing_ok=True)
 
 
 def outbox_list(root: Path) -> list[dict]:
@@ -479,11 +505,16 @@ def resend_outbox(root: Path) -> dict:
         except Refused as e:
             if _unreachable(e):
                 res["waiting"] = [x["id"] for x in items[n:]]
+                if getattr(e, "blocked", False):
+                    res["problem"] = str(e)  # not the network: needs fixing before anything goes out
+                    _set_problem(root, res["problem"])
                 break
             res["dropped"].append({"id": m["id"], "reason": str(e)})
         else:
             res["sent"].append(m["id"])
         p.unlink(missing_ok=True)
+    if not res["waiting"] and "problem" not in res:
+        _set_problem(root, None)  # nothing is blocked any more
     return res
 
 

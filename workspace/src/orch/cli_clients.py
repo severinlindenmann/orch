@@ -363,7 +363,9 @@ def run_relay(args, root: Path, out) -> None:
             lines.append(f"Not sent, the relay refused {d['id']}: {d['reason']}")
         if res and res["sent"]:
             lines.insert(0, f"Sent {len(res['sent'])} waiting message{'s' if len(res['sent']) != 1 else ''}.")
-        if left:
+        if left and (res or {}).get("problem"):
+            lines.append(f"Not sent: {res['problem']} These go out once this is fixed.")
+        elif left:
             lines.append("These go out with the next orch relay command.")
         out(args, {"waiting": left, **(res or {})}, "\n".join(lines) or "Nothing is waiting to be sent.")
     elif sub == "inbox" and args.since is not None:
@@ -459,6 +461,8 @@ NOT_SENT = "Not sent yet - the relay can't be reached. It goes out with the next
 
 
 def _sent_line(root: Path, m: dict, ok: str) -> str:
+    if m.get("sent") is False and m.get("problem"):
+        return f"Not sent: {m['problem']} The message is kept and goes out once this is fixed."
     return NOT_SENT if m.get("sent") is False else ok.format(relay.name_of(root, m["to"]))
 
 
@@ -473,6 +477,8 @@ def _resend_waiting(root: Path) -> None:
         print(
             f"A saved message could not be sent and was removed: {d['reason']} [{d['id']}]", file=sys.stderr
         )
+    if res.get("problem"):
+        print(f"Saved messages are waiting: {res['problem']}", file=sys.stderr)
 
 
 def _inbox_line(i: dict, root: Path) -> str:
@@ -522,8 +528,9 @@ def send_phone_question(
     root: Path, tid: str, q: dict, previews: list[str] | None = None, scope: str | None = None
 ) -> None:
     try:
-        if relay.send_question(root, tickets.load(root, tid), q, previews, scope).get("sent") is False:
-            raise Refused(NOT_SENT)
+        m = relay.send_question(root, tickets.load(root, tid), q, previews, scope)
+        if m.get("sent") is False:
+            raise Refused(m.get("problem") or NOT_SENT)
     except Refused as e:
         raise Refused(
             f"The question is saved on the ticket, but it could not be sent to the phones. {e}"
