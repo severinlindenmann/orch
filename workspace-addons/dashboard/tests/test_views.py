@@ -386,7 +386,7 @@ def test_settings_wording_and_one_toast_at_a_time():
         "Off: agents send finished work to Review and you decide when it is Done.",
         "'Workflow'",
         "Shared. Your team can now see this workspace.",
-        "Claude is not signed in yet.",
+        "The agent is not signed in yet.",
         "Type the command you use to start your tool. {prompt} is where the ticket text goes.",
         "Only use this if you trust it.",
         "Stored on this computer",

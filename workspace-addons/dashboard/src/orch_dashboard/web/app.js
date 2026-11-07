@@ -869,7 +869,7 @@
         h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Share with team', 'data-key':'settings-switch-share', 'data-action':'settings-share', disabled:snapshot || settingsBusy.has('share')}))));
   }
   // The CLI hint stays out of the page: a missing sign-in is said in plain words.
-  const plainTest = reason => /not logged in|\/login/i.test(String(reason || '')) ? 'Claude is not signed in yet.' : reason;
+  const plainTest = reason => /not logged in|\/login/i.test(String(reason || '')) ? 'The agent is not signed in yet.' : reason;
   function workflowCard(settings) {
     return h('div', {className:'stack', 'data-key':'settings-workflow'}, h('h2', {className:'set-sub'}, 'Workflow'),
       h('div', {className:'card'}, h('div', {className:'card-row'},
