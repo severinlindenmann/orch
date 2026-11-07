@@ -222,7 +222,7 @@ enum ChatBuilder {
     /// Display time: "9:41" today, otherwise a short date.
     static func timeText(_ iso: String, now: Date = Date(), calendar: Calendar = .current) -> String {
         guard let d = ISO8601DateFormatter().date(from: String(iso.prefix(while: { $0 != "~" }))) else { return "" }
-        let f = DateFormatter()
+        let f = DateFormatter(); f.timeZone = calendar.timeZone
         if calendar.isDate(d, inSameDayAs: now) { f.dateFormat = "HH:mm" }
         else if calendar.isDate(d, inSameDayAs: calendar.date(byAdding: .day, value: -1, to: now) ?? now) { return "Yesterday" }
         else { f.dateFormat = "d MMM" }
