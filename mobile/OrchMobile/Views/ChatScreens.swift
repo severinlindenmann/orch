@@ -203,19 +203,13 @@ struct ConversationView: View {
                             }
                         }.id(row.id)
                     }
+                    // At the bottom exactly while this end marker is on screen (the jump row's own inset cannot confuse it).
                     Color.clear.frame(height: 1).id("conversation-bottom")
+                        .onAppear { atBottom = true; rememberRead() }
+                        .onDisappear { atBottom = false }
                 }.padding(.horizontal, 16).padding(.vertical, 10)
             }.defaultScrollAnchor(.bottom).scrollDismissesKeyboard(.interactively)
                 .accessibilityIdentifier("message-list")
-                .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    // Points between the end of the content and the bottom edge (negative when everything fits).
-                    (geometry.contentSize.height + geometry.contentInsets.bottom - geometry.contentOffset.y - geometry.containerSize.height).rounded()
-                } action: { _, distance in
-                    // The jump row itself adds ~68 pt of inset while it shows: allow for it so showing the button can never keep it shown.
-                    let bottom = distance <= 45 + (atBottom ? 0 : 68)
-                    if atBottom != bottom { atBottom = bottom }
-                    if bottom { rememberRead() }
-                }
                 // Not an overlay: the button takes its own row above the composer, so it never covers a bubble.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if !atBottom {
