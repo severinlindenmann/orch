@@ -269,7 +269,7 @@ def main() -> int:
         if r.returncode:
             print("orch install failed:", r.stderr[-400:])
             return 1
-        needs_servers = any(s[0] in "PRMF" or (s in lib.V2_NEEDS_SERVERS or s.startswith("V3-")) for s in ids)
+        needs_servers = any(s[0] in "PRMF" or (s in lib.V2_NEEDS_SERVERS or s.startswith(("V3-", "LOOK-"))) for s in ids)
         if needs_servers:
             if a.mode == "local":
                 bins = json.loads(a.bins)
@@ -278,9 +278,9 @@ def main() -> int:
                 e.pub, e.rel = live_servers(e)
                 if e.pub is None:
                     for s in ids:
-                        if s[0] in "PRMF" or (s in lib.V2_NEEDS_SERVERS or s.startswith("V3-")):
+                        if s[0] in "PRMF" or (s in lib.V2_NEEDS_SERVERS or s.startswith(("V3-", "LOOK-"))):
                             print(f"{s:<5} SKIP  live servers are not up")
-                    ids = [s for s in ids if not (s[0] in "PRMF" or (s in lib.V2_NEEDS_SERVERS or s.startswith("V3-")))]
+                    ids = [s for s in ids if not (s[0] in "PRMF" or (s in lib.V2_NEEDS_SERVERS or s.startswith(("V3-", "LOOK-"))))]
         res = run_scenarios(e, ids, out_md)
     finally:
         for fn in reversed(e.cleanup):
