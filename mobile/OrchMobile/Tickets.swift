@@ -84,8 +84,8 @@ enum TicketBuilder {
             var st = status(forKind: u.kind)
             if st == .needsYou { st = .working }   // only a real open question counts (below)
             // The ticket's own status (when the snapshot carries a known one) decides, whatever the note's kind: an agent's
-            // "done" arrives as review, a person's Done as done. Failure and stopped keep their own sign.
-            if !["failure", "stopped"].contains(u.kind), let own = Ticket.Status(ticketStatus: u.ticketView?.status) { st = own }
+            // "done" arrives as review, a person's Done as done. The update kind only decides for old snapshots without a status (failure and stopped keep their own sign when the ticket is done).
+            if let own = Ticket.Status(ticketStatus: u.ticketView?.status) { st = own }
             byKey[key] = Ticket(id: key, workspace: u.workspace, workspaceName: u.workspaceName, ticket: u.ticket,
                                 title: u.ticketView?.title ?? u.title ?? u.text, text: u.text, status: st, kind: u.kind, at: u.at, question: nil,
                                 key: u.key, view: u.ticketView)

@@ -28,7 +28,12 @@ final class StatusRefsTests: XCTestCase {
         XCTAssertEqual(topic(nil), .working, "an old snapshot without a status keeps working")
         XCTAssertEqual(topic("review", kind: "result"), .review, "an agent's done lands as review")
         XCTAssertEqual(topic(nil, kind: "result"), .done)
-        XCTAssertEqual(topic("active", kind: "failure"), .didntWork, "failure keeps its own sign")
+        XCTAssertEqual(topic("active", kind: "failure"), .working, "the stored status wins over the update kind")
+        XCTAssertEqual(topic("done", kind: "failure"), .didntWork, "a finished ticket keeps its failure sign")
+        XCTAssertEqual(topic(nil, kind: "failure"), .didntWork, "old snapshot: the kind decides")
+        // E2: a result update on a ticket that is still open must not list it under Done
+        XCTAssertEqual(topic("open", kind: "result"), .backlog); XCTAssertEqual(topic("active", kind: "result"), .working)
+        XCTAssertEqual(topic("waiting", kind: "result"), .waitingOnYou)
     }
 
     func testChipWordsAndLabels() {
