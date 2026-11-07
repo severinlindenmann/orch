@@ -7,11 +7,6 @@
   ['pointerdown','keydown'].forEach(type => document.addEventListener(type, resume, {once:true}));
   const overlayState = new WeakMap();
   const loading = new WeakMap();
-  const toastQueue = [];
-  const drainToasts = () => {
-    const host=document.querySelector('.toasts');
-    while(host && host.children.length<2 && toastQueue.length) toastQueue.shift()();
-  };
   const api = window.orch = {
     enter(el) {
       if (!el || reduce()) return;
@@ -33,16 +28,16 @@
     toast(text, kind='info') {
       let host = document.querySelector('.toasts');
       if (!host) {host=document.createElement('div');host.className='toasts';host.setAttribute('role','group');host.setAttribute('aria-label','Notifications');document.body.append(host);}
-      const item=document.createElement('div');item.className=`toast ${kind==='error'?'error':''}`;item.dataset.state='opening';item.setAttribute('role',kind==='error'?'alert':'status');
+      host.replaceChildren();const item=document.createElement('div');item.className=`toast ${kind==='error'?'error':''}`;item.dataset.state='opening';item.setAttribute('role',kind==='error'?'alert':'status');
       const mark=document.createElement('span');mark.innerHTML=window.icon?.(kind==='ok'?'check':kind==='error'?'stop':'note',16)||'';
       const copy=document.createElement('span');copy.className='grow';copy.textContent=text;
       const close=document.createElement('button');close.className='btn ghost icon sm';close.setAttribute('aria-label','Dismiss notification');close.innerHTML=window.icon?.('x',16)||'×';
-      let timer,remaining=6000,started=0,hovered=false,focused=false;
-      const dismiss=()=>{if(item.dataset.state==='closing')return;clearTimeout(timer);item.dataset.state='closing';setTimeout(()=>{item.remove();drainToasts();},reduce()?0:200);};
+      let timer,remaining=4000,started=0,hovered=false,focused=false;
+      const dismiss=()=>{if(item.dataset.state==='closing')return;clearTimeout(timer);item.dataset.state='closing';setTimeout(()=>item.remove(),reduce()?0:200);};
       const pause=()=>{clearTimeout(timer);if(started){remaining-=Date.now()-started;started=0;}};
       const start=()=>{if(kind!=='error'&&!hovered&&!focused){clearTimeout(timer);started=Date.now();timer=setTimeout(dismiss,Math.max(0,remaining));}};
       close.onclick=dismiss;item.append(mark,copy,close);
-      toastQueue.push(()=>{host.append(item);start();});drainToasts();
+      host.append(item);start();
       item.onmouseenter=()=>{hovered=true;pause();};item.onmouseleave=()=>{hovered=false;start();};
       item.onfocusin=()=>{focused=true;pause();};item.onfocusout=()=>{focused=false;start();};
       return item;
