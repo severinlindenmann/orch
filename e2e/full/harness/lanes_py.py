@@ -481,11 +481,14 @@ def lane_r(env, out: Path) -> Lane:
     L = Lane("R", "References", out)
     e = env.e
     w = e.ws("Pilatus")
-    tid = env.vars["ticket_id"]
     other = None
 
     def run(*a):
         return e.sh(["orch", *a], cwd=w, timeout=60)
+
+    # its own ticket: lane A adds references to the fixture ticket in parallel, which would renumber the list this lane checks
+    rc0, o0, _ = run("ticket", "new", "References lane ticket", "--json")
+    tid = json.loads(o0)["id"]
 
     def mk(st):
         nonlocal other
@@ -540,7 +543,7 @@ def lane_r(env, out: Path) -> Lane:
             raise RuntimeError((err or o)[-200:])
         rc, o, err = run("ref", "list", tid)
         if "example.com" in o:
-            raise RuntimeError("ref rm 1 did not remove the first reference")
+            raise RuntimeError("ref rm 1 did not remove the first reference; list now: " + o.replace("\n", " | ")[:400])
     L.step("R06", "Remove a reference by its number", rm)
     return L
 
@@ -964,7 +967,7 @@ def lane_l(env, out: Path, repo: Path) -> Lane:
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=2400, cwd=repo, env=_host_env())
     log.write_text(r.stdout + r.stderr)
     seen = {}
-    for m in re.finditer(r"^(LOOK-\d+)\s+(PASS|FAIL|SKIP)\s*(.*)$", r.stdout, re.M):
+    for m in re.finditer(r"^(LOOK-\d+)[ \t]+(PASS|FAIL|SKIP)[ \t]*(.*)$", r.stdout, re.M):
         seen[m.group(1)] = (m.group(2), m.group(3).strip())
     for sid in ids:
         status, why = seen.get(sid, ("FAIL", "no result line in the output: " + (r.stderr or r.stdout)[-200:]))
