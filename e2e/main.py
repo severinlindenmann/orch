@@ -233,15 +233,15 @@ def main() -> int:
     ap.add_argument("--repo", required=True)
     ap.add_argument("--bins", default="")
     a = ap.parse_args()
-    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3  # noqa: F401,E401
+    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3, scenarios_sim  # noqa: F401,E401
 
     if a.what == "all":
-        ids = list(REGISTRY)
+        ids = [k for k in REGISTRY if k != "V3-SIM"]  # V3-SIM is a long-lived harness, only by name
     else:  # comma list; a single letter (W, A, P, R, M, F) selects the group
         ids = []
         for w in a.what.split(","):
             if w in ("V2", "V3"):  # every v2 / v3 scenario (V2-*, V3-*)
-                ids += [k for k in REGISTRY if k.startswith(w + "-")]
+                ids += [k for k in REGISTRY if k.startswith(w + "-") and k != "V3-SIM"]
             else:
                 ids += [k for k in REGISTRY if k[0] == w] if len(w) == 1 else [w]
     # run order: W A P R M F  (A0 before A4/A5)
