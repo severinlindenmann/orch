@@ -70,5 +70,9 @@ Format: steps → expected result.
 - M4 Send text to Home (typed, and voice with a test audio file) → Home inbox has the text message from the phone.
 - M5 Phone tries to send to Reports → 403; sign out → token deleted, API refuses the old token.
 
+## Workspace look (LOOK)
+- LOOK-1 `orch look list|show|set` and the relay look (core side).
+- LOOK-2 Dashboard: Settings > General picks Wallet/Amber (config + relay), the description edit is a pending proposal, the shared-pages switch turns off, the sidebar switcher lists both workspaces with badges (Playwright, 1280 and 720; skipped without node + playwright).
+
 ## Whole flow (F)
 - F1 Fresh machine: GitHub install → `orch init` → publish + relay connect → ticket with evidence → question answered on the phone → report published → link opens. Runs in under 15 min.

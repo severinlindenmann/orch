@@ -16,6 +16,8 @@ from pathlib import Path
 
 from . import runfiles
 from .data import run_orch
+from .look import LOOK_OPS
+from .look import forget as look_forget
 from .mobile import MOBILE_OPS
 
 MAX_TEXT = 2000
@@ -344,6 +346,7 @@ OPS = {
     "addon.set": _addon_set,
     "share.set": _share_set,
     **MOBILE_OPS,
+    **LOOK_OPS,
     "ref.add": _ref_add,
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
@@ -478,6 +481,8 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
             out,
         )  # `orch agents test` exits 1 when the agent does not work; the JSON is the answer either way
     if r.returncode == 0:
+        if op.startswith("look."):
+            look_forget(root)
         if op in ("config.agent.add", "addon.set", "config.agent", "config.permissions", "workflow.set", "share.set"):
             _audit(root, op, args)
         return 200, "", out if isinstance(out, dict) else None

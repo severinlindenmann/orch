@@ -13,6 +13,12 @@ def add_parsers(sub, common) -> None:
     s = sub.add_parser("look", help="the workspace icon and colour").add_subparsers(dest="sub", required=True)
     s.add_parser("list", parents=[common], help="the icons and colours to pick from")
     s.add_parser("show", parents=[common], help="what this workspace has, and who chose it")
+    x = s.add_parser(
+        "shared-pages",
+        parents=[common],
+        help="show or set: the workspace name and icon on shared file pages (publish)",
+    )
+    x.add_argument("value", nargs="?", choices=("on", "off"), help="on or off; leave out to show")
     x = s.add_parser("set", parents=[common], help="pick the icon and colour")
     x.add_argument(
         "--icon", metavar="ID|none", help="an icon id from 'orch look list'; none = the first letter"
@@ -66,6 +72,11 @@ def dispatch(args, root: Path) -> bool:
     elif args.sub == "show":
         d = look.show(root)
         _out(args, d, _show_text(d))
+    elif args.sub == "shared-pages":
+        if args.value is not None:
+            look.set_shared_pages(root, args.value == "on", _actor(args))
+        on = look.shared_pages(root)
+        _out(args, {"on": on}, "Shared file pages show the workspace name and icon: " + ("on" if on else "off"))
     else:
         if args.icon is None and args.color is None:
             raise Refused("Say what to change: --icon <id>|none or --color <token>|auto.")
