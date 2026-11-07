@@ -118,7 +118,7 @@ questions and answers, history. Relay and publish ship in the same package as bu
 | `orch agents`, `orch config`, `orch run ...` | Agents and runs: [agents.md](agents.md) |
 | `orch addon add\|list\|remove\|uninstall`, `orch start\|stop\|status`, `orch update` | Add-ons: [addons.md](addons.md) |
 
-All commands accept `--json` for agents. Exit code 0 = ok, 2 = refused (stderr `Refused: <reason>`; with `--json` stdout `{"error": "<reason>"}`), 1 = bug.
+All commands accept `--json` for agents. Exit code 0 = ok, 2 = refused (stderr `Refused: <reason>`; a confirmation that needs `--yes` without a terminal prints just its question; with `--json` stdout `{"error": "<reason>"}`), 1 = bug.
 
 ## Data storage
 `.orch/` in the workspace (contracts/local-files.md). Tickets may be committed; secrets and inbox are gitignored.
