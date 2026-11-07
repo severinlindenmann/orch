@@ -89,6 +89,34 @@ def test_after_install_puts_registered_addons_back(proj, run, github, uv_calls, 
     assert "automation" in out
 
 
+def test_after_install_drops_a_builtin_that_no_longer_ships(proj, run, github, uv_calls):  # noqa: F811
+    """An install from an older orch registered 'scheduler' (renamed to automation): the reinstall leaves it
+    out and removes it from the registry instead of failing on a missing folder."""
+    p = _write_registry([OLD[0], {"name": "scheduler", "source": "built-in", "version": "0.2.0"}])
+    code, out, err = run("update", "--after-install")
+    assert code == 0, err
+    assert _withs(uv_calls[0]) == ["workspace-addons/dashboard"]
+    assert "scheduler" not in " ".join(uv_calls[0])
+    assert [e["name"] for e in json.loads(p.read_text(encoding="utf-8"))] == ["dashboard"]
+    assert "scheduler removed" in out
+
+
+def test_after_install_with_only_a_dropped_builtin(proj, run, github, uv_calls):  # noqa: F811
+    p = _write_registry([{"name": "scheduler", "source": "built-in", "version": "0.2.0"}])
+    code, out, err = run("update", "--after-install")
+    assert code == 0, err
+    assert uv_calls == [] and json.loads(p.read_text(encoding="utf-8")) == []
+
+
+def test_update_leaves_out_a_builtin_that_no_longer_ships(proj, run, github, uv_calls, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(addons, "_entry_points", lambda: {})
+    _write_registry([OLD[0], {"name": "scheduler", "source": "built-in", "version": "0.2.0"}])
+    code, out, err = run("update")
+    assert code == 0, err
+    assert _withs(uv_calls[0]) == ["workspace-addons/dashboard"]
+    assert "scheduler removed" in out
+
+
 def test_an_unknown_old_name_is_refused_plainly(proj, run, uv_calls, tmp_path, monkeypatch):  # noqa: F811
     (proj / ".orch").mkdir()
     (proj / ".orch/addons.json").write_text('{"active": {"scheduler": {"version": "0.2.0"}}}')
