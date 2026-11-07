@@ -356,7 +356,7 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
     static let linkClickGuard = """
     (function () {
       // Everything the guard reads is captured now, before any page script can shadow it; it is only ever called through `apply`.
-      var apply = Reflect.apply, URLc = URL, getAttr = Element.prototype.getAttribute, closest = Element.prototype.closest;
+      var apply = Reflect.apply, URLc = URL, getNS = Element.prototype.getAttributeNS, closest = Element.prototype.closest;
       function getter(proto, name) { return Object.getOwnPropertyDescriptor(proto, name).get; }
       var protocol = getter(URL.prototype, 'protocol');
       var nodeType = getter(Node.prototype, 'nodeType'), baseURI = getter(Node.prototype, 'baseURI'), eventType = getter(Event.prototype, 'type');
@@ -365,7 +365,8 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
         try {
           var a = el && apply(nodeType, el, []) === 1 ? apply(closest, el, ['a[href],area[href],a[*|href]']) : null;
           if (!a) return false;
-          var raw = apply(getAttr, a, ['href']); if (raw === null) raw = apply(getAttr, a, ['xlink:href']); if (raw === null) return false;
+          var raw = apply(getNS, a, [null, 'href']); if (raw === null) raw = apply(getNS, a, ['http://www.w3.org/1999/xlink', 'href']);
+          if (raw === null) return true;   // matched as a link but no address could be read: fail closed
           return apply(protocol, new URLc(raw, apply(baseURI, document, [])), []) !== 'orch-page:';
         } catch (e) { return true; }
       }
