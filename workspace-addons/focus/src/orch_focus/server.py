@@ -20,6 +20,7 @@ from . import actions, adapterdata, chat, proofs, runfiles
 from .board import Board, TicketWatcher
 from .events import RUN_ID, EventLog, for_display
 from .permissions import Permissions
+from .revisions import Revisions
 from .tail import Tail
 
 DEFAULT_PORT = 8430
@@ -32,7 +33,9 @@ TYPES = {
 KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js")  # fmt: skip
 WEB_FILES = ("index.html", "focus.js", "proof.js", "focus.css", "logo.svg")
-PREFIX = re.compile(r"/addon/[a-z][a-z0-9-]{1,31}")  # set by the dashboard when it shows this page under its own address
+PREFIX = re.compile(
+    r"/addon/[a-z][a-z0-9-]{1,31}"
+)  # set by the dashboard when it shows this page under its own address
 CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'none'; base-uri 'none'"
 
 
@@ -52,6 +55,7 @@ class Tracker:
     def __init__(self, root: Path, orch_bin: str | None):
         self.root, self.orch_bin = root, orch_bin
         self.lock = threading.Lock()
+        self.seen_sig = ""
         self.tickets: dict[str, dict] = {}
         self.status_cache: dict[str, tuple[float, dict]] = {}
         # ticket -> run id, for the runs Focus started (kept in .orch/run/focus/ so a crash is recoverable)
@@ -268,7 +272,9 @@ class Tracker:
 
     def tickets_list(self) -> list[dict]:
         try:
-            code, out, _ = actions.orch(self.root, self.orch_bin, ["ticket", "list", "--all", "--json"], timeout=15)
+            code, out, _ = actions.orch(
+                self.root, self.orch_bin, ["ticket", "list", "--all", "--json"], timeout=15
+            )
             rows = json.loads(out) if code == 0 else []
         except (actions.Unavailable, ValueError, RecursionError):
             rows = []
@@ -277,7 +283,15 @@ class Tracker:
             if (
                 isinstance(t, dict)
                 and TID_RE.fullmatch(str(t.get("id")))
-                and t.get("status") in ("open", "active", "waiting", "done")  # a done ticket opens as a read-only board
+                and t.get("status")
+                in (
+                    "open",
+                    "ready",
+                    "active",
+                    "waiting",
+                    "review",
+                    "done",
+                )  # a done ticket opens as a read-only board
             ):
                 out.append(
                     {
@@ -343,8 +357,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         if path == "/api/tickets":
             return self._json(200, self.tracker.tickets_list())
+        if path == "/api/events":
+            return self._events()
         m = re.fullmatch(r"/api/t/(t_[a-z0-9]{6,16})", path)
         if m:
+            if "fresh=1" in self.path.partition("?")[2].split("&"):
+                # a pushed change: drop the 1 s caches once per change of the workspace files (one `orch` call
+                # per change, not per request), however old the cached answer is
+                sig = self.server.revisions.signature()
+                if sig != self.tracker.seen_sig:
+                    self.tracker.seen_sig = sig
+                    self.tracker.ticket_cache.clear()
+                    self.tracker.status_cache.clear()
             v = self.tracker.view(m.group(1))
             return self._json(200, v) if v else self._send(404, b"no such ticket", "text/plain")
         if path == "/api/file":  # one proof file of a ticket, read by orch.safefile only (proofs.py)
@@ -353,7 +377,7 @@ class Handler(BaseHTTPRequestHandler):
             code, body, ctype, extra = proofs.read(self.root, one("t"), one("n"), one("m") or "view")
             return self._send(code, body, ctype, {"Cross-Origin-Resource-Policy": "same-origin", **extra})
         if path == "/" or re.fullmatch(r"(/t)?/t/t_[a-z0-9]{6,16}", path):
-            pre = (self.headers.get("X-Forwarded-Prefix") or "")
+            pre = self.headers.get("X-Forwarded-Prefix") or ""
             pre = pre if PREFIX.fullmatch(pre) else ""
             return self._send(200, _web("index.html").replace(b"__P__", pre.encode()), TYPES[".html"])
         if path.startswith("/kit/") and path[5:] in KIT_FILES:
@@ -361,6 +385,43 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/web/") and path[5:] in WEB_FILES:
             return self._send(200, _web(path[5:]), TYPES["." + path.rsplit(".", 1)[1]])
         self._send(404, b"not found", "text/plain")
+
+    def _events(self):
+        """Server-sent events: one `rev` event whenever a ticket or run file changes (same stream as the dashboard's)."""
+        origin, host = self.headers.get("Origin"), (self.headers.get("Host") or "").strip().lower()
+        if (
+            origin is not None and origin.lower() != f"http://{host}"
+        ):  # as the dashboard's stream: a foreign page may not listen
+            return self._send(403, b"forbidden", "text/plain")
+        revisions = self.server.revisions
+        if not revisions.join():
+            return self._send(503, b"Too many open pages.", "text/plain")
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            last = None
+            ping = time.monotonic()
+            while not revisions.closed:
+                with revisions.condition:
+                    rev = revisions.rev
+                    if rev == last:
+                        revisions.condition.wait(timeout=max(0, 15 - (time.monotonic() - ping)))
+                        rev = revisions.rev
+                if rev != last:
+                    self.wfile.write(f"event: rev\ndata: {rev}\n\n".encode())
+                    self.wfile.flush()
+                    last = rev
+                elif time.monotonic() - ping >= 15:
+                    self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+                    ping = time.monotonic()
+        except OSError:
+            pass
+        finally:
+            revisions.leave()
 
     def _refuse(self):
         self._send(405, b"not allowed", "text/plain")
@@ -429,9 +490,16 @@ def stop_started(srv) -> None:
     tracker._save_started()
 
 
+class _Server(ThreadingHTTPServer):
+    def server_close(self):
+        if hasattr(self, "revisions"):  # not yet set when the bind failed
+            self.revisions.close()
+        super().server_close()
+
+
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:
     orch_bin = orch_bin if orch_bin is not None else os.environ.get("ORCH_BIN") or None
     tracker = Tracker(root, orch_bin)
-    return ThreadingHTTPServer(
-        ("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, tracker=tracker)
-    )
+    srv = _Server(("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, tracker=tracker))
+    srv.revisions = Revisions(root)
+    return srv

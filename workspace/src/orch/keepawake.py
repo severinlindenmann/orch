@@ -2,7 +2,8 @@
 
 macOS   caffeinate -dimsu -w <owner pid>             (ends by itself when the owner is gone)
 Windows SetThreadExecutionState(CONTINUOUS|SYSTEM_REQUIRED) in the calling thread (standard user is fine)
-Linux   systemd-inhibit --what=sleep:idle:handle-lid-switch ... sleep <seconds>
+Linux   systemd-inhibit --what=sleep:idle:handle-lid-switch ... tail --pid=<owner pid> -f /dev/null
+        (ends by itself when the owner is gone)
 none    acquire() returns None: the caller says "could not keep awake"
 
 Only the child process this module started is ever stopped. Closing a laptop lid still sleeps macOS/Windows.
@@ -30,8 +31,10 @@ def command(platform: str, owner_pid: int, seconds: int, which=shutil.which) -> 
             "--who=orch",
             "--why=Mobile mode",
             "--mode=block",
-            "sleep",
-            str(max(60, int(seconds))),
+            "tail",
+            f"--pid={owner_pid}",
+            "-f",
+            "/dev/null",
         ]
     return None
 
@@ -76,7 +79,7 @@ def acquire(
     which=shutil.which,
     win=None,
 ) -> Hold | None:
-    """Start holding the computer awake for at most `seconds`. None when this system cannot do it.
+    """Start holding the computer awake until released or the owner exits. None if unavailable.
     On Windows call it from the thread that stays alive (the assertion belongs to the thread)."""
     platform = platform or sys.platform
     owner_pid = owner_pid or os.getpid()

@@ -71,9 +71,9 @@ The core knows no add-on by name. An add-on is a folder with an `orch-addon.toml
 | `name`, `version`, `description` | Its command `orch <name>`, and one plain sentence shown in `orch addon list` |
 | `run`, `skill`, `agents_block` | The code, and the skill text agents read |
 | `ticket_ext` | Schema for the data it keeps on tickets (`ext.<name>`) |
-| `[[ticket_links]]` | Link types it knows (label, icon, address pattern, statuses): matching links get its name, icon and status |
+| `[[ticket_links]]` | Reference types it knows (label, icon, address pattern, statuses): matching references get its name, icon and status |
 | `[ticket_fields]` | Fields under the ticket's Details (section, schema, `show_on_card`), edited in place or with `orch ticket set` |
-| `[acts.refresh]` | A Refresh that updates its links' title and status: `orch <name> act refresh -- <ticket>` |
+| `[acts.refresh]` | A Refresh that updates its references' title and status: `orch <name> act refresh -- <ticket>` |
 | `background = true` | It has a long-running process: `orch <name> start\|stop\|status --json` |
 | `needs = true` | `orch <name> needs --json` adds rows to `orch needs` |
 | `runs_agents = true` | It starts agent runs, only through `orch run start` |

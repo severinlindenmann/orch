@@ -10,7 +10,7 @@ dependencies = []
 focus = "orch_focus"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "jsonschema>=4"]
+dev = ["pytest>=8", "pytest-xdist>=3", "ruff>=0.6", "jsonschema>=4"]
 
 [build-system]
 requires = ["hatchling"]

@@ -12,27 +12,48 @@ node = pytest.mark.skipif(shutil.which("node") is None, reason="node not install
 
 
 def call(fn, *args):
-    out = subprocess.run(["node", str(HARNESS), str(WEB / "helpers.js"), json.dumps({"fn": fn, "args": list(args)})],
-                         capture_output=True, text=True, check=True, env={**os.environ, "TZ": "UTC"})
+    out = subprocess.run(
+        ["node", str(HARNESS), str(WEB / "helpers.js"), json.dumps({"fn": fn, "args": list(args)})],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "TZ": "UTC"},
+    )
     return json.loads(out.stdout)
 
 
 @node
-@pytest.mark.parametrize("raw,want", [
-    ("Created", "Ticket created"), ("Created under t_abc12345", "Created as a sub-ticket"),
-    ("Edited due, owner", "Changed the due day and the owner"), ("Edited title", "Changed the title"),
-    ("Asked q1, waiting", "Asked a question"), ("Answered q1: Yes", "Answered a question"),
-    ("Status open -> active", "Moved to Doing"), ("Check c2 done", "Finished a task"), ("Status active -> done", "Moved to Done"),
-    ("Patched status (status done -> open)", "Moved to To do"),
-    ("Something the agent wrote", "Something the agent wrote")])
+@pytest.mark.parametrize(
+    "raw,want",
+    [
+        ("Created", "Ticket created"),
+        ("Created under t_abc12345", "Created as a sub-ticket"),
+        ("Edited due, owner", "Changed the due day and the owner"),
+        ("Edited title", "Changed the title"),
+        ("Asked q1, waiting", "Asked a question"),
+        ("Answered q1: Yes", "Answered a question"),
+        ("Status open -> active", "Moved to Working"),
+        ("Check c2 done", "Finished a task"),
+        ("Status active -> done", "Moved to Done"),
+        ("Patched status (status done -> open)", "Moved to Backlog"),
+        ("Something the agent wrote", "Something the agent wrote"),
+    ],
+)
 def test_history_lines_are_plain_words(raw, want):
     assert call("historyLine", {"text": raw}) == want
 
 
 @node
 def test_winning_answer_has_text_who_and_via():
-    t = [{"id": "t_a", "questions": [{"id": "q1", "answer": "Travel", "answered_by": "human:Marco", "via": "phone"},
-                                     {"id": "q2", "answer": None}]}]
+    t = [
+        {
+            "id": "t_a",
+            "questions": [
+                {"id": "q1", "answer": "Travel", "answered_by": "human:Marco", "via": "phone"},
+                {"id": "q2", "answer": None},
+            ],
+        }
+    ]
     assert call("winningAnswer", t, "t_a", "q1") == {"text": "Travel", "who": "human:Marco", "via": "phone"}
     assert call("winningAnswer", t, "t_a", "q2") is None and call("winningAnswer", t, "t_x", "q1") is None
 
@@ -48,22 +69,48 @@ def test_need_action_per_kind():
 
 @node
 def test_agent_rows_working_needs_and_idle():
-    tickets = [{"id": "t_a", "title": "A", "questions": [], "sessions": [{"agent": "claude", "last_used": "2026-11-03T10:00:00Z"}]},
-               {"id": "t_b", "title": "B", "questions": [{"id": "q1", "answer": None}], "sessions": []},
-               {"id": "t_c", "title": "C", "questions": [], "sessions": [{"agent": "codex", "last_used": "2026-11-03T10:00:00Z"}]}]
-    runs = {"t_a": {"running": True, "state": "alive", "claim": {"agent": "claude", "started_at": "2026-11-06T07:00:00Z"}},
-            "t_b": {"running": True, "state": "alive", "claim": {"agent": "gemini"}}}
+    tickets = [
+        {
+            "id": "t_a",
+            "title": "A",
+            "questions": [],
+            "sessions": [{"agent": "claude", "last_used": "2026-11-03T10:00:00Z"}],
+        },
+        {"id": "t_b", "title": "B", "questions": [{"id": "q1", "answer": None}], "sessions": []},
+        {
+            "id": "t_c",
+            "title": "C",
+            "questions": [],
+            "sessions": [{"agent": "codex", "last_used": "2026-11-03T10:00:00Z"}],
+        },
+    ]
+    runs = {
+        "t_a": {
+            "running": True,
+            "state": "alive",
+            "claim": {"agent": "claude", "started_at": "2026-11-06T07:00:00Z"},
+        },
+        "t_b": {"running": True, "state": "alive", "claim": {"agent": "gemini"}},
+    }
     rows = call("agentRows", tickets, runs, 1793923200000)
-    assert [(r["agent"], r["state"]) for r in rows] == [("gemini", "needs"), ("claude", "working"), ("codex", "idle")]
+    assert [(r["agent"], r["state"]) for r in rows] == [
+        ("gemini", "needs"),
+        ("claude", "working"),
+        ("codex", "idle"),
+    ]
 
 
 @node
 def test_service_links_only_other_local_running_pages():
-    s = [{"addon": "dashboard", "running": True, "url": "http://127.0.0.1:8420"},
-         {"addon": "panel", "running": True, "url": "http://127.0.0.1:8500"},
-         {"addon": "evil", "running": True, "url": "https://example.com"},
-         {"addon": "off", "running": False, "url": "http://127.0.0.1:8600"}]
-    assert call("serviceLinks", s, "http://127.0.0.1:8420") == [{"label": "panel", "url": "http://127.0.0.1:8500"}]
+    s = [
+        {"addon": "dashboard", "running": True, "url": "http://127.0.0.1:8420"},
+        {"addon": "panel", "running": True, "url": "http://127.0.0.1:8500"},
+        {"addon": "evil", "running": True, "url": "https://example.com"},
+        {"addon": "off", "running": False, "url": "http://127.0.0.1:8600"},
+    ]
+    assert call("serviceLinks", s, "http://127.0.0.1:8420") == [
+        {"label": "panel", "url": "http://127.0.0.1:8500"}
+    ]
 
 
 T = {"id": "t_a", "questions": [], "sessions": []}
@@ -73,18 +120,46 @@ T = {"id": "t_a", "questions": [], "sessions": []}
 def test_agent_line_states_one_main_action():
     now = 1793923200000  # 2026-11-06
     line = lambda t, r=None, live=None: call("agentLine", t, r, now, live)
-    w = line(T, {"running": True, "state": "alive", "claim": {"agent": "claude", "by": "human:Mia", "started_at": "2026-11-06T00:00:00Z"}})
-    assert w["state"] == "working" and "started by Mia" in w["status"] and w["primary"]["op"] == "run.stop" and w["items"] == []
-    w2 = line(T, {"running": True, "state": "alive", "claim": {"agent": "claude"}}, {"label": "focus", "url": "http://127.0.0.1:1"})
+    w = line(
+        T,
+        {
+            "running": True,
+            "state": "alive",
+            "claim": {"agent": "claude", "by": "human:Mia", "started_at": "2026-11-06T00:00:00Z"},
+        },
+    )
+    assert (
+        w["state"] == "working"
+        and "started by Mia" in w["status"]
+        and w["primary"]["op"] == "run.stop"
+        and w["items"] == []
+    )
+    w2 = line(
+        T,
+        {"running": True, "state": "alive", "claim": {"agent": "claude"}},
+        {"label": "focus", "url": "http://127.0.0.1:1"},
+    )
     assert w2["primary"]["op"] == "open" and w2["items"][0]["op"] == "run.stop"
     stuck = line(T, {"running": False, "state": "maybe-stale", "claim": {"agent": "claude"}})
-    assert stuck["state"] == "stuck" and stuck["primary"] == {"label": "Start anyway", "op": "run.start", "args": {"ticket": "t_a", "take_over": True}}
+    assert stuck["state"] == "stuck" and stuck["primary"] == {
+        "label": "Start anyway",
+        "op": "run.start",
+        "args": {"ticket": "t_a", "take_over": True},
+    }
     needs = line({**T, "questions": [{"id": "q1", "answer": None}]})
     assert needs["state"] == "needs" and needs["primary"]["label"] == "Answer"
     dead = line(T, {"running": False, "state": "dead", "claim": {"agent": "claude"}})
-    assert dead["state"] == "failed" and dead["primary"]["label"] == "Try again" and dead["items"][0]["args"]["fresh"] is True
+    assert (
+        dead["state"] == "failed"
+        and dead["primary"]["label"] == "Try again"
+        and dead["items"][0]["args"]["fresh"] is True
+    )
     resume = line({**T, "sessions": [{"agent": "claude", "last_used": "2026-11-03T10:00:00Z"}]})
-    assert resume["state"] == "resume" and resume["status"] == "last worked 3 days ago" and resume["primary"]["label"] == "Continue"
+    assert (
+        resume["state"] == "resume"
+        and resume["status"] == "last worked 3 days ago"
+        and resume["primary"]["label"] == "Continue"
+    )
     assert resume["items"][0]["label"] == "Start fresh"
     new = line(T)
     assert new["state"] == "new" and new["primary"]["label"] == "Start" and new["status"] == "not started yet"
@@ -92,11 +167,16 @@ def test_agent_line_states_one_main_action():
 
 @node
 def test_tree_rows_children_counts_collapse_and_missing_parent():
-    ts = [{"id": "t_p", "status": "open"}] + [{"id": f"t_c{i}", "status": "done" if i < 2 else "open", "parent": "t_p"} for i in range(5)] \
+    ts = (
+        [{"id": "t_p", "status": "open"}]
+        + [{"id": f"t_c{i}", "status": "done" if i < 2 else "open", "parent": "t_p"} for i in range(5)]
         + [{"id": "t_o", "status": "open", "parent": "t_gone"}]
+    )
     rows = call("treeRows", ts)
     assert rows[0]["children"] == 5 and rows[0]["done"] == 2 and rows[0]["depth"] == 0
-    assert [r["late"] for r in rows[1:6]] == [False, False, False, True, True] and all(r["depth"] == 1 for r in rows[1:6])
+    assert [r["late"] for r in rows[1:6]] == [False, False, False, True, True] and all(
+        r["depth"] == 1 for r in rows[1:6]
+    )
     orphan = rows[-1]
     assert orphan["ticket"]["id"] == "t_o" and orphan["depth"] == 0 and orphan["parentMissing"] is True
     cyc = call("treeRows", [{"id": "t_a", "parent": "t_b"}, {"id": "t_b", "parent": "t_a"}])
@@ -124,9 +204,17 @@ def test_a_file_proof_shows_when_it_was_added():
     now = 1793980800000  # 2026-11-06T16:00:00Z
     ev = {"type": "file", "ref": "evidence/hello.txt", "text": "1 KB", "at": "2026-11-06T16:05:00Z"}
     assert call("fileProofLabel", ev, now) == "hello.txt · 1 KB · today 16:05"
-    assert call("fileProofLabel", {**ev, "at": "2026-11-05T09:12:00Z"}, now) == "hello.txt · 1 KB · yesterday 09:12"
-    assert call("fileProofLabel", {**ev, "at": "2026-10-30T09:12:00Z"}, now) == "hello.txt · 1 KB · 30 Oct 09:12"
-    assert call("fileProofLabel", {**ev, "at": "2025-12-24T07:00:00Z"}, now) == "hello.txt · 1 KB · 24 Dec 2025 07:00"
+    assert (
+        call("fileProofLabel", {**ev, "at": "2026-11-05T09:12:00Z"}, now)
+        == "hello.txt · 1 KB · yesterday 09:12"
+    )
+    assert (
+        call("fileProofLabel", {**ev, "at": "2026-10-30T09:12:00Z"}, now) == "hello.txt · 1 KB · 30 Oct 09:12"
+    )
+    assert (
+        call("fileProofLabel", {**ev, "at": "2025-12-24T07:00:00Z"}, now)
+        == "hello.txt · 1 KB · 24 Dec 2025 07:00"
+    )
     assert call("fileProofLabel", {**ev, "at": "nonsense"}, now) == "hello.txt · 1 KB"
     assert call("fileProofLabel", {k: v for k, v in ev.items() if k != "at"}, now) == "hello.txt · 1 KB"
 
@@ -134,15 +222,20 @@ def test_a_file_proof_shows_when_it_was_added():
 @node
 def test_proof_mark_you_or_agent_says():
     assert call("proofMark", {"by": "human:Mia"})["label"] == "You"
-    assert call("proofMark", {"by": "agent:claude"})["label"] == "Agent says" and call("proofMark", {})["mark"] == "○"
+    assert (
+        call("proofMark", {"by": "agent:claude"})["label"] == "Agent says"
+        and call("proofMark", {})["mark"] == "○"
+    )
 
 
 @node
 def test_tree_children_follow_creation_order_not_list_order():
-    ts = [{"id": "t_p", "created_at": "2026-11-01T00:00:00Z"},
-          {"id": "t_c3", "parent": "t_p", "created_at": "2026-11-03T00:00:00Z"},
-          {"id": "t_c1", "parent": "t_p", "created_at": "2026-11-01T01:00:00Z"},
-          {"id": "t_c2", "parent": "t_p", "created_at": "2026-11-02T00:00:00Z"}]
+    ts = [
+        {"id": "t_p", "created_at": "2026-11-01T00:00:00Z"},
+        {"id": "t_c3", "parent": "t_p", "created_at": "2026-11-03T00:00:00Z"},
+        {"id": "t_c1", "parent": "t_p", "created_at": "2026-11-01T01:00:00Z"},
+        {"id": "t_c2", "parent": "t_p", "created_at": "2026-11-02T00:00:00Z"},
+    ]
     assert [r["ticket"]["id"] for r in call("treeRows", ts)] == ["t_p", "t_c1", "t_c2", "t_c3"]
 
 
@@ -162,7 +255,9 @@ const n = H.flushPending([{state: mk('pending'), send: a => sent.push(a)}, {stat
                           {state: mk('sending'), send: a => sent.push('bad')}]);
 console.log(JSON.stringify([n, sent]));
 """
-    out = subprocess.run(["node", "-e", js, str(WEB / "helpers.js")], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(
+        ["node", "-e", js, str(WEB / "helpers.js")], capture_output=True, text=True, check=True
+    ).stdout
     assert json.loads(out) == [1, ["Yes"]]
 
 
@@ -170,12 +265,20 @@ console.log(JSON.stringify([n, sent]));
 def test_agent_line_run_states_starting_background_stopped():
     now = 1793923200000
     link = {"label": "focus", "url": "#open/focus/t/t_a"}
-    run = {"running": True, "state": "alive", "claim": {"agent": "claude", "mode": "live", "live": {"state": "starting", "since": "x"}}}
+    run = {
+        "running": True,
+        "state": "alive",
+        "claim": {"agent": "claude", "mode": "live", "live": {"state": "starting", "since": "x"}},
+    }
     w = call("agentLine", T, run, now, link)
     assert w["state"] == "starting" and w["status"] == "Starting…" and w["primary"]["op"] == "open"
     run = {"running": True, "state": "alive", "claim": {"agent": "mine", "mode": "oneshot"}}
     w = call("agentLine", T, run, now, link)
-    assert w["state"] == "background" and "no live view" in w["status"] and w["primary"]["label"] == "Watch in focus"
+    assert (
+        w["state"] == "background"
+        and "no live view" in w["status"]
+        and w["primary"]["label"] == "Watch in focus"
+    )
 
 
 @node
@@ -183,11 +286,32 @@ def test_agent_line_with_the_status_shapes_core_really_returns():
     now = 1793923200000
     t = {**T, "sessions": [{"agent": "claude", "last_used": "2026-11-06T00:00:00Z"}]}
     # `orch run status --json`: running is state == alive; a stale claim has running false; a stop releases the claim
-    stale = call("agentLine", t, {"ticket": "t_a", "running": False, "state": "maybe-stale", "claim": {"agent": "claude", "mode": "live"}}, now, None)
+    stale = call(
+        "agentLine",
+        t,
+        {
+            "ticket": "t_a",
+            "running": False,
+            "state": "maybe-stale",
+            "claim": {"agent": "claude", "mode": "live"},
+        },
+        now,
+        None,
+    )
     assert stale["state"] == "stuck" and stale["primary"]["args"]["take_over"] is True
     after_stop = call("agentLine", t, {"ticket": "t_a", "running": False, "pending": 0}, now, None)
-    assert after_stop["state"] == "resume" and after_stop["status"].startswith("last worked") and after_stop["primary"]["label"] == "Continue"
-    dead = call("agentLine", t, {"ticket": "t_a", "running": False, "state": "dead", "claim": {"agent": "claude"}}, now, None)
+    assert (
+        after_stop["state"] == "resume"
+        and after_stop["status"].startswith("last worked")
+        and after_stop["primary"]["label"] == "Continue"
+    )
+    dead = call(
+        "agentLine",
+        t,
+        {"ticket": "t_a", "running": False, "state": "dead", "claim": {"agent": "claude"}},
+        now,
+        None,
+    )
     assert dead["state"] == "failed"
 
 
@@ -213,8 +337,13 @@ def test_last_worked_just_now_has_no_ago():
 @node
 def test_a_live_session_waiting_for_a_message_is_idle_not_working():
     now = 1793923200000
-    live = {"agent": "claude", "mode": "live", "by": "human:lume", "started_at": "2026-11-06T00:00:00Z",
-            "live": {"state": "idle", "since": "2026-11-06T00:05:00Z"}}
+    live = {
+        "agent": "claude",
+        "mode": "live",
+        "by": "human:lume",
+        "started_at": "2026-11-06T00:00:00Z",
+        "live": {"state": "idle", "since": "2026-11-06T00:05:00Z"},
+    }
     run = {"running": True, "state": "alive", "claim": live}
     w = call("agentLine", T, run, now, {"label": "Focus", "url": "#open/focus/t/t_a"})
     assert w["state"] == "idle" and "waiting for a message" in w["status"] and w["primary"]["op"] == "open"
@@ -224,28 +353,46 @@ def test_a_live_session_waiting_for_a_message_is_idle_not_working():
 
 @node
 def test_cron_in_plain_words():
-    for cron, words in [("30 7 * * *", "Every day at 07:30"), ("0 9 * * 1-5", "Weekdays at 09:00"),
-                        ("15 18 * * 5", "Every Friday at 18:15"), ("*/2 * * * *", "Every 2 minutes"),
-                        ("5 * * * *", "Every hour at :05"), ("0 8 1 * *", "Every month on day 1 at 08:00"),
-                        ("0 8 * 1 *", "0 8 * 1 *"), ("nonsense", "nonsense")]:
+    for cron, words in [
+        ("30 7 * * *", "Every day at 07:30"),
+        ("0 9 * * 1-5", "Weekdays at 09:00"),
+        ("15 18 * * 5", "Every Friday at 18:15"),
+        ("*/2 * * * *", "Every 2 minutes"),
+        ("5 * * * *", "Every hour at :05"),
+        ("0 8 1 * *", "Every month on day 1 at 08:00"),
+        ("0 8 * 1 *", "0 8 * 1 *"),
+        ("nonsense", "nonsense"),
+    ]:
         assert call("cronHuman", cron) == words
 
 
 @node
 def test_phone_text_is_split_into_readable_parts():
     tid = "t_abc123456"
-    text = "\n".join([
-        "From Anna: Look at this", 'Voice message (de-CH): "Das Dach ist kaputt"',
-        f"Photo: .orch/tickets/{tid}/files/roof.jpg", f"Voice recording: .orch/tickets/{tid}/files/v.m4a",
-        f"File: .orch/tickets/{tid}/files/a.pdf", "Location: 47.37690, 8.54170 (Office) - https://maps.apple.com/?ll=47.3769%2C8.5417&q=Office",
-        "Feedback on Report (a1b2): changes wanted", '  1. "Total": too high', "  (+3 more comments not shown)",
-        "Photo x.jpg: could not be downloaded."])
+    text = "\n".join(
+        [
+            "From Anna: Look at this",
+            'Voice message (de-CH): "Das Dach ist kaputt"',
+            f"Photo: .orch/tickets/{tid}/files/roof.jpg",
+            f"Voice recording: .orch/tickets/{tid}/files/v.m4a",
+            f"File: .orch/tickets/{tid}/files/a.pdf",
+            "Location: 47.37690, 8.54170 (Office) - https://maps.apple.com/?ll=47.3769%2C8.5417&q=Office",
+            "Feedback on Report (a1b2): changes wanted",
+            '  1. "Total": too high',
+            "  (+3 more comments not shown)",
+            "Photo x.jpg: could not be downloaded.",
+        ]
+    )
     r = call("phoneParts", text, tid)
     assert r["who"] == "Anna" and r["text"] == "Look at this"
     kinds = [p["type"] for p in r["parts"]]
     assert kinds == ["voice", "photo", "sound", "file", "location", "feedback", "pin", "note"]
     assert r["parts"][0]["transcript"] == "Das Dach ist kaputt" and r["parts"][1]["name"] == "roof.jpg"
-    assert r["parts"][4]["label"] == "Office" and r["parts"][5]["rev"] == "a1b2" and r["parts"][5]["approve"] is False
+    assert (
+        r["parts"][4]["label"] == "Office"
+        and r["parts"][5]["rev"] == "a1b2"
+        and r["parts"][5]["approve"] is False
+    )
     assert r["parts"][6] == {"type": "pin", "n": "1", "where": '"Total"', "said": "too high"}
 
 
@@ -254,9 +401,11 @@ def test_phone_text_with_only_a_voice_or_a_thumbs_up_and_foreign_files():
     tid = "t_abc123456"
     r = call("phoneParts", 'From Ben: Voice message (en): "hi"', tid)
     assert r["text"] == "" and r["parts"][0]["type"] == "voice"
-    r = call("phoneParts", "From Ben: Feedback on Page: \U0001F44D Looks good", tid)
+    r = call("phoneParts", "From Ben: Feedback on Page: \U0001f44d Looks good", tid)
     assert r["parts"][0]["approve"] is True
-    r = call("phoneParts", "From Ben: File: .orch/tickets/t_other/files/x.txt", tid)  # another ticket's folder is never opened
+    r = call(
+        "phoneParts", "From Ben: File: .orch/tickets/t_other/files/x.txt", tid
+    )  # another ticket's folder is never opened
     assert r["parts"] == [] and r["text"].startswith("File:")
     assert call("phoneParts", "Edited the title", tid) is None
     r = call("phoneParts", "From Ben: Location: 1.0, 2.0 - https://evil.example/x", tid)
@@ -266,8 +415,16 @@ def test_phone_text_with_only_a_voice_or_a_thumbs_up_and_foreign_files():
 @node
 def test_pins_with_quotes_and_overflow_note_and_sound_and_failed_download():
     tid = "t_abc123456"
-    text = "\n".join(["From Anna: hi", '  1. "say "no" now": fix it', "  2. page 3: wrong", "  (+3 more comments not shown)",
-                      f"Voice recording: .orch/tickets/{tid}/files/v.m4a", "File x.pdf: could not be downloaded."])
+    text = "\n".join(
+        [
+            "From Anna: hi",
+            '  1. "say "no" now": fix it',
+            "  2. page 3: wrong",
+            "  (+3 more comments not shown)",
+            f"Voice recording: .orch/tickets/{tid}/files/v.m4a",
+            "File x.pdf: could not be downloaded.",
+        ]
+    )
     r = call("phoneParts", text, tid)
     assert [p["type"] for p in r["parts"]] == ["pin", "pin", "sound", "note"]
     assert r["parts"][0]["where"] == '"say "no" now"' and r["parts"][0]["said"] == "fix it"
@@ -279,3 +436,77 @@ def test_first_run_note_is_not_shown_as_an_answer():
     assert call("historyLine", {"text": "Answered q1: Hi"}) == "Answered a question"
     first = "Answered Claude's first-run screens (theme, notes, folder trust)."
     assert call("historyLine", {"text": first}) == first
+
+
+@node
+@pytest.mark.parametrize(
+    "status,word",
+    [
+        ("open", "Backlog"),
+        ("ready", "Ready"),
+        ("active", "Working"),
+        ("waiting", "Waiting"),
+        ("review", "Review"),
+        ("done", "Done"),
+    ],
+)
+def test_all_status_words(status, word):
+    assert call("historyLine", {"text": f"Status open -> {status}"}) == "Moved to " + word
+
+
+@node
+@pytest.mark.parametrize(
+    "why,want",
+    [
+        (
+            "Claude wants a login. Open the live session to finish it: orch run attach PIL-2",
+            "Claude needs you to sign in",
+        ),
+        (
+            "Claude shows its security notes. Open the live session to go on: orch run attach PIL-2",
+            "Claude shows its security notes",
+        ),
+        ("Open the live session to see why: orch run attach t_ab12", ""),
+        ("Waiting for your OK", "Waiting for your OK"),
+    ],
+)
+def test_plain_why_has_no_command_text(why, want):
+    got = call("plainWhy", why, "Claude")
+    assert got == want and "orch run" not in got
+
+
+@node
+@pytest.mark.parametrize(
+    "status,live,want",
+    [
+        ("active", "attention", "waiting"),
+        ("active", "working", "active"),
+        ("active", None, "active"),
+        ("review", "attention", "review"),
+    ],
+)
+def test_a_ticket_that_cannot_go_on_is_waiting_not_working(status, live, want):
+    run = {"running": True, "claim": {"live": {"state": live}}} if live else None
+    assert call("shownStatus", {"status": status}, run) == want
+
+
+@node
+@pytest.mark.parametrize(
+    "ticket,live,want",
+    [
+        ({"questions": [{"answer": None}]}, None, True),
+        ({"questions": [{"answer": "Yes"}]}, None, False),
+        ({}, "attention", True),
+        ({}, "working", False),
+    ],
+)
+def test_one_chip_while_a_question_is_open(ticket, live, want):
+    run = {"claim": {"live": {"state": live}}} if live else None
+    assert call("showsAnswerChip", ticket, run) is want
+
+
+def test_the_status_menu_stays_reachable_while_a_question_is_open():
+    """Only the duplicate plain chip is dropped (icon-only summary); statusControl never returns nothing."""
+    src = (WEB / "app.js").read_text()
+    assert "if (hideStatus(t)) return null" not in src
+    assert "status-sum-icon" in src

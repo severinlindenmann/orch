@@ -60,6 +60,8 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         "mm_ends_at TEXT",
         "mm_machine TEXT",
         "mm_unreach INTEGER NOT NULL DEFAULT 0",
+        "mm_last_ended_push INTEGER",
+        "mm_heartbeats TEXT NOT NULL DEFAULT '[]'",
     ] {
         let _ = c.execute(&format!("ALTER TABLE workspaces ADD COLUMN {col}"), []);
     }
@@ -660,7 +662,8 @@ pub fn mobile_mode(c: &Connection, ws: &str) -> Value {
         "SELECT mm_on,mm_since,mm_ends_at,mm_machine FROM workspaces WHERE id=?1",
         [ws],
         |r| {
-            let on = r.get::<_, i64>(0)? != 0;
+            let ends_at: Option<String> = r.get(2)?;
+            let on = r.get::<_, i64>(0)? != 0 && !mobile_mode_expired(ends_at.as_deref(), now());
             Ok(if on {
                 json!({"on": true, "since": r.get::<_, Option<String>>(1)?,
                     "ends_at": r.get::<_, Option<String>>(2)?, "machine": r.get::<_, Option<String>>(3)?})
@@ -670,4 +673,13 @@ pub fn mobile_mode(c: &Connection, ws: &str) -> Value {
         },
     )
     .unwrap_or_else(|_| json!({"on": false, "since": null, "ends_at": null, "machine": null}))
+}
+
+/// Compare parsed instants so offsets and fractional seconds are handled consistently.
+pub(crate) fn mobile_mode_expired(ends_at: Option<&str>, at: i64) -> bool {
+    ends_at
+        .and_then(|s| {
+            time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()
+        })
+        .is_some_and(|end| end.unix_timestamp_nanos() <= i128::from(at) * 1_000_000_000)
 }

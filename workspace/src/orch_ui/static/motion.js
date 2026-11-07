@@ -32,7 +32,7 @@
     },
     toast(text, kind='info') {
       let host = document.querySelector('.toasts');
-      if (!host) {host=document.createElement('div');host.className='toasts';host.setAttribute('aria-label','Notifications');document.body.append(host);}
+      if (!host) {host=document.createElement('div');host.className='toasts';host.setAttribute('role','group');host.setAttribute('aria-label','Notifications');document.body.append(host);}
       const item=document.createElement('div');item.className=`toast ${kind==='error'?'error':''}`;item.dataset.state='opening';item.setAttribute('role',kind==='error'?'alert':'status');
       const mark=document.createElement('span');mark.innerHTML=window.icon?.(kind==='ok'?'check':kind==='error'?'stop':'note',16)||'';
       const copy=document.createElement('span');copy.className='grow';copy.textContent=text;

@@ -6,7 +6,7 @@
   else root.DashHelpers = api;
 })(typeof self !== 'undefined' ? self : this, function () {
   const arr = v => Array.isArray(v) ? v : [];
-  const STATUS_WORD = {open: 'To do', active: 'Doing', waiting: 'Waiting', done: 'Done', dropped: 'Dropped'};
+  const STATUS_WORD = {open: 'Backlog', ready: 'Ready', active: 'Working', waiting: 'Waiting', review: 'Review', done: 'Done', dropped: 'Dropped'};
   const FIELD_WORD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary',
     status: 'the status'};
 
@@ -36,7 +36,7 @@
     if (/^(Updated|Removed) .+ settings$/.test(text)) return text;
     if (/^Check c\d+ done/i.test(text) || /^(Checked|Done)\b.*\bc\d+/.test(text) || /^Task .* done/i.test(text)) return 'Finished a task';
     if (/^Added task|^Added check/i.test(text)) return 'Added a task';
-    if (/^Linked|^Link added/i.test(text)) return 'Added a link';
+    if (/^Linked|^Link added/i.test(text)) return 'Added a reference';
     return text;
   }
 
@@ -102,7 +102,7 @@
     const t = ticket || {}, r = run || null, id = t.id;
     const sessions = arr(t.sessions).slice().sort((a, b) => Date.parse(b.last_used || 0) - Date.parse(a.last_used || 0));
     const claim = (r && r.claim) || {};
-    const agent = capital(noPrefix(claim.agent || (sessions[0] && sessions[0].agent) || '')) || 'Agent';
+    const agent = capital(noPrefix(claim.label || claim.agent || (sessions[0] && sessions[0].agent) || '')) || 'Agent';
     const asks = arr(t.questions).some(q => q && q.answer == null);
     const start = (label, extra) => ({label, op: 'run.start', args: {ticket: id, ...(extra || {})}});
     const stop = {label: 'Stop', op: 'run.stop', args: {ticket: id}};
@@ -133,6 +133,26 @@
         primary: start('Continue'), items: [fresh]};
     }
     return {state: 'new', agent, status: 'not started yet', primary: start('Start'), items: []};
+  }
+
+  /* The line under an agent's "waiting" chip, in plain words: no command text, a login named as signing in. */
+  function plainWhy(why, label) {
+    const w = String(why || '');
+    if (/wants a login|log in to|login method/i.test(w)) return (label || 'The agent') + ' needs you to sign in';
+    return w.replace(/\s*(Open the live session[^:]*:\s*)?orch run attach\s+\S+/gi, '').replace(/\s+/g, ' ').trim().replace(/[.:]$/, '');
+  }
+
+  /* One state per ticket: a ticket the agent cannot go on with (live state attention) is Waiting, never Working. */
+  function shownStatus(ticket, run) {
+    const t = ticket || {}, live = run && run.claim && run.claim.live;
+    return t.status === 'active' && live && live.state === 'attention' ? 'waiting' : t.status;
+  }
+
+  /* True while the yellow "Waiting for your answer" chip shows (an open question, or the agent needs you): the plain
+     Waiting status chip is then left out, so the ticket shows one chip. */
+  function showsAnswerChip(ticket, run) {
+    const t = ticket || {}, live = run && run.claim && run.claim.live;
+    return arr(t.questions).some(q => q && q.answer == null) || !!(live && live.state === 'attention');
   }
 
   /* Tickets tab tree: parents with their children (N of M done), children beyond 3 collapsed, a child whose parent is
@@ -253,5 +273,5 @@
     return out;
   }
 
-  return {phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

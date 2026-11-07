@@ -9,7 +9,7 @@ final class ArchiveUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-openChat", "ws_pilatus001"]
         app.launch()
-        let done = app.buttons["segment-done"]
+        let done = app.buttons["done-toggle"]
         XCTAssertTrue(done.waitForExistence(timeout: 20), "workspace screen")
         done.tap()
         return app

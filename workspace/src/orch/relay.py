@@ -106,9 +106,10 @@ def _handle_mobile_off(root: Path, m: dict) -> str:
         if m["id"] in seen(root):
             return "already handled"
         ok = _mobile_off_ok(root, m)
+        since = mobile_mode.settle(root).get("since")
         _mark_seen(root, m["id"])
     if ok:
-        mobile_mode.turn_off(root, "off")
+        mobile_mode.turn_off(root, "phone", if_since=since, by=m["from"])
     return (
         "Mobile mode was turned off from the phone"
         if ok
