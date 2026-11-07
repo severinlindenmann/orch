@@ -537,7 +537,11 @@ def load_state(
         local_refs = None
 
     for t in tickets:
-        t["refs"] = [r for r in t.get("refs", []) if not (isinstance(r, dict) and r.get("local"))]
+        stored = t.get("refs", [])
+        for n, r in enumerate(stored, 1):  # the stored number: what `orch ref list` and `orch ref rm` use
+            if isinstance(r, dict):
+                r["n"] = n
+        t["refs"] = [r for r in stored if not (isinstance(r, dict) and r.get("local"))]
         if (
             with_settings and local_refs
         ):  # only the live local server: a snapshot is shared and must not carry local paths
@@ -545,7 +549,8 @@ def load_state(
                 more = local_refs(root, t["id"])
             except (ValueError, TypeError, OSError):
                 more = []
-            t["refs"] += [r for r in more if isinstance(r, dict)] if isinstance(more, list) else []
+            more = [r for r in more if isinstance(r, dict)] if isinstance(more, list) else []
+            t["refs"] += [{**r, "n": len(stored) + i} for i, r in enumerate(more, 1)]
     add_link_views(
         tickets, link_kinds(raw) if with_addons else []
     )  # snapshots: known sites only, no add-on names

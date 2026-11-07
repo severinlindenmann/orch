@@ -312,8 +312,7 @@ def reference_views(root: Path, ticket: dict) -> list[dict]:
                 row["name"] = _clip(ref["name"], 240)
         elif kind == "file":
             path = ref.get("path")
-            parts = safefile._parts(path)
-            if parts is None or parts[0].lower() in (".orch", ".git"):
+            if not safefile.file_ref_ok(root, path):
                 continue
             row = {"kind": kind, "path": _clip(path, 240)}
             line = ref.get("line")

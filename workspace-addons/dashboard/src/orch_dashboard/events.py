@@ -33,12 +33,13 @@ class Revisions:
         return hashlib.sha256(repr(sorted(rows)).encode()).hexdigest()
 
     def join(self):
+        first = self.signature()  # the folder walk happens outside the lock
         with self.condition:
             if self.closed or self.clients >= 20:
                 return False
             self.clients += 1
             if self.thread is None:
-                self.rev = self.signature()
+                self.rev = first
                 self.thread = threading.Thread(target=self.watch, daemon=True)
                 self.thread.start()
             return True
@@ -49,14 +50,16 @@ class Revisions:
             self.condition.notify_all()
 
     def watch(self):
-        with self.condition:
-            while self.clients and not self.closed:
-                rev = self.signature()
+        while True:
+            rev = self.signature()  # the folder walk happens outside the lock; the lock only publishes
+            with self.condition:
+                if not self.clients or self.closed:
+                    self.thread = None
+                    return
                 if rev != self.rev:
                     self.rev = rev
                     self.condition.notify_all()
                 self.condition.wait(0.25)
-            self.thread = None
 
     def close(self):
         with self.condition:

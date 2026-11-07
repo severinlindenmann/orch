@@ -5,7 +5,10 @@ from pathlib import Path
 
 
 def read(root, tid, number):
-    from orch.safefile import TooLarge, open_file_ref
+    try:
+        from orch.safefile import TooLarge, open_file_ref
+    except ImportError:
+        return 503, b"The orch tool is not available here, so this file cannot be shown.", "text/plain"
 
     from .actions import TID
 
