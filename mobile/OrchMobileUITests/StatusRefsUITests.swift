@@ -55,8 +55,10 @@ final class StatusRefsUITests: XCTestCase {
         tab.tap()
         XCTAssertTrue(el(app, "info-ref-ref0").waitForExistence(timeout: 5), "web address card")
         XCTAssertTrue(app.staticTexts["PIL-13 · Rename field X in ingestion job"].exists, "ticket row with key and title")
-        XCTAssertTrue(app.staticTexts["docs/board/q3.md:12"].exists, "file reference as plain text")
+        for _ in 0..<3 where !app.staticTexts["docs/board/q3.md:12"].exists { app.swipeUp() }   // the list is lazy
+        XCTAssertTrue(app.staticTexts["docs/board/q3.md:12"].waitForExistence(timeout: 5), "file reference as plain text")
         shot(app, "4-references")
+        for _ in 0..<3 where !el(app, "info-ref-ref1").isHittable { app.swipeDown() }
         el(app, "info-ref-ref1").tap()   // opens that topic
         XCTAssertTrue(app.descendants(matching: .any)["tasks-card"].waitForExistence(timeout: 10) || app.staticTexts["composer-note"].waitForExistence(timeout: 5))
         shot(app, "5-reference-opened")

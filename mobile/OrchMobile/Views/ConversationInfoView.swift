@@ -204,7 +204,7 @@ struct ConversationInfoView: View {
                 ForEach(links) { entry in
                     Button { open(entry) } label: { row(entry) }
                         .buttonStyle(.plain)
-                        .accessibilityIdentifier("info-ref-\(entry.id)")
+                        .accessibilityIdentifier("info-item-\(entry.id)")
                 }
             }
         }
