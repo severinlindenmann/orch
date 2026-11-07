@@ -44,8 +44,10 @@ final class RealRelayUITests: XCTestCase {
         XCTAssertTrue(app.buttons["room-\(ws)"].waitForExistence(timeout: 20))
         shot("03-chats")
         app.buttons["new-chat"].tap()
-        if app.buttons["pick-\(ws)"].waitForExistence(timeout: 3) {
-            app.buttons["pick-\(ws)"].tap(); app.buttons["pick-continue"].tap()
+        app.buttons["compose-new-topic"].tap()
+        if app.buttons["workspace-picker"].waitForExistence(timeout: 3), app.buttons["workspace-picker"].isHittable {
+            app.buttons["workspace-picker"].tap()
+            if app.buttons["pick-\(ws)"].waitForExistence(timeout: 3) { app.buttons["pick-\(ws)"].tap() }
         }
         let topic = field(app, "topic-field")
         XCTAssertTrue(topic.waitForExistence(timeout: 5))

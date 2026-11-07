@@ -8,11 +8,6 @@ import XCTest
         app.launch()
         XCTAssertTrue(app.buttons["room-ws_pilatus001"].waitForExistence(timeout: 15))
         sleep(2)
-        // The tab bar is deliberately capped at xxxLarge (like system tab bars); everything else must scale.
-        let tabBar: Set<String> = ["Chats", "Settings"]
-        try app.performAccessibilityAudit(for: .dynamicType) { issue in
-            let l = issue.element?.label ?? ""
-            return tabBar.contains(l) || Int(l) != nil   // system tab bar and its unread badge (drawn by UIKit, capped like the bar)
-        }
+        try app.performAccessibilityAudit(for: .dynamicType)
     }
 }
