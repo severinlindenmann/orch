@@ -352,7 +352,7 @@ final class RealRelayE2ETests: XCTestCase {
         let app = launch(extra: ["-fakeVoice", "YES"])
         openGeneral(app)
         let mic = el(app, "composer-mic"); must(app, mic, "mic")
-        mic.press(forDuration: 1.6)
+        mic.press(forDuration: 3.5)   // recording starts ~0.25 s after the touch and under load can take a second more; < 1 s is dropped
         must(app, el(app, "voice-play"), "my voice note bubble", timeout: 30); sleep(1); shot("80-voice-note")
         host("ws_send('Here is a long answer you can listen to instead of reading it.', '--speak')")
         let plays = app.descendants(matching: .any).matching(identifier: "voice-play")
@@ -509,10 +509,10 @@ final class RealRelayE2ETests: XCTestCase {
         host("out = mm_on(4)")
         defer {
             host("""
-            import os
+            import os, signal
             pid = S.pop('mobile_mode_stopped_pid', '')
             if pid:
-                try: os.kill(int(pid), 18)
+                try: os.kill(int(pid), signal.SIGCONT)
                 except ProcessLookupError: pass
             out = mm_off()
             """)
@@ -521,15 +521,15 @@ final class RealRelayE2ETests: XCTestCase {
         chats(app)
         must(app, mobileBanner(app, containing: "is in Mobile mode"), "reachable banner", timeout: 90)
         host("""
-        import os
+        import os, signal
         pid = keeper_pid()
         assert pid, 'no keeper to stop'
         S['mobile_mode_stopped_pid'] = pid
-        os.kill(int(pid), 19)
+        os.kill(int(pid), signal.SIGSTOP)
         """)
         must(app, mobileBanner(app, containing: "Can't reach"), "unreachable banner after silence", timeout: 480)
         shot("124-mobile-mode-unreachable")
-        host("import os; os.kill(int(S['mobile_mode_stopped_pid']), 18)")
+        host("import os, signal; os.kill(int(S['mobile_mode_stopped_pid']), signal.SIGCONT)")
         must(app, mobileBanner(app, containing: "is in Mobile mode"), "reachable banner after resume", timeout: 90)
         host("out = mm_off()")
         XCTAssertTrue(el(app, "mobile-mode-banner-\(ws)").waitForNonExistence(timeout: 60))

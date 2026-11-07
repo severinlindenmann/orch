@@ -228,7 +228,12 @@ struct Composer: View {
     private func sendRecording() async {
         guard let target, !busy else { return }
         collect()
-        guard segments.reduce(0, { $0 + $1.duration }) >= 1 else { discard(); return }
+        guard segments.reduce(0, { $0 + $1.duration }) >= 1 else {
+            discard()   // too short to be a memo: say so instead of dropping it silently (the same hint as a plain tap)
+            hint = true; hintTask?.cancel()
+            hintTask = Task { try? await Task.sleep(for: .seconds(2)); if !Task.isCancelled { hint = false } }
+            return
+        }
         stopPlayback(); busy = true; error = nil; micError = false
         defer { busy = false }
         let replyId = reply?.messageId
