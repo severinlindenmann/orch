@@ -151,10 +151,13 @@ def start_live(
     mine = cur is not None and runs.state(cur) == "alive"
     if not mine and _full(root):
         _queue_for_slot(root, tid, by, busy_text)
+        n = (
+            MAX_LIVE if len(live_alive(root)) >= MAX_LIVE else MAX_LIVE + HARD_EXTRA
+        )  # name the limit that was really hit
         raise runs.Busy(
-            f"{MAX_LIVE} live sessions are open here, the most at once. Your request for {tid} is saved and "
+            f"{n} live sessions are open here, the most at once. Your request for {tid} is saved and "
             f"starts when one closes. To close one: orch run stop <ticket>",
-            {"pending": True, "limit": MAX_LIVE},
+            {"pending": True, "limit": n},
         )
     if not mine and session_exists(root, tid):
         tmux(root, "kill-session", "-t", target(tid))  # left over from a crash: the claim is gone
@@ -304,18 +307,24 @@ def event(
     if not rec or rec.get("mode") != "live":
         return 0
     tid, run = rec["ticket"], rec["run"]
+
+    def up(state: str) -> None:
+        # tool is up: resume after the state is written (else check_starting could win), for this run
+        if _set_state(root, tid, run, state):
+            tickets.resume_after_start_wait(root, tid, f"agent:{rec['agent']}")
+
     if kind == "session":
         if session_id and adapters.SESSION_RE.match(session_id):
             tickets.record_session(root, tid, rec["agent"], session_id, runs.host())
-        _set_state(root, tid, run, "idle")  # the tool is up and waiting for its first input
+        up("idle")  # the tool is up and waiting for its first input
     elif kind == "idle":
-        _set_state(root, tid, run, "idle")
+        up("idle")
     elif kind == "attention" and idle_notice(rec["agent"], root, payload):
         # "still waiting for your input": input may go in only if the run is idle already (after Stop); in any
         # other state (a dialog may be open) nothing changes, and the next Stop sets idle.
         return deliver(root, tid)
     elif kind == "working":  # a prompt went in (also one a person typed in the live session): never paste now
-        _set_state(root, tid, run, "working")
+        up("working")
         return 0
     else:  # a permission prompt or any other notice: a person answers it; nothing is pasted
         _set_state(root, tid, run, "attention")
@@ -532,6 +541,7 @@ def check_starting(
         if cur and cur["run"] == run and (cur.get("live") or {}).get("state") == "starting":
             cur["live"] = {"state": "attention", "since": tickets.now(), "why": note}
             runs._write(root, cur)
+            tickets.wait_for_start(root, tid, note, f"agent:{rec['agent']}")
     return note
 
 

@@ -28,7 +28,7 @@ from lane import Lane  # noqa: E402
 
 REAL_HOME = Path(os.environ.get("E2E_REAL_HOME") or Path.home())
 STATE = REAL_HOME / "orch-dev/state/e2e-full"
-BROWSER_LANES = {"A": "lanes/A.json", "C": "lanes/C.json", "D": "lanes/D.json"}
+BROWSER_LANES = {"A": "lanes/A.json", "C": "lanes/C.json", "D": "lanes/D.json", "F": "lanes/F.json"}
 
 
 def log(*a):
@@ -92,6 +92,8 @@ def main() -> int:
     ap.add_argument("--phone", action="store_true", help="run lane P (Simulator); only after the mobile v3 lanes merged")
     ap.add_argument("--real-agents", action="store_true", help="lane B with real Claude (needs E2E_CLAUDE_TOKEN)")
     ap.add_argument("--udid", default="", help="Simulator for lane P (default: the first booted one)")
+    ap.add_argument("--real-runs", type=int, default=6, help="runs of lane B with a real agent in --full")
+    ap.add_argument("--build-label", default="", help="shown in the report header, e.g. the TestFlight build number the phone lane runs against")
     ap.add_argument("--no-review", action="store_true")
     ap.add_argument("--review-shots", type=int, default=24)
     ap.add_argument("--viewports", default="1280,720,390")
@@ -116,7 +118,7 @@ def main() -> int:
         repo = wt
         sha = subprocess.run(["git", "-C", str(wt), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     want = [x for x in (a.lanes.split(",") if a.lanes else
-                        (["A", "B", "G", "Z"] if quick else ["A", "B", "C", "D", "W", "G", "M", "U", "Z"] + ([] if a.no_windows else ["X"])))]
+                        (["A", "B", "G", "Z"] if quick else ["A", "B", "C", "D", "F", "W", "G", "R", "M", "U", "Z"] + ([] if a.no_windows else ["X"])))]
     if a.phone and "P" not in want:
         want.append("P")
     hist = load_history()
@@ -207,13 +209,15 @@ def main() -> int:
         for t in threads:
             t.join()
         if "B" in want and a.real_agents:
-            results["B"] = _save(lanes_py.lane_b(env, outdir / "B", True, 1 if quick else 5))
-        for l in ("A", "B", "C", "D"):
+            results["B"] = _save(lanes_py.lane_b(env, outdir / "B", True, 1 if quick else a.real_runs))
+        for l in ("A", "B", "C", "D", "F"):
             if l in results:
                 lanes.append({**results[l], "dir": l})
         # serial
         if "W" in want:
             lanes.append({**_save(lanes_py.lane_w(env, outdir / "W")), "dir": "W"})
+        if "R" in want:
+            lanes.append({**_save(lanes_py.lane_r(env, outdir / "R")), "dir": "R"})
         if "G" in want:
             lanes.append({**_save(lanes_py.lane_g(env, outdir / "G")), "dir": "G"})
         if "M" in want:
@@ -297,7 +301,7 @@ def main() -> int:
     census = {"found": found, "clicked": clicked, "percent": round(100 * clicked / found) if found else 0}
     runinfo = {"sha": sha, "mode": a.mode, "started": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t_start)),
                "elapsed": f"{int((time.time() - t_start) // 60)} min {int((time.time() - t_start) % 60)} s", "n": n,
-               "timing_fail": timing_fail,
+               "timing_fail": timing_fail, "build_label": a.build_label,
                "manual": ["Push notifications and the real iPhone: 5-minute checklist FULL-CHECKLIST.md iPhone steps 1 to 8",
                           "Real microphone and Deepgram accuracy", "Camera QR scan on a device", "Judging if a design is nice"]}
     page = report.render(runinfo, lanes, findings, census, outdir)
