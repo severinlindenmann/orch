@@ -224,10 +224,9 @@ final class PublishWebViewTests: XCTestCase {
         retained += [c, web]
         c.load(web)
         for _ in 0..<100 {
-            if web.url?.scheme == "orch-page" {
-                let state = try await web.evaluateJavaScript("document.readyState") as? String
-                if state == "complete" { break }
-            }
+            // Read from the page itself: web.url changes while the first (blank) document is still the one on screen.
+            let state = try await web.evaluateJavaScript("location.protocol + document.readyState + (document.body ? 'B' : '')") as? String
+            if state == "orch-page:completeB" { break }
             try await Task.sleep(for: .milliseconds(100))
         }
         XCTAssertEqual(web.url?.scheme, "orch-page", "the page loaded")
