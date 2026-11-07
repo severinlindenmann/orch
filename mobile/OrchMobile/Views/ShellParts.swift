@@ -3,7 +3,8 @@ import SwiftUI
 struct ShellAvatar: View {
     let name: String
     var size: CGFloat = 46
-    var online: Bool? = nil
+    /// When set, shows the green dot while the workspace is online (re-checked every minute so "online" expires).
+    var lastSeen: String?? = nil
     private var tint: Color {
         let hash = name.utf8.reduce(UInt64(5381)) { ($0 &* 33) &+ UInt64($1) }
         return [Theme.brand, Color(red: 0.76, green: 0.64, blue: 0.88), Color(red: 0.85, green: 0.71, blue: 0.46)][Int(hash % 3)]
@@ -13,9 +14,11 @@ struct ShellAvatar: View {
             .themeFont(size * 0.44, .semibold).foregroundStyle(tint)
             .frame(width: size, height: size).background(tint.opacity(0.18), in: Circle())
             .overlay(alignment: .bottomTrailing) {
-                if let online {
-                    Circle().fill(online ? Color.green : Theme.muted).frame(width: 8, height: 8)
-                        .overlay(Circle().stroke(Theme.surface, lineWidth: 2))
+                if let lastSeen {
+                    TimelineView(.everyMinute) { context in
+                        Circle().fill(Presence.of(lastSeen: lastSeen, now: context.date).isOnline ? Theme.online : Theme.muted).frame(width: 8, height: 8)
+                            .overlay(Circle().stroke(Theme.surface, lineWidth: 2))
+                    }
                 }
             }.accessibilityHidden(true)
     }
@@ -33,12 +36,15 @@ struct ShellBadge: View {
 }
 
 struct PresenceLine: View {
-    let presence: Presence
+    let lastSeen: String?
     var body: some View {
-        HStack(spacing: 5) {
-            Circle().fill(presence.isOnline ? Color.green : Theme.muted).frame(width: 7, height: 7).accessibilityHidden(true)
-            Text(presence.isOnline ? "online" : presence.text()).themeFont(13).foregroundStyle(Theme.muted)
-        }.accessibilityElement(children: .combine)
+        TimelineView(.everyMinute) { context in
+            let presence = Presence.of(lastSeen: lastSeen, now: context.date)
+            HStack(spacing: 5) {
+                Circle().fill(presence.isOnline ? Theme.online : Theme.muted).frame(width: 7, height: 7).accessibilityHidden(true)
+                Text(presence.line(now: context.date)).themeFont(13).foregroundStyle(Theme.muted)
+            }.accessibilityElement(children: .combine)
+        }
     }
 }
 

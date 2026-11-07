@@ -76,16 +76,11 @@ final class ChatTests: XCTestCase {
         XCTAssertTrue(ChatBuilder.search("   ", d, rows: rooms).isEmpty)
     }
 
-    func testFiltersAndOrderPutNeedsYouFirst() async throws {
+    func testRoomsOrderPutNeedsYouFirst() async throws {
         let d = try await data(MockRelay(latency: .zero))
         let rooms = ChatBuilder.rooms(d, read: ReadState())
         XCTAssertEqual(rooms.count, 2)
         XCTAssertTrue(rooms.allSatisfy { $0.openQuestions == 1 })
-        XCTAssertEqual(ChatBuilder.filtered(rooms, .needsYou).count, 2)
-        var answered = d; answered.answers = Dictionary(uniqueKeysWithValues: d.questions.map { ($0.id, "x") })
-        let calm = ChatBuilder.rooms(answered, read: ReadState())
-        XCTAssertTrue(ChatBuilder.filtered(calm, .needsYou).allSatisfy { $0.tickets.allSatisfy { $0.ticket.status == .needsYou } })
-        XCTAssertEqual(ChatBuilder.filtered(rooms, .tickets).flatMap(\.tickets).count, rooms.flatMap(\.tickets).count)
     }
 
     func testComposerWording() {

@@ -2,17 +2,6 @@ import SwiftUI
 
 /// Pieces shared by the chat screens: avatar, bubbles, cards, composer. Original messenger look in the orch dark theme.
 
-struct Avatar: View {
-    let name: String
-    var size: CGFloat = 40
-    var body: some View {
-        Text(String(name.prefix(1)).uppercased()).themeFont(size * 0.42, .semibold).foregroundStyle(Theme.brand)
-            .frame(width: size, height: size).background(Theme.brand.opacity(0.14), in: RoundedRectangle(cornerRadius: size * 0.3))
-            .overlay(RoundedRectangle(cornerRadius: size * 0.3).stroke(Theme.brand.opacity(0.35)))
-            .accessibilityHidden(true)
-    }
-}
-
 struct KeyTag: View {
     let key: String?
     @ScaledMetric(relativeTo: .caption) private var size: CGFloat = 12
@@ -31,16 +20,6 @@ struct StatusPill: View {
     var body: some View {
         Text(text).themeFont(11, .semibold).foregroundStyle(color).padding(.horizontal, 8).padding(.vertical, 3)
             .overlay(Capsule().stroke(color.opacity(0.6)))
-    }
-}
-
-struct UnreadBadge: View {
-    let count: Int
-    var body: some View {
-        if count > 0 {
-            Text("\(count)").themeFont(12, .bold).foregroundStyle(Theme.onBrand).padding(.horizontal, 7).frame(minWidth: 22, minHeight: 22)
-                .background(Theme.brand, in: Capsule()).accessibilityLabel("\(count) unread")
-        }
     }
 }
 
@@ -316,6 +295,9 @@ struct MessageBubble: View {
                         Button { onOpenArtifact(attachment.blobId) } label: {
                             BlobImage(id: attachment.blobId).frame(height: 190).clipShape(RoundedRectangle(cornerRadius: 10))
                         }.buttonStyle(PressStyle()).accessibilityLabel("Open \(attachment.name)").accessibilityIdentifier("image-\(attachment.id)")
+                    } else if BlobID.isValid(attachment.blobId), attachment.kind == .file {
+                        Button { onOpenArtifact(attachment.blobId) } label: { fileRow(attachment.name, size: attachment.size) }
+                            .buttonStyle(PressStyle()).accessibilityLabel("Open \(attachment.name)").accessibilityIdentifier("file-\(attachment.id)")
                     } else { fileRow(attachment.name, size: attachment.size) }
                 }
                 ForEach(item.queuedFiles, id: \.file) { file in
@@ -323,13 +305,22 @@ struct MessageBubble: View {
                         QueuedConversationImage(url: model.outbox.fileURL(pending, file), name: file.name)
                     } else { fileRow(file.name, size: file.size) }
                 }
+                ForEach(item.artifacts) { artifact in
+                    Button { onOpenArtifact(artifact.id) } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: Self.symbol(artifact.kind)).themeFont(20).foregroundStyle(Theme.brand).frame(width: 42, height: 48)
+                                .background(Theme.surface3, in: RoundedRectangle(cornerRadius: 10))
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(artifact.label ?? "Preview").themeFont(14, .semibold).multilineTextAlignment(.leading)
+                                Text("Open ›").themeFont(13).foregroundStyle(Theme.brand)
+                            }
+                            Spacer(minLength: 0)
+                        }.frame(minHeight: 44).contentShape(Rectangle())
+                    }.buttonStyle(PressStyle()).accessibilityLabel("Open \(artifact.label ?? "preview")")
+                        .accessibilityIdentifier("artifact-\(artifact.id)")
+                }
                 if let location = item.location {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("Location", systemImage: "mappin.and.ellipse").themeFont(15, .semibold)
-                        if let url = URL(string: "https://maps.apple.com/?ll=\(location.lat),\(location.lon)") {
-                            Link("Open in Maps", destination: url).themeFont(15).frame(minHeight: 44).foregroundStyle(Theme.brand).accessibilityIdentifier("location-\(item.id)")
-                        }
-                    }
+                    LocationCard(location: location).accessibilityIdentifier("location-\(item.id)")
                 }
                 if let feedback = item.feedback {
                     VStack(alignment: .leading, spacing: 4) {
@@ -356,6 +347,9 @@ struct MessageBubble: View {
                 .modifier(BubbleActions(item: item, conversationId: conversationId, onReply: onReply, onRetry: onRetry, onDiscard: onDiscard))
             if !mine { Spacer(minLength: typeSize.isAccessibilitySize ? 8 : 32) }
         }
+    }
+    private static func symbol(_ kind: String) -> String {
+        switch kind { case "html": "globe"; case "image": "photo"; case "pr", "commit", "link": "arrow.triangle.pull"; default: "doc" }
     }
     private func fileRow(_ name: String, size: Int) -> some View {
         HStack(spacing: 10) {

@@ -1,11 +1,5 @@
 import SwiftUI
 
-struct ConversationHooks {
-    var composer = ComposerHooks.none
-    var openArtifact: (String) -> Void = { _ in }
-    static var none: ConversationHooks { ConversationHooks() }
-}
-
 /// A tappable "RIG-4 started ›" line under General: the workspace acked a message with a new ticket.
 struct StartedChip: Identifiable, Equatable {
     let id: String          // the ack's message id: one chip per ack
@@ -24,14 +18,22 @@ enum ConversationRules {
         return items.dropFirst(index + 1).contains { $0.side == .them && $0.kind == .message && $0.label != nil }
     }
 
+    /// "2 of 5 · Working"; with no checklist only the status ("Working").
+    static func summaryText(done: Int, total: Int, status: String, separator: String = " · ") -> String {
+        total > 0 ? "\(done) of \(total)\(separator)\(status)" : status
+    }
+
     /// General only: acks (a workspace text with `reply_to`) naming a ticket for a General text of this phone.
     static func startedChips(messages: [PhoneMessage], workspace: String, key: (String) -> String?) -> [StartedChip] {
-        let general = Set(messages.filter { $0.fromPhone && $0.workspaceId == workspace && $0.message.body.general == true }.map(\.id))
+        let generalAt = Dictionary(messages.filter { $0.fromPhone && $0.workspaceId == workspace && $0.message.body.general == true }.map { ($0.id, $0.message.createdAt) },
+                                   uniquingKeysWith: { a, _ in a })
+        let general = Set(generalAt.keys)
         var seen = Set<String>(), out: [StartedChip] = []
         for pm in messages.sorted(by: { $0.message.createdAt < $1.message.createdAt }) where !pm.fromPhone && pm.workspaceId == workspace {
             guard pm.message.body.update?.kind == "ack", let t = pm.message.ticket, let r = pm.message.replyTo, general.contains(r),
                   seen.insert(pm.id).inserted else { continue }
-            out.append(StartedChip(id: pm.id, at: pm.message.createdAt, workspace: workspace, ticket: t, label: "\(pm.message.key ?? key(t) ?? "Topic") started"))
+            // After the message it answers (clocks of phone and workspace may differ): never above it.
+            out.append(StartedChip(id: pm.id, at: max(pm.message.createdAt, generalAt[r] ?? ""), workspace: workspace, ticket: t, label: "\(pm.message.key ?? key(t) ?? "Topic") started"))
         }
         return out
     }
@@ -56,8 +58,9 @@ struct TicketChatView: View {
 
 struct ConversationView: View {
     let id: ConversationID
-    var hooks = ConversationHooks.none
     @Environment(AppModel.self) private var model
+    @Environment(\.openURL) private var openURL
+    @State private var viewing: ArtifactItem?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var reply: ReplyPreview?
     @State private var tasksShown = false
@@ -110,10 +113,11 @@ struct ConversationView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     if working(items) { StatusLine("\(workspaceName) is working…") }
-                    Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(running: ticket?.view?.running), reply: $reply, hooks: hooks.composer)
+                    Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(running: ticket?.view?.running), reply: $reply, )
                 }
             }
             .sheet(isPresented: $tasksShown) { tasksSheet }
+            .fullScreenCover(item: $viewing) { ArtifactViewer(item: $0) }
             .task { await model.watchWhileOpen() }
     }
     @ViewBuilder private var presence: some View {
@@ -121,20 +125,25 @@ struct ConversationView: View {
         else {
             HStack(spacing: 4) {
                 if resolved.ticket != nil { Text("\(workspaceName) ·") }
-                if model.presence(of: resolved.workspace).isOnline { PresenceDot() }
-                Text(model.presence(of: resolved.workspace).text().lowercased())
+                TimelineView(.everyMinute) { context in
+                    let presence = model.presence(of: resolved.workspace, now: context.date)
+                    HStack(spacing: 4) {
+                        if presence.isOnline { PresenceDot() }
+                        Text(presence.line(now: context.date))
+                    }
+                }
             }.themeFont(13).foregroundStyle(Theme.muted)
         }
     }
     private func summary(_ ticket: Ticket) -> some View {
         Button { tasksShown = true } label: {
             HStack {
-                Text("\(ticket.view?.doneCount ?? 0) of \(ticket.view?.totalCount ?? 0) · \(TopicStatus(ticket).label)")
+                Text(ConversationRules.summaryText(done: ticket.view?.doneCount ?? 0, total: ticket.view?.totalCount ?? 0, status: TopicStatus(ticket).label))
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.down")
             }.themeFont(13).foregroundStyle(Theme.muted).padding(.horizontal, 18).frame(minHeight: 44)
                 .background(Theme.surface).overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
-        }.buttonStyle(PressStyle()).accessibilityLabel("Tasks, \(ticket.view?.doneCount ?? 0) of \(ticket.view?.totalCount ?? 0), \(TopicStatus(ticket).label)")
+        }.buttonStyle(PressStyle()).accessibilityLabel("Tasks, " + ConversationRules.summaryText(done: ticket.view?.doneCount ?? 0, total: ticket.view?.totalCount ?? 0, status: TopicStatus(ticket).label, separator: ", "))
             .accessibilityIdentifier("tasks-toggle")
     }
     private var tasksSheet: some View {
@@ -148,7 +157,7 @@ struct ConversationView: View {
                 }
                 Text("\(title) · \(ticket.map { TopicStatus($0).label } ?? "")").themeFont(13).foregroundStyle(Theme.muted)
                 if let view = ticket?.view {
-                    ProgressBar(done: view.doneCount, total: view.totalCount)
+                    if view.totalCount > 0 { ProgressBar(done: view.doneCount, total: view.totalCount) }
                     ForEach(Array(view.checklist.enumerated()), id: \.offset) { _, task in
                         HStack(spacing: 16) {
                             Image(systemName: task.done ? "checkmark" : "circle").foregroundStyle(Theme.brand).accessibilityHidden(true)
@@ -166,12 +175,14 @@ struct ConversationView: View {
         case chip(StartedChip)
         var id: String { switch self { case .item(let i, _): i.id; case .chip(let c): "chip-" + c.id } }
         var at: String { switch self { case .item(let i, _): i.at; case .chip(let c): c.at } }
+        var isChip: Bool { if case .chip = self { true } else { false } }
     }
     private func rows(_ items: [ConvItem]) -> [Row] {
         var all = items.enumerated().map { Row.item($0.element, index: $0.offset) }
         if case .general(let ws) = resolved {
             all += ConversationRules.startedChips(messages: model.messages, workspace: ws, key: { model.ticket(ws, $0)?.key }).map(Row.chip)
-            all.sort { ($0.at, $0.id) < ($1.at, $1.id) }
+            // By time; at the same time a chip comes after the message it belongs to.
+            all.sort { ($0.at, $0.isChip ? 1 : 0, $0.id) < ($1.at, $1.isChip ? 1 : 0, $1.id) }
         }
         return all
     }
@@ -202,10 +213,12 @@ struct ConversationView: View {
                     atBottom = bottom
                     if bottom { rememberRead() }
                 }
-                .overlay(alignment: .bottomTrailing) {
+                // Not an overlay: the button takes its own row above the composer, so it never covers a bubble.
+                .safeAreaInset(edge: .bottom, spacing: 0) {
                     if !atBottom {
                         Button { scroll(proxy, to: "conversation-bottom", anchor: .bottom) } label: { JumpToLatestButton(count: unread(items)) }
-                            .buttonStyle(PressStyle()).accessibilityIdentifier("jump-latest").padding(12)
+                            .buttonStyle(PressStyle()).accessibilityIdentifier("jump-latest")
+                            .frame(maxWidth: .infinity, alignment: .trailing).padding(.horizontal, 12).padding(.bottom, 12)
                     }
                 }
                 .onChange(of: items.last?.id) { _, _ in
@@ -219,6 +232,14 @@ struct ConversationView: View {
                     if scrolledQuestion != model.focusedQuestion { focusQuestion(model.focusedQuestion, proxy: proxy) }
                 }
         }
+    }
+    /// A tap on a picture, file or preview in the conversation: `id` is a blob id, or the id of a topic attachment / question preview.
+    private func openArtifact(_ id: String) {
+        let found = model.conversationItems(resolved).lazy.flatMap(\.attachments).first { $0.blobId == id }.map { ArtifactItem($0, in: resolved) }
+            ?? ticket?.view?.attachments.first { $0.id == id || $0.blobId == id || $0.artifactId == id }.map { ArtifactItem($0, in: resolved) }
+            ?? model.tickets.lazy.compactMap { $0.view?.attachments.first { $0.id == id } }.first.map { ArtifactItem($0, in: resolved) }
+        guard let item = found else { return }
+        if item.kind == .link { if let url = item.url { openURL(url) } } else { viewing = item }
     }
     private func chipView(_ chip: StartedChip) -> some View {
         Button { model.path.append(.ticket(workspace: chip.workspace, ticket: chip.ticket)) } label: {
@@ -237,7 +258,7 @@ struct ConversationView: View {
             let stale = ConversationRules.isStale(index: index, in: items)
             QuestionCard(item: item, conversationId: resolved, onReply: { question in
                 reply = ReplyPreview(messageId: question.id, title: "Answering \(workspaceName)", quote: question.message.body.text)
-            }, onOpenArtifact: hooks.openArtifact, isStale: stale)
+            }, onOpenArtifact: openArtifact, isStale: stale)
         } else if item.side == .me && item.voice != nil {
             OwnVoiceBubble(item: item, conversationLanguage: language, onRetry: retry, onDiscard: discard, onReply: replyHere, waitNote: wait)
         } else if item.side == .them && item.canPlay && item.speak != nil {
@@ -245,7 +266,7 @@ struct ConversationView: View {
         } else {
             MessageBubble(item: item, conversationId: resolved, conversationLanguage: language, workspaceName: workspaceName,
                           quotedText: item.replyTo.flatMap { key in items.first { $0.id == key }?.preview },
-                          onRetry: retry, onDiscard: discard, onOpenArtifact: hooks.openArtifact, onReply: replyHere, waitNote: wait)
+                          onRetry: retry, onDiscard: discard, onOpenArtifact: openArtifact, onReply: replyHere, waitNote: wait)
         }
     }
     private var emptyState: some View {

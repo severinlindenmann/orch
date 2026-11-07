@@ -10,6 +10,7 @@ enum Theme {
     static let borderStrong = Color(hex: 0x667180)
     static let text = Color(hex: 0xe8eaed), muted = Color(hex: 0x9aa3ad)
     static let brand = Color(hex: 0x2fc6a3), onBrand = Color(hex: 0x06231c)
+    static let online = brand
     static let warn = Color(hex: 0xfbbf24), danger = Color(hex: 0xf87171), purple = Color(hex: 0xb392f0)
 }
 
