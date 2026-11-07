@@ -93,6 +93,7 @@ struct Composer: View {
             if target == nil { Text("Starting topic…").themeFont(13).foregroundStyle(Theme.muted) }
             else if let note, !hasAudio { Text(note).themeFont(13).foregroundStyle(Theme.muted) }
         }.padding(.horizontal, 12).padding(.vertical, 8).background(Theme.surface)
+            .accessibilityElement(children: .contain).accessibilityIdentifier("composer")
             .foregroundStyle(Theme.text).tint(Theme.brand)
             .sensoryFeedback(.success, trigger: success).sensoryFeedback(.warning, trigger: cancellation)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: hasAudio)

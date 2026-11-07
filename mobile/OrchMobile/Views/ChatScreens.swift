@@ -52,7 +52,7 @@ struct ConversationView: View {
             OfflineBanner()
             if let ticket { summary(ticket) }
             messages
-        }.background(Theme.bg).foregroundStyle(Theme.text)
+        }.background(Theme.bg).foregroundStyle(Theme.text).accessibilityElement(children: .contain).accessibilityIdentifier("conversation-view")
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -77,7 +77,6 @@ struct ConversationView: View {
             }
             .sheet(isPresented: $tasksShown) { tasksSheet }
             .task { await model.watchWhileOpen() }
-            .accessibilityIdentifier("conversation-view")
     }
     @ViewBuilder private var presence: some View {
         if case .starting = resolved { Text("Starting topic…").themeFont(13).foregroundStyle(Theme.muted) }
