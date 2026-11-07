@@ -57,12 +57,9 @@ struct WorkspaceView: View {
                     .foregroundStyle(Theme.muted).listRowBackground(Theme.surface)
                     .accessibilityIdentifier("done-toggle")
                     .accessibilityValue(showDone ? "Expanded" : "Collapsed")
-                }
-                if showDone {
-                    ForEach(finished, id: \.status) { group in
-                        Section {
-                            ForEach(group.topics) { topic in topicRow(topic) }
-                        } header: { Text(group.status.label).themeFont(13, .semibold).foregroundStyle(Theme.muted) }
+                    // The finished chats sit directly under the toggle, no second "Done" header (owner 2A).
+                    if showDone {
+                        ForEach(finished.flatMap(\.topics)) { topic in topicRow(topic) }
                     }
                 }
             }
