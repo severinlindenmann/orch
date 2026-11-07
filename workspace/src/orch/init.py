@@ -18,6 +18,7 @@ def init(root: Path, code: str | None = None) -> list[str]:
     if code is not None or not config.workspace_code(root):
         code = config.set_code(root, code or config.suggest_code(root.resolve().name))
     code = config.workspace_code(root)
+    skills.ensure_gitignore(root)  # local files stay out of git before anything else is written
     src = skills.packaged_skills_dir() / "orch"
     skills.install_skill(root, "orch", src)
     skills.set_block(root, "orch", skills.read_block(src, "orch"))

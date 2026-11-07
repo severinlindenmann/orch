@@ -463,3 +463,11 @@ def test_addon_ignore_lines_that_name_a_place_are_accepted(proj):
     addons._set_gitignore(proj, "ok", ["received/", ".orch/outbox/", "notes/*.tmp", ".orch/relay.lock*"])
     ex = (proj / ".git/info/exclude").read_text(encoding="utf-8")
     assert "/received/" in ex and "/.orch/outbox/" in ex and "/notes/*.tmp" in ex
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink setup")
+def test_linked_dot_folder_outside_the_project_is_not_written_into(proj, run, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("dotfiles")
+    os.symlink(outside, proj / ".claude", target_is_directory=True)  # `skills` does not exist there yet
+    code, _, err = run("init")
+    assert code == 2 and "outside" in err and list(outside.iterdir()) == []

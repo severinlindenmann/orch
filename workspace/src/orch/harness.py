@@ -331,7 +331,7 @@ def link_skill(root: Path, where: str, name: str, target: Path | None = None) ->
     """<where>/<name> -> .orch/harness/skills/<name> (or target). Never replaces a folder or file that is not orch's."""
     target = target or harness_dir(root) / "skills" / name
     parent = root / where
-    if parent.exists() and not _inside(root, parent):
+    if not _inside(root, parent):  # resolve() follows a linked ancestor even when the folder is not there yet
         raise Refused(f"{parent} points outside this project; orch will not write there.")
     if is_link(parent):
         return  # the team links the whole folder (to .agents/skills or elsewhere): nothing of ours goes into it
