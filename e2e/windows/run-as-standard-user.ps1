@@ -3,8 +3,9 @@
 # user, grants it "log on as a batch job" and sets the machine policy.
 #   run-as-standard-user.ps1 -Ref <branch|sha> [-Installer <path to install.ps1>] [-Repo <local source folder>]
 #                            [-Flows standard-user,scheduler,dashboard]   (the *-flow.ps1 scripts to run, in this order)
+#                            [-EnvFile <KEY=VALUE lines>]   (set for the flows, e.g. relay settings from relay-pair.py)
 param([Parameter(Mandatory)] [string]$Ref, [string]$Installer = "", [string]$Repo = "",
-    [string[]]$Flows = @("standard-user", "scheduler"), [int]$MaxSec = 1800)
+    [string[]]$Flows = @("standard-user", "scheduler"), [int]$MaxSec = 1800, [string]$EnvFile = "")
 $ErrorActionPreference = "Stop"
 # Windows PowerShell 5.1 leaves $PSScriptRoot empty in param defaults (C:\..\..\install.ps1); the body has it.
 if (-not $Installer) { $Installer = "$PSScriptRoot\..\..\install.ps1" }
@@ -39,6 +40,11 @@ $path = ([Environment]::GetEnvironmentVariable("Path", "Machine") -split ";" |
     Where-Object { $_ -and -not (Test-Path (Join-Path $_ "git.exe")) }) -join ";"
 # Passed as a command, not -File: a .ps1 file would itself be refused under Restricted (irm | iex is not).
 $repoSet = if ($Repo) { "`$env:ORCH_REPO = '$Repo'; " } else { "" }
+if ($EnvFile) {  # values may hold tokens: they go into the task's command, never into the log
+    foreach ($line in Get-Content $EnvFile) {
+        if ($line -match '^([A-Z][A-Z0-9_]*)=(.*)$') { $repoSet += "`$env:$($Matches[1]) = '$($Matches[2].Replace("'", "''"))'; " }
+    }
+}
 $cmd = "`$env:Path = '$path'; $repoSet`$env:ORCH_REF = '$Ref'; `$env:ORCH_INSTALL_PS1 = '$pub\$installerName'; " +
     (($Flows | % { "Invoke-Expression (Get-Content '$pub\$_-flow.ps1' -Raw)" }) -join "; ")
 $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))

@@ -35,11 +35,11 @@ $p = "$env:USERPROFILE\orch-dash"; New-Item -ItemType Directory -Force $p | Out-
 O init | Out-String | % { L $_ }
 O ticket new "`"$title`"" | Out-String | % { L $_ }
 Check ($LASTEXITCODE -eq 0) "a ticket for the dashboard"
-if (-not ("$(O addon list)" -match "dashboard")) {
-    $since = (Results "$env:USERPROFILE\.orch-tool\finish.log").Count  # the finish log is shared with earlier flows
-    $out = O addon add dashboard --yes | Out-String; L $out
-    Check (WaitFinish $out $since) "dashboard add-on installed"
-}
+# Always add: "addon list" also names an add-on installed for another workspace (standard-user-flow installs the
+# dashboard for its own folder); this new folder still has to turn it on.
+$since = (Results "$env:USERPROFILE\.orch-tool\finish.log").Count  # the finish log is shared with earlier flows
+$out = O addon add dashboard --yes | Out-String; L $out
+Check ($LASTEXITCODE -eq 0 -and (WaitFinish $out $since)) "dashboard add-on on in this workspace"
 $out = O start --no-open --json | Out-String; L $out
 $url = [regex]::Match($out, 'http://127\.0\.0\.1:\d+').Value
 Check ([bool]$url) "orch start runs the dashboard"

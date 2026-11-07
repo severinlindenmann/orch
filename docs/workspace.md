@@ -145,6 +145,8 @@ flow (install, init, ticket, dashboard add-on in the background, update) and the
 repeat and a one-time wake-up in a named time zone start a fake agent). On a winvm clone run the same script; add
 `-Flows dashboard` for the dashboard smoke (Playwright inside the machine opens Home, Tickets, a ticket, General and
 Settings, and at 720 and 390 px; screenshots end up in `C:\Users\Public\orchsmoke\shots`).
+`-Flows relay -EnvFile <file>` adds a relay round trip with a Mac workspace: `e2e/windows/relay-pair.py` makes the two
+workspaces on a relay and writes the file, `e2e/windows/relay-peer.py` answers on the Mac (text and file back).
 
 ## Not included
 Signing, approvals, planning gates, fixed requirements, durations, a server.
