@@ -106,4 +106,9 @@ def test_snapshot_preserves_project_and_local_reference_text(ws):
     html = render_snapshot(ws)
     data = json.loads(re.search(r"window\.ORCH_SNAPSHOT=(.*?);</script>", html, re.DOTALL).group(1))
     refs = next(t for t in data["tickets"] if t["id"] == "t_weekly01")["refs"]
-    assert [r["path"] for r in refs] == ["docs/notes.md", "/outside/private.txt"]
+    assert [r["path"] for r in refs] == ["docs/notes.md"]  # a shared snapshot carries no local path
+    assert "/outside/private.txt" not in html
+    from orch_dashboard.data import load_state
+
+    live = next(t for t in load_state(ws, with_settings=True)["tickets"] if t["id"] == "t_weekly01")["refs"]
+    assert [r["path"] for r in live] == ["docs/notes.md", "/outside/private.txt"]
