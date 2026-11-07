@@ -65,7 +65,12 @@ struct NewTopicScreen: View {
                 try? await Task.sleep(for: .milliseconds(700))
                 await model.reloadMessages(); await model.refreshUpdates()
                 guard model.path == [.workspace(ws)] else { return }   // the person went elsewhere
-                if case .topic(_, let t) = model.resolve(starting) { model.path = [.workspace(ws), .ticket(workspace: ws, ticket: t)]; return }
+                var ticket: String? = nil
+                if case .topic(_, let t) = model.resolve(starting) { ticket = t }
+                else if case .starting(_, let key) = starting, let id = model.messages.first(where: { ($0.clientId ?? $0.message.body.clientId) == key })?.id {
+                    ticket = model.ack(for: id)?.ticket   // the ack may arrive as a work update before it shows as a message
+                }
+                if let ticket { model.path = [.workspace(ws), .ticket(workspace: ws, ticket: ticket)]; return }
             }
         }
     }
