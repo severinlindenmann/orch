@@ -474,10 +474,12 @@ private struct MediaMapPicture: View {
     private var key: String { String(format: "%.5f,%.5f", location.lat, location.lon) }
 
     var body: some View {
-        Group {
-            if let picture { Image(uiImage: picture).resizable().scaledToFill() }
-            else { Theme.surface2.overlay { Image(systemName: "mappin.and.ellipse").foregroundStyle(Theme.brand).themeFont(28) } }
-        }
+        // The picture only fills an overlay: a scaledToFill image as the view itself made the card wider than the screen.
+        Theme.surface2
+            .overlay {
+                if let picture { Image(uiImage: picture).resizable().scaledToFill() }
+                else { Image(systemName: "mappin.and.ellipse").foregroundStyle(Theme.brand).themeFont(28) }
+            }
         .frame(height: 130).frame(maxWidth: .infinity)
         .clipped().clipShape(RoundedRectangle(cornerRadius: 10))
         .accessibilityLabel("Map of \(location.label ?? coordinateLabel(location))")

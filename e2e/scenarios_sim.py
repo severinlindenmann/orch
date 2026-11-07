@@ -56,7 +56,8 @@ def sim(e):
 
     def ph():
         """The id of the paired Simulator phone."""
-        return [p["id"] for p in e.rel.admin.call("GET", "/admin/api/phones").json()["items"] if p["paired"]][-1]
+        return [p["id"] for p in e.rel.admin.call("GET", "/admin/api/phones").json()["items"]
+                if p["paired"] and p["name"] == "Simulator phone"][-1]
 
     def ws_send(text, *flags):
         """Workspace -> phone text (orch relay send); returns what orch printed."""
