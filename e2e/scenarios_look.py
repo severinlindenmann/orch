@@ -109,7 +109,7 @@ def look2(e):
     import shutil
     from pathlib import Path
 
-    pw = os.environ.get("PW_DIR") or next((str(p) for p in (Path.home() / "orch-dev" / "e2e" / "dashboard" / "node_modules",
+    pw = os.environ.get("PW_DIR") or next((str(p) for p in (Path(os.environ.get("E2E_REAL_HOME") or Path.home()) / "orch-dev" / "e2e" / "dashboard" / "node_modules",
                                                            Path(__file__).parent / "walkthrough" / "node_modules") if (p / "playwright").is_dir()), "")
     node = shutil.which("node", path=os.environ.get("PATH", "") + os.pathsep + e.path)
     if not pw or not node:
@@ -131,7 +131,9 @@ def look2(e):
                     urls[r["name"]] = a["url"]
         check(set(urls) >= {n, other}, f"both dashboards running: {urls}")
         shots = os.environ.get("LOOK2_SHOTS", "")
-        env = {**e.env, "PW_DIR": pw}
+        real = Path(os.environ.get("E2E_REAL_HOME") or Path.home())  # the browsers live in the real home, not the test home
+        cache = next((str(c) for c in (real / "Library/Caches/ms-playwright", real / ".cache/ms-playwright") if c.is_dir()), "")
+        env = {**e.env, "PW_DIR": pw, **({"PLAYWRIGHT_BROWSERS_PATH": cache} if cache else {})}
         rc, out, err = e.sh([node, str(Path(__file__).parent / "look_dash.cjs"), urls[n], shots, "Product work, now with a Wallet"], env=env, timeout=180)
         check(rc == 0, f"browser half failed: {(err or out)[-400:]}")
         got = json.loads(out.strip().splitlines()[-1])
