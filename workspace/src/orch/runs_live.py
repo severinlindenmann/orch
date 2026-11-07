@@ -307,20 +307,24 @@ def event(
     if not rec or rec.get("mode") != "live":
         return 0
     tid, run = rec["ticket"], rec["run"]
-    if kind in ("session", "idle", "working"):
-        tickets.resume_after_start_wait(root, tid, f"agent:{rec['agent']}")  # the tool is up
+
+    def up(state: str) -> None:
+        # tool is up: resume after the state is written (else check_starting could win), for this run
+        if _set_state(root, tid, run, state):
+            tickets.resume_after_start_wait(root, tid, f"agent:{rec['agent']}")
+
     if kind == "session":
         if session_id and adapters.SESSION_RE.match(session_id):
             tickets.record_session(root, tid, rec["agent"], session_id, runs.host())
-        _set_state(root, tid, run, "idle")  # the tool is up and waiting for its first input
+        up("idle")  # the tool is up and waiting for its first input
     elif kind == "idle":
-        _set_state(root, tid, run, "idle")
+        up("idle")
     elif kind == "attention" and idle_notice(rec["agent"], root, payload):
         # "still waiting for your input": input may go in only if the run is idle already (after Stop); in any
         # other state (a dialog may be open) nothing changes, and the next Stop sets idle.
         return deliver(root, tid)
     elif kind == "working":  # a prompt went in (also one a person typed in the live session): never paste now
-        _set_state(root, tid, run, "working")
+        up("working")
         return 0
     else:  # a permission prompt or any other notice: a person answers it; nothing is pasted
         _set_state(root, tid, run, "attention")

@@ -456,3 +456,30 @@ def test_an_agent_that_cannot_be_launched_does_not_leave_the_ticket_working(proj
     assert rc != 0
     t = tickets.load(proj, tid)
     assert t["status"] == "waiting" and "before it got going" in t["waiting_on"]["ref"]
+
+
+def test_wait_for_start_moves_only_a_working_ticket(proj, run):
+    tid = _ticket(run)
+    for status in ("done", "review"):
+        run("ticket", "status", tid, status, "--by", "human:t")
+        tickets.wait_for_start(proj, tid, "x", "agent:claude")
+        assert tickets.load(proj, tid)["status"] == status
+
+
+def test_a_hook_of_an_old_run_does_not_resume_and_a_person_choice_stays(proj, run, monkeypatch):
+    tid, _ = _screens(proj, run, monkeypatch, [LOGIN_SCREEN], age=5)
+    runs_live.check_starting(proj, runs.read(proj, tid), answered=[])
+    runs_live.event(proj, "idle", "r_oldrun", tid, None)
+    assert tickets.load(proj, tid)["status"] == "waiting"  # the hook named another run
+    tickets.set_status(proj, tid, "waiting", "human:t")  # the person keeps it waiting
+    assert "start" not in tickets.load(proj, tid)["waiting_on"]
+    run("run", "event", "--run", runs.read(proj, tid)["run"], "--kind", "idle")
+    assert tickets.load(proj, tid)["status"] == "waiting"
+
+
+def test_a_hook_resumes_only_after_the_state_is_written(proj, run, monkeypatch):
+    tid, _ = _screens(proj, run, monkeypatch, [LOGIN_SCREEN], age=5)
+    runs_live.check_starting(proj, runs.read(proj, tid), answered=[])
+    monkeypatch.setattr(runs_live, "_set_state", lambda *a, **k: False)  # another run holds the claim
+    runs_live.event(proj, "idle", None, tid, None)
+    assert tickets.load(proj, tid)["status"] == "waiting"

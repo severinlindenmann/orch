@@ -612,6 +612,8 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
         target, actor = _finish_status(root, ticket, status, by)
         if target != "waiting":
             ticket["waiting_on"] = None
+        elif isinstance(ticket.get("waiting_on"), dict):
+            ticket["waiting_on"].pop("start", None)  # a person's choice: no hook turns it back
         old = ticket["status"]
         ticket["status"] = target
         if old != target and target == status:
