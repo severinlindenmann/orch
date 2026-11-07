@@ -31,6 +31,7 @@ struct WorkspaceView: View {
         List {
             Group {
                 ModelMessage()
+                MobileModeBanner(workspaceId: workspaceId)
                 if parts?.general ?? true { generalCard }
                 segments
             }.listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))

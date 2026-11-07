@@ -668,7 +668,7 @@ def start(
         p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name)
         log_rel = f".orch/run/logs/{tid}-{rec['run']}.log"
         (root / log_rel).parent.mkdir(parents=True, exist_ok=True)
-        cmd = [sys.executable, "-m", "orch", "run", "_wrap", rec["run"], "--ticket", tid, "--agent", name]
+        cmd = procs.orch_python_argv("run", "_wrap", rec["run"], "--ticket", tid, "--agent", name)
         cmd += ["--fresh"] if fresh else []
         for pat in allow:
             cmd += ["--allow", pat]

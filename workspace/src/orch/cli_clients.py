@@ -120,6 +120,7 @@ def add_parsers(sub, common) -> None:
     rel.add_parser("whoami", parents=[common], help="show who you are and which phones are paired")
     rel.add_parser("status", parents=[common], help="is this folder connected to a relay (no network)")
     rel.add_parser("view", parents=[common], help="the Relay tab of the dashboard (read-only, no network)")
+    _add_mobile(rel, common)
     _add_profile(rel)
     x = rel.add_parser("inbox", parents=[common], help="pull new messages")
     x.add_argument("--wait", type=int, default=0, help="wait up to N seconds (max 30)")
@@ -259,11 +260,60 @@ def run_publish(args, root: Path, out) -> None:
         out(args, {"ok": True, "deleted": args.id}, f"Deleted the {kind} {args.id}.")
 
 
+def _add_mobile(rel, common) -> None:
+    mob = rel.add_parser(
+        "mobile",
+        parents=[common],
+        help="Mobile mode: questions also go to the phone, this computer stays awake",
+    ).add_subparsers(dest="mobile", required=True)
+    x = mob.add_parser("on", parents=[common], help="turn Mobile mode on")
+    x.add_argument(
+        "--hours", type=int, help="switch off by itself after 4, 8, 12 or 24 hours (default: the saved one)"
+    )
+    mob.add_parser("off", parents=[common], help="turn Mobile mode off")
+    mob.add_parser("status", parents=[common], help="is Mobile mode on, until when")
+    x = mob.add_parser("hours", parents=[common], help="save how long Mobile mode stays on by default")
+    x.add_argument("hours", type=int)
+    mob.add_parser("ack", parents=[common], help="dismiss the 'Mobile mode ended' notice")
+    mob.add_parser("keeper", parents=[common], help=argparse.SUPPRESS)
+
+
+def _mobile_line(st: dict) -> str:
+    if not st["on"]:
+        return (st.get("ended") or {}).get("text") or "Mobile mode is off."
+    awake = "" if st["awake"] != "could_not_keep_awake" else " Could not keep this computer awake."
+    return f"Mobile mode is on since {st['since']}, ends {st['ends_at']}.{awake}"
+
+
+def run_mobile(args, root: Path, out) -> None:
+    from orch import mobile_mode as mm
+
+    sub = args.mobile
+    if sub == "keeper":
+        mm.run_keeper(root)
+        return
+    if sub == "on":
+        st = mm.turn_on(root, args.hours)
+    elif sub == "off":
+        st = mm.turn_off(root)
+    elif sub == "hours":
+        mm.set_default_hours(root, args.hours)
+        st = mm.status(root)
+    elif sub == "ack":
+        mm.acknowledge_ended(root)
+        st = mm.status(root)
+    else:
+        st = mm.status(root)
+    out(args, st, _mobile_line(st))
+
+
 def run_relay(args, root: Path, out) -> None:
     sub = args.sub
     args._root = root
     if sub == "profile":
         return _run_profile(args, relay, out)
+    if sub == "mobile":
+        return run_mobile(args, root, out)
     t = getattr(args, "ticket", None)
     if sub not in ("connect", "status", "outbox", "view"):
         _resend_waiting(root)

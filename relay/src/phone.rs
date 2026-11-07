@@ -26,6 +26,7 @@ pub fn router() -> Router<AppState> {
         .route("/v1/phone/questions", get(questions))
         .route("/v1/phone/answer", post(answer))
         .route("/v1/phone/send", post(send))
+        .route("/v1/phone/control", post(control))
         .route("/v1/phone/messages", get(messages))
         .route("/v1/phone/updates", get(updates))
         .route(
@@ -161,6 +162,7 @@ async fn workspaces(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value
         if let Some(mut card) = card {
             card["open_questions"] = open.iter().filter(|m| &m.from == w).count().into();
             card["muted_until"] = store::muted_until(&c, &pid, w);
+            card["mobile_mode"] = store::mobile_mode(&c, w);
             items.push(card);
         }
     }
@@ -490,7 +492,9 @@ async fn blob(
 
 const MSG_SCHEMA_ID: &str = "https://orch.severin.io/contracts/message.schema.json";
 const PHONE_SCHEMA_ID: &str = "https://orch.severin.io/contracts/phone-api.schema.json";
-const DEFS: [&str; 4] = [
+const DEFS: [&str; 6] = [
+    "heartbeat_request",
+    "control_request",
     "send_request",
     "answer_request",
     "settings_patch_request",
@@ -522,7 +526,7 @@ fn schemas() -> &'static HashMap<&'static str, jsonschema::JSONSchema> {
     })
 }
 
-fn check(def: &str, v: &Value) -> Res<()> {
+pub(crate) fn check(def: &str, v: &Value) -> Res<()> {
     match schemas()[def].validate(v) {
         Ok(()) => Ok(()),
         Err(errs) => Err(invalid(
@@ -1200,8 +1204,13 @@ pub async fn push_message(app: &AppState, q: &Value) {
         payload["type"] = "text".into();
         payload["text_id"] = q["id"].clone();
     }
+    send_pushes(app, targets, &payload).await;
+}
+
+/// Send one payload to each (sandbox, device token); a dead token is forgotten.
+pub async fn send_pushes(app: &AppState, targets: Vec<(bool, String)>, payload: &Value) {
     for (sandbox, token) in targets {
-        if let Err(e) = app.pusher.send(sandbox, &token, &payload).await {
+        if let Err(e) = app.pusher.send(sandbox, &token, payload).await {
             tracing::warn!("push failed: {}", e.message);
             if e.dead_token {
                 let c = app.db.lock().unwrap();
@@ -1212,6 +1221,60 @@ pub async fn push_message(app: &AppState, q: &Value) {
             }
         }
     }
+}
+
+/// `POST /v1/phone/control`: a phone asks a workspace on its list for one thing (`mobile_mode_off`). The relay builds
+/// the `control` message itself (`from` = the authenticated phone); nobody else can make this type.
+async fn control(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    body: Bytes,
+) -> Res<(StatusCode, Json<Value>)> {
+    let v = parse_body(&body)?;
+    let (id, cid) = {
+        let c = app.db.lock().unwrap();
+        let (pid, _, ws) = auth::phone(&c, &h)?;
+        if let Some(cid) = v["client_id"].as_str() {
+            if let Some(old) = client_dup(&c, &pid, cid)? {
+                return Ok((
+                    StatusCode::OK,
+                    Json(json!({"id": old, "client_id": cid, "duplicate": true})),
+                ));
+            }
+        }
+        check("control_request", &v)?;
+        let to = v["to"].as_str().unwrap_or("");
+        if !ws.iter().any(|w| w == to) || !store::ws_exists(&c, to) {
+            return Err(not_allowed("This phone may not send to that workspace."));
+        }
+        let mut b = serde_json::Map::new();
+        b.insert("control".into(), v["control"].clone());
+        if let Some(cid) = v["client_id"].as_str() {
+            b.insert("client_id".into(), cid.into());
+        }
+        let tx = c.unchecked_transaction()?;
+        let m = store::system_message(
+            &c,
+            &app.key,
+            &pid,
+            to,
+            "control",
+            None,
+            None,
+            Value::Object(b),
+        )?;
+        let id = m["id"].as_str().unwrap().to_string();
+        if let Some(cid) = v["client_id"].as_str() {
+            remember_client_id(&c, &pid, cid, &id)?;
+        }
+        tx.commit()?;
+        (id, v["client_id"].clone())
+    };
+    app.notify.notify_waiters();
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({"id": id, "client_id": cid})),
+    ))
 }
 
 /// `GET /v1/phone/speech/<message_id>`: the text read aloud as mp3 (see `speech::generate`).
