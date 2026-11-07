@@ -686,6 +686,11 @@ def parse_xcode_tests(text: str) -> list[dict]:
     return out
 
 
+def _host_env() -> dict:
+    """Environment for host tools (simctl, xcodegen, xcodebuild): the real HOME, because the Simulators live there (the harness itself runs with a throw-away HOME)."""
+    return {**os.environ, "HOME": os.environ.get("E2E_REAL_HOME") or str(Path.home())}
+
+
 def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
     """Phone lane on the V3-SIM driver (PR #207): `e2e/run.sh V3-SIM` starts its own local relay + workspace and writes ctl/info.json;
     RealRelayE2ETests (XCUITest) drives the app in the Simulator against it. One harness step per XCTest case, shots collected.
@@ -707,21 +712,21 @@ def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
     if not udid:
         # this lane's own Simulator (never one that is already booted: other lanes drive those); deleted by its exact UDID at the end
         r = subprocess.run(["xcrun", "simctl", "create", "e2e-full-phone", "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-                            "com.apple.CoreSimulator.SimRuntime.iOS-27-0"], capture_output=True, text=True)
+                            "com.apple.CoreSimulator.SimRuntime.iOS-27-0"], env=_host_env(), capture_output=True, text=True)
         udid = r.stdout.strip()
         if r.returncode or not udid:
             L.step("P00", "Create the lane's Simulator", lambda st: (_ for _ in ()).throw(RuntimeError("simctl create failed: " + (r.stderr or r.stdout)[-200:])))
             return L
         own_sim = True
-        subprocess.run(["xcrun", "simctl", "boot", udid], capture_output=True)
-        subprocess.run(["xcrun", "simctl", "bootstatus", udid, "-b"], capture_output=True, timeout=300)
+        subprocess.run(["xcrun", "simctl", "boot", udid], env=_host_env(), capture_output=True)
+        subprocess.run(["xcrun", "simctl", "bootstatus", udid, "-b"], env=_host_env(), capture_output=True, timeout=300)
         L.notes.append(f"own Simulator e2e-full-phone {udid} (deleted at the end)")
     try:
         return _lane_p_run(L, env, out, repo, udid)
     finally:
         if own_sim:
-            subprocess.run(["xcrun", "simctl", "shutdown", udid], capture_output=True)
-            subprocess.run(["xcrun", "simctl", "delete", udid], capture_output=True)
+            subprocess.run(["xcrun", "simctl", "shutdown", udid], env=_host_env(), capture_output=True)
+            subprocess.run(["xcrun", "simctl", "delete", udid], env=_host_env(), capture_output=True)
 
 
 def _lane_p_run(L, env, out: Path, repo: Path, udid: str) -> Lane:
@@ -732,7 +737,7 @@ def _lane_p_run(L, env, out: Path, repo: Path, udid: str) -> Lane:
 
     def start(st):
         log = open(out / "v3sim.log", "w")
-        p = subprocess.Popen(["sh", str(repo / "e2e" / "run.sh"), "V3-SIM"], stdout=log, stderr=log, cwd=repo, start_new_session=True)
+        p = subprocess.Popen(["sh", str(repo / "e2e" / "run.sh"), "V3-SIM"], stdout=log, stderr=log, cwd=repo, start_new_session=True, env=_host_env())
         host["p"] = p
         end = time.time() + 600
         while time.time() < end:
@@ -751,10 +756,16 @@ def _lane_p_run(L, env, out: Path, repo: Path, udid: str) -> Lane:
         return L
     try:
         xo = out / "xcodebuild.log"
+        import tempfile
+        dd = tempfile.mkdtemp(prefix=".tf-p-dd-", dir=str(Path(os.environ.get("E2E_REAL_HOME") or Path.home())))  # build products: not in the report
+        g = subprocess.run(["xcodegen", "generate"], cwd=repo / "mobile", env=_host_env(), capture_output=True, text=True)
+        if g.returncode:
+            raise RuntimeError("xcodegen failed: " + (g.stderr or g.stdout)[-300:])
         t0 = time.time()
         r = subprocess.run(["xcodebuild", "test", "-project", "OrchMobile.xcodeproj", "-scheme", "OrchMobile", "-destination", f"id={udid}",
+                            "-derivedDataPath", dd, "-parallel-testing-enabled", "NO",
                             "-only-testing:OrchMobileUITests/RealRelayE2ETests"], cwd=repo / "mobile", capture_output=True, text=True,
-                           timeout=3600, env={**os.environ, "TEST_RUNNER_ORCH_E2E_CTL": str(host["ctl"]),
+                           timeout=3600, env={**_host_env(), "TEST_RUNNER_ORCH_E2E_CTL": str(host["ctl"]),
                                               "TEST_RUNNER_ORCH_SHOTS": str(shots), "ORCH_E2E_UDID": udid})
         xo.write_text(r.stdout + r.stderr)
         cases = parse_xcode_tests(r.stdout)
@@ -775,6 +786,11 @@ def _lane_p_run(L, env, out: Path, repo: Path, udid: str) -> Lane:
             L.step("P02", "XCTest run", lambda st: (_ for _ in ()).throw(RuntimeError("no test cases in the xcodebuild output: " + r.stdout[-300:])))
     finally:
         _p_stop(host)
+        try:
+            import shutil as _sh
+            _sh.rmtree(dd)  # the exact temp folder made above
+        except (NameError, OSError):
+            pass
     return L
 
 
