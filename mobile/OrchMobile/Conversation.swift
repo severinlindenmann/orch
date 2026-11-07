@@ -27,15 +27,28 @@ enum ConversationID: Hashable, Sendable {
 }
 
 enum TopicStatus: String, Sendable, CaseIterable {
-    case working, waitingOnYou, done, stopped, didntWork
+    case working, waitingOnYou, review, backlog, done, stopped, didntWork
+    /// Short word: group headers and the info summary.
     var label: String {
-        switch self { case .working: "Working"; case .waitingOnYou: "Waiting on you"; case .done: "Done"; case .stopped: "Stopped"; case .didntWork: "Didn't work" }
+        switch self {
+        case .working: "Working"; case .waitingOnYou: "Waiting"; case .review: "Review"; case .backlog: "Backlog"
+        case .done: "Done"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
+        }
+    }
+    /// The chip words of the status workflow (PLAN-A section 5).
+    var chip: String {
+        switch self {
+        case .working: "Claude is working"; case .waitingOnYou: "Waiting for your answer"; case .review: "Check this"; case .backlog: "Backlog"
+        case .done: "Done"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
+        }
     }
     init(_ t: Ticket) {
         switch t.status {
         case .needsYou: self = .waitingOnYou
         case .working: self = .working
-        case .done: self = t.kind == "failure" ? .didntWork : (t.kind == "stopped" ? .stopped : .done)
+        case .review: self = .review
+        case .backlog: self = .backlog
+        case .done: self = t.view?.status == "dropped" ? .stopped : t.kind == "failure" ? .didntWork : (t.kind == "stopped" ? .stopped : .done)
         }
     }
 }

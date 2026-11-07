@@ -16,7 +16,7 @@ final class ArchiveUITests: XCTestCase {
     }
     private func launch() -> XCUIApplication {
         let app = start(["-openChat", "ws_pilatus001"])
-        let done = app.buttons["segment-done"]
+        let done = app.buttons["done-toggle"]
         XCTAssertTrue(done.waitForExistence(timeout: 20), "workspace screen")
         done.tap()
         return app
