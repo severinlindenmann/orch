@@ -1,0 +1,1 @@
+{"name":"orch-e2e-full-web","private":true,"type":"module","dependencies":{"playwright":"1.55.0","@axe-core/playwright":"4.10.2"}}

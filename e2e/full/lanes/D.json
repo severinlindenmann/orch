@@ -1,0 +1,47 @@
+{
+ "lane": "D",
+ "title": "Publish walk",
+ "base": "publish_admin",
+ "viewports": [
+  1280,
+  720,
+  390
+ ],
+ "steps": [
+  {
+   "id": "D01",
+   "name": "Publish portal loads",
+   "page": "publish-home",
+   "expect": "portal with Add your first workspace",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    }
+   ]
+  },
+  {
+   "id": "D02",
+   "name": "Click every control of the publish portal",
+   "page": "publish-home",
+   "tags": [
+    "census"
+   ],
+   "expect": "all controls clicked",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/"
+    },
+    {
+     "do": "click_all_census",
+     "page": "publish-home"
+    }
+   ]
+  }
+ ]
+}

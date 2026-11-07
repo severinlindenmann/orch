@@ -1,0 +1,48 @@
+{
+ "lane": "C",
+ "title": "Relay admin walk",
+ "base": "relay_admin",
+ "viewports": [
+  1280,
+  720,
+  390
+ ],
+ "steps": [
+  {
+   "id": "C01",
+   "name": "Relay admin overview loads",
+   "quick": false,
+   "page": "relay-home",
+   "expect": "overview with the workspace map",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    }
+   ]
+  },
+  {
+   "id": "C02",
+   "name": "Click every control of the relay admin",
+   "page": "relay-home",
+   "tags": [
+    "census"
+   ],
+   "expect": "all controls clicked",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/"
+    },
+    {
+     "do": "click_all_census",
+     "page": "relay-home"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,292 @@
+{
+ "lane": "A",
+ "title": "Workspace A browser walk (Pilatus dashboard)",
+ "base": "pilatus",
+ "viewports": [
+  1280,
+  720,
+  390
+ ],
+ "census_skip": [
+  "settings\\|.*\\|.*(Full|full)"
+ ],
+ "steps": [
+  {
+   "id": "A01",
+   "name": "Home empty state and title",
+   "quick": true,
+   "page": "home",
+   "tags": [
+    "win"
+   ],
+   "expect": "Home says Needs you and the Today heading; no console error",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/"
+    },
+    {
+     "do": "expect_text",
+     "text": "Needs you"
+    },
+    {
+     "do": "expect_text",
+     "text": "New ticket"
+    }
+   ]
+  },
+  {
+   "id": "A02",
+   "name": "Menu: open every nav item",
+   "quick": true,
+   "page": "nav",
+   "tags": [
+    "win"
+   ],
+   "expect": "each page loads fast, URL hash changes, Back works",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "click",
+     "sel": "role=link[name=\"Tickets\"]"
+    },
+    {
+     "do": "expect_url",
+     "contains": "#"
+    },
+    {
+     "do": "click",
+     "sel": "role=link[name=\"Settings\"]"
+    },
+    {
+     "do": "expect_url",
+     "contains": "#"
+    },
+    {
+     "do": "back"
+    },
+    {
+     "do": "click",
+     "sel": "role=link[name=\"Home\"]"
+    },
+    {
+     "do": "expect_text",
+     "text": "Needs you"
+    }
+   ]
+  },
+  {
+   "id": "A03",
+   "name": "New ticket: empty submit shows an inline error, Esc closes",
+   "quick": true,
+   "page": "new-ticket",
+   "expect": "empty title is refused in words next to the field; Esc closes the dialog",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "click",
+     "sel": "#new-ticket"
+    },
+    {
+     "do": "wait",
+     "ms": 300
+    },
+    {
+     "do": "press",
+     "key": "Enter",
+     "optional": true
+    },
+    {
+     "do": "press",
+     "key": "Escape"
+    }
+   ]
+  },
+  {
+   "id": "A04",
+   "name": "New ticket with title and note",
+   "quick": true,
+   "page": "tickets",
+   "expect": "ticket appears on Home and in Tickets",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "click",
+     "sel": "#new-ticket"
+    },
+    {
+     "do": "fill",
+     "sel": "label=Title",
+     "value": "E2E ticket {{stamp}}"
+    },
+    {
+     "do": "press",
+     "key": "Enter"
+    },
+    {
+     "do": "wait",
+     "ms": 1500
+    },
+    {
+     "do": "expect_text",
+     "text": "E2E ticket"
+    }
+   ]
+  },
+  {
+   "id": "A05",
+   "name": "Tickets page and ticket page",
+   "quick": true,
+   "page": "ticket",
+   "expect": "the ticket page shows title, status, tasks",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#tickets"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "click",
+     "sel": "text=E2E ticket >> nth=0"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "expect_text",
+     "text": "E2E ticket"
+    }
+   ]
+  },
+  {
+   "id": "A06",
+   "name": "Settings page",
+   "page": "settings",
+   "expect": "Settings loads with the agent choice and add-ons",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "expect_text",
+     "text": "Settings"
+    }
+   ]
+  },
+  {
+   "id": "A07",
+   "name": "Add-on tabs: Automation, Focus, Relay",
+   "page": "addons",
+   "expect": "each add-on tab loads its page",
+   "actions": [
+    {
+     "do": "click",
+     "sel": "role=link[name=\"Automation\"]"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "click",
+     "sel": "role=link[name=\"Focus\"]"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "click",
+     "sel": "role=link[name=\"Relay\"]"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    }
+   ]
+  },
+  {
+   "id": "A08",
+   "name": "Origin check: a foreign page cannot act",
+   "page": "api",
+   "noshot": true,
+   "quick": true,
+   "expect": "POST /api/act with a foreign Origin is refused",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/"
+    },
+    {
+     "do": "expect_status",
+     "method": "POST",
+     "path": "/api/act",
+     "headers": {
+      "Origin": "http://evil.example"
+     },
+     "body": {
+      "op": "log",
+      "args": {}
+     },
+     "status": [
+      400,
+      403
+     ]
+    }
+   ]
+  },
+  {
+   "id": "A09",
+   "name": "Click every remaining control (census)",
+   "page": "home",
+   "tags": [
+    "census"
+   ],
+   "expect": "every control of the main pages is clicked once, destructive ones are listed",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "click_all_census",
+     "page": "home"
+    },
+    {
+     "do": "goto",
+     "path": "/#tickets"
+    },
+    {
+     "do": "click_all_census",
+     "page": "tickets"
+    },
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click_all_census",
+     "page": "settings"
+    }
+   ]
+  }
+ ]
+}
