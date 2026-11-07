@@ -28,11 +28,11 @@ from orch.errors import Refused
 host = sys.argv[1]
 net.time.sleep = lambda s: None  # connection-level retries without waiting
 def say(ok, what): print(("ok: " if ok else "FAIL: ") + what, flush=True)
-def refused(url, headers=None):
+def refused(url, headers=None):  # True only when the certificate check refused it (not any network failure)
     try:
         net.call("GET", url, headers=headers, timeout=20); return False
-    except Refused:
-        return True
+    except Refused as e:
+        return isinstance(getattr(e.__context__, "reason", None), ssl.SSLCertVerificationError)
 ctx = net._tls()
 say(ctx is not None and ctx.check_hostname and ctx.verify_mode == ssl.CERT_REQUIRED
     and ctx.minimum_version >= ssl.TLSVersion.TLSv1_2, "the Windows check is strict (hostname, certificate, TLS 1.2+)")
@@ -48,7 +48,8 @@ try:
     with socket.create_connection((srv_host, 443), timeout=20) as raw, ctx.wrap_socket(raw, server_hostname="wrong-name.example.org"):
         say(False, f"a trusted certificate for another name is refused ({srv_host}: the handshake succeeded)")
 except ssl.SSLCertVerificationError as e:
-    say(True, f"a trusted certificate for another name is refused ({srv_host}: {e.verify_message or e.reason})")
+    msg = str(e.verify_message or e.reason or e)
+    say("name" in msg.lower() or "mismatch" in msg.lower(), f"a trusted certificate for another name is refused for its name ({srv_host}: {msg})")
 except OSError as e:
     say(False, f"a trusted certificate for another name is refused ({srv_host}: no handshake: {type(e).__name__} {e})")
 # a local server with a self-signed certificate
@@ -80,6 +81,7 @@ url = f"https://127.0.0.1:{srv.server_address[1]}/health"
 say(refused(url, {"Authorization": "Bearer tok_secret"}), "a local self-signed server is refused")
 say(seen == [], "the self-signed server never got the token")
 srv.shutdown()
+import shutil; shutil.rmtree(d, ignore_errors=True)  # the throwaway key never stays in %TEMP%
 '@
 $script = "$env:TEMP\orch-tls-check.py"
 $code | Set-Content $script -Encoding UTF8

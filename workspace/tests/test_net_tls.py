@@ -78,9 +78,11 @@ def test_an_untrusted_certificate_is_refused_before_the_token_is_sent(untrusted_
     url, seen = untrusted_server
     monkeypatch.setattr(net.time, "sleep", lambda s: None)  # connection-level retries without waiting
     net._tls.cache_clear()
-    with pytest.raises(Refused, match="reach"):
+    with pytest.raises(Refused, match="reach") as e:
         net.call("GET", url + "/health", headers={"Authorization": "Bearer tok_secret"}, timeout=10)
     assert seen == []  # the handshake failed: the server never got a request, so never the token
+    cause = e.value.__context__  # urllib's URLError; its reason is what refused the connection
+    assert isinstance(getattr(cause, "reason", None), ssl.SSLCertVerificationError)  # the certificate check
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="truststore is installed on Windows only")

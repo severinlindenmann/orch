@@ -32,7 +32,7 @@ def _tls() -> ssl.SSLContext | None:
         import truststore
     except ImportError:  # a broken install: fail closed, in plain words (never fall back to a weaker check)
         raise Refused(
-            "orch can not check web certificates here: a part of orch is missing. Install orch again."
+            "orch can't check web certificates here: a part of orch is missing. Install orch again."
         ) from None
     return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
