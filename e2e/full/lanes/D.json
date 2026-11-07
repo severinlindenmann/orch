@@ -280,6 +280,11 @@
     },
     {
      "do": "click",
+     "sel": "text=Cancel >> visible=true >> nth=0",
+     "optional": true
+    },
+    {
+     "do": "click",
      "sel": "a:has-text('Add workspace') >> nth=0",
      "optional": true
     },
@@ -324,9 +329,8 @@
      "optional": true
     },
     {
-     "do": "select",
-     "sel": "label=Sharing >> nth=0",
-     "value": "",
+     "do": "click",
+     "sel": "role=combobox[name='Sharing']",
      "optional": true
     },
     {
