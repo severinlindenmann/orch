@@ -236,7 +236,7 @@ final class PublishWebViewTests: XCTestCase {
         try { delete window.RTCPeerConnection; } catch (e) {}
         try { Object.defineProperty(window, 'RTCPeerConnection', { value: 1 }); } catch (e) {}
         try { new RTCPeerConnection(); r.ctor = 'works'; } catch (e) { r.ctor = 'throws'; }
-        try { var f = document.createElement('iframe'); f.src = 'about:blank'; document.body.appendChild(f); try { new f.contentWindow.RTCPeerConnection(); r.frame = 'fresh'; } catch (e) { r.frame = 'none'; }
+        try { var f = document.createElement('iframe'); f.src = 'about:blank'; document.body.appendChild(f); try { new f.contentWindow.RTCPeerConnection(); r.frame = 'fresh'; } catch (e) { r.frame = 'none'; } } catch (e) { r.frame = 'none'; }
         </script></body>
         """
         let (web, _, _) = try await open(html)
