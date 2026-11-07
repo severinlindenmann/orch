@@ -393,7 +393,9 @@ def test_review_fixes_user_folder_kept_share_off_exact_and_eol(proj, run):
     (proj / ".gitattributes").write_bytes(b"AGENTS.md merge=union\r\n*.png binary\r\n")
     (proj / "AGENTS.md").write_bytes(b"# Team\r\n")
     harness.share_on(proj)
-    assert b"\r\n" in (proj / "AGENTS.md").read_bytes() and b"\n" not in (proj / "AGENTS.md").read_bytes().replace(b"\r\n", b"")
+    assert b"\r\n" in (proj / "AGENTS.md").read_bytes() and b"\n" not in (
+        proj / "AGENTS.md"
+    ).read_bytes().replace(b"\r\n", b"")
     harness.share_off(proj)
     assert (proj / "AGENTS.md").read_bytes() == b"# Team\r\n"
     assert (proj / ".gitattributes").read_bytes() == b"AGENTS.md merge=union\r\n*.png binary\r\n"
@@ -427,6 +429,37 @@ def test_a_long_orch_block_never_cuts_the_ticket_out_of_the_prompt(proj, run):
 def test_addon_ignore_lines_that_hide_everything_are_refused(proj):
     from orch import addons
 
-    for bad in ("*", "**", ".orch", ".orch/tickets/", "./"):
+    for bad in (
+        "*",
+        "**",
+        ".orch",
+        ".orch/",
+        ".orc?",
+        ".ORCH",
+        ".Orch/tickets/",
+        ".orch/Tickets",
+        ".orch/*",
+        ".orch/tick*",
+        "*/tickets",
+        ".orch ",
+        " .orch",
+        "[.]orch",
+        "./",
+        "?",
+        "*.tmp",
+        ".orch/./tickets",
+        ".orch/config.toml",
+    ):
         with pytest.raises(skills.Refused):
             addons._set_gitignore(proj, "evil", [bad])
+
+
+def test_addon_ignore_lines_that_name_a_place_are_accepted(proj):
+    import subprocess
+
+    from orch import addons
+
+    subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
+    addons._set_gitignore(proj, "ok", ["received/", ".orch/outbox/", "notes/*.tmp", ".orch/relay.lock*"])
+    ex = (proj / ".git/info/exclude").read_text(encoding="utf-8")
+    assert "/received/" in ex and "/.orch/outbox/" in ex and "/notes/*.tmp" in ex

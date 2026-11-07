@@ -11,6 +11,7 @@ AGENTS block, tab and background process. Leftover files or ext data never activ
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import importlib.util
 import json
@@ -1144,17 +1145,35 @@ def _apply_project(root: Path, m: dict) -> None:
     skills.apply_agent_files(root)
 
 
+_ORCH_STATE = {"tickets", "config.toml", "addons.json", "ticket-counter.json"}  # the team's workspace state
+
+
+def _check_ignore_line(name: str, ln: str) -> None:
+    """Allowlist: the first folder or file name of the line is literal (no glob characters), so a line can
+    name a place but never sweep across the workspace; and nothing may hide .orch or the team's ticket files
+    (compared without case, as on macOS and Windows, and without surrounding spaces)."""
+    bad = Refused(
+        f"The add-on '{name}' asks to hide '{ln}' from git. That is not allowed; nothing was changed."
+    )
+    parts = [p for p in ln.strip().strip("/").split("/") if p not in ("", ".")]
+    if not parts or any(c in parts[0] for c in "*?[]\\{}") or parts[0].strip() != parts[0]:
+        raise bad
+    if parts[0].lower().strip() == ".orch":
+        seg = parts[1].lower().strip() if len(parts) > 1 else ""
+        if not seg or any(
+            fnmatch.fnmatchcase(state, seg) for state in _ORCH_STATE
+        ):  # a glob that can hit one
+            raise bad
+
+
 def _set_gitignore(root: Path, name: str, lines: list[str]) -> None:
     """The add-on's lines live in their own block of .git/info/exclude (local; the team's .gitignore stays
     untouched); no lines = block removed."""
     from orch import harness
 
     for ln in lines:
-        core = ln.strip("/").rstrip("/")
-        if re.fullmatch(r"[*?./\\[\]]*", core) or core == ".orch" or core.startswith(".orch/tickets"):
-            raise Refused(
-                f"The add-on '{name}' asks to hide '{ln}' from git. That is too broad; nothing was changed."
-            )
+        _check_ignore_line(name, ln)
+    lines = [ln.strip() for ln in lines]
     harness.exclude_set(root, f"addon-{name}", lines)
 
 

@@ -74,7 +74,7 @@ def test_gitignore_added_on_add_removed_on_remove(proj, run, tmp_path, monkeypat
     (proj / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
     ex = proj / ".git/info/exclude"
-    folder = make_addon(tmp_path / "s", extra='gitignore = ["notes/cache/", "*.tmp"]')
+    folder = make_addon(tmp_path / "s", extra='gitignore = ["notes/cache/", "cache.tmp"]')
     eps = {}
     monkeypatch.setattr(addons, "_entry_points", lambda: dict(eps))
     import sys
@@ -86,7 +86,7 @@ def test_gitignore_added_on_add_removed_on_remove(proj, run, tmp_path, monkeypat
         code, _, err = run("addon", "add", str(folder), "--yes")
         assert code == 0, err
         g = ex.read_text(encoding="utf-8")
-        assert "# orch:begin addon-hello\n/notes/cache/\n/*.tmp\n# orch:end addon-hello" in g
+        assert "# orch:begin addon-hello\n/notes/cache/\n/cache.tmp\n# orch:end addon-hello" in g
         assert _gi(proj) == "node_modules/\n"  # the team's .gitignore is never edited
         run("addon", "add", str(folder), "--yes")  # again: no duplicate block
         assert ex.read_text(encoding="utf-8").count("notes/cache/") == 1
