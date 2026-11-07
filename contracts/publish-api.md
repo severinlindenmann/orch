@@ -17,8 +17,9 @@ Rights per workspace (set by the admin): `files` (temporary files), `apps` (temp
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| GET | `/v1/whoami` | – | `{id, name, description, tags, rights, pending, max_file_mb, default_days, max_days}`. `pending` = `{description: string\|null, tags: [..]\|null, at, rev}` or `null` |
+| GET | `/v1/whoami` | – | `{id, name, description, tags, icon, color, look_by, show_on_shared_pages, rights, pending, max_file_mb, default_days, max_days}` (look fields: look.md). `pending` = `{description: string\|null, tags: [..]\|null, at, rev}` or `null` |
 | PATCH | `/v1/me` | `{description?: string ≤ 280, tags?: [string ≤ 24, ≤ 8 items]}` (at least one; tags are trimmed) | `202 {…whoami, status: "pending"}`. Only a proposal: the owner must approve it in the admin panel, until then the old values stay in effect. One pending change per workspace; a new one replaces it. `description`: one line of plain text (Unicode categories L, M, N, P, S, Zs; NFC-normalised; no Default_Ignorable_Code_Point characters or U+2800; at most 2 combining marks in a row); tags lowercase `[a-z0-9-]` 1–24 chars. Admin-set values follow the same rules. Guarded write: only while the calling token is current, else `401`. Bad input → `422 invalid` |
+| PATCH | `/v1/me` (look) | `{icon?: <id>\|null, color?: <token>\|null, show_on_shared_pages?: bool}` (at least one; look.schema.json `publish_me_patch`) | `200 {…whoami}`. Applied at once, not pending; `icon`/`color` set `look_by = workspace`. `show_on_shared_pages` (default `true`): whether shared file pages show the workspace name and icon. Rules as in relay-api.md `PATCH /v1/me` (look): one bad value → `422`, nothing stored; not mixed with `description`/`tags` |
 | POST | `/v1/files?days=7` or `?permanent=1` | body = encrypted blob (`application/octet-stream`, crypto.md) | `201 {id, url, size, expires_at\|null}`. `url` has no key; the CLI adds `#k=<key>`. `days` 1–90, default 7 |
 | GET | `/v1/files` | – | list of `{id, size, created_at, expires_at}` |
 | DELETE | `/v1/files/<id>` | – | `204` |
@@ -40,6 +41,7 @@ Expired apps are stopped and removed by the hourly sweep, like files.
 | GET | `/f/<id>` | Small HTML page. Its JS reads `#k=` from the URL, fetches the blob, decrypts in the browser, shows a preview by type (docs/publish.md "Previews") and offers the download. States: decrypting, ready, expired (`410`), missing key, wrong key. Headers: `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob: https:; media-src blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` |
 | GET | `/_/frame.html` | The sandboxed preview frame for HTML files and folder pages (loaded by the file page in `<iframe sandbox="allow-scripts">`, gets the decrypted files by `postMessage`). Own CSP: see docs/publish.md "Previews" |
 | GET | `/_/favicon.svg`, `/_/apple-touch-icon.png` | The blue orch publish icon (also on the admin listener) |
+| GET | `/f/<id>/meta` | `{workspace: {name, icon, color} \| null}` for the file page header: the sharing workspace's name and look while its `show_on_shared_pages` is on, else `workspace: null` (and the page shows only the orch logo). `404` / `410` as for the blob. Headers `Cache-Control: no-store`, `Referrer-Policy: no-referrer`. The page inserts `name` as text on the client (`textContent`); the server never renders it into the HTML, the title or preview/meta tags (vectors/look-v1.json `meta`) |
 | GET | `/f/<id>/blob` | The encrypted blob (`application/octet-stream`). `404` / `410` when gone |
 | ANY | `/a/<name>/...` | The app. Private apps need `?token=<view_token>` once; the server sets a cookie (HttpOnly, SameSite=Lax, path `/a/<name>/`) and redirects without the token. No token → small "This app is private" page (`401`) |
 | GET | `/onboarding.sh`, `/onboarding.ps1` | Small scripts: install orch if missing, then `orch addon add publish --yes` and `orch publish connect` (below) |
@@ -71,9 +73,9 @@ Auth: header `X-Orch-Admin: <admin token>` (file `/etc/orch-publish/admin-token`
 | Method | Path | Request | Response |
 |---|---|---|---|
 | GET | `/admin` | – | Portal HTML |
-| GET | `/admin/api/workspaces` | – | list of `{id, name, description, tags, description_by, tags_by, pending, rights, files, apps}` (`*_by` = `admin`\|`workspace`) |
-| POST | `/admin/api/workspaces` | `{name, description, tags: [], rights: {files, apps, permanent, public}}` | `201 {id, token, prompt}` (token shown only here) |
-| PATCH | `/admin/api/workspaces/<id>` | `{name?, description?, tags?, rights?}` | `200 {id, name, description, tags, rights}`. Admin-set description/tags are marked `admin` |
+| GET | `/admin/api/workspaces` | – | list of `{id, name, description, tags, description_by, tags_by, icon, color, look_by, show_on_shared_pages, pending, rights, files, apps}` (`*_by` = `admin`\|`workspace`) |
+| POST | `/admin/api/workspaces` | `{name, description, tags: [], icon?, color?, rights: {files, apps, permanent, public}}` (`icon`/`color` given → `look_by = admin`) | `201 {id, token, prompt}` (token shown only here) |
+| PATCH | `/admin/api/workspaces/<id>` | `{name?, description?, tags?, icon?, color?, rights?}` | `200 {id, name, description, tags, icon, color, look_by, rights}`. Admin-set description/tags are marked `admin`. `icon`/`color` only while `look_by` is `null` or `admin`, else `409 conflict` and nothing stored (check and write in one transaction; a new token keeps the look and `look_by`); bad value → `422` (as relay-api.md) |
 | POST | `/admin/api/workspaces/<id>/token` | – | `200 {token, prompt}` (new token, old one stops; a pending profile change is dropped) |
 | POST | `/admin/api/workspaces/<id>/profile/approve` | `{rev}` (of the proposal the owner looked at) | `200` the workspace. Pending description/tags become live. `404` nothing pending, `409 conflict` when `rev` no longer matches |
 | POST | `/admin/api/workspaces/<id>/profile/reject` | `{rev}` | `204`. Proposal dropped, old values stay. `404` / `409` as above |

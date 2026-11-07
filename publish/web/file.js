@@ -680,6 +680,7 @@ if (typeof document !== "undefined") {
         return show("lock", "This browser can’t open the file", "Open the link in an up-to-date browser, over a secure (https) address.");
       }
       const id = location.pathname.split("/").filter(Boolean)[1];
+      if (globalThis.OrchLook) globalThis.OrchLook.fileHeader(id);
       let res;
       try {
         res = await fetch("/f/" + encodeURIComponent(id) + "/blob", { cache: "no-store" });
