@@ -52,6 +52,63 @@ def whoami(root: Path) -> dict:
     return _api(root, "GET", "/v1/whoami")[1]
 
 
+def heartbeat(root: Path, mobile_mode: dict) -> None:
+    """Tell the relay we are here and whether Mobile mode is on (shape: contracts/relay-api.md)."""
+    _api(root, "POST", "/v1/heartbeat", {"mobile_mode": mobile_mode}, timeout=15)
+
+
+def _is_mobile_off(m: dict) -> bool:
+    b = m.get("body")
+    return (
+        m.get("type") == "control"
+        and str(m.get("from", "")).startswith("ph_")
+        and isinstance(b, dict)
+        and b.get("control") == "mobile_mode_off"
+    )
+
+
+MOBILE_OFF_MAX_AGE = 600  # seconds: an older 'off' is acked and ignored
+
+
+def _handle_mobile_off(root: Path, m: dict) -> str:
+    """Act on a phone's 'turn off Mobile mode' only if that phone is still paired (last refresh) and the
+    request is under 10 minutes old; either way it is marked handled. Returns a plain note."""
+    from datetime import UTC, datetime
+
+    from orch import mobile_mode
+
+    paired = {p.get("id") for p in _read_dir(root).get("phones", []) if isinstance(p, dict)}
+    try:
+        age = (
+            datetime.now(UTC)
+            - datetime.strptime(str(m.get("created_at")), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        ).total_seconds()
+    except ValueError:
+        age = None
+    ok = m["from"] in paired and age is not None and age <= MOBILE_OFF_MAX_AGE
+    if ok:
+        mobile_mode.turn_off(root, "off")
+    with locked(root):
+        _mark_seen(root, m["id"])
+    return (
+        "Mobile mode was turned off from the phone"
+        if ok
+        else "ignored an old or unpaired Mobile mode request"
+    )
+
+
+def mobile_controls(root: Path) -> list[str]:
+    """Pull and act on phone controls. Other messages stay saved and unseen for `orch relay inbox`."""
+    _pull(root, 0)
+    done_ids = []
+    for f in sorted((root / ".orch" / "inbox").glob("m_*.json")):
+        m = net.read_json(f, None)
+        if isinstance(m, dict) and m.get("id") == f.stem and f.stem not in seen(root) and _is_mobile_off(m):
+            _handle_mobile_off(root, m)
+            done_ids.append(f.stem)
+    return done_ids
+
+
 def profile(root: Path, description: str | None, tags: list[str] | None) -> dict:
     return net.profile(root, "relay", description, tags)
 
@@ -1385,6 +1442,8 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                             note = _store_allow(root, m)
                         auto = True
                         _mark_seen(root, m["id"])  # last
+            elif _is_mobile_off(m):
+                note, auto = _handle_mobile_off(root, m), True
             elif typ == "text" and str(m.get("from", "")).startswith("ph_"):
                 with locked(root):
                     if m["id"] not in seen(root):
