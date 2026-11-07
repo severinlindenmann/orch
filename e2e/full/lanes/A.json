@@ -799,7 +799,7 @@
   },
   {
    "id": "A23",
-   "name": "Settings Agent: try an agent, open and close 'Add your own agent'",
+   "name": "Settings Agent: try an agent, add your own agent",
    "page": "settings-agent",
    "expect": "Test answers in words; a custom agent can be added",
    "actions": [
@@ -821,17 +821,61 @@
     },
     {
      "do": "click",
-     "sel": "button:has-text('Add your own agent')",
-     "optional": true
-    },
-    {
-     "do": "wait",
-     "ms": 500
+     "sel": "button:has-text('Add your own agent')"
     },
     {
      "do": "click",
-     "sel": "button:has-text('Back')",
-     "optional": true
+     "sel": "button:has-text('Cancel')"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add your own agent')"
+    },
+    {
+     "do": "fill",
+     "sel": "role=textbox[name='Name']",
+     "value": "my-tool"
+    },
+    {
+     "do": "fill",
+     "sel": "role=textbox[name=/^Command/]",
+     "value": "echo {prompt}"
+    },
+    {
+     "do": "click",
+     "sel": "role=combobox[name=/^How the task goes in/]"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Save')"
+    },
+    {
+     "do": "wait",
+     "ms": 600
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Back')"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Save')"
+    },
+    {
+     "do": "wait",
+     "ms": 600
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add agent')"
+    },
+    {
+     "do": "wait",
+     "ms": 1200
+    },
+    {
+     "do": "expect_text",
+     "text": "my-tool"
     }
    ]
   },
