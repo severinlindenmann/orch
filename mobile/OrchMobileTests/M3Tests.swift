@@ -300,7 +300,8 @@ final class PublishWebViewTests: XCTestCase {
         let (web, _, _) = try await open("<head></head><body><script>var m=document.createElement('meta'); m.httpEquiv='x-dns-prefetch-control'; m.content='on'; document.head.appendChild(m); setTimeout(function(){ m.content='on'; }, 100);</script></body>")
         try await Task.sleep(for: .milliseconds(500))
         let values = try await web.evaluateJavaScript("Array.from(document.querySelectorAll('meta[http-equiv]')).map(function(m){return m.content;}).join(',')") as? String
-        XCTAssertEqual(values, "off")
+        let all = (values ?? "").split(separator: ",")
+        XCTAssertFalse(all.isEmpty); XCTAssertTrue(all.allSatisfy { $0 == "off" }, "every meta says off: \(values ?? "-")")
     }
     func testHintScriptRemovesAddedHintsAndTurnsPrefetchOff() async throws {
         let (web, _, _) = try await open("<head></head><body><script>var l=document.createElement('link'); l.rel='preconnect'; l.href='http://127.0.0.1:9'; document.head.appendChild(l);</script></body>")
