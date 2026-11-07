@@ -21,8 +21,12 @@ No other values. No uploads, no free SVG, no hex colours. Ids and tokens never c
 
 ## Where it lives and who sets it
 
-- **Workspace:** `.orch/config.toml` `[workspace] icon = "wallet"`, `color = "amber"`, `look_set_by = "agent"|"human"`
-  (left out = `null` / nobody). A value not in `look.json` is ignored (default shown).
+- **Workspace:** `.orch/config.toml` `[workspace] icon = "wallet"`, `color = "amber"` (left out = `null`). A value not
+  in `look.json` is ignored (default shown).
+- **Kept per machine, not in the workspace:** who picked it (`look_set_by` = `agent`|`human`, absent = nobody) in
+  `look-set-by.json`, and the shared-pages switch (`show_on_shared_pages`) in `shared-pages.json`, both in the orch home
+  and keyed by the workspace's real path (like `permissions.json`). An agent editing `config.toml` cannot fake them;
+  a `look_set_by` or `show_on_shared_pages` key in `config.toml` is ignored.
 - **The agent picks it by default:** during setup the agent reads `orch look list`, picks an icon and colour that fit the
   workspace name and description and runs `orch look set` (`look_set_by = agent`). It may change its own pick later.
 - **The person changes it** in the dashboard, Settings → General → *Icon and colour* (a click, no typed word;
@@ -31,7 +35,7 @@ No other values. No uploads, no free SVG, no hex colours. Ids and tokens never c
 - **Push:** after each save and on every `connect` the core sends `PATCH /v1/me {icon, color}` to each connected service
   (relay, publish). The first such call makes the workspace the owner of its look there (`look_by = workspace`). Exception
   on connect: when the local look is `null`/`null` and the service holds an admin look, the core first takes that look
-  into `config.toml` with `look_set_by = human` (the admin is the owner, so an agent may not replace it) and sends it
+  into `config.toml` and records `look_set_by = human` (orch home) (the admin is the owner, so an agent may not replace it) and sends it
   back (vectors `connect`). A failed push is retried with the latest value on the next connect.
 - **Relay / publish admin portal:** may set the look only while `look_by` is `null` or `admin` (e.g. a workspace created
   but not connected yet). Once `look_by = workspace` the portal shows it read only ("Chosen in the workspace's dashboard")
@@ -48,7 +52,7 @@ No other values. No uploads, no free SVG, no hex colours. Ids and tokens never c
 |---|---|
 | `orch look list [--json]` | the 100 icons (id, label, group, search words) and 12 colours; `--json` = `{categories, icons, colors}` as in `look.json` |
 | `orch look show [--json]` | this workspace's `{icon, color, set_by}` and what each service has |
-| `orch look set [--icon <id>\|none] [--color <token>\|auto]` | saves to `config.toml` and pushes; unknown id/token → refused with the nearest ids; agent after a human pick → refused |
+| `orch look set [--icon <id>\|none] [--color <token>\|auto]` | saves icon/colour to `config.toml`, records who set it in the orch home, and pushes; unknown id/token → refused with the nearest ids; agent after a human pick → refused |
 
 The orch core skill and the `AGENTS.orch.md` entry get three lines: the agent picks the icon and colour at setup with
 these commands, the person may change it in the dashboard, and an agent never changes a pick the person made.
@@ -59,7 +63,7 @@ these commands, the person may change it in the dashboard, and an agent never ch
 `show_on_shared_pages` (publish workspace record, default `true`): `GET /f/<id>/meta` returns `{workspace: {name, icon,
 color}}` and the file page shows the badge and name above the file; `false` → `{workspace: null}`, only the orch logo.
 The person switches it in the dashboard (Settings → Add-ons → Publish: "Show workspace name and icon on shared pages");
-the core sends `PATCH /v1/me {show_on_shared_pages}` to publish. Only a person may change it: the core refuses `agent:*`
+the core records it per machine (orch home `shared-pages.json`) and sends `PATCH /v1/me {show_on_shared_pages}` to publish. Only a person may change it: the core refuses `agent:*`
   callers (vectors `shared_pages_set`); publish cannot tell them apart, so the core is where this is enforced.
 App pages (`/a/<name>`) are the workspace's own and are not changed.
 
