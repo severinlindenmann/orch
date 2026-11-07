@@ -31,14 +31,14 @@ enum TopicStatus: String, Sendable, CaseIterable {
     /// Short word: group headers and the info summary.
     var label: String {
         switch self {
-        case .working: "Working"; case .waitingOnYou: "Waiting"; case .review: "Review"; case .backlog: "Backlog"
+        case .working: "Working"; case .waitingOnYou: "Needs you"; case .review: "Ready for review"; case .backlog: "Not started"
         case .done: "Done"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
         }
     }
     /// The chip words of the status workflow (PLAN-A section 5).
     var chip: String {
         switch self {
-        case .working: "Claude is working"; case .waitingOnYou: "Needs you"; case .review: "Check this"; case .backlog: "Backlog"
+        case .working: "Claude is working"; case .waitingOnYou: "Needs you"; case .review: "Ready for review"; case .backlog: "Not started"
         case .done: "Done"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
         }
     }
@@ -314,7 +314,7 @@ enum ConversationBuilder {
     }
 
     private static func startingSummary(_ id: ConversationID, text: String, at: String) -> TopicSummary {
-        TopicSummary(id: id, title: text.isEmpty ? "New topic" : String(text.prefix(60)), key: nil, status: .working, lastLine: "Starting topic…", lastAt: at, unread: 0, isStarting: true, ticket: nil)
+        TopicSummary(id: id, title: text.isEmpty ? "New topic" : String(text.prefix(60)), key: nil, status: .working, lastLine: "Getting started…", lastAt: at, unread: 0, isStarting: true, ticket: nil)
     }
 
     static func general(workspace ws: String, _ d: ConversationInputs, read: ReadState) -> ConversationSummary {

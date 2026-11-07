@@ -21,9 +21,9 @@ final class StatusRefsUITests: XCTestCase {
     func testWorkspaceGroupsByStatusAndDoneIsCollapsed() {
         let app = launch("ws_pilatus001")
         XCTAssertTrue(app.buttons["general-ws_pilatus001"].waitForExistence(timeout: 20), "General is pinned")
-        XCTAssertTrue(app.staticTexts["Waiting"].waitForExistence(timeout: 10), "the topic with an open question is under Waiting")
+        XCTAssertTrue(app.staticTexts["Needs you"].waitForExistence(timeout: 10), "the topic with an open question is under Needs you")
         XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_7k3f9q"].exists)
-        XCTAssertFalse(app.staticTexts["Backlog"].exists && app.staticTexts["Review"].exists, "empty groups are hidden")
+        XCTAssertFalse(app.staticTexts["Not started"].exists && app.staticTexts["Ready for review"].exists, "empty groups are hidden")
         let done = app.buttons["done-toggle"]
         XCTAssertTrue(done.exists)
         XCTAssertFalse(app.buttons["ticket-ws_pilatus001|t_q3sum1"].exists, "Done is collapsed")

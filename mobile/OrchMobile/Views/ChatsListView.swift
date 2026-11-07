@@ -190,7 +190,7 @@ struct ChatsListView: View {
                 WorkspaceBadge(name: name, icon: summary.workspace.icon, color: summary.workspace.color, size: 46, lastSeen: .some(summary.workspace.lastSeen), id: summary.id)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(name).themeFont(17, .semibold).lineLimit(2)
-                    Text(starting ? "Starting topic…" : summary.lastLine).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(starting ? "Getting started…" : summary.lastLine).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
                     if summary.openQuestions > 0 { Text(summary.openQuestions == 1 ? "1 needs you" : "\(summary.openQuestions) need you").themeFont(13).foregroundStyle(Theme.warn) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: .trailing, spacing: 10) {

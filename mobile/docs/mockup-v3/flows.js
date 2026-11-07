@@ -98,14 +98,14 @@ renderChats=function(){
 function topicRow(c){const t=state.topics[c],m=state.messages[c]?.at(-1);if(!t)return '';return `<button class="row-content topic-row" data-action="navigate" data-value="${c}"><span class="topic-symbol ${statusFor(c)==='Needs you'?'amber':''}">#</span><span class="fill"><span class="title">${esc(topicTitle(c))}</span><span class="topic-status ${statusFor(c)==='Needs you'?'amber':''}">${esc(statusFor(c))}</span><span class="preview">${esc(m?.text||'Updates and results show up here.')}</span></span>${unread(c)?`<span class="badge">${unread(c)}</span>`:icon('chevron')}</button>`;}
 function renderTopics(){
  const ids=children(currentWorkspace), finished=['Done','Stopped',"Didn't work"];
- const status=c=>state.topics[c]?.pending?'Working':({'Needs you':'Waiting','Open':'Backlog'}[statusFor(c)]||statusFor(c));
+ const status=c=>state.topics[c]?.pending?'Working':({'Review':'Ready for review','Open':'Not started','Backlog':'Not started'}[statusFor(c)]||statusFor(c));
  const group=label=>{const topics=ids.filter(c=>status(c)===label);return topics.length?`<section><h3 class="status-group">${esc(label)}</h3><div class="topic-group">${topics.map(topicRow).join('')}</div></section>`:'';};
  const count=ids.filter(c=>finished.includes(status(c))).length;
- contentRoot().innerHTML=nav(names[currentWorkspace],'back',presence(currentWorkspace).label)+`<div class="scroll"><button class="row-content general" data-action="navigate" data-value="general:${currentWorkspace}">${avatar(currentWorkspace)}<span class="fill"><span class="title">General <small>⌖</small></span><span class="preview">Talk to ${esc(names[currentWorkspace])}</span></span>${icon('chevron')}</button>${['Working','Waiting','Review','Backlog'].map(group).join('')}${count?`<details class="done-topics"><summary id="done-toggle">Done (${count})</summary>${finished.map(group).join('')}</details>`:''}${!ids.length?'<div class="empty"><img class="quiet-logo" src="logo.svg" alt=""><h3>Nothing here yet.</h3><p>Start a topic when you have something to work on.</p></div>':''}</div>${actionButton('new-chat','New topic',currentWorkspace,'wide-btn topic-compose')}`;
+ contentRoot().innerHTML=nav(names[currentWorkspace],'back',presence(currentWorkspace).label)+`<div class="scroll"><button class="row-content general" data-action="navigate" data-value="general:${currentWorkspace}">${avatar(currentWorkspace)}<span class="fill"><span class="title">General <small>⌖</small></span><span class="preview">Talk to ${esc(names[currentWorkspace])}</span></span>${icon('chevron')}</button>${['Needs you','Working','Ready for review','Not started'].map(group).join('')}${count?`<details class="done-topics"><summary id="done-toggle">Done (${count})</summary>${finished.map(group).join('')}</details>`:''}${!ids.length?'<div class="empty"><img class="quiet-logo" src="logo.svg" alt=""><h3>Nothing here yet.</h3><p>Start a topic when you have something to work on.</p></div>':''}</div>${actionButton('new-chat','New topic',currentWorkspace,'wide-btn topic-compose')}`;
 }
 
 renderChat=function(){
- baseChat();if(["Didn't work",'Stopped'].includes(statusFor(chat)))$('#composer').insertAdjacentHTML('afterbegin',actionButton('retry-topic','Try again','','wide-btn'));const heading=$('.nav h2');heading.dataset.title=state.topics[chat]?.pending?'Starting topic…':parent[chat]?topicTitle(chat):'General';heading.innerHTML=title(heading.dataset.title);
+ baseChat();if(["Didn't work",'Stopped'].includes(statusFor(chat)))$('#composer').insertAdjacentHTML('afterbegin',actionButton('retry-topic','Try again','','wide-btn'));const heading=$('.nav h2');heading.dataset.title=state.topics[chat]?.pending?'Getting started…':parent[chat]?topicTitle(chat):'General';heading.innerHTML=title(heading.dataset.title);
  $('.nav [data-action="navigate"]').dataset.value='back';
  $('.nav .subtitle').innerHTML=chatPresence();
  if(parent[chat])$('.nav').insertAdjacentHTML('afterend',actionButton('checklist',`${state.topics[chat]?.done||0} of ${state.topics[chat]?.total||5} · ${statusFor(chat)} <span>⌄</span>`,'','progress-pin'));
@@ -144,7 +144,7 @@ sendMessage=function(type,text='',extra={}){
  if(newTopicDraft){
   const w=newTopicDraft?selectedWorkspace:chat;newTopicDraft=false;selectedWorkspace=w;localStorage.setItem('orch-last-workspace',w);
   const id=createTopic(w,text||extra.transcript||(type==='voice'?'A new request by voice':'Shared '+type));closeModal(true);navigate(id);
-  $('.nav h2').textContent='Starting topic…';
+  $('.nav h2').textContent='Getting started…';
  }
  return baseSend(type,text,extra);
 };
