@@ -87,14 +87,6 @@ final class AppModel {
         self.voiceMode = voiceMode
         self.outboxDirectory = outboxDirectory
         let creds = Keychain.load()
-<<<<<<< HEAD
-        if let c = creds { credentials = c; phase = .ready }
-        outbox = Outbox(directory: outboxDirectory, phone: creds?.phoneId ?? "")
-        let holder = ClientHolder()
-        speech = SpeechPlayer(fetch: { id, lang in try await holder.client().speech(messageId: id, lang: lang) }, cacheDirectory: speechCache, systemControls: systemAudioControls)
-        holder.make = { [weak self] in await MainActor.run { self?.client } }
-        if creds == nil { outbox.wipe() }
-=======
         // Every stored property is set first; only then is `self` used (the Observation macros need that).
         let holder = ClientHolder()
         let box = Outbox(directory: outboxDirectory, phone: creds?.phoneId ?? "")
@@ -103,20 +95,13 @@ final class AppModel {
                                    cacheDirectory: speechCache, systemControls: systemAudioControls)
         if let c = creds { credentials = c; phase = .ready } else { box.wipe() }
         holder.make = { [weak self] in self?.client }
->>>>>>> origin/develop
     }
 
     /// Lets the (Sendable) speech fetch reach the current client, which changes with sign-in.
     private final class ClientHolder: @unchecked Sendable {
-<<<<<<< HEAD
-        var make: (@Sendable () async -> (any RelayAPI)?)?
-        func client() async throws -> any RelayAPI {
-            guard let c = await make?() else { throw RelayError.unauthorized }
-=======
         var make: (@MainActor @Sendable () -> (any RelayAPI)?)?
         func client() async throws -> any RelayAPI {
             guard let make, let c = await make() else { throw RelayError.unauthorized }
->>>>>>> origin/develop
             return c
         }
     }
@@ -257,40 +242,6 @@ final class AppModel {
         if !quiet { isLoading = true }
         defer { if !quiet { isLoading = false } }
         do {
-<<<<<<< HEAD
-            async let w = client.workspaces()
-            async let q = client.questions()
-            let beforeUpdates = updates
-            async let u = (try? await client.updates()) ?? beforeUpdates  // an older relay without /updates must not break the rest
-            async let st = try? await client.settings()
-            workspaces = try await w; questions = try await q.deduplicated(); updates = await u
-            if let st = await st { settings = st }
-            await reloadMessages()
-            for item in questions { questionLog[item.id] = item }
-            message = nil; hasLoaded = true; lastUpdated = Date()
-            await flushOutbox()
-        } catch { handle(error) }
-    }
-
-    /// The newest page of `/v1/phone/messages`, merged into what is loaded (older pages stay). An older relay without it keeps the list.
-    func reloadMessages() async {
-        guard let page = try? await client.messages(after: nil, limit: Self.pageSize) else { return }
-        var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
-        for m in page.items { byId[m.id] = m }          // newer data (delivered_at) replaces the old copy
-        messages = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
-        if messagesNext == nil || page.next == nil || messages.count <= page.items.count { messagesNext = page.next }
-        outbox.reconcile(with: messages)
-    }
-    static let pageSize = 100
-
-    /// Scrolling up: the next older page. No-op when everything is loaded.
-    func loadOlderMessages() async {
-        guard let cursor = messagesNext, let page = try? await client.messages(after: cursor, limit: Self.pageSize) else { return }
-        var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
-        for m in page.items { byId[m.id] = m }
-        messages = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
-        messagesNext = page.next
-=======
             do { try await load() }
             catch where retry && !useMock && Self.isOffline(error) {
                 // Cold start: the first request can run before the network is ready. Once more before the banner.
@@ -361,7 +312,6 @@ final class AppModel {
             let page = try await client.messages(after: cursor, limit: pageSize)
             merge(page.items); messagesNext = page.next
         } catch RelayError.unauthorized { handle(RelayError.unauthorized) } catch {}
->>>>>>> origin/develop
     }
     var hasOlderMessages: Bool { messagesNext != nil }
 
@@ -391,10 +341,7 @@ final class AppModel {
             case .sent: sendTick += 1; announcement = "Message sent"
             case .failed(_, _, let text): message = text; errorTick += 1; announcement = text
             case .unauthorized: handle(RelayError.unauthorized)
-<<<<<<< HEAD
-=======
             case .throttled: announcement = "Try again later"
->>>>>>> origin/develop
             case .offline: break
             }
         }

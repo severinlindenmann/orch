@@ -1,10 +1,7 @@
 import CryptoKit
 import Foundation
 import Observation
-<<<<<<< HEAD
-=======
 import os
->>>>>>> origin/develop
 
 // MARK: Drafts (what a composer hands over)
 
@@ -119,27 +116,21 @@ struct OutboxItem: Codable, Sendable, Equatable, Identifiable {
     /// A permanent refusal (4xx): shown as "Not sent"; `retry` clears it.
     var failure: String? = nil
     var attempts: Int = 0
-<<<<<<< HEAD
-=======
     /// Status of the refusal in `failure` (so `retry` knows whether a blob has to be uploaded again).
     var failureStatus: Int? = nil
     /// 408 / 429 / 503: the relay is busy. The item stays queued and is not tried again before this time (ISO).
     var retryAfter: String? = nil
     var throttleCount: Int? = nil
->>>>>>> origin/develop
 
     var id: String { clientId }
     var isNewTopic: Bool { kind == .send && ticket == nil && !general }
     var isWaiting: Bool { sentMessageId == nil && failure == nil }
-<<<<<<< HEAD
-=======
     /// Waiting and past its backoff.
     func isDue(now: Date = Date()) -> Bool {
         guard isWaiting else { return false }
         guard let r = retryAfter, let t = ISO8601DateFormatter().date(from: r) else { return true }
         return t <= now
     }
->>>>>>> origin/develop
     /// All local files of the item (attachments, voice memo, pin recordings).
     var allFiles: [PendingFile] { files + (voice.map { [$0.file] } ?? []) + (feedback?.pins.compactMap(\.voice) ?? []) }
 }
@@ -161,11 +152,8 @@ final class Outbox {
         /// Someone else answered first (409).
         case answerTaken(clientId: String, questionMessageId: String, message: String)
         case unauthorized
-<<<<<<< HEAD
-=======
         /// 408 / 429 / 503: kept queued with a backoff (30 s, doubling, at most 5 min). Show "Try again later".
         case throttled(clientId: String, status: Int)
->>>>>>> origin/develop
         /// No network (or a 5xx): everything stays queued, in order.
         case offline
     }
@@ -198,11 +186,6 @@ final class Outbox {
     func folder(_ clientId: String) -> URL { directory.appendingPathComponent(clientId, isDirectory: true) }
     func fileURL(_ item: OutboxItem, _ f: PendingFile) -> URL { folder(item.clientId).appendingPathComponent(f.file) }
     private func removeFolder(_ clientId: String) { try? fm.removeItem(at: folder(clientId)) }
-<<<<<<< HEAD
-    private func save() {
-        guard let d = try? JSONEncoder().encode(items) else { return }
-        try? d.write(to: indexURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-=======
     private static let log = Logger(subsystem: "io.severin.orch", category: "outbox")
     /// Set when the index could not be written (disk full...): the queue only lives in memory until the next good save.
     private(set) var lastSaveError: String?
@@ -217,7 +200,6 @@ final class Outbox {
             Self.log.error("outbox save failed: \(error.localizedDescription, privacy: .public)")
             assertionFailure("outbox save failed: \(error)")
         }
->>>>>>> origin/develop
     }
 
     // MARK: Enqueue
@@ -231,11 +213,7 @@ final class Outbox {
         let text = draft.text?.trimmingCharacters(in: .whitespacesAndNewlines)
         item.text = (text?.isEmpty ?? true) ? nil : text
         item.location = draft.location
-<<<<<<< HEAD
-        try fm.createDirectory(at: folder(clientId), withIntermediateDirectories: true)
-=======
         try fm.createDirectory(at: folder(clientId), withIntermediateDirectories: true, attributes: [.protectionKey: Self.protection])
->>>>>>> origin/develop
         do {
             var n = 0
             func copy(_ url: URL, kind: MessageAttachment.Kind, name: String, mime: String, duration: Double?) throws -> PendingFile {
@@ -243,10 +221,7 @@ final class Outbox {
                 let local = "\(n)-" + Self.safeFileName(name)
                 let dest = folder(clientId).appendingPathComponent(local)
                 try fm.copyItem(at: url, to: dest)
-<<<<<<< HEAD
-=======
                 try? fm.setAttributes([.protectionKey: Self.protection], ofItemAtPath: dest.path)    // same protection as the index
->>>>>>> origin/develop
                 let size = (try fm.attributesOfItem(atPath: dest.path)[.size] as? Int) ?? 0
                 guard size > 0, size <= SendRequest.maxBlobBytes else { throw SendRequest.Problem.attachmentTooBig }
                 return PendingFile(file: local, kind: kind, name: name, mime: mime, size: size, duration: duration)
@@ -285,24 +260,15 @@ final class Outbox {
     /// Try a refused message again (same client_id).
     func retry(_ clientId: String) {
         guard let i = items.firstIndex(where: { $0.clientId == clientId }) else { return }
-<<<<<<< HEAD
-        items[i].failure = nil; save()
-=======
         // A refusal about a blob (404 not found / 422 size): the upload may be gone, so every file goes up again.
         if items[i].failureStatus == 404 || items[i].failureStatus == 422 { Self.clearBlobIds(&items[i]) }
         items[i].failure = nil; items[i].failureStatus = nil; items[i].retryAfter = nil; items[i].throttleCount = nil; save()
->>>>>>> origin/develop
     }
     /// Sign-out: nothing may stay for the next person.
     func wipe() {
         items = []
-<<<<<<< HEAD
-        try? fm.removeItem(at: directory)
-        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
-=======
         do { try fm.removeItem(at: directory) } catch { Self.log.error("outbox wipe failed: \(error.localizedDescription, privacy: .public)") }
         do { try fm.createDirectory(at: directory, withIntermediateDirectories: true) } catch { Self.log.error("outbox recreate failed: \(error.localizedDescription, privacy: .public)") }
->>>>>>> origin/develop
     }
 
     /// Items the relay now lists (by `client_id`) are done: drop them and their files. Call after every `/messages` load.
@@ -342,11 +308,7 @@ final class Outbox {
     /// Send everything that waits, oldest first. Stops at the first network problem (order is kept); a refused item is marked failed and
     /// the next one goes on. Overlapping calls fold into one pass. Returns what happened.
     @discardableResult
-<<<<<<< HEAD
-    func flush(using client: any RelayAPI) async -> [Event] {
-=======
     func flush(using client: any RelayAPI, now: @autoclosure () -> Date = Date()) async -> [Event] {
->>>>>>> origin/develop
         if flushing { flushAgain = true; return [] }
         flushing = true; defer { flushing = false }
         var events: [Event] = []
@@ -354,22 +316,13 @@ final class Outbox {
             flushAgain = false
             for id in items.filter(\.isWaiting).map(\.clientId) {
                 guard let item = self.item(clientId: id), item.isWaiting else { continue }
-<<<<<<< HEAD
-=======
                 if !item.isDue(now: now()) { return events }      // backing off: later items wait too (order is kept)
->>>>>>> origin/develop
                 do { events.append(try await deliver(item, client)) }
                 catch let e as RelayError {
                     switch e {
                     case .unauthorized: events.append(.unauthorized); return events
                     case .network: events.append(.offline); return events
                     case .api(let status, let code, let message):
-<<<<<<< HEAD
-                        if status >= 500 || status == 429 { events.append(.offline); return events }
-                        if item.kind == .answer && status == 409 && code == "already_answered" {
-                            events.append(.answerTaken(clientId: id, questionMessageId: item.questionMessageId ?? "", message: message)); discard(id)
-                        } else { mark(id) { $0.failure = message }; events.append(.failed(clientId: id, status: status, message: message)) }
-=======
                         if [408, 429, 503].contains(status) {
                             let n = (item.throttleCount ?? 0) + 1
                             let wait = min(30.0 * pow(2, Double(n - 1)), 300)
@@ -380,7 +333,6 @@ final class Outbox {
                         if item.kind == .answer && status == 409 && code == "already_answered" {
                             events.append(.answerTaken(clientId: id, questionMessageId: item.questionMessageId ?? "", message: message)); discard(id)
                         } else { mark(id) { $0.failure = message; $0.failureStatus = status }; events.append(.failed(clientId: id, status: status, message: message)) }
->>>>>>> origin/develop
                     case .badLink: break
                     }
                 } catch is URLError { events.append(.offline); return events }
@@ -390,15 +342,12 @@ final class Outbox {
         return events
     }
 
-<<<<<<< HEAD
-=======
     private static func clearBlobIds(_ i: inout OutboxItem) {
         for k in i.files.indices { i.files[k].blobId = nil }
         i.voice?.file.blobId = nil
         if let f = i.feedback { for k in f.pins.indices { i.feedback?.pins[k].voice?.blobId = nil } }
     }
 
->>>>>>> origin/develop
     private func mark(_ id: String, _ change: (inout OutboxItem) -> Void) {
         guard let i = items.firstIndex(where: { $0.clientId == id }) else { return }
         change(&items[i]); save()
@@ -414,11 +363,7 @@ final class Outbox {
         try await uploadMissing(item.clientId, client)
         guard let fresh = self.item(clientId: item.clientId) else { throw RelayError.network("gone") }
         let r = try await client.send(try Self.request(for: fresh))
-<<<<<<< HEAD
-        mark(item.clientId) { $0.sentMessageId = r.id }
-=======
         mark(item.clientId) { $0.sentMessageId = r.id; $0.retryAfter = nil; $0.throttleCount = nil }
->>>>>>> origin/develop
         return .sent(clientId: item.clientId, messageId: r.id, duplicate: r.duplicate ?? false)
     }
 
