@@ -6,10 +6,12 @@ struct WorkspaceView: View {
     @Environment(AppModel.self) private var model
     @State private var done = false
     @State private var newTopic = false
+    @State private var deleting: ConversationID?
+    @State private var toast: ArchiveToast?
     private var summary: WorkspaceSummary? { model.workspaceSummaries.first { $0.id == workspaceId } }
     private var name: String { summary.map { WorkspaceAlias.name(for: $0.workspace) } ?? "Workspace" }
     private var topics: [TopicSummary] {
-        (summary?.topics ?? []).filter { topic in
+        (summary.map { model.split($0).topics } ?? []).filter { topic in
             let open = topic.isStarting || topic.status == .working || topic.status == .waitingOnYou
             return done ? !open : open
         }
@@ -25,27 +27,42 @@ struct WorkspaceView: View {
 
     var body: some View {
         let _ = aliasRevision
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+        let parts = summary.map { model.split($0) }
+        List {
+            Group {
                 ModelMessage()
-                generalCard
+                MobileModeBanner(workspaceId: workspaceId)
+                if parts?.general ?? true { generalCard }
                 segments
-                if topics.isEmpty { emptyState }
-                else {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if done {
-                            let groups = doneGroups(topics)
-                            ForEach(Array(groups.enumerated()), id: \.element.status) { index, group in
-                                Text(group.status.label).themeFont(13, .semibold).foregroundStyle(Theme.muted)
-                                    .padding(.horizontal, 18).padding(.top, 14)
-                                ForEach(group.topics) { topic in topicRow(topic) }
-                                if index < groups.count - 1 { ShellDivider().padding(.leading, 74) }
-                            }
-                        } else { ForEach(topics) { topic in topicRow(topic) } }
-                    }.background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+            }.listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
+            if topics.isEmpty { emptyState.listRowBackground(Color.clear).listRowSeparator(.hidden) }
+            else if done {
+                ForEach(doneGroups(topics), id: \.status) { group in
+                    Section {
+                        ForEach(group.topics) { topic in topicRow(topic) }
+                    } header: { Text(group.status.label).themeFont(13, .semibold).foregroundStyle(Theme.muted) }
                 }
-            }.padding(16)
-        }
+            } else {
+                Section { ForEach(topics) { topic in topicRow(topic) } }
+            }
+            if let count = parts?.archived.count, count > 0 {
+                Section {
+                    NavigationLink { ArchivedView(workspaceId: workspaceId) } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "archivebox").themeFont(20).foregroundStyle(Theme.muted)
+                                .frame(width: 24).accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Archived").themeFont(17, .semibold)
+                                Text("\(count) chat\(count == 1 ? "" : "s")").themeFont(13).foregroundStyle(Theme.muted)
+                            }
+                        }.frame(minHeight: 44)
+                    }.foregroundStyle(Theme.text).accessibilityIdentifier("archived-row")
+                        .accessibilityLabel("Archived").accessibilityValue("\(count) chat\(count == 1 ? "" : "s")")
+                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                        .listRowBackground(Theme.surface).listRowSeparator(.hidden)
+                }
+            }
+        }.listStyle(.insetGrouped).scrollContentBackground(.hidden).listSectionSpacing(14)
         .background(Theme.bg.ignoresSafeArea()).navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
@@ -69,6 +86,20 @@ struct WorkspaceView: View {
             NewTopicScreen(workspaceId: workspaceId, asSheet: true).presentationDetents([.medium, .large])
         }
         .refreshable { await model.refresh() }
+        .confirmDelete($deleting) { id in model.deleteChat(id) }
+        .archiveToast($toast, bottom: 84)
+    }
+
+    private func archive(_ id: ConversationID) {
+        model.archiveChat(id)
+        toast = ArchiveToast(text: "Chat archived") { model.moveBack(id) }
+    }
+    @ViewBuilder private func chatMenu(_ id: ConversationID, status: TopicStatus?) -> some View {
+        // The first trailing action is outermost and handles a full swipe.
+        Button { archive(id) } label: { Label("Archive", systemImage: "archivebox") }.tint(Theme.brand)
+        if ArchiveStore.canDelete(status) {
+            Button(role: .destructive) { deleting = id } label: { Label("Delete", systemImage: "trash") }.tint(Theme.danger)
+        }
     }
 
     private var generalCard: some View {
@@ -87,7 +118,9 @@ struct WorkspaceView: View {
                 ShellChevron()
             }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
-        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("general-\(workspaceId)")
+        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("general-\(workspaceId)").navigationLinkIndicatorVisibility(.hidden)
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) { chatMenu(.general(workspace: workspaceId), status: nil) }
+            .contextMenu { chatMenu(.general(workspace: workspaceId), status: nil) }
     }
 
     private var segments: some View {
@@ -108,8 +141,11 @@ struct WorkspaceView: View {
     @ViewBuilder private func topicRow(_ topic: TopicSummary) -> some View {
         if !topic.isStarting, let ticket = topic.id.ticket {
             NavigationLink(value: ChatRoute.ticket(workspace: workspaceId, ticket: ticket)) { topicLabel(topic) }
-                .buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("ticket-\(workspaceId)|\(ticket)")
-        } else { topicLabel(topic) }
+                .foregroundStyle(Theme.text).accessibilityIdentifier("ticket-\(workspaceId)|\(ticket)").navigationLinkIndicatorVisibility(.hidden)
+                .listRowBackground(Theme.surface).listRowInsets(EdgeInsets()).listRowSeparatorTint(Theme.border)
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) { chatMenu(topic.id, status: topic.status) }
+                .contextMenu { chatMenu(topic.id, status: topic.status) }
+        } else { topicLabel(topic).listRowBackground(Theme.surface).listRowInsets(EdgeInsets()) }
     }
 
     private func topicLabel(_ topic: TopicSummary) -> some View {

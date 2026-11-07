@@ -15,47 +15,175 @@ def claude_found(monkeypatch):
     )
 
 
+def _git(proj, *args):
+    import subprocess
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return subprocess.run(
+        ["git", *args], cwd=proj, env=env, capture_output=True, text=True, check=True
+    ).stdout
+
+
+def _git_repo(proj):
+    _git(proj, "init", "-q")
+    _git(proj, "config", "user.email", "t@example.com")
+    _git(proj, "config", "user.name", "t")
+
+
 def test_init_creates_everything(proj, run):
     code, out, _ = run("init")
     assert code == 0
-    assert "name: orch" in (proj / ".agents/skills/orch/SKILL.md").read_text(encoding="utf-8")
-    assert not (proj / ".agents/skills/orch/AGENTS-block.md").exists()
-    agents = (proj / "AGENTS.md").read_text(encoding="utf-8")
-    assert "<!-- orch:begin orch -->" in agents and "<!-- orch:end orch -->" in agents
-    assert (proj / "CLAUDE.md").read_text(encoding="utf-8").splitlines() == ["@AGENTS.md"]
-    gi = (proj / ".gitignore").read_text(encoding="utf-8")
-    assert ".orch/secrets/" in gi and ".orch/addons/" in gi and ".orch/.local-id" in gi
-    assert (proj / ".claude/skills/orch/SKILL.md").is_file()  # through the link
+    assert "name: orch" in (proj / ".orch/harness/skills/orch/SKILL.md").read_text(encoding="utf-8")
+    assert not (proj / ".orch/harness/skills/orch/AGENTS-block.md").exists()
+    assert (proj / ".agents/skills/orch/SKILL.md").is_file()  # through the link
+    assert (proj / ".claude/skills/orch/SKILL.md").is_file()
+    assert "orch" in (proj / ".orch/harness/AGENTS.orch.md").read_text(encoding="utf-8")
+    local = (proj / "CLAUDE.local.md").read_text(encoding="utf-8")
+    assert "@.orch/harness/AGENTS.orch.md" in local and "@AGENTS.md" not in local  # the team has no AGENTS.md
+    assert not (proj / "AGENTS.md").exists() and not (proj / "CLAUDE.md").exists()
+    assert not (proj / ".gitignore").exists()
     assert (proj / ".orch/tickets").is_dir()
 
 
-def test_init_is_idempotent_and_keeps_user_text(proj, run):
+def test_fresh_init_in_a_git_repo_leaves_git_status_clean(proj, run):
+    _git_repo(proj)
+    (proj / "AGENTS.md").write_text("# Team rules\n", encoding="utf-8")
+    (proj / ".gitignore").write_text("node_modules\n", encoding="utf-8")
+    _git(proj, "add", "-A")
+    _git(proj, "commit", "-qm", "base")
+    assert run("init")[0] == 0
+    # .orch/tickets, config.toml are the team's workspace state; everything of the harness is invisible
+    status = _git(proj, "status", "--porcelain", "--untracked-files=all").splitlines()
+    names = [x[3:] for x in status]
+    assert not any(
+        n.startswith((".agents", ".claude", ".orch/harness")) or n == "CLAUDE.local.md" for n in names
+    )
+    assert (proj / "AGENTS.md").read_text(encoding="utf-8") == "# Team rules\n"
+    assert (proj / ".gitignore").read_text(encoding="utf-8") == "node_modules\n"
+    assert "@AGENTS.md" in (proj / "CLAUDE.local.md").read_text(
+        encoding="utf-8"
+    )  # team AGENTS.md, no CLAUDE.md
+    ex = (proj / ".git/info/exclude").read_text(encoding="utf-8")
+    assert "/.agents/skills/orch\n" in ex and "/.claude/skills/orch\n" in ex and "/CLAUDE.local.md" in ex
+    assert run("init")[0] == 0  # again: same result, one block
+    assert (proj / ".git/info/exclude").read_text(encoding="utf-8") == ex
+
+
+def test_a_colleague_clone_without_orch_sees_no_orch_files(proj, run, tmp_path_factory):
+    _git_repo(proj)
+    (proj / "AGENTS.md").write_text("# Team rules\n", encoding="utf-8")
+    assert run("init")[0] == 0
+    _git(proj, "add", "-A")
+    _git(proj, "commit", "-qm", "work")
+    tracked = _git(proj, "ls-files").split()
+    assert not any(
+        t.startswith((".agents", ".claude", ".orch/harness")) or t == "CLAUDE.local.md" for t in tracked
+    )
+    clone = tmp_path_factory.mktemp("colleague") / "c"
+    _git(proj, "clone", "-q", str(proj), str(clone))
+    files = sorted(
+        p.relative_to(clone).as_posix()
+        for p in clone.rglob("*")
+        if p.is_file() and ".git/" not in p.as_posix()
+    )
+    assert "AGENTS.md" in files
+    assert not [f for f in files if "harness" in f or f.startswith((".agents", ".claude")) or "CLAUDE" in f]
+
+
+def test_init_keeps_user_files_and_is_idempotent(proj, run):
     (proj / "AGENTS.md").write_text("# Mine\nhello\n", encoding="utf-8")
-    (proj / "CLAUDE.md").write_text("# Claude\n@AGENTS.md\n", encoding="utf-8")
+    (proj / "CLAUDE.md").write_text("# Claude\n", encoding="utf-8")
+    (proj / "CLAUDE.local.md").write_text("my private notes\n", encoding="utf-8")
     (proj / ".gitignore").write_text("node_modules\n", encoding="utf-8")
     assert run("init")[0] == 0
-    first = {n: (proj / n).read_text(encoding="utf-8") for n in ("AGENTS.md", "CLAUDE.md", ".gitignore")}
+    names = ("AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", ".gitignore")
+    first = {n: (proj / n).read_text(encoding="utf-8") for n in names}
     assert run("init")[0] == 0
-    second = {n: (proj / n).read_text(encoding="utf-8") for n in first}
-    assert first == second
-    assert first["AGENTS.md"].startswith("# Mine\nhello\n")
-    assert first["AGENTS.md"].count("orch:begin orch") == 1
-    assert first["CLAUDE.md"].count("@AGENTS.md") == 1
-    assert first["CLAUDE.md"].startswith("# Claude")
+    assert first == {n: (proj / n).read_text(encoding="utf-8") for n in names}
+    assert first["AGENTS.md"] == "# Mine\nhello\n" and first["CLAUDE.md"] == "# Claude\n"
+    assert first[".gitignore"] == "node_modules\n"
+    local = first["CLAUDE.local.md"]
+    assert local.startswith("my private notes\n") and local.count("orch:begin local") == 1
+    assert "@AGENTS.md" not in local  # the team's CLAUDE.md is there: Claude reads it already
+
+
+def test_no_git_same_layout_without_exclude(proj, run):
+    assert run("init")[0] == 0
+    assert not (proj / ".git").exists()
+    assert (proj / ".agents/skills/orch/SKILL.md").is_file() and (proj / "CLAUDE.local.md").is_file()
+
+
+def test_the_orch_block_is_in_the_start_prompt_of_a_non_claude_agent(proj, run):
+    from orch import harness, runs
+
+    assert run("init")[0] == 0
+    assert "orch" in harness.start_text(proj)
+    runs_mod_plan = runs.plan
+    t = run("ticket", "new", "x", "--json")[1]
+    import json
+
+    tid = json.loads(t)["id"]
+    plan_codex = runs_mod_plan(proj, tid, agent="codex")
+    assert harness.start_text(proj)[:40] in plan_codex["prompt"]
+    plan_claude = runs_mod_plan(proj, tid, agent="claude")
+    assert harness.start_text(proj)[:40] not in plan_claude["prompt"]
+
+
+def test_windows_copy_fallback_is_kept_in_sync(proj, run, monkeypatch):
+    from orch import harness
+
+    def no_links(link, target):
+        harness._copy_dir(target, link)
+
+    monkeypatch.setattr(harness, "_link_dir", no_links)
+    assert run("init")[0] == 0
+    cp = proj / ".agents/skills/orch"
+    assert cp.is_dir() and not cp.is_symlink() and (cp / harness.COPY_MARK).is_file()
+    (proj / ".orch/harness/skills/orch/SKILL.md").write_text("changed", encoding="utf-8")
+    assert run("init")[0] == 0
+    assert (cp / "SKILL.md").read_text(encoding="utf-8") == "changed" or "name: orch" in (
+        cp / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+
+def test_does_not_replace_a_users_own_orch_folder(proj, run):
+    (proj / ".agents/skills/orch").mkdir(parents=True)
+    (proj / ".agents/skills/orch/SKILL.md").write_text("mine", encoding="utf-8")
+    code, _, err = run("init")
+    assert code == 2 and "not orch's" in err
+    assert (proj / ".agents/skills/orch/SKILL.md").read_text(encoding="utf-8") == "mine"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink setup")
+def test_harness_folder_linked_outside_is_refused(proj, run, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("outside2")
+    (proj / ".orch").mkdir()
+    os.symlink(outside, proj / ".orch" / "harness", target_is_directory=True)
+    code, _, err = run("init")
+    assert code == 2 and list(outside.iterdir()) == []
+
+
+def test_share_with_team_on_and_off(proj, run):
+    from orch import harness
+
+    (proj / "AGENTS.md").write_text("# Team rules\n", encoding="utf-8")
+    assert run("init")[0] == 0
+    harness.share_on(proj)
+    harness.share_on(proj)  # twice: still one block
+    t = (proj / "AGENTS.md").read_text(encoding="utf-8")
     assert (
-        first[".gitignore"].startswith("node_modules\n") and first[".gitignore"].count(".orch/secrets/") == 1
+        t.startswith("# Team rules\n") and t.count("orch:begin share") == 1 and "If it does not, ignore" in t
     )
-
-
-def test_block_replaced_whole_text_outside_untouched(proj):
-    skills.set_block(proj, "orch", "old")
-    p = proj / "AGENTS.md"
-    p.write_text("before\n" + p.read_text(encoding="utf-8") + "after\n", encoding="utf-8")
-    skills.set_block(proj, "orch", "new")
-    t = p.read_text(encoding="utf-8")
-    assert "new" in t and "old" not in t and t.startswith("before\n") and t.endswith("after\n")
-    skills.remove_block(proj, "orch")
-    assert p.read_text(encoding="utf-8") == "before\nafter\n"
+    assert "AGENTS.md merge=union" in (proj / ".gitattributes").read_text(encoding="utf-8")
+    assert harness.share_state(proj)
+    other = proj.parent / (proj.name + "_other")
+    other.mkdir()
+    (other / "AGENTS.md").write_text("# Team rules\n", encoding="utf-8")
+    harness.share_on(other)
+    assert (other / "AGENTS.md").read_text(encoding="utf-8") == t  # same text for everyone
+    harness.share_off(proj)
+    assert (proj / "AGENTS.md").read_text(encoding="utf-8") == "# Team rules\n"
+    assert not (proj / ".gitattributes").exists() and not harness.share_state(proj)
 
 
 def test_existing_claude_skills_folder_gets_per_skill_links(proj, run):
@@ -64,7 +192,7 @@ def test_existing_claude_skills_folder_gets_per_skill_links(proj, run):
     assert run("init")[0] == 0
     assert (proj / ".claude/skills/mine/SKILL.md").is_file()
     assert (proj / ".claude/skills/orch/SKILL.md").is_file()
-    assert not (proj / ".claude/skills").is_symlink()
+    assert not (proj / ".claude/skills").is_symlink() and (proj / ".claude/skills/orch").is_symlink()
 
 
 def test_all_packaged_skills_have_front_matter():
@@ -80,19 +208,12 @@ def test_all_packaged_skills_have_front_matter():
         assert (d / "AGENTS-block.md").is_file()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows junction")
-def test_windows_junction(proj, run):
-    assert run("init")[0] == 0
-    cl = proj / ".claude" / "skills"
-    assert os.lstat(cl).st_file_attributes & 0x400  # reparse point = junction
-    assert (cl / "orch" / "SKILL.md").is_file()
-    assert Path(os.path.realpath(cl)) == (proj / ".agents" / "skills").resolve()
-
-
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink")
 def test_unix_symlink_is_relative(proj, run):
     assert run("init")[0] == 0
-    assert os.readlink(proj / ".claude/skills") == os.path.join("..", ".agents", "skills")
+    assert os.readlink(proj / ".claude/skills/orch") == os.path.join(
+        "..", "..", ".orch", "harness", "skills", "orch"
+    )
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink setup")
@@ -115,8 +236,8 @@ def test_no_agent_found_links_nothing(proj, run, monkeypatch):
     monkeypatch.setattr(adapters, "detect", lambda: [])
     code, out, _ = run("init")
     assert code == 0 and "Linked for" not in out
-    assert not (proj / ".claude").exists() and not (proj / "CLAUDE.md").exists()
-    assert (proj / "AGENTS.md").is_file()
+    assert not (proj / ".claude").exists() and not (proj / "CLAUDE.local.md").exists()
+    assert (proj / ".agents/skills/orch/SKILL.md").is_file()
 
 
 def test_codex_only_needs_only_agents_md(proj, run, monkeypatch):
@@ -124,9 +245,8 @@ def test_codex_only_needs_only_agents_md(proj, run, monkeypatch):
         adapters, "detect", lambda: [{"name": "codex", "label": "Codex", "found": True, "version": None}]
     )
     code, out, _ = run("init")
-    assert code == 0 and "Linked for" not in out and not (proj / "CLAUDE.md").exists()
-    # Codex reads AGENTS.md and .agents/skills itself: both are there without any link
-    assert "orch:begin orch" in (proj / "AGENTS.md").read_text(encoding="utf-8")
+    assert code == 0 and "Linked for" not in out and not (proj / "CLAUDE.local.md").exists()
+    # Codex reads .agents/skills itself; its orch text comes in the start prompt
     assert (proj / ".agents/skills/orch/SKILL.md").is_file() and not (proj / ".claude").exists()
 
 
@@ -141,9 +261,10 @@ def test_files_entries_come_from_the_data(proj, monkeypatch):
     monkeypatch.setattr(
         adapters, "detect", lambda: [{"name": "codex", "label": "Codex", "found": True, "version": None}]
     )
+    skills.set_block(proj, "orch", "x")
     assert skills.apply_agent_files(proj) == ["Codex"]
-    assert (proj / "OTHER.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
-    assert (proj / ".other/skills").is_symlink()
+    assert (proj / "OTHER.md").is_file() and not (proj / "AGENTS.md").exists()
+    assert (proj / ".other/skills").is_dir() or not (proj / ".orch/harness/skills").exists()
 
 
 def test_recommended_turns_on_marked_addons_or_none(proj, run, monkeypatch):
@@ -213,3 +334,140 @@ def test_shipped_recommended_reads_the_local_source_manifests(monkeypatch):
     monkeypatch.setenv("ORCH_REPO", str(repo))
     monkeypatch.setattr(addons, "discover", lambda: {})
     assert sorted(addons.shipped_recommended()) == ["automation", "dashboard", "focus"]
+
+
+def test_secrets_stay_ignored_even_when_linking_is_refused(proj, run, tmp_path_factory):
+    _git_repo(proj)
+    outside = tmp_path_factory.mktemp("outside3")
+    (proj / ".agents").mkdir()
+    os.symlink(outside, proj / ".agents" / "skills", target_is_directory=True)
+    assert run("init")[0] == 2  # linking refused
+    ex = (proj / ".git/info/exclude").read_text(encoding="utf-8")
+    assert "/.orch/secrets/" in ex and "/.orch/run/" in ex and "/.orch/inbox/" in ex
+    assert "secrets/" in (proj / ".orch/.gitignore").read_text(encoding="utf-8")
+    (proj / ".orch/secrets").mkdir(parents=True, exist_ok=True)
+    (proj / ".orch/secrets/publish.json").write_text("{}", encoding="utf-8")
+    assert ".orch/secrets" not in _git(proj, "status", "--porcelain", "--untracked-files=all")
+
+
+def test_orch_gitignore_protects_without_git_info_and_secrets_refuse_when_nothing_works(proj, monkeypatch):
+    from orch import harness, net
+
+    harness.protect_local(proj)  # no git repo: .orch/.gitignore alone is enough
+    assert (proj / ".orch/.gitignore").is_file()
+    (proj / ".orch/.gitignore").unlink()
+    monkeypatch.setattr(harness, "write_text", lambda *a, **k: (_ for _ in ()).throw(OSError("read-only")))
+    with pytest.raises(skills.Refused, match="Nothing was stored"):
+        net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
+    assert not (proj / ".orch/secrets/x.json").exists()
+
+
+def test_share_command_on_off_status_and_agents_are_refused(proj, run, monkeypatch):
+    assert run("init")[0] == 0
+    code, out, _ = run("share", "--json")
+    assert code == 0 and '"shared": false' in out
+    assert run("share", "on")[0] == 0 and (proj / "AGENTS.md").is_file()
+    assert '"shared": true' in run("share", "status", "--json")[1]
+    monkeypatch.setenv("CLAUDECODE", "1")
+    code, _, err = run("share", "off")
+    assert code == 2 and "Only a person" in err and (proj / "AGENTS.md").is_file()
+    monkeypatch.delenv("CLAUDECODE")
+    assert run("share", "off")[0] == 0 and not (proj / "AGENTS.md").exists()
+
+
+def test_review_fixes_user_folder_kept_share_off_exact_and_eol(proj, run):
+    from orch import harness
+
+    # a user's own folder at a link place is never emptied or removed
+    (proj / ".claude/skills/orch").mkdir(parents=True)
+    (proj / ".claude/skills/orch/README.md").write_text("mine", encoding="utf-8")
+    code, _, err = run("init")
+    assert code == 2 and (proj / ".claude/skills/orch/README.md").read_text(encoding="utf-8") == "mine"
+    # a user's own skill named like ours (orchestrator) is not hidden by the exclude block
+    _git_repo(proj)
+    (proj / ".claude/skills/orch/README.md").unlink()
+    (proj / ".claude/skills/orch").rmdir()
+    run("init")
+    assert "orch*" not in (proj / ".git/info/exclude").read_text(encoding="utf-8")
+    # share off: a .gitattributes line the team wrote itself stays; CRLF files keep CRLF
+    (proj / ".gitattributes").write_bytes(b"AGENTS.md merge=union\r\n*.png binary\r\n")
+    (proj / "AGENTS.md").write_bytes(b"# Team\r\n")
+    harness.share_on(proj)
+    assert b"\r\n" in (proj / "AGENTS.md").read_bytes() and b"\n" not in (
+        proj / "AGENTS.md"
+    ).read_bytes().replace(b"\r\n", b"")
+    harness.share_off(proj)
+    assert (proj / "AGENTS.md").read_bytes() == b"# Team\r\n"
+    assert (proj / ".gitattributes").read_bytes() == b"AGENTS.md merge=union\r\n*.png binary\r\n"
+
+
+def test_share_off_removes_an_agents_md_only_when_orch_made_it(proj, run):
+    from orch import harness
+
+    (proj / "AGENTS.md").write_text("", encoding="utf-8")  # the team's own (empty) file
+    assert run("init")[0] == 0
+    harness.share_on(proj)
+    harness.share_off(proj)
+    assert (proj / "AGENTS.md").is_file()
+    (proj / "AGENTS.md").unlink()
+    harness.share_on(proj)
+    harness.share_off(proj)
+    assert not (proj / "AGENTS.md").exists()
+
+
+def test_a_long_orch_block_never_cuts_the_ticket_out_of_the_prompt(proj, run):
+    import json
+
+    from orch import harness, runs
+
+    assert run("init")[0] == 0
+    harness.set_block(proj, "big", "x" * 30000, addon=True)
+    tid = json.loads(run("ticket", "new", "Find me", "--json")[1])["id"]
+    assert "Find me" in runs.plan(proj, tid, agent="codex")["prompt"]
+
+
+def test_addon_ignore_lines_that_hide_everything_are_refused(proj):
+    from orch import addons
+
+    for bad in (
+        "*",
+        "**",
+        ".orch",
+        ".orch/",
+        ".orc?",
+        ".ORCH",
+        ".Orch/tickets/",
+        ".orch/Tickets",
+        ".orch/*",
+        ".orch/tick*",
+        "*/tickets",
+        ".orch ",
+        " .orch",
+        "[.]orch",
+        "./",
+        "?",
+        "*.tmp",
+        ".orch/./tickets",
+        ".orch/config.toml",
+    ):
+        with pytest.raises(skills.Refused):
+            addons._set_gitignore(proj, "evil", [bad])
+
+
+def test_addon_ignore_lines_that_name_a_place_are_accepted(proj):
+    import subprocess
+
+    from orch import addons
+
+    subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
+    addons._set_gitignore(proj, "ok", ["received/", ".orch/outbox/", "notes/*.tmp", ".orch/relay.lock*"])
+    ex = (proj / ".git/info/exclude").read_text(encoding="utf-8")
+    assert "/received/" in ex and "/.orch/outbox/" in ex and "/notes/*.tmp" in ex
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink setup")
+def test_linked_dot_folder_outside_the_project_is_not_written_into(proj, run, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("dotfiles")
+    os.symlink(outside, proj / ".claude", target_is_directory=True)  # `skills` does not exist there yet
+    code, _, err = run("init")
+    assert code == 2 and "outside" in err and list(outside.iterdir()) == []

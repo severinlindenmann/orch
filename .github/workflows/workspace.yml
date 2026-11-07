@@ -17,6 +17,8 @@ jobs:
       matrix:
         os: ${{ fromJSON(inputs.full && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
+    # The suite takes 3-6 min; a hung test must not hold the runner for GitHub's 6 h default.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: workspace
@@ -27,6 +29,10 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q
+        if: runner.os != 'Windows'
+      # Windows: a test that hangs is stopped after 120 s with every thread's stack, so the log names it.
+      - run: uv run --with pytest-timeout pytest -q --timeout 120 --timeout-method thread
+        if: runner.os == 'Windows'
       - name: Installed wheel smoke (orch init, junction on Windows)
         shell: bash
         run: |

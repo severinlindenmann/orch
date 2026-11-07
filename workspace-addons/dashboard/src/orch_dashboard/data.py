@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import mobile
+
 STATUS_ORDER = ["active", "waiting", "open", "done", "dropped"]
 _NAME = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
 ICONS = ("clock", "calendar", "inbox", "list", "chart", "bell", "book", "globe", "link", "check", "star", "box",
@@ -273,7 +275,7 @@ def _consent(r: dict) -> str:
     if r.get("source") == "local":
         lines.append("Source: local folder (not checked by orch). It runs code on this computer.")
     lines.append(f"Adds the command: orch {name}")
-    lines.append(f"Adds a skill and an entry in AGENTS.md: orch-{name}")
+    lines.append(f"Adds a skill and an entry in the local orch instructions: orch-{name}")
     if r.get("ticket_view"):
         lines.append(f"Stores data on tickets under: ext.{name}")
     if d and isinstance(d.get("label"), str):
@@ -309,8 +311,14 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
     perm = run_orch(orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
+    try:  # read-only look: the entry `orch share on` writes (a link is never followed)
+        f = root / "AGENTS.md"
+        share = f.is_file() and not f.is_symlink() and "<!-- orch:begin share -->" in f.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        share = False
     return {
         "folder": str(root),
+        "share": share,
         "permissions": perm if perm in ("ask", "auto", "full") else "auto",  # core's default is Auto
         "agents": [{k: a.get(k) for k in keep} for a in (agents if isinstance(agents, list) else [])
                    if isinstance(a, dict) and isinstance(a.get("name"), str)],
@@ -375,6 +383,7 @@ def load_state(root: Path, orch_bin: str | None = None, with_addons: bool = True
         "needs": needs if isinstance(needs, list) else [],
         "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
         "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},
+        "mobile_mode": mobile.load_mobile(root, orch_bin) if with_settings else None,  # the live page only, never a snapshot
         "settings": load_settings(root, orch_bin) if with_settings else None,  # only the live local server: it holds the folder path
     }
     state["rev"] = hashlib.sha1(

@@ -1,5 +1,12 @@
 import SwiftUI
 
+/// Reserve the same trailing space for agent text and memo bubbles.
+enum ChatBubbleLayout {
+    static func agentTrailingSpace(for typeSize: DynamicTypeSize) -> CGFloat {
+        typeSize.isAccessibilitySize ? 8 : 32
+    }
+}
+
 struct OrbitMark: View {
     var body: some View {
         GeometryReader { proxy in

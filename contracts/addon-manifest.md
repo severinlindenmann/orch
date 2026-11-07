@@ -21,13 +21,13 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `version`, `description` | `x.y.z`; one plain sentence (shown in `orch addon list` and `orch --help`) |
 | `run` | Top-level module. `orch <name> <args>` = subprocess `<orch's python> -m <run> <args>` |
 | `skill` | Folder with `SKILL.md` → copied to `.agents/skills/orch-<name>/` |
-| `agents_block` | AGENTS.md block body (default `<skill>/AGENTS-block.md`) |
+| `agents_block` | block body for .orch/harness/AGENTS.orch.md (default `<skill>/AGENTS-block.md`) |
 | `ticket_ext` | Local JSON Schema for `ext.<name>` (no remote `$ref`, ≤ 32 KB) |
 | `background` | `true` = has a long-running process; must implement `orch <name> start\|stop\|status --json` (Background, below) |
 | `[dashboard]` | `label` (≤ 16 chars), `icon` (fixed set in the schema), `order`: the add-on has a tab filled by `orch <name> view --json` |
 | `[[ticket_view]]` | Ticket detail rows from `ext.<name>`: `field`, `label`, `format` = `text` · `time` · `cron-human` · `chips` · `yes-no` · `open-page` (an "Open" button to `[page]` `path` + `/` + the value; needs `[page]`) |
 | `recommended` | `true` = `orch init --recommended` turns it on (the core names no add-on; it reads this key) |
-| `gitignore` | Lines for the workspace `.gitignore`, added by `orch addon add`, removed by `orch addon remove`: relative paths inside the workspace, no leading `/`, no `..`, no `\`, no drive letter |
+| `gitignore` | Lines kept out of git (own block of `.git/info/exclude`, never the team `.gitignore`), added by `orch addon add`, removed by `orch addon remove`: relative paths inside the workspace, no leading `/`, no `..`, no `\`, no drive letter |
 | `runs_agents` | `true` = the add-on starts agent runs; it does so only through `orch run start` (one claim per ticket, the workspace's agent) |
 | `requires` | Add-on names that must be active first; `orch addon add` refuses and names the missing ones (nothing is turned on by itself) |
 | `needs` | `true` = implements `orch <name> needs --json` → rows of `needs.schema.json` for `orch needs` (only rows that are not ticket questions: those come from the tickets) |
@@ -66,8 +66,8 @@ record. The installed list (`addons.json` in the same folder) is the registry of
 
 `orch addon add <name|path>` = install (if needed) + activate. `orch addon remove <name>` (this workspace):
 1. `orch <name> stop` if `background = true` (the process also exits by itself when it sees it is no longer active);
-2. removes `.agents/skills/orch-<name>/` (exactly that folder, never `orch-<name>-x`, which may belong to another add-on or the
-   user), the AGENTS.md block, the `.claude/skills` links;
+2. removes `.orch/harness/skills/orch-<name>/` and its links (exactly that folder, never `orch-<name>-x`, which may belong to another add-on or the
+   user) and its block in `.orch/harness/AGENTS.orch.md`;
 3. drops it from `.orch/addons.json` → tab and ticket rows disappear;
 4. keeps `ext.<name>` in tickets (hidden, never validated, never blocks ticket access) and `.orch/addons/<name>/`;
    `--purge` also deletes `.orch/addons/<name>/` and the `[<name>]` table of `.orch/config.toml`.

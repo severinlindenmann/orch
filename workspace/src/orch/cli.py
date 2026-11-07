@@ -19,6 +19,7 @@ from orch import (
     cli_status,
     fields,
     links,
+    mobile_mode,
     net,
     relay,
     runs_live,
@@ -224,7 +225,7 @@ def _visible(root: Path, t: dict) -> dict:
     return {**t, "ext": {k: v for k, v in ext.items() if k in on}}
 
 
-_PLACEHOLDERS = {"run", "agents", "config"}  # hidden until built
+_PLACEHOLDERS = {"run", "agents", "config", "share"}  # hidden until built
 ADVANCED_TOP = {"update", "wait", "log", "answer", "link", "ext"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
@@ -666,6 +667,9 @@ def run(args: argparse.Namespace) -> None:
         )
         if args.phone:
             cli_clients.send_phone_question(root, t["id"], q, args.preview, args.scope)
+        elif mobile_mode.routes_to_phone(root):  # Mobile mode: every question also goes to the phone
+            with contextlib.suppress(Refused):  # the question is saved either way
+                cli_clients.send_phone_question(root, t["id"], q)
         _out(
             args,
             q,

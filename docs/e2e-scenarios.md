@@ -7,7 +7,7 @@ Format: steps → expected result.
 
 ## Workspace (W)
 - W0 Fresh machine without uv: GitHub `install.sh` (macOS, Linux) / `install.ps1` (Windows) → `orch --version` works; `orch update` → reinstalls, project skills refreshed.
-- W1 `orch init` on an empty folder (macOS, Linux, Windows) → `.orch/`, skill, AGENTS.md block, `.claude/skills` link/junction, `.gitignore` lines; second run changes nothing.
+- W1 `orch init` on an empty folder (macOS, Linux, Windows) → `.orch/`, local harness (`.orch/harness`), skill links (copies where links are refused), `CLAUDE.local.md`, `.orch/.gitignore`; no team file written; second run changes nothing.
 - W2 Agent (claude -p) gets "rename field X", makes a ticket, adds 2 checklist items, does the work → ticket valid, history `by: agent:claude-code`.
 - W3 `orch check done` without evidence → refused, exit 2, plain reason; with `--evidence` commit → done.
 - W4 `orch ticket status done` while an item lacks evidence → refused.

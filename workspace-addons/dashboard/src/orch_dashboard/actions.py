@@ -15,6 +15,7 @@ from pathlib import Path
 
 from . import runfiles
 from .data import run_orch
+from .mobile import MOBILE_OPS
 
 MAX_TEXT = 2000
 TID = re.compile(r"t_[a-z0-9]{6,16}")
@@ -235,6 +236,14 @@ def _config_permissions(a):
     return ["config", "set", "workspace.permissions", mode], [], []
 
 
+def _share_set(a):
+    """Share with team: `orch share on|off` (AGENTS.md entry + merge=union; off removes both)."""
+    _only(a, ("on",))
+    if not isinstance(a.get("on"), bool):
+        raise BadRequest("Say on or off.")
+    return ["share", "on" if a["on"] else "off"], [], []
+
+
 def _config_agent_test(a):
     """Try an agent: `orch agents test <name> --json` answers {name, ok, reason}. Changes nothing, so no --by."""
     _only(a, ("name",))
@@ -274,7 +283,8 @@ def _addon_set(a):
 OPS = {"answer": _answer, "ticket.new": _ticket_new, "ticket.patch": _ticket_patch, "ticket.edit": _ticket_edit,
        "log": _log, "check.add": _check_add, "run.start": _run_start, "run.stop": _run_stop, "addon.start": _addon_start,
        "addon.act": _addon_act, "config.agent": _config_agent, "config.agent.add": _config_agent_add, "config.agent.test": _config_agent_test,
-       "config.permissions": _config_permissions, "addon.set": _addon_set,
+       "config.permissions": _config_permissions, "addon.set": _addon_set, "share.set": _share_set,
+       **MOBILE_OPS,
        "link.add": _link_add, "link.remove": _link_remove, "ticket.field": _ticket_field}
 
 
@@ -359,7 +369,7 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
     if op == "config.agent.test" and isinstance(out, dict) and isinstance(out.get("ok"), bool):
         return 200, "", out  # `orch agents test` exits 1 when the agent does not work; the JSON is the answer either way
     if r.returncode == 0:
-        if op in ("config.agent.add", "addon.set", "config.agent", "config.permissions"):
+        if op in ("config.agent.add", "addon.set", "config.agent", "config.permissions", "share.set"):
             _audit(root, op, args)
         return 200, "", out if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None
