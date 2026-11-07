@@ -151,10 +151,11 @@ def start_live(
     mine = cur is not None and runs.state(cur) == "alive"
     if not mine and _full(root):
         _queue_for_slot(root, tid, by, busy_text)
+        n = MAX_LIVE if len(live_alive(root)) >= MAX_LIVE else MAX_LIVE + HARD_EXTRA  # name the limit that was really hit
         raise runs.Busy(
-            f"{MAX_LIVE} live sessions are open here, the most at once. Your request for {tid} is saved and "
+            f"{n} live sessions are open here, the most at once. Your request for {tid} is saved and "
             f"starts when one closes. To close one: orch run stop <ticket>",
-            {"pending": True, "limit": MAX_LIVE},
+            {"pending": True, "limit": n},
         )
     if not mine and session_exists(root, tid):
         tmux(root, "kill-session", "-t", target(tid))  # left over from a crash: the claim is gone

@@ -320,3 +320,5 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .mm-chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)}
 .mm-hours{display:flex;gap:6px;flex-wrap:wrap}
 @media(max-width:720px){.mm-toggle{margin-left:0}.mm-bar{padding:10px 12px}}
+.status-sum-icon{padding:2px 6px;min-width:0}
+.status-sum-icon .chev{margin:0}
