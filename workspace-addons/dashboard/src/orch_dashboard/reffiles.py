@@ -3,10 +3,10 @@
 import json
 from pathlib import Path
 
-from orch.safefile import TooLarge, open_file_ref
-
 
 def read(root, tid, number):
+    from orch.safefile import TooLarge, open_file_ref
+
     from .actions import TID
 
     refused = (404, b"This reference cannot be opened.", "text/plain")

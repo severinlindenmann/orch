@@ -678,8 +678,13 @@ def test_human_review_done_and_workflow_reach_core_even_when_server_was_started_
     from orch import config
 
     monkeypatch.setenv("ORCH_AGENT", "claude")
+    pytest.importorskip("cryptography")  # the real CLI runs in a subprocess; this venv may lack the core deps
     command = tmp_path / "orch-core"
-    command.write_text(f"#!{sys.executable}\nfrom orch.cli import main\nraise SystemExit(main())\n")
+    src = Path(__file__).resolve().parents[3] / "workspace" / "src"
+    command.write_text(
+        f"#!{sys.executable}\nimport sys\nsys.path.insert(0, {str(src)!r})\n"
+        "from orch.cli import main\nraise SystemExit(main())\n"
+    )
     command.chmod(0o700)
     p = ws / ".orch/tickets/t_7k3f9q.json"
     t = json.loads(p.read_text())
@@ -697,3 +702,10 @@ def test_human_review_done_and_workflow_reach_core_even_when_server_was_started_
     code, text, _ = actions.run_op(ws, str(command), "workflow.set", {"on": True})
     assert code == 200, text
     assert config.agents_may_finish(ws) is True
+
+
+def test_human_env_drops_the_agent_variables(ws, monkeypatch):
+    monkeypatch.setenv("ORCH_AGENT", "claude")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    env = actions.human_env(ws, "orch")
+    assert "ORCH_AGENT" not in env and "CLAUDECODE" not in env and env["ORCH_VIA"] == "dashboard"

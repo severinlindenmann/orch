@@ -523,11 +523,16 @@ def load_state(
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
-    from orch.refs import local_refs
+    try:
+        from orch.refs import local_refs
+    except ImportError:  # the core is not importable here: no local references
+        local_refs = None
 
     for t in tickets:
         t["refs"] = [r for r in t.get("refs", []) if not (isinstance(r, dict) and r.get("local"))]
-        if with_settings:  # only the live local server: a snapshot is shared and must not carry local paths
+        if (
+            with_settings and local_refs
+        ):  # only the live local server: a snapshot is shared and must not carry local paths
             try:
                 more = local_refs(root, t["id"])
             except (ValueError, TypeError, OSError):

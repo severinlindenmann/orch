@@ -69,17 +69,7 @@ def test_result_update_carries_the_snapshot_with_marked_proof_only(proj, run, ne
     run("check", "done", tid, "c2", "--file", "out/notes.txt", "--role", "support", "--by", "agent:claude")
     run("check", "done", tid, "c3", "--url", "https://ci.example.ch/run/7?token=abc123", "--role", "check",
         "--by", "agent:claude")  # fmt: skip
-    run(
-        "link",
-        "add",
-        tid,
-        "--type",
-        "github",
-        "--url",
-        "https://github.com/acme/app/pull/142",
-        "--title",
-        "Fix #142",
-    )
+    run("ref", "add", tid, "https://github.com/acme/app/pull/142", "--title", "Fix #142")
     code, _, err = run("relay", "send", "phones", "Charts are done.", "--ticket", tid, "--update", "result")
     assert code == 0, err
     (m,) = views(conn)

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 """Ticket links and add-on fields in the dashboard: the three new ops (ref.add, ref.rm, ticket.field), the
 refresh answer, and the link view the page gets from the core's one link module (orch.refs)."""
 
@@ -289,8 +291,13 @@ def test_a_host_the_browser_reads_differently_is_shown_as_a_plain_link():
 def test_reference_ops_reach_core_for_all_four_kinds(ws, tmp_path):
     import sys
 
+    pytest.importorskip("cryptography")  # the real CLI runs in a subprocess; this venv may lack the core deps
     command = tmp_path / "orch-core"
-    command.write_text(f"#!{sys.executable}\nfrom orch.cli import main\nraise SystemExit(main())\n")
+    src = Path(__file__).resolve().parents[3] / "workspace" / "src"
+    command.write_text(
+        f"#!{sys.executable}\nimport sys\nsys.path.insert(0, {str(src)!r})\n"
+        "from orch.cli import main\nraise SystemExit(main())\n"
+    )
     command.chmod(0o700)
     (ws / "notes.md").write_text("# Notes")
     artifacts = ws / ".orch/tickets/t_weekly01/artifacts"
