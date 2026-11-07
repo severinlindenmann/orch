@@ -322,6 +322,8 @@ def _secrets_in(outdir: Path, env) -> list[str]:
     if not env:
         return []
     names = {k: v for k, v in env.vars.items() if k.endswith("_token") and v}
+    if os.environ.get("E2E_CLAUDE_TOKEN"):
+        names["claude_login"] = os.environ["E2E_CLAUDE_TOKEN"]
     found = []
     for p in outdir.rglob("*"):
         if p.is_file() and p.stat().st_size < 50_000_000:

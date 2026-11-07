@@ -39,8 +39,6 @@ class Env:
     # -- bring-up -------------------------------------------------------------------------------
     def up(self, log=print) -> dict:
         e = self.e
-        if os.environ.get("E2E_CLAUDE_TOKEN"):  # real-agent runs: the agent's login, in memory and in the child environment only
-            e.env["CLAUDE_CODE_OAUTH_TOKEN"] = os.environ["E2E_CLAUDE_TOKEN"]
         e.home.mkdir(parents=True, exist_ok=True)
         (e.home / ".gitconfig").write_text("[init]\n\tdefaultBranch = main\n")
         t = time.time()

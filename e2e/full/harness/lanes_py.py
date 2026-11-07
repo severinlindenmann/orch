@@ -71,11 +71,19 @@ def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
     fake_log = env.root / "fake-agent.log"
     cfg = w / ".orch" / "config.toml"
     if real_agents:
-        # the workspace's own default agent (Claude through its adapter, tmux when available); the login comes from the environment
-        if not os.environ.get("E2E_CLAUDE_TOKEN"):
+        # a real Claude with a narrow tool list, in the generic adapter. The login goes ONLY into the processes of this one workspace
+        # (restarted below with a per-command env), never into the shared environment of relay, publish or the other workspaces.
+        tok = os.environ.get("E2E_CLAUDE_TOKEN")
+        if not tok:
             L.step("B00", "Claude login for real-agent runs", lambda st: (_ for _ in ()).throw(Blocked("E2E_CLAUDE_TOKEN is not set (Proton Pass lookup failed)")))
             return L
-        L.notes.append("REAL Claude agent (default agent of the workspace); latencies include the model")
+        agent_line = "claude -p {prompt} --permission-mode acceptEdits --max-turns 20 --allowedTools 'Bash(orch:*)' Read Write Edit"
+        cfg.write_text(f'[workspace]\nagent = "e2eagent"\n\n[agents.e2eagent]\nadapter = "generic"\ncommand = {json.dumps(agent_line)}\n\n[automation]\ninterval = 2\n')
+        e.sh(["orch", "stop"], cwd=w, timeout=60)
+        e.sh(["orch", "start", "--no-open"], cwd=w, timeout=120, env={"CLAUDE_CODE_OAUTH_TOKEN": tok})
+        env.refresh_urls()
+        dash = env.urls.get("reports")
+        L.notes.append("REAL Claude agent (narrow allowed tools); the login is only in this workspace's processes; latencies include the model")
     else:
         script = env.root / "fake-agent.sh"
         script.write_text(FAKE_AGENT)
