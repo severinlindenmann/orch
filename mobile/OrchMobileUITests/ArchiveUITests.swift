@@ -34,42 +34,73 @@ final class ArchiveUITests: XCTestCase {
     }
     private func el(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
 
+    /// Waits until an element exists and can be tapped (swipe actions, toasts and dialogs animate in; a busy runner is slow).
+    private func ready(_ e: XCUIElement, _ what: String, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(e.waitForExistence(timeout: timeout), "\(what) shows", file: file, line: line)
+        let ok = NSPredicate(format: "exists == true AND isHittable == true")
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: ok, object: e)], timeout: timeout), .completed,
+                       "\(what) can be tapped", file: file, line: line)
+    }
+    /// Swipe the row and tap one of its actions once the button is there.
+    private func swipeAction(_ app: XCUIApplication, _ rowEl: XCUIElement, _ title: String) {
+        app.reveal(rowEl)
+        rowEl.swipeLeft()
+        let b = app.buttons[title]
+        ready(b, "\(title) action")
+        b.tap()
+    }
+    /// The row is back after Undo: re-query (the list rebuilds), scroll to it, give it 10 s or more.
+    private func rowBack(_ app: XCUIApplication, _ why: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        let back = el(app, row)
+        XCTAssertTrue(back.waitForExistence(timeout: 15), why, file: file, line: line)
+        app.reveal(back)
+        ready(back, "the restored row", file: file, line: line)
+        return back
+    }
+
     func testSwipeArchiveUndoThenArchivedListMoveBack() {
         let app = launch()
         let chat = el(app, row)
         XCTAssertTrue(chat.waitForExistence(timeout: 20))
+        app.reveal(chat)
         chat.swipeLeft()
-        XCTAssertTrue(app.buttons["Delete"].exists, "Done chat offers Delete")
+        ready(app.buttons["Delete"], "Delete action")
         shot(app, "1-swipe")
-        app.buttons["Archive"].tap()
-        XCTAssertTrue(el(app, "archive-toast").waitForExistence(timeout: 5))
-        shot(app, "2-undo-toast")
-        app.buttons["Undo"].tap()
-        var back = el(app, row)   // re-query: the old element can go stale while the list rebuilds
-        XCTAssertTrue(back.waitForExistence(timeout: 15), "Undo brings the chat back")
-        let hittable = NSPredicate(format: "exists == true AND isHittable == true")
-        wait(for: [expectation(for: hittable, evaluatedWith: back)], timeout: 15)
-        back = el(app, row)
-        app.reveal(back)
-        back.swipeLeft(); app.buttons["Archive"].tap()
-        XCTAssertTrue(el(app, row).waitForNonExistence(timeout: 5), "the row is gone")
+        ready(app.buttons["Archive"], "Archive action"); app.buttons["Archive"].tap()
+        XCTAssertTrue(el(app, "archive-toast").waitForExistence(timeout: 10), "undo toast shows")   // not hittable-checked: it only lives 5 s
+        // No screenshot here: the toast only lives 5 s and a screenshot on a busy machine can eat that.
+        ready(app.buttons["Undo"], "Undo button", timeout: 10); app.buttons["Undo"].tap()
+        let back = rowBack(app, "Undo brings the chat back")
+        swipeAction(app, back, "Archive")
+        XCTAssertTrue(el(app, row).waitForNonExistence(timeout: 10), "the row is gone")
         let archived = el(app, "archived-row")
-        XCTAssertTrue(archived.waitForExistence(timeout: 5)); archived.tap()
-        XCTAssertTrue(el(app, "archived-t:ws_pilatus001|t_q3sum1").waitForExistence(timeout: 5))
+        ready(archived, "Archived row"); archived.tap()
+        XCTAssertTrue(el(app, "archived-t:ws_pilatus001|t_q3sum1").waitForExistence(timeout: 10))
         shot(app, "3-archived-list")
-        el(app, "move-back-t:ws_pilatus001|t_q3sum1").tap()
-        XCTAssertTrue(el(app, "archived-t:ws_pilatus001|t_q3sum1").waitForNonExistence(timeout: 5))
+        ready(el(app, "move-back-t:ws_pilatus001|t_q3sum1"), "move back button"); el(app, "move-back-t:ws_pilatus001|t_q3sum1").tap()
+        XCTAssertTrue(el(app, "archived-t:ws_pilatus001|t_q3sum1").waitForNonExistence(timeout: 10))
+    }
+
+    /// Product check: Undo always brings the chat back, also when archive and Undo follow each other quickly.
+    func testArchiveThenUndoFiveTimesInARowAlwaysBringsTheChatBack() {
+        let app = launch()
+        var chat = el(app, row)
+        for round in 1...5 {
+            swipeAction(app, chat, "Archive")
+            ready(app.buttons["Undo"], "Undo button (round \(round))", timeout: 10); app.buttons["Undo"].tap()
+            chat = rowBack(app, "round \(round): Undo brings the chat back")
+        }
     }
 
     func testDeleteAsksInPlainWordsAndErasesThisPhonesCopy() {
         let app = launch()
         let chat = el(app, row)
         XCTAssertTrue(chat.waitForExistence(timeout: 20))
-        chat.swipeLeft(); app.buttons["Delete"].tap()
-        XCTAssertTrue(app.staticTexts["Delete this chat from your phone?"].waitForExistence(timeout: 5))
+        swipeAction(app, chat, "Delete")
+        ready(app.staticTexts["Delete this chat from your phone?"], "delete confirmation", timeout: 10)
         shot(app, "4-delete-confirm")
-        el(app, "delete-confirm").tap()
-        XCTAssertTrue(chat.waitForNonExistence(timeout: 5), "the chat leaves the list")
+        ready(el(app, "delete-confirm"), "confirm button"); el(app, "delete-confirm").tap()
+        XCTAssertTrue(chat.waitForNonExistence(timeout: 10), "the chat leaves the list")
         XCTAssertFalse(el(app, "archived-row").exists, "a deleted chat is not archived")
     }
 
