@@ -17,10 +17,21 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import procs, term
+from orch import config, procs, term
 from orch.errors import Refused
 
-STATUSES = ("open", "active", "waiting", "done", "dropped")
+STATUSES = ("open", "active", "waiting", "ready", "review", "done", "dropped")
+STATUS_WORDS = {
+    "open": "Backlog",
+    "ready": "Ready",
+    "active": "Working",
+    "waiting": "Waiting",
+    "review": "Review",
+    "done": "Done",
+    "dropped": "Dropped",
+}
+OPEN_STATUSES = tuple(s for s in STATUS_WORDS if s not in ("done", "dropped"))
+REVIEW_MESSAGE = "Moved to Review, not Done. A person marks a ticket Done."
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
 PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "summary")
@@ -394,13 +405,6 @@ _FIELD_WORDS = {
     "status": "status",
     "waiting_on": "wait",
 }
-_STATUS_WORDS = {
-    "open": "To do",
-    "active": "Doing",
-    "waiting": "Waiting",
-    "done": "Done",
-    "dropped": "Dropped",
-}
 
 
 def _fields_text(raw: str) -> str | None:
@@ -429,14 +433,14 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
     if m := re.fullmatch(r"Answered q\d+: (.*)", t, re.DOTALL):
         return f"Answered a question: {m.group(1)}"
     if m := re.fullmatch(r"Status (\w+) -> (\w+)", t):
-        return f"Moved to {_STATUS_WORDS.get(m.group(2), m.group(2))}"
+        return f"Moved to {STATUS_WORDS.get(m.group(2), m.group(2))}"
     if m := re.fullmatch(r"Edited ([a-z_, ]+)", t):
         if (f := _fields_text(m.group(1))) is not None:
             return "Changed " + f
     if m := re.fullmatch(r"Patched ([a-z_, ]+?)(?: \(status \w+ -> (\w+)\))?", t):
         if (f := _fields_text(m.group(1))) is not None:
             return (
-                "Changed " + f + (f" (now {_STATUS_WORDS.get(m.group(2), m.group(2))})" if m.group(2) else "")
+                "Changed " + f + (f" (now {STATUS_WORDS.get(m.group(2), m.group(2))})" if m.group(2) else "")
             )
     if m := re.fullmatch(r"Added check (c\d+)", t):
         return "Added a task" + task(m.group(1))
@@ -535,19 +539,42 @@ def _check_can_finish(ticket: dict) -> None:
         raise Refused(f"Not done: {', '.join(bad)} is checked without evidence.")
 
 
+def _finish_status(root: Path, ticket: dict, status: str, by: str) -> str:
+    if status == "done" and by.startswith("agent:"):
+        _check_can_finish(ticket)
+        if not config.agents_may_finish(root):
+            add_history(ticket, by, f"{by} finished the work and moved it to Review")
+            return "review"
+    return status
+
+
+def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
+    def op(ticket):
+        if ticket["status"] not in ("open", "ready", "review"):
+            return NO_WRITE
+        ticket["status"] = "active"
+        ticket["waiting_on"] = None
+        add_history(ticket, by, f"{agent_label} started")
+
+    try:
+        apply_op(root, tid, op)
+    except (Refused, FileNotFoundError):
+        if ticket_path(root, tid).exists():
+            raise
+
+
 def set_status(root: Path, tid: str, status: str, by: str) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
 
     def op(ticket):
-        if status == "done":
-            _check_can_finish(ticket)
-        if status != "waiting":
+        target = _finish_status(root, ticket, status, by)
+        if target != "waiting":
             ticket["waiting_on"] = None
         old = ticket["status"]
-        ticket["status"] = status
-        if old != status:
-            add_history(ticket, by, f"Status {old} -> {status}")
+        ticket["status"] = target
+        if old != target and target == status:
+            add_history(ticket, by, f"Status {old} -> {target}")
 
     return apply_op(root, tid, op)[0]
 
@@ -1219,8 +1246,8 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         status = obj.get("status", ticket["status"])
         if status not in STATUSES:
             raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
-        if status == "done":
-            _check_can_finish(ticket)
+        if "status" in obj:
+            status = _finish_status(root, ticket, status, by)
         for k in ("owner", "due", "note", "summary"):
             if k in obj:
                 _set_field(ticket, k, obj[k])

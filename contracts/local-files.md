@@ -163,3 +163,6 @@ Reject absolute paths, `..`, drive letters, and symlinks or hard links in archiv
    Without an allow the user decides; `allow` sends an `allow` message back to the asker.
 4. `start` with key K runs the ticket whose `ext.relay.start_key` is K **and** `ext.relay.from` is the sender, while it is open/active/waiting; if there is none, a new ticket is made with that key.
 5. `answer` → written into the ticket's question (`via: relay` or `phone`); `refresh-hint` → run `orch relay refresh`.
+
+Ticket status display order: open (Backlog), ready (Ready), active (Working), waiting (Waiting), review (Review), done (Done), dropped (Dropped). Only done and dropped are closed.
+Agents requesting done must evidence every check and move to review by default. Humans may mark Done without checklist checks. A workspace can allow agents to finish with [workflow] agents_may_finish = true in .orch/config.toml (default false).

@@ -53,7 +53,7 @@ def _progress(t: dict) -> str:
 
 
 def _line(t: dict) -> str:
-    bits = [t["status"]] + ([_progress(t)] if _progress(t) else [])
+    bits = [tickets.STATUS_WORDS[t["status"]]] + ([_progress(t)] if _progress(t) else [])
     return (f"{t['key']}  " if t.get("key") else "") + f"{t['title']}  ({', '.join(bits)})  [{t['id']}]"
 
 
@@ -132,7 +132,9 @@ def _show(t: dict, root: Path | None = None) -> str:
     if t.get("summary"):
         out.append(t["summary"])
     d, n = tickets.checks_done(t)
-    out.append(f"Status: {t['status']}" + (f" - {_progress(t)}" if _progress(t) else ""))
+    out.append(
+        f"Status: {tickets.STATUS_WORDS[t['status']]}" + (f" - {_progress(t)}" if _progress(t) else "")
+    )
     if n and d == n:
         out.append(f"✓ All done · {n} of {n}")
     extra = [f"{k.capitalize()}: {t[k]}" for k in ("owner", "due") if t.get(k)]
@@ -154,7 +156,9 @@ def _show(t: dict, root: Path | None = None) -> str:
         elif w["kind"] == "ticket":
             b = _lookup(root, w["ref"])
             out.append(
-                f"Blocked by: {b['title']} ({b['id']}, {b['status']})" if b else f"Blocked by: {w['ref']}"
+                f"Blocked by: {b['title']} ({b['id']}, {tickets.STATUS_WORDS[b['status']]})"
+                if b
+                else f"Blocked by: {w['ref']}"
             )
         else:
             out.append(
@@ -201,11 +205,15 @@ def _tree(all_: list[dict], t: dict, prefix: str = "", seen: frozenset = frozens
     for i, k in enumerate(kids):
         last = i == len(kids) - 1
         closed = k["status"] in tickets.CLOSED
-        mark = "✓" if closed else ("○" if k["status"] == "open" else "◐")
+        mark = "✓" if closed else ("○" if k["status"] in ("open", "ready") else "◐")
         state = ""
         if not closed:
             asks = any(q["answer"] is None for q in k["questions"])
-            state = "   " + ("waiting for your answer" if k["status"] == "waiting" and asks else k["status"])
+            state = "   " + (
+                "waiting for your answer"
+                if k["status"] == "waiting" and asks
+                else tickets.STATUS_WORDS[k["status"]]
+            )
         out.append(f"{prefix}{'└─' if last else '├─'} {mark} {k['title']}{state}")
         if k["id"] not in seen:
             out += _tree(all_, k, prefix + ("   " if last else "│  "), seen | {t["id"]})
@@ -549,6 +557,7 @@ def run(args: argparse.Namespace) -> None:
             )
         ]
         hidden = 0 if args.status or args.all else sum(1 for t in all_ if t["status"] in ("done", "dropped"))
+        ts.sort(key=lambda t: tuple(tickets.STATUS_WORDS).index(t["status"]))
         everything = tickets.list_all(root)
         ids = {x["id"] for x in everything}
         for t in ts:
@@ -569,7 +578,13 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "status":
         t = tickets.set_status(root, args.id, args.status, by())
         warn = _child_warning(root, t)
-        _out(args, {**t, "warnings": warn} if warn else t, f"{t['title']} - {t['status']}")
+        _out(
+            args,
+            {**t, "warnings": warn} if warn else t,
+            tickets.REVIEW_MESSAGE
+            if args.status == "done" and t["status"] == "review"
+            else f"{t['title']} - {tickets.STATUS_WORDS[t['status']]}",
+        )
     elif cmd == "ticket" and sub == "edit":
         fields = {k: getattr(args, k) for k in ("owner", "due", "note") if getattr(args, k) is not None}
         if args.title is None and not fields:
@@ -598,7 +613,13 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "patch":
         t = tickets.patch(root, args.id, args.if_revision, args.data, by())
         warn = _child_warning(root, t)
-        _out(args, {**t, "warnings": warn} if warn else t, f"{t['id']} changed (revision {t['revision']})")
+        _out(
+            args,
+            {**t, "warnings": warn} if warn else t,
+            tickets.REVIEW_MESSAGE
+            if json.loads(args.data).get("status") == "done" and t["status"] == "review"
+            else f"{t['id']} changed (revision {t['revision']})",
+        )
     elif (cmd == "ticket" and sub == "wait") or cmd == "wait":
         t = tickets.wait(root, args.id, args.until, args.on, by(), args.clear)
         _out(

@@ -64,8 +64,8 @@ def test_tree(proj, run):
     assert out[0] == "Quarter close"
     text = "\n".join(out)  # same-second siblings: their order is not defined
     assert "├─ ✓ Bank" in text or "└─ ✓ Bank" in text
-    assert "○ VAT return   open" in text
-    assert any(x.endswith("└─ ○ Sub of VAT   open") and x.startswith(("│  ", "   ")) for x in out)
+    assert "○ VAT return   Backlog" in text
+    assert any(x.endswith("└─ ○ Sub of VAT   Backlog") and x.startswith(("│  ", "   ")) for x in out)
 
 
 def test_blocked_by_and_came_from(proj, run):
@@ -76,7 +76,7 @@ def test_blocked_by_and_came_from(proj, run):
     t["links"].append({"type": "ticket", "url": "ws_pilatus001/t_h8w2qa", "title": "pilatus / t_h8w2qa"})
     tickets.save(proj, t)
     text = run("ticket", "show", b)[1]
-    assert f"Blocked by: Move customer data ({a}, active)" in text
+    assert f"Blocked by: Move customer data ({a}, Working)" in text
     assert "Came from: pilatus / t_h8w2qa" in text and "Links:" not in text
     run("wait", b, "--on", "ticket:t_gone99")
     assert "Blocked by: t_gone99" in run("ticket", "show", b)[1]

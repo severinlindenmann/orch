@@ -78,7 +78,7 @@ def test_done_refused_when_checked_without_evidence(proj, run, new_ticket):
     t = json.loads(p.read_text(encoding="utf-8"))
     t["checklist"].append({"id": "c1", "text": "x", "done": True, "evidence": []})
     p.write_text(json.dumps(t), encoding="utf-8")
-    code, _, err = run("ticket", "status", tid, "done")
+    code, _, err = run("ticket", "status", tid, "done", "--by", "agent:generic")
     assert code == 2 and "c1" in err
     assert read(proj, tid)["status"] == "open"
 
@@ -217,7 +217,8 @@ def test_patch_only_allowed_fields(proj, run, new_ticket):
     assert read(proj, tid)["revision"] == 1
     run("check", "add", tid, "step")
     assert (
-        run("ticket", "patch", tid, "--if-revision", "2", '{"status": "done"}')[0] == 2
+        run("ticket", "patch", tid, "--if-revision", "2", '{"status": "done"}', "--by", "agent:generic")[0]
+        == 2
     )  # same rule as status
 
 
@@ -252,7 +253,7 @@ def test_edit_and_show_json(proj, run, new_ticket):
     code, out, _ = run("ticket", "show", tid, "--json")
     assert json.loads(out)["title"] == "New title"
     code, out, _ = run("ticket", "show", tid)
-    assert "Status: open" in out
+    assert "Status: Backlog" in out
 
 
 def test_missing_ticket_refused(proj, run):
@@ -292,7 +293,7 @@ def test_agent_cannot_answer_a_phone_question(proj, run, new_ticket):
 def test_done_refused_while_an_item_is_unchecked(proj, run, new_ticket):
     tid = new_ticket()
     assert run("check", "add", tid, "never done")[0] == 0
-    code, _, err = run("ticket", "status", tid, "done")
+    code, _, err = run("ticket", "status", tid, "done", "--by", "agent:generic")
     assert code == 2 and "c1" in err and "not checked" in err
     assert read(proj, tid)["status"] == "open"
     assert run("ticket", "status", tid, "dropped")[0] == 0  # a dropped ticket is not affected
@@ -326,9 +327,9 @@ def test_new_with_bad_ext_makes_no_ticket(proj, run, bad):
         ("Edited due, owner", "Changed the due date and owner"),
         ("Edited title", "Changed the title"),
         ("Edited note, summary, due", "Changed the note, summary and due date"),
-        ("Patched owner, status (status open -> active)", "Changed the owner and status (now Doing)"),
+        ("Patched owner, status (status open -> active)", "Changed the owner and status (now Working)"),
         ("Status open -> done", "Moved to Done"),
-        ("Status done -> open", "Moved to To do"),
+        ("Status done -> open", "Moved to Backlog"),
         ("Added check c1", "Added a task"),
         ("Check c1 done", "Finished a task"),
         ("Set ext.focus", "Updated Focus settings"),

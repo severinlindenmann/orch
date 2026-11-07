@@ -10,7 +10,7 @@
     "id": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "Random, e.g. t_7k3f9q. Same as the file name." },
     "key": { "$ref": "#/$defs/key", "description": "Optional. Short display key for people, e.g. DM1-12: the workspace code ([workspace] code in .orch/config.toml) at creation, '-', and a number from the workspace counter (.orch/ticket-counter.json) that is never reused. Set once at creation and never rewritten (a new code changes only later keys). The id stays the identity everywhere; every command that takes an id also takes the key, any case. Tickets made before keys have none." },
     "title": { "type": "string", "minLength": 1, "maxLength": 200 },
-    "status": { "enum": ["open", "active", "waiting", "done", "dropped"] },
+    "status": { "enum": ["open", "active", "waiting", "ready", "review", "done", "dropped"] },
     "created_at": { "$ref": "#/$defs/time" },
     "updated_at": { "$ref": "#/$defs/time" },
     "checklist": { "type": "array", "items": { "$ref": "#/$defs/check" } },

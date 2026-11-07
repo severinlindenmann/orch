@@ -167,7 +167,7 @@ def test_schedule_row_is_an_accordion_with_actions_and_linked_tickets(ws):
     (row,) = sch["items"]
     assert row["toggle"]["on"] is True and row["toggle"]["action"] == {"op": "addon.act", "args": {"verb": "toggle", "target": "t_rec00001"}}
     assert {d["label"] for d in row["detail"]} >= {"Repeats", "Time zone", "Next run", "Last run", "Agent"}
-    assert [(t["id"], t["status"]["label"]) for t in row["tickets"]] == [("t_rec00001", "Doing"), ("t_kid00001", "Done")]
+    assert [(t["id"], t["status"]["label"]) for t in row["tickets"]] == [("t_rec00001", "Working"), ("t_kid00001", "Done")]
     assert [a["label"] for a in row["actions"]] == ["Run now", "Delete"]
     assert row["actions"][1]["confirm"] == "Stop and remove this schedule? Its tickets stay."
 

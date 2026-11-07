@@ -107,6 +107,15 @@ def live_idle_minutes(root: Path | None) -> int:
     return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else DEFAULT_LIVE_IDLE_MINUTES
 
 
+def agents_may_finish(root: Path | None) -> bool:
+    return root is not None and (read(root).get("workflow") or {}).get("agents_may_finish") is True
+
+
+def set_agents_may_finish(root: Path, value: bool) -> bool:
+    set_key(root, "workflow", "agents_may_finish", value)
+    return value
+
+
 def set_live_idle_minutes(root: Path, value: str) -> int:
     if not value.isdigit() or not 1 <= int(value) <= 10080:
         raise Refused("Give a whole number of minutes, from 1 to 10080 (one week).")
@@ -158,7 +167,9 @@ def agent_entries(root: Path) -> dict[str, dict]:
     return out
 
 
-def _value(v: str | int) -> str:
+def _value(v: str | int | bool) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
     if isinstance(v, int):
         return str(v)
     # a JSON string is a valid TOML basic string, except that TOML forbids a raw DEL
@@ -200,7 +211,7 @@ def _headers(lines: list[str]) -> list[tuple[int, str]]:
     return out
 
 
-def set_key(root: Path, table: str, key: str, value: str | int) -> None:
+def set_key(root: Path, table: str, key: str, value: str | int | bool) -> None:
     """Set `key = "value"` inside [table], creating the table (and file) when needed."""
     p = path(root)
     p.parent.mkdir(parents=True, exist_ok=True)

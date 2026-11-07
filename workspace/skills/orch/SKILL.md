@@ -102,3 +102,6 @@ If work remains, leave it visible (open steps, a log line).
 - Credentials live in `.orch/secrets/` (ignored by git). Never put them in a ticket.
 - Ask the user before anything that cannot be undone.
 - More is possible with optional add-ons: `orch addon list`.
+
+Ticket statuses are Backlog, Ready, Working, Waiting, Review, Done, and Dropped.
+When the work is finished set the ticket to done: orch moves it to Review for a person to check; never wait for or claim it is Done.

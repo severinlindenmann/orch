@@ -161,7 +161,7 @@
       "description": "Optional, only next to body.update: a snapshot of the ticket for the phone's ticket chat (title, tasks, the last history lines, proof and links). Written by the sending workspace; the relay stores it with the text, never interprets it, and refuses a text whose ticket_view is over 16384 bytes as compact UTF-8 JSON (422 invalid). The newest one of a ticket wins. Plain text everywhere, never HTML; secrets are removed by the workspace before sending.",
       "properties": {
         "title": { "type": "string", "minLength": 1, "maxLength": 200 },
-        "status": { "enum": ["open", "active", "waiting", "done", "dropped"] },
+        "status": { "enum": ["open", "active", "waiting", "ready", "review", "done", "dropped"] },
         "agent": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The agent working on it now or last, as a display name (e.g. Claude)." },
         "summary": { "type": "string", "maxLength": 200 },
         "running": { "type": "boolean", "description": "An agent runs on the ticket now (the phone says \"Goes in after this step\"), else \"Saved for the next run\"." },

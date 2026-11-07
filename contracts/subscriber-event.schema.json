@@ -32,7 +32,7 @@
           "required": ["title", "status", "agent", "summary", "done", "total", "links", "files"],
           "properties": {
             "title": { "type": "string" },
-            "status": { "enum": ["open", "active", "waiting", "done", "dropped"] },
+            "status": { "enum": ["open", "active", "waiting", "ready", "review", "done", "dropped"] },
             "agent": { "type": ["string", "null"] },
             "summary": { "type": ["string", "null"] },
             "done": { "type": "integer", "minimum": 0 },
