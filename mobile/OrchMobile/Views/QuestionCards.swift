@@ -129,7 +129,8 @@ struct QuestionCard: View {
     }
 
     private func answered(_ q: Question, answer: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let hasOptions = !q.message.body.options.isEmpty
+        return VStack(alignment: .leading, spacing: 8) {
             selectedChip(q, answer: answer)
             if !q.message.body.options.isEmpty {
                 Button {
@@ -151,7 +152,7 @@ struct QuestionCard: View {
                 Text("Already answered on your computer: \(label(q, answer))")
                     .themeFont(13).foregroundStyle(Theme.muted).frame(minHeight: 44, alignment: .leading)
             }
-        }
+        }.accessibilityAction(named: showOther ? "Hide other options" : "Show other options") { if hasOptions { showOther.toggle() } }
     }
 
     private func sending(_ q: Question) -> some View {

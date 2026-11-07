@@ -191,6 +191,9 @@ struct Composer: View {
                 }
             }
         }.transition(.move(edge: .bottom).combined(with: .opacity))
+            // The hold gesture is not reachable with VoiceOver / Switch Control: the recording row offers the same choices.
+            .accessibilityAction(named: "Cancel recording") { discard(); cancellation += 1 }
+            .accessibilityActions { if recording && !locked { Button("Lock recording") { locked = true } } }
     }
     private var waveform: some View {
         HStack(spacing: 3) {

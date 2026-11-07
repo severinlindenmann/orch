@@ -52,6 +52,21 @@ final class ConversationUITests: XCTestCase {
         XCTAssertTrue(el(app, "voice-play").waitForExistence(timeout: 20), "the voice note bubble appears")
     }
 
+    func testStartedChipOpensTheTopicOncePerAck() {
+        let app = launch(["-openChat", "ws_pilatus001"])
+        let field = el(app, "composer-field")
+        must(app, field, "composer-field")
+        field.tap(); field.typeText("Start the board summary")
+        el(app, "composer-send").tap()
+        let chip = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'started-chip-'")).firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 15), "the ack that names a ticket shows a chip")
+        XCTAssertTrue(chip.label.contains("started"))
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'started-chip-'")).count, 1, "one chip per ack")
+        chip.tap()
+        must(app, el(app, "composer"), "the topic screen")
+        XCTAssertTrue(el(app, "chat-title").waitForExistence(timeout: 5))
+    }
+
     func testAttachSheetOffersEveryKind() {
         let app = launch(["-openChat", "ws_pilatus001"])
         let plus = el(app, "composer-attach")

@@ -44,59 +44,6 @@ struct UnreadBadge: View {
     }
 }
 
-struct TextBubble: View {
-    let text: String
-    var mine = false
-    var queued = false
-    var label: String? = nil
-    var sender: String? = nil
-    var at: String = ""
-    var body: some View {
-        HStack {
-            if mine { Spacer(minLength: 48) }
-            VStack(alignment: .leading, spacing: 4) {
-                if let sender { Text(sender).themeFont(11, .semibold).foregroundStyle(Theme.brand) }
-                if let label { Eyebrow(text: label, color: Theme.brand) }
-                Text(text).themeFont(16).fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 6) {
-                    Spacer(minLength: 0)
-                    if queued { Image(systemName: "clock").accessibilityHidden(true); Text("Waiting to send") }
-                    Text(ChatBuilder.timeText(at))
-                }.themeFont(11).foregroundStyle(Theme.muted)
-            }.padding(.horizontal, 12).padding(.vertical, 9)
-                .background(mine ? Theme.brand.opacity(0.14) : Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(mine ? Theme.brand.opacity(0.5) : Theme.border))
-            if !mine { Spacer(minLength: 48) }
-        }.accessibilityElement(children: .combine)
-    }
-}
-
-struct SystemLine: View {
-    let text: String
-    var body: some View {
-        Text(text).themeFont(12).foregroundStyle(Theme.muted).padding(.horizontal, 12).padding(.vertical, 6)
-            .overlay(Capsule().stroke(Theme.border)).frame(maxWidth: .infinity).multilineTextAlignment(.center)
-    }
-}
-
-/// Ticket card in the workspace chat: key, title, tasks progress, "Open chat".
-struct TicketCardBubble: View {
-    let ticket: Ticket
-    var body: some View {
-        NavigationLink(value: ChatRoute.ticket(workspace: ticket.workspace, ticket: ticket.ticket ?? "")) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack { Text("TICKET").themeFont(11, .semibold).tracking(1).foregroundStyle(Theme.muted); KeyTag(key: ticket.key); Spacer(); StatusPill(status: ticket.status, kind: ticket.kind) }
-                Text(ticket.displayTitle).themeFont(16, .semibold).multilineTextAlignment(.leading)
-                if let v = ticket.view, v.totalCount > 0 {
-                    Text("\(v.doneCount) of \(v.totalCount) tasks").themeFont(12).foregroundStyle(Theme.muted)
-                    ProgressBar(done: v.doneCount, total: v.totalCount)
-                }
-                HStack { Text("Open chat").foregroundStyle(Theme.brand); Spacer(); Image(systemName: "chevron.right").foregroundStyle(Theme.brand) }.themeFont(13, .semibold)
-            }.orchCard(padding: 12).foregroundStyle(Theme.text)
-        }.buttonStyle(PressStyle()).accessibilityIdentifier("card-\(ticket.id)")
-    }
-}
-
 struct ProgressBar: View {
     let done: Int, total: Int
     var body: some View {
@@ -106,69 +53,6 @@ struct ProgressBar: View {
                 Capsule().fill(Theme.brand).frame(width: g.size.width * CGFloat(done) / CGFloat(max(total, 1)))
             }
         }.frame(height: 4).accessibilityHidden(true)
-    }
-}
-
-/// A question as a bubble: options (or Allow once / Always / Ignore), then a 5 s undo, then the answer.
-struct QuestionBubble: View {
-    @Environment(AppModel.self) private var model
-    let question: Question
-    @Environment(\.dynamicTypeSize) private var typeSize
-
-    var body: some View {
-        let q = question
-        let answer = model.answers[q.id]
-        let accent = q.isAllow ? Theme.warn : Theme.warn
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: q.isAllow ? "lock.fill" : "exclamationmark.circle").accessibilityHidden(true)
-                Text(answer != nil ? "Answered" : (q.isAllow ? "Permission" : "Needs you")).themeFont(12, .semibold)
-            }.foregroundStyle(answer != nil ? Theme.muted : accent)
-            Text(q.message.body.text).themeFont(17, .semibold).fixedSize(horizontal: false, vertical: true)
-            if q.message.key != nil || q.message.body.title != nil {
-                HStack(spacing: 6) { KeyTag(key: q.message.key); if let t = q.message.body.title { Text(t).themeFont(12).foregroundStyle(Theme.muted) } }
-            }
-            if let answer {
-                Text(model.answeredElsewhere.contains(q.id) ? "Already answered: \(answer)" : "✓ \(q.label(answer)) · answered from this phone")
-                    .themeFont(14).foregroundStyle(Theme.brand).accessibilityIdentifier("answered-\(q.id)")
-            } else if let choice = model.pendingAnswers[q.id] {
-                HStack(spacing: 10) {
-                    ProgressView().tint(Theme.brand)
-                    Text(model.sendingAnswers.contains(q.id) ? "Sending \(q.label(choice))…" : "Sending \(q.label(choice)) in a moment…").themeFont(14, .medium)
-                    Spacer()
-                    if !model.sendingAnswers.contains(q.id) {
-                        Button("Undo") { model.undoAnswer(q) }.themeFont(14, .semibold).foregroundStyle(Theme.brand)
-                            .frame(minWidth: 60, minHeight: 44).accessibilityIdentifier("undo-\(q.id)")
-                    }
-                }
-            } else {
-                let layout = q.isAllow ? AnyLayout(HStackLayout(spacing: 8)) : AnyLayout(VStackLayout(spacing: 8))
-                layout {
-                    ForEach(q.message.body.options, id: \.self) { option in optionButton(q, option) }
-                }
-            }
-        }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(alignment: .leading) { if answer == nil { Rectangle().fill(accent).frame(width: 3).clipShape(RoundedRectangle(cornerRadius: 2)) } }
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(model.focusedQuestion == q.id ? Theme.brand : Theme.border))
-            .accessibilityElement(children: .contain).accessibilityIdentifier("question-\(q.id)")
-    }
-
-    @ViewBuilder private func optionButton(_ q: Question, _ option: String) -> some View {
-        let recommended = option == q.message.body.recommended
-        let primary = q.isAllow && option == "Once"
-        Button { model.chooseAnswer(q, option) } label: {
-            HStack(spacing: 8) {
-                Text(q.label(option)).themeFont(15, primary ? .semibold : .regular).lineLimit(3)
-                if !q.isAllow { Spacer(minLength: 0) }
-                if recommended { Text("Suggested").themeFont(11, .semibold).foregroundStyle(Theme.brand).fixedSize() }
-            }.frame(maxWidth: q.isAllow ? nil : .infinity, minHeight: 46, alignment: .leading).padding(.horizontal, 14)
-                .foregroundStyle(primary ? Theme.onBrand : Theme.text)
-                .background(primary ? Theme.brand : Theme.surface2, in: RoundedRectangle(cornerRadius: q.isAllow ? 20 : 10))
-                .overlay(RoundedRectangle(cornerRadius: q.isAllow ? 20 : 10).stroke(primary ? Color.clear : Theme.borderStrong))
-                .contentShape(Rectangle())
-        }.buttonStyle(PressStyle()).accessibilityIdentifier("answer-\(option)")
-            .accessibilityLabel(recommended ? "\(q.label(option)), suggested" : q.label(option))
     }
 }
 
@@ -408,6 +292,9 @@ struct MessageBubble: View {
     let onRetry: (() -> Void)?
     let onDiscard: (() -> Void)?
     var onOpenArtifact: (String) -> Void
+    var onReply: (() -> Void)? = nil
+    /// "Try again later" next to the clock while the relay is throttling this message.
+    var waitNote: String? = nil
     private var mine: Bool { item.side == .me }
 
     var body: some View {
@@ -451,7 +338,7 @@ struct MessageBubble: View {
                     }.themeFont(15)
                 }
                 if mine {
-                    ReceiptView(receipt: item.receipt ?? .sent, time: ChatBuilder.timeText(item.at), onRetry: onRetry, onDiscard: onDiscard)
+                    ReceiptView(receipt: item.receipt ?? .sent, time: ChatBuilder.timeText(item.at), note: waitNote, onRetry: onRetry, onDiscard: onDiscard)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 } else {
                     Text(ChatBuilder.timeText(item.at)).themeFont(13).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .trailing)
@@ -466,6 +353,7 @@ struct MessageBubble: View {
                     }
                 }
                 .accessibilityAction(named: "Copy") { UIPasteboard.general.string = item.text }
+                .modifier(BubbleActions(item: item, conversationId: conversationId, onReply: onReply, onRetry: onRetry, onDiscard: onDiscard))
             if !mine { Spacer(minLength: typeSize.isAccessibilitySize ? 8 : 32) }
         }
     }
@@ -491,5 +379,36 @@ private struct QueuedConversationImage: View {
             else { Image(systemName: "photo").foregroundStyle(Theme.muted) }
         }.frame(height: 190).clipped().clipShape(RoundedRectangle(cornerRadius: 10)).accessibilityLabel(name)
             .task(id: url) { if let data = try? Data(contentsOf: url) { image = Thumbnail.image(from: data) } }
+    }
+}
+
+
+/// VoiceOver custom actions shared by every bubble: Reply, Retry and Discard on a failed send, Listen where the text can be read aloud.
+struct BubbleActions: ViewModifier {
+    @Environment(AppModel.self) private var model
+    let item: ConvItem
+    let conversationId: ConversationID
+    var onReply: (() -> Void)?
+    var onRetry: (() -> Void)?
+    var onDiscard: (() -> Void)?
+    private var failed: Bool { if case .failed? = item.receipt { true } else { false } }
+    func body(content: Content) -> some View {
+        content
+            .accessibilityAction(named: "Reply") { onReply?() }
+            .accessibilityActions {
+                if failed {
+                    Button("Retry") { onRetry?() }
+                    Button("Discard") { onDiscard?() }
+                }
+                if item.incoming && item.canPlay { Button("Listen") { model.play(item, in: conversationId) } }
+            }
+    }
+}
+
+/// "Try again later" for a message the relay is throttling (HTTP 429): shown next to the clock.
+enum ThrottleNote {
+    static func text(for item: OutboxItem?) -> String? {
+        guard let item, item.sentMessageId == nil, item.failure == nil, (item.throttleCount ?? 0) > 0 || item.retryAfter != nil else { return nil }
+        return "Try again later"
     }
 }

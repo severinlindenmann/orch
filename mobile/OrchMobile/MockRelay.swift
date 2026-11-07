@@ -239,9 +239,13 @@ actor MockRelay: RelayAPI {
         deliver(id: id)
         // The relay add-on's "Got it": a new ticket for a new topic, the same ticket for a reply, a General receipt in General.
         let label = String((r.text ?? (r.voice?.transcript ?? "Message")).prefix(40)).trimmingCharacters(in: .whitespaces)
+        // Test hook: a General text that begins with "Start " makes the workspace open a topic (the ack names the ticket; mockup "PIL-15 started").
+        let startsTopic = r.general == true && (r.text ?? "").hasPrefix("Start ")
         if r.general == true {
-            generalReceipts.append(PhoneMessage(message: TextMessage(id: String(format: "m_gen4ck%010d", counter), from: to, to: "ph_iphone0001", type: "text", createdAt: at, ticket: nil,
-                                                                     body: TextBody(text: "Got it", update: TextUpdate(kind: "ack"), general: true), replyTo: id),
+            generalReceipts.append(PhoneMessage(message: TextMessage(id: String(format: "m_gen4ck%010d", counter), from: to, to: "ph_iphone0001", type: "text", createdAt: at,
+                                                                     ticket: startsTopic ? newTicket : nil,
+                                                                     body: TextBody(text: "Got it", update: TextUpdate(kind: "ack"), general: true),
+                                                                     key: startsTopic ? "\(to == Self.pilatus ? "PIL" : "RGS")-\(20 + counter)" : nil, replyTo: id),
                                                 workspaceName: names[to] ?? to))
         } else {
             let prior = updateLog.last { $0.ticket == r.ticket && $0.workspace == to }   // the feed's snapshot and key stay with the ticket

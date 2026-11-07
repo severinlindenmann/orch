@@ -3,6 +3,7 @@ import SwiftUI
 struct ReceiptView: View {
     let receipt: Receipt
     var time: String
+    var note: String? = nil
     var onRetry: (() -> Void)? = nil
     var onDiscard: (() -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -19,6 +20,7 @@ struct ReceiptView: View {
     private var stamp: some View {
         HStack(spacing: 5) {
             Text(time)
+            if let note { Text(note).foregroundStyle(Theme.warn).accessibilityIdentifier("receipt-wait") }
             Group {
                 switch receipt {
                 case .queued:

@@ -6,6 +6,43 @@ struct ConversationHooks {
     static var none: ConversationHooks { ConversationHooks() }
 }
 
+/// A tappable "RIG-4 started ›" line under General: the workspace acked a message with a new ticket.
+struct StartedChip: Identifiable, Equatable {
+    let id: String          // the ack's message id: one chip per ack
+    let at: String
+    let workspace: String
+    let ticket: String
+    let label: String
+}
+
+/// Pure rules of the conversation screen (unit-tested).
+enum ConversationRules {
+    /// An open question is stale once the workspace has moved on: a later result/failure/stopped line exists.
+    static func isStale(index: Int, in items: [ConvItem]) -> Bool {
+        let q = items[index]
+        guard q.kind == .question, q.answer == nil else { return false }
+        return items.dropFirst(index + 1).contains { $0.side == .them && $0.kind == .message && $0.label != nil }
+    }
+
+    /// General only: acks (a workspace text with `reply_to`) naming a ticket for a General text of this phone.
+    static func startedChips(messages: [PhoneMessage], workspace: String, key: (String) -> String?) -> [StartedChip] {
+        let general = Set(messages.filter { $0.fromPhone && $0.workspaceId == workspace && $0.message.body.general == true }.map(\.id))
+        var seen = Set<String>(), out: [StartedChip] = []
+        for pm in messages.sorted(by: { $0.message.createdAt < $1.message.createdAt }) where !pm.fromPhone && pm.workspaceId == workspace {
+            guard pm.message.body.update?.kind == "ack", let t = pm.message.ticket, let r = pm.message.replyTo, general.contains(r),
+                  seen.insert(pm.id).inserted else { continue }
+            out.append(StartedChip(id: pm.id, at: pm.message.createdAt, workspace: workspace, ticket: t, label: "\(pm.message.key ?? key(t) ?? "Topic") started"))
+        }
+        return out
+    }
+}
+
+private enum ConversationFormat {
+    static let day: DateFormatter = { let f = DateFormatter(); f.dateFormat = "EEE d MMM"; return f }()
+    static let iso = ISO8601DateFormatter()
+    static let isoFraction: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); f.formatOptions.insert(.withFractionalSeconds); return f }()
+}
+
 struct ChatRoomView: View {
     let workspaceId: String
     var body: some View { ConversationView(id: .general(workspace: workspaceId)) }
@@ -39,19 +76,20 @@ struct ConversationView: View {
         case .topic: ticket.map { [$0.key, $0.displayTitle].compactMap { $0 }.joined(separator: " · ") } ?? "Topic"
         }
     }
-    private var working: Bool {
+    private func working(_ items: [ConvItem]) -> Bool {
         if let ticket { return TopicStatus(ticket) == .working }
         if case .general = resolved { return items.last?.side == .me && items.last?.receipt == .started }
         return false
     }
-    private var unread: Int { items.filter { $0.incoming && !seenIncoming.contains($0.id) }.count }
+    private func unread(_ items: [ConvItem]) -> Int { items.filter { $0.incoming && !seenIncoming.contains($0.id) }.count }
 
     var body: some View {
+        let items = self.items
         VStack(spacing: 0) {
             if model.speech.isActive { MiniPlayer() }
             OfflineBanner()
             if let ticket { summary(ticket) }
-            messages
+            messages(items)
         }.background(Theme.bg).foregroundStyle(Theme.text).accessibilityElement(children: .contain).accessibilityIdentifier("conversation-view")
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -71,7 +109,7 @@ struct ConversationView: View {
             .tint(Theme.brand)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
-                    if working { StatusLine("\(workspaceName) is working…") }
+                    if working(items) { StatusLine("\(workspaceName) is working…") }
                     Composer(target: resolved.target, note: ticket.map { ChatBuilder.composerNote(running: $0.view?.running) }, reply: $reply, hooks: hooks.composer)
                 }
             }
@@ -123,14 +161,36 @@ struct ConversationView: View {
         }.foregroundStyle(Theme.text).presentationBackground(Theme.surface)
             .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
     }
-    private var messages: some View {
-        ScrollViewReader { proxy in
+    private enum Row: Identifiable {
+        case item(ConvItem, index: Int)
+        case chip(StartedChip)
+        var id: String { switch self { case .item(let i, _): i.id; case .chip(let c): "chip-" + c.id } }
+        var at: String { switch self { case .item(let i, _): i.at; case .chip(let c): c.at } }
+    }
+    private func rows(_ items: [ConvItem]) -> [Row] {
+        var all = items.enumerated().map { Row.item($0.element, index: $0.offset) }
+        if case .general(let ws) = resolved {
+            all += ConversationRules.startedChips(messages: model.messages, workspace: ws, key: { model.ticket(ws, $0)?.key }).map(Row.chip)
+            all.sort { ($0.at, $0.id) < ($1.at, $1.id) }
+        }
+        return all
+    }
+    private func messages(_ items: [ConvItem]) -> some View {
+        let language = LanguageLabel.conversationLanguage(items)
+        let rows = rows(items)
+        let waiting = Dictionary(model.outbox.items.compactMap { o in ThrottleNote.text(for: o).map { (o.clientId, $0) } }, uniquingKeysWith: { a, _ in a })
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 8) {
                     if items.isEmpty { emptyState }
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                        if index == 0 || dayKey(item.at) != dayKey(items[index - 1].at) { DayDivider(dayLabel(item.at)) }
-                        row(item, index: index).id(item.id)
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { n, row in
+                        if n == 0 || dayKey(row.at) != dayKey(rows[n - 1].at) { DayDivider(dayLabel(row.at)) }
+                        Group {
+                            switch row {
+                            case .item(let item, let index): self.row(item, index: index, items: items, language: language, waiting: waiting)
+                            case .chip(let chip): chipView(chip)
+                            }
+                        }.id(row.id)
                     }
                     Color.clear.frame(height: 1).id("conversation-bottom")
                 }.padding(.horizontal, 16).padding(.vertical, 10)
@@ -144,12 +204,13 @@ struct ConversationView: View {
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if !atBottom {
-                        Button { scroll(proxy, to: "conversation-bottom", anchor: .bottom) } label: { JumpToLatestButton(count: unread) }
+                        Button { scroll(proxy, to: "conversation-bottom", anchor: .bottom) } label: { JumpToLatestButton(count: unread(items)) }
                             .buttonStyle(PressStyle()).accessibilityIdentifier("jump-latest").padding(12)
                     }
                 }
                 .onChange(of: items.last?.id) { _, _ in
                     if atBottom || items.last?.side == .me { scroll(proxy, to: "conversation-bottom", anchor: .bottom) }
+                    rememberRead(bottomSeen: atBottom)   // the open conversation is read, also while scrolled up
                 }
                 .onChange(of: model.focusedQuestion) { _, focus in focusQuestion(focus, proxy: proxy) }
                 .task(id: items.count) {
@@ -159,23 +220,32 @@ struct ConversationView: View {
                 }
         }
     }
-    @ViewBuilder private func row(_ item: ConvItem, index: Int) -> some View {
-        let language = LanguageLabel.conversationLanguage(items)
+    private func chipView(_ chip: StartedChip) -> some View {
+        Button { model.path.append(.ticket(workspace: chip.workspace, ticket: chip.ticket)) } label: {
+            HStack(spacing: 4) { Text(chip.label); Image(systemName: "chevron.right").themeFont(11, .semibold) }
+                .themeFont(13, .semibold).foregroundStyle(Theme.brand).padding(.horizontal, 14).frame(minHeight: 44)
+                .background(Theme.surface2, in: Capsule())
+        }.buttonStyle(PressStyle()).frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("\(chip.label). Open topic").accessibilityIdentifier("started-chip-\(chip.ticket)")
+    }
+    @ViewBuilder private func row(_ item: ConvItem, index: Int, items: [ConvItem], language: String, waiting: [String: String]) -> some View {
         let retry: () -> Void = { Task { await model.retrySend(item.clientId ?? "") } }
         let discard: () -> Void = { model.discardSend(item.clientId ?? "") }
+        let replyHere: () -> Void = { reply = ReplyPreview(messageId: item.id, title: "Answering \(workspaceName)", quote: item.preview) }
+        let wait = item.clientId.flatMap { waiting[$0] }
         if item.kind == .question {
-            let stale = item.answer == nil && items.dropFirst(index + 1).contains { $0.side == .them && $0.kind == .message && $0.label != nil }
+            let stale = ConversationRules.isStale(index: index, in: items)
             QuestionCard(item: item, conversationId: resolved, onReply: { question in
                 reply = ReplyPreview(messageId: question.id, title: "Answering \(workspaceName)", quote: question.message.body.text)
             }, onOpenArtifact: hooks.openArtifact, isStale: stale)
         } else if item.side == .me && item.voice != nil {
-            OwnVoiceBubble(item: item, conversationLanguage: language, onRetry: retry, onDiscard: discard)
+            OwnVoiceBubble(item: item, conversationLanguage: language, onRetry: retry, onDiscard: discard, onReply: replyHere, waitNote: wait)
         } else if item.side == .them && item.canPlay && item.speak != nil {
-            AgentMemoBubble(item: item, conversationId: resolved, workspaceName: workspaceName)
+            AgentMemoBubble(item: item, conversationId: resolved, workspaceName: workspaceName, onReply: replyHere)
         } else {
             MessageBubble(item: item, conversationId: resolved, conversationLanguage: language, workspaceName: workspaceName,
                           quotedText: item.replyTo.flatMap { key in items.first { $0.id == key }?.preview },
-                          onRetry: retry, onDiscard: discard, onOpenArtifact: hooks.openArtifact)
+                          onRetry: retry, onDiscard: discard, onOpenArtifact: hooks.openArtifact, onReply: replyHere, waitNote: wait)
         }
     }
     private var emptyState: some View {
@@ -202,18 +272,12 @@ struct ConversationView: View {
         if reduceMotion { proxy.scrollTo(id, anchor: anchor) }
         else { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: anchor) } }
     }
-    private func date(_ iso: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        if let date = formatter.date(from: iso) { return date }
-        formatter.formatOptions.insert(.withFractionalSeconds)
-        return formatter.date(from: iso)
-    }
+    private func date(_ iso: String) -> Date? { ConversationFormat.iso.date(from: iso) ?? ConversationFormat.isoFraction.date(from: iso) }
     private func dayKey(_ iso: String) -> String { date(iso).map { String(Calendar.current.startOfDay(for: $0).timeIntervalSince1970) } ?? String(iso.prefix(10)) }
     private func dayLabel(_ iso: String) -> String {
         guard let date = date(iso) else { return String(iso.prefix(10)) }
         if Calendar.current.isDateInToday(date) { return "Today" }
         if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
-        let formatter = DateFormatter(); formatter.dateFormat = "EEE d MMM"
-        return formatter.string(from: date)
+        return ConversationFormat.day.string(from: date)
     }
 }

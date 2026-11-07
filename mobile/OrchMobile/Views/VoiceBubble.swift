@@ -102,6 +102,8 @@ struct OwnVoiceBubble: View {
     let conversationLanguage: String
     let onRetry: () -> Void
     let onDiscard: () -> Void
+    var onReply: (() -> Void)? = nil
+    var waitNote: String? = nil
     @Environment(AppModel.self) private var model
     @State private var player = NotePlayer()
 
@@ -149,6 +151,10 @@ struct OwnVoiceBubble: View {
             .frame(maxWidth: .infinity, alignment: .trailing)
             .task(id: item.voice?.blobId) { await loadAudio() }
             .onDisappear { player.stop() }
+            .accessibilityAction(named: "Reply") { onReply?() }
+            .accessibilityActions {
+                if case .failed? = item.receipt { Button("Retry") { onRetry() }; Button("Discard") { onDiscard() } }
+            }
     }
 
     @ViewBuilder private var language: some View {
@@ -157,7 +163,7 @@ struct OwnVoiceBubble: View {
         }
     }
     private var receipt: some View {
-        ReceiptView(receipt: item.receipt ?? .sent, time: ChatBuilder.timeText(item.at), onRetry: onRetry, onDiscard: onDiscard)
+        ReceiptView(receipt: item.receipt ?? .sent, time: ChatBuilder.timeText(item.at), note: waitNote, onRetry: onRetry, onDiscard: onDiscard)
     }
     private var scrubber: some View {
         GeometryReader { proxy in
@@ -188,6 +194,7 @@ struct AgentMemoBubble: View {
     let item: ConvItem
     let conversationId: ConversationID
     let workspaceName: String
+    var onReply: (() -> Void)? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showText = false
@@ -253,6 +260,8 @@ struct AgentMemoBubble: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .onChange(of: model.speech.state, initial: true) { _, _ in captureTiming() }
             .onChange(of: model.speech.rate) { _, _ in captureTiming() }
+            .accessibilityAction(named: "Reply") { onReply?() }
+            .accessibilityAction(named: playing ? "Pause" : "Listen") { toggle() }
     }
 
     private func toggle() {
