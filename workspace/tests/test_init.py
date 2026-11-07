@@ -471,3 +471,226 @@ def test_linked_dot_folder_outside_the_project_is_not_written_into(proj, run, tm
     os.symlink(outside, proj / ".claude", target_is_directory=True)  # `skills` does not exist there yet
     code, _, err = run("init")
     assert code == 2 and "outside" in err and list(outside.iterdir()) == []
+
+
+# ---- review findings of PR #215 (harness local-only)
+
+
+def _tracked_orch_gitignore(proj, extra_root=None, orch_text=None):
+    _git_repo(proj)
+    (proj / ".orch").mkdir(exist_ok=True)
+    (proj / ".orch/.gitignore").write_text(orch_text or "# team\n", encoding="utf-8")
+    if extra_root is not None:
+        (proj / ".gitignore").write_text(extra_root, encoding="utf-8")
+    _git(proj, "add", "-f", ".")
+    _git(proj, "commit", "-qm", "team")
+
+
+@pytest.mark.parametrize(
+    "root_ignore,orch_ignore",
+    [
+        ("!/.orch/secrets/\n", None),
+        ("*\n!.orch/\n!.orch/**\n", None),
+        (None, "!secrets/\n"),
+    ],
+)
+def test_private_write_refuses_when_a_team_ignore_file_unignores_secrets(proj, root_ignore, orch_ignore):
+    from orch import harness, net
+
+    _tracked_orch_gitignore(proj, root_ignore, orch_ignore)
+    with pytest.raises(skills.Refused):
+        net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
+    assert not (proj / ".orch/secrets/x.json").exists()
+    assert harness  # imported for clarity
+
+
+def test_private_write_still_works_with_a_plain_tracked_orch_gitignore(proj):
+    from orch import net
+
+    _tracked_orch_gitignore(proj)
+    net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
+    assert (proj / ".orch/secrets/x.json").is_file()
+
+
+@pytest.mark.parametrize("bad", ["a\nb", "*", "x y", "..", ".", "a" * 65, "!x", "a[b]"])
+def test_odd_skill_folder_names_are_skipped_and_never_reach_the_exclude_block(proj, bad, capsys):
+    from orch import harness
+
+    if "/" in bad or bad in {".", ".."}:
+        pytest.skip("not creatable as a folder name")
+    base = proj / ".agents/skills"
+    (base / bad).mkdir(parents=True)
+    (base / bad / ".orch-shared").write_text("", encoding="utf-8")
+    (base / "good-1.0_x").mkdir()
+    (base / "good-1.0_x/.orch-shared").write_text("", encoding="utf-8")
+    assert [p.name for p in skills._shared_skills(proj)] == ["good-1.0_x"]
+    assert bad not in "\n".join(skills._exclude_lines(proj)).splitlines()
+    assert "skipped" in capsys.readouterr().err.lower()
+    del harness
+
+
+def test_odd_harness_skill_names_are_not_excluded(proj):
+    sk = proj / ".orch/harness/skills"
+    (sk / "ok").mkdir(parents=True)
+    (sk / "new\nline").mkdir()
+    (sk / "star*").mkdir()
+    lines = skills._exclude_lines(proj)
+    assert not any("\n" in ln or "*" in ln for ln in lines)
+    assert ".agents/skills/ok" in lines
+
+
+def test_glob_characters_are_escaped_in_exclude_lines():
+    from orch import harness
+
+    assert harness.glob_escape("a*b[c]?!") == "a\\*b\\[c\\]\\?\\!"
+
+
+def _copy_setup(proj, harness):
+    src = proj / ".orch/harness/skills/s1"
+    src.mkdir(parents=True)
+    (src / "SKILL.md").write_text("x", encoding="utf-8")
+    dest = proj / ".agents/skills/s1"
+    harness._copy_dir(src, dest)
+    return src, dest
+
+
+def test_a_copy_marker_alone_does_not_delete_a_tracked_folder(proj, capsys):
+    from orch import harness
+
+    _git_repo(proj)
+    dest = proj / ".agents/skills/s1"
+    dest.mkdir(parents=True)
+    (dest / "mine.md").write_text("user", encoding="utf-8")
+    (dest / harness.COPY_MARK).write_text("x", encoding="utf-8")
+    _git(proj, "add", "-f", ".agents")
+    (proj / ".orch/harness/skills/s1").mkdir(parents=True)
+    with pytest.raises(skills.Refused):
+        harness.link_skill(proj, ".agents/skills", "s1")
+    harness.sync_copies(proj, [".agents/skills"])
+    harness.unlink_skill(proj, ".agents/skills", "s1")
+    assert (dest / "mine.md").read_text(encoding="utf-8") == "user"
+
+
+def test_a_copy_with_a_file_newer_than_the_marker_is_kept(proj):
+    from orch import harness
+
+    src, dest = _copy_setup(proj, harness)
+    mark = dest / harness.COPY_MARK
+    os.utime(mark, (1000, 1000))
+    (dest / "user.txt").write_text("mine", encoding="utf-8")
+    harness.sync_copies(proj, [".agents/skills"])
+    harness.unlink_skill(proj, ".agents/skills", "s1")
+    assert (dest / "user.txt").read_text(encoding="utf-8") == "mine"
+
+
+def test_an_untouched_copy_is_still_synced_and_removed(proj):
+    from orch import harness
+
+    src, dest = _copy_setup(proj, harness)
+    os.utime(dest / harness.COPY_MARK, (time_future(), time_future()))
+    (src / "SKILL.md").write_text("new", encoding="utf-8")
+    harness.sync_copies(proj, [".agents/skills"])
+    assert (dest / "SKILL.md").read_text(encoding="utf-8") == "new"
+    harness.unlink_skill(proj, ".agents/skills", "s1")
+    assert not dest.exists()
+
+
+def time_future():
+    import time
+
+    return time.time() + 5
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
+def test_copy_dir_does_not_follow_directory_links(proj, tmp_path_factory):
+    from orch import harness
+
+    outside = tmp_path_factory.mktemp("outside_copy")
+    (outside / "secret.txt").write_text("s", encoding="utf-8")
+    src = proj / "srcdir"
+    src.mkdir()
+    (src / "a.txt").write_text("a", encoding="utf-8")
+    os.symlink(outside, src / "lnk", target_is_directory=True)
+    dst = proj / "dstdir"
+    harness._copy_dir(src, dst)
+    assert (dst / "a.txt").is_file()
+    assert not (dst / "lnk").exists() and not any(dst.rglob("secret.txt"))
+
+
+_REINC = "!/.orch/secrets/\n/.orch/secrets/*\n"
+
+
+@pytest.mark.parametrize(
+    "root_ignore",
+    [_REINC + "!/.orch/secrets/token.json\n", _REINC + "!*.json\n", _REINC + "!/.orch/secrets/tok*\n"],
+)
+def test_private_write_refuses_a_name_that_a_gitignore_unignores(proj, root_ignore):
+    from orch import net
+
+    _tracked_orch_gitignore(proj, root_ignore)
+    with pytest.raises(skills.Refused):
+        net.write_json(proj / ".orch/secrets/token.json", {"t": 1}, True)
+    assert not (proj / ".orch/secrets/token.json").exists()
+
+
+def test_private_write_refuses_a_tracked_file(proj):
+    from orch import net
+
+    _tracked_orch_gitignore(proj)
+    (proj / ".orch/secrets").mkdir()
+    (proj / ".orch/secrets/token.json").write_text("{}", encoding="utf-8")
+    _git(proj, "add", "-f", ".orch/secrets/token.json")
+    with pytest.raises(skills.Refused):
+        net.write_json(proj / ".orch/secrets/token.json", {"t": 1}, True)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
+def test_private_write_refuses_a_linked_secrets_folder_in_a_repo(proj, tmp_path_factory):
+    from orch import net
+
+    _tracked_orch_gitignore(proj)
+    outside = tmp_path_factory.mktemp("outside_sec")
+    os.symlink(outside, proj / ".orch/secrets", target_is_directory=True)
+    with pytest.raises(skills.Refused):
+        net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
+    assert not (outside / "x.json").exists()
+
+
+def test_a_git_failure_inside_a_repo_refuses_and_no_repo_is_fine(proj, monkeypatch):
+    import subprocess
+
+    from orch import harness, net
+
+    _tracked_orch_gitignore(proj)
+    real = subprocess.run
+
+    def broken(cmd, *a, **k):
+        if cmd[:2] == ["git", "check-ignore"]:
+            return subprocess.CompletedProcess(cmd, 128, b"", b"fatal: detected dubious ownership")
+        return real(cmd, *a, **k)
+
+    monkeypatch.setattr(harness.subprocess, "run", broken)
+    with pytest.raises(skills.Refused):
+        net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
+    monkeypatch.undo()
+    assert not (proj / ".orch/secrets/x.json").exists()
+
+
+def test_rev_parse_failure_that_is_not_no_repo_refuses(proj, monkeypatch):
+    import subprocess
+
+    from orch import harness
+
+    def broken(cmd, *a, **k):
+        return subprocess.CompletedProcess(cmd, 128, b"", b"fatal: detected dubious ownership")
+
+    monkeypatch.setattr(harness.subprocess, "run", broken)
+    with pytest.raises(skills.Refused):
+        harness._in_git_repo(proj)
+
+
+def test_not_a_repo_still_stores_private_files(proj):
+    from orch import net
+
+    net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
+    assert (proj / ".orch/secrets/x.json").is_file()
