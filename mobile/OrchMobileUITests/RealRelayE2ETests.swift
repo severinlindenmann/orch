@@ -405,6 +405,19 @@ final class RealRelayE2ETests: XCTestCase {
         shot("105-home-removed")
     }
 
+    // MARK: 17 workspace look
+    /// The workspace picks an icon and colour (PATCH /v1/me); the chats list shows the badge `workspace-badge-<id>`.
+    func test17WorkspaceIconInChatsList() {
+        let r = host("""
+        r = e.rapi('Pilatus', 'PATCH', '/v1/me', {'icon': 'wallet', 'color': 'amber'})
+        out = str(r.status)
+        """)
+        XCTAssertEqual(r.trimmingCharacters(in: .whitespacesAndNewlines), "200", "workspace look saved on the relay")
+        let app = launch()
+        must(app, el(app, "workspace-badge-\(ws)"), "workspace badge in the chats list"); shot("170-look-chats")
+        app.terminate()
+    }
+
     // MARK: 11 the four v2 bugs
     func test11V2BugsDoNotOccur() {
         let app = launch()

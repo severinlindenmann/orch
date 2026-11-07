@@ -41,6 +41,9 @@ struct Workspace: Codable, Sendable, Equatable, Identifiable {
     var mutedUntil: String? = nil
     /// Mobile mode of the workspace's computer (relay-api.md, Mobile mode); nil from an older relay.
     var mobileMode: MobileMode? = nil
+    /// Look chosen in the workspace (contracts/look.md); nil = letter + Automatic colour. Unknown values fall back in `Look.shown`.
+    var icon: String? = nil
+    var color: String? = nil
     var displayName: String { OrchMobile.displayName(name) }
     func isMuted(now: Date = Date()) -> Bool {
         guard let m = mutedUntil else { return false }

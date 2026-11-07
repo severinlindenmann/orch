@@ -167,7 +167,8 @@ actor MockRelay: RelayAPI {
         func open(_ ws: String) -> Int { all.filter { $0.message.from == ws && answered[$0.id] == nil }.count }
         var list = [
             Workspace(id: Self.pilatus, name: "Pilatus Workspace", description: "Data pipelines for the Pilatus client",
-                      tags: ["client", "data", "ingestion"], online: true, lastSeen: "2026-11-04T10:41:00Z", openQuestions: open(Self.pilatus)),
+                      tags: ["client", "data", "ingestion"], online: true, lastSeen: "2026-11-04T10:41:00Z", openQuestions: open(Self.pilatus),
+                      icon: "wallet", color: "amber"),
             Workspace(id: Self.reports, name: "Reports", description: "Weekly and monthly reporting",
                       tags: ["reports", "scheduler"], online: true, lastSeen: "2026-11-04T10:50:00Z", openQuestions: open(Self.reports)),
         ]

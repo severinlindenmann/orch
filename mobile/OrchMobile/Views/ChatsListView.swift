@@ -112,7 +112,7 @@ struct ChatsListView: View {
             VStack(spacing: 0) {
                 ForEach(0..<3, id: \.self) { _ in
                     HStack(spacing: 12) {
-                        ShellAvatar(name: "Workspace")
+                        WorkspaceBadge(name: "Workspace")
                         VStack(alignment: .leading) { Text("Workspace name").themeFont(17, .semibold); Text("Latest message in this workspace").themeFont(15) }
                     }.padding(16)
                 }
@@ -187,7 +187,7 @@ struct ChatsListView: View {
         let starting = newest?.isStarting == true && newest?.lastAt == summary.lastAt
         return NavigationLink(value: ChatRoute.workspace(summary.id)) {
             HStack(spacing: 12) {
-                ShellAvatar(name: name, size: 46, lastSeen: .some(summary.workspace.lastSeen))
+                WorkspaceBadge(name: name, icon: summary.workspace.icon, color: summary.workspace.color, size: 46, lastSeen: .some(summary.workspace.lastSeen), id: summary.id)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(name).themeFont(17, .semibold).lineLimit(2)
                     Text(starting ? "Starting topic…" : summary.lastLine).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)

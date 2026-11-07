@@ -115,10 +115,8 @@ struct ConversationInfoView: View {
 
     private var header: some View {
         VStack(spacing: 16) {
-            Text(String(workspaceName.prefix(1)).uppercased()).themeFont(30, .semibold)
-                .foregroundStyle(Theme.brand).frame(width: 72, height: 72)
-                .background(Theme.brand.opacity(0.2), in: RoundedRectangle(cornerRadius: 26))
-                .accessibilityHidden(true)
+            WorkspaceBadge(name: workspaceName, icon: model.workspace(conversation.workspace)?.icon,
+                           color: model.workspace(conversation.workspace)?.color, size: 96, id: "info-\(conversation.workspace)")
             Text(title).themeFont(22, .semibold).multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
             Text(conversation.ticket == nil ? "Workspace conversation" : workspaceName)
