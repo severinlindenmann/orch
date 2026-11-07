@@ -836,7 +836,7 @@
     };
     return h('div', {className:'settings stack'}, heading('Settings'),
       h('div', {className:'tabs', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Agent'], ['addons', 'Add-ons']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))),
-      panel('general', [h('div', {className:'card'},
+      panel('general', [snapshot ? null : window.OrchMobileMode?.settingsSection(h), h('div', {className:'card'},
         h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
         h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), settingsText('p', {className:'grow set-ctl mono'}, settings.folder))),
         shareCard(settings)]),
@@ -957,6 +957,7 @@
     const arrived = new Set(array(next.needs).filter(n => !seenNeeds.has(n.id)).map(n => n.id));
     array(next.needs).forEach(n => seenNeeds.add(n.id));
     state = next;
+    window.dispatchEvent(new CustomEvent('orch:state', {detail: next}));
     render(first ? new Set() : arrived);
   }
   // The General conversation with the phone: every text both ways, newest last. Read only.
@@ -1102,6 +1103,7 @@
     if (!snapshot) addonTimer = setInterval(() => loadAddon(id), 15000);
   }
 
+  window.orchAct = (op, args) => act(op, args);
   async function act(op, args) {
     if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
     writing++;

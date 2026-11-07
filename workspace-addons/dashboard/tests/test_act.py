@@ -26,7 +26,7 @@ def calls(act_orch):
 
 
 def acts(act_orch):
-    return [c for c in calls(act_orch) if c[0] not in ("addon", "needs", "status", "agents") and c[:2] not in (["run", "status"], ["ticket", "list"], ["config", "get"])]
+    return [c for c in calls(act_orch) if c[0] not in ("addon", "needs", "status", "agents") and c[:3] != ["relay", "mobile", "status"] and c[:2] not in (["run", "status"], ["ticket", "list"], ["config", "get"])]
 
 
 def test_foreign_or_missing_origin_and_wrong_host_are_refused(act_server, act_orch):
@@ -165,6 +165,7 @@ def test_dashboard_source_names_no_addon():
     from pathlib import Path
     src = Path(actions.__file__).parent
     text = "".join((src / f).read_text() for f in ("actions.py", "server.py", "data.py"))
+    assert "relay" in (src / "mobile.py").read_text()  # the one file allowed to name an add-on: Mobile mode
     for name in ("scheduler", "automation", "relay", "focus", "publish", "wiki"):
         assert not re.search(rf"\b{name}\b", text, re.IGNORECASE), name
 
@@ -273,7 +274,8 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
             code, text, _ = post(base, body)
             assert code == 200, (body, text)
             last = [c for c in calls(act_orch) if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"])
-                    and c[0] not in ("needs", "status", "agents") and c[:2] != ["config", "get"]][-1]
+                    and c[0] not in ("needs", "status", "agents") and c[:2] != ["config", "get"]
+                    and c[:3] != ["relay", "mobile", "status"]][-1]
             assert last == want, body
         n = len(calls(act_orch))
         bad = [

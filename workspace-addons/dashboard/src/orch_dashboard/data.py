@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import mobile
+
 STATUS_ORDER = ["active", "waiting", "open", "done", "dropped"]
 _NAME = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
 ICONS = ("clock", "calendar", "inbox", "list", "chart", "bell", "book", "globe", "link", "check", "star", "box",
@@ -381,6 +383,7 @@ def load_state(root: Path, orch_bin: str | None = None, with_addons: bool = True
         "needs": needs if isinstance(needs, list) else [],
         "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
         "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},
+        "mobile_mode": mobile.load_mobile(root, orch_bin) if with_settings else None,  # the live page only, never a snapshot
         "settings": load_settings(root, orch_bin) if with_settings else None,  # only the live local server: it holds the folder path
     }
     state["rev"] = hashlib.sha1(
