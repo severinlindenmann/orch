@@ -47,6 +47,7 @@ async function fitsWidth() {
 await step('home', async () => {
   await page.goto(`${base}/#home`);
   await page.waitForLoadState('networkidle');
+  await page.getByRole('heading', { name: 'Today', exact: true }).first().waitFor();
 });
 await step('tickets', async () => {
   await page.goto(`${base}/#tickets`);
@@ -57,18 +58,19 @@ await step('ticket', async () => {
   await page.waitForFunction(() => location.hash.startsWith('#ticket/'));
   await page.getByText(TITLE).first().waitFor();
 });
-for (const [name, hash] of [['general', '#general'], ['settings', '#settings']]) {
-  await step(name, async () => {
-    await page.goto(`${base}/${hash}`);
-    await page.waitForLoadState('networkidle');
-  });
-}
+// A hash change is same-document (networkidle returns at once) and an unknown page falls back to Home: wait for the
+// page's own heading. General exists only once the phone sent texts that belong to no ticket.
+const heading = name => page.getByRole('heading', { name, exact: true }).first().waitFor();
+if (await page.locator('a[href="#general"]').count()) {
+  await step('general', async () => { await page.goto(`${base}/#general`); await heading('General'); });
+} else console.log('skip: general (no texts from the phone yet, so the page is not offered)');
+await step('settings', async () => { await page.goto(`${base}/#settings`); await heading('Settings'); });
 for (const width of [720, 390]) {
   await page.setViewportSize({ width, height: 800 });
-  for (const [name, hash] of [['home', '#home'], ['tickets', '#tickets']]) {
+  for (const [name, hash, title] of [['home', '#home', 'Today'], ['tickets', '#tickets', 'Tickets']]) {
     await step(`${name}-narrow`, async () => {
       await page.goto(`${base}/${hash}`);
-      await page.waitForLoadState('networkidle');
+      await heading(title);
       await fitsWidth();
     });
   }

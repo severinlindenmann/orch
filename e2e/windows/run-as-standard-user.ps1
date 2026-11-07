@@ -61,7 +61,10 @@ if (-not (Test-Path $logFile)) { throw "the flow wrote no log (task state $s, re
 Get-Content $logFile
 # Screenshots of a flow (dashboard) next to the scripts, where the admin side can pull them
 $shots = Join-Path $profileDir "orch-shots"
-if (Test-Path $shots) { Copy-Item $shots "$pub\shots" -Recurse -Force; "Screenshots: $pub\shots" }
+if (Test-Path $shots) {
+    Remove-Item "$pub\shots" -Recurse -Force -ErrorAction SilentlyContinue  # else Copy-Item nests a second run inside
+    Copy-Item $shots "$pub\shots" -Recurse -Force; "Screenshots: $pub\shots"
+}
 # every flow ends with its own RESULT line
 $results = @(Get-Content $logFile | Where-Object { $_ -match '^RESULT ' })
 if ($results.Count -ne $Flows.Count -or ($results | Where-Object { $_ -ne "RESULT ok" })) { exit 1 }

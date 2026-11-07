@@ -16,12 +16,13 @@ if (-not (Get-Command orch -ErrorAction SilentlyContinue)) {
 }
 Check ("$(cmd /c 'orch --version < NUL 2>&1')" -match "^orch ") "orch runs"
 function O { cmd /c "orch $($args -join ' ') < NUL 2>&1" }
-function WaitFinish($out) {  # add-on installs finish in the background on Windows (see standard-user-flow.ps1)
+function Results($log) { @(Get-Content $log -ErrorAction SilentlyContinue | Select-String '^\S+ \S+ RESULT ') }
+function WaitFinish($out, $since) {  # add-on installs finish in the background on Windows (see standard-user-flow.ps1)
     $m = [regex]::Match("$out", 'Log: (\S+)')
     if (-not $m.Success) { return $true }
     $t0 = Get-Date
     while (((Get-Date) - $t0).TotalSeconds -lt 600) {
-        $last = Get-Content $m.Groups[1].Value -ErrorAction SilentlyContinue | Select-String '^\S+ \S+ RESULT ' | Select -Last 1
+        $last = Results $m.Groups[1].Value | Select -Skip $since | Select -Last 1  # only RESULT lines of this install
         if ($last) { L "finisher: $last"; return ("$last" -match 'RESULT ok') }
         Start-Sleep 3
     }
@@ -29,13 +30,15 @@ function WaitFinish($out) {  # add-on installs finish in the background on Windo
 }
 
 $title = "Windows dashboard smoke"
+$env:ORCH_AGENT = "claude"  # as standard-user-flow.ps1: init links .claude\skills (no agent is installed here)
 $p = "$env:USERPROFILE\orch-dash"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
 O init | Out-String | % { L $_ }
 O ticket new "`"$title`"" | Out-String | % { L $_ }
 Check ($LASTEXITCODE -eq 0) "a ticket for the dashboard"
 if (-not ("$(O addon list)" -match "dashboard")) {
+    $since = (Results "$env:USERPROFILE\.orch-tool\finish.log").Count  # the finish log is shared with earlier flows
     $out = O addon add dashboard --yes | Out-String; L $out
-    Check (WaitFinish $out) "dashboard add-on installed"
+    Check (WaitFinish $out $since) "dashboard add-on installed"
 }
 $out = O start --no-open --json | Out-String; L $out
 $url = [regex]::Match($out, 'http://127\.0\.0\.1:\d+').Value
