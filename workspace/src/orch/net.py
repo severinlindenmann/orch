@@ -28,8 +28,12 @@ def _tls() -> ssl.SSLContext | None:
     Other systems keep Python's default (None)."""
     if sys.platform != "win32":
         return None
-    import truststore
-
+    try:
+        import truststore
+    except ImportError:  # a broken install: fail closed, in plain words (never fall back to a weaker check)
+        raise Refused(
+            "orch can not check web certificates here: a part of orch is missing. Install orch again."
+        ) from None
     return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
 
