@@ -330,19 +330,33 @@
    "id": "A27",
    "name": "Tickets board view (the shot is taken on the Board)",
    "page": "tickets-board",
-   "expect": "columns Backlog, Ready, Working, Waiting, Review, Done readable at 720 and 390",
+   "expect": "one column per screen at 720 and 390 (opens on the first column with tickets), chips show counts, nothing cut off at the right",
    "actions": [
     {
      "do": "goto",
      "path": "/#tickets"
     },
     {
+     "do": "eval",
+     "js": "(async () => { const get = async () => (await (await fetch('/api/state', {cache:'no-store'})).json()).tickets || []; let ts = (await get()).filter(t => t.status !== 'dropped'); const want = ['active', 'review']; for (let i = 0; i < want.length && i < ts.length; i++) { if (ts.some(t => t.status === want[i])) continue; const t = ts.find(t => t.status === 'open'); if (!t) break; await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'ticket.patch', args:{ticket:t.id, data:{status:want[i]}, if_revision:t.revision}})}); ts = (await get()).filter(t => t.status !== 'dropped'); } return ts.map(t => t.status).join(','); })()",
+     "store": "board_fixture"
+    },
+    {
+     "do": "reload"
+    },
+    {
      "do": "click",
      "sel": "role=button[name='Board']"
     },
     {
-     "do": "wait",
-     "ms": 800
+     "do": "wait_for",
+     "sel": ".kanban-col.is-shown .ticket-card",
+     "timeout": 10000
+    },
+    {
+     "do": "wait_for",
+     "sel": ".status-jumps button[aria-pressed='true']",
+     "state": "attached"
     },
     {
      "do": "expect_text",
