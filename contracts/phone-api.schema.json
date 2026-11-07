@@ -4,15 +4,12 @@
   "title": "orch relay phone API v3: request and response bodies",
   "description": "Shapes of the phone routes in relay-api.md (Phone API). One $def per body; contracts/validate.py checks every /v1/phone example in review/relay-api.examples.json and vectors/phone-v3-v1.json against them. Unknown request fields are kept (common.md); response fields are never left out (null instead).",
   "$defs": {
-<<<<<<< HEAD
-=======
     "machine_name": {
       "description": "Display name of a computer in Mobile mode. Same character rule as update.title and the PATCH /v1/me description (relay-api.md): one line, NFC, only letters, marks, numbers, punctuation, symbols and spaces, not only spaces, no control/format/line/paragraph separators (bidi overrides, zero-width), no Default_Ignorable_Code_Point characters, at most 2 combining marks in a row. 1 to 60 characters.",
       "type": "string", "minLength": 1, "maxLength": 60,
       "pattern": "^[\\p{Zs}]*[\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}][\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}\\p{Zs}]*$",
       "not": { "anyOf": [{ "pattern": "[\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u3164\ufe00-\ufe0f\uffa0\udb40\udd00-\udb40\uddef]" }, { "pattern": "[\\p{M}][\\p{M}][\\p{M}]" }] }
     },
->>>>>>> origin/develop
     "mobile_mode": {
       "description": "Mobile mode of a workspace (relay-api.md, Mobile mode). Phones always see all four fields.",
       "type": "object", "required": ["on", "since", "ends_at", "machine"], "additionalProperties": false,
@@ -20,11 +17,7 @@
         "on": { "type": "boolean" },
         "since": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
         "ends_at": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
-<<<<<<< HEAD
-        "machine": { "oneOf": [{ "type": "string", "minLength": 1, "maxLength": 60 }, { "type": "null" }] }
-=======
         "machine": { "oneOf": [{ "$ref": "#/$defs/machine_name" }, { "type": "null" }] }
->>>>>>> origin/develop
       },
       "allOf": [
         { "if": { "properties": { "on": { "const": true } } }, "then": { "properties": { "since": { "type": "string" }, "ends_at": { "type": "string" }, "machine": { "type": "string" } } }, "else": { "properties": { "since": { "type": "null" }, "ends_at": { "type": "null" }, "machine": { "type": "null" } } } }
@@ -40,11 +33,7 @@
             "on": { "type": "boolean" },
             "since": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
             "ends_at": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
-<<<<<<< HEAD
-            "machine": { "oneOf": [{ "type": "string", "minLength": 1, "maxLength": 60 }, { "type": "null" }] },
-=======
             "machine": { "oneOf": [{ "$ref": "#/$defs/machine_name" }, { "type": "null" }] },
->>>>>>> origin/develop
             "ended": { "enum": ["off", "lease", "restart"] }
           },
           "allOf": [

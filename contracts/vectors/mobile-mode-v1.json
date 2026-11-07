@@ -118,8 +118,6 @@
      "machine": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
     }
    }
-<<<<<<< HEAD
-=======
   },
   {
    "name": "machine-newline",
@@ -172,7 +170,6 @@
      "machine": "   "
     }
    }
->>>>>>> origin/develop
   }
  ],
  "phone": "ph_iphone0001",
