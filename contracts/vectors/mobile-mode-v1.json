@@ -118,6 +118,61 @@
      "machine": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
     }
    }
+<<<<<<< HEAD
+=======
+  },
+  {
+   "name": "machine-newline",
+   "ok": false,
+   "why": "one line only",
+   "request": {
+    "mobile_mode": {
+     "on": true,
+     "since": "2026-11-07T14:02:00Z",
+     "ends_at": "2026-11-08T02:02:00Z",
+     "machine": "Acme\nPC"
+    }
+   }
+  },
+  {
+   "name": "machine-bidi-override",
+   "ok": false,
+   "why": "no bidi/format characters",
+   "request": {
+    "mobile_mode": {
+     "on": true,
+     "since": "2026-11-07T14:02:00Z",
+     "ends_at": "2026-11-08T02:02:00Z",
+     "machine": "Acme ‮PC"
+    }
+   }
+  },
+  {
+   "name": "machine-zero-width",
+   "ok": false,
+   "why": "no zero-width characters",
+   "request": {
+    "mobile_mode": {
+     "on": true,
+     "since": "2026-11-07T14:02:00Z",
+     "ends_at": "2026-11-08T02:02:00Z",
+     "machine": "Acme​PC"
+    }
+   }
+  },
+  {
+   "name": "machine-only-spaces",
+   "ok": false,
+   "why": "not only spaces",
+   "request": {
+    "mobile_mode": {
+     "on": true,
+     "since": "2026-11-07T14:02:00Z",
+     "ends_at": "2026-11-08T02:02:00Z",
+     "machine": "   "
+    }
+   }
+>>>>>>> origin/develop
   }
  ],
  "phone": "ph_iphone0001",

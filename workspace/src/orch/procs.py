@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+
+
+def orch_python_argv(*args: str) -> list[str]:
+    """argv that runs this orch again. Always `-P`: Python must not put the current folder on sys.path,
+    or a planted orch.py / json.py in a workspace would run as the user. Every `-m orch` spawn uses this."""
+    return [sys.executable, "-P", "-m", "orch", *args]
 
 
 def _iso(ts: float) -> str:

@@ -29,6 +29,7 @@ async fn run() -> Result<(), String> {
     let app = state::App::new(cfg, key, pusher)?;
     orch_relay::spawn_purge(app.clone());
     orch_relay::subs_push::spawn(app.clone());
+    orch_relay::mobile::spawn(app.clone());
     let pl = tokio::net::TcpListener::bind(&pub_addr)
         .await
         .map_err(|e| format!("{pub_addr}: {e}"))?;

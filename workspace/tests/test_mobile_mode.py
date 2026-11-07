@@ -1,9 +1,12 @@
 import json
+import os
+import sys
+import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from orch import keepawake, net, relay
+from orch import keepawake, net, procs, relay
 from orch import mobile_mode as mm
 from orch.errors import Refused
 
@@ -29,6 +32,9 @@ def beats(monkeypatch):
     got = []
     monkeypatch.setattr(relay, "heartbeat", lambda root, p: got.append(p))
     return got
+
+
+REAL_SPAWN = mm._spawn_keeper
 
 
 @pytest.fixture
@@ -227,22 +233,83 @@ def put_dir(root, phones):
     (d / "workspaces.json").write_text(json.dumps({"workspaces": [], "phones": phones}))
 
 
+def stamp(delta_s):
+    return (datetime.now(UTC) + timedelta(seconds=delta_s)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def ctl_at(mid, delta_s, frm="ph_aaaaaaaaaa"):
+    m = ctl(mid, frm)
+    m["created_at"] = stamp(delta_s)
+    return m
+
+
+MID = "m_" + "a" * 16
+
+
 @pytest.mark.parametrize(
-    "frm,age,paired,off",
+    "frm,delta,paired,off",
     [
-        ("ph_aaaaaaaaaa", 10, True, True),
-        ("ph_aaaaaaaaaa", 700, True, False),
-        ("ph_bbbbbbbbbb", 10, True, False),
-        ("ph_aaaaaaaaaa", 10, False, False),
+        ("ph_aaaaaaaaaa", -10, True, True),
+        ("ph_aaaaaaaaaa", -700, True, False),  # too old
+        ("ph_aaaaaaaaaa", 60, True, True),  # a little ahead: clock skew
+        ("ph_aaaaaaaaaa", 600, True, False),  # dated in the future
+        ("ph_bbbbbbbbbb", -10, True, False),  # not a paired phone
+        ("ph_aaaaaaaaaa", -10, False, False),
     ],
 )
-def test_phone_off_control(on_state, frm, age, paired, off):
+def test_phone_off_control(on_state, frm, delta, paired, off):
     mm.turn_on(on_state, 4)
     put_dir(on_state, [{"id": "ph_aaaaaaaaaa", "name": "P"}] if paired else [])
-    m = ctl("m_" + "a" * 16, frm, age)
+    m = ctl_at(MID, delta, frm)
+    p = on_state / ".orch/run/mobile-mode.json"
+    d = json.loads(p.read_text())
+    d["since"] = stamp(-3600)  # only the age is under test
+    d.update(keeper_pid=os.getpid(), keeper_started=procs.pid_started(os.getpid()))
+    p.write_text(json.dumps(d))
     relay._handle_mobile_off(on_state, m)
     assert mm.status(on_state)["on"] is (not off)
-    assert "m_" + "a" * 16 in relay.seen(on_state)
+    assert MID in relay.seen(on_state)
+
+
+def test_old_control_does_not_end_a_newer_mobile_mode(on_state):
+    put_dir(on_state, [{"id": "ph_aaaaaaaaaa", "name": "P"}])
+    mm.turn_on(on_state, 4)
+    old = ctl_at(MID, -1)
+    time.sleep(1.1)
+    mm.turn_off(on_state)
+    mm.turn_on(on_state, 4)  # a newer Mobile mode began after the request was made
+    assert "ignored" in relay._handle_mobile_off(on_state, old)
+    assert mm.status(on_state)["on"]
+
+
+def test_control_is_handled_once(on_state, beats):
+    put_dir(on_state, [{"id": "ph_aaaaaaaaaa", "name": "P"}])
+    mm.turn_on(on_state, 4)
+    time.sleep(1.1)
+    m = ctl_at(MID, 0)
+    assert "turned off" in relay._handle_mobile_off(on_state, m)
+    mm.turn_on(on_state, 4)
+    assert relay._handle_mobile_off(on_state, m) == "already handled"  # the racing reader
+    assert mm.status(on_state)["on"]
+
+
+def test_keeper_argv_has_dash_P(on_state, monkeypatch):
+    spawned = []
+    monkeypatch.setattr(mm.subprocess, "Popen", lambda argv, **kw: spawned.append((argv, kw)))
+    REAL_SPAWN(on_state)
+    argv, kw = spawned[-1]
+    assert argv[:4] == [sys.executable, "-P", "-m", "orch"] and argv[4:] == ["relay", "mobile", "keeper"]
+    assert kw["cwd"] == str(on_state)
+
+
+def test_heartbeat_machine_is_cleaned_again(on_state):
+    mm.turn_on(on_state, 4)
+    p = on_state / ".orch/run/mobile-mode.json"
+    d = json.loads(p.read_text())
+    d["machine"] = "Ev\u202eil\n" + "y" * 100
+    p.write_text(json.dumps(d))
+    got = mm.payload(on_state)["machine"]
+    assert got.startswith("Evil") and "\u202e" not in got and "\n" not in got and len(got) <= 60
 
 
 def test_cli_status_and_hours(on_state, run):
@@ -254,3 +321,19 @@ def test_cli_status_and_hours(on_state, run):
     assert json.loads(out)["on"] is True
     code, out, _ = run("relay", "mobile", "off")
     assert code == 0 and "off" in out.lower()
+
+
+def test_machine_name_is_plain_one_line(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        mm._platform, "node", lambda: "Ac\u202eme\u200b \n PC\x00\u034f" + "x" * 80 + ".local"
+    )
+    n = mm.machine_name()
+    assert n.startswith("Acme PC") and len(n) <= 60
+    assert not any(c in n for c in "\u202e\u200b\n\x00\u034f")
+    monkeypatch.setattr(mm._platform, "node", lambda: "e" + "\u0301" * 5)  # at most 2 marks in a row
+    assert mm.machine_name() == "\u00e9\u0301\u0301"
+    monkeypatch.setattr(mm._platform, "node", lambda: "   \n\u200b ")
+    ws = tmp_path / "Acme\u202e ws"
+    ws.mkdir()
+    assert mm.machine_name(ws) == "Acme ws"  # empty name: the workspace name, cleaned the same way
+    assert mm.machine_name() == "this computer"

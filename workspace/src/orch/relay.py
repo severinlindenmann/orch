@@ -67,33 +67,52 @@ def _is_mobile_off(m: dict) -> bool:
     )
 
 
-MOBILE_OFF_MAX_AGE = 600  # seconds: an older 'off' is acked and ignored
+MOBILE_OFF_MAX_AGE = 600  # seconds: an older 'off' is ignored
+MOBILE_OFF_SKEW = 120  # seconds a request may be dated ahead (clock differences)
 
 
-def _handle_mobile_off(root: Path, m: dict) -> str:
-    """Act on a phone's 'turn off Mobile mode' only if that phone is still paired (last refresh) and the
-    request is under 10 minutes old; either way it is marked handled. Returns a plain note."""
+def _age_seconds(stamp) -> float | None:
     from datetime import UTC, datetime
 
+    try:
+        then = datetime.strptime(str(stamp), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+    return (datetime.now(UTC) - then).total_seconds()
+
+
+def _mobile_off_ok(root: Path, m: dict) -> bool:
+    """A phone may end Mobile mode only if it is still paired (last refresh), the request is at most 10
+    minutes old (or 2 minutes ahead) and was made after this Mobile mode began (never ends a newer one)."""
     from orch import mobile_mode
 
     paired = {p.get("id") for p in _read_dir(root).get("phones", []) if isinstance(p, dict)}
-    try:
-        age = (
-            datetime.now(UTC)
-            - datetime.strptime(str(m.get("created_at")), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
-        ).total_seconds()
-    except ValueError:
-        age = None
-    ok = m["from"] in paired and age is not None and age <= MOBILE_OFF_MAX_AGE
+    age = _age_seconds(m.get("created_at"))
+    since = mobile_mode.settle(root).get("since")  # None when off
+    return (
+        m["from"] in paired
+        and age is not None
+        and -MOBILE_OFF_SKEW <= age <= MOBILE_OFF_MAX_AGE
+        and since is not None
+        and str(m["created_at"]) >= since
+    )
+
+
+def _handle_mobile_off(root: Path, m: dict) -> str:
+    """Handle one phone 'turn off Mobile mode' request exactly once (inbox and mobile_controls may race)."""
+    from orch import mobile_mode
+
+    with locked(root):
+        if m["id"] in seen(root):
+            return "already handled"
+        ok = _mobile_off_ok(root, m)
+        _mark_seen(root, m["id"])
     if ok:
         mobile_mode.turn_off(root, "off")
-    with locked(root):
-        _mark_seen(root, m["id"])
     return (
         "Mobile mode was turned off from the phone"
         if ok
-        else "ignored an old or unpaired Mobile mode request"
+        else "ignored an old, future, unpaired or outdated Mobile mode request"
     )
 
 

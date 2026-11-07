@@ -319,7 +319,7 @@ for k in kvec["invalid_keys"]:
 # Phone API v3 (relay-api.md, Phone API): request/response bodies in phone-api.schema.json, which points into
 # message.schema.json. Every /v1/phone example and the phone-v3 vector are checked against it.
 _msg_schema = _expand(json.loads((HERE / "message.schema.json").read_text()))
-_phone_schema = json.loads((HERE / "phone-api.schema.json").read_text())
+_phone_schema = _expand(json.loads((HERE / "phone-api.schema.json").read_text()))
 _reg = Registry().with_resources(
     [(s["$id"], Resource.from_contents(s)) for s in (_msg_schema, _phone_schema)]
 )
