@@ -533,7 +533,8 @@ def test_local_reference_is_private(proj, run, tid):  # noqa: F811
     assert target not in (proj / ".orch" / "tickets" / f"{tid}.json").read_text()
     jrun(run, "ref", "add", tid, target)
     assert len(refs.local_refs(proj, tid)) == 1
-    assert ".orch/local/" in (proj / ".gitignore").read_text().splitlines()
+    assert "local/" in (proj / ".orch" / ".gitignore").read_text().splitlines()
+    assert not (proj / ".gitignore").exists()
     assert "On this computer only" in run("ref", "list", tid)[1]
     assert run("ref", "rm", tid, "1")[0] == 0
     assert not refs.local_refs(proj, tid)

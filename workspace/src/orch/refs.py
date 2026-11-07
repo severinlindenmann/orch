@@ -369,19 +369,13 @@ def local_refs(root: Path, tid: str) -> list[dict]:
 
 
 def write_local(root: Path, tid: str, values: list[dict]) -> None:
-    from orch import net, skills
+    from orch import harness, net
 
     path = local_path(root, tid)
     for folder in (root / ".orch", path.parent.parent, path.parent):
         if folder.is_symlink():
             raise Refused("The local references folder must be a real folder.")
-    ignore = root / ".gitignore"
-    if ignore.is_symlink():
-        raise Refused("The project .gitignore must be a regular file.")
-    skills.ensure_gitignore(root)
-    content = ignore.read_text()
-    if ".orch/local/" not in content.splitlines():
-        net.write_atomic(ignore, (content.rstrip() + "\n.orch/local/\n").encode())
+    harness.protect_local(root)  # .orch/local/ stays out of git; the team's .gitignore is never edited
     net.write_json(path, values, private=True)
 
 
