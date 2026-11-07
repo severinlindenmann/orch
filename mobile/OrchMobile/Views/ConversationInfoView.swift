@@ -209,7 +209,7 @@ struct ConversationInfoView: View {
                   url.host != nil else { return }
             openURL(url)
         case .file:
-            if !ArtifactItem.canPreview(fileName: item.name ?? item.title) { viewer = item; return }   // share only, never previewed in the app
+            if !ArtifactItem.previewName(item.name ?? item.title).previewable { viewer = item; return }   // share only, never previewed in the app
             guard !loadingFile else { return }
             loadingFile = true
             Task { @MainActor in
@@ -221,8 +221,9 @@ struct ConversationInfoView: View {
                 let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
                 do {
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                    let url = folder.appendingPathComponent(Outbox.safeFileName(item.name ?? item.title))
+                    let url = folder.appendingPathComponent(ArtifactItem.previewName(item.name ?? item.title).safe)
                     try bytes.write(to: url, options: .atomic)
+                    guard ArtifactItem.canPreview(fileName: url.lastPathComponent) else { throw CocoaError(.fileWriteInvalidFileName) }
                     clearPreview()
                     previewFolder = folder
                     preview = InfoPreview(url: url)

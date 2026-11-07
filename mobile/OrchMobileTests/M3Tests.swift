@@ -314,6 +314,14 @@ final class M3HelperTests: XCTestCase {
         do { _ = try await f.load(link); XCTFail("over the cap") } catch { XCTAssertEqual(error as? PublishError, .broken) }
         XCTAssertEqual(PublishFetcher.maxBlobBytes, 100 * 1_048_576 + 65_536 + 36)
     }
+    func testPreviewIsDecidedOnTheSanitizedName() {
+        let long = String(repeating: "a", count: 120) + ".pdf"      // cut to 100 characters: the extension is gone
+        XCTAssertFalse(ArtifactItem.canPreview(fileName: Outbox.safeFileName(long)) )
+        XCTAssertFalse(ArtifactItem.previewName(long).previewable)
+        XCTAssertEqual(ArtifactItem.previewName("../.hidden/report.pdf").safe, "hidden" + "report.pdf")
+        XCTAssertTrue(ArtifactItem.previewName("../report.pdf").previewable)
+        XCTAssertFalse(ArtifactItem.previewName("x.pdf/..html").previewable)
+    }
     func testOnlyInertTypesArePreviewedInTheApp() {
         for ok in ["report.pdf", "PHOTO.JPG", "a.png", "n.txt", "d.csv", "x.json", "v.mov", "s.m4a"] { XCTAssertTrue(ArtifactItem.canPreview(fileName: ok), ok) }
         for no in ["page.html", "logo.svg", "run.js", "noextension", "x.webarchive", "d.docx", "d.xlsx", "d.pptx", "a.zip", "n.pages", "k.key", "t.rtf"] {

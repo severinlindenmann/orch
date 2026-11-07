@@ -229,7 +229,8 @@ struct ArtifactViewer: View {
         if mime.hasPrefix("text/html"), let html = String(data: bytes, encoding: .utf8) { return .publish(.page(html: html, name: name)) }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("orch-preview-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(Outbox.safeFileName(name))
+        let safe = ArtifactItem.previewName(name).safe
+        let url = folder.appendingPathComponent(safe)
         do { try bytes.write(to: url, options: .atomic) }
         catch { try? FileManager.default.removeItem(at: folder); throw error }
         if let temporaryDirectory { try? FileManager.default.removeItem(at: temporaryDirectory) }

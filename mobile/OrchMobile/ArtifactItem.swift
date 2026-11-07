@@ -56,6 +56,11 @@ struct ArtifactItem: Identifiable, Equatable, Sendable {
 
     /// Types shown in the app (QuickLook): they cannot run script or render web content. Everything else is only shared / opened in Files.
     static let previewAllowed: Set<String> = ["pdf", "png", "jpg", "jpeg", "heic", "gif", "txt", "csv", "md", "json", "m4a", "mp3", "mp4", "mov"]
+    /// The name the file is written under, and whether it may be previewed: decided on the sanitized name (cleaning can cut the extension).
+    static func previewName(_ name: String) -> (safe: String, previewable: Bool) {
+        let safe = Outbox.safeFileName(name)
+        return (safe, canPreview(fileName: safe))
+    }
     static func canPreview(fileName: String) -> Bool { previewAllowed.contains((fileName as NSString).pathExtension.lowercased()) }
 
     static func isPDF(name: String?, mime: String?) -> Bool {
