@@ -1,3 +1,7 @@
+# Info tabs (TestFlight 10 + 14, 7 Nov)
+- Conversation info: the four tabs sit in one row with one-line labels (Photos, Files, References, Artifacts); the count is a small badge, shown only when there is something. With large text the row scrolls sideways instead of wrapping.
+- Removed the "Voice & reply language" row from Conversation info: Settings > Voice keeps Swiss German, and replies follow the language the person spoke.
+
 # Round 5
 - Grouped workspace topics by Working / Waiting / Review / Backlog with Done collapsed; renamed Links to References with URL, ticket, artifact and plain file-path rows. Added static `statuses-references.html` review screens.
 - Removed all bottom-tab rendering, styles, badges and reserved space; Chats is the only root.
