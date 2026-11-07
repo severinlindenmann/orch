@@ -642,3 +642,55 @@ def test_private_write_refuses_a_tracked_file(proj):
     _git(proj, "add", "-f", ".orch/secrets/token.json")
     with pytest.raises(skills.Refused):
         net.write_json(proj / ".orch/secrets/token.json", {"t": 1}, True)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
+def test_private_write_refuses_a_linked_secrets_folder_in_a_repo(proj, tmp_path_factory):
+    from orch import net
+
+    _tracked_orch_gitignore(proj)
+    outside = tmp_path_factory.mktemp("outside_sec")
+    os.symlink(outside, proj / ".orch/secrets", target_is_directory=True)
+    with pytest.raises(skills.Refused):
+        net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
+    assert not (outside / "x.json").exists()
+
+
+def test_a_git_failure_inside_a_repo_refuses_and_no_repo_is_fine(proj, monkeypatch):
+    import subprocess
+
+    from orch import harness, net
+
+    _tracked_orch_gitignore(proj)
+    real = subprocess.run
+
+    def broken(cmd, *a, **k):
+        if cmd[:2] == ["git", "check-ignore"]:
+            return subprocess.CompletedProcess(cmd, 128, b"", b"fatal: detected dubious ownership")
+        return real(cmd, *a, **k)
+
+    monkeypatch.setattr(harness.subprocess, "run", broken)
+    with pytest.raises(skills.Refused):
+        net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
+    monkeypatch.undo()
+    assert not (proj / ".orch/secrets/x.json").exists()
+
+
+def test_rev_parse_failure_that_is_not_no_repo_refuses(proj, monkeypatch):
+    import subprocess
+
+    from orch import harness
+
+    def broken(cmd, *a, **k):
+        return subprocess.CompletedProcess(cmd, 128, b"", b"fatal: detected dubious ownership")
+
+    monkeypatch.setattr(harness.subprocess, "run", broken)
+    with pytest.raises(skills.Refused):
+        harness._in_git_repo(proj)
+
+
+def test_not_a_repo_still_stores_private_files(proj):
+    from orch import net
+
+    net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
+    assert (proj / ".orch/secrets/x.json").is_file()

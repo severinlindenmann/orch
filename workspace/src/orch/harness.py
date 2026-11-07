@@ -256,50 +256,95 @@ def _tracked(root: Path, rel: str) -> bool:
 
 
 def _git_env() -> dict[str, str]:
-    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["LC_ALL"] = "C"
+    return env
+
+
+def _in_git_repo(root: Path) -> bool:
+    """True inside a git work tree, False when there is none. Any other git failure (dubious ownership, a broken
+    index, ...) refuses: an unknown state is never treated as "no repo"."""
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=root,
+            capture_output=True,
+            env=_git_env(),
+            timeout=10,
+        )
+    except FileNotFoundError:
+        return False  # no git program: nothing can be committed
+    except (OSError, subprocess.SubprocessError):
+        raise Refused("orch cannot ask git about this folder. Nothing was stored.") from None
+    if r.returncode == 0:
+        return r.stdout.strip() == b"true"
+    if b"not a git repository" in r.stderr.lower():
+        return False
+    raise Refused("git cannot be read in this folder (is it owned by someone else?). Nothing was stored.")
+
+
+def _ignored(root: Path, rel: str) -> bool:
+    try:
+        r = subprocess.run(
+            ["git", "check-ignore", "-q", "--", rel],
+            cwd=root,
+            capture_output=True,
+            env=_git_env(),
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise Refused("orch cannot ask git about this folder. Nothing was stored.") from None
+    if r.returncode == 0:
+        return True
+    if r.returncode == 1:
+        return False
+    raise Refused("git could not say whether private files are ignored here. Nothing was stored.")
 
 
 def _probes_ignored(root: Path) -> bool:
     """In a git repo: git itself says the secrets and run folders are ignored (a team .gitignore with a `!` line
     can undo our rules). True outside a git repo (nothing to leak into)."""
-    for probe in (".orch/secrets/probe", ".orch/run/probe"):
-        try:
-            r = subprocess.run(
-                ["git", "check-ignore", "-q", "--", probe],
-                cwd=root,
-                capture_output=True,
-                env=_git_env(),
-                timeout=10,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return False
-        if r.returncode == 128:
-            return True  # not a git repo
-        if r.returncode != 0:
-            return False
-    return True
+    if not _in_git_repo(root):
+        return True
+    return all(_ignored(root, p) for p in (".orch/secrets/probe", ".orch/run/probe"))
 
 
 def check_private_path(root: Path, path: Path) -> None:
-    """Right before a private write: in a git repo, git must ignore this exact file and not track it."""
+    """Right before a private write: the file stays under root/.orch with no link on the way, and in a git repo
+    git ignores this exact file and does not track it."""
+    base = root / ".orch"
     try:
-        rel = path.absolute().relative_to(root.absolute()).as_posix()
+        rel_in = path.absolute().relative_to(base.absolute())
     except ValueError:
+        raise Refused(f"{path} is not inside .orch; orch will not store private files there.") from None
+    cur = base
+    if is_link(cur):
+        raise Refused(f"{cur} is a link; orch will not store private files there.")
+    for part in rel_in.parts:
+        cur = cur / part
+        if is_link(cur):
+            raise Refused(f"{cur} is a link; orch will not store private files there.")
+    if not _inside(base, cur) and cur.exists():
+        raise Refused(f"{path} points outside .orch; orch will not store private files there.")
+    if not _in_git_repo(root):
         return
-    env = _git_env()
+    rel = path.absolute().relative_to(root.absolute()).as_posix()
     try:
-        r = subprocess.run(
-            ["git", "check-ignore", "-q", "--", rel], cwd=root, capture_output=True, env=env, timeout=10
+        t = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", "--", rel],
+            cwd=root,
+            capture_output=True,
+            env=_git_env(),
+            timeout=10,
         )
-        if r.returncode == 128:
-            return  # not a git repo
-        ignored = r.returncode == 0
-        tracked = _tracked(root, rel)
     except (OSError, subprocess.SubprocessError):
-        ignored, tracked = False, False
-    if not ignored or tracked:
+        raise Refused("orch cannot ask git about this folder. Nothing was stored.") from None
+    if t.returncode not in (0, 1):
+        raise Refused("git could not say whether private files are tracked here. Nothing was stored.")
+    if not _ignored(root, rel) or t.returncode == 0:
         raise Refused(
-            f"git would not leave {rel} alone (a .gitignore of the project shows it, or it is tracked). Nothing was stored."
+            f"git would not leave {rel} alone (a .gitignore of the project shows it, or it is tracked). "
+            "Nothing was stored."
         )
 
 
