@@ -109,6 +109,7 @@ def main() -> int:
 
     t_start = time.time()
     envmod.sweep_orphans(log)
+    orch_tool_before = _real_orch_tool_state()
     atexit.register(lambda: envmod.sweep_tmux(str(Path(a.root))))  # a crash of the harness itself still ends the agents of this run
     quick = a.mode == "quick"
     root, src = Path(a.root), Path(a.repo)
@@ -289,6 +290,13 @@ def main() -> int:
     if bad:
         findings.append({"lane": "S", "kind": "run", "severity": "blocking", "step": "", "shots": [], "title": "A secret was found in the report folder",
                          "now": f"{bad}", "proposal": "Never write typed keys into step results, shots or traces."})
+    after = _real_orch_tool_state()
+    changed = sorted(k for k in set(orch_tool_before) | set(after) if orch_tool_before.get(k) != after.get(k))
+    if changed:
+        findings.append({"lane": "S", "kind": "run", "severity": "blocking", "step": "", "shots": [], "title": "The real ~/.orch-tool changed during the run",
+                         "now": f"{len(changed)} file(s) in ~/.orch-tool changed while the run was going: {[Path(c).name for c in changed][:6]}. "
+                                "A call of orch without ORCH_HOME may have written there, or another session used it at the same time.",
+                         "proposal": "Every orch call of the harness needs ORCH_HOME under /Users/lume/.orch-e2e-*; find the call that lacks it (compare the times with the lane logs)."})
     left = envmod.claude_under(str(root))
     if left:
         findings.append({"lane": "S", "kind": "run", "severity": "blocking", "step": "", "shots": [], "title": "Agent processes left after tear-down",
@@ -330,7 +338,22 @@ def main() -> int:
     missing = [l for l in want if l not in {x["lane"] for x in lanes}]
     nblocked = sum(s["status"] == "blocked" for s in steps)
     status("e2e full run " + a.mode, "done", f"{len(steps)} steps, {nfail} fail, {len(findings)} findings: {url}")
-    return 1 if (nfail or aborted or nblocked or missing or leaked or bad) else 0
+    return 1 if (nfail or aborted or nblocked or missing or leaked or bad or changed) else 0
+
+
+def _real_orch_tool_state() -> dict:
+    """mtime and size of every file in the real ~/.orch-tool: a run must never touch it (orch takes its home from the passwd entry, not $HOME)."""
+    d = REAL_HOME / ".orch-tool"
+    out = {}
+    if d.is_dir():
+        for p in d.rglob("*"):
+            try:
+                if p.is_file():
+                    s = p.stat()
+                    out[str(p)] = (s.st_mtime_ns, s.st_size)
+            except OSError:
+                pass
+    return out
 
 
 def _secrets_in(outdir: Path, env) -> list[str]:

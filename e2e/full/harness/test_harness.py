@@ -83,6 +83,25 @@ class HarnessTests(unittest.TestCase):
             r = subprocess.run(["tmux", "-L", sock, "ls"], capture_output=True)
             self.assertNotEqual(r.returncode, 0)  # the server is gone
 
+    def test_real_orch_tool_snapshot_sees_a_change(self):
+        import os
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("harness_main", str(Path(__file__).parent / "main.py"))
+        mainmod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mainmod)
+        with tempfile.TemporaryDirectory(prefix=".tf-fe2e-test-", dir=os.path.expanduser("~")) as d:
+            old = mainmod.REAL_HOME
+            try:
+                mainmod.REAL_HOME = Path(d)
+                (Path(d) / ".orch-tool").mkdir()
+                f = Path(d) / ".orch-tool" / "running.json"
+                f.write_text("[]")
+                before = mainmod._real_orch_tool_state()
+                f.write_text("[1]")
+                self.assertNotEqual(before, mainmod._real_orch_tool_state())
+            finally:
+                mainmod.REAL_HOME = old
+
     def test_report_header_shows_build_label(self):
         with tempfile.TemporaryDirectory() as d:
             run = {"sha": "abcdef123456", "mode": "full", "started": "now", "elapsed": "1 min", "n": 1, "build_label": "TF 42"}
