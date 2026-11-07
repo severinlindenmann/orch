@@ -3,9 +3,11 @@
 # user, grants it "log on as a batch job" and sets the machine policy.
 #   run-as-standard-user.ps1 -Ref <branch|sha> [-Installer <path to install.ps1>] [-Repo <local source folder>]
 #                            [-Flows standard-user,scheduler]   (the *-flow.ps1 scripts to run, in this order)
-param([Parameter(Mandatory)] [string]$Ref, [string]$Installer = "$PSScriptRoot\..\..\install.ps1", [string]$Repo = "",
+param([Parameter(Mandatory)] [string]$Ref, [string]$Installer = "", [string]$Repo = "",
     [string[]]$Flows = @("standard-user", "scheduler"), [int]$MaxSec = 1800)
 $ErrorActionPreference = "Stop"
+# Windows PowerShell 5.1 leaves $PSScriptRoot empty in param defaults (C:\..\..\install.ps1); the body has it.
+if (-not $Installer) { $Installer = "$PSScriptRoot\..\..\install.ps1" }
 $Flows = @($Flows | ForEach-Object { $_ -split "," } | Where-Object { $_ })  # "-Flows a,b" also from powershell -File
 $user = "orchsmoke"; $pass = "Smoke-$([guid]::NewGuid().ToString('N').Substring(0, 12))!"
 $pw = ConvertTo-SecureString $pass -AsPlainText -Force
