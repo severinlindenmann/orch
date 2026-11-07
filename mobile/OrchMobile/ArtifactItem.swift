@@ -263,7 +263,7 @@ enum NetworkBlock {
     /// The custom scheme the viewer serves decrypted pages from.
     static let scheme = "orch-page"
     /// Sent with every page file: nothing but the local files, no network from script.
-static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'"
+static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; form-action 'none'; base-uri 'none'"
     /// Types a page may use. Anything else is served as `application/octet-stream`: nothing the web view could render as a document.
     static let allowedTypes: Set<String> = [
         "text/html", "application/xhtml+xml", "text/xml", "application/xml", "image/svg+xml",
@@ -331,8 +331,45 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
         }
         return nil
     }
+    /// Activating a link makes WebKit connect to its host before the navigation policy can cancel it. Isolated world: a tap, or any click that
+    /// reaches the window, on a link to anything but the page's own scheme is prevented. (`#fragment` links stay: they resolve to orch-page:.)
+    static let linkGuard = """
+    (function () {
+      function target(n) {
+        if (!n || n.nodeType !== 1) return null;
+        var name = n.localName;
+        if (name !== 'a' && name !== 'area') return null;
+        var raw = n.getAttribute('href'); if (raw === null) raw = n.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+        if (raw === null) return null;
+        try { return new URL(raw, document.baseURI).protocol; } catch (e) { return 'bad:'; }
+      }
+      window.addEventListener('click', function (e) {
+        var p = e.composedPath();
+        for (var i = 0; i < p.length; i++) { var s = target(p[i]); if (s !== null) { if (s !== 'orch-page:') e.preventDefault(); return; } }
+      }, true);
+    })();
+    """
+    /// Page world: `element.click()` and `dispatchEvent(click)` never activate a link to another scheme (detached anchors and closed shadow
+    /// roots included: no listener could see those). Non-writable wrappers; the originals are captured at document start.
+    static let linkClickGuard = """
+    (function () {
+      var apply = Reflect.apply, URLc = URL, getAttr = Element.prototype.getAttribute, closest = Element.prototype.closest;
+      var click = HTMLElement.prototype.click, dispatch = EventTarget.prototype.dispatchEvent;
+      function external(el) {
+        try {
+          var a = el && el.nodeType === 1 ? apply(closest, el, ['a[href],area[href],a']) : null;
+          if (!a) return false;
+          var raw = apply(getAttr, a, ['href']); if (raw === null) raw = apply(getAttr, a, ['xlink:href']); if (raw === null) return false;
+          return new URLc(raw, document.baseURI).protocol !== 'orch-page:';
+        } catch (e) { return true; }
+      }
+      Object.defineProperty(HTMLElement.prototype, 'click', { value: function () { if (external(this)) return; return apply(click, this, []); }, writable: false, configurable: false });
+      Object.defineProperty(EventTarget.prototype, 'dispatchEvent', { value: function (ev) { if (ev && ev.type === 'click' && external(this)) return false; return apply(dispatch, this, [ev]); }, writable: false, configurable: false });
+    })();
+    """
     /// Runs at document start in every frame, in the page's world: WebRTC (not covered by the rule list) becomes a throwing stub
-    /// that cannot be deleted or replaced. Frames and workers are blocked by the CSP, so no fresh realm can bring it back.
+    /// that cannot be deleted or replaced. The CSP does not stop an `about:blank` iframe (a fresh realm); the stub holds there because
+    /// this user script is injected into every frame, and a test reads it from such a frame.
     static let noWebRTC = """
     (function () {
       ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel', 'RTCSessionDescription', 'RTCIceCandidate'].forEach(function (name) {

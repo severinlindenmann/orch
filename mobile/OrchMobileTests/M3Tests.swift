@@ -213,6 +213,61 @@ final class PublishWebViewTests: XCTestCase {
         return (web, nav, pages)
     }
 
+    private var retained: [AnyObject] = []
+    /// The page opened exactly as the viewer does: the production coordinator (scheme handler, navigation delegate, scripts, rule list).
+    private func openProduction(_ html: String) async throws -> WKWebView {
+        let surface = HTMLSurface(content: .publish(.page(html: html, name: "index.html")), commentMode: false, store: PinStore())
+        let c = HTMLSurface.Coordinator(surface)
+        let web = PublishWebView.make(handler: c.pages, pins: c)
+        web.frame = CGRect(x: 0, y: 0, width: 390, height: 600)
+        web.navigationDelegate = c
+        retained += [c, web]
+        c.load(web)
+        for _ in 0..<100 {
+            if web.url?.scheme == "orch-page", try await web.evaluateJavaScript("document.readyState") as? String == "complete" { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertEqual(web.url?.scheme, "orch-page", "the page loaded")
+        return web
+    }
+
+    /// Link activation connects to the link's host before the navigation policy can cancel it: the guards must stop every way of activating one.
+    func testLinkActivationNeverConnects() async throws {
+        let host = try await LoopbackHost.start()
+        defer { host.stop() }
+        _ = try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(host.port)/sanity")!)
+        XCTAssertGreaterThan(host.connections, 0, "the host is reachable, so the test can fail")
+        let before = host.connections
+        let base = "http://127.0.0.1:\(host.port)"
+        let html = """
+        <body><a id=att href="\(base)/att">x</a><a id=frag href="#end">f</a><div style="height:3000px"></div><p id=end>end</p>
+        <script>
+        document.getElementById('att').click();
+        var d = document.createElement('a'); d.href = '\(base)/detached'; d.click();
+        var t = document.createElement('a'); t.href = '\(base)/blank'; t.target = '_blank'; document.body.appendChild(t); t.click();
+        var dl = document.createElement('a'); dl.href = '\(base)/dl'; dl.download = 'x'; dl.click();
+        var h = document.createElement('div'); var s = h.attachShadow({mode: 'closed'}); var sa = document.createElement('a'); sa.href = '\(base)/shadow'; s.appendChild(sa); sa.click();
+        document.getElementById('att').dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+        var la = document.createElement('a'); la.href = '\(base)/span'; var sp = document.createElement('span'); la.appendChild(sp); sp.click();
+        document.getElementById('frag').click();
+        </script></body>
+        """
+        let web = try await openProduction(html)
+        try await Task.sleep(for: .milliseconds(1000))
+        XCTAssertEqual(host.connections, before, "no link activation reached the host")
+        let hash = try await web.evaluateJavaScript("location.hash") as? String
+        XCTAssertEqual(hash, "#end", "a #fragment link still works")
+    }
+
+    func testFreshAboutBlankFrameStillHasTheWebRTCStub() async throws {
+        let web = try await openProduction("<body><script>var f = document.body.appendChild(document.createElement('iframe')); try { new f.contentWindow.RTCPeerConnection(); window.__r = 'works'; } catch (e) { window.__r = 'throws'; }</script></body>")
+        XCTAssertEqual(try await web.evaluateJavaScript("window.__r") as? String, "throws")
+    }
+
+    func testResponseHeadersAndCSPCloseFormsAndBase() {
+        XCTAssertTrue(NetworkBlock.csp.contains("form-action 'none'") && NetworkBlock.csp.contains("base-uri 'none'"))
+    }
+
     func testPageCannotReachTheNetworkOrUseWebRTC() async throws {
         // A real host that answers every request and counts the connections: the page must never reach it.
         let host = try await LoopbackHost.start()
@@ -221,7 +276,8 @@ final class PublishWebViewTests: XCTestCase {
         XCTAssertGreaterThan(host.connections, 0, "the host is reachable, so the test can fail")
         let before = host.connections
         let html = """
-        <head><link rel="preconnect" href="http://127.0.0.1:\(host.port)"><link rel='dns-prefetch' href='http://127.0.0.1:\(host.port)'></head>
+        <head><link rel="preconnect" href="http://127.0.0.1:\(host.port)"><link rel='dns-prefetch' href='http://127.0.0.1:\(host.port)'>
+        <link rel="&#112;reconnect" href="http://127.0.0.1:\(host.port)/entity"></head>
         <body><script>
         var r = {}; window.__r = r;
         fetch('http://127.0.0.1:\(host.port)/x').then(function(){ r.fetch = 'ok'; }, function(){ r.fetch = 'blocked'; });
@@ -231,7 +287,7 @@ final class PublishWebViewTests: XCTestCase {
         try { new RTCPeerConnection(); r.rtc = 'present'; } catch (e) { r.rtc = 'gone'; }
         </script></body>
         """
-        let (web, _, _) = try await open(html)
+        let web = try await openProduction(html)
         var result: [String: String] = [:]
         for _ in 0..<50 {
             let json = try await web.evaluateJavaScript("JSON.stringify(window.__r || {})") as? String ?? "{}"
@@ -241,7 +297,7 @@ final class PublishWebViewTests: XCTestCase {
         }
         XCTAssertEqual(result, ["fetch": "blocked", "xhr": "blocked", "ws": "blocked", "img": "blocked", "rtc": "gone"])
         try await Task.sleep(for: .milliseconds(500))
-        XCTAssertEqual(host.connections, before, "no connection reached the host: not by script, not by a preconnect hint")
+        XCTAssertEqual(host.connections, before, "no connection reached the host: not by script, not by a preconnect hint (also the entity-encoded one the strip cannot see)")
     }
 
     func testPreconnectAndPrefetchHintsAreStripped() {

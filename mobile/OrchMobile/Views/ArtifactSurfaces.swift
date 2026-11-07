@@ -31,7 +31,7 @@ final class PageSchemeHandler: NSObject, WKURLSchemeHandler {
         let path = String((url.path.removingPercentEncoding ?? url.path).drop(while: { $0 == "/" }))
         let file = url.host == "page" ? bundle.file(at: path) : nil
         let served = file.map { NetworkBlock.serve(type: $0.type, data: $0.data) }
-        let headers = ["Content-Type": served?.type ?? "text/plain", "Content-Security-Policy": NetworkBlock.csp, "X-Content-Type-Options": "nosniff",
+        let headers = ["Content-Type": served?.type ?? "text/plain", "Content-Security-Policy": NetworkBlock.csp, "X-Content-Type-Options": "nosniff", "X-DNS-Prefetch-Control": "off",
                        "Referrer-Policy": "no-referrer", "Cache-Control": "no-store"]
         guard let response = HTTPURLResponse(url: url, statusCode: file == nil ? 404 : 200, httpVersion: "HTTP/1.1", headerFields: headers) else { return }
         urlSchemeTask.didReceive(response)
@@ -50,6 +50,8 @@ enum PublishWebView {
         configuration.setURLSchemeHandler(handler, forURLScheme: NetworkBlock.scheme)
         let controller = WKUserContentController()
         controller.addUserScript(WKUserScript(source: NetworkBlock.noHints, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: NetworkBlock.hintWorld))
+        controller.addUserScript(WKUserScript(source: NetworkBlock.linkGuard, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: NetworkBlock.hintWorld))
+        controller.addUserScript(WKUserScript(source: NetworkBlock.linkClickGuard, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         controller.addUserScript(WKUserScript(source: NetworkBlock.noWebRTC, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         controller.addUserScript(WKUserScript(source: AnchorScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: AnchorScript.world))
         if let pins { controller.add(pins, contentWorld: AnchorScript.world, name: AnchorScript.handler) }
