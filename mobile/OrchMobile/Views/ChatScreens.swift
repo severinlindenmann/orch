@@ -93,13 +93,18 @@ struct ConversationView: View {
             OfflineBanner()
             if let ticket { summary(ticket) }
             messages(items)
-        }.background(Theme.bg).foregroundStyle(Theme.text).accessibilityElement(children: .contain).accessibilityIdentifier("conversation-view")
+        }
+            // Keep the message area dark without letting it paint the status-bar safe area.
+            .background(Theme.bg, ignoresSafeAreaEdges: .bottom)
+            .background(Theme.bg.ignoresSafeArea(edges: .top))
+            .foregroundStyle(Theme.text).accessibilityElement(children: .contain).accessibilityIdentifier("conversation-view")
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(title).themeFont(16, .semibold).lineLimit(1).accessibilityIdentifier("chat-title")
                         presence
                     }
+                    .padding(.vertical, 8)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: ChatRoute.info(workspace: resolved.workspace, ticket: resolved.ticket)) {
@@ -108,7 +113,7 @@ struct ConversationView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline).toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbarBackground(Theme.surface, for: .navigationBar).toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(Theme.bg, for: .navigationBar).toolbarBackground(.visible, for: .navigationBar)
             .tint(Theme.brand)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
@@ -141,7 +146,9 @@ struct ConversationView: View {
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.down")
             }.themeFont(13).foregroundStyle(Theme.muted).padding(.horizontal, 18).frame(minHeight: 44)
-                .background(Theme.surface).overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+                .padding(.vertical, 4)
+                .background(Theme.bg, ignoresSafeAreaEdges: .top)
+                .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
         }.buttonStyle(PressStyle()).accessibilityLabel("Tasks, " + ConversationRules.summaryText(done: ticket.view?.doneCount ?? 0, total: ticket.view?.totalCount ?? 0, status: TopicStatus(ticket).label, separator: ", "))
             .accessibilityIdentifier("tasks-toggle")
     }
@@ -241,7 +248,7 @@ struct ConversationView: View {
         Button { model.path.append(.ticket(workspace: chip.workspace, ticket: chip.ticket)) } label: {
             HStack(spacing: 4) { Text(chip.label); Image(systemName: "chevron.right").themeFont(11, .semibold) }
                 .themeFont(13, .semibold).foregroundStyle(Theme.brand).padding(.horizontal, 14).frame(minHeight: 44)
-                .background(Theme.surface2, in: Capsule())
+                .background(Theme.surface2, in: Capsule(style: .continuous))
         }.buttonStyle(PressStyle()).frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityLabel("\(chip.label). Open topic").accessibilityIdentifier("started-chip-\(chip.ticket)")
     }

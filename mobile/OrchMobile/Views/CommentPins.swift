@@ -23,7 +23,7 @@ struct PinChipRow: View {
                         }
                         .accessibilityLabel("Delete comment \(pin.n)").accessibilityIdentifier("pin-chip-delete-\(pin.n)")
                     }
-                    .background(Theme.surface3, in: Capsule())
+                    .background(Theme.surface3, in: Capsule(style: .continuous))
                 }
             }
         }
@@ -60,7 +60,7 @@ struct PinEditorSheet: View {
                     .lineLimit(2...5)
                     .themeFont(16)
                     .padding(12)
-                    .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 12))
+                    .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                     .accessibilityLabel("What should change?")
                     .accessibilityIdentifier("pin-text")
                 HStack(spacing: 12) {
@@ -75,7 +75,7 @@ struct PinEditorSheet: View {
                     if let recorder, recorder.isRecording {
                         HStack(alignment: .center, spacing: 3) {
                             ForEach(Array(recorder.levels.enumerated()), id: \.offset) { _, level in
-                                Capsule().fill(Theme.brand).frame(width: 3, height: max(3, 24 * level))
+                                Capsule(style: .continuous).fill(Theme.brand).frame(width: 3, height: max(3, 24 * level))
                             }
                         }.frame(height: 24).accessibilityHidden(true)
                         Text("Recording \(Int(recorder.elapsed))s").themeFont(14).monospacedDigit()

@@ -56,7 +56,7 @@ struct ArtifactViewer: View {
             preview
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Theme.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
             if !commentMode, let approval {
                 VStack(spacing: 6) {
                     Button {
@@ -72,7 +72,7 @@ struct ArtifactViewer: View {
                         Text("Approve publishing").themeFont(16, .semibold)
                             .frame(maxWidth: .infinity, minHeight: 50)
                             .foregroundStyle(Theme.onBrand)
-                            .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                            .background(Theme.brand, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("artifact-approve-publishing")

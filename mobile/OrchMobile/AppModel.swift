@@ -78,16 +78,21 @@ final class AppModel {
     let voiceMode: VoiceInput.Mode
 
     private let outboxDirectory: URL
+    static let installedMarkerKey = "installedMarker"
 
     init(useMock: Bool = AppModel.configuredMock, session: URLSession = .shared,
          voiceMode: VoiceInput.Mode = AppModel.configuredVoice, outboxDirectory: URL = Outbox.defaultDirectory(),
-         speechCache: URL = SpeechPlayer.defaultCacheDirectory, systemAudioControls: Bool = true) {
+         speechCache: URL = SpeechPlayer.defaultCacheDirectory, systemAudioControls: Bool = true,
+         defaults: UserDefaults = .standard) {
         self.useMock = useMock
         let mock = useMock ? MockRelay() : nil
         self.mock = mock
         self.session = session
         self.voiceMode = voiceMode
         self.outboxDirectory = outboxDirectory
+        // The keychain outlives deleting the app. No marker in this app container = a fresh install: drop the stale pairing
+        // quietly and show the welcome screen (the red "signed out" message is only for a real sign-out/revoke while installed).
+        if !defaults.bool(forKey: AppModel.installedMarkerKey) { Keychain.delete(); defaults.set(true, forKey: AppModel.installedMarkerKey) }
         let creds = Keychain.load()
         // Every stored property is set first; only then is `self` used (the Observation macros need that).
         let holder = ClientHolder()

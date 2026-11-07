@@ -88,7 +88,7 @@ struct ConversationInfoView: View {
                     Text(summary).themeFont(15)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .padding(.horizontal, 16).padding(.vertical, 5)
-                        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
+                        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                         .accessibilityIdentifier("info-summary")
                 }
                 VStack(spacing: 16) {
@@ -101,7 +101,7 @@ struct ConversationInfoView: View {
         }
         .foregroundStyle(Theme.text).background(Theme.bg)
         .navigationTitle("Conversation info").navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Theme.surface, for: .navigationBar)
+        .toolbarBackground(Theme.bg, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .tint(Theme.brand).preferredColorScheme(.dark)
         .fullScreenCover(item: $viewer) { ArtifactViewer(item: $0) }
@@ -139,7 +139,7 @@ struct ConversationInfoView: View {
                 .onChange(of: selection) { _, new in withAnimation { reader.scrollTo(new, anchor: .center) } }
             }
         }
-        .padding(4).background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
+        .padding(4).background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
     }
 
     private func tabButton(_ group: InfoGroup, count: Int, fill: Bool) -> some View {
@@ -149,13 +149,13 @@ struct ConversationInfoView: View {
                 if count > 0 {
                     Text("\(count)").themeFont(11, .semibold).lineLimit(1).fixedSize()
                         .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Theme.surface3, in: Capsule())
+                        .background(Theme.surface3, in: Capsule(style: .continuous))
                         .accessibilityHidden(true)
                 }
             }
             .foregroundStyle(selection == group ? Theme.brand : Theme.muted)
             .padding(.horizontal, 10).frame(maxWidth: fill ? .infinity : nil, minHeight: 44)
-            .background(selection == group ? Theme.surface3 : Theme.surface2, in: RoundedRectangle(cornerRadius: 11))
+            .background(selection == group ? Theme.surface3 : Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m - 4, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(group.title), \(count) items")
@@ -235,7 +235,7 @@ struct ConversationInfoView: View {
         case .file(_, let text):
             Text(text).font(.system(size: 15, design: .monospaced))
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(16)
-                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
+                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
         }
     }
 
@@ -250,7 +250,7 @@ struct ConversationInfoView: View {
             if chevron { ShellChevron() }
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(16)
-        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
+        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
     }
 
     private func row(_ entry: InfoEntry) -> some View {
@@ -265,7 +265,7 @@ struct ConversationInfoView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(16)
-        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
+        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
     }
 
     private func artifactCard(_ entry: InfoEntry) -> some View {
@@ -289,8 +289,8 @@ struct ConversationInfoView: View {
             .padding(14)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
     }
 
     private func open(_ entry: InfoEntry) {
@@ -385,7 +385,7 @@ private struct InfoThumbnail: View {
                     }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
             .task(id: blobID) {
                 image = nil
                 guard let blobID, let data = await model.blob(blobID), !Task.isCancelled else { return }

@@ -88,7 +88,7 @@ struct ChatsListView: View {
                 Button { query = "" } label: { Image(systemName: "xmark.circle.fill").frame(width: 44, height: 44) }
                     .foregroundStyle(Theme.muted).accessibilityLabel("Clear search")
             }
-        }.padding(.horizontal, 14).frame(minHeight: 44).background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+        }.padding(.horizontal, 14).frame(minHeight: 44).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
     }
 
     private var chips: some View {
@@ -98,11 +98,11 @@ struct ChatsListView: View {
                     Text(option).themeFont(13).lineLimit(2).minimumScaleFactor(0.8)
                         .foregroundStyle(filter == option ? Theme.text : Theme.muted)
                         .frame(maxWidth: .infinity, minHeight: 44).padding(.vertical, 2)
-                        .background(filter == option ? Theme.surface3 : .clear, in: RoundedRectangle(cornerRadius: 9))
+                        .background(filter == option ? Theme.surface3 : .clear, in: RoundedRectangle(cornerRadius: Theme.Radius.m - 4, style: .continuous))
                 }.buttonStyle(PressStyle()).accessibilityIdentifier("filter-\(option)")
                     .accessibilityAddTraits(filter == option ? .isSelected : [])
             }
-        }.padding(4).background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+        }.padding(4).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
     }
 
     @ViewBuilder private var content: some View {
@@ -116,7 +116,7 @@ struct ChatsListView: View {
                         VStack(alignment: .leading) { Text("Workspace name").themeFont(17, .semibold); Text("Latest message in this workspace").themeFont(15) }
                     }.padding(16)
                 }
-            }.frame(maxWidth: .infinity, alignment: .leading).background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+            }.frame(maxWidth: .infinity, alignment: .leading).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                 .skeleton(true).accessibilityHidden(true)
         } else if model.workspaceSummaries.isEmpty {
             VStack(spacing: 14) {
@@ -136,7 +136,7 @@ struct ChatsListView: View {
                         workspaceRow(summary)
                         if summary.id != shown.last?.id { ShellDivider().padding(.leading, 64) }
                     }
-                }.background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+                }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
             }
             if model.archivedCount > 0 { archivedRow }
         }
@@ -154,7 +154,7 @@ struct ChatsListView: View {
                 Spacer()
                 ShellChevron()
             }.frame(minHeight: 44).padding(.horizontal, 16).padding(.vertical, 12).contentShape(Rectangle())
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
         }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("archived-row-all").padding(.top, 6)
             .accessibilityLabel("Archived").accessibilityValue("\(model.archivedCount) chat\(model.archivedCount == 1 ? "" : "s")")
     }
@@ -173,7 +173,7 @@ struct ChatsListView: View {
                                 Text(question.message.body.title ?? question.message.body.text).themeFont(15, .semibold).lineLimit(2)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }.padding(16).frame(width: 220, alignment: .leading).frame(minHeight: 98)
-                                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16))
+                                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                         }.buttonStyle(PressStyle()).foregroundStyle(Theme.text)
                     }
                 }

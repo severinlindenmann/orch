@@ -23,8 +23,8 @@ struct ArchiveToastBar: View {
                     .accessibilityHint("Reverses the last archive or move back action.")
             }
         }.foregroundStyle(Theme.text).padding(.horizontal, 16).padding(.vertical, 4)
-            .background(Theme.surface3, in: RoundedRectangle(cornerRadius: 14))
-            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border, lineWidth: 1) }
+            .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).strokeBorder(Theme.border, lineWidth: 1) }
             .shadow(color: Theme.bg.opacity(0.5), radius: 8, y: 4)
             .padding(.horizontal, 16).accessibilityIdentifier("archive-toast")
     }
@@ -110,8 +110,8 @@ struct ArchivedView: View {
                 Text("Move back").themeFont(13, .semibold).foregroundStyle(Theme.brand)
                     .multilineTextAlignment(.center).padding(.horizontal, 12)
                     .frame(minWidth: 44, minHeight: 44)
-                    .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 10))
-                    .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.borderStrong, lineWidth: 1) }
+                    .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                    .overlay { RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).strokeBorder(Theme.borderStrong, lineWidth: 1) }
                     .contentShape(Rectangle())
             }.buttonStyle(PressStyle()).accessibilityIdentifier("move-back-\(ReadState.key(chat.id))")
                 .accessibilityLabel("Move back \(chat.title)")

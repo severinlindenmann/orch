@@ -39,3 +39,38 @@ extension Color {
         self.init(red: Double((hex >> 16) & 0xff) / 255, green: Double((hex >> 8) & 0xff) / 255, blue: Double(hex & 0xff) / 255)
     }
 }
+
+/// One corner-radius scale for the whole app (iOS 26 HIG: continuous squircle corners, concentric: inner = outer - padding).
+extension Theme {
+    enum Radius {
+        static let s: CGFloat = 8       // small chips, tags, thumbnails
+        static let m: CGFloat = 14      // cards, inputs, buttons, banners
+        static let l: CGFloat = 22      // message bubbles, large panels
+        static let xl: CGFloat = 26     // composer, app-owned panels
+        static let pill: CGFloat = 999  // capsules
+        /// Rounded-square avatars: 30 percent of the size.
+        static func avatar(_ size: CGFloat) -> CGFloat { size * 0.3 }
+    }
+}
+
+extension View {
+    /// Continuous (squircle) rounded rectangle background + optional border, from the radius scale.
+    func themeCard(_ radius: CGFloat = Theme.Radius.m, fill: Color = Theme.surface2, border: Color? = Theme.border) -> some View {
+        background(fill, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay { if let border { RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(border) } }
+    }
+}
+
+extension Theme {
+    /// The navigation bar fills the status-bar / Dynamic Island strip with the same surface colour as the bar itself.
+    static func applyBarAppearance() {
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = UIColor(Theme.bg)
+        appearance.shadowColor = UIColor(Theme.border)
+        appearance.titleTextAttributes = [.foregroundColor: UIColor(Theme.text)]
+        UINavigationBar.appearance().standardAppearance = appearance
+        UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        UINavigationBar.appearance().compactAppearance = appearance
+    }
+}

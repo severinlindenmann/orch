@@ -19,7 +19,7 @@ struct StatusPill: View {
     var color: Color { switch status { case .needsYou: Theme.warn; case .review: Theme.warn; case .backlog: Theme.muted; case .working: Theme.brand; case .done: kind == "result" ? Theme.muted : Theme.danger } }
     var body: some View {
         Text(text).themeFont(11, .semibold).foregroundStyle(color).padding(.horizontal, 8).padding(.vertical, 3)
-            .overlay(Capsule().stroke(color.opacity(0.6)))
+            .overlay(Capsule(style: .continuous).stroke(color.opacity(0.6)))
     }
 }
 
@@ -28,8 +28,8 @@ struct ProgressBar: View {
     var body: some View {
         GeometryReader { g in
             ZStack(alignment: .leading) {
-                Capsule().fill(Theme.surface3)
-                Capsule().fill(Theme.brand).frame(width: g.size.width * CGFloat(done) / CGFloat(max(total, 1)))
+                Capsule(style: .continuous).fill(Theme.surface3)
+                Capsule(style: .continuous).fill(Theme.brand).frame(width: g.size.width * CGFloat(done) / CGFloat(max(total, 1)))
             }
         }.frame(height: 4).accessibilityHidden(true)
     }
@@ -44,8 +44,8 @@ struct AttachmentBubble: View {
                 Text("Agent").themeFont(11, .semibold).foregroundStyle(Theme.brand)
                 AttachmentTile(attachment: attachment, large: true)
                 Text(ChatBuilder.timeText(at)).themeFont(11).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .trailing)
-            }.padding(10).background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border))
+            }.padding(10).background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous).stroke(Theme.border))
             Spacer(minLength: 48)
         }.accessibilityIdentifier("attachment-\(attachment.kind)")
     }
@@ -60,7 +60,7 @@ struct AttachmentTile: View {
         case "image":
             if let id = attachment.blobId, BlobID.isValid(id) {
                 VStack(alignment: .leading, spacing: 6) {
-                    BlobImage(id: id).frame(maxWidth: .infinity).frame(height: large ? 140 : 84).clipShape(RoundedRectangle(cornerRadius: 8))
+                    BlobImage(id: id).frame(maxWidth: .infinity).frame(height: large ? 140 : 84).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
                     Text(attachment.label ?? "Image").themeFont(12).foregroundStyle(Theme.text).lineLimit(1)
                 }
             } else {
@@ -97,7 +97,7 @@ struct AttachmentTile: View {
     }
     private func row(symbol: String, title: String, sub: String) -> some View {
         let inner = HStack(spacing: 10) {
-            Image(systemName: symbol).foregroundStyle(Theme.brand).frame(width: 34, height: 34).background(Theme.surface3, in: RoundedRectangle(cornerRadius: 8))
+            Image(systemName: symbol).foregroundStyle(Theme.brand).frame(width: 34, height: 34).background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.avatar(34), style: .continuous))
             VStack(alignment: .leading, spacing: 2) { Text(title).themeFont(14, .semibold).lineLimit(1); Text(sub).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1) }
             Spacer(minLength: 0)
         }.foregroundStyle(Theme.text)
@@ -244,7 +244,7 @@ struct LinkTile: View {
             }
         }
         .frame(width: 34, height: 34)
-        .background(Self.colors[key].map { Color(hex: $0) } ?? Theme.surface3, in: RoundedRectangle(cornerRadius: 8))
+        .background(Self.colors[key].map { Color(hex: $0) } ?? Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.avatar(34), style: .continuous))
     }
 }
 
@@ -255,7 +255,7 @@ struct LinkStatus: View {
         let tone: Color = ["open", "live", "public", "published"].contains(text) ? Theme.brand
             : text == "merged" ? Theme.purple : ["review", "draft"].contains(text) ? Theme.warn : Theme.muted
         Text(text).themeFont(11, .semibold).foregroundStyle(tone).padding(.horizontal, 8).padding(.vertical, 2)
-            .overlay(Capsule().stroke(tone.opacity(0.6)))
+            .overlay(Capsule(style: .continuous).stroke(tone.opacity(0.6)))
     }
 }
 
@@ -293,7 +293,7 @@ struct MessageBubble: View {
                 ForEach(item.attachments) { attachment in
                     if attachment.kind == .image, BlobID.isValid(attachment.blobId) {
                         Button { onOpenArtifact(attachment.blobId) } label: {
-                            BlobImage(id: attachment.blobId).frame(height: 190).clipShape(RoundedRectangle(cornerRadius: 10))
+                            BlobImage(id: attachment.blobId).frame(height: 190).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
                         }.buttonStyle(PressStyle()).accessibilityLabel("Open \(attachment.name)").accessibilityIdentifier("image-\(attachment.id)")
                     } else if BlobID.isValid(attachment.blobId), attachment.kind == .file {
                         Button { onOpenArtifact(attachment.blobId) } label: { fileRow(attachment.name, size: attachment.size) }
@@ -309,7 +309,7 @@ struct MessageBubble: View {
                     Button { onOpenArtifact(artifact.id) } label: {
                         HStack(spacing: 10) {
                             Image(systemName: Self.symbol(artifact.kind)).themeFont(20).foregroundStyle(Theme.brand).frame(width: 42, height: 48)
-                                .background(Theme.surface3, in: RoundedRectangle(cornerRadius: 10))
+                                .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.avatar(42), style: .continuous))
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(artifact.label ?? "Preview").themeFont(14, .semibold).multilineTextAlignment(.leading)
                                 Text("Open ›").themeFont(13).foregroundStyle(Theme.brand)
@@ -335,8 +335,8 @@ struct MessageBubble: View {
                     Text(ChatBuilder.timeText(item.at)).themeFont(13).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }.padding(12).foregroundStyle(Theme.text)
-                .background(mine ? Theme.brand.opacity(0.14) : Theme.surface2, in: RoundedRectangle(cornerRadius: 18))
-                .overlay(RoundedRectangle(cornerRadius: 18).stroke(mine ? Theme.brand.opacity(0.5) : Theme.border))
+                .background(mine ? Theme.brand.opacity(0.14) : Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous).stroke(mine ? Theme.brand.opacity(0.5) : Theme.border))
                 .contextMenu {
                     Button { UIPasteboard.general.string = item.text } label: { Label("Copy", systemImage: "doc.on.doc") }.accessibilityIdentifier("copy-\(item.id)")
                     if !mine && item.canPlay {
@@ -359,7 +359,7 @@ struct MessageBubble: View {
     }
     private func fileRow(_ name: String, size: Int) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: "doc").themeFont(20).foregroundStyle(Theme.brand).frame(width: 42, height: 48).background(Theme.surface3, in: RoundedRectangle(cornerRadius: 10))
+            Image(systemName: "doc").themeFont(20).foregroundStyle(Theme.brand).frame(width: 42, height: 48).background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.avatar(42), style: .continuous))
             VStack(alignment: .leading, spacing: 4) {
                 Text(name).themeFont(14, .semibold).fixedSize(horizontal: false, vertical: true)
                 Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)).themeFont(13).foregroundStyle(Theme.muted)
@@ -377,7 +377,7 @@ private struct QueuedConversationImage: View {
             Theme.surface3
             if let image { Image(uiImage: image).resizable().scaledToFill() }
             else { Image(systemName: "photo").foregroundStyle(Theme.muted) }
-        }.frame(height: 190).clipped().clipShape(RoundedRectangle(cornerRadius: 10)).accessibilityLabel(name)
+        }.frame(height: 190).clipped().clipShape(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous)).accessibilityLabel(name)
             .task(id: url) { if let data = try? Data(contentsOf: url) { image = Thumbnail.image(from: data) } }
     }
 }

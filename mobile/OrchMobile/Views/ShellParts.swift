@@ -12,7 +12,7 @@ struct ShellAvatar: View {
     var body: some View {
         Text(String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased())
             .themeFont(size * 0.44, .semibold).foregroundStyle(tint)
-            .frame(width: size, height: size).background(tint.opacity(0.18), in: Circle())
+            .frame(width: size, height: size).background(tint.opacity(0.18), in: RoundedRectangle(cornerRadius: Theme.Radius.avatar(size), style: .continuous))
             .overlay(alignment: .bottomTrailing) {
                 if let lastSeen {
                     TimelineView(.everyMinute) { context in
@@ -30,7 +30,7 @@ struct ShellBadge: View {
         if count > 0 {
             Text(count > 99 ? "99+" : "\(count)").themeFont(12, .semibold)
                 .foregroundStyle(Theme.onBrand).padding(.horizontal, 6).padding(.vertical, 3)
-                .background(Theme.brand, in: Capsule()).accessibilityLabel("\(count) unread")
+                .background(Theme.brand, in: Capsule(style: .continuous)).accessibilityLabel("\(count) unread")
         }
     }
 }

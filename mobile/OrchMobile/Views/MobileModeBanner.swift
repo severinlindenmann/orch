@@ -62,7 +62,7 @@ struct MobileModeBanner: View {
                 }
                 Spacer(minLength: 0)
             }.padding(.horizontal, 12).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                 .accessibilityElement(children: .contain).accessibilityIdentifier("mobile-mode-banner-\(id)")
         }
     }

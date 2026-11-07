@@ -141,7 +141,7 @@ struct WorkspaceView: View {
                 ShellBadge(count: summary?.general.unread ?? 0)
                 ShellChevron()
             }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
         }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("general-\(workspaceId)").navigationLinkIndicatorVisibility(.hidden)
             .swipeActions(edge: .trailing, allowsFullSwipe: true) { chatMenu(.general(workspace: workspaceId), status: nil) }
             .contextMenu { chatMenu(.general(workspace: workspaceId), status: nil) }

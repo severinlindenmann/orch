@@ -304,7 +304,8 @@ struct ImageSurface: UIViewRepresentable {
                 badge.textAlignment = .center
                 badge.backgroundColor = UIColor(Theme.brand)
                 badge.textColor = UIColor(Theme.onBrand)
-                badge.layer.cornerRadius = 14
+                badge.layer.cornerRadius = Theme.Radius.s
+                badge.layer.cornerCurve = .continuous
                 badge.clipsToBounds = true
                 badge.bounds = CGRect(x: 0, y: 0, width: 28, height: 28)
                 badge.isAccessibilityElement = true

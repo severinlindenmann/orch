@@ -27,7 +27,7 @@ enum MediaSelection: Equatable {
 struct MediaPicker: View {
     var onPick: (MediaSelection) -> Void
     @Environment(\.dismiss) private var dismiss
-    @ScaledMetric private var tileWidth: CGFloat = 72
+    @State private var detent: PresentationDetent = .height(170)
     @State private var step: Step = .choices
     @State private var cameraOptions = false
     @State private var capture: Capture?
@@ -51,10 +51,12 @@ struct MediaPicker: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: step == .choices ? 0 : 16) {
                 HStack {
-                    Text(title).themeFont(20, .semibold)
-                        .accessibilityAddTraits(.isHeader)
+                    if step != .choices {
+                        Text(title).themeFont(20, .semibold)
+                            .accessibilityAddTraits(.isHeader)
+                    }
                     Spacer()
                     Button { finished = true; removePrepared(drafts); dismiss() } label: {
                         Image(systemName: "xmark").frame(width: 44, height: 44)
@@ -76,7 +78,13 @@ struct MediaPicker: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.vertical, step == .choices ? 4 : 16)
+        }
+        .presentationDetents([detent], selection: $detent)
+        .presentationDragIndicator(.visible)
+        .onChange(of: step) { _, value in
+            detent = value == .choices ? .height(170) : .large
         }
         .foregroundStyle(Theme.text)
         .background(Theme.surface)
@@ -112,42 +120,64 @@ struct MediaPicker: View {
     }
 
     private var choices: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: tileWidth), spacing: 8)], spacing: 16) {
-                Button { errorText = nil; cameraOptions = true } label: {
-                    MediaTile(label: "Camera", icon: "camera", color: Theme.brand)
-                }
-                .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
-                .accessibilityLabel("Camera").accessibilityIdentifier("media-camera")
-                PhotosPicker(selection: $photos, maxSelectionCount: 10, matching: .images) {
-                    MediaTile(label: "Photos", icon: "photo", color: Theme.purple)
-                }
-                .accessibilityLabel("Photos").accessibilityIdentifier("media-photos")
-                Button { errorText = nil; importer = true } label: {
-                    MediaTile(label: "Files", icon: "doc", color: Theme.warn)
-                }
-                .accessibilityLabel("Files").accessibilityIdentifier("media-files")
+        HStack(alignment: .top, spacing: 8) {
+            Button { errorText = nil; cameraOptions = true } label: {
+                MediaTile(label: "Camera", icon: "camera", color: Theme.brand)
+            }
+            .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+            .accessibilityLabel("Camera").accessibilityIdentifier("media-camera")
+            photoChoice
+            Button {
+                errorText = nil
                 #if DEBUG
-                if UserDefaults.standard.bool(forKey: "fakePhoto") {   // UI tests: the photo library is out of process
-                    Button { errorText = nil; receiveCapture(.success([Self.fakeJPEG()]), mode: .photo) } label: {
-                        MediaTile(label: "Test photo", icon: "photo.badge.plus", color: Theme.purple)
-                    }.accessibilityLabel("Test photo").accessibilityIdentifier("media-fake-photo")
-                    Button { errorText = nil; importFiles(.success([Self.fakePDF()])) } label: {
-                        MediaTile(label: "Test PDF", icon: "doc.badge.plus", color: Theme.warn)
-                    }.accessibilityLabel("Test PDF").accessibilityIdentifier("media-fake-pdf")
+                if UserDefaults.standard.bool(forKey: "fakePhoto") {
+                    importFiles(.success([Self.fakePDF()]))
+                    return
                 }
                 #endif
-                Button {
-                    errorText = nil; step = .location; locationRequest = UUID()
-                } label: { MediaTile(label: "Location", icon: "mappin.and.ellipse", color: Theme.brand) }
-                .accessibilityLabel("Location").accessibilityIdentifier("media-location")
+                importer = true
+            } label: {
+                MediaTile(label: "File", icon: "doc", color: Theme.warn)
             }
-            .buttonStyle(.plain)
-            .disabled(busy)
-            if !UIImagePickerController.isSourceTypeAvailable(.camera) {
-                Text("No camera on this device.").themeFont(14).foregroundStyle(Theme.muted)
-            }
+            .accessibilityLabel("File").accessibilityIdentifier(fileChoiceID)
+            Button {
+                errorText = nil; step = .location; locationRequest = UUID()
+            } label: { MediaTile(label: "Location", icon: "mappin.and.ellipse", color: Theme.brand) }
+            .accessibilityLabel("Location").accessibilityIdentifier("media-location")
         }
+        .buttonStyle(.plain)
+        .disabled(busy)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("media-choices")
+    }
+
+    @ViewBuilder private var photoChoice: some View {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "fakePhoto") {
+            Button { errorText = nil; receiveCapture(.success([Self.fakeJPEG()]), mode: .photo) } label: {
+                MediaTile(label: "Photos", icon: "photo", color: Theme.purple)
+            }
+            .accessibilityLabel("Photos").accessibilityIdentifier("media-fake-photo")
+        } else {
+            libraryChoice
+        }
+        #else
+        libraryChoice
+        #endif
+    }
+
+    private var libraryChoice: some View {
+        PhotosPicker(selection: $photos, maxSelectionCount: 10, matching: .images) {
+            MediaTile(label: "Photos", icon: "photo", color: Theme.purple)
+        }
+        .accessibilityLabel("Photos").accessibilityIdentifier("media-photos")
+    }
+
+    private var fileChoiceID: String {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "fakePhoto") { return "media-fake-pdf" }
+        #endif
+        return "media-files"
     }
 
     #if DEBUG
@@ -182,7 +212,7 @@ struct MediaPicker: View {
                                 }
                             }
                             .frame(width: 240, height: 160)
-                            .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 12))
+                            .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
                             .accessibilityLabel(draft.name)
                             Button {
                                 removePrepared([draft])
@@ -199,8 +229,8 @@ struct MediaPicker: View {
             }
             TextField("Add a caption...", text: $caption, axis: .vertical)
                 .themeFont(17).padding(12).frame(minHeight: 44)
-                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(Theme.border))
                 .accessibilityLabel("Add a caption")
                 .accessibilityIdentifier("media-caption")
             Button {
@@ -227,11 +257,12 @@ struct MediaPicker: View {
                 MediaMapPicture(location: location)
                 Text(location.label ?? coordinateLabel(location)).themeFont(16, .semibold)
                 if !address.isEmpty { Text(address).themeFont(14).foregroundStyle(Theme.muted) }
+                Button("Open in Maps") { openMediaLocation(location) }
+                    .buttonStyle(MediaActionStyle()).accessibilityLabel("Open in Maps")
+                    .accessibilityIdentifier("Open in Maps")
                 Button("Share current location") { pick(.location(location)) }
                     .buttonStyle(MediaActionStyle(primary: true))
                     .accessibilityLabel("Share current location").accessibilityIdentifier("media-send")
-                Button("Open in Maps") { openMediaLocation(location) }
-                    .buttonStyle(MediaActionStyle()).accessibilityLabel("Open in Maps")
             } else if let locationProblem {
                 Text(locationProblem.localizedDescription).themeFont(14).foregroundStyle(Theme.danger)
                 if locationProblem == .denied {
@@ -333,6 +364,13 @@ struct MediaPicker: View {
 
     private func findLocation() async {
         location = nil; locationProblem = nil
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "fakeLocation") {
+            address = "1 Infinite Loop, Cupertino"
+            location = LocationShare(lat: 37.3317, lon: -122.0301, label: "Infinite Loop", accuracyM: 10)
+            return
+        }
+        #endif
         let fetcher = LocationFetcher()
         do {
             let share = try await fetcher.current()
@@ -367,7 +405,7 @@ private struct MediaActionStyle: ButtonStyle {
         configuration.label.themeFont(17, .semibold)
             .frame(maxWidth: .infinity, minHeight: 44).padding(.vertical, 4).padding(.horizontal, 12)
             .foregroundStyle(primary ? Theme.onBrand : Theme.text)
-            .background(primary ? Theme.brand : Theme.surface3, in: RoundedRectangle(cornerRadius: 12))
+            .background(primary ? Theme.brand : Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
             .opacity(configuration.isPressed ? 0.75 : 1)
     }
 }
@@ -444,14 +482,16 @@ struct LocationCard: View {
     init(location: LocationShare) { self.location = location }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            MediaMapPicture(location: location)
+            MediaMapPicture(radius: Theme.Radius.m - 12, location: location)
             Text(location.label ?? coordinateLabel(location)).themeFont(16, .semibold)
             Button("Open in Maps") { openMediaLocation(location) }
                 .buttonStyle(MediaActionStyle()).accessibilityLabel("Open in Maps")
+                .accessibilityIdentifier("Open in Maps")
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12).foregroundStyle(Theme.text)
-        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border))
+        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(Theme.border))
     }
 }
 
@@ -468,6 +508,7 @@ private func openMediaLocation(_ location: LocationShare) {
 
 @MainActor
 private struct MediaMapPicture: View {
+    var radius: CGFloat = Theme.Radius.m
     let location: LocationShare
     @State private var picture: UIImage?
     private static var cache: [String: UIImage] = [:]
@@ -481,7 +522,7 @@ private struct MediaMapPicture: View {
                 else { Image(systemName: "mappin.and.ellipse").foregroundStyle(Theme.brand).themeFont(28) }
             }
         .frame(height: 130).frame(maxWidth: .infinity)
-        .clipped().clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipped().clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .accessibilityLabel("Map of \(location.label ?? coordinateLabel(location))")
         .task(id: key) { await snapshot() }
     }
@@ -530,7 +571,7 @@ private struct MediaTile: View {
         VStack(spacing: 8) {
             Image(systemName: icon).themeFont(22).foregroundStyle(color)
                 .frame(width: 56, height: 56)
-                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 18))
+                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.avatar(56), style: .continuous))
             Text(label).themeFont(13).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, minHeight: 88)
