@@ -9,7 +9,7 @@ import sys
 import pytest
 from test_addons import install, make_addon, uv_calls  # noqa: F401  (fixture)
 
-from orch import addons, services
+from orch import addons, services, skills
 
 NO_WIN_LINKS = pytest.mark.skipif(os.name == "nt", reason="file symlinks need admin rights on Windows")
 
@@ -242,85 +242,38 @@ def test_add_on_error_text_has_no_escape_sequences(svc, proj, run):
 
 def test_start_keeps_runtime_files_out_of_git(svc, proj, run):
     run("start")
-    assert ".orch/run/" in (proj / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "run/" in (proj / ".orch/.gitignore").read_text(encoding="utf-8").splitlines()
+    assert not (proj / ".gitignore").exists()  # the team's .gitignore is not orch's
 
 
 @NO_WIN_LINKS
-@pytest.mark.parametrize("name", [".gitignore", "AGENTS.md", "CLAUDE.md"])
-def test_project_files_never_written_through_a_link_outside(proj, tmp_path, name):
-    from orch import skills
-    from orch.errors import Refused
-
-    victim = tmp_path.parent / f"{tmp_path.name}-victim.txt"
-    victim.write_text("keep me", encoding="utf-8")
-    (proj / name).symlink_to(victim)
-    with pytest.raises(Refused, match="link orch does not write through"):
-        {
-            ".gitignore": skills.ensure_gitignore,
-            "CLAUDE.md": lambda r: skills._ensure_line(r, "CLAUDE.md", "@AGENTS.md"),
-        }.get(name, lambda r: skills.set_block(r, "x", "body"))(proj)
-    assert victim.read_text(encoding="utf-8") == "keep me"
-
-
-@NO_WIN_LINKS
-def test_start_refuses_a_gitignore_link_outside(svc, proj, run, tmp_path):
-    victim = tmp_path.parent / f"{tmp_path.name}-victim2.txt"
-    victim.write_text("keep me", encoding="utf-8")
-    (proj / ".gitignore").unlink()
-    (proj / ".gitignore").symlink_to(victim)
-    code, _, err = run("start")
-    assert (
-        code == 2
-        and "link orch does not write through" in err
-        and victim.read_text(encoding="utf-8") == "keep me"
-    )
-
-
-@NO_WIN_LINKS
-def test_claude_md_linked_to_agents_md_inside_still_works(proj, run, monkeypatch):
+@pytest.mark.parametrize("name", [".orch/.gitignore", "CLAUDE.local.md"])
+def test_local_files_never_written_through_a_link(proj, tmp_path, name):
     from orch import adapters
 
-    monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
-    )
-    (proj / "AGENTS.md").write_text("# mine\n", encoding="utf-8")
-    (proj / "CLAUDE.md").symlink_to("AGENTS.md")
-    assert run("init")[0] == 0
-    assert (proj / "CLAUDE.md").is_symlink() and "@AGENTS.md" in (proj / "AGENTS.md").read_text(
-        encoding="utf-8"
-    )
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep", encoding="utf-8")
+    (proj / ".orch").mkdir()
+    (proj / name).symlink_to(victim)
+    skills.set_block(proj, "orch", "x")
+    try:
+        skills.apply_agent_files(proj)
+    except skills.Refused:
+        pass
+    assert victim.read_text(encoding="utf-8") == "keep"
 
 
 @NO_WIN_LINKS
-@pytest.mark.parametrize(
-    "name,target",
-    [(".gitignore", ".git/config"), ("CLAUDE.md", ".git/hooks/pre-commit"), ("AGENTS.md", ".orch/x")],
-)
-def test_links_inside_the_project_to_other_files_are_refused(proj, name, target):
-    from orch import skills
-    from orch.errors import Refused
+def test_a_link_for_orch_gitignore_makes_orch_refuse_secrets_without_git(proj, tmp_path):
+    from orch import net
 
-    t = proj / target
-    t.parent.mkdir(parents=True, exist_ok=True)
-    t.write_text("keep me\n", encoding="utf-8")
-    (proj / name).symlink_to(t)
-    with pytest.raises(Refused, match="link orch does not write through"):
-        {
-            ".gitignore": skills.ensure_gitignore,
-            "CLAUDE.md": lambda r: skills._ensure_line(r, "CLAUDE.md", "@AGENTS.md"),
-        }.get(name, lambda r: skills.set_block(r, "x", "body"))(proj)
-    assert t.read_text(encoding="utf-8") == "keep me\n"
-
-
-@NO_WIN_LINKS
-def test_gitignore_never_follows_a_link(proj):
-    from orch import skills
-    from orch.errors import Refused
-
-    (proj / "AGENTS.md").write_text("x\n", encoding="utf-8")
-    (proj / ".gitignore").symlink_to("AGENTS.md")
-    with pytest.raises(Refused):
-        skills.ensure_gitignore(proj)
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep", encoding="utf-8")
+    (proj / ".orch").mkdir()
+    (proj / ".orch/.gitignore").symlink_to(victim)
+    with pytest.raises(skills.Refused, match="Nothing was stored"):
+        net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
+    assert victim.read_text(encoding="utf-8") == "keep"
 
 
 def test_status_says_when_an_addon_is_not_running(svc, proj, run):

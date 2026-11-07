@@ -12,7 +12,7 @@ import re
 import tomllib
 from pathlib import Path
 
-from orch import skills
+from orch import harness, skills
 from orch.errors import Refused
 
 _SEC = re.compile(r"\{\{([#^])(\w+)\}\}(.*?)\{\{/\2\}\}", re.S)
@@ -140,10 +140,8 @@ def remember_rights(root: Path, who: dict) -> None:
 def _safe_write(root: Path, dest: Path, text: str) -> None:
     """Into .orch/harness/skills only, never through a link: the file is replaced (a new file next to it,
     then rename), so a planted SKILL.md link is replaced, not followed."""
-    from orch import harness
-
     skills.check_inside(root, dest)
-    harness.write_text(dest, text)
+    harness.write_text(dest, text, replace_link=True)
 
 
 def render_installed(root: Path, addon: str, source: Path) -> bool:
@@ -158,9 +156,7 @@ def render_installed(root: Path, addon: str, source: Path) -> bool:
         _safe_write(root, dest, body)
         changed = True
     if block:
-        from orch import harness
-
-        if (harness.current_block(root, addon) or "").strip() != re.sub(r"<!--.*?-->", "", block, flags=re.S).strip():
+        if (harness.current_block(root, addon) or "").strip() != harness.strip_comments(block).strip():
             skills.set_block(root, addon, block, addon=True)
             changed = True
     return changed

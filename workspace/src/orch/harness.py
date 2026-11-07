@@ -4,7 +4,7 @@
     .orch/harness/AGENTS.orch.md         all blocks joined (what an agent reads)
     .orch/harness/skills/<skill>/        the real skill folders (orch, orch-<add-on>)
 The places agents look are links (or, where links are not allowed, copies) to those skill folders, plus a local
-instruction file such as CLAUDE.local.md; all of them are listed in .git/info/exclude, so `git status` stays clean.
+local instruction file (named in agents.json); all of them are listed in .git/info/exclude, so `git status` stays clean.
 "Share with team" is the one opt-in that writes into team files (AGENTS.md and .gitattributes)."""
 
 from __future__ import annotations
@@ -60,7 +60,13 @@ def is_link(p: Path) -> bool:
 def check_harness(root: Path, dest: Path | None = None) -> None:
     """.orch, .orch/harness, its subfolders and dest must be real folders inside the project."""
     h = harness_dir(root)
-    for p in (root / ".orch", h, h / "skills", h / "blocks", *([dest] if dest else [])):
+    between = []
+    if dest is not None:
+        d = Path(os.path.abspath(dest))
+        between = [*(q for q in d.parents if h.absolute() in q.parents)]
+        if d.is_dir() or not is_link(d):  # a link to a file is replaced by the writer, never followed
+            between.append(d)
+    for p in (root / ".orch", h, h / "skills", h / "blocks", *between):
         if is_link(p):
             raise Refused(f"{p} is a link; orch will not write there. Make it a plain folder and try again.")
         if p.exists() and not _inside(root, p):
@@ -70,9 +76,10 @@ def check_harness(root: Path, dest: Path | None = None) -> None:
 # ------------------------------------------------------------------ plain files
 
 
-def write_text(path: Path, text: str, mode: int = 0o644) -> None:
-    """Atomic write; never through a link at the destination."""
-    if is_link(path):
+def write_text(path: Path, text: str, mode: int = 0o644, replace_link: bool = False) -> None:
+    """Atomic write; never through a link at the destination (a link to a file is refused, or with
+    replace_link replaced by the new file, the target untouched)."""
+    if is_link(path) and not replace_link:
         raise Refused(f"{path} is a link; orch will not write through it.")
     if path.exists() and not path.is_file():
         raise Refused(f"{path} is not a regular file; orch will not write there.")
@@ -101,9 +108,18 @@ def block_file(root: Path, name: str, addon: bool) -> Path:
     return harness_dir(root) / "blocks" / (f"addon-{name}.md" if addon else f"{name}.md")
 
 
+def strip_comments(body: str) -> str:
+    """No HTML comment (and no piece of one) stays in a block; pieces cannot join into a marker."""
+    while True:
+        new = re.sub(r"<!--.*?-->", "", body, flags=re.S)
+        if new == body:
+            return body.replace("<!--", "").replace("-->", "")
+        body = new
+
+
 def set_block(root: Path, name: str, body: str, addon: bool = False) -> None:
     check_harness(root)
-    body = re.sub(r"<!--.*?-->", "", body, flags=re.S).strip()
+    body = strip_comments(body).strip()
     write_text(block_file(root, name, addon), body + "\n")
     rebuild(root)
 
@@ -167,11 +183,12 @@ def _git_exclude(root: Path) -> tuple[Path, str] | None:
     return ex, ("" if rel == "." else rel)
 
 
-def exclude_set(root: Path, tag: str, lines: list[str]) -> None:
-    """Own block `tag` of .git/info/exclude (no lines = block removed). Not a git repo: nothing to do."""
+def exclude_set(root: Path, tag: str, lines: list[str]) -> bool:
+    """Own block `tag` of .git/info/exclude (no lines = block removed). True when the file is in place;
+    False when this is no git repo (nothing to exclude from)."""
     found = _git_exclude(root)
     if found is None:
-        return
+        return False
     ex, rel = found
     if is_link(ex):
         raise Refused(f"{ex} is a link; orch will not write there.")
@@ -186,6 +203,52 @@ def exclude_set(root: Path, tag: str, lines: list[str]) -> None:
     new = "\n".join(rows) + "\n" if rows else ""
     if new != (ex.read_text(encoding="utf-8") if ex.is_file() else ""):
         write_text(ex, new)
+    return True
+
+
+# Local paths relative to .orch/: orch's own .gitignore keeps them out of git with or without git info
+# exclude, written before anything else and independent of linking. It lists itself.
+ORCH_IGNORE = [
+    ".gitignore",
+    ".local-id",
+    "secrets/",
+    "inbox/",
+    "inbox-seen.json",
+    "inbox-notes.json",
+    "outbox/",
+    "addons/",
+    "run/",
+    "harness/",
+    "tickets/*/evidence/",
+]
+
+
+def protect_local(root: Path, lines: list[str] | None = None) -> None:
+    """Keep secrets and other local files out of git. Fails closed: when neither .orch/.gitignore nor
+    .git/info/exclude can be written, it refuses (so no secret is stored unprotected). `lines` are the
+    extra root-relative patterns for the exclude block (links, local instruction files)."""
+    text = "# orch: local files, never committed (written by orch)\n" + "\n".join(ORCH_IGNORE) + "\n"
+    ok = False
+    try:
+        p = root / ".orch" / ".gitignore"
+        if is_link(root / ".orch"):
+            raise Refused("link")
+        if not (p.is_file() and not is_link(p) and p.read_text(encoding="utf-8") == text):
+            write_text(p, text)
+        ok = True
+    except (Refused, OSError):
+        pass
+    try:
+        core = [".orch/" + ln.rstrip("/") + ("/" if ln.endswith("/") else "") for ln in ORCH_IGNORE[1:]]
+        if exclude_set(root, "core", list(dict.fromkeys([*core, *(lines or [])]))):
+            ok = True
+    except (Refused, OSError):
+        pass
+    if not ok:
+        raise Refused(
+            "orch cannot keep its private files out of git here (.orch/.gitignore and .git/info/exclude "
+            "could not be written). Nothing was stored."
+        )
 
 
 # ------------------------------------------------------------------ links (or copies) to skill folders
@@ -282,12 +345,12 @@ def sync_copies(root: Path, wheres: list[str]) -> None:
                 _copy_dir(s, dest)
 
 
-# ------------------------------------------------------------------ local instruction file (CLAUDE.local.md)
+# ------------------------------------------------------------------ local instruction file
 
 
 def write_local_file(root: Path, fn: str, line: str | None) -> bool:
-    """The local-only instruction file: our marked block imports AGENTS.md (when the team has no CLAUDE.md of
-    its own and an AGENTS.md) and the orch block. Other text in the file is kept. Returns False when skipped."""
+    """The local-only instruction file: our marked block imports AGENTS.md (when the team has no shared sibling file of
+    the same name without ".local" and an AGENTS.md) and the orch block. Other text in the file is kept. Returns False when skipped."""
     path = root / fn
     if is_link(path) or (path.exists() and not path.is_file()):
         return False
@@ -296,8 +359,8 @@ def write_local_file(root: Path, fn: str, line: str | None) -> bool:
     if text and LOCAL_MARK[0] not in text and not local:
         return False  # a file somebody else owns: not ours to edit
     lines = []
-    team_claude = (root / "CLAUDE.md").exists() or (root / ".claude" / "CLAUDE.md").exists()
-    if line and (root / "AGENTS.md").is_file() and not team_claude:
+    team_file = local and (root / fn.replace(".local", "")).exists()  # the team's own file: the tool reads it already
+    if line and (root / "AGENTS.md").is_file() and not team_file:
         lines.append(line)
     if combined(root):
         lines.append(f"@{(HARNESS / 'AGENTS.orch.md').as_posix()}")

@@ -138,8 +138,9 @@ def apply_agent_files(root: Path) -> list[str]:
     Nothing here is a tracked file. Returns the labels of the agents it prepared files for."""
     from orch import adapters
 
-    sk = harness.harness_dir(root) / "skills"
     places = _skill_places(root)
+    harness.protect_local(root, _exclude_lines(root))  # first, so a refused link cannot leave secrets visible
+    sk = harness.harness_dir(root) / "skills"
     names = sorted(p.name for p in sk.iterdir() if p.is_dir()) if sk.is_dir() else []
     for where in places:
         for n in names:
@@ -155,15 +156,20 @@ def apply_agent_files(root: Path) -> list[str]:
                 local.append(fn)
         if f.get("skills_link") or f.get("instructions_link"):
             done.append(a["label"])
-    _write_exclude(root, local)
     return done
 
 
-def _write_exclude(root: Path, local: list[str]) -> None:
-    lines = [*GITIGNORE_LINES, ".orch/harness/", ".agents/skills/orch*", *local]
-    for w in _skill_places(root)[1:]:
-        lines.append(f"{w}/orch*")
-    harness.exclude_set(root, "core", list(dict.fromkeys(lines)))
+def _exclude_lines(root: Path) -> list[str]:
+    """Root-relative patterns of the links and local instruction files orch makes here."""
+    from orch import adapters
+
+    lines = [".agents/skills/orch*"]
+    for n in detected_agents(root):
+        f = adapters.load(n).get("files") or {}
+        lines += [fn for fn in (f.get("instructions_link") or {}) if ".local." in fn]
+        if f.get("skills_link"):
+            lines.append(f"{f['skills_link']}/orch*")
+    return list(dict.fromkeys(lines))
 
 
 def unlink_skill(root: Path, name: str) -> None:
@@ -172,8 +178,9 @@ def unlink_skill(root: Path, name: str) -> None:
 
 
 def ensure_gitignore(root: Path) -> None:
-    """The local-only lines (secrets, inbox, run files, ...) go to .git/info/exclude, not to .gitignore."""
-    apply_agent_files(root)
+    """The local-only lines (secrets, inbox, run files, ...) stay out of git: .orch/.gitignore and
+    .git/info/exclude, never the team's .gitignore. Refuses when neither can be written."""
+    harness.protect_local(root, _exclude_lines(root))
 
 
 def front_matter_name(skill_dir: Path) -> str:

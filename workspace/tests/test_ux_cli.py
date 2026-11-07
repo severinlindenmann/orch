@@ -44,17 +44,8 @@ def test_second_init_and_addon_blocks_do_not_nest(proj):
     body = "<!-- orch:begin orch-x -->\n## orch-x\nHello\n<!-- orch:end orch-x -->\n"
     for _ in range(3):
         skills.set_block(proj, "orch-x", body)
-    text = (proj / "AGENTS.md").read_text()
-    assert text.count("orch:begin orch-x") == 1 and text.count("orch:end orch-x") == 1
-
-
-def test_set_block_repairs_nested_blocks(proj):
-    (proj / "AGENTS.md").write_text(
-        "mine\n<!-- orch:begin a -->\n<!-- orch:begin a -->\nold\n<!-- orch:end a -->\n<!-- orch:end a -->\n"
-    )
-    skills.set_block(proj, "a", "new")
-    text = (proj / "AGENTS.md").read_text()
-    assert text == "mine\n<!-- orch:begin a -->\nnew\n<!-- orch:end a -->\n"
+    text = (proj / ".orch/harness/AGENTS.orch.md").read_text()
+    assert text == "## orch-x\nHello\n"
 
 
 def test_block_file_either_case(tmp_path):

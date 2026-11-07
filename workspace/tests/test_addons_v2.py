@@ -69,7 +69,11 @@ def test_new_keys_default_and_reserved_names(tmp_path):
 
 
 def test_gitignore_added_on_add_removed_on_remove(proj, run, tmp_path, monkeypatch, uv_calls):  # noqa: F811
+    import subprocess
+
     (proj / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
+    ex = proj / ".git/info/exclude"
     folder = make_addon(tmp_path / "s", extra='gitignore = ["notes/cache/", "*.tmp"]')
     eps = {}
     monkeypatch.setattr(addons, "_entry_points", lambda: dict(eps))
@@ -81,13 +85,14 @@ def test_gitignore_added_on_add_removed_on_remove(proj, run, tmp_path, monkeypat
     try:
         code, _, err = run("addon", "add", str(folder), "--yes")
         assert code == 0, err
-        g = _gi(proj)
-        assert "node_modules/\n" in g and "# orch:addon:hello\nnotes/cache/\n*.tmp\n# /orch:addon:hello" in g
+        g = ex.read_text(encoding="utf-8")
+        assert "# orch:begin addon-hello\n/notes/cache/\n/*.tmp\n# orch:end addon-hello" in g
+        assert _gi(proj) == "node_modules/\n"  # the team's .gitignore is never edited
         run("addon", "add", str(folder), "--yes")  # again: no duplicate block
-        assert _gi(proj).count("notes/cache/") == 1
+        assert ex.read_text(encoding="utf-8").count("notes/cache/") == 1
         code, _, err = run("addon", "remove", "hello")
         assert code == 0, err
-        assert _gi(proj) == "node_modules/\n"
+        assert "addon-hello" not in ex.read_text(encoding="utf-8")
     finally:
         sys.path.remove(str(folder / "src"))
 
@@ -108,14 +113,17 @@ def test_list_text_and_json_new_fields(proj, run, hello):  # noqa: F811
     assert row["recommended"] is False and row["page"] is None and row["running"] is False
 
 
-def test_gitignore_keeps_crlf_and_is_idempotent(proj):
-    (proj / ".gitignore").write_bytes(b"a/\r\nb/\r\n")
+def test_exclude_block_is_idempotent_and_keeps_other_lines(proj):
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
+    ex = proj / ".git/info/exclude"
+    ex.write_text("mine/\n", encoding="utf-8")
     addons._set_gitignore(proj, "hello", ["x/"])
     addons._set_gitignore(proj, "hello", ["x/"])
-    raw = (proj / ".gitignore").read_bytes()
-    assert raw == b"a/\r\nb/\r\n# orch:addon:hello\r\nx/\r\n# /orch:addon:hello\r\n"
+    assert ex.read_text(encoding="utf-8") == "mine/\n# orch:begin addon-hello\n/x/\n# orch:end addon-hello\n"
     addons._set_gitignore(proj, "hello", [])
-    assert (proj / ".gitignore").read_bytes() == b"a/\r\nb/\r\n"
+    assert ex.read_text(encoding="utf-8") == "mine/\n"
 
 
 def test_shipped_local_addons_are_recommended_and_server_ones_are_not():

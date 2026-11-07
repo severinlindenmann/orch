@@ -318,3 +318,29 @@ def test_shipped_recommended_reads_the_local_source_manifests(monkeypatch):
     monkeypatch.setenv("ORCH_REPO", str(repo))
     monkeypatch.setattr(addons, "discover", lambda: {})
     assert sorted(addons.shipped_recommended()) == ["automation", "dashboard", "focus"]
+
+
+def test_secrets_stay_ignored_even_when_linking_is_refused(proj, run, tmp_path_factory):
+    _git_repo(proj)
+    outside = tmp_path_factory.mktemp("outside3")
+    (proj / ".agents").mkdir()
+    os.symlink(outside, proj / ".agents" / "skills", target_is_directory=True)
+    assert run("init")[0] == 2  # linking refused
+    ex = (proj / ".git/info/exclude").read_text(encoding="utf-8")
+    assert "/.orch/secrets/" in ex and "/.orch/run/" in ex and "/.orch/inbox/" in ex
+    assert "secrets/" in (proj / ".orch/.gitignore").read_text(encoding="utf-8")
+    (proj / ".orch/secrets").mkdir(parents=True, exist_ok=True)
+    (proj / ".orch/secrets/publish.json").write_text("{}", encoding="utf-8")
+    assert ".orch/secrets" not in _git(proj, "status", "--porcelain", "--untracked-files=all")
+
+
+def test_orch_gitignore_protects_without_git_info_and_secrets_refuse_when_nothing_works(proj, monkeypatch):
+    from orch import harness, net
+
+    harness.protect_local(proj)  # no git repo: .orch/.gitignore alone is enough
+    assert (proj / ".orch/.gitignore").is_file()
+    (proj / ".orch/.gitignore").unlink()
+    monkeypatch.setattr(harness, "write_text", lambda *a, **k: (_ for _ in ()).throw(OSError("read-only")))
+    with pytest.raises(skills.Refused, match="Nothing was stored"):
+        net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
+    assert not (proj / ".orch/secrets/x.json").exists()
