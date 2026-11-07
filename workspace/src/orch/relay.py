@@ -500,6 +500,14 @@ def _update_title(root: Path, ticket: str) -> str | None:
     return line[:120].strip() or None
 
 
+def _topic_of_message(root: Path, mid: str) -> str | None:
+    """The ticket that `relay topic --from <mid>` (or a new-topic text) started, else None."""
+    for t in tickets.list_all(root):
+        if _relay_ext(root, t["id"]).get("message") == mid:
+            return t["id"]
+    return None
+
+
 def _is_general(root: Path, ticket: str | None) -> bool:
     if not ticket:
         return False
@@ -556,6 +564,8 @@ def send_text(
 
     body: dict = {"text": text}
     to = resolve(root, target)
+    if not ticket and not general and reply_to and not update:
+        ticket = _topic_of_message(root, reply_to)  # answers a text that started a topic: stays in that topic
     general = general or _is_general(root, ticket)
     if general:
         ticket = None

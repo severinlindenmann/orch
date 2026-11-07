@@ -586,6 +586,7 @@ final class AppModel {
     /// Test and screenshot hook: `-seedPaired YES` skips onboarding against the mock.
     func seedIfRequested() async {
         let d = UserDefaults.standard
+        path = []   // a cold start always lands on the Chats list; only a push or `-open` below opens something
         if d.bool(forKey: "resetState") { Keychain.delete(); reset() }
         if d.bool(forKey: "seedPaired"), credentials == nil, useMock {
             openSampleInvite(); await connect(phoneName: "Severin's iPhone"); await finishSetup(allowNotifications: false)

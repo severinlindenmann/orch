@@ -154,14 +154,18 @@ final class RealRelayE2ETests: XCTestCase {
             if 'offsite' in json.dumps(m.get('body', {})): mid = m['id']
         o = e.orch('Pilatus', 'relay', 'topic', 'Offsite in March', '--from', mid, '--json')[1] if mid else 'none'
         out = o[:300]
+        if mid: ws_send('I started a topic for the offsite.', '--reply-to', mid)
         """)
         XCTAssertNotEqual(r, "none", "the offsite text reached the workspace")
-        host("ws_send('I started a topic for the offsite.')")
         let chip = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'started-chip-'")).firstMatch
         _ = chip.waitForExistence(timeout: 40)
         shot("20-general-started-chip")
         XCTAssertTrue(chip.exists || text(app, "started").exists, "started chip under the reply")
-        if chip.exists { chip.tap(); must(app, el(app, "composer"), "topic chat"); sleep(1); shot("21-topic-from-chip"); back(app) }
+        if chip.exists { chip.tap(); must(app, el(app, "composer"), "topic chat")
+            must(app, text(app, "plan the offsite"), "the text that started the topic, first in the topic")
+            must(app, text(app, "I started a topic for the offsite"), "the agent's reply inside the topic")
+            sleep(1); shot("21-topic-from-chip"); back(app)
+        }
     }
 
     // MARK: 3 new topic from +

@@ -379,3 +379,19 @@ enum OnDeviceSpeech {
         return try await VoiceInput.speechOnDevice(url, recognizer: recognizer)
     }
 }
+
+
+/// Length of a recorded or downloaded audio file; nil when it cannot be read or is empty (never 0).
+enum AudioLength {
+    static func seconds(of url: URL) async -> Double? {
+        guard let d = try? await AVURLAsset(url: url).load(.duration).seconds, d.isFinite, d > 0 else { return nil }
+        return d
+    }
+    static func seconds(of data: Data) async -> Double? {
+        if let p = try? AVAudioPlayer(data: data), p.duration > 0 { return p.duration }
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("len-\(UUID().uuidString).m4a")
+        guard (try? data.write(to: tmp)) != nil else { return nil }
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        return await seconds(of: tmp)
+    }
+}

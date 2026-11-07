@@ -206,6 +206,12 @@ final class SpeechPlayer {
     static func isValidMessageId(_ id: String) -> Bool { id.range(of: "^m_[a-z0-9]{16}$", options: .regularExpression) != nil }
     static let cacheLimitBytes = 50 * 1024 * 1024
 
+    /// Length of the audio already on disk for this clip (after the first play); nil until then.
+    func cachedDuration(for clip: SpeechClip) async -> Double? {
+        guard Self.isValidMessageId(clip.messageId), ["de", "en"].contains(clip.lang) else { return nil }
+        return await AudioLength.seconds(of: cacheDir.appendingPathComponent("\(clip.messageId)-\(clip.lang).mp3"))
+    }
+
     private func audioData(for clip: SpeechClip) async throws -> Data {
         // The id becomes part of a file name: only the relay's own shape is accepted (no path tricks).
         guard Self.isValidMessageId(clip.messageId), ["de", "en"].contains(clip.lang) else { throw RelayError.api(status: 404, code: "not_found", message: "Nothing to read aloud.") }
