@@ -370,8 +370,11 @@
 
   /* ---- polling ---- */
   let timer = null, fresh = false, live = false;
+  let busy = false, again = false, lastFetch = 0;
   async function poll() {
     clearTimeout(timer);
+    if (busy) { again = true; return; }  // one request at a time, so an older answer never lands after a newer one
+    busy = true;
     if (!document.hidden) {
       try {
         const r = await fetch(P + '/api/t/' + TID + (fresh ? '?fresh=1' : '')); fresh = false;
@@ -379,7 +382,9 @@
         else if (r.status === 404 && firstRender) { root.replaceChildren(h('div', {class: 'fx-pick'}, h('h1', {text: 'No such ticket'}), h('a', {href: INAPP ? '/#home' : '/', target: INAPP ? '_top' : '_self', text: 'All tickets'}))); return; }
       } catch (e) { /* try again */ }
     }
-    timer = setTimeout(poll, live ? (view && view.run.running ? 3000 : 15000) : view && view.run.running ? 1500 : 3000);
+    busy = false; lastFetch = Date.now();
+    if (again) { again = false; timer = setTimeout(poll, 500); return; }
+    timer = setTimeout(poll, live ? (view && view.run.running ? 1500 : 15000) : view && view.run.running ? 1500 : 3000);
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
   /* A push (server-sent events) tells the page at once when a ticket or run file changed; the poll above is the
@@ -391,7 +396,7 @@
       stream = new EventSource('/api/events');
       stream.onopen = () => { live = true; };
       stream.onerror = () => { live = false; };
-      stream.addEventListener('rev', () => { clearTimeout(pending); pending = setTimeout(() => { fresh = true; poll(); }, 30); });
+      stream.addEventListener('rev', () => { clearTimeout(pending); pending = setTimeout(() => { fresh = true; poll(); }, Math.max(30, 500 - (Date.now() - lastFetch))); });
     };
     connect();
     window.addEventListener('pagehide', () => { stream.close(); live = false; });

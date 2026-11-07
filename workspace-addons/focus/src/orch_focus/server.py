@@ -360,11 +360,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._events()
         m = re.fullmatch(r"/api/t/(t_[a-z0-9]{6,16})", path)
         if m:
-            if "fresh=1" in self.path.partition("?")[2].split(
-                "&"
-            ):  # a pushed change: do not answer from the 1 s cache
-                self.tracker.ticket_cache.pop(m.group(1), None)
-                self.tracker.status_cache.pop(m.group(1), None)
+            if "fresh=1" in self.path.partition("?")[2].split("&"):
+                # a pushed change: skip the 1 s cache, but keep answers younger than 0.4 s (no stampede of `orch` calls)
+                for cache in (self.tracker.ticket_cache, self.tracker.status_cache):
+                    hit = cache.get(m.group(1))
+                    if hit and time.time() - hit[0] >= 0.4:
+                        cache.pop(m.group(1), None)
             v = self.tracker.view(m.group(1))
             return self._json(200, v) if v else self._send(404, b"no such ticket", "text/plain")
         if path == "/api/file":  # one proof file of a ticket, read by orch.safefile only (proofs.py)

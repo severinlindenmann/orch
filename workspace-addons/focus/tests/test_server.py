@@ -400,4 +400,9 @@ def test_fresh_view_skips_the_one_second_cache(server, fake_orch):
     assert req(server, "GET", f"/api/t/{TID}")[0] == 200
     assert len(calls(fake_orch)) == n  # cached
     assert req(server, "GET", f"/api/t/{TID}?fresh=1")[0] == 200
+    assert len(calls(fake_orch)) == n  # fresh is ignored for an answer under 0.4 s old
+    import time
+
+    time.sleep(0.45)
+    assert req(server, "GET", f"/api/t/{TID}?fresh=1")[0] == 200
     assert len(calls(fake_orch)) > n
