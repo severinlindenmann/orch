@@ -318,7 +318,7 @@
       h('div', {className:'card-h'}, h('h2', {className:'grow'}, 'References'), rows.length ? h('span', {className:'meta'}, String(rows.length)) : null,
         refresh.map(a => h('button', {type:'button', className:'btn ghost xs', title:'Update titles and status (' + addonLabel(a) + ')', 'data-action':'link-refresh', 'data-addon':a.name, 'data-ticket':t.id, 'data-key':'link-refresh-' + a.name}, iconEl('refresh'), refresh.length > 1 ? addonLabel(a) : 'Refresh'))),
       h('div', {className:'links'}, rows.map(l => linkRow(t, l, true)),
-        snapshot ? null : h('div', {className:'add-link', 'data-key':'add-link-' + t.id}, h('button', {type:'button', className:'add-row', 'data-action':'link-add', 'data-ticket':t.id}, iconEl('plus'), '+ Add reference'))));
+        snapshot ? null : h('div', {className:'add-link', 'data-key':'add-link-' + t.id}, h('button', {type:'button', className:'add-row', 'data-action':'link-add', 'data-ticket':t.id}, iconEl('plus'), 'Add reference'))));
   }
   function referenceRow(t, ref, removable) {
     const other = ticketOf(ref.ticket), n = array(t.refs).indexOf(ref) + 1;
@@ -693,7 +693,7 @@
         panel('tasks', tasksCard('tasks')), panel('questions', [qs.length ? qs : emptyRow('No open questions'), answered]), panel('artifacts', artifactsPanel(t)),
         panel('history', card('history', 'History', '', history.length ? history : emptyRow('No history yet.')))),
       h('div', {className:'stack ticket-side'}, linksCard(t), h('aside', {className:'card ticket-aside'}, h('div', {className:'card-h'}, h('h2', {}, 'Details')),
-        h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', h('span', {className:'ed-ro'}, agent)), field('Created', h('span', {className:'ed-ro'}, date(t.created_at))), field('Updated', h('span', {className:'ed-ro'}, t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : '')), field('Ticket', h('span', {className:'ed-ro mono'}, t.id)))), fieldSections(t)))));
+        h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', h('span', {className:'ed-ro'}, agent)), field('Created', h('span', {className:'ed-ro'}, date(t.created_at))), field('Updated', h('span', {className:'ed-ro'}, t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : '')), typeof t.key === 'string' ? null : field('Ticket', h('span', {className:'ed-ro mono'}, t.id)))), fieldSections(t)))));
   }
 
   const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note'};
@@ -879,9 +879,9 @@
     };
     return h('div', {className:'settings stack'}, heading('Settings'),
       h('div', {className:'tabs', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Agent'], ['addons', 'Add-ons']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))),
-      panel('general', [snapshot ? null : window.OrchMobileMode?.settingsSection(h), h('div', {className:'card'},
+      panel('general', [snapshot ? null : window.OrchMobileMode?.settingsSection(h), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
         h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
-        h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), settingsText('p', {className:'grow set-ctl mono'}, settings.folder))),
+        h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), settingsText('p', {className:'grow set-ctl mono'}, settings.folder)))),
         shareCard(settings)]),
       panel('agent', [h('p', {className:'meta'}, 'Pick the default. It is saved right away.'), h('div', {className:'card'}, h('div', {role:'radiogroup', 'aria-label':'Default agent'}, agents),
         snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own agent'))),
