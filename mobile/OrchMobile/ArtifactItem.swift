@@ -280,7 +280,9 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
         if textTypes.contains(base), String(data: data, encoding: .utf8) == nil { return ("application/octet-stream", data) }
         // Only the normalized type leaves here (never the publisher's parameters); text is always declared UTF-8, the encoding that was checked.
         guard textTypes.contains(base) else { return (base, data) }
-        return (base + "; charset=utf-8", markupTypes.contains(base) ? stripHints(from: data) : data)
+        guard markupTypes.contains(base) else { return (base + "; charset=utf-8", data) }
+        guard let stripped = stripHints(from: data) else { return ("text/plain; charset=utf-8", data) }   // still changing: never rendered as markup
+        return (base + "; charset=utf-8", stripped)
     }
     static let hintWorld = WKContentWorld.world(name: "orch-hints")
     /// Runs at document start in an isolated world (the page cannot reach or change it; the DOM is shared): DNS prefetch forced off on every
@@ -308,18 +310,26 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
       meta(); clean();
     })();
     """
-    /// `<link rel="preconnect | dns-prefetch | prefetch | prerender">` makes the web view open a connection before any rule applies: removed from pages.
-    static func stripHints(from data: Data) -> Data {
+    /// Removes connection hints (`<link rel=preconnect|dns-prefetch|prefetch|prerender>`) and `x-dns-prefetch-control` metas. A removed tag becomes one
+    /// space (neighbours can never join into a new tag) and the patterns run again until nothing changes. nil = still changing after
+    /// `maxPasses`: the caller serves the file as plain text. A first line of defence only; the rule list, CSP and type allowlist are the others.
+    static let maxPasses = 5
+    static func stripHints(from data: Data, passes: Int = maxPasses) -> Data? {
         guard var html = String(data: data, encoding: .utf8) else { return data }
-        let pattern = #"<link\b[^>]*\brel\s*=\s*(?:"[^"]*\b(?:preconnect|dns-prefetch|prefetch|prerender)\b[^"]*"|'[^']*\b(?:preconnect|dns-prefetch|prefetch|prerender)\b[^']*'|(?:preconnect|dns-prefetch|prefetch|prerender)\b)[^>]*>"#
-        guard let expression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return data }
-        let range = NSRange(html.startIndex..., in: html)
-        let metaPattern = #"<meta\b[^>]*\bhttp-equiv\s*=\s*["']?\s*x-dns-prefetch-control\b[^>]*>"#
-        guard let metas = try? NSRegularExpression(pattern: metaPattern, options: [.caseInsensitive]) else { return data }
-        guard expression.firstMatch(in: html, range: range) != nil || metas.firstMatch(in: html, range: range) != nil else { return data }
-        html = expression.stringByReplacingMatches(in: html, range: range, withTemplate: "")
-        html = metas.stringByReplacingMatches(in: html, range: NSRange(html.startIndex..., in: html), withTemplate: "")
-        return Data(html.utf8)
+        let hint = "(?:preconnect|dns-prefetch|prefetch|prerender)"
+        let patterns = [
+            #"<link\b[^>]*\brel\s*=\s*(?:"[^"]*\b\#(hint)\b[^"]*"|'[^']*\b\#(hint)\b[^']*'|\#(hint)\b)[^>]*>"#,
+            #"<meta\b[^>]*\bhttp-equiv\s*=\s*["']?\s*x-dns-prefetch-control\b[^>]*>"#,
+        ].compactMap { try? NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
+        guard patterns.count == 2 else { return nil }
+        for _ in 0..<passes {
+            let before = html
+            for expression in patterns {
+                html = expression.stringByReplacingMatches(in: html, range: NSRange(html.startIndex..., in: html), withTemplate: " ")
+            }
+            if html == before { return html == String(decoding: data, as: UTF8.self) ? data : Data(html.utf8) }
+        }
+        return nil
     }
     /// Runs at document start in every frame, in the page's world: WebRTC (not covered by the rule list) becomes a throwing stub
     /// that cannot be deleted or replaced. Frames and workers are blocked by the CSP, so no fresh realm can bring it back.

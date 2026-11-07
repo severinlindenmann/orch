@@ -245,15 +245,16 @@ final class PublishWebViewTests: XCTestCase {
 
     func testPreconnectAndPrefetchHintsAreStripped() {
         let html = #"<head><link rel="stylesheet" href="a.css"><link rel="preconnect" href="https://x.example"><link href="https://y.example" REL='dns-prefetch'><link rel="icon preload prefetch" href="z"><link rel=prerender href=q></head><p>kept</p>"#
-        let out = String(decoding: NetworkBlock.stripHints(from: Data(html.utf8)), as: UTF8.self)
-        XCTAssertEqual(out, #"<head><link rel="stylesheet" href="a.css"></head><p>kept</p>"#)
+        let out = String(decoding: NetworkBlock.stripHints(from: Data(html.utf8))!, as: UTF8.self)
+        XCTAssertFalse(out.contains("preconnect") || out.contains("prefetch") || out.contains("prerender"))
+        XCTAssertTrue(out.contains(#"<link rel="stylesheet" href="a.css">"#) && out.contains("<p>kept</p>"))
     }
 
     func testXHTMLAndSVGPagesAreStrippedToo() {
         let hint = #"<link rel="preconnect" href="https://x.example"/>"#
         for type in ["application/xhtml+xml", "image/svg+xml", "text/xml", "application/xml", "text/html; charset=utf-8"] {
             let out = NetworkBlock.serve(type: type, data: Data("<root>\(hint)<p>kept</p></root>".utf8))
-            XCTAssertEqual(String(decoding: out.data, as: UTF8.self), "<root><p>kept</p></root>", type)
+            XCTAssertEqual(String(decoding: out.data, as: UTF8.self), "<root> <p>kept</p></root>", type)
             XCTAssertEqual(out.type, String(type.split(separator: ";")[0]) + "; charset=utf-8", type)
         }
     }
@@ -268,6 +269,25 @@ final class PublishWebViewTests: XCTestCase {
             XCTAssertEqual(NetworkBlock.serve(type: ok, data: Data("x".utf8)).type, isText ? ok + "; charset=utf-8" : ok)
         }
     }
+    /// Removing one tag must never glue its neighbours into a new one.
+    func testRemovingATagCannotSpliceANewOne() {
+        let cases = [
+            "<li<meta http-equiv=x-dns-prefetch-control content=on>nk rel=preconnect href=//x>",     // meta inside a link
+            "<me<link rel=preconnect href=//x>ta http-equiv=x-dns-prefetch-control content=on>",     // link inside a meta
+            "<li<link rel=preconnect>nk rel=preconnect href=//x>",                                  // doubled
+            "<lin<li<link rel=preconnect>nk rel=preconnect>k rel=preconnect href=//x>"]              // nested twice
+        for html in cases {
+            let out = NetworkBlock.stripHints(from: Data(html.utf8)).map { String(decoding: $0, as: UTF8.self) } ?? "<unstable>"
+            XCTAssertFalse(out.lowercased().contains("<link"), "\(html) -> \(out)")
+            XCTAssertFalse(out.lowercased().contains("<meta"), "\(html) -> \(out)")
+            XCTAssertEqual(NetworkBlock.stripHints(from: Data(out.utf8)).map { String(decoding: $0, as: UTF8.self) }, out, "stable: a second run changes nothing")
+        }
+    }
+    func testPagesThatDoNotSettleAreServedAsPlainText() {
+        let html = Data("<link rel=preconnect href=//x>".utf8)
+        XCTAssertNil(NetworkBlock.stripHints(from: html, passes: 0), "no pass left to prove it stable")
+        XCTAssertNotNil(NetworkBlock.stripHints(from: html))
+    }
     func testPublishersCharsetIsNeverPassedOn() {
         let out = NetworkBlock.serve(type: "text/html; charset=iso-8859-1", data: Data("<p>caf\u{e9}</p>".utf8))
         XCTAssertEqual(out.type, "text/html; charset=utf-8", "WebKit decodes the bytes that were checked")
@@ -275,7 +295,7 @@ final class PublishWebViewTests: XCTestCase {
     }
     func testDNSPrefetchMetaIsStrippedAndForcedOff() async throws {
         let on = #"<head><META content="on" http-equiv="X-DNS-Prefetch-Control"><meta http-equiv='x-dns-prefetch-control' content='on'></head><p>kept</p>"#
-        XCTAssertEqual(String(decoding: NetworkBlock.stripHints(from: Data(on.utf8)), as: UTF8.self), "<head></head><p>kept</p>")
+        XCTAssertEqual(String(decoding: NetworkBlock.stripHints(from: Data(on.utf8))!, as: UTF8.self).replacingOccurrences(of: "  ", with: " "), "<head> </head><p>kept</p>")
         // A page that adds or flips such a meta itself: the isolated script turns every one of them off again.
         let (web, _, _) = try await open("<head></head><body><script>var m=document.createElement('meta'); m.httpEquiv='x-dns-prefetch-control'; m.content='on'; document.head.appendChild(m); setTimeout(function(){ m.content='on'; }, 100);</script></body>")
         try await Task.sleep(for: .milliseconds(500))
