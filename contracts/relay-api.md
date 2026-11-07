@@ -82,7 +82,7 @@ phone. The relay only stores the flag, shows it to phones, pushes three kinds of
 **Heartbeat (`POST /v1/heartbeat`, workspace auth).** The workspace sends `{mobile_mode: {on, since, ends_at, machine, ended?}}`
 at least every 60 s while Mobile mode is on, and once when it changes (also when it turns off). `on` is required (bool). While `on` is
 true: `since` and `ends_at` are UTC times (`ends_at` = when the lease runs out), `machine` is a display name of the computer, one line of
-plain text, 1 to 60 characters (the description character rule), `ended` is not allowed. While `on` is false: `since`, `ends_at` and
+plain text, 1 to 60 characters, NFC, same character rule as `update.title` / the `PATCH /v1/me` description (letters, marks, numbers, punctuation, symbols, spaces; no control, bidi, zero-width or other format characters; schema `machine_name`; 422 otherwise), `ended` is not allowed. While `on` is false: `since`, `ends_at` and
 `machine` must be `null` or left out; `ended` (optional) says why: `off` (someone turned it off), `lease` (the time ran out) or `restart`
 (the computer restarted). A bad body → `422 invalid`. The relay keeps one value per workspace (the last one) and replaces it as a
 whole. A workspace that never sent a heartbeat is `{on: false}`. Any authenticated call of the workspace counts as "heard from it"
