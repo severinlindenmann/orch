@@ -1441,7 +1441,7 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
     schema = json.loads((CONTRACTS / "addon-view.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(v)
     people, recent = v["blocks"]
-    assert v["notice"] == "Connected." and people["title"] == "Workspaces you can talk to · 1"
+    assert v["notice"] == "Connected. Send messages and files to other workspaces." and people["title"] == "Workspaces you can talk to · 1"
     assert (
         people["items"][0]["title"] == "Reports"
         and people["items"][0]["chips"][0]["label"] == "Messages and files"

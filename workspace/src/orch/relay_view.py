@@ -198,7 +198,7 @@ def view(root: Path) -> dict:
         )
         out["notice_tone"] = "warn"
     else:
-        out["notice"] = "Connected."
+        out["notice"] = "Connected. Send messages and files to other workspaces."
         out["notice_tone"] = "good"
     out["blocks"].append(
         {

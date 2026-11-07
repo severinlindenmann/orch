@@ -488,11 +488,20 @@ def test_url_is_stored_canonical_with_an_ascii_host():
 
 @pytest.mark.parametrize("value", ["docs/spec.md", r"docs\spec.md:40", "docs/./spec.md"])
 def test_project_files(proj, run, tid, value, validate):  # noqa: F811
+    (proj / "docs").mkdir(exist_ok=True)
+    (proj / "docs" / "spec.md").write_text("spec")
     ref = jrun(run, "ref", "add", tid, value)
     assert ref["kind"] == "file" and ref["path"] == "docs/spec.md"
     assert jrun(run, "ref", "list", tid)[0]["path"] == "docs/spec.md"
     validate(tickets.load(proj, tid))
     assert run("ref", "rm", tid, value)[0] == 0
+    assert not tickets.load(proj, tid)["refs"]
+
+
+@pytest.mark.parametrize("value", ["not a link", "nofile.md", "docs/missing.md:3"])
+def test_text_that_is_no_address_ticket_or_file_is_refused(proj, run, tid, value):  # noqa: F811
+    code, out, err = run("ref", "add", tid, value)
+    assert code != 0 and "That is not a web address, a ticket or a file in this folder." in out + err
     assert not tickets.load(proj, tid)["refs"]
 
 
@@ -527,6 +536,7 @@ def test_ticket_and_artifact_references(proj, run, tid, new_ticket, validate):  
 
 def test_local_reference_is_private(proj, run, tid):  # noqa: F811
     target = str(proj.parent / "private.txt")
+    (proj.parent / "private.txt").write_text("x")
     ref = jrun(run, "ref", "add", tid, target)
     assert ref["local"] is True
     assert not tickets.load(proj, tid)["refs"]
@@ -590,6 +600,9 @@ def test_namespaced_kind(proj, run, tid):  # noqa: F811
 def test_phone_shows_shared_references_with_current_ticket_title(proj, run, tid, new_ticket):  # noqa: F811
     other = new_ticket("Current title")
     tickets.ref_add(proj, tid, other, "human:test")
+    (proj / "docs").mkdir(exist_ok=True)
+    (proj / "docs" / "spec.md").write_text("spec")
+    (proj.parent / "private.txt").write_text("x")
     tickets.ref_add(proj, tid, "docs/spec.md:40", "human:test")
     tickets.ref_add(proj, tid, str(proj.parent / "private.txt"), "human:test")
     rows = phone_view.build(proj, tickets.load(proj, tid), [])["refs"]
