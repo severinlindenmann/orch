@@ -118,7 +118,6 @@ struct ConversationView: View {
             }
             .sheet(isPresented: $tasksShown) { tasksSheet }
             .fullScreenCover(item: $viewing) { ArtifactViewer(item: $0) }
-            .task { await model.watchWhileOpen() }
     }
     @ViewBuilder private var presence: some View {
         if case .starting = resolved { Text("Starting topic…").themeFont(13).foregroundStyle(Theme.muted) }

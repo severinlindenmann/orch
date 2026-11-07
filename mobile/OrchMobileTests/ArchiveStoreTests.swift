@@ -30,6 +30,36 @@ final class ArchiveStoreTests: XCTestCase {
         XCTAssertFalse(a.isArchived(key: key("t1"), status: .done, lastAt: at, muted: false, now: now))
     }
 
+    func testNewTicketMessageRestoresArchivedTopicUnlessWorkspaceIsMuted() throws {
+        let id = ConversationID.topic(workspace: ws, ticket: "t1")
+        let updateAt = "2026-11-10T10:00:00Z"
+        let messageAt = "2026-11-10T10:05:00Z"
+        for muted in [false, true] {
+            var d = ConversationInputs(workspaces: [summary([], muted: muted).workspace])
+            d.tickets = [Ticket(id: "\(ws)|t1", workspace: ws, workspaceName: "Pilatus", ticket: "t1", title: "Archive me",
+                                text: "done", status: .done, kind: "result", at: updateAt, question: nil)]
+            func message(_ at: String) -> PhoneMessage {
+                PhoneMessage(message: TextMessage(id: at, from: ws, to: "ph", type: "text", createdAt: at,
+                                                 ticket: "t1", body: TextBody(text: "Back again")), workspaceName: "Pilatus")
+            }
+            // A newer ticket update must count even when an older message supplies the preview.
+            d.messages = [message("2026-11-10T09:00:00Z")]
+            let before = try XCTUnwrap(ConversationBuilder.summaries(d, read: ReadState()).first)
+            XCTAssertEqual(before.topics.first?.lastAt, updateAt)
+            var archive = ArchiveStore()
+            archive.archive(ReadState.key(id), lastAt: before.topics.first?.lastAt)
+            XCTAssertEqual(archive.split(before).archived.map(\.id), [id])
+
+            // A relay send with --ticket and no --update leaves the ticket unchanged.
+            d.messages.append(message(messageAt))
+            let after = try XCTUnwrap(ConversationBuilder.summaries(d, read: ReadState()).first)
+            XCTAssertEqual(after.topics.first?.lastAt, messageAt)
+            XCTAssertEqual(after.lastAt, messageAt)
+            XCTAssertEqual(archive.split(after).topics.map(\.id), muted ? [] : [id])
+            XCTAssertEqual(archive.split(after).archived.map(\.id), muted ? [id] : [])
+        }
+    }
+
     func testAutoArchiveRules() {
         var a = ArchiveStore()
         let old = "2026-11-01T10:00:00Z"      // 19 days

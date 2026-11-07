@@ -288,8 +288,10 @@ enum ConversationBuilder {
             let its = items(id, d)
             if its.isEmpty, d.erased[ReadState.key(id)] != nil { continue }   // deleted on this phone, nothing new since
             let last = its.last(where: { $0.kind == .message || $0.answer == nil })
+            // Activity includes every item and the latest ticket update, independent of the preview selection.
+            let lastAt = [its.last?.at, t.at].compactMap { $0 }.max()
             out.append(TopicSummary(id: id, title: t.displayTitle, key: t.key, status: TopicStatus(t), lastLine: last?.preview ?? t.text,
-                                    lastAt: last?.at ?? t.at, unread: read.unread(ReadState.key(id), in: its), isStarting: false, ticket: t))
+                                    lastAt: lastAt, unread: read.unread(ReadState.key(id), in: its), isStarting: false, ticket: t))
         }
         // New topics that are not acked yet (stored or still queued).
         let ix = index(d)
@@ -316,7 +318,7 @@ enum ConversationBuilder {
     static func general(workspace ws: String, _ d: ConversationInputs, read: ReadState) -> ConversationSummary {
         let id = ConversationID.general(workspace: ws), its = items(id, d)
         let last = its.last(where: { $0.kind == .message || $0.answer == nil })
-        return ConversationSummary(id: id, lastLine: last?.preview ?? "", lastAt: last?.at, unread: read.unread(ReadState.key(id), in: its))
+        return ConversationSummary(id: id, lastLine: last?.preview ?? "", lastAt: its.last?.at, unread: read.unread(ReadState.key(id), in: its))
     }
 
     /// The workspace list: open questions first, then newest activity.
