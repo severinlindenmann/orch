@@ -239,7 +239,7 @@ ORCH_IGNORE = [
 
 
 def _tracked(root: Path, rel: str) -> bool:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env = _git_env()
     try:
         return (
             subprocess.run(
@@ -253,6 +253,67 @@ def _tracked(root: Path, rel: str) -> bool:
         )
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def _git_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+def _probes_ignored(root: Path) -> bool:
+    """In a git repo: git itself says the secrets and run folders are ignored (a team .gitignore with a `!` line
+    can undo our rules). True outside a git repo (nothing to leak into)."""
+    for probe in (".orch/secrets/probe", ".orch/run/probe"):
+        try:
+            r = subprocess.run(
+                ["git", "check-ignore", "-q", "--", probe],
+                cwd=root,
+                capture_output=True,
+                env=_git_env(),
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        if r.returncode == 128:
+            return True  # not a git repo
+        if r.returncode != 0:
+            return False
+    return True
+
+
+def glob_escape(text: str) -> str:
+    """A name with glob characters stays literal in a gitignore line."""
+    return re.sub(r"([\\\[\]*?!#])", r"\\\1", text)
+
+
+SKILL_NAME = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+def safe_skill_name(name: str) -> bool:
+    return bool(SKILL_NAME.fullmatch(name)) and name not in {".", ".."}
+
+
+def skip_note(what: str) -> None:
+    print(f"orch: skipped {what} (unusual name or folder not made by orch)", file=sys.stderr)
+
+
+def _is_ours_copy(dest: Path, root: Path) -> bool:
+    """A folder orch may delete: it has the copy marker, no git-tracked file and no file newer than the marker."""
+    mark = dest / COPY_MARK
+    if not mark.is_file() or is_link(mark):
+        return False
+    try:
+        mt = mark.stat().st_mtime
+        for dp, _dns, fns in os.walk(dest, followlinks=False):
+            for fn in fns:
+                if (Path(dp) / fn).lstat().st_mtime > mt:
+                    return False
+    except OSError:
+        return False
+    try:
+        rel = dest.relative_to(root).as_posix()
+    except ValueError:
+        return False
+    return not _tracked(root, rel)
 
 
 def protect_local(root: Path, lines: list[str] | None = None) -> None:
@@ -279,10 +340,12 @@ def protect_local(root: Path, lines: list[str] | None = None) -> None:
             ok = True
     except (Refused, OSError, UnicodeDecodeError):
         pass
+    if ok and not _probes_ignored(root):
+        ok = False
     if not ok:
         raise Refused(
             "orch cannot keep its private files out of git here (.orch/.gitignore and .git/info/exclude "
-            "could not be written). Nothing was stored."
+            "could not be written, or a .gitignore of the project makes them visible again). Nothing was stored."
         )
 
 
@@ -309,14 +372,16 @@ def _link_dir(link: Path, target: Path) -> None:
 def _copy_dir(src: Path, dst: Path) -> None:
     """Where links are not allowed: a copy that orch keeps in sync (it owns it: COPY_MARK)."""
     dst.mkdir(parents=True, exist_ok=True)
-    for p in src.rglob("*"):
-        rel = p.relative_to(src)
-        if is_link(p):
-            continue
-        if p.is_dir():
-            (dst / rel).mkdir(parents=True, exist_ok=True)
-        elif p.is_file():
-            shutil.copyfile(p, dst / rel)
+    for dp, dns, fns in os.walk(src, followlinks=False):
+        d = Path(dp)
+        rel = d.relative_to(src)
+        dns[:] = [n for n in dns if not is_link(d / n)]  # never descend into a directory link
+        for n in dns:
+            (dst / rel / n).mkdir(parents=True, exist_ok=True)
+        for n in fns:
+            p = d / n
+            if not is_link(p) and p.is_file():
+                shutil.copyfile(p, dst / rel / n)
     (dst / COPY_MARK).write_text("orch keeps this copy in sync with .orch/harness/skills\n", encoding="utf-8")
 
 
@@ -341,7 +406,7 @@ def link_skill(root: Path, where: str, name: str, target: Path | None = None) ->
             return
         raise Refused(f"{dest} is a link to somewhere else; orch will not replace it.")
     if dest.exists():
-        if (dest / COPY_MARK).is_file():
+        if (dest / COPY_MARK).is_file() and _is_ours_copy(dest, root):
             shutil.rmtree(dest)
         elif name == "orch-relay" and dest.is_dir() and not (dest / "SKILL.md").exists():
             # only the directory the relay wrote before its skill came: move that one file into the harness
@@ -368,7 +433,10 @@ def unlink_skill(root: Path, where: str, name: str) -> None:
         else:
             dest.unlink()
     elif dest.is_dir() and (dest / COPY_MARK).is_file():
-        shutil.rmtree(dest)
+        if _is_ours_copy(dest, root):
+            shutil.rmtree(dest)
+        else:
+            skip_note(f"{dest} (it has files of yours)")
 
 
 def sync_copies(root: Path, wheres: list[str]) -> None:
@@ -382,6 +450,9 @@ def sync_copies(root: Path, wheres: list[str]) -> None:
             if is_link(root / where) or not _inside(root, root / where):
                 continue
             if dest.is_dir() and not is_link(dest) and (dest / COPY_MARK).is_file():
+                if not _is_ours_copy(dest, root):
+                    skip_note(f"{dest} (it has files of yours)")
+                    continue
                 shutil.rmtree(dest)  # rebuilt whole: deleted files go, a planted link inside is gone
                 _copy_dir(s, dest)
 
