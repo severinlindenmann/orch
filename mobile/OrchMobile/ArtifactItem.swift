@@ -252,15 +252,52 @@ enum AnchorScript {
 /// Everything a viewer may not load: no web address at all (a published page works from the decrypted bytes only).
 enum NetworkBlock {
     static let identifier = "orch-no-network"
+    /// Everything is blocked, then the page's own scheme (and data:/blob:, which never touch the network) is let through again:
+    /// no rule names a resource type, so every type is covered, "other" (preconnect, ping, beacon, ...) included.
     static let rules = #"""
-    [{"trigger":{"url-filter":"^https?://"},"action":{"type":"block"}},
-     {"trigger":{"url-filter":"^wss?://"},"action":{"type":"block"}},
-     {"trigger":{"url-filter":"^ftp://"},"action":{"type":"block"}}]
+    [{"trigger":{"url-filter":".*"},"action":{"type":"block"}},
+     {"trigger":{"url-filter":"^orch-page:"},"action":{"type":"ignore-previous-rules"}},
+     {"trigger":{"url-filter":"^data:"},"action":{"type":"ignore-previous-rules"}},
+     {"trigger":{"url-filter":"^blob:"},"action":{"type":"ignore-previous-rules"}}]
     """#
     /// The custom scheme the viewer serves decrypted pages from.
     static let scheme = "orch-page"
     /// Sent with every page file: nothing but the local files, no network from script.
 static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'"
+    /// Types a page may use. Anything else is served as `application/octet-stream`: nothing the web view could render as a document.
+    static let allowedTypes: Set<String> = [
+        "text/html", "application/xhtml+xml", "text/xml", "application/xml", "image/svg+xml",
+        "text/css", "text/javascript", "application/javascript", "application/json",
+        "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/x-icon", "image/vnd.microsoft.icon",
+        "font/woff", "font/woff2", "font/ttf", "font/otf", "application/font-woff", "application/pdf"]
+    /// Types WebKit renders as markup: connection hints are removed from all of them.
+    static let markupTypes: Set<String> = ["text/html", "application/xhtml+xml", "text/xml", "application/xml", "image/svg+xml"]
+    private static let textTypes: Set<String> = markupTypes.union(["text/css", "text/javascript", "application/javascript", "application/json"])
+    /// What the scheme handler sends for a file: the one place that decides type and bytes (allowlist, UTF-8 check, hint strip).
+    static func serve(type declared: String, data: Data) -> (type: String, data: Data) {
+        let base = declared.split(separator: ";").first.map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? ""
+        guard allowedTypes.contains(base) else { return ("application/octet-stream", data) }
+        if textTypes.contains(base), String(data: data, encoding: .utf8) == nil { return ("application/octet-stream", data) }
+        return (base == declared.lowercased() ? declared : base, markupTypes.contains(base) ? stripHints(from: data) : data)
+    }
+    /// Runs at document start in the page's world: DNS prefetch off, connection hints removed now and whenever the page adds one.
+    static let noHints = """
+    (function () {
+      var hint = /(^|\\s)(preconnect|dns-prefetch|prefetch|preload|prerender|modulepreload)(\\s|$)/i;
+      function clean() {
+        try { document.querySelectorAll('link[rel]').forEach(function (l) { if (hint.test(l.getAttribute('rel') || '')) l.remove(); }); } catch (e) {}
+      }
+      function meta() {
+        try {
+          if (document.querySelector('meta[http-equiv="x-dns-prefetch-control"]')) return;
+          var m = document.createElement('meta'); m.setAttribute('http-equiv', 'x-dns-prefetch-control'); m.setAttribute('content', 'off');
+          (document.head || document.documentElement).appendChild(m);
+        } catch (e) {}
+      }
+      new MutationObserver(function () { meta(); clean(); }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['rel'] });
+      meta(); clean();
+    })();
+    """
     /// `<link rel="preconnect | dns-prefetch | prefetch | prerender">` makes the web view open a connection before any rule applies: removed from pages.
     static func stripHints(from data: Data) -> Data {
         guard var html = String(data: data, encoding: .utf8) else { return data }

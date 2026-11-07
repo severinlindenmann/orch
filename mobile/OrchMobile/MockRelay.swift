@@ -41,6 +41,7 @@ actor MockRelay: RelayAPI {
 
     init(latency: Duration? = nil) {
         if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
+        if UserDefaults.standard.bool(forKey: "mockMemo") { received.append(Self.memo) }
         let ms = UserDefaults.standard.integer(forKey: "mockLatencyMs")
         self.latency = latency ?? .milliseconds(ms > 0 ? ms : 150)
     }
@@ -65,13 +66,14 @@ actor MockRelay: RelayAPI {
                                           createdAt: "2026-11-04T10:44:00Z", ticket: nil,
                                           body: TextBody(text: "Yes, I can answer your phone. The report is ready.")),
                      workspaceName: "Pilatus Workspace"),
-        // A long answer the workspace marked `speak`: shows the memo bubble (screenshots, UI tests).
-        PhoneMessage(message: TextMessage(id: "m_memo0phone00001", from: pilatus, to: "ph_iphone0001", type: "text",
-                                          createdAt: "2026-11-04T10:45:00Z", ticket: nil,
-                                          body: TextBody(text: "The Q3 numbers are in. Revenue is up eight percent, costs are flat, and the board summary will be ready this afternoon.",
-                                                         speak: SpeakHint(lang: "en", summary: "Q3 is up eight percent."))),
-                     workspaceName: "Pilatus Workspace"),
     ]
+
+    /// A long answer the workspace marked `speak`: shows the memo bubble (screenshots, UI tests): `-mockMemo YES`.
+    static let memo = PhoneMessage(message: TextMessage(id: "m_memo0phone00001", from: pilatus, to: "ph_iphone0001", type: "text",
+                                      createdAt: "2026-11-04T10:45:00Z", ticket: nil,
+                                      body: TextBody(text: "The Q3 numbers are in. Revenue is up eight percent, costs are flat, and the board summary will be ready this afternoon.",
+                                                     speak: SpeakHint(lang: "en", summary: "Q3 is up eight percent."))),
+                 workspaceName: "Pilatus Workspace")
     private var sentMessages: [PhoneMessage] = [
         PhoneMessage(message: TextMessage(id: "m_seedsent00000001", from: "ph_iphone0001", to: pilatus, type: "text",
                                           createdAt: "2026-11-05T10:32:00Z", ticket: nil, body: TextBody(text: "Can you make the Q3 summary for the board?")),

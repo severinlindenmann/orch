@@ -6,7 +6,7 @@ final class WiringUITests: XCTestCase {
 
     private func launch(_ extra: [String]) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-fakePhoto", "YES"] + extra
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-fakePhoto", "YES", "-mockMemo", "YES"] + extra
         app.launch()
         return app
     }

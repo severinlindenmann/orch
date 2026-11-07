@@ -249,6 +249,32 @@ final class PublishWebViewTests: XCTestCase {
         XCTAssertEqual(out, #"<head><link rel="stylesheet" href="a.css"></head><p>kept</p>"#)
     }
 
+    func testXHTMLAndSVGPagesAreStrippedToo() {
+        let hint = #"<link rel="preconnect" href="https://x.example"/>"#
+        for type in ["application/xhtml+xml", "image/svg+xml", "text/xml", "application/xml", "text/html; charset=utf-8"] {
+            let out = NetworkBlock.serve(type: type, data: Data("<root>\(hint)<p>kept</p></root>".utf8))
+            XCTAssertEqual(String(decoding: out.data, as: UTF8.self), "<root><p>kept</p></root>", type)
+            XCTAssertNotEqual(out.type, "application/octet-stream", type)
+        }
+    }
+    func testNonUTF8MarkupAndUnknownTypesAreServedAsOctetStream() {
+        let bad = NetworkBlock.serve(type: "text/html", data: Data([0x3c, 0x70, 0x3e, 0xff, 0xfe, 0x3c, 0x2f, 0x70, 0x3e]))
+        XCTAssertEqual(bad.type, "application/octet-stream")
+        for type in ["application/x-shockwave-flash", "text/plain", "application/octet-stream", "multipart/related", "", "text/html-sandboxed"] {
+            XCTAssertEqual(NetworkBlock.serve(type: type, data: Data("<p>x</p>".utf8)).type, "application/octet-stream", type)
+        }
+        for ok in ["text/css", "image/png", "font/woff2", "application/json", "application/pdf", "text/javascript"] {
+            XCTAssertEqual(NetworkBlock.serve(type: ok, data: Data("x".utf8)).type, ok)
+        }
+    }
+    func testHintScriptRemovesAddedHintsAndTurnsPrefetchOff() async throws {
+        let (web, _, _) = try await open("<head></head><body><script>var l=document.createElement('link'); l.rel='preconnect'; l.href='http://127.0.0.1:9'; document.head.appendChild(l);</script></body>")
+        try await Task.sleep(for: .milliseconds(300))
+        let n = try await web.evaluateJavaScript("document.querySelectorAll('link[rel~=preconnect]').length") as? Int
+        XCTAssertEqual(n, 0, "a hint the page adds itself is removed again")
+        let meta = try await web.evaluateJavaScript("document.querySelector('meta[http-equiv=\"x-dns-prefetch-control\"]').content") as? String
+        XCTAssertEqual(meta, "off")
+    }
     func testAboutBlankIsNotALocalPage() {
         XCTAssertTrue(PublishWebView.isLocal(URL(string: "orch-page://page/index.html")))
         XCTAssertFalse(PublishWebView.isLocal(URL(string: "about:blank")))
