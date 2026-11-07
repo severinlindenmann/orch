@@ -359,7 +359,7 @@ def test_board_moves_use_ticket_patch_with_the_revision_and_keyboard_menu():
     assert "act('ticket.patch', {ticket:t.id, data:{status}, if_revision:t.revision})" in move
     assert "if (!t || t.status === status" in move  # dropping on the same column does nothing
     card = js[js.index("function boardCard") : js.index("function board()")]
-    assert "statusItems(t, 'card')" in card and "aria-label" in card  # the menu is the keyboard way to move
+    assert "statusItems(t, 'card', STATUS_CHOICES)" in card and "aria-label" in card  # the menu is the keyboard way to move
     assert "slice(0, cap)" in js and "boardMore" in js  # Done shows 3 until asked
     assert (
         "localStorage" in js

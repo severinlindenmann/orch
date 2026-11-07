@@ -6,7 +6,7 @@
   else root.DashHelpers = api;
 })(typeof self !== 'undefined' ? self : this, function () {
   const arr = v => Array.isArray(v) ? v : [];
-  const STATUS_WORD = {open: 'Backlog', ready: 'Ready', active: 'Working', waiting: 'Waiting', review: 'Review', done: 'Done', dropped: 'Dropped'};
+  const STATUS_WORD = {open: 'Not started', ready: 'Ready to start', active: 'Working', waiting: 'Waiting', review: 'Ready for review', done: 'Done', dropped: 'Dropped'};
   const FIELD_WORD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary',
     status: 'the status'};
 
@@ -89,7 +89,7 @@
       const asks = arr(t && t.questions).some(q => q && q.answer == null);
       busy.add(String(agent).replace(/^(agent|human):/, ''));
       const idle = !asks && run.state !== 'maybe-stale' && run.claim && run.claim.live && run.claim.live.state === 'idle';  // a live session waiting for a message
-      out.push({agent: String(agent).replace(/^(agent|human):/, ''), state: run.state === 'maybe-stale' ? 'stuck' : asks ? 'needs' : idle ? 'idle' : 'working',
+      out.push({agent: String(agent).replace(/^(agent|human):/, ''), state: run.state === 'maybe-stale' ? 'stuck' : asks ? 'needs' : idle ? 'idle' : run.claim && run.claim.live && run.claim.live.state === 'starting' ? 'starting' : 'working',
         ticket: tid, since: idle ? run.claim.live.since : run.claim && run.claim.started_at});
     }
     const last = new Map();
@@ -99,7 +99,7 @@
       if (!last.has(s.agent) || at > last.get(s.agent).at) last.set(s.agent, {at, ticket: t.id});
     }
     for (const [agent, v] of last) if (nowMs - v.at >= 0) out.push({agent, state: 'idle', ticket: v.ticket, since: new Date(v.at).toISOString()});
-    const rank = {needs: 0, stuck: 1, working: 2, idle: 3};
+    const rank = {needs: 0, stuck: 1, working: 2, starting: 2, idle: 3};
     return out.sort((a, b) => rank[a.state] - rank[b.state]);
   }
 

@@ -67,12 +67,13 @@
     els.stopIc = h('span');
     els.stopL = h('span', {class: 'opt', text: 'Stop'});
     els.stop = h('button', {class: 'btn ghost sm', 'data-act': 'stop', title: 'Stop or continue (S)'}, els.stopIc, els.stopL);
+    els.answer = h('button', {class: 'btn primary sm', 'data-act': 'answer', title: 'Answer the question below', hidden: true, text: 'Answer'});
     els.fresh = h('button', {class: 'btn ghost sm opt', 'data-act': 'fresh', title: 'Start again without the earlier conversation', text: 'Start fresh instead', hidden: true});
     els.attachBtn = h('button', {class: 'btn ghost sm', 'data-act': 'attach', title: 'Open the live session', hidden: true}, h('span', {icon: 'external'}), h('span', {class: 'opt', text: 'Open live session'}));
     els.full = h('button', {class: 'btn ghost icon sm', 'data-act': 'full', 'aria-label': 'Full screen', 'aria-pressed': 'false', title: 'Full screen (F)', icon: 'expand'});
     els.helpBtn = h('button', {class: 'btn ghost icon sm', 'data-act': 'help', 'aria-label': 'Keyboard shortcuts', title: 'Shortcuts (?)'}, h('kbd', {text: '?'}));
     const top = h('header', {class: 'fx-top'}, els.rail, h('div', {class: 'fx-title'}, els.key, els.title), h('div', {class: 'fx-prog'}, els.count, els.prog), els.live,
-      h('div', {class: 'fx-tools'}, els.stop, els.fresh, els.attachBtn, h('span', {class: 'sep opt'}), els.full, els.helpBtn, h('a', {class: 'btn ghost sm', href: INAPP ? '/#ticket/' + TID : '/', target: INAPP ? '_top' : '_self', title: INAPP ? 'Back to the ticket' : 'All tickets'}, h('span', {icon: 'x'}), h('span', {class: 'opt', text: 'Exit'}))));
+      h('div', {class: 'fx-tools'}, els.answer, els.stop, els.fresh, els.attachBtn, h('span', {class: 'sep opt'}), els.full, els.helpBtn, h('a', {class: 'btn ghost sm', href: INAPP ? '/#ticket/' + TID : '/', target: INAPP ? '_top' : '_self', title: INAPP ? 'Back to the ticket' : 'All tickets'}, h('span', {icon: 'x'}), h('span', {class: 'opt', text: 'Exit'}))));
     els.tasks = h('div', {id: 'fx-tasks'});
     els.helpers = h('div');
     els.railNote = h('p', {class: 'meta', style: false});
@@ -138,7 +139,11 @@
     els.stopIc.innerHTML = ic(running ? 'pause' : 'play');
     els.stopL.textContent = running ? 'Stop' : 'Continue';
     els.compose.hidden = v.state === 'done' && !running;  /* a done ticket is a read-only board; Continue starts a run */
-    els.fresh.hidden = running;
+    /* an open question: Answer is the main action; Continue and Start fresh wait until it is answered */
+    const asking = v.ticket.questions.some(q => q.answer == null);
+    els.answer.hidden = !asking;
+    els.stop.hidden = asking && !running;
+    els.fresh.hidden = running || asking;
     els.attachBtn.hidden = !(running && v.live);
     els.sub.textContent = running ? (v.live ? 'live session' : 'one run') : (v.state === 'done' ? 'done' : v.run.run ? 'last run ended' : 'not started');
     els.msg.placeholder = 'Message ' + els.agent.textContent + '…';
@@ -295,8 +300,15 @@
   setInterval(() => { if (view && view.state === 'working') tickTimer(); }, 1000);
 
   /* ---- actions ---- */
+  function focusQuestion() {
+    const host = els.qs.querySelector('button,input,textarea') || els.qs;
+    els.qs.scrollIntoView({block: 'center'});
+    if (host === els.qs) els.qs.tabIndex = -1;
+    host.focus();
+  }
   async function stopToggle() {
     if (!view) return;
+    if (!view.run.running && view.ticket.questions.some(q => q.answer == null)) { focusQuestion(); return; }
     const r = view.run.running ? await act('run.stop', {ticket: TID}) : await act('run.start', {ticket: TID});
     if (!r.ok) toast(r.message, 'error'); else toast(view.run.running ? 'Started. Same conversation.' : 'Stopped. The work done so far is kept.', 'ok');
   }
@@ -325,7 +337,7 @@
     root.addEventListener('click', e => {
       const a = e.target.closest('[data-act]')?.dataset.act;
       if (a === 'rail') toggleRail(); else if (a === 'full') setFull(!root.classList.contains('is-full')); else if (a === 'help') toggleHelp();
-      else if (a === 'stop') stopToggle(); else if (a === 'fresh') startFresh(); else if (a === 'attach') showAttach();
+      else if (a === 'answer') focusQuestion(); else if (a === 'stop') stopToggle(); else if (a === 'fresh') startFresh(); else if (a === 'attach') showAttach();
       if (e.target === els.help) toggleHelp(false);
     });
     const grow = () => { els.msg.style.height = 'auto'; els.msg.style.height = Math.min(els.msg.scrollHeight, 120) + 'px'; };

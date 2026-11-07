@@ -126,7 +126,9 @@ def _peers(root: Path) -> list[dict]:
                 continue
             pid, name = w["id"], plain(w.get("name") or w["id"], 60)
             detail = [{"label": "Messages and files", "value": "Yes"}]
-            pills = [{"label": "Messages and files", "tone": "good"}]
+            pills: list[
+                dict
+            ] = []  # "Messages and files" is plain text in the subtitle, not a pill that looks like a button
             if kind == "workspaces":
                 mine = _yes(a["received"], pid, "delegate"), _yes(a["received"], pid, "start")
                 theirs = _yes(a["given"], pid, "delegate"), _yes(a["given"], pid, "start")
@@ -149,7 +151,20 @@ def _peers(root: Path) -> list[dict]:
                 pills += [{"label": "Give tasks", "tone": "good"}, {"label": "Start work", "tone": "good"}]
             if w.get("description"):
                 detail.append({"label": "About", "value": plain(w["description"], 200)})
-            rows.append({"title": name, "subtitle": label, "chips": pills, "detail": detail})
+            rows.append(
+                {
+                    "title": name,
+                    "subtitle": f"{label} · messages and files",
+                    "chips": pills,
+                    "detail": detail,
+                    "actions": [
+                        {
+                            "label": "Send a message",
+                            "action": {"op": "message.send", "args": {"workspace": pid}},
+                        }
+                    ],
+                }
+            )
     return rows
 
 

@@ -75,43 +75,45 @@
   const overdue = t => activeTicket(t) && t.due && t.due < today();
   const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
   const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
-  const statusWord = t => ({open:'Backlog', ready:'Ready', active:'Working', waiting:'Waiting', review:'Review', done:'Done'}[t.status] || 'Backlog');
+  const statusWord = t => ({open:'Not started', ready:'Ready to start', active:'Working', waiting:'Waiting', review:'Ready for review', done:'Done'}[t.status] || 'Not started');
   const chip = (text, cls = '') => h('span', {className:'chip ' + cls}, text);
   const shown = t => snapshot ? t : {...t, status: window.DashHelpers.shownStatus(t, state.runs?.[t.id])};
   const statusChip = t => { const s = shown(t); return chip(statusWord(s), s.status === 'active' ? 'active' : ''); };
-  // one chip: while the yellow 'Waiting for your answer' shows, the plain Waiting status is left out
-  const hideStatus = t => !snapshot && !!activityText(t);
-  const STATUS_CHOICES = [['open', 'Backlog'], ['ready', 'Ready'], ['active', 'Working'], ['waiting', 'Waiting'], ['review', 'Review'], ['done', 'Done']];
+  const STATUS_CHOICES = [['open', 'Not started'], ['ready', 'Ready to start'], ['active', 'Working'], ['waiting', 'Waiting'], ['review', 'Ready for review'], ['done', 'Done']];
+  // "Move to" offers four places; Ready to start counts as Not started and Waiting as Working (the agent decides Waiting).
+  const MOVE_CHOICES = [['open', 'Not started'], ['active', 'Working'], ['review', 'Ready for review'], ['done', 'Done']];
+  const moveHome = status => ({ready:'open', waiting:'active'}[status] || status);
   const starting = new Set();
   // The one chip of a ticket: what the agent or the person has to do now ('' when nothing).
   function activityInfo(t) {
     const run = state.runs?.[t.id], live = run?.claim?.live;
     const agent = run?.claim?.label || array(state.settings?.agents).find(a => a.name === run?.claim?.agent)?.label || capitalise(run?.claim?.agent || array(state.settings?.agents).find(a => a.chosen)?.label || 'agent');
-    const busy = starting.has(t.id) || (run?.running && !['idle', 'attention'].includes(live?.state));
-    const text = starting.has(t.id) ? 'Starting ' + agent + '...' : questions(t).length || live?.state === 'attention' ? 'Waiting for your answer' : t.status === 'review' ? 'Ready for your review' : busy ? agent + ' is working' : '';
+    const getting = starting.has(t.id) || live?.state === 'starting';
+    const busy = getting || (run?.running && !['idle', 'attention'].includes(live?.state));
+    const text = getting ? 'Getting started…' : questions(t).length || live?.state === 'attention' ? 'Waiting for your answer' : t.status === 'review' ? 'Ready for your review' : busy ? agent + ' is working' : '';
     return {run, live, agent, busy, text};
   }
   const needsList = () => window.DashHelpers.uniqueNeeds(state?.needs);
-  const activityText = t => activityInfo(t).text;
   // one line of the question a waiting ticket asks, under its title
   const questionLine = t => { const q = snapshot || window.DashHelpers.inNeeds(needsList(), t.id) ? '' : window.DashHelpers.questionPreview(t); return q ? h('p', {className:'meta question-line'}, clean(q)) : null; };
-  function activity(t) {
+  function activity(t, where = '') {
     if (snapshot) return null;
-    const {live, agent, busy, text} = activityInfo(t);
-    if (!text) return null;
+    const {live, agent, busy, text: full} = activityInfo(t);
+    if (!full || (where === 'head' && questions(t).length)) return null;  // the banner is the one place for an open question
+    const text = where === 'board' && full === 'Waiting for your answer' ? 'Needs you' : full;
     const seconds = live?.since ? Math.max(0, Math.floor((Date.now() - Date.parse(live.since)) / 1000)) : null;
     const why = window.DashHelpers.plainWhy(live?.why, agent);
     const open = live?.state === 'attention' ? liveLinkFor(t) : null;
-    return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(chip(text, busy && (starting.has(t.id) || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === 'Ready for your review' ? {title:'Ready for your review'} : {}),
+    return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === 'Ready for your review' ? {title:'Ready for your review'} : text === 'Needs you' ? {title:'Waiting for your answer'} : {}),
       why || Number.isFinite(seconds) ? h('p', {className:'meta'}, [why, Number.isFinite(seconds) ? window.DashHelpers.ago(live.since, Date.now()) : ''].filter(Boolean).join(' · ')) : null,
       open ? h('a', {className:'btn outline xs', href:open.url, 'data-key':'activity-open-' + t.id}, 'Open the live session') : null);
   }
   const reviewActions = t => !snapshot && t.status === 'review' ? h('div', {className:'row'}, [['done', 'Mark done'], ['active', 'Send back']].map(([status, label]) => h('button', {type:'button', className:'btn outline xs', 'data-action':'status-set', 'data-ticket':t.id, 'data-status':status}, label))) : null;
-  const statusItems = (t, scope) => STATUS_CHOICES.map(([value, label]) => h('button', {type:'button', className:'menu-item' + (t.status === value ? ' sel' : ''), role:'menuitemradio', 'aria-checked':t.status === value, 'data-action':'status-set', 'data-ticket':t.id, 'data-status':value, 'data-key':'status-' + scope + '-' + t.id + '-' + value, title:value === 'open' ? 'Backlog: not started yet' : null}, label));
+  const statusItems = (t, scope, choices = MOVE_CHOICES) => choices.map(([value, label]) => h('button', {type:'button', className:'menu-item' + (moveHome(t.status) === value || t.status === value ? ' sel' : ''), role:'menuitemradio', 'aria-checked':moveHome(t.status) === value || t.status === value, 'data-action':'status-set', 'data-ticket':t.id, 'data-status':value, 'data-key':'status-' + scope + '-' + t.id + '-' + value}, label));
+  // The visible "Move to" control: a labelled button (Apple HIG: a control says what it does; WCAG 2.5.3 label in name).
   const statusControl = (t, scope) => {
     if (snapshot) return statusChip(t);
-    const items = statusItems(t, scope);
-    return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'status-sum' + (hideStatus(t) ? ' status-sum-icon' : ''), title:'Change the status', 'aria-label':'Change the status. Now: ' + statusWord(shown(t))}, hideStatus(t) ? null : statusChip(t), iconEl('down')), h('div', {className:'menu-pop', role:'menu'}, items));
+    return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'btn outline xs status-sum', 'aria-label':'Move ' + clean(t.title) + ' to… Now: ' + statusWord(shown(t))}, 'Move to', iconEl('down')), h('div', {className:'menu-pop', role:'menu', 'aria-label':'Move to'}, statusItems(t, scope)));
   };
   const heading = (title, sub = '') => h('header', {className:'page-heading', 'data-key':'heading'}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null);
   const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);
@@ -119,7 +121,7 @@
   const newButton = () => snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'new'}, 'New ticket');
   const firstTicket = () => h('div', {className:'card-row'}, h('p', {className:'grow muted'}, 'Your first ticket starts here.'), newButton());
   function ticketRow(t) {
-    const meta = [typeof t.key === 'string' ? t.key : '', name(t.owner), t.due ? 'Due ' + date(t.due) : ''].filter(Boolean);
+    const meta = [typeof t.key === 'string' ? t.key : '', statusWord(shown(t)), name(t.owner), t.due ? 'Due ' + date(t.due) : ''].filter(Boolean);
     const parent = ticketOf(t.parent);
     let late = '';
     if (overdue(t)) {
@@ -143,24 +145,27 @@
     const needs = needsList();
     const rows = window.DashHelpers.agentRows(state.tickets, state.runs, Date.now());
     const working = rows.filter(row => ['working', 'needs', 'stuck'].includes(row.state));
+    // a ticket whose agent is still starting (the click is answered, the session is not up yet) counts as starting
+    const gettingStarted = new Set([...starting, ...rows.filter(row => row.state === 'starting').map(row => row.ticket)]);
+    const startingText = gettingStarted.size ? gettingStarted.size + (gettingStarted.size === 1 ? ' agent starting' : ' agents starting') : '';
     const current = sorted(tickets().filter(activeTicket));
     const oldest = needs.map(n => parse(n.since)).filter(Boolean).sort((a, b) => a - b)[0];
     const newest = needs.slice().sort((a, b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
     const history = tickets().flatMap(t => array(t.history).map(entry => ({entry, title:t.title, checklist:t.checklist}))).sort((a, b) => (Date.parse(b.entry.at) || 0) - (Date.parse(a.entry.at) || 0)).slice(0, 5);
     const stopped = array(state.services).some(s => s.running === false);
     const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;
-    const agents = rows.slice(0, 5).map(row => h('div', {className:'card-row', 'data-key':'agent-' + row.agent + '-' + row.ticket}, h('span', {className:'dot ' + (row.state === 'stuck' ? 'needs' : row.state)}), h('div', {className:'grow'}, h('h3', {}, capitalise(name(row.agent) || 'Agent') + ' · ' + ({working:'working', needs:'needs you', stuck:'may be stuck', idle:'idle'}[row.state])), h('p', {className:'meta'}, row.state === 'idle' ? 'Last worked ' + window.DashHelpers.ago(row.since, Date.now()) : [clean(ticketOf(row.ticket)?.title), age(row.since)].filter(Boolean).join(' · ')))));
+    const agents = rows.slice(0, 5).map(row => h('div', {className:'card-row', 'data-key':'agent-' + row.agent + '-' + row.ticket}, h('span', {className:'dot ' + (row.state === 'stuck' ? 'needs' : row.state)}), h('div', {className:'grow'}, h('h3', {}, capitalise(name(row.agent) || 'Agent') + ' · ' + ({working:'working', starting:'getting started', needs:'needs you', stuck:'may be stuck', idle:'idle'}[row.state])), h('p', {className:'meta'}, row.state === 'idle' ? 'Last worked ' + window.DashHelpers.ago(row.since, Date.now()) : [clean(ticketOf(row.ticket)?.title), age(row.since)].filter(Boolean).join(' · ')))));
     const links = pageLinks();
     const recent = history.map(({entry, title, checklist}) => {
       const line = clean(window.DashHelpers.historyLine(entry, checklist));
       return h('div', {className:'card-row'}, h('div', {className:'grow'}, h('h3', {}, line.length > 80 ? line.slice(0, 79) + '…' : line), h('p', {className:'meta'}, [name(entry.by), clean(title), age(entry.at)].filter(Boolean).join(' · '))));
     });
-    return fragment(heading('Today', now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + needs.length + ' need you · ' + working.length + (working.length === 1 ? ' agent working' : ' agents working')), banner,
+    return fragment(heading('Today', now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + [needs.length + ' need you', working.length + (working.length === 1 ? ' agent working' : ' agents working'), startingText].filter(Boolean).join(' · ')), banner,
       h('div', {className:'columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
         card('needs-you', 'Needs you', needs.length + (oldest ? ' · oldest ' + age(oldest) : ''), needs.length ? needs.map(n => needRow(n, newest)) : emptyRow('Nothing needs you right now.'), true),
         card('your-tickets', 'Your tickets', current.length + (current.some(overdue) ? ' · ' + current.filter(overdue).length + ' overdue' : ''), current.length ? current.map(ticketRow) : tickets().length ? h('div', {className:'card-row'}, h('p', {className:'grow muted'}, 'Nothing open. Finished tickets are under Tickets.'), newButton()) : firstTicket(), true)),
       h('aside', {className:'stack', 'data-key':'right'},
-        card('agents', 'Agents', working.length + ' working', [agents.length ? agents : emptyRow('No one is working on your tickets. Open a ticket and press Start.'), links.length ? h('div', {className:'card-row'}, links.map(link => h('a', {className:'meta', href:link.url}, 'Watch live in ' + capitalise(link.label) + ' →'))) : null]),
+        card('agents', 'Agents', working.length + ' working' + (gettingStarted.size ? ' · ' + gettingStarted.size + ' starting' : ''), [agents.length ? agents : emptyRow('No one is working on your tickets. Open a ticket and press Start.'), links.length ? h('div', {className:'card-row'}, links.map(link => h('a', {className:'meta', href:link.url}, 'Watch live in ' + capitalise(link.label) + ' →'))) : null]),
         card('recently', 'Recently', '', recent.length ? recent : emptyRow('No recent activity.')))));
   }
   const expanded = new Set();
@@ -176,7 +181,7 @@
     const late = children.filter(i => rows[i].late);
     return fragment(h('div', {className:'card-row ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
       row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, h('span', {className:'chevron ' + (open ? '' : 'closed')}, iconEl('down'))) : null,
-      h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, [typeof t.key === 'string' ? t.key : '', name(t.owner), t.due ? 'Due ' + date(t.due) : '', row.children ? row.done + ' of ' + row.children + ' done' : ''].filter(Boolean).join(' · ')), questionLine(t),
+      h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, [typeof t.key === 'string' ? t.key : '', row.depth ? statusWord(shown(t)) : '', name(t.owner), t.due ? 'Due ' + date(t.due) : '', row.children ? row.done + ' of ' + row.children + ' done' : ''].filter(Boolean).join(' · ')), questionLine(t),
         !row.depth && row.parentMissing ? h('p', {className:'meta'}, 'Part of a ticket that is not here') : null), activity(t), statusControl(t, 'tree')),
       open ? children.filter(i => !rows[i].late || treeAll.has(t.id)).map(i => treeBranch(rows, i)) : null,
       open && late.length && !treeAll.has(t.id) ? h('div', {className:'card-row child', 'data-key':'tree-all-' + t.id}, h('button', {type:'button', className:'btn ghost sm', 'data-action':'tree-all', 'data-ticket':t.id}, 'Show all ' + children.length)) : null);
@@ -197,13 +202,13 @@
     const who = name(t.owner);
     return h('article', {className:'card ticket-card', draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
       h('div', {className:'row'}, h('span', {className:'mono key grow'}, typeof t.key === 'string' ? t.key : ''), null,
-        snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'btn ghost icon sm move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card')))),
+        snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'btn ghost icon sm move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card', STATUS_CHOICES)))),
       h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))),
       h('div', {className:'owner-line'}, who ? [h('span', {className:'avatar', 'aria-hidden':'true'}, initials(who)), who] : null, t.due ? h('span', {className:'due' + (overdue(t) ? ' bad' : '')}, date(t.due)) : null),
-      questionLine(t), activity(t), reviewActions(t), cardLinks(t),
+      questionLine(t), activity(t, 'board'), reviewActions(t), cardLinks(t),
       tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':'0', 'aria-valuemax':String(tasks.length), 'aria-valuenow':String(done), 'aria-label':'Tasks done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, done + '/' + tasks.length)) : null);
   }
-  const COLUMN_EMPTY = {open:'Backlog: not started yet. New tickets start here.', ready:'Tickets ready to start wait here.', active:'Tickets being worked on show here.', waiting:'Tickets waiting for an answer show here.', review:'Tickets to check show here.', done:'Finished tickets appear here.'};
+  const COLUMN_EMPTY = {open:'New tickets show here.', ready:'Tickets ready to start show here.', active:'Tickets being worked on show here.', waiting:'Tickets waiting for an answer show here.', review:'Tickets to check show here.', done:'Finished tickets show here.'};
   function board() {
     const visible = sorted(tickets().filter(t => t.status !== 'dropped'));
     const counts = {};
@@ -220,6 +225,16 @@
     return h('div', {className:'board', 'data-key':'board'},
       h('div', {className:'status-jumps', 'data-key':'status-jumps'}, STATUS_CHOICES.map(([status, label]) => h('button', {type:'button', 'data-action':'board-jump', 'data-status':status, 'aria-pressed':String(status === shown)}, window.DashHelpers.columnChipLabel(label, counts[status])))),
       h('div', {className:'board-track'}, cols));
+  }
+  // Tick a task on or off by hand (orch check done / reopen). A task with proof from an agent can be opened again.
+  async function toggleTask(id, cid) {
+    const t = ticketOf(id), task = array(t?.checklist).find(c => c.id === cid), lock = 'task-' + id + '-' + cid;
+    if (!task || locks.has(lock)) return;
+    locks.add(lock);
+    const result = await act('check.set', {ticket:t.id, check:cid, done:!task.done});
+    locks.delete(lock);
+    render();
+    if (!result.ok) window.orch.toast(result.text, 'error');
   }
   async function moveTicket(id, status) {
     const t = ticketOf(id), lock = 'status-' + id;
@@ -515,6 +530,9 @@
   function agentBar(t) {
     const liveLink = liveLinkFor(t);
     const line = window.DashHelpers.agentLine(t, state.runs?.[t.id], Date.now(), liveLink);
+    // an open question is answered in the banner only: the bar then just says the agent is waiting
+    const answering = line.primary.op === 'answer';
+    if (answering) line.status = 'waiting';
     const action = (item, primary) => {
       const attrs = {className:primary ? 'btn sm ' + (['working', 'starting', 'background'].includes(line.state) ? 'outline' : 'primary') : 'menu-item', role:primary ? null : 'menuitem', 'data-key':primary ? 'agent-primary' : 'agent-' + item.label};
       if (item.op === 'open') return /^#open\//.test(item.url) ? h('a', {...attrs, href:item.url}, item.label) : null;
@@ -522,7 +540,7 @@
     };
     return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'}, h('span', {className:'dot ' + ({working:'working', starting:'starting', background:'bg', needs:'needs', stuck:'needs', failed:'error', stopped:'stopped'}[line.state] || 'idle')}),
       h('span', {className:'ab-text grow'}, h('strong', {}, name(line.agent)), h('span', {className:'muted'}, ' · ' + clean(line.status))),
-      h('span', {className:'ab-actions'}, !activeTicket(t) && liveLink && !snapshot && line.primary.op !== 'open' ? h('a', {className:'btn outline sm', href:liveLink.url, 'data-key':'agent-open-done'}, 'Open ' + liveLink.label) : null, action(line.primary, true), line.items.length ? h('details', {className:'menu', 'data-key':'agent-menu'}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More agent actions'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, line.items.map(item => action(item, false)))) : null));
+      h('span', {className:'ab-actions'}, !activeTicket(t) && liveLink && !snapshot && line.primary.op !== 'open' ? h('a', {className:'btn outline sm', href:liveLink.url, 'data-key':'agent-open-done'}, 'Open ' + liveLink.label) : null, answering ? null : action(line.primary, true), line.items.length ? h('details', {className:'menu', 'data-key':'agent-menu'}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More agent actions'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, line.items.map(item => action(item, false)))) : null));
   }
   const surface = via => clean(via === 'cli' ? 'terminal' : via);
   function proofLabel(ev) {
@@ -620,7 +638,9 @@
   function taskRows(t) {
     return array(t.checklist).map((task, i) => {
       const meta = [name(task.owner || task.by), clean(task.summary)].filter(Boolean).join(' · ');
-      return h('div', {className:'card-row', 'data-key':'task-' + (task.id || i)}, task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot ' + (task.state === 'doing' ? 'working' : 'idle')}),
+      const mark = snapshot || !task.id ? (task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot ' + (task.state === 'doing' ? 'working' : 'idle')}))
+        : h('button', {type:'button', className:'task-check' + (task.done ? ' on' : ''), role:'checkbox', 'aria-checked':String(!!task.done), 'aria-label':clean(task.text), 'data-action':'task-toggle', 'data-ticket':t.id, 'data-check':task.id, 'data-key':'task-check-' + task.id}, task.done ? iconEl('check') : null);
+      return h('div', {className:'card-row', 'data-key':'task-' + (task.id || i)}, mark,
         h('div', {className:'grow'}, h('h3', {}, clean(task.text)), meta ? h('p', {className:'meta'}, meta) : null,
           array(task.evidence).length ? h('div', {className:'chips task-proofs'}, array(task.evidence).map(proofChip)) : null), chip(task.done ? 'Done' : task.state === 'doing' ? 'Doing' : 'To do', task.done ? 'success' : task.state === 'doing' ? 'active' : ''));
     });
@@ -682,7 +702,8 @@
   }
   function detail(t) {
     if (!t) return fragment(heading('Ticket not found'), h('a', {href:'#tickets'}, 'All tickets'));
-    const qs = questions(t).map(q => snapshot
+    const openQuestions = questions(t);
+    const qs = openQuestions.map(q => snapshot
       ? card('question-' + q.id, clean(q.text), '', h('div', {className:'card-row'}, h('div', {className:'grow'}, h('p', {className:'muted'}, 'Waiting for an answer'), h('div', {className:'row'}, array(q.options).map(o => chip(clean(o), o === q.recommended ? 'attn' : ''))))))
       : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
     const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => { const rich = entry.via === 'phone' ? phoneEntry(t.id, entry) : null; return h('div', {className:'card-row'}, rich ? h('div', {className:'grow'}, rich, h('p', {className:'meta'}, [name(entry.by), surface(entry.via)].filter(Boolean).join(' · '))) : h('p', {className:'grow'}, [clean(window.DashHelpers.historyLine(entry, t.checklist)), name(entry.by), surface(entry.via)].filter(Boolean).join(' · ')), h('time', {datetime:entry.at || ''}, age(entry.at))); });
@@ -702,12 +723,12 @@
     });
     return fragment(h('header', {className:'stack', 'data-key':'ticket-heading'},
       parent ? h('a', {href:href(parent.id), className:'muted'}, 'Part of ' + clean(parent.title)) : null,
-      h('div', {className:'row'}, typeof t.key === 'string' ? h('span', {className:'mono'}, t.key) : null, chip('Ticket', 'outline'), statusControl(t, 'head'), activity(t), reviewActions(t)),
+      h('div', {className:'row'}, typeof t.key === 'string' ? h('span', {className:'mono'}, t.key) : null, chip('Ticket', 'outline'), snapshot ? null : statusChip(t), statusControl(t, 'head'), activity(t, 'head'), reviewActions(t)),
       h('div', {className:'row', 'data-key':'ticket-meta'}, h('h1', {className:'grow'}, inlineField(t, 'title')), snapshot ? null : agentBar(t)),
       h('div', {className:'columns ticket-columns', 'data-key':'ticket-columns'}, h('div', {className:'stack'},
         snapshot ? null : h('div', {className:'tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label]) => h('button', {type:'button', id:'ticket-tab-' + id, role:'tab', 'aria-selected':selected === id, 'aria-controls':'ticket-panel-' + id, tabindex:selected === id ? '0' : '-1', 'data-action':'ticket-tab', 'data-tab':id, 'data-ticket':t.id}, label))),
         panel('overview', [t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null,
-          qs.length ? h('div', {className:'banner attn'}, h('p', {className:'grow'}, qs.length + (qs.length === 1 ? ' question needs you' : ' questions need you')), snapshot || window.DashHelpers.agentLine(t, state.runs?.[t.id], Date.now(), null).primary.op === 'answer' ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'answer-tab', 'data-ticket':t.id}, 'Answer')) : null,
+          openQuestions.length ? h('div', {className:'banner attn question-banner', 'data-key':'question-banner'}, h('div', {className:'grow'}, h('p', {className:'banner-q'}, clean(openQuestions[0].text)), openQuestions.length > 1 ? h('p', {className:'meta'}, 'and ' + (openQuestions.length - 1) + (openQuestions.length === 2 ? ' more question' : ' more questions')) : null), snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'answer-tab', 'data-ticket':t.id}, 'Answer')) : null,
           tasksCard('overview-tasks'), addonRows(t), ticketLinks(t), children.length ? card('sub-tickets', 'Sub-tickets', children.filter(child => child.status === 'done').length + ' of ' + children.length + ' done', children.map(child => h('div', {className:'card-row'}, h('a', {className:'grow', href:href(child.id)}, clean(child.title)), statusChip(child)))) : null]),
         panel('tasks', tasksCard('tasks')), panel('questions', [qs.length ? qs : emptyRow('No open questions'), answered]), panel('artifacts', artifactsPanel(t)),
         panel('history', card('history', 'History', '', history.length ? history : emptyRow('No history yet.')))),
@@ -1081,7 +1102,7 @@
       crumb.replaceChildren(pageName, ' › ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || last);
     } else crumb.textContent = pageName;
     const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
-    reconcile(nav, fragment(navLink('#home', 'Home', 'page', needsList().length ? h('span', {className:'count', title:needsList().length + ' waiting for you', 'aria-label':needsList().length + ' waiting for you'}, needsList().length) : null), navLink('#tickets', 'Tickets', 'table'), state.general ? navLink('#general', 'General', 'text') : null,
+    reconcile(nav, fragment(navLink('#home', 'Home', 'page', needsList().length ? h('span', {className:'count', title:needsList().length + ' waiting for you', 'aria-label':needsList().length + ' need you'}, needsList().length + ' need you') : null), navLink('#tickets', 'Tickets', 'table'), state.general ? navLink('#general', 'General', 'text') : null,
       addons().some(a => a.dashboard) ? h('p', {className:'eyebrow'}, 'Add-ons') : null, addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon))));
     reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'user') : null));
     if (changed) {
@@ -1430,6 +1451,30 @@
     d.append(actions);
     window.orch.open(d);
   }
+  // An add-on row's "Send a message" opens a small box; Send passes the text on for that workspace or phone.
+  function messageSend(control) {
+    if (snapshot || route().kind !== 'addon') return;
+    const peer = control.dataset.sendTo, who = control.dataset.who || 'this workspace';
+    const {d, actions} = dialog('Send a message to ' + who, 'dialog');
+    const area = el('textarea', 'input');
+    Object.assign(area, {rows:4, maxLength:2000, name:'message', placeholder:'Write your message'});
+    area.setAttribute('aria-label', 'Message to ' + who);
+    const go = button('Send', 'primary', async () => {
+      const text = area.value.trim();
+      if (!text || go.disabled) return;
+      go.disabled = true;
+      const result = await act('message.send', {workspace:peer, text});
+      go.disabled = false;
+      if (!result.ok) { window.orch.toast(result.text || 'That did not work.', 'error'); return; }
+      await window.orch.close(d);
+      window.orch.toast('Sent to ' + who, 'ok');
+      loadAddon(route().id);
+    });
+    actions.append(go);
+    d.append(area, actions);
+    window.orch.open(d);
+    area.focus();
+  }
   async function copyText(control) {
     try { await navigator.clipboard.writeText(control.dataset.copy); window.orch.toast('Copied', 'ok'); }
     catch (_) { window.orch.toast('Could not copy. Select the text and copy it.', 'error'); }
@@ -1506,6 +1551,8 @@
   main.addEventListener('click', async event => {
     const menu = event.target.closest('details.menu');
     if (menu && event.target.closest('button,a')) menu.open = false;
+    const sendControl = event.target.closest('[data-send-to]');
+    if (sendControl) { messageSend(sendControl); return; }
     const row = event.target.closest('[data-addon-act]');
     if (row) { if (!snapshot) addonAct(row); return; }
     const copy = event.target.closest('[data-copy]');
@@ -1559,6 +1606,7 @@
       window.orch.toast(result.ok ? (op === 'run.start' ? 'Started' : 'Stopped') : result.text, result.ok ? 'ok' : 'error');
       return;
     }
+    if (action === 'task-toggle') { await toggleTask(control.dataset.ticket, control.dataset.check); return; }
     if (action === 'status-set') { await moveTicket(control.dataset.ticket, control.dataset.status); return; }
     if (action === 'view') {
       ticketView = control.dataset.view === 'board' ? 'board' : 'list';
