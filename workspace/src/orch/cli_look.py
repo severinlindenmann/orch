@@ -76,7 +76,8 @@ def dispatch(args, root: Path) -> bool:
         if args.value is not None:
             look.set_shared_pages(root, args.value == "on", _actor(args))
         on = look.shared_pages(root)
-        _out(args, {"on": on}, "Shared file pages show the workspace name and icon: " + ("on" if on else "off"))
+        state = "on" if on else "off"
+        _out(args, {"on": on}, f"Shared file pages show the workspace name and icon: {state}")
     else:
         if args.icon is None and args.color is None:
             raise Refused("Say what to change: --icon <id>|none or --color <token>|auto.")
