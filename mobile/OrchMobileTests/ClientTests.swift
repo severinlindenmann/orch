@@ -55,7 +55,8 @@ final class ClientTests: XCTestCase {
         let id = try await client(Example.find("POST", "/v1/phone/answer", status: 201)).answer(questionMessageId: "m_q1date0ts0000001", answer: "TIMESTAMP")
         XCTAssertEqual(id, "m_an5wer7q2w9e4r6t")
         let body = try JSONSerialization.jsonObject(with: StubProtocol.seenBodies[0]) as! [String: String]
-        XCTAssertEqual(body, ["question_message_id": "m_q1date0ts0000001", "answer": "TIMESTAMP"])
+        XCTAssertEqual(body["question_message_id"], "m_q1date0ts0000001"); XCTAssertEqual(body["answer"], "TIMESTAMP")
+        XCTAssertTrue(SendRequest.isClientId(body["client_id"] ?? ""), "every answer carries a client_id")
     }
 
     func testSecondAnswerIs409AlreadyAnswered() async throws {

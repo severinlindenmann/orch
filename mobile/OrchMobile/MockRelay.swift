@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import UIKit
 
 /// In-process fake of the phone endpoints with the shared dataset (Pilatus Workspace + Reports).
@@ -6,6 +7,29 @@ import UIKit
 actor MockRelay: RelayAPI {
     static let pilatus = "ws_pilatus001", reports = "ws_reports001"
     private(set) var sent: [(to: String, text: String)] = []
+    /// Every `send` request that reached the relay (duplicates excluded), for tests.
+    private(set) var requests: [SendRequest] = []
+    private(set) var uploads: [String: Data] = [:]
+    private var clientIds: [String: String] = [:]          // client_id -> message id (send and answer share one namespace)
+    private var mutes: [String: String?] = [:]
+    private var removed: Set<String> = []
+    private var usedCodes: Set<String> = []
+    private var phoneSettings = PhoneSettings()
+    private var generalReceipts: [PhoneMessage] = []
+    /// Test hooks. `autoDeliver`: the workspace acks (delivered_at) a phone text at once. `offline`: every call fails like no network.
+    private(set) var autoDeliver = true
+    var offline = false
+    enum SpeechMode { case ok, capReached, off, failed }
+    var speechMode: SpeechMode = .ok
+    private var uploadFailures: [Int] = [], sendFailures: [Int] = []
+    /// Test hooks: the next upload / send calls fail with these statuses (one status per call), then work again.
+    func queueUploadFailures(_ s: [Int]) { uploadFailures = s }
+    func queueSendFailures(_ s: [Int]) { sendFailures = s }
+    private(set) var uploadCalls = 0
+    func setAutoDeliver(_ v: Bool) { autoDeliver = v }
+    func setOffline(_ v: Bool) { offline = v }
+    func setSpeechMode(_ m: SpeechMode) { speechMode = m }
+    private(set) var speechRequests: [(id: String, lang: String?)] = []
     private var answered: [String: String] = [:]
     private var signedOut = false
     private var counter = 0, updateCounter = 0
@@ -21,7 +45,7 @@ actor MockRelay: RelayAPI {
         self.latency = latency ?? .milliseconds(ms > 0 ? ms : 150)
     }
 
-    private let names = [pilatus: "Pilatus Workspace", reports: "Reports"]
+    private var names = [pilatus: "Pilatus Workspace", reports: "Reports"]
     private var all: [Question] = [
         Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_q1date0ts0000001", from: pilatus, to: "phones", type: "question",
                                           createdAt: "2026-11-04T10:41:00Z", ticket: "t_7k3f9q",
@@ -108,8 +132,11 @@ actor MockRelay: RelayAPI {
     private func check() async throws {
         try? await Task.sleep(for: latency)
         if signedOut { throw RelayError.unauthorized }
-        if fail { throw URLError(.notConnectedToInternet) }
+        if fail || offline { throw URLError(.notConnectedToInternet) }
     }
+    private func reachable(_ ws: String) -> Bool { names[ws] != nil && !removed.contains(ws) }
+    private static func now() -> String { ISO8601DateFormatter().string(from: Date()) }
+    private static func invalid(_ m: String) -> RelayError { .api(status: 422, code: "invalid", message: m) }
 
     func pair(code: String, name: String) async throws -> PairResponse {
         try? await Task.sleep(for: latency)
@@ -126,28 +153,42 @@ actor MockRelay: RelayAPI {
         try await check()
         if empty { return [] }
         func open(_ ws: String) -> Int { all.filter { $0.message.from == ws && answered[$0.id] == nil }.count }
-        return [
+        var list = [
             Workspace(id: Self.pilatus, name: "Pilatus Workspace", description: "Data pipelines for the Pilatus client",
                       tags: ["client", "data", "ingestion"], online: true, lastSeen: "2026-11-04T10:41:00Z", openQuestions: open(Self.pilatus)),
             Workspace(id: Self.reports, name: "Reports", description: "Weekly and monthly reporting",
                       tags: ["reports", "scheduler"], online: true, lastSeen: "2026-11-04T10:50:00Z", openQuestions: open(Self.reports)),
         ]
+        if names["ws_home000001"] != nil {
+            list.append(Workspace(id: "ws_home000001", name: "Home", description: "", tags: [], online: false, lastSeen: nil, openQuestions: 0))
+        }
+        return list.filter { !removed.contains($0.id) }.map { var w = $0; w.mutedUntil = mutes[w.id] ?? nil; return w }
     }
     func questions() async throws -> [Question] {
         try await check()
         if empty { return [] }
         return all.filter { answered[$0.id] == nil }
     }
-    func messages() async throws -> [PhoneMessage] {
+    func messages(after: String?, limit: Int?) async throws -> ListResponse<PhoneMessage> {
         try await check()
-        if empty { return [] }
+        if empty { return ListResponse(items: [], next: nil) }
         // The real relay lists work updates (texts with `update`) in /messages too.
         let updateTexts = updateLog.map { u in
             PhoneMessage(message: TextMessage(id: u.id, from: u.workspace, to: "ph_iphone0001", type: "text", createdAt: u.at, ticket: u.ticket,
-                                              body: TextBody(text: u.text, update: TextUpdate(kind: u.kind, title: u.title)), key: u.key),
+                                              body: TextBody(text: u.text, update: TextUpdate(kind: u.kind, title: u.title), ticketView: u.ticketView),
+                                              key: u.key, replyTo: u.replyTo),
                          workspaceName: u.workspaceName)
         }
-        return (received + sentMessages + updateTexts).sorted { $0.message.createdAt > $1.message.createdAt }
+        let all = (received + sentMessages + updateTexts + generalReceipts).filter { !removed.contains($0.workspaceId) }
+            .sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
+        var start = 0
+        if let after {
+            guard let i = all.firstIndex(where: { $0.id == after }) else { throw Self.invalid("after is not in this view") }
+            start = i + 1
+        }
+        let n = min(max(limit ?? 50, 1), 100)
+        let page = Array(all.dropFirst(start).prefix(n))
+        return ListResponse(items: page, next: start + n < all.count ? page.last?.id : nil)
     }
     func updates() async throws -> [TicketUpdate] {
         try await check()
@@ -156,34 +197,124 @@ actor MockRelay: RelayAPI {
         for u in updateLog where (newest["\(u.workspace)|\(u.ticket)"]?.at ?? "") <= u.at { newest["\(u.workspace)|\(u.ticket)"] = u }
         return newest.values.sorted { $0.at > $1.at }
     }
-    func answer(questionMessageId: String, answer: String) async throws -> String {
+    func answer(_ r: AnswerRequest) async throws -> SendReceipt {
         try await check()
-        guard all.contains(where: { $0.id == questionMessageId }) else { throw RelayError.api(status: 404, code: "not_found", message: "Question not found.") }
+        if let id = clientIds[r.clientId] { return SendReceipt(id: id, clientId: r.clientId, duplicate: true) }
+        guard all.contains(where: { $0.id == r.questionMessageId }) else { throw RelayError.api(status: 404, code: "not_found", message: "Question not found.") }
         // Simulator evidence hook `-mockRace YES`: another phone answered "DATE" a moment before this one.
-        if UserDefaults.standard.bool(forKey: "mockRace"), answered[questionMessageId] == nil { answered[questionMessageId] = "DATE" }
-        if let a = answered[questionMessageId] {
+        if UserDefaults.standard.bool(forKey: "mockRace"), answered[r.questionMessageId] == nil { answered[r.questionMessageId] = "DATE" }
+        if let a = answered[r.questionMessageId] {
             throw RelayError.api(status: 409, code: "already_answered", message: "This question was already answered: \(a).")
         }
-        answered[questionMessageId] = answer
+        answered[r.questionMessageId] = r.answer
         counter += 1
-        return String(format: "m_an5wer%010d", counter)
+        let id = String(format: "m_an5wer%010d", counter)
+        clientIds[r.clientId] = id
+        return SendReceipt(id: id, clientId: r.clientId)
     }
-    func send(to: String, text: String, ticket: String?) async throws -> String {
+    func send(_ r: SendRequest) async throws -> SendReceipt {
         try await check()
-        guard names[to] != nil else { throw RelayError.api(status: 403, code: "not_allowed", message: "This phone may not reach that workspace.") }
-        sent.append((to, text))
+        if let id = clientIds[r.clientId] { return SendReceipt(id: id, clientId: r.clientId, duplicate: true) }
+        if !sendFailures.isEmpty { let s = sendFailures.removeFirst(); throw RelayError.api(status: s, code: "error", message: "Try again later.") }
+        do { try r.validate() } catch { throw Self.invalid("Nothing valid to send.") }
+        guard reachable(r.to) else { throw RelayError.api(status: 403, code: "not_allowed", message: "This phone may not reach that workspace.") }
+        var blobs = r.attachments?.map(\.blobId) ?? []
+        if let v = r.voice { blobs.append(v.blobId) }
+        blobs += r.feedback?.pins.compactMap(\.voiceBlobId) ?? []
+        for b in blobs where uploads[b] == nil { throw RelayError.api(status: 404, code: "not_found", message: "Upload not found.") }
+        for a in r.attachments ?? [] where uploads[a.blobId]?.count != a.size { throw Self.invalid("Size does not match the upload.") }
+        requests.append(r)
+        let to = r.to
+        sent.append((to, r.text ?? ""))
         counter += 1
-        // The relay add-on's "Got it": a new ticket for a phone text, the same ticket for a reply.
-        let ack = String(text.prefix(40)).trimmingCharacters(in: .whitespaces)
-        let prior = updateLog.last { $0.ticket == ticket && $0.workspace == to }   // the feed's snapshot and key stay with the ticket
-        let newKey = "\(to == Self.pilatus ? "PIL" : "RGS")-\(20 + counter)"
-        deliverUpdate(workspace: to, ticket: ticket ?? String(format: "t_ph%06d", counter), kind: "ack", title: ack, text: "Got it: \(ack)",
-                      replyTo: String(format: "m_ph0nesend%06d", counter), key: ticket == nil ? newKey : prior?.key,
-                      view: ticket == nil ? TicketSnapshot(title: ack, status: "working", agent: "Claude", running: false) : prior?.ticketView)
-        sentMessages.append(PhoneMessage(message: TextMessage(id: String(format: "m_ph0nesend%06d", counter), from: "ph_iphone0001", to: to, type: "text",
-                                                              createdAt: ISO8601DateFormatter().string(from: Date()), ticket: ticket, body: TextBody(text: text)),
-                                         workspaceName: names[to] ?? to))
-        return String(format: "m_ph0nesend%06d", counter)
+        let id = String(format: "m_ph0nesend%06d", counter)
+        clientIds[r.clientId] = id
+        let at = Self.now()
+        let isNewTopic = r.ticket == nil && r.general != true
+        let newTicket = String(format: "t_ph%06d", counter)
+        let body = TextBody(text: r.text ?? "", clientId: r.clientId, general: r.general, attachments: r.attachments ?? [], voice: r.voice, location: r.location, feedback: r.feedback)
+        sentMessages.append(PhoneMessage(message: TextMessage(id: id, from: "ph_iphone0001", to: to, type: "text", createdAt: at, ticket: r.ticket, body: body, replyTo: r.replyTo),
+                                         workspaceName: names[to] ?? to, deliveredAt: nil, clientId: r.clientId))
+        guard autoDeliver else { return SendReceipt(id: id, clientId: r.clientId) }
+        deliver(id: id)
+        // The relay add-on's "Got it": a new ticket for a new topic, the same ticket for a reply, a General receipt in General.
+        let label = String((r.text ?? (r.voice?.transcript ?? "Message")).prefix(40)).trimmingCharacters(in: .whitespaces)
+        if r.general == true {
+            generalReceipts.append(PhoneMessage(message: TextMessage(id: String(format: "m_gen4ck%010d", counter), from: to, to: "ph_iphone0001", type: "text", createdAt: at, ticket: nil,
+                                                                     body: TextBody(text: "Got it", update: TextUpdate(kind: "ack"), general: true), replyTo: id),
+                                                workspaceName: names[to] ?? to))
+        } else {
+            let prior = updateLog.last { $0.ticket == r.ticket && $0.workspace == to }   // the feed's snapshot and key stay with the ticket
+            let newKey = "\(to == Self.pilatus ? "PIL" : "RGS")-\(20 + counter)"
+            deliverUpdate(workspace: to, ticket: r.ticket ?? newTicket, kind: "ack", title: label, text: "Got it: \(label)", replyTo: id,
+                          key: isNewTopic ? newKey : prior?.key,
+                          view: isNewTopic ? TicketSnapshot(title: label, status: "working", agent: "Claude", running: false) : prior?.ticketView)
+        }
+        return SendReceipt(id: id, clientId: r.clientId)
+    }
+    private func deliver(id: String) {
+        guard let i = sentMessages.firstIndex(where: { $0.id == id }) else { return }
+        sentMessages[i].deliveredAt = Self.now()
+    }
+    /// Test hook: the workspace acks every waiting phone text (second tick).
+    func deliverPending() { for m in sentMessages where m.deliveredAt == nil { deliver(id: m.id) } }
+    /// Test hook: the workspace says it started on a phone text (`working`, reply_to = that text).
+    func deliverWorking(workspace: String, ticket: String, replyTo: String) {
+        deliverUpdate(workspace: workspace, ticket: ticket, kind: "working", title: nil, text: "Working on it", replyTo: replyTo)
+    }
+    func uploadBlob(file: URL, contentType: String) async throws -> BlobUpload {
+        try await check()
+        uploadCalls += 1
+        if !uploadFailures.isEmpty { let s = uploadFailures.removeFirst(); throw RelayError.api(status: s, code: "error", message: "Try again later.") }
+        let d = try Data(contentsOf: file)
+        guard !d.isEmpty else { throw Self.invalid("Empty upload.") }
+        guard d.count <= 25 * 1024 * 1024 else { throw RelayError.api(status: 413, code: "too_large", message: "File too large.") }
+        counter += 1
+        let id = String(format: "b_up%014d", counter)
+        uploads[id] = d
+        return BlobUpload(blobId: id, size: d.count, sha256: SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined())
+    }
+    func speech(messageId: String, lang: String?) async throws -> Data {
+        try await check()
+        speechRequests.append((messageId, lang))
+        if let l = lang, !["de", "en"].contains(l) { throw Self.invalid("lang") }
+        switch speechMode {
+        case .capReached: throw RelayError.api(status: 402, code: "tts_cap_reached", message: "Read-aloud budget used up.")
+        case .off: throw RelayError.api(status: 503, code: "tts_off", message: "Read-aloud is off.")
+        case .failed: throw RelayError.api(status: 502, code: "tts_failed", message: "Read-aloud failed.")
+        case .ok: break
+        }
+        guard let m = (updateLog.map(\.id) + received.map(\.id)).first(where: { $0 == messageId }) else { throw RelayError.api(status: 404, code: "not_found", message: "Nothing to read aloud.") }
+        return Data("ID3-mock-mp3-\(m)-\(lang ?? "en")".utf8)
+    }
+    func settings() async throws -> PhoneSettings { try await check(); return phoneSettings }
+    func updateSettings(_ p: SettingsPatch) async throws -> PhoneSettings {
+        try await check()
+        guard p.isValid else { throw Self.invalid("settings") }
+        if let v = p.speak { phoneSettings.speak = v }
+        if let v = p.swissGerman { phoneSettings.swissGerman = v }
+        if let v = p.ttsCapUsd { phoneSettings.ttsCapUsd = v }
+        return phoneSettings
+    }
+    func redeem(code: String) async throws -> RedeemResponse {
+        try await check()
+        guard code.hasPrefix("pc_") else { throw RelayError.api(status: 404, code: "not_found", message: "Invitation not found.") }
+        if usedCodes.contains(code) || code.hasPrefix("pc_expired") { throw RelayError.api(status: 410, code: "gone", message: "This invitation was already used or has expired.") }
+        usedCodes.insert(code)
+        names["ws_home000001"] = "Home"; removed.remove("ws_home000001")
+        return RedeemResponse(workspaces: [WorkspaceRef(id: "ws_home000001", name: "Home")])
+    }
+    func setMute(workspace: String, mute: Mute) async throws -> Workspace {
+        try await check()
+        guard reachable(workspace) else { throw RelayError.api(status: 404, code: "not_found", message: "Workspace not found.") }
+        mutes[workspace] = .some(mute.wire)
+        guard let w = try await workspaces().first(where: { $0.id == workspace }) else { throw RelayError.api(status: 404, code: "not_found", message: "Workspace not found.") }
+        return w
+    }
+    func removeWorkspace(_ id: String) async throws {
+        try await check()
+        guard reachable(id) else { throw RelayError.api(status: 404, code: "not_found", message: "Workspace not found.") }
+        removed.insert(id)
     }
     /// Fixed transcript, whatever the audio is.
     static let transcript = "Send the weekly report on Friday."
