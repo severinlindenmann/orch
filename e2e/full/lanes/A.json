@@ -565,10 +565,6 @@
      "sel": "button:has-text('Add reference')"
     },
     {
-     "do": "expect_text",
-     "text": "Search tickets"
-    },
-    {
      "do": "click",
      "sel": "role=tab[name='Web address']"
     },

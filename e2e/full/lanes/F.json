@@ -47,6 +47,33 @@
      "timeout": 1000
     }
    ]
+  },
+  {
+   "id": "F02",
+   "name": "Focus: click every control that does not start a run (census)",
+   "page": "focus-direct",
+   "tags": [
+    "census"
+   ],
+   "expect": "tabs, shortcuts, full screen, add task and send message all respond",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/t/{{ticket2_id}}"
+    },
+    {
+     "do": "wait",
+     "ms": 1200
+    },
+    {
+     "do": "click_all_census",
+     "page": "focus-direct"
+    }
+   ]
   }
+ ],
+ "census_skip": [
+  "\\|Continue$",
+  "Start fresh"
  ]
 }
