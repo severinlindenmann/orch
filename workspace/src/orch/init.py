@@ -66,7 +66,9 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
     text = "\n\n".join(addons.consent_text(mans[r["name"]], False) for r in rows)
     if not yes:
         if not interactive:
-            raise Refused(f"{text}\nTo turn these on run it again with --yes.")
+            err = Refused(f"{text}\n\nTo turn these on, run it again with --yes.")
+            err.confirm = True
+            raise err
         sys.stderr.write(text + "\nTurn these on? [y/N] ")
         sys.stderr.flush()
         if sys.stdin.readline().strip().lower() not in ("y", "yes"):
