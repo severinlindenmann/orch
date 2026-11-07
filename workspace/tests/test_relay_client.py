@@ -35,7 +35,7 @@ def test_connect(proj, run, rel):
     assert json.loads((proj / ".orch/secrets/relay.json").read_text())["token"] == rel.token
     assert (proj / ".agents/skills/orch-relay/SKILL.md").is_file()
     assert (proj / ".agents/skills/orch-relay/workspaces.json").is_file()
-    assert "<!-- orch:addon:relay -->" in (proj / "AGENTS.md").read_text()
+    assert "orch-relay" in (proj / ".orch/harness/AGENTS.orch.md").read_text()
     assert run("relay", "whoami")[0] == 0
 
 
@@ -94,9 +94,12 @@ def test_refresh_handles_the_waiting_refresh_hints(proj, run, rel):
     """After a refresh the inbox no longer says "new settings are waiting"."""
     connect(run, rel)
     rel.inbox.append(msg("m_hint000000000001", "refresh-hint", {}, frm="relay"))
-    assert "new settings are waiting" in run("relay", "inbox")[1]
-    run("relay", "refresh")
-    assert "new settings are waiting" not in run("relay", "inbox")[1]
+    assert "new settings are waiting" not in run("relay", "inbox")[1]  # refreshed by itself
+    assert not [
+        f
+        for f in (proj / ".orch/inbox").glob("m_*.json")
+        if f.stem not in json.loads((proj / ".orch/inbox-seen.json").read_text())
+    ]
 
 
 def test_send_by_name_with_two_matching_phones_is_refused(proj, run, rel):
@@ -333,7 +336,7 @@ def test_refresh_installs_and_removes_shared_skills(proj, run, rel, monkeypatch)
     assert code == 0 and "1 workspace" in out and "acme-sql" in out
     d = proj / ".agents/skills/acme-sql"
     assert (d / "ref/a.md").read_bytes() == b"x" and (d / ".orch-shared").exists()
-    assert (proj / ".claude/skills/acme-sql/SKILL.md").exists()  # reached through the skills link
+    assert (proj / ".claude/skills/acme-sql/SKILL.md").exists()  # linked per skill
     s = proj / ".orch/secrets"
     assert json.loads((s / "credentials.json").read_text()) == {"DB_URL": "pg://x"}
     assert json.loads((s / "mcp.json").read_text()) == {"mcpServers": {"sql": {"command": "x"}}}
@@ -387,10 +390,23 @@ def test_webhooks(proj, run, rel):
     assert run("relay", "webhook", "delete", "wh_0000000000")[0] == 0 and not rel.webhooks
 
 
-def test_refresh_hint_is_shown_not_applied(proj, run, rel):
+def test_refresh_hint_refreshes_by_itself(proj, run, rel):
     connect(run, rel)
+    rel.snapshot.update(version=8)
     rel.inbox.append(msg("m_refresh000000001", "refresh-hint", {"version": 8}, frm="admin"))
-    assert "orch relay refresh" in run("relay", "inbox")[1]
+    out = run("relay", "inbox")[1]
+    assert "orch relay refresh" not in out
+    have = json.loads((proj / ".orch/secrets/shared.json").read_text())
+    assert have["version"] == 8
+
+
+def test_no_hint_no_refresh(proj, run, rel, monkeypatch):
+    from orch import relay
+
+    connect(run, rel)
+    called = []
+    monkeypatch.setattr(relay, "refresh", lambda root: called.append(1))
+    assert relay.auto_refresh(proj) is False and not called
 
 
 def test_refresh_hint_is_quiet_once_refresh_ran(proj, run, rel):
@@ -399,8 +415,10 @@ def test_refresh_hint_is_quiet_once_refresh_ran(proj, run, rel):
     rel.inbox.append(msg("m_refresh000000002", "refresh-hint", {"version": 8}, frm="admin"))
     assert run("relay", "refresh")[0] == 0
     assert "orch relay refresh" not in run("relay", "inbox")[1]
+    rel.snapshot.update(version=9)
     rel.inbox.append(msg("m_refresh000000003", "refresh-hint", {"version": 9}, frm="admin"))
-    assert "orch relay refresh" in run("relay", "inbox")[1]
+    assert "orch relay refresh" not in run("relay", "inbox")[1]
+    assert json.loads((proj / ".orch/secrets/shared.json").read_text())["version"] == 9
 
 
 def test_answer_rejected_unless_it_matches_a_question_we_sent(proj, run, new_ticket, rel):
@@ -868,10 +886,17 @@ def test_send_update_needs_a_ticket_and_a_known_kind(proj, run, rel):
 
 
 def test_relay_manifest_lists_what_never_goes_into_git(proj, run, rel):
+    import subprocess
+
+    from orch import addons
+
+    subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
+    addons._activate(proj, "relay")  # the fixture turned it on before the repo existed: apply its lines now
     connect(run, rel)
-    lines = (proj / ".gitignore").read_text().splitlines()
-    for want in ("received/", ".orch/outbox/", ".agents/skills/orch-relay/workspaces.json"):
+    lines = (proj / ".git/info/exclude").read_text().splitlines()
+    for want in ("/received/", "/.orch/outbox/", "/.agents/skills/orch-relay/workspaces.json"):
         assert want in lines
+    assert not (proj / ".gitignore").exists()
 
 
 def test_relay_help_lists_webhook_and_outbox(proj, run, rel, capsys):
@@ -1499,3 +1524,18 @@ def test_relay_answer_without_a_run_queues_nothing(proj, run, new_ticket, rel):
     )
     assert "answered q1" in run("relay", "inbox")[1]
     assert runs.undelivered(proj, tid) == []
+
+
+def test_relay_tab_refreshes_when_settings_are_waiting(proj, run, rel):
+    from orch import relay_view
+
+    connect(run, rel)
+    rel.snapshot.update(version=11)
+    rel.snapshot["workspaces"]["workspaces"] = [
+        {"id": PEER, "name": "Reports", "description": "", "tags": [], "online": True, "last_seen": None}
+    ]
+    (proj / ".orch/inbox").mkdir(parents=True, exist_ok=True)
+    m = msg("m_refresh000000011", "refresh-hint", {"version": 11}, frm="admin")
+    (proj / ".orch/inbox/m_refresh000000011.json").write_text(json.dumps(m))
+    text = json.dumps(relay_view.view(proj))
+    assert "Nobody yet" not in text and "Reports" in text

@@ -11,6 +11,7 @@ AGENTS block, tab and background process. Leftover files or ext data never activ
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import importlib.util
 import json
@@ -36,7 +37,7 @@ PATH_RE = re.compile(r"^(?!/)(?!.*\.\.)[A-Za-z0-9_./-]{1,200}$")
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 # Names an add-on may never take: core commands (same list as contracts/addon-manifest.schema.json).
 RESERVED = frozenset(
-    "orch core ticket check log ask answer link ext wait addon addons update init publish relay config help "
+    "orch core ticket check log ask answer ref ext wait addon addons update init publish relay config help "
     "version view start stop status run needs agents".split()
 )
 ICONS = frozenset(
@@ -409,7 +410,7 @@ def _ext_schema(base: Path, rel, key: str) -> dict:
     return schema
 
 
-LINK_KIND_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+REF_KIND_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}(?::[a-z0-9][a-z0-9-]{0,31})?")
 LINK_ICON_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
 LINK_STATUS_RE = re.compile(r"[a-z0-9][a-z0-9 -]{0,23}")
 LINK_MATCH_RE = re.compile(r"https?://[^\s<>\"'`]{1,300}")
@@ -417,11 +418,11 @@ FIELD_KEY_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 def _ticket_links_fields_acts(base: Path, m: dict) -> None:
-    """[[ticket_links]] (link types), [ticket_fields] (fields under the ticket's Details) and [acts] (what
+    """[[ticket_links]] (reference types), [ticket_fields] (ticket fields) and [acts] (what
     `orch <name> act <verb>` offers; core knows only `refresh`)."""
     tl = m.setdefault("ticket_links", [])
     if not isinstance(tl, list) or len(tl) > 16:
-        raise _bad("ticket_links has at most 16 link types")
+        raise _bad("ticket_links has at most 16 reference types")
     kinds = set()
     for k in tl:
         match = k.get("match") if isinstance(k, dict) else None
@@ -431,8 +432,8 @@ def _ticket_links_fields_acts(base: Path, m: dict) -> None:
             isinstance(k, dict)
             and not set(k) - {"kind", "label", "icon", "match", "statuses", "preview"}
             and isinstance(k.get("kind"), str)
-            and LINK_KIND_RE.fullmatch(k["kind"])
-            and k["kind"] != "link"
+            and REF_KIND_RE.fullmatch(k["kind"])
+            and k["kind"] not in ("url", "ticket", "artifact", "file")
             and k["kind"] not in kinds
             and _text_ok(k.get("label"), 24)
             and isinstance(k.get("icon"), str)
@@ -478,10 +479,10 @@ def _ticket_links_fields_acts(base: Path, m: dict) -> None:
             and _text_ok(a.get("summary"), 80)
             and a.setdefault("who", "anyone") in ("anyone", "people")
             and isinstance(a.setdefault("writes", []), list)
-            and all(x == "links" or x == f"ext.{m.get('name')}" for x in a["writes"])
+            and all(x == "refs" or x == f"ext.{m.get('name')}" for x in a["writes"])
         )
         if not ok:
-            raise _bad(f"[acts.{verb}] has summary, who (anyone or people) and writes (links, ext.<name>)")
+            raise _bad(f"[acts.{verb}] has summary, who (anyone or people) and writes (refs, ext.<name>)")
 
 
 def parse_manifest(file: Path, core: bool = False) -> dict:
@@ -912,11 +913,11 @@ def dispatch(root: Path, name: str, argv: list[str]) -> int:
 
 
 def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) -> int:
-    """`orch <name> act refresh [--by X] [--json] -- <ticket>`: the add-on looks its links up and prints
-    ONE JSON object `{ticket, links: [{url, title?, status?, thumb?}], ext?: {<name>: {...}}, say?}`; core
+    """`orch <name> act refresh [--by X] [--json] -- <ticket>`: the add-on looks its references up and prints
+    ONE JSON object `{ticket, refs: [{url, title?, status?, thumb?}], ext?: {<name>: {...}}, say?}`; core
     merges it into the ticket (tickets.merge_refresh) and says what changed.
     The add-on never writes the ticket itself."""
-    from orch import links, tickets
+    from orch import refs, tickets
 
     rest = argv[argv.index("--") + 1 :] if "--" in argv else []
     if len(rest) != 1:
@@ -942,16 +943,16 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
         raise Refused(f"The {name} add-on answered something orch cannot read.") from None
     if isinstance(out, dict) and out.get("ticket") and tickets.resolve(root, str(out["ticket"])) != tid:
         raise Refused(f"The {name} add-on answered for another ticket.")
-    writes = act["writes"] or ["links", f"ext.{name}"]  # what the manifest says the refresh may change
+    writes = act["writes"] or ["refs", f"ext.{name}"]  # what the manifest says the refresh may change
     if isinstance(out, dict):
         out = {
             **out,
-            "links": out.get("links") if "links" in writes else [],
+            "refs": out.get("refs") if "refs" in writes else [],
             "ext": out.get("ext") if f"ext.{name}" in writes else {},
         }
     t, changes = tickets.merge_refresh(root, tid, name, out, by, active_ext_schema(root, name))
     say = out.get("say") if isinstance(out.get("say"), str) else ""
-    say = links.one_line(say, 300)
+    say = refs.one_line(say, 300)
     key = t.get("key") or t["id"]
     if "--json" in argv:
         print(json.dumps({"ticket": t["id"], "key": key, "changes": changes, "say": say}, ensure_ascii=False))
@@ -960,8 +961,8 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
         print(f"{key}  {say or 'Nothing to update.'}")
         return 0
     for c in changes:
-        old, new = (links.one_line("-" if x in (None, "") else x, 120) for x in (c["old"], c["new"]))
-        what = f"{links.one_line(c['name'])}  {c['field']}" if c["what"] == "link" else c["field"]
+        old, new = (refs.one_line("-" if x in (None, "") else x, 120) for x in (c["old"], c["new"]))
+        what = f"{refs.one_line(c['name'])}  {c['field']}" if c["what"] == "link" else c["field"]
         print(f"{key}  {what}: {old} → {new}")
     if say:
         print(say)
@@ -984,11 +985,11 @@ def consent_text(m: dict, local: bool) -> str:
     if local:
         lines.append("Source: local folder (not checked by orch). It runs code on this computer.")
     lines.append(f"Adds the command: orch {m['name']}")
-    lines.append(f"Adds a skill and an entry in AGENTS.md: orch-{m['name']}")
+    lines.append(f"Adds a skill and an entry in the local orch instructions: orch-{m['name']}")
     if "ticket_ext" in m or m.get("ticket_fields"):
         lines.append(f"Stores data on tickets under: ext.{m['name']}")
     if m.get("ticket_links"):
-        lines.append("Knows these links: " + ", ".join(k["label"] for k in m["ticket_links"]))
+        lines.append("Knows these references: " + ", ".join(k["label"] for k in m["ticket_links"]))
     if m.get("dashboard"):
         lines.append(f"Adds a dashboard tab: {m['dashboard']['label']}")
     if m["background"]:
@@ -1144,35 +1145,41 @@ def _apply_project(root: Path, m: dict) -> None:
     skills.apply_agent_files(root)
 
 
-def _gi_markers(name: str) -> tuple[str, str]:
-    return f"# orch:addon:{name}", f"# /orch:addon:{name}"
+_ORCH_STATE = {"tickets", "config.toml", "addons.json", "ticket-counter.json"}  # the team's workspace state
+
+
+def _check_ignore_line(name: str, ln: str) -> None:
+    """Allowlist: the first folder or file name of the line is literal (no glob characters), so a line can
+    name a place but never sweep across the workspace; and nothing may hide .orch or the team's ticket files
+    (compared without case, as on macOS and Windows, and without surrounding spaces)."""
+    bad = Refused(
+        f"The add-on '{name}' asks to hide '{ln}' from git. That is not allowed; nothing was changed."
+    )
+    parts = [p for p in ln.strip().strip("/").split("/") if p not in ("", ".")]
+    if not parts or any(c in parts[0] for c in "*?[]\\{}") or parts[0].strip() != parts[0]:
+        raise bad
+    if parts[0].lower().strip() == ".orch":
+        seg = parts[1].lower().strip() if len(parts) > 1 else ""
+        if not seg or any(
+            fnmatch.fnmatchcase(state, seg) for state in _ORCH_STATE
+        ):  # a glob that can hit one
+            raise bad
 
 
 def _set_gitignore(root: Path, name: str, lines: list[str]) -> None:
-    """The add-on's lines live in their own block of the workspace .gitignore; no lines = block removed."""
-    path = root / ".gitignore"
-    f = skills._project_file(root, path)
-    text = f.read_bytes().decode("utf-8") if f.exists() else ""
-    eol = "\r\n" if "\r\n" in text else "\n"
-    start, end = _gi_markers(name)
-    rows = text.splitlines()
-    if start in rows and end in rows[rows.index(start) :]:
-        i = rows.index(start)
-        j = rows.index(end, i)
-        rows = rows[:i] + rows[j + 1 :]
-    if lines:
-        rows += [start, *lines, end]
-    new = eol.join(rows) + eol if rows else ""
-    if new != text:
-        skills._write_project_file(root, path, new)
+    """The add-on's lines live in their own block of .git/info/exclude (local; the team's .gitignore stays
+    untouched); no lines = block removed."""
+    from orch import harness
+
+    for ln in lines:
+        _check_ignore_line(name, ln)
+    lines = [ln.strip() for ln in lines]
+    harness.exclude_set(root, f"addon-{name}", lines)
 
 
 def _remove_skill_folders(root: Path, name: str) -> None:
     """Exactly orch-<name>: never a neighbour such as orch-<name>-x (another add-on or the user's skill)."""
-    d = root / ".agents" / "skills" / f"orch-{name}"
-    if d.exists() or d.is_symlink():
-        skills.unlink_skill(root, d.name)
-        skills.remove_skill(root, d.name)
+    skills.remove_skill(root, f"orch-{name}")
 
 
 def remove(root: Path, name: str, purge: bool = False) -> None:
@@ -1297,7 +1304,7 @@ def update(root: Path, project_only: bool = False, after_install: bool = False) 
         )
         return []
     done = []
-    if (root / ".agents" / "skills" / "orch").is_dir():
+    if (root / ".orch" / "harness" / "skills" / "orch").is_dir():
         from orch.init import init
 
         init(root)

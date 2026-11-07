@@ -260,7 +260,7 @@ def test_footer_goes_to_stderr_only_and_once(proj, new_ticket, run, monkeypatch)
     code, out, err = run("check", "done", tid, "c1", "--note", "ok", "--json", "--by", "agent:claude")
     assert code == 0
     json.loads(out)  # stdout is exactly the JSON
-    assert f"New on {tid} since you looked: q2 answered Yes (human:marco)" in err
+    assert f"New on {tid} since you looked: Claude started (scheduler); q2 answered Yes (human:marco)" in err
     code, out, err = run("log", tid, "second", "--by", "agent:claude")
     assert "New on" not in err  # once per new revision
     tickets.log(proj, tid, "another thing", "human:marco")

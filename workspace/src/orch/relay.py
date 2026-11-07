@@ -52,6 +52,83 @@ def whoami(root: Path) -> dict:
     return _api(root, "GET", "/v1/whoami")[1]
 
 
+def heartbeat(root: Path, mobile_mode: dict) -> None:
+    """Tell the relay we are here and whether Mobile mode is on (shape: contracts/relay-api.md)."""
+    _api(root, "POST", "/v1/heartbeat", {"mobile_mode": mobile_mode}, timeout=15)
+
+
+def _is_mobile_off(m: dict) -> bool:
+    b = m.get("body")
+    return (
+        m.get("type") == "control"
+        and str(m.get("from", "")).startswith("ph_")
+        and isinstance(b, dict)
+        and b.get("control") == "mobile_mode_off"
+    )
+
+
+MOBILE_OFF_MAX_AGE = 600  # seconds: an older 'off' is ignored
+MOBILE_OFF_SKEW = 120  # seconds a request may be dated ahead (clock differences)
+
+
+def _age_seconds(stamp) -> float | None:
+    from datetime import UTC, datetime
+
+    try:
+        then = datetime.strptime(str(stamp), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+    return (datetime.now(UTC) - then).total_seconds()
+
+
+def _mobile_off_ok(root: Path, m: dict) -> bool:
+    """A phone may end Mobile mode only if it is still paired (last refresh), the request is at most 10
+    minutes old (or 2 minutes ahead) and was made after this Mobile mode began (never ends a newer one)."""
+    from orch import mobile_mode
+
+    paired = {p.get("id") for p in _read_dir(root).get("phones", []) if isinstance(p, dict)}
+    age = _age_seconds(m.get("created_at"))
+    since = mobile_mode.settle(root).get("since")  # None when off
+    return (
+        m["from"] in paired
+        and age is not None
+        and -MOBILE_OFF_SKEW <= age <= MOBILE_OFF_MAX_AGE
+        and since is not None
+        and str(m["created_at"]) >= since
+    )
+
+
+def _handle_mobile_off(root: Path, m: dict) -> str:
+    """Handle one phone 'turn off Mobile mode' request exactly once (inbox and mobile_controls may race)."""
+    from orch import mobile_mode
+
+    with locked(root):
+        if m["id"] in seen(root):
+            return "already handled"
+        ok = _mobile_off_ok(root, m)
+        since = mobile_mode.settle(root).get("since")
+        _mark_seen(root, m["id"])
+    if ok:
+        mobile_mode.turn_off(root, "phone", if_since=since, by=m["from"])
+    return (
+        "Mobile mode was turned off from the phone"
+        if ok
+        else "ignored an old, future, unpaired or outdated Mobile mode request"
+    )
+
+
+def mobile_controls(root: Path) -> list[str]:
+    """Pull and act on phone controls. Other messages stay saved and unseen for `orch relay inbox`."""
+    _pull(root, 0)
+    done_ids = []
+    for f in sorted((root / ".orch" / "inbox").glob("m_*.json")):
+        m = net.read_json(f, None)
+        if isinstance(m, dict) and m.get("id") == f.stem and f.stem not in seen(root) and _is_mobile_off(m):
+            _handle_mobile_off(root, m)
+            done_ids.append(f.stem)
+    return done_ids
+
+
 def profile(root: Path, description: str | None, tags: list[str] | None) -> dict:
     return net.profile(root, "relay", description, tags)
 
@@ -1354,6 +1431,26 @@ def _hint_applied(root: Path, m: dict) -> bool:
     )
 
 
+def auto_refresh(root: Path) -> bool:
+    """When the admin's "new settings are waiting" notice is pending, do what `orch relay refresh` does.
+    The refresh marks the notices seen. Nothing pending: no call. A failed refresh keeps the notice."""
+    for f in (root / ".orch" / "inbox").glob("m_*.json"):
+        m = net.read_json(f, None)
+        if (
+            isinstance(m, dict)
+            and m.get("id") == f.stem
+            and m.get("type") == "refresh-hint"
+            and f.stem not in seen(root)
+            and not _hint_applied(root, m)
+        ):
+            try:
+                refresh(root)
+            except (Refused, OSError, ValueError, TimeoutError):
+                return False
+            return True
+    return False
+
+
 def inbox(root: Path, wait: int = 0) -> list[dict]:
     """Pull, save, journal, ack, then handle the ones not seen. Returns [{message, note, allowed}]."""
     with contextlib.suppress(Refused):
@@ -1385,6 +1482,8 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                             note = _store_allow(root, m)
                         auto = True
                         _mark_seen(root, m["id"])  # last
+            elif _is_mobile_off(m):
+                note, auto = _handle_mobile_off(root, m), True
             elif typ == "text" and str(m.get("from", "")).startswith("ph_"):
                 with locked(root):
                     if m["id"] not in seen(root):
@@ -1409,9 +1508,11 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                             note = f"could not use this phone message: {clean_untrusted(str(e), 200)}"
                         auto = True
                         _mark_seen(root, m["id"])  # last
-            elif typ == "refresh-hint" and _hint_applied(root, m):
+            elif typ == "refresh-hint" and (
+                _hint_applied(root, m) or m["id"] in seen(root) or auto_refresh(root)
+            ):
                 with locked(root):
-                    _mark_seen(root, m["id"])  # the refresh already ran for this version: nothing to tell
+                    _mark_seen(root, m["id"])  # the settings are up to date: nothing to tell
                 continue
             elif typ in ("delegate", "start") and not _allowed_or_made(root, m):
                 with locked(root):

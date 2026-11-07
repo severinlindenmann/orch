@@ -142,6 +142,8 @@ struct ConversationInputs: Sendable {
     var outbox: [OutboxItem] = []
     var speak: PhoneSettings.Speak = .auto
     var now: Date = Date()
+    /// Phone-local "Delete": chat key -> messages up to this time are hidden (ArchiveStore).
+    var erased: [String: String] = [:]
 }
 
 extension ReadState {
@@ -170,7 +172,7 @@ enum ConversationBuilder {
         return k == "ack" || k == "working"
     }
 
-    private static func index(_ d: ConversationInputs) -> Index {
+    static func index(_ d: ConversationInputs) -> Index {
         var ix = Index()
         for pm in d.messages where !pm.fromPhone && isReceipt(pm.message) {
             guard let r = pm.message.replyTo else { continue }
@@ -259,7 +261,9 @@ enum ConversationBuilder {
             item.question = q; item.answer = d.answers[q.id]
             out.append(item)
         }
-        return out.sorted { ($0.at, $0.id) < ($1.at, $1.id) }
+        out.sort { ($0.at, $0.id) < ($1.at, $1.id) }
+        if let cut = d.erased[ReadState.key(id)] { out.removeAll { $0.at <= cut } }
+        return out
     }
 
     // MARK: Lists
@@ -269,6 +273,7 @@ enum ConversationBuilder {
         for t in d.tickets where t.workspace == ws && t.ticket != nil {
             let id = ConversationID.topic(workspace: ws, ticket: t.ticket!)
             let its = items(id, d)
+            if its.isEmpty, d.erased[ReadState.key(id)] != nil { continue }   // deleted on this phone, nothing new since
             let last = its.last(where: { $0.kind == .message || $0.answer == nil })
             out.append(TopicSummary(id: id, title: t.displayTitle, key: t.key, status: TopicStatus(t), lastLine: last?.preview ?? t.text,
                                     lastAt: last?.at ?? t.at, unread: read.unread(ReadState.key(id), in: its), isStarting: false, ticket: t))

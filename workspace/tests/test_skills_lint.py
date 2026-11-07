@@ -18,7 +18,9 @@ BUILTIN = ROOT / "workspace/src/orch/builtin"
 
 # Commands a person types (or the installer runs); no skill needs to teach them to an agent.
 HUMAN_ONLY = {
+    *(f"relay mobile {x}" for x in ("on", "off", "status", "hours", "ack", "keeper")),  # a person's switch
     "init",
+    "share",
     "update",
     "start",
     "stop",
@@ -266,7 +268,7 @@ def _addon_with_skill(proj, name):
 
 def test_refresh_writes_only_on_change(proj, capsys):
     _addon_with_skill(proj, "publish")
-    skill = proj / ".agents/skills/orch-publish/SKILL.md"
+    skill = proj / ".orch/harness/skills/orch-publish/SKILL.md"
     assert "Connect" in skill.read_text(encoding="utf-8") and "{{" not in skill.read_text(encoding="utf-8")
     capsys.readouterr()
     assert skillrender.refresh_skills(proj) == []
@@ -287,7 +289,7 @@ def test_skill_file_link_is_replaced_not_followed(proj, tmp_path):
     _addon_with_skill(proj, "publish")
     victim = proj / "victim.txt"  # inside the project (a link out of it is refused earlier)
     victim.write_text("keep me", encoding="utf-8")
-    skill = proj / ".agents/skills/orch-publish/SKILL.md"
+    skill = proj / ".orch/harness/skills/orch-publish/SKILL.md"
     skill.unlink()
     skill.symlink_to(victim)
     (proj / ".orch/secrets").mkdir(parents=True)
@@ -304,7 +306,7 @@ def test_skills_folder_link_is_refused(proj, tmp_path):
     from orch.errors import Refused
 
     _addon_with_skill(proj, "publish")
-    real = proj / ".agents/skills/orch-publish"
+    real = proj / ".orch/harness/skills/orch-publish"
     moved = proj / "elsewhere"
     real.rename(moved)
     real.symlink_to(moved, target_is_directory=True)

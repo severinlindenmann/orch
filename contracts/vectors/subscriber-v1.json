@@ -23,7 +23,7 @@
         "summary": null,
         "done": 4,
         "total": 4,
-        "links": [
+        "refs": [
           {
             "kind": "pr",
             "title": "Pull request #42",
@@ -119,7 +119,7 @@
           "summary": null,
           "done": 4,
           "total": 4,
-          "links": [
+          "refs": [
             {
               "kind": "pr",
               "title": "Pull request #42",
@@ -159,7 +159,7 @@
           "summary": null,
           "done": 4,
           "total": 4,
-          "links": [
+          "refs": [
             {
               "kind": "pr",
               "title": "Pull request #42",
@@ -215,8 +215,8 @@
       "name": "update",
       "secret": "whsec_dGVzdC1zZWNyZXQtZm9yLW9yY2gtc3Vic2NyaWJlcnMx",
       "timestamp": 1762458130,
-      "body": "{\"v\":1,\"id\":\"m_9f3k2q7x1c0a4b5d\",\"type\":\"update\",\"workspace\":{\"id\":\"ws_4hd8k2m1qa\",\"name\":\"Month-end close\"},\"ticket\":\"t_7k3f9q\",\"key\":\"DM1-12\",\"at\":\"2026-11-06T19:42:10Z\",\"kind\":\"result\",\"title\":\"March export matched\",\"text\":\"All 214 accounts matched. Three had no category, I put them under Other.\",\"ticket_view\":{\"title\":\"Match March export\",\"status\":\"done\",\"agent\":\"Claude\",\"summary\":null,\"done\":4,\"total\":4,\"links\":[{\"kind\":\"pr\",\"title\":\"Pull request #42\",\"url\":\"https://github.com/acme/books/pull/42\"}],\"files\":[{\"name\":\"march-check.csv\",\"size\":18234,\"blob_id\":\"b_2k9d7s1x0a1b2c3d\"}]}}",
-      "signature": "v1=2ff332327262189bce40093797b26acf6fb360491273c96451cb00662cf508a2"
+      "body": "{\"v\":1,\"id\":\"m_9f3k2q7x1c0a4b5d\",\"type\":\"update\",\"workspace\":{\"id\":\"ws_4hd8k2m1qa\",\"name\":\"Month-end close\"},\"ticket\":\"t_7k3f9q\",\"key\":\"DM1-12\",\"at\":\"2026-11-06T19:42:10Z\",\"kind\":\"result\",\"title\":\"March export matched\",\"text\":\"All 214 accounts matched. Three had no category, I put them under Other.\",\"ticket_view\":{\"title\":\"Match March export\",\"status\":\"done\",\"agent\":\"Claude\",\"summary\":null,\"done\":4,\"total\":4,\"refs\":[{\"kind\":\"pr\",\"title\":\"Pull request #42\",\"url\":\"https://github.com/acme/books/pull/42\"}],\"files\":[{\"name\":\"march-check.csv\",\"size\":18234,\"blob_id\":\"b_2k9d7s1x0a1b2c3d\"}]}}",
+      "signature": "v1=e2e5622f65d01b51ca96033055102a088504ce442101b9e6970f4fd7f8ac051c"
     },
     {
       "name": "test",

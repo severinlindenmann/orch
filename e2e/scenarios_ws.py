@@ -73,14 +73,13 @@ def w1(e):
     check(rc == 0, f"init failed: {err}")
     check((d / ".orch/tickets").is_dir(), ".orch/tickets missing")
     check((d / ".agents/skills/orch/SKILL.md").is_file(), "orch skill missing")
-    agents = (d / "AGENTS.md").read_text()
-    check("<!-- orch:begin orch" in agents and "<!-- orch:end orch" in agents, "AGENTS.md block missing")
-    check((d / ".claude/skills").is_symlink(), ".claude/skills is not a link")
-    check(os.readlink(d / ".claude/skills") == "../.agents/skills", f"link target {os.readlink(d / '.claude/skills')}")
-    check("@AGENTS.md" in (d / "CLAUDE.md").read_text(), "CLAUDE.md lacks @AGENTS.md")
-    gi = (d / ".gitignore").read_text()
-    for line in (".orch/.local-id", ".orch/secrets/", ".orch/inbox/", ".orch/inbox-seen.json", ".orch/addons/"):
-        check(line in gi.splitlines(), f".gitignore lacks {line}")
+    check((d / ".orch/harness/AGENTS.orch.md").is_file(), "orch block missing under .orch/harness")
+    check(not (d / "AGENTS.md").exists() and not (d / "CLAUDE.md").exists() and not (d / ".gitignore").exists(), "init wrote a team file")
+    check((d / ".claude/skills/orch").is_symlink() and (d / ".claude/skills/orch/SKILL.md").is_file(), ".claude/skills/orch is not a link")
+    check("@.orch/harness/AGENTS.orch.md" in (d / "CLAUDE.local.md").read_text(), "CLAUDE.local.md lacks the import")
+    gi = (d / ".orch/.gitignore").read_text()
+    for line in (".local-id", "secrets/", "inbox/", "inbox-seen.json", "addons/"):
+        check(line in gi.splitlines(), f".orch/.gitignore lacks {line}")
     before = snapshot(d)
     rc, _, err = e.sh(["orch", "init"], cwd=d)
     check(rc == 0, f"second init failed: {err}")
@@ -155,7 +154,7 @@ def w6(e):
     ws = e.ws("Pilatus")
     t = e.orchj(ws, "ticket", "new", "W6 links")["id"]
     for url in ("https://acme.atlassian.net/browse/X-1", "https://teams.microsoft.com/l/x", "https://intranet.example/a"):
-        e.orch(ws, "link", "add", t, url)
+        e.orch(ws, "ref", "add", t, url)
     e.orch(ws, "ext", "set", t, "demo", '{"k": 1}')
     p = ws / ".orch/tickets" / f"{t}.json"
     d = json.loads(p.read_text())
@@ -165,8 +164,8 @@ def w6(e):
     e.orch(ws, "log", t, "another write")
     e.orch(ws, "check", "add", t, "again")
     d = tload(ws, t)
-    check([l["kind"] for l in d["links"]] == ["link", "link", "link"] and all(l.get("at") and l.get("by") for l in d["links"]), f"links {d['links']}")
-    listed = e.orch(ws, "link", "list", t)[1]
+    check([l["kind"] for l in d["refs"]] == ["url", "url", "url"] and all(l.get("at") and l.get("by") for l in d["refs"]), f"links {d['refs']}")
+    listed = e.orch(ws, "ref", "list", t)[1]
     check("Jira" in listed and "Teams" in listed and "intranet.example/a" in listed, f"link list {listed!r}")
     check(d["ext"]["demo"] == {"k": 1} and d["ext"]["unknown_addon"] == {"a": [1, 2]}, f"ext lost: {d['ext']}")
     check(d.get("x_hand") == {"note": "keep me"}, "unknown top-level field lost")
@@ -213,7 +212,7 @@ def a0(e):
         check(x["active"] is True and x["source"] == "built-in", f"{a}: {x}")
         check(set(x) >= {"name", "version", "description", "source", "active", "dashboard", "ticket_view", "background"}, f"keys {sorted(x)}")
         check((ws / f".agents/skills/orch-{a}/SKILL.md").is_file(), f"skill orch-{a} missing")
-        check(f"<!-- orch:addon:{a} -->" in (ws / "AGENTS.md").read_text(), f"AGENTS.md block {a} missing")
+        check(f"orch-{a}" in (ws / ".orch/harness/AGENTS.orch.md").read_text(), f"orch block {a} missing")
     check(lst["automation"]["background"] is True and lst["automation"]["dashboard"]["label"], f"automation entry {lst['automation']}")
     act = json.loads((ws / ".orch/addons.json").read_text())["active"]
     check({"dashboard", "automation"} <= set(act) and act["automation"]["version"], f"addons.json {act}")
@@ -223,8 +222,8 @@ def a0(e):
     check((e.orch_home / "consent.json").is_file(), "consent record missing under ORCH_HOME")
     e.orch(ws, "addon", "remove", "automation")
     check(not (ws / ".agents/skills/orch-automation").exists(), "automation skill still there")
-    check("orch:addon:automation" not in (ws / "AGENTS.md").read_text(), "automation block still there")
-    check("<!-- orch:addon:dashboard -->" in (ws / "AGENTS.md").read_text(), "dashboard block was removed too")
+    check("orch-automation" not in (ws / ".orch/harness/AGENTS.orch.md").read_text(), "automation block still there")
+    check("orch-dashboard" in (ws / ".orch/harness/AGENTS.orch.md").read_text(), "dashboard block was removed too")
     rc, out, err = e.addon_add(ws, "automation")  # back for A4/A5
     check(rc == 0, f"addon add automation again: {(err or out)[-200:]}")
     e._addons = True

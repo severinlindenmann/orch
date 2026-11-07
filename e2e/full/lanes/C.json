@@ -1,0 +1,403 @@
+{
+ "lane": "C",
+ "title": "Relay admin walk",
+ "base": "relay_admin",
+ "viewports": [
+  1280,
+  720,
+  390
+ ],
+ "census_skip": [
+  "Delete",
+  "Remove",
+  "Sign out",
+  "\\|Cancel$",
+  "\\|Close$"
+ ],
+ "steps": [
+  {
+   "id": "C01",
+   "name": "Sign in: wrong key is refused in words, right key opens the admin",
+   "page": "relay-signin",
+   "expect": "a wrong key shows a plain message",
+   "expect_errors": {
+    "http": [
+     "/admin/api"
+    ],
+    "console": [
+     "Failed to load resource"
+    ]
+   },
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/"
+    },
+    {
+     "do": "fill",
+     "sel": "input[type=password]",
+     "value": "wrong-key"
+    },
+    {
+     "do": "click",
+     "sel": "button[type=submit]"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "fill",
+     "sel": "input[type=password]",
+     "value": "{{relay_admin_token}}"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Show')",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "button[type=submit]"
+    },
+    {
+     "do": "expect_text",
+     "text": "Overview"
+    }
+   ]
+  },
+  {
+   "id": "C02",
+   "name": "Overview: workspaces and the network",
+   "page": "relay-overview",
+   "expect": "all three workspaces are listed; Add connection explains how",
+   "actions": [
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Overview'), aside a:has-text('Overview')"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "expect_text",
+     "text": "Pilatus"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add connection')",
+     "optional": true
+    },
+    {
+     "do": "press",
+     "key": "Escape"
+    }
+   ]
+  },
+  {
+   "id": "C03",
+   "name": "Groups: create a group",
+   "page": "relay-groups",
+   "expect": "the group appears in the list",
+   "actions": [
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Groups'), aside a:has-text('Groups')"
+    },
+    {
+     "do": "fill",
+     "sel": "input[placeholder='e.g. Work']",
+     "value": "Engineering {{stamp}}"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Create group')"
+    },
+    {
+     "do": "expect_text",
+     "text": "Engineering"
+    }
+   ]
+  },
+  {
+   "id": "C04",
+   "name": "Who can do what: allow a direction and save",
+   "page": "relay-rules",
+   "expect": "the change is saved and shown again after reload",
+   "actions": [
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Who can do what'), aside a:has-text('Who can do what')"
+    },
+    {
+     "do": "wait",
+     "ms": 600
+    },
+    {
+     "do": "check",
+     "sel": "#r-{{relay_id_reports}}-{{relay_id_pilatus}}-delegate",
+     "force": true
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Save changes')"
+    },
+    {
+     "do": "wait",
+     "ms": 900
+    },
+    {
+     "do": "reload"
+    }
+   ]
+  },
+  {
+   "id": "C05",
+   "name": "Messages: filters",
+   "page": "relay-messages",
+   "expect": "filters narrow the list",
+   "actions": [
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Messages'), aside a:has-text('Messages')"
+    },
+    {
+     "do": "wait",
+     "ms": 600
+    },
+    {
+     "do": "select",
+     "sel": "select >> nth=0",
+     "value": "{{relay_id_pilatus}}",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    }
+   ]
+  },
+  {
+   "id": "C06",
+   "name": "Shared tools: add a secret",
+   "page": "relay-shared",
+   "expect": "the secret is listed by name, never shown",
+   "actions": [
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Shared tools'), aside a:has-text('Shared tools')"
+    },
+    {
+     "do": "fill",
+     "sel": "role=textbox[name='Name'] >> nth=0",
+     "value": "E2E_SECRET"
+    },
+    {
+     "do": "fill",
+     "sel": "label=Secret value",
+     "value": "e2e-value"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add secret')"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "expect_text",
+     "text": "E2E_SECRET"
+    }
+   ]
+  },
+  {
+   "id": "C07",
+   "name": "Webhooks and Phones pages",
+   "page": "relay-webhooks",
+   "expect": "both pages load with a plain empty state",
+   "actions": [
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Webhooks'), aside a:has-text('Webhooks')"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    },
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Phones'), aside a:has-text('Phones')"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    }
+   ]
+  },
+  {
+   "id": "C08",
+   "name": "Subscribers: add one with a push address, copy the token, test push",
+   "page": "relay-subs",
+   "expect": "subscriber is listed; the token is shown once",
+   "actions": [
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Subscribers'), aside a:has-text('Subscribers')"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add subscriber') >> nth=0"
+    },
+    {
+     "do": "fill",
+     "sel": "input[placeholder='e.g. Team chat bot']",
+     "value": "Browser bot"
+    },
+    {
+     "do": "click",
+     "sel": "label.pill-check:has-text('Pilatus')"
+    },
+    {
+     "do": "fill",
+     "sel": "input[type=url]",
+     "value": "{{url:receiver}}/push"
+    },
+    {
+     "do": "click",
+     "sel": "form button[type=submit]"
+    },
+    {
+     "do": "wait",
+     "ms": 1200
+    },
+    {
+     "do": "press",
+     "key": "Escape"
+    }
+   ]
+  },
+  {
+   "id": "C10",
+   "name": "Subscribers dialog: every switch, field and Cancel",
+   "page": "relay-sub-dialog",
+   "expect": "all options can be changed; Cancel closes without adding",
+   "actions": [
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Subscribers'), aside a:has-text('Subscribers')"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add subscriber') >> nth=0"
+    },
+    {
+     "do": "click_all_census",
+     "page": "relay-sub-dialog"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Close')",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add subscriber') >> nth=0"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Cancel')",
+     "optional": true
+    }
+   ]
+  },
+  {
+   "id": "C09",
+   "name": "Click every remaining control (census)",
+   "page": "relay-census",
+   "tags": [
+    "census"
+   ],
+   "expect": "every control on every admin page clicked once",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/"
+    },
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Overview'), aside a:has-text('Overview')"
+    },
+    {
+     "do": "click_all_census",
+     "page": "relay-overview"
+    },
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Groups'), aside a:has-text('Groups')"
+    },
+    {
+     "do": "click_all_census",
+     "page": "relay-groups"
+    },
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Who can do what'), aside a:has-text('Who can do what')"
+    },
+    {
+     "do": "click_all_census",
+     "page": "relay-rules"
+    },
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Messages'), aside a:has-text('Messages')"
+    },
+    {
+     "do": "click_all_census",
+     "page": "relay-messages"
+    },
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Shared tools'), aside a:has-text('Shared tools')"
+    },
+    {
+     "do": "click_all_census",
+     "page": "relay-shared"
+    },
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Webhooks'), aside a:has-text('Webhooks')"
+    },
+    {
+     "do": "click_all_census",
+     "page": "relay-webhooks"
+    },
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Subscribers'), aside a:has-text('Subscribers')"
+    },
+    {
+     "do": "click_all_census",
+     "page": "relay-subs"
+    },
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Phones'), aside a:has-text('Phones')"
+    },
+    {
+     "do": "click_all_census",
+     "page": "relay-phones"
+    },
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Add workspace'), aside a:has-text('Add workspace')"
+    },
+    {
+     "do": "click_all_census",
+     "page": "relay-add"
+    }
+   ]
+  }
+ ]
+}

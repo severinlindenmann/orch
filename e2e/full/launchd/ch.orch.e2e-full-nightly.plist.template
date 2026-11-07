@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Nightly orch e2e (quick), 02:00. NOT loaded by anything: the owner decides.
+     Install:  sed -e 's|@REPO@|/Users/lume/orch-dev/orch|g' -e 's|@HOME@|/Users/lume|g' this-file > ~/Library/LaunchAgents/ch.orch.e2e-full-nightly.plist
+               launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ch.orch.e2e-full-nightly.plist
+     Remove:   launchctl bootout gui/$(id -u)/ch.orch.e2e-full-nightly
+     It runs the checkout in @REPO@ (keep it on develop, `git pull` first via the script). -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>ch.orch.e2e-full-nightly</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/sh</string><string>-c</string>
+    <string>cd @REPO@ &amp;&amp; git fetch -q origin develop &amp;&amp; e2e/full/run.sh --quick --sha "$(git rev-parse origin/develop)"</string>
+  </array>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>0</integer></dict>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>@HOME@/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StandardOutPath</key><string>@HOME@/orch-dev/state/e2e-full/nightly.log</string>
+  <key>StandardErrorPath</key><string>@HOME@/orch-dev/state/e2e-full/nightly.log</string>
+</dict></plist>

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import socket
+import ssl
 import sys
 import time
 import urllib.error
@@ -16,6 +18,19 @@ from orch import term
 from orch.errors import Refused
 
 RETRY_DELAYS = (1, 2, 4)  # seconds; connection-level failures only
+
+
+@functools.cache
+def _tls() -> ssl.SSLContext | None:
+    """Windows: let Windows check the server's certificate (truststore). Python alone only knows the root
+    certificates already in the Windows store, and a fresh PC fetches missing ones only when Windows itself
+    checks: the first connection to a relay then failed with "unable to get local issuer certificate".
+    Other systems keep Python's default (None)."""
+    if sys.platform != "win32":
+        return None
+    import truststore
+
+    return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
 
 def _safe_to_retry(req, exc) -> bool:
@@ -34,7 +49,7 @@ def _send(req, timeout, limit=None):
     delays = list(RETRY_DELAYS)
     while True:
         try:
-            r = urllib.request.urlopen(req, timeout=timeout)
+            r = urllib.request.urlopen(req, timeout=timeout, context=_tls())
         except urllib.error.HTTPError:
             raise  # a response arrived: never retry (no duplicate POSTs)
         except (urllib.error.URLError, TimeoutError, OSError) as e:
@@ -123,6 +138,13 @@ def secrets_dir(root: Path) -> Path:
 
 
 def write_atomic(path: Path, data: bytes, private: bool = False) -> None:
+    if private:  # fail closed: a private file is only stored when git is told to leave it alone
+        from orch import skills
+
+        for anc in path.parents:
+            if anc.name == ".orch":
+                skills.ensure_gitignore(anc.parent)
+                break
     path.parent.mkdir(parents=True, exist_ok=True)
     import tempfile
 

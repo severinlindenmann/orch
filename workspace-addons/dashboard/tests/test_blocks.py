@@ -179,3 +179,15 @@ def test_an_addon_page_shown_inside_the_app_opens_there_not_in_a_new_tab(tmp_pat
     a = [n for n in walk(run(tmp_path, view, {"focus": "http://127.0.0.1:8500"}, own="focus", inapp=True)) if n["tag"] == "a"]
     assert a and a[0]["attrs"]["href"] == "#open/focus/t/t_abc12345" and "target" not in a[0]["attrs"]
     assert "Start focus" in texts(run(tmp_path, view, own="focus", inapp=True))  # not running: still offers Start
+
+
+def test_settings_general_panel_holds_mobile_mode_name_folder_and_share_together():
+    """panel(id, body) takes ONE body: the General panel must pass an array, or all but the first part is dropped."""
+    src = (WEB / "app.js").read_text(encoding="utf-8")
+    start = src.index("panel('general', ")
+    end = src.index("panel('agent', ", start)
+    part = src[start:end]
+    assert part.startswith("panel('general', [") and part.rstrip().endswith("]),")
+    for want in ("OrchMobileMode?.settingsSection(h)", "'Name'", "'Folder'", "shareCard(settings)"):
+        assert want in part, want
+    assert "const panel = (id, body) =>" in src[: src.index("function settingsPage")] or "const panel = (id, body) =>" in src

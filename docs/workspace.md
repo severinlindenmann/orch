@@ -75,16 +75,16 @@ rows (for example "automation is not running"). The same list is on the dashboar
 
 To pause a ticket until a time: `orch wait <id> --until 2026-12-01T08:00:00+01:00`.
 
-## Links and history
+## References and history
 
 ```sh
-$ orch link add DM1-12 https://github.com/acme/billing/pull/418
-Linked DM1-12 → Pull request github.com/acme/billing/pull/418
-$ orch link add DM1-12 https://www.figma.com/design/k2Lq9/Billing --title "Export button states"
-$ orch link list DM1-12
+$ orch ref add DM1-12 https://github.com/acme/billing/pull/418
+Added reference to DM1-12: https://github.com/acme/billing/pull/418
+$ orch ref add DM1-12 https://www.figma.com/design/k2Lq9/Billing --title "Export button states"
+$ orch ref list DM1-12
   1  Pull request  github.com/acme/billing/pull/418  open
   2  Figma         Export button states
-$ orch link remove DM1-12 2
+$ orch ref rm DM1-12 2
 $ orch ticket set MK2-7 marketing.budget 2400        # an add-on field (shown under Details)
 $ orch log <id> "Waiting for the new price list"
 ```
@@ -114,7 +114,7 @@ questions and answers, history. Relay and publish ship in the same package as bu
 | `orch ticket new\|list\|show\|tree\|edit\|summary\|status\|wait\|patch` | Tickets. `done` is refused while a ticked task lacks proof |
 | `orch check add\|edit\|move\|remove\|reopen\|start\|stop\|done` | Tasks and proof |
 | `orch ask` / `answer` / `needs` | Questions and the list of what needs a person |
-| `orch link add\|list\|remove`, `orch ticket set`, `orch log`, `orch ext set\|unset` | Links (https/http; kind from the active add-ons, else the known-sites table, else Link), add-on fields, history, add-on data (`ext.<addon>`; `ext unset <id> <addon>[.<key>] [--if-revision N]` removes it) |
+| `orch ref add\|list\|rm`, `orch ticket set`, `orch log`, `orch ext set\|unset` | References (URLs, tickets, artifacts and files; kind from the active add-ons, else the known-sites table, else Reference), add-on fields, history, add-on data (`ext.<addon>`; `ext unset <id> <addon>[.<key>] [--if-revision N]` removes it) |
 | `orch agents`, `orch config`, `orch run ...` | Agents and runs: [agents.md](agents.md) |
 | `orch addon add\|list\|remove\|uninstall`, `orch start\|stop\|status`, `orch update` | Add-ons: [addons.md](addons.md) |
 
@@ -142,7 +142,11 @@ installer runs with a bypass for that one process only). On Windows on ARM the i
 `finish.log` in orch's home, `orch addon list` shows the result; wait for it before the next orch command). CI runs
 `e2e/windows/run-as-standard-user.ps1` on develop pushes and on PRs that change the install path: the standard-user
 flow (install, init, ticket, dashboard add-on in the background, update) and the scheduler flow (automation add-on: a
-repeat and a one-time wake-up in a named time zone start a fake agent). On a winvm clone run the same script.
+repeat and a one-time wake-up in a named time zone start a fake agent). On a winvm clone run the same script; add
+`-Flows dashboard` for the dashboard smoke (Playwright inside the machine opens Home, Tickets, a ticket, General and
+Settings, and at 720 and 390 px; screenshots end up in `C:\Users\Public\orchsmoke\shots`).
+`-Flows relay -EnvFile <file>` adds a relay round trip with a Mac workspace: `e2e/windows/relay-pair.py` makes the two
+workspaces on a relay and writes the file, `e2e/windows/relay-peer.py` answers on the Mac (text and file back).
 
 ## Not included
 Signing, approvals, planning gates, fixed requirements, durations, a server.

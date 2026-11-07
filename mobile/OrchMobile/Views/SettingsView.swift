@@ -78,6 +78,24 @@ struct SettingsView: View {
                             }.buttonStyle(PressStyle()).accessibilityIdentifier("add-workspace")
                         }
                     }
+                    section("CHATS") {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Toggle("Archive old chats automatically", isOn: Binding(get: { model.archive.autoDays > 0 },
+                                set: { model.setAutoArchive(days: $0 ? 7 : 0) }))
+                                .themeFont(17).tint(Theme.brand).frame(minHeight: 44).padding(16).accessibilityIdentifier("auto-archive")
+                            if model.archive.autoDays > 0 {
+                                ShellDivider().padding(.leading, 16)
+                                NavigationLink { AutoArchiveDaysView() } label: {
+                                    HStack { Text("After"); Spacer(); Text("\(model.archive.autoDays) days").foregroundStyle(Theme.muted); ShellChevron() }
+                                        .themeFont(17).padding(16).frame(minHeight: 52).contentShape(Rectangle())
+                                }.buttonStyle(PressStyle()).accessibilityIdentifier("auto-archive-days")
+                                    .accessibilityLabel("Archive after").accessibilityValue("\(model.archive.autoDays) days")
+                            }
+                            Text("Only finished (Done) chats with no new message move to Archived. Chats waiting for you, in Review, and General never do. A new message brings a chat back.")
+                                .themeFont(13).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 16)
+                        }
+                    }
                     section("PREFERENCES") {
                         VStack(spacing: 0) {
                             NavigationLink { VoiceSettingsView() } label: {
@@ -205,6 +223,25 @@ struct WorkspaceSettingsView: View {
         default: mute = .off
         }
         Task { await model.setMute(workspaceId, mute); busy = false }
+    }
+}
+
+struct AutoArchiveDaysView: View {
+    @Environment(AppModel.self) private var model
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(ArchiveStore.dayChoices, id: \.self) { days in
+                    Button { model.setAutoArchive(days: days) } label: {
+                        HStack { Text("\(days) days"); Spacer(); if model.archive.autoDays == days { Image(systemName: "checkmark").foregroundStyle(Theme.brand).accessibilityHidden(true) } }
+                            .themeFont(17).padding(16).frame(minHeight: 48).contentShape(Rectangle())
+                    }.buttonStyle(PressStyle()).accessibilityAddTraits(model.archive.autoDays == days ? .isSelected : [])
+                        .accessibilityIdentifier("auto-archive-\(days)")
+                    if days != ArchiveStore.dayChoices.last { ShellDivider().padding(.leading, 16) }
+                }
+            }.background(Theme.surface, in: RoundedRectangle(cornerRadius: 14)).padding(16)
+        }.background(Theme.bg.ignoresSafeArea()).foregroundStyle(Theme.text)
+            .navigationTitle("Archive after").navigationBarTitleDisplayMode(.inline)
     }
 }
 

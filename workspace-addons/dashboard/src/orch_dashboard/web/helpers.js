@@ -6,7 +6,7 @@
   else root.DashHelpers = api;
 })(typeof self !== 'undefined' ? self : this, function () {
   const arr = v => Array.isArray(v) ? v : [];
-  const STATUS_WORD = {open: 'To do', active: 'Doing', waiting: 'Waiting', done: 'Done', dropped: 'Dropped'};
+  const STATUS_WORD = {open: 'Backlog', ready: 'Ready', active: 'Working', waiting: 'Waiting', review: 'Review', done: 'Done', dropped: 'Dropped'};
   const FIELD_WORD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary',
     status: 'the status'};
 
@@ -36,7 +36,7 @@
     if (/^(Updated|Removed) .+ settings$/.test(text)) return text;
     if (/^Check c\d+ done/i.test(text) || /^(Checked|Done)\b.*\bc\d+/.test(text) || /^Task .* done/i.test(text)) return 'Finished a task';
     if (/^Added task|^Added check/i.test(text)) return 'Added a task';
-    if (/^Linked|^Link added/i.test(text)) return 'Added a link';
+    if (/^Linked|^Link added/i.test(text)) return 'Added a reference';
     return text;
   }
 
@@ -102,7 +102,7 @@
     const t = ticket || {}, r = run || null, id = t.id;
     const sessions = arr(t.sessions).slice().sort((a, b) => Date.parse(b.last_used || 0) - Date.parse(a.last_used || 0));
     const claim = (r && r.claim) || {};
-    const agent = capital(noPrefix(claim.agent || (sessions[0] && sessions[0].agent) || '')) || 'Agent';
+    const agent = capital(noPrefix(claim.label || claim.agent || (sessions[0] && sessions[0].agent) || '')) || 'Agent';
     const asks = arr(t.questions).some(q => q && q.answer == null);
     const start = (label, extra) => ({label, op: 'run.start', args: {ticket: id, ...(extra || {})}});
     const stop = {label: 'Stop', op: 'run.stop', args: {ticket: id}};

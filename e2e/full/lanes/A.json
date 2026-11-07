@@ -1,0 +1,1030 @@
+{
+ "lane": "A",
+ "title": "Workspace A browser walk (Pilatus dashboard)",
+ "base": "pilatus",
+ "viewports": [
+  1280,
+  720,
+  390
+ ],
+ "census_skip": [
+  "\\|switch\\|",
+  "Turn on",
+  "\\|Stop",
+  "Change the status"
+ ],
+ "steps": [
+  {
+   "id": "A01",
+   "name": "Home empty state and title",
+   "quick": true,
+   "page": "home",
+   "tags": [
+    "win"
+   ],
+   "expect": "Home says Needs you and the Today heading; no console error",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/"
+    },
+    {
+     "do": "expect_text",
+     "text": "Needs you"
+    },
+    {
+     "do": "expect_text",
+     "text": "New ticket"
+    }
+   ]
+  },
+  {
+   "id": "A02",
+   "name": "Menu: open every nav item",
+   "quick": true,
+   "page": "nav",
+   "tags": [
+    "win"
+   ],
+   "expect": "each page loads fast, URL hash changes, Back works",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "click",
+     "sel": "role=link[name=\"Tickets\"]"
+    },
+    {
+     "do": "expect_url",
+     "contains": "#"
+    },
+    {
+     "do": "click",
+     "sel": "role=link[name=\"Settings\"]"
+    },
+    {
+     "do": "expect_url",
+     "contains": "#"
+    },
+    {
+     "do": "back"
+    },
+    {
+     "do": "click",
+     "sel": "role=link[name=/^Home/]"
+    },
+    {
+     "do": "expect_text",
+     "text": "Needs you"
+    }
+   ]
+  },
+  {
+   "id": "A03",
+   "name": "New ticket: empty submit shows an inline error, Esc closes",
+   "quick": true,
+   "page": "new-ticket",
+   "expect": "empty title is refused in words next to the field; Esc closes the dialog",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "click",
+     "sel": "#new-ticket"
+    },
+    {
+     "do": "wait",
+     "ms": 300
+    },
+    {
+     "do": "press",
+     "key": "Enter",
+     "optional": true
+    },
+    {
+     "do": "press",
+     "key": "Escape"
+    }
+   ]
+  },
+  {
+   "id": "A04",
+   "name": "New ticket with title and note",
+   "quick": true,
+   "page": "tickets",
+   "expect": "ticket appears on Home and in Tickets",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "click",
+     "sel": "#new-ticket"
+    },
+    {
+     "do": "fill",
+     "sel": "label=Title",
+     "value": "E2E ticket {{stamp}}"
+    },
+    {
+     "do": "press",
+     "key": "Enter"
+    },
+    {
+     "do": "wait",
+     "ms": 1500
+    },
+    {
+     "do": "expect_text",
+     "text": "E2E ticket"
+    }
+   ]
+  },
+  {
+   "id": "A05",
+   "name": "Ticket page of the fixture ticket",
+   "quick": true,
+   "page": "ticket",
+   "expect": "the ticket page shows title, status, tasks",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#ticket/{{ticket_id}}"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "expect_text",
+     "text": "{{ticket_title}}"
+    }
+   ]
+  },
+  {
+   "id": "A06",
+   "name": "Settings page",
+   "page": "settings",
+   "expect": "Settings loads with the agent choice and add-ons",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "expect_text",
+     "text": "Settings"
+    }
+   ]
+  },
+  {
+   "id": "A07",
+   "name": "Add-on tabs: Automation, Focus, Relay",
+   "page": "addons",
+   "expect": "each add-on tab loads its page",
+   "actions": [
+    {
+     "do": "click",
+     "sel": "role=link[name=\"Automation\"]"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "click",
+     "sel": "role=link[name=\"Focus\"]"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "click",
+     "sel": "role=link[name=\"Relay\"]"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    }
+   ]
+  },
+  {
+   "id": "A08",
+   "name": "Origin check: a foreign page cannot act",
+   "page": "api",
+   "noshot": true,
+   "quick": true,
+   "expect": "POST /api/act with a foreign Origin is refused",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/"
+    },
+    {
+     "do": "expect_status",
+     "method": "POST",
+     "path": "/api/act",
+     "headers": {
+      "Origin": "http://evil.example"
+     },
+     "body": {
+      "op": "log",
+      "args": {}
+     },
+     "status": [
+      400,
+      403
+     ]
+    }
+   ]
+  },
+  {
+   "id": "A10",
+   "name": "Change a ticket status from the menu",
+   "page": "home",
+   "expect": "the status chip changes to Doing and stays after reload",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "click",
+     "sel": "[data-key^='ticket-']:has-text('E2E ticket') summary >> nth=0"
+    },
+    {
+     "do": "click",
+     "sel": "role=menuitemradio[name='Doing']"
+    },
+    {
+     "do": "wait",
+     "ms": 1200
+    },
+    {
+     "do": "reload"
+    },
+    {
+     "do": "expect_text",
+     "text": "Doing"
+    }
+   ]
+  },
+  {
+   "id": "A11",
+   "name": "Tickets: List and Board",
+   "page": "tickets",
+   "expect": "both views show the tickets; the choice survives a reload",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#tickets"
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='Board']"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    },
+    {
+     "do": "reload"
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='List']"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    }
+   ]
+  },
+  {
+   "id": "A12",
+   "name": "Settings tabs: General, Agent, Add-ons",
+   "page": "settings",
+   "expect": "each tab shows its page",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Agent']"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Add-ons']"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='General']"
+    }
+   ]
+  },
+  {
+   "id": "A13",
+   "name": "Keyboard: Tab reaches the nav and the New ticket button",
+   "page": "home",
+   "noshot": true,
+   "expect": "focus is visible and moves in a sensible order",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "press",
+     "key": "Tab"
+    },
+    {
+     "do": "press",
+     "key": "Tab"
+    },
+    {
+     "do": "press",
+     "key": "Tab"
+    },
+    {
+     "do": "eval",
+     "js": "(() => { const e = document.activeElement; const s = getComputedStyle(e); return e.tagName + ' ' + (s.outlineStyle !== 'none' || s.boxShadow !== 'none') })()",
+     "store": "focus_ring"
+    }
+   ]
+  },
+  {
+   "id": "A14",
+   "name": "Ticket tabs: Overview, Tasks, Questions, Artifacts, History",
+   "page": "ticket-tabs",
+   "expect": "every tab shows its content or a plain empty state",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#ticket/{{ticket_id}}"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-tasks"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-questions"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-artifacts"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-history"
+    },
+    {
+     "do": "expect_text",
+     "text": "Created"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-overview"
+    }
+   ]
+  },
+  {
+   "id": "A15",
+   "name": "Add a task, then a second one",
+   "page": "ticket-tasks",
+   "expect": "the task appears in the list and the counter changes",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#ticket/{{ticket_id}}"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-tasks"
+    },
+    {
+     "do": "fill",
+     "sel": "input[aria-label='Add a task'] >> visible=true",
+     "value": "Write the intro {{stamp}}"
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='Add']"
+    },
+    {
+     "do": "expect_text",
+     "text": "Write the intro"
+    },
+    {
+     "do": "wait",
+     "ms": 900
+    },
+    {
+     "do": "fill",
+     "sel": "input[aria-label='Add a task'] >> visible=true",
+     "value": "Check the facts"
+    },
+    {
+     "do": "press",
+     "key": "Enter"
+    },
+    {
+     "do": "expect_text",
+     "text": "Check the facts"
+    }
+   ]
+  },
+  {
+   "id": "A16",
+   "name": "Add a link to the ticket",
+   "page": "ticket-links",
+   "expect": "a valid link is added, an invalid one is refused in words",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#ticket/{{ticket_id}}"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add a link')"
+    },
+    {
+     "do": "fill",
+     "sel": "input[type=url]",
+     "value": "not a link"
+    },
+    {
+     "do": "press",
+     "key": "Enter"
+    },
+    {
+     "do": "expect_text",
+     "text": "web address"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add a link')"
+    },
+    {
+     "do": "fill",
+     "sel": "input[type=url]",
+     "value": "https://github.com/example/repo/pull/1"
+    },
+    {
+     "do": "press",
+     "key": "Enter"
+    },
+    {
+     "do": "wait",
+     "ms": 1000
+    },
+    {
+     "do": "expect_text",
+     "text": "github"
+    }
+   ],
+   "expect_errors": {
+    "http": [
+     "/api/act"
+    ],
+    "console": [
+     "Failed to load resource"
+    ]
+   }
+  },
+  {
+   "id": "A17",
+   "name": "Edit owner, due day and note on the ticket",
+   "page": "ticket-fields",
+   "expect": "the choices are saved and shown after a reload",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#ticket/{{ticket_id}}"
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='Not chosen yet']"
+    },
+    {
+     "do": "wait",
+     "ms": 400
+    },
+    {
+     "do": "press",
+     "key": "Escape"
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='Not set']"
+    },
+    {
+     "do": "wait",
+     "ms": 400
+    },
+    {
+     "do": "press",
+     "key": "Escape"
+    }
+   ]
+  },
+  {
+   "id": "A18",
+   "name": "Home: Needs you shows the fixture question; dismiss a notification",
+   "page": "home-needs",
+   "expect": "the question is in Needs you with its options",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "wait",
+     "ms": 1500
+    },
+    {
+     "do": "expect_text",
+     "text": "Which greeting"
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='Dismiss notification']",
+     "optional": true
+    }
+   ]
+  },
+  {
+   "id": "A19",
+   "name": "Add-ons: switch Automation and Focus off and on again",
+   "page": "settings-addons",
+   "expect": "tabs vanish and come back, help text is plain",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Add-ons']"
+    },
+    {
+     "do": "click",
+     "sel": "role=switch[name='automation on or off']"
+    },
+    {
+     "do": "wait",
+     "ms": 3500
+    },
+    {
+     "do": "click",
+     "sel": "role=switch[name='automation on or off']"
+    },
+    {
+     "do": "wait",
+     "ms": 3500
+    },
+    {
+     "do": "click",
+     "sel": "role=switch[name='focus on or off']",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 3500
+    },
+    {
+     "do": "click",
+     "sel": "role=switch[name='focus on or off']",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 3500
+    },
+    {
+     "do": "expect_text",
+     "text": "Automation"
+    }
+   ]
+  },
+  {
+   "id": "A20",
+   "name": "Answer the fixture question from Home",
+   "page": "answer",
+   "expect": "answering with one click removes it from Needs you",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "wait",
+     "ms": 1200
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='Hi'] >> nth=0",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 1500
+    }
+   ]
+  },
+  {
+   "id": "A21",
+   "name": "Mobile mode: ask, cancel, turn on, bar, turn off",
+   "page": "mobile-mode",
+   "expect": "the switch asks once, the bar shows while on, Turn off ends it",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-toggle']"
+    },
+    {
+     "do": "wait_for",
+     "sel": "[data-testid='mobile-mode-ask']"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-cancel']"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-toggle']"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-confirm']"
+    },
+    {
+     "do": "wait_for",
+     "sel": "[data-testid='mobile-mode-bar']",
+     "timeout": 10000
+    },
+    {
+     "do": "expect_text",
+     "text": "Mobile mode"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-bar-off']"
+    },
+    {
+     "do": "wait",
+     "ms": 1500
+    },
+    {
+     "do": "expect_no_text",
+     "text": "Turn off"
+    }
+   ]
+  },
+  {
+   "id": "A22",
+   "name": "Settings General: Mobile mode switches off after 4, 8, 12, 24 hours",
+   "page": "mobile-mode-settings",
+   "expect": "each choice is selectable",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click",
+     "sel": "#settings-tab-general"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-hours-4']"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-hours-12']"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-hours-24']"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-hours-8']"
+    }
+   ]
+  },
+  {
+   "id": "A25",
+   "name": "Settings General: Name/Folder, Team and Mobile mode on one panel; Team switch on and off",
+   "page": "settings-general",
+   "expect": "the General panel shows Name, Folder, Team (Share with team) and Mobile mode together",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click",
+     "sel": "#settings-tab-general"
+    },
+    {
+     "do": "expect_text",
+     "text": "Folder"
+    },
+    {
+     "do": "expect_text",
+     "text": "Team"
+    },
+    {
+     "do": "expect_text",
+     "text": "Share with team"
+    },
+    {
+     "do": "expect_text",
+     "text": "Mobile mode"
+    },
+    {
+     "do": "click",
+     "sel": "[aria-label='Share with team']"
+    },
+    {
+     "do": "wait",
+     "ms": 1500
+    },
+    {
+     "do": "expect_text",
+     "text": "AGENTS.md has a short orch entry"
+    },
+    {
+     "do": "click",
+     "sel": "[aria-label='Share with team']"
+    },
+    {
+     "do": "wait",
+     "ms": 1500
+    },
+    {
+     "do": "expect_text",
+     "text": "orch files stay on this computer"
+    }
+   ]
+  },
+  {
+   "id": "A23",
+   "name": "Settings Agent: try an agent, add your own agent",
+   "page": "settings-agent",
+   "expect": "Test answers in words; a custom agent can be added",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click",
+     "sel": "#settings-tab-agent"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Test') >> nth=0"
+    },
+    {
+     "do": "wait",
+     "ms": 2500
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add your own agent')"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Cancel')"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add your own agent')"
+    },
+    {
+     "do": "fill",
+     "sel": "role=textbox[name='Name']",
+     "value": "my-tool"
+    },
+    {
+     "do": "fill",
+     "sel": "role=textbox[name=/^Command/]",
+     "value": "echo {prompt}"
+    },
+    {
+     "do": "click",
+     "sel": "role=combobox[name=/^How the task goes in/]"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Save')"
+    },
+    {
+     "do": "wait",
+     "ms": 600
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Back')"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Save')"
+    },
+    {
+     "do": "wait",
+     "ms": 600
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add agent')"
+    },
+    {
+     "do": "wait",
+     "ms": 1200
+    },
+    {
+     "do": "expect_text",
+     "text": "my-tool"
+    }
+   ]
+  },
+  {
+   "id": "A24",
+   "name": "Settings Agent: what the agent may do (Ask, Full with confirm, back to Auto)",
+   "page": "settings-perms",
+   "expect": "Full asks for a plain confirmation; Back keeps the old choice",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click",
+     "sel": "#settings-tab-agent"
+    },
+    {
+     "do": "click",
+     "sel": "role=radio[name=/^Ask/]"
+    },
+    {
+     "do": "wait",
+     "ms": 600
+    },
+    {
+     "do": "click",
+     "sel": "role=radio[name=/^Full/]",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 400
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Back') >> visible=true >> nth=0",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "role=radio[name=/^Full/]",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 400
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Yes, use Full')",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 600
+    },
+    {
+     "do": "click",
+     "sel": "role=radio[name=/^Auto/]"
+    },
+    {
+     "do": "wait",
+     "ms": 600
+    }
+   ]
+  },
+  {
+   "id": "A09",
+   "name": "Click every remaining control (census)",
+   "page": "home",
+   "tags": [
+    "census"
+   ],
+   "expect": "every control of the main pages is clicked once, destructive ones are listed",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "click_all_census",
+     "page": "home"
+    },
+    {
+     "do": "goto",
+     "path": "/#tickets"
+    },
+    {
+     "do": "click_all_census",
+     "page": "tickets"
+    },
+    {
+     "do": "goto",
+     "path": "/#ticket/{{ticket_id}}"
+    },
+    {
+     "do": "click_all_census",
+     "page": "ticket"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-tasks"
+    },
+    {
+     "do": "click_all_census",
+     "page": "ticket-tasks-tab"
+    },
+    {
+     "do": "click",
+     "sel": "#ticket-tab-history"
+    },
+    {
+     "do": "click_all_census",
+     "page": "ticket-history-tab"
+    },
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click_all_census",
+     "page": "settings"
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Agent']"
+    },
+    {
+     "do": "click_all_census",
+     "page": "settings-agent"
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Add-ons']"
+    },
+    {
+     "do": "click_all_census",
+     "page": "settings-addons"
+    }
+   ],
+   "expect_errors": {
+    "http": [
+     "/api/act"
+    ],
+    "console": [
+     "Failed to load resource"
+    ]
+   }
+  }
+ ]
+}

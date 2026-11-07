@@ -426,6 +426,11 @@ def claim(
         if any(not i.get("delivered_at") for i in _pending_read(root, tid)):
             rec["pending"] = True
         _write(root, rec)
+    try:
+        label = adapters.load(agent, root)["label"]
+    except Refused:
+        label = agent
+    tickets.mark_working(root, tid, by, label)
     notify_working(root)
     return rec
 
@@ -579,9 +584,16 @@ def plan(
     if not resumed:
         sid = None
         new_session = str(uuid.uuid4()) if a["capabilities"]["choose_session_id"] else None
-        v.update(
-            prompt=prompt if prompt is not None else fresh_prompt(ticket, items), new_session=new_session
-        )
+        text = prompt
+        if text is None:
+            text = fresh_prompt(ticket, items)
+            if not (a.get("files") or {}).get("instructions_link"):  # this agent does not read the local file
+                from orch import harness
+
+                block = harness.start_text(root)
+                if block:
+                    text = f"{block[:6000]}\n\n{text}"
+        v.update(prompt=text, new_session=new_session)
         argv = adapters.render(name, "fresh", mode, v, root)
         if argv is None:
             raise Refused(f"'{name}' cannot run in {mode} mode here.")
@@ -668,7 +680,7 @@ def start(
         p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name)
         log_rel = f".orch/run/logs/{tid}-{rec['run']}.log"
         (root / log_rel).parent.mkdir(parents=True, exist_ok=True)
-        cmd = [sys.executable, "-m", "orch", "run", "_wrap", rec["run"], "--ticket", tid, "--agent", name]
+        cmd = procs.orch_python_argv("run", "_wrap", rec["run"], "--ticket", tid, "--agent", name)
         cmd += ["--fresh"] if fresh else []
         for pat in allow:
             cmd += ["--allow", pat]

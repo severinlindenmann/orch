@@ -345,11 +345,17 @@ struct MessageBubble: View {
                 }
                 .accessibilityAction(named: "Copy") { UIPasteboard.general.string = item.text }
                 .modifier(BubbleActions(item: item, conversationId: conversationId, onReply: onReply, onRetry: onRetry, onDiscard: onDiscard))
-            if !mine { Spacer(minLength: typeSize.isAccessibilitySize ? 8 : 32) }
+            if !mine { Spacer(minLength: ChatBubbleLayout.agentTrailingSpace(for: typeSize)) }
         }
     }
     private static func symbol(_ kind: String) -> String {
-        switch kind { case "html": "globe"; case "image": "photo"; case "pr", "commit", "link": "arrow.triangle.pull"; default: "doc" }
+        switch kind.lowercased() {
+        case "html", "page", "text/html": "globe"
+        case "image": "photo"
+        case "pr", "commit": "arrow.triangle.branch"
+        case "link": "link"
+        default: "doc"
+        }
     }
     private func fileRow(_ name: String, size: Int) -> some View {
         HStack(spacing: 10) {

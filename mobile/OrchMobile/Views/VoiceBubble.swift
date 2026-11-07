@@ -197,6 +197,7 @@ struct AgentMemoBubble: View {
     var onReply: (() -> Void)? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var showText = false
     @State private var timingDate = Date()
     @State private var elapsed: Double = 0
@@ -238,26 +239,28 @@ struct AgentMemoBubble: View {
                     Circle().fill(listened ? Theme.muted : Theme.brand).frame(width: 10, height: 10).accessibilityHidden(true)
                     Text(listened ? "Listened" : "Voice memo").foregroundStyle(listened ? Theme.muted : Theme.brand)
                 }.themeFont(13).padding(.leading, 48)
-                Button {
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { showText.toggle() }
-                } label: {
-                    Text(showText ? "Hide text" : "Show text").themeFont(13).foregroundStyle(Theme.muted)
-                        .frame(minHeight: 44).contentShape(Rectangle())
-                }.accessibilityIdentifier("memo-show-text")
-                    .accessibilityValue(showText ? "Expanded" : "Collapsed")
+                HStack {
+                    Button {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { showText.toggle() }
+                    } label: {
+                        Text(showText ? "Hide text" : "Show text").themeFont(13).foregroundStyle(Theme.muted)
+                            .frame(minHeight: 44).contentShape(Rectangle())
+                    }.accessibilityIdentifier("memo-show-text")
+                        .accessibilityValue(showText ? "Expanded" : "Collapsed")
+                    Spacer(minLength: 8)
+                    Text(ChatBuilder.timeText(item.at)).themeFont(13).foregroundStyle(Theme.muted)
+                }
                 if showText {
                     Text(item.text).themeFont(17).textSelection(.enabled).accessibilityIdentifier("voice-transcript")
                 }
-                Text(ChatBuilder.timeText(item.at)).themeFont(13).foregroundStyle(Theme.muted)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
             }.padding(.vertical, 11).padding(.horizontal, 13)
                 .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 17))
             if current, let notice = model.speech.notice {
                 Text(notice).themeFont(13).foregroundStyle(Theme.muted)
             }
         }.foregroundStyle(Theme.text).buttonStyle(PressStyle())
-            .containerRelativeFrame(.horizontal) { width, _ in width * 0.88 }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, ChatBubbleLayout.agentTrailingSpace(for: typeSize))
             .onChange(of: model.speech.state, initial: true) { _, _ in captureTiming() }
             .onChange(of: model.speech.rate) { _, _ in captureTiming() }
             .accessibilityAction(named: "Reply") { onReply?() }

@@ -25,6 +25,7 @@ protocol RelayAPI: Sendable {
     func redeem(code: String) async throws -> RedeemResponse
     func setMute(workspace: String, mute: Mute) async throws -> Workspace
     func removeWorkspace(_ id: String) async throws
+    func turnOffMobileMode(workspace: String) async throws
     func signOut() async throws
     /// Raw bytes of a relay blob (images in a ticket chat). Only ever called with the paired credentials.
     func blob(id: String) async throws -> Data
@@ -158,6 +159,12 @@ struct URLSessionRelayClient: RelayAPI {
             enum Key: String, CodingKey { case mutedUntil }
         }
         return try JSONCoding.decoder.decode(Workspace.self, from: try await request("PATCH", "/v1/phone/workspaces/\(workspace)", body: Req(mutedUntil: mute.wire)))
+    }
+    /// The "Turn off" of the Mobile mode banner: the relay hands a `mobile_mode_off` request to the workspace.
+    func turnOffMobileMode(workspace: String) async throws {
+        guard BlobID.isValid(workspace) else { throw RelayError.api(status: 404, code: "not_found", message: "Workspace not found.") }
+        struct Req: Encodable { let to: String; let control = "mobile_mode_off"; let clientId = UUID().uuidString.lowercased() }
+        _ = try await request("POST", "/v1/phone/control", body: Req(to: workspace))
     }
     func removeWorkspace(_ id: String) async throws {
         guard BlobID.isValid(id) else { throw RelayError.api(status: 404, code: "not_found", message: "Workspace not found.") }

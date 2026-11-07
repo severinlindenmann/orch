@@ -23,6 +23,7 @@ struct ChatsListView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     header
                     ModelMessage()
+                    MobileModeBanner()
                     searchField
                     chips
                     content
@@ -137,7 +138,25 @@ struct ChatsListView: View {
                     }
                 }.background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
             }
+            if model.archivedCount > 0 { archivedRow }
         }
+    }
+
+    /// "Archived" at the end of the list (all workspaces, grouped per workspace).
+    private var archivedRow: some View {
+        NavigationLink { ArchivedView(workspaceId: nil) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "archivebox").themeFont(20).foregroundStyle(Theme.muted).frame(width: 24).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Archived").themeFont(17, .semibold)
+                    Text("\(model.archivedCount) chat\(model.archivedCount == 1 ? "" : "s")").themeFont(13).foregroundStyle(Theme.muted)
+                }
+                Spacer()
+                ShellChevron()
+            }.frame(minHeight: 44).padding(.horizontal, 16).padding(.vertical, 12).contentShape(Rectangle())
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("archived-row-all").padding(.top, 6)
+            .accessibilityLabel("Archived").accessibilityValue("\(model.archivedCount) chat\(model.archivedCount == 1 ? "" : "s")")
     }
 
     @ViewBuilder private var attentionCards: some View {

@@ -17,10 +17,21 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import procs, term
+from orch import config, procs, term
 from orch.errors import Refused
 
-STATUSES = ("open", "active", "waiting", "done", "dropped")
+STATUSES = ("open", "active", "waiting", "ready", "review", "done", "dropped")
+STATUS_WORDS = {
+    "open": "Backlog",
+    "ready": "Ready",
+    "active": "Working",
+    "waiting": "Waiting",
+    "review": "Review",
+    "done": "Done",
+    "dropped": "Dropped",
+}
+OPEN_STATUSES = tuple(s for s in STATUS_WORDS if s not in ("done", "dropped"))
+REVIEW_MESSAGE = "Moved to Review, not Done. A person marks a ticket Done."
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
 PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "summary")
@@ -101,7 +112,7 @@ def tickets_dir(root: Path) -> Path:
 
 
 def ticket_path(root: Path, tid: str) -> Path:
-    if not _ID_RE.match(tid):
+    if not _ID_RE.fullmatch(tid):
         raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
     return tickets_dir(root) / f"{tid}.json"
 
@@ -377,7 +388,7 @@ def ensure_general(root: Path, by: str) -> str:
         "created_at": t,
         "updated_at": t,
         "checklist": [],
-        "links": [],
+        "refs": [],
         "questions": [],
         "history": [{"at": t, "by": by, "via": "cli", "text": "Created"}],
     }
@@ -393,13 +404,6 @@ _FIELD_WORDS = {
     "summary": "summary",
     "status": "status",
     "waiting_on": "wait",
-}
-_STATUS_WORDS = {
-    "open": "To do",
-    "active": "Doing",
-    "waiting": "Waiting",
-    "done": "Done",
-    "dropped": "Dropped",
 }
 
 
@@ -429,14 +433,14 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
     if m := re.fullmatch(r"Answered q\d+: (.*)", t, re.DOTALL):
         return f"Answered a question: {m.group(1)}"
     if m := re.fullmatch(r"Status (\w+) -> (\w+)", t):
-        return f"Moved to {_STATUS_WORDS.get(m.group(2), m.group(2))}"
+        return f"Moved to {STATUS_WORDS.get(m.group(2), m.group(2))}"
     if m := re.fullmatch(r"Edited ([a-z_, ]+)", t):
         if (f := _fields_text(m.group(1))) is not None:
             return "Changed " + f
     if m := re.fullmatch(r"Patched ([a-z_, ]+?)(?: \(status \w+ -> (\w+)\))?", t):
         if (f := _fields_text(m.group(1))) is not None:
             return (
-                "Changed " + f + (f" (now {_STATUS_WORDS.get(m.group(2), m.group(2))})" if m.group(2) else "")
+                "Changed " + f + (f" (now {STATUS_WORDS.get(m.group(2), m.group(2))})" if m.group(2) else "")
             )
     if m := re.fullmatch(r"Added check (c\d+)", t):
         return "Added a task" + task(m.group(1))
@@ -505,7 +509,7 @@ def create(
         "created_at": t,
         "updated_at": t,
         "checklist": [],
-        "links": [],
+        "refs": [],
         "questions": [],
         "history": [
             {"at": t, "by": by, "via": _env_via(), "text": "Created" + (f" under {parent}" if parent else "")}
@@ -535,19 +539,44 @@ def _check_can_finish(ticket: dict) -> None:
         raise Refused(f"Not done: {', '.join(bad)} is checked without evidence.")
 
 
+def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
+    if agent_tool():  # an agent in the environment counts as an agent whatever --by says
+        by = "agent:" + str(agent_tool())
+    if status == "done" and by.startswith("agent:"):
+        _check_can_finish(ticket)
+        if not config.agents_may_finish(root):
+            add_history(ticket, by, f"{by} finished the work and moved it to Review")
+            return "review", by
+    return status, by
+
+
+def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
+    def op(ticket):
+        if ticket["status"] not in ("open", "ready", "review"):
+            return NO_WRITE
+        ticket["status"] = "active"
+        ticket["waiting_on"] = None
+        add_history(ticket, by, f"{agent_label} started")
+
+    try:
+        apply_op(root, tid, op)
+    except (Refused, FileNotFoundError):
+        if ticket_path(root, tid).exists():
+            raise
+
+
 def set_status(root: Path, tid: str, status: str, by: str) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
 
     def op(ticket):
-        if status == "done":
-            _check_can_finish(ticket)
-        if status != "waiting":
+        target, actor = _finish_status(root, ticket, status, by)
+        if target != "waiting":
             ticket["waiting_on"] = None
         old = ticket["status"]
-        ticket["status"] = status
-        if old != status:
-            add_history(ticket, by, f"Status {old} -> {status}")
+        ticket["status"] = target
+        if old != target and target == status:
+            add_history(ticket, actor, f"Status {old} -> {target}")
 
     return apply_op(root, tid, op)[0]
 
@@ -831,76 +860,78 @@ def log(root: Path, tid: str, text: str, by: str) -> dict:
     return apply_op(root, tid, lambda t: add_history(t, by, text.strip()))[0]
 
 
-def link_add(
-    root: Path, tid: str, url: str, by: str, kind: str | None = None, title: str | None = None, kinds=()
+def ref_add(
+    root: Path, tid: str, target: str, by: str, kind: str | None = None, title: str | None = None, kinds=()
 ) -> tuple[dict, dict, bool]:
-    """Add a web link to the ticket (kind from the active add-ons' patterns unless given). The same address
-    twice is one link: a new title or kind updates it. Returns (ticket, link, added)."""
-    from orch import links
+    from orch import refs
 
-    url = links.check_url(url)
-    if kind is not None and not links.KIND_RE.fullmatch(kind):
-        raise Refused("A link kind is lowercase letters, digits and dashes, e.g. github-pr.")
-    if isinstance(title, str) and len(title) > 200:
-        raise Refused("A link title is one line of at most 200 characters.")
-    title = links.one_line(title) if isinstance(title, str) else None
-    # an explicit kind is kept as given (an add-on that is off shows it as a plain link until it is on again)
-    kind = kind or links.kind_for(url, list(kinds))
-    added = [True]
+    t = load(root, tid)
+    value = refs.detect(root, t["id"], target, kind, title, kinds)
+    identity = {k: v for k, v in value.items() if k != "title" and (k != "kind" or "url" not in value)}
+    added = True
+    result = None
 
-    def op(t):
-        cur = next((ln for ln in t["links"] if isinstance(ln, dict) and ln.get("url") == url), None)
-        if cur is not None:
-            added[0] = False
-            change = {}
-            if title and cur.get("title") != title:
-                change["title"] = title
-            if kind != "link" and links.kind_of(cur) != kind:
-                change["kind"] = kind
-            if not change:
+    def op(ticket):
+        nonlocal added, result
+        values = refs.local_refs(root, ticket["id"]) if value.get("local") else ticket["refs"]
+        result = next((r for r in values if all(r.get(k) == v for k, v in identity.items())), None)
+        if result is not None:
+            added = False
+            if value.get("kind") == "url" and kind is None:
+                value["kind"] = result["kind"]
+            if all(result.get(k) == v for k, v in value.items()):
                 return NO_WRITE
-            cur.update(change)
-            cur.pop("type", None)
-            add_history(t, by, f"Changed link {title or cur.get('title') or links.short_url(url)}")
-            return cur
-        link = {"kind": kind, "url": url}
-        if title:
-            link["title"] = title
-        link.update(at=now(), by=by)
-        t["links"].append(link)
-        add_history(t, by, f"Linked {title or links.short_url(url)}")
-        return link
-
-    t, link = apply_op(root, tid, op)
-    if link is None:  # nothing changed: the existing entry
-        link = next(ln for ln in t["links"] if isinstance(ln, dict) and ln.get("url") == url)
-    return t, link, added[0]
-
-
-def link_remove(root: Path, tid: str, ref: str, by: str) -> tuple[dict, dict]:
-    """Remove a link by its number in `orch link list` (1, 2, …) or its address. History keeps the record."""
-    from orch import links
-
-    def op(t):
-        nums = links.numbered(t)
-        hit = None
-        if ref.strip().isdigit():
-            hit = next((ln for n, ln in nums if n == int(ref)), None)
+            result.update(value)
+            verb = "Changed reference"
         else:
-            try:
-                canon = links.check_url(ref)
-            except Refused:
-                canon = ref.strip()
-            hit = next((ln for _, ln in nums if ln["url"] in (ref.strip(), canon)), None)
-        if hit is None:
-            raise Refused(
-                f"{t.get('key') or t['id']} has no link {ref}. See: orch link list {t.get('key') or t['id']}"
-            )
-        t["links"].remove(hit)
-        add_history(t, by, f"Removed link {hit.get('title') or links.short_url(hit['url'])} ({hit['url']})")
-        return hit
+            result = {**value, "at": now(), "by": by}
+            values.append(result)
+            verb = "Added reference"
+        if value.get("local"):
+            refs.write_local(root, ticket["id"], values)
+            return NO_WRITE
+        add_history(ticket, by, f"{verb} {refs.target(result)}")
+        return result
 
-    return apply_op(root, tid, op)
+    t, _ = apply_op(root, t["id"], op)
+    return t, result, added
+
+
+def ref_remove(root: Path, tid: str, target: str, by: str) -> tuple[dict, dict]:
+    from orch import refs
+
+    t = load(root, tid)
+    wanted = None if target.isdigit() else refs.detect(root, t["id"], target, check_exists=False)
+    result = None
+
+    def op(ticket):
+        nonlocal result
+        values = refs.all_refs(root, ticket)
+        result = next(
+            (
+                r
+                for n, r in values
+                if (
+                    n == int(target)
+                    if target.isdigit()
+                    else all(r.get(k) == v for k, v in wanted.items() if k != "kind")
+                )
+            ),
+            None,
+        )
+        if result is None:
+            raise Refused(f"{ticket.get('key') or ticket['id']} has no reference {target}.")
+        if result.get("local"):
+            local = refs.local_refs(root, ticket["id"])
+            local.remove(result)
+            refs.write_local(root, ticket["id"], local)
+            return NO_WRITE
+        ticket["refs"].remove(result)
+        add_history(ticket, by, f"Removed reference {refs.target(result)}")
+        return result
+
+    t, _ = apply_op(root, t["id"], op)
+    return t, result
 
 
 def merge_refresh(
@@ -909,14 +940,14 @@ def merge_refresh(
     """Merge what an add-on's refresh act printed: links matched by url change only title, status and thumb;
     ext only under the add-on's own name (checked with its schema). One history line per change.
     Returns (ticket, changes) with changes = [{what, url?, field, old, new}]."""
-    from orch import links
+    from orch import refs
 
     if not isinstance(out, dict):
         raise Refused(f"The {addon} add-on did not say what to update.")
-    upd = out.get("links") or []
+    upd = out.get("refs") or []
     ext = out.get("ext") or {}
     if not isinstance(upd, list) or not isinstance(ext, dict) or set(ext) - {addon}:
-        raise Refused(f"The {addon} add-on may only update links and ext.{addon}.")
+        raise Refused(f"The {addon} add-on may only update refs and ext.{addon}.")
     mine = ext.get(addon) or {}
     if not isinstance(mine, dict):
         raise Refused(f"The {addon} add-on sent ext.{addon} that is not an object.")
@@ -926,10 +957,10 @@ def merge_refresh(
         for u in upd:
             if not isinstance(u, dict) or not isinstance(u.get("url"), str):
                 continue
-            cur = next((ln for ln in t["links"] if isinstance(ln, dict) and ln.get("url") == u["url"]), None)
+            cur = next((ln for ln in t["refs"] if isinstance(ln, dict) and ln.get("url") == u["url"]), None)
             if cur is None:
                 continue
-            name = links.one_line(cur.get("title") or links.short_url(cur["url"]))
+            name = refs.one_line(cur.get("title") or refs.short_url(cur["url"]))
             for f in ("title", "status", "thumb"):
                 v = u.get(f)
                 if f not in u or v == cur.get(f):
@@ -937,10 +968,10 @@ def merge_refresh(
                 if v is not None and not isinstance(v, str):
                     continue
                 if f == "title" and v is not None:
-                    v = links.one_line(v) or None
+                    v = refs.one_line(v) or None
                     if v == cur.get(f):
                         continue
-                if f == "status" and v is not None and not links.STATUS_RE.fullmatch(v):
+                if f == "status" and v is not None and not refs.STATUS_RE.fullmatch(v):
                     continue
                 if f == "thumb" and v is not None and not re.fullmatch(r"artifacts/[A-Za-z0-9_.-]{1,100}", v):
                     continue
@@ -966,7 +997,7 @@ def merge_refresh(
             return NO_WRITE
         for c in changes:
             what = f"{c['name']} {c['field']}" if c["what"] == "link" else c["field"]
-            old, new = (links.one_line("-" if v in (None, "") else v, 120) for v in (c["old"], c["new"]))
+            old, new = (refs.one_line("-" if v in (None, "") else v, 120) for v in (c["old"], c["new"]))
             add_history(t, by, f"{addon} refresh: {what} {old} -> {new}")
         return changes
 
@@ -1219,8 +1250,9 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         status = obj.get("status", ticket["status"])
         if status not in STATUSES:
             raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
-        if status == "done":
-            _check_can_finish(ticket)
+        actor = by
+        if "status" in obj:
+            status, actor = _finish_status(root, ticket, status, by)
         for k in ("owner", "due", "note", "summary"):
             if k in obj:
                 _set_field(ticket, k, obj[k])
@@ -1230,7 +1262,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
             ticket["waiting_on"] = None
         old, ticket["status"] = ticket["status"], status
         note = f" (status {old} -> {status})" if old != status else ""
-        add_history(ticket, by, "Patched " + ", ".join(sorted(obj)) + note)
+        add_history(ticket, actor, "Patched " + ", ".join(sorted(obj)) + note)
 
     return apply_op(root, tid, op, if_revision=if_revision)[0]
 
@@ -1310,7 +1342,7 @@ def attach_file(root: Path, tid: str, path: str, title: str | None, role: str | 
     for part in rel.parts:
         cur = cur / part
         if cur.is_symlink():
-            raise Refused("proof files cannot be links. Give the real file.")
+            raise Refused("proof files cannot be refs. Give the real file.")
     low = tuple(x.lower() for x in rel.parts)
     if low[:2] == (".orch", "secrets") or ".git" in low:
         raise inside
@@ -1352,7 +1384,7 @@ def attach_file(root: Path, tid: str, path: str, title: str | None, role: str | 
     except OSError:
         os.close(fd)
         os.unlink(dest)
-        raise Refused("proof files cannot be links. Give the real file.") from None
+        raise Refused("proof files cannot be refs. Give the real file.") from None
     try:
         with os.fdopen(src_fd, "rb") as src, os.fdopen(fd, "wb") as out:
             if os.fstat(src.fileno()).st_size > MAX_PROOF_BYTES:

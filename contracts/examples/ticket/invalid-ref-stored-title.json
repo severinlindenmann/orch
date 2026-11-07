@@ -1,0 +1,20 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_7k3f9q",
+  "title": "References",
+  "status": "open",
+  "created_at": "2026-11-07T10:00:00Z",
+  "updated_at": "2026-11-07T10:00:00Z",
+  "checklist": [],
+  "questions": [],
+  "history": [],
+  "refs": [
+    {
+      "kind": "ticket",
+      "ticket": "t_9d2x1q",
+      "at": "2026-11-07T10:00:00Z",
+      "by": "human:tester",
+      "title": "Stale title"
+    }
+  ]
+}

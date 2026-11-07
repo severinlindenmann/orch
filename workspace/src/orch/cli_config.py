@@ -16,7 +16,13 @@ from pathlib import Path
 from orch import adapters, config, tickets
 from orch.errors import Refused
 
-KEYS = ("workspace.agent", "workspace.code", "workspace.permissions", "workspace.live_idle_minutes")
+KEYS = (
+    "workspace.agent",
+    "workspace.code",
+    "workspace.permissions",
+    "workspace.live_idle_minutes",
+    "workflow.agents_may_finish",
+)
 TEST_PROMPT = "Reply with the word ok"
 TEST_TIMEOUT = 60  # seconds
 
@@ -25,6 +31,8 @@ def add_parsers(sub, common) -> None:
     ag = sub.add_parser("agents", parents=[common], help=argparse.SUPPRESS).add_subparsers(dest="sub")
     t = ag.add_parser("test", parents=[common], help="run an agent once with a trivial prompt")
     t.add_argument("name")
+    sh = sub.add_parser("share", parents=[common], help=argparse.SUPPRESS)
+    sh.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
     c = sub.add_parser("config", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
     g = c.add_parser("get", parents=[common])
     g.add_argument("key", nargs="?", choices=KEYS)
@@ -180,11 +188,30 @@ def _config(args, root: Path) -> None:
             "workspace.code": config.workspace_code(root),
             "workspace.permissions": config.permissions(root),
             "workspace.live_idle_minutes": config.live_idle_minutes(root),
+            "workflow.agents_may_finish": config.agents_may_finish(root),
         }
         if args.key:
-            _out(args, {args.key: cur[args.key]}, str(cur[args.key]) if cur[args.key] else "(not set)")
+            _out(
+                args,
+                {args.key: cur[args.key]},
+                str(cur[args.key]) if cur[args.key] is not None else "(not set)",
+            )
         else:
-            _out(args, cur, "\n".join(f"{k} = {v}" for k, v in cur.items() if v) or "Nothing is set.")
+            _out(
+                args,
+                cur,
+                "\n".join(f"{k} = {v}" for k, v in cur.items() if v is not None) or "Nothing is set.",
+            )
+    elif args.sub == "set" and args.key == "workflow.agents_may_finish":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        if args.value == "on" and _actor(args).startswith("agent:"):
+            raise Refused(
+                "Only a person can allow agents to mark tickets Done. Ask them to run: "
+                "orch config set workflow.agents_may_finish on"
+            )
+        value = config.set_agents_may_finish(root, args.value == "on")
+        _out(args, {"workflow.agents_may_finish": value}, f"Agents may mark tickets Done: {args.value}.")
     elif args.sub == "set" and args.key == "workspace.code":
         code = config.set_code(root, args.value)
         _out(
@@ -234,6 +261,25 @@ def _config(args, root: Path) -> None:
             _out(args, {"workspace.agent": name}, f"Saved: workspace.agent = {name}.")
 
 
+def _share(args, root: Path) -> None:
+    """Share with team: one stable block in the team's AGENTS.md and merge=union in .gitattributes.
+    Human only (it changes files the team owns). Off removes both."""
+    from orch import harness
+
+    if args.state != "status":
+        if tickets.agent_tool():
+            raise Refused("Only a person can share the orch entry with the team.")
+        (harness.share_on if args.state == "on" else harness.share_off)(root)
+    on = harness.share_state(root)
+    _out(
+        args,
+        {"shared": on},
+        "Shared with your team: AGENTS.md has the orch entry."
+        if on
+        else "Not shared: the orch files stay on this computer.",
+    )
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd == "agents":
         if getattr(args, "sub", None) == "test":
@@ -241,6 +287,8 @@ def dispatch(args, root: Path) -> bool:
         _agents(args, root)
     elif args.cmd == "config":
         _config(args, root)
+    elif args.cmd == "share":
+        _share(args, root)
     else:
         return False
     return True

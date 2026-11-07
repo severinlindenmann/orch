@@ -1,0 +1,45 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_7k3f9q",
+  "title": "References",
+  "status": "open",
+  "created_at": "2026-11-07T10:00:00Z",
+  "updated_at": "2026-11-07T10:00:00Z",
+  "checklist": [],
+  "questions": [],
+  "history": [],
+  "refs": [
+    {
+      "kind": "url",
+      "url": "https://example.com",
+      "at": "2026-11-07T10:00:00Z",
+      "by": "human:tester"
+    },
+    {
+      "kind": "ticket",
+      "ticket": "t_9d2x1q",
+      "at": "2026-11-07T10:00:00Z",
+      "by": "human:tester"
+    },
+    {
+      "kind": "artifact",
+      "ticket": "t_9d2x1q",
+      "name": "report.pdf",
+      "at": "2026-11-07T10:00:00Z",
+      "by": "human:tester"
+    },
+    {
+      "kind": "file",
+      "path": "docs/spec.md",
+      "line": 40,
+      "at": "2026-11-07T10:00:00Z",
+      "by": "human:tester"
+    },
+    {
+      "kind": "github:pr",
+      "url": "https://github.com/acme/app/pull/1",
+      "at": "2026-11-07T10:00:00Z",
+      "by": "human:tester"
+    }
+  ]
+}

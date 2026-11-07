@@ -3,12 +3,27 @@
 A workspace is any folder (git or not). Nothing needs git. Everything orch writes is here:
 
 ```
-AGENTS.md                         one block per orch skill (below)
-CLAUDE.md                         gets the line "@AGENTS.md" if it lacks it (Claude Code reads CLAUDE.md)
-.gitignore                        gets the lines below
-.agents/skills/<name>/SKILL.md    the one real skills folder: orch (init), orch-publish / orch-relay (connect), orch-<add-on> (addon add, only while active), shared skills (relay refresh)
-.agents/skills/orch-relay/workspaces.json   directory of reachable workspaces (workspaces.schema.json), written by refresh
-.claude/skills  ->  ../.agents/skills      symlink (macOS/Linux) or junction (Windows, no admin needed)
+.orch/harness/                    LOCAL, never committed: everything orch generates for agents (orch never edits a file the team owns)
+  blocks/<name>.md                the core block (orch.md) and one block per active add-on (addon-<name>.md)
+  AGENTS.orch.md                  all blocks joined (core first, add-ons by name); agents read it through CLAUDE.local.md or the start prompt
+  skills/<name>/SKILL.md          the real skill folders: orch (init), orch-publish / orch-relay (connect), orch-<add-on> (addon add, only while active)
+  skills/orch-relay/workspaces.json   directory of reachable workspaces (workspaces.schema.json), written by refresh
+.agents/skills/orch*              per-skill links (junction on Windows; a copy kept in sync, marked .orch-copy, where links are refused) to .orch/harness/skills/<name>. Local
+.claude/skills/orch*              the same for a detected agent that looks there (agents.json files.skills_link). Local
+CLAUDE.local.md                   local file of a detected agent (agents.json files.instructions_link): one marked block with @AGENTS.md
+                                  (only when the team has an AGENTS.md and no CLAUDE.md) and @.orch/harness/AGENTS.orch.md. Other text in it is kept. Local
+```
+
+An agent that reads none of these (Codex) gets the joined block at the top of the start prompt of every orch-started run.
+Local means: listed in `.orch/.gitignore` (orch's own file, written first, works without git) and in a block of
+`.git/info/exclude`, so `git status` stays clean. If neither can be written, orch refuses to store a secret.
+No git repo: the same layout, only `.orch/.gitignore`. orch refuses to replace a folder or file at a link place that is not its own.
+
+Share with team (off by default; dashboard Settings or `orch share on|off`, a person only) is the one write into team files:
+a marked block in `AGENTS.md` ("If the `orch` command exists ... read .agents/skills/orch/SKILL.md; if not, ignore"; the same
+text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes both. Add-on skills stay local.
+
+```
 .orch/
   tickets/<id>.json               one ticket per file (ticket.schema.json). Can be committed
   tickets/<id>/evidence/<name>    proof files copied by `orch check done --file` (workspace files only, max 25 MB each). GITIGNORED.
@@ -44,22 +59,15 @@ CLAUDE.md                         gets the line "@AGENTS.md" if it lacks it (Cla
 received/                         files saved by `orch relay download` (visible, next to the work; ignore line from the relay add-on's manifest)
 ```
 
-## .gitignore lines (added once, by `orch init`)
+## Local-only lines (`.orch/.gitignore`, written first by `orch init` and before any secret is stored)
 
 ```
-# orch (local only)
-.orch/secrets/
-.orch/inbox/
-.orch/inbox-seen.json
-.orch/addons/
-.orch/run/
-.orch/outbox/
-.orch/inbox-notes.json
-.orch/tickets/*/evidence/
+.gitignore  .local-id  secrets/  inbox/  inbox-seen.json  inbox-notes.json  outbox/  addons/  run/  harness/  tickets/*/evidence/
 ```
 
-An active add-on adds its own lines from its manifest `gitignore` key (addon-manifest.md) on `orch addon add` and removes
-them on `orch addon remove`; the core never writes add-on lines.
+The team's `.gitignore` is never edited. An active add-on adds its own lines from its manifest `gitignore` key
+(addon-manifest.md) as its own block of `.git/info/exclude` on `orch addon add` and removes them on `orch addon remove`;
+the core never writes add-on lines.
 
 ## Ticket keys
 
@@ -162,4 +170,10 @@ Reject absolute paths, `..`, drive letters, and symlinks or hard links in archiv
    - **permanent**: made by `orch relay allow <id> --permanent`; later messages must carry its `allow_token`.
    Without an allow the user decides; `allow` sends an `allow` message back to the asker.
 4. `start` with key K runs the ticket whose `ext.relay.start_key` is K **and** `ext.relay.from` is the sender, while it is open/active/waiting; if there is none, a new ticket is made with that key.
-5. `answer` → written into the ticket's question (`via: relay` or `phone`); `refresh-hint` → run `orch relay refresh`.
+5. `answer` → written into the ticket's question (`via: relay` or `phone`); `refresh-hint` → the workspace runs the refresh by itself (inbox pull and Relay tab); `orch relay refresh` still works by hand.
+
+Ticket status display order: open (Backlog), ready (Ready), active (Working), waiting (Waiting), review (Review), done (Done), dropped (Dropped). Only done and dropped are closed.
+Agents requesting done must evidence every check and move to review by default. Humans may mark Done without checklist checks. A workspace can allow agents to finish with [workflow] agents_may_finish = true in .orch/config.toml (default false).
+
+Ticket references live in `refs`. Local file references are stored only in `.orch/local/refs/<ticket id>.json`
+and marked `local: true`. `.orch/local/` is in `.orch/.gitignore` (the team's `.gitignore` is never edited).

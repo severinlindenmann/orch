@@ -1,4 +1,5 @@
 """Stdlib HTTP server on 127.0.0.1. GET reads; the only POST is /api/act (the fixed op table in actions.py)."""
+
 from __future__ import annotations
 
 import hashlib
@@ -14,21 +15,37 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from . import actions, ticketfiles
+from . import actions, reffiles, ticketfiles
 from .data import load_addons, load_services, load_state
+from .events import Revisions
 from .views import ViewPuller
 
 DEFAULT_PORT = 8420
 MAX_BODY = 16384
-KIT = ("tokens.css", "components.css", "motion.css", "motion.js", "icons.js", "question-card-state.js",
-       "question-card.js", "evidence.js")
-TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
-         ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png"}
+KIT = (
+    "tokens.css",
+    "components.css",
+    "motion.css",
+    "motion.js",
+    "icons.js",
+    "question-card-state.js",
+    "question-card.js",
+    "evidence.js",
+)
+TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+}
 
 
 PROXY = re.compile(r"/addon/([a-z][a-z0-9-]{1,31})(/[A-Za-z0-9_./-]*)?")
 LOCAL = re.compile(r"http://(?:127\.0\.0\.1|localhost):(\d{1,5})/?")
-PROXY_CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'self'; base-uri 'none'"
+PROXY_CSP = (
+    "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'self'; base-uri 'none'"
+)
 PROXY_BODY = 16384
 PROXY_MAX_REPLY = 4 * 1024 * 1024
 
@@ -42,6 +59,7 @@ _PORTS: dict[tuple[str, str], tuple[float, int | None]] = {}
 
 class Handler(BaseHTTPRequestHandler):
     timeout = 10  # a short body must not hold a thread
+
     def __init__(self, *a, root: Path, orch_bin: str | None, puller: ViewPuller, **kw):
         self.root, self.orch_bin, self.puller = root, orch_bin, puller
         self.nonce = os.environ.get("ORCH_DASHBOARD_NONCE", "")
@@ -58,7 +76,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
-        self.send_header("Content-Security-Policy", csp or "default-src 'self'; img-src 'self' data:; style-src 'self'")
+        self.send_header(
+            "Content-Security-Policy", csp or "default-src 'self'; img-src 'self' data:; style-src 'self'"
+        )
         self.end_headers()
         self.wfile.write(body)
 
@@ -76,7 +96,12 @@ class Handler(BaseHTTPRequestHandler):
         if any(a["name"] == name and a.get("page") for a in load_addons(self.root, self.orch_bin)):
             for svc in load_services(self.root, self.orch_bin):
                 m = LOCAL.fullmatch(str(svc.get("url") or ""))
-                if svc.get("addon") == name and svc.get("running") is True and m and 0 < int(m.group(1)) < 65536:
+                if (
+                    svc.get("addon") == name
+                    and svc.get("running") is True
+                    and m
+                    and 0 < int(m.group(1)) < 65536
+                ):
                     port = int(m.group(1))
         _PORTS[(str(self.root), name)] = (time.monotonic(), port)
         return port
@@ -127,30 +152,57 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(421, b"misdirected request", "text/plain")
         path, _, query = self.path.partition("?")
         px = PROXY.fullmatch(path)
-        if px:  # an add-on's page inside this app: same-site requests only (a frame of ours sends same-origin)
+        if (
+            px
+        ):  # an add-on's page inside this app: same-site requests only (a frame of ours sends same-origin)
             if self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
                 return self._send(403, b"forbidden", "text/plain")
             return self._proxy("GET", px.group(1), px.group(2) or "/", query)
         if path.startswith("/api/") and not self._same_origin():  # a foreign page must not trigger pulls
             return self._send(403, b"forbidden", "text/plain")
-        if path == "/ready" and self.nonce:  # challenge-response for start/stop; the nonce itself is never sent
+        if (
+            path == "/ready" and self.nonce
+        ):  # challenge-response for start/stop; the nonce itself is never sent
             c = self.path.partition("?c=")[2]
             if not re.fullmatch(r"[0-9a-f]{32,64}", c):
                 return self._send(404, b"not found", "text/plain")
             m = hmac.new(self.nonce.encode(), c.encode(), hashlib.sha256).hexdigest()
             return self._send(200, json.dumps({"pid": os.getpid(), "mac": m}).encode(), "application/json")
+        if path == "/api/events":
+            return self._events()
+        if path == "/api/ref-file":
+            q = parse_qs(query)
+            code, body, ctype = reffiles.read(
+                self.root, (q.get("ticket") or [""])[0], (q.get("n") or [""])[0]
+            )
+            return self._send(
+                code, body, ctype, {"Content-Disposition": "inline"}, csp="default-src 'none'; sandbox"
+            )
         if path == "/api/state":
-            return self._send(200, json.dumps(load_state(self.root, orch_bin=self.orch_bin, with_settings=True)).encode(),
-                              "application/json")
+            return self._send(
+                200,
+                json.dumps(load_state(self.root, orch_bin=self.orch_bin, with_settings=True)).encode(),
+                "application/json",
+            )
         m = re.fullmatch(r"/api/artifacts/(t_[a-z0-9]{6,16})", path)
         if m:  # the file list of one ticket (orch lists them); no file content here
-            return self._send(200, json.dumps(ticketfiles.listing(self.root, self.orch_bin, m.group(1))).encode(), "application/json")
-        if path == "/api/file":  # one file of a ticket's artifacts or evidence folder: plain text and pictures only
+            return self._send(
+                200,
+                json.dumps(ticketfiles.listing(self.root, self.orch_bin, m.group(1))).encode(),
+                "application/json",
+            )
+        if (
+            path == "/api/file"
+        ):  # one file of a ticket's artifacts or evidence folder: plain text and pictures only
             q = parse_qs(query, keep_blank_values=True)
             one = lambda k: (q.get(k) or [""])[0]
-            code, body, ctype, extra = ticketfiles.read_file(self.root, one("t"), one("k"), one("n"), one("dl") == "1")
+            code, body, ctype, extra = ticketfiles.read_file(
+                self.root, one("t"), one("k"), one("n"), one("dl") == "1"
+            )
             rng = re.fullmatch(r"bytes=(\d{0,15})-(\d{0,15})", self.headers.get("Range") or "")
-            if code == 200 and rng and ctype.startswith("audio/") and body and (rng.group(1) or rng.group(2)):  # Safari plays a sound only with byte ranges
+            if (
+                code == 200 and rng and ctype.startswith("audio/") and body and (rng.group(1) or rng.group(2))
+            ):  # Safari plays a sound only with byte ranges
                 size = len(body)
                 if rng.group(1):
                     a = int(rng.group(1))
@@ -160,20 +212,74 @@ class Handler(BaseHTTPRequestHandler):
                 if a >= size:
                     return self._send(416, b"", "text/plain", {"Content-Range": f"bytes */{size}"})
                 if a <= b:
-                    return self._send(206, body[a:b + 1], ctype, {**extra, "Content-Range": f"bytes {a}-{b}/{size}"}, csp="default-src 'none'; sandbox")
-            return self._send(code, body, ctype, {"Accept-Ranges": "bytes", **extra} if ctype.startswith("audio/") else extra, csp="default-src 'none'; img-src 'self'; sandbox")
+                    return self._send(
+                        206,
+                        body[a : b + 1],
+                        ctype,
+                        {**extra, "Content-Range": f"bytes {a}-{b}/{size}"},
+                        csp="default-src 'none'; sandbox",
+                    )
+            return self._send(
+                code,
+                body,
+                ctype,
+                {"Accept-Ranges": "bytes", **extra} if ctype.startswith("audio/") else extra,
+                csp="default-src 'none'; img-src 'self'; sandbox",
+            )
         if path.startswith("/api/addon/"):  # only names that are active here and have a tab
-            name = path[len("/api/addon/"):]
+            name = path[len("/api/addon/") :]
             if not any(a["name"] == name and a["dashboard"] for a in load_addons(self.root, self.orch_bin)):
                 return self._send(404, b"not found", "text/plain")
             return self._send(200, json.dumps(self.puller.pull(name)).encode(), "application/json")
         name = {"/": "index.html"}.get(path, path.lstrip("/"))
-        if name.startswith("kit/") and name[4:] in KIT:  # the orch_ui kit, copied next to the page (a test keeps it in sync)
+        if (
+            name.startswith("kit/") and name[4:] in KIT
+        ):  # the orch_ui kit, copied next to the page (a test keeps it in sync)
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
-        if name in ("index.html", "app.js", "blocks.js", "helpers.js", "style.css", "logo.svg", "favicon.svg",
-                    "apple-touch-icon.png"):
+        if name in (
+            "index.html",
+            "app.js",
+            "mobile-mode.js",
+            "blocks.js",
+            "helpers.js",
+            "style.css",
+            "logo.svg",
+            "favicon.svg",
+            "apple-touch-icon.png",
+        ):
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         self._send(404, b"not found", "text/plain")
+
+    def _events(self):
+        revisions = self.server.revisions
+        if not revisions.join():
+            return self._send(503, b"Too many open pages.", "text/plain")
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            last = None
+            ping = time.monotonic()
+            while not revisions.closed:
+                with revisions.condition:
+                    rev = revisions.rev
+                    if rev == last:
+                        revisions.condition.wait(timeout=max(0, 15 - (time.monotonic() - ping)))
+                        rev = revisions.rev
+                if rev != last:
+                    self.wfile.write(f"event: rev\ndata: {rev}\n\n".encode())
+                    self.wfile.flush()
+                    last = rev
+                elif time.monotonic() - ping >= 15:
+                    self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+                    ping = time.monotonic()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            revisions.leave()
 
     def _refuse(self):
         self._send(405, b"read only", "text/plain")
@@ -224,18 +330,38 @@ class Handler(BaseHTTPRequestHandler):
             hdr = {"X-Revision": str(extra["revision"])} if extra else None
             return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
         state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
-        if body.get("op") == "config.agent.test" and isinstance(extra, dict):  # the answer of the try, plain words only
-            state["test"] = {"name": str(extra.get("name"))[:40], "ok": extra.get("ok") is True, "reason": str(extra.get("reason") or "")[:300]}
-        if body.get("op") == "addon.act" and isinstance(extra, dict) and isinstance(extra.get("changes"), list):  # refresh
+        if body.get("op") == "config.agent.test" and isinstance(
+            extra, dict
+        ):  # the answer of the try, plain words only
+            state["test"] = {
+                "name": str(extra.get("name"))[:40],
+                "ok": extra.get("ok") is True,
+                "reason": str(extra.get("reason") or "")[:300],
+            }
+        if (
+            body.get("op") == "addon.act"
+            and isinstance(extra, dict)
+            and isinstance(extra.get("changes"), list)
+        ):  # refresh
             state["act_result"] = {"changes": len(extra["changes"]), "say": str(extra.get("say") or "")[:300]}
         self._send(200, json.dumps(state).encode(), "application/json")
 
 
 class _Server(ThreadingHTTPServer):
-    request_queue_size = 128  # the page loads a dozen files at once; the default of 5 resets connections (seen on macOS)
+    def server_close(self):
+        if hasattr(self, "revisions"):
+            self.revisions.close()
+        super().server_close()
+
+    request_queue_size = (
+        128  # the page loads a dozen files at once; the default of 5 resets connections (seen on macOS)
+    )
 
 
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:
     orch_bin = orch_bin if orch_bin is not None else os.environ.get("ORCH_BIN") or None
-    return _Server(("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin,
-                                                            puller=ViewPuller(root, orch_bin)))
+    srv = _Server(
+        ("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, puller=ViewPuller(root, orch_bin))
+    )
+    srv.revisions = Revisions(root)
+    return srv
