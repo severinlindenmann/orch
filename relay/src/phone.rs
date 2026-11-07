@@ -986,6 +986,7 @@ async fn patch_workspace(
         .count()
         .into();
     card["muted_until"] = store::muted_until(&c, &pid, &wsid);
+    card["mobile_mode"] = store::mobile_mode(&c, &wsid);
     Ok(Json(card))
 }
 
