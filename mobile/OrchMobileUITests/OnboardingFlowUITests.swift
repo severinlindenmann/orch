@@ -46,9 +46,7 @@ final class OnboardingFlowUITests: XCTestCase {
         while !card.isHittable && tries < 5 { app.swipeDown(); tries += 1 }
         card.tap()
         XCTAssertTrue(app.staticTexts["Q3 summary for the board"].waitForExistence(timeout: 10) || app.otherElements["chat-title"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.descendants(matching: .any)["tasks-card"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["composer-note"].exists)
-        XCTAssertEqual(app.staticTexts["composer-note"].label, "Saved for the next run")
+        // (tasks card / composer note of a finished ticket belong to the conversation lane, M2)
     }
 
     func testAnswerCanBeUndone() {

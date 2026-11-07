@@ -67,6 +67,7 @@ final class ShotsUITests: XCTestCase {
         try shot(app, "12-empty"); app.terminate()
 
         app = launch(["-mockFail", "YES", "-openChat", "ws_pilatus001"])
+        let generalOff = app.buttons["general-ws_pilatus001"]; if generalOff.waitForExistence(timeout: 15) { generalOff.tap() }
         XCTAssertTrue(app.descendants(matching: .any)["offline-banner"].waitForExistence(timeout: 15))
         try shot(app, "13-offline"); app.terminate()
 
