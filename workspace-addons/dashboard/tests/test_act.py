@@ -89,6 +89,8 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         ({"op": "run.start", "args": {"ticket": "t_abcdef", "fresh": True, "take_over": True}},
          ["run", "start", "t_abcdef", "--fresh", "--take-over", *common]),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
+        ({"op": "share.set", "args": {"on": True}}, ["share", "on", *common]),
+        ({"op": "share.set", "args": {"on": False}}, ["share", "off", *common]),
         ({"op": "check.add", "args": {"ticket": "t_abcdef", "text": "--draft the page"}},
          ["check", "add", "t_abcdef", *common, "--", "--draft the page"]),
         ({"op": "config.permissions", "args": {"mode": "full", "confirm": True}}, ["config", "set", "workspace.permissions", "full", *common]),
@@ -412,7 +414,7 @@ def test_check_add_and_permissions_are_checked(act_server, act_orch):
            ("config.permissions", {"mode": "bypass"}), ("config.permissions", {"mode": "Full"}),
            ("config.permissions", {"mode": "full"}), ("config.permissions", {"mode": "full", "confirm": False}),
            ("config.permissions", {"mode": "full", "confirm": "yes"}), ("config.permissions", {}),
-           ("config.permissions", {"mode": "ask", "x": 1}), ("ticket.patch", {"ticket": "t_abcdef", "data": {"status": "finished"}, "if_revision": 1}),
+           ("config.permissions", {"mode": "ask", "x": 1}), ("share.set", {}), ("share.set", {"on": "yes"}), ("share.set", {"on": True, "x": 1}), ("ticket.patch", {"ticket": "t_abcdef", "data": {"status": "finished"}, "if_revision": 1}),
            ("ticket.patch", {"ticket": "t_abcdef", "data": {"status": "done"}})]
     for op, args in bad:
         assert post(act_server, {"op": op, "args": args})[0] == 400, (op, args)
@@ -442,3 +444,10 @@ def test_full_is_only_sent_after_the_yes_dialog():
     assert sender.index("settingsConfirm(") < sender.rindex("send") and "if (mode !== 'full') { await send(); return; }" in sender
     assert actions.build_argv("config.permissions", {"mode": "ask"})[:3] == ["config", "set", "workspace.permissions"]
     assert "confirm" not in " ".join(actions.build_argv("config.permissions", {"mode": "full", "confirm": True}))
+
+
+def test_share_state_is_read_from_agents_md_only(ws):
+    from orch_dashboard.data import load_settings
+    assert load_settings(ws, None)["share"] is False
+    (ws / "AGENTS.md").write_text("# Team\n<!-- orch:begin share -->\nx\n<!-- orch:end share -->\n", encoding="utf-8")
+    assert load_settings(ws, None)["share"] is True

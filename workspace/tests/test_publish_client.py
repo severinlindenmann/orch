@@ -58,8 +58,8 @@ def test_connect_saves_token_and_installs_skill(proj, run, pub):
         "public",
     }  # the skill lists what may be shared
     assert (proj / ".agents/skills/orch-publish/SKILL.md").is_file()
-    assert "<!-- orch:addon:publish -->" in (proj / "AGENTS.md").read_text()
-    assert ".orch/secrets/" in (proj / ".gitignore").read_text()
+    assert "orch-publish" in (proj / ".orch/harness/AGENTS.orch.md").read_text()
+    assert "secrets/" in (proj / ".orch/.gitignore").read_text() and not (proj / "AGENTS.md").exists()
 
 
 def test_connect_wrong_token_is_refused_and_saves_nothing(proj, run, pub):

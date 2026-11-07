@@ -798,6 +798,15 @@
       h('div', {className:'card'}, h('div', {role:'radiogroup', 'aria-label':'What the agent may do'}, rows),
         current === 'full' ? h('p', {className:'card-row bad', role:'note'}, FULL_WARNING) : null));
   }
+  // Share with team: off by default; on writes one short entry into the team's AGENTS.md (the orch files stay local).
+  function shareCard(settings) {
+    const on = settings.share === true;
+    return h('div', {className:'stack', 'data-key':'settings-share'}, h('h2', {className:'set-sub'}, 'Team'),
+      h('div', {className:'card'}, h('div', {className:'card-row'},
+        h('div', {className:'grow'}, settingsText('h3', {}, 'Share with team'),
+          settingsText('p', {className:'meta'}, on ? 'AGENTS.md has a short orch entry. Turn off to remove it.' : 'Off: orch files stay on this computer and your team sees nothing.')),
+        h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Share with team', 'data-key':'settings-switch-share', 'data-action':'settings-share', disabled:snapshot || settingsBusy.has('share')}))));
+  }
   function settingsPage() {
     const settings = state.settings;
     const agents = array(settings.agents).map(agent => {
@@ -827,9 +836,10 @@
     };
     return h('div', {className:'settings stack'}, heading('Settings'),
       h('div', {className:'tabs', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Agent'], ['addons', 'Add-ons']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))),
-      panel('general', snapshot ? null : window.OrchMobileMode?.settingsSection(h), h('div', {className:'card'},
+      panel('general', [snapshot ? null : window.OrchMobileMode?.settingsSection(h), h('div', {className:'card'},
         h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
-        h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), settingsText('p', {className:'grow set-ctl mono'}, settings.folder)))),
+        h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), settingsText('p', {className:'grow set-ctl mono'}, settings.folder))),
+        shareCard(settings)]),
       panel('agent', [h('p', {className:'meta'}, 'Pick the default. It is saved right away.'), h('div', {className:'card'}, h('div', {role:'radiogroup', 'aria-label':'Default agent'}, agents),
         snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own agent'))),
         permissionsCard(settings)]),
@@ -1435,6 +1445,13 @@
     if (action === 'settings-tab') {
       settingsTab = control.dataset.tab;
       render(); return;
+    }
+    if (action === 'settings-share') {
+      if (snapshot || settingsBusy.has('share')) return;
+      const on = state.settings?.share !== true;
+      const result = await settingsSend('share.set', {on}, 'share');
+      if (result.ok) window.orch.toast(on ? 'Shared. AGENTS.md has the orch entry.' : 'Not shared any more.', 'ok');
+      return;
     }
     if (action === 'settings-addon') {
       const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);

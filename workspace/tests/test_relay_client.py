@@ -35,7 +35,7 @@ def test_connect(proj, run, rel):
     assert json.loads((proj / ".orch/secrets/relay.json").read_text())["token"] == rel.token
     assert (proj / ".agents/skills/orch-relay/SKILL.md").is_file()
     assert (proj / ".agents/skills/orch-relay/workspaces.json").is_file()
-    assert "<!-- orch:addon:relay -->" in (proj / "AGENTS.md").read_text()
+    assert "orch-relay" in (proj / ".orch/harness/AGENTS.orch.md").read_text()
     assert run("relay", "whoami")[0] == 0
 
 
@@ -333,7 +333,7 @@ def test_refresh_installs_and_removes_shared_skills(proj, run, rel, monkeypatch)
     assert code == 0 and "1 workspace" in out and "acme-sql" in out
     d = proj / ".agents/skills/acme-sql"
     assert (d / "ref/a.md").read_bytes() == b"x" and (d / ".orch-shared").exists()
-    assert (proj / ".claude/skills/acme-sql/SKILL.md").exists()  # reached through the skills link
+    assert (proj / ".claude/skills/acme-sql/SKILL.md").exists()  # linked per skill
     s = proj / ".orch/secrets"
     assert json.loads((s / "credentials.json").read_text()) == {"DB_URL": "pg://x"}
     assert json.loads((s / "mcp.json").read_text()) == {"mcpServers": {"sql": {"command": "x"}}}
@@ -868,10 +868,17 @@ def test_send_update_needs_a_ticket_and_a_known_kind(proj, run, rel):
 
 
 def test_relay_manifest_lists_what_never_goes_into_git(proj, run, rel):
+    import subprocess
+
+    from orch import addons
+
+    subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
+    addons._activate(proj, "relay")  # the fixture turned it on before the repo existed: apply its lines now
     connect(run, rel)
-    lines = (proj / ".gitignore").read_text().splitlines()
-    for want in ("received/", ".orch/outbox/", ".agents/skills/orch-relay/workspaces.json"):
+    lines = (proj / ".git/info/exclude").read_text().splitlines()
+    for want in ("/received/", "/.orch/outbox/", "/.agents/skills/orch-relay/workspaces.json"):
         assert want in lines
+    assert not (proj / ".gitignore").exists()
 
 
 def test_relay_help_lists_webhook_and_outbox(proj, run, rel, capsys):
