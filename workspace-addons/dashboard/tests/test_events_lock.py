@@ -7,7 +7,7 @@ def test_signature_is_computed_outside_the_lock(tmp_path):
     class Probe(Revisions):
         def signature(self):
             seen.append(self.condition._is_owned())
-            return "r%d" % len(seen)
+            return f"r{len(seen)}"
 
     rev = Probe(tmp_path)
     assert rev.join()
