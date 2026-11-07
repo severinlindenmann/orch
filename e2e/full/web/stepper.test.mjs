@@ -8,6 +8,11 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { lintText, termTable, RULES } from './lint.mjs';
 
+test('a typed orch command in the UI is flagged', () => {
+  assert.ok(lintText('Try: orch relay send Home "Hello"').some(x => x.rule === 'cli-command'));
+  assert.equal(lintText('Send one from the phone.').length, 0);
+});
+
 test('wording rules, boundaries, allowances, and purity', () => {
   for (const text of ['Connected over NetBird', 'Evidence', 'Recommended', 'undefined']) assert.ok(lintText(text).length, text);
   assert.deepEqual(lintText('Ticket Proof Suggested scheduled requestor'), []);
