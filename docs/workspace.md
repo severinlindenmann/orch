@@ -147,6 +147,8 @@ repeat and a one-time wake-up in a named time zone start a fake agent). On a win
 Settings, and at 720 and 390 px; screenshots end up in `C:\Users\Public\orchsmoke\shots`).
 `-Flows relay -EnvFile <file>` adds a relay round trip with a Mac workspace: `e2e/windows/relay-pair.py` makes the two
 workspaces on a relay and writes the file, `e2e/windows/relay-peer.py` answers on the Mac (text and file back).
+`-Flows tls` checks how orch checks web certificates on Windows: a trusted certificate for the right name is accepted,
+one for another name and a self-signed one are refused (the self-signed server never gets the token).
 
 ## Not included
 Signing, approvals, planning gates, fixed requirements, durations, a server.
