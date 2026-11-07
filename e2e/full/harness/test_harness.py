@@ -55,6 +55,14 @@ class HarnessTests(unittest.TestCase):
         finally:
             r.stop()
 
+    def test_run_sh_keeps_an_argument_with_spaces_as_one_word(self):
+        import os
+        import subprocess
+        run_sh = Path(__file__).resolve().parents[1] / "run.sh"
+        r = subprocess.run(["sh", str(run_sh), "--full", "--build-label", "TF 261107.140550", "--phone"], capture_output=True, text=True,
+                           env={**os.environ, "E2E_FULL_LOCKED": "1", "E2E_FULL_ARGS_ONLY": "1"})
+        self.assertEqual(r.stdout.splitlines(), ["mode=full", "arg=--build-label", "arg=TF 261107.140550", "arg=--phone"])
+
     def test_report_header_shows_build_label(self):
         with tempfile.TemporaryDirectory() as d:
             run = {"sha": "abcdef123456", "mode": "full", "started": "now", "elapsed": "1 min", "n": 1, "build_label": "TF 42"}

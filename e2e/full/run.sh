@@ -9,18 +9,26 @@ REPO=$(cd "$HERE/../.." && pwd)
 REAL_HOME=$HOME
 HEAVY="$REAL_HOME/orch-dev/state/v2-plan-2026-11-05/build/heavy.sh"
 if [ -z "${E2E_FULL_LOCKED:-}" ] && [ -x "$HEAVY" ]; then
-  E2E_FULL_LOCKED=1 exec "$HEAVY" e2e-full -- "$0" "$@"
+  E2E_FULL_LOCKED=1 exec "$HEAVY" e2e-full -- "$HERE/run.sh" "$@"
 fi
-MODE=quick; EXTRA=""; REAL_AGENTS=0
-for a in "$@"; do
-  case "$a" in --quick) MODE=quick ;; --full) MODE=full ;; --real-agents) REAL_AGENTS=1; EXTRA="$EXTRA $a" ;;
-    *) EXTRA="$EXTRA $a" ;; esac
+MODE=quick; REAL_AGENTS=0; KEEP=0
+# keep every argument as ONE word (a value may contain spaces, e.g. --build-label "TF 1"): rebuild "$@" without --quick/--full
+n=$#
+while [ "$n" -gt 0 ]; do
+  a=$1; shift; n=$((n - 1))
+  case "$a" in
+    --quick) MODE=quick ;;
+    --full) MODE=full ;;
+    --real-agents) REAL_AGENTS=1; set -- "$@" "$a" ;;
+    --keep-root) KEEP=1; set -- "$@" "$a" ;;
+    *) set -- "$@" "$a" ;;
+  esac
 done
+if [ -n "${E2E_FULL_ARGS_ONLY:-}" ]; then printf 'mode=%s\n' "$MODE"; for a in "$@"; do printf 'arg=%s\n' "$a"; done; exit 0; fi
 df -k "$REAL_HOME" | awk 'NR==2 && $4 < 5000000 { print "under 5 GB free: stop"; exit 1 }'
 [ -d "$HERE/web/node_modules" ] || (cd "$HERE/web" && npm_config_cache="$REAL_HOME/.npm" npm i --no-audit --no-fund --silent)
 ROOT=$(mktemp -d "$REAL_HOME/.tf-fe2e-XXXX")
 OHOME=$(mktemp -d "$REAL_HOME/.orch-e2e-XXXX")   # ORCH_HOME is only trusted under the real home outside any git repo
-KEEP=0; case "$EXTRA" in *--keep-root*) KEEP=1 ;; esac
 trap '[ "$KEEP" = 1 ] || rm -rf "$ROOT" "$OHOME"' EXIT
 trap 'exit 130' INT TERM
 mkdir -p "$ROOT/home" "$ROOT/tools"
@@ -45,4 +53,4 @@ env -i HOME="$ROOT/home" PATH="$(dirname "$(command -v uv)"):$(dirname "$(comman
   E2E_CLAUDE_TOKEN="${E2E_CLAUDE_TOKEN:-}" E2E_PATH_EXTRA="$EXTRA_PATH" E2E_ORCH_HOME="$OHOME" E2E_REAL_HOME="$REAL_HOME" \
   UV_CACHE_DIR="${UV_CACHE_DIR:-$REAL_HOME/.cache/uv}" CARGO_TARGET_DIR="$CARGO_TARGET_DIR" \
   uv run --no-project --quiet --with cryptography --with jsonschema --with rfc3339-validator \
-  python "$HERE/harness/main.py" --mode "$MODE" --repo "$REPO" --root "$ROOT" $EXTRA
+  python "$HERE/harness/main.py" --mode "$MODE" --repo "$REPO" --root "$ROOT" "$@"
