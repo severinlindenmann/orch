@@ -78,7 +78,10 @@
   const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
   const statusWord = t => ({open:'Backlog', ready:'Ready', active:'Working', waiting:'Waiting', review:'Review', done:'Done'}[t.status] || 'Backlog');
   const chip = (text, cls = '') => h('span', {className:'chip ' + cls}, text);
-  const statusChip = t => chip(statusWord(t), t.status === 'active' ? 'active' : '');
+  const shown = t => snapshot ? t : {...t, status: window.DashHelpers.shownStatus(t, state.runs?.[t.id])};
+  const statusChip = t => { const s = shown(t); return chip(statusWord(s), s.status === 'active' ? 'active' : ''); };
+  // one chip: while the yellow 'Waiting for your answer' shows, the plain Waiting status is left out
+  const hideStatus = t => !snapshot && shown(t).status === 'waiting' && window.DashHelpers.showsAnswerChip(t, state.runs?.[t.id]);
   const STATUS_CHOICES = [['open', 'Backlog'], ['ready', 'Ready'], ['active', 'Working'], ['waiting', 'Waiting'], ['review', 'Review'], ['done', 'Done']];
   const starting = new Set();
   function activity(t) {
@@ -89,15 +92,18 @@
     const text = starting.has(t.id) ? 'Starting ' + agent + '...' : questions(t).length || live?.state === 'attention' ? 'Waiting for your answer' : t.status === 'review' ? 'Check this' : busy ? agent + ' is working' : '';
     if (!text) return null;
     const seconds = live?.since ? Math.max(0, Math.floor((Date.now() - Date.parse(live.since)) / 1000)) : null;
+    const why = window.DashHelpers.plainWhy(live?.why, agent);
+    const open = live?.state === 'attention' ? liveLinkFor(t) : null;
     return h('div', {className:'activity', 'data-key':'activity-' + t.id}, chip(text, busy && (starting.has(t.id) || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'),
-      live?.why || Number.isFinite(seconds) ? h('p', {className:'meta'}, [live?.why, Number.isFinite(seconds) ? seconds + ' s ago' : ''].filter(Boolean).join(' · ')) : null);
+      why || Number.isFinite(seconds) ? h('p', {className:'meta'}, [why, Number.isFinite(seconds) ? seconds + ' s ago' : ''].filter(Boolean).join(' · ')) : null,
+      open ? h('a', {className:'btn outline xs', href:open.url, 'data-key':'activity-open-' + t.id}, 'Open the live session') : null);
   }
   const reviewActions = t => !snapshot && t.status === 'review' ? h('div', {className:'row'}, [['done', 'Mark done'], ['active', 'Send back']].map(([status, label]) => h('button', {type:'button', className:'btn outline xs', 'data-action':'status-set', 'data-ticket':t.id, 'data-status':status}, label))) : null;
   const statusItems = (t, scope) => STATUS_CHOICES.map(([value, label]) => h('button', {type:'button', className:'menu-item' + (t.status === value ? ' sel' : ''), role:'menuitemradio', 'aria-checked':t.status === value, 'data-action':'status-set', 'data-ticket':t.id, 'data-status':value, 'data-key':'status-' + scope + '-' + t.id + '-' + value}, label));
   const statusControl = (t, scope) => {
     if (snapshot) return statusChip(t);
     const items = statusItems(t, scope);
-    return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'status-sum', title:'Change the status', 'aria-label':'Change the status. Now: ' + statusWord(t)}, statusChip(t), iconEl('down')), h('div', {className:'menu-pop', role:'menu'}, items));
+    return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'status-sum' + (hideStatus(t) ? ' status-sum-icon' : ''), title:'Change the status', 'aria-label':'Change the status. Now: ' + statusWord(shown(t))}, hideStatus(t) ? null : statusChip(t), iconEl('down')), h('div', {className:'menu-pop', role:'menu'}, items));
   };
   const heading = (title, sub = '') => h('header', {className:'page-heading', 'data-key':'heading'}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null);
   const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);
@@ -306,7 +312,7 @@
     const v = link.view, url = safeHref(link.url);
     return h('div', {className:'lk-row', 'data-key':'link-' + link.url},
       h('a', {className:'lk', href:url, target:'_blank', rel:'noopener noreferrer', title:url}, linkTile(v), h('span', {className:'t'}, h('b', {}, oneLine(clean(v.title), 200)), linkSub(v, url)), linkStatus(v.status), artMark(t, link.url), h('span', {className:'ext'}, iconEl('external'))),
-      removable && !snapshot ? h('button', {type:'button', className:'btn ghost icon xs lk-x', title:'Remove this reference', 'aria-label':'Remove reference ' + clean(v.title), 'data-action':'link-remove', 'data-ticket':t.id, 'data-n':array(t.refs).indexOf(link) + 1}, iconEl('x')) : null);
+      removable && !snapshot ? h('button', {type:'button', className:'btn ghost icon xs lk-x', title:'Remove this reference', 'aria-label':'Remove reference ' + clean(v.title), 'data-action':'link-remove', 'data-ticket':t.id, 'data-n':link.n || array(t.refs).indexOf(link) + 1}, iconEl('x')) : null);
   }
   // add-ons that are on, have a refresh act and own a link on this ticket
   const refreshers = t => addons().filter(a => array(a.acts).includes('refresh') && webLinks(t).some(l => l.view.addon === a.name));
@@ -318,10 +324,10 @@
       h('div', {className:'card-h'}, h('h2', {className:'grow'}, 'References'), rows.length ? h('span', {className:'meta'}, String(rows.length)) : null,
         refresh.map(a => h('button', {type:'button', className:'btn ghost xs', title:'Update titles and status (' + addonLabel(a) + ')', 'data-action':'link-refresh', 'data-addon':a.name, 'data-ticket':t.id, 'data-key':'link-refresh-' + a.name}, iconEl('refresh'), refresh.length > 1 ? addonLabel(a) : 'Refresh'))),
       h('div', {className:'links'}, rows.map(l => linkRow(t, l, true)),
-        snapshot ? null : h('div', {className:'add-link', 'data-key':'add-link-' + t.id}, h('button', {type:'button', className:'add-row', 'data-action':'link-add', 'data-ticket':t.id}, iconEl('plus'), '+ Add reference'))));
+        snapshot ? null : h('div', {className:'add-link', 'data-key':'add-link-' + t.id}, h('button', {type:'button', className:'add-row', 'data-action':'link-add', 'data-ticket':t.id}, iconEl('plus'), 'Add reference'))));
   }
   function referenceRow(t, ref, removable) {
-    const other = ticketOf(ref.ticket), n = array(t.refs).indexOf(ref) + 1;
+    const other = ticketOf(ref.ticket), n = ref.n || array(t.refs).indexOf(ref) + 1;
     const title = ref.kind === 'ticket' ? clean(other?.title) || 'Ticket unavailable' : ref.name || (ref.path + (ref.line ? ':' + ref.line : ''));
     const sub = ref.local ? 'On this computer only' : ref.kind === 'ticket' ? 'Ticket · ' + (other ? statusWord(other) : 'Unavailable') : ref.kind === 'artifact' ? 'Artifact' + (other ? ' · ' + clean(other.title) : '') : 'File in this project';
     const attrs = {className:'lk'};
@@ -693,7 +699,7 @@
         panel('tasks', tasksCard('tasks')), panel('questions', [qs.length ? qs : emptyRow('No open questions'), answered]), panel('artifacts', artifactsPanel(t)),
         panel('history', card('history', 'History', '', history.length ? history : emptyRow('No history yet.')))),
       h('div', {className:'stack ticket-side'}, linksCard(t), h('aside', {className:'card ticket-aside'}, h('div', {className:'card-h'}, h('h2', {}, 'Details')),
-        h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', h('span', {className:'ed-ro'}, agent)), field('Created', h('span', {className:'ed-ro'}, date(t.created_at))), field('Updated', h('span', {className:'ed-ro'}, t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : '')), field('Ticket', h('span', {className:'ed-ro mono'}, t.id)))), fieldSections(t)))));
+        h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', h('span', {className:'ed-ro'}, agent)), field('Created', h('span', {className:'ed-ro'}, date(t.created_at))), field('Updated', h('span', {className:'ed-ro'}, t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : '')), typeof t.key === 'string' ? null : field('Ticket', h('span', {className:'ed-ro mono'}, t.id)))), fieldSections(t)))));
   }
 
   const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note'};
@@ -879,9 +885,9 @@
     };
     return h('div', {className:'settings stack'}, heading('Settings'),
       h('div', {className:'tabs', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Agent'], ['addons', 'Add-ons']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))),
-      panel('general', [snapshot ? null : window.OrchMobileMode?.settingsSection(h), h('div', {className:'card'},
+      panel('general', [snapshot ? null : window.OrchMobileMode?.settingsSection(h), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
         h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
-        h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), settingsText('p', {className:'grow set-ctl mono'}, settings.folder))),
+        h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), settingsText('p', {className:'grow set-ctl mono'}, settings.folder)))),
         shareCard(settings)]),
       panel('agent', [h('p', {className:'meta'}, 'Pick the default. It is saved right away.'), h('div', {className:'card'}, h('div', {role:'radiogroup', 'aria-label':'Default agent'}, agents),
         snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own agent'))),
@@ -900,14 +906,14 @@
     const via = input('select');
     via.append(new Option('The task goes in as an argument', 'arg'), new Option('The task goes in on stdin', 'stdin'));
     const err = el('p', 'bad'); err.setAttribute('role', 'alert');
-    const row = (label, control, hint) => { const l = el('label', '', label); l.append(control); if (hint) l.append(el('span', 'hint', hint)); return l; };
+    const row = (label, control, hint) => { const l = el('label', '', label); l.append(control); if (hint) { const t = el('span', 'hint', hint); t.setAttribute('aria-hidden', 'true'); t.id = 'hint-' + label.toLowerCase().replace(/\W+/g, '-'); control.setAttribute('aria-describedby', t.id); l.append(t); } return l; };
     const form = el('div', 'add-form');
     const preview = el('div', 'cmd-preview');
     preview.hidden = true;
     const cancel = () => { locks.delete('settings-add-slot'); render(); };
     const back = button('Back', 'ghost sm', () => { preview.hidden = true; fields.hidden = false; });
     const fields = el('div', 'add-form');
-    fields.append(row('Name', nameIn), row('Command', cmdIn, '{prompt} is replaced with the ticket and its tasks.'), row('How the task goes in', via), err);
+    fields.append(row('Name', nameIn, '2–32 characters: lowercase letters, numbers or hyphens, a letter first.'), row('Command', cmdIn, '{prompt} is replaced with the ticket and its tasks.'), row('How the task goes in', via), err);
     const next = button('Save', 'primary sm', () => {
       const draft = {name:nameIn.value.trim(), command:cmdIn.value, prompt_via:via.value};
       err.textContent = !/^[a-z][a-z0-9-]{1,31}$/.test(draft.name) ? 'Name: 2–32 characters, a lowercase letter first, then lowercase letters, numbers or hyphens.'
@@ -1051,7 +1057,7 @@
     } else crumb.textContent = pageName;
     const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
     reconcile(nav, fragment(navLink('#home', 'Home', 'page', array(state.needs).length ? h('span', {className:'count'}, array(state.needs).length) : null), navLink('#tickets', 'Tickets', 'table'), state.general ? navLink('#general', 'General', 'text') : null,
-      h('p', {className:'eyebrow'}, 'Add-ons'), addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon))));
+      addons().some(a => a.dashboard) ? h('p', {className:'eyebrow'}, 'Add-ons') : null, addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon))));
     reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'user') : null));
     if (changed) {
       for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }

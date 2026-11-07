@@ -320,3 +320,18 @@ def test_reference_ops_reach_core_for_all_four_kinds(ws, tmp_path):
     code, text, _ = actions.run_op(ws, str(command), "ref.rm", {"ticket": "t_weekly01", "n": before})
     assert code == 200, text
     assert len(json.loads((ws / ".orch/tickets/t_weekly01.json").read_text())["refs"]) == before - 1
+
+
+def test_references_carry_their_stored_number(ws):
+    """A stored reference flagged local is dropped from the page, but the others keep their stored numbers
+    (the ones `orch ref list` and `orch ref rm` use)."""
+    f = ws / ".orch/tickets/t_weekly01.json"
+    t = json.loads(f.read_text())
+    t["refs"] = [
+        {"kind": "url", "url": "https://example.com/a"},
+        {"kind": "file", "path": "x.md", "local": True},
+        {"kind": "url", "url": "https://example.com/c"},
+    ]
+    f.write_text(json.dumps(t))
+    shown = next(x for x in data.load_state(ws)["tickets"] if x["id"] == "t_weekly01")["refs"]
+    assert [(r["url"], r["n"]) for r in shown] == [("https://example.com/a", 1), ("https://example.com/c", 3)]

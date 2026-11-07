@@ -161,12 +161,11 @@ final class RealRelayE2ETests: XCTestCase {
         _ = chip.waitForExistence(timeout: 40)
         shot("20-general-started-chip")
         XCTAssertTrue(chip.exists || text(app, "started").exists, "started chip under the reply")
-        if chip.exists { chip.tap(); must(app, el(app, "composer"), "topic chat")
+        if chip.exists {
+            chip.tap(); must(app, el(app, "composer"), "topic chat")
             must(app, text(app, "plan the offsite"), "the text that started the topic, first in the topic")
             must(app, text(app, "I started a topic for the offsite"), "the agent's reply inside the topic")
-            sleep(1); shot("21-topic-from-chip"); back(app)
-            // Chats list rows carry the last line, a time and the unread pill (not an empty row).
-            back(app)
+            sleep(1); shot("21-topic-from-chip"); back(app); back(app)
             let row = app.buttons["room-\(ws)"]
             must(app, row, "Chats row")
             sleep(1); shot("22-chats-rows")

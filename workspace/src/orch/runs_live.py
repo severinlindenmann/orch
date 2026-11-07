@@ -6,7 +6,8 @@ orch owns that tmux server (own socket), so a person's own tmux is never touched
 process (the wrapper). Input waits in the pending file and is pasted (bracketed paste, then Enter) only when
 the agent says it is idle: the tool's own hooks call `orch run event --kind idle`, a generic agent calls
 `orch run done`. At most 4 live sessions per workspace. A session idle (or waiting for a person) for an
-hour (workspace.live_idle_minutes), or on a ticket Done for that long, is closed on the next
+hour (workspace.live_idle_minutes; 10 minutes once the ticket is in Review, Done or Dropped, and such a
+session does not count toward the limit), or on a ticket Done for that long, is closed on the next
 `orch run` call (there is no daemon); its session id stays on the ticket, so the next start continues it.
 Nothing here reads the screen to decide anything, with one exception: a run still "starting" (no hook has
 fired) is checked against the adapter's live.screens (a screen the tool shows before it is up). The run's
@@ -32,6 +33,9 @@ from orch.errors import Refused
 
 MAX_LIVE = 4
 IDLE_SECONDS = 60 * 60
+FINISHED_IDLE_SECONDS = 10 * 60  # a session on a ticket in Review, Done or Dropped closes after this
+HARD_EXTRA = 4  # most sessions over the limit that finished tickets may keep open
+FINISHED = ("review", "done", "dropped")
 PASTE_DELAY = 0.3
 STARTUP_SECONDS = 60
 KINDS = ("session", "idle", "working", "attention")
@@ -101,13 +105,35 @@ def records(root: Path) -> list[dict]:
     return out
 
 
-def live_alive(root: Path) -> list[dict]:
-    """Live runs that count against MAX_LIVE (the hidden General ticket's run does not)."""
+def _finished(root: Path, tid: str) -> bool:
+    """True when the ticket is in Review, Done or Dropped: its session no longer needs a slot."""
+    with contextlib.suppress(Exception):
+        return tickets.load(root, tid).get("status") in FINISHED
+    return False
+
+
+def live_all(root: Path) -> list[dict]:
+    """Every alive live run except the hidden General ticket's."""
     return [
         r
         for r in records(root)
         if r.get("mode") == "live" and runs.state(r) == "alive" and not tickets.is_general(root, r["ticket"])
     ]
+
+
+def live_alive(root: Path) -> list[dict]:
+    """Live runs that count against MAX_LIVE. A session that is idle or waiting for a person on a ticket in
+    Review, Done or Dropped does not (it closes by itself after FINISHED_IDLE_SECONDS); a working or starting
+    one does."""
+    return [
+        r
+        for r in live_all(root)
+        if not ((r.get("live") or {}).get("state") in ("idle", "attention") and _finished(root, r["ticket"]))
+    ]
+
+
+def _full(root: Path) -> bool:
+    return len(live_alive(root)) >= MAX_LIVE or len(live_all(root)) >= MAX_LIVE + HARD_EXTRA
 
 
 # ---------------------------------------------------------------- start
@@ -123,7 +149,7 @@ def start_live(
 ) -> dict:
     cur = runs.read(root, tid)
     mine = cur is not None and runs.state(cur) == "alive"
-    if not mine and len(live_alive(root)) >= MAX_LIVE:
+    if not mine and _full(root):
         _queue_for_slot(root, tid, by, busy_text)
         raise runs.Busy(
             f"{MAX_LIVE} live sessions are open here, the most at once. Your request for {tid} is saved and "
@@ -413,19 +439,20 @@ def cleanup(root: Path) -> list[str]:
             idle = time.time() - runs._parse(live["since"])
         except (KeyError, ValueError):
             continue
-        if (idle > limit or _done_for(root, tid, limit)) and _claim_close(root, rec):
+        short = live.get("state") == "idle" and _finished(root, tid)  # attention keeps the full limit
+        lim = min(limit, FINISHED_IDLE_SECONDS) if short else limit
+        if (idle > lim or _done_for(root, tid, limit)) and _claim_close(root, rec, short and idle <= limit):
             try:
                 _close(root, rec, interrupt=False)
             except Exception:  # the close failed: input may go in again; the next cleanup tries again
                 _unclaim_close(root, rec)
                 continue
             closed.append(tid)
-    if closed:
-        start_waiting(root)
+    start_waiting(root)  # a ticket that moved to Review/Done/Dropped may have freed a slot
     return closed
 
 
-def _claim_close(root: Path, rec: dict) -> bool:
+def _claim_close(root: Path, rec: dict, needs_finished: bool = False) -> bool:
     """Right before an idle close: under the run lock, the run must still be the same, still idle (or waiting
     for a person) since the same moment, with nothing waiting to go in. It is then marked closing, so
     deliver() pastes nothing more into it; a message sent meanwhile stays waiting for the next start."""
@@ -435,6 +462,8 @@ def _claim_close(root: Path, rec: dict) -> bool:
         if not now or now["run"] != rec["run"] or runs.state(now) != "alive":
             return False
         if (now.get("live") or {}) != (rec.get("live") or {}) or runs.undelivered(root, tid):
+            return False
+        if needs_finished and not _finished(root, tid):  # sent back to Working meanwhile
             return False
         now["closing"] = tickets.now()
         runs._write(root, now)
@@ -542,7 +571,7 @@ def watch_start(root: Path, tid: str, run: str, name: str, proc: subprocess.Pope
 
 def start_waiting(root: Path) -> None:
     """A slot opened: start the oldest ticket whose live start was queued for lack of one."""
-    if len(live_alive(root)) >= MAX_LIVE:
+    if _full(root):
         return
     d = runs.run_dir(root) / "pending"
     waiting = []
