@@ -102,9 +102,8 @@
   const statusItems = (t, scope) => STATUS_CHOICES.map(([value, label]) => h('button', {type:'button', className:'menu-item' + (t.status === value ? ' sel' : ''), role:'menuitemradio', 'aria-checked':t.status === value, 'data-action':'status-set', 'data-ticket':t.id, 'data-status':value, 'data-key':'status-' + scope + '-' + t.id + '-' + value}, label));
   const statusControl = (t, scope) => {
     if (snapshot) return statusChip(t);
-    if (hideStatus(t)) return null;
     const items = statusItems(t, scope);
-    return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'status-sum', title:'Change the status', 'aria-label':'Change the status. Now: ' + statusWord(shown(t))}, statusChip(t), iconEl('down')), h('div', {className:'menu-pop', role:'menu'}, items));
+    return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'status-sum' + (hideStatus(t) ? ' status-sum-icon' : ''), title:'Change the status', 'aria-label':'Change the status. Now: ' + statusWord(shown(t))}, hideStatus(t) ? null : statusChip(t), iconEl('down')), h('div', {className:'menu-pop', role:'menu'}, items));
   };
   const heading = (title, sub = '') => h('header', {className:'page-heading', 'data-key':'heading'}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null);
   const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);

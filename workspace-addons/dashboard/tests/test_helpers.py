@@ -503,3 +503,10 @@ def test_a_ticket_that_cannot_go_on_is_waiting_not_working(status, live, want):
 def test_one_chip_while_a_question_is_open(ticket, live, want):
     run = {"claim": {"live": {"state": live}}} if live else None
     assert call("showsAnswerChip", ticket, run) is want
+
+
+def test_the_status_menu_stays_reachable_while_a_question_is_open():
+    """Only the duplicate plain chip is dropped (icon-only summary); statusControl never returns nothing."""
+    src = (WEB / "app.js").read_text()
+    assert "if (hideStatus(t)) return null" not in src
+    assert "status-sum-icon" in src

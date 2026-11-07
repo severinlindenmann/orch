@@ -209,3 +209,41 @@ def test_review_session_closes_after_ten_minutes(proj, run, closed, status, age,
     tid = _live(proj, run, "idle", age)
     tickets.set_status(proj, tid, status, "human:t")
     assert runs_live.cleanup(proj) == ([tid] if shut else [])
+
+
+def test_a_working_session_on_a_review_ticket_still_counts(proj, run):
+    for _ in range(runs_live.MAX_LIVE - 1):
+        _live(proj, run, "idle", 1)
+    tid = _live(proj, run, "working", 1)
+    tickets.set_status(proj, tid, "review", "human:t")
+    assert len(runs_live.live_alive(proj)) == runs_live.MAX_LIVE
+    assert runs_live._full(proj)
+
+
+def test_hard_cap_over_all_sessions(proj, run):
+    for _ in range(runs_live.MAX_LIVE + runs_live.HARD_EXTRA):
+        tid = _live(proj, run, "idle", 1)
+        tickets.set_status(proj, tid, "done", "human:t")
+    assert runs_live.live_alive(proj) == [] and runs_live._full(proj)
+
+
+def test_attention_on_a_review_ticket_keeps_the_full_hour(proj, run, closed):
+    tid = _live(proj, run, "attention", 11)
+    tickets.set_status(proj, tid, "review", "human:t")
+    assert runs_live.cleanup(proj) == [] and closed == []
+
+
+def test_sent_back_to_working_keeps_the_session(proj, run, closed, monkeypatch):
+    tid = _live(proj, run, "idle", 11)
+    tickets.set_status(proj, tid, "review", "human:t")
+    orig = runs_live._finished
+    calls = []
+
+    def flip(root, t):
+        calls.append(t)
+        if len(calls) >= 2:  # after the cleanup read, under the close lock: the person sent it back
+            return False
+        return orig(root, t)
+
+    monkeypatch.setattr(runs_live, "_finished", flip)
+    assert runs_live.cleanup(proj) == [] and closed == []
