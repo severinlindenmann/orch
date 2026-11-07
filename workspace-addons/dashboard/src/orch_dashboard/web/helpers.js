@@ -132,7 +132,7 @@
       primary: start('Start anyway', {take_over: true}), items: [stop]};
     if (r && r.running === true) {
       const by = claim.by ? ' · started by ' + noPrefix(claim.by) : '';
-      if (asks) return {state: 'needs', agent, status: 'waiting for your answer' + since, primary: {label: 'Answer', op: 'answer'}, items: [stop, fresh]};
+      if (asks) return {state: 'needs', agent, status: 'needs your answer' + since, primary: {label: 'Answer', op: 'answer'}, items: [stop, fresh]};
       const waits = claim.live && claim.live.state === 'attention' ? (plainWhy(claim.live.why, agent) || 'waiting for your OK in the live session') : '';
       if (waits) return {state: 'needs', agent, status: waits, primary: liveLink ? {label: 'Open ' + liveLink.label, op: 'open', url: liveLink.url} : stop,
         items: liveLink ? [stop] : []};
@@ -145,7 +145,7 @@
     }
     if (r && r.state === 'dead') return {state: 'failed', agent, status: 'the last run ended without finishing',
       primary: start('Try again'), items: [fresh]};
-    if (asks) return {state: 'needs', agent, status: 'waiting for your answer', primary: {label: 'Answer', op: 'answer'}, items: [fresh]};
+    if (asks) return {state: 'needs', agent, status: 'needs your answer', primary: {label: 'Answer', op: 'answer'}, items: [fresh]};
     if (sessions[0]) {
       const when = Date.parse(sessions[0].last_used);
       return {state: 'resume', agent, status: 'last worked ' + (Number.isNaN(when) ? 'earlier' : span(nowMs - when) === 'just now' ? 'just now' : span(nowMs - when) + ' ago'),
@@ -174,7 +174,7 @@
     return t.status === 'active' && live && live.state === 'attention' ? 'waiting' : t.status;
   }
 
-  /* True while the yellow "Waiting for your answer" chip shows (an open question, or the agent needs you): the plain
+  /* True while the yellow "Needs you" chip shows (an open question, or the agent needs you): the plain
      Waiting status chip is then left out, so the ticket shows one chip. */
   function showsAnswerChip(ticket, run) {
     const t = ticket || {}, live = run && run.claim && run.claim.live;

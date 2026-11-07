@@ -90,7 +90,7 @@
     const agent = run?.claim?.label || array(state.settings?.agents).find(a => a.name === run?.claim?.agent)?.label || capitalise(run?.claim?.agent || array(state.settings?.agents).find(a => a.chosen)?.label || 'agent');
     const getting = starting.has(t.id) || live?.state === 'starting';
     const busy = getting || (run?.running && !['idle', 'attention'].includes(live?.state));
-    const text = getting ? 'Getting started…' : questions(t).length || live?.state === 'attention' ? 'Waiting for your answer' : t.status === 'review' ? 'Ready for your review' : busy ? agent + ' is working' : '';
+    const text = getting ? 'Getting started…' : questions(t).length || live?.state === 'attention' ? 'Needs you' : t.status === 'review' ? 'Ready for your review' : busy ? agent + ' is working' : '';
     return {run, live, agent, busy, text};
   }
   const needsList = () => window.DashHelpers.uniqueNeeds(state?.needs);
@@ -100,11 +100,11 @@
     if (snapshot) return null;
     const {live, agent, busy, text: full} = activityInfo(t);
     if (!full || (where === 'head' && questions(t).length)) return null;  // the banner is the one place for an open question
-    const text = where === 'board' && full === 'Waiting for your answer' ? 'Needs you' : full;
+    const text = full;
     const seconds = live?.since ? Math.max(0, Math.floor((Date.now() - Date.parse(live.since)) / 1000)) : null;
     const why = window.DashHelpers.plainWhy(live?.why, agent);
     const open = live?.state === 'attention' ? liveLinkFor(t) : null;
-    return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === 'Ready for your review' ? {title:'Ready for your review'} : text === 'Needs you' ? {title:'Waiting for your answer'} : {}),
+    return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === 'Ready for your review' ? {title:'Ready for your review'} : text === 'Needs you' ? {title:'The agent asked you something'} : {}),
       why || Number.isFinite(seconds) ? h('p', {className:'meta'}, [why, Number.isFinite(seconds) ? window.DashHelpers.ago(live.since, Date.now()) : ''].filter(Boolean).join(' · ')) : null,
       open ? h('a', {className:'btn outline xs', href:open.url, 'data-key':'activity-open-' + t.id}, 'Open the live session') : null);
   }
@@ -1102,7 +1102,7 @@
       crumb.replaceChildren(pageName, ' › ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || last);
     } else crumb.textContent = pageName;
     const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
-    reconcile(nav, fragment(navLink('#home', 'Home', 'page', needsList().length ? h('span', {className:'count', title:needsList().length + ' waiting for you', 'aria-label':needsList().length + ' need you'}, needsList().length + ' need you') : null), navLink('#tickets', 'Tickets', 'table'), state.general ? navLink('#general', 'General', 'text') : null,
+    reconcile(nav, fragment(navLink('#home', 'Home', 'page', needsList().length ? h('span', {className:'count', title:needsList().length + ' need you', 'aria-label':needsList().length + ' need you'}, needsList().length + ' need you') : null), navLink('#tickets', 'Tickets', 'table'), state.general ? navLink('#general', 'General', 'text') : null,
       addons().some(a => a.dashboard) ? h('p', {className:'eyebrow'}, 'Add-ons') : null, addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon))));
     reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'user') : null));
     if (changed) {
