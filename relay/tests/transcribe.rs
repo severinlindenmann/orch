@@ -252,3 +252,75 @@ async fn transcribe_workspace_endpoint() {
     let (s, _) = post_audio(&t, "/v1/transcribe", &[], "audio/wav", vec![1; 10]).await;
     assert_eq!(s, 401);
 }
+
+#[test]
+fn language_swiss_german_setting_and_explicit() {
+    use orch_relay::transcribe::effective_language as l;
+    assert_eq!(l(None, false), None);
+    assert_eq!(l(None, true).as_deref(), Some("de-CH"));
+    assert_eq!(l(Some(""), true).as_deref(), Some("de-CH"));
+    assert_eq!(l(Some("en"), true).as_deref(), Some("en"), "explicit wins");
+    assert_eq!(l(Some("de-CH"), false).as_deref(), Some("de-CH"));
+}
+
+#[tokio::test]
+async fn transcribe_accepts_de_ch_explicitly() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    set_key(&t).await;
+    let (s, v) = post_audio(
+        &t,
+        "/v1/phone/transcribe?language=de-CH",
+        &ph(&p),
+        "audio/m4a",
+        vec![1; 100],
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(t.dg.calls.lock().unwrap()[0].3.as_deref(), Some("de-CH"));
+}
+
+#[tokio::test]
+async fn admin_voice_switch_for_reading_aloud() {
+    let t = start().await;
+    let (_, v) = t.admin_json("GET", "/admin/api/voice", None).await;
+    assert_eq!(v["tts_enabled"], true);
+    // the switch alone needs no key and leaves the key alone
+    set_key(&t).await;
+    let (s, v) = t
+        .admin_json(
+            "PUT",
+            "/admin/api/voice",
+            Some(json!({"tts_enabled": false})),
+        )
+        .await;
+    assert_eq!(
+        (s, v["tts_enabled"].clone(), v["deepgram"]["set"].clone()),
+        (200, json!(false), json!(true))
+    );
+    assert!(!orch_relay::speech::enabled(&t.app.db.lock().unwrap()));
+    let (s, _) = t
+        .admin_json(
+            "PUT",
+            "/admin/api/voice",
+            Some(json!({"tts_enabled": "no"})),
+        )
+        .await;
+    assert_eq!(s, 422);
+    let (_, v) = t
+        .admin_json(
+            "PUT",
+            "/admin/api/voice",
+            Some(json!({"tts_enabled": true})),
+        )
+        .await;
+    assert_eq!(v["tts_enabled"], true);
+    // an empty PUT is still an invalid key
+    assert_eq!(
+        t.admin_json("PUT", "/admin/api/voice", Some(json!({})))
+            .await
+            .0,
+        422
+    );
+}

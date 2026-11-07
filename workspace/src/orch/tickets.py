@@ -330,17 +330,59 @@ def save(root: Path, ticket: dict) -> None:
         _write(root, ticket)
 
 
-def list_all(root: Path) -> list[dict]:
+def list_all(root: Path, include_general: bool = False) -> list[dict]:
+    """Every ticket by creation time. The hidden General ticket of the phone conversation (flag
+    `general: true`) is left out unless include_general: it is not a ticket anyone lists, counts or closes."""
     d = tickets_dir(root)
     out = []
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
-                out.append(json.loads(p.read_text(encoding="utf-8")))
+                t = json.loads(p.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
+            if include_general or not (isinstance(t, dict) and t.get("general") is True):
+                out.append(t)
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
+
+
+def is_general(root: Path, tid: str) -> bool:
+    """True for the hidden General ticket (reads one file; a missing or unreadable ticket is not General)."""
+    try:
+        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("general") is True
+    except (OSError, ValueError, Refused, AttributeError):
+        return False
+
+
+def general_id(root: Path) -> str | None:
+    """The id of this workspace's hidden General ticket, or None before the first General text."""
+    for t in list_all(root, include_general=True):
+        if isinstance(t, dict) and t.get("general") is True:
+            return t["id"]
+    return None
+
+
+def ensure_general(root: Path, by: str) -> str:
+    """The General ticket (flag general: true, no display key so no number is used up), made once."""
+    if tid := general_id(root):
+        return tid
+    t = now()
+    ticket = {
+        "schema": "orch.ticket/1",
+        "id": new_id(root),
+        "title": "General",
+        "general": True,
+        "status": "open",
+        "created_at": t,
+        "updated_at": t,
+        "checklist": [],
+        "links": [],
+        "questions": [],
+        "history": [{"at": t, "by": by, "via": "cli", "text": "Created"}],
+    }
+    save(root, ticket)
+    return ticket["id"]
 
 
 _FIELD_WORDS = {
@@ -407,8 +449,14 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
     return t
 
 
-def add_history(ticket: dict, by: str, text: str, via: str = "cli") -> None:
-    ticket["history"].append({"at": now(), "by": by, "via": via, "text": text})
+def _env_via() -> str:
+    """Where a change comes from: ORCH_VIA (a page that runs orch sets it, e.g. dashboard), else cli."""
+    v = os.environ.get("ORCH_VIA", "")
+    return v if re.fullmatch(r"[a-z][a-z0-9-]{1,23}", v) else "cli"
+
+
+def add_history(ticket: dict, by: str, text: str, via: str | None = None) -> None:
+    ticket["history"].append({"at": now(), "by": by, "via": via or _env_via(), "text": text})
 
 
 def parse_ext_args(pairs: list[str] | None, schema_for=None) -> dict[str, dict]:
@@ -432,13 +480,21 @@ def parse_ext_args(pairs: list[str] | None, schema_for=None) -> dict[str, dict]:
 
 
 def create(
-    root: Path, title: str, by: str, parent: str | None = None, ext: dict[str, dict] | None = None
+    root: Path,
+    title: str,
+    by: str,
+    parent: str | None = None,
+    ext: dict[str, dict] | None = None,
+    fields: dict | None = None,
 ) -> dict:
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
     if parent is not None:
         load(root, parent)  # the parent must exist (cycles are impossible: it is set only here)
+    fields = fields or {}
+    for k, v in fields.items():
+        clean_field(k, v)
     t = now()
     ticket = {
         "schema": "orch.ticket/1",
@@ -452,11 +508,13 @@ def create(
         "links": [],
         "questions": [],
         "history": [
-            {"at": t, "by": by, "via": "cli", "text": "Created" + (f" under {parent}" if parent else "")}
+            {"at": t, "by": by, "via": _env_via(), "text": "Created" + (f" under {parent}" if parent else "")}
         ],
     }
     if parent is not None:
         ticket["parent"] = parent
+    for k, v in fields.items():  # owner, due, note: part of the one "Created" line
+        _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
         ticket["ext"] = ext
     save(root, ticket)
@@ -1219,7 +1277,9 @@ def _proof_name(name: str) -> str:
 def _size_text(n: int) -> str:
     if n >= 1024 * 1024:
         return f"{n / (1024 * 1024):.1f} MB"
-    return f"{max(round(n / 1024), 1)} KB"
+    if n >= 1024:
+        return f"{round(n / 1024)} KB"
+    return f"{n} B"
 
 
 def _too_big(name: str) -> str:
@@ -1328,6 +1388,22 @@ def artifacts_path(root: Path, tid: str) -> Path:
     """.orch/tickets/<id>/artifacts/ : where the files a ticket produces go (next to evidence/)."""
     load(root, tid)
     return tickets_dir(root) / tid / "artifacts"
+
+
+def files_dir(root: Path, tid: str) -> Path:
+    """.orch/tickets/<id>/files/ : files people send to the ticket (from the phone), created. A link anywhere
+    on the way is refused."""
+    load(root, tid)
+    cur = root / ".orch"
+    for part in ("tickets", tid, "files"):
+        cur = cur / part
+        if cur.is_symlink():
+            raise Refused("The files folder of this ticket is a link. orch will not use it.")
+        if cur.exists() and not cur.is_dir():
+            raise Refused("The files folder of this ticket is blocked by a file. Move that file away.")
+        if not cur.exists():
+            cur.mkdir()
+    return cur
 
 
 def artifacts_dir(root: Path, tid: str) -> Path:

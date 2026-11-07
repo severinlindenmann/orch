@@ -20,6 +20,43 @@ TRUST_SCREEN = """ Accessing workspace:
    Yes, I trust this folder
  Enter to confirm · Esc to cancel"""
 
+# recorded from a real first start (fresh HOME, Claude Code 2.1.319, tmux pane 200x50), trimmed
+THEME_SCREEN = """ Let's get started.
+ Choose the text style that looks best with your terminal
+ To change this later, run /theme
+     Auto (match terminal)
+ ❯ ✔ Dark mode
+     Light mode
+     Dark mode (colorblind-friendly)
+  Syntax theme: Monokai Extended (ctrl+t to disable)"""
+NOTES_SCREEN = """ Security notes:
+ 1. Claude can make mistakes.
+    You're responsible for Claude's actions and should always
+    review them, especially when running code.
+ 2. Due to prompt injection risks, only use it with code you trust
+    Learn more: https://code.claude.com/docs/en/security
+ Press Enter to continue…"""
+FOLDER_TRUST_SCREEN = """ Accessing workspace:
+ {folder}
+ Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open \
+source project, or work from your team). If not, take a moment to review what's in this
+ folder first.
+ Claude Code'll be able to read, edit, and execute files here.
+ Security guide
+ ❯ No, exit
+   Yes, I trust this folder
+ Enter to confirm · Esc to cancel"""
+LOGIN_SCREEN = """ Claude Code can be used with your Claude subscription or billed based on API usage.
+ Select login method:
+ ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise
+   2. Anthropic Console account · API usage billing"""
+PERMISSION_SCREEN = """ Bash command
+   rm -rf build
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for rm commands in this folder
+   3. No, and tell Claude what to do differently (esc)"""
+
 
 def _ticket(run, title="A presentation about giraffes"):
     return json.loads(run("ticket", "new", title, "--json", "--by", "human:t")[1])["id"]
@@ -143,8 +180,8 @@ def _starting(proj, run, monkeypatch, pane_text, age):
 
 
 def test_a_trust_question_is_shown_instead_of_working(proj, run, monkeypatch):
-    tid = _starting(proj, run, monkeypatch, TRUST_SCREEN, age=5)
-    runs_live.cleanup(proj)
+    tid = _starting(proj, run, monkeypatch, TRUST_SCREEN, age=5)  # the screen names no folder: never answered
+    runs_live.check_starting(proj, runs.read(proj, tid), answered=[])
     rec = runs.read(proj, tid)
     _valid_run(rec)
     assert rec["live"]["state"] == "attention"
@@ -170,6 +207,127 @@ def test_a_quiet_start_is_left_alone_for_a_minute(proj, run, monkeypatch):
     tid = _starting(proj, run, monkeypatch, "loading", age=10)
     runs_live.cleanup(proj)
     assert runs.read(proj, tid)["live"]["state"] == "starting"
+
+
+# ---------------------------------------------------------------- first-run screens: passed, never a login
+
+
+def _screens(proj, run, monkeypatch, panes, age=5):
+    """A starting run whose pane shows the given screens in turn; returns (ticket, keys sent)."""
+    tid = _ticket(run)
+    rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+    rec["live"] = {"state": "starting", "since": runs._iso(time.time() - age)}
+    runs._write(proj, rec)
+    panes, sent = list(panes), []
+
+    def fake(root, *a, **k):
+        if a[0] == "capture-pane":
+            return subprocess.CompletedProcess(a, 0, panes.pop(0) if len(panes) > 1 else panes[0], "")
+        if a[0] == "send-keys":
+            sent.append((a[2], a[3]))
+        return subprocess.CompletedProcess(a, 0, "", "")
+
+    monkeypatch.setattr(runs_live, "session_exists", lambda root, t: True)
+    monkeypatch.setattr(runs_live, "tmux", fake)
+    monkeypatch.setattr(runs_live, "PASTE_DELAY", 0)
+    return tid, sent
+
+
+def _trust(folder):
+    return FOLDER_TRUST_SCREEN.replace("{folder}", str(folder))
+
+
+@pytest.mark.parametrize(
+    ("screen", "keys", "what"),
+    [(THEME_SCREEN, ["Enter"], "theme"), (NOTES_SCREEN, ["Enter"], "notes")],
+)
+def test_a_harmless_first_run_screen_is_passed_once(proj, run, monkeypatch, screen, keys, what):
+    tid, sent = _screens(proj, run, monkeypatch, [screen])
+    answered: list[str] = []
+    assert runs_live.check_starting(proj, runs.read(proj, tid), answered=answered) is None
+    assert sent == [(runs_live.target(tid), k) for k in keys] and answered == [what]
+    # the tool is still redrawing the same screen: nothing is sent twice
+    assert runs_live.check_starting(proj, runs.read(proj, tid), answered=answered) is None
+    assert len(sent) == len(keys)
+    assert runs.read(proj, tid)["live"]["state"] == "starting"
+
+
+def test_the_trust_screen_is_answered_yes_only_for_the_orch_init_folder(proj, run, monkeypatch):
+    run("init", "--yes")
+    tid, sent = _screens(proj, run, monkeypatch, [_trust(proj.resolve())])
+    answered: list[str] = []
+    assert runs_live.check_starting(proj, runs.read(proj, tid), answered=answered) is None
+    assert [k for _, k in sent] == ["Down", "Enter"] and answered == ["folder trust"]
+
+
+def test_the_trust_screen_for_another_folder_is_not_answered(proj, run, monkeypatch, tmp_path):
+    run("init", "--yes")
+    tid, sent = _screens(proj, run, monkeypatch, [_trust(tmp_path / "elsewhere")])
+    note = runs_live.check_starting(proj, runs.read(proj, tid), answered=[])
+    assert sent == [] and note.startswith("Claude asks whether to trust this folder")
+    assert runs.read(proj, tid)["live"]["state"] == "attention"
+
+
+def test_the_trust_screen_without_orch_init_is_not_answered(proj, run, monkeypatch):
+    tid, sent = _screens(proj, run, monkeypatch, [_trust(proj.resolve())])
+    monkeypatch.setattr(runs_live.adapters, "orch_folder", lambda root: False)
+    assert runs_live.check_starting(proj, runs.read(proj, tid), answered=[]) is not None
+    assert sent == []
+
+
+@pytest.mark.parametrize("screen", [LOGIN_SCREEN, THEME_SCREEN + "\n" + LOGIN_SCREEN, PERMISSION_SCREEN])
+def test_a_login_or_permission_screen_is_never_answered(proj, run, monkeypatch, screen):
+    tid, sent = _screens(proj, run, monkeypatch, [screen], age=61)
+    note = runs_live.check_starting(proj, runs.read(proj, tid), answered=[])
+    assert sent == [] and note
+    if "login" in screen:
+        assert note.startswith("Claude wants a login") and "orch run attach" in note
+
+
+def test_only_the_runs_own_wrapper_answers(proj, run, monkeypatch):
+    tid, sent = _screens(proj, run, monkeypatch, [THEME_SCREEN])
+    runs_live.cleanup(proj)  # any other orch command: leaves the screen to the wrapper
+    assert sent == [] and runs.read(proj, tid)["live"]["state"] == "starting"
+
+
+class _Proc:
+    def __init__(self):
+        self.n = 0
+
+    def poll(self):
+        return None
+
+
+def test_the_wrapper_passes_the_first_run_screens_and_says_so_once(proj, run, monkeypatch):
+    run("init", "--yes")
+    screens = [THEME_SCREEN, THEME_SCREEN, NOTES_SCREEN, _trust(proj.resolve()), "loading"]
+    tid, sent = _screens(proj, run, monkeypatch, screens)
+    rec = runs.read(proj, tid)
+    ticks = {"n": 0}
+
+    def tick(_s):  # one second passes; after the trust answer the tool is up and its hook fires
+        ticks["n"] += 1
+        if ticks["n"] == len(screens):
+            run("run", "event", "--run", rec["run"], "--kind", "session")
+
+    monkeypatch.setattr(runs_live.time, "sleep", tick)
+    answered = runs_live.watch_start(proj, tid, rec["run"], "claude", _Proc())
+    assert answered == ["theme", "notes", "folder trust"]
+    assert [k for _, k in sent] == ["Enter", "Enter", "Down", "Enter"]
+    assert {t for t, _ in sent} == {runs_live.target(tid)}  # only this run's own pane
+    texts = [h.get("text", "") for h in tickets.load(proj, tid)["history"]]
+    said = [t for t in texts if "first-run screens" in t]
+    assert said == ["Answered Claude's first-run screens (theme, notes, folder trust)."]
+
+
+def test_the_wrapper_stops_at_a_login(proj, run, monkeypatch):
+    tid, sent = _screens(proj, run, monkeypatch, [THEME_SCREEN, LOGIN_SCREEN])
+    monkeypatch.setattr(runs_live.time, "sleep", lambda s: None)
+    rec = runs.read(proj, tid)
+    assert runs_live.watch_start(proj, tid, rec["run"], "claude", _Proc()) == ["theme"]
+    live = runs.read(proj, tid)["live"]
+    assert live["state"] == "attention" and live["why"].startswith("Claude wants a login")
+    assert [k for _, k in sent] == ["Enter"]
 
 
 # ---------------------------------------------------------------- a never-pasted prompt

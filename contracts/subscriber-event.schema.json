@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.dev/contracts/subscriber-event.schema.json",
+  "title": "orch relay subscriber event (v1)",
+  "description": "One event a subscriber gets from GET /v1/sub/<token>/events, the stream, or a push POST (relay-api.md, Subscribers). v = format version: fields may be added, never renamed. id = the stored message id (the cursor for after / Last-Event-ID). Text is plain text, never HTML. The push test event has type test.",
+  "type": "object",
+  "required": ["v", "id", "type", "at"],
+  "properties": {
+    "v": { "const": 1 },
+    "id": { "type": "string", "pattern": "^(m_[a-z0-9]{16}|test_[a-z0-9]{10})$" },
+    "type": { "enum": ["update", "text", "question", "answered", "test"] },
+    "at": { "type": "string", "format": "date-time" },
+    "workspace": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^ws_[a-z0-9]{10}$" },
+        "name": { "type": "string" }
+      }
+    },
+    "ticket": { "type": ["string", "null"] },
+    "key": { "oneOf": [{ "type": "string", "pattern": "^[A-Z0-9]{2,4}-[1-9][0-9]{0,8}$" }, { "type": "null" }] },
+    "kind": { "enum": ["started", "working", "note", "result", "failure", "stopped", "question"] },
+    "title": { "type": ["string", "null"] },
+    "text": { "type": "string" },
+    "ticket_view": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["title", "status", "agent", "summary", "done", "total", "links", "files"],
+          "properties": {
+            "title": { "type": "string" },
+            "status": { "enum": ["open", "active", "waiting", "done", "dropped"] },
+            "agent": { "type": ["string", "null"] },
+            "summary": { "type": ["string", "null"] },
+            "done": { "type": "integer", "minimum": 0 },
+            "total": { "type": "integer", "minimum": 0 },
+            "links": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "title", "url"],
+                "properties": {
+                  "kind": { "enum": ["link", "html", "pr", "commit"] },
+                  "title": { "type": "string" },
+                  "url": { "type": "string", "pattern": "^https?://" }
+                }
+              }
+            },
+            "files": {
+              "type": "array",
+              "description": "Image and file attachments, only when the subscriber receives Files; bytes from GET /v1/sub/<token>/files/<blob_id> when downloads are allowed.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "size", "blob_id"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "size": { "type": "integer", "minimum": 0 },
+                  "blob_id": { "type": "string", "pattern": "^b_[a-z0-9]{16}$" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "question_id": { "type": "string", "pattern": "^m_[a-z0-9]{16}$" },
+    "options": { "type": "array", "items": { "type": "string" } },
+    "answerable": { "type": "boolean" },
+    "answered": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["answer", "answered_by"],
+          "properties": { "answer": { "type": "string" }, "answered_by": { "type": "string" } }
+        }
+      ]
+    },
+    "answer": { "type": "string" },
+    "answered_by": { "type": "string" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "update" } } },
+      "then": { "required": ["workspace", "ticket", "key", "kind", "title", "text", "ticket_view"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "text" } } },
+      "then": { "required": ["workspace", "ticket", "key", "text"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "question" } } },
+      "then": { "required": ["workspace", "ticket", "key", "question_id", "text", "title", "options", "answerable", "answered"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "answered" } } },
+      "then": { "required": ["workspace", "ticket", "key", "question_id", "answer", "answered_by"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "test" } } },
+      "then": { "required": ["text"] }
+    }
+  ]
+}

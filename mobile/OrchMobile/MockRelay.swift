@@ -21,6 +21,11 @@ actor MockRelay: RelayAPI {
     var offline = false
     enum SpeechMode { case ok, capReached, off, failed }
     var speechMode: SpeechMode = .ok
+    private var uploadFailures: [Int] = [], sendFailures: [Int] = []
+    /// Test hooks: the next upload / send calls fail with these statuses (one status per call), then work again.
+    func queueUploadFailures(_ s: [Int]) { uploadFailures = s }
+    func queueSendFailures(_ s: [Int]) { sendFailures = s }
+    private(set) var uploadCalls = 0
     func setAutoDeliver(_ v: Bool) { autoDeliver = v }
     func setOffline(_ v: Bool) { offline = v }
     func setSpeechMode(_ m: SpeechMode) { speechMode = m }
@@ -210,6 +215,7 @@ actor MockRelay: RelayAPI {
     func send(_ r: SendRequest) async throws -> SendReceipt {
         try await check()
         if let id = clientIds[r.clientId] { return SendReceipt(id: id, clientId: r.clientId, duplicate: true) }
+        if !sendFailures.isEmpty { let s = sendFailures.removeFirst(); throw RelayError.api(status: s, code: "error", message: "Try again later.") }
         do { try r.validate() } catch { throw Self.invalid("Nothing valid to send.") }
         guard reachable(r.to) else { throw RelayError.api(status: 403, code: "not_allowed", message: "This phone may not reach that workspace.") }
         var blobs = r.attachments?.map(\.blobId) ?? []
@@ -258,6 +264,8 @@ actor MockRelay: RelayAPI {
     }
     func uploadBlob(file: URL, contentType: String) async throws -> BlobUpload {
         try await check()
+        uploadCalls += 1
+        if !uploadFailures.isEmpty { let s = uploadFailures.removeFirst(); throw RelayError.api(status: s, code: "error", message: "Try again later.") }
         let d = try Data(contentsOf: file)
         guard !d.isEmpty else { throw Self.invalid("Empty upload.") }
         guard d.count <= 25 * 1024 * 1024 else { throw RelayError.api(status: 413, code: "too_large", message: "File too large.") }

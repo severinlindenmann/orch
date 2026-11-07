@@ -190,6 +190,20 @@ def test_answer_from_phone_updates_ticket(proj, run, new_ticket, rel):
     assert "m_answer0000000001" in json.loads((proj / ".orch/inbox-seen.json").read_text())
 
 
+def test_answer_from_relay_subscriber_is_recorded_as_that_system(proj, run, new_ticket, rel):
+    """A relay subscriber (sub_) may answer a phone question; recorded as agent:, never as a person."""
+    connect(run, rel)
+    tid = new_ticket()
+    run("ask", tid, "Ship it?", "--option", "Yes", "--option", "No", "--phone", "--by", "agent:x")
+    q = next(m for m in rel.sent if m["type"] == "question")
+    body = {"question_id": "q1", "answer": "Yes", "answered_by": "human:Pretending to be a person"}
+    ans = msg("m_answer0000000021", "answer", body, frm="sub_nightmon01", ticket=tid, reply_to=q["id"])
+    rel.inbox.append(ans)
+    assert "answered q1" in run("relay", "inbox")[1]
+    qq = json.loads(run("ticket", "show", tid, "--json")[1])["questions"][0]
+    assert (qq["answer"], qq["answered_by"], qq["via"]) == ("Yes", "agent:sub_nightmon01", "subscriber")
+
+
 def test_ask_phone_failure_keeps_question(proj, run, new_ticket, rel):
     connect(run, rel)
     rel.stop()
@@ -376,6 +390,16 @@ def test_webhooks(proj, run, rel):
 def test_refresh_hint_is_shown_not_applied(proj, run, rel):
     connect(run, rel)
     rel.inbox.append(msg("m_refresh000000001", "refresh-hint", {"version": 8}, frm="admin"))
+    assert "orch relay refresh" in run("relay", "inbox")[1]
+
+
+def test_refresh_hint_is_quiet_once_refresh_ran(proj, run, rel):
+    connect(run, rel)
+    rel.snapshot.update(version=8)
+    rel.inbox.append(msg("m_refresh000000002", "refresh-hint", {"version": 8}, frm="admin"))
+    assert run("relay", "refresh")[0] == 0
+    assert "orch relay refresh" not in run("relay", "inbox")[1]
+    rel.inbox.append(msg("m_refresh000000003", "refresh-hint", {"version": 9}, frm="admin"))
     assert "orch relay refresh" in run("relay", "inbox")[1]
 
 
@@ -1051,7 +1075,10 @@ def test_phone_text_on_a_ticket_continues_it(proj, run, rel, new_ticket):
     lines = [h["text"] for h in t["history"]]
     assert lines.count("From Marco's iPhone: Also add the totals") == 1
     assert len(runs.undelivered(proj, tid)) == 1
-    assert len(_tickets(run)) == 1 and not _replies(rel), "no new ticket, no second agent, no ack"
+    assert len(_tickets(run)) == 1, "no new ticket, no second agent"
+    acks = _replies(rel)
+    assert len(acks) == 1 and acks[0]["ticket"] == tid and acks[0]["reply_to"] == "m_phone00000000003"
+    assert acks[0]["body"]["update"]["kind"] == "ack", "a follow-up is acked once, with no new ticket"
 
 
 def test_phone_text_with_unknown_ticket_makes_a_new_one(proj, run, rel):
@@ -1123,7 +1150,7 @@ def test_allow_question_always_and_ignore(proj, run, rel):
     assert "Spam" not in run("relay", "inbox")[1], "an ignored message does not come back"
 
 
-def test_phone_text_added_to_a_ticket_is_not_acked_on_rerun(proj, run, rel, new_ticket, monkeypatch):
+def test_phone_text_added_to_a_ticket_is_acked_once_on_rerun(proj, run, rel, new_ticket, monkeypatch):
     from orch import relay
 
     _phone_setup(rel, run)
@@ -1140,7 +1167,7 @@ def test_phone_text_added_to_a_ticket_is_not_acked_on_rerun(proj, run, rel, new_
     monkeypatch.setattr(relay, "_mark_seen", real)
     out = run("relay", "inbox")[1]
     assert f"added to {tid}" in out and "new ticket" not in out
-    assert not _replies(rel), "no Got it for a text that continued a ticket"
+    assert len(_replies(rel)) == 1, "the follow-up ack goes out once, also after a crash before it"
 
 
 def test_phone_ack_is_marked_before_it_is_sent(proj, run, rel, monkeypatch):
@@ -1152,14 +1179,14 @@ def test_phone_ack_is_marked_before_it_is_sent(proj, run, rel, monkeypatch):
     real = relay.send_text
 
     def spy(root, *a, **k):
-        seen_flag.append([t["ext"]["relay"].get("acked") for t in relay.tickets.list_all(root)])
+        seen_flag.append(relay._v3_state(root)["acked"])
         raise RuntimeError("slow relay died")
 
     monkeypatch.setattr(relay, "send_text", spy)
     with pytest.raises(RuntimeError):
         relay.inbox(proj)
     monkeypatch.setattr(relay, "send_text", real)
-    assert seen_flag == [[True]]
+    assert seen_flag == [["m_phone00000000006"]]
     run("relay", "inbox")
     assert not _replies(rel), "the marker was written first: no second Got it"
 

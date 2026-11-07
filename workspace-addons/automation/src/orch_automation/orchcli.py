@@ -33,8 +33,9 @@ def log(root: Path, tid: str, text: str) -> None:
 
 
 def tickets(root: Path) -> list[dict]:
-    """`orch ticket list --json` (a list, or {"tickets": [...]}); only well-formed tickets."""
-    data = call(root, "ticket", "list", by=False)
+    """`orch ticket list --all --json` (a list, or {"tickets": [...]}); only well-formed tickets. Done ones too:
+    a repeat goes on after its ticket was finished (callers check the status they need)."""
+    data = call(root, "ticket", "list", "--all", by=False)
     items = data.get("tickets", []) if isinstance(data, dict) else data
     return [t for t in items if isinstance(t, dict) and isinstance(t.get("id"), str)
             and ID_RE.match(t["id"]) and t.get("status")] if isinstance(items, list) else []

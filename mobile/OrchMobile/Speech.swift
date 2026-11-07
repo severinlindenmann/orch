@@ -144,7 +144,9 @@ final class SpeechPlayer {
     }
     func pause() {
         guard case .playing(let id) = state else { return }
-        if usingPhoneVoice { synth.stop(); state = .idle; current = nil; return }   // the phone's voice cannot resume: it starts again
+        // The phone's own voice cannot resume: pausing it stops it and drops the current clip. The queue is kept, so "next" /
+        // a new play() still works; the lock screen entry goes away.
+        if usingPhoneVoice { synth.stop(); state = .idle; current = nil; usingPhoneVoice = false; clearNowPlaying(); return }
         audio.pause(); state = .paused(id); updateNowPlaying()
     }
     func resume() {
@@ -190,12 +192,37 @@ final class SpeechPlayer {
     }
 
     /// Cached audio first (free, offline); else the relay.
+    static func isValidMessageId(_ id: String) -> Bool { id.range(of: "^m_[a-z0-9]{16}$", options: .regularExpression) != nil }
+    static let cacheLimitBytes = 50 * 1024 * 1024
+
     private func audioData(for clip: SpeechClip) async throws -> Data {
+        // The id becomes part of a file name: only the relay's own shape is accepted (no path tricks).
+        guard Self.isValidMessageId(clip.messageId), ["de", "en"].contains(clip.lang) else { throw RelayError.api(status: 404, code: "not_found", message: "Nothing to read aloud.") }
         let url = cacheDir.appendingPathComponent("\(clip.messageId)-\(clip.lang).mp3")
-        if let d = try? Data(contentsOf: url), !d.isEmpty { return d }
+        if let d = try? Data(contentsOf: url), !d.isEmpty {
+            try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)    // last used, for eviction
+            return d
+        }
         let d = try await fetch(clip.messageId, clip.lang)
         try? d.write(to: url, options: .atomic)
+        Self.evict(cacheDir, limit: Self.cacheLimitBytes, keep: url)
         return d
+    }
+
+    /// Least recently used files go first until the folder is at most `limit` bytes. `keep` is never removed.
+    nonisolated static func evict(_ dir: URL, limit: Int, keep: URL? = nil) {
+        let fm = FileManager.default
+        guard let urls = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]) else { return }
+        var files = urls.compactMap { u -> (URL, Date, Int)? in
+            guard let v = try? u.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]) else { return nil }
+            return (u, v.contentModificationDate ?? .distantPast, v.fileSize ?? 0)
+        }.sorted { $0.1 < $1.1 }
+        var total = files.reduce(0) { $0 + $1.2 }
+        while total > limit, !files.isEmpty {
+            let f = files.removeFirst()
+            if f.0 == keep { continue }
+            try? fm.removeItem(at: f.0); total -= f.2
+        }
     }
 
     /// 402 / 503 / 502 (and no network): the phone reads the same words with its own voice. Anything else (404, 401...) just stops.

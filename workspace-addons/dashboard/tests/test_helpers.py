@@ -229,3 +229,53 @@ def test_cron_in_plain_words():
                         ("5 * * * *", "Every hour at :05"), ("0 8 1 * *", "Every month on day 1 at 08:00"),
                         ("0 8 * 1 *", "0 8 * 1 *"), ("nonsense", "nonsense")]:
         assert call("cronHuman", cron) == words
+
+
+@node
+def test_phone_text_is_split_into_readable_parts():
+    tid = "t_abc123456"
+    text = "\n".join([
+        "From Anna: Look at this", 'Voice message (de-CH): "Das Dach ist kaputt"',
+        f"Photo: .orch/tickets/{tid}/files/roof.jpg", f"Voice recording: .orch/tickets/{tid}/files/v.m4a",
+        f"File: .orch/tickets/{tid}/files/a.pdf", "Location: 47.37690, 8.54170 (Office) - https://maps.apple.com/?ll=47.3769%2C8.5417&q=Office",
+        "Feedback on Report (a1b2): changes wanted", '  1. "Total": too high', "  (+3 more comments not shown)",
+        "Photo x.jpg: could not be downloaded."])
+    r = call("phoneParts", text, tid)
+    assert r["who"] == "Anna" and r["text"] == "Look at this"
+    kinds = [p["type"] for p in r["parts"]]
+    assert kinds == ["voice", "photo", "sound", "file", "location", "feedback", "pin", "note"]
+    assert r["parts"][0]["transcript"] == "Das Dach ist kaputt" and r["parts"][1]["name"] == "roof.jpg"
+    assert r["parts"][4]["label"] == "Office" and r["parts"][5]["rev"] == "a1b2" and r["parts"][5]["approve"] is False
+    assert r["parts"][6] == {"type": "pin", "n": "1", "where": '"Total"', "said": "too high"}
+
+
+@node
+def test_phone_text_with_only_a_voice_or_a_thumbs_up_and_foreign_files():
+    tid = "t_abc123456"
+    r = call("phoneParts", 'From Ben: Voice message (en): "hi"', tid)
+    assert r["text"] == "" and r["parts"][0]["type"] == "voice"
+    r = call("phoneParts", "From Ben: Feedback on Page: \U0001F44D Looks good", tid)
+    assert r["parts"][0]["approve"] is True
+    r = call("phoneParts", "From Ben: File: .orch/tickets/t_other/files/x.txt", tid)  # another ticket's folder is never opened
+    assert r["parts"] == [] and r["text"].startswith("File:")
+    assert call("phoneParts", "Edited the title", tid) is None
+    r = call("phoneParts", "From Ben: Location: 1.0, 2.0 - https://evil.example/x", tid)
+    assert r["parts"] == [] and r["text"].startswith("Location")
+
+
+@node
+def test_pins_with_quotes_and_overflow_note_and_sound_and_failed_download():
+    tid = "t_abc123456"
+    text = "\n".join(["From Anna: hi", '  1. "say "no" now": fix it', "  2. page 3: wrong", "  (+3 more comments not shown)",
+                      f"Voice recording: .orch/tickets/{tid}/files/v.m4a", "File x.pdf: could not be downloaded."])
+    r = call("phoneParts", text, tid)
+    assert [p["type"] for p in r["parts"]] == ["pin", "pin", "sound", "note"]
+    assert r["parts"][0]["where"] == '"say "no" now"' and r["parts"][0]["said"] == "fix it"
+    assert r["parts"][1]["where"] == "page 3" and r["parts"][2]["name"] == "v.m4a"
+
+
+@node
+def test_first_run_note_is_not_shown_as_an_answer():
+    assert call("historyLine", {"text": "Answered q1: Hi"}) == "Answered a question"
+    first = "Answered Claude's first-run screens (theme, notes, folder trust)."
+    assert call("historyLine", {"text": first}) == first

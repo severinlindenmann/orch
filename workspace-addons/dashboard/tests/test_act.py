@@ -77,6 +77,8 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         ({"op": "ticket.new", "args": {"title": "--sneaky"}}, ["ticket", "new", *common, "--", "--sneaky"]),
         ({"op": "ticket.new", "args": {"title": "Child", "parent": "t_abcdef"}},
          ["ticket", "new", "--parent=t_abcdef", *common, "--", "Child"]),
+        ({"op": "ticket.new", "args": {"title": "T", "owner": "Sam", "due": "2026-12-01", "note": "-n"}},
+         ["ticket", "new", "--owner=Sam", "--due=2026-12-01", "--note=-n", *common, "--", "T"]),
         ({"op": "ticket.patch", "args": {"ticket": "t_abcdef", "data": {"title": "New"}, "if_revision": 3}},
          ["ticket", "patch", "t_abcdef", "--if-revision=3", *common, "--", '{"title": "New"}']),
         ({"op": "ticket.edit", "args": {"ticket": "t_abcdef", "owner": "Marco", "due": "2026-11-30", "note": "-n", "if_revision": 2}},

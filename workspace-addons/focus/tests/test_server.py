@@ -252,6 +252,13 @@ def test_attention_state_in_a_live_run(server, fake_orch):
     assert v["state"] == "needs" and v["attention"] is True and v["why"] == ""
 
 
+def test_a_live_session_waiting_for_a_message_is_not_working(server, fake_orch):
+    (fake_orch.parent / "status.json").write_text(json.dumps(
+        {"running": True, "claim": {"run": "r_idl00001", "agent": "claude", "mode": "live", "live": {"state": "idle"}}}))  # fmt: skip
+    v = json.loads(req(server, "GET", f"/api/t/{TID}")[1])
+    assert v["state"] == "waiting" and v["run"]["running"] is True
+
+
 def test_attention_shows_what_the_live_tool_waits_for(server, fake_orch):
     why = "Claude asks whether to trust this folder. Open the live session and answer: orch run attach t_x"
     (fake_orch.parent / "status.json").write_text(json.dumps(
