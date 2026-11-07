@@ -17,10 +17,18 @@ import time
 from pathlib import Path
 
 
+def say(line: str) -> None:
+    print(line, flush=True)  # run in the background: every line at once
+
+
 def orch(ws: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["orch", *args], cwd=ws, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120
     )
+
+
+def tail(r: subprocess.CompletedProcess) -> str:
+    return (r.stdout + r.stderr).strip().replace("\n", " | ")[-300:]
 
 
 def main() -> int:
@@ -31,13 +39,14 @@ def main() -> int:
     until = time.time() + (int(sys.argv[2]) if len(sys.argv) == 3 else 300)
     peer = os.environ.get("E2E_RELAY_PEER", "")
     if not peer:
-        print("FAIL: set E2E_RELAY_PEER (the Windows workspace id)")
+        say("FAIL: set E2E_RELAY_PEER (the Windows workspace id)")
         return 2
     nonce = text_done = file_done = None
-    seen: set[str] = set()
+    inbox = ws / ".orch" / "inbox"
+    seen = {f.stem for f in inbox.glob("m_*.json")}  # only messages that arrive after the start count
     while time.time() < until and not (text_done and file_done):
         orch(ws, "relay", "inbox", "--wait", "20")
-        for f in sorted((ws / ".orch" / "inbox").glob("m_*.json")):
+        for f in sorted(inbox.glob("m_*.json")):
             m = json.loads(f.read_text(encoding="utf-8"))
             if m["id"] in seen or m.get("from") != peer:
                 continue
@@ -48,25 +57,19 @@ def main() -> int:
             ):
                 nonce = hit.group(1)
                 r = orch(ws, "relay", "send", peer, f"pong {nonce}", "--reply-to", m["id"])
-                print(
-                    ("ok: " if r.returncode == 0 else "FAIL: ") + f"answered the text ({nonce})",
-                    r.stdout.strip()[-200:],
-                )
+                say(("ok: " if r.returncode == 0 else "FAIL: ") + f"answered the text ({nonce}) {tail(r)}")
                 text_done = r.returncode == 0
             elif m.get("type") == "file":
                 r = orch(ws, "relay", "download", m["id"])
                 saved = re.search(r"Saved (.+)", r.stdout)
                 if r.returncode != 0 or not saved:
-                    print(f"FAIL: download {body.get('name')}: {(r.stdout + r.stderr).strip()[-200:]}")
+                    say(f"FAIL: download {body.get('name')}: {tail(r)}")
                     return 1
                 back = orch(ws, "relay", "send", peer, "your file back", "--file", saved.group(1).strip())
-                print(
-                    ("ok: " if back.returncode == 0 else "FAIL: ")
-                    + f"sent the file back ({body.get('name')})"
-                )
+                say(("ok: " if back.returncode == 0 else "FAIL: ") + f"sent the file back {tail(back)}")
                 file_done = back.returncode == 0
     if not (text_done and file_done):
-        print(f"FAIL: no text and file from {peer} in time (text {bool(text_done)}, file {bool(file_done)})")
+        say(f"FAIL: no text and file from {peer} in time (text {bool(text_done)}, file {bool(file_done)})")
         return 1
     return 0
 
