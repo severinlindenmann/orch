@@ -8,6 +8,7 @@ Owner-reviewed in 5 rounds on 6 Nov 2026 (Codex + Opus challenges between rounds
 Open: `python3 -m http.server 8000 --bind 127.0.0.1 --directory mobile/docs/mockup-v3` → http://127.0.0.1:8000/
 (the right panel jumps to every screen; `?phone=1` shows only the app). Works offline, no build.
 
+- `archive.html` — archive, delete and auto-archive of chats (swipe, Undo, Archived list, Settings > Chats; phone-local).
 - `notes.html` — what the backend needs (contracts: `contracts/relay-api.md` "Phone API v3").
 - `FEATURES.md` — inventory of the app before v3 (every feature must stay).
 - `RESEARCH.md` — messenger UX + speech research behind the design.

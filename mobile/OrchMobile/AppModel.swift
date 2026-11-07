@@ -49,6 +49,8 @@ final class AppModel {
     private(set) var questionLog: [String: Question] = [:]
     /// Read state per chat (client only, kept in UserDefaults).
     private(set) var readState = ReadState(seen: UserDefaults.standard.dictionary(forKey: "chatRead") as? [String: String] ?? [:])
+    /// Archive, delete and auto-archive of chats: phone-local (ArchiveStore.swift).
+    private(set) var archive = ArchiveStore.load()
     /// Everything the phone writes (texts, voice, photos, files, locations, feedback, answers): durable, retried with the same client_id.
     private(set) var outbox: Outbox
     /// Per-phone settings kept on the relay (read aloud, Swiss German, monthly cap).
@@ -393,7 +395,7 @@ final class AppModel {
     var conversationInputs: ConversationInputs {
         let cd = chatData
         return ConversationInputs(workspaces: workspaces, messages: messages, tickets: tickets, questions: cd.questions, answers: answers,
-                                  outbox: outbox.items, speak: settings.speak)
+                                  outbox: outbox.items, speak: settings.speak, erased: archive.erased)
     }
     /// The workspace list: presence, General and topics with status, unread, "Starting topic…".
     var workspaceSummaries: [WorkspaceSummary] { ConversationBuilder.summaries(conversationInputs, read: readState) }
@@ -403,6 +405,26 @@ final class AppModel {
     func presence(of workspaceId: String, now: Date = Date()) -> Presence { workspace(workspaceId)?.presence(now: now) ?? .unknown }
 
     func unread(_ id: ConversationID) -> Int { readState.unread(ReadState.key(id), in: conversationItems(id)) }
+    // Archive, delete, auto-archive (phone-local)
+
+    private func lastAt(_ id: ConversationID) -> String? {
+        let summary = workspaceSummaries.first { $0.id == id.workspace }
+        if case .general = id { return summary?.general.lastAt }
+        return summary?.topics.first { $0.id == id }?.lastAt
+    }
+    private func change(_ edit: (inout ArchiveStore) -> Void) { var a = archive; edit(&a); archive = a; a.save() }
+    func archiveChat(_ id: ConversationID) { let at = lastAt(id); change { $0.archive(ReadState.key(id), lastAt: at) } }
+    func moveBack(_ id: ConversationID) { let at = lastAt(id); change { $0.moveBack(ReadState.key(id), lastAt: at) } }
+    /// Delete = this phone's copy only; the ticket and the workspace are untouched.
+    func deleteChat(_ id: ConversationID) {
+        guard let last = conversationItems(id).map(\.at).max() else { return }
+        change { $0.erase(ReadState.key(id), upTo: last) }
+    }
+    func setAutoArchive(days: Int) { change { $0.autoDays = days } }
+    /// What the list of one workspace shows, and what is archived.
+    func split(_ summary: WorkspaceSummary) -> (topics: [TopicSummary], general: Bool, archived: [ArchivedChat]) { archive.split(summary) }
+    var archivedCount: Int { workspaceSummaries.reduce(0) { $0 + archive.split($1).archived.count } }
+
     /// Opening a conversation (or a new message arriving in the open one) marks it read. Phone-local.
     func markRead(_ id: ConversationID) {
         let items = conversationItems(id)
@@ -543,6 +565,7 @@ final class AppModel {
         outbox.wipe(); speech.reset(); settings = PhoneSettings(); messagesNext = nil
         UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
         readState = ReadState(); blobCache = [:]
+        archive = ArchiveStore(); UserDefaults.standard.removeObject(forKey: ArchiveStore.defaultsKey)
         credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answeredElsewhere = []; hasLoaded = false
         pairedWorkspaces = []; lastUpdated = nil; message = nil; tab = .chats; phase = .onboarding
     }
