@@ -325,11 +325,19 @@ def check_private_path(root: Path, path: Path) -> None:
     """Right before a private write: the file stays under root/.orch with no link on the way, and in a git repo
     git ignores this exact file and does not track it."""
     base = root / ".orch"
-    try:
-        rel_in = Path(os.path.normpath(path.absolute())).relative_to(Path(os.path.normpath(base.absolute())))
-    except ValueError:
-        raise Refused(f"{path} is not inside .orch; orch will not store private files there.") from None
+    # Not Path.relative_to alone: Windows paths compare without case, so ".ORCH/..." would pass. The project folder
+    # compares as the OS does; the ".orch" part itself must be spelled exactly.
+    full, top = os.path.normpath(path.absolute()), os.path.normpath(base.absolute())
+    if (
+        not os.path.normcase(full).startswith(os.path.normcase(top) + os.sep)
+        or full[len(top) - 5 : len(top)] != ".orch"
+    ):
+        raise Refused(f"{path} is not inside .orch; orch will not store private files there.")
+    rel_in = Path(full[len(top) + 1 :])
     if ".." in path.parts or ".." in rel_in.parts:
+        raise Refused(f"{path} is not a plain path; orch will not store private files there.")
+    # Windows aliases: "x." and "x " name x, and an 8.3 short name (SECRE~1) names another folder. Never written.
+    if any("~" in p or p != p.rstrip(". ") for p in rel_in.parts):
         raise Refused(f"{path} is not a plain path; orch will not store private files there.")
     cur = base
     if is_link(cur):

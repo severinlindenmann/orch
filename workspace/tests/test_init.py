@@ -536,6 +536,10 @@ def test_odd_skill_folder_names_are_skipped_and_never_reach_the_exclude_block(pr
 
     if "/" in bad or bad in {".", ".."}:
         pytest.skip("not creatable as a folder name")
+    if sys.platform == "win32" and any(c in bad for c in '\n*?<>|"'):
+        pytest.skip(
+            "Windows cannot hold this folder name (name check: test_safe_skill_name_refuses_odd_names)"
+        )
     base = proj / ".agents/skills"
     (base / bad).mkdir(parents=True)
     (base / bad / ".orch-shared").write_text("", encoding="utf-8")
@@ -547,6 +551,20 @@ def test_odd_skill_folder_names_are_skipped_and_never_reach_the_exclude_block(pr
     del harness
 
 
+@pytest.mark.parametrize(
+    "bad", ["a\nb", "*", "new\nline", "star*", "x y", "..", ".", "a" * 65, "!x", "a[b]", "a:b"]
+)
+def test_safe_skill_name_refuses_odd_names(bad):
+    from orch import harness
+
+    assert not harness.safe_skill_name(bad)
+    assert harness.safe_skill_name("good-1.0_x")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows cannot hold these folder names (see test_safe_skill_name_refuses_odd_names)",
+)
 def test_odd_harness_skill_names_are_not_excluded(proj):
     sk = proj / ".orch/harness/skills"
     (sk / "ok").mkdir(parents=True)
@@ -760,6 +778,24 @@ def test_private_path_rejects_dotdot_and_other_case_orch(proj):
         harness.check_private_path(proj, proj / ".orch" / "secrets" / ".." / ".." / "x.json")
     with pytest.raises(skills.Refused):
         harness.check_private_path(proj, proj / ".ORCH" / "secrets" / "x.json")
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        (".Orch", "secrets", "x.json"),  # another case of .orch: the same folder on Windows and macOS
+        ("ORCH~1", "secrets", "x.json"),  # Windows 8.3 short name of .orch
+        (".orch", "SECRE~1", "x.json"),  # a short name inside .orch
+        (".orch", "secrets ", "x.json"),  # Windows drops a trailing space: lands in secrets
+        (".orch", "secrets.", "x.json"),  # ... and a trailing dot
+        (".orch", "secrets", "x.json."),
+    ],
+)
+def test_private_path_refuses_names_windows_would_alias(proj, rel):
+    from orch import harness
+
+    with pytest.raises(skills.Refused):
+        harness.check_private_path(proj, proj.joinpath(*rel))
 
 
 def test_outbox_probe_is_checked_at_protect_time(proj):
