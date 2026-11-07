@@ -306,7 +306,7 @@
     const v = link.view, url = safeHref(link.url);
     return h('div', {className:'lk-row', 'data-key':'link-' + link.url},
       h('a', {className:'lk', href:url, target:'_blank', rel:'noopener noreferrer', title:url}, linkTile(v), h('span', {className:'t'}, h('b', {}, oneLine(clean(v.title), 200)), linkSub(v, url)), linkStatus(v.status), artMark(t, link.url), h('span', {className:'ext'}, iconEl('external'))),
-      removable && !snapshot ? h('button', {type:'button', className:'btn ghost icon xs lk-x', title:'Remove this reference', 'aria-label':'Remove reference ' + clean(v.title), 'data-action':'link-remove', 'data-ticket':t.id, 'data-n':array(t.refs).indexOf(link) + 1}, iconEl('x')) : null);
+      removable && !snapshot ? h('button', {type:'button', className:'btn ghost icon xs lk-x', title:'Remove this reference', 'aria-label':'Remove reference ' + clean(v.title), 'data-action':'link-remove', 'data-ticket':t.id, 'data-n':link.n || array(t.refs).indexOf(link) + 1}, iconEl('x')) : null);
   }
   // add-ons that are on, have a refresh act and own a link on this ticket
   const refreshers = t => addons().filter(a => array(a.acts).includes('refresh') && webLinks(t).some(l => l.view.addon === a.name));
@@ -321,7 +321,7 @@
         snapshot ? null : h('div', {className:'add-link', 'data-key':'add-link-' + t.id}, h('button', {type:'button', className:'add-row', 'data-action':'link-add', 'data-ticket':t.id}, iconEl('plus'), '+ Add reference'))));
   }
   function referenceRow(t, ref, removable) {
-    const other = ticketOf(ref.ticket), n = array(t.refs).indexOf(ref) + 1;
+    const other = ticketOf(ref.ticket), n = ref.n || array(t.refs).indexOf(ref) + 1;
     const title = ref.kind === 'ticket' ? clean(other?.title) || 'Ticket unavailable' : ref.name || (ref.path + (ref.line ? ':' + ref.line : ''));
     const sub = ref.local ? 'On this computer only' : ref.kind === 'ticket' ? 'Ticket · ' + (other ? statusWord(other) : 'Unavailable') : ref.kind === 'artifact' ? 'Artifact' + (other ? ' · ' + clean(other.title) : '') : 'File in this project';
     const attrs = {className:'lk'};
