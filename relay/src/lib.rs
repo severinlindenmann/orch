@@ -4,6 +4,7 @@ pub mod auth;
 pub mod crypto;
 pub mod error;
 pub mod groups;
+pub mod look;
 pub mod mobile;
 pub mod onboarding;
 pub mod phone;

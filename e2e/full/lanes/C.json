@@ -252,7 +252,7 @@
     },
     {
      "do": "fill",
-     "sel": "input[placeholder='e.g. Team chat bot']",
+     "sel": "role=textbox[name='Name'] >> visible=true >> nth=0",
      "value": "Browser bot"
     },
     {

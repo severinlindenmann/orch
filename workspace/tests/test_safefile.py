@@ -205,3 +205,13 @@ def test_windows_real_private_path_refused(root, monkeypatch, private):
         lambda p: str(root / private / "secret") if str(p) == str(root / "alias") else realpath(p),
     )
     assert safefile.open_file_ref(root, "alias", 100) is None
+
+
+def test_file_ref_ok_refuses_a_short_name_on_windows(root, monkeypatch):
+    (root / "ORCH~1").mkdir()
+    monkeypatch.setattr(safefile, "_DIR_FD", True)
+    if hasattr(os, "O_DIRECTORY"):
+        assert safefile.file_ref_ok(root, "ORCH~1/x.md")  # POSIX: unchanged
+    monkeypatch.setattr(safefile, "_DIR_FD", False)  # the Windows path
+    assert not safefile.file_ref_ok(root, "ORCH~1/x.md")
+    assert safefile.file_ref_ok(root, "docs/x.md")

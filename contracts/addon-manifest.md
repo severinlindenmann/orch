@@ -86,7 +86,7 @@ then refreshes skills and AGENTS blocks of the active add-ons in this workspace.
 - `orch <name> …` runs the add-on as a subprocess in the workspace root, env `ORCH_ADDON=<name>`, `ORCH_ROOT=<root>`,
   `ORCH_BIN=<path of orch>`. Not active here → refused: `The scheduler add-on is not turned on in this workspace. Turn it on: orch addon add scheduler`.
 - `orch --help` lists active add-ons in a group **Add-ons** (name + description), right under the core commands.
-- Every command takes `--json`. Exit `0` = ok, stdout = one JSON value. Exit `2` = refused: stderr `Refused: <plain words>`,
+- Every command takes `--json`. Exit `0` = ok, stdout = one JSON value. Exit `2` = refused: stderr `Refused: <plain words>` (a `--yes` confirmation without a terminal: just its question),
   with `--json` stdout `{"error": "<plain words>"}`. Exit `1` = bug (traceback allowed on stderr). Same as the core.
 - Add-ons change tickets only through the public CLI (`$ORCH_BIN … --json`), never by writing ticket files:
   `orch ext set <id> <name> '<json>' [--if-revision N]` (checked with the add-on's `ticket_ext` schema),
