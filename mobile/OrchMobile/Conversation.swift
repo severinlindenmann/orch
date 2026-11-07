@@ -38,7 +38,7 @@ enum TopicStatus: String, Sendable, CaseIterable {
     /// The chip words of the status workflow (PLAN-A section 5).
     var chip: String {
         switch self {
-        case .working: "Claude is working"; case .waitingOnYou: "Waiting for your answer"; case .review: "Check this"; case .backlog: "Backlog"
+        case .working: "Claude is working"; case .waitingOnYou: "Needs you"; case .review: "Check this"; case .backlog: "Backlog"
         case .done: "Done"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
         }
     }

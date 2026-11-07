@@ -13,7 +13,7 @@ struct ChatsListView: View {
     @State private var sheet: ShellSheet?
     @State private var pendingSheet: ShellSheet?
     @State private var showSettings = false
-    private let filters = ["All", "Unread", "Waiting on you"]
+    private let filters = ["All", "Unread", "Needs you"]
 
     var body: some View {
         let _ = aliasRevision
@@ -169,7 +169,7 @@ struct ChatsListView: View {
                         let name = model.workspaceSummaries.first { $0.id == ws }.map { WorkspaceAlias.name(for: $0.workspace) } ?? ws
                         NavigationLink(value: question.message.ticket.map { ChatRoute.ticket(workspace: ws, ticket: $0) } ?? .workspace(ws)) {
                             VStack(alignment: .leading, spacing: 9) {
-                                Text("\(name) · Waiting on you").themeFont(12, .semibold).foregroundStyle(Theme.warn).lineLimit(1)
+                                Text("\(name) · Needs you").themeFont(12, .semibold).foregroundStyle(Theme.warn).lineLimit(1)
                                 Text(question.message.body.title ?? question.message.body.text).themeFont(15, .semibold).lineLimit(2)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }.padding(16).frame(width: 220, alignment: .leading).frame(minHeight: 98)
@@ -191,7 +191,7 @@ struct ChatsListView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(name).themeFont(17, .semibold).lineLimit(2)
                     Text(starting ? "Starting topic…" : summary.lastLine).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
-                    if summary.openQuestions > 0 { Text("\(summary.openQuestions) Waiting on you").themeFont(13).foregroundStyle(Theme.warn) }
+                    if summary.openQuestions > 0 { Text(summary.openQuestions == 1 ? "1 needs you" : "\(summary.openQuestions) need you").themeFont(13).foregroundStyle(Theme.warn) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: .trailing, spacing: 10) {
                     Text(ShellTime.short(summary.lastAt)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.8)

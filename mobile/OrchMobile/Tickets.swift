@@ -43,7 +43,7 @@ struct Ticket: Identifiable, Equatable, Sendable {
     var stateLine: String {
         let first = text.split(separator: " ").prefix(6).joined(separator: " ")
         switch status {
-        case .needsYou: return "Waiting for your answer"
+        case .needsYou: return "Needs you"
         case .working: return "Working on it"
         case .review: return "Check this"
         case .backlog: return "Not started"
