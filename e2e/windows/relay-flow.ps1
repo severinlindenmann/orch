@@ -40,7 +40,7 @@ $out = O addon add relay --yes | Out-String; L $out
 Check ($LASTEXITCODE -eq 0 -and (WaitFinish $out $since)) "relay add-on turned on"
 # The token goes on the command line of a throwaway test user only; it is not written to the log.
 $out = O relay connect $env:E2E_RELAY_URL --workspace $env:E2E_RELAY_WS --token $env:E2E_RELAY_TOKEN | Out-String
-L ($out.Replace($env:E2E_RELAY_TOKEN, "<token>"))
+L $(if ($env:E2E_RELAY_TOKEN) { $out.Replace($env:E2E_RELAY_TOKEN, "<token>") } else { $out })
 Check ($LASTEXITCODE -eq 0) "orch relay connect"
 L (O relay whoami | Out-String)
 Check ($LASTEXITCODE -eq 0) "orch relay whoami reaches the relay"

@@ -22,9 +22,12 @@ def say(line: str) -> None:
 
 
 def orch(ws: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["orch", *args], cwd=ws, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120
-    )
+    try:
+        return subprocess.run(
+            ["orch", *args], cwd=ws, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120
+        )
+    except subprocess.TimeoutExpired:  # counts as a failed step, the loop goes on
+        return subprocess.CompletedProcess(args, 124, "", "orch took more than 120 s")
 
 
 def tail(r: subprocess.CompletedProcess) -> str:
@@ -47,7 +50,10 @@ def main() -> int:
     while time.time() < until and not (text_done and file_done):
         orch(ws, "relay", "inbox", "--wait", "20")
         for f in sorted(inbox.glob("m_*.json")):
-            m = json.loads(f.read_text(encoding="utf-8"))
+            try:
+                m = json.loads(f.read_text(encoding="utf-8"))
+            except ValueError:
+                continue  # still being written: read it on the next round
             if m["id"] in seen or m.get("from") != peer:
                 continue
             seen.add(m["id"])

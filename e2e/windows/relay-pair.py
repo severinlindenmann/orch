@@ -33,6 +33,7 @@ def call(admin: str, token: str, method: str, path: str, body: dict) -> dict:
 
 def write_private(p: Path, text: str) -> None:
     fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)  # also when an older file was there with wider rights
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
 
