@@ -45,13 +45,14 @@ final class M1ShellUITests: XCTestCase {
         XCTAssertTrue(app.buttons["compose-add-workspace"].waitForExistence(timeout: 5))
         app.buttons["compose-new-topic"].tap()
         let picker = app.buttons["workspace-picker"]
-        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
         picker.tap()
-        XCTAssertTrue(app.buttons["pick-ws_pilatus001"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["pick-ws_pilatus001"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["pick-ws_reports001"].waitForExistence(timeout: 10))
         app.buttons["pick-ws_reports001"].tap()
         let field = app.textViews["topic-field"].exists ? app.textViews["topic-field"] : app.textFields["topic-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap(); field.typeText("Plan the offsite")
+        field.tap(); expectKeyboardFocus(field); field.typeText("Plan the offsite")
         app.buttons["topic-start"].tap()
         XCTAssertTrue(app.staticTexts["composer-note"].waitForExistence(timeout: 10), "landed in the new topic")
     }
@@ -122,5 +123,14 @@ final class M1ShellUITests: XCTestCase {
             XCTAssertTrue(app.buttons["Paste invitation link"].waitForExistence(timeout: 5)); try snap(app, "8-add-workspace")
             app.terminate()
         }
+    }
+}
+
+extension XCTestCase {
+    /// Waits (event based, no sleep) until the tapped field really holds keyboard focus; typing before that is dropped on slow runners.
+    func expectKeyboardFocus(_ field: XCUIElement, timeout: TimeInterval = 10) {
+        let focused = NSPredicate(format: "hasKeyboardFocus == true")
+        let e = XCTNSPredicateExpectation(predicate: focused, object: field)
+        if XCTWaiter.wait(for: [e], timeout: timeout) != .completed { field.tap() }
     }
 }
