@@ -31,6 +31,8 @@ def relay_stop(e):
 
 def relay_start(e):
     """Start the relay again with the same data folder, port and token."""
+    if e.rel.proc.poll() is None:
+        return  # already running
     env = e.rel.env
     log = open(e.tmp / "relay.log", "a")
     e.rel.proc = subprocess.Popen([e.bins["relay"]], env=env, stdout=log, stderr=log, cwd=e.tmp)
@@ -50,7 +52,20 @@ def sim(e):
             "ws_path": str(e.ws("Pilatus")), "tmp": str(e.tmp), "pid": os.getpid()}
     (ctl / "info.json").write_text(json.dumps(info))
     done = set()
-    scope = {"e": e, "relay_stop": relay_stop, "relay_start": relay_start, "ids": ids, "info": info}
+    S: dict = {}
+
+    def ph():
+        """The id of the paired Simulator phone."""
+        return [p["id"] for p in e.rel.admin.call("GET", "/admin/api/phones").json()["items"] if p["paired"]][-1]
+
+    def ws_send(text, *flags):
+        """Workspace -> phone text (orch relay send); returns what orch printed."""
+        return e.orch("Pilatus", "relay", "send", ph(), text, *flags)[1]
+
+    def inbox():
+        return e.orch("Pilatus", "relay", "inbox")[1]
+
+    scope = {"S": S, "ph": ph, "ws_send": ws_send, "inbox": inbox, "e": e, "relay_stop": relay_stop, "relay_start": relay_start, "ids": ids, "info": info}
     while not (ctl / "stop").exists():
         for f in sorted(ctl.glob("*.py")):
             if f.name in done:
