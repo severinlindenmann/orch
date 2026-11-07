@@ -229,6 +229,24 @@ final class PublishWebViewTests: XCTestCase {
         XCTAssertEqual(result, ["fetch": "blocked", "xhr": "blocked", "ws": "blocked", "img": "blocked", "rtc": "gone"])
     }
 
+    func testWebRTCStaysGoneEvenIfThePageTriesToRestoreIt() async throws {
+        let html = """
+        <body><script>
+        var r = {}; window.__r = r;
+        try { delete window.RTCPeerConnection; } catch (e) {}
+        try { Object.defineProperty(window, 'RTCPeerConnection', { value: 1 }); } catch (e) {}
+        try { new RTCPeerConnection(); r.ctor = 'works'; } catch (e) { r.ctor = 'throws'; }
+        try { var f = document.createElement('iframe'); f.src = 'about:blank'; document.body.appendChild(f); r.frame = f.contentWindow && f.contentWindow.RTCPeerConnection ? 'fresh' : 'none'; } catch (e) { r.frame = 'none'; }
+        </script></body>
+        """
+        let (web, _, _) = try await open(html)
+        let json = try await web.evaluateJavaScript("JSON.stringify(window.__r || {})") as? String ?? "{}"
+        let r = (try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: String]) ?? [:]
+        XCTAssertEqual(r["ctor"], "throws")
+        XCTAssertNotEqual(r["frame"], "fresh", "a child frame must not give a fresh WebRTC")
+        XCTAssertTrue(NetworkBlock.csp.contains("frame-src 'none'") && NetworkBlock.csp.contains("worker-src 'none'") && NetworkBlock.csp.contains("connect-src 'none'"))
+    }
+
     func testTapInCommentModePostsSelectorQuoteOffset() async throws {
         let h = Handler()
         let (web, _, _) = try await open("<meta name=viewport content='width=device-width'><body style='margin:0'><section id=hero><h1 style='margin:0;height:200px'>Good things</h1></section><p>Second paragraph</p></body>", handler: h)
@@ -300,5 +318,10 @@ final class M3HelperTests: XCTestCase {
         XCTAssertEqual(ArtifactItem.quickLookName("page.HTML"), "page.HTML.txt")
         XCTAssertEqual(ArtifactItem.quickLookName("logo.svg"), "logo.svg.txt")
         XCTAssertEqual(ArtifactItem.quickLookName("report.pdf"), "report.pdf")
+        XCTAssertEqual(ArtifactItem.quickLookName("data.xlsx"), "data.xlsx")
+        XCTAssertEqual(ArtifactItem.quickLookName("run.js"), "run.js.txt", "not on the allowlist")
+        XCTAssertEqual(ArtifactItem.quickLookName("noextension"), "noextension.txt")
+        XCTAssertEqual(ArtifactItem.quickLookName("x.webarchive"), "x.webarchive.txt")
+        XCTAssertEqual(ArtifactItem.quickLookName("PHOTO.JPG"), "PHOTO.JPG")
     }
 }

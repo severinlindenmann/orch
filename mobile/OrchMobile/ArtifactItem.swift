@@ -54,10 +54,12 @@ struct ArtifactItem: Identifiable, Equatable, Sendable {
         self.artifactId = artifactId; self.rev = rev; self.conversation = conversation
     }
 
-    /// A file name safe to hand to QuickLook: pages and vector files could run script there, so they open as plain text.
+    /// Types QuickLook may show as they are (they cannot run script). Anything else is shown as plain text.
+    static let quickLookAllowed: Set<String> = ["pdf", "png", "jpg", "jpeg", "heic", "gif", "txt", "csv", "md", "json", "rtf", "docx", "xlsx",
+                                                "pptx", "pages", "numbers", "key", "m4a", "mp3", "mp4", "mov", "zip"]
+    /// A file name safe to hand to QuickLook: only inert types keep their name, the rest (pages, svg, scripts, unknown) opens as text.
     static func quickLookName(_ name: String) -> String {
-        let risky: Set<String> = ["html", "htm", "xhtml", "svg", "svgz", "webarchive", "xml"]
-        return risky.contains((name as NSString).pathExtension.lowercased()) ? name + ".txt" : name
+        quickLookAllowed.contains((name as NSString).pathExtension.lowercased()) ? name : name + ".txt"
     }
 
     static func isPDF(name: String?, mime: String?) -> Bool {
@@ -254,9 +256,18 @@ enum NetworkBlock {
     /// The custom scheme the viewer serves decrypted pages from.
     static let scheme = "orch-page"
     /// Sent with every page file: nothing but the local files, no network from script.
-    static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-src 'none'"
-    /// Runs at document start in every frame, in the page's world: no WebRTC (it is not covered by the rule list).
-    static let noWebRTC = "delete window.RTCPeerConnection; delete window.webkitRTCPeerConnection; delete window.RTCDataChannel;"
+static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'"
+    /// Runs at document start in every frame, in the page's world: WebRTC (not covered by the rule list) becomes a throwing stub
+    /// that cannot be deleted or replaced. Frames and workers are blocked by the CSP, so no fresh realm can bring it back.
+    static let noWebRTC = """
+    (function () {
+      ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel', 'RTCSessionDescription', 'RTCIceCandidate'].forEach(function (name) {
+        try {
+          Object.defineProperty(window, name, { value: function () { throw new TypeError('Not available'); }, writable: false, configurable: false, enumerable: false });
+        } catch (e) {}
+      });
+    })();
+    """
 }
 
 /// Where the viewer gets its bytes. The default goes to the network; a test or demo host puts its own in the environment.
