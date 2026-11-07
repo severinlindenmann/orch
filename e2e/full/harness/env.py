@@ -155,15 +155,52 @@ class Env:
                 except OSError:
                     break
                 time.sleep(0.4)
-        # live agent runs live in their own tmux server (socket orch-<hash>); end the ones that run inside this root
-        import re
-        ps = subprocess.run(["ps", "-axo", "command="], capture_output=True, text=True).stdout
-        for sock in {m.group(1) for ln in ps.splitlines() if str(self.root) in ln for m in [re.search(r"tmux -L (orch-\w+)", ln)] if m}:
-            subprocess.run(["tmux", "-L", sock, "kill-server"], capture_output=True)
+        sweep_tmux(str(self.root))  # live agent runs live in their own tmux server (socket orch-<hash>): end the ones under this root
         leaked = e2emain.leaked_servers(self.root)
         if leaked:
             log(f"LEAK: add-on servers still running: {leaked}")
         return leaked
+
+
+def tmux_sockets_under(root_prefix: str) -> set[str]:
+    """Sockets (orch-<hash>) of tmux servers whose sessions run in a folder under `root_prefix`."""
+    import re
+    ps = subprocess.run(["ps", "-axo", "command="], capture_output=True, text=True).stdout
+    out = set()
+    for ln in ps.splitlines():
+        m = re.search(r"tmux -L (orch-\w+) .*-c (\S+)", ln)
+        if m and m.group(2).startswith(root_prefix):
+            out.add(m.group(1))
+    return out
+
+
+def sweep_tmux(root_prefix: str) -> list[str]:
+    """End every tmux server (live agent sessions) that runs under `root_prefix`, by exact socket. Returns the sockets ended."""
+    socks = sorted(tmux_sockets_under(root_prefix))
+    for s in socks:
+        subprocess.run(["tmux", "-L", s, "kill-server"], capture_output=True)
+    return socks
+
+
+def sweep_orphans(log=print) -> list[str]:
+    """At the start of a run: end tmux servers of earlier runs that died without teardown (their run folder has no env.json or is gone)."""
+    import re
+    ps = subprocess.run(["ps", "-axo", "command="], capture_output=True, text=True).stdout
+    ended = []
+    for ln in ps.splitlines():
+        m = re.search(r"tmux -L (orch-\w+) .*-c (/\S*?/\.tf-fe2e-\w+)/", ln)
+        if m and not (Path(m.group(2)) / "env.json").exists():
+            subprocess.run(["tmux", "-L", m.group(1), "kill-server"], capture_output=True)
+            ended.append(m.group(1))
+    if ended:
+        log(f"ended {len(set(ended))} tmux server(s) left over from earlier runs")
+    return ended
+
+
+def claude_under(root_prefix: str) -> list[str]:
+    """Processes of live agents whose command line or folder mentions the run folder."""
+    ps = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True).stdout
+    return [ln.strip()[:120] for ln in ps.splitlines() if root_prefix in ln and ("claude" in ln or "tmux" in ln)]
 
 
 def build_bins(repo: Path, log=print) -> dict:

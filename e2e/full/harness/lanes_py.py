@@ -545,6 +545,119 @@ def lane_r(env, out: Path) -> Lane:
     return L
 
 
+# ---------------------------------------------------------------------------------------------- lane N (multi-workspace)
+
+
+def lane_n(env, out: Path) -> Lane:
+    """Three workspaces together: one phone sees all three, phone to each workspace, workspace to workspace both ways,
+    a relay group (talk inside the group, shared secret given to its members)."""
+    L = Lane("N", "Multi-workspace", out)
+    e = env.e
+    admin = e.rel.admin
+    ids = {"Pilatus": env.vars["relay_id_pilatus"], "Reports": env.vars["relay_id_reports"], "Home": env.vars["relay_id_home"]}
+    ph: dict = {}
+
+    def pair(st):
+        r = admin.call("POST", "/admin/api/phones", {"name": "E2E three-workspace phone", "workspaces": list(ids.values())})
+        if r.status != 201:
+            raise RuntimeError(f"add phone {r.status} {r.text[:150]}")
+        code = r.json()["link"].split("code=")[1]
+        p = lib.http("POST", e.rel.url + "/v1/phone/pair", None, {"code": code, "name": "E2E three-workspace phone"})
+        if p.status != 201:
+            raise RuntimeError(f"pair {p.status}")
+        ph.update(id=p.json()["phone_id"], token=p.json()["token"])
+    L.step("N00", "Pair one phone with all three workspaces", pair)
+
+    def ph_call(method, path, body=None):
+        return lib.http(method, e.rel.url + path, {"X-Orch-Phone": ph["id"], "Authorization": f"Bearer {ph['token']}"}, body)
+
+    def sees_three(st):
+        items = (ph_call("GET", "/v1/phone/workspaces").json() or {}).get("items", [])
+        got = {w["id"]: w for w in items}
+        missing = [n for n, i in ids.items() if i not in got]
+        if missing:
+            raise RuntimeError(f"the phone does not list {missing}; it lists {[w.get('name') for w in items]}")
+        names = {w.get("name") for w in items}
+        st["note"] = "phone lists: " + ", ".join(sorted(str(n) for n in names))
+    L.step("N01", "The phone lists all three workspaces with their names", sees_three, expect="Pilatus, Reports and Home all listed")
+
+    def phone_to_each(name):
+        def go(st):
+            import uuid
+            body = f"hello {name} from the phone {int(time.time())}"
+            r = ph_call("POST", "/v1/phone/send", {"to": ids[name], "client_id": str(uuid.uuid4()), "text": body})
+            if r.status not in (200, 201):
+                raise RuntimeError(f"phone send {r.status} {r.text[:150]}")
+            t0 = time.time()
+            end = t0 + 20
+            while time.time() < end:
+                rc, o, _ = e.sh(["orch", "relay", "inbox", "--json"], cwd=e.ws(name), timeout=30)
+                if body in o:
+                    st["note"] = f"{time.time() - t0:.1f} s"
+                    return
+                time.sleep(0.5)
+            raise RuntimeError(f"the text never reached the inbox of {name}")
+        return go
+    for n in ("Pilatus", "Reports", "Home"):
+        L.step(f"N-phone-{n}", f"Phone sends a text to {n}, its inbox gets it", phone_to_each(n), expect="in the inbox within 20 s")
+
+    def w2w(frm, to, ok=True):
+        def go(st):
+            body = f"{frm} to {to} {int(time.time())}"
+            rc, o, err = e.sh(["orch", "relay", "send", ids[to], body], cwd=e.ws(frm), timeout=60)
+            if not ok:
+                if rc == 0:
+                    raise RuntimeError(f"{frm} could send to {to} without a rule")
+                if not (err or o).strip():
+                    raise RuntimeError("the refusal has no reason")
+                st["note"] = (err or o).strip()[:160]
+                return
+            if rc:
+                raise RuntimeError((err or o)[-200:])
+            end = time.time() + 20
+            while time.time() < end:
+                if body in e.sh(["orch", "relay", "inbox", "--json"], cwd=e.ws(to), timeout=30)[1]:
+                    return
+                time.sleep(0.5)
+            raise RuntimeError(f"{to} never got it")
+        return go
+    L.step("N-w2w-1", "Pilatus to Reports arrives (rule allows it)", w2w("Pilatus", "Reports"))
+    L.step("N-w2w-2", "Reports to Pilatus arrives (rule allows text)", w2w("Reports", "Pilatus"))
+    L.step("N-w2w-3", "Home to Pilatus is refused in words (no rule)", w2w("Home", "Pilatus", ok=False))
+
+    grp: dict = {}
+
+    def group(st):
+        r = admin.call("POST", "/admin/api/groups", {"name": "E2E group", "talk": True, "defaults": {"credentials": True}})
+        if r.status != 201:
+            raise RuntimeError(f"create group {r.status} {r.text[:150]}")
+        grp["id"] = r.json()["id"]
+        for n in ("Home", "Reports"):
+            p = admin.call("PATCH", f"/admin/api/workspaces/{ids[n]}", {"group": grp["id"]})
+            if p.status != 200:
+                raise RuntimeError(f"put {n} in the group: {p.status} {p.text[:150]}")
+        for n in ("Home", "Reports"):
+            e.sh(["orch", "relay", "refresh"], cwd=e.ws(n), timeout=60)
+    L.step("N-group-1", "Create a group that may talk inside itself and put Home and Reports in it", group, expect="group with two members")
+
+    L.step("N-group-2", "Inside the group Home can send to Reports without a rule", w2w("Home", "Reports"))
+
+    def shared(st):
+        r = admin.call("PUT", "/admin/api/shared/credentials/E2E_TEAM_KEY", {"value": "team-secret-value"})
+        if r.status != 200:
+            raise RuntimeError(f"add shared secret {r.status} {r.text[:150]}")
+        sh = admin.call("GET", "/admin/api/shared").json() or {}
+        assign = sh.get("assign", {})
+        miss = [n for n in ("Home", "Reports") if "E2E_TEAM_KEY" not in (assign.get(ids[n], {}) or {}).get("credentials", [])]
+        if miss:
+            raise RuntimeError(f"the shared secret was not given to {miss}: {json.dumps(assign)[:200]}")
+        if "E2E_TEAM_KEY" in (assign.get(ids["Pilatus"], {}) or {}).get("credentials", []):
+            raise RuntimeError("Pilatus is not in the group but got the group's secret")
+        st["note"] = "Home and Reports have it, Pilatus does not; the value is never shown"
+    L.step("N-group-3", "A shared secret goes to the group members only", shared, expect="Home and Reports get it, Pilatus does not")
+    return L
+
+
 # ---------------------------------------------------------------------------------------------- lane U
 
 
@@ -556,7 +669,7 @@ def lane_u(env, out: Path, rcv: Receiver) -> Lane:
     e = env.e
     admin = e.rel.admin
     sub: dict = {}
-    pil_id, rep_id = env.vars["relay_id_pilatus"], env.vars["relay_id_reports"]
+    pil_id = env.vars["relay_id_pilatus"]
 
     def create(st):
         r = admin.call("POST", "/admin/api/subscribers", {"name": "E2E receiver", "workspaces": [pil_id],
@@ -700,7 +813,6 @@ def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
     """Phone lane on the V3-SIM driver (PR #207): `e2e/run.sh V3-SIM` starts its own local relay + workspace and writes ctl/info.json;
     RealRelayE2ETests (XCUITest) drives the app in the Simulator against it. One harness step per XCTest case, shots collected.
     No second phone driver: new phone steps (Mobile mode banner, archive, ...) are XCTests of that class or `-open` targets."""
-    import re
     import shutil
     import subprocess
     L = Lane("P", "Phone (Simulator)", out)
@@ -723,13 +835,8 @@ def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
             L.step("P00", "Create the lane's Simulator", lambda st: (_ for _ in ()).throw(RuntimeError("simctl create failed: " + (r.stderr or r.stdout)[-200:])))
             return L
         own_sim = True
-        subprocess.run(["xcrun", "simctl", "boot", udid], env=_host_env(), capture_output=True)
-        subprocess.run(["xcrun", "simctl", "bootstatus", udid, "-b"], env=_host_env(), capture_output=True, timeout=300)
-        # a fresh Simulator has no permissions and no position: grant what the walk uses (location card, voice note) before the app is installed
-        subprocess.run(["xcrun", "simctl", "privacy", udid, "grant", "location", "io.severin.orch"], env=_host_env(), capture_output=True)
-        subprocess.run(["xcrun", "simctl", "privacy", udid, "grant", "microphone", "io.severin.orch"], env=_host_env(), capture_output=True)
-        subprocess.run(["xcrun", "simctl", "privacy", udid, "grant", "speech-recognition", "io.severin.orch"], env=_host_env(), capture_output=True)
-        subprocess.run(["xcrun", "simctl", "location", udid, "set", "47.0502,8.3093"], env=_host_env(), capture_output=True)
+        # boot, permissions, the XCTest run and the shutdown all happen inside ONE heavy.sh simulator job below (HEAVY_SIM=1): the Simulator is
+        # never booted while the lane waits for something else
         L.notes.append(f"own Simulator e2e-full-phone {udid} (deleted at the end)")
     try:
         return _lane_p_run(L, env, out, repo, udid)
@@ -772,11 +879,25 @@ def _lane_p_run(L, env, out: Path, repo: Path, udid: str) -> Lane:
         if g.returncode:
             raise RuntimeError("xcodegen failed: " + (g.stderr or g.stdout)[-300:])
         t0 = time.time()
-        r = subprocess.run(["xcodebuild", "test", "-project", "OrchMobile.xcodeproj", "-scheme", "OrchMobile", "-destination", f"id={udid}",
-                            "-derivedDataPath", dd, "-parallel-testing-enabled", "NO",
-                            "-only-testing:OrchMobileUITests/RealRelayE2ETests"], cwd=repo / "mobile", capture_output=True, text=True,
-                           timeout=3600, env={**_host_env(), "TEST_RUNNER_ORCH_E2E_CTL": str(host["ctl"]),
-                                              "TEST_RUNNER_ORCH_SHOTS": str(shots), "ORCH_E2E_UDID": udid, "TEST_RUNNER_ORCH_E2E_UDID": udid, "TEST_RUNNER_ORCH_E2E_SLOW": "1"})
+        import shlex
+        script = out / "psim.sh"
+        script.write_text("\n".join([
+            "#!/bin/sh",
+            f"U={shlex.quote(udid)}",
+            "trap 'xcrun simctl shutdown \"$U\" >/dev/null 2>&1' EXIT",
+            "xcrun simctl boot \"$U\" >/dev/null 2>&1; xcrun simctl bootstatus \"$U\" -b >/dev/null 2>&1",
+            *[f"xcrun simctl privacy \"$U\" grant {svc} io.severin.orch >/dev/null 2>&1" for svc in ("location", "microphone", "speech-recognition")],
+            "xcrun simctl location \"$U\" set 47.0502,8.3093 >/dev/null 2>&1",
+            f"cd {shlex.quote(str(repo / 'mobile'))} || exit 1",
+            "exec xcodebuild test -project OrchMobile.xcodeproj -scheme OrchMobile -destination \"id=$U\" "
+            f"-derivedDataPath {shlex.quote(dd)} -parallel-testing-enabled NO -only-testing:OrchMobileUITests/RealRelayE2ETests",
+            ""]))
+        heavy = Path(os.environ.get("E2E_REAL_HOME") or Path.home()) / "orch-dev/state/v2-plan-2026-11-05/build/heavy.sh"
+        cmd = ["sh", str(heavy), "e2e-full-sim", "--", "sh", str(script)] if heavy.exists() else ["sh", str(script)]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600,
+                           env={**_host_env(), "HEAVY_SIM": "1", "E2E_FULL_LOCKED": "1", "TEST_RUNNER_ORCH_E2E_CTL": str(host["ctl"]),
+                                "TEST_RUNNER_ORCH_SHOTS": str(shots), "ORCH_E2E_UDID": udid, "TEST_RUNNER_ORCH_E2E_UDID": udid,
+                                "TEST_RUNNER_ORCH_E2E_SLOW": "1"})
         xo.write_text(r.stdout + r.stderr)
         cases = parse_xcode_tests(r.stdout)
         L.notes.append(f"xcodebuild {time.time() - t0:.0f} s, {len(cases)} test cases, exit {r.returncode}")

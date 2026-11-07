@@ -58,7 +58,7 @@ def run_browser_lane(lane: str, env_json: Path, outdir: Path, quick: bool, viewp
             cmd += ["--only", ",".join(ids)]
     outdir.mkdir(parents=True, exist_ok=True)
     t = time.time()
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=3600,
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=1700,
                        env={"HOME": os.environ["E2E_REAL_HOME"], "PATH": os.environ["PATH"], "LANG": "en_US.UTF-8"})
     (outdir / "stepper.log").write_text(p.stdout + "\n" + p.stderr)
     rj = outdir / "result.json"
@@ -80,8 +80,10 @@ def load_history() -> dict:
 
 
 def main() -> int:
+    import atexit
     import signal
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # the finally block still tears the environment down
+    for sg in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sg, lambda *_: sys.exit(143))  # the finally block still tears the environment down
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["quick", "full"], default="quick")
     ap.add_argument("--sha", default="")
@@ -106,6 +108,9 @@ def main() -> int:
     a = ap.parse_args()
 
     t_start = time.time()
+    envmod.sweep_orphans(log)
+    orch_tool_before = _real_orch_tool_state()
+    atexit.register(lambda: envmod.sweep_tmux(str(Path(a.root))))  # a crash of the harness itself still ends the agents of this run
     quick = a.mode == "quick"
     root, src = Path(a.root), Path(a.repo)
     repo = src
@@ -118,7 +123,7 @@ def main() -> int:
         repo = wt
         sha = subprocess.run(["git", "-C", str(wt), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     want = [x for x in (a.lanes.split(",") if a.lanes else
-                        (["A", "B", "G", "Z"] if quick else ["A", "B", "C", "D", "F", "W", "G", "R", "M", "U", "Z"] + ([] if a.no_windows else ["X"])))]
+                        (["A", "B", "G", "Z"] if quick else ["A", "B", "C", "D", "F", "W", "G", "R", "N", "M", "U", "Z"] + ([] if a.no_windows else ["X"])))]
     if a.phone and "P" not in want:
         want.append("P")
     hist = load_history()
@@ -216,6 +221,8 @@ def main() -> int:
         # serial
         if "W" in want:
             lanes.append({**_save(lanes_py.lane_w(env, outdir / "W")), "dir": "W"})
+        if "N" in want:
+            lanes.append({**_save(lanes_py.lane_n(env, outdir / "N")), "dir": "N"})
         if "R" in want:
             lanes.append({**_save(lanes_py.lane_r(env, outdir / "R")), "dir": "R"})
         if "G" in want:
@@ -283,6 +290,17 @@ def main() -> int:
     if bad:
         findings.append({"lane": "S", "kind": "run", "severity": "blocking", "step": "", "shots": [], "title": "A secret was found in the report folder",
                          "now": f"{bad}", "proposal": "Never write typed keys into step results, shots or traces."})
+    after = _real_orch_tool_state()
+    changed = sorted(k for k in set(orch_tool_before) | set(after) if orch_tool_before.get(k) != after.get(k))
+    if changed:
+        findings.append({"lane": "S", "kind": "run", "severity": "blocking", "step": "", "shots": [], "title": "The real ~/.orch-tool changed during the run",
+                         "now": f"{len(changed)} file(s) in ~/.orch-tool changed while the run was going: {[Path(c).name for c in changed][:6]}. "
+                                "A call of orch without ORCH_HOME may have written there, or another session used it at the same time.",
+                         "proposal": "Every orch call of the harness needs ORCH_HOME under /Users/lume/.orch-e2e-*; find the call that lacks it (compare the times with the lane logs)."})
+    left = envmod.claude_under(str(root))
+    if left:
+        findings.append({"lane": "S", "kind": "run", "severity": "blocking", "step": "", "shots": [], "title": "Agent processes left after tear-down",
+                         "now": f"{len(left)} process(es) of this run were still alive after tear-down: {left[:2]}", "proposal": "End every agent session at tear-down."})
     seen, uniq = set(), []
     for f in findings:
         k = (f.get("lane"), f.get("kind"), f.get("title"))
@@ -313,14 +331,29 @@ def main() -> int:
     STATE.mkdir(parents=True, exist_ok=True)
     if not a.no_history:
         (STATE / "history.json").write_text(json.dumps(hist, indent=1))
-    _prune(STATE / "reports", 7)
+    _prune(STATE / "reports", 40)
     url = f"http://develop.netbird.cloud:{a.serve_port}/{runname}/"
     log(f"REPORT {url}  ({page})")
     nfail = sum(s["status"] == "fail" for s in steps)
     missing = [l for l in want if l not in {x["lane"] for x in lanes}]
     nblocked = sum(s["status"] == "blocked" for s in steps)
     status("e2e full run " + a.mode, "done", f"{len(steps)} steps, {nfail} fail, {len(findings)} findings: {url}")
-    return 1 if (nfail or aborted or nblocked or missing or leaked or bad) else 0
+    return 1 if (nfail or aborted or nblocked or missing or leaked or bad or changed) else 0
+
+
+def _real_orch_tool_state() -> dict:
+    """mtime and size of every file in the real ~/.orch-tool: a run must never touch it (orch takes its home from the passwd entry, not $HOME)."""
+    d = REAL_HOME / ".orch-tool"
+    out = {}
+    if d.is_dir():
+        for p in d.rglob("*"):
+            try:
+                if p.is_file():
+                    s = p.stat()
+                    out[str(p)] = (s.st_mtime_ns, s.st_size)
+            except OSError:
+                pass
+    return out
 
 
 def _secrets_in(outdir: Path, env) -> list[str]:

@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url';
 import { lintText } from './lint.mjs';
 
 const CONTROL = 'button, a[href], input, select, textarea, [role=switch], [role=tab], [role=button], summary';
+const stepMs = () => Number(process.env.STEPPER_STEP_MS || 90000), laneMs = () => Number(process.env.STEPPER_LANE_MS || 1200000);
+const withTimeout = (p, ms, msg) => { let t; return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(msg)), ms); })]).finally(() => clearTimeout(t)); };
 const firstLine = e => String(e?.message || e).split('\n')[0];
 const height = w => w === 390 ? 844 : w === 720 ? 900 : 800;
 // This function runs in the page for both census and action attribution.
@@ -101,7 +103,8 @@ export async function run(opts) {
       }
       if (await modalOpen()) await page.keyboard.press('Escape');  // a dialog a census click opened: close it for the next step
     }
-    const settle = async () => { try { await page.evaluate(() => Promise.all(document.getAnimations().map(a => a.finished.catch(() => {})))); await page.waitForTimeout(150); } catch { /* page navigating */ } };
+    // wait for page fade-ins, but never for an endless animation (a spinner): only finite animations, and at most 2 s
+    const settle = async () => { try { await page.evaluate(() => Promise.race([Promise.all(document.getAnimations().filter(a => { const t = a.effect && a.effect.getComputedTiming(); return t && Number.isFinite(t.endTime); }).map(a => a.finished.catch(() => {}))), new Promise(r => setTimeout(r, 2000))])); await page.waitForTimeout(150); } catch { /* page navigating */ } };
     const modalOpen = async () => (await page.locator('dialog[open], [role=dialog], [aria-modal=true]').filter({ visible: true }).count()) > 0;
     async function clickCensusOnce(pageName, step, timeout) {
       const items = await census(pageName, step.id);
@@ -155,7 +158,7 @@ export async function run(opts) {
           if (a.expect_contains !== undefined && !String(value).includes(a.expect_contains)) throw new Error(`eval did not contain ${a.expect_contains}`);
           break;
         }
-        case 'shell': { const { execFileSync } = await import('node:child_process'); execFileSync(a.cmd, a.args || [], { timeout: 30000, stdio: 'pipe' }); break; }  // trusted lane files only: the harness writes the commands (env.json vars) it allows
+        case 'shell': { const { execFile } = await import('node:child_process'); await new Promise((ok, no) => { const c = execFile(a.cmd, a.args || [], { timeout: 30000 }, e => e ? no(e) : ok()); setTimeout(() => c.kill('SIGKILL'), stepMs()).unref(); }); break; }  // trusted lane files only: the harness writes the commands (env.json vars) it allows
         case 'shot': await shot(step, page.viewportSize().width); break;
         case 'expect_status': {
           const url = new URL(a.path, base);
@@ -192,6 +195,7 @@ export async function run(opts) {
         await writeFile(join(out, 'census', `${encodeURIComponent(name)}.json`), JSON.stringify(result.census[name], null, 2));
       }
     } else for (const step of steps) {
+      if (Date.now() - start > laneMs()) { result.steps.push({ id: step.id, name: step.name || '', status: 'blocked', error: `lane took longer than ${laneMs() / 60000} min`, ms: 0, actions: [], shots: [], console: [], http_errors: [], axe: [], lint: [], page: step.page }); continue; }
       const t = Date.now();
       const entry = { id: step.id, name: step.name || '', status: 'pass', error: '', ms: 0, actions: [], shots: [], console: [], http_errors: [], axe: [], lint: [], unnamed_controls: [], page: step.page };
       result.steps.push(entry);
@@ -205,7 +209,7 @@ export async function run(opts) {
           for (const a of step.actions) {
             const at = Date.now(), record = { do: a.do, ...(a.sel ? { sel: a.sel } : {}), ms: 0, load_ms: null, status: 'ok', error: '' };
             entry.actions.push(record);
-            try { await action(substitute(a, env), step, record); }
+            try { await withTimeout(action(substitute(a, env), step, record), stepMs(), `step took longer than ${stepMs() / 1000} s`); }
             catch (e) { record.status = a.optional ? 'skip' : 'fail'; record.error = firstLine(e); if (!a.optional) failure ||= record.error; }
             finally { record.ms = Date.now() - at; }
             if (blocked) break;
@@ -258,5 +262,6 @@ export async function run(opts) {
   return result;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  setTimeout(() => { console.error('stepper watchdog: the lane did not end in time'); process.exit(3); }, laneMs() + 180000).unref();  // last resort: never hang
   Promise.resolve().then(() => run(parseArgs(process.argv.slice(2)))).catch(e => { console.error(firstLine(e)); process.exitCode = 2; });
 }

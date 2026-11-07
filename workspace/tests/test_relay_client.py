@@ -1491,7 +1491,7 @@ def test_view_without_messages_names_a_workspace_to_try(proj, run, rel):
     rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports", "description": "Numbers"}]
     connect(run, rel)
     v = json.loads(run("relay", "view", "--json")[1])
-    assert v["blocks"][1]["items"][0]["subtitle"] == 'Try: orch relay send Reports "Hello"'
+    assert v["blocks"][1]["items"][0]["subtitle"] == "Send one from the phone or from another workspace."
 
 
 @pytest.mark.parametrize(
