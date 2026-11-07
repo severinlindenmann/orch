@@ -55,22 +55,19 @@ struct NewTopicScreen: View {
     /// When the workspace acks within a few seconds the new topic opens by itself.
     private func opened() {
         guard let ws = selected?.id else { return }
-        // The message was just queued or sent, so its "starting" conversation exists; follow it until the workspace's ack names the ticket.
-        let starting = model.workspaceSummaries.first { $0.id == ws }?.topics.first { $0.isStarting }?.id
         model.path = [.workspace(ws)]
         if asSheet { dismiss() }
-        guard let starting else { return }
         Task { @MainActor in
             for _ in 0..<10 {
+                // Newest text this phone sent to the workspace; the workspace's ack names the ticket it started.
+                let mine = model.messages.filter { $0.fromPhone && $0.workspaceId == ws }.max { $0.message.createdAt < $1.message.createdAt }
+                if let mine, let ticket = mine.message.ticket ?? model.ack(for: mine.id)?.ticket,
+                   model.path == [.workspace(ws)] {
+                    model.path = [.workspace(ws), .ticket(workspace: ws, ticket: ticket)]; return
+                }
                 try? await Task.sleep(for: .milliseconds(700))
                 await model.reloadMessages(); await model.refreshUpdates()
                 guard model.path == [.workspace(ws)] else { return }   // the person went elsewhere
-                var ticket: String? = nil
-                if case .topic(_, let t) = model.resolve(starting) { ticket = t }
-                else if case .starting(_, let key) = starting, let id = model.messages.first(where: { ($0.clientId ?? $0.message.body.clientId) == key })?.id {
-                    ticket = model.ack(for: id)?.ticket   // the ack may arrive as a work update before it shows as a message
-                }
-                if let ticket { model.path = [.workspace(ws), .ticket(workspace: ws, ticket: ticket)]; return }
             }
         }
     }
