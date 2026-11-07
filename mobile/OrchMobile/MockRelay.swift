@@ -91,7 +91,7 @@ actor MockRelay: RelayAPI {
         historyTail: [.init(at: "2026-11-05T10:34:00Z", by: "Claude", role: "agent", text: "Pulled the numbers from the Q3 sheet."),
                       .init(at: "2026-11-05T10:37:00Z", by: "Claude", role: "agent", text: "Draft is ready, charts next.")])
     static let invoiceView = TicketSnapshot(
-        title: "Invoice CSV export", status: "working", agent: "Claude", summary: "Writing the export.",
+        title: "Invoice CSV export", status: "active", agent: "Claude", summary: "Writing the export.",
         checklist: [.init(text: "Read the invoice table", done: true), .init(text: "Choose the columns", done: true), .init(text: "Write the export", done: false),
                     .init(text: "Add a test", done: false)],
         running: true,
@@ -260,7 +260,7 @@ actor MockRelay: RelayAPI {
             let newKey = "\(to == Self.pilatus ? "PIL" : "RGS")-\(20 + counter)"
             deliverUpdate(workspace: to, ticket: r.ticket ?? newTicket, kind: "ack", title: label, text: "Got it: \(label)", replyTo: id,
                           key: isNewTopic ? newKey : prior?.key,
-                          view: isNewTopic ? TicketSnapshot(title: label, status: "working", agent: "Claude", running: false) : prior?.ticketView)
+                          view: isNewTopic ? TicketSnapshot(title: label, status: "active", agent: "Claude", running: false) : prior?.ticketView)
         }
         return SendReceipt(id: id, clientId: r.clientId)
     }
