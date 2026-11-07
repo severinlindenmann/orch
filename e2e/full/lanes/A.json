@@ -264,7 +264,7 @@
     },
     {
      "do": "click",
-     "sel": "[data-key^='ticket-']:has-text('E2E ticket') summary >> nth=0"
+     "sel": "summary[aria-label^='Change the status'] >> nth=0"
     },
     {
      "do": "expect_text",
@@ -579,7 +579,7 @@
     },
     {
      "do": "click",
-     "sel": "role=dialog >> button:has-text('Add')"
+     "sel": "role=dialog >> button:text-is('Add')"
     },
     {
      "do": "wait",
@@ -592,7 +592,7 @@
     },
     {
      "do": "click",
-     "sel": "role=dialog >> button:has-text('Add')"
+     "sel": "role=dialog >> button:text-is('Add')"
     },
     {
      "do": "wait",
