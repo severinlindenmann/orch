@@ -26,7 +26,7 @@ def add_parsers(sub, common) -> None:
     t = ag.add_parser("test", parents=[common], help="run an agent once with a trivial prompt")
     t.add_argument("name")
     sh = sub.add_parser(
-        "share", parents=[common], help="share the orch entry with your team (off by default)"
+        "share", parents=[common], help=argparse.SUPPRESS
     )
     sh.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
     c = sub.add_parser("config", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
