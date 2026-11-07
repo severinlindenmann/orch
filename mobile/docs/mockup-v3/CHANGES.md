@@ -10,3 +10,4 @@
 
 # Archive (lane AR, 7 Nov)
 - New `archive.html`: swipe left on a chat = [Delete][Archive] with Undo toast, plain Delete confirmation (phone copy only), Archived list (move back by swipe, button or menu), Settings > Chats auto-archive 3/7/14/30 days. Phone-local, no contract change.
+- New `mobile-mode.html`: the Mobile mode banner in its three states (on, can't reach, muted).
