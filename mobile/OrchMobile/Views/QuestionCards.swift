@@ -152,7 +152,7 @@ struct QuestionCard: View {
                 Text("Already answered on your computer: \(label(q, answer))")
                     .themeFont(13).foregroundStyle(Theme.muted).frame(minHeight: 44, alignment: .leading)
             }
-        }.accessibilityIdentifier("answered-\(q.id)")
+        }.accessibilityElement(children: .contain).accessibilityIdentifier("answered-\(q.id)")
             .accessibilityAction(named: showOther ? "Hide other options" : "Show other options") { if hasOptions { showOther.toggle() } }
     }
 
