@@ -856,7 +856,7 @@
     const via = input('select');
     via.append(new Option('The task goes in as an argument', 'arg'), new Option('The task goes in on stdin', 'stdin'));
     const err = el('p', 'bad'); err.setAttribute('role', 'alert');
-    const row = (label, control, hint) => { const l = el('label', '', label); l.append(control); if (hint) l.append(el('span', 'hint', hint)); return l; };
+    const row = (label, control, hint) => { const l = el('label', '', label); l.append(control); if (hint) { const t = el('span', 'hint', hint); t.setAttribute('aria-hidden', 'true'); t.id = 'hint-' + label.toLowerCase().replace(/\W+/g, '-'); control.setAttribute('aria-describedby', t.id); l.append(t); } return l; };
     const form = el('div', 'add-form');
     const preview = el('div', 'cmd-preview');
     preview.hidden = true;
