@@ -5,10 +5,7 @@ Timing probes are what the owner cares about most: how fast does the dashboard (
 from __future__ import annotations
 
 import json
-import os
-import shlex
 import stat
-import threading
 import time
 from pathlib import Path
 
@@ -108,23 +105,28 @@ def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
             for x in state(dash).get("needs", []):
                 if tid in json.dumps(x):
                     st["needs_item"] = x
-                    qid = x.get("question") or x.get("q") or x.get("qid")
+                    qid = (x.get("answer") or {}).get("question") or x.get("question")
             for q in _ticket(state(dash), tid).get("questions", []):
                 if q.get("answer") is None and not q.get("answered_at"):
                     qid = q.get("id")
-            t1 = time.time()
             ra = act(dash, "answer", {"ticket": tid, "question": qid, "answer": "Hi"}) if qid else None
             if ra is None or ra.status != 200:
                 st["note"] = f"answer op: {ra.status if ra else 'no question id'} {(ra.text[:120] if ra else '')}"
                 e.sh(["orch", "answer", tid, qid or "q1", "Hi"], cwd=w)
             h = poll(dash, lambda s: "answered" in json.dumps(_ticket(s, tid).get("history", [])).lower(), 20)
             samples["answer_to_history"].append(h if h is not None else 20.0)
-            t2 = time.time()
-            d = poll(dash, lambda s: _ticket(s, tid).get("status") == "done", 90)
+            all_done = lambda s: bool(_ticket(s, tid).get("checklist")) and all(c.get("done") for c in _ticket(s, tid)["checklist"])
+            d = poll(dash, all_done, 90)
             if d is None:
                 s_ = state(dash)
-                raise RuntimeError("the ticket never reached Done: " + json.dumps({"ticket": _ticket(s_, tid), "run": s_.get("runs", {}).get(tid),
+                raise RuntimeError("the task was never checked off: " + json.dumps({"ticket": _ticket(s_, tid), "run": s_.get("runs", {}).get(tid),
                                    "needs": s_.get("needs")})[:900])
+            fin = _ticket(state(dash), tid).get("status")
+            if fin != "done":
+                L.finding("status", f"Ticket stays '{fin}' after its last task is checked", f"Run {i}: the agent checked the last task with proof, "
+                          f"but the ticket status is still '{fin}' (Home shows it as not finished).",
+                          "When the last task is done and the agent ends the run, the status should say Done (or Waiting for you to close), "
+                          "never the same word as while it works. Belongs to the statuses work (core-flow).", step=f"B{i:02d}")
             samples["done_to_dashboard"].append(d)
             st["note"] = f"{tid}: working {samples['start_to_working'][-1]:.1f}s, needs {samples['ask_to_needs'][-1]:.1f}s"
         return go
@@ -170,7 +172,13 @@ def lane_w(env, out: Path) -> Lane:
             dash = env.urls.get("reports")
             if dash:
                 d = poll(dash, lambda s: body in json.dumps(s), 20)
-                s_dash.append(seen + (d if d is not None else 20))
+                if d is None:
+                    L.finding("latency", "Message from another workspace is not shown on the dashboard",
+                              f"Send {i}: the text reached `relay inbox` in {seen:.1f} s but was not in the dashboard state of Reports after 20 more seconds.",
+                              "Show arrivals from other workspaces on Home (Needs you or Recently) within 5 s, or say where to find them.",
+                              step=f"W{i:02d}", severity="functional")
+                else:
+                    s_dash.append(seen + d)
         return go
 
     for i in range(1, 4):

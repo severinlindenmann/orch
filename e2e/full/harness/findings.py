@@ -64,7 +64,7 @@ def from_lane(res: dict, lane_dir: str, timing_fail: bool) -> list[dict]:
     if cov and cov.get("found") and cov.get("percent", 100) < 100:
         un = cov.get("uncovered", [])
         out.append({"lane": lane, "kind": "coverage", "severity": "functional", "step": "", "shots": [],
-                    "title": f"Control coverage {cov['percent']}% ({cov['clicked']}/{cov['found']})",
+                    "title": f"Control coverage {round(cov['percent'])}% ({cov['clicked']}/{cov['found']})",
                     "now": f"{len(un)} controls were never clicked, e.g. {', '.join(un[:6])}.",
                     "proposal": "Add a step for each control (data: lanes/*.json) or put it on the destructive allow-list with a reason."})
     for p in (res.get("probes") or {}).values():

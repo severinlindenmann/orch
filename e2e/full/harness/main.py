@@ -93,8 +93,9 @@ def main() -> int:
     ap.add_argument("--review-shots", type=int, default=24)
     ap.add_argument("--viewports", default="1280,720,390")
     ap.add_argument("--prod", default="", help="read-only smoke: relay=URL,publish=URL")
-    ap.add_argument("--build", action="store_true", help="cargo build relay/publish from the sha first")
+    ap.add_argument("--no-build", action="store_true", help="reuse the relay/publish binaries in the shared cargo target (dry runs)")
     ap.add_argument("--keep-root", action="store_true")
+    ap.add_argument("--no-history", action="store_true", help="a dry run: do not count it for the timing gate")
     ap.add_argument("--serve-port", type=int, default=8796)
     a = ap.parse_args()
 
@@ -102,7 +103,14 @@ def main() -> int:
     quick = a.mode == "quick"
     root, src = Path(a.root), Path(a.repo)
     repo = src
-    sha = a.sha or subprocess.run(["git", "-C", str(src), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    head = subprocess.run(["git", "-C", str(src), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    sha = a.sha or head
+    wt = None
+    if a.sha and subprocess.run(["git", "-C", str(src), "rev-parse", a.sha], capture_output=True, text=True).stdout.strip() != head:
+        wt = root / "src"  # the sha is not the checkout: install and build from a detached worktree of it (removed at the end)
+        subprocess.run(["git", "-C", str(src), "worktree", "add", "--detach", str(wt), a.sha], check=True, capture_output=True)
+        repo = wt
+        sha = subprocess.run(["git", "-C", str(wt), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     want = [x for x in (a.lanes.split(",") if a.lanes else
                         (["A", "B", "Z"] if quick else ["A", "B", "C", "D", "W", "U", "Z"] + ([] if a.no_windows else ["X"])))]
     if a.phone and "P" not in want:
@@ -122,16 +130,15 @@ def main() -> int:
         # S: setup
         S = Lane("S", "Setup", outdir / "S")
         bins: dict = {}
-        wt_src = root / "src"
 
         def build(st):
             nonlocal bins
-            bins = envmod.build_bins(repo) if a.build else {
+            bins = envmod.build_bins(repo) if not a.no_build else {
                 "publish": str(REAL_HOME / "orch-dev/.cargo-target-v2/release/orch-publish"),
                 "relay": str(REAL_HOME / "orch-dev/.cargo-target-v2/release/orch-relay")}
             for b in bins.values():
                 if not Path(b).exists():
-                    raise RuntimeError(f"missing binary {b} (use --build)")
+                    raise RuntimeError(f"missing binary {b} (run without --no-build)")
         S.step("S01", "Relay and publish binaries from the sha", build, expect="both servers built")
         env = envmod.Env(root, repo, bins, sha)
         S.step("S02", "Install orch, start relay + publish, 3 workspaces, add-ons, relay/publish connect", lambda st: env.up(log),
@@ -202,6 +209,8 @@ def main() -> int:
     finally:
         if env:
             env.down(log)
+        if wt:
+            subprocess.run(["git", "-C", str(src), "worktree", "remove", "--force", str(wt)], capture_output=True)
     for l in lanes:
         if l["lane"] != "S":
             findings += findmod.from_lane(l, l["dir"], timing_fail)
@@ -220,6 +229,18 @@ def main() -> int:
             for f in q:
                 f["shots"] = [os.path.relpath(p, outdir) for p in f["shots"]]
             findings += q
+    seen, uniq = set(), []
+    for f in findings:
+        k = (f.get("lane"), f.get("kind"), f.get("title"))
+        if k not in seen:
+            seen.add(k)
+            f["count"] = 1
+            uniq.append(f)
+        else:
+            first = next(u for u in uniq if (u.get("lane"), u.get("kind"), u.get("title")) == k)
+            first["count"] += 1
+            first["step"] = f"{first['step']}, {f['step']}" if f["step"] not in first["step"] else first["step"]
+    findings = uniq
     # census totals
     found = sum(l.get("coverage", {}).get("found", 0) for l in lanes)
     clicked = sum(l.get("coverage", {}).get("clicked", 0) for l in lanes)
@@ -231,11 +252,13 @@ def main() -> int:
                           "Real microphone and Deepgram accuracy", "Camera QR scan on a device", "Judging if a design is nice"]}
     page = report.render(runinfo, lanes, findings, census, outdir)
     steps = [s for l in lanes for s in l["steps"]]
-    hist["runs"].append({"run": runname, "sha": sha, "mode": a.mode, "pass": sum(s["status"] == "pass" for s in steps),
+    if not a.no_history:
+      hist["runs"].append({"run": runname, "sha": sha, "mode": a.mode, "pass": sum(s["status"] == "pass" for s in steps),
                          "fail": sum(s["status"] == "fail" for s in steps), "findings": len(findings),
                          "probes": {p["id"]: p["median"] for l in lanes for p in l.get("probes", {}).values()}})
     STATE.mkdir(parents=True, exist_ok=True)
-    (STATE / "history.json").write_text(json.dumps(hist, indent=1))
+    if not a.no_history:
+        (STATE / "history.json").write_text(json.dumps(hist, indent=1))
     _prune(STATE / "reports", 7)
     url = f"http://develop.netbird.cloud:{a.serve_port}/{runname}/"
     log(f"REPORT {url}  ({page})")

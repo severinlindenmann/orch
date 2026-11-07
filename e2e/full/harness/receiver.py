@@ -1,7 +1,6 @@
 """Tiny subscriber receiver: records every request body + headers it gets (signed push check, retry check)."""
 from __future__ import annotations
 
-import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

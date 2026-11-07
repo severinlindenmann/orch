@@ -1,6 +1,6 @@
 #!/bin/sh
 # orch full e2e (plan B): e2e/full/run.sh [--quick|--full] [--sha <commit>] [--lanes S,A,B] [--no-windows] [--phone]
-#                                         [--real-agents] [--no-review] [--build] [--keep-root]
+#                                         [--real-agents] [--no-review] [--no-build] [--keep-root]
 # One command. Holds the global heavy lock (v2 build) when it exists. Everything runs under one root
 # ~/.tf-fe2e-XXXX with `env -i`; the real ~/.orch-tool and ~/.config/orch are never touched. Report: ~/orch-dev/state/e2e-full/reports/
 set -eu

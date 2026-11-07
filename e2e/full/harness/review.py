@@ -32,7 +32,8 @@ def review(shots: list[tuple[str, Path]], model="claude-sonnet-5-5", batch=6, lo
             task = f.name
         try:
             r = subprocess.run([str(RUNNER), f"e2efull-q{i // batch}", task, "--model", model, *[str(p) for _, p in part]],
-                               capture_output=True, text=True, timeout=300)
+                               capture_output=True, text=True, timeout=300,
+                               env={"HOME": str(REAL_HOME), "PATH": os.environ.get("PATH", "") + ":/opt/homebrew/bin:/usr/local/bin:" + str(REAL_HOME / ".local/bin") + ":/Users/lume/.local/bin", "LANG": "en_US.UTF-8"})
             m = re.search(r"\[.*\]", r.stdout, re.S)
             if r.returncode or not m:
                 log(f"review batch {i // batch} failed: {(r.stderr or r.stdout)[-200:]}")

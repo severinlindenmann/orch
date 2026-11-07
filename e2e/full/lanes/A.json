@@ -254,6 +254,130 @@
    ]
   },
   {
+   "id": "A10",
+   "name": "Change a ticket status from the menu",
+   "page": "home",
+   "expect": "the status chip changes to Doing and stays after reload",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "click",
+     "sel": "summary[aria-label^='Change the status'] >> nth=0"
+    },
+    {
+     "do": "click",
+     "sel": "role=menuitemradio[name='Doing']"
+    },
+    {
+     "do": "wait",
+     "ms": 1200
+    },
+    {
+     "do": "reload"
+    },
+    {
+     "do": "expect_text",
+     "text": "Doing"
+    }
+   ]
+  },
+  {
+   "id": "A11",
+   "name": "Tickets: List and Board",
+   "page": "tickets",
+   "expect": "both views show the tickets; the choice survives a reload",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#tickets"
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='Board']"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    },
+    {
+     "do": "reload"
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='List']"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    }
+   ]
+  },
+  {
+   "id": "A12",
+   "name": "Settings tabs: General, Agent, Add-ons",
+   "page": "settings",
+   "expect": "each tab shows its page",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Agent']"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Add-ons']"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='General']"
+    }
+   ]
+  },
+  {
+   "id": "A13",
+   "name": "Keyboard: Tab reaches the nav and the New ticket button",
+   "page": "home",
+   "noshot": true,
+   "expect": "focus is visible and moves in a sensible order",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "press",
+     "key": "Tab"
+    },
+    {
+     "do": "press",
+     "key": "Tab"
+    },
+    {
+     "do": "press",
+     "key": "Tab"
+    },
+    {
+     "do": "eval",
+     "js": "(() => { const e = document.activeElement; const s = getComputedStyle(e); return e.tagName + ' ' + (s.outlineStyle !== 'none' || s.boxShadow !== 'none') })()",
+     "store": "focus_ring"
+    }
+   ]
+  },
+  {
    "id": "A09",
    "name": "Click every remaining control (census)",
    "page": "home",

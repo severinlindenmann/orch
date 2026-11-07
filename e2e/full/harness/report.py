@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import html
 import json
-import shutil
-import time
 from pathlib import Path
 
 CSS = """
@@ -57,7 +55,7 @@ def render(run: dict, lanes: list[dict], findings: list[dict], census: dict, out
         h.append("<p>No findings.</p>")
     for i, f in enumerate(findings, 1):
         sh = "".join(img(s, big=False) for s in f.get("shots", []))
-        h.append(f"<div class=card><h3>F{i} {e(f['title'])} <span class='tag {e(f.get('severity'))}'>{e(f.get('severity'))}</span> "
+        h.append(f"<div class=card><h3>F{i} {e(f['title'])}{(' (x' + str(f['count']) + ')') if f.get('count', 1) > 1 else ''} <span class='tag {e(f.get('severity'))}'>{e(f.get('severity'))}</span> "
                  f"<span class=tag>{e(f.get('lane'))} {e(f.get('step'))}</span> <span class=tag>{e(f.get('kind'))}</span></h3>"
                  f"<div class=f><div><div class=lab>Now</div>{e(f.get('now'))}<div>{sh}</div></div>"
                  f"<div><div class=lab>Proposal</div>{e(f.get('proposal'))}"
