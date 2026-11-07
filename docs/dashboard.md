@@ -19,3 +19,11 @@ $ orch stop
 - **Add-ons:** each add-on you turn on gets its own tab (automation, publish's Shared tab, relay messages).
 
 ![A ticket](images/dashboard-ticket.png)
+
+The board has six columns: Backlog, Ready, Working, Waiting, Review, and Done. Done initially shows three tickets. Review cards offer **Mark done** and **Send back**. An agent's activity appears separately on its ticket; Start moves the card to Working immediately.
+
+Settings ends with **Workflow → Agents may mark tickets Done**, off by default. Browser actions are recorded as a person, including when an agent started the dashboard.
+
+**References** holds tickets, web addresses, project files, and artifacts. Project text and image previews use stored references and the core's safe file reader. Files outside the project say **On this computer only** and remain text. Shared snapshots keep references but do not open files or artifacts.
+
+The live dashboard listens on `/api/events` for changes, with a 20-second fallback refresh while connected and a 3-second refresh while disconnected. Shared snapshots make no requests.

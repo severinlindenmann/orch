@@ -75,7 +75,7 @@ rows (for example "automation is not running"). The same list is on the dashboar
 
 To pause a ticket until a time: `orch wait <id> --until 2026-12-01T08:00:00+01:00`.
 
-## Links and history
+## References and history
 
 ```sh
 $ orch ref add DM1-12 https://github.com/acme/billing/pull/418

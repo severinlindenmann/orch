@@ -42,7 +42,7 @@
       ]
     }
   ],
-  "links": [
+  "refs": [
     {
       "type": "jira",
       "url": "https://jira.example.com/browse/ING-42",

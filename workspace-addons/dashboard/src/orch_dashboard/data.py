@@ -1,4 +1,5 @@
 """Read .orch/ files of a workspace into one JSON-able state. Read only; never writes."""
+
 from __future__ import annotations
 
 import hashlib
@@ -12,10 +13,26 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-STATUS_ORDER = ["active", "waiting", "open", "done", "dropped"]
+STATUS_ORDER = ["open", "ready", "active", "waiting", "review", "done", "dropped"]
 _NAME = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
-ICONS = ("clock", "calendar", "inbox", "list", "chart", "bell", "book", "globe", "link", "check", "star", "box",
-         "chat", "folder", "user", "bolt")
+ICONS = (
+    "clock",
+    "calendar",
+    "inbox",
+    "list",
+    "chart",
+    "bell",
+    "book",
+    "globe",
+    "link",
+    "check",
+    "star",
+    "box",
+    "chat",
+    "folder",
+    "user",
+    "bolt",
+)
 FORMATS = ("text", "time", "cron-human", "chips", "yes-no", "open-page")
 
 
@@ -46,17 +63,29 @@ def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float =
     if not orch_bin:
         return None
     try:
-        r = subprocess.run([orch_bin, *args], check=False, cwd=root, capture_output=True, text=True, timeout=timeout,
-                           env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin})
+        r = subprocess.run(
+            [orch_bin, *args],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin},
+        )
         return json.loads(r.stdout) if r.returncode == 0 else None
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
 
 
 def _valid_ticket(t, stem: str | None = None) -> bool:
-    return (isinstance(t, dict) and t.get("schema") == "orch.ticket/1" and isinstance(t.get("id"), str)
-            and (stem is None or t["id"] == stem) and isinstance(t.get("title"), str)
-            and t.get("status") in STATUS_ORDER)
+    return (
+        isinstance(t, dict)
+        and t.get("schema") == "orch.ticket/1"
+        and isinstance(t.get("id"), str)
+        and (stem is None or t["id"] == stem)
+        and isinstance(t.get("title"), str)
+        and t.get("status") in STATUS_ORDER
+    )
 
 
 def _file_here(root: Path, tid: str, ref: str) -> bool:
@@ -75,8 +104,15 @@ def _file_here(root: Path, tid: str, ref: str) -> bool:
 
 def _mark_missing_proofs(root: Path, t: dict) -> None:
     for c in t.get("checklist", []):
-        for ev in c.get("evidence", []) if isinstance(c, dict) and isinstance(c.get("evidence"), list) else []:
-            if isinstance(ev, dict) and ev.get("type") == "file" and isinstance(ev.get("ref"), str) and "\x00" not in ev["ref"]:
+        for ev in (
+            c.get("evidence", []) if isinstance(c, dict) and isinstance(c.get("evidence"), list) else []
+        ):
+            if (
+                isinstance(ev, dict)
+                and ev.get("type") == "file"
+                and isinstance(ev.get("ref"), str)
+                and "\x00" not in ev["ref"]
+            ):
                 ev["missing"] = not _file_here(root, str(t["id"]), ev["ref"])
 
 
@@ -120,7 +156,11 @@ def add_artifact_marks(tickets: list[dict]) -> None:
         pairs = [("link", ln.get("url")) for ln in links if isinstance(ln, dict)]
         for c in t.get("checklist") if isinstance(t.get("checklist"), list) else []:
             evs = c.get("evidence") if isinstance(c, dict) and isinstance(c.get("evidence"), list) else []
-            pairs += [(ev["type"], ev.get("ref")) for ev in evs if isinstance(ev, dict) and ev.get("type") in ("url", "pr", "commit")]
+            pairs += [
+                (ev["type"], ev.get("ref"))
+                for ev in evs
+                if isinstance(ev, dict) and ev.get("type") in ("url", "pr", "commit")
+            ]
         for source, ref in pairs[:100]:
             if not isinstance(ref, str) or not ref.startswith(("http://", "https://")):
                 continue
@@ -136,9 +176,17 @@ def load_general(root: Path) -> dict | None:
     """The General conversation of the phone (the hidden ticket with `general: true`): {id, history}, oldest first."""
     for f in _json_files(root / ".orch" / "tickets"):
         t = _load(f)
-        if isinstance(t, dict) and t.get("general") is True and isinstance(t.get("id"), str) and t["id"] == f.stem:
-            hist = [h for h in t.get("history") if isinstance(h, dict) and isinstance(h.get("text"), str)] \
-                if isinstance(t.get("history"), list) else []
+        if (
+            isinstance(t, dict)
+            and t.get("general") is True
+            and isinstance(t.get("id"), str)
+            and t["id"] == f.stem
+        ):
+            hist = (
+                [h for h in t.get("history") if isinstance(h, dict) and isinstance(h.get("text"), str)]
+                if isinstance(t.get("history"), list)
+                else []
+            )
             hist = [h for h in hist if h.get("text") != "Created"]
             return {"id": t["id"], "history": hist[-200:]}
     return None
@@ -149,25 +197,53 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
     raw = run_orch(orch_bin, ["addon", "list", "--json"], root) if raw is None else raw
     out = []
     for a in raw if isinstance(raw, list) else []:
-        if not (isinstance(a, dict) and a.get("active") is True and isinstance(a.get("name"), str)
-                and _NAME.match(a["name"])):
+        if not (
+            isinstance(a, dict)
+            and a.get("active") is True
+            and isinstance(a.get("name"), str)
+            and _NAME.match(a["name"])
+        ):
             continue
         d = a.get("dashboard") if isinstance(a.get("dashboard"), dict) else None
         if d and not (isinstance(d.get("label"), str) and d.get("icon") in ICONS):
             d = None
-        tv = [r for r in a.get("ticket_view") or [] if isinstance(r, dict) and isinstance(r.get("field"), str)
-              and isinstance(r.get("label"), str) and r.get("format") in FORMATS]
+        tv = [
+            r
+            for r in a.get("ticket_view") or []
+            if isinstance(r, dict)
+            and isinstance(r.get("field"), str)
+            and isinstance(r.get("label"), str)
+            and r.get("format") in FORMATS
+        ]
         pg = a.get("page") if isinstance(a.get("page"), dict) else None
-        if pg and not (isinstance(pg.get("path"), str) and re.fullmatch(r"/[A-Za-z0-9_./-]*", pg["path"]) and ".." not in pg["path"]):
+        if pg and not (
+            isinstance(pg.get("path"), str)
+            and re.fullmatch(r"/[A-Za-z0-9_./-]*", pg["path"])
+            and ".." not in pg["path"]
+        ):
             pg = None
         tf = _ticket_fields(a.get("ticket_fields"))
-        acts = [v for v in a.get("acts") or [] if isinstance(v, str) and re.fullmatch(r"[a-z][a-z-]{0,20}", v)]
-        kinds = [k.get("kind") for k in a.get("ticket_links") or [] if isinstance(k, dict) and isinstance(k.get("kind"), str)]
+        acts = [
+            v for v in a.get("acts") or [] if isinstance(v, str) and re.fullmatch(r"[a-z][a-z-]{0,20}", v)
+        ]
+        kinds = [
+            k.get("kind")
+            for k in a.get("ticket_links") or []
+            if isinstance(k, dict) and isinstance(k.get("kind"), str)
+        ]
         if d or tv or tf or acts or kinds:
-            out.append({"name": a["name"], "dashboard": d and {"label": d["label"][:16], "icon": d["icon"],
-                                                               "order": d.get("order", 50)}, "ticket_view": tv,
-                        "page": pg and {"path": pg["path"], "label": str(pg.get("label") or "")[:40]},
-                        "ticket_fields": tf, "acts": acts, "link_kinds": kinds})
+            out.append(
+                {
+                    "name": a["name"],
+                    "dashboard": d
+                    and {"label": d["label"][:16], "icon": d["icon"], "order": d.get("order", 50)},
+                    "ticket_view": tv,
+                    "page": pg and {"path": pg["path"], "label": str(pg.get("label") or "")[:40]},
+                    "ticket_fields": tf,
+                    "acts": acts,
+                    "link_kinds": kinds,
+                }
+            )
     out.sort(key=lambda a: (a["dashboard"] or {}).get("order", 50))
     return out
 
@@ -177,18 +253,33 @@ FIELD_TYPES = ("text", "number", "date", "choice", "url")
 
 def _ticket_fields(tf) -> dict | None:
     """`ticket_fields` of `orch addon list --json` (core already typed the schema): section, show_on_card, fields."""
-    if not (isinstance(tf, dict) and isinstance(tf.get("section"), str) and isinstance(tf.get("fields"), list)):
+    if not (
+        isinstance(tf, dict) and isinstance(tf.get("section"), str) and isinstance(tf.get("fields"), list)
+    ):
         return None
     fields = []
     for f in tf["fields"]:
-        if not (isinstance(f, dict) and isinstance(f.get("key"), str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", f["key"])
-                and f.get("type") in FIELD_TYPES and isinstance(f.get("title"), str)):
+        if not (
+            isinstance(f, dict)
+            and isinstance(f.get("key"), str)
+            and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", f["key"])
+            and f.get("type") in FIELD_TYPES
+            and isinstance(f.get("title"), str)
+        ):
             continue
-        out = {"key": f["key"], "title": f["title"][:40], "type": f["type"], "read_only": f.get("read_only") is True,
-               "hidden": f.get("hidden") is True}
+        out = {
+            "key": f["key"],
+            "title": f["title"][:40],
+            "type": f["type"],
+            "read_only": f.get("read_only") is True,
+            "hidden": f.get("hidden") is True,
+        }
         if f["type"] == "choice":
-            out["options"] = [{"value": o["value"], "label": str(o.get("label") or o["value"])[:40]}
-                              for o in f.get("options") or [] if isinstance(o, dict) and isinstance(o.get("value"), str)]
+            out["options"] = [
+                {"value": o["value"], "label": str(o.get("label") or o["value"])[:40]}
+                for o in f.get("options") or []
+                if isinstance(o, dict) and isinstance(o.get("value"), str)
+            ]
         fields.append(out)
     card = [k for k in tf.get("show_on_card") or [] if isinstance(k, str)][:3]
     return {"section": tf["section"][:24], "show_on_card": card, "fields": fields}
@@ -197,11 +288,19 @@ def _ticket_fields(tf) -> dict | None:
 def link_kinds(raw) -> list[dict]:
     """The link types of the active add-ons (`orch addon list --json` rows), for orch.refs.describe."""
     out, seen = [], set()
-    for a in sorted((a for a in raw if isinstance(a, dict) and a.get("active") is True) if isinstance(raw, list) else [],
-                    key=lambda a: str(a.get("name"))):
+    for a in sorted(
+        (a for a in raw if isinstance(a, dict) and a.get("active") is True) if isinstance(raw, list) else [],
+        key=lambda a: str(a.get("name")),
+    ):
         for k in a.get("ticket_links") or []:
-            if (isinstance(k, dict) and isinstance(k.get("kind"), str) and k["kind"] not in seen
-                    and isinstance(k.get("label"), str) and isinstance(k.get("icon"), str) and isinstance(k.get("match"), list)):
+            if (
+                isinstance(k, dict)
+                and isinstance(k.get("kind"), str)
+                and k["kind"] not in seen
+                and isinstance(k.get("label"), str)
+                and isinstance(k.get("icon"), str)
+                and isinstance(k.get("match"), list)
+            ):
                 seen.add(k["kind"])
                 out.append({**k, "addon": a["name"]})
     return out
@@ -217,8 +316,10 @@ def add_link_views(tickets: list[dict], kinds: list[dict]) -> None:
         for ln in t.get("refs") or []:
             if isinstance(ln, dict) and isinstance(ln.get("url"), str):
                 ln["view"] = refs.describe(ln, kinds)
-                ln["view"].update(shown_type=shown_type(ln["view"].get("label"), ln["url"], refs),
-                                  **dict(zip(("host_head", "domain"), host_parts(ln["url"]))))
+                ln["view"].update(
+                    shown_type=shown_type(ln["view"].get("label"), ln["url"], refs),
+                    **dict(zip(("host_head", "domain"), host_parts(ln["url"]))),
+                )
 
 
 # What a link row says it is: one rule (the phone app has the same one, LinkFace in ChatParts.swift).
@@ -226,9 +327,32 @@ def add_link_views(tickets: list[dict], kinds: list[dict]) -> None:
 # label of ASCII letters, digits, spaces and "-", at most 24, naming no site even with spaces and "-" taken out; else
 # dropped, and with nothing left the type is "Link". Host: the registrable domain (never cut) and the rest before it.
 _PLAIN = re.compile(r"[A-Za-z0-9 -]{1,24}")
-TWO_PART_SUFFIXES = frozenset({
-    "co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "ne.jp", "or.jp",
-    "com.br", "com.cn", "com.mx", "co.in", "co.za", "com.tr", "com.sg", "com.hk", "co.kr", "github.io", "gitlab.io"})
+TWO_PART_SUFFIXES = frozenset(
+    {
+        "co.uk",
+        "org.uk",
+        "ac.uk",
+        "gov.uk",
+        "com.au",
+        "net.au",
+        "org.au",
+        "co.nz",
+        "co.jp",
+        "ne.jp",
+        "or.jp",
+        "com.br",
+        "com.cn",
+        "com.mx",
+        "co.in",
+        "co.za",
+        "com.tr",
+        "com.sg",
+        "com.hk",
+        "co.kr",
+        "github.io",
+        "gitlab.io",
+    }
+)
 
 
 def _squeeze(s: str) -> str:
@@ -297,7 +421,9 @@ def _addon_detail(root: Path, name: str) -> dict | None:
     url = _host(link.get("url"))
     out = {"connected": bool(url), "address": url, "workspaces": []}
     d = _load(root / ".agents" / "skills" / f"orch-{name}" / "workspaces.json")
-    for w in (d.get("workspaces") if url and isinstance(d, dict) and isinstance(d.get("workspaces"), list) else [])[:50]:
+    for w in (
+        d.get("workspaces") if url and isinstance(d, dict) and isinstance(d.get("workspaces"), list) else []
+    )[:50]:
         if isinstance(w, dict) and isinstance(w.get("name"), str):
             out["workspaces"].append({"name": w["name"][:60], "online": w.get("online") is True})
     return out
@@ -305,19 +431,35 @@ def _addon_detail(root: Path, name: str) -> dict | None:
 
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
-    agents, rows = run_orch(orch_bin, ["agents", "--json"], root), run_orch(orch_bin, ["addon", "list", "--json"], root)
+    agents, rows = (
+        run_orch(orch_bin, ["agents", "--json"], root),
+        run_orch(orch_bin, ["addon", "list", "--json"], root),
+    )
     keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
     perm = run_orch(orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
+    from orch.config import agents_may_finish
+
     return {
+        "agents_may_finish": agents_may_finish(root),
         "folder": str(root),
         "permissions": perm if perm in ("ask", "auto", "full") else "auto",  # core's default is Auto
-        "agents": [{k: a.get(k) for k in keep} for a in (agents if isinstance(agents, list) else [])
-                   if isinstance(a, dict) and isinstance(a.get("name"), str)],
-        "addons": [{"name": r["name"], "description": str(r.get("description") or "")[:200], "active": r.get("active") is True,
-                    "consent": _consent(r), "detail": _addon_detail(root, r["name"])}
-                   for r in (rows if isinstance(rows, list) else []) if isinstance(r, dict) and isinstance(r.get("name"), str)
-                   and _NAME.match(r["name"])],
+        "agents": [
+            {k: a.get(k) for k in keep}
+            for a in (agents if isinstance(agents, list) else [])
+            if isinstance(a, dict) and isinstance(a.get("name"), str)
+        ],
+        "addons": [
+            {
+                "name": r["name"],
+                "description": str(r.get("description") or "")[:200],
+                "active": r.get("active") is True,
+                "consent": _consent(r),
+                "detail": _addon_detail(root, r["name"]),
+            }
+            for r in (rows if isinstance(rows, list) else [])
+            if isinstance(r, dict) and isinstance(r.get("name"), str) and _NAME.match(r["name"])
+        ],
     }
 
 
@@ -332,6 +474,7 @@ def load_services(root: Path, orch_bin: str | None) -> list[dict]:
 
 
 _RUNS: dict[tuple[str, str], tuple[float, dict | None]] = {}
+_RUN_SIGNATURES = {}
 RUNS_TTL = 5.0
 RUNS_MAX = 30
 
@@ -341,11 +484,23 @@ def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool
     Cached for a few seconds so the 3 s page poll costs nothing; an action's reply passes fresh=True."""
     if not orch_bin:
         return {}
+    from .events import Revisions
+
+    signature = Revisions(root).signature()
+    if _RUN_SIGNATURES.get(str(root)) != signature:
+        fresh = True
+        _RUN_SIGNATURES[str(root)] = signature
     claims = root / ".orch" / "run" / "tickets"  # a done ticket can still have its live session open
     ids = [t["id"] for t in tickets if t["status"] not in ("done", "dropped")][:RUNS_MAX]
-    ids += [t["id"] for t in tickets if t["status"] in ("done", "dropped") and (claims / f"{t['id']}.json").exists()]
+    ids += [
+        t["id"]
+        for t in tickets
+        if t["status"] in ("done", "dropped") and (claims / f"{t['id']}.json").exists()
+    ]
     now = time.monotonic()
-    todo = [i for i in ids if fresh or (str(root), i) not in _RUNS or now - _RUNS[(str(root), i)][0] > RUNS_TTL]
+    todo = [
+        i for i in ids if fresh or (str(root), i) not in _RUNS or now - _RUNS[(str(root), i)][0] > RUNS_TTL
+    ]
     if todo:
         with ThreadPoolExecutor(max_workers=6) as pool:
             got = list(pool.map(lambda i: run_orch(orch_bin, ["run", "status", i, "--json"], root), todo))
@@ -354,8 +509,13 @@ def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool
     return {i: _RUNS[(str(root), i)][1] for i in ids if _RUNS[(str(root), i)][1]}
 
 
-def load_state(root: Path, orch_bin: str | None = None, with_addons: bool = True, fresh: bool = False,
-               with_settings: bool = False) -> dict:
+def load_state(
+    root: Path,
+    orch_bin: str | None = None,
+    with_addons: bool = True,
+    fresh: bool = False,
+    with_settings: bool = False,
+) -> dict:
     """with_addons=False (snapshots by default): no add-on tabs, no ticket rows, `ext` dropped from tickets."""
     tickets, skipped = load_tickets(root, orch_bin)
     raw = run_orch(orch_bin, ["addon", "list", "--json"], root)
@@ -363,7 +523,13 @@ def load_state(root: Path, orch_bin: str | None = None, with_addons: bool = True
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
-    add_link_views(tickets, link_kinds(raw) if with_addons else [])  # snapshots: known sites only, no add-on names
+    from orch.refs import local_refs
+
+    for t in tickets:
+        t["refs"] = t.get("refs", []) + local_refs(root, t["id"])
+    add_link_views(
+        tickets, link_kinds(raw) if with_addons else []
+    )  # snapshots: known sites only, no add-on names
     needs = run_orch(orch_bin, ["needs", "--json"], root) if with_addons else None
     state = {
         "workspace": root.name,
@@ -375,8 +541,11 @@ def load_state(root: Path, orch_bin: str | None = None, with_addons: bool = True
         "needs": needs if isinstance(needs, list) else [],
         "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
         "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},
-        "settings": load_settings(root, orch_bin) if with_settings else None,  # only the live local server: it holds the folder path
+        "settings": load_settings(root, orch_bin)
+        if with_settings
+        else None,  # only the live local server: it holds the folder path
     }
     state["rev"] = hashlib.sha1(
-        json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()).hexdigest()[:12]
+        json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()
+    ).hexdigest()[:12]
     return state
