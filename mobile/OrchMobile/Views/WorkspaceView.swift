@@ -15,7 +15,7 @@ struct WorkspaceView: View {
     }
 
     private func activeGroups(_ topics: [TopicSummary]) -> [(status: TopicStatus, topics: [TopicSummary])] {
-        [TopicStatus.working, .waitingOnYou, .review, .backlog].compactMap { status in
+        [TopicStatus.waitingOnYou, .working, .review, .backlog].compactMap { status in
             let group = topics.filter { $0.isStarting ? status == .working : $0.status == status }
             return group.isEmpty ? nil : (status, group)
         }
@@ -168,7 +168,7 @@ struct WorkspaceView: View {
         }.padding(.horizontal, 16).padding(.vertical, 18).frame(minHeight: 72).contentShape(Rectangle())
     }
     private func subtitle(_ topic: TopicSummary) -> String {
-        if topic.isStarting { return "Starting topic…" }
+        if topic.isStarting { return "Getting started…" }
         let day = ShellTime.day(topic.lastAt)
         let finished = [TopicStatus.done, .stopped, .didntWork].contains(topic.status)
         return topic.status.chip + (finished && !day.isEmpty ? " · " + day : "")

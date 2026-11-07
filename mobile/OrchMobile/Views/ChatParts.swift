@@ -14,7 +14,7 @@ struct StatusPill: View {
     let status: Ticket.Status
     let kind: String
     var text: String {
-        switch status { case .needsYou: "Needs you"; case .review: "Check this"; case .backlog: "Backlog"; case .working: "Working"; case .done: kind == "result" ? "Done" : (kind == "stopped" ? "Stopped" : "Did not work") }
+        switch status { case .needsYou: "Needs you"; case .review: "Ready for review"; case .backlog: "Not started"; case .working: "Working"; case .done: kind == "result" ? "Done" : (kind == "stopped" ? "Stopped" : "Did not work") }
     }
     var color: Color { switch status { case .needsYou: Theme.warn; case .review: Theme.warn; case .backlog: Theme.muted; case .working: Theme.brand; case .done: kind == "result" ? Theme.muted : Theme.danger } }
     var body: some View {

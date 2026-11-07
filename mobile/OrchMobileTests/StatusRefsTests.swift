@@ -37,9 +37,9 @@ final class StatusRefsTests: XCTestCase {
     }
 
     func testChipWordsAndLabels() {
-        XCTAssertEqual(TopicStatus.working.chip, "Claude is working"); XCTAssertEqual(TopicStatus.waitingOnYou.chip, "Waiting for your answer")
-        XCTAssertEqual(TopicStatus.review.chip, "Check this"); XCTAssertEqual(TopicStatus.done.chip, "Done")
-        XCTAssertEqual(TopicStatus.allCases.map(\.label), ["Working", "Waiting", "Review", "Backlog", "Done", "Stopped", "Didn't work"])
+        XCTAssertEqual(TopicStatus.working.chip, "Claude is working"); XCTAssertEqual(TopicStatus.waitingOnYou.chip, "Needs you")
+        XCTAssertEqual(TopicStatus.review.chip, "Ready for review"); XCTAssertEqual(TopicStatus.done.chip, "Done")
+        XCTAssertEqual(TopicStatus.allCases.map(\.label), ["Working", "Needs you", "Ready for review", "Not started", "Done", "Stopped", "Didn't work"])
     }
 
     func testGroupingOrderOfTicketsIsNeedsYouReviewWorkingBacklogDone() {

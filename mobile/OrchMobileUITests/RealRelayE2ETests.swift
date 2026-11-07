@@ -187,7 +187,7 @@ final class RealRelayE2ETests: XCTestCase {
         }
         let title = "Make the Q3 chart \(Int(Date().timeIntervalSince1970) % 100000)"
         type(app, "topic-field", title, send: "topic-start")
-        must(app, text(app, "Starting topic"), "Starting topic row in the workspace", timeout: 30)
+        must(app, text(app, "Getting started"), "Starting topic row in the workspace", timeout: 30)
         shot("32-starting-topic")
         host("out = inbox()")   // the workspace pulls and makes the ticket + ack: the topic opens by itself or shows as a row
         let opened = el(app, "composer").waitForExistence(timeout: 30)

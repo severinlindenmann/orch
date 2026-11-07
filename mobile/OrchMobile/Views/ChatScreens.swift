@@ -125,7 +125,7 @@ struct ConversationView: View {
             .fullScreenCover(item: $viewing) { ArtifactViewer(item: $0) }
     }
     @ViewBuilder private var presence: some View {
-        if case .starting = resolved { Text("Starting topic…").themeFont(13).foregroundStyle(Theme.muted) }
+        if case .starting = resolved { Text("Getting started…").themeFont(13).foregroundStyle(Theme.muted) }
         else {
             HStack(spacing: 4) {
                 if resolved.ticket != nil { Text("\(workspaceName) ·") }

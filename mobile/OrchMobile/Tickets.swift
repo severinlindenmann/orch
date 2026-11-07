@@ -7,7 +7,7 @@ struct Ticket: Identifiable, Equatable, Sendable {
         case needsYou, review, working, backlog, done
         static func < (a: Status, b: Status) -> Bool { a.rawValue < b.rawValue }
         var title: String {
-            switch self { case .needsYou: "Needs you"; case .review: "Check this"; case .working: "Working on"; case .backlog: "Backlog"; case .done: "Done" }
+            switch self { case .needsYou: "Needs you"; case .review: "Ready for review"; case .working: "Working on"; case .backlog: "Not started"; case .done: "Done" }
         }
         /// The ticket's own status word from `ticket_view.status` (open|ready|active|waiting|review|done|dropped). Unknown words: nil.
         init?(ticketStatus word: String?) {
@@ -43,9 +43,9 @@ struct Ticket: Identifiable, Equatable, Sendable {
     var stateLine: String {
         let first = text.split(separator: " ").prefix(6).joined(separator: " ")
         switch status {
-        case .needsYou: return "Waiting for your answer"
+        case .needsYou: return "Needs you"
         case .working: return "Working on it"
-        case .review: return "Check this"
+        case .review: return "Ready for review"
         case .backlog: return "Not started"
         case .done:
             switch kind {
