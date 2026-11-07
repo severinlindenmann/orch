@@ -1,6 +1,7 @@
 """orch.safefile: the one reader for ticket folder files (hard link, FIFO, swapped folder, links, shapes)."""
 
 import os
+import sys
 
 import pytest
 
@@ -62,6 +63,7 @@ def test_links_are_never_followed(root, mode, tmp_path):
     assert rd(root, "key.txt", "evidence") is None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the dir_fd path is POSIX only (no O_DIRECTORY)")
 def test_a_folder_swapped_for_a_link_while_reading_is_not_followed(root, monkeypatch):
     """After the folder was opened, its path is swapped for a link to the secrets: the file is still read
     from the folder we hold, never from the link."""

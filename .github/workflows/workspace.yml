@@ -50,8 +50,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $item = Get-Item "$env:RUNNER_TEMP\smoke\.claude\skills" -Force
-          if ($item.LinkType -ne "Junction") { throw "expected a junction, got $($item.LinkType)" }
+          # Since #215 .claude\skills is a plain folder with one link per skill (a copy where links are refused)
+          $item = Get-Item "$env:RUNNER_TEMP\smoke\.claude\skills\orch" -Force
+          if ($item.LinkType -ne "Junction" -and -not (Test-Path "$env:RUNNER_TEMP\smoke\.claude\skills\orch\.orch-copy")) {
+            throw "expected .claude\skills\orch to be a junction, got '$($item.LinkType)'"
+          }
   windows-standard-user:
     if: inputs.windows
     # The README's Windows install as a standard user (no admin), no git, default execution
