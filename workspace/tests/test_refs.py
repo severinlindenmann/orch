@@ -541,6 +541,21 @@ def test_local_reference_is_private(proj, run, tid):  # noqa: F811
     assert jrun(run, "ref", "add", tid, "../private.txt")["local"] is True
 
 
+def test_ref_rm_works_after_the_file_became_a_link(proj, run, tid):  # noqa: F811
+    (proj / "docs").mkdir()
+    (proj / "docs" / "a.md").write_text("x")
+    (proj / "docs" / "b.md").write_text("y")
+    jrun(run, "ref", "add", tid, "docs/a.md")
+    jrun(run, "ref", "add", tid, "docs/b.md")
+    for name in ("a.md", "b.md"):
+        (proj / "docs" / name).unlink()
+        (proj / "docs" / name).symlink_to(proj / ".orch" / "config.toml")
+    assert run("ref", "rm", tid, "docs/b.md")[0] == 0
+    assert [r["path"] for r in tickets.load(proj, tid)["refs"]] == ["docs/a.md"]
+    assert run("ref", "rm", tid, "1")[0] == 0
+    assert not tickets.load(proj, tid)["refs"]
+
+
 def test_project_symlink_outside_refused(proj, run, tid):  # noqa: F811
     (proj / "outside").symlink_to(proj.parent, target_is_directory=True)
     assert run("ref", "add", tid, "outside/private.txt")[0] == 2

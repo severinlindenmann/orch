@@ -335,3 +335,30 @@ def test_references_carry_their_stored_number(ws):
     f.write_text(json.dumps(t))
     shown = next(x for x in data.load_state(ws)["tickets"] if x["id"] == "t_weekly01")["refs"]
     assert [(r["url"], r["n"]) for r in shown] == [("https://example.com/a", 1), ("https://example.com/c", 3)]
+
+
+def test_a_local_file_reference_is_removed_by_the_number_the_state_shows(ws, act_server, act_orch):
+    ticket = ws / ".orch/tickets/t_weekly01.json"
+    t = json.loads(ticket.read_text())
+    t["refs"] = [{"kind": "file", "path": "docs/notes.md"}]
+    ticket.write_text(json.dumps(t))
+    local = ws / ".orch/local/refs"
+    local.mkdir(parents=True)
+    (local / "t_weekly01.json").write_text(
+        json.dumps([{"kind": "file", "path": str(ws.parent / "x"), "local": True}])
+    )
+    shown = next(
+        x for x in data.load_state(ws, with_settings=True)["tickets"] if x["id"] == "t_weekly01"
+    )["refs"]
+    mine = next(r for r in shown if r.get("path") == str(ws.parent / "x"))
+    assert mine["n"] == 2  # len(stored) + 1
+    code, text, _ = post(act_server, {"op": "ref.rm", "args": {"ticket": "t_weekly01", "n": mine["n"]}})
+    assert code == 200, text
+    assert acts(act_orch)[-1][:4] == ["ref", "rm", "t_weekly01", "2"]
+    from orch import tickets
+
+    tickets.ref_remove(ws, "t_weekly01", str(mine["n"]), "test")  # the core accepts that same number
+    from orch import refs
+
+    assert not refs.local_refs(ws, "t_weekly01")
+    assert len(tickets.load(ws, "t_weekly01")["refs"]) == 1
