@@ -669,7 +669,7 @@ def lane_u(env, out: Path, rcv: Receiver) -> Lane:
     e = env.e
     admin = e.rel.admin
     sub: dict = {}
-    pil_id, rep_id = env.vars["relay_id_pilatus"], env.vars["relay_id_reports"]
+    pil_id = env.vars["relay_id_pilatus"]
 
     def create(st):
         r = admin.call("POST", "/admin/api/subscribers", {"name": "E2E receiver", "workspaces": [pil_id],
@@ -813,7 +813,6 @@ def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
     """Phone lane on the V3-SIM driver (PR #207): `e2e/run.sh V3-SIM` starts its own local relay + workspace and writes ctl/info.json;
     RealRelayE2ETests (XCUITest) drives the app in the Simulator against it. One harness step per XCTest case, shots collected.
     No second phone driver: new phone steps (Mobile mode banner, archive, ...) are XCTests of that class or `-open` targets."""
-    import re
     import shutil
     import subprocess
     L = Lane("P", "Phone (Simulator)", out)
