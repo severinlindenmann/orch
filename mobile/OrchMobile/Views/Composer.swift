@@ -1,14 +1,6 @@
 import SwiftUI
 import AVFoundation
 
-enum AttachKind: String, CaseIterable { case camera, scan, photos, files, location
-    var title: String { switch self { case .camera: "Camera"; case .scan: "Scan document"; case .photos: "Photos"; case .files: "Files"; case .location: "Location" } }
-    var symbol: String { switch self { case .camera: "camera"; case .scan: "doc.viewfinder"; case .photos: "photo"; case .files: "doc"; case .location: "mappin.and.ellipse" } }
-}
-struct ComposerHooks {
-    var attach: (AttachKind, _ send: @escaping (MessageDraft) async -> Void) -> Void = { _, _ in }
-    static var none: ComposerHooks { ComposerHooks() }
-}
 struct ReplyPreview: Equatable { let messageId: String; let title: String; let quote: String }
 
 struct Composer: View {
@@ -17,7 +9,6 @@ struct Composer: View {
     var note: String?
     var autoFocus: Bool
     @Binding var reply: ReplyPreview?
-    var hooks: ComposerHooks
     var onSent: (() -> Void)?
     /// Accessibility ids of the text field and send button (the New topic screen keeps its older ids).
     var fieldId = "composer-field"
@@ -30,7 +21,6 @@ struct Composer: View {
     @State private var error: String?
     @State private var micError = false
     @State private var attaching = false
-    @State private var attachment: AttachKind?
     @State private var busy = false
     @State private var success = 0
     @State private var cancellation = 0
@@ -51,11 +41,11 @@ struct Composer: View {
     @MainActor private static var drafts: [SendTarget: String] = [:]
 
     init(target: SendTarget?, placeholder: String = "Message…", note: String? = nil, autoFocus: Bool = false,
-         reply: Binding<ReplyPreview?>, hooks: ComposerHooks = .none, onSent: (() -> Void)? = nil,
+         reply: Binding<ReplyPreview?>, onSent: (() -> Void)? = nil,
          fieldId: String = "composer-field", sendId: String = "composer-send") {
         self.fieldId = fieldId; self.sendId = sendId
         self.target = target; self.placeholder = placeholder; self.note = note; self.autoFocus = autoFocus
-        _reply = reply; self.hooks = hooks; self.onSent = onSent
+        _reply = reply; self.onSent = onSent
     }
     private var showMic: Bool { !locked && segments.isEmpty && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var recording: Bool { recorder?.isRecording == true }
@@ -107,21 +97,9 @@ struct Composer: View {
             .onChange(of: target) { _, new in text = new.flatMap { Self.drafts[$0] } ?? ""; discard() }
             .onChange(of: recorder?.error) { _, value in if let value { error = value; micError = true; collect() } }
             .onDisappear { holding = false; holdTask?.cancel(); hintTask?.cancel(); discard() }
-            .sheet(isPresented: $attaching, onDismiss: {
-                if let kind = attachment { attachment = nil; hooks.attach(kind, sendDraft) }
-            }) {
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 90))], spacing: 18) {
-                        ForEach(AttachKind.allCases, id: \.self) { kind in
-                            Button { attachment = kind; attaching = false } label: {
-                                VStack(spacing: 8) {
-                                    Image(systemName: kind.symbol).themeFont(22).frame(width: 53, height: 53).background(Theme.surface3, in: RoundedRectangle(cornerRadius: 17))
-                                    Text(kind.title).themeFont(13)
-                                }.frame(maxWidth: .infinity, minHeight: 80)
-                            }.buttonStyle(PressStyle()).accessibilityIdentifier("attach-\(kind.rawValue)")
-                        }
-                    }.padding(24)
-                }.presentationDetents([.height(300), .large]).presentationDragIndicator(.visible).presentationBackground(Theme.surface).tint(Theme.brand)
+            .sheet(isPresented: $attaching) {
+                MediaPicker { selection in Task { await sendMedia(selection) } }
+                    .presentationDetents([.height(300), .large]).presentationDragIndicator(.visible).tint(Theme.brand)
             }
     }
     private var composeRow: some View {
@@ -217,9 +195,15 @@ struct Composer: View {
             text = ""; Self.drafts[target] = nil; reply = nil; success += 1; onSent?()
         } catch { self.error = error.localizedDescription }
     }
-    private func sendDraft(_ draft: MessageDraft) async {
+    /// A photo, file or place from the "+" sheet: goes through the outbox like any message; the picker's temp files are removed after.
+    private func sendMedia(_ selection: MediaSelection) async {
+        defer { selection.cleanUp() }
         guard let target else { return }
-        var draft = draft; if draft.replyTo == nil { draft.replyTo = reply?.messageId }
+        let draft: MessageDraft
+        switch selection {
+        case .files(let files, let caption): draft = MessageDraft(text: caption, files: files, replyTo: reply?.messageId)
+        case .location(let place): draft = MessageDraft(location: place, replyTo: reply?.messageId)
+        }
         do { try await model.send(draft, to: target); reply = nil; success += 1; onSent?() }
         catch { self.error = error.localizedDescription; micError = false }
     }

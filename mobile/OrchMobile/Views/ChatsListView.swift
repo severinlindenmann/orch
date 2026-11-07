@@ -39,7 +39,8 @@ struct ChatsListView: View {
                     switch route {
                     case .workspace(let id): WorkspaceView(workspaceId: id)
                     case .ticket(let ws, let ticket): TicketChatView(workspaceId: ws, ticketId: ticket)
-                    case .info(let ws, let ticket): ChatInfoView(workspaceId: ws, ticketId: ticket)
+                    case .info(let ws, let ticket):
+                        ConversationInfoView(conversation: ticket.map { .topic(workspace: ws, ticket: $0) } ?? .general(workspace: ws))
                     case .newChat: NewTopicScreen(workspaceId: nil)
                     case .newTopic(let ws): NewTopicScreen(workspaceId: ws)
                     }
@@ -166,7 +167,7 @@ struct ChatsListView: View {
         let starting = newest?.isStarting == true && newest?.lastAt == summary.lastAt
         return NavigationLink(value: ChatRoute.workspace(summary.id)) {
             HStack(spacing: 12) {
-                ShellAvatar(name: name, size: 46, online: summary.presence.isOnline)
+                ShellAvatar(name: name, size: 46, lastSeen: .some(summary.workspace.lastSeen))
                 VStack(alignment: .leading, spacing: 3) {
                     Text(name).themeFont(17, .semibold).lineLimit(2)
                     Text(starting ? "Starting topic…" : summary.lastLine).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)

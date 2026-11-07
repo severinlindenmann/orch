@@ -184,7 +184,7 @@ struct ArtifactViewer: View {
                     .buttonStyle(ArtifactTextButtonStyle()).accessibilityIdentifier("artifact-share-file")
             }.padding(20)
         case .link(let url):
-            Button("Open in Safari") { openURL(url) }.buttonStyle(ArtifactTextButtonStyle())
+            Button("Open in Safari") { if let safe = SafeLink.url(url.absoluteString) { openURL(safe) } }.buttonStyle(ArtifactTextButtonStyle())
         }
     }
 

@@ -80,6 +80,8 @@ struct ConvItem: Identifiable, Equatable, Sendable {
     var answer: String? = nil
     /// Files still on the phone (queued uploads): show them from disk.
     var queuedFiles: [PendingFile] = []
+    /// What a RESULT update delivered (page, picture, file, pull request): tappable cards in the bubble.
+    var artifacts: [TicketSnapshot.Attachment] = []
     var incoming: Bool { side == .them }
 
     /// One line for lists: the text, else what it carries.
@@ -207,6 +209,7 @@ enum ConversationBuilder {
         var item = ConvItem(id: pm.id, at: m.createdAt, side: pm.fromPhone ? .me : .them, text: b.text, attachments: b.attachments, voice: b.voice,
                             location: b.location, feedback: b.feedback)
         item.label = label(b.update?.kind); item.speak = b.speak; item.replyTo = m.replyTo
+        if !pm.fromPhone, b.update?.kind == "result" { item.artifacts = b.ticketView?.attachments ?? [] }
         if !pm.fromPhone { item.canPlay = d.speak == .always || (b.speak != nil && d.speak != .never) }
         if pm.fromPhone { item.receipt = receipt(pm, ix); item.clientId = pendingKey(pm) }
         return item

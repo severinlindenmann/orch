@@ -37,11 +37,11 @@ struct AddWorkspaceView: View {
                             Text(link.relay.absoluteString).themeFont(13).textSelection(.enabled).padding(.vertical, 8)
                         } label: { Text("Connection details").themeFont(15).frame(minHeight: 44) }
                         Button {
-                            busy = true
+                            busy = true; model.message = nil
                             Task { added = await model.redeemInvitation(link.link); attempted = true; busy = false }
                         } label: {
                             HStack { if busy { ProgressView().tint(Theme.onBrand) }; Text(busy ? "Adding workspace…" : "Add workspace") }
-                        }.buttonStyle(PrimaryButtonStyle()).disabled(busy)
+                        }.buttonStyle(PrimaryButtonStyle()).disabled(busy).accessibilityIdentifier("invite-add")
                         Button("Try another link") { reset() }.buttonStyle(WideButtonStyle(color: Theme.muted)).disabled(busy)
                     }
                 } else {

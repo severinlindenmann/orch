@@ -95,6 +95,34 @@ final class M1ShellUITests: XCTestCase {
         XCTAssertEqual(app.textFields["invite-field"].value as? String, "https://example.com/nope")
     }
 
+    /// Add workspace from Settings: a used invitation is explained, the next good one clears that message and "Open" lands on the new workspace.
+    func testAddWorkspaceFromSettingsThenOpenIt() {
+        let app = paired()
+        XCTAssertTrue(app.buttons["settings-button"].waitForExistence(timeout: 15))
+        app.buttons["settings-button"].tap()
+        XCTAssertTrue(app.buttons["add-workspace"].waitForExistence(timeout: 10))
+        app.buttons["add-workspace"].tap()
+        func enter(_ link: String) {
+            XCTAssertTrue(app.buttons["Paste invitation link"].waitForExistence(timeout: 5))
+            app.buttons["Paste invitation link"].tap()
+            let field = app.textFields["invite-field"]
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            field.tap(); field.typeText(link)
+            app.buttons["invite-continue"].tap()
+        }
+        enter("orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_expiredAAAAAAAAAAAAAA")
+        XCTAssertTrue(app.buttons["invite-add"].waitForExistence(timeout: 5)); app.buttons["invite-add"].tap()
+        XCTAssertTrue(app.staticTexts["invite-error"].waitForExistence(timeout: 10), "the used invitation is explained")
+        app.buttons["Try another link"].tap()
+        enter("orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_Tg5Yh7Uj9Ik2Ol4Pz6Xc8V")
+        XCTAssertTrue(app.buttons["invite-add"].waitForExistence(timeout: 5)); app.buttons["invite-add"].tap()
+        let open = app.buttons["Open Home"]
+        XCTAssertTrue(open.waitForExistence(timeout: 10), "added")
+        XCTAssertFalse(app.staticTexts["invite-error"].exists, "the old error is gone")
+        open.tap()
+        XCTAssertTrue(app.buttons["general-ws_home000001"].waitForExistence(timeout: 10), "the new workspace opens")
+    }
+
     /// Screenshots for the PR (default and XXL text) when the shots folder exists.
     func testShots() throws {
         let home = ProcessInfo.processInfo.environment["SIMULATOR_HOST_HOME"] ?? NSHomeDirectory()

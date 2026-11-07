@@ -157,10 +157,16 @@ final class CappedDownload: NSObject, URLSessionDataDelegate, @unchecked Sendabl
     func run(_ request: URLRequest, configuration: URLSessionConfiguration) async throws -> Data {
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
-        return try await withCheckedThrowingContinuation { c in
-            continuation = c
-            session.dataTask(with: request).resume()
-        }
+        let task = session.dataTask(with: request)
+        nonisolated(unsafe) let cancellable = task
+        // Closing the viewer cancels the awaiting task: the download stops with it instead of running on.
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { c in
+                continuation = c
+                task.resume()
+                if Task.isCancelled { task.cancel() }
+            }
+        } onCancel: { cancellable.cancel() }
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
@@ -179,6 +185,7 @@ final class CappedDownload: NSObject, URLSessionDataDelegate, @unchecked Sendabl
         guard let c = continuation else { return }
         continuation = nil
         if let failure { c.resume(throwing: failure) }
+        else if (error as? URLError)?.code == .cancelled { c.resume(throwing: CancellationError()) }
         else if error != nil { c.resume(throwing: PublishError.unreachable) }
         else { c.resume(returning: data) }
     }

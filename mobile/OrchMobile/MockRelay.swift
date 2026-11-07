@@ -41,6 +41,7 @@ actor MockRelay: RelayAPI {
 
     init(latency: Duration? = nil) {
         if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
+        if UserDefaults.standard.bool(forKey: "mockMemo") { received.append(Self.memo) }
         let ms = UserDefaults.standard.integer(forKey: "mockLatencyMs")
         self.latency = latency ?? .milliseconds(ms > 0 ? ms : 150)
     }
@@ -66,6 +67,13 @@ actor MockRelay: RelayAPI {
                                           body: TextBody(text: "Yes, I can answer your phone. The report is ready.")),
                      workspaceName: "Pilatus Workspace"),
     ]
+
+    /// A long answer the workspace marked `speak`: shows the memo bubble (screenshots, UI tests): `-mockMemo YES`.
+    static let memo = PhoneMessage(message: TextMessage(id: "m_memo0phone00001", from: pilatus, to: "ph_iphone0001", type: "text",
+                                      createdAt: "2026-11-04T10:45:00Z", ticket: nil,
+                                      body: TextBody(text: "The Q3 numbers are in. Revenue is up eight percent, costs are flat, and the board summary will be ready this afternoon.",
+                                                     speak: SpeakHint(lang: "en", summary: "Q3 is up eight percent."))),
+                 workspaceName: "Pilatus Workspace")
     private var sentMessages: [PhoneMessage] = [
         PhoneMessage(message: TextMessage(id: "m_seedsent00000001", from: "ph_iphone0001", to: pilatus, type: "text",
                                           createdAt: "2026-11-05T10:32:00Z", ticket: nil, body: TextBody(text: "Can you make the Q3 summary for the board?")),
@@ -77,7 +85,7 @@ actor MockRelay: RelayAPI {
         title: "Q3 summary for the board", status: "done", agent: "Claude", summary: "Pulled the numbers, drew the charts, the board deck is ready.",
         checklist: ["Read the Q3 sheet", "Check the totals", "Prepare the summary", "Draw the charts", "Review the board deck"].map { .init(text: $0, done: true) },
         running: false,
-        attachments: [.init(kind: "image", title: "q3-chart.png", blobId: "b_chart", name: "q3-chart.png", size: 48_000, at: "2026-11-05T11:19:00Z"),
+        attachments: [.init(kind: "image", title: "q3-chart.png", blobId: "b_chart", name: "q3-chart.png", size: 48_000, at: "2026-11-05T11:19:00Z", artifactId: "a_bbbbbbbbbbbb", rev: "r1"),
                       .init(kind: "link", title: "Board deck draft", url: "https://docs.pilatus.ch/board-q3", at: "2026-11-05T11:19:30Z", linkType: "Link", icon: "link"),
                       .init(kind: "file", title: "test-report.pdf", name: "test-report.pdf", size: 84_000, at: "2026-11-05T11:19:40Z")],
         historyTail: [.init(at: "2026-11-05T10:34:00Z", by: "Claude", role: "agent", text: "Pulled the numbers from the Q3 sheet."),

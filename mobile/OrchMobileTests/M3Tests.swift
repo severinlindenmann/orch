@@ -1,4 +1,5 @@
 import XCTest
+import Network
 import WebKit
 @testable import OrchMobile
 
@@ -101,14 +102,19 @@ final class PublishVectorTests: XCTestCase {
 
 final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var respond: (URLRequest) -> (Int, Data) = { _ in (200, Data()) }
+    /// A request that never answers; `stopped` counts requests that were cancelled.
+    nonisolated(unsafe) static var hang = false
+    nonisolated(unsafe) static var stopped = 0
+    nonisolated(unsafe) static var started = 0
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if Self.hang { Self.started += 1; return }
         let (code, data) = Self.respond(request)
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data); client?.urlProtocolDidFinishLoading(self)
     }
-    override func stopLoading() {}
+    override func stopLoading() { if Self.hang { Self.stopped += 1 } }
 }
 
 // MARK: Comment pins and anchors
@@ -207,18 +213,170 @@ final class PublishWebViewTests: XCTestCase {
         return (web, nav, pages)
     }
 
-    func testPageCannotReachTheNetworkOrUseWebRTC() async throws {
+    private var retained: [AnyObject] = []
+    /// The page opened exactly as the viewer does: the production coordinator (scheme handler, navigation delegate, scripts, rule list).
+    private func openProduction(_ html: String) async throws -> WKWebView {
+        let surface = HTMLSurface(content: .publish(.page(html: html, name: "index.html")), commentMode: false, store: PinStore())
+        let c = HTMLSurface.Coordinator(surface)
+        let web = PublishWebView.make(handler: c.pages, pins: c)
+        web.frame = CGRect(x: 0, y: 0, width: 390, height: 600)
+        web.navigationDelegate = c
+        retained += [c, web]
+        c.load(web)
+        for _ in 0..<100 {
+            // Read from the page itself: web.url changes while the first (blank) document is still the one on screen.
+            let state = try await web.evaluateJavaScript("location.protocol + document.readyState + (document.body ? 'B' : '')") as? String
+            if state == "orch-page:completeB" { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertEqual(web.url?.scheme, "orch-page", "the page loaded")
+        return web
+    }
+
+    /// Link activation connects to the link's host before the navigation policy can cancel it: the guards must stop every way of activating one.
+    func testLinkActivationNeverConnects() async throws {
+        let host = try await LoopbackHost.start()
+        defer { host.stop() }
+        _ = try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(host.port)/sanity")!)
+        XCTAssertGreaterThan(host.connections, 0, "the host is reachable, so the test can fail")
+        let before = host.connections
+        let base = "http://127.0.0.1:\(host.port)"
+        let html = """
+        <body><a id=att href="\(base)/att">x</a><a id=frag href="#end">f</a><div style="height:3000px"></div><p id=end>end</p>
+        <script>
+        document.getElementById('att').click();
+        var d = document.createElement('a'); d.href = '\(base)/detached'; d.click();
+        var t = document.createElement('a'); t.href = '\(base)/blank'; t.target = '_blank'; document.body.appendChild(t); t.click();
+        var dl = document.createElement('a'); dl.href = '\(base)/dl'; dl.download = 'x'; dl.click();
+        var h = document.createElement('div'); var s = h.attachShadow({mode: 'closed'}); var sa = document.createElement('a'); sa.href = '\(base)/shadow'; s.appendChild(sa); sa.click();
+        document.getElementById('att').dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+        var la = document.createElement('a'); la.href = '\(base)/span'; var sp = document.createElement('span'); la.appendChild(sp); sp.click();
+        var tn = document.createElement('a'); tn.href = '\(base)/text'; tn.textContent = 'x'; tn.firstChild.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        document.getElementById('att').firstChild.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        var da = document.createElement('a'); da.href = '\(base)/dshadow'; var dh = document.createElement('div'); da.appendChild(dh);
+        var dr = dh.attachShadow({mode: 'open'}); var ds = document.createElement('span'); dr.appendChild(ds); ds.click();
+        var sh = document.createElement('div'); var sr = sh.attachShadow({mode: 'open'}); sr.innerHTML = '<a href="\(base)/slot"><slot></slot></a>';
+        var ss = document.createElement('span'); sh.appendChild(ss); ss.click();
+        document.getElementById('frag').click();
+        </script></body>
+        """
+        let web = try await openProduction(html)
+        try await Task.sleep(for: .milliseconds(1000))
+        XCTAssertEqual(host.connections, before, "no link activation reached the host")
+        let hash = try await web.evaluateJavaScript("location.hash") as? String
+        XCTAssertEqual(hash, "#end", "a #fragment link still works")
+    }
+
+    /// The page shadows the properties a naive guard would read, then activates a link; and a closed shadow root cannot hide a link from the tap listener.
+    func testLinkGuardSurvivesTamperingAndClosedShadowRoots() async throws {
+        let host = try await LoopbackHost.start()
+        defer { host.stop() }
+        _ = try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(host.port)/sanity")!)
+        XCTAssertGreaterThan(host.connections, 0, "the host is reachable, so the test can fail")
+        let before = host.connections
+        let base = "http://127.0.0.1:\(host.port)"
+        let html = """
+        <body><a id=att href="\(base)/att">x</a><div id=h></div>
+        <script>
+        Object.defineProperty(Node.prototype, 'nodeType', { get: function () { return 3; }, configurable: true });
+        Object.defineProperty(Event.prototype, 'type', { get: function () { return 'nothing'; }, configurable: true });
+        Object.defineProperty(Element.prototype, 'closest', { value: function () { return null; }, configurable: true });
+        Object.defineProperty(HTMLAnchorElement.prototype, 'href', { get: function () { return 'orch-page://page/x'; }, configurable: true });
+        var a = document.getElementById('att');
+        a.click();
+        a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        var d = document.createElement('a'); d.href = '\(base)/detached'; d.click();
+        var s = document.getElementById('h').attachShadow({ mode: 'closed' });
+        var sa = document.createElement('a'); sa.id = 'sa'; sa.href = '\(base)/shadow'; sa.textContent = 'in shadow'; s.appendChild(sa);
+        </script></body>
+        """
+        let web = try await openProduction(html)
+        // The page cannot reach its closed root any more (it was made open); a native click from the isolated world is what a tap does.
+        let open = try await web.evaluateJavaScript("document.getElementById('h').shadowRoot !== null", in: nil, contentWorld: NetworkBlock.hintWorld) as? Bool
+        XCTAssertEqual(open, true, "attachShadow was forced to open")
+        _ = try await web.evaluateJavaScript("document.getElementById('h').shadowRoot.getElementById('sa').click()", in: nil, contentWorld: NetworkBlock.hintWorld)
+        try await Task.sleep(for: .milliseconds(1000))
+        XCTAssertEqual(host.connections, before, "no connection reached the host")
+    }
+
+    /// Three more ways round the guard: a replaced URL, declarative shadow roots (from the server markup and from setHTMLUnsafe), a bare <a> inside a link.
+    func testLinkGuardSurvivesUrlTamperDeclarativeShadowAndNestedAnchors() async throws {
+        let host = try await LoopbackHost.start()
+        defer { host.stop() }
+        _ = try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(host.port)/sanity")!)
+        let before = host.connections
+        let base = "http://127.0.0.1:\(host.port)"
+        let html = """
+        <body><a id=att href="\(base)/att">x</a>
+        <div id=decl><template shadowrootmode="closed"><a id=sa href="\(base)/decl">decl</a></template></div>
+        <div id=unsafe></div>
+        <script>
+        Object.defineProperty(URL.prototype, 'protocol', { get: function () { return 'orch-page:'; }, configurable: true });
+        window.URL = function () { this.protocol = 'orch-page:'; };
+        document.getElementById('att').click();
+        var u = document.getElementById('unsafe');
+        if (u.setHTMLUnsafe) u.setHTMLUnsafe('<template shadowrootmode=closed><a id=sb href="\(base)/unsafe">unsafe</a></template>');
+        var outer = document.createElement('a'); outer.href = '\(base)/nested'; var inner = document.createElement('a');
+        var span = document.createElement('span'); inner.appendChild(span); outer.appendChild(inner); document.body.appendChild(outer);
+        span.click();
+        </script></body>
+        """
+        let web = try await openProduction(html)
+        let js = "(function(){ var r=[]; ['decl','unsafe'].forEach(function(id){ var root=document.getElementById(id).shadowRoot; r.push(root ? 'open' : 'none'); if(root){ var a=root.querySelector('a'); if(a) a.click(); } }); return r.join(','); })()"
+        let state = try await web.evaluateJavaScript(js, in: nil, contentWorld: NetworkBlock.hintWorld) as? String
+        XCTAssertTrue(state?.hasPrefix("open") == true, "the declarative root was made open: \(state ?? "nil")")
+        try await Task.sleep(for: .milliseconds(1000))
+        XCTAssertEqual(host.connections, before, "no connection reached the host")
+    }
+
+    /// A link buried deeper than the guard's step cap is blocked, not allowed.
+    func testLinkNestedBeyondTheStepCapIsBlocked() async throws {
+        let host = try await LoopbackHost.start()
+        defer { host.stop() }
+        _ = try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(host.port)/sanity")!)
+        let before = host.connections
         let html = """
         <body><script>
+        var a = document.createElement('a'); a.href = 'http://127.0.0.1:\(host.port)/deep';
+        var n = a; for (var i = 0; i < 10001; i++) { var d = document.createElement('div'); n.appendChild(d); n = d; }
+        n.click();
+        </script></body>
+        """
+        _ = try await openProduction(html)
+        try await Task.sleep(for: .milliseconds(1000))
+        XCTAssertEqual(host.connections, before, "no connection reached the host")
+    }
+
+    func testFreshAboutBlankFrameStillHasTheWebRTCStub() async throws {
+        let web = try await openProduction("<body><script>try { var f = document.body.appendChild(document.createElement('iframe')); try { new f.contentWindow.RTCPeerConnection(); window.__r = 'works'; } catch (e) { window.__r = 'throws'; } } catch (e) { window.__r = 'error ' + e; }</script></body>")
+        let r = try await web.evaluateJavaScript("window.__r") as? String
+        XCTAssertEqual(r, "throws")
+    }
+
+    func testResponseHeadersAndCSPCloseFormsAndBase() {
+        XCTAssertTrue(NetworkBlock.csp.contains("form-action 'none'") && NetworkBlock.csp.contains("base-uri 'none'"))
+    }
+
+    func testPageCannotReachTheNetworkOrUseWebRTC() async throws {
+        // A real host that answers every request and counts the connections: the page must never reach it.
+        let host = try await LoopbackHost.start()
+        defer { host.stop() }
+        _ = try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(host.port)/sanity")!)
+        XCTAssertGreaterThan(host.connections, 0, "the host is reachable, so the test can fail")
+        let before = host.connections
+        let html = """
+        <head><link rel="preconnect" href="http://127.0.0.1:\(host.port)"><link rel='dns-prefetch' href='http://127.0.0.1:\(host.port)'>
+        <link rel="&#112;reconnect" href="http://127.0.0.1:\(host.port)/entity"></head>
+        <body><script>
         var r = {}; window.__r = r;
-        fetch('https://127.0.0.1:9/x').then(function(){ r.fetch = 'ok'; }, function(){ r.fetch = 'blocked'; });
-        var x = new XMLHttpRequest(); x.open('GET', 'https://127.0.0.1:9/x'); x.onload = function(){ r.xhr = 'ok'; }; x.onerror = function(){ r.xhr = 'blocked'; }; x.send();
-        try { var w = new WebSocket('wss://127.0.0.1:9/x'); w.onopen = function(){ r.ws = 'ok'; }; w.onerror = function(){ r.ws = 'blocked'; }; } catch (e) { r.ws = 'blocked'; }
-        var i = new Image(); i.onload = function(){ r.img = 'ok'; }; i.onerror = function(){ r.img = 'blocked'; }; i.src = 'https://127.0.0.1:9/p.png';
+        fetch('http://127.0.0.1:\(host.port)/x').then(function(){ r.fetch = 'ok'; }, function(){ r.fetch = 'blocked'; });
+        var x = new XMLHttpRequest(); x.open('GET', 'http://127.0.0.1:\(host.port)/x'); x.onload = function(){ r.xhr = 'ok'; }; x.onerror = function(){ r.xhr = 'blocked'; }; x.send();
+        try { var w = new WebSocket('ws://127.0.0.1:\(host.port)/x'); w.onopen = function(){ r.ws = 'ok'; }; w.onerror = function(){ r.ws = 'blocked'; }; } catch (e) { r.ws = 'blocked'; }
+        var i = new Image(); i.onload = function(){ r.img = 'ok'; }; i.onerror = function(){ r.img = 'blocked'; }; i.src = 'http://127.0.0.1:\(host.port)/p.png';
         try { new RTCPeerConnection(); r.rtc = 'present'; } catch (e) { r.rtc = 'gone'; }
         </script></body>
         """
-        let (web, _, _) = try await open(html)
+        let web = try await openProduction(html)
         var result: [String: String] = [:]
         for _ in 0..<50 {
             let json = try await web.evaluateJavaScript("JSON.stringify(window.__r || {})") as? String ?? "{}"
@@ -227,6 +385,88 @@ final class PublishWebViewTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(200))
         }
         XCTAssertEqual(result, ["fetch": "blocked", "xhr": "blocked", "ws": "blocked", "img": "blocked", "rtc": "gone"])
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(host.connections, before, "no connection reached the host: not by script, not by a preconnect hint (also the entity-encoded one the strip cannot see)")
+    }
+
+    func testPreconnectAndPrefetchHintsAreStripped() {
+        let html = #"<head><link rel="stylesheet" href="a.css"><link rel="preconnect" href="https://x.example"><link href="https://y.example" REL='dns-prefetch'><link rel="icon preload prefetch" href="z"><link rel=prerender href=q></head><p>kept</p>"#
+        let out = String(decoding: NetworkBlock.stripHints(from: Data(html.utf8))!, as: UTF8.self)
+        XCTAssertFalse(out.contains("preconnect") || out.contains("prefetch") || out.contains("prerender"))
+        XCTAssertTrue(out.contains(#"<link rel="stylesheet" href="a.css">"#) && out.contains("<p>kept</p>"))
+    }
+
+    func testXHTMLAndSVGPagesAreStrippedToo() {
+        let hint = #"<link rel="preconnect" href="https://x.example"/>"#
+        for type in ["application/xhtml+xml", "image/svg+xml", "text/xml", "application/xml", "text/html; charset=utf-8"] {
+            let out = NetworkBlock.serve(type: type, data: Data("<root>\(hint)<p>kept</p></root>".utf8))
+            XCTAssertEqual(String(decoding: out.data, as: UTF8.self), "<root> <p>kept</p></root>", type)
+            XCTAssertEqual(out.type, String(type.split(separator: ";")[0]) + "; charset=utf-8", type)
+        }
+    }
+    func testNonUTF8MarkupAndUnknownTypesAreServedAsOctetStream() {
+        let bad = NetworkBlock.serve(type: "text/html", data: Data([0x3c, 0x70, 0x3e, 0xff, 0xfe, 0x3c, 0x2f, 0x70, 0x3e]))
+        XCTAssertEqual(bad.type, "application/octet-stream")
+        for type in ["application/x-shockwave-flash", "text/plain", "application/octet-stream", "multipart/related", "", "text/html-sandboxed"] {
+            XCTAssertEqual(NetworkBlock.serve(type: type, data: Data("<p>x</p>".utf8)).type, "application/octet-stream", type)
+        }
+        for ok in ["text/css", "image/png", "font/woff2", "application/json", "application/pdf", "text/javascript"] {
+            let isText = ["text/css", "application/json", "text/javascript"].contains(ok)
+            XCTAssertEqual(NetworkBlock.serve(type: ok, data: Data("x".utf8)).type, isText ? ok + "; charset=utf-8" : ok)
+        }
+    }
+    /// Removing one tag must never glue its neighbours into a new one.
+    func testRemovingATagCannotSpliceANewOne() {
+        let cases = [
+            "<li<meta http-equiv=x-dns-prefetch-control content=on>nk rel=preconnect href=//x>",     // meta inside a link
+            "<me<link rel=preconnect href=//x>ta http-equiv=x-dns-prefetch-control content=on>",     // link inside a meta
+            "<li<link rel=preconnect>nk rel=preconnect href=//x>",                                  // doubled
+            "<lin<li<link rel=preconnect>nk rel=preconnect>k rel=preconnect href=//x>"]              // nested twice
+        for html in cases {
+            let out = NetworkBlock.stripHints(from: Data(html.utf8)).map { String(decoding: $0, as: UTF8.self) } ?? "<unstable>"
+            XCTAssertFalse(out.lowercased().contains("<link"), "\(html) -> \(out)")
+            XCTAssertFalse(out.lowercased().contains("<meta"), "\(html) -> \(out)")
+            XCTAssertEqual(NetworkBlock.stripHints(from: Data(out.utf8)).map { String(decoding: $0, as: UTF8.self) }, out, "stable: a second run changes nothing")
+        }
+    }
+    func testPagesThatDoNotSettleAreServedAsPlainText() {
+        let html = Data("<link rel=preconnect href=//x>".utf8)
+        XCTAssertNil(NetworkBlock.stripHints(from: html, passes: 0), "no pass left to prove it stable")
+        XCTAssertNotNil(NetworkBlock.stripHints(from: html))
+    }
+    func testDeclarativeShadowRootsAreServedOpen() {
+        let html = #"<template shadowrootmode=closed><a href=x></a></template><template ShadowRoot='closed'></template><template shadowrootmode = "closed"></template>"#
+        let out = String(decoding: NetworkBlock.stripHints(from: Data(html.utf8))!, as: UTF8.self).lowercased()
+        XCTAssertFalse(out.contains("closed"), out)
+        XCTAssertEqual(out.components(separatedBy: "=\"open\"").count - 1, 3)
+    }
+    func testPublishersCharsetIsNeverPassedOn() {
+        let out = NetworkBlock.serve(type: "text/html; charset=iso-8859-1", data: Data("<p>caf\u{e9}</p>".utf8))
+        XCTAssertEqual(out.type, "text/html; charset=utf-8", "WebKit decodes the bytes that were checked")
+        XCTAssertEqual(NetworkBlock.serve(type: "IMAGE/PNG; foo=bar", data: Data([1])).type, "image/png")
+    }
+    func testDNSPrefetchMetaIsStrippedAndForcedOff() async throws {
+        let on = #"<head><META content="on" http-equiv="X-DNS-Prefetch-Control"><meta http-equiv='x-dns-prefetch-control' content='on'></head><p>kept</p>"#
+        XCTAssertEqual(String(decoding: NetworkBlock.stripHints(from: Data(on.utf8))!, as: UTF8.self).replacingOccurrences(of: "  ", with: " "), "<head> </head><p>kept</p>")
+        // A page that adds or flips such a meta itself: the isolated script turns every one of them off again.
+        let (web, _, _) = try await open("<head></head><body><script>var m=document.createElement('meta'); m.httpEquiv='x-dns-prefetch-control'; m.content='on'; document.head.appendChild(m); setTimeout(function(){ m.content='on'; }, 100);</script></body>")
+        try await Task.sleep(for: .milliseconds(500))
+        let values = try await web.evaluateJavaScript("Array.from(document.querySelectorAll('meta[http-equiv]')).map(function(m){return m.content;}).join(',')") as? String
+        let all = (values ?? "").split(separator: ",")
+        XCTAssertFalse(all.isEmpty); XCTAssertTrue(all.allSatisfy { $0 == "off" }, "every meta says off: \(values ?? "-")")
+    }
+    func testHintScriptRemovesAddedHintsAndTurnsPrefetchOff() async throws {
+        let (web, _, _) = try await open("<head></head><body><script>var l=document.createElement('link'); l.rel='preconnect'; l.href='http://127.0.0.1:9'; document.head.appendChild(l);</script></body>")
+        try await Task.sleep(for: .milliseconds(300))
+        let n = try await web.evaluateJavaScript("document.querySelectorAll('link[rel~=preconnect]').length") as? Int
+        XCTAssertEqual(n, 0, "a hint the page adds itself is removed again")
+        let meta = try await web.evaluateJavaScript("document.querySelector('meta[http-equiv=\"x-dns-prefetch-control\"]').content") as? String
+        XCTAssertEqual(meta, "off")
+    }
+    func testAboutBlankIsNotALocalPage() {
+        XCTAssertTrue(PublishWebView.isLocal(URL(string: "orch-page://page/index.html")))
+        XCTAssertFalse(PublishWebView.isLocal(URL(string: "about:blank")))
+        XCTAssertFalse(PublishWebView.isLocal(URL(string: "https://example.org")))
     }
 
     func testWebRTCStaysGoneEvenIfThePageTriesToRestoreIt() async throws {
@@ -305,6 +545,23 @@ final class M3HelperTests: XCTestCase {
         XCTAssertEqual(InfoGrouping.entries(in: .links, from: all).map(\.item.title), ["Doc"])
         XCTAssertEqual(InfoGrouping.entries(in: .artifacts, from: all).map(\.item.title), ["Page", "PR 1"], "newest first")
     }
+    func testClosingTheViewerCancelsTheDownload() async throws {
+        let c = try json("publish-blob-v1")["good"] as! [String: Any]
+        let link = PublishLink(URL(string: "https://p.example.org/f/x1\(c["url_fragment"] as! String)")!)!
+        StubURLProtocol.hang = true; StubURLProtocol.stopped = 0; StubURLProtocol.started = 0
+        defer { StubURLProtocol.hang = false }
+        let cfg = URLSessionConfiguration.ephemeral; cfg.protocolClasses = [StubURLProtocol.self]
+        let fetcher = PublishFetcher(session: URLSession(configuration: cfg))
+        let task = Task { try await fetcher.load(link) }
+        // wait until the request is really in flight (slow CI simulators), then cancel
+        for _ in 0..<100 where StubURLProtocol.started == 0 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(StubURLProtocol.started, 1, "the download started")
+        task.cancel()
+        do { _ = try await task.value; XCTFail("cancelled") } catch { XCTAssertTrue(error is CancellationError, "\(error)") }
+        // URLSession calls stopLoading on its own queue, shortly after the cancel
+        for _ in 0..<100 where StubURLProtocol.stopped == 0 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(StubURLProtocol.stopped, 1, "the data task was cancelled, not left running")
+    }
     func testDownloadIsCapped() async throws {
         let c = try json("publish-blob-v1")["good"] as! [String: Any]
         let link = PublishLink(URL(string: "https://p.example.org/f/x1\(c["url_fragment"] as! String)")!)!
@@ -313,6 +570,14 @@ final class M3HelperTests: XCTestCase {
         var f = PublishFetcher(session: URLSession(configuration: cfg)); f.maxBytes = 1000
         do { _ = try await f.load(link); XCTFail("over the cap") } catch { XCTAssertEqual(error as? PublishError, .broken) }
         XCTAssertEqual(PublishFetcher.maxBlobBytes, 100 * 1_048_576 + 65_536 + 36)
+    }
+    func testAgentLinksOpenOnlyAsWebAddresses() {
+        func link(_ raw: String) -> ArtifactItem { ArtifactItem(TicketSnapshot.Attachment(kind: "pr", title: "PR", url: raw)) }
+        XCTAssertNotNil(link("https://github.com/x/pull/1").safeLinkURL)
+        XCTAssertNotNil(link("http://example.org/a").safeLinkURL)
+        for bad in ["javascript:alert(1)", "tel:+41000000", "sms:+41000000", "orch://pair?code=x", "myapp://open", "file:///etc/passwd", "https:///nohost", "mailto:a@b.c"] {
+            XCTAssertNil(link(bad).safeLinkURL, bad)
+        }
     }
     func testPreviewIsDecidedOnTheSanitizedName() {
         let long = String(repeating: "a", count: 120) + ".pdf"      // cut to 100 characters: the extension is gone
@@ -328,4 +593,34 @@ final class M3HelperTests: XCTestCase {
             XCTAssertFalse(ArtifactItem.canPreview(fileName: no), no)
         }
     }
+}
+
+/// A loopback HTTP host that answers every request with 200 and counts connections (the page sandbox test must never reach it).
+final class LoopbackHost: @unchecked Sendable {
+    private let listener: NWListener
+    private let lock = NSLock()
+    private var count = 0
+    var port: UInt16 { listener.port?.rawValue ?? 0 }
+    var connections: Int { lock.lock(); defer { lock.unlock() }; return count }
+    private init(_ l: NWListener) { listener = l }
+    static func start() async throws -> LoopbackHost {
+        let host = LoopbackHost(try NWListener(using: .tcp, on: .any))
+        host.listener.newConnectionHandler = { c in
+            host.lock.lock(); host.count += 1; host.lock.unlock()
+            c.start(queue: .global())
+            c.receive(minimumIncompleteLength: 1, maximumLength: 4096) { _, _, _, _ in
+                let body = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                c.send(content: Data(body.utf8), completion: .contentProcessed { _ in c.cancel() })
+            }
+        }
+        await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in
+            nonisolated(unsafe) var resumed = false
+            host.listener.stateUpdateHandler = { state in
+                if case .ready = state, !resumed { resumed = true; k.resume() }
+            }
+            host.listener.start(queue: .global())
+        }
+        return host
+    }
+    func stop() { listener.cancel() }
 }

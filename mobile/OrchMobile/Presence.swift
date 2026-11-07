@@ -30,4 +30,10 @@ enum Presence: Equatable, Sendable {
             return "Last seen " + f.string(from: d)
         }
     }
+
+    /// The line shown under a name: "online", "last seen 14:02", "last seen 4 Nov" (only the first letter is lowercase).
+    func line(now: Date = Date(), calendar: Calendar = .current) -> String {
+        let t = text(now: now, calendar: calendar)
+        return t.prefix(1).lowercased() + t.dropFirst()
+    }
 }

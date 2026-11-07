@@ -127,6 +127,13 @@ struct MediaPicker: View {
                     MediaTile(label: "Files", icon: "doc", color: Theme.warn)
                 }
                 .accessibilityLabel("Files").accessibilityIdentifier("media-files")
+                #if DEBUG
+                if UserDefaults.standard.bool(forKey: "fakePhoto") {   // UI tests: the photo library is out of process
+                    Button { errorText = nil; receiveCapture(.success([Self.fakeJPEG()]), mode: .photo) } label: {
+                        MediaTile(label: "Test photo", icon: "photo.badge.plus", color: Theme.purple)
+                    }.accessibilityLabel("Test photo").accessibilityIdentifier("media-fake-photo")
+                }
+                #endif
                 Button {
                     errorText = nil; step = .location; locationRequest = UUID()
                 } label: { MediaTile(label: "Location", icon: "mappin.and.ellipse", color: Theme.brand) }
@@ -139,6 +146,15 @@ struct MediaPicker: View {
             }
         }
     }
+
+    #if DEBUG
+    private static func fakeJPEG() -> Data {
+        UIGraphicsImageRenderer(size: CGSize(width: 640, height: 480)).jpegData(withCompressionQuality: 0.8) { c in
+            UIColor(red: 0.18, green: 0.78, blue: 0.64, alpha: 1).setFill(); c.fill(CGRect(x: 0, y: 0, width: 640, height: 480))
+            ("Test photo" as NSString).draw(at: CGPoint(x: 40, y: 200), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 48), .foregroundColor: UIColor.white])
+        }
+    }
+    #endif
 
     private var preview: some View {
         VStack(spacing: 12) {

@@ -70,11 +70,6 @@ struct ReadState: Equatable {
     init(seen: [String: String] = [:]) { self.seen = seen }
 }
 
-enum ChatFilter: String, CaseIterable, Identifiable {
-    case all = "All", needsYou = "Needs you", workspaces = "Workspaces", tickets = "Tickets"
-    var id: String { rawValue }
-}
-
 struct SearchHit: Identifiable, Equatable {
     let id: String
     let route: ChatRoute
@@ -178,17 +173,6 @@ enum ChatBuilder {
             let unread = read.unread(ReadState.workspaceKey(w.id), in: items)
             return RoomRow(workspace: w, lastLine: line, lastAt: at.map { String($0.prefix(while: { $0 != "~" })) }, unread: unread, openQuestions: open.count, tickets: tickets)
         }.sorted { ($0.openQuestions > 0 ? 1 : 0, $0.lastAt ?? "") > ($1.openQuestions > 0 ? 1 : 0, $1.lastAt ?? "") }
-    }
-
-    static func filtered(_ rows: [RoomRow], _ f: ChatFilter) -> [RoomRow] {
-        switch f {
-        case .all, .workspaces: return rows
-        case .needsYou: return rows.compactMap { r in
-            let t = r.tickets.filter { $0.ticket.status == .needsYou }
-            return r.openQuestions > 0 || !t.isEmpty ? RoomRow(workspace: r.workspace, lastLine: r.lastLine, lastAt: r.lastAt, unread: r.unread, openQuestions: r.openQuestions, tickets: t) : nil
-        }
-        case .tickets: return rows.filter { !$0.tickets.isEmpty }
-        }
     }
 
     // MARK: Search (client only, over what is loaded)

@@ -54,6 +54,30 @@ final class ConversationViewTests: XCTestCase {
         XCTAssertEqual(chips.first?.ticket, "t_1")
     }
 
+    func testStartedChipNeverSitsAboveTheMessageItAnswers() {
+        // The ack's clock is earlier than the phone message's (clock skew): the chip still sorts at the message's time.
+        var early = ack("a1", replyTo: "m1", ticket: "t_1")
+        early = PhoneMessage(message: TextMessage(id: "a1", from: "ws_a", to: "ph_1", type: "text", createdAt: "2026-11-06T08:00:00Z", ticket: "t_1",
+                                                  body: early.message.body, key: "PIL-15", replyTo: "m1"), workspaceName: "A")
+        let chips = ConversationRules.startedChips(messages: [general("m1"), early], workspace: "ws_a", key: { _ in nil })
+        XCTAssertEqual(chips.first?.at, "2026-11-06T09:00:00Z")
+    }
+
+    func testTopicSummaryHidesTheCountWithoutAChecklist() {
+        XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 0, status: "Working"), "Working")
+        XCTAssertEqual(ConversationRules.summaryText(done: 2, total: 5, status: "Working"), "2 of 5 · Working")
+    }
+
+    func testPresenceLineIsLowercaseExceptTheMonth() {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let now = ISO8601DateFormatter().date(from: "2026-11-07T10:00:00Z")!
+        XCTAssertEqual(Presence.of(lastSeen: "2026-11-04T10:41:00Z", now: now).line(now: now, calendar: cal), "last seen 4 Nov")
+        XCTAssertEqual(Presence.of(lastSeen: "2026-11-07T09:58:00Z", now: now).line(now: now, calendar: cal), "online")
+        // "online" expires without a refresh: the same last-seen time, six minutes later.
+        let later = now.addingTimeInterval(6 * 60)
+        XCTAssertEqual(Presence.of(lastSeen: "2026-11-07T09:58:00Z", now: later).line(now: later, calendar: cal), "last seen 09:58")
+    }
+
     func testThrottleNoteOnlyWhileWaiting() {
         var o = OutboxItem(clientId: "c", phone: "p", kind: .send, workspace: "w", createdAt: "2026-11-06T10:00:00Z")
         XCTAssertNil(ThrottleNote.text(for: o))

@@ -31,7 +31,7 @@ struct SettingsView: View {
         }
     }
     private var statusColor: Color {
-        switch model.connection { case .ok: .green; case .unreachable: Theme.danger; case .checking: Theme.muted }
+        switch model.connection { case .ok: Theme.online; case .unreachable: Theme.danger; case .checking: Theme.muted }
     }
     var body: some View {
         let _ = aliasRevision
@@ -65,7 +65,7 @@ struct SettingsView: View {
                                     HStack {
                                         VStack(alignment: .leading, spacing: 8) {
                                             Text(WorkspaceAlias.name(for: summary.workspace)).themeFont(17)
-                                            PresenceLine(presence: summary.presence)
+                                            PresenceLine(lastSeen: summary.workspace.lastSeen)
                                         }
                                         Spacer(); ShellChevron()
                                     }.padding(16).frame(minHeight: 64).contentShape(Rectangle())
@@ -157,7 +157,7 @@ struct WorkspaceSettingsView: View {
                     Eyebrow(text: "NAME")
                     TextField("Workspace name", text: $name).themeFont(17).padding(16)
                         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12)).accessibilityLabel("Workspace name")
-                        .onChange(of: name) { _, value in WorkspaceAlias.set(value, for: workspaceId) }
+                        .submitLabel(.done).onSubmit { WorkspaceAlias.set(name, for: workspaceId) }
                     Text("Only changes how it looks on this phone.").themeFont(13).foregroundStyle(Theme.muted)
                 }
                 VStack(alignment: .leading, spacing: 10) {
@@ -183,12 +183,13 @@ struct WorkspaceSettingsView: View {
         }.background(Theme.bg.ignoresSafeArea()).foregroundStyle(Theme.text)
             .navigationTitle(displayName).navigationBarTitleDisplayMode(.inline)
             .onAppear { name = workspace.map { WorkspaceAlias.name(for: $0) } ?? "" }
+            .onDisappear { if workspace != nil { WorkspaceAlias.set(name, for: workspaceId) } }
             .confirmationDialog("Remove \(displayName) from this phone?", isPresented: $removing, titleVisibility: .visible) {
                 Button("Remove", role: .destructive) {
                     busy = true
                     Task {
                         await model.removeWorkspace(workspaceId); busy = false
-                        if workspace == nil { dismiss() }
+                        if workspace == nil { WorkspaceAlias.set(nil, for: workspaceId); dismiss() }
                     }
                 }
                 Button("Cancel", role: .cancel) {}

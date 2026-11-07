@@ -400,7 +400,7 @@ final class AppModel {
     func conversationItems(_ id: ConversationID) -> [ConvItem] { ConversationBuilder.items(ConversationBuilder.resolve(id, conversationInputs), conversationInputs) }
     /// A "starting" conversation becomes its topic once the workspace acked it; others are returned unchanged.
     func resolve(_ id: ConversationID) -> ConversationID { ConversationBuilder.resolve(id, conversationInputs) }
-    func presence(of workspaceId: String) -> Presence { workspace(workspaceId)?.presence() ?? .unknown }
+    func presence(of workspaceId: String, now: Date = Date()) -> Presence { workspace(workspaceId)?.presence(now: now) ?? .unknown }
 
     func unread(_ id: ConversationID) -> Int { readState.unread(ReadState.key(id), in: conversationItems(id)) }
     /// Opening a conversation (or a new message arriving in the open one) marks it read. Phone-local.

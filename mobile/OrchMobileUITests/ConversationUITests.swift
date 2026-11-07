@@ -72,8 +72,8 @@ final class ConversationUITests: XCTestCase {
         let plus = el(app, "composer-attach")
         must(app, plus, "composer-attach")
         plus.tap()
-        for kind in ["camera", "scan", "photos", "files", "location"] {
-            XCTAssertTrue(el(app, "attach-\(kind)").waitForExistence(timeout: 5), kind)
+        for kind in ["camera", "photos", "files", "location"] {
+            XCTAssertTrue(el(app, "media-\(kind)").waitForExistence(timeout: 5), kind)
         }
     }
 }

@@ -15,6 +15,14 @@ struct WorkspaceView: View {
         }
     }
 
+    /// Finished topics by outcome, built once per render (empty groups left out).
+    private func doneGroups(_ topics: [TopicSummary]) -> [(status: TopicStatus, topics: [TopicSummary])] {
+        [TopicStatus.done, .stopped, .didntWork].compactMap { status in
+            let group = topics.filter { $0.status == status }
+            return group.isEmpty ? nil : (status, group)
+        }
+    }
+
     var body: some View {
         let _ = aliasRevision
         ScrollView {
@@ -26,16 +34,12 @@ struct WorkspaceView: View {
                 else {
                     VStack(alignment: .leading, spacing: 0) {
                         if done {
-                            ForEach([TopicStatus.done, .stopped, .didntWork], id: \.self) { status in
-                                let group = topics.filter { $0.status == status }
-                                if !group.isEmpty {
-                                    Text(status.label).themeFont(13, .semibold).foregroundStyle(Theme.muted)
-                                        .padding(.horizontal, 18).padding(.top, 14)
-                                    ForEach(group) { topic in topicRow(topic) }
-                                    if status != [TopicStatus.done, .stopped, .didntWork].last(where: { candidate in topics.contains { $0.status == candidate } }) {
-                                        ShellDivider().padding(.leading, 74)
-                                    }
-                                }
+                            let groups = doneGroups(topics)
+                            ForEach(Array(groups.enumerated()), id: \.element.status) { index, group in
+                                Text(group.status.label).themeFont(13, .semibold).foregroundStyle(Theme.muted)
+                                    .padding(.horizontal, 18).padding(.top, 14)
+                                ForEach(group.topics) { topic in topicRow(topic) }
+                                if index < groups.count - 1 { ShellDivider().padding(.leading, 74) }
                             }
                         } else { ForEach(topics) { topic in topicRow(topic) } }
                     }.background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
@@ -48,13 +52,13 @@ struct WorkspaceView: View {
             ToolbarItem(placement: .principal) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(name).themeFont(17, .semibold).lineLimit(1)
-                    PresenceLine(presence: summary?.presence ?? .unknown)
+                    PresenceLine(lastSeen: summary?.workspace.lastSeen)
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink(value: ChatRoute.info(workspace: workspaceId, ticket: nil)) {
                     Image(systemName: "info.circle").frame(width: 44, height: 44)
-                }.accessibilityLabel("Chat info")
+                }.accessibilityLabel("Chat info").accessibilityIdentifier("workspace-info")
             }
         }
         .safeAreaInset(edge: .bottom) {

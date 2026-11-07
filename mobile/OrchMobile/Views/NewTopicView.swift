@@ -90,10 +90,10 @@ private struct ShellWorkspacePicker: View {
                         select(summary.id); dismiss()
                     } label: {
                         HStack(spacing: 12) {
-                            ShellAvatar(name: WorkspaceAlias.name(for: summary.workspace), online: summary.presence.isOnline)
+                            ShellAvatar(name: WorkspaceAlias.name(for: summary.workspace), lastSeen: .some(summary.workspace.lastSeen))
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(WorkspaceAlias.name(for: summary.workspace)).themeFont(17, .semibold)
-                                PresenceLine(presence: summary.presence)
+                                PresenceLine(lastSeen: summary.workspace.lastSeen)
                             }
                             Spacer()
                             if selectedId == summary.id { Image(systemName: "checkmark").foregroundStyle(Theme.brand) }
