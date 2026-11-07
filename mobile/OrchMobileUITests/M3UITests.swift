@@ -64,7 +64,9 @@ import XCTest
     func testImageViewerLooksGood() throws {
         let app = launch("viewer-image")
         XCTAssertTrue(app.buttons["artifact-looks-good"].waitForExistence(timeout: 20))
-        app.buttons["artifact-looks-good"].tap()
+        let good = app.buttons["artifact-looks-good"]
+        wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: good)], timeout: 10)
+        good.tap()
         XCTAssertTrue(app.staticTexts["feedback sent: 1"].waitForExistence(timeout: 10))
     }
 

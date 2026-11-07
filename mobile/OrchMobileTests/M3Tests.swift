@@ -215,7 +215,7 @@ final class PublishWebViewTests: XCTestCase {
         var x = new XMLHttpRequest(); x.open('GET', 'https://127.0.0.1:9/x'); x.onload = function(){ r.xhr = 'ok'; }; x.onerror = function(){ r.xhr = 'blocked'; }; x.send();
         try { var w = new WebSocket('wss://127.0.0.1:9/x'); w.onopen = function(){ r.ws = 'ok'; }; w.onerror = function(){ r.ws = 'blocked'; }; } catch (e) { r.ws = 'blocked'; }
         var i = new Image(); i.onload = function(){ r.img = 'ok'; }; i.onerror = function(){ r.img = 'blocked'; }; i.src = 'https://127.0.0.1:9/p.png';
-        r.rtc = (typeof RTCPeerConnection === 'undefined' && typeof webkitRTCPeerConnection === 'undefined') ? 'gone' : 'present';
+        try { new RTCPeerConnection(); r.rtc = 'present'; } catch (e) { r.rtc = 'gone'; }
         </script></body>
         """
         let (web, _, _) = try await open(html)
@@ -236,7 +236,7 @@ final class PublishWebViewTests: XCTestCase {
         try { delete window.RTCPeerConnection; } catch (e) {}
         try { Object.defineProperty(window, 'RTCPeerConnection', { value: 1 }); } catch (e) {}
         try { new RTCPeerConnection(); r.ctor = 'works'; } catch (e) { r.ctor = 'throws'; }
-        try { var f = document.createElement('iframe'); f.src = 'about:blank'; document.body.appendChild(f); r.frame = f.contentWindow && f.contentWindow.RTCPeerConnection ? 'fresh' : 'none'; } catch (e) { r.frame = 'none'; }
+        try { var f = document.createElement('iframe'); f.src = 'about:blank'; document.body.appendChild(f); try { new f.contentWindow.RTCPeerConnection(); r.frame = 'fresh'; } catch (e) { r.frame = 'none'; }
         </script></body>
         """
         let (web, _, _) = try await open(html)
@@ -251,7 +251,6 @@ final class PublishWebViewTests: XCTestCase {
         let h = Handler()
         let (web, _, _) = try await open("<meta name=viewport content='width=device-width'><body style='margin:0'><section id=hero><h1 style='margin:0;height:200px'>Good things</h1></section><p>Second paragraph</p></body>", handler: h)
         let w = AnchorScript.world
-        _ = try await web.evaluateJavaScript("window.__orchTest = true;", in: nil, contentWorld: w)
         _ = try await web.evaluateJavaScript(AnchorScript.setMode(true), in: nil, contentWorld: w)
         let tap = """
         (function(){ var e=document.querySelector('h1'); var r=e.getBoundingClientRect();
@@ -261,6 +260,7 @@ final class PublishWebViewTests: XCTestCase {
         // The page's own world cannot trigger anything: it has neither the handler nor the test flag.
         _ = try await web.evaluateJavaScript(tap)
         XCTAssertTrue(h.bodies.isEmpty, "a synthetic event from the page itself is not a finger")
+        _ = try await web.evaluateJavaScript("window.__orchTest = true;", in: nil, contentWorld: w)   // the test plays the finger
         _ = try await web.evaluateJavaScript(tap, in: nil, contentWorld: w)
         let r = try XCTUnwrap(AnchorMaker.html(fromScript: try XCTUnwrap(h.bodies.first)))
         XCTAssertEqual(r.anchor.selector, "#hero > h1:nth-of-type(1)")
