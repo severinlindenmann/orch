@@ -24,11 +24,10 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import time
 from pathlib import Path
 
-from orch import adapters, runs, tickets
+from orch import adapters, procs, runs, tickets
 from orch.errors import Refused
 
 MAX_LIVE = 4
@@ -148,7 +147,7 @@ def start_live(
         with runs.locked(root, tid):
             runs._pending_add_locked(root, tid, by, "text", p["prompt"], "start", None)
             runs.mark_delivered_locked(root, tid, p["item_ids"])  # those are inside the prompt now
-        cmd = [sys.executable, "-m", "orch", "run", "_wrap", run, "--ticket", tid, "--agent", name, "--live"]
+        cmd = procs.orch_python_argv("run", "_wrap", run, "--ticket", tid, "--agent", name, "--live")
         if p["session"] and not p["resumed"]:
             cmd += ["--new-session", p["session"]]
         # The agent gets the environment of whoever starts this run, not of whoever started the tmux server.
