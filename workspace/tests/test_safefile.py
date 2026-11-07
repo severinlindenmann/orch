@@ -183,14 +183,19 @@ def test_project_file_reader(tmp_path, monkeypatch, fallback):
 @pytest.mark.parametrize("path", ["sub/.git/config", ".orch./secrets/x", ".git /config", "sub/.GiT/config"])
 def test_project_private_parts_refused(root, mode, path):
     file = root / path
-    file.parent.mkdir(parents=True, exist_ok=True)
-    file.write_text("secret")
+    # Windows drops trailing dots and spaces (".git " is ".git"): the setup may fail there, the rule must hold
+    try:
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text("secret")
+    except OSError:
+        assert sys.platform == "win32"
     assert safefile.open_file_ref(root, path, 100) is None
+    assert not safefile.file_ref_ok(root, path)
 
 
 def test_windows_short_names_refused(root, monkeypatch):
     monkeypatch.setattr(safefile, "_DIR_FD", False)
-    (root / "ORCH~1").mkdir()
+    (root / "ORCH~1").mkdir(exist_ok=True)  # on Windows it already exists: the short name of .orch itself
     (root / "ORCH~1" / "secret").write_text("secret")
     assert safefile.open_file_ref(root, "ORCH~1/secret", 100) is None
 
@@ -208,7 +213,7 @@ def test_windows_real_private_path_refused(root, monkeypatch, private):
 
 
 def test_file_ref_ok_refuses_a_short_name_on_windows(root, monkeypatch):
-    (root / "ORCH~1").mkdir()
+    (root / "ORCH~1").mkdir(exist_ok=True)  # Windows: already the short name of .orch
     monkeypatch.setattr(safefile, "_DIR_FD", True)
     if hasattr(os, "O_DIRECTORY"):
         assert safefile.file_ref_ok(root, "ORCH~1/x.md")  # POSIX: unchanged

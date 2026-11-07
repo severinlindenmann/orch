@@ -161,6 +161,8 @@ def write_atomic(path: Path, data: bytes, private: bool = False) -> None:
                 skills.ensure_gitignore(anc.parent)
                 harness.check_private_path(anc.parent, path)
                 break
+        else:
+            raise skills.Refused(f"{path} is not inside .orch; orch will not store private files there.")
     path.parent.mkdir(parents=True, exist_ok=True)
     import tempfile
 
