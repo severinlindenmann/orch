@@ -147,6 +147,10 @@
     {
      "do": "press",
      "key": "Escape"
+    },
+    {
+     "do": "click_all_census",
+     "page": "pub-file-page"
     }
    ]
   },
@@ -302,6 +306,15 @@
     {
      "do": "expect_text",
      "text": "orch publish connect"
+    },
+    {
+     "do": "click_all_census",
+     "page": "pub-added"
+    },
+    {
+     "do": "click",
+     "sel": "a:has-text('Done')",
+     "optional": true
     }
    ]
   },

@@ -16,7 +16,7 @@ function describe(el, pageName) {
   const labelled = (el.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => document.getElementById(id)?.textContent || '').join(' ');
   const name = clean(labelled || el.getAttribute('aria-label') || Array.from(el.labels || []).map(x => x.textContent).join(' ') || (tag === 'input' && ['submit', 'button'].includes(el.type) ? el.value : '') || (tag === 'input' || tag === 'textarea' || tag === 'select' ? '' : el.innerText) || el.querySelector('img[alt]')?.getAttribute('alt') || el.getAttribute('title'));
   const fallback = clean(el.getAttribute('placeholder') || el.id || (el.href ? new URL(el.href, location.href).pathname : ''));
-  const norm = (name || fallback).split(' · ')[0].split(';')[0].replace(/\d{3,}/g, '#').slice(0, 60);
+  const norm = (name || fallback).split(' · ')[0].split(';')[0].replace(/\d{3,}/g, '#').replace(/ \d+$/, '').slice(0, 60);
   return { key: `${pageName}|${role}|${norm}`, role, name, unnamed: !name, href: tag === 'a' ? el.href : null };
 }
 function substitute(value, env) {
@@ -90,14 +90,22 @@ export async function run(opts) {
       return items;
     }
     async function clickCensus(pageName, step, timeout) {
+      for (let pass = 0; pass < 3; pass++) {
+        const before = covered.size + unclickable.size;
+        await clickCensusOnce(pageName, step, timeout);
+        if (covered.size + unclickable.size === before) break;
+      }
+    }
+    async function clickCensusOnce(pageName, step, timeout) {
       const items = await census(pageName, step.id);
       const restore = substitute(step.actions.find(a => a.do === 'goto')?.path || page.url(), env);
       for (const item of items) {
+        if (process.env.STEPPER_DEBUG) console.error('census', pageName, item.key, isCovered(item.key) ? 'covered' : 'todo');
         if (isCovered(item.key)) continue;
         if (/delete|remove|sign out|reset|stop|wipe|leave|disconnect/i.test(item.name) || skipRegexes.some(r => r.test(item.key)) || (item.href && new URL(item.href).origin !== base.origin)) { skipped.add(item.key); continue; }
         // Resolve again after navigation, since earlier locator indexes may have changed.
         const fresh = (await census(pageName, step.id)).find(x => x.key === item.key);
-        if (!fresh) continue;
+        if (!fresh) { if (process.env.STEPPER_DEBUG) console.error('  vanished', item.key); continue; }
         const before = page.url();
         try { await fresh.el.click({ timeout: Math.min(timeout, 2500) }); covered.add(ck(item.key)); } catch (e) { unclickable.add(ck(item.key)); await page.keyboard.press('Escape'); continue; }
         await page.keyboard.press('Escape');
@@ -224,10 +232,12 @@ export async function run(opts) {
       if (attempts.length > 1) entry.attempts = attempts;
       entry.ms = Date.now() - t; delete entry.expected; current = null;
     }
-    const keys = [...new Set(Object.values(result.census).flatMap(map => Object.keys(map)).map(ck))];
+    const allKeys = [...new Set(Object.values(result.census).flatMap(map => Object.keys(map)).map(ck))];
+    const allowlisted = allKeys.filter(k => skipRegexes.some(r => r.test('x|' + k)));
+    const keys = allKeys.filter(k => !allowlisted.includes(k) && ![...skipped].some(x => ck(x) === k));
     for (const map of Object.values(result.census)) for (const [key, value] of Object.entries(map)) value.clicked = isCovered(key);
     const clicked = keys.filter(k => covered.has(k) || isCovered('x|' + k)).length;
-    result.coverage = opts.censusOnly ? { found: keys.length } : { found: keys.length, clicked, percent: keys.length ? 100 * clicked / keys.length : 100, uncovered: keys.filter(k => !(covered.has(k) || isCovered('x|' + k))), skipped_destructive: [...new Set([...skipped].map(ck))], unclickable: [...unclickable] };
+    result.coverage = opts.censusOnly ? { found: keys.length } : { found: keys.length, clicked, percent: keys.length ? 100 * clicked / keys.length : 100, uncovered: keys.filter(k => !(covered.has(k) || isCovered('x|' + k))), skipped_destructive: [...new Set([...skipped].map(ck))], unclickable: [...unclickable], allowlisted };
   } finally {
     if (context) await context.tracing.stop({ path: join(out, 'trace.zip') }).finally(() => browser.close());
     else await browser.close();

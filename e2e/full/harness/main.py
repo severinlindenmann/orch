@@ -113,7 +113,7 @@ def main() -> int:
         repo = wt
         sha = subprocess.run(["git", "-C", str(wt), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     want = [x for x in (a.lanes.split(",") if a.lanes else
-                        (["A", "B", "Z"] if quick else ["A", "B", "C", "D", "W", "U", "Z"] + ([] if a.no_windows else ["X"])))]
+                        (["A", "B", "Z"] if quick else ["A", "B", "C", "D", "W", "M", "U", "Z"] + ([] if a.no_windows else ["X"])))]
     if a.phone and "P" not in want:
         want.append("P")
     hist = load_history()
@@ -209,6 +209,8 @@ def main() -> int:
         # serial
         if "W" in want:
             lanes.append({**_save(lanes_py.lane_w(env, outdir / "W")), "dir": "W"})
+        if "M" in want:
+            lanes.append({**_save(lanes_py.lane_m(env, outdir / "M")), "dir": "M"})
         if "U" in want:
             lanes.append({**_save(lanes_py.lane_u(env, outdir / "U", rcv)), "dir": "U"})
         if "P" in want:

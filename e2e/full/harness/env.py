@@ -118,6 +118,10 @@ class Env:
         e = self.e
         for name in WORKSPACES:
             try:
+                e.sh(["orch", "relay", "mobile", "off"], cwd=e.ws(name), timeout=30)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
                 e.sh(["orch", "stop"], cwd=e.ws(name), timeout=60)
             except Exception:  # noqa: BLE001
                 pass

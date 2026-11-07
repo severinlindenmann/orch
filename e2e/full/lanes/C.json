@@ -10,7 +10,8 @@
  "census_skip": [
   "Delete",
   "Remove",
-  "Sign out"
+  "Sign out",
+  "\\|Cancel$"
  ],
  "steps": [
   {
@@ -277,6 +278,30 @@
    ]
   },
   {
+   "id": "C10",
+   "name": "Subscribers dialog: every switch, field and Cancel",
+   "page": "relay-sub-dialog",
+   "expect": "all options can be changed; Cancel closes without adding",
+   "actions": [
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Subscribers'), aside a:has-text('Subscribers')"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add subscriber') >> nth=0"
+    },
+    {
+     "do": "click_all_census",
+     "page": "relay-sub-dialog"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Cancel')"
+    }
+   ]
+  },
+  {
    "id": "C09",
    "name": "Click every remaining control (census)",
    "page": "relay-census",
@@ -285,6 +310,10 @@
    ],
    "expect": "every control on every admin page clicked once",
    "actions": [
+    {
+     "do": "goto",
+     "path": "/"
+    },
     {
      "do": "click",
      "sel": "nav a:has-text('Overview'), aside a:has-text('Overview')"
@@ -348,6 +377,14 @@
     {
      "do": "click_all_census",
      "page": "relay-phones"
+    },
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Add workspace'), aside a:has-text('Add workspace')"
+    },
+    {
+     "do": "click_all_census",
+     "page": "relay-add"
     }
    ]
   }

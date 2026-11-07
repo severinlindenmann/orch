@@ -248,6 +248,102 @@ def lane_w(env, out: Path) -> Lane:
     return L
 
 
+# ---------------------------------------------------------------------------------------------- lane M (Mobile mode, workspace side)
+
+
+def _keepers() -> set[str]:
+    import subprocess
+    out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True).stdout
+    return {ln.split(None, 1)[0] for ln in out.splitlines() if "relay mobile keeper" in ln}
+
+
+def lane_m(env, out: Path) -> Lane:
+    """Mobile mode on a workspace (orch relay mobile): state, keeper process, heartbeat to the relay, what a phone sees, off."""
+    L = Lane("M", "Mobile mode (workspace side)", out)
+    e = env.e
+    ws = "Reports"
+    w = e.ws(ws)
+    admin = e.rel.admin
+    ph: dict = {}
+    before = _keepers()
+
+    def pair(st):
+        r = admin.call("POST", "/admin/api/phones", {"name": "E2E mobile-mode phone", "workspaces": [env.vars["relay_id_reports"]]})
+        code = r.json()["link"].split("code=")[1]
+        p = lib.http("POST", e.rel.url + "/v1/phone/pair", None, {"code": code, "name": "E2E mobile-mode phone"})
+        if p.status != 201:
+            raise RuntimeError(f"pair {p.status}")
+        ph.update(id=p.json()["phone_id"], token=p.json()["token"])
+
+    def phone_sees() -> str:
+        r = lib.http("GET", e.rel.url + "/v1/phone/workspaces", {"X-Orch-Phone": ph["id"], "Authorization": f"Bearer {ph['token']}"})
+        return r.text
+
+    L.step("M00", "Pair a scripted phone for Reports", pair)
+
+    def on(st):
+        rc, o, err = e.sh(["orch", "relay", "mobile", "on", "--hours", "4", "--json"], cwd=w, timeout=60)
+        if rc:
+            raise RuntimeError((err or o)[-200:])
+        j = json.loads(o)
+        if not j.get("on"):
+            raise RuntimeError(f"status says off: {o[:150]}")
+        st["note"] = f"since {j.get('since')} ends {j.get('ends_at')} awake={j.get('awake')}"
+    L.step("M01", "orch relay mobile on --hours 4: state is on, ends in about 4 hours", on, expect="on true, ends_at set")
+
+    def keeper(st):
+        new = _keepers() - before
+        if not new:
+            raise RuntimeError("no keeper process is running after Mobile mode on")
+        st["note"] = f"{len(new)} keeper process(es)"
+    L.step("M02", "The keeper process runs (this computer stays awake)", keeper, expect="a keeper process exists")
+
+    seen: list[float] = []
+
+    def heartbeat(st):
+        t0 = time.time()
+        end = t0 + 90
+        while time.time() < end:
+            if "mobile_mode" in phone_sees():
+                seen.append(time.time() - t0)
+                return
+            time.sleep(1)
+        raise RuntimeError("the phone never saw mobile_mode on the workspace within 90 s")
+    L.step("M03", "The phone sees the workspace in Mobile mode", heartbeat, expect="phone workspace item carries mobile_mode")
+    if seen:
+        L.probe("M-phone", "Mobile mode on to the phone sees it", seen, 5, 65)
+
+    def dash(st):
+        d = env.urls.get("reports")
+        s_ = json.dumps(state(d))
+        if "mobile" not in s_.lower():
+            raise RuntimeError("the dashboard state of Reports does not mention Mobile mode")
+    L.step("M04", "The dashboard of the workspace knows Mobile mode is on", dash, expect="state carries the mobile mode block")
+
+    def off(st):
+        rc, o, err = e.sh(["orch", "relay", "mobile", "off", "--json"], cwd=w, timeout=60)
+        if rc:
+            raise RuntimeError((err or o)[-200:])
+        end = time.time() + 15
+        while time.time() < end and (_keepers() - before):
+            time.sleep(0.5)
+        if _keepers() - before:
+            raise RuntimeError("the keeper process is still running after Mobile mode off")
+        st["note"] = "keeper ended"
+    L.step("M05", "orch relay mobile off: state off and the keeper process ends", off, expect="no keeper left")
+
+    def hours(st):
+        rc, o, err = e.sh(["orch", "relay", "mobile", "hours", "8", "--json"], cwd=w, timeout=60)
+        if rc:
+            raise RuntimeError((err or o)[-200:])
+        rc, o, err = e.sh(["orch", "relay", "mobile", "on", "--json"], cwd=w, timeout=60)
+        j = json.loads(o)
+        e.sh(["orch", "relay", "mobile", "off"], cwd=w, timeout=60)
+        st["note"] = f"default 8 h: ends_at {j.get('ends_at')} since {j.get('since')}"
+    L.step("M06", "The saved default hours apply", hours, expect="ends about 8 hours after start")
+    return L
+
+
 # ---------------------------------------------------------------------------------------------- lane U
 
 

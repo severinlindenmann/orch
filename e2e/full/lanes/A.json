@@ -653,6 +653,162 @@
    ]
   },
   {
+   "id": "A21",
+   "name": "Mobile mode: ask, cancel, turn on, bar, turn off",
+   "page": "mobile-mode",
+   "expect": "the switch asks once, the bar shows while on, Turn off ends it",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#home"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-toggle']"
+    },
+    {
+     "do": "wait_for",
+     "sel": "[data-testid='mobile-mode-ask']"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-cancel']"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-toggle']"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-confirm']"
+    },
+    {
+     "do": "wait_for",
+     "sel": "[data-testid='mobile-mode-bar']",
+     "timeout": 10000
+    },
+    {
+     "do": "expect_text",
+     "text": "Mobile mode"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-bar-off']"
+    },
+    {
+     "do": "wait",
+     "ms": 1500
+    },
+    {
+     "do": "expect_no_text",
+     "text": "Turn off"
+    }
+   ]
+  },
+  {
+   "id": "A22",
+   "name": "Settings General: Mobile mode switches off after 4, 8, 12, 24 hours",
+   "page": "mobile-mode-settings",
+   "expect": "each choice is selectable",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click",
+     "sel": "#settings-tab-general"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-hours-4']"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-hours-12']"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-hours-24']"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-hours-8']"
+    }
+   ]
+  },
+  {
+   "id": "A23",
+   "name": "Settings Agent: try an agent, add your own agent",
+   "page": "settings-agent",
+   "expect": "Test answers in words; a custom agent can be added",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click",
+     "sel": "#settings-tab-agent"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Test') >> nth=0"
+    },
+    {
+     "do": "wait",
+     "ms": 2500
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add your own agent')"
+    },
+    {
+     "do": "fill",
+     "sel": "xpath=//label[normalize-space()='Name']/following::input[1]",
+     "value": "My tool"
+    },
+    {
+     "do": "fill",
+     "sel": "xpath=//label[normalize-space()='Command']/following::textarea[1]",
+     "value": "echo {prompt}"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Save')"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    },
+    {
+     "do": "expect_text",
+     "text": "lowercase"
+    },
+    {
+     "do": "fill",
+     "sel": "xpath=//label[normalize-space()='Name']/following::input[1]",
+     "value": "my-tool"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Save')"
+    },
+    {
+     "do": "wait",
+     "ms": 1500
+    },
+    {
+     "do": "expect_text",
+     "text": "my-tool"
+    }
+   ]
+  },
+  {
    "id": "A09",
    "name": "Click every remaining control (census)",
    "page": "home",
