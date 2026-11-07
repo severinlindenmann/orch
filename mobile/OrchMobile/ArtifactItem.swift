@@ -382,7 +382,7 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
             if (raw === null) continue;
             if (apply(protocol, new URLc(raw, apply(baseURI, document, [])), []) !== 'orch-page:') return true;
           }
-          return false;
+          return !!n;   // still on the path after the step cap: fail closed
         } catch (e) { return true; }
       }
       function lock(proto, name, value) { Object.defineProperty(proto, name, { value: value, writable: false, configurable: false }); }

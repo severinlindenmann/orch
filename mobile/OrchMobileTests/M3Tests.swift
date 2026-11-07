@@ -329,6 +329,24 @@ final class PublishWebViewTests: XCTestCase {
         XCTAssertEqual(host.connections, before, "no connection reached the host")
     }
 
+    /// A link buried deeper than the guard's step cap is blocked, not allowed.
+    func testLinkNestedBeyondTheStepCapIsBlocked() async throws {
+        let host = try await LoopbackHost.start()
+        defer { host.stop() }
+        _ = try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(host.port)/sanity")!)
+        let before = host.connections
+        let html = """
+        <body><script>
+        var a = document.createElement('a'); a.href = 'http://127.0.0.1:\(host.port)/deep';
+        var n = a; for (var i = 0; i < 10001; i++) { var d = document.createElement('div'); n.appendChild(d); n = d; }
+        n.click();
+        </script></body>
+        """
+        _ = try await openProduction(html)
+        try await Task.sleep(for: .milliseconds(1000))
+        XCTAssertEqual(host.connections, before, "no connection reached the host")
+    }
+
     func testFreshAboutBlankFrameStillHasTheWebRTCStub() async throws {
         let web = try await openProduction("<body><script>try { var f = document.body.appendChild(document.createElement('iframe')); try { new f.contentWindow.RTCPeerConnection(); window.__r = 'works'; } catch (e) { window.__r = 'throws'; } } catch (e) { window.__r = 'error ' + e; }</script></body>")
         let r = try await web.evaluateJavaScript("window.__r") as? String
