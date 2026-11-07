@@ -234,7 +234,14 @@ async fn switch_not_mixed_with_description() {
     let t = setup();
     let ws = t.workspace("Finance", basic_rights()).await;
     let r = t
-        .api(&ws, "PATCH", "/v1/me", json!({"show_on_shared_pages": true, "description": "x"}).to_string().into_bytes())
+        .api(
+            &ws,
+            "PATCH",
+            "/v1/me",
+            json!({"show_on_shared_pages": true, "description": "x"})
+                .to_string()
+                .into_bytes(),
+        )
         .await;
     assert_eq!(r.status, 422, "{}", r.text());
     assert_eq!(r.json()["pending"], Value::Null);
@@ -244,7 +251,11 @@ async fn switch_not_mixed_with_description() {
 async fn create_with_null_look_keeps_look_by_null() {
     let t = setup();
     let r = t
-        .adm("POST", "/admin/api/workspaces", json!({"name": "N", "icon": null, "rights": basic_rights()}))
+        .adm(
+            "POST",
+            "/admin/api/workspaces",
+            json!({"name": "N", "icon": null, "rights": basic_rights()}),
+        )
         .await;
     assert_eq!(r.status, 201);
     let id = r.json()["id"].as_str().unwrap().to_string();

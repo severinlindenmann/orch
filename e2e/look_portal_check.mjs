@@ -8,6 +8,7 @@ await ctx.addInitScript((t) => { try { sessionStorage.setItem("orch_admin", t); 
 const page = await ctx.newPage();
 const fail = (m) => { console.error("FAIL " + m); process.exit(1); };
 async function openEditor() {
+  await page.goto("about:blank");
   await page.goto(base + "/admin#" + (kind === "relay" ? "overview" : "workspaces"));
   if (kind === "relay") {
     await page.waitForFunction(() => typeof workspaces !== "undefined" && workspaces.length > 0);
@@ -15,11 +16,12 @@ async function openEditor() {
   } else {
     await page.locator(`[data-edit-id="${id}"]`).click();
   }
-  await page.locator("[data-look-row]").waitFor({ timeout: 10000 });
+  await page.locator("[data-look-row]").first().waitFor({ timeout: 10000 });
 }
 await openEditor();
-await page.locator('.look-picker [role="option"][aria-label="Wallet"]').click();
-await page.getByText("Saved.").waitFor({ timeout: 5000 });
+console.log('rows', await page.locator('[data-look-row]').count(), 'dialogs', await page.locator('dialog').count());
+await page.locator('.look-picker [role="option"][aria-label="Wallet"]').first().click();
+await page.getByText("Saved.").first().waitFor({ timeout: 5000 });
 const r = await fetch(base + "/admin/api/workspaces" + (kind === "relay" ? "" : ""), { headers: { "X-Orch-Admin": token } });
 const w = (await r.json()).items.find((x) => x.id === id);
 if (w.icon !== "wallet" || w.look_by !== "admin") fail("admin pick not stored " + JSON.stringify(w));
@@ -29,6 +31,6 @@ const m = await fetch((pub || base) + "/v1/me", { method: "PATCH", headers: { "X
 if (m.status !== 200) fail("workspace patch " + m.status);
 await openEditor();
 if (await page.locator('.look-picker').count()) fail("picker still shown after connect");
-await page.getByText("This workspace chooses its own icon.").waitFor({ timeout: 5000 });
+await page.getByText("This workspace chooses its own icon.").first().waitFor({ timeout: 5000 });
 console.log("OK " + kind);
 await b.close();

@@ -183,8 +183,15 @@ async fn look_patch_sends_no_refresh_hint() {
 async fn create_with_null_look_keeps_look_by_null() {
     let t = start().await;
     let (s, v) = t
-        .admin_json("POST", "/admin/api/workspaces", Some(json!({"name": "N", "description": "d", "tags": [], "icon": null})))
+        .admin_json(
+            "POST",
+            "/admin/api/workspaces",
+            Some(json!({"name": "N", "description": "d", "tags": [], "icon": null})),
+        )
         .await;
     assert_eq!(s, 201, "{v}");
-    assert_eq!(stored(&t, v["id"].as_str().unwrap())["look_by"], Value::Null);
+    assert_eq!(
+        stored(&t, v["id"].as_str().unwrap())["look_by"],
+        Value::Null
+    );
 }
