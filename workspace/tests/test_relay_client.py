@@ -1527,7 +1527,7 @@ def test_refresh_refuses_when_a_gitignore_shows_credentials_and_leaves_secrets_a
     git("init", "-q")
     git("config", "user.email", "t@example.com")
     git("config", "user.name", "t")
-    (proj / ".orch").mkdir()
+    (proj / ".orch").mkdir(exist_ok=True)
     (proj / ".orch/.gitignore").write_text("# team\n", encoding="utf-8")
     (proj / ".gitignore").write_text(
         "!/.orch/secrets/\n/.orch/secrets/*\n!/.orch/secrets/credentials.json\n", encoding="utf-8"
@@ -1552,7 +1552,7 @@ def test_outbox_write_checks_git_for_the_exact_file(proj, monkeypatch):
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     subprocess.run(["git", "init", "-q"], cwd=proj, env=env, check=True)
     subprocess.run(["git", "config", "user.email", "t@e.com"], cwd=proj, env=env, check=True)
-    (proj / ".orch").mkdir()
+    (proj / ".orch").mkdir(exist_ok=True)
     (proj / ".orch/.gitignore").write_text("# team\n", encoding="utf-8")
     (proj / ".gitignore").write_text(
         "!/.orch/outbox/\n/.orch/outbox/*\n!/.orch/outbox/m1.json\n", encoding="utf-8"
