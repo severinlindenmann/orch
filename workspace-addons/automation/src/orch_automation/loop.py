@@ -16,7 +16,7 @@ from .orchcli import tickets as read_tickets
 from .plain import daily_or_slower, workspace_tz, zone
 from .runner import history, load_config, load_state, sdir, update_state
 
-OPEN = ("open", "active", "waiting")
+OPEN = ("open", "ready", "active", "waiting", "review")
 
 
 def scheduled(t: dict) -> bool:

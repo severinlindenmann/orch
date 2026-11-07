@@ -21,8 +21,11 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
       - run: node --test web/file.test.js
+      # the release binary only after a merge (push) or on a manual run; PRs run cargo test only
       - run: cargo build --release
+        if: github.event_name != 'pull_request'
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: orch-publish-linux-x86_64
           path: publish/target/release/orch-publish

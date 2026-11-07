@@ -18,3 +18,12 @@
 /* Round 5b: compact rows with avatar presence. */
 #phone .workspace-entry .row-content{min-height:80px;padding-block:8px}
 .avatar-presence{position:absolute;right:0;bottom:0;width:10px;height:10px;box-sizing:border-box;border:2px solid var(--surface2);border-radius:50%;background:#30d158}
+
+/* Status groups and References */
+.done-topics { margin: 18px 16px; }
+.done-topics > summary { padding: 16px; min-height: 44px; cursor: pointer; color: var(--muted); }
+.reference-link, .reference-ticket, .reference-file { display:flex; align-items:center; gap:12px; padding:16px; border-radius:14px; background:var(--surface2); color:inherit; text-align:left; width:100%; box-sizing:border-box; }
+.reference-link { text-decoration:none; }
+.reference-link button { display:flex; gap:12px; text-align:left; width:100%; }
+.reference-link small { display:block; margin-top:4px; color:var(--muted); }
+.reference-file { overflow-wrap:anywhere; }

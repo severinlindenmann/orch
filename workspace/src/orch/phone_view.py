@@ -2,7 +2,7 @@
 
 Built from the ticket file: title, status, tasks, the last 30 history lines in plain words, and
 the proof marked for the phone (evidence with role result or check: files are uploaded as relay
-blobs, URLs and PRs become links) plus the ticket's links. Secrets are cut from every text before
+blobs, URLs and PRs become links) plus the ticket's refs. Secrets are cut from every text before
 it leaves. No other file content is ever sent.
 
 It rides on update texts to phones (result, failure, stopped, question) and, quietly (kind note,
@@ -21,7 +21,7 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
-from orch import links, net, runs, safefile, tickets
+from orch import net, refs, runs, safefile, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -188,7 +188,7 @@ def _upload(root: Path, data: bytes, state: dict) -> dict | None:
 
 def artifact_id(source: str, ref: str) -> str:
     """a_ + 12 hex of sha256("<source>\\n<ref>"): stable across revisions (vectors/phone-v3-v1.json).
-    source = the evidence type (pr, commit, file, url, command, note) or "link" for ticket links."""
+    source = the evidence type (pr, commit, file, url, command, note) or "link" for ticket refs."""
     return "a_" + hashlib.sha256(f"{source}\n{ref}".encode()).hexdigest()[:12]
 
 
@@ -253,11 +253,11 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
             )
         elif ev.get("type") == "commit" and re.fullmatch(r"[0-9a-f]{7,40}", str(ev.get("ref", ""))):
             pass  # a bare commit sha has no address to open: nothing for the phone to show
-    kinds = links.active_kinds(root) if ticket.get("links") else []
-    for ln in ticket.get("links") or []:
+    kinds = refs.active_kinds(root) if ticket.get("refs") else []
+    for ln in ticket.get("refs") or []:
         if not isinstance(ln, dict) or not (url := safe_url(ln.get("url", ""))):
             continue
-        d = links.describe(ln, kinds)  # same label, icon and status as the dashboard and CLI
+        d = refs.describe(ln, kinds)  # same label, icon and status as the dashboard and CLI
         at = ln["at"] if _TIME.fullmatch(str(ln.get("at"))) else at0
         kind, rev = _url_art("link", url)
         a = {
@@ -283,10 +283,49 @@ def artifact_title(root: Path, ticket: dict, aid: str) -> str | None:
     for ev in phone_proof(root, ticket):
         if artifact_id(str(ev.get("type")), str(ev.get("ref", ""))) == aid:
             return _clip(ev.get("title") or Path(str(ev.get("ref", ""))).name, 200) or None
-    for ln in ticket.get("links") or []:
+    for ln in ticket.get("refs") or []:
         if isinstance(ln, dict) and artifact_id("link", str(ln.get("url", ""))) == aid:
             return _clip(ln.get("title") or ln.get("url", ""), 200) or None
     return None
+
+
+def reference_views(root: Path, ticket: dict) -> list[dict]:
+    """Shared references for the phone; local computer paths never leave this machine."""
+    out = []
+    for ref in (ticket.get("refs") or [])[:ATTACHMENTS]:
+        if not isinstance(ref, dict) or ref.get("local"):
+            continue
+        kind = ref.get("kind")
+        if kind in ("ticket", "artifact"):
+            tid = ref.get("ticket")
+            if not isinstance(tid, str) or not re.fullmatch(r"t_[a-z0-9]{6,16}", tid):
+                continue
+            row = {"kind": kind, "ticket": tid}
+            try:
+                other = tickets.load(root, tid)
+                row.update(title=_clip(other["title"], 200), status=other["status"])
+            except (Refused, OSError, ValueError, KeyError):
+                pass
+            if kind == "artifact":
+                if safefile._parts(ref.get("name")) is None:
+                    continue
+                row["name"] = _clip(ref["name"], 240)
+        elif kind == "file":
+            path = ref.get("path")
+            parts = safefile._parts(path)
+            if parts is None or parts[0].lower() in (".orch", ".git"):
+                continue
+            row = {"kind": kind, "path": _clip(path, 240)}
+            line = ref.get("line")
+            if type(line) is int and line > 0:
+                row["line"] = line
+        else:
+            url = safe_url(ref.get("url", ""))
+            if not url or not isinstance(kind, str) or not refs.KIND_RE.fullmatch(kind):
+                continue
+            row = {"kind": kind, "url": url, "title": _clip(ref.get("title") or url, 200)}
+        out.append(row)
+    return out
 
 
 def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
@@ -320,6 +359,8 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
         "history_tail": hist,
         "attachments": atts,
     }
+    if shared_refs := reference_views(root, ticket):
+        view["refs"] = shared_refs
     if agent:
         view["agent"] = agent
     if ticket.get("summary"):
@@ -333,6 +374,8 @@ def fit(view: dict) -> dict:
         view["history_tail"].pop(0)
     while size_of(view) > BUDGET and view["attachments"]:
         view["attachments"].pop()
+    while size_of(view) > BUDGET and view.get("refs"):
+        view["refs"].pop()
     for n in (120, 40):
         if size_of(view) > BUDGET:
             for c in view["checklist"]:

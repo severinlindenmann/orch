@@ -41,7 +41,8 @@ final class TicketTests: XCTestCase {
         let t = TicketBuilder.build(updates: [u("a", "t_1", "open"), u("bb", "t_2", "active"), u("ccc", "t_3", "done")], questions: [], answers: [:])
         XCTAssertEqual(Set(t.compactMap(\.ticket)), ["t_1", "t_2", "t_3"])
         XCTAssertEqual(t.first { $0.ticket == "t_3" }?.status, .done)
-        XCTAssertEqual(t.first { $0.ticket == "t_1" }?.status, .working)
+        XCTAssertEqual(t.first { $0.ticket == "t_1" }?.status, .backlog)
+        XCTAssertEqual(t.first { $0.ticket == "t_2" }?.status, .working)
         // each one is a sub-chat under its workspace
         let d = ChatData(workspaces: [Workspace(id: "ws_a", name: "A", description: nil, tags: [], online: true, lastSeen: nil, openQuestions: 0)], messages: [], tickets: t, questions: [], answers: [:], outbox: [])
         XCTAssertEqual(ChatBuilder.rooms(d, read: ReadState()).first?.tickets.count, 3)
