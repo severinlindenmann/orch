@@ -265,6 +265,8 @@ def _set_state(root: Path, tid: str, run: str, state: str) -> bool:
         if not rec or rec["run"] != run:
             return False
         rec["live"] = {"state": state, "since": tickets.now()}
+        if state in ("idle", "working"):
+            rec["up"] = True  # the tool has been up: a later notice is never a first-run screen
         rec["renewed_at"] = tickets.now()
         rec.pop("maybe_stale_since", None)
         runs._write(root, rec)
@@ -545,7 +547,10 @@ def check_starting(
         if (
             cur
             and cur["run"] == run
-            and (lv.get("state") == "starting" or (lv.get("state") == "attention" and not lv.get("why")))
+            and (
+                lv.get("state") == "starting"
+                or (lv.get("state") == "attention" and not lv.get("why") and not cur.get("up"))
+            )
         ):
             cur["live"] = {"state": "attention", "since": tickets.now(), "why": note}
             runs._write(root, cur)

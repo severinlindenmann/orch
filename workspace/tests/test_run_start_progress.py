@@ -509,3 +509,16 @@ def test_an_attention_notice_without_a_known_screen_stays_working(proj, run, mon
     runs_live.cleanup(proj)
     assert tickets.load(proj, tid)["status"] == "active"
     assert "why" not in runs.read(proj, tid)["live"]
+
+
+def test_an_agent_that_is_up_and_asks_something_never_gets_a_login_wait(proj, run, monkeypatch):
+    tid, _ = _screens(proj, run, monkeypatch, [LOGIN_SCREEN], age=5)  # the pane text merely says "Log in to"
+    r = runs.read(proj, tid)["run"]
+    run("run", "event", "--run", r, "--kind", "idle")  # the tool is up
+    for _ in range(2):
+        run("run", "event", "--run", r, "--kind", "attention")  # a permission prompt
+        runs_live.cleanup(proj)
+        assert tickets.load(proj, tid)["status"] == "active"
+        assert "why" not in runs.read(proj, tid)["live"]
+        run("run", "event", "--run", r, "--kind", "idle")
+    assert not any("Waiting" in h.get("text", "") for h in tickets.load(proj, tid).get("history", []))
