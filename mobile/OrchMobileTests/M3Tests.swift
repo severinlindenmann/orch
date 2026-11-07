@@ -224,7 +224,10 @@ final class PublishWebViewTests: XCTestCase {
         retained += [c, web]
         c.load(web)
         for _ in 0..<100 {
-            if web.url?.scheme == "orch-page", try await web.evaluateJavaScript("document.readyState") as? String == "complete" { break }
+            if web.url?.scheme == "orch-page" {
+                let state = try await web.evaluateJavaScript("document.readyState") as? String
+                if state == "complete" { break }
+            }
             try await Task.sleep(for: .milliseconds(100))
         }
         XCTAssertEqual(web.url?.scheme, "orch-page", "the page loaded")
@@ -261,7 +264,8 @@ final class PublishWebViewTests: XCTestCase {
 
     func testFreshAboutBlankFrameStillHasTheWebRTCStub() async throws {
         let web = try await openProduction("<body><script>var f = document.body.appendChild(document.createElement('iframe')); try { new f.contentWindow.RTCPeerConnection(); window.__r = 'works'; } catch (e) { window.__r = 'throws'; }</script></body>")
-        XCTAssertEqual(try await web.evaluateJavaScript("window.__r") as? String, "throws")
+        let r = try await web.evaluateJavaScript("window.__r") as? String
+        XCTAssertEqual(r, "throws")
     }
 
     func testResponseHeadersAndCSPCloseFormsAndBase() {
