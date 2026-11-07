@@ -114,7 +114,7 @@
     if (r && r.running === true) {
       const by = claim.by ? ' · started by ' + noPrefix(claim.by) : '';
       if (asks) return {state: 'needs', agent, status: 'waiting for your answer' + since, primary: {label: 'Answer', op: 'answer'}, items: [stop, fresh]};
-      const waits = claim.live && claim.live.state === 'attention' ? String(claim.live.why || 'waiting for your OK in the live session') : '';
+      const waits = claim.live && claim.live.state === 'attention' ? (plainWhy(claim.live.why, agent) || 'waiting for your OK in the live session') : '';
       if (waits) return {state: 'needs', agent, status: waits, primary: liveLink ? {label: 'Open ' + liveLink.label, op: 'open', url: liveLink.url} : stop,
         items: liveLink ? [stop] : []};
       const live = liveLink ? {label: 'Open ' + liveLink.label, op: 'open', url: liveLink.url} : null;
@@ -140,6 +140,13 @@
     const w = String(why || '');
     if (/wants a login|log in to|login method/i.test(w)) return (label || 'The agent') + ' needs you to sign in';
     return w.replace(/\s*(Open the live session[^:]*:\s*)?orch run attach\s+\S+/gi, '').replace(/\s+/g, ' ').trim().replace(/[.:]$/, '');
+  }
+
+  /* One line of the question a ticket waits on (the first open one), for under its title; '' when none. */
+  function questionPreview(ticket) {
+    const q = arr(ticket && ticket.questions).find(x => x && x.answer == null && x.text);
+    const text = q ? String(q.text).replace(/\s+/g, ' ').trim() : '';
+    return text.length > 90 ? text.slice(0, 89) + '…' : text;
   }
 
   /* One state per ticket: a ticket the agent cannot go on with (live state attention) is Waiting, never Working. */
@@ -280,5 +287,5 @@
   }
   const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
 
-  return {firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });
