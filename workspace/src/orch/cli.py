@@ -829,7 +829,8 @@ def main(argv: list[str] | None = None) -> int:
     want_json = "--json" in argv
 
     def refuse(e: Refused) -> int:
-        print(f"Refused: {e}", file=sys.stderr)
+        # a confirmation that could not be asked (no terminal) is a question: no "Refused:" in front
+        print(f"{e}" if getattr(e, "confirm", False) else f"Refused: {e}", file=sys.stderr)
         if want_json:
             print(json.dumps({"error": str(e), **getattr(e, "extra", {})}, ensure_ascii=False))
         return 2

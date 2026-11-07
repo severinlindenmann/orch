@@ -44,6 +44,24 @@ pub fn router(app: AppState) -> Router {
                 )
             }),
         )
+        .route(
+            "/admin/look.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("../web/look-bundle.js"),
+                )
+            }),
+        )
+        .route(
+            "/admin/look.css",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+                    include_str!("../web/look.css"),
+                )
+            }),
+        )
         .merge(crate::api::icon_routes())
         .merge(crate::subs::admin_router())
         .route("/admin/api/workspaces", get(list_ws).post(add_ws))
@@ -146,6 +164,7 @@ async fn list_ws(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> 
         )?;
         w["unread"] = n.into();
         w["pending"] = store::pending(&c, w["id"].as_str().unwrap());
+        crate::look::add_to(&c, w, true);
         w["group"] = groups::group_of(&c, w["id"].as_str().unwrap()).into();
     }
     Ok(Json(json!({"items": items, "next": null})))
@@ -170,6 +189,7 @@ async fn add_ws(
         }
     })?;
     let desc = parse_description(&v["description"])?;
+    let lk = crate::look::parse(&v)?;
     let id = rand_id("ws_", 10);
     let token = rand_token("orn_", 32);
     let mut c = app.db.lock().unwrap();
@@ -196,6 +216,7 @@ async fn add_ws(
         "INSERT INTO workspaces(id,name,description,tags,token_hash,created_at,description_by,tags_by) VALUES(?1,?2,?3,?4,?5,?6,'admin','admin')",
         params![id, name, desc, serde_json::to_string(&tags).unwrap(), token_hash(&token), now()],
     )?;
+    crate::look::apply_new(&tx, &id, &lk)?;
     let mut out = json!({"id": id, "token": token, "group": null});
     if let Some(g) = &grp {
         let affected = groups::join(&tx, &id, g)?;
@@ -218,9 +239,16 @@ async fn edit_ws(
 ) -> Res<StatusCode> {
     guard(&app, &h)?;
     let v = parse_body(&body)?;
-    let c = app.db.lock().unwrap();
+    let mut guard_db = app.db.lock().unwrap();
+    // One transaction: a refused look (409) or any other error stores nothing from this body.
+    let c = guard_db.transaction()?;
     if !store::ws_exists(&c, &id) {
         return Err(not_found("No such workspace."));
+    }
+    // Look first: a refused or bad look stores nothing from this body.
+    let lk = crate::look::parse(&v)?;
+    if !lk.is_empty() {
+        crate::look::admin_allowed(&c, &id)?;
     }
     let new_group = match v.get("group") {
         None => None,
@@ -229,6 +257,7 @@ async fn edit_ws(
             _ => return Err(invalid("No such group.")),
         },
     };
+    crate::look::apply(&c, "workspaces", &id, &lk, "admin")?;
     if let Some(n) = v.get("name") {
         let n = n.as_str().unwrap_or("").trim();
         if n.is_empty() {
@@ -256,7 +285,8 @@ async fn edit_ws(
         }
     }
     store::bump_and_hint(&c, &app.key, &rel)?;
-    drop(c);
+    c.commit()?;
+    drop(guard_db);
     app.notify.notify_waiters();
     Ok(StatusCode::OK)
 }

@@ -72,7 +72,18 @@ class Env:
             rc, out, err = e.sh(["orch", "start", "--json", "--no-open"], cwd=e.ws(name), timeout=120)
         self.refresh_urls()
         self.fixtures()
+        self.write_status_script()
         return self.env_json()
+
+    def write_status_script(self):
+        """A tiny script the browser lanes may call (action `shell`): set the fixture ticket's status through the real CLI, in this run's environment."""
+        import shlex
+        e = self.e
+        script = self.root / "setstatus.sh"
+        env_args = " ".join(f"{k}={shlex.quote(v)}" for k, v in e.env.items())
+        script.write_text(f"#!/bin/sh\ncd {shlex.quote(str(e.ws('Pilatus')))} || exit 1\nexec env -i {env_args} orch ticket status \"${{2:-{self.vars['ticket_id']}}}\" \"$1\" >/dev/null\n")
+        script.chmod(0o700)
+        self.vars["setstatus"] = str(script)
 
     def fixtures(self):
         """One ticket with a question waiting in Pilatus: the steps that need 'a ticket' use it (vars ticket_id, ticket_title)."""
@@ -81,6 +92,8 @@ class Env:
         rc, out, err = e.sh(["orch", "ticket", "new", "Plan the launch", "--note", "Fixture ticket of the full e2e", "--json"], cwd=w)
         t = json.loads(out)
         self.vars.update(ticket_id=t["id"], ticket_title=t["title"])
+        rc2, out2, _ = e.sh(["orch", "ticket", "new", "Focus live check", "--json"], cwd=w)  # a second ticket for the Focus lane, so lanes never share a status
+        self.vars["ticket2_id"] = json.loads(out2)["id"]
         p = subprocess.Popen(["orch", "ask", t["id"], "Which greeting should I use?", "--option", "Hi", "--option", "Hello",
                               "--recommend", "Hi"], cwd=w, env=e.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              stdin=subprocess.DEVNULL, start_new_session=True)

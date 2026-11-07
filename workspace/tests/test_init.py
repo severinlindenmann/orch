@@ -290,6 +290,22 @@ def test_recommended_turns_on_marked_addons_or_none(proj, run, monkeypatch):
     assert seen == []
 
 
+def test_recommended_without_a_terminal_asks_and_is_not_an_error(proj, run, monkeypatch):
+    """No terminal to ask in: orch says what it would turn on and how to confirm. A question, not an error."""
+    from orch import addons
+
+    rows = [{"name": "a1", "recommended": True, "active": False}]
+    monkeypatch.setattr(addons, "listing", lambda root: rows)
+    monkeypatch.setattr(addons, "shipped_recommended", lambda fetch=True: {})
+    man = {"name": "a1", "version": "1", "description": "Shows things.", "background": False}
+    monkeypatch.setattr(addons, "discover", lambda: {"a1": man})
+    added = []
+    monkeypatch.setattr(addons, "add", lambda root, n, yes=False: added.append(n))
+    code, _, err = run("init", "--recommended")
+    assert code == 2 and not err.startswith("Refused") and "Refused:" not in err
+    assert "Shows things." in err and "To turn these on, run it again with --yes." in err and added == []
+
+
 def test_recommended_failure_turns_none_on(proj, monkeypatch):
     from orch import addons, init
 

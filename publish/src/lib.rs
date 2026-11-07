@@ -6,6 +6,7 @@ pub mod config;
 pub mod db;
 pub mod err;
 pub mod files;
+pub mod look;
 pub mod runner;
 pub mod sweep;
 pub mod util;
@@ -79,12 +80,15 @@ pub fn public_router(st: State) -> Router {
         .route("/v1/apps/:name/stop", post(api::apps_stop))
         .route("/f/:id", get(files::page))
         .route("/f/:id/blob", get(files::blob))
+        .route("/f/:id/meta", get(files::meta))
         .route("/a/:name", any(apps::serve_root))
         .route("/a/:name/", any(apps::serve_root))
         .route("/a/:name/*rest", any(apps::serve))
         .route("/onboarding.sh", get(web::onboarding_sh))
         .route("/onboarding.ps1", get(web::onboarding_ps1))
         .route("/_/file.js", get(web::file_js))
+        .route("/_/look.js", get(web::look_js))
+        .route("/_/look-data.js", get(web::look_data_js))
         .route("/_/style.css", get(web::style_css))
         .route("/_/frame.html", get(web::frame_html))
         .route("/_/frame.js", get(web::frame_js))
