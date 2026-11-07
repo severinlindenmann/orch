@@ -876,10 +876,17 @@ def wrap(
         if why is not None and now and now["run"] == run and now.get("stop_requested"):
             why = None  # we stopped it ourselves (Windows has no SIGTERM handler): a normal end
         if why is not None:  # a person sees why nothing happened (in the ticket's history, Home and Focus)
+            if turns == 1 and not resumed and not adapters.parse_session(name, out, root):  # never got going
+                with contextlib.suppress(Exception):
+                    tickets.wait_for_start(
+                        root, tid, f"The agent stopped before it got going: {why}", f"agent:{name}"
+                    )
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, f"The agent stopped with an error: {why}", f"agent:{name}")
         if release(root, tid, run, keep_if_pending=turns <= MAX_DRAIN_TURNS)["released"]:
             return 0 if rc == 0 else rc
+        with contextlib.suppress(Exception):
+            tickets.resume_after_start_wait(root, tid, f"agent:{name}")  # the extra turn is work again
         p = plan(root, tid, mode=mode, allow=allow, agent=name)  # input came in meanwhile: one more turn
         argv, stdin, resumed = p["argv"], p["stdin"], p["resumed"]
         new_session = None if p["resumed"] else p["session"]
@@ -903,6 +910,8 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         proc = subprocess.Popen(argv, cwd=root, env=env)
     except OSError as e:
         print(f"orch could not start the agent: {e}", file=sys.stderr)
+        with contextlib.suppress(Exception):
+            tickets.wait_for_start(root, tid, f"The agent could not be started: {e}", f"agent:{name}")
         release(root, tid, run)
         return 127
     current["proc"] = proc

@@ -88,18 +88,32 @@ your shell file, do that and open a new terminal. No admin rights and no git are
 In your project folder:
 
 ```sh
-$ orch init
+orch init --recommended
+orch start
+```
+
+1. `orch init --recommended` sets up the folder for your agent and turns on the dashboard, Focus and automation. It
+   shows what it adds and asks first.
+2. `orch start` opens the **dashboard** in your browser. Everything else starts there: new tickets, what needs you,
+   your agents at work, and (once connected) the Relay tab.
+3. Optional, relay and phone: your admin clicks **Add workspace** on the relay admin page and gets a short text. Paste
+   it to your agent, or run its two lines. For your iPhone, the admin clicks **Add phone**; open that invitation on the
+   phone.
+4. Later: `orch update` brings orch and the add-ons up to date.
+
+### From the command line
+
+The dashboard covers the daily work; every step also works as a command (handy for agents and scripts):
+
+```sh
 $ orch ticket new "Fix the invoice export"
 $ orch check add <id> "Export the file"
 $ orch run start <id>
 $ orch needs
 ```
 
-1. `orch init` creates `.orch/`, asks which agent to use, and teaches that agent about orch.
-2. Make a ticket, add tasks, and start your agent on it. `orch needs` lists what waits for you.
-3. More, when you want it: `orch init --recommended` turns on the dashboard, focus and automation add-ons in one step; or add them one by one with `orch addon add <name>` ([docs/addons.md](docs/addons.md)).
-4. Optional: publish and relay. Your admin clicks **Add workspace** on the admin page and gets a short text for your agent.
-5. Later: `orch update` brings orch and the add-ons up to date.
+Make a ticket, add tasks and start your agent on it; `orch needs` lists what waits for you. Add-ons one by one:
+`orch addon add <name>` ([docs/addons.md](docs/addons.md)).
 
 Guides: [tickets](docs/workspace.md) · [agents](docs/agents.md) · [add-ons](docs/addons.md) · [publish](docs/publish.md) · [dashboard](docs/dashboard.md) ·
 [relay](docs/relay.md) · [words used](docs/wording.md)

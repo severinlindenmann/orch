@@ -44,7 +44,7 @@ async fn me_patch_vectors() {
     let t = setup();
     let ws = t.workspace("Finance", basic_rights()).await;
     for v in vectors()["me_patch"].as_array().unwrap() {
-        if v["service"] == "relay" {
+        if v["name"] == "relay has no shared pages" {
             continue;
         }
         let mut s = v["stored"].clone();
@@ -227,4 +227,37 @@ async fn file_page_loads_look_scripts() {
         .await
         .text();
     assert!(!js.contains("innerHTML") && !js.contains("insertAdjacentHTML"));
+}
+
+#[tokio::test]
+async fn switch_not_mixed_with_description() {
+    let t = setup();
+    let ws = t.workspace("Finance", basic_rights()).await;
+    let r = t
+        .api(
+            &ws,
+            "PATCH",
+            "/v1/me",
+            json!({"show_on_shared_pages": true, "description": "x"})
+                .to_string()
+                .into_bytes(),
+        )
+        .await;
+    assert_eq!(r.status, 422, "{}", r.text());
+    assert_eq!(r.json()["pending"], Value::Null);
+}
+
+#[tokio::test]
+async fn create_with_null_look_keeps_look_by_null() {
+    let t = setup();
+    let r = t
+        .adm(
+            "POST",
+            "/admin/api/workspaces",
+            json!({"name": "N", "icon": null, "rights": basic_rights()}),
+        )
+        .await;
+    assert_eq!(r.status, 201);
+    let id = r.json()["id"].as_str().unwrap().to_string();
+    assert_eq!(stored(&t, &id)["look_by"], Value::Null);
 }

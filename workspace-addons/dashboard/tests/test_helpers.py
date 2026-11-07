@@ -510,3 +510,23 @@ def test_the_status_menu_stays_reachable_while_a_question_is_open():
     src = (WEB / "app.js").read_text()
     assert "if (hideStatus(t)) return null" not in src
     assert "status-sum-icon" in src
+
+
+@node
+@pytest.mark.parametrize(
+    "counts,want",
+    [
+        ({"open": 0, "ready": 0, "active": 2, "done": 1}, "active"),
+        ({"open": 3, "active": 2}, "open"),
+        ({"open": 0, "ready": 0}, "open"),
+        ({}, ""),
+    ],
+)
+def test_first_column_with_tickets(counts, want):
+    assert call("firstColumnWithTickets", counts) == want
+
+
+@node
+@pytest.mark.parametrize("label,n,want", [("Working", 2, "Working 2"), ("Backlog", 0, "Backlog")])
+def test_column_chip_label(label, n, want):
+    assert call("columnChipLabel", label, n) == want

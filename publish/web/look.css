@@ -1,0 +1,3 @@
+.look-row{margin:12px 0}.look-label{font-weight:600;margin-bottom:6px}.look-note{margin:6px 0 0;opacity:.8;font-size:13px}
+.look-picker button[aria-pressed=true]{outline:2px solid currentColor}.look-picker [role=option][aria-selected=true]{outline:2px solid currentColor;border-radius:8px}
+.look-picker>*{margin-bottom:8px}.look-picker button{cursor:pointer}

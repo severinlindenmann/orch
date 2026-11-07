@@ -44,6 +44,24 @@ pub fn router(app: AppState) -> Router {
                 )
             }),
         )
+        .route(
+            "/admin/look.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("../web/look-bundle.js"),
+                )
+            }),
+        )
+        .route(
+            "/admin/look.css",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+                    include_str!("../web/look.css"),
+                )
+            }),
+        )
         .merge(crate::api::icon_routes())
         .merge(crate::subs::admin_router())
         .route("/admin/api/workspaces", get(list_ws).post(add_ws))
@@ -198,7 +216,7 @@ async fn add_ws(
         "INSERT INTO workspaces(id,name,description,tags,token_hash,created_at,description_by,tags_by) VALUES(?1,?2,?3,?4,?5,?6,'admin','admin')",
         params![id, name, desc, serde_json::to_string(&tags).unwrap(), token_hash(&token), now()],
     )?;
-    crate::look::apply(&tx, "workspaces", &id, &lk, "admin")?;
+    crate::look::apply_new(&tx, &id, &lk)?;
     let mut out = json!({"id": id, "token": token, "group": null});
     if let Some(g) = &grp {
         let affected = groups::join(&tx, &id, g)?;

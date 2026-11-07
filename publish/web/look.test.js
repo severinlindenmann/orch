@@ -23,3 +23,11 @@ test("render falls back to letter and automatic colour", () => {
     assert.strictEqual(s.letter, r.shown.letter, r.why);
   }
 });
+
+test("prototype names are not icons or colours", () => {
+  for (const k of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+    const s = L.resolve("Finance", k, k);
+    assert.strictEqual(s.icon, null, k);
+    assert.strictEqual(s.color, L.defaultColor("Finance"), k);
+  }
+});

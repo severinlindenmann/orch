@@ -103,6 +103,16 @@ pub fn apply(c: &Connection, table: &str, id: &str, p: &Patch, by: &str) -> rusq
     Ok(())
 }
 
+/// On create: `look_by = admin` only when an actual icon or colour is given (null = no look).
+pub fn apply_new(c: &Connection, id: &str, p: &Patch) -> rusqlite::Result<()> {
+    let set = matches!(p.icon, Some(Some(_))) || matches!(p.color, Some(Some(_)));
+    apply(c, "workspaces", id, p, if set { "admin" } else { "" })?;
+    if !set {
+        c.execute("UPDATE workspaces SET look_by=NULL WHERE id=?1", [id])?;
+    }
+    Ok(())
+}
+
 /// The admin may only change the look while the workspace has not chosen its own.
 pub fn admin_allowed(c: &Connection, id: &str) -> Res<()> {
     let by: Option<String> = c

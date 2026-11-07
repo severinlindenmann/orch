@@ -300,6 +300,7 @@ def test_a_failed_step_says_why_in_the_ticket_history(proj, run, tmp_path, monke
     last = tickets.load(proj, tid)["history"][-1]
     assert last["text"] == "The agent stopped with an error: Not logged in · Please run /login"
     assert last["by"] == "agent:claude"
+    assert tickets.load(proj, tid)["status"] == "waiting"  # never left Working
 
 
 def test_failure_text_reads_the_tool_error_or_the_last_line():

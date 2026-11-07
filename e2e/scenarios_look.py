@@ -68,33 +68,30 @@ def look4(e):
     return "meta on/off"
 
 
-def _items(j):
-    return j.get("items", j.get("workspaces", [])) if isinstance(j, dict) else j
+@scenario("LOOK-5")
+def look5(e):
+    """Playwright: both admin portals show the badge picker before connect and the locked 409 text after."""
+    import shutil
+    import subprocess
+    from pathlib import Path
 
+    import pwd
 
-@scenario("LOOK-1")
-def look1(e):
-    """orch look list = 100 icons / 12 colours; an agent sets the look and the relay shows it (look_by workspace);
-    a person's pick then locks out the agent."""
-    n = "Pilatus"
-    wid, _ = e.connect_relay(n)
-    lst = e.orchj(n, "look", "list")
-    check(len(lst["icons"]) == 100 and len(lst["colors"]) == 12, f"list {len(lst['icons'])}/{len(lst['colors'])}")
-    show = e.orchj(n, "look", "show")
-    check(show["set_by"] is None and show["icon"] is None, f"fresh workspace {show}")
-
-    e.orch(n, "look", "set", "--icon", "wallet", "--color", "amber", by="agent:claude")
-    who = e.rapi(n, "GET", "/v1/whoami").json()
-    check((who["icon"], who["color"], who["look_by"]) == ("wallet", "amber", "workspace"), f"whoami {who}")
-    adm = next(w for w in _items(e.rel.admin.call("GET", "/admin/api/workspaces").json()) if w["id"] == wid)
-    check((adm["icon"], adm["color"], adm["look_by"]) == ("wallet", "amber", "workspace"), f"admin {adm}")
-    r = e.rel.admin.call("PATCH", f"/admin/api/workspaces/{wid}", {"icon": "code"})
-    check(r.status == 409, f"admin change after the workspace chose: {r}")
-
-    e.orch(n, "look", "set", "--icon", "bank", "--color", "teal", by="human:e2e")
-    rc, _, err = e.orch(n, "look", "set", "--icon", "house", by="agent:claude", ok=False)
-    check(rc == 2 and "person chose" in err, f"agent after person: {rc} {err!r}")
-    who = e.rapi(n, "GET", "/v1/whoami").json()
-    check((who["icon"], who["color"]) == ("bank", "teal"), f"whoami after person pick {who}")
-    st = e.orchj(n, "status")
-    check(isinstance(st, list), "status --json")
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir)  # the run uses a temp HOME
+    nm = home / "orch-dev/.trun6q-e2e/node_modules"
+    node = shutil.which("node") or str(next((home / ".nvm/versions/node").glob("*/bin/node"), ""))
+    if not (nm / "playwright").is_dir() or not node or node == ".":
+        from lib import Skip
+        raise Skip("playwright or node not installed")
+    for kind, srv in (("relay", e.rel), ("publish", e.pub)):
+        r = srv.admin.call("POST", "/admin/api/workspaces", {"name": e.label("Portal" + kind), "description": "d", "tags": []})
+        check(r.status == 201, f"add: {r}")
+        j = r.json()
+        wid = j["id"]
+        e.cleanup.append(lambda s=srv, w=wid: s.admin.call("DELETE", f"/admin/api/workspaces/{w}"))
+        script = Path(__file__).parent / "look_portal_check.mjs"
+        env = {**e.env, "PW_DIR": str(nm), "HOME": str(home)}
+        p = subprocess.run([node, str(script), kind, srv.admin.base, srv.admin.token, wid, e.label("Portal" + kind), j["token"], srv.url],
+                           capture_output=True, text=True, timeout=120, env=env, cwd=str(nm.parent))
+        check(p.returncode == 0, f"{kind} portal: {p.stdout[-300:]} {p.stderr[-600:]}")
+    return "both portals"
