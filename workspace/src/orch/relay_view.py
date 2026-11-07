@@ -190,7 +190,12 @@ def view(root: Path) -> dict:
     waiting = len(relay.outbox_list(root))
     if waiting:
         s = "s" if waiting != 1 else ""
-        out["notice"] = f"{waiting} message{s} wait to be sent. They go out with the next orch relay command."
+        problem = relay.outbox_problem(root)
+        out["notice"] = (
+            f"{waiting} message{s} wait to be sent: {problem}"
+            if problem
+            else f"{waiting} message{s} wait to be sent. They go out with the next orch relay command."
+        )
         out["notice_tone"] = "warn"
     else:
         out["notice"] = "Connected."

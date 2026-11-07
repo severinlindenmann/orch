@@ -109,9 +109,13 @@ def call(
         raise err from None
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         host = urllib.parse.urlsplit(url).netloc
-        if isinstance(getattr(e, "reason", e), ssl.SSLCertVerificationError):
+        reason = e.reason if isinstance(e, urllib.error.URLError) else e  # as _safe_to_retry
+        if isinstance(reason, ssl.SSLCertVerificationError):
             # not the internet: the server is not who it says it is (or its certificate is broken)
-            err = Refused(f"The server's security certificate is not valid for {host}. orch did not connect.")
+            err = Refused(
+                f"The server's security certificate is not valid for {host}. orch did not connect. "
+                "Check the address, or ask whoever runs that server."
+            )
             err.status, err.blocked = None, True  # no answer; trying again will not help until fixed
             raise err from None
         err = Refused(f"Can't reach {host} right now. Check your internet and try again.")

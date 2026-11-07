@@ -528,8 +528,9 @@ def send_phone_question(
     root: Path, tid: str, q: dict, previews: list[str] | None = None, scope: str | None = None
 ) -> None:
     try:
-        if relay.send_question(root, tickets.load(root, tid), q, previews, scope).get("sent") is False:
-            raise Refused(NOT_SENT)
+        m = relay.send_question(root, tickets.load(root, tid), q, previews, scope)
+        if m.get("sent") is False:
+            raise Refused(m.get("problem") or NOT_SENT)
     except Refused as e:
         raise Refused(
             f"The question is saved on the ticket, but it could not be sent to the phones. {e}"

@@ -732,7 +732,9 @@ def test_outbox_saves_first_and_resends_the_same_bytes(proj, run, rel, monkeypat
     assert run("relay", "outbox")[1].strip() == "Nothing is waiting to be sent."
 
 
-def test_a_certificate_problem_is_said_in_words_and_the_message_is_kept(proj, run, rel, monkeypatch):
+def test_a_certificate_problem_is_said_in_words_and_the_message_is_kept(
+    proj, run, rel, monkeypatch, new_ticket
+):
     """Not 'the relay can't be reached': a problem to fix first (a server certificate that is not valid, a
     broken install) is shown as it is; the message stays in the outbox and goes out once it is fixed."""
     from orch import relay
@@ -755,8 +757,16 @@ def test_a_certificate_problem_is_said_in_words_and_the_message_is_kept(proj, ru
     assert len(list((proj / ".orch/outbox").glob("m_*.json"))) == 2  # nothing is lost
     out = run("relay", "outbox", "--resend")[1]
     assert problem in out and "next orch relay command" not in out
+    from orch import relay_view
+
+    assert problem in relay_view.view(proj)["notice"]  # the dashboard's Relay tab says it too
+    assert "Saved messages are waiting: " + problem in run("relay", "whoami")[2]  # before any relay command
+    code, _, err = run("ask", new_ticket(), "Go?", "--phone")  # the question to the phones
+    assert code == 2 and "saved on the ticket" in err and problem in err and "can't be reached" not in err
     monkeypatch.setattr(relay, "_post_message", real)
-    assert "Sent 2 waiting messages" in run("relay", "outbox", "--resend")[1] and len(rel.sent) == 2
+    assert "waiting messages" in run("relay", "outbox", "--resend")[1]  # the sends, the question, its note
+    assert not list((proj / ".orch/outbox").glob("m_*.json")) and len(rel.sent) >= 3
+    assert relay.outbox_problem(proj) is None and "wait to be sent" not in relay_view.view(proj)["notice"]
 
 
 def test_outbox_resend_command_and_refused_message_is_dropped(proj, run, rel, monkeypatch):
