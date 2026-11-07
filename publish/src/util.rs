@@ -54,7 +54,7 @@ pub fn esc(s: &str) -> String {
 fn find_tag(h: &[u8], tag: &str) -> Option<usize> {
     let t = tag.as_bytes();
     let mut i = 0;
-    while i + t.len() < h.len() {
+    while i + 1 + t.len() < h.len() {
         if h[i] == b'<'
             && h[i + 1..i + 1 + t.len()].eq_ignore_ascii_case(t)
             && matches!(
@@ -92,13 +92,12 @@ pub fn with_default_head(bytes: &[u8], app_name: &str) -> Vec<u8> {
         if let Some(e) = tag_end(&out, h) {
             let attrs = out[h + 5..e].to_ascii_lowercase();
             let has_lang = attrs.windows(5).enumerate().any(|(i, w)| {
-                w == b"lang="
+                w[..4] == *b"lang"
+                    && (w[4] == b'=' || w[4] == b'>' || w[4].is_ascii_whitespace())
                     && (i == 0
                         || attrs[i - 1].is_ascii_whitespace()
-                        || attrs[i - 1] == b'"'
-                        || attrs[i - 1] == b'\'')
-            }) || attrs.windows(5).any(|w| w == b"lang ")
-                || attrs.ends_with(b"lang>");
+                        || matches!(attrs[i - 1], b'"' | b'\'' | b'/'))
+            });
             if !has_lang {
                 let at = h + 5;
                 out.splice(at..at, b" lang=\"en\"".iter().copied());
@@ -112,7 +111,12 @@ pub fn with_default_head(bytes: &[u8], app_name: &str) -> Vec<u8> {
             .find_map(|(tag, _)| find_tag(&out, tag).and_then(|s| tag_end(&out, s)))
             .or_else(|| {
                 // fragment page: after a leading doctype if any, else at the very start
-                let lead = out.iter().position(|c| !c.is_ascii_whitespace())?;
+                let bom = if out.starts_with(b"\xEF\xBB\xBF") {
+                    3
+                } else {
+                    0
+                };
+                let lead = bom + out[bom..].iter().position(|c| !c.is_ascii_whitespace())?;
                 if out[lead..].len() >= 9 && out[lead..lead + 9].eq_ignore_ascii_case(b"<!doctype")
                 {
                     tag_end(&out, lead)
@@ -120,7 +124,11 @@ pub fn with_default_head(bytes: &[u8], app_name: &str) -> Vec<u8> {
                     None
                 }
             })
-            .unwrap_or(0);
+            .unwrap_or(if out.starts_with(b"\xEF\xBB\xBF") {
+                3
+            } else {
+                0
+            });
         out.splice(at..at, t.bytes());
     }
     out
@@ -244,6 +252,24 @@ mod head_tests {
         assert!(s("<html data-lang=\"x\"><head></head></html>").contains(" lang=\"en\" data-lang"));
         assert!(
             s("<html title=\"a>lang=b\"><head></head></html>").contains("<html lang=\"en\" title")
+        );
+    }
+    #[test]
+    fn no_panic_on_trailing_tag_and_odd_lang_spacing() {
+        for p in ["<html", "x<head", "<!doctype html><html", "<title"] {
+            let _ = f(p.as_bytes(), "my-app");
+        }
+        let p = "<html lang\t=\"de\"><head><title>T</title></head></html>";
+        assert_eq!(s(p), p);
+        let p = "<html/lang=\"de\"><head><title>T</title></head></html>";
+        assert_eq!(s(p), p);
+    }
+    #[test]
+    fn bom_stays_first() {
+        let o = f("\u{feff}<!doctype html><h1>".as_bytes(), "my-app");
+        assert_eq!(
+            String::from_utf8(o).unwrap(),
+            "\u{feff}<!doctype html><title>my-app</title><h1>"
         );
     }
     #[test]
