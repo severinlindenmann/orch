@@ -170,7 +170,7 @@ class Handler(BaseHTTPRequestHandler):
         name = {"/": "index.html"}.get(path, path.lstrip("/"))
         if name.startswith("kit/") and name[4:] in KIT:  # the orch_ui kit, copied next to the page (a test keeps it in sync)
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
-        if name in ("index.html", "app.js", "blocks.js", "helpers.js", "style.css", "logo.svg", "favicon.svg",
+        if name in ("index.html", "app.js", "mobile-mode.js", "blocks.js", "helpers.js", "style.css", "logo.svg", "favicon.svg",
                     "apple-touch-icon.png"):
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         self._send(404, b"not found", "text/plain")

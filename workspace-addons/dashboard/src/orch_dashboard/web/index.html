@@ -25,7 +25,8 @@
 <div class="side-foot"><p class="meta" id="workspace-mode"></p></div>
 </aside>
 <div>
-<header class="topbar"><span id="crumb">Home</span><button type="button" class="btn primary sm" id="new-ticket" hidden>New ticket</button></header>
+<div id="mm-bar" class="mm-bar" hidden></div>
+<header class="topbar"><span id="crumb">Home</span><button type="button" class="mm-toggle" id="mm-toggle" role="switch" aria-checked="false" data-testid="mobile-mode-toggle" hidden><i class="mm-sw"></i>Mobile mode</button><button type="button" class="btn primary sm" id="new-ticket" hidden>New ticket</button></header>
 <div id="connection" class="banner attn" role="status" hidden></div>
 <main id="content" class="page" aria-label="Dashboard"></main>
 </div>
@@ -37,6 +38,7 @@
 <script src="kit/evidence.js"></script>
 <script src="helpers.js"></script>
 <script src="blocks.js"></script>
+<script src="mobile-mode.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
