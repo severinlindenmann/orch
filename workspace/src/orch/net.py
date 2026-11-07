@@ -124,11 +124,12 @@ def secrets_dir(root: Path) -> Path:
 
 def write_atomic(path: Path, data: bytes, private: bool = False) -> None:
     if private:  # fail closed: a private file is only stored when git is told to leave it alone
-        from orch import skills
+        from orch import harness, skills
 
         for anc in path.parents:
             if anc.name == ".orch":
                 skills.ensure_gitignore(anc.parent)
+                harness.check_private_path(anc.parent, path)
                 break
     path.parent.mkdir(parents=True, exist_ok=True)
     import tempfile

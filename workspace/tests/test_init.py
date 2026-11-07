@@ -615,3 +615,30 @@ def test_copy_dir_does_not_follow_directory_links(proj, tmp_path_factory):
     harness._copy_dir(src, dst)
     assert (dst / "a.txt").is_file()
     assert not (dst / "lnk").exists() and not any(dst.rglob("secret.txt"))
+
+
+_REINC = "!/.orch/secrets/\n/.orch/secrets/*\n"
+
+
+@pytest.mark.parametrize(
+    "root_ignore",
+    [_REINC + "!/.orch/secrets/token.json\n", _REINC + "!*.json\n", _REINC + "!/.orch/secrets/tok*\n"],
+)
+def test_private_write_refuses_a_name_that_a_gitignore_unignores(proj, root_ignore):
+    from orch import net
+
+    _tracked_orch_gitignore(proj, root_ignore)
+    with pytest.raises(skills.Refused):
+        net.write_json(proj / ".orch/secrets/token.json", {"t": 1}, True)
+    assert not (proj / ".orch/secrets/token.json").exists()
+
+
+def test_private_write_refuses_a_tracked_file(proj):
+    from orch import net
+
+    _tracked_orch_gitignore(proj)
+    (proj / ".orch/secrets").mkdir()
+    (proj / ".orch/secrets/token.json").write_text("{}", encoding="utf-8")
+    _git(proj, "add", "-f", ".orch/secrets/token.json")
+    with pytest.raises(skills.Refused):
+        net.write_json(proj / ".orch/secrets/token.json", {"t": 1}, True)

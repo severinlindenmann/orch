@@ -280,6 +280,29 @@ def _probes_ignored(root: Path) -> bool:
     return True
 
 
+def check_private_path(root: Path, path: Path) -> None:
+    """Right before a private write: in a git repo, git must ignore this exact file and not track it."""
+    try:
+        rel = path.absolute().relative_to(root.absolute()).as_posix()
+    except ValueError:
+        return
+    env = _git_env()
+    try:
+        r = subprocess.run(
+            ["git", "check-ignore", "-q", "--", rel], cwd=root, capture_output=True, env=env, timeout=10
+        )
+        if r.returncode == 128:
+            return  # not a git repo
+        ignored = r.returncode == 0
+        tracked = _tracked(root, rel)
+    except (OSError, subprocess.SubprocessError):
+        ignored, tracked = False, False
+    if not ignored or tracked:
+        raise Refused(
+            f"git would not leave {rel} alone (a .gitignore of the project shows it, or it is tracked). Nothing was stored."
+        )
+
+
 def glob_escape(text: str) -> str:
     """A name with glob characters stays literal in a gitignore line."""
     return re.sub(r"([\\\[\]*?!#])", r"\\\1", text)
