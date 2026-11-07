@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import socket
+import ssl
 import sys
 import time
 import urllib.error
@@ -18,10 +20,30 @@ from orch.errors import Refused
 RETRY_DELAYS = (1, 2, 4)  # seconds; connection-level failures only
 
 
+@functools.cache
+def _tls() -> ssl.SSLContext | None:
+    """Windows: let Windows check the server's certificate (truststore). Python alone only knows the root
+    certificates already in the Windows store, and a fresh PC fetches missing ones only when Windows itself
+    checks: the first connection to a relay then failed with "unable to get local issuer certificate".
+    Other systems keep Python's default (None)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import truststore
+    except ImportError:  # a broken install: fail closed, in plain words (never fall back to a weaker check)
+        msg = "orch can't check web certificates here: a part of orch is missing. Install orch again."
+        err = Refused(msg)
+        err.status, err.blocked = None, True  # no answer; trying again will not help until it is fixed
+        raise err from None
+    return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
+
 def _safe_to_retry(req, exc) -> bool:
     """Retry only when the request cannot have been processed. Never replay a POST that may have arrived."""
     replayable = req.get_method() in ("GET", "HEAD") or req.full_url.split("?")[0].endswith("/v1/messages")
     reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return False  # the certificate is wrong: the same answer every time
     if isinstance(reason, (ConnectionRefusedError, socket.gaierror)):
         return True  # the connection was never established
     if isinstance(exc, urllib.error.URLError) and isinstance(reason, TimeoutError):
@@ -34,7 +56,7 @@ def _send(req, timeout, limit=None):
     delays = list(RETRY_DELAYS)
     while True:
         try:
-            r = urllib.request.urlopen(req, timeout=timeout)
+            r = urllib.request.urlopen(req, timeout=timeout, context=_tls())
         except urllib.error.HTTPError:
             raise  # a response arrived: never retry (no duplicate POSTs)
         except (urllib.error.URLError, TimeoutError, OSError) as e:
@@ -85,10 +107,18 @@ def call(
         err = Refused(msg + (f"\n{out}" if out else ""))
         err.status = e.code  # callers decide what is worth a retry
         raise err from None
-    except (urllib.error.URLError, TimeoutError, OSError):
-        err = Refused(
-            f"Can't reach {urllib.parse.urlsplit(url).netloc} right now. Check your internet and try again."
-        )
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        host = urllib.parse.urlsplit(url).netloc
+        reason = e.reason if isinstance(e, urllib.error.URLError) else e  # as _safe_to_retry
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            # not the internet: the server is not who it says it is (or its certificate is broken)
+            err = Refused(
+                f"The server's security certificate is not valid for {host}. orch did not connect. "
+                "Check the address, or ask whoever runs that server."
+            )
+            err.status, err.blocked = None, True  # no answer; trying again will not help until fixed
+            raise err from None
+        err = Refused(f"Can't reach {host} right now. Check your internet and try again.")
         err.status = None  # no answer at all
         raise err from None
 
@@ -189,7 +219,7 @@ def auth_headers(cfg: dict) -> dict:
 def connect_service(root: Path, name: str, skill: str, url: str, workspace: str, token: str, prefix: str):
     """Shared part of `orch publish|relay connect`: init if needed, check token, save."""
     from orch import init as init_mod
-    from orch import skillrender, skills
+    from orch import look, skillrender, skills
 
     url = clean_url(url)
     if not token.startswith(prefix):
@@ -203,6 +233,7 @@ def connect_service(root: Path, name: str, skill: str, url: str, workspace: str,
     if name == "publish":
         skillrender.remember_rights(root, who)
     skillrender.refresh_skills(root)
+    look.on_connect(root, name, who)
     return who
 
 

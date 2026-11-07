@@ -192,7 +192,9 @@ def test_existing_claude_skills_folder_gets_per_skill_links(proj, run):
     assert run("init")[0] == 0
     assert (proj / ".claude/skills/mine/SKILL.md").is_file()
     assert (proj / ".claude/skills/orch/SKILL.md").is_file()
-    assert not (proj / ".claude/skills").is_symlink() and (proj / ".claude/skills/orch").is_symlink()
+    link = proj / ".claude/skills/orch"  # a symlink; on Windows a junction (no privileges needed)
+    is_link = link.is_symlink() or getattr(link, "is_junction", lambda: False)()
+    assert not (proj / ".claude/skills").is_symlink() and is_link
 
 
 def test_all_packaged_skills_have_front_matter():
@@ -286,6 +288,22 @@ def test_recommended_turns_on_marked_addons_or_none(proj, run, monkeypatch):
     with pytest.raises(skills.Refused):  # not asked and no --yes: nothing happens
         init.recommended(proj, yes=False, interactive=False)
     assert seen == []
+
+
+def test_recommended_without_a_terminal_asks_and_is_not_an_error(proj, run, monkeypatch):
+    """No terminal to ask in: orch says what it would turn on and how to confirm. A question, not an error."""
+    from orch import addons
+
+    rows = [{"name": "a1", "recommended": True, "active": False}]
+    monkeypatch.setattr(addons, "listing", lambda root: rows)
+    monkeypatch.setattr(addons, "shipped_recommended", lambda fetch=True: {})
+    man = {"name": "a1", "version": "1", "description": "Shows things.", "background": False}
+    monkeypatch.setattr(addons, "discover", lambda: {"a1": man})
+    added = []
+    monkeypatch.setattr(addons, "add", lambda root, n, yes=False: added.append(n))
+    code, _, err = run("init", "--recommended")
+    assert code == 2 and not err.startswith("Refused") and "Refused:" not in err
+    assert "Shows things." in err and "To turn these on, run it again with --yes." in err and added == []
 
 
 def test_recommended_failure_turns_none_on(proj, monkeypatch):

@@ -23,7 +23,7 @@ def test_relay_profile_show_and_change(proj, run, rel):
     assert "Sent to the owner for approval." in out
     assert "Nothing changes until they approve" in out and out.count("Builds sites") == 1
     assert "Waiting for the owner to approve" in out
-    patch = [c for c in rel.calls if c[0] == "PATCH"][0]
+    patch = [c for c in rel.calls if c[0] == "PATCH" and "description" in json.loads(c[3])][0]
     assert json.loads(patch[3]) == {"description": "Builds sites", "tags": ["web", "design"]}
     # no arguments: current values stay, the proposal is shown as waiting
     shown = run("relay", "profile")[1]

@@ -72,7 +72,18 @@ class Env:
             rc, out, err = e.sh(["orch", "start", "--json", "--no-open"], cwd=e.ws(name), timeout=120)
         self.refresh_urls()
         self.fixtures()
+        self.write_status_script()
         return self.env_json()
+
+    def write_status_script(self):
+        """A tiny script the browser lanes may call (action `shell`): set the fixture ticket's status through the real CLI, in this run's environment."""
+        import shlex
+        e = self.e
+        script = self.root / "setstatus.sh"
+        env_args = " ".join(f"{k}={shlex.quote(v)}" for k, v in e.env.items())
+        script.write_text(f"#!/bin/sh\ncd {shlex.quote(str(e.ws('Pilatus')))} || exit 1\nexec env -i {env_args} orch ticket status \"${{2:-{self.vars['ticket_id']}}}\" \"$1\" >/dev/null\n")
+        script.chmod(0o700)
+        self.vars["setstatus"] = str(script)
 
     def fixtures(self):
         """One ticket with a question waiting in Pilatus: the steps that need 'a ticket' use it (vars ticket_id, ticket_title)."""
@@ -81,6 +92,8 @@ class Env:
         rc, out, err = e.sh(["orch", "ticket", "new", "Plan the launch", "--note", "Fixture ticket of the full e2e", "--json"], cwd=w)
         t = json.loads(out)
         self.vars.update(ticket_id=t["id"], ticket_title=t["title"])
+        rc2, out2, _ = e.sh(["orch", "ticket", "new", "Focus live check", "--json"], cwd=w)  # a second ticket for the Focus lane, so lanes never share a status
+        self.vars["ticket2_id"] = json.loads(out2)["id"]
         p = subprocess.Popen(["orch", "ask", t["id"], "Which greeting should I use?", "--option", "Hi", "--option", "Hello",
                               "--recommend", "Hi"], cwd=w, env=e.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              stdin=subprocess.DEVNULL, start_new_session=True)
@@ -142,10 +155,52 @@ class Env:
                 except OSError:
                     break
                 time.sleep(0.4)
+        sweep_tmux(str(self.root))  # live agent runs live in their own tmux server (socket orch-<hash>): end the ones under this root
         leaked = e2emain.leaked_servers(self.root)
         if leaked:
             log(f"LEAK: add-on servers still running: {leaked}")
         return leaked
+
+
+def tmux_sockets_under(root_prefix: str) -> set[str]:
+    """Sockets (orch-<hash>) of tmux servers whose sessions run in a folder under `root_prefix`."""
+    import re
+    ps = subprocess.run(["ps", "-axo", "command="], capture_output=True, text=True).stdout
+    out = set()
+    for ln in ps.splitlines():
+        m = re.search(r"tmux -L (orch-\w+) .*-c (\S+)", ln)
+        if m and m.group(2).startswith(root_prefix):
+            out.add(m.group(1))
+    return out
+
+
+def sweep_tmux(root_prefix: str) -> list[str]:
+    """End every tmux server (live agent sessions) that runs under `root_prefix`, by exact socket. Returns the sockets ended."""
+    socks = sorted(tmux_sockets_under(root_prefix))
+    for s in socks:
+        subprocess.run(["tmux", "-L", s, "kill-server"], capture_output=True)
+    return socks
+
+
+def sweep_orphans(log=print) -> list[str]:
+    """At the start of a run: end tmux servers of earlier runs that died without teardown (their run folder has no env.json or is gone)."""
+    import re
+    ps = subprocess.run(["ps", "-axo", "command="], capture_output=True, text=True).stdout
+    ended = []
+    for ln in ps.splitlines():
+        m = re.search(r"tmux -L (orch-\w+) .*-c (/\S*?/\.tf-fe2e-\w+)/", ln)
+        if m and not (Path(m.group(2)) / "env.json").exists():
+            subprocess.run(["tmux", "-L", m.group(1), "kill-server"], capture_output=True)
+            ended.append(m.group(1))
+    if ended:
+        log(f"ended {len(set(ended))} tmux server(s) left over from earlier runs")
+    return ended
+
+
+def claude_under(root_prefix: str) -> list[str]:
+    """Processes of live agents whose command line or folder mentions the run folder."""
+    ps = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True).stdout
+    return [ln.strip()[:120] for ln in ps.splitlines() if root_prefix in ln and ("claude" in ln or "tmux" in ln)]
 
 
 def build_bins(repo: Path, log=print) -> dict:

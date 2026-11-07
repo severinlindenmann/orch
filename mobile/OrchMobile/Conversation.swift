@@ -27,15 +27,28 @@ enum ConversationID: Hashable, Sendable {
 }
 
 enum TopicStatus: String, Sendable, CaseIterable {
-    case working, waitingOnYou, done, stopped, didntWork
+    case working, waitingOnYou, review, backlog, done, stopped, didntWork
+    /// Short word: group headers and the info summary.
     var label: String {
-        switch self { case .working: "Working"; case .waitingOnYou: "Waiting on you"; case .done: "Done"; case .stopped: "Stopped"; case .didntWork: "Didn't work" }
+        switch self {
+        case .working: "Working"; case .waitingOnYou: "Waiting"; case .review: "Review"; case .backlog: "Backlog"
+        case .done: "Done"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
+        }
+    }
+    /// The chip words of the status workflow (PLAN-A section 5).
+    var chip: String {
+        switch self {
+        case .working: "Claude is working"; case .waitingOnYou: "Waiting for your answer"; case .review: "Check this"; case .backlog: "Backlog"
+        case .done: "Done"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
+        }
     }
     init(_ t: Ticket) {
         switch t.status {
         case .needsYou: self = .waitingOnYou
         case .working: self = .working
-        case .done: self = t.kind == "failure" ? .didntWork : (t.kind == "stopped" ? .stopped : .done)
+        case .review: self = .review
+        case .backlog: self = .backlog
+        case .done: self = t.view?.status == "dropped" ? .stopped : t.kind == "failure" ? .didntWork : (t.kind == "stopped" ? .stopped : .done)
         }
     }
 }
@@ -142,6 +155,8 @@ struct ConversationInputs: Sendable {
     var outbox: [OutboxItem] = []
     var speak: PhoneSettings.Speak = .auto
     var now: Date = Date()
+    /// Phone-local "Delete": chat key -> messages up to this time are hidden (ArchiveStore).
+    var erased: [String: String] = [:]
 }
 
 extension ReadState {
@@ -170,7 +185,7 @@ enum ConversationBuilder {
         return k == "ack" || k == "working"
     }
 
-    private static func index(_ d: ConversationInputs) -> Index {
+    static func index(_ d: ConversationInputs) -> Index {
         var ix = Index()
         for pm in d.messages where !pm.fromPhone && isReceipt(pm.message) {
             guard let r = pm.message.replyTo else { continue }
@@ -188,12 +203,13 @@ enum ConversationBuilder {
         let m = pm.message, ws = pm.workspaceId
         if pm.fromPhone {
             if let t = m.ticket { return .topic(workspace: ws, ticket: t) }
-            if m.body.general == true { return .general(workspace: ws) }
+            if m.body.general == true { return .general(workspace: ws) }   // stays in General; the topic it started also shows it first (items)
             if let t = ix.ticketOfPhoneText[pm.id] { return .topic(workspace: ws, ticket: t) }
             return .starting(workspace: ws, id: pendingKey(pm))
         }
         if let k = m.body.update?.kind, !["result", "failure", "stopped"].contains(k) { return nil }   // ack, working, note, question
         if let t = m.ticket { return .topic(workspace: ws, ticket: t) }
+        if m.body.general != true, let r = m.replyTo, let t = ix.ticketOfPhoneText[r] { return .topic(workspace: ws, ticket: t) }
         return .general(workspace: ws)
     }
 
@@ -248,6 +264,7 @@ enum ConversationBuilder {
         for pm in d.messages where pm.workspaceId == id.workspace {
             if let c = pm.clientId ?? pm.message.body.clientId { listed.insert(c) }
             if conversation(of: pm, ix, d) == id { out.append(bubble(pm, ix, d)) }
+            else if case .topic(_, let t) = id, pm.fromPhone, pm.message.ticket == nil, ix.ticketOfPhoneText[pm.id] == t { out.append(bubble(pm, ix, d)) }   // General text that started this topic
         }
         for o in d.outbox where o.kind == .send && o.workspace == id.workspace && !listed.contains(o.clientId) && outboxConversation(o) == id {
             out.append(queuedBubble(o))
@@ -259,7 +276,9 @@ enum ConversationBuilder {
             item.question = q; item.answer = d.answers[q.id]
             out.append(item)
         }
-        return out.sorted { ($0.at, $0.id) < ($1.at, $1.id) }
+        out.sort { ($0.at, $0.id) < ($1.at, $1.id) }
+        if let cut = d.erased[ReadState.key(id)] { out.removeAll { $0.at <= cut } }
+        return out
     }
 
     // MARK: Lists
@@ -269,9 +288,12 @@ enum ConversationBuilder {
         for t in d.tickets where t.workspace == ws && t.ticket != nil {
             let id = ConversationID.topic(workspace: ws, ticket: t.ticket!)
             let its = items(id, d)
+            if its.isEmpty, d.erased[ReadState.key(id)] != nil { continue }   // deleted on this phone, nothing new since
             let last = its.last(where: { $0.kind == .message || $0.answer == nil })
+            // Activity includes every item and the latest ticket update, independent of the preview selection.
+            let lastAt = [its.last?.at, t.at].compactMap { $0 }.max()
             out.append(TopicSummary(id: id, title: t.displayTitle, key: t.key, status: TopicStatus(t), lastLine: last?.preview ?? t.text,
-                                    lastAt: last?.at ?? t.at, unread: read.unread(ReadState.key(id), in: its), isStarting: false, ticket: t))
+                                    lastAt: lastAt, unread: read.unread(ReadState.key(id), in: its), isStarting: false, ticket: t))
         }
         // New topics that are not acked yet (stored or still queued).
         let ix = index(d)
@@ -298,7 +320,7 @@ enum ConversationBuilder {
     static func general(workspace ws: String, _ d: ConversationInputs, read: ReadState) -> ConversationSummary {
         let id = ConversationID.general(workspace: ws), its = items(id, d)
         let last = its.last(where: { $0.kind == .message || $0.answer == nil })
-        return ConversationSummary(id: id, lastLine: last?.preview ?? "", lastAt: last?.at, unread: read.unread(ReadState.key(id), in: its))
+        return ConversationSummary(id: id, lastLine: last?.preview ?? "", lastAt: its.last?.at, unread: read.unread(ReadState.key(id), in: its))
     }
 
     /// The workspace list: open questions first, then newest activity.

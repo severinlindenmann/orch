@@ -29,15 +29,18 @@ final class RefreshTests: XCTestCase {
         XCTAssertFalse(m.hasLoaded)
     }
 
-    func testOpenChatKeepsRefreshingUntilItCloses() async throws {
+    func testActiveShellKeepsRefreshingUntilCancelled() async throws {
         let m = pairedModel()
+        m.watchInMock = true
         let t = Task { await m.watchWhileOpen(every: .milliseconds(30)) }
         try await Task.sleep(for: .milliseconds(300))
         t.cancel()
         try await Task.sleep(for: .milliseconds(150))   // a request already in flight may still land
         let n = StubProtocol.seen.filter { $0.url?.path == "/v1/phone/updates" }.count
-        XCTAssertGreaterThanOrEqual(n, 3, "an open chat polls the relay by itself")
+        XCTAssertGreaterThanOrEqual(n, 3, "the active shell polls the relay for lists and chats")
+        XCTAssertGreaterThanOrEqual(StubProtocol.seen.filter { $0.url?.path == "/v1/phone/messages" }.count, 3,
+                                    "plain ticket messages refresh even without a ticket update")
         try await Task.sleep(for: .milliseconds(150))
-        XCTAssertEqual(StubProtocol.seen.filter { $0.url?.path == "/v1/phone/updates" }.count, n, "closing the chat stops it")
+        XCTAssertEqual(StubProtocol.seen.filter { $0.url?.path == "/v1/phone/updates" }.count, n, "cancelling the shell task stops it")
     }
 }

@@ -8,7 +8,6 @@ struct ConversationInfoView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selection: InfoGroup = .photos
     @State private var viewer: ArtifactItem?
     @State private var preview: InfoPreview?
@@ -52,10 +51,35 @@ struct ConversationInfoView: View {
                              ticketAt: ticket?.at ?? "", conversation: conversation)
     }
 
+    private var refs: [TicketRef] { ticket?.view?.refs ?? [] }
+
+    private var referenceRows: [RefRow] {
+        RefRow.rows(refs, lookup: { id in
+            model.ticket(conversation.workspace, id).map { (key: $0.key, title: $0.displayTitle) }
+        }, attachments: { ticketId, name in
+            model.ticket(conversation.workspace, ticketId)?.view?.attachments
+                .first { $0.name == name || $0.title == name }
+                .map { ArtifactItem($0, in: .topic(workspace: conversation.workspace, ticket: ticketId)) }
+        })
+    }
+
+    private func remainingLinks(_ all: [InfoEntry], rows: [RefRow]) -> [InfoEntry] {
+        let urls = Set(rows.compactMap { row -> URL? in
+            if case .link(_, _, _, let url) = row { return url }
+            return nil
+        })
+        return entries(in: .links, from: all).filter { entry in
+            guard let url = entry.item.url else { return true }
+            return !urls.contains(url)
+        }
+    }
+
     private func entries(in group: InfoGroup, from all: [InfoEntry]) -> [InfoEntry] { InfoGrouping.entries(in: group, from: all) }
 
     var body: some View {
         let all = entries
+        let references = referenceRows
+        let links = remainingLinks(all, rows: references)
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
@@ -64,32 +88,20 @@ struct ConversationInfoView: View {
                     Text(summary).themeFont(15)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .padding(.horizontal, 16).padding(.vertical, 5)
-                        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
+                        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                         .accessibilityIdentifier("info-summary")
                 }
-                NavigationLink {
-                    InfoLanguageView(conversation: conversation)
-                } label: {
-                    HStack {
-                        Text("Voice & reply language").themeFont(16, .medium)
-                        Spacer(minLength: 8)
-                        Image(systemName: "chevron.right").accessibilityHidden(true)
-                    }
-                    .padding(.horizontal, 16).frame(minHeight: 44).padding(.vertical, 2)
-                    .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("info-language-row")
                 VStack(spacing: 16) {
-                    segments(all)
-                    content(entries(in: selection, from: all))
+                    segments(all, referenceCount: references.count + links.count)
+                    if selection == .links { referenceContent(references, links: links) }
+                    else { content(entries(in: selection, from: all)) }
                 }
             }
             .padding(16).padding(.top, 8)
         }
         .foregroundStyle(Theme.text).background(Theme.bg)
         .navigationTitle("Conversation info").navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Theme.surface, for: .navigationBar)
+        .toolbarBackground(Theme.bg, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .tint(Theme.brand).preferredColorScheme(.dark)
         .fullScreenCover(item: $viewer) { ArtifactViewer(item: $0) }
@@ -103,10 +115,8 @@ struct ConversationInfoView: View {
 
     private var header: some View {
         VStack(spacing: 16) {
-            Text(String(workspaceName.prefix(1)).uppercased()).themeFont(30, .semibold)
-                .foregroundStyle(Theme.brand).frame(width: 72, height: 72)
-                .background(Theme.brand.opacity(0.2), in: RoundedRectangle(cornerRadius: 26))
-                .accessibilityHidden(true)
+            WorkspaceBadge(name: workspaceName, icon: model.workspace(conversation.workspace)?.icon,
+                           color: model.workspace(conversation.workspace)?.color, size: 96, id: "info-\(conversation.workspace)")
             Text(title).themeFont(22, .semibold).multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
             Text(conversation.ticket == nil ? "Workspace conversation" : workspaceName)
@@ -115,26 +125,42 @@ struct ConversationInfoView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func segments(_ all: [InfoEntry]) -> some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2),
-                                 count: dynamicTypeSize.isAccessibilitySize ? 2 : 4), spacing: 4) {
-            ForEach(InfoGroup.allCases) { group in
-                let count = entries(in: group, from: all).count
-                Button { selection = group } label: {
-                    Text("\(group.title) (\(count))").themeFont(12, .semibold)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(selection == group ? Theme.brand : Theme.muted)
-                        .frame(maxWidth: .infinity, minHeight: 44).padding(.horizontal, 2)
-                        .background(selection == group ? Theme.surface3 : Theme.surface2,
-                                    in: RoundedRectangle(cornerRadius: 11))
+    /// One row of tabs: short labels, the count as a small badge (only when there is something). They share the width
+    /// when they fit; with large text the same row scrolls sideways instead of wrapping a label onto two lines.
+    private func segments(_ all: [InfoEntry], referenceCount: Int) -> some View {
+        let tabs = InfoGroup.allCases.map { g in (g, g == .links ? referenceCount : entries(in: g, from: all).count) }
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) { ForEach(tabs, id: \.0) { tabButton($0.0, count: $0.1, fill: true) } }
+            ScrollViewReader { reader in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) { ForEach(tabs, id: \.0) { tabButton($0.0, count: $0.1, fill: false).id($0.0) } }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(group.title), \(count) items")
-                .accessibilityAddTraits(selection == group ? .isSelected : [])
-                .accessibilityIdentifier("info-tab-\(group.rawValue)")
+                .onAppear { reader.scrollTo(selection, anchor: .center) }   // the selected tab is always in view
+                .onChange(of: selection) { _, new in withAnimation { reader.scrollTo(new, anchor: .center) } }
             }
         }
-        .padding(4).background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
+        .padding(4).background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+    }
+
+    private func tabButton(_ group: InfoGroup, count: Int, fill: Bool) -> some View {
+        Button { selection = group } label: {
+            HStack(spacing: 5) {
+                Text(group.title).themeFont(13, .semibold).lineLimit(1).fixedSize()
+                if count > 0 {
+                    Text("\(count)").themeFont(11, .semibold).lineLimit(1).fixedSize()
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Theme.surface3, in: Capsule(style: .continuous))
+                        .accessibilityHidden(true)
+                }
+            }
+            .foregroundStyle(selection == group ? Theme.brand : Theme.muted)
+            .padding(.horizontal, 10).frame(maxWidth: fill ? .infinity : nil, minHeight: 44)
+            .background(selection == group ? Theme.surface3 : Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m - 4, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(group.title), \(count) items")
+        .accessibilityAddTraits(selection == group ? .isSelected : [])
+        .accessibilityIdentifier("info-tab-\(group.rawValue)")
     }
 
     @ViewBuilder private func content(_ selected: [InfoEntry]) -> some View {
@@ -166,6 +192,67 @@ struct ConversationInfoView: View {
         }
     }
 
+    @ViewBuilder private func referenceContent(_ rows: [RefRow], links: [InfoEntry]) -> some View {
+        if rows.isEmpty && links.isEmpty {
+            Text("Nothing shared yet.").themeFont(15).foregroundStyle(Theme.muted)
+                .frame(maxWidth: .infinity).padding(.vertical, 32)
+        } else {
+            LazyVStack(spacing: 12) {
+                ForEach(rows) { row in
+                    referenceRow(row).accessibilityIdentifier("info-ref-\(row.id)")
+                }
+                ForEach(links) { entry in
+                    Button { open(entry) } label: { row(entry) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("info-item-\(entry.id)")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func referenceRow(_ row: RefRow) -> some View {
+        switch row {
+        case .link(_, let title, let host, let url):
+            Button { openURL(url) } label: {
+                referenceLabel(title, detail: host, symbol: "link")
+            }.buttonStyle(.plain)
+        case .ticket(let id, let label, let known):
+            Button {
+                if known, let target = refs.enumerated().first(where: { "ref\($0.offset)" == id })?.element.ticket {
+                    model.path.append(ChatRoute.ticket(workspace: conversation.workspace, ticket: target))
+                }
+            } label: {
+                referenceLabel(label, symbol: "arrow.turn.down.right", chevron: true)
+            }.buttonStyle(.plain).disabled(!known).opacity(known ? 1 : 0.5)
+        case .artifact(_, let name, let item):
+            if let item {
+                Button { viewer = item } label: {
+                    artifactCard(item, title: item.title, kindLabel: item.kind == .pdf ? "PDF" : "Artifact")
+                }.buttonStyle(.plain)
+            } else {
+                artifactCard(nil, title: name, kindLabel: "Artifact").opacity(0.5)
+            }
+        case .file(_, let text):
+            Text(text).font(.system(size: 15, design: .monospaced))
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(16)
+                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+        }
+    }
+
+    private func referenceLabel(_ title: String, detail: String? = nil, symbol: String, chevron: Bool = false) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol).themeFont(22).foregroundStyle(Theme.brand).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).themeFont(16, .medium)
+                if let detail { Text(detail).themeFont(13).foregroundStyle(Theme.muted) }
+            }.multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+            if chevron { ShellChevron() }
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(16)
+        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+    }
+
     private func row(_ entry: InfoEntry) -> some View {
         HStack(spacing: 12) {
             Image(systemName: selection == .links ? "link" : "doc")
@@ -178,26 +265,32 @@ struct ConversationInfoView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(16)
-        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
+        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
     }
 
     private func artifactCard(_ entry: InfoEntry) -> some View {
+        artifactCard(entry.item, title: entry.item.title, kindLabel: entry.kindLabel)
+    }
+
+    private func artifactCard(_ item: ArtifactItem?, title: String, kindLabel: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: entry.item.kind == .pdf ? "doc.richtext" : "globe")
+            Image(systemName: item?.kind == .pdf ? "doc.richtext" : "globe")
                 .themeFont(40).foregroundStyle(Theme.brand)
                 .frame(maxWidth: .infinity, minHeight: 120)
                 .background(Theme.surface3).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
-                Text(entry.item.title).themeFont(16, .semibold)
-                Text(entry.kindLabel).themeFont(13).foregroundStyle(Theme.muted)
-                Label("Open", systemImage: "arrow.up.right").themeFont(13, .semibold)
-                    .foregroundStyle(Theme.brand).padding(.top, 4)
+                Text(title).themeFont(16, .semibold)
+                Text(kindLabel).themeFont(13).foregroundStyle(Theme.muted)
+                if item != nil {
+                    Label("Open", systemImage: "arrow.up.right").themeFont(13, .semibold)
+                        .foregroundStyle(Theme.brand).padding(.top, 4)
+                }
             }
             .padding(14)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
     }
 
     private func open(_ entry: InfoEntry) {
@@ -243,7 +336,7 @@ struct ConversationInfoView: View {
 enum InfoGroup: String, CaseIterable, Identifiable {
     case photos, files, links, artifacts
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    var title: String { self == .links ? "References" : rawValue.capitalized }
 }
 
 struct InfoEntry: Identifiable {
@@ -292,7 +385,7 @@ private struct InfoThumbnail: View {
                     }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
             .task(id: blobID) {
                 image = nil
                 guard let blobID, let data = await model.blob(blobID), !Task.isCancelled else { return }
@@ -301,44 +394,7 @@ private struct InfoThumbnail: View {
     }
 }
 
-@MainActor
-private struct InfoLanguageView: View {
-    let conversation: ConversationID
-    @Environment(AppModel.self) private var model
-
-    private var languageName: String {
-        let code = LanguageLabel.conversationLanguage(model.conversationItems(conversation))
-        return (Locale.current.localizedString(forLanguageCode: code) ?? code).capitalized
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Replies in \(languageName)").themeFont(20, .semibold)
-                    Text("orch answers in the language you speak in this conversation.")
-                        .themeFont(15).foregroundStyle(Theme.muted)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle("Swiss German", isOn: Binding(
-                        get: { model.settings.swissGerman },
-                        set: { value in Task { await model.updateSettings(SettingsPatch(swissGerman: value)) } }
-                    ))
-                    .themeFont(16).frame(minHeight: 44)
-                    Text("Understands Swiss German when you speak.")
-                        .themeFont(13).foregroundStyle(Theme.muted)
-                }
-                .padding(16).background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
-            }
-            .padding(16)
-        }
-        .foregroundStyle(Theme.text).background(Theme.bg).tint(Theme.brand)
-        .navigationTitle("Voice & reply language").navigationBarTitleDisplayMode(.inline)
-        .preferredColorScheme(.dark)
-    }
-}
-
-/// Which attachments of a conversation go into Photos / Files / Links / Artifacts, newest first and without duplicates.
+/// Which attachments of a conversation go into Photos / Files / References / Artifacts, newest first and without duplicates.
 enum InfoGrouping {
     static func entries(messages: [ConvItem], ticketAttachments: [TicketSnapshot.Attachment], ticketAt: String,
                         conversation: ConversationID) -> [InfoEntry] {

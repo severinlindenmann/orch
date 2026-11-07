@@ -48,6 +48,42 @@ def read_ticket_file(root: Path, tid: str, folder: str, name, max_bytes: int) ->
     if parts is None or folder not in FOLDERS or not isinstance(tid, str) or not _ID_RE.fullmatch(tid):
         return None
     head = [".orch", "tickets", tid, folder]
+    return _read_parts(root, head, parts, max_bytes)
+
+
+def open_file_ref(root: Path, path: str, max_bytes: int) -> bytes | None:
+    """Read a project file without following symlinks or exposing orch/git state."""
+    parts = _parts(path)
+    if parts is None or any(p.rstrip(". ").lower() in (".orch", ".git") for p in parts):
+        return None
+    return _read_parts(root, [], parts, max_bytes)
+
+
+def file_ref_ok(root: Path, path) -> bool:
+    """The add/show-time twin of open_file_ref's rules: every part plain, none named .orch or .git, no part a
+    link, and the real path not inside the workspace's .orch folder. Nothing is opened or read."""
+    parts = _parts(path)
+    if parts is None or any(p.rstrip(". ").lower() in (".orch", ".git") for p in parts):
+        return False
+    if not (_DIR_FD and os.open in os.supports_dir_fd and hasattr(os, "O_DIRECTORY")) and any(
+        "~" in p for p in parts
+    ):
+        return False  # Windows: a short 8.3 name (ORCH~1) could be .orch, as in _read_parts
+    cur = Path(os.path.realpath(root))
+    for part in parts:
+        cur = cur / part
+        if cur.is_symlink():
+            return False
+    return not _inside_orch(root, cur)
+
+
+def _inside_orch(root: Path, p: Path) -> bool:
+    orch = Path(os.path.realpath(root)) / ".orch"
+    real = Path(os.path.realpath(p))
+    return real == orch or orch in real.parents
+
+
+def _read_parts(root: Path, head: list[str], parts: list[str], max_bytes: int) -> bytes | None:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     dir_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_DIRECTORY", 0)
     fds: list[int] = []
@@ -58,6 +94,8 @@ def read_ticket_file(root: Path, tid: str, folder: str, name, max_bytes: int) ->
                 fds.append(os.open(part, dir_flags, dir_fd=fds[-1]))
             fd = os.open(parts[-1], flags, dir_fd=fds[-1])
         else:  # Windows: no dir_fd. Check every part for links, contain the real path, re-check after open
+            if any("~" in p for p in [*head, *parts]):
+                return None
             base = Path(os.path.realpath(root))
             cur = base
             for part in [*head, *parts]:
@@ -67,6 +105,8 @@ def read_ticket_file(root: Path, tid: str, folder: str, name, max_bytes: int) ->
             real = Path(os.path.realpath(cur))
             allowed = base.joinpath(*head)
             if allowed not in real.parents or (base / ".orch" / "secrets") in (real, *real.parents):
+                return None
+            if not head and any(base / p in (real, *real.parents) for p in (".orch", ".git")):
                 return None
             before = os.lstat(real)
             if not stat.S_ISREG(before.st_mode):

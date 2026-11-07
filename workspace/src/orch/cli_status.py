@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from orch import services, term
+from orch import look, services, term
 from orch.errors import Refused
 
 
@@ -95,6 +95,8 @@ def _services_cmd(args, root: Path) -> None:
                     w = {"workspace": key, "name": root.resolve().name, "addons": []}
                     ws = sorted([*ws, w], key=lambda x: (x["name"].lower(), x["workspace"]))
                 w["addons"] = here
+        for w in ws:  # the workspace switcher draws each one with its badge
+            w.update({k: look.read(Path(w["workspace"]))[k] for k in ("icon", "color")})
         lines = []
         for w in ws:
             lines.append(f"{w['name']}  ({_home_path(w['workspace'])})")

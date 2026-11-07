@@ -39,10 +39,17 @@ struct MobileModeBanner: View {
     @Environment(AppModel.self) private var model
     var workspaceId: String? = nil
 
+    /// "Can't reach" depends on the clock (last call > 5 min), not only on data: re-evaluate every 15 s, because an unchanged
+    /// list poll no longer redraws the screen (#244).
     var body: some View {
+        TimelineView(.periodic(from: .now, by: 15)) { context in banner(now: context.date) }
+    }
+
+    @ViewBuilder
+    private func banner(now: Date) -> some View {
         let items = model.workspaces
             .filter { workspaceId == nil || $0.id == workspaceId }
-            .compactMap { w in MobileModeBannerState.of(w).map { (w.id, $0) } }
+            .compactMap { w in MobileModeBannerState.of(w, now: now).map { (w.id, $0) } }
         ForEach(items, id: \.0) { id, state in
             HStack(spacing: 10) {
                 Image(systemName: "bolt.horizontal.circle").foregroundStyle(Theme.brand).accessibilityHidden(true)
@@ -55,7 +62,7 @@ struct MobileModeBanner: View {
                 }
                 Spacer(minLength: 0)
             }.padding(.horizontal, 12).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                 .accessibilityElement(children: .contain).accessibilityIdentifier("mobile-mode-banner-\(id)")
         }
     }

@@ -81,13 +81,16 @@ struct Composer: View {
                         if recording && !locked {
                             VStack(spacing: 8) { Image(systemName: "lock"); Image(systemName: "arrow.up") }
                                 .themeFont(16).foregroundStyle(Theme.brand).frame(width: 44, height: 65)
-                                .background(Theme.surface3, in: Capsule()).offset(y: -77).accessibilityHidden(true)
+                                .background(Theme.surface3, in: Capsule(style: .continuous)).offset(y: -77).accessibilityHidden(true)
                         }
                     }
             }
             if target == nil { Text("Starting topic…").themeFont(13).foregroundStyle(Theme.muted) }
             else if let note, !hasAudio { Text(note).themeFont(13).foregroundStyle(Theme.muted).accessibilityIdentifier("composer-note") }
-        }.padding(.horizontal, 12).padding(.vertical, 8).background(Theme.surface)
+        }.padding(.horizontal, 8).padding(.vertical, 8)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous))
+            .padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 4)
+            .background(Theme.bg)
             .accessibilityElement(children: .contain).accessibilityIdentifier("composer")
             .foregroundStyle(Theme.text).tint(Theme.brand)
             .sensoryFeedback(.success, trigger: success).sensoryFeedback(.warning, trigger: cancellation)
@@ -99,16 +102,16 @@ struct Composer: View {
             .onDisappear { holding = false; holdTask?.cancel(); hintTask?.cancel(); discard() }
             .sheet(isPresented: $attaching) {
                 MediaPicker { selection in Task { await sendMedia(selection) } }
-                    .presentationDetents([.height(300), .large]).presentationDragIndicator(.visible).tint(Theme.brand)
+                    .tint(Theme.brand)
             }
     }
     private var composeRow: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            control("plus", "Attach", "composer-attach") { attaching = true }.disabled(target == nil || busy)
+            control("plus", "Attach", "composer-attach") { focused = false; attaching = true }.disabled(target == nil || busy)
             TextField(target == nil ? "Starting topic…" : placeholder, text: $text, axis: .vertical)
                 .themeFont(17).lineLimit(1...5).padding(.horizontal, 12).padding(.vertical, 10)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24))
-                .overlay(RoundedRectangle(cornerRadius: 24).stroke(Theme.borderStrong))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.xl - 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.xl - 8, style: .continuous).stroke(Theme.borderStrong))
                 .focused($focused).disabled(target == nil || busy).accessibilityIdentifier(fieldId)
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Color.clear.frame(width: 44, height: 44) }
             else { control("arrow.up", "Send message", sendId, filled: true) { Task { await sendText() } }.disabled(busy || target == nil) }
@@ -176,7 +179,7 @@ struct Composer: View {
     private var waveform: some View {
         HStack(spacing: 3) {
             ForEach(Array((recorder?.levels ?? []).enumerated()), id: \.offset) { _, level in
-                Capsule().fill(Theme.muted).frame(width: 3, height: 4 + 22 * level)
+                Capsule(style: .continuous).fill(Theme.muted).frame(width: 3, height: 4 + 22 * level)
             }
         }.frame(maxWidth: .infinity, minHeight: 28).animation(reduceMotion ? nil : .linear(duration: 0.08), value: recorder?.levels).accessibilityHidden(true)
     }
@@ -228,7 +231,12 @@ struct Composer: View {
     private func sendRecording() async {
         guard let target, !busy else { return }
         collect()
-        guard segments.reduce(0, { $0 + $1.duration }) >= 1 else { discard(); return }
+        guard segments.reduce(0, { $0 + $1.duration }) >= 1 else {
+            discard()   // too short to be a memo: say so instead of dropping it silently (the same hint as a plain tap)
+            hint = true; hintTask?.cancel()
+            hintTask = Task { try? await Task.sleep(for: .seconds(2)); if !Task.isCancelled { hint = false } }
+            return
+        }
         stopPlayback(); busy = true; error = nil; micError = false
         defer { busy = false }
         let replyId = reply?.messageId

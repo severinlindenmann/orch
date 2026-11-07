@@ -12,7 +12,7 @@ Format: steps → expected result.
 - W3 `orch check done` without evidence → refused, exit 2, plain reason; with `--evidence` commit → done.
 - W4 `orch ticket status done` while an item lacks evidence → refused.
 - W5 Agent asks q1 with options + recommendation, status waiting; human answers via CLI → answer, `answered_by`, `via: cli` set.
-- W6 3 links (Jira and Teams by address, a plain one) + `orch link list` + `orch ext set` → kept; a hand-added unknown field survives the next CLI write.
+- W6 3 references (Jira and Teams by address, a plain one) + `orch ref list` + `orch ext set` → kept; a hand-added unknown field survives the next CLI write.
 - W7 Same flow in Home with codex exec and no git → works the same; ticket file in local git and remote git (Reports) also works.
 
 ## Add-ons (A)
@@ -69,6 +69,10 @@ Format: steps → expected result.
 - M3 Same question on two phones → answered on one, gone on the other; a late answer from the second → 409 `already_answered`.
 - M4 Send text to Home (typed, and voice with a test audio file) → Home inbox has the text message from the phone.
 - M5 Phone tries to send to Reports → 403; sign out → token deleted, API refuses the old token.
+
+## Workspace look (LOOK)
+- LOOK-1 `orch look list|show|set` and the relay look (core side).
+- LOOK-2 Dashboard: Settings > General picks Wallet/Amber (config + relay), the description edit is a pending proposal, the shared-pages switch turns off, the sidebar switcher lists both workspaces with badges (Playwright, 1280 and 720; skipped without node + playwright).
 
 ## Whole flow (F)
 - F1 Fresh machine: GitHub install → `orch init` → publish + relay connect → ticket with evidence → question answered on the phone → report published → link opens. Runs in under 15 min.

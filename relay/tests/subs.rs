@@ -464,7 +464,7 @@ async fn files_metadata_only_unless_downloads_allowed() {
     let tv = |v: &Value| v["items"][0]["ticket_view"].clone();
     let v0 = tv(&events(&t, &no_files, "").await.1);
     assert_eq!(v0["files"], json!([]));
-    assert_eq!(v0["links"][0]["url"], "https://github.com/a/b/pull/1");
+    assert_eq!(v0["refs"][0]["url"], "https://github.com/a/b/pull/1");
     assert!(v0.get("history_tail").is_none() && v0.get("checklist").is_none());
     assert!(!v0.to_string().contains("secret-ish"));
     let v1 = tv(&events(&t, &meta, "").await.1);

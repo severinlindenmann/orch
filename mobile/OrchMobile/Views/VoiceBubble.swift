@@ -26,7 +26,7 @@ struct Waveform: View {
             HStack(spacing: max(1, (proxy.size.width - 84) / 27)) {
                 ForEach(0..<28, id: \.self) { index in
                     let level = levels.isEmpty ? 0.2 : levels[min(levels.count - 1, index * levels.count / 28)]
-                    RoundedRectangle(cornerRadius: 3)
+                    RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous)
                         .fill(Double(index) / 28 < (progress ?? 0) ? Theme.brand : tint)
                         .frame(width: min(3, proxy.size.width / 55), height: max(4, 28 * min(1, max(0, level))))
                 }
@@ -54,6 +54,7 @@ struct Waveform: View {
         audio?.prepareToPlay()
         duration = audio?.duration ?? 0
         isAvailable = audio != nil
+        if duration <= 0 { Task { [weak self] in if let d = await AudioLength.seconds(of: data) { self?.duration = d } } }
     }
 
     func play(model: AppModel) {
@@ -96,6 +97,8 @@ struct Waveform: View {
 
 func voiceRateText(_ rate: Double) -> String { rate == 1.5 ? "1.5x" : "\(Int(rate))x" }
 private func voiceDurationText(_ duration: Double) -> String { clockText(duration) }
+/// Nothing is shown until the length is known (never "00:00" for a real note).
+func voiceDurationLabel(_ duration: Double) -> String? { duration > 0 ? clockText(duration) : nil }
 
 struct OwnVoiceBubble: View {
     let item: ConvItem
@@ -123,17 +126,17 @@ struct OwnVoiceBubble: View {
                         .foregroundStyle(Theme.onBrand).background(Theme.brand, in: Circle())
                 }.disabled(!player.isAvailable).opacity(player.isAvailable ? 1 : 0.45)
                     .accessibilityIdentifier("voice-play")
-                    .accessibilityLabel(player.isAvailable ? "Play voice message, \(voiceDurationText(duration))" : "Audio not available")
+                    .accessibilityLabel(player.isAvailable ? "Play voice message" + (voiceDurationLabel(duration).map { ", \($0)" } ?? "") : "Audio not available")
                     .accessibilityValue(player.isPlaying ? "Pause" : "Play")
                 scrubber
                 Button { player.cycleRate() } label: {
                     Text(voiceRateText(player.rate)).themeFont(13)
-                        .frame(width: 44, height: 44).background(Theme.surface3, in: RoundedRectangle(cornerRadius: 12))
+                        .frame(width: 44, height: 44).background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                 }.accessibilityIdentifier("voice-speed").accessibilityLabel("Playback speed")
                     .accessibilityValue(voiceRateText(player.rate))
             }
             HStack(spacing: 5) {
-                Text(voiceDurationText(duration)).foregroundStyle(Theme.muted)
+                if let t = voiceDurationLabel(duration) { Text(t).foregroundStyle(Theme.muted) }
                 Circle().fill(Theme.brand).frame(width: 10, height: 10).accessibilityHidden(true)
                 Text("Voice memo").foregroundStyle(Theme.brand)
             }.themeFont(13).padding(.leading, 48)
@@ -145,8 +148,8 @@ struct OwnVoiceBubble: View {
             }
         }.foregroundStyle(Theme.text).buttonStyle(PressStyle())
             .padding(.vertical, 11).padding(.horizontal, 13)
-            .background(Theme.brand.opacity(0.14), in: RoundedRectangle(cornerRadius: 17))
-            .overlay(RoundedRectangle(cornerRadius: 17).stroke(Theme.brand.opacity(0.3)))
+            .background(Theme.brand.opacity(0.14), in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous).stroke(Theme.brand.opacity(0.3)))
             .containerRelativeFrame(.horizontal) { width, _ in width * 0.8 }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .task(id: item.voice?.blobId) { await loadAudio() }
@@ -230,7 +233,7 @@ struct AgentMemoBubble: View {
                     }.frame(height: 44).accessibilityIdentifier("voice-scrub")
                     Button { model.speech.cycleRate() } label: {
                         Text(voiceRateText(model.speech.rate)).themeFont(13).frame(width: 44, height: 44)
-                            .background(Theme.surface3, in: RoundedRectangle(cornerRadius: 12))
+                            .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                     }.accessibilityIdentifier("voice-speed").accessibilityLabel("Playback speed")
                         .accessibilityValue(voiceRateText(model.speech.rate))
                 }
@@ -254,7 +257,7 @@ struct AgentMemoBubble: View {
                     Text(item.text).themeFont(17).textSelection(.enabled).accessibilityIdentifier("voice-transcript")
                 }
             }.padding(.vertical, 11).padding(.horizontal, 13)
-                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 17))
+                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
             if current, let notice = model.speech.notice {
                 Text(notice).themeFont(13).foregroundStyle(Theme.muted)
             }
@@ -262,6 +265,7 @@ struct AgentMemoBubble: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.trailing, ChatBubbleLayout.agentTrailingSpace(for: typeSize))
             .onChange(of: model.speech.state, initial: true) { _, _ in captureTiming() }
+            .task { if duration <= 0, let clip = model.speechClip(item, workspaceName: workspaceName), let d = await model.speech.cachedDuration(for: clip) { duration = d } }
             .onChange(of: model.speech.rate) { _, _ in captureTiming() }
             .accessibilityAction(named: "Reply") { onReply?() }
             .accessibilityAction(named: playing ? "Pause" : "Listen") { toggle() }
@@ -283,6 +287,9 @@ struct AgentMemoBubble: View {
         elapsed = (info[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? NSNumber)?.doubleValue ?? 0
         duration = (info[MPMediaItemPropertyPlaybackDuration] as? NSNumber)?.doubleValue ?? 0
         timingDate = Date()
+        if duration <= 0, let clip = model.speechClip(item, workspaceName: workspaceName) {
+            Task { if let d = await model.speech.cachedDuration(for: clip) { duration = d } }   // known once the audio is on disk
+        }
     }
     private func progress(at date: Date) -> Double? {
         guard current, duration > 0 else { return listened ? 1 : nil }

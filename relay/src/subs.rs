@@ -372,7 +372,7 @@ fn view_subset(tv: &Value, files: bool) -> Value {
     };
     json!({"title": tv["title"], "status": tv["status"], "agent": tv.get("agent").cloned().unwrap_or(Value::Null),
         "summary": tv.get("summary").cloned().unwrap_or(Value::Null), "done": tv["done"], "total": tv["total"],
-        "links": links, "files": file_list})
+        "refs": links, "files": file_list})
 }
 
 fn first_answer(c: &Connection, qid: &str) -> rusqlite::Result<Option<Msg>> {

@@ -1,0 +1,265 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://orch.severin.io/contracts/look.schema.json",
+ "title": "Workspace look (contracts/look.md)",
+ "description": "Icon and colour of a workspace. The enums must equal the ids in look.json (validate.py checks it). null = default (first letter / Automatic colour).",
+ "$defs": {
+  "icon": {
+   "oneOf": [
+    {
+     "type": "string",
+     "enum": [
+      "briefcase",
+      "office",
+      "presentation",
+      "calendar",
+      "checklist",
+      "folder",
+      "inbox",
+      "mail",
+      "phone",
+      "team",
+      "house",
+      "sofa",
+      "baby",
+      "dog",
+      "cat",
+      "flower",
+      "tree",
+      "key",
+      "bed",
+      "kitchen",
+      "repairs",
+      "cleaning",
+      "wallet",
+      "savings",
+      "cash",
+      "card",
+      "receipt",
+      "growth",
+      "bank",
+      "calculator",
+      "legal",
+      "health",
+      "doctor",
+      "pill",
+      "gym",
+      "apple",
+      "bike",
+      "mind",
+      "salad",
+      "walk",
+      "code",
+      "terminal",
+      "bug",
+      "branch",
+      "database",
+      "server",
+      "chip",
+      "cloud",
+      "robot",
+      "puzzle",
+      "palette",
+      "design",
+      "brush",
+      "camera",
+      "image",
+      "film",
+      "music",
+      "mic",
+      "layout",
+      "type",
+      "book",
+      "writing",
+      "notebook",
+      "school",
+      "library",
+      "news",
+      "document",
+      "idea",
+      "plane",
+      "car",
+      "train",
+      "map",
+      "compass",
+      "mountain",
+      "tent",
+      "globe",
+      "ship",
+      "pin",
+      "cart",
+      "store",
+      "package",
+      "truck",
+      "coffee",
+      "pizza",
+      "wine",
+      "chef",
+      "gift",
+      "tag",
+      "sun",
+      "moon",
+      "leaf",
+      "flame",
+      "bolt",
+      "star",
+      "rocket",
+      "shield",
+      "sparkles",
+      "flag",
+      "party",
+      "volunteer"
+     ]
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "description": "An icon id from look.json, or null = first letter of the name"
+  },
+  "color": {
+   "oneOf": [
+    {
+     "type": "string",
+     "enum": [
+      "teal",
+      "green",
+      "lime",
+      "amber",
+      "orange",
+      "red",
+      "pink",
+      "violet",
+      "indigo",
+      "blue",
+      "cyan",
+      "slate"
+     ]
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "description": "A colour token from look.json, or null = Automatic (colour from the name)"
+  },
+  "look_by": {
+   "enum": [
+    "admin",
+    "workspace",
+    null
+   ],
+   "description": "Who set the look last: null = nobody yet, admin = the relay/publish admin portal (only before the workspace sent its own), workspace = the workspace (its dashboard); from then on admin changes get 409"
+  },
+  "me_look_patch": {
+   "type": "object",
+   "minProperties": 1,
+   "additionalProperties": false,
+   "properties": {
+    "icon": {
+     "$ref": "#/$defs/icon"
+    },
+    "color": {
+     "$ref": "#/$defs/color"
+    }
+   },
+   "description": "PATCH /v1/me body that sets the look (relay and publish). Left out = unchanged, null = back to default. Look fields may not be mixed with description/tags in one body."
+  },
+  "admin_look_patch": {
+   "type": "object",
+   "properties": {
+    "icon": {
+     "$ref": "#/$defs/icon"
+    },
+    "color": {
+     "$ref": "#/$defs/color"
+    }
+   },
+   "description": "The look part of PATCH/POST /admin/api/workspaces[/<id>] (other fields as in relay-api.md / publish-api.md)"
+  },
+  "look_fields": {
+   "type": "object",
+   "required": [
+    "icon",
+    "color"
+   ],
+   "properties": {
+    "icon": {
+     "$ref": "#/$defs/icon"
+    },
+    "color": {
+     "$ref": "#/$defs/color"
+    }
+   }
+  },
+  "publish_me_patch": {
+   "type": "object",
+   "minProperties": 1,
+   "additionalProperties": false,
+   "properties": {
+    "icon": {
+     "$ref": "#/$defs/icon"
+    },
+    "color": {
+     "$ref": "#/$defs/color"
+    },
+    "show_on_shared_pages": {
+     "type": "boolean"
+    }
+   },
+   "description": "PATCH /v1/me look body on publish: the relay body plus show_on_shared_pages (default true)."
+  },
+  "file_meta": {
+   "type": "object",
+   "required": [
+    "workspace"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "workspace": {
+     "oneOf": [
+      {
+       "type": "null"
+      },
+      {
+       "type": "object",
+       "required": [
+        "name",
+        "icon",
+        "color"
+       ],
+       "additionalProperties": false,
+       "properties": {
+        "name": {
+         "type": "string"
+        },
+        "icon": {
+         "$ref": "#/$defs/icon"
+        },
+        "color": {
+         "$ref": "#/$defs/color"
+        }
+       }
+      }
+     ]
+    }
+   },
+   "description": "GET /f/<id>/meta on publish"
+  },
+  "look_list": {
+   "type": "object",
+   "required": [
+    "icons",
+    "colors"
+   ],
+   "properties": {
+    "icons": {
+     "type": "array"
+    },
+    "colors": {
+     "type": "array"
+    }
+   },
+   "description": "orch look list --json: {categories, icons, colors} exactly as in look.json"
+  }
+ }
+}

@@ -15,7 +15,7 @@ import re
 from datetime import date
 
 from orch.errors import Refused
-from orch.links import one_line
+from orch.refs import one_line
 
 KEY_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
@@ -105,10 +105,10 @@ def parse_value(f: dict, raw: str, schema_prop: dict):
             raise Refused(f"{name} must be a day like 2026-12-01.") from None
         return v
     if f["type"] == "url":
-        from orch import links
+        from orch import refs
 
         try:
-            return links.check_url(v)
+            return refs.check_url(v)
         except Refused:
             raise Refused(f"{name} must be a web address that starts with https:// or http://.") from None
     v = one_line(v, 2000)  # no control characters (terminal escapes), bidi or invisible ones

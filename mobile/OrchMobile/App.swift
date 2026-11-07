@@ -5,6 +5,8 @@ struct OrchMobileApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel()
 
+    init() { Theme.applyBarAppearance() }
+
     var body: some Scene {
         WindowGroup {
             root

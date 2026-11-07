@@ -41,6 +41,9 @@ struct Workspace: Codable, Sendable, Equatable, Identifiable {
     var mutedUntil: String? = nil
     /// Mobile mode of the workspace's computer (relay-api.md, Mobile mode); nil from an older relay.
     var mobileMode: MobileMode? = nil
+    /// Look chosen in the workspace (contracts/look.md); nil = letter + Automatic colour. Unknown values fall back in `Look.shown`.
+    var icon: String? = nil
+    var color: String? = nil
     var displayName: String { OrchMobile.displayName(name) }
     func isMuted(now: Date = Date()) -> Bool {
         guard let m = mutedUntil else { return false }
@@ -336,9 +339,12 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
     var running: Bool? = nil
     var attachments: [Attachment] = []
     var historyTail: [Line] = []
+    /// What the ticket points at (web addresses, other tickets, files it produced, project files). Unknown kinds are left out.
+    var refs: [TicketRef] = []
 
     init(title: String? = nil, status: String? = nil, agent: String? = nil, summary: String? = nil, checklist: [Task] = [],
-         running: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = []) {
+         running: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = [], refs: [TicketRef] = []) {
+        self.refs = refs
         self.title = title; self.status = status; self.agent = agent; self.summary = summary; self.checklist = checklist
         self.done = checklist.filter(\.done).count; self.total = checklist.count
         self.running = running; self.attachments = attachments; self.historyTail = historyTail
@@ -355,8 +361,9 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         running = try? c.decodeIfPresent(Bool.self, forKey: .running)
         attachments = (try? c.decodeIfPresent([Attachment].self, forKey: .attachments)) ?? []
         historyTail = (try? c.decodeIfPresent([Line].self, forKey: .historyTail)) ?? []
+        refs = TicketRef.decodeList(c, forKey: .refs)
     }
-    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, running, attachments, historyTail }
+    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, running, attachments, historyTail, refs }
     var doneCount: Int { done ?? checklist.filter(\.done).count }
     var totalCount: Int { total ?? checklist.count }
 }

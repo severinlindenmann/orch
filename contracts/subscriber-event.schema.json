@@ -29,15 +29,15 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["title", "status", "agent", "summary", "done", "total", "links", "files"],
+          "required": ["title", "status", "agent", "summary", "done", "total", "refs", "files"],
           "properties": {
             "title": { "type": "string" },
-            "status": { "enum": ["open", "active", "waiting", "done", "dropped"] },
+            "status": { "enum": ["open", "active", "waiting", "ready", "review", "done", "dropped"] },
             "agent": { "type": ["string", "null"] },
             "summary": { "type": ["string", "null"] },
             "done": { "type": "integer", "minimum": 0 },
             "total": { "type": "integer", "minimum": 0 },
-            "links": {
+            "refs": {
               "type": "array",
               "items": {
                 "type": "object",

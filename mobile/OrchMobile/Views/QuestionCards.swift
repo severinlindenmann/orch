@@ -47,8 +47,8 @@ struct QuestionCard: View {
                 }
             }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                 .foregroundStyle(isStale ? Theme.muted : Theme.text)
-                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(item.answer != nil || isStale ? Theme.border : .clear))
+                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(item.answer != nil || isStale ? Theme.border : .clear))
                 .buttonStyle(PressStyle()).accessibilityElement(children: .contain)
                 .accessibilityIdentifier("question-\(q.id)")
         }
@@ -64,7 +64,7 @@ struct QuestionCard: View {
             Button { onReply(q) } label: {
                 Label("Reply", systemImage: "arrow.turn.up.left").themeFont(15, .medium)
                     .padding(.horizontal, 16).frame(minHeight: 44)
-                    .foregroundStyle(Theme.brand).background(Theme.surface3, in: Capsule())
+                    .foregroundStyle(Theme.brand).background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
             }.accessibilityIdentifier("question-reply").disabled(model.pendingAnswers[q.id] != nil)
         } else if q.isAllow {
             VStack(spacing: 12) {
@@ -112,8 +112,8 @@ struct QuestionCard: View {
             }.themeFont(15, .medium).padding(.horizontal, 12).padding(.vertical, 10)
                 .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: 44)
                 .foregroundStyle(primary ? Theme.onBrand : Theme.text)
-                .background(primary ? Theme.brand : Theme.surface3, in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(q.message.body.recommended == option ? Theme.brand : .clear))
+                .background(primary ? Theme.brand : Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(q.message.body.recommended == option ? Theme.brand : .clear))
                 .opacity(pending != nil && pending != option ? 0.45 : 1)
         }.disabled(pending != nil).accessibilityLabel(option).accessibilityIdentifier("answer-\(option)")
     }
@@ -123,7 +123,7 @@ struct QuestionCard: View {
             if checked { Image(systemName: "checkmark") }
             Text(label(q, answer))
         }.themeFont(15).padding(.horizontal, 12).padding(.vertical, 10).frame(minHeight: 44)
-            .background(Theme.surface3, in: RoundedRectangle(cornerRadius: 10))
+            .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
             .accessibilityElement(children: .ignore).accessibilityLabel(answer)
             .accessibilityValue(checked ? "Selected" : "")
     }
@@ -204,8 +204,8 @@ struct QuestionCard: View {
                 }.accessibilityLabel("Open \(artifact?.label ?? "preview")").accessibilityIdentifier("question-preview-\(id)")
             }.padding(8)
         }.frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.surface2).clipShape(RoundedRectangle(cornerRadius: 13))
-            .overlay(RoundedRectangle(cornerRadius: 13).stroke(suggested ? Theme.brand : Theme.border))
+            .background(Theme.surface2).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(suggested ? Theme.brand : Theme.border))
     }
 }
 

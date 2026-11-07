@@ -160,6 +160,7 @@ async fn workspaces(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value
             )
             .optional()?;
         if let Some(mut card) = card {
+            crate::look::add_to(&c, &mut card, false);
             card["open_questions"] = open.iter().filter(|m| &m.from == w).count().into();
             card["muted_until"] = store::muted_until(&c, &pid, w);
             card["mobile_mode"] = store::mobile_mode(&c, w);
@@ -980,12 +981,14 @@ async fn patch_workspace(
         [&wsid],
         store::ws_card,
     )?;
+    crate::look::add_to(&c, &mut card, false);
     card["open_questions"] = open_questions(&c, &pid, &ws)?
         .iter()
         .filter(|m| m.from == wsid)
         .count()
         .into();
     card["muted_until"] = store::muted_until(&c, &pid, &wsid);
+    card["mobile_mode"] = store::mobile_mode(&c, &wsid);
     Ok(Json(card))
 }
 

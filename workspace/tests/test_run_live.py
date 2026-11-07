@@ -182,7 +182,9 @@ def test_an_event_with_stdin_left_open_never_blocks(proj, run, monkeypatch, kind
         t = time.monotonic()
         code, out, err = run("run", "event", "--run", "r_nosuchrun", "--kind", kind)
         took = time.monotonic() - t
-    os.close(w)
+        # End stdin before closing it: the given-up read is still in os.read on r, and on Windows closing an
+        # fd another thread reads waits for that read (the test hung 6 h in CI). EOF lets the read finish.
+        os.close(w)
     assert code == 0 and out == "" and err == "" and took < 2
 
 

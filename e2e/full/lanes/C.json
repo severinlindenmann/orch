@@ -11,7 +11,8 @@
   "Delete",
   "Remove",
   "Sign out",
-  "\\|Cancel$"
+  "\\|Cancel$",
+  "\\|Close$"
  ],
  "steps": [
   {
@@ -91,6 +92,72 @@
     {
      "do": "press",
      "key": "Escape"
+    }
+   ]
+  },
+  {
+   "id": "C11",
+   "name": "Overview map: open a workspace and a pair, switch the filter",
+   "page": "relay-map",
+   "expect": "clicking a node or a pair shows its details; the filter chips switch",
+   "actions": [
+    {
+     "do": "click",
+     "sel": "nav a:has-text('Overview'), aside a:has-text('Overview')"
+    },
+    {
+     "do": "wait",
+     "ms": 600
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Pilatus') >> visible=true >> nth=0",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 400
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Reports') >> visible=true >> nth=0",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 400
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Home') >> visible=true >> nth=0",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 400
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text(' and ') >> visible=true >> nth=0",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 400
+    },
+    {
+     "do": "click",
+     "sel": "button:text-is('All')",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "a:has-text('All messages')",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 500
     }
    ]
   },
@@ -251,7 +318,7 @@
     },
     {
      "do": "fill",
-     "sel": "input[placeholder='e.g. Team chat bot']",
+     "sel": "role=textbox[name='Name'] >> visible=true >> nth=0",
      "value": "Browser bot"
     },
     {
@@ -294,6 +361,15 @@
     {
      "do": "click_all_census",
      "page": "relay-sub-dialog"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Close')",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add subscriber') >> nth=0"
     },
     {
      "do": "click",

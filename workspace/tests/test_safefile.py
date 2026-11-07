@@ -1,6 +1,7 @@
 """orch.safefile: the one reader for ticket folder files (hard link, FIFO, swapped folder, links, shapes)."""
 
 import os
+import sys
 
 import pytest
 
@@ -62,6 +63,7 @@ def test_links_are_never_followed(root, mode, tmp_path):
     assert rd(root, "key.txt", "evidence") is None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the dir_fd path is POSIX only (no O_DIRECTORY)")
 def test_a_folder_swapped_for_a_link_while_reading_is_not_followed(root, monkeypatch):
     """After the folder was opened, its path is swapped for a link to the secrets: the file is still read
     from the folder we hold, never from the link."""
@@ -145,3 +147,71 @@ def test_an_fstat_error_closes_the_file(root, mode, monkeypatch):
     assert rd(root, "n.md") is None
     monkeypatch.undo()
     assert opened and sorted(opened) == sorted(closed)
+
+
+@pytest.mark.parametrize("fallback", [False, True])
+def test_project_file_reader(tmp_path, monkeypatch, fallback):
+    from orch import safefile
+
+    monkeypatch.setattr(safefile, "_DIR_FD", not fallback)
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "docs").mkdir()
+    (root / "docs" / "spec.md").write_bytes(b"hello")
+    assert safefile.open_file_ref(root, "docs/spec.md", 5) == b"hello"
+    with pytest.raises(safefile.TooLarge):
+        safefile.open_file_ref(root, "docs/spec.md", 4)
+    for path in [
+        "../secret",
+        "/etc/passwd",
+        ".orch/secrets/x",
+        ".git/config",
+        "docs/../docs/spec.md",
+        "x\0y",
+    ]:
+        assert safefile.open_file_ref(root, path, 100) is None
+    (root / "symlink").symlink_to(root / "docs" / "spec.md")
+    (root / "folder").symlink_to(root / "docs", target_is_directory=True)
+    os.link(root / "docs" / "spec.md", root / "hardlink")
+    for path in ["symlink", "folder/spec.md", "hardlink"]:
+        assert safefile.open_file_ref(root, path, 100) is None
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(root / "pipe")
+        assert safefile.open_file_ref(root, "pipe", 100) is None
+
+
+@pytest.mark.parametrize("path", ["sub/.git/config", ".orch./secrets/x", ".git /config", "sub/.GiT/config"])
+def test_project_private_parts_refused(root, mode, path):
+    file = root / path
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text("secret")
+    assert safefile.open_file_ref(root, path, 100) is None
+
+
+def test_windows_short_names_refused(root, monkeypatch):
+    monkeypatch.setattr(safefile, "_DIR_FD", False)
+    (root / "ORCH~1").mkdir()
+    (root / "ORCH~1" / "secret").write_text("secret")
+    assert safefile.open_file_ref(root, "ORCH~1/secret", 100) is None
+
+
+@pytest.mark.parametrize("private", [".orch", ".git"])
+def test_windows_real_private_path_refused(root, monkeypatch, private):
+    monkeypatch.setattr(safefile, "_DIR_FD", False)
+    realpath = os.path.realpath
+    monkeypatch.setattr(
+        os.path,
+        "realpath",
+        lambda p: str(root / private / "secret") if str(p) == str(root / "alias") else realpath(p),
+    )
+    assert safefile.open_file_ref(root, "alias", 100) is None
+
+
+def test_file_ref_ok_refuses_a_short_name_on_windows(root, monkeypatch):
+    (root / "ORCH~1").mkdir()
+    monkeypatch.setattr(safefile, "_DIR_FD", True)
+    if hasattr(os, "O_DIRECTORY"):
+        assert safefile.file_ref_ok(root, "ORCH~1/x.md")  # POSIX: unchanged
+    monkeypatch.setattr(safefile, "_DIR_FD", False)  # the Windows path
+    assert not safefile.file_ref_ok(root, "ORCH~1/x.md")
+    assert safefile.file_ref_ok(root, "docs/x.md")

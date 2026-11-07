@@ -234,6 +234,7 @@ ORCH_IGNORE = [
     "run/",
     "tmp-refresh/",
     "harness/",
+    "local/",
     "tickets/*/evidence/",
 ]
 

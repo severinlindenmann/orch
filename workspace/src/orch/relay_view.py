@@ -4,6 +4,7 @@ Local files only, no network: workspaces.json, allows.json, inbox, outbox and th
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
 from pathlib import Path
@@ -183,21 +184,33 @@ def view(root: Path) -> dict:
             }
         )
         return out
+    with contextlib.suppress(Exception):  # the admin's settings changed: pick them up now
+        relay.auto_refresh(root)
     peers = _peers(root)
     waiting = len(relay.outbox_list(root))
     if waiting:
         s = "s" if waiting != 1 else ""
-        out["notice"] = f"{waiting} message{s} wait to be sent. They go out with the next orch relay command."
+        problem = relay.outbox_problem(root)
+        out["notice"] = (
+            f"{waiting} message{s} wait to be sent: {problem}"
+            if problem
+            else f"{waiting} message{s} wait to be sent. They go out as soon as the relay can be reached."
+        )
         out["notice_tone"] = "warn"
     else:
-        out["notice"] = "Connected."
+        out["notice"] = "Connected. Send messages and files to other workspaces."
         out["notice_tone"] = "good"
     out["blocks"].append(
         {
             "type": "list",
             "title": f"Workspaces you can talk to · {len(peers)}",
             "items": peers[:50]
-            or [{"title": "Nobody yet", "subtitle": "Ask your admin, then run: orch relay refresh"}],
+            or [
+                {
+                    "title": "Nobody yet",
+                    "subtitle": "Ask your admin to allow this workspace to talk to others.",
+                }
+            ],
         }
     )
     rows: list[tuple[str, dict]] = []
@@ -235,7 +248,7 @@ def view(root: Path) -> dict:
         {
             "title": "No messages yet",
             "subtitle": (
-                "Try: orch relay send " + _arg(peers[0]["title"]) + ' "Hello"'
+                "Send one from the phone or from another workspace."
                 if peers
                 else "First add a workspace you can talk to (ask your admin)."
             ),

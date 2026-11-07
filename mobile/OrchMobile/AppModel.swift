@@ -49,6 +49,8 @@ final class AppModel {
     private(set) var questionLog: [String: Question] = [:]
     /// Read state per chat (client only, kept in UserDefaults).
     private(set) var readState = ReadState(seen: UserDefaults.standard.dictionary(forKey: "chatRead") as? [String: String] ?? [:])
+    /// Archive, delete and auto-archive of chats: phone-local (ArchiveStore.swift).
+    private(set) var archive = ArchiveStore.load()
     /// Everything the phone writes (texts, voice, photos, files, locations, feedback, answers): durable, retried with the same client_id.
     private(set) var outbox: Outbox
     /// Per-phone settings kept on the relay (read aloud, Swiss German, monthly cap).
@@ -76,16 +78,21 @@ final class AppModel {
     let voiceMode: VoiceInput.Mode
 
     private let outboxDirectory: URL
+    static let installedMarkerKey = "installedMarker"
 
     init(useMock: Bool = AppModel.configuredMock, session: URLSession = .shared,
          voiceMode: VoiceInput.Mode = AppModel.configuredVoice, outboxDirectory: URL = Outbox.defaultDirectory(),
-         speechCache: URL = SpeechPlayer.defaultCacheDirectory, systemAudioControls: Bool = true) {
+         speechCache: URL = SpeechPlayer.defaultCacheDirectory, systemAudioControls: Bool = true,
+         defaults: UserDefaults = .standard) {
         self.useMock = useMock
         let mock = useMock ? MockRelay() : nil
         self.mock = mock
         self.session = session
         self.voiceMode = voiceMode
         self.outboxDirectory = outboxDirectory
+        // The keychain outlives deleting the app. No marker in this app container = a fresh install: drop the stale pairing
+        // quietly and show the welcome screen (the red "signed out" message is only for a real sign-out/revoke while installed).
+        if !defaults.bool(forKey: AppModel.installedMarkerKey) { Keychain.delete(); defaults.set(true, forKey: AppModel.installedMarkerKey) }
         let creds = Keychain.load()
         // Every stored property is set first; only then is `self` used (the Observation macros need that).
         let holder = ClientHolder()
@@ -145,7 +152,8 @@ final class AppModel {
     var chatData: ChatData {
         ChatData(workspaces: workspaces, messages: messages, tickets: tickets,
                  questions: questionLog.values.sorted { $0.message.createdAt < $1.message.createdAt }.map { $0 }, answers: answers,
-                 outbox: outbox.items.filter { $0.kind == .send && $0.text != nil }.map { QueuedText(id: $0.clientId, workspace: $0.workspace, ticket: $0.ticket, text: $0.text ?? "", at: $0.createdAt, phone: $0.phone) })
+                 outbox: outbox.items.filter { $0.kind == .send && $0.text != nil }.map { QueuedText(id: $0.clientId, workspace: $0.workspace, ticket: $0.ticket, text: $0.text ?? "", at: $0.createdAt, phone: $0.phone) },
+                 erased: archive.erased)
     }
     var chatRooms: [RoomRow] { ChatBuilder.rooms(chatData, read: readState) }
     var totalUnread: Int { chatRooms.reduce(0) { $0 + $1.unread } }
@@ -226,9 +234,13 @@ final class AppModel {
 
     /// Wait before the one automatic retry of a first load that found the network not ready yet (tests shorten it).
     var retryDelay: Duration = .seconds(1)
+    /// Unit tests of the loop against the mock set this instead of the launch argument.
+    var watchInMock = false
 
-    /// Keeps an open chat current: refreshes every `interval` until the calling task is cancelled (the chat closes).
-    func watchWhileOpen(every interval: Duration = .seconds(4)) async {
+    /// Keeps lists and chats current: the app shell runs one loop while paired and active, cancelling it in the background.
+    /// 10 s; nothing runs against the in-process mock unless `-watchLoop YES` (UI tests must see an idle app).
+    func watchWhileOpen(every interval: Duration = .seconds(10)) async {
+        if useMock && !UserDefaults.standard.bool(forKey: "watchLoop") && !watchInMock { return }
         while !Task.isCancelled {
             try? await Task.sleep(for: interval)
             if Task.isCancelled { break }
@@ -236,7 +248,7 @@ final class AppModel {
         }
     }
 
-    /// `quiet`: the background poll of an open chat, it must not flip `isLoading`.
+    /// `quiet`: the periodic refresh must not flip `isLoading`.
     func refresh(retry: Bool = true, quiet: Bool = false) async {
         guard phase == .ready || phase == .notifyStep, credentials != nil else { return }
         if !quiet { isLoading = true }
@@ -265,11 +277,17 @@ final class AppModel {
             let beforeUpdates = updates
             async let u = (try? await client.updates()) ?? beforeUpdates  // an older relay without /updates must not break the rest
             async let st = try? await client.settings()
-            workspaces = try await w; questions = try await q.deduplicated(); updates = await u
-            if let st = await st { settings = st }
+            // Assign only what changed: an unchanged poll must not redraw (XCUITest idle, battery).
+            let newWorkspaces = try await w, newQuestions = try await q.deduplicated(), newUpdates = await u
+            if workspaces != newWorkspaces { workspaces = newWorkspaces }
+            if questions != newQuestions { questions = newQuestions }
+            if updates != newUpdates { updates = newUpdates }
+            if let st = await st, settings != st { settings = st }
             await reloadMessages()
-            for item in questions { questionLog[item.id] = item }
-            message = nil; hasLoaded = true; lastUpdated = Date()
+            for item in questions where questionLog[item.id] != item { questionLog[item.id] = item }
+            if message != nil { message = nil }
+            if !hasLoaded { hasLoaded = true }
+            if lastUpdated == nil || Date().timeIntervalSince(lastUpdated ?? .distantPast) > 30 { lastUpdated = Date() }
             await flushOutbox()
         }
     }
@@ -295,7 +313,8 @@ final class AppModel {
     private func merge(_ items: [PhoneMessage]) {
         var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
         for m in items { byId[m.id] = m }          // newer data (delivered_at) replaces the old copy
-        messages = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
+        let merged = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
+        if merged != messages { messages = merged }
     }
     /// client_ids of messages the relay stored (first tick) that `/messages` has not listed yet.
     private func unlistedSentClientIds() -> Set<String> {
@@ -393,7 +412,7 @@ final class AppModel {
     var conversationInputs: ConversationInputs {
         let cd = chatData
         return ConversationInputs(workspaces: workspaces, messages: messages, tickets: tickets, questions: cd.questions, answers: answers,
-                                  outbox: outbox.items, speak: settings.speak)
+                                  outbox: outbox.items, speak: settings.speak, erased: archive.erased)
     }
     /// The workspace list: presence, General and topics with status, unread, "Starting topic…".
     var workspaceSummaries: [WorkspaceSummary] { ConversationBuilder.summaries(conversationInputs, read: readState) }
@@ -403,6 +422,26 @@ final class AppModel {
     func presence(of workspaceId: String, now: Date = Date()) -> Presence { workspace(workspaceId)?.presence(now: now) ?? .unknown }
 
     func unread(_ id: ConversationID) -> Int { readState.unread(ReadState.key(id), in: conversationItems(id)) }
+    // Archive, delete, auto-archive (phone-local)
+
+    private func lastAt(_ id: ConversationID) -> String? {
+        let summary = workspaceSummaries.first { $0.id == id.workspace }
+        if case .general = id { return summary?.general.lastAt }
+        return summary?.topics.first { $0.id == id }?.lastAt
+    }
+    private func change(_ edit: (inout ArchiveStore) -> Void) { var a = archive; edit(&a); archive = a; a.save() }
+    func archiveChat(_ id: ConversationID) { let at = lastAt(id); change { $0.archive(ReadState.key(id), lastAt: at) } }
+    func moveBack(_ id: ConversationID) { let at = lastAt(id); change { $0.moveBack(ReadState.key(id), lastAt: at) } }
+    /// Delete = this phone's copy only; the ticket and the workspace are untouched.
+    func deleteChat(_ id: ConversationID) {
+        guard let last = conversationItems(id).map(\.at).max() else { return }
+        change { $0.erase(ReadState.key(id), upTo: last) }
+    }
+    func setAutoArchive(days: Int) { change { $0.autoDays = days } }
+    /// What the list of one workspace shows, and what is archived.
+    func split(_ summary: WorkspaceSummary) -> (topics: [TopicSummary], general: Bool, archived: [ArchivedChat]) { archive.split(summary) }
+    var archivedCount: Int { workspaceSummaries.reduce(0) { $0 + archive.split($1).archived.count } }
+
     /// Opening a conversation (or a new message arriving in the open one) marks it read. Phone-local.
     func markRead(_ id: ConversationID) {
         let items = conversationItems(id)
@@ -547,6 +586,7 @@ final class AppModel {
         outbox.wipe(); speech.reset(); settings = PhoneSettings(); messagesNext = nil
         UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
         readState = ReadState(); blobCache = [:]
+        archive = ArchiveStore(); UserDefaults.standard.removeObject(forKey: ArchiveStore.defaultsKey)
         credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answeredElsewhere = []; hasLoaded = false
         pairedWorkspaces = []; lastUpdated = nil; message = nil; tab = .chats; phase = .onboarding
     }
@@ -562,6 +602,7 @@ final class AppModel {
     /// Test and screenshot hook: `-seedPaired YES` skips onboarding against the mock.
     func seedIfRequested() async {
         let d = UserDefaults.standard
+        path = []   // a cold start always lands on the Chats list; only a push or `-open` below opens something
         if d.bool(forKey: "resetState") { Keychain.delete(); reset() }
         if d.bool(forKey: "seedPaired"), credentials == nil, useMock {
             openSampleInvite(); await connect(phoneName: "Severin's iPhone"); await finishSetup(allowNotifications: false)
@@ -580,6 +621,19 @@ final class AppModel {
             if d.bool(forKey: "openInfo") { path.append(.info(workspace: ws, ticket: d.string(forKey: "openTicket"))) }
         }
         if d.bool(forKey: "openNewChat"), phase == .ready { path = [.newChat] }
+        #if DEBUG
+        // `-open general:<ws>` | `topic:<ws>:<ticket>` | `workspace:<ws>` | `settings:chats` | `archived` (ignored until the archive exists)
+        if phase == .ready, let target = d.string(forKey: "open") {
+            let p = target.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+            switch p.first {
+            case "general" where p.count == 2: path = [.workspace(p[1]), .general(p[1])]
+            case "topic" where p.count == 3: path = [.workspace(p[1]), .ticket(workspace: p[1], ticket: p[2])]
+            case "workspace" where p.count == 2: path = [.workspace(p[1])]
+            case "settings": tab = .settings
+            default: break
+            }
+        }
+        #endif
         if phase == .ready { if !useMock { await PushPermission.registerIfAuthorized() } }
     }
 }

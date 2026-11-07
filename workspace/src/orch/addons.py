@@ -37,7 +37,7 @@ PATH_RE = re.compile(r"^(?!/)(?!.*\.\.)[A-Za-z0-9_./-]{1,200}$")
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 # Names an add-on may never take: core commands (same list as contracts/addon-manifest.schema.json).
 RESERVED = frozenset(
-    "orch core ticket check log ask answer link ext wait addon addons update init publish relay config help "
+    "orch core ticket check log ask answer ref ext wait addon addons update init publish relay config help "
     "version view start stop status run needs agents".split()
 )
 ICONS = frozenset(
@@ -410,7 +410,7 @@ def _ext_schema(base: Path, rel, key: str) -> dict:
     return schema
 
 
-LINK_KIND_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+REF_KIND_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}(?::[a-z0-9][a-z0-9-]{0,31})?")
 LINK_ICON_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
 LINK_STATUS_RE = re.compile(r"[a-z0-9][a-z0-9 -]{0,23}")
 LINK_MATCH_RE = re.compile(r"https?://[^\s<>\"'`]{1,300}")
@@ -418,11 +418,11 @@ FIELD_KEY_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 def _ticket_links_fields_acts(base: Path, m: dict) -> None:
-    """[[ticket_links]] (link types), [ticket_fields] (fields under the ticket's Details) and [acts] (what
+    """[[ticket_links]] (reference types), [ticket_fields] (ticket fields) and [acts] (what
     `orch <name> act <verb>` offers; core knows only `refresh`)."""
     tl = m.setdefault("ticket_links", [])
     if not isinstance(tl, list) or len(tl) > 16:
-        raise _bad("ticket_links has at most 16 link types")
+        raise _bad("ticket_links has at most 16 reference types")
     kinds = set()
     for k in tl:
         match = k.get("match") if isinstance(k, dict) else None
@@ -432,8 +432,8 @@ def _ticket_links_fields_acts(base: Path, m: dict) -> None:
             isinstance(k, dict)
             and not set(k) - {"kind", "label", "icon", "match", "statuses", "preview"}
             and isinstance(k.get("kind"), str)
-            and LINK_KIND_RE.fullmatch(k["kind"])
-            and k["kind"] != "link"
+            and REF_KIND_RE.fullmatch(k["kind"])
+            and k["kind"] not in ("url", "ticket", "artifact", "file")
             and k["kind"] not in kinds
             and _text_ok(k.get("label"), 24)
             and isinstance(k.get("icon"), str)
@@ -479,10 +479,10 @@ def _ticket_links_fields_acts(base: Path, m: dict) -> None:
             and _text_ok(a.get("summary"), 80)
             and a.setdefault("who", "anyone") in ("anyone", "people")
             and isinstance(a.setdefault("writes", []), list)
-            and all(x == "links" or x == f"ext.{m.get('name')}" for x in a["writes"])
+            and all(x == "refs" or x == f"ext.{m.get('name')}" for x in a["writes"])
         )
         if not ok:
-            raise _bad(f"[acts.{verb}] has summary, who (anyone or people) and writes (links, ext.<name>)")
+            raise _bad(f"[acts.{verb}] has summary, who (anyone or people) and writes (refs, ext.<name>)")
 
 
 def parse_manifest(file: Path, core: bool = False) -> dict:
@@ -913,11 +913,11 @@ def dispatch(root: Path, name: str, argv: list[str]) -> int:
 
 
 def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) -> int:
-    """`orch <name> act refresh [--by X] [--json] -- <ticket>`: the add-on looks its links up and prints
-    ONE JSON object `{ticket, links: [{url, title?, status?, thumb?}], ext?: {<name>: {...}}, say?}`; core
+    """`orch <name> act refresh [--by X] [--json] -- <ticket>`: the add-on looks its references up and prints
+    ONE JSON object `{ticket, refs: [{url, title?, status?, thumb?}], ext?: {<name>: {...}}, say?}`; core
     merges it into the ticket (tickets.merge_refresh) and says what changed.
     The add-on never writes the ticket itself."""
-    from orch import links, tickets
+    from orch import refs, tickets
 
     rest = argv[argv.index("--") + 1 :] if "--" in argv else []
     if len(rest) != 1:
@@ -943,16 +943,16 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
         raise Refused(f"The {name} add-on answered something orch cannot read.") from None
     if isinstance(out, dict) and out.get("ticket") and tickets.resolve(root, str(out["ticket"])) != tid:
         raise Refused(f"The {name} add-on answered for another ticket.")
-    writes = act["writes"] or ["links", f"ext.{name}"]  # what the manifest says the refresh may change
+    writes = act["writes"] or ["refs", f"ext.{name}"]  # what the manifest says the refresh may change
     if isinstance(out, dict):
         out = {
             **out,
-            "links": out.get("links") if "links" in writes else [],
+            "refs": out.get("refs") if "refs" in writes else [],
             "ext": out.get("ext") if f"ext.{name}" in writes else {},
         }
     t, changes = tickets.merge_refresh(root, tid, name, out, by, active_ext_schema(root, name))
     say = out.get("say") if isinstance(out.get("say"), str) else ""
-    say = links.one_line(say, 300)
+    say = refs.one_line(say, 300)
     key = t.get("key") or t["id"]
     if "--json" in argv:
         print(json.dumps({"ticket": t["id"], "key": key, "changes": changes, "say": say}, ensure_ascii=False))
@@ -961,8 +961,8 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
         print(f"{key}  {say or 'Nothing to update.'}")
         return 0
     for c in changes:
-        old, new = (links.one_line("-" if x in (None, "") else x, 120) for x in (c["old"], c["new"]))
-        what = f"{links.one_line(c['name'])}  {c['field']}" if c["what"] == "link" else c["field"]
+        old, new = (refs.one_line("-" if x in (None, "") else x, 120) for x in (c["old"], c["new"]))
+        what = f"{refs.one_line(c['name'])}  {c['field']}" if c["what"] == "link" else c["field"]
         print(f"{key}  {what}: {old} → {new}")
     if say:
         print(say)
@@ -989,7 +989,7 @@ def consent_text(m: dict, local: bool) -> str:
     if "ticket_ext" in m or m.get("ticket_fields"):
         lines.append(f"Stores data on tickets under: ext.{m['name']}")
     if m.get("ticket_links"):
-        lines.append("Knows these links: " + ", ".join(k["label"] for k in m["ticket_links"]))
+        lines.append("Knows these references: " + ", ".join(k["label"] for k in m["ticket_links"]))
     if m.get("dashboard"):
         lines.append(f"Adds a dashboard tab: {m['dashboard']['label']}")
     if m["background"]:
@@ -1003,7 +1003,9 @@ def _confirm(m: dict, local: bool, yes: bool) -> None:
         print(text)
         return
     if not term.is_terminal(sys.stdin):
-        raise Refused(f"{text}\nTo continue run it again with --yes.")
+        err = Refused(f"{text}\n\nTo add it, run it again with --yes.")
+        err.confirm = True
+        raise err
     sys.stderr.write(text + "\nAdd it? [y/N] ")
     sys.stderr.flush()
     if sys.stdin.readline().strip().lower() not in ("y", "yes"):
@@ -1092,7 +1094,9 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
             elif yes:
                 m = None
             elif not term.is_terminal(sys.stdin):
-                raise Refused(f"Installing the built-in add-on {name}: run it again with --yes.")
+                err = Refused(f"To install the built-in add-on {name}, run it again with --yes.")
+                err.confirm = True
+                raise err
             else:
                 m = preview_builtin(name)
                 _confirm(m, False, False)

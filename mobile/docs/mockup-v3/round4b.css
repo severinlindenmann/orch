@@ -13,8 +13,17 @@
 /* Round 5: one root, shared presence and inset conversation details. */
 .phone .list-head{gap:8px;padding-inline:16px}.list-head h2{flex:1}.list-head>.icon-button,.list-head>div>.icon-button{width:44px;height:44px;flex:0 0 44px}
 .phone .nav .subtitle{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.presence-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#30d158;margin-right:5px;vertical-align:middle}
-.phone .info-body{padding:24px 16px 16px!important}.info-profile{display:flex;flex-direction:column;align-items:center;gap:8px;margin:0 0 24px}.info-profile .avatar{margin:0 0 8px}.info-profile h2{font-size:1.375rem;line-height:1.75rem;font-weight:600}.info-profile p{font-size:.9375rem;line-height:1.25rem;color:var(--muted);margin:0}.info-section>h3{font-size:.8125rem;line-height:1.125rem;text-transform:uppercase;color:var(--muted);font-weight:400;margin:0 0 8px}.info-summary{padding:16px;line-height:1.4}.info-language{margin-top:24px}.info-language .setting-row{width:100%;text-align:left}.info-body .info-tabs{margin:24px 0 16px;overflow:visible}.phone .info-body .info-tabs button{font-size:.8125rem;min-width:0;flex:1;padding-inline:2px;overflow-wrap:anywhere}.info-content>.artifact-card:first-child{margin-top:0}.info-content{display:grid;gap:8px;min-width:0}.empty h3+p{margin-top:8px}.setting-block>.sheet-note,.setting-block>p{margin:0;padding:16px}.info-summary>p{padding:0}.settings-body>.sheet-note{margin:8px 0 24px}
+.phone .info-body{padding:24px 16px 16px!important}.info-profile{display:flex;flex-direction:column;align-items:center;gap:8px;margin:0 0 24px}.info-profile .avatar{margin:0 0 8px}.info-profile h2{font-size:1.375rem;line-height:1.75rem;font-weight:600}.info-profile p{font-size:.9375rem;line-height:1.25rem;color:var(--muted);margin:0}.info-section>h3{font-size:.8125rem;line-height:1.125rem;text-transform:uppercase;color:var(--muted);font-weight:400;margin:0 0 8px}.info-summary{padding:16px;line-height:1.4}.info-language{margin-top:24px}.info-language .setting-row{width:100%;text-align:left}.info-body .info-tabs{margin:24px 0 16px;overflow-x:auto;scrollbar-width:none}.phone .info-body .info-tabs button{font-size:.8125rem;min-width:max-content;flex:1;padding-inline:10px;white-space:nowrap}.info-tabs .count{display:inline-block;margin-left:4px;padding:0 5px;border-radius:9px;background:var(--surface3);font-size:.6875rem;line-height:1.1rem}.info-content>.artifact-card:first-child{margin-top:0}.info-content{display:grid;gap:8px;min-width:0}.empty h3+p{margin-top:8px}.setting-block>.sheet-note,.setting-block>p{margin:0;padding:16px}.info-summary>p{padding:0}.settings-body>.sheet-note{margin:8px 0 24px}
 
 /* Round 5b: compact rows with avatar presence. */
 #phone .workspace-entry .row-content{min-height:80px;padding-block:8px}
 .avatar-presence{position:absolute;right:0;bottom:0;width:10px;height:10px;box-sizing:border-box;border:2px solid var(--surface2);border-radius:50%;background:#30d158}
+
+/* Status groups and References */
+.done-topics { margin: 18px 16px; }
+.done-topics > summary { padding: 16px; min-height: 44px; cursor: pointer; color: var(--muted); }
+.reference-link, .reference-ticket, .reference-file { display:flex; align-items:center; gap:12px; padding:16px; border-radius:14px; background:var(--surface2); color:inherit; text-align:left; width:100%; box-sizing:border-box; }
+.reference-link { text-decoration:none; }
+.reference-link button { display:flex; gap:12px; text-align:left; width:100%; }
+.reference-link small { display:block; margin-top:4px; color:var(--muted); }
+.reference-file { overflow-wrap:anywhere; }

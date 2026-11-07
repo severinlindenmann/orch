@@ -33,11 +33,10 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(room.waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["ticket-ws_pilatus001|t_q3sum1"].exists, "topics live one level down, in the workspace")
         room.tap()
-        XCTAssertTrue(app.buttons["segment-done"].waitForExistence(timeout: 10))
-        app.buttons["segment-done"].tap()
+        XCTAssertTrue(app.buttons["done-toggle"].waitForExistence(timeout: 10))
+        app.buttons["done-toggle"].tap()
         XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_q3sum1"].waitForExistence(timeout: 10), "topic row with its key")
         // Questions live in their topic (v3): open PIL-13 under Open, answer there.
-        app.buttons["segment-open"].tap()
         let topic = app.buttons["ticket-ws_pilatus001|t_7k3f9q"]
         XCTAssertTrue(topic.waitForExistence(timeout: 10), "the topic with the open question")
         topic.tap()
@@ -182,6 +181,9 @@ final class OnboardingFlowUITests: XCTestCase {
         app.launch()
         let box = app.buttons["Sign out"]
         XCTAssertTrue(box.waitForExistence(timeout: 15))
+        // Settings grew (Chats section): scroll until the box is on screen
+        for _ in 0..<6 where !box.isHittable { app.swipeUp() }
+        XCTAssertTrue(box.isHittable, "Sign out is on screen")
         XCTAssertGreaterThanOrEqual(box.frame.height, 44)
         box.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.5)).tap()
         XCTAssertTrue(app.buttons["signout-confirm"].waitForExistence(timeout: 3))

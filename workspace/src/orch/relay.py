@@ -106,9 +106,10 @@ def _handle_mobile_off(root: Path, m: dict) -> str:
         if m["id"] in seen(root):
             return "already handled"
         ok = _mobile_off_ok(root, m)
+        since = mobile_mode.settle(root).get("since")
         _mark_seen(root, m["id"])
     if ok:
-        mobile_mode.turn_off(root, "off")
+        mobile_mode.turn_off(root, "phone", if_since=since, by=m["from"])
     return (
         "Mobile mode was turned off from the phone"
         if ok
@@ -440,11 +441,37 @@ def _message(
         _post_message(root, raw)
     except Refused as e:
         if _unreachable(e):
+            # kept in the outbox; a problem to fix first (certificate, broken install) is said in words
+            if getattr(e, "blocked", False):
+                _set_problem(root, str(e))
+                return {**msg, "sent": False, "problem": str(e)}
             return {**msg, "sent": False}
         path.unlink(missing_ok=True)  # the relay said no: nothing to retry
         raise
     path.unlink(missing_ok=True)
+    _set_problem(root, None)  # it went out: whatever blocked it is fixed
     return msg
+
+
+def _problem_path(root: Path) -> Path:
+    return _outbox(root) / ".problem"
+
+
+def outbox_problem(root: Path) -> str | None:
+    """The problem that keeps the outbox from going out (a certificate, a broken install), else None."""
+    try:
+        return _problem_path(root).read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def _set_problem(root: Path, text: str | None) -> None:
+    p = _problem_path(root)
+    if text:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+    else:
+        p.unlink(missing_ok=True)
 
 
 def outbox_list(root: Path) -> list[dict]:
@@ -480,11 +507,16 @@ def resend_outbox(root: Path) -> dict:
         except Refused as e:
             if _unreachable(e):
                 res["waiting"] = [x["id"] for x in items[n:]]
+                if getattr(e, "blocked", False):
+                    res["problem"] = str(e)  # not the network: needs fixing before anything goes out
+                    _set_problem(root, res["problem"])
                 break
             res["dropped"].append({"id": m["id"], "reason": str(e)})
         else:
             res["sent"].append(m["id"])
         p.unlink(missing_ok=True)
+    if not res["waiting"] and "problem" not in res:
+        _set_problem(root, None)  # nothing is blocked any more
     return res
 
 
@@ -500,6 +532,14 @@ def _update_title(root: Path, ticket: str) -> str | None:
     line = " ".join(clean_untrusted(title, 200).split())
     line = "".join(c for c in line if unicodedata.category(c)[0] in "LMNPS" or c == " ")
     return line[:120].strip() or None
+
+
+def _topic_of_message(root: Path, mid: str) -> str | None:
+    """The ticket that `relay topic --from <mid>` (or a new-topic text) started, else None."""
+    for t in tickets.list_all(root):
+        if _relay_ext(root, t["id"]).get("message") == mid:
+            return t["id"]
+    return None
 
 
 def _is_general(root: Path, ticket: str | None) -> bool:
@@ -558,6 +598,8 @@ def send_text(
 
     body: dict = {"text": text}
     to = resolve(root, target)
+    if not ticket and not general and reply_to and not update:
+        ticket = _topic_of_message(root, reply_to)  # answers a text that started a topic: stays in that topic
     general = general or _is_general(root, ticket)
     if general:
         ticket = None
@@ -1432,6 +1474,26 @@ def _hint_applied(root: Path, m: dict) -> bool:
     )
 
 
+def auto_refresh(root: Path) -> bool:
+    """When the admin's "new settings are waiting" notice is pending, do what `orch relay refresh` does.
+    The refresh marks the notices seen. Nothing pending: no call. A failed refresh keeps the notice."""
+    for f in (root / ".orch" / "inbox").glob("m_*.json"):
+        m = net.read_json(f, None)
+        if (
+            isinstance(m, dict)
+            and m.get("id") == f.stem
+            and m.get("type") == "refresh-hint"
+            and f.stem not in seen(root)
+            and not _hint_applied(root, m)
+        ):
+            try:
+                refresh(root)
+            except (Refused, OSError, ValueError, TimeoutError):
+                return False
+            return True
+    return False
+
+
 def inbox(root: Path, wait: int = 0) -> list[dict]:
     """Pull, save, journal, ack, then handle the ones not seen. Returns [{message, note, allowed}]."""
     with contextlib.suppress(Refused):
@@ -1489,9 +1551,11 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                             note = f"could not use this phone message: {clean_untrusted(str(e), 200)}"
                         auto = True
                         _mark_seen(root, m["id"])  # last
-            elif typ == "refresh-hint" and _hint_applied(root, m):
+            elif typ == "refresh-hint" and (
+                _hint_applied(root, m) or m["id"] in seen(root) or auto_refresh(root)
+            ):
                 with locked(root):
-                    _mark_seen(root, m["id"])  # the refresh already ran for this version: nothing to tell
+                    _mark_seen(root, m["id"])  # the settings are up to date: nothing to tell
                 continue
             elif typ in ("delegate", "start") and not _allowed_or_made(root, m):
                 with locked(root):

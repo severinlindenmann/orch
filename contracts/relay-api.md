@@ -35,8 +35,9 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| GET | `/v1/whoami` | – | `{id, name, description, tags, phones: n, pending}`: the approved values, plus `pending` = `{description: string\|null, tags: [..]\|null, at}` (only the proposed fields are set; `rev` identifies this exact proposal) or `null` |
+| GET | `/v1/whoami` | – | `{id, name, description, tags, icon, color, look_by, phones: n, pending}` (`icon`/`color`/`look_by`: look.md): the approved values, plus `pending` = `{description: string\|null, tags: [..]\|null, at}` (only the proposed fields are set; `rev` identifies this exact proposal) or `null` |
 | PATCH | `/v1/me` | `{description?: string ≤ 280, tags?: [string ≤ 24, ≤ 8 items]}` (at least one) | `202 {…whoami, status: "pending"}`. The change is only a proposal: the owner must approve it in the admin panel, and until then the old values stay in effect everywhere (directory, refresh snapshot, phones). One pending change per workspace; a new one replaces it. `description` is one line of plain text, characters from Unicode categories L, M, N, P, S and Zs only (no control, newline, bidi or zero-width characters), NFC-normalised, no Default_Ignorable_Code_Point characters (variation selectors, U+034F, U+3164, ...) or U+2800, at most 2 combining marks in a row; tags are lowercase `[a-z0-9-]`, 1–24 characters. Admin-set values follow the same rules. Writes only the pending fields, only while the calling token is still current (else `401`). Bad input → `422 invalid` |
+| PATCH | `/v1/me` (look) | `{icon?: <id>\|null, color?: <token>\|null}` (at least one; look.schema.json `me_look_patch`) | `200 {…whoami}`. Applied at once, not pending; sets `look_by = workspace`. Left out = unchanged, `null` = default. One bad value → `422 invalid`, nothing stored. Look fields mixed with `description`/`tags` or any other field → `422` (send them on their own). Not part of `workspaces.json`: no version bump, no refresh-hint (look.md, vectors/look-v1.json `me_patch`) |
 | POST | `/v1/heartbeat` | `{mobile_mode: {on, since, ends_at, machine, ended?}}` | `200 {mobile_mode}` (the stored value, as phones see it). See **Mobile mode** below |
 | POST | `/v1/messages` | one message | `201 {id}` (see rules above) |
 | GET | `/v1/inbox?wait=0..30` | – | `{items: [message…], next: null}` not yet acked, oldest first, max 100. `wait` = long-poll seconds |
@@ -55,7 +56,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 |---|---|---|---|
 | POST | `/v1/phone/pair` | `{code, name}` (no auth; one-time code from the link) | `201 {phone_id, token, workspaces: [{id, name}]}` |
 | POST | `/v1/phone/push` | `{apns_token, sandbox: bool}` | `204` |
-| GET | `/v1/phone/workspaces` | – | list of `{id, name, description, tags, online, last_seen, open_questions, muted_until}` (only workspaces this phone may reach). `online` = called the relay in the last 2 minutes (unchanged); the phone itself shows a workspace as online while `last_seen` is at most 5 minutes old. `muted_until`: `null`, a time, or `"forever"`; plus `mobile_mode` = `{on, since, ends_at, machine}` (always present; `on: false` and the other three `null` when off; see **Mobile mode**) |
+| GET | `/v1/phone/workspaces` | – | list of `{id, name, description, tags, icon, color, online, last_seen, open_questions, muted_until}` (only workspaces this phone may reach; `icon`/`color` = the workspace look or `null`, look.md: unknown values and missing fields fall back to letter + Automatic colour). `online` = called the relay in the last 2 minutes (unchanged); the phone itself shows a workspace as online while `last_seen` is at most 5 minutes old. `muted_until`: `null`, a time, or `"forever"`; plus `mobile_mode` = `{on, since, ends_at, machine}` (always present; `on: false` and the other three `null` when off; see **Mobile mode**) |
 | PATCH | `/v1/phone/workspaces/<ws>` | `{muted_until: <time> \| null \| "forever"}` | `200` the workspace item as listed. While muted (`"forever"`, or a time in the future) the relay sends this phone no push for anything from that workspace (texts and questions); messages are still stored and listed. `null` or a past time = not muted. A workspace not on the phone's list → `404` |
 | DELETE | `/v1/phone/workspaces/<ws>` | – | `204`. Drops the workspace from this phone's list (same as the admin unticking it: the workspace gets a refresh-hint and can no longer reach the phone). Only an invitation adds it again. Not on the list → `404` |
 | GET | `/v1/phone/questions` | – | list of `{message, workspace_name}`, open questions only (sent to `phones` or to this phone by a workspace on its list) |
@@ -87,6 +88,9 @@ plain text, 1 to 60 characters, NFC, same character rule as `update.title` / the
 (the computer restarted). A bad body → `422 invalid`. The relay keeps one value per workspace (the last one) and replaces it as a
 whole. A workspace that never sent a heartbeat is `{on: false}`. Any authenticated call of the workspace counts as "heard from it"
 (`last_seen`), the heartbeat is the only call that changes the flag.
+
+Expired leases are immediately shown as off; the next sweep clears the stored flag and sends `mobile_mode_ended` with `ended: lease`, instead of an unreachable push.
+Heartbeats per workspace per rolling minute: at most 6 that repeat the current on/off state, at most 20 that change it, and at most 30 in all (counted right after auth, before the body is read); beyond that `429 rate_limited`; `mobile_mode_ended` pushes have a ten-minute per-workspace cooldown (off transitions are still stored).
 
 **Phones see it:** `GET /v1/phone/workspaces` items carry `mobile_mode: {on, since, ends_at, machine}` (all `null` but `on: false` when off).
 The phone's own mute still wins: a muted phone gets no push below and shows "muted, but <machine> is in Mobile mode".
@@ -146,6 +150,9 @@ upload of this phone (else `404 not_found`), and an attachment's `size` must equ
   Workspaces should set `general: true` on General texts; an update in General must (schema).
 - **The phone's own texts:** `general: true` = General; `ticket` = that topic; neither = a **pending new topic** until a
   workspace ack with `reply_to` = its id names the ticket (then the phone shows it in that topic).
+- **Topic started from General:** a workspace text without `ticket` whose `reply_to` is a phone text that started a topic
+  (`orch relay topic --from`, or a new-topic text) belongs to that topic (the workspace sets `ticket` itself), and the phone
+  shows that originating General text first in the topic (it also stays in General, with the "started" chip).
 
 **Receipts.** ✓ = the relay stored it (`201`/`200`). ✓✓ = `delivered_at` is set (the workspace acked it from its inbox).
 **Started** = a workspace text with `body.update.kind` `ack` or `working` and `reply_to` = the phone text's id. The
@@ -176,9 +183,9 @@ marked `speak`, `always` = on every workspace text, `never` = none), `swiss_germ
 (a published page or app), `pr`, `commit` (url kinds; a PR's state in `status`). `id` = `a_` + the first 12 hex
 characters of sha256(`"<evidence type>\n<ref>"` (UTF-8), where `<evidence type>` is the ticket evidence `type`:
 `pr`, `commit`, `file`, `url`, `command` or `note` (ticket.schema.json), and `<ref>` its `ref`; or `"link\n<url>"` for
-ticket links) stays the same across revisions (section `artifact_ids` of `vectors/phone-v3-v1.json`);
+ticket references) stays the same across revisions (section `artifact_ids` of `vectors/phone-v3-v1.json`);
 `rev` names the revision (blob sha256, commit sha, publish id or deploy rev). Feedback points at (`id`, `rev`).
-ticket.schema.json is unchanged: the phone attachments are made from evidence and links at send time, `id` is derived
+ticket.schema.json is unchanged: the phone attachments are made from evidence and references at send time, `id` is derived
 from (type, ref) and `rev` from the content (blob sha256, commit sha, publish id), so nothing new needs storing.
 
 **Questions** (`body` of a `question`): optional `previews: {"<option>": "<attachment id>"}` (A/B choices, approve with a
@@ -251,7 +258,7 @@ Fields: `{v, id, type, workspace: {id, name}, ticket, key, at}` on every event (
 `options`, `answerable` (this subscriber may answer and no one has yet), `answered` (`null`, or `{answer, answered_by}`
 at read time); `answered` → `question_id` (the question's id), `answer`, `answered_by` (a display name: the phone's name,
 or `<name> (system)`). `ticket_view` = a smaller copy of the message's `body.ticket_view`, else `null`: `{title, status,
-agent, summary, done, total, links: [{kind, title, url}], files}`, no checklist and no history; `files` (`[{name, size,
+agent, summary, done, total, refs: [{kind, title, url}], files}`, no checklist and no history; `files` (`[{name, size,
 blob_id}]`, the image and file attachments) only when **Files** is on, else `[]`.
 
 **Push (optional).** With a `push_url` the relay also POSTs every event, oldest first, one at a time, as the JSON body with
@@ -289,8 +296,8 @@ Auth: `X-Orch-Admin: <admin token>` (file `/etc/orch-relay/admin-token`); the po
 | Method | Path | Request | Response |
 |---|---|---|---|
 | GET | `/admin` | – | Portal HTML |
-| GET / POST | `/admin/api/workspaces` | POST: `{name, description, tags: [], group?: "grp_…", new_group?: "<name>"}` (at most one of `group` / `new_group`) | list of `{id, name, description, tags, description_by, tags_by, online, last_seen, unread, pending, group}` (`last_seen` null until the workspace first calls; `pending` as in whoami, or `null`; `group` = `grp_…` or `null`) / `201 {id, token, prompt, group, shared?}`. With `group` (an existing group) or `new_group` (creates a group with the defaults of `POST /admin/api/groups`), the workspace joins it and gets the group's tools at once (see Groups); `shared` = `{skills, mcp, credentials}` counts it got. Unknown group or both fields → `422`, a taken `new_group` name → `409`; nothing is created then. Without either, the workspace is in no group and gets no tools (the admin portal always sends one) |
-| PATCH | `/admin/api/workspaces/<id>` | `{name?, description?, tags?, group?: "grp_…"}` | `200` (shows up in the next refresh). Admin-set description/tags are marked `description_by` / `tags_by` = `admin`. `group` moves it to that group (unknown → `422`): it gets the new group's tools and keeps the ones it has |
+| GET / POST | `/admin/api/workspaces` | POST: `{name, description, tags: [], icon?, color?, group?: "grp_…", new_group?: "<name>"}` (at most one of `group` / `new_group`; `icon`/`color` given → `look_by = admin`) | list of `{id, name, description, tags, description_by, tags_by, icon, color, look_by, online, last_seen, unread, pending, group}` (`last_seen` null until the workspace first calls; `pending` as in whoami, or `null`; `group` = `grp_…` or `null`) / `201 {id, token, prompt, group, shared?}`. With `group` (an existing group) or `new_group` (creates a group with the defaults of `POST /admin/api/groups`), the workspace joins it and gets the group's tools at once (see Groups); `shared` = `{skills, mcp, credentials}` counts it got. Unknown group or both fields → `422`, a taken `new_group` name → `409`; nothing is created then. Without either, the workspace is in no group and gets no tools (the admin portal always sends one) |
+| PATCH | `/admin/api/workspaces/<id>` | `{name?, description?, tags?, icon?, color?, group?: "grp_…"}` | `200` (shows up in the next refresh). Admin-set description/tags are marked `description_by` / `tags_by` = `admin`. `icon`/`color`: only while `look_by` is `null` or `admin` (sets `look_by = admin`); once the workspace sent its own look (`look_by = workspace`) → `409 conflict` ("This workspace chooses its own icon.") and nothing in the body is stored (check and write in one transaction; a new token keeps the look and `look_by`); bad value → `422` (vectors/look-v1.json `admin_patch`). `group` moves it to that group (unknown → `422`): it gets the new group's tools and keeps the ones it has |
 | GET / POST | `/admin/api/groups` | POST: `{name, colour?, defaults?: {skills?, mcp?, credentials?}, talk?}` | `{items: [group]}` by name / `201 group`. group = `{id: "grp_…", name, colour, defaults: {skills, mcp, credentials}, talk, members: [ws…], gives: {skills, mcp, credentials}}`. `name`: one line of plain text (description rule), 1–40 characters, unique ignoring case (else `409 conflict`). `colour`: one of `teal, violet, amber, blue, pink`; left out = the one used least. `defaults` (each `true` when left out) = the kinds of shared tools members get; `talk` (default `true`) = members may send each other messages and files. `gives` = how many shared items of each kind a member gets now |
 | PATCH | `/admin/api/groups/<id>` | `{name?, colour?, defaults?: {…}, talk?}` | `200 group`. A default kind turned on is given to the current members at once: turning a default on grants all items of that kind, including any the admin took away from a member before; turned off takes nothing away. `404` unknown group |
 | DELETE | `/admin/api/groups/<id>` | – | `204`. Members stay, keep their tools and are in no group |

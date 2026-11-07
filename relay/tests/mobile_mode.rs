@@ -34,7 +34,7 @@ async fn mm(t: &T, w: &Ws, p: &P) -> Value {
 }
 
 fn on() -> Value {
-    json!({"mobile_mode": {"on": true, "since": "2026-11-07T14:02:00Z", "ends_at": "2026-11-08T02:02:00Z", "machine": "Acme PC"}})
+    json!({"mobile_mode": {"on": true, "since": orch_relay::util::fmt_time(orch_relay::util::now()), "ends_at": orch_relay::util::fmt_time(orch_relay::util::now() + 43_200), "machine": "Acme PC"}})
 }
 
 fn sent_kinds(t: &T) -> Vec<(String, String)> {
@@ -48,11 +48,41 @@ fn sent_kinds(t: &T) -> Vec<(String, String)> {
 }
 
 #[tokio::test]
-async fn vector_heartbeat_cases() {
+async fn mute_reply_preserves_mobile_mode() {
     let t = start().await;
     let a = t.add_ws("A").await;
     let p = t.pair_phone(&[&a]).await;
+    assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
+    let expected = mm(&t, &a, &p).await;
+    assert_eq!(expected["on"], true);
+    let (s, card) = t
+        .phone(
+            &p,
+            "PATCH",
+            &format!("/v1/phone/workspaces/{}", a.id),
+            Some(json!({"muted_until": "forever"})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(card["muted_until"], "forever");
+    assert_eq!(card["mobile_mode"], expected);
+}
+
+#[tokio::test]
+async fn vector_heartbeat_cases() {
+    let t = start().await;
     for case in vectors()["heartbeat"].as_array().unwrap() {
+        let a = t.add_ws("A").await;
+        let p = t.pair_phone(&[&a]).await;
+        let mut case = case.clone();
+        // Preserve the vector shape while keeping its lease in the future.
+        let future = orch_relay::util::fmt_time(orch_relay::util::now() + 43_200);
+        if case["request"]["mobile_mode"]["ends_at"].is_string() {
+            case["request"]["mobile_mode"]["ends_at"] = future.clone().into();
+        }
+        if case["stored"]["ends_at"].is_string() {
+            case["stored"]["ends_at"] = future.into();
+        }
         let name = case["name"].as_str().unwrap();
         let (s, v) = t
             .call(&a, "POST", "/v1/heartbeat", Some(case["request"].clone()))
@@ -254,4 +284,221 @@ async fn workspaces_and_other_phones_cannot_forge_a_control() {
         .await;
     assert_eq!(s, 403);
     assert!(t.inbox(&a).await.iter().all(|m| m["type"] != "control"));
+}
+
+#[tokio::test]
+async fn authentication_precedes_body_validation() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    let mut bad_machine = on();
+    bad_machine["mobile_mode"]["machine"] = "bad\nname".into();
+    for body in [json!({}), bad_machine] {
+        let response = t
+            .http
+            .post(format!("{}/v1/heartbeat", t.base))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 401);
+        let wrong = Ws {
+            id: a.id.clone(),
+            token: "wrong".into(),
+        };
+        assert_eq!(
+            t.call(&wrong, "POST", "/v1/heartbeat", Some(body.clone()))
+                .await
+                .0,
+            401
+        );
+        assert_eq!(
+            t.phone(&p, "POST", "/v1/heartbeat", Some(body.clone()))
+                .await
+                .0,
+            401
+        );
+        assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(body)).await.0, 422);
+    }
+    let response = t
+        .http
+        .post(format!("{}/v1/heartbeat", t.base))
+        .body("{")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 401);
+}
+
+#[tokio::test]
+async fn heartbeat_limit_is_rolling_and_per_workspace() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let b = t.add_ws("B").await;
+    for _ in 0..7 {
+        assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
+    }
+    let (status, body) = t.call(&a, "POST", "/v1/heartbeat", Some(on())).await;
+    assert_eq!(status, 429);
+    assert_eq!(body["error"], "rate_limited");
+    assert_eq!(
+        orch_relay::store::mobile_mode(&t.app.db.lock().unwrap(), &a.id)["on"],
+        true
+    );
+    assert_eq!(t.call(&b, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
+    // Age just one request out: five recent requests still consume the window.
+    let at = orch_relay::util::now();
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE workspaces SET mm_heartbeats=?2 WHERE id=?1",
+            rusqlite::params![
+                a.id,
+                json!([[at - 60, 1], [at, 1], [at, 1], [at, 1], [at, 1], [at, 1]]).to_string()
+            ],
+        )
+        .unwrap();
+    assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
+    assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(on())).await.0, 429);
+}
+
+#[tokio::test]
+async fn ended_cooldown_stores_off_and_is_per_workspace() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let b = t.add_ws("B").await;
+    let p = t.pair_phone(&[&a, &b]).await;
+    register_push(&t, &p, "abcdef0001").await;
+    t.push.sent.lock().unwrap().clear();
+    for w in [&a, &a, &b] {
+        assert_eq!(t.call(w, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
+        let (status, body) = t
+            .call(
+                w,
+                "POST",
+                "/v1/heartbeat",
+                Some(json!({"mobile_mode": {"on": false, "ended": "off"}})),
+            )
+            .await;
+        assert_eq!(status, 200);
+        assert_eq!(
+            body["mobile_mode"],
+            json!({"on": false, "since": null, "ends_at": null, "machine": null})
+        );
+    }
+    assert_eq!(sent_kinds(&t).len(), 2);
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE workspaces SET mm_last_ended_push=?2 WHERE id=?1",
+            rusqlite::params![a.id, orch_relay::util::now() - 600],
+        )
+        .unwrap();
+    t.call(&a, "POST", "/v1/heartbeat", Some(on())).await;
+    t.call(
+        &a,
+        "POST",
+        "/v1/heartbeat",
+        Some(json!({"mobile_mode": {"on": false}})),
+    )
+    .await;
+    assert_eq!(
+        sent_kinds(&t),
+        vec![("abcdef0001".into(), "mobile_mode_ended".into()); 3]
+    );
+}
+
+#[tokio::test]
+async fn expired_lease_is_off_before_sweep_and_pushes_lease_once() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    register_push(&t, &p, "abcdef0001").await;
+    t.push.sent.lock().unwrap().clear();
+    t.call(&a, "POST", "/v1/heartbeat", Some(on())).await;
+    let at = orch_relay::util::now();
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE workspaces SET mm_ends_at=?2,last_seen=?3 WHERE id=?1",
+            rusqlite::params![a.id, orch_relay::util::fmt_time(at - 1), at - 400],
+        )
+        .unwrap();
+    let off = json!({"on": false, "since": null, "ends_at": null, "machine": null});
+    assert_eq!(mm(&t, &a, &p).await, off);
+    assert!(sent_kinds(&t).is_empty());
+    orch_relay::mobile::sweep(&t.app, at).await;
+    orch_relay::mobile::sweep(&t.app, at + 60).await;
+    assert_eq!(
+        sent_kinds(&t),
+        vec![("abcdef0001".into(), "mobile_mode_ended".into())]
+    );
+    assert_eq!(
+        t.push.sent.lock().unwrap()[0].2["aps"]["alert"]["body"],
+        "Mobile mode ended: the time ran out."
+    );
+    let cleared: bool = t.app.db.lock().unwrap().query_row(
+        "SELECT mm_on=0 AND mm_since IS NULL AND mm_ends_at IS NULL AND mm_machine IS NULL AND mm_unreach=0 FROM workspaces WHERE id=?1",
+        [&a.id], |r| r.get(0),
+    ).unwrap();
+    assert!(cleared);
+    // A second expiry in the cooldown is cleared without another push, even after an outage.
+    t.call(&a, "POST", "/v1/heartbeat", Some(on())).await;
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE workspaces SET mm_ends_at=?2,mm_unreach=1 WHERE id=?1",
+            rusqlite::params![a.id, orch_relay::util::fmt_time(at)],
+        )
+        .unwrap();
+    orch_relay::mobile::sweep(&t.app, at + 599).await;
+    assert_eq!(mm(&t, &a, &p).await, off);
+    assert_eq!(sent_kinds(&t).len(), 1);
+    // Heartbeat transitions share the same cooldown with the sweeper.
+    t.call(&a, "POST", "/v1/heartbeat", Some(on())).await;
+    t.call(
+        &a,
+        "POST",
+        "/v1/heartbeat",
+        Some(json!({"mobile_mode": {"on": false}})),
+    )
+    .await;
+    assert_eq!(sent_kinds(&t).len(), 1);
+}
+
+#[tokio::test]
+async fn state_changes_have_their_own_limit() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let off = || json!({"mobile_mode": {"on": false}});
+    // five quick toggles, then an off is still accepted
+    for _ in 0..2 {
+        assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
+        assert_eq!(
+            t.call(&a, "POST", "/v1/heartbeat", Some(off())).await.0,
+            200
+        );
+    }
+    assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
+    assert_eq!(
+        t.call(&a, "POST", "/v1/heartbeat", Some(off())).await.0,
+        200
+    );
+    // 25 alternating toggles: changes 1..=20 pass (6 already used), the 21st change is refused
+    let b = t.add_ws("B").await;
+    let mut codes = vec![];
+    for i in 0..25 {
+        let body = if i % 2 == 0 { on() } else { off() };
+        codes.push(t.call(&b, "POST", "/v1/heartbeat", Some(body)).await.0);
+    }
+    assert!(codes[..20].iter().all(|c| *c == 200), "{codes:?}");
+    assert_eq!(codes[20], 429, "{codes:?}");
 }

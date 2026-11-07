@@ -95,9 +95,12 @@ def test_refresh_handles_the_waiting_refresh_hints(proj, run, rel):
     """After a refresh the inbox no longer says "new settings are waiting"."""
     connect(run, rel)
     rel.inbox.append(msg("m_hint000000000001", "refresh-hint", {}, frm="relay"))
-    assert "new settings are waiting" in run("relay", "inbox")[1]
-    run("relay", "refresh")
-    assert "new settings are waiting" not in run("relay", "inbox")[1]
+    assert "new settings are waiting" not in run("relay", "inbox")[1]  # refreshed by itself
+    assert not [
+        f
+        for f in (proj / ".orch/inbox").glob("m_*.json")
+        if f.stem not in json.loads((proj / ".orch/inbox-seen.json").read_text())
+    ]
 
 
 def test_send_by_name_with_two_matching_phones_is_refused(proj, run, rel):
@@ -388,10 +391,23 @@ def test_webhooks(proj, run, rel):
     assert run("relay", "webhook", "delete", "wh_0000000000")[0] == 0 and not rel.webhooks
 
 
-def test_refresh_hint_is_shown_not_applied(proj, run, rel):
+def test_refresh_hint_refreshes_by_itself(proj, run, rel):
     connect(run, rel)
+    rel.snapshot.update(version=8)
     rel.inbox.append(msg("m_refresh000000001", "refresh-hint", {"version": 8}, frm="admin"))
-    assert "orch relay refresh" in run("relay", "inbox")[1]
+    out = run("relay", "inbox")[1]
+    assert "orch relay refresh" not in out
+    have = json.loads((proj / ".orch/secrets/shared.json").read_text())
+    assert have["version"] == 8
+
+
+def test_no_hint_no_refresh(proj, run, rel, monkeypatch):
+    from orch import relay
+
+    connect(run, rel)
+    called = []
+    monkeypatch.setattr(relay, "refresh", lambda root: called.append(1))
+    assert relay.auto_refresh(proj) is False and not called
 
 
 def test_refresh_hint_is_quiet_once_refresh_ran(proj, run, rel):
@@ -400,8 +416,10 @@ def test_refresh_hint_is_quiet_once_refresh_ran(proj, run, rel):
     rel.inbox.append(msg("m_refresh000000002", "refresh-hint", {"version": 8}, frm="admin"))
     assert run("relay", "refresh")[0] == 0
     assert "orch relay refresh" not in run("relay", "inbox")[1]
+    rel.snapshot.update(version=9)
     rel.inbox.append(msg("m_refresh000000003", "refresh-hint", {"version": 9}, frm="admin"))
-    assert "orch relay refresh" in run("relay", "inbox")[1]
+    assert "orch relay refresh" not in run("relay", "inbox")[1]
+    assert json.loads((proj / ".orch/secrets/shared.json").read_text())["version"] == 9
 
 
 def test_answer_rejected_unless_it_matches_a_question_we_sent(proj, run, new_ticket, rel):
@@ -713,6 +731,43 @@ def test_outbox_saves_first_and_resends_the_same_bytes(proj, run, rel, monkeypat
     assert not list((proj / ".orch/outbox").glob("m_*.json"))
     assert run("relay", "send", PEER, "again")[0] == 0  # no 409 for the resent ids
     assert run("relay", "outbox")[1].strip() == "Nothing is waiting to be sent."
+
+
+def test_a_certificate_problem_is_said_in_words_and_the_message_is_kept(
+    proj, run, rel, monkeypatch, new_ticket
+):
+    """Not 'the relay can't be reached': a problem to fix first (a server certificate that is not valid, a
+    broken install) is shown as it is; the message stays in the outbox and goes out once it is fixed."""
+    from orch import relay
+    from orch.errors import Refused
+
+    connect(run, rel)
+    problem = "The server's security certificate is not valid for relay.example. orch did not connect."
+
+    def blocked(root, raw):
+        err = Refused(problem)
+        err.status, err.blocked = None, True
+        raise err
+
+    real = relay._post_message
+    monkeypatch.setattr(relay, "_post_message", blocked)
+    code, out, _ = run("relay", "send", PEER, "hello")
+    assert code == 0 and "Not sent: " + problem in out and "kept" in out and "can't be reached" not in out
+    m = json.loads(run("relay", "send", PEER, "second", "--json")[1])
+    assert m["sent"] is False and m["problem"] == problem
+    assert len(list((proj / ".orch/outbox").glob("m_*.json"))) == 2  # nothing is lost
+    out = run("relay", "outbox", "--resend")[1]
+    assert problem in out and "next orch relay command" not in out
+    from orch import relay_view
+
+    assert problem in relay_view.view(proj)["notice"]  # the dashboard's Relay tab says it too
+    assert "Saved messages are waiting: " + problem in run("relay", "whoami")[2]  # before any relay command
+    code, _, err = run("ask", new_ticket(), "Go?", "--phone")  # the question to the phones
+    assert code == 2 and "saved on the ticket" in err and problem in err and "can't be reached" not in err
+    monkeypatch.setattr(relay, "_post_message", real)
+    assert "waiting messages" in run("relay", "outbox", "--resend")[1]  # the sends, the question, its note
+    assert not list((proj / ".orch/outbox").glob("m_*.json")) and len(rel.sent) >= 3
+    assert relay.outbox_problem(proj) is None and "wait to be sent" not in relay_view.view(proj)["notice"]
 
 
 def test_outbox_resend_command_and_refused_message_is_dropped(proj, run, rel, monkeypatch):
@@ -1387,7 +1442,8 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
     schema = json.loads((CONTRACTS / "addon-view.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(v)
     people, recent = v["blocks"]
-    assert v["notice"] == "Connected." and people["title"] == "Workspaces you can talk to · 1"
+    assert v["notice"] == "Connected. Send messages and files to other workspaces."
+    assert people["title"] == "Workspaces you can talk to · 1"
     assert (
         people["items"][0]["title"] == "Reports"
         and people["items"][0]["chips"][0]["label"] == "Messages and files"
@@ -1437,7 +1493,7 @@ def test_view_without_messages_names_a_workspace_to_try(proj, run, rel):
     rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports", "description": "Numbers"}]
     connect(run, rel)
     v = json.loads(run("relay", "view", "--json")[1])
-    assert v["blocks"][1]["items"][0]["subtitle"] == 'Try: orch relay send Reports "Hello"'
+    assert v["blocks"][1]["items"][0]["subtitle"] == "Send one from the phone or from another workspace."
 
 
 @pytest.mark.parametrize(
@@ -1562,3 +1618,18 @@ def test_outbox_write_checks_git_for_the_exact_file(proj, monkeypatch):
     with pytest.raises(relay.Refused):
         relay._write_outbox(proj, "m1", b"{}")
     assert not (proj / ".orch/outbox/m1.json").exists()
+
+
+def test_relay_tab_refreshes_when_settings_are_waiting(proj, run, rel):
+    from orch import relay_view
+
+    connect(run, rel)
+    rel.snapshot.update(version=11)
+    rel.snapshot["workspaces"]["workspaces"] = [
+        {"id": PEER, "name": "Reports", "description": "", "tags": [], "online": True, "last_seen": None}
+    ]
+    (proj / ".orch/inbox").mkdir(parents=True, exist_ok=True)
+    m = msg("m_refresh000000011", "refresh-hint", {"version": 11}, frm="admin")
+    (proj / ".orch/inbox/m_refresh000000011.json").write_text(json.dumps(m))
+    text = json.dumps(relay_view.view(proj))
+    assert "Nobody yet" not in text and "Reports" in text

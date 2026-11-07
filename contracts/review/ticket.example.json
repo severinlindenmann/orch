@@ -42,26 +42,34 @@
       ]
     }
   ],
-  "links": [
+  "refs": [
     {
-      "type": "jira",
       "url": "https://jira.example.com/browse/ING-42",
-      "title": "ING-42"
+      "title": "ING-42",
+      "kind": "jira",
+      "at": "2026-11-04T08:30:00Z",
+      "by": "human:severin"
     },
     {
-      "type": "github",
       "url": "https://github.com/acme/ingest/pull/17",
-      "title": "PR 17"
+      "title": "PR 17",
+      "kind": "github",
+      "at": "2026-11-04T08:30:00Z",
+      "by": "human:severin"
     },
     {
-      "type": "teams",
       "url": "https://teams.microsoft.com/l/message/19:abc/1730700000",
-      "title": "Data team thread"
+      "title": "Data team thread",
+      "kind": "teams",
+      "at": "2026-11-04T08:30:00Z",
+      "by": "human:severin"
     },
     {
-      "type": "publish",
-      "url": "https://publish.severin.io/f/f_9q2w7e4r1t8y5u3i#k=…",
-      "title": "Sample rows (encrypted)"
+      "url": "https://publish.severin.io/f/f_9q2w7e4r1t8y5u3i#k=\u2026",
+      "title": "Sample rows (encrypted)",
+      "kind": "publish",
+      "at": "2026-11-04T08:30:00Z",
+      "by": "human:severin"
     }
   ],
   "questions": [

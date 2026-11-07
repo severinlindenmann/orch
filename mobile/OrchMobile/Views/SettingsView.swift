@@ -78,10 +78,28 @@ struct SettingsView: View {
                             }.buttonStyle(PressStyle()).accessibilityIdentifier("add-workspace")
                         }
                     }
+                    section("CHATS") {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Toggle("Archive old chats automatically", isOn: Binding(get: { model.archive.autoDays > 0 },
+                                set: { model.setAutoArchive(days: $0 ? 7 : 0) }))
+                                .themeFont(17).tint(Theme.brand).frame(minHeight: 44).padding(16).accessibilityIdentifier("auto-archive")
+                            if model.archive.autoDays > 0 {
+                                ShellDivider().padding(.leading, 16)
+                                NavigationLink { AutoArchiveDaysView() } label: {
+                                    HStack { Text("After"); Spacer(); Text("\(model.archive.autoDays) days").foregroundStyle(Theme.muted); ShellChevron() }
+                                        .themeFont(17).padding(16).frame(minHeight: 52).contentShape(Rectangle())
+                                }.buttonStyle(PressStyle()).accessibilityIdentifier("auto-archive-days")
+                                    .accessibilityLabel("Archive after").accessibilityValue("\(model.archive.autoDays) days")
+                            }
+                            Text("Only finished (Done) chats with no new message move to Archived. Chats waiting for you, in Review, and General never do. A new message brings a chat back.")
+                                .themeFont(13).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 16)
+                        }
+                    }
                     section("PREFERENCES") {
                         VStack(spacing: 0) {
                             NavigationLink { VoiceSettingsView() } label: {
-                                HStack { Text("Voice"); Spacer(); ShellChevron() }.themeFont(17).padding(16).frame(minHeight: 52)
+                                HStack { Text("Voice"); Spacer(); ShellChevron() }.themeFont(17).padding(16).frame(minHeight: 52).contentShape(Rectangle())
                             }.buttonStyle(PressStyle()).accessibilityIdentifier("voice-settings")
                             ShellDivider().padding(.leading, 16)
                             Toggle("Notify me when I'm needed", isOn: Binding(get: { model.notificationsEnabled }, set: { enabled in
@@ -124,7 +142,7 @@ struct SettingsView: View {
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Eyebrow(text: title)
-            content().background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+            content().background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
         }
     }
 }
@@ -156,7 +174,7 @@ struct WorkspaceSettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Eyebrow(text: "NAME")
                     TextField("Workspace name", text: $name).themeFont(17).padding(16)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12)).accessibilityLabel("Workspace name")
+                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).accessibilityLabel("Workspace name")
                         .submitLabel(.done).onSubmit { WorkspaceAlias.set(name, for: workspaceId) }
                     Text("Only changes how it looks on this phone.").themeFont(13).foregroundStyle(Theme.muted)
                 }
@@ -176,7 +194,7 @@ struct WorkspaceSettingsView: View {
                             }.buttonStyle(PressStyle()).accessibilityAddTraits(selectedMute == option ? .isSelected : []).accessibilityIdentifier("mute-\(option)")
                             if option != "Always" { ShellDivider().padding(.leading, 16) }
                         }
-                    }.background(Theme.surface, in: RoundedRectangle(cornerRadius: 14)).disabled(busy)
+                    }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).disabled(busy)
                 }
                 Button("Remove from this phone") { removing = true }.buttonStyle(WideButtonStyle(color: Theme.danger, bordered: true)).disabled(busy).accessibilityIdentifier("remove-workspace")
             }.padding(16)
@@ -208,6 +226,25 @@ struct WorkspaceSettingsView: View {
     }
 }
 
+struct AutoArchiveDaysView: View {
+    @Environment(AppModel.self) private var model
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(ArchiveStore.dayChoices, id: \.self) { days in
+                    Button { model.setAutoArchive(days: days) } label: {
+                        HStack { Text("\(days) days"); Spacer(); if model.archive.autoDays == days { Image(systemName: "checkmark").foregroundStyle(Theme.brand).accessibilityHidden(true) } }
+                            .themeFont(17).padding(16).frame(minHeight: 48).contentShape(Rectangle())
+                    }.buttonStyle(PressStyle()).accessibilityAddTraits(model.archive.autoDays == days ? .isSelected : [])
+                        .accessibilityIdentifier("auto-archive-\(days)")
+                    if days != ArchiveStore.dayChoices.last { ShellDivider().padding(.leading, 16) }
+                }
+            }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).padding(16)
+        }.background(Theme.bg.ignoresSafeArea()).foregroundStyle(Theme.text)
+            .navigationTitle("Archive after").navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 struct VoiceSettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var budget = false
@@ -230,12 +267,12 @@ struct VoiceSettingsView: View {
                             }.buttonStyle(PressStyle()).accessibilityAddTraits(model.settings.speak == option ? .isSelected : []).accessibilityIdentifier("speak-\(option.rawValue)")
                             if option != .never { ShellDivider().padding(.leading, 16) }
                         }
-                    }.background(Theme.surface, in: RoundedRectangle(cornerRadius: 14)).disabled(saving)
+                    }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).disabled(saving)
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     Eyebrow(text: "LISTENING & SPEECH")
                     Toggle("I speak Swiss German", isOn: Binding(get: { model.settings.swissGerman }, set: { update(SettingsPatch(swissGerman: $0)) }))
-                        .themeFont(17).tint(Theme.brand).padding(16).background(Theme.surface, in: RoundedRectangle(cornerRadius: 14)).disabled(saving)
+                        .themeFont(17).tint(Theme.brand).padding(16).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).disabled(saving)
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     Eyebrow(text: "VOICE BUDGET")
@@ -245,8 +282,8 @@ struct VoiceSettingsView: View {
                             Spacer(minLength: 4)
                             Text(String(format: "$%.0f", model.settings.ttsCapUsd)).foregroundStyle(Theme.muted)
                             ShellChevron()
-                        }.themeFont(17).padding(16).frame(minHeight: 48)
-                    }.buttonStyle(PressStyle()).background(Theme.surface, in: RoundedRectangle(cornerRadius: 14)).disabled(saving)
+                        }.themeFont(17).padding(16).frame(minHeight: 48).contentShape(Rectangle())
+                    }.buttonStyle(PressStyle()).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).disabled(saving)
                     Text(String(format: "Used this month $%.2f · left $%.2f", model.settings.ttsUsedUsdMonth, model.settings.ttsLeftUsd))
                         .themeFont(13).foregroundStyle(Theme.muted)
                 }
