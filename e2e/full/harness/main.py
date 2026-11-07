@@ -118,7 +118,7 @@ def main() -> int:
         repo = wt
         sha = subprocess.run(["git", "-C", str(wt), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     want = [x for x in (a.lanes.split(",") if a.lanes else
-                        (["A", "B", "G", "Z"] if quick else ["A", "B", "C", "D", "F", "W", "G", "R", "M", "U", "Z"] + ([] if a.no_windows else ["X"])))]
+                        (["A", "B", "G", "Z"] if quick else ["A", "B", "C", "D", "F", "W", "G", "R", "N", "M", "U", "Z"] + ([] if a.no_windows else ["X"])))]
     if a.phone and "P" not in want:
         want.append("P")
     hist = load_history()
@@ -216,6 +216,8 @@ def main() -> int:
         # serial
         if "W" in want:
             lanes.append({**_save(lanes_py.lane_w(env, outdir / "W")), "dir": "W"})
+        if "N" in want:
+            lanes.append({**_save(lanes_py.lane_n(env, outdir / "N")), "dir": "N"})
         if "R" in want:
             lanes.append({**_save(lanes_py.lane_r(env, outdir / "R")), "dir": "R"})
         if "G" in want:
@@ -313,7 +315,7 @@ def main() -> int:
     STATE.mkdir(parents=True, exist_ok=True)
     if not a.no_history:
         (STATE / "history.json").write_text(json.dumps(hist, indent=1))
-    _prune(STATE / "reports", 7)
+    _prune(STATE / "reports", 40)
     url = f"http://develop.netbird.cloud:{a.serve_port}/{runname}/"
     log(f"REPORT {url}  ({page})")
     nfail = sum(s["status"] == "fail" for s in steps)
