@@ -371,7 +371,7 @@ body.pf-body{font-size:14px;background:var(--bg)}
 .sound .media-box{padding:32px 22px}.sound audio{width:100%}
 .code-wrap{flex:1;min-height:0;display:flex;background:#11161d;overflow:auto}
 .code-wrap pre{margin:0;border:0;border-radius:0;background:none;white-space:pre;overflow-wrap:normal;font:12.5px/24px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:20px 22px 22px 0;min-height:min-content}
-.code-wrap .gutter{color:#566476;text-align:right;padding:20px 18px 22px 24px;user-select:none;font-size:11px;line-height:24px;position:sticky;left:0;background:#11161d}
+.code-wrap .gutter{color:#7d8b9c;text-align:right;padding:20px 18px 22px 24px;user-select:none;font-size:11px;line-height:24px;position:sticky;left:0;background:#11161d}
 .code-wrap pre.code{color:#c5ced9;flex:1}
 .tk-c{color:#748290;font-style:italic}.tk-s{color:#9bbdad}.tk-n{color:#d0b58f}.tk-k{color:#b4a4d1}.tk-p{color:#9abbdc}
 .md{flex:1;min-height:0;overflow:auto;padding:36px max(24px,calc((100% - 820px)/2));font-size:14px;line-height:1.8;color:var(--text)}
