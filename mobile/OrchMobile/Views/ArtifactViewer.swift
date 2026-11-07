@@ -205,7 +205,7 @@ struct ArtifactViewer: View {
                 } else { throw PublishError.broken }
             case .pdf, .image, .file:
                 let loaded: Data?
-                if let id = item.blobId { if let custom = loader.blob { loaded = await custom(id) } else { loaded = await model.blob(id) } } else { loaded = nil }
+                if let id = item.blobId { if let custom = loader.blob, let data = await custom(id) { loaded = data } else { loaded = await model.blob(id) } } else { loaded = nil }
                 guard let data = loaded else {
                     if !Task.isCancelled { loadState = .failed("Could not load this file. Check your connection and try again.") }
                     return
