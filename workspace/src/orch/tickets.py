@@ -901,17 +901,29 @@ def ref_remove(root: Path, tid: str, target: str, by: str) -> tuple[dict, dict]:
     from orch import refs
 
     t = load(root, tid)
-    wanted = None if target.isdigit() else refs.detect(root, t["id"], target, check_exists=False)
+    wanted = None
+    if not target.isdigit():
+        try:
+            wanted = refs.detect(root, t["id"], target, check_exists=False)
+        except Refused:  # a file that became a link is refused by detect: match its stored text instead
+            import posixpath
+
+            text = target.replace("\\", "/")
+            line = re.fullmatch(r"(.+):([0-9]+)", text)
+            wanted = dict(path=posixpath.normpath(line[1] if line else text))
+            if line:
+                wanted["line"] = int(line[2])
     result = None
 
     def op(ticket):
         nonlocal result
-        values = refs.all_refs(root, ticket)
+        values = refs.numbered({"refs": ticket["refs"] + refs.local_refs(root, ticket["id"])})
         result = next(
             (
                 r
                 for n, r in values
-                if (
+                if isinstance(r, dict)
+                and (
                     n == int(target)
                     if target.isdigit()
                     else all(r.get(k) == v for k, v in wanted.items() if k != "kind")
