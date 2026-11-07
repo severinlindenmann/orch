@@ -1,18 +1,29 @@
 name: ci
 on:
   pull_request:
+    # draft PRs get no CI run (the gate says "draft"); marking the PR ready starts it
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
+    inputs:
+      windows:
+        description: "also run the Windows jobs (off by default: Windows is tested locally on the winvm VMs)"
+        type: boolean
+        default: false
   push:
     branches: [develop, main]
+# one run per PR / branch: a new push cancels the older run that is still going
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
   changes:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     outputs:
       contracts: ${{ steps.f.outputs.contracts }}
       workspace: ${{ steps.f.outputs.workspace }}
-      install: ${{ steps.f.outputs.install }}
       addons: ${{ steps.f.outputs.addons }}
       publish: ${{ steps.f.outputs.publish }}
       relay: ${{ steps.f.outputs.relay }}
@@ -25,7 +36,6 @@ jobs:
           filters: |
             contracts: ['contracts/**', '.github/workflows/contracts.yml']
             workspace: ['workspace/**', 'contracts/**', 'install.ps1', 'install.sh', 'e2e/windows/**', '.github/workflows/workspace.yml']
-            install: ['install.ps1', 'install.sh', 'e2e/windows/**', 'workspace/src/orch/addons.py', 'workspace/src/orch/term.py', 'workspace/src/orch/winfinish.py', 'workspace-addons/*/src/*/runfiles.py']
             addons: ['workspace-addons/**', 'workspace/**', 'contracts/**', '.github/workflows/addons.yml']
             publish: ['publish/**', 'contracts/**', '.github/workflows/publish.yml']
             relay: ['relay/**', 'contracts/**', '.github/workflows/relay.yml']
@@ -39,10 +49,11 @@ jobs:
     if: needs.changes.outputs.workspace == 'true'
     uses: ./.github/workflows/workspace.yml
     with:
-      # PRs into develop: Linux only. Everything else (push to develop/main, PRs into main, manual): + macOS, Windows.
+      # PRs into develop: Linux only. Everything else (push to develop/main, PRs into main, manual): + macOS.
       full: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
-      # the Windows standard-user install also on PRs that change the install path
-      install: ${{ needs.changes.outputs.install == 'true' }}
+      # Windows (unit tests + standard-user install) only on a manual run with windows=true (owner, 7 Nov);
+      # Windows changes are tested locally on a winvm clone (e2e/windows/run-as-standard-user.ps1).
+      windows: ${{ github.event_name == 'workflow_dispatch' && inputs.windows }}
   addons:
     needs: changes
     if: needs.changes.outputs.addons == 'true'
@@ -64,7 +75,11 @@ jobs:
     needs: [changes, contracts, workspace, addons, publish, relay, mobile]
     runs-on: ubuntu-latest
     steps:
+      - name: draft PRs are not tested
+        if: github.event.pull_request.draft == true
+        run: echo "draft PR - CI runs when it is marked ready for review" && exit 1
       - name: every called job passed or was skipped
+        if: github.event.pull_request.draft != true
         run: |
           echo '${{ toJSON(needs) }}' > needs.json
           python3 - <<'PY'
