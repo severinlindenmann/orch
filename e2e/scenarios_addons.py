@@ -59,7 +59,7 @@ def _help(e, ws) -> str:
 def _tree_text(ws: Path) -> str:
     """All text a fresh agent could read: AGENTS.md, CLAUDE.md and every skill."""
     out = []
-    for p in [ws / "AGENTS.md", ws / "CLAUDE.md", *sorted((ws / ".agents").rglob("*"))]:
+    for p in [ws / "AGENTS.md", ws / "CLAUDE.md", ws / ".orch/harness/AGENTS.orch.md", *sorted((ws / ".orch/harness/skills").rglob("*"))]:
         if p.is_file():
             out.append(p.read_text(errors="replace"))
     return "\n".join(out).lower()
@@ -80,7 +80,7 @@ def a7(e):
     check(rc == 0 and json.loads(out) == {"hello": "world"}, f"command: {rc} {out}")
     check("hello-world" in _help(e, ws) and "Add-ons" in _help(e, ws), "command not in --help under Add-ons")
     check((ws / ".agents/skills/orch-hello-world/SKILL.md").is_file(), "skill missing")
-    check("<!-- orch:addon:hello-world -->" in (ws / "AGENTS.md").read_text(), "AGENTS block missing")
+    check("orch-hello-world" in (ws / ".orch/harness/AGENTS.orch.md").read_text(), "orch block missing")
     lst = {x["name"]: x for x in e.orchj(ws, "addon", "list")}
     check(lst["hello-world"]["source"] == "local" and lst["hello-world"]["active"], f"list: {lst['hello-world']}")
     with _dashboard(e, ws) as (base, get):
@@ -113,7 +113,7 @@ def a8(e):
     rc, out, err = e.sh(["orch", "automation", "list"], cwd=ws)
     check(rc == 2 and "not turned on in this workspace" in err and "orch addon add automation" in err, f"command not refused: {rc} {err!r}")
     check(not (ws / ".agents/skills/orch-automation").exists(), "skill still there")
-    check("orch:addon:automation" not in (ws / "AGENTS.md").read_text(), "block still there")
+    check(not (ws / ".orch/harness/AGENTS.orch.md").exists() or "orch-automation" not in (ws / ".orch/harness/AGENTS.orch.md").read_text(), "block still there")
     check("automation" not in _help(e, ws).lower(), "automation still in --help")
     check("automation" not in json.loads((ws / ".orch/addons.json").read_text())["active"], "still in addons.json")
     with _dashboard(e, ws) as (_, get):
@@ -273,9 +273,9 @@ def a13(e):
     check("--recurring" not in sk and "wake_at" not in sk, "old automation wording in the skill")
     names = sorted(p.name for p in (ws / ".agents/skills").iterdir() if p.is_dir())
     check({"orch", "orch-dashboard", "orch-automation"} <= set(names) and all(n == "orch" or n.startswith("orch-") for n in names), f"skill folder names {names}")
-    check((ws / ".claude/skills").is_symlink() and (ws / ".claude/skills/orch-automation/SKILL.md").is_file(), ".claude/skills does not show the add-on")
-    a = (ws / "AGENTS.md").read_text()
-    blk = a.split("<!-- orch:addon:automation -->")[1].split("<!-- /orch:addon:automation -->")[0]
+    check((ws / ".claude/skills/orch-automation").is_symlink() and (ws / ".claude/skills/orch-automation/SKILL.md").is_file(), ".claude/skills does not show the add-on")
+    a = (ws / ".orch/harness/blocks/addon-automation.md").read_text()
+    blk = a
     check(blk.strip().startswith("## orch-automation") and "SKILL.md" in blk and len(blk.strip().splitlines()) <= 6, f"AGENTS block shape: {blk!r}")
     with _dashboard(e, ws) as (base, get):
         st = get("/api/state")[1]
@@ -419,7 +419,7 @@ def a16(e):
     check(rc == 0 and "Adds the command: orch relay" in out, f"add relay: {(err or out)[-200:]}")
     check("relay" in _help(e, ws).split("Add-ons:")[1], "relay not under Add-ons in --help")
     check((ws / ".agents/skills/orch-relay/SKILL.md").is_file(), "relay skill missing")
-    check("<!-- orch:addon:relay -->" in (ws / "AGENTS.md").read_text(), "relay AGENTS block missing")
+    check("orch-relay" in (ws / ".orch/harness/AGENTS.orch.md").read_text(), "relay orch block missing")
     check("publish" not in _help(e, ws), "publish appeared with relay")
     e.orch(ws, "addon", "remove", "relay")
     check("orch-relay" not in _tree_text(ws), "relay left a trace after remove")
@@ -445,7 +445,7 @@ def a17(e):
         check(urls["Start1"] != urls["Start2"], f"two dashboards on one port: {urls}")
         rc, out, _ = e.sh(["orch", "start"], cwd=one)  # again: same processes, plain lines
         check(rc == 0 and "Started in Start1:" in out and urls["Start1"] in out and "automation" in out, f"start text: {out}")
-        check(".orch/run/" in (one / ".gitignore").read_text().splitlines(), "runtime files not gitignored")
+        check("run/" in (one / ".orch/.gitignore").read_text().splitlines(), "runtime files not gitignored")
         check((one / ".orch/run/dashboard/server.json").is_file() and (one / ".orch/run/automation/automation.json").is_file(),
               "runtime files not in .orch/run/")
         st = e.orchj(e.tmp, "status")

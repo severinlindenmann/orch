@@ -146,6 +146,9 @@ def apply_agent_files(root: Path) -> list[str]:
         for n in names:
             harness.check_harness(root, sk / n)
             harness.link_skill(root, where, n)
+    for sh in _shared_skills(root):  # skills the relay delivered (not orch*): visible to every detected agent
+        for where in places[1:]:
+            harness.link_skill(root, where, sh.name, sh)
     harness.sync_copies(root, places)
     done, local = [], []
     for n in detected_agents(root):
@@ -159,6 +162,13 @@ def apply_agent_files(root: Path) -> list[str]:
     return done
 
 
+def _shared_skills(root: Path) -> list[Path]:
+    base = root / ".agents" / "skills"
+    if not base.is_dir() or harness.is_link(base):
+        return []
+    return sorted(p for p in base.iterdir() if p.is_dir() and not harness.is_link(p) and (p / ".orch-shared").exists())
+
+
 def _exclude_lines(root: Path) -> list[str]:
     """Root-relative patterns of the links and local instruction files orch makes here."""
     from orch import adapters
@@ -169,6 +179,8 @@ def _exclude_lines(root: Path) -> list[str]:
         lines += [fn for fn in (f.get("instructions_link") or {}) if ".local." in fn]
         if f.get("skills_link"):
             lines.append(f"{f['skills_link']}/orch*")
+    for sh in _shared_skills(root):
+        lines += [f".agents/skills/{sh.name}/", *[f"{w}/{sh.name}" for w in _skill_places(root)[1:]]]
     return list(dict.fromkeys(lines))
 
 

@@ -292,9 +292,9 @@ def _same(a: Path, b: Path) -> bool:
         return False
 
 
-def link_skill(root: Path, where: str, name: str) -> None:
-    """<where>/<name> -> .orch/harness/skills/<name>. Never replaces a folder or file that is not orch's."""
-    target = harness_dir(root) / "skills" / name
+def link_skill(root: Path, where: str, name: str, target: Path | None = None) -> None:
+    """<where>/<name> -> .orch/harness/skills/<name> (or target). Never replaces a folder or file that is not orch's."""
+    target = target or harness_dir(root) / "skills" / name
     parent = root / where
     if parent.exists() and not _inside(root, parent):
         raise Refused(f"{parent} points outside this project; orch will not write there.")

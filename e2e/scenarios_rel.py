@@ -35,7 +35,7 @@ def r1(e):
         who = e.orchj(n, "relay", "whoami")
         check(who["id"] == i[n], f"whoami {who}")
         check((e.ws(n) / ".agents/skills/orch-relay/SKILL.md").is_file(), f"{n}: skill missing")
-        check("<!-- orch:addon:relay -->" in (e.ws(n) / "AGENTS.md").read_text(), f"{n}: AGENTS block")
+        check("orch-relay" in (e.ws(n) / ".orch/harness/AGENTS.orch.md").read_text(), f"{n}: orch block")
     rules = e.rel.admin.call("GET", "/admin/api/rules").json()["rules"]
     mine = [r for r in rules if r["from"] == i["Pilatus"] and r["to"] == i["Reports"]]
     check(mine and all(mine[0][k] for k in ("text", "files", "delegate", "start")), f"rules {rules}")
