@@ -1,6 +1,6 @@
 {
  "name": "look-v1",
- "description": "Workspace look (contracts/look.md). default: Automatic colour + letter for a name. me_patch: PATCH /v1/me with look fields on relay and publish (stored/after = the workspace record's icon, color, look_by). admin_patch: the look part of PATCH /admin/api/workspaces/<id>. render: what a surface shows for raw server values (phone, portals, dashboard). connect: what the core does on connect (local = .orch/config.toml [workspace] icon/color, remote = whoami). me_patch.service: relay or publish (publish also takes show_on_shared_pages). meta: GET /f/<id>/meta on publish. local_set: `orch look set` / the dashboard against .orch/config.toml [workspace] icon, color, look_set_by (caller agent|human).",
+ "description": "Workspace look (contracts/look.md). default: Automatic colour + letter for a name. me_patch: PATCH /v1/me with look fields on relay and publish (stored/after = the workspace record's icon, color, look_by). admin_patch: the look part of PATCH /admin/api/workspaces/<id>. render: what a surface shows for raw server values (phone, portals, dashboard). connect: what the core does on connect (local = .orch/config.toml [workspace] icon/color, remote = whoami). me_patch.service: relay or publish (publish also takes show_on_shared_pages). meta: GET /f/<id>/meta on publish. local_set: `orch look set` / the dashboard against .orch/config.toml [workspace] icon, color, look_set_by (caller agent|human). connect.write_local.set_by: the adopted admin look counts as the person's pick. shared_pages_set: the core's rule for show_on_shared_pages (caller agent|human).",
  "default": [
   {
    "name": "Finance",
@@ -573,6 +573,24 @@
     "color": "blue",
     "look_by": "admin"
    }
+  },
+  {
+   "name": "mixed body while the workspace owns the look: nothing stored, name included",
+   "stored": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   },
+   "body": {
+    "name": "Money",
+    "icon": "code"
+   },
+   "status": 409,
+   "after": {
+    "icon": "wallet",
+    "color": "amber",
+    "look_by": "workspace"
+   }
   }
  ],
  "render": [
@@ -651,7 +669,8 @@
    },
    "write_local": {
     "icon": "code",
-    "color": "blue"
+    "color": "blue",
+    "set_by": "human"
    },
    "send": {
     "icon": "code",
@@ -850,6 +869,40 @@
     "color": null,
     "set_by": "human"
    }
+  }
+ ],
+ "shared_pages_set": [
+  {
+   "name": "person turns it off in the dashboard",
+   "caller": "human",
+   "local": true,
+   "request": false,
+   "ok": true,
+   "after": false
+  },
+  {
+   "name": "agent may not turn it off",
+   "caller": "agent",
+   "local": true,
+   "request": false,
+   "ok": false,
+   "after": true
+  },
+  {
+   "name": "agent may not turn it on",
+   "caller": "agent",
+   "local": false,
+   "request": true,
+   "ok": false,
+   "after": false
+  },
+  {
+   "name": "not a boolean",
+   "caller": "human",
+   "local": true,
+   "request": "no",
+   "ok": false,
+   "after": true
   }
  ]
 }

@@ -31,10 +31,13 @@ No other values. No uploads, no free SVG, no hex colours. Ids and tokens never c
 - **Push:** after each save and on every `connect` the core sends `PATCH /v1/me {icon, color}` to each connected service
   (relay, publish). The first such call makes the workspace the owner of its look there (`look_by = workspace`). Exception
   on connect: when the local look is `null`/`null` and the service holds an admin look, the core first takes that look
-  into `config.toml` and sends it back (vectors `connect`). A failed push is retried with the latest value on the next connect.
+  into `config.toml` with `look_set_by = human` (the admin is the owner, so an agent may not replace it) and sends it
+  back (vectors `connect`). A failed push is retried with the latest value on the next connect.
 - **Relay / publish admin portal:** may set the look only while `look_by` is `null` or `admin` (e.g. a workspace created
   but not connected yet). Once `look_by = workspace` the portal shows it read only ("Chosen in the workspace's dashboard")
-  and an admin change of `icon`/`color` gets `409 conflict`.
+  and an admin change of `icon`/`color` gets `409 conflict` (the whole body is refused, other fields included). The
+  `look_by` check and the write happen in one database transaction. A new workspace token (`/token`) keeps `look`
+  and `look_by`.
 - **Phone:** reads `icon`, `color` from `GET /v1/phone/workspaces`; stores nothing of its own.
 - Applied at once, never pending: unlike the description these are no free text and cannot carry instructions.
   A look change is not part of `workspaces.json` (agents do not need it): no version bump, no refresh-hint.
@@ -56,7 +59,8 @@ these commands, the person may change it in the dashboard, and an agent never ch
 `show_on_shared_pages` (publish workspace record, default `true`): `GET /f/<id>/meta` returns `{workspace: {name, icon,
 color}}` and the file page shows the badge and name above the file; `false` → `{workspace: null}`, only the orch logo.
 The person switches it in the dashboard (Settings → Add-ons → Publish: "Show workspace name and icon on shared pages");
-the core sends `PATCH /v1/me {show_on_shared_pages}` to publish. Agents may not change it (`agent:*` refused in the core).
+the core sends `PATCH /v1/me {show_on_shared_pages}` to publish. Only a person may change it: the core refuses `agent:*`
+  callers (vectors `shared_pages_set`); publish cannot tell them apart, so the core is where this is enforced.
 App pages (`/a/<name>`) are the workspace's own and are not changed.
 
 ## Description from the dashboard
