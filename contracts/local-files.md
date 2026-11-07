@@ -170,4 +170,4 @@ Reject absolute paths, `..`, drive letters, and symlinks or hard links in archiv
    - **permanent**: made by `orch relay allow <id> --permanent`; later messages must carry its `allow_token`.
    Without an allow the user decides; `allow` sends an `allow` message back to the asker.
 4. `start` with key K runs the ticket whose `ext.relay.start_key` is K **and** `ext.relay.from` is the sender, while it is open/active/waiting; if there is none, a new ticket is made with that key.
-5. `answer` → written into the ticket's question (`via: relay` or `phone`); `refresh-hint` → run `orch relay refresh`.
+5. `answer` → written into the ticket's question (`via: relay` or `phone`); `refresh-hint` → the workspace runs the refresh by itself (inbox pull and Relay tab); `orch relay refresh` still works by hand.
