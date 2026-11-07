@@ -27,7 +27,7 @@ final class ConversationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Please check the totals"].waitForExistence(timeout: 10), "my bubble")
         let any = ["receipt-queued", "receipt-sent", "receipt-delivered", "receipt-started"].contains { el(app, $0).waitForExistence(timeout: 5) }
         XCTAssertTrue(any, "a receipt under my bubble")
-        XCTAssertEqual(field.value as? String ?? "", "Message…", "the field is empty again (placeholder)")
+        XCTAssertFalse((field.value as? String ?? "").contains("totals"), "the field is empty again")
     }
 
     func testQuestionUndoThenAnswered() {

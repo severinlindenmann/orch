@@ -96,7 +96,7 @@ struct Composer: View {
                     }
             }
             if target == nil { Text("Starting topic…").themeFont(13).foregroundStyle(Theme.muted) }
-            else if let note, !hasAudio { Text(note).themeFont(13).foregroundStyle(Theme.muted) }
+            else if let note, !hasAudio { Text(note).themeFont(13).foregroundStyle(Theme.muted).accessibilityIdentifier("composer-note") }
         }.padding(.horizontal, 12).padding(.vertical, 8).background(Theme.surface)
             .accessibilityElement(children: .contain).accessibilityIdentifier("composer")
             .foregroundStyle(Theme.text).tint(Theme.brand)
