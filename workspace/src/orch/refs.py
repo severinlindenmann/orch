@@ -311,6 +311,9 @@ def detect(root: Path, tid: str, value: str, kind=None, title=None, kinds=(), *,
         p.rstrip(". ").lower() in (".orch", ".git") for p in path.split("/")
     ):
         raise Refused("Choose a project file outside .orch and .git.")
+    full = Path(value) if absolute else (root / path)
+    if check_exists and not full.exists():
+        raise Refused("That is not a web address, a ticket or a file in this folder.")
     out = dict(kind="file", path=str((root / path).absolute()) if local and not absolute else path)
     if line is not None:
         out["line"] = line
