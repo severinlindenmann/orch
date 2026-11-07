@@ -48,7 +48,9 @@ $env:ORCH_AGENT = "claude"  # links .claude\skills (no agent is installed here; 
 $p = "$env:USERPROFILE\orch-smoke"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
 L "--- init"; O init | Out-String | % { L $_ }
 Check (Test-Path "$p\.agents\skills\orch\SKILL.md") "orch init wrote the skill"
-Check ((Get-Item "$p\.claude\skills" -Force -ErrorAction SilentlyContinue).LinkType -eq "Junction") ".claude\skills is a junction"
+Check (((Get-Item "$p\.claude\skills\orch" -Force -ErrorAction SilentlyContinue).LinkType -eq "Junction") -or (Test-Path "$p\.claude\skills\orch\.orch-copy")) ".claude\skills\orch is a junction (or a copy where links are refused)"
+Check (Test-Path "$p\.claude\skills\orch\SKILL.md") "the skill is found through .claude\skills"
+Check ((-not (Test-Path "$p\AGENTS.md")) -and (-not (Test-Path "$p\CLAUDE.md")) -and (-not (Test-Path "$p\.gitignore"))) "init wrote no team file"
 $before = (Get-ChildItem -Recurse -Force -File | Get-FileHash | Out-String)
 O init | Out-Null
 Check ($before -eq (Get-ChildItem -Recurse -Force -File | Get-FileHash | Out-String)) "a second orch init changes nothing"
