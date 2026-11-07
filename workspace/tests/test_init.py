@@ -192,7 +192,9 @@ def test_existing_claude_skills_folder_gets_per_skill_links(proj, run):
     assert run("init")[0] == 0
     assert (proj / ".claude/skills/mine/SKILL.md").is_file()
     assert (proj / ".claude/skills/orch/SKILL.md").is_file()
-    assert not (proj / ".claude/skills").is_symlink() and (proj / ".claude/skills/orch").is_symlink()
+    link = proj / ".claude/skills/orch"  # a symlink; on Windows a junction (no privileges needed)
+    is_link = link.is_symlink() or getattr(link, "is_junction", lambda: False)()
+    assert not (proj / ".claude/skills").is_symlink() and is_link
 
 
 def test_all_packaged_skills_have_front_matter():
