@@ -723,6 +723,7 @@ def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
         # a fresh Simulator has no permissions and no position: grant what the walk uses (location card, voice note) before the app is installed
         subprocess.run(["xcrun", "simctl", "privacy", udid, "grant", "location", "io.severin.orch"], env=_host_env(), capture_output=True)
         subprocess.run(["xcrun", "simctl", "privacy", udid, "grant", "microphone", "io.severin.orch"], env=_host_env(), capture_output=True)
+        subprocess.run(["xcrun", "simctl", "privacy", udid, "grant", "speech-recognition", "io.severin.orch"], env=_host_env(), capture_output=True)
         subprocess.run(["xcrun", "simctl", "location", udid, "set", "47.0502,8.3093"], env=_host_env(), capture_output=True)
         L.notes.append(f"own Simulator e2e-full-phone {udid} (deleted at the end)")
     try:
