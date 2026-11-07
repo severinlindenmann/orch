@@ -21,6 +21,14 @@ struct PairResponse: Decodable, Sendable {
 /// Workspace names are shown exactly as the relay returns them.
 func displayName(_ raw: String) -> String { raw.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+/// `{on, since, ends_at, machine}`: the computer keeps awake and sends every question to this phone.
+struct MobileMode: Codable, Sendable, Equatable {
+    let on: Bool
+    var since: String? = nil
+    var endsAt: String? = nil
+    var machine: String? = nil
+}
+
 struct Workspace: Codable, Sendable, Equatable, Identifiable {
     let id: String
     let name: String
@@ -31,6 +39,8 @@ struct Workspace: Codable, Sendable, Equatable, Identifiable {
     let openQuestions: Int
     /// `null`, a UTC time, or "forever" (PATCH /v1/phone/workspaces/<id>).
     var mutedUntil: String? = nil
+    /// Mobile mode of the workspace's computer (relay-api.md, Mobile mode); nil from an older relay.
+    var mobileMode: MobileMode? = nil
     var displayName: String { OrchMobile.displayName(name) }
     func isMuted(now: Date = Date()) -> Bool {
         guard let m = mutedUntil else { return false }
