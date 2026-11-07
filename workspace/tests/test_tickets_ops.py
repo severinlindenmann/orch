@@ -224,3 +224,16 @@ def test_core_names_no_addon_or_tool_in_new_code():
         text = (Path(tickets.__file__).parent / f).read_text(encoding="utf-8").lower()
         for word in ("scheduler", "netbird", "claude", "codex"):
             assert word not in text.replace("claude_code_entrypoint", ""), (f, word)
+
+
+def test_history_says_where_a_change_came_from(proj, run, monkeypatch):
+    from orch import runs, tickets
+
+    monkeypatch.setenv("ORCH_VIA", "dashboard")
+    t = tickets.create(proj, "From the page", "human:t")
+    assert t["history"][0]["via"] == "dashboard"
+    monkeypatch.setenv("ORCH_VIA", "Bad Word!")
+    t = tickets.create(proj, "Odd", "human:t")
+    assert t["history"][0]["via"] == "cli"
+    monkeypatch.setenv("ORCH_VIA", "dashboard")
+    assert "ORCH_VIA" not in runs._agent_environ()  # an agent started from the page writes as itself

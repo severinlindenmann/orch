@@ -54,6 +54,7 @@ pub fn router(app: AppState) -> Router {
                 .layer(DefaultBodyLimit::max(crate::transcribe::MAX_AUDIO + 1024)),
         )
         .merge(crate::phone::router())
+        .merge(crate::subs::router())
         .merge(icon_routes())
         .fallback(not_found_page)
         .layer(DefaultBodyLimit::max(MAX_JSON))
@@ -383,7 +384,9 @@ async fn get_blob(
         let me = auth::workspace(&c, &h)?;
         let ok: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM blobs WHERE id=?1 AND uploader=?2)
-             OR EXISTS(SELECT 1 FROM messages WHERE blob_id=?1 AND type='file' AND to_addr=?2)",
+             OR EXISTS(SELECT 1 FROM messages WHERE blob_id=?1 AND type='file' AND to_addr=?2)
+             OR EXISTS(SELECT 1 FROM phone_blobs pb JOIN messages m ON m.id=pb.msg_id JOIN blobs b ON b.id=pb.blob_id
+               WHERE pb.blob_id=?1 AND m.type='text' AND m.to_addr=?2 AND b.uploader=m.from_addr)",
             params![id, me],
             |r| r.get(0),
         )?;
@@ -396,7 +399,15 @@ async fn get_blob(
         .map_err(|_| not_found("No such file."))?;
     let plain =
         crypto::open(&app.key, &id, &raw).ok_or_else(|| internal("blob does not decrypt"))?;
-    Ok(([(header::CONTENT_TYPE, "application/octet-stream")], plain).into_response())
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/octet-stream"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::CONTENT_DISPOSITION, "attachment"),
+        ],
+        plain,
+    )
+        .into_response())
 }
 
 async fn refresh(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {

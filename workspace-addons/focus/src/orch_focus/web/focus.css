@@ -15,7 +15,7 @@ body{margin:0}
 .fx-live .t{font-family:var(--font-mono);font-size:11px;font-variant-numeric:tabular-nums}
 .fx[data-state=working] .fx-live{border-color:rgb(47 198 163 / .45)}
 .fx[data-state=needs] .fx-live{border-color:rgb(251 191 36 / .5)}
-.fx[data-state=stopped] .fx-live,.fx[data-state=done] .fx-live{border-color:var(--border-strong)}
+.fx[data-state=stopped] .fx-live,.fx[data-state=done] .fx-live,.fx[data-state=waiting] .fx-live{border-color:var(--border-strong)}
 .fx-dot{position:relative;width:8px;height:8px;border-radius:50%;background:var(--text-faint);transition:background-color .3s}
 .fx[data-state=working] .fx-dot{background:var(--brand)}
 .fx[data-state=needs] .fx-dot{background:var(--warning)}

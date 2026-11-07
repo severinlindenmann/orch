@@ -90,8 +90,14 @@ def _answer(a):
 
 
 def _ticket_new(a):
-    _only(a, ("title", "parent"))
+    _only(a, ("title", "parent", "owner", "due", "note"))
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
+    for k in ("owner", "due", "note"):
+        if a.get(k):
+            v = _text(a[k], k)
+            if k == "due" and not DAY.fullmatch(v):
+                raise BadRequest("The due day must look like 2026-11-30.")
+            flags.append(f"--{k}={v}")
     return ["ticket", "new"], flags, [_text(a.get("title"), "title")]
 
 
@@ -340,7 +346,7 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
         raise BadRequest("An agent with that name is already set up. Pick another name (changing one is done in the terminal).")
     try:
         r = subprocess.run([orch_bin, *argv], check=False, cwd=root, capture_output=True, text=True, timeout=75 if op == "config.agent.test" else 60,
-                           stdin=subprocess.DEVNULL, env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin})
+                           stdin=subprocess.DEVNULL, env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "dashboard"})
     except subprocess.TimeoutExpired:
         return 504, "That took too long. Please try again.", None
     except OSError:

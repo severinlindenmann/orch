@@ -29,7 +29,7 @@ def _safe_to_retry(req, exc) -> bool:
     return replayable and isinstance(reason, (ConnectionError, TimeoutError, OSError))
 
 
-def _send(req, timeout):
+def _send(req, timeout, limit=None):
     """urlopen with up to 3 retries (1/2/4 s) on connection-level failures, never after a response."""
     delays = list(RETRY_DELAYS)
     while True:
@@ -43,7 +43,14 @@ def _send(req, timeout):
             time.sleep(delays.pop(0))
             continue
         with r:
-            return r.status, r.read()
+            if limit is None:
+                return r.status, r.read()
+            raw = r.read(limit + 1)  # never buffers more than limit + 1 bytes
+            if len(raw) > limit:
+                err = Refused("The answer is bigger than allowed.")
+                err.status = 413
+                raise err
+            return r.status, raw
 
 
 def call(
@@ -52,6 +59,7 @@ def call(
     headers: dict | None = None,
     body: bytes | dict | None = None,
     timeout: float = 120,
+    limit: int | None = None,
 ) -> tuple[int, bytes]:
     """One request. Returns (status, body bytes). A 4xx/5xx becomes Refused with the server's message."""
     hdrs = dict(headers or {})
@@ -64,7 +72,7 @@ def call(
         hdrs.setdefault("Content-Type", "application/octet-stream")
     req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
     try:
-        return _send(req, timeout)
+        return _send(req, timeout, limit)
     except urllib.error.HTTPError as e:
         raw = e.read()
         msg, out = f"The server answered {e.code}.", ""

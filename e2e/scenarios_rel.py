@@ -368,3 +368,99 @@ def r15(e):
     check(ph[0] not in [p["id"] for p in d.get("phones", [])], "Home lists a phone it may not reach")
     check(not [x for x in phone(e, ph, "GET", "/v1/phone/messages").json()["items"] if x["message"]["body"]["text"] == "hi"], "Home reached the phone")
     return "showing the reply in the iPhone app: mobile lane (GET /v1/phone/messages, text push)"
+
+
+@scenario("R16", local_only=True)
+def r16(e):
+    """Subscriber: admin creates it; pull; live stream sees a new event; signed push to a local receiver; rotate stops
+    the old token; delete."""
+    import hmac
+    import threading
+    import urllib.request
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from lib import free_port
+
+    wid = e.connect_relay("Pilatus")[0]
+    ad = e.rel.admin
+    got: list[tuple[dict, bytes]] = []
+    arrived = threading.Event()
+
+    class Recv(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            got.append(({k.lower(): v for k, v in self.headers.items()}, body))
+            arrived.set()
+            self.send_response(204)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    port = free_port(e.used_ports)
+    srv = HTTPServer(("127.0.0.1", port), Recv)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    e.cleanup.append(srv.shutdown)
+
+    def update(text, kind="result"):
+        m = e.msg(wid, "phones", "text", {"text": text, "update": {"kind": kind, "title": "R16 export"}}, ticket="t_r16sub")
+        r = e.rapi("Pilatus", "POST", "/v1/messages", m)
+        check(r.status == 201, f"post update: {r}")
+        return m["id"]
+
+    # create (admin API): results on, push to the local receiver
+    r = ad.call("POST", "/admin/api/subscribers", {"name": "R16 bot", "workspaces": [wid],
+                                                    "push_url": f"http://127.0.0.1:{port}/hook"})
+    check(r.status == 201, f"create subscriber: {r}")
+    j = r.json()
+    sid, tok, secret = j["subscriber"]["id"], j["token"], j["push_secret"]
+    e.cleanup.append(lambda: ad.call("DELETE", f"/admin/api/subscribers/{sid}"))
+    check(tok.startswith("sub_") and secret.startswith("whsec_") and j["link"].endswith(f"/v1/sub/{tok}"), f"create: {j}")
+    sub = e.rel.url + f"/v1/sub/{tok}"
+
+    # pull
+    first = update("R16 first result")
+    r = http("GET", sub + "/events")
+    check(r.status == 200 and first in [i["id"] for i in r.json()["items"]], f"pull: {r}")
+    r = http("GET", e.rel.url + "/v1/sub/-/events", {"Authorization": f"Bearer {tok}"})
+    check(r.status == 200 and r.json()["items"][-1]["text"] == "R16 first result", f"pull with Bearer: {r}")
+
+    # push of the first event, signed as relay-api.md says: v1=hex HMAC-SHA256(secret, ts + "." + body)
+    check(arrived.wait(15), "no push within 15 s")
+    h, body = got[0]
+    ts = h["x-orch-timestamp"]
+    want = "v1=" + hmac.new(secret.encode(), ts.encode() + b"." + body, "sha256").hexdigest()
+    check(hmac.compare_digest(h["x-orch-signature"], want), "push signature does not verify")
+    check(abs(time.time() - int(ts)) < 300 and h["x-orch-event-id"] == first == json.loads(body)["id"], f"push headers: {h}")
+
+    # live stream (SSE): a new event arrives
+    resp = urllib.request.urlopen(sub + "/stream", timeout=15)
+    check(resp.status == 200 and resp.headers["content-type"].startswith("text/event-stream"), "stream did not open")
+    second = update("R16 second result")
+    frame: dict[str, str] = {}
+    while "data" not in frame:
+        raw = resp.readline()
+        check(raw != b"", "the stream ended before an event")
+        line = raw.decode().rstrip("\r\n")
+        if ":" in line and not line.startswith(":"):
+            k, _, v = line.partition(":")
+            frame[k] = v.lstrip()
+    ev = json.loads(frame["data"])
+    check(frame.get("id") == second and frame.get("event") == "update" and ev["text"] == "R16 second result", f"stream: {frame}")
+
+    # rotate: the old token stops working, the open stream ends, the new one works
+    r = ad.call("POST", f"/admin/api/subscribers/{sid}/token")
+    check(r.status == 200 and r.json()["token"] != tok, f"rotate: {r}")
+    new = r.json()["token"]
+    check(http("GET", sub + "/events").status == 401, "old token still works after rotate")
+    try:
+        rest = resp.read()
+    except OSError as x:
+        raise Fail(f"stream not closed after rotate: {x}") from None
+    check(b"R16" not in rest, f"the stream sent more after rotate: {rest[:200]!r}")
+    check(http("GET", e.rel.url + f"/v1/sub/{new}/events").status == 200, "new token refused")
+
+    # delete
+    check(ad.call("DELETE", f"/admin/api/subscribers/{sid}").status in (200, 204), "delete")
+    check(http("GET", e.rel.url + f"/v1/sub/{new}/events").status == 401, "token works after delete")
+    check(sid not in [s["id"] for s in ad.call("GET", "/admin/api/subscribers").json()["items"]], "still listed after delete")

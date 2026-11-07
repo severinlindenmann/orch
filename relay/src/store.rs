@@ -35,6 +35,12 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS blobs(id TEXT PRIMARY KEY, uploader TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, created_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS webhooks(id TEXT PRIMARY KEY, workspace TEXT NOT NULL, mode TEXT NOT NULL, ticket TEXT,
             token_hash TEXT NOT NULL, created_at INTEGER NOT NULL, last_call_at INTEGER, used INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS phone_mutes(phone TEXT NOT NULL, ws TEXT NOT NULL, until INTEGER NOT NULL, PRIMARY KEY(phone, ws));
+        CREATE TABLE IF NOT EXISTS phone_settings(phone TEXT PRIMARY KEY, speak TEXT NOT NULL DEFAULT 'auto',
+            swiss_german INTEGER NOT NULL DEFAULT 0, tts_cap_usd REAL NOT NULL DEFAULT 10,
+            tts_used_usd REAL NOT NULL DEFAULT 0, tts_month TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS phone_client_ids(phone TEXT NOT NULL, client_id TEXT NOT NULL, msg_id TEXT NOT NULL, PRIMARY KEY(phone, client_id));
+        CREATE TABLE IF NOT EXISTS phone_blobs(blob_id TEXT NOT NULL, msg_id TEXT NOT NULL, PRIMARY KEY(blob_id, msg_id));
         CREATE TABLE IF NOT EXISTS skills(name TEXT PRIMARY KEY, version INTEGER NOT NULL, files BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS mcp(name TEXT PRIMARY KEY, config BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS creds(name TEXT PRIMARY KEY, value BLOB NOT NULL);
@@ -55,6 +61,7 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
     // When the phone paired (L3): broadcasts to `phones` from before are not shown to it.
     let _ = c.execute("ALTER TABLE phones ADD COLUMN paired_at INTEGER", []);
     crate::groups::init(c)?;
+    crate::subs::init(c)?;
     Ok(())
 }
 
@@ -86,6 +93,8 @@ pub struct Msg {
     pub reply_to: Option<String>,
     pub payload: Vec<u8>,
     pub acked: bool,
+    /// When the receiver acked it (unix seconds).
+    pub acked_at: Option<i64>,
 }
 
 pub const MSG_COLS: &str =
@@ -103,6 +112,7 @@ pub fn msg_from_row(r: &Row) -> rusqlite::Result<Msg> {
         reply_to: r.get(7)?,
         payload: r.get(8)?,
         acked: r.get::<_, Option<i64>>(9)?.is_some(),
+        acked_at: r.get(9)?,
     })
 }
 
@@ -555,9 +565,22 @@ pub fn purge(c: &Connection, data_dir: &Path, at: i64) -> rusqlite::Result<(usiz
         "DELETE FROM view_blobs WHERE msg_id NOT IN (SELECT id FROM messages)",
         [],
     )?;
-    let mut st = c.prepare("SELECT id FROM blobs WHERE created_at<?1")?;
+    c.execute(
+        "DELETE FROM phone_blobs WHERE msg_id NOT IN (SELECT id FROM messages)",
+        [],
+    )?;
+    c.execute(
+        "DELETE FROM phone_client_ids WHERE msg_id NOT IN (SELECT id FROM messages)",
+        [],
+    )?;
+    c.execute("DELETE FROM phone_mutes WHERE until>=0 AND until<?1", [at])?;
+    // Phone uploads never named in a sent text go after 24 hours.
+    let mut st = c.prepare(
+        "SELECT id FROM blobs WHERE created_at<?1 OR (uploader LIKE 'ph\\_%' ESCAPE '\\' AND created_at<?2
+           AND id NOT IN (SELECT blob_id FROM phone_blobs))",
+    )?;
     let ids: Vec<String> = st
-        .query_map([cutoff], |r| r.get(0))?
+        .query_map([cutoff, at - 86400], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     for id in &ids {
         let _ = std::fs::remove_file(data_dir.join("blobs").join(id));
@@ -565,4 +588,63 @@ pub fn purge(c: &Connection, data_dir: &Path, at: i64) -> rusqlite::Result<(usiz
     }
     c.execute("DELETE FROM pair_codes WHERE expires_at<?1", [at - 86400])?;
     Ok((m, ids.len()))
+}
+
+// ---------- phone v3: mute, settings ----------
+
+/// Mute marker for "forever" in `phone_mutes.until`.
+pub const MUTE_FOREVER: i64 = -1;
+
+/// `muted_until` of a workspace for a phone: `null`, a time, or `"forever"`.
+pub fn muted_until(c: &Connection, pid: &str, ws: &str) -> Value {
+    let u: Option<i64> = c
+        .query_row(
+            "SELECT until FROM phone_mutes WHERE phone=?1 AND ws=?2",
+            [pid, ws],
+            |r| r.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    match u {
+        Some(MUTE_FOREVER) => "forever".into(),
+        Some(t) if t > now() => fmt_time(t).into(),
+        _ => Value::Null,
+    }
+}
+
+/// True when phone `pid` muted workspace `ws` (forever, or until a time in the future).
+pub fn is_muted(c: &Connection, pid: &str, ws: &str) -> bool {
+    !muted_until(c, pid, ws).is_null()
+}
+
+/// Current calendar month (UTC) as `YYYY-MM`: the key of `phone_settings.tts_month`.
+pub fn month_key(t: i64) -> String {
+    fmt_time(t).chars().take(7).collect()
+}
+
+fn num(x: f64) -> Value {
+    if x.fract() == 0.0 && x.abs() < 1e9 {
+        Value::from(x as i64)
+    } else {
+        Value::from(x)
+    }
+}
+
+/// `{speak, swiss_german, tts_cap_usd, tts_used_usd_month}` of a phone (defaults when it never changed them).
+/// `tts_used_usd` / `tts_month` are written by the speech route: usage counts only while `tts_month` is this month.
+pub fn phone_settings(c: &Connection, pid: &str) -> Value {
+    let row: Option<(String, bool, f64, f64, String)> = c
+        .query_row(
+            "SELECT speak,swiss_german,tts_cap_usd,tts_used_usd,tts_month FROM phone_settings WHERE phone=?1",
+            [pid],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    let (speak, swiss, cap, used, month) =
+        row.unwrap_or(("auto".into(), false, 10.0, 0.0, String::new()));
+    let used = if month == month_key(now()) { used } else { 0.0 };
+    json!({"speak": speak, "swiss_german": swiss, "tts_cap_usd": num(cap), "tts_used_usd_month": num(used)})
 }

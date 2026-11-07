@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 
 from orch import adapters, net, runs, runs_live, term, tickets
@@ -198,12 +199,46 @@ def _status(args, root: Path) -> None:
     _out(args, data, text)
 
 
+HOOK_INPUT_SECONDS = 2.0  # a tool writes its hook input at once and closes the pipe; nobody else gets more
+
+
+def _read_bounded(stream, limit: int = 65536, seconds: float | None = None) -> str:
+    """Up to `limit` bytes of stdin, waiting at most `seconds` for its end. A caller that leaves stdin open
+    (a script that never closes it, an inherited pipe) must never block a hook: whatever came in time counts,
+    an unfinished read is given up (the process may exit while it waits)."""
+    try:
+        fd = stream.fileno()
+    except (AttributeError, OSError, ValueError):  # not a real file (tests): a plain read
+        return stream.read(limit)
+    buf: list[bytes] = []
+    done = threading.Event()
+
+    def pump() -> None:
+        n = 0
+        try:
+            while n < limit:
+                b = os.read(fd, limit - n)  # the raw fd: an abandoned read holds no lock of sys.stdin
+                if not b:
+                    break
+                buf.append(b)
+                n += len(b)
+        except OSError:
+            pass
+        finally:
+            done.set()
+
+    threading.Thread(target=pump, daemon=True, name="orch-hook-input").start()
+    if not done.wait(HOOK_INPUT_SECONDS if seconds is None else seconds):
+        return ""  # never finished: a partial JSON document is no input
+    return b"".join(buf).decode("utf-8", "replace")
+
+
 def _hook_input(args) -> dict:
-    """The tool's hook input (JSON on stdin), or {}."""
+    """The tool's hook input (JSON on stdin), or {}. Never waits more than HOOK_INPUT_SECONDS."""
     if args.kind not in ("session", "attention") or sys.stdin is None or term.is_terminal(sys.stdin):
         return {}
     try:
-        data = json.loads(sys.stdin.read(65536) or "{}")
+        data = json.loads(_read_bounded(sys.stdin) or "{}")
     except (ValueError, OSError):
         return {}
     return data if isinstance(data, dict) else {}

@@ -110,6 +110,7 @@ def _by_key(root: Path, ref: str) -> str:
             continue
         if (
             isinstance(t, dict)
+            and t.get("general") is not True
             and str(t.get("key") or "").upper() == want
             and TID_RE.fullmatch(str(t.get("id")))
         ):

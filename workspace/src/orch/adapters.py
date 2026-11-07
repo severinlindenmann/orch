@@ -285,7 +285,7 @@ def trust_folder(name: str, root: Path, environ: Mapping[str, str] | None = None
     if not t:
         return "none"
     # only the workspace the person set up with `orch init` (its consent), never any other folder
-    if not (root / ".orch" / "tickets").is_dir() or (root / ".orch").is_symlink():
+    if not orch_folder(root):
         return "skipped"
     env = os.environ if environ is None else environ
     base = Path(env.get(t.get("dir_env") or "", "") or env.get("HOME") or Path.home())
@@ -330,8 +330,9 @@ def trust_folder(name: str, root: Path, environ: Mapping[str, str] | None = None
     return "skipped"
 
 
-def screen_note(name: str, root: Path | None, text: str, tid: str) -> str | None:
-    """The plain line for a screen that waits for a person (live.screens), or None."""
+def screen(name: str, root: Path | None, text: str, tid: str) -> dict | None:
+    """The first live.screens entry whose match is in the pane text, with its say filled in, or None.
+    An entry with answer is a harmless first-run screen the run's wrapper may pass (see runs_live)."""
     a = load(name, root)
     for s in (a.get("live") or {}).get("screens") or []:
         try:
@@ -339,8 +340,13 @@ def screen_note(name: str, root: Path | None, text: str, tid: str) -> str | None
         except re.error:
             continue
         if hit:
-            return s["say"].replace("{label}", a["label"]).replace("{ticket}", tid)
+            return {**s, "say": s["say"].replace("{label}", a["label"]).replace("{ticket}", tid)}
     return None
+
+
+def orch_folder(root: Path) -> bool:
+    """True for a workspace the person set up with `orch init` (its consent that the agent works there)."""
+    return (root / ".orch" / "tickets").is_dir() and not (root / ".orch").is_symlink()
 
 
 def session_mode(name: str, root: Path | None = None) -> str:

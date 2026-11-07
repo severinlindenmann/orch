@@ -57,7 +57,10 @@ class E:
     def sh(self, cmd, cwd=None, input=None, env=None, timeout=300, check_rc=False):
         if isinstance(input, str):
             input = input.encode()
-        p = subprocess.run(cmd, cwd=cwd or self.tmp, env={**self.env, **(env or {})}, input=input,
+        # no input: stdin is /dev/null, never the runner's own stdin (a pipe that stays open would make a command
+        # that reads its input, such as a hook's `orch run event`, wait for it)
+        io = {"input": input} if input is not None else {"stdin": subprocess.DEVNULL}
+        p = subprocess.run(cmd, cwd=cwd or self.tmp, env={**self.env, **(env or {})}, **io,
                            capture_output=True, timeout=timeout)
         out, err = p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace")
         if check_rc and p.returncode != 0:

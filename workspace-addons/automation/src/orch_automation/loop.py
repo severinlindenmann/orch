@@ -17,6 +17,12 @@ from .plain import daily_or_slower, workspace_tz, zone
 from .runner import history, load_config, load_state, sdir, update_state
 
 OPEN = ("open", "active", "waiting")
+
+
+def scheduled(t: dict) -> bool:
+    """An open ticket, or a finished one that repeats (its next run opens it again)."""
+    rec = ((t.get("ext") or {}).get("automation") or {}).get("recurring") is True
+    return t.get("status") in OPEN or (rec and t.get("status") == "done")
 FAST_FAIL_SECONDS = 10
 KIND = "automation:failure"
 KINDS = (KIND,)
@@ -33,6 +39,13 @@ def outside_prompt(what: str, text: str) -> str:
 def others(t: dict | None) -> int:
     """History entries on a ticket not written by the scheduler itself (only those show real work)."""
     return sum(h.get("by") != orchcli.BY for h in (t or {}).get("history") or [])
+
+
+def record_last_run(root: Path, t: dict, now: datetime, by: str | None = None) -> None:
+    """The one writer of "last run" (ext.automation.last_run, read by the dashboard view and by the due check);
+    used by the scheduled loop and by Run now."""
+    orchcli.set_ext(root, t, by=by, last_run=fmt(now))
+    update_state(root, t["id"], last_run=fmt(now))
 
 
 class Scheduler:
@@ -172,7 +185,7 @@ class Scheduler:
         state = load_state(self.root)
         for t in read_tickets(self.root):
             tid = t["id"]
-            if t["status"] not in OPEN or tid in started:
+            if not scheduled(t) or tid in started:  # a finished repeat runs again
                 continue
             w = t.get("waiting_on") or {}
             until = parse(w.get("until")) if w.get("kind") == "time" else None
@@ -197,10 +210,12 @@ class Scheduler:
                     run_tid: str | None = tid
                     if sched.get("each_run") == "sub-ticket" and daily_or_slower(cron):
                         run_tid = self.occurrence(t, last_due(cron, now, tz), tz)
+                    if run_tid == tid and t["status"] == "done":  # the agent finished the last one: open it again
+                        orchcli.call(self.root, "ticket", "status", tid, "open")
+                        orchcli.log(self.root, tid, "Opened again for the next run of this repeat.")
                     res = self.start_run(run_tid, f"cron {cron}", now) if run_tid else "failed"
                     if run_tid:  # a sub-ticket that could not be made is tried again next pass
-                        upd["last_run"] = fmt(now)  # also after a failure: the next planned time retries
-                        orchcli.set_ext(self.root, t, last_run=fmt(now))
+                        record_last_run(self.root, t, now)  # also after a failure: the next planned time retries
                     if res == "started":
                         started.append(run_tid)
                 nxt = next_after(cron, now, tz)

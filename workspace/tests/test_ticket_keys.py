@@ -145,3 +145,23 @@ def test_key_shaped_ids_of_other_commands_pass_through(proj):
     a = argparse.Namespace(cmd="relay", sub="send", id=None, ticket="app-1")
     cli._resolve_keys(a, proj)
     assert a.ticket == tid
+
+
+def test_new_ticket_with_note_owner_due_is_one_history_line(proj, run):
+    code, out, err = run(
+        "ticket", "new", "With details", "--note", "Remember this", "--owner", "Sam",
+        "--due", "2026-12-01", "--json", "--by", "human:tester",
+    )  # fmt: skip
+    assert code == 0, err
+    t = json.loads(out)
+    assert (t["note"], t["owner"], t["due"]) == ("Remember this", "Sam", "2026-12-01")
+    assert [h["text"] for h in t["history"]] == ["Created"]
+    assert run("ticket", "new", "Bad day", "--due", "tomorrow", "--by", "human:tester")[0] != 0
+
+
+@pytest.mark.parametrize(
+    ("n", "want"),
+    [(0, "0 B"), (14, "14 B"), (1023, "1023 B"), (1024, "1 KB"), (int(1.5 * 1024 * 1024), "1.5 MB")],
+)
+def test_proof_size_text(n, want):
+    assert tickets._size_text(n) == want

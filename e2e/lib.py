@@ -205,7 +205,8 @@ def start_local(e, tmp: Path, bins: dict, used: set[int]) -> tuple[Server, Serve
     (tmp / "relay-master.key").write_bytes(os.urandom(32))
     rel_env = {**env, "ORCH_RELAY_DATA_DIR": str(rd), "ORCH_RELAY_MASTER_KEY_FILE": str(tmp / "relay-master.key"),
                "ORCH_RELAY_LISTEN": f"127.0.0.1:{rp}", "ORCH_RELAY_ADMIN_LISTEN": f"127.0.0.1:{ra}",
-               "ORCH_RELAY_ADMIN_TOKEN": tok_r, "ORCH_RELAY_PUBLIC_ORIGIN": f"http://127.0.0.1:{rp}"}
+               "ORCH_RELAY_ADMIN_TOKEN": tok_r, "ORCH_RELAY_PUBLIC_ORIGIN": f"http://127.0.0.1:{rp}",
+               "ORCH_RELAY_TEST_PUSH_LOOPBACK": "1"}  # subscriber push to a scenario's own receiver (R16)
     rlog = open(tmp / "relay.log", "w")
     rproc = subprocess.Popen([bins["relay"]], env=rel_env, stdout=rlog, stderr=rlog, cwd=tmp)
     e.pids.append(rproc.pid)

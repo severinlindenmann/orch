@@ -8,7 +8,7 @@ use crate::util::*;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
@@ -19,12 +19,27 @@ pub fn router() -> Router<AppState> {
         .route("/v1/phone/pair", post(pair))
         .route("/v1/phone/push", post(register_push))
         .route("/v1/phone/workspaces", get(workspaces))
+        .route(
+            "/v1/phone/workspaces/:id",
+            patch(patch_workspace).delete(delete_workspace),
+        )
         .route("/v1/phone/questions", get(questions))
         .route("/v1/phone/answer", post(answer))
         .route("/v1/phone/send", post(send))
         .route("/v1/phone/messages", get(messages))
         .route("/v1/phone/updates", get(updates))
+        .route(
+            "/v1/phone/blobs",
+            post(upload_blob).layer(DefaultBodyLimit::disable()),
+        )
         .route("/v1/phone/blobs/:id", get(blob))
+        .route("/v1/phone/speech/:id", get(speech))
+        .route(
+            "/v1/phone/settings",
+            get(get_settings).patch(patch_settings),
+        )
+        .route("/v1/phone/invitations/redeem", post(redeem))
+        // Lane R2 (speech, transcribe) adds its routes below this line.
         .route("/v1/phone/signout", post(signout))
         .route(
             "/v1/phone/transcribe",
@@ -145,6 +160,7 @@ async fn workspaces(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value
             .optional()?;
         if let Some(mut card) = card {
             card["open_questions"] = open.iter().filter(|m| &m.from == w).count().into();
+            card["muted_until"] = store::muted_until(&c, &pid, w);
             items.push(card);
         }
     }
@@ -222,8 +238,20 @@ async fn messages(
     let items: Vec<Value> = rows
         .iter()
         .map(|m| {
-            let peer = if m.from == pid { &m.to } else { &m.from };
-            json!({"message": msg_json(&app.key, m), "workspace_name": store::ws_name(&c, peer)})
+            let own = m.from == pid;
+            let peer = if own { &m.to } else { &m.from };
+            // Receipts exist on the phone's own texts only.
+            let client_id = if own {
+                store::open_payload(&app.key, m).0["client_id"].clone()
+            } else {
+                Value::Null
+            };
+            let delivered_at = match (own, m.acked_at) {
+                (true, Some(t)) => Value::from(fmt_time(t)),
+                _ => Value::Null,
+            };
+            json!({"message": msg_json(&app.key, m), "workspace_name": store::ws_name(&c, peer),
+                "delivered_at": delivered_at, "client_id": client_id})
         })
         .collect();
     let next = if more {
@@ -331,7 +359,8 @@ async fn updates(
                 break 'scan;
             }
             let (body, top) = store::open_payload(&app.key, &m);
-            if !body["update"].is_object() {
+            // General receipts (ack/working without a ticket) are not part of this per-ticket view.
+            if !body["update"].is_object() || m.ticket.is_none() {
                 continue;
             }
             let mut body = body;
@@ -429,7 +458,8 @@ async fn blob(
             |r| r.get(0),
         )?;
         let ok: bool = c.query_row(
-            "SELECT EXISTS(SELECT 1 FROM view_blobs v JOIN messages m ON m.id=v.msg_id JOIN blobs b ON b.id=v.blob_id
+            "SELECT EXISTS(SELECT 1 FROM blobs WHERE id=?1 AND uploader=?4)
+             OR EXISTS(SELECT 1 FROM view_blobs v JOIN messages m ON m.id=v.msg_id JOIN blobs b ON b.id=v.blob_id
                WHERE v.blob_id=?1 AND m.type='text' AND b.uploader=m.from_addr
                  AND m.from_addr IN (SELECT value FROM json_each(?2))
                  AND ((m.to_addr='phones' AND m.stored_at>=?3) OR m.to_addr=?4))",
@@ -446,10 +476,85 @@ async fn blob(
     let plain = crate::crypto::open(&app.key, &id, &raw)
         .ok_or_else(|| internal("blob does not decrypt"))?;
     Ok((
-        [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+        [
+            (axum::http::header::CONTENT_TYPE, "application/octet-stream"),
+            (axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (axum::http::header::CONTENT_DISPOSITION, "attachment"),
+        ],
         plain,
     )
         .into_response())
+}
+
+// ---------- phone app v3 ----------
+
+const MSG_SCHEMA_ID: &str = "https://orch.severin.io/contracts/message.schema.json";
+const PHONE_SCHEMA_ID: &str = "https://orch.severin.io/contracts/phone-api.schema.json";
+const DEFS: [&str; 4] = [
+    "send_request",
+    "answer_request",
+    "settings_patch_request",
+    "workspace_patch_request",
+];
+
+/// Request bodies are checked against `phone-api.schema.json` (the contract), one `$defs` entry each.
+fn schemas() -> &'static HashMap<&'static str, jsonschema::JSONSchema> {
+    static S: std::sync::OnceLock<HashMap<&'static str, jsonschema::JSONSchema>> =
+        std::sync::OnceLock::new();
+    S.get_or_init(|| {
+        let msg: Value = serde_json::from_str(include_str!("../../contracts/message.schema.json"))
+            .expect("message schema");
+        let phone: Value =
+            serde_json::from_str(include_str!("../../contracts/phone-api.schema.json"))
+                .expect("phone schema");
+        DEFS.iter()
+            .map(|d| {
+                let root = json!({"$ref": format!("{PHONE_SCHEMA_ID}#/$defs/{d}")});
+                let s = jsonschema::JSONSchema::options()
+                    .should_validate_formats(true)
+                    .with_document(MSG_SCHEMA_ID.into(), msg.clone())
+                    .with_document(PHONE_SCHEMA_ID.into(), phone.clone())
+                    .compile(&root)
+                    .expect("compile phone schema");
+                (*d, s)
+            })
+            .collect()
+    })
+}
+
+fn check(def: &str, v: &Value) -> Res<()> {
+    match schemas()[def].validate(v) {
+        Ok(()) => Ok(()),
+        Err(errs) => Err(invalid(
+            errs.take(3)
+                .map(|e| format!("{} ({})", e, e.instance_path))
+                .collect::<Vec<_>>()
+                .join("; "),
+        )),
+    }
+}
+
+/// The id of the message this phone already stored under `client_id` (one namespace across send and answer).
+fn client_dup(c: &rusqlite::Connection, pid: &str, cid: &str) -> rusqlite::Result<Option<String>> {
+    c.query_row(
+        "SELECT msg_id FROM phone_client_ids WHERE phone=?1 AND client_id=?2",
+        [pid, cid],
+        |r| r.get(0),
+    )
+    .optional()
+}
+
+fn remember_client_id(
+    c: &rusqlite::Connection,
+    pid: &str,
+    cid: &str,
+    msg_id: &str,
+) -> rusqlite::Result<()> {
+    c.execute(
+        "INSERT INTO phone_client_ids(phone,client_id,msg_id) VALUES(?1,?2,?3)",
+        [pid, cid, msg_id],
+    )?;
+    Ok(())
 }
 
 async fn answer(
@@ -458,14 +563,22 @@ async fn answer(
     body: Bytes,
 ) -> Res<(StatusCode, Json<Value>)> {
     let v = parse_body(&body)?;
-    let qid = v["question_message_id"].as_str().unwrap_or("");
-    let text = v["answer"].as_str().unwrap_or("");
-    if text.is_empty() {
-        return Err(invalid("`answer` must not be empty."));
-    }
-    let id = {
+    let (id, cid) = {
         let c = app.db.lock().unwrap();
         let (pid, name, ws) = auth::phone(&c, &h)?;
+        // A retry of the same client_id is a duplicate, checked before the 409 and whatever the body says.
+        if let Some(cid) = v["client_id"].as_str() {
+            if let Some(old) = client_dup(&c, &pid, cid)? {
+                return Ok((
+                    StatusCode::OK,
+                    Json(json!({"id": old, "client_id": cid, "duplicate": true})),
+                ));
+            }
+        }
+        check("answer_request", &v)?;
+        let qid = v["question_message_id"].as_str().unwrap_or("");
+        let text = v["answer"].as_str().unwrap_or("");
+        let cid = v["client_id"].as_str().map(String::from);
         let q = store::get_msg(&c, qid)?
             .filter(|q| {
                 q.typ == "question" && (q.to == "phones" || q.to == pid) && ws.contains(&q.from)
@@ -487,6 +600,11 @@ async fn answer(
             )));
         }
         let (qb, qextra) = store::open_payload(&app.key, &q);
+        let tx = c.unchecked_transaction()?;
+        let mut abody = json!({"question_id": qb["question_id"], "answer": text, "answered_by": format!("human:{name}")});
+        if let Some(cid) = &cid {
+            abody["client_id"] = cid.clone().into();
+        }
         let m = store::system_message_with_key(
             qextra.get("key").and_then(crate::rules::ticket_key),
             &c,
@@ -496,12 +614,39 @@ async fn answer(
             "answer",
             q.ticket.as_deref(),
             Some(qid),
-            json!({"question_id": qb["question_id"], "answer": text, "answered_by": format!("human:{name}")}),
+            abody,
         )?;
-        m["id"].as_str().unwrap().to_string()
+        let id = m["id"].as_str().unwrap().to_string();
+        if let Some(cid) = &cid {
+            remember_client_id(&c, &pid, cid, &id)?;
+        }
+        tx.commit()?;
+        (id, cid)
     };
     app.notify.notify_waiters();
-    Ok((StatusCode::CREATED, Json(json!({"id": id}))))
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({"id": id, "client_id": cid})),
+    ))
+}
+
+/// Blob ids a send request names, with the size an attachment claims: attachments, `voice.blob_id`, pins' `voice_blob_id`.
+fn named_blobs(v: &Value) -> Vec<(String, Option<i64>)> {
+    let mut out = vec![];
+    for a in v["attachments"].as_array().into_iter().flatten() {
+        if let Some(b) = a["blob_id"].as_str() {
+            out.push((b.to_string(), Some(a["size"].as_i64().unwrap_or(-1))));
+        }
+    }
+    if let Some(b) = v["voice"]["blob_id"].as_str() {
+        out.push((b.to_string(), None));
+    }
+    for p in v["feedback"]["pins"].as_array().into_iter().flatten() {
+        if let Some(b) = p["voice_blob_id"].as_str() {
+            out.push((b.to_string(), None));
+        }
+    }
+    out
 }
 
 async fn send(
@@ -510,39 +655,448 @@ async fn send(
     body: Bytes,
 ) -> Res<(StatusCode, Json<Value>)> {
     let v = parse_body(&body)?;
-    let to = v["to"].as_str().unwrap_or("");
-    let text = v["text"].as_str().unwrap_or("");
-    if text.is_empty() || text.len() > 20000 {
-        return Err(invalid("`text` must be 1 to 20000 characters."));
-    }
-    let ticket = v["ticket"].as_str();
     let id = {
         let c = app.db.lock().unwrap();
         let (pid, _, ws) = auth::phone(&c, &h)?;
+        if let Some(cid) = v["client_id"].as_str() {
+            if let Some(old) = client_dup(&c, &pid, cid)? {
+                return Ok((
+                    StatusCode::OK,
+                    Json(json!({"id": old, "client_id": cid, "duplicate": true})),
+                ));
+            }
+        }
+        check("send_request", &v)?;
+        let to = v["to"].as_str().unwrap_or("");
+        let cid = v["client_id"].as_str();
         if !ws.iter().any(|w| w == to) || !store::ws_exists(&c, to) {
             return Err(not_allowed("This phone may not send to that workspace."));
         }
+        let ticket = v["ticket"].as_str();
+        let reply_to = v["reply_to"].as_str();
+        if let Some(r) = reply_to {
+            // Only a text of this phone's own conversation with that workspace (the /v1/phone/messages view).
+            let since: i64 = c.query_row(
+                "SELECT COALESCE(paired_at, created_at) FROM phones WHERE id=?1",
+                [&pid],
+                |r| r.get(0),
+            )?;
+            let ok: bool = c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM messages WHERE id=?1 AND type='text' AND (
+                    (from_addr=?2 AND to_addr=?3) OR (from_addr=?3 AND (to_addr=?2 OR (to_addr='phones' AND stored_at>=?4)))))",
+                params![r, pid, to, since],
+                |r| r.get(0),
+            )?;
+            if !ok {
+                return Err(invalid(
+                    "`reply_to` must be a text of your conversation with this workspace.",
+                ));
+            }
+        }
+        // Every file must be an upload of this phone (another phone's or an unknown id answers the same 404).
+        let blobs = named_blobs(&v);
+        for (b, size) in &blobs {
+            let stored: Option<i64> = c
+                .query_row(
+                    "SELECT size FROM blobs WHERE id=?1 AND uploader=?2",
+                    [b, &pid],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            match (stored, size) {
+                (None, _) => {
+                    return Err(not_found("Upload the file first (POST /v1/phone/blobs)."))
+                }
+                (Some(n), Some(claimed)) if n != *claimed => {
+                    return Err(invalid(
+                        "An attachment's size does not match the uploaded file.",
+                    ))
+                }
+                _ => {}
+            }
+        }
+        let mut b = serde_json::Map::new();
+        if let Some(cid) = cid {
+            b.insert("client_id".into(), cid.into());
+        }
+        if v["general"] == true {
+            b.insert("general".into(), true.into());
+        }
+        for k in ["text", "attachments", "voice", "location", "feedback"] {
+            if !v[k].is_null() {
+                b.insert(k.into(), v[k].clone());
+            }
+        }
+        let body = Value::Object(b);
         // Same schema check as workspace messages.
         let mut cand = json!({"schema": "orch.msg/1", "id": rand_id("m_", 16), "from": pid, "to": to,
-            "type": "text", "created_at": fmt_time(now()), "body": {"text": text}});
+            "type": "text", "created_at": fmt_time(now()), "body": body});
         if let Some(t) = ticket {
             cand["ticket"] = t.into();
         }
+        if let Some(r) = reply_to {
+            cand["reply_to"] = r.into();
+        }
         crate::rules::validate_schema(&cand).map_err(invalid)?;
-        let m = store::system_message(
-            &c,
-            &app.key,
-            &pid,
-            to,
-            "text",
-            ticket,
-            None,
-            json!({"text": text}),
-        )?;
-        m["id"].as_str().unwrap().to_string()
+        let tx = c.unchecked_transaction()?;
+        let m = store::system_message(&c, &app.key, &pid, to, "text", ticket, reply_to, body)?;
+        let id = m["id"].as_str().unwrap().to_string();
+        if let Some(cid) = cid {
+            remember_client_id(&c, &pid, cid, &id)?;
+        }
+        // The workspace named in this text may read these files (GET /v1/blobs/<id>).
+        for (b, _) in &blobs {
+            c.execute(
+                "INSERT OR IGNORE INTO phone_blobs(blob_id,msg_id) VALUES(?1,?2)",
+                [b, &id],
+            )?;
+        }
+        tx.commit()?;
+        id
     };
     app.notify.notify_waiters();
-    Ok((StatusCode::CREATED, Json(json!({"id": id}))))
+    let cid = v["client_id"].clone();
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({"id": id, "client_id": cid})),
+    ))
+}
+
+/// Largest phone upload: 25 MB.
+pub const MAX_PHONE_BLOB: usize = 25 * 1024 * 1024;
+/// Most bytes one phone may upload in 24 hours: 1 GB.
+const PHONE_UPLOAD_DAY: i64 = 1024 * 1024 * 1024;
+/// Slowest average upload speed (bytes per second) allowed after the grace time (else 408).
+const MIN_UPLOAD_BPS: f64 = 16.0 * 1024.0;
+/// Whole body at most this long (else 408).
+const UPLOAD_TOTAL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// The phone's one upload in flight; freed when the request ends, however it ends.
+struct UploadSlot {
+    app: AppState,
+    pid: String,
+}
+
+impl Drop for UploadSlot {
+    fn drop(&mut self) {
+        self.app.upload_inflight.lock().unwrap().remove(&self.pid);
+    }
+}
+
+/// `POST /v1/phone/blobs`: raw bytes, stored like workspace blobs (encrypted), uploader = this phone.
+async fn upload_blob(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    body: axum::body::Body,
+) -> Res<(StatusCode, Json<Value>)> {
+    use futures_util::StreamExt;
+    use sha2::{Digest, Sha256};
+    // Authenticate before reading a single body byte.
+    let pid = {
+        let c = app.db.lock().unwrap();
+        auth::phone(&c, &h)?.0
+    };
+    let too_big = || too_large("Files can be at most 25 MB.");
+    let announced = h
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok());
+    if announced.is_some_and(|n| n > MAX_PHONE_BLOB) {
+        return Err(too_big());
+    }
+    // One upload at a time per phone, and a daily budget that counts what is in flight: the check and the
+    // reservation happen together under the database lock, before a body byte is read.
+    let _slot = {
+        let c = app.db.lock().unwrap();
+        let used: i64 = c.query_row(
+            "SELECT COALESCE(SUM(size),0) FROM blobs WHERE uploader=?1 AND created_at>?2",
+            params![pid, now() - 86400],
+            |r| r.get(0),
+        )?;
+        let want = announced.unwrap_or(MAX_PHONE_BLOB) as i64;
+        let mut live = app.upload_inflight.lock().unwrap();
+        if live.contains_key(&pid) || used + want > PHONE_UPLOAD_DAY {
+            return Err(ApiError {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                code: "rate_limited",
+                message: "Too many uploads. Try again later.".into(),
+            });
+        }
+        live.insert(pid.clone(), want);
+        UploadSlot {
+            app: app.clone(),
+            pid: pid.clone(),
+        }
+    };
+    // A few uploads in flight per relay (memory); do not wait for ever.
+    let _permit = tokio::time::timeout(app.upload_wait(), app.upload_slots.acquire())
+        .await
+        .map_err(|_| ApiError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "busy",
+            message: "The relay is busy. Try again in a moment.".into(),
+        })?
+        .map_err(internal)?;
+    let mut buf: Vec<u8> = Vec::new();
+    let mut hasher = Sha256::new();
+    let mut stream = body.into_data_stream();
+    let started = std::time::Instant::now();
+    let timeout = || ApiError {
+        status: StatusCode::REQUEST_TIMEOUT,
+        code: "request_timeout",
+        message: "The upload took too long.".into(),
+    };
+    loop {
+        let left = UPLOAD_TOTAL.saturating_sub(started.elapsed());
+        let next = tokio::time::timeout(left.min(app.upload_idle()), stream.next())
+            .await
+            .map_err(|_| timeout())?;
+        let Some(chunk) = next else { break };
+        let chunk = chunk.map_err(|_| invalid("Upload was interrupted."))?;
+        // too slow on average (below 16 KB/s once past the grace time): free the slot
+        let age = started.elapsed();
+        if age
+            >= std::time::Duration::from_millis(
+                app.upload_grace_ms
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            )
+            && ((buf.len() + chunk.len()) as f64) < MIN_UPLOAD_BPS * age.as_secs_f64()
+        {
+            return Err(timeout());
+        }
+        if buf.len() + chunk.len() > MAX_PHONE_BLOB {
+            return Err(too_big());
+        }
+        hasher.update(&chunk);
+        buf.extend_from_slice(&chunk);
+    }
+    if buf.is_empty() {
+        return Err(invalid("The file is empty."));
+    }
+    let size = buf.len();
+    let sha = hex::encode(hasher.finalize());
+    let id = rand_id("b_", 16);
+    crate::crypto::seal_in_place(&app.key, &id, &mut buf);
+    if let Err(e) = tokio::fs::write(app.blob_path(&id), &buf).await {
+        let _ = tokio::fs::remove_file(app.blob_path(&id)).await;
+        return Err(internal(e));
+    }
+    drop(buf);
+    let ins = app.db.lock().unwrap().execute(
+        "INSERT INTO blobs(id,uploader,size,sha256,created_at) VALUES(?1,?2,?3,?4,?5)",
+        params![id, pid, size as i64, sha, now()],
+    );
+    if let Err(e) = ins {
+        let _ = tokio::fs::remove_file(app.blob_path(&id)).await;
+        return Err(e.into());
+    }
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({"blob_id": id, "size": size, "sha256": sha})),
+    ))
+}
+
+async fn get_settings(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {
+    let c = app.db.lock().unwrap();
+    let (pid, ..) = auth::phone(&c, &h)?;
+    Ok(Json(store::phone_settings(&c, &pid)))
+}
+
+async fn patch_settings(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    body: Bytes,
+) -> Res<Json<Value>> {
+    let v = parse_body(&body)?;
+    let c = app.db.lock().unwrap();
+    let (pid, ..) = auth::phone(&c, &h)?;
+    check("settings_patch_request", &v)?;
+    c.execute(
+        "INSERT OR IGNORE INTO phone_settings(phone) VALUES(?1)",
+        [&pid],
+    )?;
+    if let Some(s) = v["speak"].as_str() {
+        c.execute(
+            "UPDATE phone_settings SET speak=?2 WHERE phone=?1",
+            params![pid, s],
+        )?;
+    }
+    if let Some(b) = v["swiss_german"].as_bool() {
+        c.execute(
+            "UPDATE phone_settings SET swiss_german=?2 WHERE phone=?1",
+            params![pid, b],
+        )?;
+    }
+    if let Some(n) = v["tts_cap_usd"].as_f64() {
+        c.execute(
+            "UPDATE phone_settings SET tts_cap_usd=?2 WHERE phone=?1",
+            params![pid, n],
+        )?;
+    }
+    Ok(Json(store::phone_settings(&c, &pid)))
+}
+
+/// `PATCH /v1/phone/workspaces/<ws>`: mute or unmute a workspace for this phone (no push while muted).
+async fn patch_workspace(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    axum::extract::Path(wsid): axum::extract::Path<String>,
+    body: Bytes,
+) -> Res<Json<Value>> {
+    let v = parse_body(&body)?;
+    let c = app.db.lock().unwrap();
+    let (pid, _, ws) = auth::phone(&c, &h)?;
+    if !ws.contains(&wsid) {
+        return Err(not_found("No such workspace."));
+    }
+    check("workspace_patch_request", &v)?;
+    let until: Option<i64> = match &v["muted_until"] {
+        Value::String(s) if s == "forever" => Some(store::MUTE_FOREVER),
+        Value::String(s) => {
+            let t = time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339)
+                .map_err(|_| {
+                    invalid("`muted_until` must be a UTC time like 2026-11-06T22:00:00Z.")
+                })?;
+            Some(t.unix_timestamp()).filter(|t| *t > now())
+        }
+        _ => None,
+    };
+    match until {
+        Some(u) => c.execute(
+            "INSERT INTO phone_mutes(phone,ws,until) VALUES(?1,?2,?3) ON CONFLICT(phone,ws) DO UPDATE SET until=?3",
+            params![pid, wsid, u],
+        )?,
+        None => c.execute(
+            "DELETE FROM phone_mutes WHERE phone=?1 AND ws=?2",
+            params![pid, wsid],
+        )?,
+    };
+    let mut card = c.query_row(
+        &format!("SELECT {} FROM workspaces WHERE id=?1", store::WS_CARD_COLS),
+        [&wsid],
+        store::ws_card,
+    )?;
+    card["open_questions"] = open_questions(&c, &pid, &ws)?
+        .iter()
+        .filter(|m| m.from == wsid)
+        .count()
+        .into();
+    card["muted_until"] = store::muted_until(&c, &pid, &wsid);
+    Ok(Json(card))
+}
+
+/// `DELETE /v1/phone/workspaces/<ws>`: drop the workspace from this phone's list.
+async fn delete_workspace(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    axum::extract::Path(wsid): axum::extract::Path<String>,
+) -> Res<StatusCode> {
+    let c = app.db.lock().unwrap();
+    let (pid, _, ws) = auth::phone(&c, &h)?;
+    if !ws.contains(&wsid) {
+        return Err(not_found("No such workspace."));
+    }
+    let rest: Vec<&String> = ws.iter().filter(|w| **w != wsid).collect();
+    c.execute(
+        "UPDATE phones SET workspaces=?2 WHERE id=?1",
+        params![pid, serde_json::to_string(&rest).unwrap_or("[]".into())],
+    )?;
+    c.execute(
+        "DELETE FROM phone_mutes WHERE phone=?1 AND ws=?2",
+        params![pid, wsid],
+    )?;
+    // The workspace can no longer reach this phone: it refreshes its phone list.
+    store::bump_and_hint(&c, &app.key, std::slice::from_ref(&wsid))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Redeem calls allowed per phone and minute.
+const REDEEM_PER_MINUTE: u32 = 10;
+
+/// `POST /v1/phone/invitations/redeem`: an invitation link adds its workspaces to this (paired) phone's list.
+async fn redeem(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<Json<Value>> {
+    let v = parse_body(&body)?;
+    let c = app.db.lock().unwrap();
+    let (pid, _, ws) = auth::phone(&c, &h)?;
+    {
+        let t = now();
+        let mut m = app.redeem_rate.lock().unwrap();
+        let e = m.entry(pid.clone()).or_insert((t, 0));
+        if t - e.0 >= 60 {
+            *e = (t, 0);
+        }
+        e.1 += 1;
+        if e.1 > REDEEM_PER_MINUTE {
+            return Err(ApiError {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                code: "rate_limited",
+                message: "Too many tries. Try again in a minute.".into(),
+            });
+        }
+    }
+    let code = v["code"]
+        .as_str()
+        .filter(|c| c.starts_with("pc_"))
+        .ok_or_else(|| invalid("`code` is the code from the invitation link (pc_…)."))?;
+    let row: Option<(String, i64, bool)> = c
+        .query_row(
+            "SELECT phone_id,expires_at,used FROM pair_codes WHERE hash=?1",
+            [token_hash(code)],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? != 0)),
+        )
+        .optional()?;
+    let Some((inv, exp, used)) = row else {
+        return Err(not_found("No such invitation."));
+    };
+    if used || exp < now() {
+        return Err(gone("This invitation was already used or has expired."));
+    }
+    // The invitation is the unpaired phone entry the admin made. A paired phone is not an invitation.
+    let inv_ws: Option<String> = c
+        .query_row(
+            "SELECT workspaces FROM phones WHERE id=?1 AND token_hash IS NULL",
+            [&inv],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(inv_ws) = inv_ws.filter(|_| inv != pid) else {
+        return Err(gone("This invitation was already used or has expired."));
+    };
+    let wanted: Vec<String> = store::parse_ws_list(&inv_ws)
+        .into_iter()
+        .filter(|w| store::ws_exists(&c, w))
+        .collect();
+    let added: Vec<String> = wanted.iter().filter(|w| !ws.contains(w)).cloned().collect();
+    let mut list = ws.clone();
+    list.extend(added.iter().cloned());
+    let tx = c.unchecked_transaction()?;
+    for w in &added {
+        c.execute(
+            "DELETE FROM phone_mutes WHERE phone=?1 AND ws=?2",
+            params![pid, w],
+        )?;
+    }
+    c.execute(
+        "UPDATE phones SET workspaces=?2 WHERE id=?1",
+        params![pid, serde_json::to_string(&list).unwrap_or("[]".into())],
+    )?;
+    c.execute(
+        "DELETE FROM phones WHERE id=?1 AND token_hash IS NULL",
+        [&inv],
+    )?;
+    c.execute(
+        "UPDATE pair_codes SET used=1 WHERE hash=?1",
+        [token_hash(code)],
+    )?;
+    if !added.is_empty() {
+        store::bump_and_hint(&c, &app.key, &added)?;
+    }
+    tx.commit()?;
+    let out: Vec<Value> = wanted
+        .iter()
+        .filter_map(|w| store::ws_name(&c, w).map(|n| json!({"id": w, "name": n})))
+        .collect();
+    Ok(Json(json!({"workspaces": out})))
 }
 
 async fn signout(State(app): State<AppState>, h: HeaderMap) -> Res<StatusCode> {
@@ -600,6 +1154,8 @@ pub async fn push_message(app: &AppState, q: &Value) {
             .filter(|(_, _, w, id)| {
                 store::parse_ws_list(w).contains(&from) && (to == "phones" || &to == id)
             })
+            // Muted: no push for anything from that workspace (stored and listed as usual).
+            .filter(|(.., id)| !store::is_muted(&c, id, &from))
             // L2: texts are always stored; only the push is skipped when the budget is used up.
             .filter(|(.., id)| {
                 !is_text
@@ -656,4 +1212,30 @@ pub async fn push_message(app: &AppState, q: &Value) {
             }
         }
     }
+}
+
+/// `GET /v1/phone/speech/<message_id>`: the text read aloud as mp3 (see `speech::generate`).
+async fn speech(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Res<axum::response::Response> {
+    use axum::response::IntoResponse;
+    let (pid, ws, settings) = {
+        let c = app.db.lock().unwrap();
+        let (pid, _, ws) = auth::phone(&c, &h)?;
+        let s = crate::speech::Settings::of(&c, &pid);
+        (pid, ws, s)
+    };
+    let mp3 = crate::speech::generate(
+        &app,
+        &pid,
+        &ws,
+        &settings,
+        &id,
+        q.get("lang").map(String::as_str),
+    )
+    .await?;
+    Ok(([(axum::http::header::CONTENT_TYPE, "audio/mpeg")], mp3).into_response())
 }

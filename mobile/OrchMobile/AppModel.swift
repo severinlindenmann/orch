@@ -87,19 +87,21 @@ final class AppModel {
         self.voiceMode = voiceMode
         self.outboxDirectory = outboxDirectory
         let creds = Keychain.load()
-        if let c = creds { credentials = c; phase = .ready }
-        outbox = Outbox(directory: outboxDirectory, phone: creds?.phoneId ?? "")
+        // Every stored property is set first; only then is `self` used (the Observation macros need that).
         let holder = ClientHolder()
-        speech = SpeechPlayer(fetch: { id, lang in try await holder.client().speech(messageId: id, lang: lang) }, cacheDirectory: speechCache, systemControls: systemAudioControls)
-        holder.make = { [weak self] in await MainActor.run { self?.client } }
-        if creds == nil { outbox.wipe() }
+        let box = Outbox(directory: outboxDirectory, phone: creds?.phoneId ?? "")
+        self.outbox = box
+        self.speech = SpeechPlayer(fetch: { id, lang in try await holder.client().speech(messageId: id, lang: lang) },
+                                   cacheDirectory: speechCache, systemControls: systemAudioControls)
+        if let c = creds { credentials = c; phase = .ready } else { box.wipe() }
+        holder.make = { [weak self] in self?.client }
     }
 
     /// Lets the (Sendable) speech fetch reach the current client, which changes with sign-in.
     private final class ClientHolder: @unchecked Sendable {
-        var make: (@Sendable () async -> (any RelayAPI)?)?
+        var make: (@MainActor @Sendable () -> (any RelayAPI)?)?
         func client() async throws -> any RelayAPI {
-            guard let c = await make?() else { throw RelayError.unauthorized }
+            guard let make, let c = await make() else { throw RelayError.unauthorized }
             return c
         }
     }
@@ -222,9 +224,41 @@ final class AppModel {
 
     // MARK: Data
 
-    func refresh() async {
+    /// Wait before the one automatic retry of a first load that found the network not ready yet (tests shorten it).
+    var retryDelay: Duration = .seconds(1)
+
+    /// Keeps an open chat current: refreshes every `interval` until the calling task is cancelled (the chat closes).
+    func watchWhileOpen(every interval: Duration = .seconds(4)) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: interval)
+            if Task.isCancelled { break }
+            await refresh(retry: false, quiet: true)
+        }
+    }
+
+    /// `quiet`: the background poll of an open chat, it must not flip `isLoading`.
+    func refresh(retry: Bool = true, quiet: Bool = false) async {
         guard phase == .ready || phase == .notifyStep, credentials != nil else { return }
-        isLoading = true; defer { isLoading = false }
+        if !quiet { isLoading = true }
+        defer { if !quiet { isLoading = false } }
+        do {
+            do { try await load() }
+            catch where retry && !useMock && Self.isOffline(error) {
+                // Cold start: the first request can run before the network is ready. Once more before the banner.
+                try await Task.sleep(for: retryDelay)
+                try await load()
+            }
+        } catch { handle(error) }
+    }
+
+    /// No network yet (cold start) or the relay is unreachable: worth one quiet retry before the offline banner.
+    private static func isOffline(_ error: Error) -> Bool {
+        if error is URLError { return true }
+        if case RelayError.network = error { return true }
+        return false
+    }
+
+    private func load() async throws {
         do {
             async let w = client.workspaces()
             async let q = client.questions()
@@ -237,27 +271,47 @@ final class AppModel {
             for item in questions { questionLog[item.id] = item }
             message = nil; hasLoaded = true; lastUpdated = Date()
             await flushOutbox()
-        } catch { handle(error) }
+        }
     }
 
     /// The newest page of `/v1/phone/messages`, merged into what is loaded (older pages stay). An older relay without it keeps the list.
     func reloadMessages() async {
-        guard let page = try? await client.messages(after: nil, limit: Self.pageSize) else { return }
-        var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
-        for m in page.items { byId[m.id] = m }          // newer data (delivered_at) replaces the old copy
-        messages = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
+        let page: ListResponse<PhoneMessage>
+        do { page = try await client.messages(after: nil, limit: pageSize) }
+        catch RelayError.unauthorized { handle(RelayError.unauthorized); return }
+        catch { return }
+        merge(page.items)
         if messagesNext == nil || page.next == nil || messages.count <= page.items.count { messagesNext = page.next }
+        // A message we sent can be beyond the first page (lots of other traffic): page on until it is listed, at most 5 more pages.
+        var cursor = page.next, extra = 0
+        while extra < 5, let c = cursor, !unlistedSentClientIds().isEmpty {
+            do {
+                let p = try await client.messages(after: c, limit: pageSize)
+                merge(p.items); cursor = p.next; messagesNext = p.next; extra += 1
+            } catch RelayError.unauthorized { handle(RelayError.unauthorized); return } catch { break }
+        }
         outbox.reconcile(with: messages)
     }
-    static let pageSize = 100
+    private func merge(_ items: [PhoneMessage]) {
+        var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
+        for m in items { byId[m.id] = m }          // newer data (delivered_at) replaces the old copy
+        messages = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
+    }
+    /// client_ids of messages the relay stored (first tick) that `/messages` has not listed yet.
+    private func unlistedSentClientIds() -> Set<String> {
+        let listed = Set(messages.compactMap { $0.clientId ?? $0.message.body.clientId })
+        return Set(outbox.items.filter { $0.kind == .send && $0.sentMessageId != nil && !listed.contains($0.clientId) }.map(\.clientId))
+    }
+    /// Messages per page (tests make it small).
+    var pageSize = 100
 
     /// Scrolling up: the next older page. No-op when everything is loaded.
     func loadOlderMessages() async {
-        guard let cursor = messagesNext, let page = try? await client.messages(after: cursor, limit: Self.pageSize) else { return }
-        var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
-        for m in page.items { byId[m.id] = m }
-        messages = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
-        messagesNext = page.next
+        guard let cursor = messagesNext else { return }
+        do {
+            let page = try await client.messages(after: cursor, limit: pageSize)
+            merge(page.items); messagesNext = page.next
+        } catch RelayError.unauthorized { handle(RelayError.unauthorized) } catch {}
     }
     var hasOlderMessages: Bool { messagesNext != nil }
 
@@ -287,6 +341,7 @@ final class AppModel {
             case .sent: sendTick += 1; announcement = "Message sent"
             case .failed(_, _, let text): message = text; errorTick += 1; announcement = text
             case .unauthorized: handle(RelayError.unauthorized)
+            case .throttled: announcement = "Try again later"
             case .offline: break
             }
         }

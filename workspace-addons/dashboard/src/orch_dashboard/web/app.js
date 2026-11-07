@@ -292,10 +292,13 @@
     return h('span', {className:'lk-sub'}, h('span', {className:'lk-type'}, linkType(v) + ' ·\u00a0'),
       v.host_head ? h('span', {className:'lk-head'}, '\u200E' + String(v.host_head) + '\u200E') : null, h('span', {className:'lk-dom'}, String(v.domain || '')));
   };
+  const ART_WORD = {html:'Page', pr:'Pull request', commit:'Commit'};
+  // what the phone calls this link (Page, Pull request, Commit) with its id and revision on hover
+  const artMark = (t, url) => { const a = t.art?.[url]; return a && ART_WORD[a.kind] ? h('span', {className:'chip art-kind', title:clean(a.id + (a.rev ? ' · ' + a.rev : ''))}, ART_WORD[a.kind]) : null; };
   function linkRow(t, link, removable) {
     const v = link.view, url = safeHref(link.url);
     return h('div', {className:'lk-row', 'data-key':'link-' + link.url},
-      h('a', {className:'lk', href:url, target:'_blank', rel:'noopener noreferrer', title:url}, linkTile(v), h('span', {className:'t'}, h('b', {}, oneLine(clean(v.title), 200)), linkSub(v, url)), linkStatus(v.status), h('span', {className:'ext'}, iconEl('external'))),
+      h('a', {className:'lk', href:url, target:'_blank', rel:'noopener noreferrer', title:url}, linkTile(v), h('span', {className:'t'}, h('b', {}, oneLine(clean(v.title), 200)), linkSub(v, url)), linkStatus(v.status), artMark(t, link.url), h('span', {className:'ext'}, iconEl('external'))),
       removable && !snapshot ? h('button', {type:'button', className:'btn ghost icon xs lk-x', title:'Remove this link', 'aria-label':'Remove link ' + clean(v.title), 'data-action':'link-remove', 'data-ticket':t.id, 'data-url':link.url}, iconEl('x')) : null);
   }
   // add-ons that are on, have a refresh act and own a link on this ticket
@@ -528,7 +531,7 @@
         const here = (ev.type || ev.kind) === 'file' && ev.missing !== true && String(ev.ref || '').startsWith('.orch/tickets/' + t.id + '/evidence/') && previewable(base);
         return h('div', {className:'card-row proof-line', 'data-key':'proof-' + i},
           h('span', {className:'proof-by' + (mark.label === 'You' ? '' : ' muted')}, mark.mark + ' ' + mark.label),
-          h('div', {className:'grow'}, h('p', {}, proofLabel(ev), ev.missing === true ? ' · on another computer' : null), h('a', {className:'proof-task', href:'#ticket/' + encodeURIComponent(t.id), 'data-action':'ticket-tab', 'data-tab':'tasks', 'data-ticket':t.id}, clean(task.text))),
+          h('div', {className:'grow'}, h('p', {}, proofLabel(ev), ' ', artMark(t, ev.ref), ev.missing === true ? ' · on another computer' : null), h('a', {className:'proof-task', href:'#ticket/' + encodeURIComponent(t.id), 'data-action':'ticket-tab', 'data-tab':'tasks', 'data-ticket':t.id}, clean(task.text))),
           here && !snapshot ? h('button', {type:'button', className:'btn ghost xs', 'data-action':'file-preview', 'data-ticket':t.id, 'data-kind':'evidence', 'data-name':base}, 'Preview') : null,
           ev.at ? h('time', {datetime:ev.at}, stamp(ev.at, Date.now())) : null);
       }))) : null,
@@ -597,12 +600,30 @@
       if (host) { host.setAttribute('tabindex', '-1'); (host.querySelector('button,input,textarea') || host).focus(); }
     }
   }
+  // ---- Texts from the phone: voice, photos, files, places and feedback shown as people would read them.
+  const PHONE_IMG = /\.(png|jpe?g|gif|webp)$/i;
+  function phoneEntry(tid, entry) {
+    const p = window.DashHelpers.phoneParts(entry.text, tid);
+    if (!p) return null;
+    const src = (n, dl) => '/api/file?t=' + encodeURIComponent(tid) + '&k=files&n=' + encodeURIComponent(n) + (dl ? '&dl=1' : '');
+    const body = p.parts.map(x => {
+      if (x.type === 'voice') return h('p', {className:'phone-voice'}, iconEl('play'), x.transcript ? '“' + clean(x.transcript) + '”' : 'Voice message (nothing could be understood)', x.lang ? h('span', {className:'meta'}, ' · ' + clean(x.lang)) : null);
+      if (x.type === 'sound') return snapshot ? h('p', {className:'meta'}, 'Voice recording') : h('audio', {className:'phone-audio', controls:true, preload:'none', src:src(x.name)});
+      if (x.type === 'photo' && PHONE_IMG.test(x.name) && !snapshot) return h('a', {className:'phone-photo', href:src(x.name), target:'_blank', rel:'noopener noreferrer', title:'Open the photo'}, h('img', {className:'phone-thumb', src:src(x.name), alt:clean(x.name), loading:'lazy'}));
+      if (x.type === 'photo' || x.type === 'file') return h('p', {className:'phone-file'}, iconEl(x.type === 'photo' ? 'image' : 'file'), snapshot ? clean(x.name) : h('a', {href:src(x.name, true), download:x.name.split('/').pop()}, clean(x.name)));
+      if (x.type === 'location') return h('p', {className:'phone-place'}, 'Location' + (x.label ? ': ' + clean(x.label) : ''), ' ', h('a', {href:x.url, target:'_blank', rel:'noopener noreferrer'}, 'Open in Maps'));
+      if (x.type === 'feedback') return h('p', {className:'phone-feedback'}, x.approve ? '👍 Looks good on ' : 'Changes wanted on ', h('b', {}, clean(x.title)), x.rev ? h('span', {className:'meta'}, ' · ' + clean(x.rev)) : null);
+      if (x.type === 'pin') return h('p', {className:'phone-pin'}, h('span', {className:'chip'}, clean(x.n)), ' ', x.where ? h('span', {className:'meta'}, clean(x.where) + (x.said ? ': ' : '')) : null, clean(x.said));
+      return h('p', {className:'meta'}, clean(x.text));
+    });
+    return h('div', {className:'phone-entry'}, p.text ? h('p', {}, clean(p.text)) : null, body);
+  }
   function detail(t) {
     if (!t) return fragment(heading('Ticket not found'), h('a', {href:'#tickets'}, 'All tickets'));
     const qs = questions(t).map(q => snapshot
       ? card('question-' + q.id, clean(q.text), '', h('div', {className:'card-row'}, h('div', {className:'grow'}, h('p', {className:'muted'}, 'Waiting for an answer'), h('div', {className:'row'}, array(q.options).map(o => chip(clean(o), o === q.recommended ? 'attn' : ''))))))
       : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
-    const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => h('div', {className:'card-row'}, h('p', {className:'grow'}, [clean(window.DashHelpers.historyLine(entry, t.checklist)), name(entry.by), surface(entry.via)].filter(Boolean).join(' · ')), h('time', {datetime:entry.at || ''}, age(entry.at))));
+    const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => { const rich = entry.via === 'phone' ? phoneEntry(t.id, entry) : null; return h('div', {className:'card-row'}, rich ? h('div', {className:'grow'}, rich, h('p', {className:'meta'}, [name(entry.by), surface(entry.via)].filter(Boolean).join(' · '))) : h('p', {className:'grow'}, [clean(window.DashHelpers.historyLine(entry, t.checklist)), name(entry.by), surface(entry.via)].filter(Boolean).join(' · ')), h('time', {datetime:entry.at || ''}, age(entry.at))); });
     const field = (label, value, cls = '') => h('div', {}, h('dt', {}, label), h('dd', {className:cls}, value));
     const total = array(t.checklist).length, done = array(t.checklist).filter(task => task.done).length;
     const tasksCard = key => card(key, total && done === total ? 'All done' : 'Tasks', done + ' of ' + total + (total && done === total ? '' : ' done'), [total ? taskRows(t) : emptyRow('No tasks yet.'), addTaskRow(t, key)]);
@@ -928,9 +949,23 @@
     state = next;
     render(first ? new Set() : arrived);
   }
+  // The General conversation with the phone: every text both ways, newest last. Read only.
+  function generalPage() {
+    const g = state.general, list = array(g?.history).slice().sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
+    const rows = list.map((entry, i) => {
+      const rich = g && entry.via === 'phone' ? phoneEntry(g.id, entry) : null;
+      const mine = entry.via !== 'phone';
+      return h('div', {className:'card-row chat-row' + (mine ? ' chat-out' : ''), 'data-key':'general-' + i + '-' + (entry.at || '')},
+        h('div', {className:'grow'}, rich || h('p', {}, clean(window.DashHelpers.historyLine(entry, []))), h('p', {className:'meta'}, [name(entry.by), surface(entry.via)].filter(Boolean).join(' · '))),
+        h('time', {datetime:entry.at || ''}, age(entry.at)));
+    });
+    return fragment(heading('General', 'Texts from the phone that belong to no ticket.'),
+      h('section', {className:'card', 'data-key':'general-card'}, rows.length ? rows : emptyRow('No messages yet. Texts from the phone that are not about a ticket show up here.')));
+  }
   function route() {
     const hash = location.hash || '#home';
     if (hash === '#settings' && !snapshot && state?.settings) return {kind:'settings', hash};
+    if (hash === '#general' && state?.general) return {kind:'general', hash};
     try {
       if (hash.startsWith('#ticket/')) return {kind:'ticket', id:decodeURIComponent(hash.slice(8)), hash};
       const open = /^#open\/([a-z][a-z0-9-]{1,31})\/([A-Za-z0-9_./-]*)$/.exec(hash);
@@ -948,7 +983,7 @@
     const scroll = [window.scrollX, window.scrollY];
     const active = document.activeElement;
     const activeKey = nodeKey(active);
-    const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'tickets' ? 'Tickets' : 'Home';
+    const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'general' ? 'General' : r.kind === 'tickets' ? 'Tickets' : 'Home';
     document.getElementById('workspace-name').textContent = clean(state.workspace || 'Workspace');
     document.getElementById('workspace-mode').textContent = snapshot ? 'Shared copy' : 'Local workspace';
     const crumb = document.getElementById('crumb');
@@ -960,14 +995,14 @@
       crumb.replaceChildren(pageName, ' › ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || last);
     } else crumb.textContent = pageName;
     const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
-    reconcile(nav, fragment(navLink('#home', 'Home', 'page', array(state.needs).length ? h('span', {className:'count'}, array(state.needs).length) : null), navLink('#tickets', 'Tickets', 'table'),
+    reconcile(nav, fragment(navLink('#home', 'Home', 'page', array(state.needs).length ? h('span', {className:'count'}, array(state.needs).length) : null), navLink('#tickets', 'Tickets', 'table'), state.general ? navLink('#general', 'General', 'text') : null,
       h('p', {className:'eyebrow'}, 'Add-ons'), addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon))));
     reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'user') : null));
     if (changed) {
       for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
       main.replaceChildren();
     }
-    reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : addonTab(r.id));
+    reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'general' ? generalPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : addonTab(r.id));
     for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
     main.querySelectorAll('[data-question]').forEach(host => {
       if (!mounts.has(host)) {
@@ -1236,7 +1271,7 @@
       else {
         if (!created) {
           const previous = new Set(tickets().map(t => t.id));
-          result = await act('ticket.new', {title:values.title});
+          result = await act('ticket.new', {title:values.title, ...Object.fromEntries(['owner', 'due', 'note'].filter(k => values[k]).map(k => [k, values[k]]))});  // one write, one history line
           if (result.ok) {
             created = tickets().filter(t => t.title === values.title && !previous.has(t.id)).sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0))[0];
             if (!created) {
@@ -1245,12 +1280,9 @@
             }
           }
         } else result = {ok:true};
-        if (result.ok && created && (values.owner || values.due || values.note)) {
-          // The ticket exists: close now, save the optional details behind the scenes.
+        if (result.ok && created) {
           window.orch.toast('Ticket created', 'ok');
           window.orch.close(d);
-          const details = await act('ticket.edit', {ticket:created.id, ...Object.fromEntries(['owner', 'due', 'note'].filter(k => values[k]).map(k => [k, values[k]]))});  // only what was filled in
-          if (!details.ok) window.orch.toast('The ticket was created, but its details were not saved: ' + details.text, 'error');
           await startNow();
           return;
         }
