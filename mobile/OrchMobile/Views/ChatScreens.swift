@@ -38,9 +38,9 @@ enum ConversationRules {
 }
 
 private enum ConversationFormat {
-    static let day: DateFormatter = { let f = DateFormatter(); f.dateFormat = "EEE d MMM"; return f }()
-    static let iso = ISO8601DateFormatter()
-    static let isoFraction: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); f.formatOptions.insert(.withFractionalSeconds); return f }()
+    nonisolated(unsafe) static let day: DateFormatter = { let f = DateFormatter(); f.dateFormat = "EEE d MMM"; return f }()
+    nonisolated(unsafe) static let iso = ISO8601DateFormatter()
+    nonisolated(unsafe) static let isoFraction: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); f.formatOptions.insert(.withFractionalSeconds); return f }()
 }
 
 struct ChatRoomView: View {
