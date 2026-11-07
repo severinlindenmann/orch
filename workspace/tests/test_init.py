@@ -64,7 +64,7 @@ def test_fresh_init_in_a_git_repo_leaves_git_status_clean(proj, run):
         encoding="utf-8"
     )  # team AGENTS.md, no CLAUDE.md
     ex = (proj / ".git/info/exclude").read_text(encoding="utf-8")
-    assert "/.agents/skills/orch*" in ex and "/.claude/skills/orch*" in ex and "/CLAUDE.local.md" in ex
+    assert "/.agents/skills/orch\n" in ex and "/.claude/skills/orch\n" in ex and "/CLAUDE.local.md" in ex
     assert run("init")[0] == 0  # again: same result, one block
     assert (proj / ".git/info/exclude").read_text(encoding="utf-8") == ex
 
@@ -373,3 +373,60 @@ def test_share_command_on_off_status_and_agents_are_refused(proj, run, monkeypat
     assert code == 2 and "Only a person" in err and (proj / "AGENTS.md").is_file()
     monkeypatch.delenv("CLAUDECODE")
     assert run("share", "off")[0] == 0 and not (proj / "AGENTS.md").exists()
+
+
+def test_review_fixes_user_folder_kept_share_off_exact_and_eol(proj, run):
+    from orch import harness
+
+    # a user's own folder at a link place is never emptied or removed
+    (proj / ".claude/skills/orch").mkdir(parents=True)
+    (proj / ".claude/skills/orch/README.md").write_text("mine", encoding="utf-8")
+    code, _, err = run("init")
+    assert code == 2 and (proj / ".claude/skills/orch/README.md").read_text(encoding="utf-8") == "mine"
+    # a user's own skill named like ours (orchestrator) is not hidden by the exclude block
+    _git_repo(proj)
+    (proj / ".claude/skills/orch/README.md").unlink()
+    (proj / ".claude/skills/orch").rmdir()
+    run("init")
+    assert "orch*" not in (proj / ".git/info/exclude").read_text(encoding="utf-8")
+    # share off: a .gitattributes line the team wrote itself stays; CRLF files keep CRLF
+    (proj / ".gitattributes").write_bytes(b"AGENTS.md merge=union\r\n*.png binary\r\n")
+    (proj / "AGENTS.md").write_bytes(b"# Team\r\n")
+    harness.share_on(proj)
+    assert b"\r\n" in (proj / "AGENTS.md").read_bytes() and b"\n" not in (proj / "AGENTS.md").read_bytes().replace(b"\r\n", b"")
+    harness.share_off(proj)
+    assert (proj / "AGENTS.md").read_bytes() == b"# Team\r\n"
+    assert (proj / ".gitattributes").read_bytes() == b"AGENTS.md merge=union\r\n*.png binary\r\n"
+
+
+def test_share_off_removes_an_agents_md_only_when_orch_made_it(proj, run):
+    from orch import harness
+
+    (proj / "AGENTS.md").write_text("", encoding="utf-8")  # the team's own (empty) file
+    assert run("init")[0] == 0
+    harness.share_on(proj)
+    harness.share_off(proj)
+    assert (proj / "AGENTS.md").is_file()
+    (proj / "AGENTS.md").unlink()
+    harness.share_on(proj)
+    harness.share_off(proj)
+    assert not (proj / "AGENTS.md").exists()
+
+
+def test_a_long_orch_block_never_cuts_the_ticket_out_of_the_prompt(proj, run):
+    import json
+
+    from orch import harness, runs
+
+    assert run("init")[0] == 0
+    harness.set_block(proj, "big", "x" * 30000, addon=True)
+    tid = json.loads(run("ticket", "new", "Find me", "--json")[1])["id"]
+    assert "Find me" in runs.plan(proj, tid, agent="codex")["prompt"]
+
+
+def test_addon_ignore_lines_that_hide_everything_are_refused(proj):
+    from orch import addons
+
+    for bad in ("*", "**", ".orch", ".orch/tickets/", "./"):
+        with pytest.raises(skills.Refused):
+            addons._set_gitignore(proj, "evil", [bad])

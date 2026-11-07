@@ -587,7 +587,7 @@ def plan(
 
                 block = harness.start_text(root)
                 if block:
-                    text = f"{block}\n\n{text}"[:14000]
+                    text = f"{block[:6000]}\n\n{text}"
         v.update(prompt=text, new_session=new_session)
         argv = adapters.render(name, "fresh", mode, v, root)
         if argv is None:

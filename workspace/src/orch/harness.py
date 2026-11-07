@@ -85,9 +85,16 @@ def write_text(path: Path, text: str, mode: int = 0o644, replace_link: bool = Fa
     if path.exists() and not path.is_file():
         raise Refused(f"{path} is not a regular file; orch will not write there.")
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file():  # a file that exists keeps its permissions and its line endings
+        mode = path.stat().st_mode & 0o7777
+        try:
+            if b"\r\n" in path.read_bytes():
+                text = text.replace("\r\n", "\n").replace("\n", "\r\n")
+        except OSError:
+            pass
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
             f.write(text)
         os.chmod(tmp, mode)
         os.replace(tmp, path)
@@ -99,7 +106,7 @@ def write_text(path: Path, text: str, mode: int = 0o644, replace_link: bool = Fa
 def _read(path: Path) -> str:
     if is_link(path):
         raise Refused(f"{path} is a link; orch will not read or write through it.")
-    return path.read_text(encoding="utf-8") if path.is_file() else ""
+    return path.read_bytes().decode("utf-8").replace("\r\n", "\n") if path.is_file() else ""
 
 
 # ------------------------------------------------------------------ blocks -> AGENTS.orch.md
@@ -204,7 +211,8 @@ def exclude_set(root: Path, tag: str, lines: list[str]) -> bool:
         i = rows.index(b)
         rows = rows[:i] + rows[rows.index(e, i) + 1 :]
     if lines:
-        prefix = "/" + (rel + "/" if rel else "")
+        esc = re.sub(r"([\\\[\]*?])", r"\\\1", rel)  # a folder name with glob characters stays literal
+        prefix = "/" + (esc + "/" if esc else "")
         rows += [b, *[prefix + ln.lstrip("/") for ln in lines], e]
     new = "\n".join(rows) + "\n" if rows else ""
     if new != (ex.read_text(encoding="utf-8") if ex.is_file() else ""):
@@ -224,9 +232,27 @@ ORCH_IGNORE = [
     "outbox/",
     "addons/",
     "run/",
+    "tmp-refresh/",
     "harness/",
     "tickets/*/evidence/",
 ]
+
+
+def _tracked(root: Path, rel: str) -> bool:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        return (
+            subprocess.run(
+                ["git", "ls-files", "--error-unmatch", "--", rel],
+                cwd=root,
+                capture_output=True,
+                env=env,
+                timeout=10,
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def protect_local(root: Path, lines: list[str] | None = None) -> None:
@@ -239,16 +265,19 @@ def protect_local(root: Path, lines: list[str] | None = None) -> None:
         p = root / ".orch" / ".gitignore"
         if is_link(root / ".orch"):
             raise Refused("link")
-        if not (p.is_file() and not is_link(p) and p.read_text(encoding="utf-8") == text):
-            write_text(p, text)
-        ok = True
-    except (Refused, OSError):
+        if _tracked(root, ".orch/.gitignore"):
+            pass  # the team owns this one: leave it, rely on .git/info/exclude
+        else:
+            if not (p.is_file() and not is_link(p) and p.read_text(encoding="utf-8") == text):
+                write_text(p, text)
+            ok = True
+    except (Refused, OSError, UnicodeDecodeError):
         pass
     try:
         core = [".orch/" + ln.rstrip("/") + ("/" if ln.endswith("/") else "") for ln in ORCH_IGNORE[1:]]
         if exclude_set(root, "core", list(dict.fromkeys([*core, *(lines or [])]))):
             ok = True
-    except (Refused, OSError):
+    except (Refused, OSError, UnicodeDecodeError):
         pass
     if not ok:
         raise Refused(
@@ -304,8 +333,8 @@ def link_skill(root: Path, where: str, name: str, target: Path | None = None) ->
     parent = root / where
     if parent.exists() and not _inside(root, parent):
         raise Refused(f"{parent} points outside this project; orch will not write there.")
-    if is_link(parent) and _same(parent, root / ".agents" / "skills"):
-        return  # the team links the whole folder to .agents/skills: the skill is already visible
+    if is_link(parent):
+        return  # the team links the whole folder (to .agents/skills or elsewhere): nothing of ours goes into it
     dest = parent / name
     if is_link(dest):
         if _same(dest, target):
@@ -314,12 +343,15 @@ def link_skill(root: Path, where: str, name: str, target: Path | None = None) ->
     if dest.exists():
         if (dest / COPY_MARK).is_file():
             shutil.rmtree(dest)
-        elif dest.is_dir() and not (dest / "SKILL.md").exists():
-            # only data an add-on wrote there before its skill came (workspaces.json): move it into the harness
-            for p in dest.iterdir():
-                if not (target / p.name).exists() and not is_link(p):
+        elif name == "orch-relay" and dest.is_dir() and not (dest / "SKILL.md").exists():
+            # only the directory the relay wrote before its skill came: move that one file into the harness
+            for p in list(dest.iterdir()):
+                if p.name == "workspaces.json" and p.is_file() and not is_link(p):
+                    target.mkdir(parents=True, exist_ok=True)
                     shutil.move(str(p), str(target / p.name))
-            shutil.rmtree(dest)
+            if any(dest.iterdir()):
+                raise Refused(f"{dest} holds files that are not orch's; orch will not replace it.")
+            dest.rmdir()
         else:
             raise Refused(f"{dest} is not orch's; orch will not replace it. Nothing was changed there.")
     _link_dir(dest, target)
@@ -327,7 +359,7 @@ def link_skill(root: Path, where: str, name: str, target: Path | None = None) ->
 
 def unlink_skill(root: Path, where: str, name: str) -> None:
     parent = root / where
-    if is_link(parent):
+    if is_link(parent) or (parent.exists() and not _inside(root, parent)):
         return
     dest = parent / name
     if is_link(dest):
@@ -347,7 +379,10 @@ def sync_copies(root: Path, wheres: list[str]) -> None:
     for where in wheres:
         for s in sorted(p for p in sk.iterdir() if p.is_dir()):
             dest = root / where / s.name
+            if is_link(root / where) or not _inside(root, root / where):
+                continue
             if dest.is_dir() and not is_link(dest) and (dest / COPY_MARK).is_file():
+                shutil.rmtree(dest)  # rebuilt whole: deleted files go, a planted link inside is gone
                 _copy_dir(s, dest)
 
 
@@ -397,6 +432,12 @@ def share_state(root: Path) -> bool:
     return p.is_file() and not is_link(p) and SHARE_MARK[0] in p.read_text(encoding="utf-8")
 
 
+ATTR_MARK = ("# orch:begin share", "# orch:end share")
+CREATED = (
+    Path(".orch") / "harness" / "share-created-agents"
+)  # AGENTS.md did not exist before "Share with team"
+
+
 def share_on(root: Path) -> None:
     for fn in ("AGENTS.md", ".gitattributes"):
         p = root / fn
@@ -404,32 +445,43 @@ def share_on(root: Path) -> None:
             raise Refused(f"{p} is a link; orch will not write through it.")
     block = f"{SHARE_MARK[0]}\n{SHARE_TEXT}\n{SHARE_MARK[1]}\n"
     p = root / "AGENTS.md"
+    existed = p.is_file()
     text = _read(p)
     if SHARE_MARK[0] not in text:
         write_text(p, (text.rstrip("\n") + "\n\n" if text.strip() else "") + block)
+        if not existed:
+            check_harness(root)
+            write_text(root / CREATED, "1\n")
     g = root / ".gitattributes"
     gt = _read(g)
-    if ATTR_LINE not in gt.splitlines():
-        write_text(g, (gt.rstrip("\n") + "\n" if gt.strip() else "") + f"{ATTR_COMMENT}\n{ATTR_LINE}\n")
+    if ATTR_MARK[0] not in gt:
+        write_text(
+            g,
+            (gt.rstrip("\n") + "\n" if gt.strip() else "") + f"{ATTR_MARK[0]}\n{ATTR_LINE}\n{ATTR_MARK[1]}\n",
+        )
 
 
 def share_off(root: Path) -> None:
     p = root / "AGENTS.md"
     if p.is_file() and not is_link(p):
-        text = p.read_text(encoding="utf-8")
-        new = _marked(text, SHARE_MARK).sub("", text)
+        text = _read(p)
+        new = _marked(text, SHARE_MARK).sub("", text, count=1)
         if new != text:
             new = new.rstrip("\n")
-            if new.strip():
-                write_text(p, new + "\n")
+            created = (root / CREATED).is_file() and not is_link(root / CREATED)
+            if new.strip() or not created:
+                write_text(p, new + "\n" if new.strip() else "")
             else:
-                p.unlink()
+                p.unlink()  # orch made this file for the share: it goes with it
+            (root / CREATED).unlink(missing_ok=True)
     g = root / ".gitattributes"
     if g.is_file() and not is_link(g):
-        rows = g.read_text(encoding="utf-8").splitlines()
-        keep = [r for r in rows if r not in (ATTR_LINE, ATTR_COMMENT)]
-        if keep != rows:
-            if keep:
-                write_text(g, "\n".join(keep) + "\n")
+        text = _read(g)
+        new = re.sub(
+            re.escape(ATTR_MARK[0]) + r".*?" + re.escape(ATTR_MARK[1]) + r"\n?", "", text, count=1, flags=re.S
+        )
+        if new != text:
+            if new.strip():
+                write_text(g, new)
             else:
                 g.unlink()

@@ -143,13 +143,20 @@ def apply_agent_files(root: Path) -> list[str]:
     harness.protect_local(root, _exclude_lines(root))  # first, so a refused link cannot leave secrets visible
     sk = harness.harness_dir(root) / "skills"
     names = sorted(p.name for p in sk.iterdir() if p.is_dir()) if sk.is_dir() else []
+    refused = None  # one refused link must not stop the others or the local instruction file
     for where in places:
         for n in names:
             harness.check_harness(root, sk / n)
-            harness.link_skill(root, where, n)
+            try:
+                harness.link_skill(root, where, n)
+            except Refused as e:
+                refused = refused or e
     for sh in _shared_skills(root):  # skills the relay delivered (not orch*): visible to every detected agent
         for where in places[1:]:
-            harness.link_skill(root, where, sh.name, sh)
+            try:
+                harness.link_skill(root, where, sh.name, sh)
+            except Refused as e:
+                refused = refused or e
     harness.sync_copies(root, places)
     done, local = [], []
     for n in detected_agents(root):
@@ -160,6 +167,8 @@ def apply_agent_files(root: Path) -> list[str]:
                 local.append(fn)
         if f.get("skills_link") or f.get("instructions_link"):
             done.append(a["label"])
+    if refused:
+        raise refused
     return done
 
 
@@ -176,12 +185,16 @@ def _exclude_lines(root: Path) -> list[str]:
     """Root-relative patterns of the links and local instruction files orch makes here."""
     from orch import adapters
 
-    lines = [".agents/skills/orch*"]
+    sk = harness.harness_dir(root) / "skills"
+    names = sorted(p.name for p in sk.iterdir() if p.is_dir()) if sk.is_dir() else []
+    lines = [
+        f".agents/skills/{n}" for n in names
+    ]  # exact names: a user's own `orchestrator` skill stays visible
     for n in detected_agents(root):
         f = adapters.load(n).get("files") or {}
         lines += [fn for fn in (f.get("instructions_link") or {}) if ".local." in fn]
         if f.get("skills_link"):
-            lines.append(f"{f['skills_link']}/orch*")
+            lines += [f"{f['skills_link']}/{s}" for s in names]
     for sh in _shared_skills(root):
         lines += [f".agents/skills/{sh.name}/", *[f"{w}/{sh.name}" for w in _skill_places(root)[1:]]]
     return list(dict.fromkeys(lines))

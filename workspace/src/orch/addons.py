@@ -984,7 +984,7 @@ def consent_text(m: dict, local: bool) -> str:
     if local:
         lines.append("Source: local folder (not checked by orch). It runs code on this computer.")
     lines.append(f"Adds the command: orch {m['name']}")
-    lines.append(f"Adds a skill and an entry in AGENTS.md: orch-{m['name']}")
+    lines.append(f"Adds a skill and an entry in the local orch instructions: orch-{m['name']}")
     if "ticket_ext" in m or m.get("ticket_fields"):
         lines.append(f"Stores data on tickets under: ext.{m['name']}")
     if m.get("ticket_links"):
@@ -1149,6 +1149,12 @@ def _set_gitignore(root: Path, name: str, lines: list[str]) -> None:
     untouched); no lines = block removed."""
     from orch import harness
 
+    for ln in lines:
+        core = ln.strip("/").rstrip("/")
+        if re.fullmatch(r"[*?./\\[\]]*", core) or core == ".orch" or core.startswith(".orch/tickets"):
+            raise Refused(
+                f"The add-on '{name}' asks to hide '{ln}' from git. That is too broad; nothing was changed."
+            )
     harness.exclude_set(root, f"addon-{name}", lines)
 
 

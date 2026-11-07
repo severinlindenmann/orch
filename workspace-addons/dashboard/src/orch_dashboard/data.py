@@ -273,7 +273,7 @@ def _consent(r: dict) -> str:
     if r.get("source") == "local":
         lines.append("Source: local folder (not checked by orch). It runs code on this computer.")
     lines.append(f"Adds the command: orch {name}")
-    lines.append(f"Adds a skill and an entry in AGENTS.md: orch-{name}")
+    lines.append(f"Adds a skill and an entry in the local orch instructions: orch-{name}")
     if r.get("ticket_view"):
         lines.append(f"Stores data on tickets under: ext.{name}")
     if d and isinstance(d.get("label"), str):
