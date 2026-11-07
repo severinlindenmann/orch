@@ -452,3 +452,54 @@ def test_first_run_note_is_not_shown_as_an_answer():
 )
 def test_all_status_words(status, word):
     assert call("historyLine", {"text": f"Status open -> {status}"}) == "Moved to " + word
+
+
+@node
+@pytest.mark.parametrize(
+    "why,want",
+    [
+        (
+            "Claude wants a login. Open the live session to finish it: orch run attach PIL-2",
+            "Claude needs you to sign in",
+        ),
+        (
+            "Claude shows its security notes. Open the live session to go on: orch run attach PIL-2",
+            "Claude shows its security notes",
+        ),
+        ("Open the live session to see why: orch run attach t_ab12", ""),
+        ("Waiting for your OK", "Waiting for your OK"),
+    ],
+)
+def test_plain_why_has_no_command_text(why, want):
+    got = call("plainWhy", why, "Claude")
+    assert got == want and "orch run" not in got
+
+
+@node
+@pytest.mark.parametrize(
+    "status,live,want",
+    [
+        ("active", "attention", "waiting"),
+        ("active", "working", "active"),
+        ("active", None, "active"),
+        ("review", "attention", "review"),
+    ],
+)
+def test_a_ticket_that_cannot_go_on_is_waiting_not_working(status, live, want):
+    run = {"running": True, "claim": {"live": {"state": live}}} if live else None
+    assert call("shownStatus", {"status": status}, run) == want
+
+
+@node
+@pytest.mark.parametrize(
+    "ticket,live,want",
+    [
+        ({"questions": [{"answer": None}]}, None, True),
+        ({"questions": [{"answer": "Yes"}]}, None, False),
+        ({}, "attention", True),
+        ({}, "working", False),
+    ],
+)
+def test_one_chip_while_a_question_is_open(ticket, live, want):
+    run = {"claim": {"live": {"state": live}}} if live else None
+    assert call("showsAnswerChip", ticket, run) is want

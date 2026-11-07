@@ -6,7 +6,8 @@ orch owns that tmux server (own socket), so a person's own tmux is never touched
 process (the wrapper). Input waits in the pending file and is pasted (bracketed paste, then Enter) only when
 the agent says it is idle: the tool's own hooks call `orch run event --kind idle`, a generic agent calls
 `orch run done`. At most 4 live sessions per workspace. A session idle (or waiting for a person) for an
-hour (workspace.live_idle_minutes), or on a ticket Done for that long, is closed on the next
+hour (workspace.live_idle_minutes; 10 minutes once the ticket is in Review, Done or Dropped, and such a
+session does not count toward the limit), or on a ticket Done for that long, is closed on the next
 `orch run` call (there is no daemon); its session id stays on the ticket, so the next start continues it.
 Nothing here reads the screen to decide anything, with one exception: a run still "starting" (no hook has
 fired) is checked against the adapter's live.screens (a screen the tool shows before it is up). The run's
@@ -32,6 +33,8 @@ from orch.errors import Refused
 
 MAX_LIVE = 4
 IDLE_SECONDS = 60 * 60
+FINISHED_IDLE_SECONDS = 10 * 60  # a session on a ticket in Review, Done or Dropped closes after this
+FINISHED = ("review", "done", "dropped")
 PASTE_DELAY = 0.3
 STARTUP_SECONDS = 60
 KINDS = ("session", "idle", "working", "attention")
@@ -101,12 +104,23 @@ def records(root: Path) -> list[dict]:
     return out
 
 
+def _finished(root: Path, tid: str) -> bool:
+    """True when the ticket is in Review, Done or Dropped: its session no longer needs a slot."""
+    with contextlib.suppress(Exception):
+        return tickets.load(root, tid).get("status") in FINISHED
+    return False
+
+
 def live_alive(root: Path) -> list[dict]:
-    """Live runs that count against MAX_LIVE (the hidden General ticket's run does not)."""
+    """Live runs that count against MAX_LIVE (the hidden General ticket's run does not, nor a session on a
+    ticket in Review, Done or Dropped)."""
     return [
         r
         for r in records(root)
-        if r.get("mode") == "live" and runs.state(r) == "alive" and not tickets.is_general(root, r["ticket"])
+        if r.get("mode") == "live"
+        and runs.state(r) == "alive"
+        and not tickets.is_general(root, r["ticket"])
+        and not _finished(root, r["ticket"])
     ]
 
 
@@ -413,7 +427,8 @@ def cleanup(root: Path) -> list[str]:
             idle = time.time() - runs._parse(live["since"])
         except (KeyError, ValueError):
             continue
-        if (idle > limit or _done_for(root, tid, limit)) and _claim_close(root, rec):
+        lim = min(limit, FINISHED_IDLE_SECONDS) if _finished(root, tid) else limit
+        if (idle > lim or _done_for(root, tid, limit)) and _claim_close(root, rec):
             try:
                 _close(root, rec, interrupt=False)
             except Exception:  # the close failed: input may go in again; the next cleanup tries again

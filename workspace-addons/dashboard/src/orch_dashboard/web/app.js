@@ -78,7 +78,10 @@
   const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
   const statusWord = t => ({open:'Backlog', ready:'Ready', active:'Working', waiting:'Waiting', review:'Review', done:'Done'}[t.status] || 'Backlog');
   const chip = (text, cls = '') => h('span', {className:'chip ' + cls}, text);
-  const statusChip = t => chip(statusWord(t), t.status === 'active' ? 'active' : '');
+  const shown = t => snapshot ? t : {...t, status: window.DashHelpers.shownStatus(t, state.runs?.[t.id])};
+  const statusChip = t => { const s = shown(t); return chip(statusWord(s), s.status === 'active' ? 'active' : ''); };
+  // one chip: while the yellow 'Waiting for your answer' shows, the plain Waiting status is left out
+  const hideStatus = t => !snapshot && shown(t).status === 'waiting' && window.DashHelpers.showsAnswerChip(t, state.runs?.[t.id]);
   const STATUS_CHOICES = [['open', 'Backlog'], ['ready', 'Ready'], ['active', 'Working'], ['waiting', 'Waiting'], ['review', 'Review'], ['done', 'Done']];
   const starting = new Set();
   function activity(t) {
@@ -89,15 +92,19 @@
     const text = starting.has(t.id) ? 'Starting ' + agent + '...' : questions(t).length || live?.state === 'attention' ? 'Waiting for your answer' : t.status === 'review' ? 'Check this' : busy ? agent + ' is working' : '';
     if (!text) return null;
     const seconds = live?.since ? Math.max(0, Math.floor((Date.now() - Date.parse(live.since)) / 1000)) : null;
+    const why = window.DashHelpers.plainWhy(live?.why, agent);
+    const open = live?.state === 'attention' ? liveLinkFor(t) : null;
     return h('div', {className:'activity', 'data-key':'activity-' + t.id}, chip(text, busy && (starting.has(t.id) || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'),
-      live?.why || Number.isFinite(seconds) ? h('p', {className:'meta'}, [live?.why, Number.isFinite(seconds) ? seconds + ' s ago' : ''].filter(Boolean).join(' · ')) : null);
+      why || Number.isFinite(seconds) ? h('p', {className:'meta'}, [why, Number.isFinite(seconds) ? seconds + ' s ago' : ''].filter(Boolean).join(' · ')) : null,
+      open ? h('a', {className:'btn outline xs', href:open.url, 'data-key':'activity-open-' + t.id}, 'Open the live session') : null);
   }
   const reviewActions = t => !snapshot && t.status === 'review' ? h('div', {className:'row'}, [['done', 'Mark done'], ['active', 'Send back']].map(([status, label]) => h('button', {type:'button', className:'btn outline xs', 'data-action':'status-set', 'data-ticket':t.id, 'data-status':status}, label))) : null;
   const statusItems = (t, scope) => STATUS_CHOICES.map(([value, label]) => h('button', {type:'button', className:'menu-item' + (t.status === value ? ' sel' : ''), role:'menuitemradio', 'aria-checked':t.status === value, 'data-action':'status-set', 'data-ticket':t.id, 'data-status':value, 'data-key':'status-' + scope + '-' + t.id + '-' + value}, label));
   const statusControl = (t, scope) => {
     if (snapshot) return statusChip(t);
+    if (hideStatus(t)) return null;
     const items = statusItems(t, scope);
-    return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'status-sum', title:'Change the status', 'aria-label':'Change the status. Now: ' + statusWord(t)}, statusChip(t), iconEl('down')), h('div', {className:'menu-pop', role:'menu'}, items));
+    return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'status-sum', title:'Change the status', 'aria-label':'Change the status. Now: ' + statusWord(shown(t))}, statusChip(t), iconEl('down')), h('div', {className:'menu-pop', role:'menu'}, items));
   };
   const heading = (title, sub = '') => h('header', {className:'page-heading', 'data-key':'heading'}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null);
   const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);

@@ -182,3 +182,30 @@ def test_init_prints_the_permission_mode_in_one_line(proj, run):
         "Permissions auto: agents work on their own and the tool checks risky steps "
         "(change: orch config set workspace.permissions ask|auto|full)"
     ]
+
+
+@pytest.mark.parametrize("status", ["review", "done", "dropped"])
+def test_finished_tickets_do_not_count_toward_the_live_limit(proj, run, status):
+    tids = [_live(proj, run, "idle", 1) for _ in range(runs_live.MAX_LIVE)]
+    assert len(runs_live.live_alive(proj)) == runs_live.MAX_LIVE
+    for t in tids:
+        tickets.set_status(proj, t, status, "human:t")
+    assert runs_live.live_alive(proj) == []  # a fifth start is allowed
+
+
+@pytest.mark.parametrize("status", ["active", "waiting"])
+def test_working_or_waiting_tickets_still_count(proj, run, status):
+    tids = [_live(proj, run, "idle", 1) for _ in range(runs_live.MAX_LIVE)]
+    for t in tids:
+        tickets.set_status(proj, t, status, "human:t")
+    assert len(runs_live.live_alive(proj)) == runs_live.MAX_LIVE
+
+
+@pytest.mark.parametrize(
+    "status,age,shut",
+    [("review", 11, True), ("review", 5, False), ("active", 11, False), ("waiting", 11, False)],
+)
+def test_review_session_closes_after_ten_minutes(proj, run, closed, status, age, shut):
+    tid = _live(proj, run, "idle", age)
+    tickets.set_status(proj, tid, status, "human:t")
+    assert runs_live.cleanup(proj) == ([tid] if shut else [])
