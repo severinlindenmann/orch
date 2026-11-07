@@ -80,8 +80,10 @@ def load_history() -> dict:
 
 
 def main() -> int:
+    import atexit
     import signal
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # the finally block still tears the environment down
+    for sg in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sg, lambda *_: sys.exit(143))  # the finally block still tears the environment down
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["quick", "full"], default="quick")
     ap.add_argument("--sha", default="")
@@ -106,6 +108,8 @@ def main() -> int:
     a = ap.parse_args()
 
     t_start = time.time()
+    envmod.sweep_orphans(log)
+    atexit.register(lambda: envmod.sweep_tmux(str(Path(a.root))))  # a crash of the harness itself still ends the agents of this run
     quick = a.mode == "quick"
     root, src = Path(a.root), Path(a.repo)
     repo = src
@@ -285,6 +289,10 @@ def main() -> int:
     if bad:
         findings.append({"lane": "S", "kind": "run", "severity": "blocking", "step": "", "shots": [], "title": "A secret was found in the report folder",
                          "now": f"{bad}", "proposal": "Never write typed keys into step results, shots or traces."})
+    left = envmod.claude_under(str(root))
+    if left:
+        findings.append({"lane": "S", "kind": "run", "severity": "blocking", "step": "", "shots": [], "title": "Agent processes left after tear-down",
+                         "now": f"{len(left)} process(es) of this run were still alive after tear-down: {left[:2]}", "proposal": "End every agent session at tear-down."})
     seen, uniq = set(), []
     for f in findings:
         k = (f.get("lane"), f.get("kind"), f.get("title"))

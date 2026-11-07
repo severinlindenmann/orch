@@ -63,6 +63,26 @@ class HarnessTests(unittest.TestCase):
                            env={**os.environ, "E2E_FULL_LOCKED": "1", "E2E_FULL_ARGS_ONLY": "1"})
         self.assertEqual(r.stdout.splitlines(), ["mode=full", "arg=--build-label", "arg=TF 261107.140550", "arg=--phone"])
 
+    def test_a_run_stopped_midway_leaves_no_tmux_server(self):
+        import os
+        import shutil
+        import subprocess
+        import env as envmod
+        if not shutil.which("tmux"):
+            self.skipTest("no tmux")
+        with tempfile.TemporaryDirectory(prefix=".tf-fe2e-test-", dir=os.path.expanduser("~")) as root:
+            sock = "orch-test" + os.urandom(3).hex()
+            ws = Path(root) / "ws" / "Pilatus"
+            ws.mkdir(parents=True)
+            subprocess.run(["tmux", "-L", sock, "new-session", "-d", "-s", "t_x", "-c", str(ws), "sleep", "300"], check=True)
+            self.assertIn(sock, envmod.tmux_sockets_under(root))
+            self.assertTrue(envmod.claude_under(root))  # a tmux line of this run is visible
+            ended = envmod.sweep_tmux(root)
+            self.assertEqual(ended, [sock])
+            self.assertNotIn(sock, envmod.tmux_sockets_under(root))
+            r = subprocess.run(["tmux", "-L", sock, "ls"], capture_output=True)
+            self.assertNotEqual(r.returncode, 0)  # the server is gone
+
     def test_report_header_shows_build_label(self):
         with tempfile.TemporaryDirectory() as d:
             run = {"sha": "abcdef123456", "mode": "full", "started": "now", "elapsed": "1 min", "n": 1, "build_label": "TF 42"}
