@@ -9,6 +9,8 @@ pub const FILE_HTML: &str = include_str!("../web/file.html");
 pub const PORTAL_HTML: &str = include_str!("../web/portal.html");
 pub const PORTAL_JS: &str = include_str!("../web/portal.js");
 const FILE_JS: &str = include_str!("../web/file.js");
+const LOOK_JS: &str = include_str!("../web/look.js");
+const LOOK_DATA_JS: &str = include_str!("../web/look-data.js");
 const FRAME_HTML: &str = include_str!("../web/frame.html");
 const FRAME_JS: &str = include_str!("../web/frame.js");
 const FAVICON_SVG: &str = include_str!("../web/favicon.svg");
@@ -31,6 +33,20 @@ pub async fn file_js() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         FILE_JS,
+    )
+}
+
+pub async fn look_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        LOOK_JS,
+    )
+}
+
+pub async fn look_data_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        LOOK_DATA_JS,
     )
 }
 

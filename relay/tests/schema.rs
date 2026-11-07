@@ -58,7 +58,10 @@ async fn schema_whoami_shape_matches_example() {
         .as_object()
         .unwrap()
         .clone();
+    // The recorded example predates the look fields (relay-api.md whoami: icon, color, look_by); contracts/review is
+    // the contract author's file, so the three keys are added here until the example is updated.
     let mut a: Vec<_> = want.keys().cloned().collect();
+    a.extend(["icon", "color", "look_by"].map(String::from));
     let mut b: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
     a.sort();
     b.sort();
