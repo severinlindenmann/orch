@@ -58,7 +58,7 @@ def run_browser_lane(lane: str, env_json: Path, outdir: Path, quick: bool, viewp
             cmd += ["--only", ",".join(ids)]
     outdir.mkdir(parents=True, exist_ok=True)
     t = time.time()
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=3600,
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=1700,
                        env={"HOME": os.environ["E2E_REAL_HOME"], "PATH": os.environ["PATH"], "LANG": "en_US.UTF-8"})
     (outdir / "stepper.log").write_text(p.stdout + "\n" + p.stderr)
     rj = outdir / "result.json"
