@@ -28,4 +28,16 @@ final class OpenArgUITests: XCTestCase {
         app = launch("archived")   // ignored until the archive exists: lands on Chats
         XCTAssertTrue(el(app, "new-chat").waitForExistence(timeout: 20), "unknown target is ignored")
     }
+
+    /// A cold start lands on the Chats list even if the last run ended inside a workspace.
+    func testRelaunchLandsOnChatsList() {
+        var app = launch("workspace:ws_pilatus001")
+        XCTAssertTrue(app.buttons["general-ws_pilatus001"].waitForExistence(timeout: 20), "inside the workspace")
+        app.terminate()
+        app = XCUIApplication()
+        app.launchArguments += ["-relayMode", "mock", "-seedPaired", "YES"]
+        app.launch()
+        XCTAssertTrue(el(app, "new-chat").waitForExistence(timeout: 20), "Chats list after relaunch")
+        XCTAssertFalse(app.buttons["general-ws_pilatus001"].exists)
+    }
 }

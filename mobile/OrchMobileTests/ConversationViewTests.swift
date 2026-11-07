@@ -45,6 +45,20 @@ final class ConversationViewTests: XCTestCase {
                                           body: TextBody(text: "Start a thing", general: true)), workspaceName: "A", clientId: "c1")
     }
 
+    func testTopicStartedFromGeneralShowsTheOriginatingTextAndTheReply() {
+        var reply = PhoneMessage(message: TextMessage(id: "r1", from: "ws_a", to: "ph_1", type: "text", createdAt: "2026-11-06T10:05:00Z", ticket: nil,
+                                                      body: TextBody(text: "Plan is ready"), replyTo: "m1"), workspaceName: "A")
+        var d = ConversationInputs(); d.messages = [general("m1"), ack("a1", replyTo: "m1", ticket: "t_1"), reply]
+        let topic = ConversationBuilder.items(.topic(workspace: "ws_a", ticket: "t_1"), d)
+        XCTAssertEqual(topic.map(\.id), ["m1", "r1"], "the text that started the topic comes first, then the agent's answer")
+        let gen = ConversationBuilder.items(.general(workspace: "ws_a"), d)
+        XCTAssertEqual(gen.map(\.id), ["m1"], "General keeps the text (and the chip); the answer lives in the topic")
+        reply = PhoneMessage(message: TextMessage(id: "r2", from: "ws_a", to: "ph_1", type: "text", createdAt: "2026-11-06T10:06:00Z", ticket: nil,
+                                                  body: TextBody(text: "Unrelated", general: true)), workspaceName: "A")
+        d.messages.append(reply)
+        XCTAssertFalse(ConversationBuilder.items(.topic(workspace: "ws_a", ticket: "t_1"), d).contains { $0.id == "r2" })
+    }
+
     func testStartedChipsOnePerAckOnlyForGeneralTexts() {
         let msgs = [general("m1"), ack("a1", replyTo: "m1", ticket: "t_1"), ack("a1", replyTo: "m1", ticket: "t_1"),
                     ack("a22", replyTo: "m_topic", ticket: "t_2"), ack("a333", replyTo: "m1", ticket: nil)]
@@ -118,6 +132,13 @@ final class ConversationModelTests: XCTestCase {
         XCTAssertEqual(m.unread(id), 0)
     }
 
+    func testColdStartLandsOnTheChatsList() async throws {
+        let m = await paired()
+        m.path = [.workspace(MockRelay.pilatus), .general(MockRelay.pilatus)]
+        await m.seedIfRequested()
+        XCTAssertEqual(m.path, [], "no leftover place inside a workspace after a cold start")
+    }
+
     func testEmptyOpenChatKeepsPolling() async throws {
         let m = await paired()
         let watcher = Task { await m.watchWhileOpen(every: .milliseconds(30)) }
@@ -125,5 +146,24 @@ final class ConversationModelTests: XCTestCase {
         for _ in 0..<60 where !m.messages.contains(where: { $0.message.body.text == "hello from a quiet chat" }) { try await Task.sleep(for: .milliseconds(50)) }
         watcher.cancel()
         XCTAssertTrue(m.messages.contains { $0.message.body.text == "hello from a quiet chat" }, "the poll picked it up without any user action")
+    }
+}
+
+
+final class AudioLengthTests: XCTestCase {
+    private var tone: URL { Bundle(for: BundleToken.self).url(forResource: "tone", withExtension: "m4a")! }
+
+    func testRealM4aHasItsLengthNeverZero() async throws {
+        let fromFile = await AudioLength.seconds(of: tone)
+        let fromData = await AudioLength.seconds(of: try Data(contentsOf: tone))
+        XCTAssertEqual(try XCTUnwrap(fromFile), 1.5, accuracy: 0.2)
+        XCTAssertEqual(try XCTUnwrap(fromData), 1.5, accuracy: 0.2)
+        XCTAssertEqual(voiceDurationLabel(try XCTUnwrap(fromFile)), "00:01")
+    }
+
+    func testUnknownLengthShowsNothing() async {
+        let none = await AudioLength.seconds(of: Data())
+        XCTAssertNil(none)
+        XCTAssertNil(voiceDurationLabel(0), "no 00:00 until the length is known")
     }
 }

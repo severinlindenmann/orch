@@ -1,11 +1,11 @@
 import Foundation
 
 /// Phone-local archive, delete and auto-archive of chats (PLAN-A section 2). Nothing here reaches the relay or the workspace.
-/// A chat key is `ReadState.key(id)`. Every stamp is the chat's newest message time (`lastAt`) when the person acted, so a newer
-/// message brings an archived chat back without any event handling: a chat is archived only while its newest message is not newer
+/// A chat key is `ReadState.key(id)`. Every stamp is the chat's latest item/update time (`lastAt`) when the person acted, so newer
+/// activity brings an archived chat back without any event handling: a chat is archived only while its latest activity is not newer
 /// than the stamp.
 struct ArchiveStore: Codable, Equatable, Sendable {
-    /// Archived by hand: key -> newest message time at that moment.
+    /// Archived by hand: key -> latest item/update time at that moment.
     var manual: [String: String] = [:]
     /// Moved back by hand: auto-archive leaves the chat alone until a newer message arrives.
     var kept: [String: String] = [:]

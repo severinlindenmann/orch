@@ -149,6 +149,9 @@ upload of this phone (else `404 not_found`), and an attachment's `size` must equ
   Workspaces should set `general: true` on General texts; an update in General must (schema).
 - **The phone's own texts:** `general: true` = General; `ticket` = that topic; neither = a **pending new topic** until a
   workspace ack with `reply_to` = its id names the ticket (then the phone shows it in that topic).
+- **Topic started from General:** a workspace text without `ticket` whose `reply_to` is a phone text that started a topic
+  (`orch relay topic --from`, or a new-topic text) belongs to that topic (the workspace sets `ticket` itself), and the phone
+  shows that originating General text first in the topic (it also stays in General, with the "started" chip).
 
 **Receipts.** ✓ = the relay stored it (`201`/`200`). ✓✓ = `delivered_at` is set (the workspace acked it from its inbox).
 **Started** = a workspace text with `body.update.kind` `ack` or `working` and `reply_to` = the phone text's id. The

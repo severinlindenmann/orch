@@ -54,6 +54,7 @@ struct Waveform: View {
         audio?.prepareToPlay()
         duration = audio?.duration ?? 0
         isAvailable = audio != nil
+        if duration <= 0 { Task { [weak self] in if let d = await AudioLength.seconds(of: data) { self?.duration = d } } }
     }
 
     func play(model: AppModel) {
@@ -96,6 +97,8 @@ struct Waveform: View {
 
 func voiceRateText(_ rate: Double) -> String { rate == 1.5 ? "1.5x" : "\(Int(rate))x" }
 private func voiceDurationText(_ duration: Double) -> String { clockText(duration) }
+/// Nothing is shown until the length is known (never "00:00" for a real note).
+func voiceDurationLabel(_ duration: Double) -> String? { duration > 0 ? clockText(duration) : nil }
 
 struct OwnVoiceBubble: View {
     let item: ConvItem
@@ -123,7 +126,7 @@ struct OwnVoiceBubble: View {
                         .foregroundStyle(Theme.onBrand).background(Theme.brand, in: Circle())
                 }.disabled(!player.isAvailable).opacity(player.isAvailable ? 1 : 0.45)
                     .accessibilityIdentifier("voice-play")
-                    .accessibilityLabel(player.isAvailable ? "Play voice message, \(voiceDurationText(duration))" : "Audio not available")
+                    .accessibilityLabel(player.isAvailable ? "Play voice message" + (voiceDurationLabel(duration).map { ", \($0)" } ?? "") : "Audio not available")
                     .accessibilityValue(player.isPlaying ? "Pause" : "Play")
                 scrubber
                 Button { player.cycleRate() } label: {
@@ -133,7 +136,7 @@ struct OwnVoiceBubble: View {
                     .accessibilityValue(voiceRateText(player.rate))
             }
             HStack(spacing: 5) {
-                Text(voiceDurationText(duration)).foregroundStyle(Theme.muted)
+                if let t = voiceDurationLabel(duration) { Text(t).foregroundStyle(Theme.muted) }
                 Circle().fill(Theme.brand).frame(width: 10, height: 10).accessibilityHidden(true)
                 Text("Voice memo").foregroundStyle(Theme.brand)
             }.themeFont(13).padding(.leading, 48)
@@ -262,6 +265,7 @@ struct AgentMemoBubble: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.trailing, ChatBubbleLayout.agentTrailingSpace(for: typeSize))
             .onChange(of: model.speech.state, initial: true) { _, _ in captureTiming() }
+            .task { if duration <= 0, let clip = model.speechClip(item, workspaceName: workspaceName), let d = await model.speech.cachedDuration(for: clip) { duration = d } }
             .onChange(of: model.speech.rate) { _, _ in captureTiming() }
             .accessibilityAction(named: "Reply") { onReply?() }
             .accessibilityAction(named: playing ? "Pause" : "Listen") { toggle() }
@@ -283,6 +287,9 @@ struct AgentMemoBubble: View {
         elapsed = (info[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? NSNumber)?.doubleValue ?? 0
         duration = (info[MPMediaItemPropertyPlaybackDuration] as? NSNumber)?.doubleValue ?? 0
         timingDate = Date()
+        if duration <= 0, let clip = model.speechClip(item, workspaceName: workspaceName) {
+            Task { if let d = await model.speech.cachedDuration(for: clip) { duration = d } }   // known once the audio is on disk
+        }
     }
     private func progress(at date: Date) -> Double? {
         guard current, duration > 0 else { return listened ? 1 : nil }

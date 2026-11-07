@@ -48,6 +48,27 @@ fn sent_kinds(t: &T) -> Vec<(String, String)> {
 }
 
 #[tokio::test]
+async fn mute_reply_preserves_mobile_mode() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    assert_eq!(t.call(&a, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
+    let expected = mm(&t, &a, &p).await;
+    assert_eq!(expected["on"], true);
+    let (s, card) = t
+        .phone(
+            &p,
+            "PATCH",
+            &format!("/v1/phone/workspaces/{}", a.id),
+            Some(json!({"muted_until": "forever"})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(card["muted_until"], "forever");
+    assert_eq!(card["mobile_mode"], expected);
+}
+
+#[tokio::test]
 async fn vector_heartbeat_cases() {
     let t = start().await;
     for case in vectors()["heartbeat"].as_array().unwrap() {

@@ -5,10 +5,17 @@ final class ArchiveUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
     private let row = "ticket-ws_pilatus001|t_q3sum1"
 
-    private func launch() -> XCUIApplication {
+    /// One launch path for every test here: a stray instance from the previous test is ended first (slow CI simulators time out
+    /// while it shuts down), then the app starts with the mock relay.
+    private func start(_ extra: [String]) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-openChat", "ws_pilatus001"]
+        if app.state != .notRunning { app.terminate() }
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES"] + extra
         app.launch()
+        return app
+    }
+    private func launch() -> XCUIApplication {
+        let app = start(["-openChat", "ws_pilatus001"])
         let done = app.buttons["done-toggle"]
         XCTAssertTrue(done.waitForExistence(timeout: 20), "workspace screen")
         done.tap()
@@ -34,9 +41,13 @@ final class ArchiveUITests: XCTestCase {
         XCTAssertTrue(el(app, "archive-toast").waitForExistence(timeout: 5))
         shot(app, "2-undo-toast")
         app.buttons["Undo"].tap()
-        XCTAssertTrue(chat.waitForExistence(timeout: 5), "Undo brings the chat back")
-        chat.swipeLeft(); app.buttons["Archive"].tap()
-        XCTAssertTrue(chat.waitForNonExistence(timeout: 5), "the row is gone")
+        var back = el(app, row)   // re-query: the old element can go stale while the list rebuilds
+        XCTAssertTrue(back.waitForExistence(timeout: 15), "Undo brings the chat back")
+        let hittable = NSPredicate(format: "exists == true AND isHittable == true")
+        wait(for: [expectation(for: hittable, evaluatedWith: back)], timeout: 15)
+        back = el(app, row)
+        back.swipeLeft(); app.buttons["Archive"].tap()
+        XCTAssertTrue(el(app, row).waitForNonExistence(timeout: 5), "the row is gone")
         let archived = el(app, "archived-row")
         XCTAssertTrue(archived.waitForExistence(timeout: 5)); archived.tap()
         XCTAssertTrue(el(app, "archived-t:ws_pilatus001|t_q3sum1").waitForExistence(timeout: 5))
@@ -58,9 +69,7 @@ final class ArchiveUITests: XCTestCase {
     }
 
     func testAutoArchiveSwitchInSettings() {
-        let app = XCUIApplication()
-        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-startTab", "settings"]
-        app.launch()
+        let app = start(["-startTab", "settings"])
         let toggle = el(app, "auto-archive")
         XCTAssertTrue(toggle.waitForExistence(timeout: 20))
         toggle.tap()
