@@ -101,6 +101,7 @@ export async function run(opts) {
       }
       if (await modalOpen()) await page.keyboard.press('Escape');  // a dialog a census click opened: close it for the next step
     }
+    const settle = async () => { try { await page.evaluate(() => Promise.all(document.getAnimations().map(a => a.finished.catch(() => {})))); await page.waitForTimeout(150); } catch { /* page navigating */ } };
     const modalOpen = async () => (await page.locator('dialog[open], [role=dialog], [aria-modal=true]').filter({ visible: true }).count()) > 0;
     async function clickCensusOnce(pageName, step, timeout) {
       const items = await census(pageName, step.id);
@@ -219,10 +220,11 @@ export async function run(opts) {
             const text = clone.innerText; clone.remove(); return text;
           });
           entry.lint = lintText(lintInput, { allow: step.lint_allow || lane.lint_allow || [] });
+          await settle();  // page fade-in animations make axe see half-transparent text
           const axe = await new AxeBuilder({ page }).analyze();
           entry.axe = axe.violations.filter(v => ['serious', 'critical'].includes(v.impact) && !(step.allow_axe || []).includes(v.id)).map(v => ({ id: v.id, impact: v.impact, help: v.help, count: v.nodes.length, selector: v.nodes[0]?.target?.[0] }));
           if (lane.axe_fail && entry.axe.length) failure ||= 'Accessibility violations';
-          for (const width of widths) { await page.setViewportSize({ width, height: height(width) }); await page.waitForTimeout(250); await shot(step, width); }
+          for (const width of widths) { await page.setViewportSize({ width, height: height(width) }); await page.waitForTimeout(250); await settle(); await shot(step, width); }
           await page.setViewportSize({ width: widths[0], height: height(widths[0]) });
           await page.waitForTimeout(250);
           await shot(step, widths[0]);
