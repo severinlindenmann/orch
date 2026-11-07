@@ -89,7 +89,11 @@ actor MockRelay: RelayAPI {
                       .init(kind: "link", title: "Board deck draft", url: "https://docs.pilatus.ch/board-q3", at: "2026-11-05T11:19:30Z", linkType: "Link", icon: "link"),
                       .init(kind: "file", title: "test-report.pdf", name: "test-report.pdf", size: 84_000, at: "2026-11-05T11:19:40Z")],
         historyTail: [.init(at: "2026-11-05T10:34:00Z", by: "Claude", role: "agent", text: "Pulled the numbers from the Q3 sheet."),
-                      .init(at: "2026-11-05T10:37:00Z", by: "Claude", role: "agent", text: "Draft is ready, charts next.")])
+                      .init(at: "2026-11-05T10:37:00Z", by: "Claude", role: "agent", text: "Draft is ready, charts next.")],
+        refs: [.init(rawKind: "url", url: "https://docs.pilatus.ch/board-q3", title: "Board deck draft"),
+               .init(rawKind: "ticket", ticket: "t_7k3f9q"),
+               .init(rawKind: "artifact", ticket: "t_q3sum1", name: "q3-chart.png"),
+               .init(rawKind: "file", path: "docs/board/q3.md", line: 12)])
     static let invoiceView = TicketSnapshot(
         title: "Invoice CSV export", status: "active", agent: "Claude", summary: "Writing the export.",
         checklist: [.init(text: "Read the invoice table", done: true), .init(text: "Choose the columns", done: true), .init(text: "Write the export", done: false),

@@ -52,10 +52,35 @@ struct ConversationInfoView: View {
                              ticketAt: ticket?.at ?? "", conversation: conversation)
     }
 
+    private var refs: [TicketRef] { ticket?.view?.refs ?? [] }
+
+    private var referenceRows: [RefRow] {
+        RefRow.rows(refs, lookup: { id in
+            model.ticket(conversation.workspace, id).map { (key: $0.key, title: $0.displayTitle) }
+        }, attachments: { ticketId, name in
+            model.ticket(conversation.workspace, ticketId)?.view?.attachments
+                .first { $0.name == name || $0.title == name }
+                .map { ArtifactItem($0, in: .topic(workspace: conversation.workspace, ticket: ticketId)) }
+        })
+    }
+
+    private func remainingLinks(_ all: [InfoEntry], rows: [RefRow]) -> [InfoEntry] {
+        let urls = Set(rows.compactMap { row -> URL? in
+            if case .link(_, _, _, let url) = row { return url }
+            return nil
+        })
+        return entries(in: .links, from: all).filter { entry in
+            guard let url = entry.item.url else { return true }
+            return !urls.contains(url)
+        }
+    }
+
     private func entries(in group: InfoGroup, from all: [InfoEntry]) -> [InfoEntry] { InfoGrouping.entries(in: group, from: all) }
 
     var body: some View {
         let all = entries
+        let references = referenceRows
+        let links = remainingLinks(all, rows: references)
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
@@ -81,8 +106,9 @@ struct ConversationInfoView: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("info-language-row")
                 VStack(spacing: 16) {
-                    segments(all)
-                    content(entries(in: selection, from: all))
+                    segments(all, referenceCount: references.count + links.count)
+                    if selection == .links { referenceContent(references, links: links) }
+                    else { content(entries(in: selection, from: all)) }
                 }
             }
             .padding(16).padding(.top, 8)
@@ -115,11 +141,11 @@ struct ConversationInfoView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func segments(_ all: [InfoEntry]) -> some View {
+    private func segments(_ all: [InfoEntry], referenceCount: Int) -> some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2),
                                  count: dynamicTypeSize.isAccessibilitySize ? 2 : 4), spacing: 4) {
             ForEach(InfoGroup.allCases) { group in
-                let count = entries(in: group, from: all).count
+                let count = group == .links ? referenceCount : entries(in: group, from: all).count
                 Button { selection = group } label: {
                     Text("\(group.title) (\(count))").themeFont(12, .semibold)
                         .multilineTextAlignment(.center)
@@ -166,6 +192,67 @@ struct ConversationInfoView: View {
         }
     }
 
+    @ViewBuilder private func referenceContent(_ rows: [RefRow], links: [InfoEntry]) -> some View {
+        if rows.isEmpty && links.isEmpty {
+            Text("Nothing shared yet.").themeFont(15).foregroundStyle(Theme.muted)
+                .frame(maxWidth: .infinity).padding(.vertical, 32)
+        } else {
+            LazyVStack(spacing: 12) {
+                ForEach(rows) { row in
+                    referenceRow(row).accessibilityIdentifier("info-ref-\(row.id)")
+                }
+                ForEach(links) { entry in
+                    Button { open(entry) } label: { row(entry) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("info-ref-\(entry.id)")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func referenceRow(_ row: RefRow) -> some View {
+        switch row {
+        case .link(_, let title, let host, let url):
+            Button { openURL(url) } label: {
+                referenceLabel(title, detail: host, symbol: "link")
+            }.buttonStyle(.plain)
+        case .ticket(let id, let label, let known):
+            Button {
+                if known, let target = refs.enumerated().first(where: { "ref\($0.offset)" == id })?.element.ticket {
+                    model.path.append(ChatRoute.ticket(workspace: conversation.workspace, ticket: target))
+                }
+            } label: {
+                referenceLabel(label, symbol: "arrow.turn.down.right", chevron: true)
+            }.buttonStyle(.plain).disabled(!known).opacity(known ? 1 : 0.5)
+        case .artifact(_, let name, let item):
+            if let item {
+                Button { viewer = item } label: {
+                    artifactCard(item, title: item.title, kindLabel: item.kind == .pdf ? "PDF" : "Artifact")
+                }.buttonStyle(.plain)
+            } else {
+                artifactCard(nil, title: name, kindLabel: "Artifact").opacity(0.5)
+            }
+        case .file(_, let text):
+            Text(text).font(.system(size: 15, design: .monospaced))
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(16)
+                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    private func referenceLabel(_ title: String, detail: String? = nil, symbol: String, chevron: Bool = false) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol).themeFont(22).foregroundStyle(Theme.brand).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).themeFont(16, .medium)
+                if let detail { Text(detail).themeFont(13).foregroundStyle(Theme.muted) }
+            }.multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+            if chevron { ShellChevron() }
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(16)
+        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
+    }
+
     private func row(_ entry: InfoEntry) -> some View {
         HStack(spacing: 12) {
             Image(systemName: selection == .links ? "link" : "doc")
@@ -182,16 +269,22 @@ struct ConversationInfoView: View {
     }
 
     private func artifactCard(_ entry: InfoEntry) -> some View {
+        artifactCard(entry.item, title: entry.item.title, kindLabel: entry.kindLabel)
+    }
+
+    private func artifactCard(_ item: ArtifactItem?, title: String, kindLabel: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: entry.item.kind == .pdf ? "doc.richtext" : "globe")
+            Image(systemName: item?.kind == .pdf ? "doc.richtext" : "globe")
                 .themeFont(40).foregroundStyle(Theme.brand)
                 .frame(maxWidth: .infinity, minHeight: 120)
                 .background(Theme.surface3).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
-                Text(entry.item.title).themeFont(16, .semibold)
-                Text(entry.kindLabel).themeFont(13).foregroundStyle(Theme.muted)
-                Label("Open", systemImage: "arrow.up.right").themeFont(13, .semibold)
-                    .foregroundStyle(Theme.brand).padding(.top, 4)
+                Text(title).themeFont(16, .semibold)
+                Text(kindLabel).themeFont(13).foregroundStyle(Theme.muted)
+                if item != nil {
+                    Label("Open", systemImage: "arrow.up.right").themeFont(13, .semibold)
+                        .foregroundStyle(Theme.brand).padding(.top, 4)
+                }
             }
             .padding(14)
         }
@@ -243,7 +336,7 @@ struct ConversationInfoView: View {
 enum InfoGroup: String, CaseIterable, Identifiable {
     case photos, files, links, artifacts
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    var title: String { self == .links ? "References" : rawValue.capitalized }
 }
 
 struct InfoEntry: Identifiable {
@@ -338,7 +431,7 @@ private struct InfoLanguageView: View {
     }
 }
 
-/// Which attachments of a conversation go into Photos / Files / Links / Artifacts, newest first and without duplicates.
+/// Which attachments of a conversation go into Photos / Files / References / Artifacts, newest first and without duplicates.
 enum InfoGrouping {
     static func entries(messages: [ConvItem], ticketAttachments: [TicketSnapshot.Attachment], ticketAt: String,
                         conversation: ConversationID) -> [InfoEntry] {

@@ -1,0 +1,64 @@
+import XCTest
+
+/// W5-S: the workspace screen groups topics by status, and the info screen lists References.
+final class StatusRefsUITests: XCTestCase {
+    override func setUp() { continueAfterFailure = false }
+
+    private func launch(_ chat: String) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-openChat", chat]
+        app.launch()
+        return app
+    }
+    private func shot(_ app: XCUIApplication, _ name: String) {
+        let home = ProcessInfo.processInfo.environment["SIMULATOR_HOST_HOME"] ?? NSHomeDirectory()
+        let dir = URL(fileURLWithPath: home).appendingPathComponent("orch-dev/state/mobile-v3-messenger/build/shots/w5s")
+        guard FileManager.default.fileExists(atPath: dir.path) else { return }
+        try? app.screenshot().pngRepresentation.write(to: dir.appendingPathComponent("\(name).png"))
+    }
+    private func el(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
+
+    func testWorkspaceGroupsByStatusAndDoneIsCollapsed() {
+        let app = launch("ws_pilatus001")
+        XCTAssertTrue(app.buttons["general-ws_pilatus001"].waitForExistence(timeout: 20), "General is pinned")
+        XCTAssertTrue(app.staticTexts["Waiting"].waitForExistence(timeout: 10), "the topic with an open question is under Waiting")
+        XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_7k3f9q"].exists)
+        XCTAssertFalse(app.staticTexts["Backlog"].exists && app.staticTexts["Review"].exists, "empty groups are hidden")
+        let done = app.buttons["done-toggle"]
+        XCTAssertTrue(done.exists)
+        XCTAssertFalse(app.buttons["ticket-ws_pilatus001|t_q3sum1"].exists, "Done is collapsed")
+        shot(app, "1-workspace-groups")
+        done.tap()
+        XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_q3sum1"].waitForExistence(timeout: 5))
+        shot(app, "2-workspace-done-open")
+    }
+
+    func testWorkingGroupShowsTheChip() {
+        let app = launch("ws_reports001")
+        XCTAssertTrue(app.staticTexts["Working"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["ticket-ws_reports001|t_9k2m4q"].exists)
+        XCTAssertTrue(app.staticTexts["Claude is working"].exists)
+        XCTAssertFalse(app.buttons["done-toggle"].exists, "no finished topic, no Done group")
+        shot(app, "3-workspace-working")
+    }
+
+    func testInfoScreenListsReferences() {
+        let app = launch("ws_pilatus001")
+        XCTAssertTrue(app.buttons["done-toggle"].waitForExistence(timeout: 20))
+        app.buttons["done-toggle"].tap()
+        app.buttons["ticket-ws_pilatus001|t_q3sum1"].tap()
+        let info = el(app, "chat-info")
+        XCTAssertTrue(info.waitForExistence(timeout: 10)); info.tap()
+        let tab = app.buttons["info-tab-links"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 10))
+        XCTAssertTrue(tab.label.hasPrefix("References"), tab.label)
+        tab.tap()
+        XCTAssertTrue(el(app, "info-ref-ref0").waitForExistence(timeout: 5), "web address card")
+        XCTAssertTrue(app.staticTexts["PIL-13 · Rename field X in ingestion job"].exists, "ticket row with key and title")
+        XCTAssertTrue(app.staticTexts["docs/board/q3.md:12"].exists, "file reference as plain text")
+        shot(app, "4-references")
+        el(app, "info-ref-ref1").tap()   // opens that topic
+        XCTAssertTrue(app.descendants(matching: .any)["tasks-card"].waitForExistence(timeout: 10) || app.staticTexts["composer-note"].waitForExistence(timeout: 5))
+        shot(app, "5-reference-opened")
+    }
+}

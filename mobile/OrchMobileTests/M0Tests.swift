@@ -387,7 +387,7 @@ final class ConversationTests: XCTestCase {
         d.speak = .never; XCTAssertFalse(ConversationBuilder.items(t[0].id, d)[0].canPlay)
         var r = ReadState(); r.markRead(ReadState.key(t[0].id), upTo: "2026-11-06T10:05:00Z")
         XCTAssertEqual(ConversationBuilder.topics(workspace: ws, d, read: r)[0].unread, 0)
-        XCTAssertEqual(TopicStatus.allCases.map(\.label), ["Working", "Waiting on you", "Done", "Stopped", "Didn't work"])
+        XCTAssertEqual(TopicStatus.allCases.map(\.label), ["Working", "Waiting", "Review", "Backlog", "Done", "Stopped", "Didn't work"])
     }
     func testLanguageLabelOnlyWhenDifferent() {
         XCTAssertNil(LanguageLabel.label(memo: "de-CH", conversation: "de-CH")); XCTAssertEqual(LanguageLabel.label(memo: "en", conversation: "de-CH"), "EN")
