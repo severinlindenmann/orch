@@ -564,13 +564,8 @@ final class RealRelayE2ETests: XCTestCase {
         let t1 = host("out = mk_done_topic('Archive me')")
         let t2 = host("out = mk_done_topic('Delete me')")
         let app = launch(extra: ["-open", "workspace:\(ws)"])
-        guard app.buttons["done-toggle"].waitForExistence(timeout: 40) else {
-            // W7-BUGS 4 (open): after #222 the Done topics made by mk_done_topic do not reach the workspace screen
-            // (only General shows), so the archive steps cannot start. Needs a look at how the phone derives Done.
-            XCTExpectFailure("W7-BUGS 4: Done topics from the workspace do not show on the phone's workspace screen")
-            XCTFail("no Done (n) section on the workspace screen")
-            return
-        }
+        // The workspace's Done tickets sit behind "Done (n)" on its screen (W7-BUGS 4: strict again)
+        must(app, app.buttons["done-toggle"], "Done (n) section on the workspace screen", timeout: 40)
         expandDone(app)
         let row = el(app, "ticket-\(ws)|\(t1)")
         must(app, row, "Archive me row", timeout: 60)
@@ -611,7 +606,7 @@ final class RealRelayE2ETests: XCTestCase {
             XCTAssertFalse(el(app, "archived-t:\(ws)|\(t2)").exists, "deleted ticket is not archived")
             back(app)
         }
-        host("rc, result = e.orch('Pilatus', 'ticket', 'show', '\(t2)'); assert rc == 0, result")
+        host("rc, result, _err = e.orch('Pilatus', 'ticket', 'show', '\(t2)'); assert rc == 0, result")  // the ticket stays in the workspace
         shot("129-archive-unarchive-and-delete")
     }
 
