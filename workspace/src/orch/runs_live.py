@@ -151,7 +151,9 @@ def start_live(
     mine = cur is not None and runs.state(cur) == "alive"
     if not mine and _full(root):
         _queue_for_slot(root, tid, by, busy_text)
-        n = MAX_LIVE if len(live_alive(root)) >= MAX_LIVE else MAX_LIVE + HARD_EXTRA  # name the limit that was really hit
+        n = (
+            MAX_LIVE if len(live_alive(root)) >= MAX_LIVE else MAX_LIVE + HARD_EXTRA
+        )  # name the limit that was really hit
         raise runs.Busy(
             f"{n} live sessions are open here, the most at once. Your request for {tid} is saved and "
             f"starts when one closes. To close one: orch run stop <ticket>",
@@ -305,6 +307,8 @@ def event(
     if not rec or rec.get("mode") != "live":
         return 0
     tid, run = rec["ticket"], rec["run"]
+    if kind in ("session", "idle", "working"):
+        tickets.resume_after_start_wait(root, tid, f"agent:{rec['agent']}")  # the tool is up
     if kind == "session":
         if session_id and adapters.SESSION_RE.match(session_id):
             tickets.record_session(root, tid, rec["agent"], session_id, runs.host())
@@ -533,6 +537,7 @@ def check_starting(
         if cur and cur["run"] == run and (cur.get("live") or {}).get("state") == "starting":
             cur["live"] = {"state": "attention", "since": tickets.now(), "why": note}
             runs._write(root, cur)
+            tickets.wait_for_start(root, tid, note, f"agent:{rec['agent']}")
     return note
 
 

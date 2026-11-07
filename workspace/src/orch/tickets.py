@@ -552,11 +552,50 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
 
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     def op(ticket):
-        if ticket["status"] not in ("open", "ready", "review"):
+        w = ticket.get("waiting_on") or {}
+        if ticket["status"] not in ("open", "ready", "review") and not (
+            ticket["status"] == "waiting" and w.get("start") is True
+        ):  # a start that was waiting for a sign-in (wait_for_start) is Working again
             return NO_WRITE
         ticket["status"] = "active"
         ticket["waiting_on"] = None
         add_history(ticket, by, f"{agent_label} started")
+
+    try:
+        apply_op(root, tid, op)
+    except (Refused, FileNotFoundError):
+        if ticket_path(root, tid).exists():
+            raise
+
+
+def wait_for_start(root: Path, tid: str, reason: str, by: str) -> None:
+    """The agent is not up (it needs a sign-in, or failed to start): the ticket is Waiting with that reason,
+    never Working. Only a Working ticket is moved."""
+
+    def op(ticket):
+        if ticket["status"] != "active":
+            return NO_WRITE
+        ticket["status"] = "waiting"
+        ref = (reason.strip() or "The agent did not start")[:200]
+        ticket["waiting_on"] = {"kind": "external", "ref": ref, "start": True}
+        add_history(ticket, by, "Waiting: the agent is not up")
+
+    try:
+        apply_op(root, tid, op)
+    except (Refused, FileNotFoundError):
+        if ticket_path(root, tid).exists():
+            raise
+
+
+def resume_after_start_wait(root: Path, tid: str, by: str) -> None:
+    """The agent is up now: a ticket that wait_for_start put in Waiting is Working again."""
+
+    def op(ticket):
+        if ticket["status"] != "waiting" or (ticket.get("waiting_on") or {}).get("start") is not True:
+            return NO_WRITE
+        ticket["status"] = "active"
+        ticket["waiting_on"] = None
+        add_history(ticket, by, "The agent is up")
 
     try:
         apply_op(root, tid, op)
