@@ -50,7 +50,7 @@ struct QuestionCard: View {
                 .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 16))
                 .overlay(RoundedRectangle(cornerRadius: 16).stroke(item.answer != nil || isStale ? Theme.border : .clear))
                 .buttonStyle(PressStyle()).accessibilityElement(children: .contain)
-                .accessibilityIdentifier("question-card-\(q.id)")
+                .accessibilityIdentifier("question-\(q.id)")
         }
     }
 
@@ -152,7 +152,8 @@ struct QuestionCard: View {
                 Text("Already answered on your computer: \(label(q, answer))")
                     .themeFont(13).foregroundStyle(Theme.muted).frame(minHeight: 44, alignment: .leading)
             }
-        }.accessibilityAction(named: showOther ? "Hide other options" : "Show other options") { if hasOptions { showOther.toggle() } }
+        }.accessibilityIdentifier("answered-\(q.id)")
+            .accessibilityAction(named: showOther ? "Hide other options" : "Show other options") { if hasOptions { showOther.toggle() } }
     }
 
     private func sending(_ q: Question) -> some View {

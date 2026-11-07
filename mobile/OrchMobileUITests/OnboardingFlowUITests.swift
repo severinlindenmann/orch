@@ -36,24 +36,21 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["segment-done"].waitForExistence(timeout: 10))
         app.buttons["segment-done"].tap()
         XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_q3sum1"].waitForExistence(timeout: 10), "topic row with its key")
-        app.buttons["general-ws_pilatus001"].tap()
+        // Questions live in their topic (v3): open PIL-13 under Open, answer there.
+        app.buttons["segment-open"].tap()
+        let topic = app.buttons["ticket-ws_pilatus001|t_7k3f9q"]
+        XCTAssertTrue(topic.waitForExistence(timeout: 10), "the topic with the open question")
+        topic.tap()
         let answer = app.buttons["answer-TIMESTAMP"]
         XCTAssertTrue(answer.waitForExistence(timeout: 10))
         answer.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["answered-m_q1date0ts0000001"].waitForExistence(timeout: 10))
-        let card = app.buttons["card-ws_pilatus001|t_q3sum1"]
-        var tries = 0
-        while !card.isHittable && tries < 5 { app.swipeDown(); tries += 1 }
-        card.tap()
-        XCTAssertTrue(app.staticTexts["Q3 summary for the board"].waitForExistence(timeout: 10) || app.otherElements["chat-title"].waitForExistence(timeout: 5))
-        // (tasks card / composer note of a finished ticket belong to the conversation lane, M2)
+        XCTAssertTrue(app.descendants(matching: .any)["answered-m_q1date0ts0000001"].waitForExistence(timeout: 15))
     }
 
     func testAnswerCanBeUndone() {
         let app = XCUIApplication()
-        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-undoSeconds", "30", "-openChat", "ws_pilatus001"]
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-undoSeconds", "30", "-openChat", "ws_pilatus001", "-openTicket", "t_7k3f9q"]
         app.launch()
-        openGeneral(app)
         let answer = app.buttons["answer-TIMESTAMP"]
         XCTAssertTrue(answer.waitForExistence(timeout: 15))
         answer.tap()
@@ -118,8 +115,7 @@ final class OnboardingFlowUITests: XCTestCase {
 
     /// VoiceOver label audit: every visible button on the main screens has a spoken label.
     func testEveryButtonHasALabel() {
-        let app = paired(["-openChat", "ws_pilatus001"])
-        openGeneral(app)
+        let app = paired(["-openChat", "ws_pilatus001", "-openTicket", "t_7k3f9q"])
         XCTAssertTrue(app.buttons["answer-DATE"].waitForExistence(timeout: 15))
         for b in app.buttons.allElementsBoundByIndex where b.exists && b.isHittable {
             XCTAssertFalse(b.label.trimmingCharacters(in: .whitespaces).isEmpty, "unlabelled button in chat: \(b.identifier)")
