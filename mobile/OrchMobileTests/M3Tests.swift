@@ -314,14 +314,10 @@ final class M3HelperTests: XCTestCase {
         do { _ = try await f.load(link); XCTFail("over the cap") } catch { XCTAssertEqual(error as? PublishError, .broken) }
         XCTAssertEqual(PublishFetcher.maxBlobBytes, 100 * 1_048_576 + 65_536 + 36)
     }
-    func testQuickLookOpensPagesAsText() {
-        XCTAssertEqual(ArtifactItem.quickLookName("page.HTML"), "page.HTML.txt")
-        XCTAssertEqual(ArtifactItem.quickLookName("logo.svg"), "logo.svg.txt")
-        XCTAssertEqual(ArtifactItem.quickLookName("report.pdf"), "report.pdf")
-        XCTAssertEqual(ArtifactItem.quickLookName("data.xlsx"), "data.xlsx")
-        XCTAssertEqual(ArtifactItem.quickLookName("run.js"), "run.js.txt", "not on the allowlist")
-        XCTAssertEqual(ArtifactItem.quickLookName("noextension"), "noextension.txt")
-        XCTAssertEqual(ArtifactItem.quickLookName("x.webarchive"), "x.webarchive.txt")
-        XCTAssertEqual(ArtifactItem.quickLookName("PHOTO.JPG"), "PHOTO.JPG")
+    func testOnlyInertTypesArePreviewedInTheApp() {
+        for ok in ["report.pdf", "PHOTO.JPG", "a.png", "n.txt", "d.csv", "x.json", "v.mov", "s.m4a"] { XCTAssertTrue(ArtifactItem.canPreview(fileName: ok), ok) }
+        for no in ["page.html", "logo.svg", "run.js", "noextension", "x.webarchive", "d.docx", "d.xlsx", "d.pptx", "a.zip", "n.pages", "k.key", "t.rtf"] {
+            XCTAssertFalse(ArtifactItem.canPreview(fileName: no), no)
+        }
     }
 }

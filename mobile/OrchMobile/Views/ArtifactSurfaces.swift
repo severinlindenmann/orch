@@ -8,6 +8,7 @@ enum ArtifactSurfaceContent {
     case publish(PublishContent)
     case data(Data, name: String, mime: String)
     case quickLook(URL)
+    case shareOnly(URL, name: String, size: Int)
     case link(URL)
 }
 

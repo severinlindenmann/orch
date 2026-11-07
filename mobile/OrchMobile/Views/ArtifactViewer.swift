@@ -139,7 +139,7 @@ struct ArtifactViewer: View {
     /// "Looks good" only once the content is on screen: never approve something that was not seen.
     private var canApprove: Bool {
         guard case .ready(let content) = loadState else { return false }
-        switch content { case .quickLook, .link: return false; default: return true }
+        switch content { case .quickLook, .shareOnly, .link: return false; default: return true }
     }
 
     private var canComment: Bool {
@@ -148,7 +148,7 @@ struct ArtifactViewer: View {
         case .publish(.page), .publish(.bundle): return true
         case .data(_, _, let mime): return mime == "application/pdf" || mime.hasPrefix("image/")
         case .publish(.file(let file)): return file.type == "application/pdf" || file.type.hasPrefix("image/")
-        case .quickLook, .link: return false
+        case .quickLook, .shareOnly, .link: return false
         }
     }
 
@@ -175,6 +175,14 @@ struct ArtifactViewer: View {
             if file.type == "application/pdf" { PDFSurface(data: file.bytes, commentMode: commentMode, store: store) }
             else if file.type.hasPrefix("image/") { ImageSurface(data: file.bytes, commentMode: commentMode, store: store) }
         case .quickLook(let url): QuickLookPreview(url: url)
+        case .shareOnly(let url, let name, let size):
+            VStack(spacing: 14) {
+                Image(systemName: "doc").themeFont(40).foregroundStyle(Theme.muted)
+                Text(name).themeFont(17, .semibold).multilineTextAlignment(.center)
+                Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)).themeFont(14).foregroundStyle(Theme.muted)
+                ShareLink(item: url) { Label("Open in Files", systemImage: "square.and.arrow.up") }
+                    .buttonStyle(ArtifactTextButtonStyle()).accessibilityIdentifier("artifact-share-file")
+            }.padding(20)
         case .link(let url):
             Button("Open in Safari") { openURL(url) }.buttonStyle(ArtifactTextButtonStyle())
         }
@@ -221,12 +229,12 @@ struct ArtifactViewer: View {
         if mime.hasPrefix("text/html"), let html = String(data: bytes, encoding: .utf8) { return .publish(.page(html: html, name: name)) }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("orch-preview-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(ArtifactItem.quickLookName(Outbox.safeFileName(name)))
+        let url = folder.appendingPathComponent(Outbox.safeFileName(name))
         do { try bytes.write(to: url, options: .atomic) }
         catch { try? FileManager.default.removeItem(at: folder); throw error }
         if let temporaryDirectory { try? FileManager.default.removeItem(at: temporaryDirectory) }
         temporaryDirectory = folder
-        return .quickLook(url)
+        return ArtifactItem.canPreview(fileName: url.lastPathComponent) ? .quickLook(url) : .shareOnly(url, name: name, size: bytes.count)
     }
 
     private func send(_ feedback: DraftFeedback?) {

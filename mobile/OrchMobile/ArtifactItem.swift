@@ -54,13 +54,9 @@ struct ArtifactItem: Identifiable, Equatable, Sendable {
         self.artifactId = artifactId; self.rev = rev; self.conversation = conversation
     }
 
-    /// Types QuickLook may show as they are (they cannot run script). Anything else is shown as plain text.
-    static let quickLookAllowed: Set<String> = ["pdf", "png", "jpg", "jpeg", "heic", "gif", "txt", "csv", "md", "json", "rtf", "docx", "xlsx",
-                                                "pptx", "pages", "numbers", "key", "m4a", "mp3", "mp4", "mov", "zip"]
-    /// A file name safe to hand to QuickLook: only inert types keep their name, the rest (pages, svg, scripts, unknown) opens as text.
-    static func quickLookName(_ name: String) -> String {
-        quickLookAllowed.contains((name as NSString).pathExtension.lowercased()) ? name : name + ".txt"
-    }
+    /// Types shown in the app (QuickLook): they cannot run script or render web content. Everything else is only shared / opened in Files.
+    static let previewAllowed: Set<String> = ["pdf", "png", "jpg", "jpeg", "heic", "gif", "txt", "csv", "md", "json", "m4a", "mp3", "mp4", "mov"]
+    static func canPreview(fileName: String) -> Bool { previewAllowed.contains((fileName as NSString).pathExtension.lowercased()) }
 
     static func isPDF(name: String?, mime: String?) -> Bool {
         mime == "application/pdf" || (name?.lowercased().hasSuffix(".pdf") ?? false)
