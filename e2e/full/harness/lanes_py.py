@@ -944,6 +944,62 @@ def _p_stop(host: dict) -> None:
                 pass
 
 
+# ---------------------------------------------------------------------------------------------- lane L (workspace look) and UP (upgrade)
+
+
+def lane_l(env, out: Path, repo: Path) -> Lane:
+    """The workspace-look scenarios (LOOK-1..5: core CLI, dashboard, relay 200/409 + phone fields, publish meta on/off), through e2e/run.sh.
+    It starts its own relay, publish and workspace (env -i, own folders), so it never touches the servers of this run."""
+    import re
+    import subprocess
+    L = Lane("L", "Workspace look (LOOK scenarios)", out)
+    src = repo / "e2e" / "scenarios_look.py"
+    if not src.exists():
+        L.step("L00", "LOOK scenarios present", lambda st: (_ for _ in ()).throw(Skipped("e2e/scenarios_look.py is not in this checkout")))
+        return L
+    ids = sorted(set(re.findall(r'@scenario\("(LOOK-\d+)"', src.read_text())))
+    log = out / "look.log"
+    heavy = Path(os.environ.get("E2E_REAL_HOME") or Path.home()) / "orch-dev/state/v2-plan-2026-11-05/build/heavy.sh"
+    cmd = ["sh", str(repo / "e2e" / "run.sh"), ",".join(ids), "--mode", "local"]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=2400, cwd=repo, env=_host_env())
+    log.write_text(r.stdout + r.stderr)
+    seen = {}
+    for m in re.finditer(r"^(LOOK-\d+)\s+(PASS|FAIL|SKIP)\s*(.*)$", r.stdout, re.M):
+        seen[m.group(1)] = (m.group(2), m.group(3).strip())
+    for sid in ids:
+        status, why = seen.get(sid, ("FAIL", "no result line in the output: " + (r.stderr or r.stdout)[-200:]))
+
+        def one(st, status=status, why=why):
+            if status == "SKIP":
+                raise Skipped(why)
+            if status != "PASS":
+                raise RuntimeError(why[:300])
+            st["note"] = why[:200]
+        L.step(sid, f"Workspace look {sid}", one, expect="PASS in e2e/run.sh")
+    return L
+
+
+def lane_up(env, out: Path, repo: Path, old_ref: str, new_ref: str = "HEAD") -> Lane:
+    """Update-safe data: old relay and publish (the production commit) write data, the new build opens the same data (e2e/upgrade_look.py)."""
+    import subprocess
+    L = Lane("UP", f"Upgrade from the production build {old_ref}", out)
+    script = repo / "e2e" / "upgrade_look.py"
+    if not script.exists():
+        L.step("UP00", "upgrade_look.py present", lambda st: (_ for _ in ()).throw(Skipped("e2e/upgrade_look.py is not in this checkout")))
+        return L
+
+    def go(st):
+        r = subprocess.run(["python3", str(script), old_ref, new_ref], capture_output=True, text=True, timeout=3000, cwd=repo, env=_host_env())
+        (out / "upgrade.log").write_text(r.stdout + r.stderr)
+        passes = sum(1 for ln in r.stdout.splitlines() if ln.startswith("PASS "))
+        fails = [ln for ln in r.stdout.splitlines() if ln.startswith("FAIL ")]
+        st["note"] = f"{passes} checks passed, {len(fails)} failed"
+        if r.returncode or fails:
+            raise RuntimeError("; ".join(fails)[:300] or (r.stderr or r.stdout)[-300:])
+    L.step("UP01", f"Old data from {old_ref} opens safely in the new build", go, expect="RESULT: PASS")
+    return L
+
+
 # ---------------------------------------------------------------------------------------------- lane Z
 
 

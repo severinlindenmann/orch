@@ -96,6 +96,7 @@ def main() -> int:
     ap.add_argument("--udid", default="", help="Simulator for lane P (default: the first booted one)")
     ap.add_argument("--real-runs", type=int, default=6, help="runs of lane B with a real agent in --full")
     ap.add_argument("--build-label", default="", help="shown in the report header, e.g. the TestFlight build number the phone lane runs against")
+    ap.add_argument("--upgrade-from", default="23e19f4", help="production commit for lane UP (e2e/upgrade_look.py)")
     ap.add_argument("--no-review", action="store_true")
     ap.add_argument("--review-shots", type=int, default=24)
     ap.add_argument("--viewports", default="1280,720,390")
@@ -123,7 +124,7 @@ def main() -> int:
         repo = wt
         sha = subprocess.run(["git", "-C", str(wt), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     want = [x for x in (a.lanes.split(",") if a.lanes else
-                        (["A", "B", "G", "Z"] if quick else ["A", "B", "C", "D", "F", "W", "G", "R", "N", "M", "U", "Z"] + ([] if a.no_windows else ["X"])))]
+                        (["A", "B", "G", "Z"] if quick else ["A", "B", "C", "D", "F", "W", "G", "R", "N", "M", "U", "L", "UP", "Z"] + ([] if a.no_windows else ["X"])))]
     if a.phone and "P" not in want:
         want.append("P")
     hist = load_history()
@@ -221,6 +222,10 @@ def main() -> int:
         # serial
         if "W" in want:
             lanes.append({**_save(lanes_py.lane_w(env, outdir / "W")), "dir": "W"})
+        if "L" in want:
+            lanes.append({**_save(lanes_py.lane_l(env, outdir / "L", repo)), "dir": "L"})
+        if "UP" in want:
+            lanes.append({**_save(lanes_py.lane_up(env, outdir / "UP", repo, a.upgrade_from, sha)), "dir": "UP"})
         if "N" in want:
             lanes.append({**_save(lanes_py.lane_n(env, outdir / "N")), "dir": "N"})
         if "R" in want:
