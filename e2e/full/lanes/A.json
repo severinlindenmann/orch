@@ -11,7 +11,7 @@
   "\\|switch\\|",
   "Turn on",
   "\\|Stop",
-  "Change the status"
+  "Move to"
  ],
  "steps": [
   {
@@ -250,7 +250,7 @@
   },
   {
    "id": "A10",
-   "name": "Status menu offers Backlog, Ready, Working, Waiting, Review, Done; pick Working",
+   "name": "Move to offers Not started, Working, Ready for review, Done; pick Working",
    "page": "home",
    "expect": "the status chip changes to Doing and stays after reload",
    "actions": [
@@ -264,19 +264,19 @@
     },
     {
      "do": "click",
-     "sel": "summary[aria-label^='Change the status'] >> nth=0"
+     "sel": "summary[aria-label^='Move '] >> nth=0"
     },
     {
      "do": "expect_text",
-     "text": "Backlog"
+     "text": "Not started"
     },
     {
      "do": "expect_text",
-     "text": "Ready"
+     "text": "Ready for review"
     },
     {
      "do": "expect_text",
-     "text": "Review"
+     "text": "Done"
     },
     {
      "do": "click",
