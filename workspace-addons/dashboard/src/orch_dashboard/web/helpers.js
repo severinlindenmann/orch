@@ -48,6 +48,25 @@
     return {text: String(q.answer), who: q.answered_by || '', via: q.via || ''};
   }
 
+  /* The rows of "Needs you", each thing that needs the person exactly once: the same row id, or the same question of
+     the same ticket (a core row and an add-on row for it), counts once. The Home badge and the list use this one list. */
+  function uniqueNeeds(rows) {
+    const seen = new Set(), out = [];
+    for (const r of arr(rows)) {
+      if (!r) continue;
+      const q = r.answer && r.answer.question;
+      const key = r.ticket && q ? 'q:' + r.ticket + ':' + q : 'id:' + r.id;
+      if (seen.has(key)) continue;
+      seen.add(key); out.push(r);
+    }
+    return out;
+  }
+
+  /* True when "Needs you" already lists a question of this ticket (the question text is shown there only). */
+  function inNeeds(rows, ticketId) {
+    return arr(rows).some(r => r && r.ticket === ticketId && r.answer && r.answer.question);
+  }
+
   /* The one button of a "Needs you" row. kind: answer (opens the question card), review (an add-on's own question),
      run (start the work again) or open (the ticket). */
   function needAction(row) {
@@ -287,5 +306,5 @@
   }
   const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
 
-  return {firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });
