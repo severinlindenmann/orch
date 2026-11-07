@@ -1,6 +1,6 @@
 """Check every contract example (tickets incl. ext.automation, run records, pending input, Needs you rows,
 agent adapters and their config entries, messages, workspaces, add-on manifests and views), the publish
-crypto vectors, and the phone API v3 (every /v1/phone example in review/relay-api.examples.json against
+crypto vectors, the workspace look (look.json, look/icons, vectors/look-v1.json), and the phone API v3 (every /v1/phone example in review/relay-api.examples.json against
 phone-api.schema.json, plus vectors/phone-v3-v1.json). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py
@@ -320,8 +320,9 @@ for k in kvec["invalid_keys"]:
 # message.schema.json. Every /v1/phone example and the phone-v3 vector are checked against it.
 _msg_schema = _expand(json.loads((HERE / "message.schema.json").read_text()))
 _phone_schema = _expand(json.loads((HERE / "phone-api.schema.json").read_text()))
+_look_schema = json.loads((HERE / "look.schema.json").read_text())
 _reg = Registry().with_resources(
-    [(s["$id"], Resource.from_contents(s)) for s in (_msg_schema, _phone_schema)]
+    [(s["$id"], Resource.from_contents(s)) for s in (_msg_schema, _phone_schema, _look_schema)]
 )
 
 
@@ -470,6 +471,150 @@ for case in svec["signatures"]:
     mac = _hmac.new(case["secret"].encode(), f"{case['timestamp']}.{case['body']}".encode(), hashlib.sha256).hexdigest()
     if "v1=" + mac != case["signature"]:
         fails.append(f"subscriber vector signature {case['name']}: got v1={mac}")
+
+
+# Workspace look (look.md): allowlists in look.json, drawings in look/icons/, schema enums, vectors/look-v1.json.
+look = json.loads((HERE / "look.json").read_text())
+LOOK_ICONS = [i["id"] for i in look["icons"]]
+LOOK_COLORS = [c["id"] for c in look["colors"]]
+_cats = {c["id"] for c in look["categories"]}
+if len(LOOK_ICONS) != 100 or len(set(LOOK_ICONS)) != 100:
+    fails.append(f"look.json: needs 100 unique icon ids, has {len(set(LOOK_ICONS))}")
+if len(LOOK_COLORS) != 12 or len(set(LOOK_COLORS)) != 12:
+    fails.append("look.json: needs 12 unique colour tokens")
+_svg_ok = re.compile(r'^<svg xmlns="http://www\.w3\.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">(<(path|circle|rect|line|polyline|polygon|ellipse)( (d|cx|cy|r|rx|ry|x|y|x1|y1|x2|y2|width|height|points|fill)="[-0-9a-zA-Z. ,]*")+/>)+</svg>\n$')
+for i in look["icons"]:
+    if not re.fullmatch(r"[a-z][a-z0-9-]{1,23}", i["id"]) or i["category"] not in _cats or not i["label"]:
+        fails.append(f"look.json icon {i['id']}: bad id, category or label")
+    f = HERE / "look" / "icons" / f"{i['id']}.svg"
+    if not f.is_file() or not _svg_ok.match(f.read_text()):
+        fails.append(f"look/icons/{i['id']}.svg: missing, or not a plain 24px line drawing (shapes and numbers only)")
+_extra = {f.stem for f in (HERE / "look" / "icons").glob("*")} - set(LOOK_ICONS)
+if _extra:
+    fails.append(f"look/icons: files without an id in look.json: {sorted(_extra)}")
+
+
+def _lum(hx):
+    c = [int(hx[k:k + 2], 16) / 255 for k in (1, 3, 5)]
+    c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+
+def _contrast(a, b):
+    x, y = sorted((_lum(a), _lum(b)), reverse=True)
+    return (x + 0.05) / (y + 0.05)
+
+
+def _mix(fg, bg, alpha):
+    f = [int(fg[k:k + 2], 16) for k in (1, 3, 5)]
+    g = [int(bg[k:k + 2], 16) for k in (1, 3, 5)]
+    return "#" + "".join(f"{round(g[k] + (f[k] - g[k]) * alpha):02x}" for k in range(3))
+
+
+for c in look["colors"]:
+    for tone, key in (("dark", "tint_dark"), ("light", "tint_light")):
+        hx, t = c[tone], look["badge"][key]
+        if not re.fullmatch(r"#[0-9a-f]{6}", hx) or _contrast(hx, _mix(hx, t["surface"], t["alpha"])) < 4.5:
+            fails.append(f"look.json colour {c['id']} {tone}: not #rrggbb or below 4.5:1 on its badge background")
+if _look_schema["$defs"]["icon"]["oneOf"][0]["enum"] != LOOK_ICONS or _look_schema["$defs"]["color"]["oneOf"][0]["enum"] != LOOK_COLORS:
+    fails.append("look.schema.json: icon/color enums differ from look.json")
+
+
+def look_errors(defname, doc):
+    v = Draft202012Validator({"$ref": f"{_look_schema['$id']}#/$defs/{defname}"}, registry=_reg)
+    return list(v.iter_errors(doc))
+
+
+def look_clean(name):
+    return unicodedata.normalize("NFC", name).strip()
+
+
+def look_default_color(name):
+    h = 5381
+    for b in look_clean(name).encode("utf-8"):
+        h = (h * 33 + b) & 0xFFFFFFFF
+    return h, LOOK_COLORS[h % len(LOOK_COLORS)]
+
+
+def look_letter(name):
+    for ch in look_clean(name):
+        if unicodedata.category(ch)[0] in "LN":
+            up = ch.upper()
+            return up if len(up) == 1 else ch
+    return "?"
+
+
+def look_me_patch(stored, body, service):
+    """PATCH /v1/me with look fields on relay or publish: (status, record after)."""
+    if not isinstance(body, dict) or look_errors("me_look_patch" if service == "relay" else "publish_me_patch", body):
+        return 422, stored
+    after = {**stored, **body}
+    if "icon" in body or "color" in body:
+        after["look_by"] = "workspace"
+    return 200, after
+
+
+def look_meta(rec):
+    return {"workspace": {k: rec[k] for k in ("name", "icon", "color")} if rec["show_on_shared_pages"] else None}
+
+
+def look_local_set(local, caller, req):
+    """orch look set / the dashboard: (ok, local after). An agent never overrides the person's pick."""
+    if look_errors("admin_look_patch", req) or not req or (caller == "agent" and local["set_by"] == "human"):
+        return False, local
+    return True, {**local, **req, "set_by": caller}
+
+
+def look_admin_patch(stored, body):
+    """The look part of PATCH /admin/api/workspaces/<id>: (status, record after)."""
+    part = {k: v for k, v in body.items() if k in ("icon", "color")}
+    if not part:
+        return 200, stored
+    if look_errors("admin_look_patch", part):
+        return 422, stored
+    if stored["look_by"] == "workspace":
+        return 409, stored
+    return 200, {**stored, **part, "look_by": "admin"}
+
+
+def look_render(name, icon, color):
+    return {"icon": icon if icon in LOOK_ICONS else None,
+            "color": color if color in LOOK_COLORS else look_default_color(name)[1], "letter": look_letter(name)}
+
+
+def look_connect(local, remote):
+    """On connect: (value written to .orch/config.toml or None, PATCH /v1/me body)."""
+    if local["icon"] is None and local["color"] is None and remote["look_by"] == "admin":
+        adopted = {"icon": remote["icon"], "color": remote["color"]}
+        return adopted, adopted
+    return None, {"icon": local["icon"], "color": local["color"]}
+
+
+lvec = json.loads((HERE / "vectors" / "look-v1.json").read_text())
+for case in lvec["default"]:
+    if look_default_color(case["name"]) != (case["djb2_32"], case["color"]) or look_letter(case["name"]) != case["letter"]:
+        fails.append(f"look vector default {case['name']!r}: got {look_default_color(case['name'])} {look_letter(case['name'])!r}")
+for case in lvec["me_patch"]:
+    if look_me_patch(case["stored"], case["body"], case["service"]) != (case["status"], case["after"]):
+        fails.append(f"look vector me_patch {case['name']}: got {look_me_patch(case['stored'], case['body'], case['service'])}")
+for case in lvec["admin_patch"]:
+    if look_admin_patch(case["stored"], case["body"]) != (case["status"], case["after"]):
+        fails.append(f"look vector admin_patch {case['name']}: got {look_admin_patch(case['stored'], case['body'])}")
+for case in lvec["meta"]:
+    if look_meta(case["record"]) != case["meta"] or look_errors("file_meta", case["meta"]):
+        fails.append(f"look vector meta {case['name']}: got {look_meta(case['record'])}")
+for case in lvec["local_set"]:
+    if look_local_set(case["local"], case["caller"], case["request"]) != (case["ok"], case["after"]):
+        fails.append(f"look vector local_set {case['name']}: got {look_local_set(case['local'], case['caller'], case['request'])}")
+for case in lvec["render"]:
+    got = look_render(case["name"], None if case.get("missing") else case["icon"], None if case.get("missing") else case["color"])
+    if got != case["shown"]:
+        fails.append(f"look vector render {case['why']}: got {got}")
+for case in lvec["connect"]:
+    if look_connect(case["local"], case["remote"]) != (case["write_local"], case["send"]):
+        fails.append(f"look vector connect {case['name']}: got {look_connect(case['local'], case['remote'])}")
+if not {200, 422}.issubset({c["status"] for c in lvec["me_patch"]}) or 409 not in {c["status"] for c in lvec["admin_patch"]}:
+    fails.append("look vectors: need 200 and 422 me_patch cases and a 409 admin_patch case")
 
 if fails:
     print("\n".join("FAIL " + f for f in fails))

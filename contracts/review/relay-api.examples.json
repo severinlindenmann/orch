@@ -500,7 +500,9 @@
             "online": true,
             "last_seen": "2026-11-04T10:41:00Z",
             "open_questions": 1,
-            "muted_until": null
+            "muted_until": null,
+            "icon": "chip",
+            "color": "blue"
           },
           {
             "id": "ws_home000001",
@@ -512,7 +514,9 @@
             "online": false,
             "last_seen": "2026-11-03T21:10:00Z",
             "open_questions": 0,
-            "muted_until": "forever"
+            "muted_until": "forever",
+            "icon": "house",
+            "color": null
           }
         ],
         "next": null
@@ -2358,7 +2362,9 @@
         "online": true,
         "last_seen": "2026-11-06T20:14:00Z",
         "open_questions": 0,
-        "muted_until": "2026-11-06T21:15:00Z"
+        "muted_until": "2026-11-06T21:15:00Z",
+        "icon": "chip",
+        "color": "blue"
       }
     }
   },
