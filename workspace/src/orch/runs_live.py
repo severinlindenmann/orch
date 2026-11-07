@@ -439,9 +439,12 @@ def cleanup(root: Path) -> list[str]:
             if session_exists(root, tid):
                 tmux(root, "kill-session", "-t", target(tid))
             continue
-        if st == "alive" and live.get("state") == "starting":
-            check_starting(root, rec)
-            continue
+        if st == "alive" and (
+            live.get("state") == "starting" or (live.get("state") == "attention" and not live.get("why"))
+        ):
+            check_starting(root, rec)  # a login/trust screen also hides behind a tool notice (attention)
+            if live.get("state") == "starting":
+                continue
         if st != "alive" or live.get("state") not in ("idle", "attention") or runs.undelivered(root, tid):
             continue
         try:
@@ -528,7 +531,7 @@ def check_starting(
             answered.append(scr["what"])
             return None
     note = scr["say"] if scr else None
-    if note is None and age >= STARTUP_SECONDS:
+    if note is None and age >= STARTUP_SECONDS and (rec.get("live") or {}).get("state") == "starting":
         label = adapters.load(rec["agent"], root)["label"]
         note = (
             f"{label} has not started up after a minute. "
@@ -538,7 +541,12 @@ def check_starting(
         return None
     with runs.locked(root, tid):
         cur = runs.read(root, tid)
-        if cur and cur["run"] == run and (cur.get("live") or {}).get("state") == "starting":
+        lv = cur.get("live") or {} if cur else {}
+        if (
+            cur
+            and cur["run"] == run
+            and (lv.get("state") == "starting" or (lv.get("state") == "attention" and not lv.get("why")))
+        ):
             cur["live"] = {"state": "attention", "since": tickets.now(), "why": note}
             runs._write(root, cur)
             tickets.wait_for_start(root, tid, note, f"agent:{rec['agent']}")

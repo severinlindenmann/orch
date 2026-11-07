@@ -483,3 +483,29 @@ def test_a_hook_resumes_only_after_the_state_is_written(proj, run, monkeypatch):
     monkeypatch.setattr(runs_live, "_set_state", lambda *a, **k: False)  # another run holds the claim
     runs_live.event(proj, "idle", None, tid, None)
     assert tickets.load(proj, tid)["status"] == "waiting"
+
+
+def test_a_login_screen_behind_an_attention_notice_leaves_the_ticket_waiting(proj, run, monkeypatch):
+    tid, _ = _screens(proj, run, monkeypatch, [LOGIN_SCREEN], age=5)
+    rec = runs.read(proj, tid)
+    rec["live"] = {"state": "attention", "since": runs._iso(time.time() - 5)}  # a tool notice, no reason yet
+    runs._write(proj, rec)
+    assert tickets.load(proj, tid)["status"] == "active"
+    runs_live.cleanup(proj)
+    t = tickets.load(proj, tid)
+    live = runs.read(proj, tid)["live"]
+    assert live["state"] == "attention" and live["why"].startswith("Claude wants a login")
+    assert t["status"] == "waiting" and t["waiting_on"]["ref"] == live["why"][:200]
+    run("run", "event", "--run", rec["run"], "--kind", "idle")
+    t = tickets.load(proj, tid)
+    assert t["status"] == "active" and t["waiting_on"] is None
+
+
+def test_an_attention_notice_without_a_known_screen_stays_working(proj, run, monkeypatch):
+    tid, _ = _screens(proj, run, monkeypatch, [PERMISSION_SCREEN], age=500)
+    rec = runs.read(proj, tid)
+    rec["live"] = {"state": "attention", "since": runs._iso(time.time() - 500)}
+    runs._write(proj, rec)
+    runs_live.cleanup(proj)
+    assert tickets.load(proj, tid)["status"] == "active"
+    assert "why" not in runs.read(proj, tid)["live"]
