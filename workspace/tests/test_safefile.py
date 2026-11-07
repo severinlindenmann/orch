@@ -145,3 +145,34 @@ def test_an_fstat_error_closes_the_file(root, mode, monkeypatch):
     assert rd(root, "n.md") is None
     monkeypatch.undo()
     assert opened and sorted(opened) == sorted(closed)
+
+
+@pytest.mark.parametrize("fallback", [False, True])
+def test_project_file_reader(tmp_path, monkeypatch, fallback):
+    from orch import safefile
+
+    monkeypatch.setattr(safefile, "_DIR_FD", not fallback)
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "docs").mkdir()
+    (root / "docs" / "spec.md").write_bytes(b"hello")
+    assert safefile.open_file_ref(root, "docs/spec.md", 5) == b"hello"
+    with pytest.raises(safefile.TooLarge):
+        safefile.open_file_ref(root, "docs/spec.md", 4)
+    for path in [
+        "../secret",
+        "/etc/passwd",
+        ".orch/secrets/x",
+        ".git/config",
+        "docs/../docs/spec.md",
+        "x\0y",
+    ]:
+        assert safefile.open_file_ref(root, path, 100) is None
+    (root / "symlink").symlink_to(root / "docs" / "spec.md")
+    (root / "folder").symlink_to(root / "docs", target_is_directory=True)
+    os.link(root / "docs" / "spec.md", root / "hardlink")
+    for path in ["symlink", "folder/spec.md", "hardlink"]:
+        assert safefile.open_file_ref(root, path, 100) is None
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(root / "pipe")
+        assert safefile.open_file_ref(root, "pipe", 100) is None

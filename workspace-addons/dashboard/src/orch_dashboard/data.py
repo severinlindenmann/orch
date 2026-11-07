@@ -97,7 +97,7 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         if not _valid_ticket(t, stem):
             skipped += 1
             continue
-        for k in ("checklist", "links", "questions", "history"):
+        for k in ("checklist", "refs", "questions", "history"):
             if not isinstance(t.get(k), list):
                 t[k] = []
         _mark_missing_proofs(root, t)
@@ -116,7 +116,7 @@ def add_artifact_marks(tickets: list[dict]) -> None:
         return
     for t in tickets:
         art: dict[str, dict] = {}
-        links = t.get("links") if isinstance(t.get("links"), list) else []
+        links = t.get("refs") if isinstance(t.get("refs"), list) else []
         pairs = [("link", ln.get("url")) for ln in links if isinstance(ln, dict)]
         for c in t.get("checklist") if isinstance(t.get("checklist"), list) else []:
             evs = c.get("evidence") if isinstance(c, dict) and isinstance(c.get("evidence"), list) else []
@@ -195,7 +195,7 @@ def _ticket_fields(tf) -> dict | None:
 
 
 def link_kinds(raw) -> list[dict]:
-    """The link types of the active add-ons (`orch addon list --json` rows), for orch.links.describe."""
+    """The link types of the active add-ons (`orch addon list --json` rows), for orch.refs.describe."""
     out, seen = [], set()
     for a in sorted((a for a in raw if isinstance(a, dict) and a.get("active") is True) if isinstance(raw, list) else [],
                     key=lambda a: str(a.get("name"))):
@@ -210,14 +210,14 @@ def link_kinds(raw) -> list[dict]:
 def add_link_views(tickets: list[dict], kinds: list[dict]) -> None:
     """Each ticket link gets `view` (label, icon, mono, title, status, group) from the core's one link module."""
     try:
-        from orch import links
+        from orch import refs
     except ImportError:  # standalone use without orch: no view, so the page shows no Links card
         return
     for t in tickets:
-        for ln in t.get("links") or []:
+        for ln in t.get("refs") or []:
             if isinstance(ln, dict) and isinstance(ln.get("url"), str):
-                ln["view"] = links.describe(ln, kinds)
-                ln["view"].update(shown_type=shown_type(ln["view"].get("label"), ln["url"], links),
+                ln["view"] = refs.describe(ln, kinds)
+                ln["view"].update(shown_type=shown_type(ln["view"].get("label"), ln["url"], refs),
                                   **dict(zip(("host_head", "domain"), host_parts(ln["url"]))))
 
 
@@ -235,9 +235,9 @@ def _squeeze(s: str) -> str:
     return s.lower().replace(" ", "").replace("-", "")
 
 
-def shown_type(label, url: str, links) -> str:
-    names = {h["name"].lower() for h in links.known_sites()["hosts"]}
-    on = (links.site(url) or {}).get("name", "").lower()
+def shown_type(label, url: str, refs) -> str:
+    names = {h["name"].lower() for h in refs.known_sites()["hosts"]}
+    on = (refs.site(url) or {}).get("name", "").lower()
     parts = []
     for p in (label if isinstance(label, str) else "").split(" · "):
         if p.lower() in names:

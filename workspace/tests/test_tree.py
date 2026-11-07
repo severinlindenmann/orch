@@ -72,12 +72,10 @@ def test_blocked_by_and_came_from(proj, run):
     a, b = mk(run, "Move customer data"), mk(run, "Q3 export")
     run("ticket", "status", a, "active")
     run("wait", b, "--on", f"ticket:{a}")
-    t = tickets.load(proj, b)  # an internal link written before links were web-only
-    t["links"].append({"type": "ticket", "url": "ws_pilatus001/t_h8w2qa", "title": "pilatus / t_h8w2qa"})
-    tickets.save(proj, t)
+    run("ref", "add", b, a)
     text = run("ticket", "show", b)[1]
     assert f"Blocked by: Move customer data ({a}, Working)" in text
-    assert "Came from: pilatus / t_h8w2qa" in text and "Links:" not in text
+    assert "References:" in text and a in text
     run("wait", b, "--on", "ticket:t_gone99")
     assert "Blocked by: t_gone99" in run("ticket", "show", b)[1]
 

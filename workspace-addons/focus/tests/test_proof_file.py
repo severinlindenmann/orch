@@ -102,7 +102,7 @@ def test_bad_mode_is_refused(server, ev):
     assert get(server, "x.txt", "edit")[0] == 404
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="links")
+@pytest.mark.skipif(sys.platform == "win32", reason="refs")
 def test_symlink_hardlink_fifo_refused(server, ws, ev):
     secret = ws / ".orch" / "secrets"
     secret.mkdir()

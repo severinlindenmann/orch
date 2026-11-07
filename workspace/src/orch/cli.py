@@ -18,8 +18,8 @@ from orch import (
     cli_run,
     cli_status,
     fields,
-    links,
     net,
+    refs,
     relay,
     runs_live,
     services,
@@ -164,9 +164,6 @@ def _show(t: dict, root: Path | None = None) -> str:
             out.append(
                 "Waiting for: " + ("an answer" if w["kind"] == "question" else f"{w['kind']} {w['ref']}")
             )
-    for ln in t["links"]:
-        if links.kind_of(ln) == "ticket":
-            out.append(f"Came from: {ln.get('title') or ln['url']}")
     if open_q:
         out.append("\nNeeds an answer:")
         for q in open_q:
@@ -182,14 +179,14 @@ def _show(t: dict, root: Path | None = None) -> str:
         out.append("\nAnswered:")
         for q in answered:
             out.append(f"  {q['text']} - {q['answer']} ({q['answered_by']})")
-    rows = links.numbered(t)
+    rows = refs.all_refs(root, t)
     if rows:
-        kinds = links.active_kinds(root)
-        out.append("\nLinks:")
+        kinds = refs.active_kinds(root)
+        out.append("\nReferences:")
         for n, ln in rows:
-            d = links.describe(ln, kinds)
+            d = refs.describe(ln, kinds, root)
             st = f" ({d['status']})" if d["status"] else ""
-            out.append(f"  {n}  {d['type']}: {d['title']}{st}  {links.one_line(ln['url'], 2000)}")
+            out.append(f"  {n}  {d['type']}: {d['title']}{st}  {refs.one_line(refs.target(ln), 2000)}")
     if t["history"]:
         out.append("\nRecent:")
         out += [
@@ -233,7 +230,7 @@ def _visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "link", "ext"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -420,19 +417,17 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("answer")
     x.add_argument("--via", default="cli", metavar="WORD", help="where the answer comes from (default cli)")
 
-    lk = sub.add_parser("link", help="links to pages outside orch").add_subparsers(dest="sub", required=True)
-    x = lk.add_parser("add", parents=[common], help="link a web page to the ticket")
+    lk = sub.add_parser("ref", help="references to useful work").add_subparsers(dest="sub", required=True)
+    x = lk.add_parser("add", parents=[common], help="add a reference to a ticket")
     x.add_argument("id")
-    x.add_argument("url", nargs="?", help="https:// or http:// address")
-    x.add_argument("--kind", help="a link type of an add-on (found from the address when left out)")
+    x.add_argument("target")
+    x.add_argument("--kind")
     x.add_argument("--title")
-    x.add_argument("--url", dest="url_opt", help=argparse.SUPPRESS)
-    x.add_argument("--type", dest="kind_opt", help=argparse.SUPPRESS)
-    x = lk.add_parser("list", parents=[common], help="the ticket's links, numbered")
+    x = lk.add_parser("list", parents=[common], help="the ticket's references, numbered")
     x.add_argument("id")
-    x = lk.add_parser("remove", parents=[common], help="remove a link (kept in the history)")
+    x = lk.add_parser("rm", parents=[common], help="remove a reference")
     x.add_argument("id")
-    x.add_argument("link", help="its number in orch link list, or its address")
+    x.add_argument("target")
 
     e = sub.add_parser("ext", help="add-on data on a ticket").add_subparsers(dest="sub", required=True)
     x = e.add_parser("set", parents=[common])
@@ -704,8 +699,8 @@ def run(args: argparse.Namespace) -> None:
             runs_live.pass_answer(root, t["id"], q, who)
         note = _addon_note(root, q)
         _out(args, q, f"Answered: {q['answer']}" + (f"\n{note}" if note else ""))
-    elif cmd == "link":
-        _link(args, root, by)
+    elif cmd == "ref":
+        _ref(args, root, by)
     elif cmd == "publish":
         cli_clients.run_publish(args, root, _out)
     elif cmd == "relay":
@@ -729,40 +724,34 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t["ext"][args.addon], f"ext.{args.addon} set on {t['id']}")
 
 
-def _link(args, root: Path, by) -> None:
-    kinds = links.active_kinds(root)
+def _ref(args, root: Path, by) -> None:
+    kinds = refs.active_kinds(root)
     if args.sub == "add":
-        url = args.url or args.url_opt
-        if not url:
-            raise Refused(
-                "Say which page to link, e.g.: orch link add DM1-12 https://github.com/acme/app/pull/4"
-            )
-        kind = args.kind or (args.kind_opt if args.kind_opt and args.kind_opt != "link" else None)
-        t, ln, added = tickets.link_add(root, args.id, url, by(), kind, args.title, kinds)
-        d = links.describe(ln, kinds)
-        what = d["type"] + (f' "{d["title"]}"' if ln.get("title") else f" {d['short']}")
-        st = f" ({d['status']})" if d["status"] else ""
+        t, ref, added = tickets.ref_add(root, args.id, args.target, by(), args.kind, args.title, kinds)
         key = t.get("key") or t["id"]
-        _out(args, ln, f"Linked {key} → {what}{st}" if added else f"{key} already has this link: {what}{st}")
+        message = (
+            f"Added reference to {key}: {refs.target(ref)}"
+            if added
+            else f"{key} already has this reference: {refs.target(ref)}"
+        )
+        _out(args, ref, message)
     elif args.sub == "list":
         t = tickets.load(root, args.id)
-        rows = links.numbered(t)
+        rows = refs.all_refs(root, t)
         if args.json:
-            _out(args, [{"n": n, **ln, "view": links.describe(ln, kinds)} for n, ln in rows], "")
-            return
-        if not rows:
+            _out(args, [{"n": n, **ref, "view": refs.describe(ref, kinds, root)} for n, ref in rows], "")
+        elif not rows:
             key = t.get("key") or t["id"]
-            print(f"{key} has no links yet. Add one: orch link add {key} <url>")
-            return
-        ds = [(n, links.describe(ln, kinds)) for n, ln in rows]
-        w1 = max(len(d["type"]) for _, d in ds)
-        w2 = min(48, max(len(d["title"]) for _, d in ds))
-        for n, d in ds:
-            title = d["title"] if len(d["title"]) <= 48 else d["title"][:47] + "…"
-            print(f"  {n}  {d['type']:<{w1}}  {title:<{w2}}  {d['status'] or ''}".rstrip())
+            print(f"{key} has no references yet. Add one: orch ref add {key} <url>")
+        else:
+            for n, ref in rows:
+                d = refs.describe(ref, kinds, root)
+                value = d["title"]
+                suffix = " (On this computer only)" if ref.get("local") else ""
+                print(f"  {n}  {d['type']}  {value}{suffix}" + (f"  {d['status']}" if d["status"] else ""))
     else:
-        t, ln = tickets.link_remove(root, args.id, args.link, by())
-        _out(args, ln, f"Removed link {args.link} from {t.get('key') or t['id']}")
+        t, ref = tickets.ref_remove(root, args.id, args.target, by())
+        _out(args, ref, f"Removed reference {args.target} from {t.get('key') or t['id']}")
 
 
 def _ticket_set(args, root: Path, by) -> None:
@@ -805,7 +794,7 @@ def _ticket_set(args, root: Path, by) -> None:
 # The arguments that really name a ticket: (command, argument). Only these take a key; an `id` of another
 # command (a publish file or app, a relay message, a webhook) is passed through untouched.
 _TICKET_ARGS = {
-    *{(c, "id") for c in ("ticket", "check", "log", "ask", "answer", "link", "ext", "wait")},
+    *{(c, "id") for c in ("ticket", "check", "log", "ask", "answer", "ref", "ext", "wait")},
     ("ticket", "parent"),
     ("run", "ticket"),
     ("relay", "ticket"),

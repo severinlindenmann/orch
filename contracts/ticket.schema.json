@@ -4,7 +4,7 @@
   "title": "orch ticket v1",
   "description": "One ticket = one file .orch/tickets/<id>.json. Writers must produce valid tickets. Unknown fields are allowed everywhere (top level and nested) and every reader/writer keeps them unchanged. Every field added after the first release is optional, so older tickets stay valid. The core knows no add-on: add-on data lives only under ext.<add-on name> and is checked by that add-on's own schema (addon-manifest.md, ticket_ext). type and wake_at are gone: wait until a time with waiting_on {kind: time, until}; recurrence is add-on data under ext.",
   "type": "object",
-  "required": ["schema", "id", "title", "status", "created_at", "updated_at", "checklist", "links", "questions", "history"],
+  "required": ["schema", "id", "title", "status", "created_at", "updated_at", "checklist", "refs", "questions", "history"],
   "properties": {
     "schema": { "const": "orch.ticket/1" },
     "id": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "Random, e.g. t_7k3f9q. Same as the file name." },
@@ -14,7 +14,7 @@
     "created_at": { "$ref": "#/$defs/time" },
     "updated_at": { "$ref": "#/$defs/time" },
     "checklist": { "type": "array", "items": { "$ref": "#/$defs/check" } },
-    "links": { "type": "array", "items": { "$ref": "#/$defs/link" } },
+    "refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
     "questions": { "type": "array", "items": { "$ref": "#/$defs/question" } },
     "history": { "type": "array", "items": { "$ref": "#/$defs/history" } },
     "revision": { "type": "integer", "minimum": 0, "description": "+1 on every write. `orch ticket patch --if-revision N` is refused when it changed (no lost updates between agents and add-ons). Missing = 0." },
@@ -86,21 +86,196 @@
       "then": { "properties": { "evidence": { "minItems": 1 } } },
       "description": "Evidence-based: done=true needs at least one evidence entry."
     },
-    "link": {
+    "ref": {
       "type": "object",
-      "required": ["url"],
-      "anyOf": [{ "required": ["kind"] }, { "required": ["type"] }],
-      "description": "A page outside orch linked to the ticket (orch link add). kind: a link type an active add-on declares in [[ticket_links]], else 'link'; how it is shown comes from workspace/src/orch/links.py (add-on kind, else the known-sites table, else 'Link').",
+      "required": [
+        "kind",
+        "at",
+        "by"
+      ],
       "properties": {
-        "kind": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$" },
-        "type": { "type": "string", "pattern": "^[a-z0-9-]{1,32}$", "description": "Written before kind existed (github, jira, file, ticket, ...); read as kind." },
-        "url": { "type": "string", "minLength": 1, "maxLength": 2000, "description": "New links: http(s) only." },
-        "title": { "type": ["string", "null"], "maxLength": 200, "description": "Empty: the short address is shown." },
-        "status": { "type": "string", "pattern": "^[a-z0-9][a-z0-9 -]{0,23}$", "description": "Set only by the add-on that owns kind (refresh act); shown only while it is on." },
-        "thumb": { "type": "string", "pattern": "^artifacts/[A-Za-z0-9_.-]{1,100}$", "description": "A picture in the ticket's artifacts folder (add-on with preview = 'thumb')." },
-        "at": { "$ref": "#/$defs/time" },
-        "by": { "$ref": "#/$defs/who" }
-      }
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,31}(?::[a-z0-9][a-z0-9-]{0,31})?$"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "A web address.",
+          "pattern": "^https?://"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200,
+          "description": "Empty: the short address is shown."
+        },
+        "status": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9 -]{0,23}$",
+          "description": "Set only by the add-on that owns kind (refresh act); shown only while it is on."
+        },
+        "thumb": {
+          "type": "string",
+          "pattern": "^artifacts/[A-Za-z0-9_.-]{1,100}$",
+          "description": "A picture in the ticket's artifacts folder (add-on with preview = 'thumb')."
+        },
+        "at": {
+          "$ref": "#/$defs/time"
+        },
+        "by": {
+          "$ref": "#/$defs/who"
+        },
+        "ticket": {
+          "$ref": "#/$defs/tid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^(?!/|.*\\\\|.*\\u0000|(?:.*\\/)?\\.\\.(?:/|$)|\\.orch(?:/|$)|\\.git(?:/|$)|[A-Za-z]:).+"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "ticket"
+            }
+          },
+          "required": [
+            "ticket"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "title"
+                ]
+              },
+              {
+                "required": [
+                  "status"
+                ]
+              },
+              {
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "required": [
+                  "name"
+                ]
+              },
+              {
+                "required": [
+                  "path"
+                ]
+              },
+              {
+                "required": [
+                  "local"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "artifact"
+            }
+          },
+          "required": [
+            "ticket",
+            "name"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "title"
+                ]
+              },
+              {
+                "required": [
+                  "status"
+                ]
+              },
+              {
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "required": [
+                  "path"
+                ]
+              },
+              {
+                "required": [
+                  "local"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "file"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "required": [
+                  "ticket"
+                ]
+              },
+              {
+                "required": [
+                  "local"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "kind": {
+              "not": {
+                "enum": [
+                  "ticket",
+                  "artifact",
+                  "file"
+                ]
+              }
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      ]
     },
     "question": {
       "type": "object",

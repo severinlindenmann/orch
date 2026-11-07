@@ -113,13 +113,13 @@ def test_bad_actor_refused(proj, run, new_ticket):
 
 def test_link_and_ext(proj, run, new_ticket, validate):
     tid = new_ticket()
-    assert run("link", "add", tid, "--type", "jira", "--url", "https://j/1", "--title", "J-1")[0] == 0
-    assert run("link", "add", tid, "--type", "Bad Type", "--url", "u")[0] == 2
+    assert run("ref", "add", tid, "https://j/1", "--kind", "jira", "--title", "J-1")[0] == 0
+    assert run("ref", "add", tid, "https://example.com", "--kind", "Bad Type")[0] == 2
     assert run("ext", "set", tid, "scheduler", '{"cron":"0 8 * * 1"}')[0] == 0
     assert run("ext", "set", tid, "scheduler", "not json")[0] == 2
     t = read(proj, tid)
     validate(t)
-    assert t["links"][0]["title"] == "J-1" and t["ext"]["scheduler"]["cron"] == "0 8 * * 1"
+    assert t["refs"][0]["title"] == "J-1" and t["ext"]["scheduler"]["cron"] == "0 8 * * 1"
 
 
 def test_ask_answer(proj, run, new_ticket, validate):

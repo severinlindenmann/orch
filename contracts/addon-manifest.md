@@ -32,9 +32,9 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `requires` | Add-on names that must be active first; `orch addon add` refuses and names the missing ones (nothing is turned on by itself) |
 | `needs` | `true` = implements `orch <name> needs --json` → rows of `needs.schema.json` for `orch needs` (only rows that are not ticket questions: those come from the tickets) |
 | `[page]` | `path` (starts with `/`), optional `label`: the add-on serves its own local page; needs `background = true`. Its base url is the checked `url` from `orch <name> status --json` (`http://127.0.0.1:<port>`) |
-| `[[ticket_links]]` | Link types the add-on knows: `kind` (`[a-z0-9-]`, not `link`), `label` (≤ 24), `icon` (a key), `match` (one or a list of `https://` patterns; `*` = one part of the address, a `*` at the end takes the rest), optional `statuses`, `preview = "thumb"`. Ticket links, below |
-| `[ticket_fields]` | `section` (heading under the ticket's Details), `schema` (JSON Schema of `ext.<name>`; the same file as `ticket_ext` when both are set), `show_on_card` (≤ 3 field keys shown as a chip on board cards). Ticket links, below |
-| `[acts.<verb>]` | What `orch <name> act <verb> [--by X] --json -- <ticket>` offers: `summary`, `who` (`anyone` · `people`), `writes` (`links`, `ext.<name>`). Core knows `refresh` (Act: refresh, below) |
+| `[[ticket_links]]` | Link types the add-on knows: `kind` (letters, digits, dashes and an optional add-on prefix, e.g. `github:pr`; not `url`, `ticket`, `artifact` or `file`), `label` (≤ 24), `icon` (a key), `match` (one or a list of `https://` patterns; `*` = one part of the address, a `*` at the end takes the rest), optional `statuses`, `preview = "thumb"`. Ticket references, below |
+| `[ticket_fields]` | `section` (heading under the ticket's Details), `schema` (JSON Schema of `ext.<name>`; the same file as `ticket_ext` when both are set), `show_on_card` (≤ 3 field keys shown as a chip on board cards). Ticket references, below |
+| `[acts.<verb>]` | What `orch <name> act <verb> [--by X] --json -- <ticket>` offers: `summary`, `who` (`anyone` · `people`), `writes` (`refs`, `ext.<name>`). Core knows `refresh` (Act: refresh, below) |
 
 All paths are relative to the manifest's folder and must stay inside it (no `..`, no absolute paths, no symlink leaving it).
 
@@ -194,22 +194,23 @@ most 3 lines. `workspace/tests/test_skills_lint.py` checks all of this for every
 Waiting is core (`waiting_on {kind: time|ticket|question|external, until?, ref?}`): the core records it and never promises
 that something wakes the ticket; an add-on (the scheduler) may wake `kind: time` tickets.
 
-## Ticket links and add-on fields
+## Ticket references and add-on fields
 
-A ticket's `links` is a plain list `{kind, url, title?, status?, thumb?, at, by}` (ticket.schema.json). People and
-agents add them with `orch link add <ticket> <url> [--kind K] [--title T]` (http and https only; the same address twice
-is one link), `orch link list <ticket>` (numbered) and `orch link remove <ticket> <n|url>`; every change is one history
-line, written through the ticket lock like every other op. `kind` is the first `[[ticket_links]]` type of an active
-add-on whose `match` fits the address, else `link`. How a link is shown is decided in one place,
-`workspace/src/orch/links.py` (used by the CLI, the dashboard and the phone snapshot):
-1. the kind belongs to an active add-on → its label (with the site's name when the address is a known site,
-   e.g. "GitHub · Pull request"), its icon and the stored `status`;
-2. else the address is in the known-sites table `workspace/src/orch/known_sites.json` (GitHub, GitLab, Confluence,
-   Jira, Linear, Notion, Figma, Miro, Google Docs/Sheets/Slides/Drive, YouTube, Loom, Slack, Teams, SharePoint,
-   Trello, Dropbox) → the site's name and icon;
-3. else "Link" with the short address.
-An add-on that is off changes nothing in the file: its links show as known site or plain link and get their label and
-status back when it is on again. Links written before `kind` existed carry `type`; it is read as the kind.
+A ticket's `refs` holds web addresses, tickets, artifacts and project files (ticket.schema.json).
+Use `orch ref add <ticket> <target> [--kind K] [--title T]`, `orch ref list <ticket>` and
+`orch ref rm <ticket> <n|target>`. Targets are http(s) addresses, ticket keys or ids,
+`artifact:report.pdf`, `artifact:DM-9/report.pdf`, or `docs/spec.md:40`. Repeating a target keeps one entry.
+Ticket and artifact references store ticket ids; titles and status are read when shown.
+Absolute or outside-project file paths stay in `.orch/local/refs/<ticket id>.json`, on this computer only.
+
+Existing add-on fields stay. The manifest table remains `[[ticket_links]]`.
+Web references keep `{kind, url, title?, status?, thumb?, at, by}`. The kind comes from an active add-on's
+address pattern, or is `url`. `workspace/src/orch/refs.py` chooses the display:
+1. An active add-on kind supplies its label, icon and stored status.
+2. Otherwise the known-sites table supplies the site's name and icon.
+3. Otherwise it shows "Reference" and the short address.
+
+An add-on that is off changes nothing in the file; its references regain their label and status when it is on.
 
 `[ticket_fields]` turns `ext.<name>` into fields under the ticket's Details. Types come from the schema: `enum` =
 choice (`x-labels` gives the shown words), `number`/`integer` = number, `format: date` = date, `format: uri` = url,
@@ -221,22 +222,22 @@ type, options?, read_only, hidden}]`) and `acts` (verbs) for the dashboard.
 
 ## Act: refresh
 
-An add-on with `[acts.refresh]` looks up its own links (e.g. a pull request's state) when someone clicks Refresh or an
+An add-on with `[acts.refresh]` looks up its own references (e.g. a pull request's state) when someone clicks Refresh or an
 agent runs `orch <name> act refresh [--by X] [--json] -- <ticket>`. Core runs the add-on's `act refresh` as usual; the
 add-on prints ONE JSON object and never writes the ticket:
 
 ```json
 {"ticket": "DM1-12",
- "links": [{"url": "https://github.com/acme/billing/pull/418", "title": "Add CSV export for invoices", "status": "merged"}],
+ "refs": [{"url": "https://github.com/acme/billing/pull/418", "title": "Add CSV export for invoices", "status": "merged"}],
  "ext": {"github": {"pr_status": "merged"}},
  "say": "Pull request #418 was merged."}
 ```
 
-Core merges it in one locked write: links are matched by `url`; only `title`, `status` (`[a-z0-9 -]`, ≤ 24) and
+Core merges it in one locked write: references are matched by `url`; only `title`, `status` (`[a-z0-9 -]`, ≤ 24) and
 `thumb` (`artifacts/<file>`) change; `ext` only under the add-on's own name, checked with its schema; anything else
 is ignored or refused. One history line per change (`<name> refresh: <link> status open -> merged`). Nothing changed →
 nothing is written and `say` (or "Nothing to update.") is printed. `--json` prints `{ticket, key, changes: [{what, url?,
 name, field, old, new}], say}`. Exit codes as for every add-on command. There is no timer in core: an add-on that wants
-regular refreshes adds a schedule. Example: `workspace/tests/test_links.py` (`REFRESH`) refreshes GitHub pull requests
+regular refreshes adds a schedule. Example: `workspace/tests/test_refs.py` (`REFRESH`) refreshes GitHub pull requests
 with `gh pr view <url> --json state,title`, and answers "gh is not installed here" without it.
 

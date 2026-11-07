@@ -48,6 +48,18 @@ def read_ticket_file(root: Path, tid: str, folder: str, name, max_bytes: int) ->
     if parts is None or folder not in FOLDERS or not isinstance(tid, str) or not _ID_RE.fullmatch(tid):
         return None
     head = [".orch", "tickets", tid, folder]
+    return _read_parts(root, head, parts, max_bytes)
+
+
+def open_file_ref(root: Path, path: str, max_bytes: int) -> bytes | None:
+    """Read a project file without following symlinks or exposing orch/git state."""
+    parts = _parts(path)
+    if parts is None or parts[0].lower() in (".orch", ".git"):
+        return None
+    return _read_parts(root, [], parts, max_bytes)
+
+
+def _read_parts(root: Path, head: list[str], parts: list[str], max_bytes: int) -> bytes | None:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     dir_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_DIRECTORY", 0)
     fds: list[int] = []

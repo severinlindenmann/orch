@@ -30,20 +30,26 @@
       "x_unknown_nested": "kept by every reader"
     }
   ],
-  "links": [
+  "refs": [
     {
-      "type": "jira",
       "url": "https://jira.example.com/browse/ING-42",
-      "title": "ING-42"
+      "title": "ING-42",
+      "kind": "jira",
+      "at": "2026-11-04T09:12:00Z",
+      "by": "human:tester"
     },
     {
-      "type": "teams",
-      "url": "https://teams.microsoft.com/l/message/abc"
+      "url": "https://teams.microsoft.com/l/message/abc",
+      "kind": "teams",
+      "at": "2026-11-04T09:12:00Z",
+      "by": "human:tester"
     },
     {
-      "type": "github",
       "url": "https://github.com/acme/ingest/pull/17",
-      "title": "PR 17"
+      "title": "PR 17",
+      "kind": "github",
+      "at": "2026-11-04T09:12:00Z",
+      "by": "human:tester"
     }
   ],
   "questions": [
