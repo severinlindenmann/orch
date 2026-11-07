@@ -172,7 +172,7 @@ enum ConversationBuilder {
         return k == "ack" || k == "working"
     }
 
-    private static func index(_ d: ConversationInputs) -> Index {
+    static func index(_ d: ConversationInputs) -> Index {
         var ix = Index()
         for pm in d.messages where !pm.fromPhone && isReceipt(pm.message) {
             guard let r = pm.message.replyTo else { continue }

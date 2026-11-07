@@ -85,4 +85,14 @@ final class ArchiveStoreTests: XCTestCase {
         var a = ArchiveStore(); a.autoDays = 14; a.archive("k", lastAt: "x"); a.save(defaults)
         XCTAssertEqual(ArchiveStore.load(defaults), a)
     }
+
+    func testSearchSkipsMessagesDeletedOnThisPhone() {
+        func msg(_ id: String, _ at: String) -> PhoneMessage {
+            PhoneMessage(message: TextMessage(id: id, from: ws, to: "ph_iphone0001", type: "text", createdAt: at, ticket: "t_q3sum1", body: TextBody(text: "board numbers \(id)")), workspaceName: "Pilatus")
+        }
+        var d = ChatData(messages: [msg("m1", "2026-11-05T10:00:00Z"), msg("m2", "2026-11-06T10:00:00Z")])
+        XCTAssertEqual(ChatBuilder.search("board", d, rows: []).messages.count, 2)
+        var a = ArchiveStore(); a.erase(ReadState.key(.topic(workspace: ws, ticket: "t_q3sum1")), upTo: "2026-11-05T10:00:00Z"); d.erased = a.erased
+        XCTAssertEqual(ChatBuilder.search("board", d, rows: []).messages.map(\.id), ["m2"], "only the message newer than the delete is found")
+    }
 }

@@ -147,7 +147,8 @@ final class AppModel {
     var chatData: ChatData {
         ChatData(workspaces: workspaces, messages: messages, tickets: tickets,
                  questions: questionLog.values.sorted { $0.message.createdAt < $1.message.createdAt }.map { $0 }, answers: answers,
-                 outbox: outbox.items.filter { $0.kind == .send && $0.text != nil }.map { QueuedText(id: $0.clientId, workspace: $0.workspace, ticket: $0.ticket, text: $0.text ?? "", at: $0.createdAt, phone: $0.phone) })
+                 outbox: outbox.items.filter { $0.kind == .send && $0.text != nil }.map { QueuedText(id: $0.clientId, workspace: $0.workspace, ticket: $0.ticket, text: $0.text ?? "", at: $0.createdAt, phone: $0.phone) },
+                 erased: archive.erased)
     }
     var chatRooms: [RoomRow] { ChatBuilder.rooms(chatData, read: readState) }
     var totalUnread: Int { chatRooms.reduce(0) { $0 + $1.unread } }

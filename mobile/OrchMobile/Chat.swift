@@ -92,6 +92,8 @@ struct ChatData {
     var questions: [Question] = []      // every question seen, answered or not
     var answers: [String: String] = [:]
     var outbox: [QueuedText] = []
+    /// Phone-local "Delete": chat key -> messages up to this time are hidden (ArchiveStore).
+    var erased: [String: String] = [:]
 
     func isOpen(_ q: Question) -> Bool { answers[q.id] == nil }
 }
@@ -183,10 +185,14 @@ enum ChatBuilder {
         var r = ChatSearchResult()
         r.rooms = rows.filter { $0.workspace.displayName.lowercased().contains(q) }
         r.chats = rows.flatMap(\.tickets).filter {
-            ($0.ticket.key ?? "").lowercased().contains(q) || $0.ticket.displayTitle.lowercased().contains(q) || ($0.ticket.ticket ?? "").lowercased() == q
+            // a chat deleted on this phone stays out until something newer arrives
+            if let cut = d.erased[ReadState.ticketKey($0.ticket.workspace, $0.ticket.ticket ?? "")], $0.ticket.at <= cut { return false }
+            return ($0.ticket.key ?? "").lowercased().contains(q) || $0.ticket.displayTitle.lowercased().contains(q) || ($0.ticket.ticket ?? "").lowercased() == q
         }
+        let inputs = ConversationInputs(messages: d.messages), ix = d.erased.isEmpty ? nil : ConversationBuilder.index(inputs)
         for m in d.messages where m.message.body.update == nil || m.message.body.update?.kind == "result" {
             guard m.message.body.text.lowercased().contains(q) else { continue }
+            if let ix, let id = ConversationBuilder.conversation(of: m, ix, inputs), let cut = d.erased[ReadState.key(id)], m.message.createdAt <= cut { continue }
             let who = (m.fromPhone ? "You" : m.workspaceName)
             let route: ChatRoute = m.message.ticket.map { .ticket(workspace: m.workspaceId, ticket: $0) } ?? .workspace(m.workspaceId)
             r.messages.append(SearchHit(id: m.id, route: route, who: who, text: m.message.body.text, at: m.message.createdAt))
