@@ -142,7 +142,9 @@ installer runs with a bypass for that one process only). On Windows on ARM the i
 `finish.log` in orch's home, `orch addon list` shows the result; wait for it before the next orch command). CI runs
 `e2e/windows/run-as-standard-user.ps1` on develop pushes and on PRs that change the install path: the standard-user
 flow (install, init, ticket, dashboard add-on in the background, update) and the scheduler flow (automation add-on: a
-repeat and a one-time wake-up in a named time zone start a fake agent). On a winvm clone run the same script.
+repeat and a one-time wake-up in a named time zone start a fake agent). On a winvm clone run the same script; add
+`-Flows dashboard` for the dashboard smoke (Playwright inside the machine opens Home, Tickets, a ticket, General and
+Settings, and at 720 and 390 px; screenshots end up in `C:\Users\Public\orchsmoke\shots`).
 
 ## Not included
 Signing, approvals, planning gates, fixed requirements, durations, a server.

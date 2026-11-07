@@ -18,6 +18,7 @@ BUILTIN = ROOT / "workspace/src/orch/builtin"
 
 # Commands a person types (or the installer runs); no skill needs to teach them to an agent.
 HUMAN_ONLY = {
+    *(f"relay mobile {x}" for x in ("on", "off", "status", "hours", "ack", "keeper")),  # a person's switch
     "init",
     "update",
     "start",

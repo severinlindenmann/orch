@@ -426,6 +426,10 @@ final class AppModel {
             message = nil
         } catch { handle(error) }
     }
+    /// Asks the workspace to leave Mobile mode; the banner goes once its next heartbeat says so.
+    func turnOffMobileMode(_ workspaceId: String) async {
+        do { try await client.turnOffMobileMode(workspace: workspaceId); message = nil } catch { handle(error) }
+    }
     /// Drops the workspace from this phone (its conversations disappear from the list).
     func removeWorkspace(_ workspaceId: String) async {
         do {

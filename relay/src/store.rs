@@ -55,6 +55,11 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         "pending_tags TEXT",
         "pending_at INTEGER",
         "pending_rev TEXT",
+        "mm_on INTEGER NOT NULL DEFAULT 0",
+        "mm_since TEXT",
+        "mm_ends_at TEXT",
+        "mm_machine TEXT",
+        "mm_unreach INTEGER NOT NULL DEFAULT 0",
     ] {
         let _ = c.execute(&format!("ALTER TABLE workspaces ADD COLUMN {col}"), []);
     }
@@ -647,4 +652,22 @@ pub fn phone_settings(c: &Connection, pid: &str) -> Value {
         row.unwrap_or(("auto".into(), false, 10.0, 0.0, String::new()));
     let used = if month == month_key(now()) { used } else { 0.0 };
     json!({"speak": speak, "swiss_german": swiss, "tts_cap_usd": num(cap), "tts_used_usd_month": num(used)})
+}
+
+/// Mobile mode of a workspace as phones see it: `{on, since, ends_at, machine}` (the last three `null` when off).
+pub fn mobile_mode(c: &Connection, ws: &str) -> Value {
+    c.query_row(
+        "SELECT mm_on,mm_since,mm_ends_at,mm_machine FROM workspaces WHERE id=?1",
+        [ws],
+        |r| {
+            let on = r.get::<_, i64>(0)? != 0;
+            Ok(if on {
+                json!({"on": true, "since": r.get::<_, Option<String>>(1)?,
+                    "ends_at": r.get::<_, Option<String>>(2)?, "machine": r.get::<_, Option<String>>(3)?})
+            } else {
+                json!({"on": false, "since": null, "ends_at": null, "machine": null})
+            })
+        },
+    )
+    .unwrap_or_else(|_| json!({"on": false, "since": null, "ends_at": null, "machine": null}))
 }

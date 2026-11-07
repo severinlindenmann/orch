@@ -2,10 +2,12 @@
 # Windows' default (Restricted). Needs an admin shell on a THROWAWAY machine (CI runner, winvm clone): it creates a
 # user, grants it "log on as a batch job" and sets the machine policy.
 #   run-as-standard-user.ps1 -Ref <branch|sha> [-Installer <path to install.ps1>] [-Repo <local source folder>]
-#                            [-Flows standard-user,scheduler]   (the *-flow.ps1 scripts to run, in this order)
-param([Parameter(Mandatory)] [string]$Ref, [string]$Installer = "$PSScriptRoot\..\..\install.ps1", [string]$Repo = "",
+#                            [-Flows standard-user,scheduler,dashboard]   (the *-flow.ps1 scripts to run, in this order)
+param([Parameter(Mandatory)] [string]$Ref, [string]$Installer = "", [string]$Repo = "",
     [string[]]$Flows = @("standard-user", "scheduler"), [int]$MaxSec = 1800)
 $ErrorActionPreference = "Stop"
+# Windows PowerShell 5.1 leaves $PSScriptRoot empty in param defaults (C:\..\..\install.ps1); the body has it.
+if (-not $Installer) { $Installer = "$PSScriptRoot\..\..\install.ps1" }
 $Flows = @($Flows | ForEach-Object { $_ -split "," } | Where-Object { $_ })  # "-Flows a,b" also from powershell -File
 $user = "orchsmoke"; $pass = "Smoke-$([guid]::NewGuid().ToString('N').Substring(0, 12))!"
 $pw = ConvertTo-SecureString $pass -AsPlainText -Force
@@ -30,6 +32,7 @@ try { Set-ExecutionPolicy Restricted -Scope LocalMachine -Force } catch { }
 $pub = "C:\Users\Public\orchsmoke"; New-Item -ItemType Directory -Force $pub | Out-Null
 Copy-Item -Path (@($Flows | % { "$PSScriptRoot\$_-flow.ps1" }) + $Installer) -Destination $pub -Force
 Copy-Item "$PSScriptRoot\..\fixtures\generic-agent\agent.py" $pub -Force  # the fake agent (scheduler flow)
+Copy-Item "$PSScriptRoot\*.mjs" $pub -Force  # node helpers of a flow (dashboard-smoke.mjs)
 $installerName = Split-Path $Installer -Leaf
 # No git for the user: PATH without any folder that holds git.exe
 $path = ([Environment]::GetEnvironmentVariable("Path", "Machine") -split ";" |
@@ -41,6 +44,9 @@ $cmd = "`$env:Path = '$path'; $repoSet`$env:ORCH_REF = '$Ref'; `$env:ORCH_INSTAL
 $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
 $a = New-ScheduledTaskAction -Execute powershell.exe -Argument "-NoProfile -NonInteractive -EncodedCommand $enc"
 Register-ScheduledTask -TaskName orchsmoke -Action $a -User $user -Password $pass -RunLevel Limited -Force | Out-Null
+# A log of an earlier run on this machine would add its RESULT lines to this one
+$old = (Get-CimInstance Win32_UserProfile | Where-Object SID -eq $sid).LocalPath
+if ($old) { Remove-Item (Join-Path $old "orch-flow.log") -Force -ErrorAction SilentlyContinue }
 Start-ScheduledTask orchsmoke
 $t0 = Get-Date
 do {
@@ -53,6 +59,12 @@ $profileDir = (Get-CimInstance Win32_UserProfile | Where-Object SID -eq $sid).Lo
 $logFile = Join-Path $profileDir "orch-flow.log"
 if (-not (Test-Path $logFile)) { throw "the flow wrote no log (task state $s, result $r)" }
 Get-Content $logFile
+# Screenshots of a flow (dashboard) next to the scripts, where the admin side can pull them
+$shots = Join-Path $profileDir "orch-shots"
+if (Test-Path $shots) {
+    Remove-Item "$pub\shots" -Recurse -Force -ErrorAction SilentlyContinue  # else Copy-Item nests a second run inside
+    Copy-Item $shots "$pub\shots" -Recurse -Force; "Screenshots: $pub\shots"
+}
 # every flow ends with its own RESULT line
 $results = @(Get-Content $logFile | Where-Object { $_ -match '^RESULT ' })
 if ($results.Count -ne $Flows.Count -or ($results | Where-Object { $_ -ne "RESULT ok" })) { exit 1 }
