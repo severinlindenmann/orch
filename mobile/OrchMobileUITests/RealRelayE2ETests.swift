@@ -81,9 +81,11 @@ final class RealRelayE2ETests: XCTestCase {
         must(app, b, "send button \(send)"); b.tap()
     }
     private func openGeneral(_ app: XCUIApplication) {
-        let room = app.buttons["room-\(ws)"]
-        if room.waitForExistence(timeout: 20) { room.tap() }
         let g = app.buttons["general-\(ws)"]
+        if !g.waitForExistence(timeout: 4) {   // the app may have kept its place inside the workspace
+            let room = app.buttons["room-\(ws)"]
+            if room.waitForExistence(timeout: 20) { room.tap() }
+        }
         must(app, g, "General row"); g.tap()
         must(app, el(app, "composer"), "composer")
     }
@@ -260,9 +262,8 @@ final class RealRelayE2ETests: XCTestCase {
         e.pids.append(S['ask'][0].pid)
         out = t
         """)
-        let app = launch()
+        let app = launch(extra: ["-open", "workspace:\(ws)"])
         let row = app.buttons["ticket-\(ws)|\(t)"]
-        _ = app.buttons["room-\(ws)"].waitForExistence(timeout: 20); app.buttons["room-\(ws)"].tap()
         _ = row.waitForExistence(timeout: 30); scrollTo(app, row)
         must(app, row, "ticket row of the question", timeout: 10); row.tap()
         let yes = el(app, "answer-Yes")
@@ -302,10 +303,11 @@ final class RealRelayE2ETests: XCTestCase {
     // MARK: 7 artifact (pdf) + feedback
     func test07ArtifactLooksGoodAndPin() {
         let tid = host(deckPython)
-        let app = launch()
-        _ = app.buttons["room-\(ws)"].waitForExistence(timeout: 20); app.buttons["room-\(ws)"].tap()
+        let app = launch(extra: ["-open", "workspace:\(ws)"])
         let row = app.buttons["ticket-\(ws)|\(tid)"]
-        _ = row.waitForExistence(timeout: 30); scrollTo(app, row)
+        // a ticket that got its result is Done: it is listed under the Done segment
+        if !row.waitForExistence(timeout: 25), app.buttons["segment-done"].exists { app.buttons["segment-done"].tap() }
+        _ = row.waitForExistence(timeout: 15); scrollTo(app, row)
         must(app, row, "deck ticket row", timeout: 10); row.tap()
         let card = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'artifact-'")).firstMatch
         must(app, card, "artifact card in the result bubble", timeout: 40); sleep(1); shot("70-result-card")
@@ -341,9 +343,12 @@ final class RealRelayE2ETests: XCTestCase {
         mic.press(forDuration: 1.6)
         must(app, el(app, "voice-play"), "my voice note bubble", timeout: 30); sleep(1); shot("80-voice-note")
         host("ws_send('Here is a long answer you can listen to instead of reading it.', '--speak')")
-        must(app, text(app, "long answer"), "spoken answer", timeout: 40)
         let plays = app.descendants(matching: .any).matching(identifier: "voice-play")
+        let end = Date().addingTimeInterval(40)
+        while plays.count < 2 && Date() < end { usleep(500_000) }   // the agent's answer is a memo bubble (text behind "Show text")
+        XCTAssertGreaterThanOrEqual(plays.count, 2, "the spoken answer shows as a memo bubble")
         sleep(1); shot("81-agent-memo")
+        if el(app, "memo-show-text").exists { el(app, "memo-show-text").tap(); sleep(1); shot("81b-memo-text") }
         if plays.count > 0 { plays.element(boundBy: plays.count - 1).tap(); sleep(3); shot("82-memo-fallback-tts") }
         XCTAssertTrue(app.state == .runningForeground, "no crash when the speech fallback plays")
         back(app); back(app)
