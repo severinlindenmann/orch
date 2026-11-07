@@ -13,7 +13,7 @@ orch-automation = "orch_automation.cli:main"
 automation = "orch_automation"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "jsonschema>=4", "rfc3339-validator"]
+dev = ["pytest>=8", "pytest-xdist>=3", "ruff>=0.6", "jsonschema>=4", "rfc3339-validator"]
 
 [build-system]
 requires = ["hatchling"]
