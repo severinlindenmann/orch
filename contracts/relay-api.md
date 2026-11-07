@@ -88,6 +88,9 @@ plain text, 1 to 60 characters, NFC, same character rule as `update.title` / the
 whole. A workspace that never sent a heartbeat is `{on: false}`. Any authenticated call of the workspace counts as "heard from it"
 (`last_seen`), the heartbeat is the only call that changes the flag.
 
+Expired leases are immediately shown as off; the next sweep clears the stored flag and sends `mobile_mode_ended` with `ended: lease`, instead of an unreachable push.
+Heartbeats per workspace per rolling minute: at most 6 that repeat the current on/off state, at most 20 that change it, and at most 30 in all (counted right after auth, before the body is read); beyond that `429 rate_limited`; `mobile_mode_ended` pushes have a ten-minute per-workspace cooldown (off transitions are still stored).
+
 **Phones see it:** `GET /v1/phone/workspaces` items carry `mobile_mode: {on, since, ends_at, machine}` (all `null` but `on: false` when off).
 The phone's own mute still wins: a muted phone gets no push below and shows "muted, but <machine> is in Mobile mode".
 
@@ -176,9 +179,9 @@ marked `speak`, `always` = on every workspace text, `never` = none), `swiss_germ
 (a published page or app), `pr`, `commit` (url kinds; a PR's state in `status`). `id` = `a_` + the first 12 hex
 characters of sha256(`"<evidence type>\n<ref>"` (UTF-8), where `<evidence type>` is the ticket evidence `type`:
 `pr`, `commit`, `file`, `url`, `command` or `note` (ticket.schema.json), and `<ref>` its `ref`; or `"link\n<url>"` for
-ticket links) stays the same across revisions (section `artifact_ids` of `vectors/phone-v3-v1.json`);
+ticket references) stays the same across revisions (section `artifact_ids` of `vectors/phone-v3-v1.json`);
 `rev` names the revision (blob sha256, commit sha, publish id or deploy rev). Feedback points at (`id`, `rev`).
-ticket.schema.json is unchanged: the phone attachments are made from evidence and links at send time, `id` is derived
+ticket.schema.json is unchanged: the phone attachments are made from evidence and references at send time, `id` is derived
 from (type, ref) and `rev` from the content (blob sha256, commit sha, publish id), so nothing new needs storing.
 
 **Questions** (`body` of a `question`): optional `previews: {"<option>": "<attachment id>"}` (A/B choices, approve with a
@@ -251,7 +254,7 @@ Fields: `{v, id, type, workspace: {id, name}, ticket, key, at}` on every event (
 `options`, `answerable` (this subscriber may answer and no one has yet), `answered` (`null`, or `{answer, answered_by}`
 at read time); `answered` → `question_id` (the question's id), `answer`, `answered_by` (a display name: the phone's name,
 or `<name> (system)`). `ticket_view` = a smaller copy of the message's `body.ticket_view`, else `null`: `{title, status,
-agent, summary, done, total, links: [{kind, title, url}], files}`, no checklist and no history; `files` (`[{name, size,
+agent, summary, done, total, refs: [{kind, title, url}], files}`, no checklist and no history; `files` (`[{name, size,
 blob_id}]`, the image and file attachments) only when **Files** is on, else `[]`.
 
 **Push (optional).** With a `push_url` the relay also POSTs every event, oldest first, one at a time, as the JSON body with

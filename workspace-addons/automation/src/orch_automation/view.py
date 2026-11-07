@@ -189,7 +189,7 @@ def _arrival(a: dict) -> dict:
     return {"title": kind, "subtitle": when, "chips": [chip]}
 
 
-_STATUS = {"open": ("To do", "neutral"), "active": ("Doing", "good"), "waiting": ("Waiting", "warn"),
+_STATUS = {"ready": ("Ready", "neutral"), "review": ("Review", "warn"), "open": ("Backlog", "neutral"), "active": ("Working", "good"), "waiting": ("Waiting", "warn"),
            "blocked": ("Blocked", "warn"), "done": ("Done", "good"), "dropped": ("Dropped", "neutral")}
 
 

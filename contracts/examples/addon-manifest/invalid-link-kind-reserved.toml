@@ -8,7 +8,7 @@ run = "orch_github"
 skill = "skills/orch-github"
 
 [[ticket_links]]
-kind = "link"
+kind = "url"
 label = "Link"
 icon = "link"
 match = "https://github.com/*"

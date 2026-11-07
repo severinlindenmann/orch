@@ -82,8 +82,8 @@ Read the parent first, work only in yours, keep it at most 3 levels deep. Close 
 **Keep context**
 
     orch log <id> "<what changed in the plan>"
-    orch link add <id> <https url> [--title "<name>"]   # PR, wiki page, design, video …
-    orch link list <id>   /   orch link remove <id> <n>
+    orch ref add <id> <https url> [--title "<name>"]   # PR, wiki page, design, video …
+    orch ref list <id>   /   orch ref rm <id> <n>
     orch ticket set <id> <addon>.<field> <value>   # an add-on field under Details
     orch ticket edit <id> --owner <name> --due YYYY-MM-DD --note "<text>"
     orch ext set <id> <addon> '<json object>'       # data an add-on keeps on the ticket
@@ -102,3 +102,8 @@ If work remains, leave it visible (open steps, a log line).
 - Credentials live in `.orch/secrets/` (ignored by git). Never put them in a ticket.
 - Ask the user before anything that cannot be undone.
 - More is possible with optional add-ons: `orch addon list`.
+
+Ticket statuses are Backlog, Ready, Working, Waiting, Review, Done, and Dropped.
+When the work is finished set the ticket to done: orch moves it to Review for a person to check; never wait for or claim it is Done.
+
+Add a reference when you use or produce something the next person should find: orch ref add <ticket> <target>.

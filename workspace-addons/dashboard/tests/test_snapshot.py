@@ -91,3 +91,24 @@ def test_snapshot_with_addons_includes_tab_rows_and_one_view(ws, fake_orch):
     assert data["views"]["scheduler"]["state"] == "ok"
     assert any("ext" in t for t in data["tickets"])
     assert cli.main(["--dir", str(ws), "snapshot", "--with-addons", "--out", str(ws / "s.html")]) == 0
+
+
+def test_snapshot_preserves_project_and_local_reference_text(ws):
+    ticket = ws / ".orch/tickets/t_weekly01.json"
+    t = json.loads(ticket.read_text())
+    t["refs"] = [{"kind": "file", "path": "docs/notes.md"}]
+    ticket.write_text(json.dumps(t))
+    local = ws / ".orch/local/refs"
+    local.mkdir(parents=True)
+    (local / "t_weekly01.json").write_text(
+        json.dumps([{"kind": "file", "path": "/outside/private.txt", "local": True}])
+    )
+    html = render_snapshot(ws)
+    data = json.loads(re.search(r"window\.ORCH_SNAPSHOT=(.*?);</script>", html, re.DOTALL).group(1))
+    refs = next(t for t in data["tickets"] if t["id"] == "t_weekly01")["refs"]
+    assert [r["path"] for r in refs] == ["docs/notes.md"]  # a shared snapshot carries no local path
+    assert "/outside/private.txt" not in html
+    from orch_dashboard.data import load_state
+
+    live = next(t for t in load_state(ws, with_settings=True)["tickets"] if t["id"] == "t_weekly01")["refs"]
+    assert [r["path"] for r in live] == ["docs/notes.md", "/outside/private.txt"]

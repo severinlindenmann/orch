@@ -154,7 +154,7 @@ def w6(e):
     ws = e.ws("Pilatus")
     t = e.orchj(ws, "ticket", "new", "W6 links")["id"]
     for url in ("https://acme.atlassian.net/browse/X-1", "https://teams.microsoft.com/l/x", "https://intranet.example/a"):
-        e.orch(ws, "link", "add", t, url)
+        e.orch(ws, "ref", "add", t, url)
     e.orch(ws, "ext", "set", t, "demo", '{"k": 1}')
     p = ws / ".orch/tickets" / f"{t}.json"
     d = json.loads(p.read_text())
@@ -164,8 +164,8 @@ def w6(e):
     e.orch(ws, "log", t, "another write")
     e.orch(ws, "check", "add", t, "again")
     d = tload(ws, t)
-    check([l["kind"] for l in d["links"]] == ["link", "link", "link"] and all(l.get("at") and l.get("by") for l in d["links"]), f"links {d['links']}")
-    listed = e.orch(ws, "link", "list", t)[1]
+    check([l["kind"] for l in d["refs"]] == ["url", "url", "url"] and all(l.get("at") and l.get("by") for l in d["refs"]), f"links {d['refs']}")
+    listed = e.orch(ws, "ref", "list", t)[1]
     check("Jira" in listed and "Teams" in listed and "intranet.example/a" in listed, f"link list {listed!r}")
     check(d["ext"]["demo"] == {"k": 1} and d["ext"]["unknown_addon"] == {"a": [1, 2]}, f"ext lost: {d['ext']}")
     check(d.get("x_hand") == {"note": "keep me"}, "unknown top-level field lost")

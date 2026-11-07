@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-FAKE_ORCH = '''#!{py}
+FAKE_ORCH = """#!{py}
 import json, sys, os
 from pathlib import Path
 root = Path.cwd()
@@ -87,7 +87,8 @@ elif args[0] == "answer":
     print("{{}}")
 else:
     sys.exit(2)
-'''
+"""
+
 
 def T(h=0, m=0, d=4):
     return datetime(2026, 11, d, h, m, tzinfo=UTC)
@@ -108,9 +109,19 @@ def ws(tmp_path, monkeypatch):
 
 
 def add_ticket(root: Path, tid: str, **kw):
-    t = {"schema": "orch.ticket/1", "id": tid, "title": "T " + tid, "status": "open", "revision": 1,
-         "created_at": "2026-11-01T00:00:00Z", "updated_at": "2026-11-01T00:00:00Z",
-         "checklist": [], "links": [], "questions": [], "history": []}
+    t = {
+        "schema": "orch.ticket/1",
+        "id": tid,
+        "title": "T " + tid,
+        "status": "open",
+        "revision": 1,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-01T00:00:00Z",
+        "checklist": [],
+        "refs": [],
+        "questions": [],
+        "history": [],
+    }
     t.update(kw)
     (root / ".orch" / "tickets" / f"{tid}.json").write_text(json.dumps(t))
     return t

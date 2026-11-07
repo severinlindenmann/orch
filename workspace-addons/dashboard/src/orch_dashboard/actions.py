@@ -3,6 +3,7 @@
 No shell is involved. Ids are checked by regex, text is limited to 2000 characters, and free text always goes
 after `--` (or as `--flag=value`) so it can never be read as an option. The dashboard never names an add-on.
 """
+
 from __future__ import annotations
 
 import getpass
@@ -24,14 +25,38 @@ DAY = re.compile(r"(\d{4}-\d\d-\d\d)?")
 ADDON = re.compile(r"[a-z][a-z0-9-]{1,31}")
 VERB = re.compile(r"[a-z][a-z-]{0,20}")
 # A name that is also a core command is never an add-on target, whatever the add-on list says.
-RESERVED = frozenset({"ticket", "check", "log", "ask", "answer", "link", "ext", "wait", "needs", "run", "start", "stop",
-                      "status", "init", "update", "addon", "agents", "config", "clients", "help", "setup", "dashboard"})
+RESERVED = frozenset(
+    {
+        "ticket",
+        "check",
+        "log",
+        "ask",
+        "answer",
+        "ref",
+        "ext",
+        "wait",
+        "needs",
+        "run",
+        "start",
+        "stop",
+        "status",
+        "init",
+        "update",
+        "addon",
+        "agents",
+        "config",
+        "clients",
+        "help",
+        "setup",
+        "dashboard",
+    }
+)
 AGENT = re.compile(r"[a-z][a-z0-9-]{1,31}")
 MAX_COMMAND = 500
 MAX_TASK = 500
 PERMISSIONS = ("ask", "auto", "full")
 PATCH_KEYS = ("title", "status", "owner", "due", "note", "summary")
-STATUSES = ("open", "active", "waiting", "done", "dropped")
+STATUSES = ("open", "ready", "active", "waiting", "review", "done")
 
 
 class BadRequest(Exception):
@@ -86,8 +111,11 @@ def _only(args: dict, allowed: tuple[str, ...]) -> None:
 
 def _answer(a):
     _only(a, ("ticket", "question", "answer"))
-    return ["answer", _tid(a.get("ticket")), _qid(a.get("question"))], ["--via", "dashboard"], \
-        [_text(a.get("answer"), "answer")]
+    return (
+        ["answer", _tid(a.get("ticket")), _qid(a.get("question"))],
+        ["--via", "dashboard"],
+        [_text(a.get("answer"), "answer")],
+    )
 
 
 def _ticket_new(a):
@@ -115,8 +143,11 @@ def _ticket_patch(a):
         if k not in ("status", "due"):
             _text(v, k, empty=k in ("owner", "note"))
     rev = _rev(a.get("if_revision"), required=True)
-    return (["ticket", "patch", _tid(a.get("ticket"))], [f"--if-revision={rev}"],
-            [json.dumps(data, ensure_ascii=False)])
+    return (
+        ["ticket", "patch", _tid(a.get("ticket"))],
+        [f"--if-revision={rev}"],
+        [json.dumps(data, ensure_ascii=False)],
+    )
 
 
 def _ticket_edit(a):
@@ -145,23 +176,24 @@ def _check_add(a):
     return ["check", "add", _tid(a.get("ticket"))], [], [text.strip()]
 
 
-def _url(v) -> str:
-    if not (isinstance(v, str) and re.fullmatch(r"https?://[^\s<>\"'`\x00-\x1f\x7f]{1,1990}", v, re.IGNORECASE)):
-        raise BadRequest("A link must be a web address that starts with https:// or http://.")
-    return v
+def _ref_add(a):
+    _only(a, ("ticket", "target"))
+    return ["ref", "add", _tid(a.get("ticket"))], [], [_text(a.get("target"), "reference")]
 
 
-def _link_add(a):
-    _only(a, ("ticket", "url", "title"))
-    flags = [f"--title={_text(a['title'], 'title')}"] if a.get("title") else []
-    if flags and ("\n" in a["title"] or len(a["title"]) > 200):
-        raise BadRequest("A link title is one line of at most 200 characters.")
-    return ["link", "add", _tid(a.get("ticket"))], flags, [_url(a.get("url"))]
+def _ref_rm(a):
+    _only(a, ("ticket", "n"))
+    n = a.get("n")
+    if type(n) is not int or n < 1:
+        raise BadRequest("Choose a reference.")
+    return ["ref", "rm", _tid(a.get("ticket")), str(n)], [], []
 
 
-def _link_remove(a):
-    _only(a, ("ticket", "url"))
-    return ["link", "remove", _tid(a.get("ticket"))], [], [_url(a.get("url"))]
+def _workflow_set(a):
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.agents_may_finish", "on" if a["on"] else "off"], [], []
 
 
 def _ticket_field(a):
@@ -175,7 +207,11 @@ def _ticket_field(a):
         raise BadRequest("That is not a field.")
     rev = _rev(a.get("if_revision"))
     flags = [f"--if-revision={rev}"] if rev is not None else []
-    return ["ticket", "set", _tid(a.get("ticket")), f"{addon}.{field}"], flags, [_text(a.get("value"), "value", empty=True)]
+    return (
+        ["ticket", "set", _tid(a.get("ticket")), f"{addon}.{field}"],
+        flags,
+        [_text(a.get("value"), "value", empty=True)],
+    )
 
 
 def _log(a):
@@ -185,7 +221,9 @@ def _log(a):
 
 def _run_start(a):
     _only(a, ("ticket", "fresh", "take_over"))
-    flags = (["--fresh"] if _flag(a.get("fresh")) else []) + (["--take-over"] if _flag(a.get("take_over")) else [])
+    flags = (["--fresh"] if _flag(a.get("fresh")) else []) + (
+        ["--take-over"] if _flag(a.get("take_over")) else []
+    )
     return ["run", "start", _tid(a.get("ticket"))], flags, []
 
 
@@ -230,7 +268,9 @@ def _config_permissions(a):
     if mode not in PERMISSIONS:
         raise BadRequest("Pick Ask, Auto or Full.")
     if mode == "full" and a.get("confirm") is not True:
-        raise BadRequest("Full needs a Yes first: the agent will never ask.")  # the page sends confirm only after its Yes/No dialog
+        raise BadRequest(
+            "Full needs a Yes first: the agent will never ask."
+        )  # the page sends confirm only after its Yes/No dialog
     if a.get("confirm") not in (None, True, False):
         raise BadRequest("A yes/no value must be true or false.")
     return ["config", "set", "workspace.permissions", mode], [], []
@@ -255,8 +295,14 @@ def _config_agent_add(a):
     (`--command=...`), so it can never be read as another option or run through a shell by the dashboard."""
     _only(a, ("name", "command", "prompt_via"))
     cmd = a.get("command")
-    if not (isinstance(cmd, str) and 1 <= len(cmd) <= MAX_COMMAND and cmd.strip() and "\n" not in cmd and "\r" not in cmd
-            and "\x00" not in cmd):
+    if not (
+        isinstance(cmd, str)
+        and 1 <= len(cmd) <= MAX_COMMAND
+        and cmd.strip()
+        and "\n" not in cmd
+        and "\r" not in cmd
+        and "\x00" not in cmd
+    ):
         raise BadRequest(f"The command must be one line of at most {MAX_COMMAND} characters.")
     flags = [f"--command={cmd}"]
     via = a.get("prompt_via")
@@ -280,12 +326,29 @@ def _addon_set(a):
 
 
 # op -> function(args) -> (words incl. ids, flags, free text after "--")
-OPS = {"answer": _answer, "ticket.new": _ticket_new, "ticket.patch": _ticket_patch, "ticket.edit": _ticket_edit,
-       "log": _log, "check.add": _check_add, "run.start": _run_start, "run.stop": _run_stop, "addon.start": _addon_start,
-       "addon.act": _addon_act, "config.agent": _config_agent, "config.agent.add": _config_agent_add, "config.agent.test": _config_agent_test,
-       "config.permissions": _config_permissions, "addon.set": _addon_set, "share.set": _share_set,
-       **MOBILE_OPS,
-       "link.add": _link_add, "link.remove": _link_remove, "ticket.field": _ticket_field}
+OPS = {
+    "answer": _answer,
+    "ticket.new": _ticket_new,
+    "ticket.patch": _ticket_patch,
+    "ticket.edit": _ticket_edit,
+    "log": _log,
+    "check.add": _check_add,
+    "run.start": _run_start,
+    "run.stop": _run_stop,
+    "addon.start": _addon_start,
+    "addon.act": _addon_act,
+    "config.agent": _config_agent,
+    "config.agent.add": _config_agent_add,
+    "config.agent.test": _config_agent_test,
+    "config.permissions": _config_permissions,
+    "addon.set": _addon_set,
+    "share.set": _share_set,
+    **MOBILE_OPS,
+    "ref.add": _ref_add,
+    "ref.rm": _ref_rm,
+    "workflow.set": _workflow_set,
+    "ticket.field": _ticket_field,
+}
 
 
 def actor() -> str:
@@ -311,13 +374,17 @@ def build_argv(op, args) -> list[str]:
 
 def _addon_is_on(root: Path, orch_bin: str, name: str) -> bool:
     rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
-    return any(isinstance(r, dict) and r.get("name") == name and r.get("active") is True
-               for r in (rows if isinstance(rows, list) else []))
+    return any(
+        isinstance(r, dict) and r.get("name") == name and r.get("active") is True
+        for r in (rows if isinstance(rows, list) else [])
+    )
 
 
 def _addon_known(root: Path, orch_bin: str, name: str) -> bool:
     rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
-    return any(isinstance(r, dict) and r.get("name") == name for r in (rows if isinstance(rows, list) else []))
+    return any(
+        isinstance(r, dict) and r.get("name") == name for r in (rows if isinstance(rows, list) else [])
+    )
 
 
 def _agent_exists(root: Path, orch_bin: str, name: str) -> bool:
@@ -325,20 +392,45 @@ def _agent_exists(root: Path, orch_bin: str, name: str) -> bool:
     rows = run_orch(orch_bin, ["agents", "--json"], root)
     if not isinstance(rows, list):
         return True
-    return any(isinstance(r, dict) and r.get("name") == name for r in (rows if isinstance(rows, list) else []))
+    return any(
+        isinstance(r, dict) and r.get("name") == name for r in (rows if isinstance(rows, list) else [])
+    )
 
 
 def _audit(root: Path, op: str, args: dict) -> None:
     """One line per settings change in .orch/run/dashboard/actions.log (local, gitignored): who, what, the exact command."""
     keep = {k: v for k, v in args.items() if k in ("name", "command", "prompt_via", "on", "mode")}
-    line = json.dumps({"at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), "by": actor(), "via": "dashboard", "op": op, **keep},
-                      ensure_ascii=False)
+    line = json.dumps(
+        {
+            "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "by": actor(),
+            "via": "dashboard",
+            "op": op,
+            **keep,
+        },
+        ensure_ascii=False,
+    )
     try:
         # .orch/run/dashboard (0700), no symlink at any level, the file opened with O_NOFOLLOW (0600)
         with runfiles.open_append(runfiles.run_dir(root, "dashboard") / "actions.log") as f:
             f.write(line + "\n")
     except (OSError, RuntimeError):
         pass  # the change is done; a missing log must not turn it into an error
+
+
+def human_env(root: Path, orch_bin: str) -> dict:
+    """Browser actions are the person's actions, even if an agent launched the server."""
+    from orch.adapters import _registry
+
+    names = {"ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET"}
+    prefixes = []
+    for adapter in _registry().values():
+        detection = adapter.get("detect") or {}
+        names.update(detection.get("env_any") or [])
+        if detection.get("env_prefix"):
+            prefixes.append(detection["env_prefix"])
+    env = {k: v for k, v in os.environ.items() if k not in names and not k.startswith(tuple(prefixes))}
+    return {**env, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "dashboard"}
 
 
 def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict | None]:
@@ -353,10 +445,20 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
     if op == "config.agent.test" and not _agent_exists(root, orch_bin, args["name"]):
         raise BadRequest("That agent is not set up.")
     if op == "config.agent.add" and _agent_exists(root, orch_bin, args["name"]):
-        raise BadRequest("An agent with that name is already set up. Pick another name (changing one is done in the terminal).")
+        raise BadRequest(
+            "An agent with that name is already set up. Pick another name (changing one is done in the terminal)."
+        )
     try:
-        r = subprocess.run([orch_bin, *argv], check=False, cwd=root, capture_output=True, text=True, timeout=75 if op == "config.agent.test" else 60,
-                           stdin=subprocess.DEVNULL, env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "dashboard"})
+        r = subprocess.run(
+            [orch_bin, *argv],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=75 if op == "config.agent.test" else 60,
+            stdin=subprocess.DEVNULL,
+            env=human_env(root, orch_bin),
+        )
     except subprocess.TimeoutExpired:
         return 504, "That took too long. Please try again.", None
     except OSError:
@@ -367,9 +469,13 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
     except ValueError:
         pass
     if op == "config.agent.test" and isinstance(out, dict) and isinstance(out.get("ok"), bool):
-        return 200, "", out  # `orch agents test` exits 1 when the agent does not work; the JSON is the answer either way
+        return (
+            200,
+            "",
+            out,
+        )  # `orch agents test` exits 1 when the agent does not work; the JSON is the answer either way
     if r.returncode == 0:
-        if op in ("config.agent.add", "addon.set", "config.agent", "config.permissions", "share.set"):
+        if op in ("config.agent.add", "addon.set", "config.agent", "config.permissions", "workflow.set", "share.set"):
             _audit(root, op, args)
         return 200, "", out if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None

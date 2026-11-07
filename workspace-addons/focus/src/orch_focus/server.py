@@ -277,7 +277,7 @@ class Tracker:
             if (
                 isinstance(t, dict)
                 and TID_RE.fullmatch(str(t.get("id")))
-                and t.get("status") in ("open", "active", "waiting", "done")  # a done ticket opens as a read-only board
+                and t.get("status") in ("open", "ready", "active", "waiting", "review", "done")  # a done ticket opens as a read-only board
             ):
                 out.append(
                     {

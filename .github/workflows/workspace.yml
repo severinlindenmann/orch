@@ -3,11 +3,11 @@ on:
   workflow_call:
     inputs:
       full:
-        description: "also run macOS and Windows (push to develop/main, PRs into main, manual runs)"
+        description: "also run macOS (push to develop/main, PRs into main, manual runs)"
         type: boolean
         default: false
-      install:
-        description: "the install path changed: run the Windows standard-user install on PRs too"
+      windows:
+        description: "also run Windows (unit tests + standard-user install); manual runs only, Windows is tested locally on winvm"
         type: boolean
         default: false
 jobs:
@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.full && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+        os: ${{ fromJSON(inputs.windows && (inputs.full && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest","windows-latest"]') || (inputs.full && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]')) }}
     runs-on: ${{ matrix.os }}
     # The suite takes 3-6 min; a hung test must not hold the runner for GitHub's 6 h default.
     timeout-minutes: 20
@@ -25,6 +25,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -48,10 +50,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $item = Get-Item "$env:RUNNER_TEMP\smoke\.claude\skills" -Force
-          if ($item.LinkType -ne "Junction") { throw "expected a junction, got $($item.LinkType)" }
+          # Since #215 .claude\skills is a plain folder with one link per skill (a copy where links are refused)
+          $item = Get-Item "$env:RUNNER_TEMP\smoke\.claude\skills\orch" -Force
+          if ($item.LinkType -ne "Junction" -and -not (Test-Path "$env:RUNNER_TEMP\smoke\.claude\skills\orch\.orch-copy")) {
+            throw "expected .claude\skills\orch to be a junction, got '$($item.LinkType)'"
+          }
   windows-standard-user:
-    if: inputs.full || inputs.install
+    if: inputs.windows
     # The README's Windows install as a standard user (no admin), no git, default execution
     # policy, from this commit's GitHub zip; then init, a ticket, an add-on and an update (e2e/windows/).
     runs-on: windows-latest
