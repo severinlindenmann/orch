@@ -8,7 +8,6 @@ struct ConversationInfoView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selection: InfoGroup = .photos
     @State private var viewer: ArtifactItem?
     @State private var preview: InfoPreview?
@@ -92,19 +91,6 @@ struct ConversationInfoView: View {
                         .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
                         .accessibilityIdentifier("info-summary")
                 }
-                NavigationLink {
-                    InfoLanguageView(conversation: conversation)
-                } label: {
-                    HStack {
-                        Text("Voice & reply language").themeFont(16, .medium)
-                        Spacer(minLength: 8)
-                        Image(systemName: "chevron.right").accessibilityHidden(true)
-                    }
-                    .padding(.horizontal, 16).frame(minHeight: 44).padding(.vertical, 2)
-                    .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("info-language-row")
                 VStack(spacing: 16) {
                     segments(all, referenceCount: references.count + links.count)
                     if selection == .links { referenceContent(references, links: links) }
@@ -141,26 +127,42 @@ struct ConversationInfoView: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// One row of tabs: short labels, the count as a small badge (only when there is something). They share the width
+    /// when they fit; with large text the same row scrolls sideways instead of wrapping a label onto two lines.
     private func segments(_ all: [InfoEntry], referenceCount: Int) -> some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2),
-                                 count: dynamicTypeSize.isAccessibilitySize ? 2 : 4), spacing: 4) {
-            ForEach(InfoGroup.allCases) { group in
-                let count = group == .links ? referenceCount : entries(in: group, from: all).count
-                Button { selection = group } label: {
-                    Text("\(group.title) (\(count))").themeFont(12, .semibold)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(selection == group ? Theme.brand : Theme.muted)
-                        .frame(maxWidth: .infinity, minHeight: 44).padding(.horizontal, 2)
-                        .background(selection == group ? Theme.surface3 : Theme.surface2,
-                                    in: RoundedRectangle(cornerRadius: 11))
+        let tabs = InfoGroup.allCases.map { g in (g, g == .links ? referenceCount : entries(in: g, from: all).count) }
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) { ForEach(tabs, id: \.0) { tabButton($0.0, count: $0.1, fill: true) } }
+            ScrollViewReader { reader in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) { ForEach(tabs, id: \.0) { tabButton($0.0, count: $0.1, fill: false).id($0.0) } }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(group.title), \(count) items")
-                .accessibilityAddTraits(selection == group ? .isSelected : [])
-                .accessibilityIdentifier("info-tab-\(group.rawValue)")
+                .onAppear { reader.scrollTo(selection, anchor: .center) }   // the selected tab is always in view
+                .onChange(of: selection) { _, new in withAnimation { reader.scrollTo(new, anchor: .center) } }
             }
         }
         .padding(4).background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func tabButton(_ group: InfoGroup, count: Int, fill: Bool) -> some View {
+        Button { selection = group } label: {
+            HStack(spacing: 5) {
+                Text(group.title).themeFont(13, .semibold).lineLimit(1).fixedSize()
+                if count > 0 {
+                    Text("\(count)").themeFont(11, .semibold).lineLimit(1).fixedSize()
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Theme.surface3, in: Capsule())
+                        .accessibilityHidden(true)
+                }
+            }
+            .foregroundStyle(selection == group ? Theme.brand : Theme.muted)
+            .padding(.horizontal, 10).frame(maxWidth: fill ? .infinity : nil, minHeight: 44)
+            .background(selection == group ? Theme.surface3 : Theme.surface2, in: RoundedRectangle(cornerRadius: 11))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(group.title), \(count) items")
+        .accessibilityAddTraits(selection == group ? .isSelected : [])
+        .accessibilityIdentifier("info-tab-\(group.rawValue)")
     }
 
     @ViewBuilder private func content(_ selected: [InfoEntry]) -> some View {
@@ -391,43 +393,6 @@ private struct InfoThumbnail: View {
                 guard let blobID, let data = await model.blob(blobID), !Task.isCancelled else { return }
                 image = ThumbnailCache.image(id: blobID, data: data)
             }
-    }
-}
-
-@MainActor
-private struct InfoLanguageView: View {
-    let conversation: ConversationID
-    @Environment(AppModel.self) private var model
-
-    private var languageName: String {
-        let code = LanguageLabel.conversationLanguage(model.conversationItems(conversation))
-        return (Locale.current.localizedString(forLanguageCode: code) ?? code).capitalized
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Replies in \(languageName)").themeFont(20, .semibold)
-                    Text("orch answers in the language you speak in this conversation.")
-                        .themeFont(15).foregroundStyle(Theme.muted)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle("Swiss German", isOn: Binding(
-                        get: { model.settings.swissGerman },
-                        set: { value in Task { await model.updateSettings(SettingsPatch(swissGerman: value)) } }
-                    ))
-                    .themeFont(16).frame(minHeight: 44)
-                    Text("Understands Swiss German when you speak.")
-                        .themeFont(13).foregroundStyle(Theme.muted)
-                }
-                .padding(16).background(Theme.surface2, in: RoundedRectangle(cornerRadius: 14))
-            }
-            .padding(16)
-        }
-        .foregroundStyle(Theme.text).background(Theme.bg).tint(Theme.brand)
-        .navigationTitle("Voice & reply language").navigationBarTitleDisplayMode(.inline)
-        .preferredColorScheme(.dark)
     }
 }
 
