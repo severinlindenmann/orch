@@ -113,7 +113,7 @@
   // The visible "Move to" control: a labelled button (Apple HIG: a control says what it does; WCAG 2.5.3 label in name).
   const statusControl = (t, scope) => {
     if (snapshot) return statusChip(t);
-    return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'btn outline xs status-sum', 'aria-label':'Move ' + clean(t.title) + ' to… Now: ' + statusWord(shown(t))}, 'Move to', iconEl('down')), h('div', {className:'menu-pop', role:'menu', 'aria-label':'Move to'}, statusItems(t, scope)));
+    return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'btn outline xs status-sum', 'aria-label':'Move to… ' + clean(t.title) + ' (now ' + statusWord(shown(t)) + ')'}, 'Move to', iconEl('down')), h('div', {className:'menu-pop', role:'menu', 'aria-label':'Move to'}, statusItems(t, scope)));
   };
   const heading = (title, sub = '') => h('header', {className:'page-heading', 'data-key':'heading'}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null);
   const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);
