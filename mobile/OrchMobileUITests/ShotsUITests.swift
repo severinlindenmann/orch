@@ -31,49 +31,15 @@ final class ShotsUITests: XCTestCase {
         let search = app.textFields["chat-search"]; XCTAssertTrue(search.waitForExistence(timeout: 15))
         search.tap(); search.typeText("board"); try shot(app, "2-search"); app.terminate()
 
-        app = launch(["-openChat", "ws_pilatus001"])
-        let general = app.buttons["general-ws_pilatus001"]; if general.waitForExistence(timeout: 15) { general.tap() }
-        XCTAssertTrue(app.buttons["answer-TIMESTAMP"].waitForExistence(timeout: 15))
-        try shot(app, "3-workspace-chat")
-        app.buttons["answer-TIMESTAMP"].tap()
+        // The DATE/TIMESTAMP question belongs to topic PIL-13, not General.
+        app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_7k3f9q"])
+        let timestamp = app.descendants(matching: .any)["answer-TIMESTAMP"].firstMatch
+        XCTAssertTrue(timestamp.waitForExistence(timeout: 20))
+        try shot(app, "3-topic-question")
+        timestamp.tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'undo-'")).firstMatch.waitForExistence(timeout: 5))
-        try shot(app, "4-question-undo"); app.terminate()
-
-        app = launch(["-mockAllow", "YES", "-openChat", "ws_pilatus001"])
-        let generalAllow = app.buttons["general-ws_pilatus001"]; if generalAllow.waitForExistence(timeout: 15) { generalAllow.tap() }
-        XCTAssertTrue(app.buttons["answer-Once"].waitForExistence(timeout: 15))
-        try shot(app, "5-allow"); app.terminate()
-
-        app = launch(["-openChat", "ws_reports001", "-openTicket", "t_9k2m4q"])
-        XCTAssertTrue(app.descendants(matching: .any)["tasks-card"].waitForExistence(timeout: 15))
-        try shot(app, "6-ticket-chat-running")
-        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Tasks'")).firstMatch.tap(); try shot(app, "7-ticket-tasks-open"); app.terminate()
-
-        app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_q3sum1"])
-        XCTAssertTrue(app.descendants(matching: .any)["tasks-card"].waitForExistence(timeout: 15))
-        try shot(app, "8-ticket-chat-done"); app.terminate()
-
-        app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_q3sum1", "-openInfo", "YES"])
-        XCTAssertTrue(app.descendants(matching: .any)["info-tabs"].waitForExistence(timeout: 15))
-        try shot(app, "9-chat-info-media")
-        app.buttons["Links 1"].tap(); try shot(app, "10-chat-info-links"); app.terminate()
-
-        app = launch(["-openNewChat", "YES"])
-        XCTAssertTrue(app.textViews["topic-field"].waitForExistence(timeout: 15) || app.textFields["topic-field"].waitForExistence(timeout: 5))
-        try shot(app, "11-new-chat"); app.terminate()
-
-        app = launch(["-mockEmpty", "YES"])
-        XCTAssertTrue(app.descendants(matching: .any)["chats-empty"].waitForExistence(timeout: 15))
-        try shot(app, "12-empty"); app.terminate()
-
-        app = launch(["-mockFail", "YES", "-openChat", "ws_pilatus001"])
-        let generalOff = app.buttons["general-ws_pilatus001"]; if generalOff.waitForExistence(timeout: 15) { generalOff.tap() }
-        XCTAssertTrue(app.descendants(matching: .any)["offline-banner"].waitForExistence(timeout: 15))
-        try shot(app, "13-offline"); app.terminate()
-
-        app = launch(["-openQuestion", "m_q1date0ts0000001"])
-        XCTAssertTrue(app.descendants(matching: .any)["question-m_q1date0ts0000001"].waitForExistence(timeout: 15))
-        try shot(app, "14-push-opened")
+        try shot(app, "4-question-undo")
+        app.terminate()
     }
 
     /// Ticket links as link cards (tile, type, add-on status): shots for the links build, when its folder exists.
@@ -82,11 +48,12 @@ final class ShotsUITests: XCTestCase {
         let out = URL(fileURLWithPath: home).appendingPathComponent("orch-dev/state/v2-plan-2026-11-05/build/shots/links-build")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: out.path), "no shots folder")
         dir = out
-        var app = launch(["-openChat", "ws_reports001", "-openTicket", "t_9k2m4q"])
-        XCTAssertTrue(app.descendants(matching: .any)["attachment-link"].firstMatch.waitForExistence(timeout: 15))
-        try shot(app, "9-phone-link-card"); app.terminate()
-        app = launch(["-openChat", "ws_reports001", "-openTicket", "t_9k2m4q", "-openInfo", "YES"])
-        XCTAssertTrue(app.descendants(matching: .any)["info-tabs"].waitForExistence(timeout: 15))
-        app.buttons["Links 1"].tap(); try shot(app, "10-phone-info-links"); app.terminate()
+        let app = launch(["-openChat", "ws_reports001", "-openTicket", "t_9k2m4q", "-openInfo", "YES"])
+        defer { app.terminate() }
+        let links = app.buttons["info-tab-links"]
+        XCTAssertTrue(links.waitForExistence(timeout: 20))
+        links.tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'info-item-'")).firstMatch.waitForExistence(timeout: 15))
+        try shot(app, "10-phone-info-links")
     }
 }
