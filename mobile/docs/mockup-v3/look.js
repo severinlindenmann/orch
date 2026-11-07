@@ -11,4 +11,5 @@
     const dot=html.includes('avatar-presence')?'<span class="avatar-presence" role="img" aria-label="Online"></span>':'';
     return `<span class="avatar look" style="--c:${l.c}">${inner}${dot}</span>`;
   };
+  if(typeof render==="function")render();
 })();
