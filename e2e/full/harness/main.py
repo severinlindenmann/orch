@@ -92,6 +92,7 @@ def main() -> int:
     ap.add_argument("--phone", action="store_true", help="run lane P (Simulator); only after the mobile v3 lanes merged")
     ap.add_argument("--real-agents", action="store_true", help="lane B with real Claude (needs E2E_CLAUDE_TOKEN)")
     ap.add_argument("--udid", default="", help="Simulator for lane P (default: the first booted one)")
+    ap.add_argument("--real-runs", type=int, default=6, help="runs of lane B with a real agent in --full")
     ap.add_argument("--no-review", action="store_true")
     ap.add_argument("--review-shots", type=int, default=24)
     ap.add_argument("--viewports", default="1280,720,390")
@@ -207,7 +208,7 @@ def main() -> int:
         for t in threads:
             t.join()
         if "B" in want and a.real_agents:
-            results["B"] = _save(lanes_py.lane_b(env, outdir / "B", True, 1 if quick else 5))
+            results["B"] = _save(lanes_py.lane_b(env, outdir / "B", True, 1 if quick else a.real_runs))
         for l in ("A", "B", "C", "D"):
             if l in results:
                 lanes.append({**results[l], "dir": l})

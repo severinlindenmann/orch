@@ -327,6 +327,30 @@
    ]
   },
   {
+   "id": "A27",
+   "name": "Tickets board view (the shot is taken on the Board)",
+   "page": "tickets-board",
+   "expect": "columns Backlog, Ready, Working, Waiting, Review, Done readable at 720 and 390",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#tickets"
+    },
+    {
+     "do": "click",
+     "sel": "role=button[name='Board']"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "expect_text",
+     "text": "Review"
+    }
+   ]
+  },
+  {
    "id": "A12",
    "name": "Settings tabs: General, Agent, Add-ons",
    "page": "settings",
