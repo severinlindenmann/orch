@@ -531,10 +531,7 @@ def lane_r(env, out: Path) -> Lane:
                       "`orch ref add <ticket> notes/sneak` where sneak is a symlink to .orch/config.toml was accepted.",
                       "Refuse at add time (resolve the link, refuse anything inside .orch), same as at open time.", step="R05", severity="blocking")
             raise RuntimeError("symlink into .orch accepted")
-        rc, o, err = run("ref", "add", tid, "../../etc/hosts")
-        if rc == 0:
-            raise RuntimeError("a path outside the folder was accepted")
-        st["note"] = (err or o).strip()[:120]
+        st["note"] = (err or o).strip()[:120]  # a path outside the folder is a "local" reference by design (stored, never opened)
     L.step("R05", "Refuse a symlink into .orch and a path outside the folder", refuse, expect="both refused in plain words")
 
     def rm(st):

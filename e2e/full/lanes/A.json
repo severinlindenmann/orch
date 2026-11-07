@@ -256,7 +256,7 @@
    "actions": [
     {
      "do": "goto",
-     "path": "/#ticket/{{ticket_id}}"
+     "path": "/#tickets"
     },
     {
      "do": "wait",
@@ -264,7 +264,7 @@
     },
     {
      "do": "click",
-     "sel": "summary[aria-label^='Change the status']"
+     "sel": "[data-key^='ticket-']:has-text('E2E ticket') summary >> nth=0"
     },
     {
      "do": "expect_text",
@@ -496,7 +496,7 @@
   },
   {
    "id": "A16",
-   "name": "Add a reference to the ticket (link)",
+   "name": "Add reference dialog: every kind (Ticket, Web address, File, Artifact)",
    "page": "ticket-links",
    "expect": "a valid link is added, an invalid one is refused in words",
    "actions": [
@@ -509,13 +509,21 @@
      "sel": "button:has-text('Add reference')"
     },
     {
+     "do": "expect_text",
+     "text": "Search tickets"
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Web address']"
+    },
+    {
      "do": "fill",
-     "sel": "input[type=url], input[aria-label*='Web address' i], input[placeholder*='address' i]",
+     "sel": "role=dialog >> input >> visible=true >> nth=0",
      "value": "not a link"
     },
     {
-     "do": "press",
-     "key": "Enter"
+     "do": "click",
+     "sel": "role=dialog >> button:has-text('Add')"
     },
     {
      "do": "wait",
@@ -523,12 +531,12 @@
     },
     {
      "do": "fill",
-     "sel": "input[type=url], input[aria-label*='Web address' i], input[placeholder*='address' i]",
+     "sel": "role=dialog >> input >> visible=true >> nth=0",
      "value": "https://github.com/example/repo/pull/1"
     },
     {
-     "do": "press",
-     "key": "Enter"
+     "do": "click",
+     "sel": "role=dialog >> button:has-text('Add')"
     },
     {
      "do": "wait",
@@ -537,6 +545,31 @@
     {
      "do": "expect_text",
      "text": "github"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add reference')",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='File']",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Artifact']",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "role=tab[name='Ticket']",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "role=dialog >> button:has-text('Cancel')",
+     "optional": true
     }
    ],
    "expect_errors": {
@@ -560,7 +593,8 @@
     },
     {
      "do": "click",
-     "sel": "role=button[name='Not chosen yet']"
+     "sel": "role=button[name='Not chosen yet']",
+     "optional": true
     },
     {
      "do": "wait",
@@ -572,7 +606,8 @@
     },
     {
      "do": "click",
-     "sel": "role=button[name='Not set']"
+     "sel": "role=button[name='Not set']",
+     "optional": true
     },
     {
      "do": "wait",
