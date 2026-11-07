@@ -52,9 +52,8 @@ final class PushTapUITests: XCTestCase {
         // (the focused card itself is covered by PushTests.testTapBeforeModelExistsIsKeptForLater).
         let cold = XCUIApplication(bundleIdentifier: "io.severin.orch")
         XCTAssertTrue(cold.wait(for: .runningForeground, timeout: 30), "app did not come to the foreground")
-        let questionsTab = cold.buttons["Chats"]
-        if !questionsTab.waitForExistence(timeout: 20) { print("COLD:", cold.debugDescription) }
-        XCTAssertTrue(questionsTab.exists)
-        XCTAssertTrue(questionsTab.isSelected, "cold start did not open the Chats tab")
+        let gear = cold.buttons["settings-button"]
+        if !gear.waitForExistence(timeout: 20) { print("COLD:", cold.debugDescription) }
+        XCTAssertTrue(gear.exists, "cold start did not open the Chats list")
     }
 }

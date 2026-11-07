@@ -1,163 +1,236 @@
 import SwiftUI
 
-/// The Chats tab: workspaces as chatrooms with their ticket chats nested below.
+private enum ShellSheet: String, Identifiable {
+    case compose, newTopic, addWorkspace
+    var id: String { rawValue }
+}
+
 struct ChatsListView: View {
+    @AppStorage("workspaceAliasRevision") private var aliasRevision = 0
     @Environment(AppModel.self) private var model
     @State private var query = ""
-    @State private var filter: ChatFilter = .all
+    @State private var filter = "All"
+    @State private var sheet: ShellSheet?
+    @State private var pendingSheet: ShellSheet?
+    @State private var showSettings = false
+    private let filters = ["All", "Unread", "Waiting on you"]
 
     var body: some View {
+        let _ = aliasRevision
         @Bindable var model = model
         NavigationStack(path: $model.path) {
-            ZStack(alignment: .bottomTrailing) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ModelMessage().padding(.bottom, 8)
-                        searchField
-                        chips
-                        content
-                    }.padding(.horizontal, 16).padding(.bottom, 90)
-                }.refreshable { await model.refresh() }
-                if !model.workspaces.isEmpty {
-                    NavigationLink(value: ChatRoute.newChat) {
-                        Label("New chat", systemImage: "square.and.pencil").themeFont(15, .semibold).foregroundStyle(Theme.onBrand)
-                            .padding(.horizontal, 18).frame(minHeight: 50).background(Theme.brand, in: Capsule())
-                    }.padding(16).accessibilityIdentifier("new-chat")
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    header
+                    ModelMessage()
+                    searchField
+                    chips
+                    content
+                }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 24)
             }
             .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle("Chats")
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar(.hidden, for: .navigationBar)
+            .refreshable { await model.refresh() }
+            // `-startTab settings` (tests, screenshots) and old callers that set `model.tab = .settings`.
+            .task(id: model.tab) { if model.tab == .settings { model.tab = .chats; showSettings = true } }
+            .navigationDestination(isPresented: $showSettings) { SettingsView().toolbar(.visible, for: .navigationBar) }
             .navigationDestination(for: ChatRoute.self) { route in
-                switch route {
-                case .workspace(let id): ChatRoomView(workspaceId: id)
-                case .ticket(let ws, let t): TicketChatView(workspaceId: ws, ticketId: t)
-                case .newChat: NewChatView()
-                case .newTopic(let ws): NewTopicView(workspaceId: ws)
-                case .info(let ws, let t): ChatInfoView(workspaceId: ws, ticketId: t)
+                Group {
+                    switch route {
+                    case .workspace(let id): WorkspaceView(workspaceId: id)
+                    case .ticket(let ws, let ticket): TicketChatView(workspaceId: ws, ticketId: ticket)
+                    case .info(let ws, let ticket): ChatInfoView(workspaceId: ws, ticketId: ticket)
+                    case .newChat: NewTopicScreen(workspaceId: nil)
+                    case .newTopic(let ws): NewTopicScreen(workspaceId: ws)
+                    }
+                }.toolbar(.visible, for: .navigationBar)
+            }
+            .sheet(item: $sheet, onDismiss: {
+                if let next = pendingSheet { pendingSheet = nil; sheet = next }
+            }) { item in
+                switch item {
+                case .compose:
+                    composeSheet.presentationDetents([.height(220), .medium]).presentationDragIndicator(.visible)
+                        .presentationBackground(Theme.surface)
+                case .newTopic:
+                    NewTopicScreen(workspaceId: nil, asSheet: true).presentationDetents([.medium, .large])
+                case .addWorkspace:
+                    AddWorkspaceView().presentationDetents([.medium, .large])
                 }
             }
         }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            NavigationLink { SettingsView().toolbar(.visible, for: .navigationBar) } label: {
+                Image(systemName: "gearshape").themeFont(20).foregroundStyle(Theme.brand)
+                    .frame(width: 44, height: 44).background(Theme.surface, in: Circle())
+            }.accessibilityIdentifier("settings-button").accessibilityLabel("Settings")
+            Text("Chats").themeFont(34, .bold).accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 0)
+            Button { sheet = .compose } label: {
+                Image(systemName: "plus").themeFont(22).foregroundStyle(Theme.brand)
+                    .frame(width: 44, height: 44).background(Theme.surface, in: Circle())
+            }.accessibilityIdentifier("new-chat").accessibilityLabel("New")
+        }.buttonStyle(PressStyle())
     }
 
     private var searchField: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
-            TextField("Search chats and messages", text: $query).themeFont(15).textInputAutocapitalization(.never).autocorrectionDisabled()
-                .accessibilityIdentifier("chat-search")
-            if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted).frame(width: 44, height: 44) }.accessibilityLabel("Clear search") }
-        }.padding(.leading, 14).frame(minHeight: 46).background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border)).padding(.vertical, 8)
+            TextField("Search chats and messages", text: $query).themeFont(15)
+                .textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier("chat-search")
+            if !query.isEmpty {
+                Button { query = "" } label: { Image(systemName: "xmark.circle.fill").frame(width: 44, height: 44) }
+                    .foregroundStyle(Theme.muted).accessibilityLabel("Clear search")
+            }
+        }.padding(.horizontal, 14).frame(minHeight: 44).background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var chips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(ChatFilter.allCases) { f in
-                    Button { filter = f } label: {
-                        Text(f.rawValue).themeFont(13).padding(.horizontal, 12).frame(minHeight: 36)
-                            .foregroundStyle(filter == f ? Theme.brand : Theme.muted)
-                            .background(filter == f ? Theme.brand.opacity(0.1) : Color.clear, in: Capsule())
-                            .overlay(Capsule().stroke(filter == f ? Theme.brand : Theme.borderStrong))
-                    }.buttonStyle(PressStyle()).accessibilityAddTraits(filter == f ? .isSelected : []).accessibilityIdentifier("filter-\(f.rawValue)")
-                }
+        HStack(spacing: 0) {
+            ForEach(filters, id: \.self) { option in
+                Button { filter = option } label: {
+                    Text(option).themeFont(13).lineLimit(2).minimumScaleFactor(0.8)
+                        .foregroundStyle(filter == option ? Theme.text : Theme.muted)
+                        .frame(maxWidth: .infinity, minHeight: 44).padding(.vertical, 2)
+                        .background(filter == option ? Theme.surface3 : .clear, in: RoundedRectangle(cornerRadius: 9))
+                }.buttonStyle(PressStyle()).accessibilityIdentifier("filter-\(option)")
+                    .accessibilityAddTraits(filter == option ? .isSelected : [])
             }
-        }.padding(.bottom, 8)
+        }.padding(4).background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder private var content: some View {
-        let rooms = model.chatRooms
-        if !query.trimmingCharacters(in: .whitespaces).isEmpty {
-            searchResults(ChatBuilder.search(query, model.chatData, rows: rooms))
+        if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            searchResults(ChatBuilder.search(query, model.chatData, rows: model.chatRooms))
         } else if !model.hasLoaded && model.message == nil {
-            ForEach(0..<3, id: \.self) { _ in roomRowView(placeholderRow) }.skeleton(true).accessibilityHidden(true)
-        } else if model.workspaces.isEmpty {
-            VStack(spacing: 12) {
-                Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 34)).foregroundStyle(Theme.brand)
-                Text("No chats yet").themeFont(18, .semibold)
-                Text("Pair a workspace to bring your work here.").themeFont(14).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
-                Button("Pair a workspace") { model.tab = .settings }.buttonStyle(SecondaryButtonStyle()).frame(maxWidth: 220)
-            }.frame(maxWidth: .infinity).padding(.top, 70).accessibilityIdentifier("chats-empty")
+            VStack(spacing: 0) {
+                ForEach(0..<3, id: \.self) { _ in
+                    HStack(spacing: 12) {
+                        ShellAvatar(name: "Workspace")
+                        VStack(alignment: .leading) { Text("Workspace name").themeFont(17, .semibold); Text("Latest message in this workspace").themeFont(15) }
+                    }.padding(16)
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading).background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+                .skeleton(true).accessibilityHidden(true)
+        } else if model.workspaceSummaries.isEmpty {
+            VStack(spacing: 14) {
+                OrbitMark().frame(width: 48, height: 48)
+                Text("No workspaces yet").themeFont(20, .semibold)
+                Text("Add a workspace with the invitation you were sent.").themeFont(15).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                Button("Add workspace") { sheet = .addWorkspace }.buttonStyle(SecondaryButtonStyle())
+            }.frame(maxWidth: .infinity).padding(.vertical, 50).accessibilityIdentifier("chats-empty")
         } else {
-            let shown = ChatBuilder.filtered(rooms, filter)
+            attentionCards
+            let shown = model.workspaceSummaries.filter { filter == "All" || (filter == "Unread" ? $0.unread > 0 : $0.openQuestions > 0) }
             if shown.isEmpty {
-                Text(filter == .needsYou ? "Nothing needs you right now." : "Nothing here yet.").themeFont(14).foregroundStyle(Theme.muted).padding(.top, 24)
-            }
-            if filter == .needsYou, !shown.isEmpty {
-                let n = shown.reduce(0) { $0 + $1.openQuestions }
-                Text("\(n) question\(n == 1 ? "" : "s") waiting").themeFont(13).foregroundStyle(Theme.muted).padding(.bottom, 6)
-            }
-            if filter == .tickets {
-                ForEach(shown.flatMap(\.tickets)) { ticketRowView($0, showWorkspace: true) }
+                Text("Nothing here yet.").themeFont(15).foregroundStyle(Theme.muted).padding(.vertical, 24)
             } else {
-                ForEach(shown) { r in
-                    roomRowView(r)
-                    if filter != .workspaces { ForEach(r.tickets) { ticketRowView($0, showWorkspace: false) } }
-                }
+                VStack(spacing: 0) {
+                    ForEach(shown) { summary in
+                        workspaceRow(summary)
+                        if summary.id != shown.last?.id { ShellDivider().padding(.leading, 64) }
+                    }
+                }.background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
             }
         }
     }
 
-    private var placeholderRow: RoomRow {
-        RoomRow(workspace: Workspace(id: "x", name: "Workspace name", description: nil, tags: [], online: true, lastSeen: nil, openQuestions: 0),
-                lastLine: "Latest message in this workspace", lastAt: nil, unread: 0, openQuestions: 0, tickets: [])
+    @ViewBuilder private var attentionCards: some View {
+        let questions = model.questions.filter { model.answers[$0.id] == nil }
+        if !questions.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(questions) { question in
+                        let ws = question.message.from
+                        let name = model.workspaceSummaries.first { $0.id == ws }.map { WorkspaceAlias.name(for: $0.workspace) } ?? ws
+                        NavigationLink(value: question.message.ticket.map { ChatRoute.ticket(workspace: ws, ticket: $0) } ?? .workspace(ws)) {
+                            VStack(alignment: .leading, spacing: 9) {
+                                Text("\(name) · Waiting on you").themeFont(12, .semibold).foregroundStyle(Theme.warn).lineLimit(1)
+                                Text(question.message.body.title ?? question.message.body.text).themeFont(15, .semibold).lineLimit(2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }.padding(16).frame(width: 220, alignment: .leading).frame(minHeight: 98)
+                                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16))
+                        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text)
+                    }
+                }
+            }.padding(.bottom, 12)
+        }
     }
 
-    private func roomRowView(_ r: RoomRow) -> some View {
-        NavigationLink(value: ChatRoute.workspace(r.workspace.id)) {
+    private func workspaceRow(_ summary: WorkspaceSummary) -> some View {
+        let name = WorkspaceAlias.name(for: summary.workspace)
+        let newest = summary.topics.max { ($0.lastAt ?? "") < ($1.lastAt ?? "") }
+        let starting = newest?.isStarting == true && newest?.lastAt == summary.lastAt
+        return NavigationLink(value: ChatRoute.workspace(summary.id)) {
             HStack(spacing: 12) {
-                Avatar(name: r.workspace.displayName, size: 46)
+                ShellAvatar(name: name, size: 46, online: summary.presence.isOnline)
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(r.workspace.displayName).themeFont(16, .semibold).lineLimit(1)
-                        if r.openQuestions > 0 { Circle().fill(Theme.warn).frame(width: 8, height: 8).accessibilityHidden(true) }
-                        Spacer()
-                        Text(r.lastAt.map { ChatBuilder.timeText($0) } ?? "").themeFont(12).foregroundStyle(r.unread > 0 ? Theme.brand : Theme.muted)
-                    }
-                    HStack {
-                        Text(r.lastLine).themeFont(14).foregroundStyle(Theme.muted).lineLimit(1)
-                        Spacer(minLength: 4)
-                        UnreadBadge(count: r.unread)
-                    }
+                    Text(name).themeFont(17, .semibold).lineLimit(2)
+                    Text(starting ? "Starting topic…" : summary.lastLine).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
+                    if summary.openQuestions > 0 { Text("\(summary.openQuestions) Waiting on you").themeFont(13).foregroundStyle(Theme.warn) }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .trailing, spacing: 10) {
+                    Text(ShellTime.short(summary.lastAt)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
+                    ShellBadge(count: summary.unread)
+                    if summary.isMuted { Image(systemName: "bell.slash").themeFont(12).foregroundStyle(Theme.muted).accessibilityLabel("Muted") }
                 }
-            }.padding(.vertical, 10).frame(minHeight: 64).contentShape(Rectangle())
-        }.buttonStyle(PressStyle()).accessibilityIdentifier("room-\(r.workspace.id)")
+                ShellChevron()
+            }.padding(.horizontal, 12).padding(.vertical, 14).contentShape(Rectangle())
+        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("room-\(summary.id)")
     }
 
-    private func ticketRowView(_ row: TicketRow, showWorkspace: Bool) -> some View {
-        let t = row.ticket
-        return NavigationLink(value: ChatRoute.ticket(workspace: t.workspace, ticket: t.ticket ?? "")) {
-            HStack(alignment: .top, spacing: 10) {
-                Circle().fill(dot(t.status)).frame(width: 8, height: 8).padding(.top, 6).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        KeyTag(key: t.key)
-                        Text(t.displayTitle).themeFont(15).lineLimit(1)
-                        Spacer(minLength: 4)
-                        UnreadBadge(count: row.unread)
-                    }
-                    Text((showWorkspace ? t.workspaceName + " · " : "") + t.stateLine).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1)
-                }
-            }.padding(.leading, 58).padding(.vertical, 8).frame(minHeight: 48).contentShape(Rectangle())
-        }.buttonStyle(PressStyle()).accessibilityIdentifier("ticket-\(t.id)")
-    }
-
-    private func dot(_ s: Ticket.Status) -> Color { switch s { case .needsYou: Theme.warn; case .working: Theme.brand; case .done: Theme.muted } }
-
-    @ViewBuilder private func searchResults(_ r: ChatSearchResult) -> some View {
-        if r.isEmpty { Text("No match on this phone.").themeFont(14).foregroundStyle(Theme.muted).padding(.top, 20) }
-        if !r.rooms.isEmpty { Eyebrow(text: "WORKSPACES · \(r.rooms.count)").padding(.vertical, 8); ForEach(r.rooms) { roomRowView($0) } }
-        if !r.chats.isEmpty { Eyebrow(text: "CHATS · \(r.chats.count)").padding(.vertical, 8); ForEach(r.chats) { ticketRowView($0, showWorkspace: true) } }
-        if !r.messages.isEmpty {
-            Eyebrow(text: "MESSAGES · \(r.messages.count)").padding(.vertical, 8)
-            ForEach(r.messages) { h in
-                NavigationLink(value: h.route) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(h.who).themeFont(12, .semibold).foregroundStyle(Theme.brand)
-                        Text(h.text).themeFont(14).lineLimit(2).multilineTextAlignment(.leading)
-                    }.orchCard(padding: 12)
-                }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).padding(.bottom, 8)
+    @ViewBuilder private func searchResults(_ result: ChatSearchResult) -> some View {
+        if result.isEmpty { Text("No match on this phone.").themeFont(14).foregroundStyle(Theme.muted).padding(.top, 20) }
+        if !result.rooms.isEmpty {
+            Eyebrow(text: "Workspaces")
+            ForEach(result.rooms) { row in
+                if let summary = model.workspaceSummaries.first(where: { $0.id == row.id }) { workspaceRow(summary) }
             }
         }
+        if !result.chats.isEmpty {
+            Eyebrow(text: "Topics")
+            ForEach(result.chats) { row in
+                NavigationLink(value: ChatRoute.ticket(workspace: row.ticket.workspace, ticket: row.ticket.ticket ?? "")) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text([row.ticket.key, row.ticket.displayTitle].compactMap { $0 }.joined(separator: " · ")).themeFont(16, .semibold)
+                            Text(row.ticket.workspaceName + " · " + row.ticket.stateLine).themeFont(13).foregroundStyle(Theme.muted)
+                        }
+                        Spacer(); ShellBadge(count: row.unread); ShellChevron()
+                    }.orchCard()
+                }.buttonStyle(PressStyle()).foregroundStyle(Theme.text)
+                    .accessibilityIdentifier("ticket-\(row.ticket.workspace)|\(row.ticket.ticket ?? "")")
+            }
+        }
+        if !result.messages.isEmpty {
+            Eyebrow(text: "Messages")
+            ForEach(result.messages) { hit in
+                NavigationLink(value: hit.route) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(hit.who).themeFont(12, .semibold).foregroundStyle(Theme.brand)
+                        Text(hit.text).themeFont(14).lineLimit(2)
+                    }.orchCard()
+                }.buttonStyle(PressStyle()).foregroundStyle(Theme.text)
+            }
+        }
+    }
+
+    private var composeSheet: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Compose").themeFont(20, .semibold).padding(.bottom, 8)
+            composeOption("New topic", symbol: "square.and.pencil", target: .newTopic, identifier: "compose-new-topic")
+            ShellDivider()
+            composeOption("Add workspace", symbol: "plus", target: .addWorkspace, identifier: "compose-add-workspace")
+        }.padding(24).foregroundStyle(Theme.text)
+    }
+
+    private func composeOption(_ title: String, symbol: String, target: ShellSheet, identifier: String) -> some View {
+        Button { pendingSheet = target; sheet = nil } label: {
+            HStack { Label(title, systemImage: symbol); Spacer(); ShellChevron() }
+                .themeFont(17).frame(minHeight: 44).contentShape(Rectangle())
+        }.buttonStyle(PressStyle()).accessibilityIdentifier(identifier)
     }
 }

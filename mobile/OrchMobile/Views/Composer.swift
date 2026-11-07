@@ -19,6 +19,9 @@ struct Composer: View {
     @Binding var reply: ReplyPreview?
     var hooks: ComposerHooks
     var onSent: (() -> Void)?
+    /// Accessibility ids of the text field and send button (the New topic screen keeps its older ids).
+    var fieldId = "composer-field"
+    var sendId = "composer-send"
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -48,7 +51,9 @@ struct Composer: View {
     @MainActor private static var drafts: [SendTarget: String] = [:]
 
     init(target: SendTarget?, placeholder: String = "Message…", note: String? = nil, autoFocus: Bool = false,
-         reply: Binding<ReplyPreview?>, hooks: ComposerHooks = .none, onSent: (() -> Void)? = nil) {
+         reply: Binding<ReplyPreview?>, hooks: ComposerHooks = .none, onSent: (() -> Void)? = nil,
+         fieldId: String = "composer-field", sendId: String = "composer-send") {
+        self.fieldId = fieldId; self.sendId = sendId
         self.target = target; self.placeholder = placeholder; self.note = note; self.autoFocus = autoFocus
         _reply = reply; self.hooks = hooks; self.onSent = onSent
     }
@@ -126,9 +131,9 @@ struct Composer: View {
                 .themeFont(17).lineLimit(1...5).padding(.horizontal, 12).padding(.vertical, 10)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24))
                 .overlay(RoundedRectangle(cornerRadius: 24).stroke(Theme.borderStrong))
-                .focused($focused).disabled(target == nil || busy).accessibilityIdentifier("composer-field")
+                .focused($focused).disabled(target == nil || busy).accessibilityIdentifier(fieldId)
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Color.clear.frame(width: 44, height: 44) }
-            else { control("arrow.up", "Send message", "composer-send", filled: true) { Task { await sendText() } }.disabled(busy || target == nil) }
+            else { control("arrow.up", "Send message", sendId, filled: true) { Task { await sendText() } }.disabled(busy || target == nil) }
         }
     }
     private var mic: some View {
