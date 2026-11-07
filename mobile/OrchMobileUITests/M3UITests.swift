@@ -14,7 +14,11 @@ import XCTest
         let app = launch("viewer-html")
         XCTAssertTrue(app.buttons["artifact-looks-good"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
-        app.buttons["artifact-looks-good"].tap()
+        let good = app.buttons["artifact-looks-good"]
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        let enabled = NSPredicate(format: "isEnabled == true")
+        wait(for: [XCTNSPredicateExpectation(predicate: enabled, object: good)], timeout: 10)   // enabled only once the page is shown
+        good.tap()
         XCTAssertTrue(app.staticTexts["demo-feedback-count"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["feedback sent: 1"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["artifact-close"].exists, "the viewer closes after sending")
@@ -43,7 +47,7 @@ import XCTest
         XCTAssertTrue(app.buttons["artifact-comment"].waitForExistence(timeout: 20))
         sleep(1)
         app.buttons["artifact-comment"].tap()
-        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.35)).tap()
+        app.buttons["artifact-add-pin"].tap()   // the no-tap way (VoiceOver): a pin in the middle of the page
         let text = app.textViews["pin-text"].firstMatch.exists ? app.textViews["pin-text"] : app.textFields["pin-text"]
         XCTAssertTrue(text.waitForExistence(timeout: 10))
         text.tap(); text.typeText("Fix the title")

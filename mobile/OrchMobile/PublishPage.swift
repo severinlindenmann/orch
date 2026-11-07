@@ -131,17 +131,55 @@ enum PublishContent: Equatable, Sendable {
     }
 }
 
-/// Fetches the encrypted blob (public route, no credentials) and opens it.
+/// Fetches the encrypted blob (public route, no credentials) and opens it. The download is capped like the server's limit
+/// (100 MiB of file + 64 KiB header + 36 bytes): a longer answer is refused up front or cut off while it streams.
 struct PublishFetcher: Sendable {
     var session: URLSession = .shared
+    static let maxBlobBytes = 100 * 1_048_576 + 65_536 + 36
+    var maxBytes = PublishFetcher.maxBlobBytes
 
     func load(_ link: PublishLink) async throws -> PublishContent {
         var req = URLRequest(url: link.blobURL); req.timeoutInterval = 30
-        let data: Data, resp: URLResponse
-        do { (data, resp) = try await session.data(for: req) } catch { throw PublishError.unreachable }
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if code == 410 || code == 404 { throw PublishError.expired }
-        guard code == 200 else { throw PublishError.unreachable }
+        let data = try await CappedDownload(maxBytes: maxBytes).run(req, configuration: session.configuration)
         return try PublishContent.from(try OPF1.open(data, key: link.key))
+    }
+}
+
+/// One data task whose body is kept only while it stays under `maxBytes`.
+final class CappedDownload: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let maxBytes: Int
+    private var data = Data()
+    private var failure: PublishError?
+    private var status = 0
+    private var continuation: CheckedContinuation<Data, Error>?
+    init(maxBytes: Int) { self.maxBytes = maxBytes }
+
+    func run(_ request: URLRequest, configuration: URLSessionConfiguration) async throws -> Data {
+        let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        return try await withCheckedThrowingContinuation { c in
+            continuation = c
+            session.dataTask(with: request).resume()
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 410 || status == 404 { failure = .expired }
+        else if status != 200 { failure = .unreachable }
+        else if response.expectedContentLength > Int64(maxBytes) { failure = .broken }
+        completionHandler(failure == nil ? .allow : .cancel)
+    }
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
+        data.append(chunk)
+        if data.count > maxBytes { failure = .broken; dataTask.cancel() }
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let c = continuation else { return }
+        continuation = nil
+        if let failure { c.resume(throwing: failure) }
+        else if error != nil { c.resume(throwing: PublishError.unreachable) }
+        else { c.resume(returning: data) }
     }
 }

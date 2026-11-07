@@ -11,6 +11,58 @@ enum ArtifactSurfaceContent {
     case link(URL)
 }
 
+/// Serves the decrypted files of one published page under `orch-page://page/<path>`. A single page is a bundle of one file.
+final class PageSchemeHandler: NSObject, WKURLSchemeHandler {
+    nonisolated(unsafe) var bundle: PublishBundle
+    init(bundle: PublishBundle) { self.bundle = bundle }
+
+    static func bundle(for content: PublishContent) -> PublishBundle? {
+        switch content {
+        case .bundle(let b, _): return b
+        case .page(let html, _): return PublishBundle(entry: "index.html", files: [.init(path: "index.html", type: "text/html", data: Data(html.utf8))])
+        case .file: return nil
+        }
+    }
+    static let base = URL(string: "orch-page://page/")!
+
+    func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
+        guard let url = urlSchemeTask.request.url else { return }
+        let path = String((url.path.removingPercentEncoding ?? url.path).drop(while: { $0 == "/" }))
+        let file = url.host == "page" ? bundle.file(at: path) : nil
+        let headers = ["Content-Type": file?.type ?? "text/plain", "Content-Security-Policy": NetworkBlock.csp,
+                       "Referrer-Policy": "no-referrer", "Cache-Control": "no-store"]
+        guard let response = HTTPURLResponse(url: url, statusCode: file == nil ? 404 : 200, httpVersion: "HTTP/1.1", headerFields: headers) else { return }
+        urlSchemeTask.didReceive(response)
+        urlSchemeTask.didReceive(file?.data ?? Data())
+        urlSchemeTask.didFinish()
+    }
+    func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {}
+}
+
+/// The one way a published page is shown: no stored data, no network (rule list + CSP + no WebRTC), pins only in their own world.
+@MainActor
+enum PublishWebView {
+    static func make(handler: PageSchemeHandler, pins: (WKScriptMessageHandler)?) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.setURLSchemeHandler(handler, forURLScheme: NetworkBlock.scheme)
+        let controller = WKUserContentController()
+        controller.addUserScript(WKUserScript(source: NetworkBlock.noWebRTC, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        controller.addUserScript(WKUserScript(source: AnchorScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: AnchorScript.world))
+        if let pins { controller.add(pins, contentWorld: AnchorScript.world, name: AnchorScript.handler) }
+        configuration.userContentController = controller
+        return WKWebView(frame: .zero, configuration: configuration)
+    }
+    /// Compiles and adds the block list; false when it could not be made (then nothing may load).
+    static func block(_ view: WKWebView) async -> Bool {
+        guard let rules = try? await WKContentRuleListStore.default().compileContentRuleList(
+            forIdentifier: NetworkBlock.identifier, encodedContentRuleList: NetworkBlock.rules) else { return false }
+        view.configuration.userContentController.add(rules)
+        return true
+    }
+    static func isLocal(_ url: URL?) -> Bool { url?.scheme?.lowercased() == NetworkBlock.scheme || url?.absoluteString == "about:blank" }
+}
+
 @MainActor
 struct HTMLSurface: UIViewRepresentable {
     let content: ArtifactSurfaceContent
@@ -21,21 +73,17 @@ struct HTMLSurface: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        let controller = WKUserContentController()
-        controller.addUserScript(WKUserScript(source: AnchorScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        controller.add(context.coordinator, name: AnchorScript.handler)
-        configuration.userContentController = controller
-        configuration.setURLSchemeHandler(context.coordinator, forURLScheme: NetworkBlock.scheme)
-        let view = WKWebView(frame: .zero, configuration: configuration)
-        view.navigationDelegate = context.coordinator
+        let c = context.coordinator
+        let view = PublishWebView.make(handler: c.pages, pins: c)
+        view.navigationDelegate = c
         view.isInspectable = false
         view.isOpaque = false
         view.backgroundColor = .white
         view.scrollView.backgroundColor = .white
         view.scrollView.contentInsetAdjustmentBehavior = .never
         view.allowsBackForwardNavigationGestures = false
-        context.coordinator.load(view)
+        store.addAtCenter = { [weak view] in view?.evaluateJavaScript("window.__orch && window.__orch.placeCenter();", in: nil, in: AnchorScript.world, completionHandler: nil) }
+        c.load(view)
         return view
     }
 
@@ -48,93 +96,57 @@ struct HTMLSurface: UIViewRepresentable {
         coordinator.loadTask?.cancel()
         view.stopLoading()
         view.navigationDelegate = nil
-        view.configuration.userContentController.removeScriptMessageHandler(forName: AnchorScript.handler)
+        view.configuration.userContentController.removeScriptMessageHandler(forName: AnchorScript.handler, contentWorld: AnchorScript.world)
     }
 
-    @MainActor final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKURLSchemeHandler {
+    @MainActor final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var parent: HTMLSurface
+        let pages: PageSchemeHandler
         var loadTask: Task<Void, Never>?
         private var lastMode: Bool?
         private var lastPins: [PinDraftItem]?
-        init(_ parent: HTMLSurface) { self.parent = parent }
+        init(_ parent: HTMLSurface) {
+            self.parent = parent
+            var bundle = PublishBundle(entry: "index.html", files: [])
+            if case .publish(let content) = parent.content, let b = PageSchemeHandler.bundle(for: content) { bundle = b }
+            pages = PageSchemeHandler(bundle: bundle)
+        }
 
         func load(_ view: WKWebView) {
             loadTask = Task { @MainActor [weak self, weak view] in
                 guard let self, let view else { return }
-                do {
-                    let rules = try await WKContentRuleListStore.default().compileContentRuleList(
-                        forIdentifier: NetworkBlock.identifier, encodedContentRuleList: NetworkBlock.rules)
-                    guard !Task.isCancelled else { return }
-                    guard let rules else {
-                        self.parent.onFailure("Could not prepare this preview. Try again.")
-                        return
-                    }
-                    view.configuration.userContentController.add(rules)
-                    switch self.parent.content {
-                    case .publish(.page(let html, _)):
-                        view.loadHTMLString(html, baseURL: URL(string: "orch-page://page/"))
-                    case .publish(.bundle(let bundle, _)):
-                        let base = URL(string: "orch-page://page/")!
-                        view.load(URLRequest(url: base.appendingPathComponent(bundle.entry)))
-                    default: break
-                    }
-                } catch {
-                    guard !Task.isCancelled else { return }
-                    self.parent.onFailure("Could not prepare this preview. Try again.")
+                guard await PublishWebView.block(view), !Task.isCancelled else {
+                    if !Task.isCancelled { self.parent.onFailure("Could not prepare this preview. Try again.") }
+                    return
                 }
+                view.load(URLRequest(url: PageSchemeHandler.base.appendingPathComponent(self.pages.bundle.entry)))
             }
         }
 
         func sync(_ view: WKWebView, force: Bool = false) {
             if force || lastMode != parent.commentMode {
-                view.evaluateJavaScript(AnchorScript.setMode(parent.commentMode), completionHandler: nil)
+                view.evaluateJavaScript(AnchorScript.setMode(parent.commentMode), in: nil, in: AnchorScript.world, completionHandler: nil)
                 lastMode = parent.commentMode
             }
             if force || lastPins != parent.store.pins {
-                view.evaluateJavaScript(AnchorScript.setPins(parent.store.pins), completionHandler: nil)
+                view.evaluateJavaScript(AnchorScript.setPins(parent.store.pins), in: nil, in: AnchorScript.world, completionHandler: nil)
                 lastPins = parent.store.pins
             }
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            do {
-                guard parent.commentMode, message.frameInfo.isMainFrame else { return }
-                if let body = message.body as? [String: Any], body["kind"] as? String == "edit",
-                   let n = body["n"] as? Int { parent.store.edit(n) }
-                else if let pin = AnchorMaker.html(fromScript: message.body) {
-                    parent.store.beginPin(anchor: pin.anchor, place: pin.place)
-                }
-            }
+            guard parent.commentMode, message.frameInfo.isMainFrame else { return }
+            if let body = message.body as? [String: Any], body["kind"] as? String == "edit", let n = body["n"] as? Int { parent.store.edit(n) }
+            else if let pin = AnchorMaker.html(fromScript: message.body) { parent.store.beginPin(anchor: pin.anchor, place: pin.place) }
         }
 
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            do { sync(webView, force: true) }
-        }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { sync(webView, force: true) }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
-                                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            do {
-                // Only the decrypted local document: the orch-page scheme and about:blank. Everything else (links in the page) is refused.
-                let url = navigationAction.request.url
-                let local = url?.scheme?.lowercased() == NetworkBlock.scheme || url?.absoluteString == "about:blank"
-                decisionHandler(local ? .allow : .cancel)
-            }
+                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            // Only the decrypted local document; links in the page (any other address) are refused.
+            decisionHandler(PublishWebView.isLocal(navigationAction.request.url) ? .allow : .cancel)
         }
-
-        func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
-            do {
-                guard let url = urlSchemeTask.request.url else { return }
-                let path = String(url.path.drop(while: { $0 == "/" }))
-                var file: PublishBundle.File?
-                if url.host == "page", case .publish(.bundle(let bundle, _)) = parent.content { file = bundle.file(at: path) }
-                guard let response = HTTPURLResponse(url: url, statusCode: file == nil ? 404 : 200, httpVersion: "HTTP/1.1",
-                                                     headerFields: ["Content-Type": file?.type ?? "text/plain"]) else { return }
-                urlSchemeTask.didReceive(response)
-                urlSchemeTask.didReceive(file?.data ?? Data())
-                urlSchemeTask.didFinish()
-            }
-        }
-        func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {}
     }
 }
 
@@ -155,6 +167,12 @@ struct PDFSurface: UIViewRepresentable {
         tap.cancelsTouchesInView = false
         tap.delegate = context.coordinator
         view.addGestureRecognizer(tap)
+        let store = self.store
+        store.addAtCenter = { [weak view] in
+            guard let view, let doc = view.document, let page = view.currentPage ?? doc.page(at: 0) else { return }
+            let n = doc.index(for: page) + 1
+            store.beginPin(anchor: AnchorMaker.pdf(page: n, x: 0.5, y: 0.5), place: .init(x: 0.5, y: 0.5, page: n))
+        }
         context.coordinator.redraw(view)
         return view
     }
@@ -253,6 +271,8 @@ struct ImageSurface: UIViewRepresentable {
         tap.cancelsTouchesInView = false
         view.addGestureRecognizer(tap)
         view.addGestureRecognizer(doubleTap)
+        let store = self.store
+        store.addAtCenter = { store.beginPin(anchor: AnchorMaker.image(x: 0.5, y: 0.5), place: .init(x: 0.5, y: 0.5)) }
         context.coordinator.redraw(view)
         return view
     }

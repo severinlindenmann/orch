@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SwiftUI
+import WebKit
 
 // Logic behind the artifact viewer and the comment pins (views: ArtifactViewer.swift, ArtifactSurfaces.swift, CommentPins.swift).
 
@@ -53,6 +54,12 @@ struct ArtifactItem: Identifiable, Equatable, Sendable {
         self.artifactId = artifactId; self.rev = rev; self.conversation = conversation
     }
 
+    /// A file name safe to hand to QuickLook: pages and vector files could run script there, so they open as plain text.
+    static func quickLookName(_ name: String) -> String {
+        let risky: Set<String> = ["html", "htm", "xhtml", "svg", "svgz", "webarchive", "xml"]
+        return risky.contains((name as NSString).pathExtension.lowercased()) ? name + ".txt" : name
+    }
+
     static func isPDF(name: String?, mime: String?) -> Bool {
         mime == "application/pdf" || (name?.lowercased().hasSuffix(".pdf") ?? false)
     }
@@ -90,6 +97,8 @@ final class PinStore {
     /// The pin in the editor: a new one (not in `pins` yet) or an existing one.
     var editing: PinDraftItem?
     var isEditingNew = false
+    /// Set by the open surface: starts a pin in the middle of what is on screen (the VoiceOver / no-tap way to comment).
+    @ObservationIgnored var addAtCenter: (@MainActor () -> Void)?
 
     var count: Int { pins.count }
 
@@ -191,17 +200,19 @@ enum AnchorScript {
           b.setAttribute('data-orch-pin', String(p.n));
           b.setAttribute('aria-label', 'Edit comment ' + p.n);
           b.style.cssText = 'position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:2px solid #06231c;background:#2fc6a3;color:#06231c;font:700 14px -apple-system,sans-serif;padding:0;left:' + (p.x * docW()) + 'px;top:' + (p.y * docH()) + 'px;';
-          b.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); post({ kind: 'edit', n: p.n }); }, true);
+          b.addEventListener('click', function (e) { if (!trusted(e)) return; e.preventDefault(); e.stopPropagation(); post({ kind: 'edit', n: p.n }); }, true);
           layer.appendChild(b);
         });
       }
+      // Events made by the page's own scripts are not trusted: only a finger counts (tests set __orchTest in this isolated world).
+      function trusted(e) { return e.isTrusted || window.__orchTest === true; }
       document.addEventListener('pointerdown', function (e) {
-        if (!mode || e.target.closest('[data-orch-pin]')) return;
+        if (!trusted(e) || !mode || e.target.closest('[data-orch-pin]')) return;
         down = { x: e.clientX, y: e.clientY, sy: window.scrollY, sx: window.scrollX };
       }, true);
       document.addEventListener('pointercancel', function () { down = null; }, true);
       document.addEventListener('pointerup', function (e) {
-        if (!mode || !down) return;
+        if (!trusted(e) || !mode || !down) return;
         var d = down; down = null;
         if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 8 || Math.abs(window.scrollY - d.sy) > 3 || Math.abs(window.scrollX - d.sx) > 3) return;
         var el = document.elementFromPoint(e.clientX, e.clientY) || document.body;
@@ -209,7 +220,13 @@ enum AnchorScript {
                fx: (e.clientX + window.scrollX) / docW(), fy: (e.clientY + window.scrollY) / docH() });
       }, true);
       document.addEventListener('click', function (e) { if (mode && !e.target.closest('[data-orch-pin]')) { e.preventDefault(); e.stopPropagation(); } }, true);
+      function placeAt(x, y) {
+        var el = document.elementFromPoint(x, y) || document.body;
+        post({ kind: 'place', selector: selectorOf(el), quote: quoteOf(el), offset: Math.round(window.scrollY), viewportW: Math.round(window.innerWidth),
+               fx: (x + window.scrollX) / docW(), fy: (y + window.scrollY) / docH() });
+      }
       window.__orch = {
+        placeCenter: function () { placeAt(window.innerWidth / 2, window.innerHeight / 2); },
         setMode: function (on) { mode = !!on; },
         setPins: function (list) { pins = list || []; ready(function () { if (!layer.parentNode) document.body.appendChild(layer); draw(); }); },
         scrollTo: function (y) { window.scrollTo(0, y); }
@@ -217,6 +234,8 @@ enum AnchorScript {
     })();
     """#
 
+    /// All pin script runs in this world: the page's own scripts cannot see or call it.
+    @MainActor static var world: WKContentWorld { .defaultClient }
     static func setMode(_ on: Bool) -> String { "window.__orch && window.__orch.setMode(\(on));" }
     static func setPins(_ pins: [PinDraftItem]) -> String {
         let items = pins.map { "{n:\($0.n),x:\($0.place.x),y:\($0.place.y)}" }.joined(separator: ",")
@@ -234,6 +253,10 @@ enum NetworkBlock {
     """#
     /// The custom scheme the viewer serves decrypted pages from.
     static let scheme = "orch-page"
+    /// Sent with every page file: nothing but the local files, no network from script.
+    static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-src 'none'"
+    /// Runs at document start in every frame, in the page's world: no WebRTC (it is not covered by the rule list).
+    static let noWebRTC = "delete window.RTCPeerConnection; delete window.webkitRTCPeerConnection; delete window.RTCDataChannel;"
 }
 
 /// Where the viewer gets its bytes. The default goes to the network; a test or demo host puts its own in the environment.

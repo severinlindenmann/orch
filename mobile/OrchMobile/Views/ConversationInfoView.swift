@@ -1,4 +1,5 @@
 import SwiftUI
+import ImageIO
 import UIKit
 
 @MainActor
@@ -47,49 +48,11 @@ struct ConversationInfoView: View {
     }
 
     private var entries: [InfoEntry] {
-        var result: [InfoEntry] = []
-        for message in model.conversationItems(conversation) {
-            for attachment in message.attachments where attachment.kind != .voice {
-                result.append(InfoEntry(item: ArtifactItem(attachment, in: conversation),
-                                        group: attachment.kind == .image ? .photos : .files,
-                                        kind: attachment.kind == .image ? "IMAGE" : "FILE",
-                                        size: attachment.size, at: message.at, isTicket: false))
-            }
-        }
-        for attachment in ticket?.view?.attachments ?? [] {
-            let group: InfoGroup
-            switch attachment.kind {
-            case "image": group = .photos
-            case "file": group = .files
-            case "link": group = .links
-            case "html", "pr", "commit": group = .artifacts
-            default: continue
-            }
-            var item = ArtifactItem(attachment, in: conversation)
-            if group == .links, attachment.label == nil { item.title = item.url?.host ?? "Link" }
-            result.append(InfoEntry(item: item, group: group, kind: attachment.kind.uppercased(),
-                                    size: attachment.size, at: attachment.at ?? ticket?.at ?? "", isTicket: true))
-        }
-        return result.sorted {
-            if $0.at != $1.at { return $0.at > $1.at }
-            if $0.isTicket != $1.isTicket { return $0.isTicket }
-            return $0.id < $1.id
-        }
+        InfoGrouping.entries(messages: model.conversationItems(conversation), ticketAttachments: ticket?.view?.attachments ?? [],
+                             ticketAt: ticket?.at ?? "", conversation: conversation)
     }
 
-    private func entries(in group: InfoGroup, from all: [InfoEntry]) -> [InfoEntry] {
-        var seen = Set<String>()
-        return all.filter { entry in
-            let belongs = entry.group == group || (group == .artifacts && entry.isTicket && entry.item.kind == .pdf)
-            guard belongs else { return false }
-            let keys = [entry.item.blobId.map { "blob:\($0)" },
-                        entry.item.artifactId.map { "artifact:\($0)" },
-                        entry.item.url.map { "url:\($0.absoluteString)" }, "id:\(entry.id)"].compactMap { $0 }
-            let duplicate = keys.contains { seen.contains($0) }
-            seen.formUnion(keys)
-            return !duplicate
-        }
-    }
+    private func entries(in group: InfoGroup, from all: [InfoEntry]) -> [InfoEntry] { InfoGrouping.entries(in: group, from: all) }
 
     var body: some View {
         let all = entries
@@ -257,7 +220,7 @@ struct ConversationInfoView: View {
                 let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
                 do {
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                    let url = folder.appendingPathComponent(Outbox.safeFileName(item.name ?? item.title))
+                    let url = folder.appendingPathComponent(ArtifactItem.quickLookName(Outbox.safeFileName(item.name ?? item.title)))
                     try bytes.write(to: url, options: .atomic)
                     clearPreview()
                     previewFolder = folder
@@ -276,13 +239,13 @@ struct ConversationInfoView: View {
     }
 }
 
-private enum InfoGroup: String, CaseIterable, Identifiable {
+enum InfoGroup: String, CaseIterable, Identifiable {
     case photos, files, links, artifacts
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
 }
 
-private struct InfoEntry: Identifiable {
+struct InfoEntry: Identifiable {
     let item: ArtifactItem
     let group: InfoGroup
     let kind: String
@@ -332,7 +295,7 @@ private struct InfoThumbnail: View {
             .task(id: blobID) {
                 image = nil
                 guard let blobID, let data = await model.blob(blobID), !Task.isCancelled else { return }
-                image = UIImage(data: data)
+                image = ThumbnailCache.image(id: blobID, data: data)
             }
     }
 }
@@ -371,5 +334,70 @@ private struct InfoLanguageView: View {
         .foregroundStyle(Theme.text).background(Theme.bg).tint(Theme.brand)
         .navigationTitle("Voice & reply language").navigationBarTitleDisplayMode(.inline)
         .preferredColorScheme(.dark)
+    }
+}
+
+/// Which attachments of a conversation go into Photos / Files / Links / Artifacts, newest first and without duplicates.
+enum InfoGrouping {
+    static func entries(messages: [ConvItem], ticketAttachments: [TicketSnapshot.Attachment], ticketAt: String,
+                        conversation: ConversationID) -> [InfoEntry] {
+        var result: [InfoEntry] = []
+        for message in messages {
+            for attachment in message.attachments where attachment.kind != .voice {
+                result.append(InfoEntry(item: ArtifactItem(attachment, in: conversation),
+                                        group: attachment.kind == .image ? .photos : .files,
+                                        kind: attachment.kind == .image ? "IMAGE" : "FILE",
+                                        size: attachment.size, at: message.at, isTicket: false))
+            }
+        }
+        for attachment in ticketAttachments {
+            let group: InfoGroup
+            switch attachment.kind {
+            case "image": group = .photos
+            case "file": group = .files
+            case "link": group = .links
+            case "html", "pr", "commit": group = .artifacts
+            default: continue
+            }
+            var item = ArtifactItem(attachment, in: conversation)
+            if group == .links, attachment.label == nil { item.title = item.url?.host ?? "Link" }
+            result.append(InfoEntry(item: item, group: group, kind: attachment.kind.uppercased(),
+                                    size: attachment.size, at: attachment.at ?? ticketAt, isTicket: true))
+        }
+        return result.sorted {
+            if $0.at != $1.at { return $0.at > $1.at }
+            if $0.isTicket != $1.isTicket { return $0.isTicket }
+            return $0.id < $1.id
+        }
+    }
+
+    static func entries(in group: InfoGroup, from all: [InfoEntry]) -> [InfoEntry] {
+        var seen = Set<String>()
+        return all.filter { entry in
+            let belongs = entry.group == group || (group == .artifacts && entry.isTicket && entry.item.kind == .pdf)
+            guard belongs else { return false }
+            let keys = [entry.item.blobId.map { "blob:\($0)" },
+                        entry.item.artifactId.map { "artifact:\($0)" },
+                        entry.item.url.map { "url:\($0.absoluteString)" }, "id:\(entry.id)"].compactMap { $0 }
+            let duplicate = keys.contains { seen.contains($0) }
+            seen.formUnion(keys)
+            return !duplicate
+        }
+    }
+}
+
+/// Small decoded thumbnails (<= 300 px) kept in memory for the info grid.
+@MainActor
+enum ThumbnailCache {
+    private static let cache = NSCache<NSString, UIImage>()
+    static func image(id: String, data: Data) -> UIImage? {
+        if let hit = cache.object(forKey: id as NSString) { return hit }
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                                     kCGImageSourceThumbnailMaxPixelSize: 300]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        let image = UIImage(cgImage: cg)
+        cache.setObject(image, forKey: id as NSString)
+        return image
     }
 }

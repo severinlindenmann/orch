@@ -60,8 +60,14 @@ struct ArtifactViewer: View {
             if !commentMode, let approval {
                 VStack(spacing: 6) {
                     Button {
-                        model.chooseAnswer(approval.question, approval.option)
-                        dismiss()
+                        let q = approval.question
+                        if model.answers[q.id] != nil || model.pendingAnswers[q.id] != nil {
+                            sendError = "This question has already been answered."
+                        } else {
+                            model.chooseAnswer(q, approval.option)
+                            if model.pendingAnswers[q.id] != nil || model.answers[q.id] != nil { dismiss() }
+                            else { sendError = "Could not send your approval. Try again." }
+                        }
                     } label: {
                         Text("Approve publishing").themeFont(16, .semibold)
                             .frame(maxWidth: .infinity, minHeight: 50)
@@ -69,7 +75,6 @@ struct ArtifactViewer: View {
                             .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
                     }
                     .buttonStyle(.plain)
-                    .disabled(sending)
                     .accessibilityIdentifier("artifact-approve-publishing")
                     Text("Answers the question in \(approval.context)")
                         .themeFont(13).foregroundStyle(Theme.muted)
@@ -114,18 +119,27 @@ struct ArtifactViewer: View {
                 store.reset(); commentMode = false; sendError = nil
             }
                 .accessibilityIdentifier("artifact-cancel-comments")
+            Button("Add comment here") { store.addAtCenter?() }
+                .accessibilityHint("Adds a comment in the middle of what is on screen")
+                .accessibilityIdentifier("artifact-add-pin")
             Button("Send comments (\(store.count))") { send(store.changesDraft(for: item)) }
                 .disabled(store.count == 0)
                 .accessibilityIdentifier("artifact-send-comments")
         } else {
             Button { send(PinStore.approveDraft(for: item)) } label: {
                 Label("Looks good", systemImage: "hand.thumbsup")
-            }.accessibilityIdentifier("artifact-looks-good")
+            }.disabled(!canApprove).accessibilityIdentifier("artifact-looks-good")
             if canComment {
                 Button("Comment") { commentMode = true; sendError = nil }
                     .accessibilityIdentifier("artifact-comment")
             }
         }
+    }
+
+    /// "Looks good" only once the content is on screen: never approve something that was not seen.
+    private var canApprove: Bool {
+        guard case .ready(let content) = loadState else { return false }
+        switch content { case .quickLook, .link: return false; default: return true }
     }
 
     private var canComment: Bool {
@@ -207,7 +221,7 @@ struct ArtifactViewer: View {
         if mime.hasPrefix("text/html"), let html = String(data: bytes, encoding: .utf8) { return .publish(.page(html: html, name: name)) }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("orch-preview-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(Outbox.safeFileName(name))
+        let url = folder.appendingPathComponent(ArtifactItem.quickLookName(Outbox.safeFileName(name)))
         do { try bytes.write(to: url, options: .atomic) }
         catch { try? FileManager.default.removeItem(at: folder); throw error }
         if let temporaryDirectory { try? FileManager.default.removeItem(at: temporaryDirectory) }

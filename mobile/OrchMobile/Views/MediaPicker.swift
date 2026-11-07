@@ -8,6 +8,17 @@ import VisionKit
 
 /// What the person picked, ready for the composer.
 enum MediaSelection: Equatable {
+    /// Call after the files were handed to the outbox (it copies them): removes the prepared temp files and their folders.
+    func cleanUp() {
+        guard case .files(let drafts, _) = self else { return }
+        let fm = FileManager.default, tmp = fm.temporaryDirectory.standardizedFileURL.path
+        for d in drafts {
+            try? fm.removeItem(at: d.url)
+            let folder = d.url.deletingLastPathComponent()
+            if folder.standardizedFileURL.path != tmp, folder.standardizedFileURL.path.hasPrefix(tmp),
+               (try? fm.contentsOfDirectory(atPath: folder.path))?.isEmpty == true { try? fm.removeItem(at: folder) }
+        }
+    }
     case files([DraftFile], caption: String?)
     case location(LocationShare)
 }
@@ -89,6 +100,7 @@ struct MediaPicker: View {
         .fileImporter(isPresented: $importer, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             importFiles(result)
         }
+        .onDisappear { if !finished { removePrepared(drafts) } }   // swiped away: nothing prepared stays in the temp folder
         .task(id: photos) { await loadPhotos() }
         .task(id: locationRequest) {
             if step == .location { await findLocation() }
@@ -96,7 +108,7 @@ struct MediaPicker: View {
     }
 
     private var title: String {
-        switch step { case .choices: "Share something"; case .preview: "Photo preview"; case .location: "Current location" }
+        switch step { case .choices: "Share something"; case .preview: "Preview"; case .location: "Current location" }
     }
 
     private var choices: some View {
@@ -175,9 +187,9 @@ struct MediaPicker: View {
                 drafts = []; caption = ""; errorText = nil; step = .choices
                 if let source { capture = source }
                 else { photos = [] }
-            } label: { Text("Retake photo") }
+            } label: { Text(source == nil ? "Choose again" : "Retake photo") }
             .buttonStyle(MediaActionStyle())
-            .accessibilityLabel("Retake photo").accessibilityIdentifier("media-retake")
+            .accessibilityLabel(source == nil ? "Choose again" : "Retake photo").accessibilityIdentifier("media-retake")
         }
     }
 

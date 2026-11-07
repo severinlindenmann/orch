@@ -184,10 +184,10 @@ final class PinTests: XCTestCase {
     }
 }
 
-// MARK: The injected script really anchors a tap (WKWebView, no network)
+// MARK: The page sandbox (WKWebView, no network)
 
 @MainActor
-final class AnchorScriptTests: XCTestCase {
+final class PublishWebViewTests: XCTestCase {
     final class Handler: NSObject, WKScriptMessageHandler {
         var bodies: [Any] = []
         func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) { bodies.append(m.body) }
@@ -197,37 +197,108 @@ final class AnchorScriptTests: XCTestCase {
         func webView(_ w: WKWebView, didFinish n: WKNavigation!) { done?.resume(); done = nil }
     }
 
-    func testTapInCommentModePostsSelectorQuoteOffset() async throws {
-        let h = Handler(), nav = Nav()
-        let cfg = WKWebViewConfiguration()
-        cfg.userContentController.add(h, name: AnchorScript.handler)
-        cfg.userContentController.addUserScript(WKUserScript(source: AnchorScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 600), configuration: cfg)
-        web.navigationDelegate = nav
-        await withCheckedContinuation { c in
-            nav.done = c
-            web.loadHTMLString("<meta name=viewport content='width=device-width'><body style='margin:0'><section id=hero><h1 style='margin:0;height:200px'>Good things</h1></section><p>Second paragraph</p></body>", baseURL: nil)
+    private func open(_ html: String, handler: Handler? = nil) async throws -> (WKWebView, Nav, PageSchemeHandler) {
+        let pages = PageSchemeHandler(bundle: PublishBundle(entry: "index.html", files: [.init(path: "index.html", type: "text/html", data: Data(html.utf8))]))
+        let web = PublishWebView.make(handler: pages, pins: handler)
+        web.frame = CGRect(x: 0, y: 0, width: 390, height: 600)
+        let nav = Nav(); web.navigationDelegate = nav
+        let ok = await PublishWebView.block(web); XCTAssertTrue(ok)
+        await withCheckedContinuation { c in nav.done = c; web.load(URLRequest(url: PageSchemeHandler.base.appendingPathComponent("index.html"))) }
+        return (web, nav, pages)
+    }
+
+    func testPageCannotReachTheNetworkOrUseWebRTC() async throws {
+        let html = """
+        <body><script>
+        var r = {}; window.__r = r;
+        fetch('https://127.0.0.1:9/x').then(function(){ r.fetch = 'ok'; }, function(){ r.fetch = 'blocked'; });
+        var x = new XMLHttpRequest(); x.open('GET', 'https://127.0.0.1:9/x'); x.onload = function(){ r.xhr = 'ok'; }; x.onerror = function(){ r.xhr = 'blocked'; }; x.send();
+        try { var w = new WebSocket('wss://127.0.0.1:9/x'); w.onopen = function(){ r.ws = 'ok'; }; w.onerror = function(){ r.ws = 'blocked'; }; } catch (e) { r.ws = 'blocked'; }
+        var i = new Image(); i.onload = function(){ r.img = 'ok'; }; i.onerror = function(){ r.img = 'blocked'; }; i.src = 'https://127.0.0.1:9/p.png';
+        r.rtc = (typeof RTCPeerConnection === 'undefined' && typeof webkitRTCPeerConnection === 'undefined') ? 'gone' : 'present';
+        </script></body>
+        """
+        let (web, _, _) = try await open(html)
+        var result: [String: String] = [:]
+        for _ in 0..<50 {
+            let json = try await web.evaluateJavaScript("JSON.stringify(window.__r || {})") as? String ?? "{}"
+            result = (try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: String]) ?? [:]
+            if result.count == 5 { break }
+            try await Task.sleep(for: .milliseconds(200))
         }
-        _ = try await web.evaluateJavaScript(AnchorScript.setMode(true))
-        _ = try await web.evaluateJavaScript("""
+        XCTAssertEqual(result, ["fetch": "blocked", "xhr": "blocked", "ws": "blocked", "img": "blocked", "rtc": "gone"])
+    }
+
+    func testTapInCommentModePostsSelectorQuoteOffset() async throws {
+        let h = Handler()
+        let (web, _, _) = try await open("<meta name=viewport content='width=device-width'><body style='margin:0'><section id=hero><h1 style='margin:0;height:200px'>Good things</h1></section><p>Second paragraph</p></body>", handler: h)
+        let w = AnchorScript.world
+        _ = try await web.evaluateJavaScript("window.__orchTest = true;", in: nil, contentWorld: w)
+        _ = try await web.evaluateJavaScript(AnchorScript.setMode(true), in: nil, contentWorld: w)
+        let tap = """
         (function(){ var e=document.querySelector('h1'); var r=e.getBoundingClientRect();
           var o={bubbles:true,clientX:r.left+20,clientY:r.top+20,pointerId:1};
           e.dispatchEvent(new PointerEvent('pointerdown',o)); e.dispatchEvent(new PointerEvent('pointerup',o)); })()
-        """)
+        """
+        // The page's own world cannot trigger anything: it has neither the handler nor the test flag.
+        _ = try await web.evaluateJavaScript(tap)
+        XCTAssertTrue(h.bodies.isEmpty, "a synthetic event from the page itself is not a finger")
+        _ = try await web.evaluateJavaScript(tap, in: nil, contentWorld: w)
         let r = try XCTUnwrap(AnchorMaker.html(fromScript: try XCTUnwrap(h.bodies.first)))
         XCTAssertEqual(r.anchor.selector, "#hero > h1:nth-of-type(1)")
         XCTAssertEqual(r.anchor.quote, "Good things")
         XCTAssertEqual(r.anchor.viewportW, 390)
         // pins are drawn inside the page and a tap on one posts "edit"
-        _ = try await web.evaluateJavaScript(AnchorScript.setPins([PinDraftItem(n: 1, anchor: r.anchor, place: r.place)]))
+        _ = try await web.evaluateJavaScript(AnchorScript.setPins([PinDraftItem(n: 1, anchor: r.anchor, place: r.place)]), in: nil, contentWorld: w)
         let n = try await web.evaluateJavaScript("document.querySelectorAll('[data-orch-pin]').length") as? Int
         XCTAssertEqual(n, 1)
-        _ = try await web.evaluateJavaScript("document.querySelector('[data-orch-pin]').click()")
+        _ = try await web.evaluateJavaScript("document.querySelector('[data-orch-pin]').click()", in: nil, contentWorld: w)
         XCTAssertEqual((h.bodies.last as? [String: Any])?["kind"] as? String, "edit")
+        // "Add comment here" posts an anchor for the middle of the screen
+        let before = h.bodies.count
+        _ = try await web.evaluateJavaScript("window.__orch.placeCenter();", in: nil, contentWorld: w)
+        XCTAssertEqual(h.bodies.count, before + 1)
+        XCTAssertNotNil(AnchorMaker.html(fromScript: h.bodies.last as Any))
         // outside comment mode nothing is posted
         let count = h.bodies.count
-        _ = try await web.evaluateJavaScript(AnchorScript.setMode(false))
-        _ = try await web.evaluateJavaScript("(function(){var e=document.querySelector('p');var o={bubbles:true,clientX:5,clientY:300,pointerId:1};e.dispatchEvent(new PointerEvent('pointerdown',o));e.dispatchEvent(new PointerEvent('pointerup',o));})()")
+        _ = try await web.evaluateJavaScript(AnchorScript.setMode(false), in: nil, contentWorld: w)
+        _ = try await web.evaluateJavaScript(tap, in: nil, contentWorld: w)
         XCTAssertEqual(h.bodies.count, count)
+    }
+}
+
+// MARK: Info grouping, download cap, QuickLook names
+
+final class M3HelperTests: XCTestCase {
+    func testInfoGroupsAreSplitDeduplicatedAndNewestFirst() {
+        let conv = ConversationID.topic(workspace: "ws_1", ticket: "t_1")
+        var photo = ConvItem(id: "m1", at: "2026-11-05T10:00:00Z", side: .me)
+        photo.attachments = [MessageAttachment(blobId: "b_1", kind: .image, name: "a.jpg", size: 10, mime: "image/jpeg"),
+                             MessageAttachment(blobId: "b_2", kind: .file, name: "r.pdf", size: 20, mime: "application/pdf"),
+                             MessageAttachment(blobId: "b_v", kind: .voice, name: "v.m4a", size: 5, mime: "audio/m4a")]
+        let ticket: [TicketSnapshot.Attachment] = [
+            .init(kind: "image", blobId: "b_1", name: "a.jpg", size: 10, at: "2026-11-05T11:00:00Z"),      // same blob as the message: once
+            .init(kind: "html", title: "Page", url: "https://x.example/f/a#k=b", at: "2026-11-05T12:00:00Z", artifactId: "a_1", rev: "r"),
+            .init(kind: "link", title: "Doc", url: "https://docs.example/x", at: "2026-11-05T09:00:00Z"),
+            .init(kind: "pr", title: "PR 1", url: "https://github.com/x/1", at: "2026-11-05T08:00:00Z")]
+        let all = InfoGrouping.entries(messages: [photo], ticketAttachments: ticket, ticketAt: "", conversation: conv)
+        XCTAssertEqual(InfoGrouping.entries(in: .photos, from: all).count, 1)
+        XCTAssertEqual(InfoGrouping.entries(in: .files, from: all).map(\.item.name), ["r.pdf"], "voice notes are not listed")
+        XCTAssertEqual(InfoGrouping.entries(in: .links, from: all).map(\.item.title), ["Doc"])
+        XCTAssertEqual(InfoGrouping.entries(in: .artifacts, from: all).map(\.item.title), ["Page", "PR 1"], "newest first")
+    }
+    func testDownloadIsCapped() async throws {
+        let c = try json("publish-blob-v1")["good"] as! [String: Any]
+        let link = PublishLink(URL(string: "https://p.example.org/f/x1\(c["url_fragment"] as! String)")!)!
+        StubURLProtocol.respond = { _ in (200, Data(repeating: 1, count: 4096)) }
+        let cfg = URLSessionConfiguration.ephemeral; cfg.protocolClasses = [StubURLProtocol.self]
+        var f = PublishFetcher(session: URLSession(configuration: cfg)); f.maxBytes = 1000
+        do { _ = try await f.load(link); XCTFail("over the cap") } catch { XCTAssertEqual(error as? PublishError, .broken) }
+        XCTAssertEqual(PublishFetcher.maxBlobBytes, 100 * 1_048_576 + 65_536 + 36)
+    }
+    func testQuickLookOpensPagesAsText() {
+        XCTAssertEqual(ArtifactItem.quickLookName("page.HTML"), "page.HTML.txt")
+        XCTAssertEqual(ArtifactItem.quickLookName("logo.svg"), "logo.svg.txt")
+        XCTAssertEqual(ArtifactItem.quickLookName("report.pdf"), "report.pdf")
     }
 }
