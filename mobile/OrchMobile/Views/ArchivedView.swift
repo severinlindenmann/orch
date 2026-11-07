@@ -6,6 +6,18 @@ struct ArchiveToast: Equatable {
     let text: String
     let undo: (() -> Void)?
     static func == (a: ArchiveToast, b: ArchiveToast) -> Bool { a.id == b.id }
+
+    /// How long the undo toast stays: exactly 5 s. Only a UI-test build (DEBUG or `-uitest`) that also sets
+    /// `ORCH_UITEST_TOAST_SECONDS` may change it (a slow CI runner needs longer); real phones never read the variable.
+    static let duration: Duration = {
+        #if DEBUG
+        let uiTest = true
+        #else
+        let uiTest = CommandLine.arguments.contains("-uitest")
+        #endif
+        if uiTest, let v = ProcessInfo.processInfo.environment["ORCH_UITEST_TOAST_SECONDS"], let n = Double(v), n > 0 { return .seconds(n) }
+        return .seconds(5)
+    }()
 }
 
 struct ArchiveToastBar: View {
@@ -37,7 +49,7 @@ extension View {
             if let t = toast.wrappedValue { ArchiveToastBar(toast: t) { toast.wrappedValue = nil }.padding(.bottom, bottom).transition(.opacity) }
         }.task(id: toast.wrappedValue?.id) {
             guard toast.wrappedValue != nil else { return }
-            try? await Task.sleep(for: .seconds(5))
+            try? await Task.sleep(for: ArchiveToast.duration)
             if !Task.isCancelled { toast.wrappedValue = nil }
         }
     }
