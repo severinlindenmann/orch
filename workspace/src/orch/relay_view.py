@@ -4,6 +4,7 @@ Local files only, no network: workspaces.json, allows.json, inbox, outbox and th
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
 from pathlib import Path
@@ -183,6 +184,8 @@ def view(root: Path) -> dict:
             }
         )
         return out
+    with contextlib.suppress(Exception):  # the admin's settings changed: pick them up now
+        relay.auto_refresh(root)
     peers = _peers(root)
     waiting = len(relay.outbox_list(root))
     if waiting:
@@ -197,7 +200,12 @@ def view(root: Path) -> dict:
             "type": "list",
             "title": f"Workspaces you can talk to · {len(peers)}",
             "items": peers[:50]
-            or [{"title": "Nobody yet", "subtitle": "Ask your admin, then run: orch relay refresh"}],
+            or [
+                {
+                    "title": "Nobody yet",
+                    "subtitle": "Ask your admin to allow this workspace to talk to others.",
+                }
+            ],
         }
     )
     rows: list[tuple[str, dict]] = []

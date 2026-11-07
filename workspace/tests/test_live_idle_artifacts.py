@@ -123,7 +123,7 @@ def test_artifacts_dir_and_list(proj, run):
     d = proj / out.strip()
     assert d.is_dir()
     assert run("ticket", "artifacts-dir", tid)[0] == 0  # again: fine
-    (d / "report.csv").write_text("a,b\n")
+    (d / "report.csv").write_bytes(b"a,b\n")  # 4 bytes on every system (text mode adds \r on Windows)
     (d / "sub").mkdir()
     (d / "sub" / "x.txt").write_text("hello")
     code, out, _ = run("ticket", "artifacts", tid, "--json")

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import addons, cli
+from orch import addons, cli, winfinish
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 
@@ -23,6 +23,10 @@ def proj(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_HOME", str(fake_home / "orchhome"))
     # an agent tool's own settings (a live start marks the folder trusted there): never the real ones
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(fake_home))
+    # Windows finishes add-on installs and updates in a background process (winfinish), which tests can not
+    # wait for: they run the same steps in the command itself, as on other systems. test_winfinish.py covers
+    # the background path (it sets needed() itself), the Windows e2e flows cover it for real.
+    monkeypatch.setattr(winfinish, "needed", lambda: False)
     return tmp_path
 
 

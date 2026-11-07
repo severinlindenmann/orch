@@ -32,7 +32,7 @@ Each workspace installs the skills of the services it uses. Phone and other work
 5. Ticket format in JSON, flexible/dynamic: extra fields for add-ons, other params/tools; generic links to any tool
 6. Questions and answers
 Not included: signed tickets, fixed requirements, planning gates.
-Ticket JSON sketch: id, title, status, checklist[{id,text,done,evidence[{type,url}]}], links[{type,url}], questions[{id,text,options,recommended,answer}], history[{at,by,text}], wake_at, waiting_on, ext{scheduler{cron}}.
+Ticket JSON sketch: id, title, status, checklist[{id,text,done,evidence[{type,url}]}], refs[{kind,url,at,by}], questions[{id,text,options,recommended,answer}], history[{at,by,text}], wake_at, waiting_on, ext{scheduler{cron}}.
 - links open (any type). ext: each add-on owns its key.
 - .agents/skills/ is the one real skills folder; .claude/skills -> symlink (mac/linux) / junction (Windows, no admin).
 

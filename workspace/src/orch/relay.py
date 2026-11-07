@@ -106,9 +106,10 @@ def _handle_mobile_off(root: Path, m: dict) -> str:
         if m["id"] in seen(root):
             return "already handled"
         ok = _mobile_off_ok(root, m)
+        since = mobile_mode.settle(root).get("since")
         _mark_seen(root, m["id"])
     if ok:
-        mobile_mode.turn_off(root, "off")
+        mobile_mode.turn_off(root, "phone", if_since=since, by=m["from"])
     return (
         "Mobile mode was turned off from the phone"
         if ok
@@ -1430,6 +1431,26 @@ def _hint_applied(root: Path, m: dict) -> bool:
     )
 
 
+def auto_refresh(root: Path) -> bool:
+    """When the admin's "new settings are waiting" notice is pending, do what `orch relay refresh` does.
+    The refresh marks the notices seen. Nothing pending: no call. A failed refresh keeps the notice."""
+    for f in (root / ".orch" / "inbox").glob("m_*.json"):
+        m = net.read_json(f, None)
+        if (
+            isinstance(m, dict)
+            and m.get("id") == f.stem
+            and m.get("type") == "refresh-hint"
+            and f.stem not in seen(root)
+            and not _hint_applied(root, m)
+        ):
+            try:
+                refresh(root)
+            except (Refused, OSError, ValueError, TimeoutError):
+                return False
+            return True
+    return False
+
+
 def inbox(root: Path, wait: int = 0) -> list[dict]:
     """Pull, save, journal, ack, then handle the ones not seen. Returns [{message, note, allowed}]."""
     with contextlib.suppress(Refused):
@@ -1487,9 +1508,11 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                             note = f"could not use this phone message: {clean_untrusted(str(e), 200)}"
                         auto = True
                         _mark_seen(root, m["id"])  # last
-            elif typ == "refresh-hint" and _hint_applied(root, m):
+            elif typ == "refresh-hint" and (
+                _hint_applied(root, m) or m["id"] in seen(root) or auto_refresh(root)
+            ):
                 with locked(root):
-                    _mark_seen(root, m["id"])  # the refresh already ran for this version: nothing to tell
+                    _mark_seen(root, m["id"])  # the settings are up to date: nothing to tell
                 continue
             elif typ in ("delegate", "start") and not _allowed_or_made(root, m):
                 with locked(root):
