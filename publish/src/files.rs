@@ -214,6 +214,9 @@ pub async fn meta(St(st): St<State>, Path(id): Path<String>) -> ApiResult<Respon
     let h = r.headers_mut();
     h.insert("cache-control", HeaderValue::from_static("no-store"));
     h.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
-    h.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    h.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
     Ok(r)
 }

@@ -48,7 +48,9 @@ fn field(v: &Value, key: &str, ok: impl Fn(&str) -> bool) -> Res<Option<Option<S
         None => Ok(None),
         Some(Value::Null) => Ok(Some(None)),
         Some(Value::String(s)) if ok(s) => Ok(Some(Some(s.clone()))),
-        Some(_) => Err(invalid(format!("`{key}` is not one of the allowed values."))),
+        Some(_) => Err(invalid(format!(
+            "`{key}` is not one of the allowed values."
+        ))),
     }
 }
 
@@ -67,7 +69,9 @@ pub fn is_look_body(v: &Value) -> bool {
 
 /// `PATCH /v1/me` with look fields: only icon and color, nothing else in the body. Returns the checked patch.
 pub fn parse_me(v: &Value) -> Res<Patch> {
-    let o = v.as_object().ok_or_else(|| invalid("Send a JSON object."))?;
+    let o = v
+        .as_object()
+        .ok_or_else(|| invalid("Send a JSON object."))?;
     if o.keys().any(|k| k != "icon" && k != "color") {
         return Err(invalid(
             "Send the icon and colour on their own, not with other fields.",

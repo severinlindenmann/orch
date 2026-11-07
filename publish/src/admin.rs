@@ -157,7 +157,8 @@ fn clean_description(d: &str) -> ApiResult<String> {
 async fn ws_create(St(st): St<State>, h: HeaderMap, body: Bytes) -> ApiResult<Response> {
     check(&st, &h)?;
     let raw: Value = serde_json::from_slice(&body).map_err(|e| ApiError::invalid(e.to_string()))?;
-    let b: NewWs = serde_json::from_value(raw.clone()).map_err(|e| ApiError::invalid(e.to_string()))?;
+    let b: NewWs =
+        serde_json::from_value(raw.clone()).map_err(|e| ApiError::invalid(e.to_string()))?;
     let lk = crate::look::parse(&raw)?;
     if b.name.trim().is_empty() || b.name.len() > 60 {
         return Err(ApiError::invalid("The name must be 1-60 characters."));
@@ -217,12 +218,14 @@ async fn ws_patch(
 ) -> ApiResult<Json<Value>> {
     check(&st, &h)?;
     let raw: Value = serde_json::from_slice(&body).map_err(|e| ApiError::invalid(e.to_string()))?;
-    let b: PatchWs = serde_json::from_value(raw.clone()).map_err(|e| ApiError::invalid(e.to_string()))?;
+    let b: PatchWs =
+        serde_json::from_value(raw.clone()).map_err(|e| ApiError::invalid(e.to_string()))?;
     let lk = crate::look::parse(&raw)?;
     // Check and set under one transaction: a refused look stores nothing from this body.
     let mut c = st.db.lock().unwrap();
     let tx = c.transaction()?;
-    let mut w = db::get_workspace(&tx, &id)?.ok_or_else(|| ApiError::not_found("No such workspace."))?;
+    let mut w =
+        db::get_workspace(&tx, &id)?.ok_or_else(|| ApiError::not_found("No such workspace."))?;
     if lk.has_look() {
         crate::look::admin_allowed(&w.look_by)?;
     }

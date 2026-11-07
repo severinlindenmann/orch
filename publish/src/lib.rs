@@ -87,6 +87,8 @@ pub fn public_router(st: State) -> Router {
         .route("/onboarding.sh", get(web::onboarding_sh))
         .route("/onboarding.ps1", get(web::onboarding_ps1))
         .route("/_/file.js", get(web::file_js))
+        .route("/_/look.js", get(web::look_js))
+        .route("/_/look-data.js", get(web::look_data_js))
         .route("/_/style.css", get(web::style_css))
         .route("/_/frame.html", get(web::frame_html))
         .route("/_/frame.js", get(web::frame_js))

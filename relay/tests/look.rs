@@ -51,7 +51,12 @@ async fn me_patch_vectors() {
         let (s, body) = t
             .call(&ws, "PATCH", "/v1/me", Some(v["body"].clone()))
             .await;
-        assert_eq!(s as u64, v["status"].as_u64().unwrap(), "{} {body}", v["name"]);
+        assert_eq!(
+            s as u64,
+            v["status"].as_u64().unwrap(),
+            "{} {body}",
+            v["name"]
+        );
         assert_eq!(stored(&t, &ws.id), v["after"], "{}", v["name"]);
         if s == 200 {
             for k in ["icon", "color", "look_by"] {
@@ -74,7 +79,12 @@ async fn admin_patch_vectors() {
                 Some(v["body"].clone()),
             )
             .await;
-        assert_eq!(s as u64, v["status"].as_u64().unwrap(), "{} {body}", v["name"]);
+        assert_eq!(
+            s as u64,
+            v["status"].as_u64().unwrap(),
+            "{} {body}",
+            v["name"]
+        );
         assert_eq!(stored(&t, &ws.id), v["after"], "{}", v["name"]);
     }
 }
@@ -83,7 +93,11 @@ async fn admin_patch_vectors() {
 async fn admin_refusal_stores_nothing_from_the_body() {
     let t = start().await;
     let ws = t.add_ws("Finance").await;
-    store(&t, &ws.id, &json!({"icon": "wallet", "color": "amber", "look_by": "workspace"}));
+    store(
+        &t,
+        &ws.id,
+        &json!({"icon": "wallet", "color": "amber", "look_by": "workspace"}),
+    );
     let (s, _) = t
         .admin_json(
             "PATCH",
@@ -115,7 +129,11 @@ async fn create_with_look_whoami_list_and_phone() {
     };
     let (_, who) = t.call(&ws, "GET", "/v1/whoami", None).await;
     assert_eq!(
-        (who["icon"].clone(), who["color"].clone(), who["look_by"].clone()),
+        (
+            who["icon"].clone(),
+            who["color"].clone(),
+            who["look_by"].clone()
+        ),
         (json!("house"), json!("teal"), json!("admin"))
     );
     let (s, _) = t

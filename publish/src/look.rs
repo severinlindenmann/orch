@@ -79,8 +79,7 @@ pub fn parse_me(v: &Value) -> ApiResult<Patch> {
     let o = v
         .as_object()
         .ok_or_else(|| ApiError::invalid("Send a JSON object."))?;
-    if o
-        .keys()
+    if o.keys()
         .any(|k| !matches!(k.as_str(), "icon" | "color" | "show_on_shared_pages"))
     {
         return Err(ApiError::invalid(
