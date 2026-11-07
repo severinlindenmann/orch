@@ -405,6 +405,27 @@ for sect, defname in (("answer", "answer_request"), ("settings_patch", "settings
             fails.append(f"phone-v3 vector {sect} {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
 
 
+# Mobile mode (relay-api.md, Mobile mode).
+mmvec = json.loads((HERE / "vectors" / "mobile-mode-v1.json").read_text())
+for case in mmvec["heartbeat"]:
+    if (not phone_errors("heartbeat_request", case["request"])) != case["ok"]:
+        fails.append(f"mobile-mode vector heartbeat {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
+    if case["ok"] and phone_errors("heartbeat_response", {"mobile_mode": case["stored"]}):
+        fails.append(f"mobile-mode vector heartbeat {case['name']}: stored value invalid")
+for case in mmvec["control"]:
+    if (not phone_errors("control_request", case["request"])) != case["ok"]:
+        fails.append(f"mobile-mode vector control {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
+    if case["ok"]:
+        body = {"control": case["request"]["control"]}
+        if "client_id" in case["request"]:
+            body["client_id"] = case["request"]["client_id"]
+        built = {"schema": "orch.msg/1", "from": mmvec["phone"], "to": case["request"]["to"], "type": "control", "body": body}
+        if built != case["built"]:
+            fails.append(f"mobile-mode vector control {case['name']}: built message differs")
+        stored = {**built, "id": "m_0000000000000001", "created_at": "2026-11-07T20:00:00Z"}
+        for e in errors("message", stored)[:1]:
+            fails.append(f"mobile-mode vector control {case['name']}: built message invalid: {e.message}")
+
 def speech_text(body, limit):
     """Reference (relay-api.md, Speech): summary else text; URLs -> 'link'; drop * ` #; one space per whitespace run;
     longer than limit: cut after the last . ! ? that is followed by a space within the limit, else before the last

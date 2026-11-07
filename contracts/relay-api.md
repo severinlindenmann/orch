@@ -26,6 +26,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | delegate / start | pair rule `delegate` / `start`. The relay does **not** check the allow; the receiver does (local-files.md) |
 | allow | `reply_to` is a delegate/start that `to` sent to `from` |
 | refresh-hint, webhook | only made by the relay itself |
+| control | only made by the relay, from `POST /v1/phone/control` (a workspace posting one → `403`) |
 
 3. **Same id twice:** identical message → `200 {id, duplicate: true}`, nothing new is stored. Same id, different content (or another sender) → `409 conflict`.
 4. **Only the receiver** can fetch and ack its inbox messages.
@@ -36,6 +37,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 |---|---|---|---|
 | GET | `/v1/whoami` | – | `{id, name, description, tags, phones: n, pending}`: the approved values, plus `pending` = `{description: string\|null, tags: [..]\|null, at}` (only the proposed fields are set; `rev` identifies this exact proposal) or `null` |
 | PATCH | `/v1/me` | `{description?: string ≤ 280, tags?: [string ≤ 24, ≤ 8 items]}` (at least one) | `202 {…whoami, status: "pending"}`. The change is only a proposal: the owner must approve it in the admin panel, and until then the old values stay in effect everywhere (directory, refresh snapshot, phones). One pending change per workspace; a new one replaces it. `description` is one line of plain text, characters from Unicode categories L, M, N, P, S and Zs only (no control, newline, bidi or zero-width characters), NFC-normalised, no Default_Ignorable_Code_Point characters (variation selectors, U+034F, U+3164, ...) or U+2800, at most 2 combining marks in a row; tags are lowercase `[a-z0-9-]`, 1–24 characters. Admin-set values follow the same rules. Writes only the pending fields, only while the calling token is still current (else `401`). Bad input → `422 invalid` |
+| POST | `/v1/heartbeat` | `{mobile_mode: {on, since, ends_at, machine, ended?}}` | `200 {mobile_mode}` (the stored value, as phones see it). See **Mobile mode** below |
 | POST | `/v1/messages` | one message | `201 {id}` (see rules above) |
 | GET | `/v1/inbox?wait=0..30` | – | `{items: [message…], next: null}` not yet acked, oldest first, max 100. `wait` = long-poll seconds |
 | POST | `/v1/inbox/ack` | `{ids: [m_…]}` | `204`. Acked messages are no longer delivered (the admin can still read them). The relay keeps the ack time; for a phone's text it is that text's `delivered_at` (Phone API) |
@@ -53,7 +55,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 |---|---|---|---|
 | POST | `/v1/phone/pair` | `{code, name}` (no auth; one-time code from the link) | `201 {phone_id, token, workspaces: [{id, name}]}` |
 | POST | `/v1/phone/push` | `{apns_token, sandbox: bool}` | `204` |
-| GET | `/v1/phone/workspaces` | – | list of `{id, name, description, tags, online, last_seen, open_questions, muted_until}` (only workspaces this phone may reach). `online` = called the relay in the last 2 minutes (unchanged); the phone itself shows a workspace as online while `last_seen` is at most 5 minutes old. `muted_until`: `null`, a time, or `"forever"` |
+| GET | `/v1/phone/workspaces` | – | list of `{id, name, description, tags, online, last_seen, open_questions, muted_until}` (only workspaces this phone may reach). `online` = called the relay in the last 2 minutes (unchanged); the phone itself shows a workspace as online while `last_seen` is at most 5 minutes old. `muted_until`: `null`, a time, or `"forever"`; plus `mobile_mode` = `{on, since, ends_at, machine}` (always present; `on: false` and the other three `null` when off; see **Mobile mode**) |
 | PATCH | `/v1/phone/workspaces/<ws>` | `{muted_until: <time> \| null \| "forever"}` | `200` the workspace item as listed. While muted (`"forever"`, or a time in the future) the relay sends this phone no push for anything from that workspace (texts and questions); messages are still stored and listed. `null` or a past time = not muted. A workspace not on the phone's list → `404` |
 | DELETE | `/v1/phone/workspaces/<ws>` | – | `204`. Drops the workspace from this phone's list (same as the admin unticking it: the workspace gets a refresh-hint and can no longer reach the phone). Only an invitation adds it again. Not on the list → `404` |
 | GET | `/v1/phone/questions` | – | list of `{message, workspace_name}`, open questions only (sent to `phones` or to this phone by a workspace on its list) |
@@ -63,12 +65,51 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | GET | `/v1/phone/blobs/<blob_id>` | – | raw bytes (`application/octet-stream`) of a proof file a workspace on the phone's list named in a `body.ticket_view` attachment of a text it sent to this phone or to `phones` (the same filter as `/v1/phone/messages`), or of a blob this phone uploaded; anything else, an unknown id included, answers `404` |
 | POST | `/v1/phone/answer` | `{question_message_id, answer, client_id}` | `201 {id, client_id}`. The relay builds the `answer` message (`from: ph_…`, `answered_by: human:<phone name>`, `body.client_id`, routed as above). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}` with the first answer's id (checked before the 409, so a retry of the winning answer is not a conflict). First answer wins; later answers from any phone → `409 already_answered` |
 | POST | `/v1/phone/send` | `{to: ws_…, client_id, text?, ticket?, general?, reply_to?, attachments?, voice?, location?, feedback?}` (phone-api.schema.json `send_request`) | `201 {id, client_id}`. A `text` message from the phone, built by the relay (see Phone app v3). `to` must be on the phone's list (`403 not_allowed`). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}`, no second message (the relay does not compare the content) |
+| POST | `/v1/phone/control` | `{to: ws_…, control: "mobile_mode_off", client_id?}` (phone-api.schema.json `control_request`) | `201 {id, client_id}`. The relay stores a `control` message `from: ph_…`, `to` the workspace, `body: {control, client_id?}`. `to` must be on the phone's list (`403 not_allowed`), an unknown `control` value → `422 invalid`. Same `client_id` again → `200 {id, client_id, duplicate: true}`. Not listed in any phone view (`/v1/phone/messages` shows `text` only). See **Mobile mode** |
 | POST | `/v1/phone/transcribe` | Body = the audio bytes, `Content-Type: audio/m4a` (also `audio/wav`, `audio/webm`), max 10 MB / 2 min, optional `?language=de` (`de`, `en`, `de-CH`, …; else the language is detected, or `de-CH` when the phone's `swiss_german` setting is on: Deepgram nova-3 with `language=de-CH`) | `200 {text, language, duration}` (`duration` in seconds). `503 transcription_off` when the admin set no Deepgram key (the app then uses on-device speech), `502 transcription_failed` when Deepgram fails or is unreachable, `429 rate_limited` after 30 calls a minute per phone, `413 too_large`, `422 invalid` (type, empty, language) |
 | POST | `/v1/phone/signout` | – | `204`. Deletes the token and the push registration; the old token gets `401` from now on |
 | GET | `/v1/phone/speech/<message_id>` | optional `?lang=de\|en` | `200` `audio/mpeg`: the text read aloud (see Speech). `404` unless the message is a text to this phone or to `phones` from a workspace on its list (the `/v1/phone/messages` filter) **and** (it has `body.speak` and the phone's `speak` setting is not `never`, or the setting is `always`). Empty spoken text → `404`. `?lang` other than `de`/`en` → `422 invalid`. `402 tts_cap_reached`, `503 tts_off`, `502 tts_failed` |
 | GET | `/v1/phone/settings` | – | `{speak, swiss_german, tts_cap_usd, tts_used_usd_month}`. Defaults: `auto`, `false`, `10`. `tts_used_usd_month` = read-aloud cost of this phone in the current calendar month (UTC) |
 | PATCH | `/v1/phone/settings` | `{speak?: auto\|always\|never, swiss_german?: bool, tts_cap_usd?: 0..100}` (at least one) | `200` the settings as for GET. A bad value → `422 invalid`; unknown fields are ignored (common.md) |
 | POST | `/v1/phone/invitations/redeem` | `{code}` (phone auth) | `200 {workspaces: [{id, name}]}` = the invitation's workspaces, now all on this phone's list (ones already there stay). The code comes from the same `orch://pair?relay=…&code=pc_…` link or QR as pairing and works once: unknown → `404 not_found`, used or expired → `410 gone`. The phone entry the admin made with that invitation is removed (it was never paired); the added workspaces get a refresh-hint. At most 10 calls a minute per phone, else `429 rate_limited` |
+
+## Mobile mode
+
+Shapes: `phone-api.schema.json` (`heartbeat_request`, `mobile_mode`, `control_request`), `message.schema.json` (`control`). Test vector:
+`vectors/mobile-mode-v1.json`. Mobile mode = the person left the desk: the workspace keeps its computer awake and sends every question to the
+phone. The relay only stores the flag, shows it to phones, pushes three kinds of news and carries one phone request back.
+
+**Heartbeat (`POST /v1/heartbeat`, workspace auth).** The workspace sends `{mobile_mode: {on, since, ends_at, machine, ended?}}`
+at least every 60 s while Mobile mode is on, and once when it changes (also when it turns off). `on` is required (bool). While `on` is
+true: `since` and `ends_at` are UTC times (`ends_at` = when the lease runs out), `machine` is a display name of the computer, one line of
+plain text, 1 to 60 characters (the description character rule), `ended` is not allowed. While `on` is false: `since`, `ends_at` and
+`machine` must be `null` or left out; `ended` (optional) says why: `off` (someone turned it off), `lease` (the time ran out) or `restart`
+(the computer restarted). A bad body → `422 invalid`. The relay keeps one value per workspace (the last one) and replaces it as a
+whole. A workspace that never sent a heartbeat is `{on: false}`. Any authenticated call of the workspace counts as "heard from it"
+(`last_seen`), the heartbeat is the only call that changes the flag.
+
+**Phones see it:** `GET /v1/phone/workspaces` items carry `mobile_mode: {on, since, ends_at, machine}` (all `null` but `on: false` when off).
+The phone's own mute still wins: a muted phone gets no push below and shows "muted, but <machine> is in Mobile mode".
+
+**Pushes** (APNs, to every paired phone that has the workspace on its list and has **not** muted it; a muted phone gets none, a phone
+that is not paired with the workspace never gets one). Payload: `{"aps": {"alert": {"title": "<workspace name>", "body": "<text>"}, "sound": "default"},
+"workspace": "ws_…", "type": "mobile_mode", "kind": "<kind>"}` with no `message_id` / `text_id`; tapping opens the workspace.
+
+| `kind` | When | Body text |
+|---|---|---|
+| `mobile_mode_unreachable` | Mobile mode is on and the relay has not heard from the workspace for 5 minutes. Once per outage | "Can't reach <machine>. Your answers wait until it is back." |
+| `mobile_mode_back` | the workspace is heard from again (a heartbeat with `on: true`) after `mobile_mode_unreachable` | "<machine> is back." |
+| `mobile_mode_ended` | a heartbeat with `on: false` after one with `on: true` (also right after `mobile_mode_unreachable`) | `ended: lease` "Mobile mode ended: the time ran out.", `restart` "Mobile mode ended: the computer restarted.", otherwise "Mobile mode was turned off." |
+
+`<machine>` = the last `machine`, else the workspace name. The relay checks for silent workspaces every 60 s. A heartbeat with
+`on: false` for a workspace that was already off pushes nothing. Turning on pushes nothing (the person just did it).
+
+**Turn off from the phone (`POST /v1/phone/control`).** `control: "mobile_mode_off"` is the only value. The relay builds the message
+(`type: "control"`, `from` = the authenticated phone, `to` = the workspace) only for a workspace on that phone's list; the workspace
+cannot post this type and the phone cannot set `from`. It reaches the workspace through its normal inbox. **The workspace must act on it
+only when** `from` is a phone id in the `phones` list of its last `GET /v1/refresh` (the phone is still paired), **and** `created_at` is at
+most 10 minutes old (an old request is acked and ignored, so a stale "off" cannot end a later Mobile mode). It then turns Mobile mode off, acks the
+message, and sends a heartbeat with `on: false, ended: "off"`. The relay does not know whether the workspace obeyed.
 
 ## Phone app v3 (messenger)
 

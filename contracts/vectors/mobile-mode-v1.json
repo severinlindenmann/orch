@@ -1,0 +1,240 @@
+{
+ "name": "mobile-mode-v1",
+ "description": "Mobile mode (relay-api.md, Mobile mode). heartbeat: POST /v1/heartbeat bodies (phone-api.schema.json heartbeat_request); ok=true cases also give `stored`, the value phones see in GET /v1/phone/workspaces (mobile_mode). control: POST /v1/phone/control bodies (control_request); ok=true cases give `built`, the message the relay stores (message.schema.json control). pushes: what the relay pushes for a transition (kind, body text), `muted` phones get none.",
+ "heartbeat": [
+  {
+   "name": "on",
+   "ok": true,
+   "why": "",
+   "request": {
+    "mobile_mode": {
+     "on": true,
+     "since": "2026-11-07T14:02:00Z",
+     "ends_at": "2026-11-08T02:02:00Z",
+     "machine": "Acme PC"
+    }
+   },
+   "stored": {
+    "on": true,
+    "since": "2026-11-07T14:02:00Z",
+    "ends_at": "2026-11-08T02:02:00Z",
+    "machine": "Acme PC"
+   }
+  },
+  {
+   "name": "off-by-person",
+   "ok": true,
+   "why": "",
+   "request": {
+    "mobile_mode": {
+     "on": false,
+     "ended": "off"
+    }
+   },
+   "stored": {
+    "on": false,
+    "since": null,
+    "ends_at": null,
+    "machine": null
+   }
+  },
+  {
+   "name": "off-lease-explicit-nulls",
+   "ok": true,
+   "why": "",
+   "request": {
+    "mobile_mode": {
+     "on": false,
+     "since": null,
+     "ends_at": null,
+     "machine": null,
+     "ended": "lease"
+    }
+   },
+   "stored": {
+    "on": false,
+    "since": null,
+    "ends_at": null,
+    "machine": null
+   }
+  },
+  {
+   "name": "on-without-lease",
+   "ok": false,
+   "why": "on needs since, ends_at and machine",
+   "request": {
+    "mobile_mode": {
+     "on": true,
+     "since": "2026-11-07T14:02:00Z",
+     "machine": "Acme PC"
+    }
+   }
+  },
+  {
+   "name": "on-with-ended",
+   "ok": false,
+   "why": "ended only when off",
+   "request": {
+    "mobile_mode": {
+     "on": true,
+     "since": "2026-11-07T14:02:00Z",
+     "ends_at": "2026-11-08T02:02:00Z",
+     "machine": "Acme PC",
+     "ended": "off"
+    }
+   }
+  },
+  {
+   "name": "off-with-machine",
+   "ok": false,
+   "why": "off carries no since/ends_at/machine",
+   "request": {
+    "mobile_mode": {
+     "on": false,
+     "machine": "Acme PC"
+    }
+   }
+  },
+  {
+   "name": "unknown-ended",
+   "ok": false,
+   "why": "ended is off, lease or restart",
+   "request": {
+    "mobile_mode": {
+     "on": false,
+     "ended": "crash"
+    }
+   }
+  },
+  {
+   "name": "machine-too-long",
+   "ok": false,
+   "why": "machine is at most 60 characters",
+   "request": {
+    "mobile_mode": {
+     "on": true,
+     "since": "2026-11-07T14:02:00Z",
+     "ends_at": "2026-11-08T02:02:00Z",
+     "machine": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+   }
+  }
+ ],
+ "phone": "ph_iphone0001",
+ "control": [
+  {
+   "name": "off",
+   "ok": true,
+   "why": "",
+   "request": {
+    "to": "ws_pilatus001",
+    "control": "mobile_mode_off",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70"
+   },
+   "built": {
+    "schema": "orch.msg/1",
+    "from": "ph_iphone0001",
+    "to": "ws_pilatus001",
+    "type": "control",
+    "body": {
+     "control": "mobile_mode_off",
+     "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70"
+    }
+   }
+  },
+  {
+   "name": "off-without-client-id",
+   "ok": true,
+   "why": "",
+   "request": {
+    "to": "ws_pilatus001",
+    "control": "mobile_mode_off"
+   },
+   "built": {
+    "schema": "orch.msg/1",
+    "from": "ph_iphone0001",
+    "to": "ws_pilatus001",
+    "type": "control",
+    "body": {
+     "control": "mobile_mode_off"
+    }
+   }
+  },
+  {
+   "name": "unknown-control",
+   "ok": false,
+   "why": "only mobile_mode_off exists",
+   "request": {
+    "to": "ws_pilatus001",
+    "control": "shutdown"
+   }
+  },
+  {
+   "name": "no-control",
+   "ok": false,
+   "why": "control is required",
+   "request": {
+    "to": "ws_pilatus001"
+   }
+  },
+  {
+   "name": "to-not-a-workspace",
+   "ok": false,
+   "why": "to is a ws_ id",
+   "request": {
+    "to": "phones",
+    "control": "mobile_mode_off"
+   }
+  }
+ ],
+ "pushes": [
+  {
+   "name": "unreachable",
+   "kind": "mobile_mode_unreachable",
+   "machine": "Acme PC",
+   "ended": null,
+   "title": "Pilatus",
+   "body": "Can't reach Acme PC. Your answers wait until it is back."
+  },
+  {
+   "name": "back",
+   "kind": "mobile_mode_back",
+   "machine": "Acme PC",
+   "ended": null,
+   "title": "Pilatus",
+   "body": "Acme PC is back."
+  },
+  {
+   "name": "ended-lease",
+   "kind": "mobile_mode_ended",
+   "machine": "Acme PC",
+   "ended": "lease",
+   "title": "Pilatus",
+   "body": "Mobile mode ended: the time ran out."
+  },
+  {
+   "name": "ended-restart",
+   "kind": "mobile_mode_ended",
+   "machine": "Acme PC",
+   "ended": "restart",
+   "title": "Pilatus",
+   "body": "Mobile mode ended: the computer restarted."
+  },
+  {
+   "name": "ended-off",
+   "kind": "mobile_mode_ended",
+   "machine": "Acme PC",
+   "ended": "off",
+   "title": "Pilatus",
+   "body": "Mobile mode was turned off."
+  },
+  {
+   "name": "ended-unknown-reason",
+   "kind": "mobile_mode_ended",
+   "machine": "Acme PC",
+   "ended": null,
+   "title": "Pilatus",
+   "body": "Mobile mode was turned off."
+  }
+ ]
+}

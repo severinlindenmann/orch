@@ -4,6 +4,52 @@
   "title": "orch relay phone API v3: request and response bodies",
   "description": "Shapes of the phone routes in relay-api.md (Phone API). One $def per body; contracts/validate.py checks every /v1/phone example in review/relay-api.examples.json and vectors/phone-v3-v1.json against them. Unknown request fields are kept (common.md); response fields are never left out (null instead).",
   "$defs": {
+    "mobile_mode": {
+      "description": "Mobile mode of a workspace (relay-api.md, Mobile mode). Phones always see all four fields.",
+      "type": "object", "required": ["on", "since", "ends_at", "machine"], "additionalProperties": false,
+      "properties": {
+        "on": { "type": "boolean" },
+        "since": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+        "ends_at": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+        "machine": { "oneOf": [{ "type": "string", "minLength": 1, "maxLength": 60 }, { "type": "null" }] }
+      },
+      "allOf": [
+        { "if": { "properties": { "on": { "const": true } } }, "then": { "properties": { "since": { "type": "string" }, "ends_at": { "type": "string" }, "machine": { "type": "string" } } }, "else": { "properties": { "since": { "type": "null" }, "ends_at": { "type": "null" }, "machine": { "type": "null" } } } }
+      ]
+    },
+    "heartbeat_request": {
+      "description": "POST /v1/heartbeat (workspace auth). on=true: since, ends_at, machine required, no ended. on=false: since/ends_at/machine null or left out, optional ended.",
+      "type": "object", "required": ["mobile_mode"],
+      "properties": {
+        "mobile_mode": {
+          "type": "object", "required": ["on"],
+          "properties": {
+            "on": { "type": "boolean" },
+            "since": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+            "ends_at": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+            "machine": { "oneOf": [{ "type": "string", "minLength": 1, "maxLength": 60 }, { "type": "null" }] },
+            "ended": { "enum": ["off", "lease", "restart"] }
+          },
+          "allOf": [
+            { "if": { "properties": { "on": { "const": true } } },
+              "then": { "required": ["since", "ends_at", "machine"], "properties": { "since": { "type": "string" }, "ends_at": { "type": "string" }, "machine": { "type": "string" } }, "not": { "required": ["ended"] } },
+              "else": { "properties": { "since": { "type": "null" }, "ends_at": { "type": "null" }, "machine": { "type": "null" } } } }
+          ]
+        }
+      }
+    },
+    "heartbeat_response": {
+      "type": "object", "required": ["mobile_mode"], "additionalProperties": false,
+      "properties": { "mobile_mode": { "$ref": "#/$defs/mobile_mode" } }
+    },
+    "control_request": {
+      "type": "object", "required": ["to", "control"],
+      "properties": {
+        "to": { "$ref": "#/$defs/ws_id" },
+        "control": { "enum": ["mobile_mode_off"] },
+        "client_id": { "$ref": "#/$defs/client_id" }
+      }
+    },
     "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
     "msg_id": { "type": "string", "pattern": "^m_[a-z0-9]{16}$" },
     "ws_id": { "type": "string", "pattern": "^ws_[a-z0-9]{10}$" },
