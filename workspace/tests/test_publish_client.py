@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import sys
 import tarfile
 from pathlib import Path
 
@@ -314,7 +315,7 @@ def test_net_retries_connection_failures_only(monkeypatch):
     sleeps, tries = [], []
     monkeypatch.setattr(net.time, "sleep", sleeps.append)
 
-    def refused(req, timeout):
+    def refused(req, timeout, **kw):
         tries.append(1)
         raise urllib.error.URLError(ConnectionRefusedError("refused"))
 
@@ -329,7 +330,7 @@ def test_net_retries_connection_failures_only(monkeypatch):
     tries.clear()
     sleeps.clear()
 
-    def answered(req, timeout):
+    def answered(req, timeout, **kw):
         tries.append(1)
         raise urllib.error.HTTPError("http://x.test/a", 500, "err", {}, None)
 
@@ -348,7 +349,7 @@ def test_net_does_not_replay_posts_after_send(monkeypatch):
     sleeps, tries = [], []
     monkeypatch.setattr(net.time, "sleep", sleeps.append)
 
-    def reset(req, timeout):
+    def reset(req, timeout, **kw):
         tries.append(1)
         raise ConnectionResetError("reset")  # raised after the request went out
 
@@ -494,3 +495,51 @@ def test_publish_has_a_shared_tab():
 
     toml = Path(publish.__file__).parent / "builtin" / "publish" / "orch-addon.toml"
     assert tomllib.loads(toml.read_text())["dashboard"]["label"] == "Shared"
+
+
+def test_net_verifies_tls_with_the_windows_store_on_windows(monkeypatch):
+    """A fresh Windows PC fetches missing root certificates only when Windows checks a certificate itself:
+    Python's own check failed the first relay connect ("unable to get local issuer certificate"). On Windows
+    net hands the check to Windows (truststore); elsewhere urlopen keeps Python's default."""
+    import ssl
+    import types
+
+    from orch import net
+
+    made = []
+
+    class Ctx:
+        def __init__(self, proto):
+            made.append(proto)
+
+    monkeypatch.setitem(sys.modules, "truststore", types.SimpleNamespace(SSLContext=Ctx))
+    monkeypatch.setattr(net.sys, "platform", "win32")
+    net._tls.cache_clear()
+    seen = []
+
+    class Resp(io.BytesIO):
+        status = 200
+
+    def ok(req, timeout, context=None):
+        seen.append(context)
+        return Resp(b"{}")
+
+    monkeypatch.setattr(net.urllib.request, "urlopen", ok)
+    try:
+        net.call("GET", "https://relay.example/health")
+        assert isinstance(seen[0], Ctx) and made == [ssl.PROTOCOL_TLS_CLIENT]
+        net.call("GET", "https://relay.example/health")
+        assert seen[1] is seen[0] and len(made) == 1  # one context per process
+    finally:
+        net._tls.cache_clear()
+
+
+def test_net_keeps_pythons_tls_default_elsewhere(monkeypatch):
+    from orch import net
+
+    monkeypatch.setattr(net.sys, "platform", "linux")
+    net._tls.cache_clear()
+    try:
+        assert net._tls() is None
+    finally:
+        net._tls.cache_clear()
