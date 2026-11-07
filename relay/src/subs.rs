@@ -665,7 +665,11 @@ async fn file(
     let plain =
         crypto::open(&app.key, &id, &raw).ok_or_else(|| internal("blob does not decrypt"))?;
     Ok((
-        [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+        [
+            (axum::http::header::CONTENT_TYPE, "application/octet-stream"),
+            (axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (axum::http::header::CONTENT_DISPOSITION, "attachment"),
+        ],
         plain,
     )
         .into_response())
