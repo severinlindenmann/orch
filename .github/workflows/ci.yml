@@ -11,10 +11,11 @@ on:
         default: false
   push:
     branches: [develop, main]
-# one run per PR / branch: a new push cancels the older run that is still going
+# one run per PR / branch: a new push cancels the older run that is still going (the newest commit covers it; the
+# merge gate is the PR's own run). Manual runs have their own group; main is never cancelled.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.ref) }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 permissions:
   contents: read
 jobs:
