@@ -732,6 +732,33 @@ def test_outbox_saves_first_and_resends_the_same_bytes(proj, run, rel, monkeypat
     assert run("relay", "outbox")[1].strip() == "Nothing is waiting to be sent."
 
 
+def test_a_certificate_problem_is_said_in_words_and_the_message_is_kept(proj, run, rel, monkeypatch):
+    """Not 'the relay can't be reached': a problem to fix first (a server certificate that is not valid, a
+    broken install) is shown as it is; the message stays in the outbox and goes out once it is fixed."""
+    from orch import relay
+    from orch.errors import Refused
+
+    connect(run, rel)
+    problem = "The server's security certificate is not valid for relay.example. orch did not connect."
+
+    def blocked(root, raw):
+        err = Refused(problem)
+        err.status, err.blocked = None, True
+        raise err
+
+    real = relay._post_message
+    monkeypatch.setattr(relay, "_post_message", blocked)
+    code, out, _ = run("relay", "send", PEER, "hello")
+    assert code == 0 and "Not sent: " + problem in out and "kept" in out and "can't be reached" not in out
+    m = json.loads(run("relay", "send", PEER, "second", "--json")[1])
+    assert m["sent"] is False and m["problem"] == problem
+    assert len(list((proj / ".orch/outbox").glob("m_*.json"))) == 2  # nothing is lost
+    out = run("relay", "outbox", "--resend")[1]
+    assert problem in out and "next orch relay command" not in out
+    monkeypatch.setattr(relay, "_post_message", real)
+    assert "Sent 2 waiting messages" in run("relay", "outbox", "--resend")[1] and len(rel.sent) == 2
+
+
 def test_outbox_resend_command_and_refused_message_is_dropped(proj, run, rel, monkeypatch):
     from orch import relay
     from orch.errors import Refused

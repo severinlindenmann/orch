@@ -31,8 +31,9 @@ def say(ok, what): print(("ok: " if ok else "FAIL: ") + what, flush=True)
 def refused(url, headers=None):  # True only when the certificate check refused it (not any network failure)
     try:
         net.call("GET", url, headers=headers, timeout=20); return False
-    except Refused as e:
-        return isinstance(getattr(e.__context__, "reason", None), ssl.SSLCertVerificationError)
+    except Refused as e:  # ...and it says so in words (no "check your internet")
+        return (isinstance(getattr(e.__context__, "reason", None), ssl.SSLCertVerificationError)
+                and "security certificate is not valid" in str(e) and "internet" not in str(e))
 ctx = net._tls()
 say(ctx is not None and ctx.check_hostname and ctx.verify_mode == ssl.CERT_REQUIRED
     and ctx.minimum_version >= ssl.TLSVersion.TLSv1_2, "the Windows check is strict (hostname, certificate, TLS 1.2+)")

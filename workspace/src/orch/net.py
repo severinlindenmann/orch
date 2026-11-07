@@ -31,9 +31,10 @@ def _tls() -> ssl.SSLContext | None:
     try:
         import truststore
     except ImportError:  # a broken install: fail closed, in plain words (never fall back to a weaker check)
-        raise Refused(
-            "orch can't check web certificates here: a part of orch is missing. Install orch again."
-        ) from None
+        msg = "orch can't check web certificates here: a part of orch is missing. Install orch again."
+        err = Refused(msg)
+        err.status, err.blocked = None, True  # no answer; trying again will not help until it is fixed
+        raise err from None
     return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
 
@@ -41,6 +42,8 @@ def _safe_to_retry(req, exc) -> bool:
     """Retry only when the request cannot have been processed. Never replay a POST that may have arrived."""
     replayable = req.get_method() in ("GET", "HEAD") or req.full_url.split("?")[0].endswith("/v1/messages")
     reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return False  # the certificate is wrong: the same answer every time
     if isinstance(reason, (ConnectionRefusedError, socket.gaierror)):
         return True  # the connection was never established
     if isinstance(exc, urllib.error.URLError) and isinstance(reason, TimeoutError):
@@ -104,10 +107,14 @@ def call(
         err = Refused(msg + (f"\n{out}" if out else ""))
         err.status = e.code  # callers decide what is worth a retry
         raise err from None
-    except (urllib.error.URLError, TimeoutError, OSError):
-        err = Refused(
-            f"Can't reach {urllib.parse.urlsplit(url).netloc} right now. Check your internet and try again."
-        )
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        host = urllib.parse.urlsplit(url).netloc
+        if isinstance(getattr(e, "reason", e), ssl.SSLCertVerificationError):
+            # not the internet: the server is not who it says it is (or its certificate is broken)
+            err = Refused(f"The server's security certificate is not valid for {host}. orch did not connect.")
+            err.status, err.blocked = None, True  # no answer; trying again will not help until fixed
+            raise err from None
+        err = Refused(f"Can't reach {host} right now. Check your internet and try again.")
         err.status = None  # no answer at all
         raise err from None
 

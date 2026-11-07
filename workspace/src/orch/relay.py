@@ -439,7 +439,8 @@ def _message(
         _post_message(root, raw)
     except Refused as e:
         if _unreachable(e):
-            return {**msg, "sent": False}
+            # kept in the outbox; a problem to fix first (certificate, broken install) is said in words
+            return {**msg, "sent": False, **({"problem": str(e)} if getattr(e, "blocked", False) else {})}
         path.unlink(missing_ok=True)  # the relay said no: nothing to retry
         raise
     path.unlink(missing_ok=True)
@@ -479,6 +480,8 @@ def resend_outbox(root: Path) -> dict:
         except Refused as e:
             if _unreachable(e):
                 res["waiting"] = [x["id"] for x in items[n:]]
+                if getattr(e, "blocked", False):
+                    res["problem"] = str(e)  # not the network: needs fixing before anything goes out
                 break
             res["dropped"].append({"id": m["id"], "reason": str(e)})
         else:
