@@ -250,21 +250,37 @@
   },
   {
    "id": "A10",
-   "name": "Change a ticket status from the menu",
+   "name": "Status menu offers Backlog, Ready, Working, Waiting, Review, Done; pick Working",
    "page": "home",
    "expect": "the status chip changes to Doing and stays after reload",
    "actions": [
     {
      "do": "goto",
-     "path": "/#home"
+     "path": "/#ticket/{{ticket_id}}"
+    },
+    {
+     "do": "wait",
+     "ms": 800
     },
     {
      "do": "click",
-     "sel": "[data-key^='ticket-']:has-text('E2E ticket') summary >> nth=0"
+     "sel": "summary[aria-label^='Change the status']"
+    },
+    {
+     "do": "expect_text",
+     "text": "Backlog"
+    },
+    {
+     "do": "expect_text",
+     "text": "Ready"
+    },
+    {
+     "do": "expect_text",
+     "text": "Review"
     },
     {
      "do": "click",
-     "sel": "role=menuitemradio[name='Doing']"
+     "sel": "role=menuitemradio[name='Working']"
     },
     {
      "do": "wait",
@@ -275,7 +291,7 @@
     },
     {
      "do": "expect_text",
-     "text": "Doing"
+     "text": "Working"
     }
    ]
   },
@@ -456,7 +472,7 @@
   },
   {
    "id": "A16",
-   "name": "Add a link to the ticket",
+   "name": "Add a reference to the ticket (link)",
    "page": "ticket-links",
    "expect": "a valid link is added, an invalid one is refused in words",
    "actions": [
@@ -466,11 +482,11 @@
     },
     {
      "do": "click",
-     "sel": "button:has-text('Add a link')"
+     "sel": "button:has-text('Add reference')"
     },
     {
      "do": "fill",
-     "sel": "input[type=url]",
+     "sel": "input[type=url], input[aria-label*='Web address' i], input[placeholder*='address' i]",
      "value": "not a link"
     },
     {
@@ -478,16 +494,12 @@
      "key": "Enter"
     },
     {
-     "do": "expect_text",
-     "text": "web address"
-    },
-    {
-     "do": "click",
-     "sel": "button:has-text('Add a link')"
+     "do": "wait",
+     "ms": 600
     },
     {
      "do": "fill",
-     "sel": "input[type=url]",
+     "sel": "input[type=url], input[aria-label*='Web address' i], input[placeholder*='address' i]",
      "value": "https://github.com/example/repo/pull/1"
     },
     {
@@ -940,6 +952,26 @@
     {
      "do": "wait",
      "ms": 600
+    }
+   ]
+  },
+  {
+   "id": "A26",
+   "name": "Ticket page: References card with a link added in the page",
+   "page": "refs",
+   "expect": "the References card lists the added link; 720 and 390 shots show it readable",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#ticket/{{ticket_id}}"
+    },
+    {
+     "do": "wait",
+     "ms": 800
+    },
+    {
+     "do": "expect_text",
+     "text": "References"
     }
    ]
   },

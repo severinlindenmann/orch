@@ -107,6 +107,11 @@ def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
             rs = act(dash, "run.start", {"ticket": tid})
             st["actions"].append({"do": "run.start", "ms": int((time.time() - t0) * 1000), "status": "ok" if rs.status == 200 else "fail"})
             if rs.status != 200:
+                if rs.status == 422 and "live sessions" in rs.text:
+                    L.finding("sessions", "Live sessions stay open after the agent finished", f"Run {i}: starting a run was refused: {rs.text[:160]}. "
+                              "Earlier runs had finished and their tickets are in Review, but their sessions still counted.",
+                              "A session of a ticket in Review should close by itself after a short idle time (or not count against the limit); "
+                              "the person should never have to close sessions by hand to start the next ticket.", step=f"B{i:02d}", severity="functional")
                 raise RuntimeError(f"run.start {rs.status} {rs.text[:150]}")
             a = poll(dash, lambda s: bool(s.get("runs", {}).get(tid)) or _ticket(s, tid).get("status") == "active", 40)
             samples["start_to_working"].append(a if a is not None else 40.0)
@@ -134,19 +139,61 @@ def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
                 s_ = state(dash)
                 raise RuntimeError("the task was never checked off: " + json.dumps({"ticket": _ticket(s_, tid), "run": s_.get("runs", {}).get(tid),
                                    "needs": s_.get("needs")})[:900])
+            e_end = time.time() + 20
             fin = _ticket(state(dash), tid).get("status")
-            if fin != "done":
-                L.finding("status", f"Ticket stays '{fin}' after its last task is checked", f"Run {i}: the agent checked the last task with proof, "
-                          f"but the ticket status is still '{fin}' (Home shows it as not finished).",
-                          "When the last task is done and the agent ends the run, the status should say Done (or Waiting for you to close), "
-                          "never the same word as while it works. Belongs to the statuses work (core-flow).", step=f"B{i:02d}")
+            while fin not in ("review", "done") and time.time() < e_end:
+                time.sleep(0.5)
+                fin = _ticket(state(dash), tid).get("status")
+            if fin != "review":
+                L.finding("status", f"Ticket is '{fin}' instead of Review after the agent finished",
+                          f"Run {i}: the agent checked the last task with proof and ended; the ticket status is '{fin}', expected Review "
+                          "(the agent hands over, the person decides Done).",
+                          "Agent done must move the ticket to Review (never straight to Done, never stay Working).", step=f"B{i:02d}", severity="functional")
             samples["done_to_dashboard"].append(d)
+            sess = e.sh(["orch", "run", "status", tid, "--json"], cwd=w)[1]
+            if '"live"' in sess.lower() or "tmux" in sess.lower():
+                st.setdefault("live_open", True)
+            e.sh(["orch", "run", "stop", tid], cwd=w, timeout=30)  # the next run needs a free live-session slot (limit 4)
             st["note"] = f"{tid}: working {samples['start_to_working'][-1]:.1f}s, needs {samples['ask_to_needs'][-1]:.1f}s"
         return go
 
     for i in range(1, runs + 1):
         L.step(f"B{i:02d}", f"Create ticket, Start, question, answer, done (run {i})", one_run(i),
                expect="chip changes to working fast, question in Needs you, answer shown, ticket Done")
+    def events_probe(st):
+        import threading
+        import urllib.request
+        got = []
+        stop = threading.Event()
+
+        def listen():
+            req = urllib.request.Request(dash + "/api/events", headers={"Origin": dash})
+            with urllib.request.urlopen(req, timeout=40) as r:
+                for line in r:
+                    if stop.is_set():
+                        return
+                    if line.startswith(b"event: rev"):
+                        got.append(time.time())
+        th = threading.Thread(target=listen, daemon=True)
+        th.start()
+        time.sleep(1.5)
+        lat = []
+        for k in range(4):
+            n = len(got)
+            t0 = time.time()
+            e.sh(["orch", "ticket", "new", f"events probe {k}"], cwd=w)
+            end = t0 + 8
+            while len(got) <= n and time.time() < end:
+                time.sleep(0.02)
+            if len(got) <= n:
+                stop.set()
+                raise RuntimeError("no /api/events message within 8 s after a ticket change")
+            lat.append(got[n] - t0)
+            time.sleep(1.2)
+        stop.set()
+        L.probe("B-events", "Ticket change to /api/events message", lat, 1, 2)
+        st["note"] = ", ".join(f"{x:.2f}s" for x in lat)
+    L.step("B-events", "/api/events pushes a change within 1 s", events_probe, expect="a rev event reaches the page within 1 s (target)")
     if real_agents:
         def skill_seen(st):
             import glob
@@ -423,6 +470,81 @@ def lane_g(env, out: Path) -> Lane:
     L.step("G-team-on", "Settings > General: Share with team ON writes the AGENTS.md block and the .gitattributes entry", team(True),
            expect="both exist")
     L.step("G-team-off", "Share with team OFF removes both again", team(False), expect="both gone")
+    return L
+
+
+# ---------------------------------------------------------------------------------------------- lane R (References)
+
+
+def lane_r(env, out: Path) -> Lane:
+    """References: orch ref add for kinds url/file/ticket/artifact, the numbered list, rm by number, refusals (symlink into .orch, outside folder)."""
+    L = Lane("R", "References", out)
+    e = env.e
+    w = e.ws("Pilatus")
+    tid = env.vars["ticket_id"]
+    other = None
+
+    def run(*a):
+        return e.sh(["orch", *a], cwd=w, timeout=60)
+
+    def mk(st):
+        nonlocal other
+        rc, o, err = run("ticket", "new", "Reference target", "--json")
+        other = json.loads(o)["id"]
+        (w / "notes").mkdir(exist_ok=True)
+        (w / "notes" / "plan.md").write_text("# Plan\n")
+    L.step("R00", "Make a second ticket and a file to point at", mk)
+
+    def add(target, kind_word):
+        def go(st):
+            rc, o, err = run("ref", "add", tid, target() if callable(target) else target)
+            if rc:
+                raise RuntimeError((err or o)[-200:])
+            rc, o, err = run("ref", "list", tid)
+            if kind_word not in o and kind_word.lower() not in o.lower():
+                raise RuntimeError(f"ref list does not show it: {o[:200]}")
+            st["note"] = o.strip().splitlines()[-1][:120]
+        return go
+    L.step("R01", "Add a web link reference", add("https://example.com/spec", "example.com"), expect="listed with its number")
+    L.step("R02", "Add a file reference", add("notes/plan.md", "plan.md"), expect="listed")
+    L.step("R03", "Add a ticket reference", add(lambda: other, "Reference target"), expect="listed with the other ticket's title")
+
+    def dash(st):
+        d = env.urls["pilatus"]
+        s_ = state(d)
+        t = _ticket(s_, tid)
+        refs = t.get("refs") or t.get("references") or []
+        if len(refs) < 3:
+            raise RuntimeError(f"dashboard state shows {len(refs)} references, expected 3: keys {sorted(t)[:20]}")
+    L.step("R04", "The dashboard state carries the references", dash)
+
+    def refuse(st):
+        (w / ".orch").mkdir(exist_ok=True)
+        link = w / "notes" / "sneak"
+        try:
+            link.symlink_to(w / ".orch" / "config.toml")
+        except FileExistsError:
+            pass
+        rc, o, err = run("ref", "add", tid, "notes/sneak")
+        if rc == 0:
+            L.finding("security", "A symlink into .orch is accepted as a reference",
+                      "`orch ref add <ticket> notes/sneak` where sneak is a symlink to .orch/config.toml was accepted.",
+                      "Refuse at add time (resolve the link, refuse anything inside .orch), same as at open time.", step="R05", severity="blocking")
+            raise RuntimeError("symlink into .orch accepted")
+        rc, o, err = run("ref", "add", tid, "../../etc/hosts")
+        if rc == 0:
+            raise RuntimeError("a path outside the folder was accepted")
+        st["note"] = (err or o).strip()[:120]
+    L.step("R05", "Refuse a symlink into .orch and a path outside the folder", refuse, expect="both refused in plain words")
+
+    def rm(st):
+        rc, o, err = run("ref", "rm", tid, "1")
+        if rc:
+            raise RuntimeError((err or o)[-200:])
+        rc, o, err = run("ref", "list", tid)
+        if "example.com" in o:
+            raise RuntimeError("ref rm 1 did not remove the first reference")
+    L.step("R06", "Remove a reference by its number", rm)
     return L
 
 
