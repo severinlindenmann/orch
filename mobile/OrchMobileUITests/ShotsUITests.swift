@@ -56,4 +56,22 @@ final class ShotsUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'info-item-'")).firstMatch.waitForExistence(timeout: 15))
         try shot(app, "10-phone-info-links")
     }
+
+    /// Evidence for W5-M items 1-3: memo bubble closed/open, result card with a page (globe) attachment.
+    func testW5mShots() throws {
+        let home = ProcessInfo.processInfo.environment["SIMULATOR_HOST_HOME"] ?? NSHomeDirectory()
+        let out = URL(fileURLWithPath: home).appendingPathComponent("orch-dev/state/mobile-v3-messenger/build/shots/w5m")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: out.path), "no shots folder")
+        dir = out
+        var app = launch(["-mockMemo", "YES", "-openChat", "ws_pilatus001"])
+        let general = app.buttons["general-ws_pilatus001"]; if general.waitForExistence(timeout: 15) { general.tap() }
+        let toggle = app.buttons["memo-show-text"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 15))
+        try shot(app, "after-memo-closed")
+        toggle.tap(); try shot(app, "after-memo-open"); app.terminate()
+        app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_q3sum1"])
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'artifact-'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20))
+        try shot(app, "after-result-card-page-icon")
+    }
 }

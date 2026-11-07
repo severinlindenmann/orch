@@ -87,7 +87,8 @@ actor MockRelay: RelayAPI {
         running: false,
         attachments: [.init(kind: "image", title: "q3-chart.png", blobId: "b_chart", name: "q3-chart.png", size: 48_000, at: "2026-11-05T11:19:00Z", artifactId: "a_bbbbbbbbbbbb", rev: "r1"),
                       .init(kind: "link", title: "Board deck draft", url: "https://docs.pilatus.ch/board-q3", at: "2026-11-05T11:19:30Z", linkType: "Link", icon: "link"),
-                      .init(kind: "file", title: "test-report.pdf", name: "test-report.pdf", size: 84_000, at: "2026-11-05T11:19:40Z")],
+                      .init(kind: "file", title: "test-report.pdf", name: "test-report.pdf", size: 84_000, at: "2026-11-05T11:19:40Z"),
+                      .init(kind: "html", title: "Board deck page", at: "2026-11-05T11:19:50Z", artifactId: "a_cccccccccccc", rev: "r1")],
         historyTail: [.init(at: "2026-11-05T10:34:00Z", by: "Claude", role: "agent", text: "Pulled the numbers from the Q3 sheet."),
                       .init(at: "2026-11-05T10:37:00Z", by: "Claude", role: "agent", text: "Draft is ready, charts next.")])
     static let invoiceView = TicketSnapshot(
