@@ -134,3 +134,15 @@ def test_web_files_are_served(server):
     for n in ("mobile-mode.js", "index.html"):
         body = urllib.request.urlopen(f"{server}/{n}").read().decode()
         assert "mm-toggle" in body or "orch:state" in body
+
+
+def test_mobile_mode_state_file_changes_the_event_revision(ws):
+    """The live push (/api/events) watches .orch/run, so a change of mobile-mode.json reaches the open page at once."""
+    from orch_dashboard.events import Revisions
+
+    r = Revisions(ws)
+    before = r.signature()
+    f = ws / ".orch" / "run" / "mobile-mode.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text('{"on": true}')
+    assert r.signature() != before
