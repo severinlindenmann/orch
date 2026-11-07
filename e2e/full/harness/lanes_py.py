@@ -836,13 +836,8 @@ def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
             L.step("P00", "Create the lane's Simulator", lambda st: (_ for _ in ()).throw(RuntimeError("simctl create failed: " + (r.stderr or r.stdout)[-200:])))
             return L
         own_sim = True
-        subprocess.run(["xcrun", "simctl", "boot", udid], env=_host_env(), capture_output=True)
-        subprocess.run(["xcrun", "simctl", "bootstatus", udid, "-b"], env=_host_env(), capture_output=True, timeout=300)
-        # a fresh Simulator has no permissions and no position: grant what the walk uses (location card, voice note) before the app is installed
-        subprocess.run(["xcrun", "simctl", "privacy", udid, "grant", "location", "io.severin.orch"], env=_host_env(), capture_output=True)
-        subprocess.run(["xcrun", "simctl", "privacy", udid, "grant", "microphone", "io.severin.orch"], env=_host_env(), capture_output=True)
-        subprocess.run(["xcrun", "simctl", "privacy", udid, "grant", "speech-recognition", "io.severin.orch"], env=_host_env(), capture_output=True)
-        subprocess.run(["xcrun", "simctl", "location", udid, "set", "47.0502,8.3093"], env=_host_env(), capture_output=True)
+        # boot, permissions, the XCTest run and the shutdown all happen inside ONE heavy.sh simulator job below (HEAVY_SIM=1): the Simulator is
+        # never booted while the lane waits for something else
         L.notes.append(f"own Simulator e2e-full-phone {udid} (deleted at the end)")
     try:
         return _lane_p_run(L, env, out, repo, udid)
@@ -885,11 +880,25 @@ def _lane_p_run(L, env, out: Path, repo: Path, udid: str) -> Lane:
         if g.returncode:
             raise RuntimeError("xcodegen failed: " + (g.stderr or g.stdout)[-300:])
         t0 = time.time()
-        r = subprocess.run(["xcodebuild", "test", "-project", "OrchMobile.xcodeproj", "-scheme", "OrchMobile", "-destination", f"id={udid}",
-                            "-derivedDataPath", dd, "-parallel-testing-enabled", "NO",
-                            "-only-testing:OrchMobileUITests/RealRelayE2ETests"], cwd=repo / "mobile", capture_output=True, text=True,
-                           timeout=3600, env={**_host_env(), "TEST_RUNNER_ORCH_E2E_CTL": str(host["ctl"]),
-                                              "TEST_RUNNER_ORCH_SHOTS": str(shots), "ORCH_E2E_UDID": udid, "TEST_RUNNER_ORCH_E2E_UDID": udid, "TEST_RUNNER_ORCH_E2E_SLOW": "1"})
+        import shlex
+        script = out / "psim.sh"
+        script.write_text("\n".join([
+            "#!/bin/sh",
+            f"U={shlex.quote(udid)}",
+            "trap 'xcrun simctl shutdown \"$U\" >/dev/null 2>&1' EXIT",
+            "xcrun simctl boot \"$U\" >/dev/null 2>&1; xcrun simctl bootstatus \"$U\" -b >/dev/null 2>&1",
+            *[f"xcrun simctl privacy \"$U\" grant {svc} io.severin.orch >/dev/null 2>&1" for svc in ("location", "microphone", "speech-recognition")],
+            "xcrun simctl location \"$U\" set 47.0502,8.3093 >/dev/null 2>&1",
+            f"cd {shlex.quote(str(repo / 'mobile'))} || exit 1",
+            "exec xcodebuild test -project OrchMobile.xcodeproj -scheme OrchMobile -destination \"id=$U\" "
+            f"-derivedDataPath {shlex.quote(dd)} -parallel-testing-enabled NO -only-testing:OrchMobileUITests/RealRelayE2ETests",
+            ""]))
+        heavy = Path(os.environ.get("E2E_REAL_HOME") or Path.home()) / "orch-dev/state/v2-plan-2026-11-05/build/heavy.sh"
+        cmd = ["sh", str(heavy), "e2e-full-sim", "--", "sh", str(script)] if heavy.exists() else ["sh", str(script)]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600,
+                           env={**_host_env(), "HEAVY_SIM": "1", "E2E_FULL_LOCKED": "1", "TEST_RUNNER_ORCH_E2E_CTL": str(host["ctl"]),
+                                "TEST_RUNNER_ORCH_SHOTS": str(shots), "ORCH_E2E_UDID": udid, "TEST_RUNNER_ORCH_E2E_UDID": udid,
+                                "TEST_RUNNER_ORCH_E2E_SLOW": "1"})
         xo.write_text(r.stdout + r.stderr)
         cases = parse_xcode_tests(r.stdout)
         L.notes.append(f"xcodebuild {time.time() - t0:.0f} s, {len(cases)} test cases, exit {r.returncode}")
