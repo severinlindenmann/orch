@@ -143,3 +143,14 @@ def test_shared_pages(ws, monkeypatch, v):
 def test_status_json_has_look(ws, run):
     code, out, _ = run("status", "--json")
     assert code == 0
+
+
+def test_cli_shared_pages(ws, run, monkeypatch, tmp_path):
+    monkeypatch.setenv("ORCH_HOME", str(tmp_path / "home"))
+    code, out, _ = run("look", "shared-pages", "--json")
+    assert code == 0 and json.loads(out) == {"on": True}  # on by default
+    code, out, _ = run("look", "shared-pages", "off", "--by", "human:owner", "--json")
+    assert code == 0 and json.loads(out) == {"on": False}
+    assert look.shared_pages(ws) is False
+    code, _, err = run("look", "shared-pages", "on", "--by", "agent:claude")
+    assert code == 2 and "person" in err and look.shared_pages(ws) is False

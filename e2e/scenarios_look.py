@@ -127,3 +127,55 @@ def look1(e):
     check((who["icon"], who["color"]) == ("bank", "teal"), f"whoami after person pick {who}")
     st = e.orchj(n, "status")
     check(isinstance(st, list), "status --json")
+
+
+@scenario("LOOK-2")
+def look2(e):
+    """Dashboard: Settings > General picks Wallet/Amber (config + relay), edits the description (pending), switches the
+    shared-pages switch off; the sidebar switcher lists both workspaces with badges. Browser half: look_dash.cjs."""
+    import json
+    import os
+    import shutil
+    from pathlib import Path
+
+    pw = os.environ.get("PW_DIR") or next((str(p) for p in (Path(os.environ.get("E2E_REAL_HOME") or Path.home()) / "orch-dev" / "e2e" / "dashboard" / "node_modules",
+                                                           Path(__file__).parent / "walkthrough" / "node_modules") if (p / "playwright").is_dir()), "")
+    node = shutil.which("node", path=os.environ.get("PATH", "") + os.pathsep + e.path)
+    if not pw or not node:
+        from lib import Skip
+        raise Skip("node + playwright not available (set PW_DIR to a node_modules folder)")
+    n, other = "Pilatus", "Home"
+    wid, _ = e.connect_relay(n)
+    e.addon_add(e.ws(n), "dashboard")
+    e.addon_add(e.ws(other), "dashboard")
+    e.orch(other, "look", "set", "--icon", "house", "--color", "teal", by="human:e2e")
+    urls = {}
+    try:
+        for w in (n, other):
+            e.orch(w, "start", "--no-open")
+        rows = e.orchj(n, "status")
+        for r in rows:
+            for a in r["addons"]:
+                if a["addon"] == "dashboard":
+                    urls[r["name"]] = a["url"]
+        check(set(urls) >= {n, other}, f"both dashboards running: {urls}")
+        shots = os.environ.get("LOOK2_SHOTS", "")
+        real = Path(os.environ.get("E2E_REAL_HOME") or Path.home())  # the browsers live in the real home, not the test home
+        cache = next((str(c) for c in (real / "Library/Caches/ms-playwright", real / ".cache/ms-playwright") if c.is_dir()), "")
+        env = {**e.env, "PW_DIR": pw, **({"PLAYWRIGHT_BROWSERS_PATH": cache} if cache else {})}
+        rc, out, err = e.sh([node, str(Path(__file__).parent / "look_dash.cjs"), urls[n], shots, "Product work, now with a Wallet"], env=env, timeout=180)
+        check(rc == 0, f"browser half failed: {(err or out)[-400:]}")
+        got = json.loads(out.strip().splitlines()[-1])
+    finally:
+        e.sh(["orch", "stop", "--all"], cwd=e.ws(n))
+    check("Saved" in got["status"] and got["title"].startswith(n), f"saved: {got}")
+    show = e.orchj(n, "look", "show")
+    check((show["icon"], show["color"], show["set_by"]) == ("wallet", "amber", "human"), f"look show {show}")
+    who = e.rapi(n, "GET", "/v1/whoami").json()
+    check((who["icon"], who["color"]) == ("wallet", "amber"), f"relay whoami {who}")
+    check((who.get("pending") or {}).get("description") == "Product work, now with a Wallet", f"pending {who.get('pending')}")
+    check("Waiting for approval" in got["pending"], f"pending text {got['pending']!r}")
+    check(got["shared"] == "false" and e.orchj(n, "look", "shared-pages")["on"] is False, f"shared-pages {got['shared']}")
+    check(set(got["items"]) >= {n, other}, f"switcher items {got['items']}")
+    check(["teal", True] in got["itemLooks"] and ["amber", True] in got["itemLooks"], f"badges {got['itemLooks']}")
+    check(got["noOverflow"] and not got["errors1280"] and not got["errors720"], f"layout/errors {got}")

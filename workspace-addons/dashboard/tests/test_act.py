@@ -30,7 +30,8 @@ def calls(act_orch):
 
 
 def acts(act_orch):
-    return [c for c in calls(act_orch) if c[0] not in ("addon", "needs", "status", "agents") and c[:3] != ["relay", "mobile", "status"] and c[:2] not in (["run", "status"], ["ticket", "list"], ["config", "get"])]
+    return [c for c in calls(act_orch) if c[0] not in ("addon", "needs", "status", "agents") and c[:3] != ["relay", "mobile", "status"] and c[:2] not in (["run", "status"], ["ticket", "list"], ["config", "get"], ["look", "show"])
+            and c[:2] != ["look", "shared-pages"] and not (c[1:2] == ["profile"] and c[-1] == "--json")]
 
 
 def test_foreign_or_missing_origin_and_wrong_host_are_refused(act_server, act_orch):
@@ -392,7 +393,7 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
             assert code == 200, (body, text)
             last = [c for c in calls(act_orch) if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"])
                     and c[0] not in ("needs", "status", "agents") and c[:2] != ["config", "get"]
-                    and c[:3] != ["relay", "mobile", "status"]][-1]
+                    and c[:3] != ["relay", "mobile", "status"] and c[0] != "look"][-1]
             assert last == want, body
         n = len(calls(act_orch))
         bad = [
