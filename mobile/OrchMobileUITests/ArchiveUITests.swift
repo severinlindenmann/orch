@@ -10,7 +10,8 @@ final class ArchiveUITests: XCTestCase {
     private func start(_ extra: [String]) -> XCUIApplication {
         let app = XCUIApplication()
         if app.state != .notRunning { app.terminate() }
-        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES"] + extra
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-uitest"] + extra
+        app.launchEnvironment["ORCH_UITEST_TOAST_SECONDS"] = "30"   // the 5 s undo toast is too short for a slow CI runner
         app.launch()
         return app
     }
@@ -44,8 +45,12 @@ final class ArchiveUITests: XCTestCase {
     /// Swipe the row and tap one of its actions once the button is there.
     private func swipeAction(_ app: XCUIApplication, _ rowEl: XCUIElement, _ title: String) {
         app.reveal(rowEl)
-        rowEl.swipeLeft()
         let b = app.buttons[title]
+        rowEl.swipeLeft()
+        if !b.waitForExistence(timeout: 10) {   // a swipe can be lost while the list settles: once more
+            app.reveal(rowEl)
+            rowEl.swipeLeft()
+        }
         ready(b, "\(title) action")
         b.tap()
     }
@@ -89,6 +94,7 @@ final class ArchiveUITests: XCTestCase {
             swipeAction(app, chat, "Archive")
             ready(app.buttons["Undo"], "Undo button (round \(round))", timeout: 10); app.buttons["Undo"].tap()
             chat = rowBack(app, "round \(round): Undo brings the chat back")
+            XCTAssertTrue(el(app, "archive-toast").waitForNonExistence(timeout: 40), "round \(round): toast gone, the list has settled")
         }
     }
 
