@@ -141,6 +141,7 @@ final class ConversationModelTests: XCTestCase {
 
     func testEmptyOpenChatKeepsPolling() async throws {
         let m = await paired()
+        m.watchInMock = true
         let watcher = Task { await m.watchWhileOpen(every: .milliseconds(30)) }
         await m.mock!.deliverText(from: MockRelay.reports, text: "hello from a quiet chat")
         for _ in 0..<60 where !m.messages.contains(where: { $0.message.body.text == "hello from a quiet chat" }) { try await Task.sleep(for: .milliseconds(50)) }
