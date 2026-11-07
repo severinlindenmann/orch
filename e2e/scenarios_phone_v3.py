@@ -39,6 +39,32 @@ def upload(e, ph, data: bytes, ctype="application/octet-stream"):
     return r.json()
 
 
+def big_upload(e, ph, size: int):
+    """Upload `size` bytes; the relay may answer 413 and hang up before it has read everything (a broken pipe on our side)."""
+    import http.client
+    from urllib.parse import urlparse
+
+    u = urlparse(e.rel.url)
+    c = http.client.HTTPConnection(u.hostname, u.port, timeout=120)
+    c.putrequest("POST", "/v1/phone/blobs")
+    for k, v in {"X-Orch-Phone": ph[0], "Authorization": f"Bearer {ph[1]}", "Content-Length": str(size),
+                 "Content-Type": "application/octet-stream"}.items():
+        c.putheader(k, v)
+    c.endheaders()
+    try:
+        chunk = b"\0" * (1024 * 1024)
+        left = size
+        while left > 0:
+            c.send(chunk[: min(left, len(chunk))])
+            left -= len(chunk)
+    except OSError:
+        pass
+    r = c.getresponse()
+    out = (r.status, r.read().decode("utf-8", "replace"))
+    c.close()
+    return out
+
+
 def listing(e, ph, **q):
     qs = "&".join(f"{k}={v}" for k, v in q.items())
     r = ph_call(e, ph, "GET", "/v1/phone/messages" + ("?" + qs if qs else ""))
@@ -201,8 +227,8 @@ def p4(e):
     check(all("/" not in n and not n.startswith(".") for n in got), f"unsafe file names: {list(got)}")
     # empty body and too big
     check(ph_call(e, ph, "POST", "/v1/phone/blobs", b"").status == 422, "empty upload accepted")
-    big = ph_call(e, ph, "POST", "/v1/phone/blobs", b"\0" * (25 * 1024 * 1024 + 1))
-    check(big.status == 413, f"25 MB + 1: {big.status} {big.text[:100]}")
+    big_status, big_text = big_upload(e, ph, 25 * 1024 * 1024 + 1)
+    check(big_status == 413, f"25 MB + 1: {big_status} {big_text[:100]}")
     ok = ph_call(e, ph, "POST", "/v1/phone/blobs", b"\0" * (1024 * 1024))
     check(ok.status == 201, f"1 MB after a refused big one: {ok}")
     return "upload, blob scoping, saved files, 413, nosniff"
@@ -259,7 +285,7 @@ def p6(e):
     e.orch("Pilatus", "relay", "send", ph[0], "Read this out loud, please.", "--ticket", t, "--speak")
     mid = from_ws(e, ph, ws)[0]["id"]
     g = ph_call(e, ph, "GET", f"/v1/phone/speech/{mid}")
-    check(g.status == 503 and g.json()["error"]["code"] == "tts_off", f"no key: {g.status} {g.text}")
+    check(g.status == 503 and g.json()["error"] == "tts_off", f"no key: {g.status} {g.text}")
     check(ph_call(e, ph, "GET", f"/v1/phone/speech/{mid}?lang=fr").status == 422, "lang fr accepted")
     check(ph_call(e, ph, "GET", "/v1/phone/speech/m_doesnotexist0000").status == 404, "unknown message")
     ad = e.rel.admin
@@ -270,7 +296,7 @@ def p6(e):
     e.cleanup.append(lambda: ad.call("DELETE", "/admin/api/voice"))
     ph_call(e, ph, "PATCH", "/v1/phone/settings", {"tts_cap_usd": 0})
     g = ph_call(e, ph, "GET", f"/v1/phone/speech/{mid}")
-    check(g.status == 402 and g.json()["error"]["code"] == "tts_cap_reached", f"cap 0: {g.status} {g.text}")
+    check(g.status == 402 and g.json()["error"] == "tts_cap_reached", f"cap 0: {g.status} {g.text}")
     ph_call(e, ph, "PATCH", "/v1/phone/settings", {"speak": "never"})
     check(ph_call(e, ph, "GET", f"/v1/phone/speech/{mid}").status == 404, "speak never still makes audio")
     return "settings round trip, 503 tts_off, 402 cap 0"
