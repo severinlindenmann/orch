@@ -1144,35 +1144,17 @@ def _apply_project(root: Path, m: dict) -> None:
     skills.apply_agent_files(root)
 
 
-def _gi_markers(name: str) -> tuple[str, str]:
-    return f"# orch:addon:{name}", f"# /orch:addon:{name}"
-
-
 def _set_gitignore(root: Path, name: str, lines: list[str]) -> None:
-    """The add-on's lines live in their own block of the workspace .gitignore; no lines = block removed."""
-    path = root / ".gitignore"
-    f = skills._project_file(root, path)
-    text = f.read_bytes().decode("utf-8") if f.exists() else ""
-    eol = "\r\n" if "\r\n" in text else "\n"
-    start, end = _gi_markers(name)
-    rows = text.splitlines()
-    if start in rows and end in rows[rows.index(start) :]:
-        i = rows.index(start)
-        j = rows.index(end, i)
-        rows = rows[:i] + rows[j + 1 :]
-    if lines:
-        rows += [start, *lines, end]
-    new = eol.join(rows) + eol if rows else ""
-    if new != text:
-        skills._write_project_file(root, path, new)
+    """The add-on's lines live in their own block of .git/info/exclude (local; the team's .gitignore stays
+    untouched); no lines = block removed."""
+    from orch import harness
+
+    harness.exclude_set(root, f"addon-{name}", lines)
 
 
 def _remove_skill_folders(root: Path, name: str) -> None:
     """Exactly orch-<name>: never a neighbour such as orch-<name>-x (another add-on or the user's skill)."""
-    d = root / ".agents" / "skills" / f"orch-{name}"
-    if d.exists() or d.is_symlink():
-        skills.unlink_skill(root, d.name)
-        skills.remove_skill(root, d.name)
+    skills.remove_skill(root, f"orch-{name}")
 
 
 def remove(root: Path, name: str, purge: bool = False) -> None:
@@ -1297,7 +1279,7 @@ def update(root: Path, project_only: bool = False, after_install: bool = False) 
         )
         return []
     done = []
-    if (root / ".agents" / "skills" / "orch").is_dir():
+    if (root / ".orch" / "harness" / "skills" / "orch").is_dir():
         from orch.init import init
 
         init(root)

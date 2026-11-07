@@ -579,9 +579,16 @@ def plan(
     if not resumed:
         sid = None
         new_session = str(uuid.uuid4()) if a["capabilities"]["choose_session_id"] else None
-        v.update(
-            prompt=prompt if prompt is not None else fresh_prompt(ticket, items), new_session=new_session
-        )
+        text = prompt
+        if text is None:
+            text = fresh_prompt(ticket, items)
+            if not (a.get("files") or {}).get("instructions_link"):  # this agent does not read the local file
+                from orch import harness
+
+                block = harness.start_text(root)
+                if block:
+                    text = f"{block}\n\n{text}"[:14000]
+        v.update(prompt=text, new_session=new_session)
         argv = adapters.render(name, "fresh", mode, v, root)
         if argv is None:
             raise Refused(f"'{name}' cannot run in {mode} mode here.")

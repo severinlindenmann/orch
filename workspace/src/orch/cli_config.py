@@ -25,6 +25,8 @@ def add_parsers(sub, common) -> None:
     ag = sub.add_parser("agents", parents=[common], help=argparse.SUPPRESS).add_subparsers(dest="sub")
     t = ag.add_parser("test", parents=[common], help="run an agent once with a trivial prompt")
     t.add_argument("name")
+    sh = sub.add_parser("share", parents=[common], help="share the orch entry with your team (off by default)")
+    sh.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
     c = sub.add_parser("config", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
     g = c.add_parser("get", parents=[common])
     g.add_argument("key", nargs="?", choices=KEYS)
@@ -234,6 +236,19 @@ def _config(args, root: Path) -> None:
             _out(args, {"workspace.agent": name}, f"Saved: workspace.agent = {name}.")
 
 
+def _share(args, root: Path) -> None:
+    """Share with team: one stable block in the team's AGENTS.md and merge=union in .gitattributes.
+    Human only (it changes files the team owns). Off removes both."""
+    from orch import harness
+
+    if args.state != "status":
+        if tickets.agent_tool():
+            raise Refused("Only a person can share the orch entry with the team.")
+        (harness.share_on if args.state == "on" else harness.share_off)(root)
+    on = harness.share_state(root)
+    _out(args, {"shared": on}, "Shared with your team: AGENTS.md has the orch entry." if on else "Not shared: the orch files stay on this computer.")
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd == "agents":
         if getattr(args, "sub", None) == "test":
@@ -241,6 +256,8 @@ def dispatch(args, root: Path) -> bool:
         _agents(args, root)
     elif args.cmd == "config":
         _config(args, root)
+    elif args.cmd == "share":
+        _share(args, root)
     else:
         return False
     return True

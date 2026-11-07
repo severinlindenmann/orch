@@ -22,15 +22,13 @@ def init(root: Path, code: str | None = None) -> list[str]:
     skills.install_skill(root, "orch", src)
     skills.set_block(root, "orch", skills.read_block(src, "orch"))
     linked = skills.apply_agent_files(root)
-    skills.ensure_gitignore(root)
     lines = [
-        "Skill       .agents/skills/orch/SKILL.md",
-        "AGENTS.md   orch entry",
+        "Skill       .agents/skills/orch/SKILL.md (local; not part of your team's files)",
     ]
     if linked:
         lines.append("Linked for: " + ", ".join(linked))
     lines += [
-        "Gitignore   .orch/secrets/ and other local files",
+        "Local only  orch files stay out of git (.git/info/exclude)",
         "Tickets     .orch/tickets/",
         f"Ticket keys {code}-1, {code}-2, ... (change the code: orch config set workspace.code <code>)",
         adapters.permission_line(root),

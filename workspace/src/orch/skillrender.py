@@ -137,51 +137,30 @@ def remember_rights(root: Path, who: dict) -> None:
 # ---------------------------------------------------------------- writing
 
 
-def _current_block(root: Path, name: str) -> str | None:
-    p = root / "AGENTS.md"
-    if not p.is_file():
-        return None
-    m = skills._block_re(name, True).search(p.read_text(encoding="utf-8"))
-    return m.group(0) if m else None
-
-
 def _safe_write(root: Path, dest: Path, text: str) -> None:
-    """Never through a link: each folder from .agents down must be a real folder, and the file is replaced
-    (a new file next to it, then rename), so a planted SKILL.md link is replaced, not followed."""
-    import os
-    import tempfile
+    """Into .orch/harness/skills only, never through a link: the file is replaced (a new file next to it,
+    then rename), so a planted SKILL.md link is replaced, not followed."""
+    from orch import harness
 
     skills.check_inside(root, dest)
-    for p in (root / ".agents", root / ".agents" / "skills", dest.parent):
-        if skills._is_link(p):
-            raise Refused(f"{p} is a link; orch will not write there. Make it a plain folder and try again.")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".SKILL.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
-        os.chmod(tmp, 0o644)
-        os.replace(tmp, dest)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+    harness.write_text(dest, text)
 
 
 def render_installed(root: Path, addon: str, source: Path) -> bool:
-    """Render one turned-on add-on's skill into .agents/skills/ and AGENTS.md. True if it changed."""
+    """Render one turned-on add-on's skill and block into .orch/harness. True if it changed."""
     skill = f"orch-{addon}"
     if "{{" not in (source / "SKILL.md").read_text(encoding="utf-8"):
         return False  # a plain skill: install_skill already copied it
-    dest = root / ".agents" / "skills" / skill / "SKILL.md"
+    dest = skills.harness_skill(root, skill) / "SKILL.md"
     body, block = render_skill(source, facts_for(root, skill))
     changed = False
     if not dest.is_file() or dest.read_text(encoding="utf-8") != body:
         _safe_write(root, dest, body)
         changed = True
     if block:
-        want_b, want_e = skills._markers(addon, True)
-        want = f"{want_b}\n{block.strip()}\n{want_e}\n"
-        if _current_block(root, addon) != want:
+        from orch import harness
+
+        if (harness.current_block(root, addon) or "").strip() != re.sub(r"<!--.*?-->", "", block, flags=re.S).strip():
             skills.set_block(root, addon, block, addon=True)
             changed = True
     return changed
