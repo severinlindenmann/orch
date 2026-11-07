@@ -17,11 +17,11 @@ jobs:
           NAME=$(xcrun simctl list devices available | grep -oE 'iPhone [0-9A-Za-z ]+ \(' | head -1 | sed 's/ ($//')
           echo "SIM_NAME=$NAME" >> "$GITHUB_ENV"
       # Ad hoc signing (not CODE_SIGNING_ALLOWED=NO): an unsigned app has no Keychain in the Simulator.
-      # Pull requests: build + unit tests (the UI suite took most of ~18 min per mobile PR). develop/main pushes and
-      # manual runs keep the full suite with the UI tests, so nothing is dropped, only moved to after the merge.
+      # Pull requests into develop: build + unit tests (the UI suite took most of ~18 min per mobile PR). develop/main pushes,
+      # PRs into main (releases) and manual runs keep the full suite with the UI tests, so nothing is dropped, only moved to after the merge.
       - name: Build and test
         env:
-          SKIP_UI: ${{ github.event_name == 'pull_request' && '-skip-testing:OrchMobileUITests' || '' }}
+          SKIP_UI: ${{ github.event_name == 'pull_request' && github.base_ref != 'main' && '-skip-testing:OrchMobileUITests' || '' }}
         run: |
           set -o pipefail
           echo "UI tests: ${SKIP_UI:-included}"
