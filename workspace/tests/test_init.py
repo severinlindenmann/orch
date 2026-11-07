@@ -749,3 +749,22 @@ def test_outbox_probe_is_checked_at_protect_time(proj):
 
     _tracked_orch_gitignore(proj, "!/.orch/outbox/\n/.orch/outbox/*\n!/.orch/outbox/probe\n")
     assert harness._probes_ignored(proj) is False
+
+
+def test_without_git_in_a_plain_folder_private_writes_work(proj, monkeypatch, tmp_path_factory):
+    from orch import net
+
+    monkeypatch.setenv("PATH", str(tmp_path_factory.mktemp("emptybin")))
+    net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
+    assert (proj / ".orch/secrets/x.json").is_file()
+
+
+def test_without_git_a_fresh_copy_is_ours(proj, monkeypatch, tmp_path_factory):
+    from orch import harness
+
+    src, dest = _copy_setup(proj, harness)
+    os.utime(dest / harness.COPY_MARK, (time_future(), time_future()))
+    monkeypatch.setenv("PATH", str(tmp_path_factory.mktemp("emptybin2")))
+    assert harness._is_ours_copy(dest, proj) is True
+    (proj / ".git").mkdir()  # a repo that cannot be checked: never ours
+    assert harness._is_ours_copy(dest, proj) is False

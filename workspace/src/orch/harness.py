@@ -239,6 +239,11 @@ ORCH_IGNORE = [
 
 
 def _tracked(root: Path, rel: str) -> bool:
+    try:
+        if not _in_git_repo(root):
+            return False  # plain folder (or no git program there): nothing can be tracked
+    except Refused:
+        return True  # cannot tell: treat the file as the team's
     env = _git_env()
     try:
         return (
@@ -377,6 +382,13 @@ def _is_ours_copy(dest: Path, root: Path) -> bool:
     mark = dest / COPY_MARK
     if not mark.is_file() or is_link(mark):
         return False
+    try:
+        return _is_ours_copy_checked(dest, root, mark)
+    except Refused:
+        return False
+
+
+def _is_ours_copy_checked(dest: Path, root: Path, mark: Path) -> bool:
     try:
         mt = mark.stat().st_mtime
         listed = set(mark.read_text(encoding="utf-8").splitlines()[1:])
