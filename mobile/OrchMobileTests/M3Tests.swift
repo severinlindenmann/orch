@@ -92,7 +92,7 @@ final class PublishVectorTests: XCTestCase {
         StubURLProtocol.respond = { _ in (200, Data(repeating: 1, count: 64)) }
         do { _ = try await f.load(link); XCTFail() } catch { XCTAssertEqual(error as? PublishError, .broken) }
     }
-    func testNetworkBlockRulesCompile() async throws {
+    @MainActor func testNetworkBlockRulesCompile() async throws {
         let list = try await WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "m3-test", encodedContentRuleList: NetworkBlock.rules)
         XCTAssertNotNil(list)
         try await WKContentRuleListStore.default().removeContentRuleList(forIdentifier: "m3-test")
