@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import os
 
 import pytest
 from fakes import WS
@@ -804,7 +805,7 @@ def test_outbox_refuses_a_symlinked_file(proj, run, rel):
     try:
         relay._write_outbox(proj, mid, b"{}")
         raise AssertionError("must not follow the link")
-    except OSError:
+    except (OSError, relay.Refused):
         pass
     assert target.read_text() == "keep" and relay.outbox_list(proj) == []
 
@@ -1562,6 +1563,61 @@ def test_relay_answer_without_a_run_queues_nothing(proj, run, new_ticket, rel):
     )
     assert "answered q1" in run("relay", "inbox")[1]
     assert runs.undelivered(proj, tid) == []
+
+
+def test_refresh_refuses_when_a_gitignore_shows_credentials_and_leaves_secrets_alone(
+    proj, run, rel, monkeypatch
+):
+    import subprocess
+
+    from orch import adapters
+
+    monkeypatch.setattr(
+        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+    )
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+    def git(*a):
+        subprocess.run(["git", *a], cwd=proj, env=env, capture_output=True, check=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    (proj / ".orch").mkdir(exist_ok=True)
+    (proj / ".orch/.gitignore").write_text("# team\n", encoding="utf-8")
+    (proj / ".gitignore").write_text(
+        "!/.orch/secrets/\n/.orch/secrets/*\n!/.orch/secrets/credentials.json\n", encoding="utf-8"
+    )
+    git("add", "-f", ".")
+    git("commit", "-qm", "team")
+    connect(run, rel)
+    before = sorted(p.name for p in (proj / ".orch/secrets").iterdir())
+    rel.snapshot.update(version=7, skills=[], mcp={"sql": {"command": "x"}}, credentials={"DB_URL": "pg://x"})
+    code, out, err = run("relay", "refresh")
+    assert code != 0
+    s = proj / ".orch/secrets"
+    assert not (s / "credentials.json").exists() and not (s / "mcp.json").exists()
+    assert sorted(p.name for p in s.iterdir()) == before
+
+
+def test_outbox_write_checks_git_for_the_exact_file(proj, monkeypatch):
+    import subprocess
+
+    from orch import relay
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(["git", "init", "-q"], cwd=proj, env=env, check=True)
+    subprocess.run(["git", "config", "user.email", "t@e.com"], cwd=proj, env=env, check=True)
+    (proj / ".orch").mkdir(exist_ok=True)
+    (proj / ".orch/.gitignore").write_text("# team\n", encoding="utf-8")
+    (proj / ".gitignore").write_text(
+        "!/.orch/outbox/\n/.orch/outbox/*\n!/.orch/outbox/m1.json\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "-f", ".orch/.gitignore"], cwd=proj, env=env, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "commit", "-qm", "x"], cwd=proj, env=env, check=True)
+    with pytest.raises(relay.Refused):
+        relay._write_outbox(proj, "m1", b"{}")
+    assert not (proj / ".orch/outbox/m1.json").exists()
 
 
 def test_relay_tab_refreshes_when_settings_are_waiting(proj, run, rel):

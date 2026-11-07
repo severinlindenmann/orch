@@ -154,11 +154,12 @@ def secrets_dir(root: Path) -> Path:
 
 def write_atomic(path: Path, data: bytes, private: bool = False) -> None:
     if private:  # fail closed: a private file is only stored when git is told to leave it alone
-        from orch import skills
+        from orch import harness, skills
 
         for anc in path.parents:
-            if anc.name == ".orch":
+            if anc.name.lower() == ".orch":
                 skills.ensure_gitignore(anc.parent)
+                harness.check_private_path(anc.parent, path)
                 break
     path.parent.mkdir(parents=True, exist_ok=True)
     import tempfile
@@ -174,6 +175,19 @@ def write_atomic(path: Path, data: bytes, private: bool = False) -> None:
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
+
+
+def replace_private(src: Path, dst: Path) -> None:
+    """os.replace into a private place (.orch/secrets): git must ignore the exact destination first."""
+    from orch import harness
+
+    for anc in dst.parents:
+        if anc.name.lower() == ".orch":
+            harness.check_private_path(anc.parent, dst)
+            break
+    else:
+        raise Refused(f"{dst} is not inside .orch; orch will not store private files there.")
+    os.replace(src, dst)
 
 
 def write_json(path: Path, obj, private: bool = False) -> None:
