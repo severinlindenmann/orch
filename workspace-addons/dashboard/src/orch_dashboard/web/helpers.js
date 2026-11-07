@@ -135,6 +135,26 @@
     return {state: 'new', agent, status: 'not started yet', primary: start('Start'), items: []};
   }
 
+  /* The line under an agent's "waiting" chip, in plain words: no command text, a login named as signing in. */
+  function plainWhy(why, label) {
+    const w = String(why || '');
+    if (/wants a login|log in to|login method/i.test(w)) return (label || 'The agent') + ' needs you to sign in';
+    return w.replace(/\s*(Open the live session[^:]*:\s*)?orch run attach\s+\S+/gi, '').replace(/\s+/g, ' ').trim().replace(/[.:]$/, '');
+  }
+
+  /* One state per ticket: a ticket the agent cannot go on with (live state attention) is Waiting, never Working. */
+  function shownStatus(ticket, run) {
+    const t = ticket || {}, live = run && run.claim && run.claim.live;
+    return t.status === 'active' && live && live.state === 'attention' ? 'waiting' : t.status;
+  }
+
+  /* True while the yellow "Waiting for your answer" chip shows (an open question, or the agent needs you): the plain
+     Waiting status chip is then left out, so the ticket shows one chip. */
+  function showsAnswerChip(ticket, run) {
+    const t = ticket || {}, live = run && run.claim && run.claim.live;
+    return arr(t.questions).some(q => q && q.answer == null) || !!(live && live.state === 'attention');
+  }
+
   /* Tickets tab tree: parents with their children (N of M done), children beyond 3 collapsed, a child whose parent is
      missing is shown as a top-level ticket. Input order is kept. */
   function treeRows(tickets) {
@@ -253,5 +273,5 @@
     return out;
   }
 
-  return {phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

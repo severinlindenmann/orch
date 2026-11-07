@@ -212,6 +212,7 @@ def start_local(e, tmp: Path, bins: dict, used: set[int]) -> tuple[Server, Serve
     e.pids.append(rproc.pid)
     pub = Server("publish", f"http://127.0.0.1:{pp}", f"http://127.0.0.1:{pa}", Admin(f"http://127.0.0.1:{pa}", tok_p), pproc, pd)
     rel = Server("relay", f"http://127.0.0.1:{rp}", f"http://127.0.0.1:{ra}", Admin(f"http://127.0.0.1:{ra}", tok_r), rproc, rd)
+    rel.env = rel_env  # kept so a harness can stop and restart the relay (V3-SIM)
     for s in (pub, rel):
         if not wait_http(s.url + "/health"):
             raise Fail(f"{s.name} did not start; see {tmp}/{s.name}.log")

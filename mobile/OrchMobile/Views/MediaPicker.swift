@@ -132,6 +132,9 @@ struct MediaPicker: View {
                     Button { errorText = nil; receiveCapture(.success([Self.fakeJPEG()]), mode: .photo) } label: {
                         MediaTile(label: "Test photo", icon: "photo.badge.plus", color: Theme.purple)
                     }.accessibilityLabel("Test photo").accessibilityIdentifier("media-fake-photo")
+                    Button { errorText = nil; importFiles(.success([Self.fakePDF()])) } label: {
+                        MediaTile(label: "Test PDF", icon: "doc.badge.plus", color: Theme.warn)
+                    }.accessibilityLabel("Test PDF").accessibilityIdentifier("media-fake-pdf")
                 }
                 #endif
                 Button {
@@ -148,6 +151,15 @@ struct MediaPicker: View {
     }
 
     #if DEBUG
+    /// UI tests: the Files browser is out of process; a small PDF in the temp folder goes through the same import path.
+    private static func fakePDF() -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Offer-Q3.pdf")
+        let data = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 400, height: 300)).pdfData { c in
+            c.beginPage(); ("Offer Q3" as NSString).draw(at: CGPoint(x: 40, y: 120), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 36)])
+        }
+        try? data.write(to: url)
+        return url
+    }
     private static func fakeJPEG() -> Data {
         UIGraphicsImageRenderer(size: CGSize(width: 640, height: 480)).jpegData(withCompressionQuality: 0.8) { c in
             UIColor(red: 0.18, green: 0.78, blue: 0.64, alpha: 1).setFill(); c.fill(CGRect(x: 0, y: 0, width: 640, height: 480))
@@ -462,10 +474,12 @@ private struct MediaMapPicture: View {
     private var key: String { String(format: "%.5f,%.5f", location.lat, location.lon) }
 
     var body: some View {
-        Group {
-            if let picture { Image(uiImage: picture).resizable().scaledToFill() }
-            else { Theme.surface2.overlay { Image(systemName: "mappin.and.ellipse").foregroundStyle(Theme.brand).themeFont(28) } }
-        }
+        // The picture only fills an overlay: a scaledToFill image as the view itself made the card wider than the screen.
+        Theme.surface2
+            .overlay {
+                if let picture { Image(uiImage: picture).resizable().scaledToFill() }
+                else { Image(systemName: "mappin.and.ellipse").foregroundStyle(Theme.brand).themeFont(28) }
+            }
         .frame(height: 130).frame(maxWidth: .infinity)
         .clipped().clipShape(RoundedRectangle(cornerRadius: 10))
         .accessibilityLabel("Map of \(location.label ?? coordinateLabel(location))")
