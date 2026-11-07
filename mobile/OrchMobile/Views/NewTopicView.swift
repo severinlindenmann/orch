@@ -61,7 +61,7 @@ struct NewTopicScreen: View {
         model.path = [.workspace(ws)]
         if asSheet { dismiss() }
         Task { @MainActor in
-            for _ in 0..<10 {
+            for _ in 0..<15 {
                 // Newest text this phone sent to the workspace; the workspace's ack names the ticket it started.
                 let mine = model.messages.filter { $0.fromPhone && $0.workspaceId == ws }.max { $0.message.createdAt < $1.message.createdAt }
                 if let mine, let ticket = mine.message.ticket ?? model.ack(for: mine.id)?.ticket,

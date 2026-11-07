@@ -32,14 +32,14 @@ final class ConversationUITests: XCTestCase {
 
     func testQuestionUndoThenAnswered() {
         let app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_7k3f9q", "-undoSeconds", "3"])
-        let timestamp = el(app, "option-TIMESTAMP")
+        let timestamp = el(app, "answer-TIMESTAMP")
         XCTAssertTrue(timestamp.waitForExistence(timeout: 20))
         timestamp.tap()
-        let undo = el(app, "question-undo")
+        let undo = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'undo-'")).firstMatch
         XCTAssertTrue(undo.waitForExistence(timeout: 5), "the undo window shows")
         undo.tap()
-        XCTAssertTrue(el(app, "option-DATE").waitForExistence(timeout: 5), "back to the open question")
-        el(app, "option-DATE").tap()
+        XCTAssertTrue(el(app, "answer-DATE").waitForExistence(timeout: 5), "back to the open question")
+        el(app, "answer-DATE").tap()
         XCTAssertTrue(el(app, "question-show-other").waitForExistence(timeout: 20), "answered card with Show other options")
         XCTAssertTrue(app.staticTexts["Answered"].exists)
     }

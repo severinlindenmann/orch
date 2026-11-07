@@ -34,10 +34,10 @@ final class ConversationShotsUITests: XCTestCase {
 
             // Topic chat with questions
             app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_7k3f9q"], size: size)
-            XCTAssertTrue(el(app, "option-TIMESTAMP").waitForExistence(timeout: 15))
+            XCTAssertTrue(el(app, "answer-TIMESTAMP").waitForExistence(timeout: 15))
             try shot(app, "topic-questions\(suffix)")
-            el(app, "option-TIMESTAMP").tap()
-            _ = el(app, "question-undo").waitForExistence(timeout: 5)
+            el(app, "answer-TIMESTAMP").tap()
+            _ = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'undo-'")).firstMatch.waitForExistence(timeout: 5)
             try shot(app, "question-undo\(suffix)")
 
             // Recording: drag up from the mic = locked hands-free row

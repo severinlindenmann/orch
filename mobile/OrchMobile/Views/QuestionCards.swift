@@ -115,7 +115,7 @@ struct QuestionCard: View {
                 .background(primary ? Theme.brand : Theme.surface3, in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(q.message.body.recommended == option ? Theme.brand : .clear))
                 .opacity(pending != nil && pending != option ? 0.45 : 1)
-        }.disabled(pending != nil).accessibilityLabel(option).accessibilityIdentifier("option-\(option)")
+        }.disabled(pending != nil).accessibilityLabel(option).accessibilityIdentifier("answer-\(option)")
     }
 
     private func selectedChip(_ q: Question, answer: String, checked: Bool = true) -> some View {
@@ -175,7 +175,7 @@ struct QuestionCard: View {
             Button { model.undoAnswer(q) } label: {
                 Text("Undo").themeFont(15, .medium).foregroundStyle(Theme.brand)
                     .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-            }.accessibilityIdentifier("question-undo")
+            }.accessibilityIdentifier("undo-\(q.id)")
         }
     }
 
