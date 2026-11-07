@@ -12,22 +12,25 @@ struct OnboardingView: View {
     @Environment(\.dynamicTypeSize) private var dynamicType  // re-evaluate fonts when text size changes (no view-identity reset)
     var body: some View {
         let _ = dynamicType
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Brand().frame(maxWidth: .infinity)
-                if model.phase == .notifyStep {
-                    ScreenHeading(title: "You're connected.", subtitle: model.pairedWorkspaces.count == 1 ? "1 workspace is ready." : "\(model.pairedWorkspaces.count) workspaces are ready.")
-                        .padding(.top, 28)
-                } else {
-                    ScreenHeading(title: "Let's get connected.", subtitle: "Use your invitation to bring your workspaces along.").padding(.top, 28)
-                }
-                if model.phase == .notifyStep {
-                    notificationStep
-                } else {
-                    invitationStep
-                }
-                ModelMessage()
-            }.padding(.horizontal, 23).padding(.top, 12).padding(.bottom, 20)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    OrbitMark().frame(width: 42, height: 42)
+                    if model.phase == .notifyStep {
+                        ScreenHeading(title: "You're connected.", subtitle: model.pairedWorkspaces.count == 1 ? "1 workspace is ready." : "\(model.pairedWorkspaces.count) workspaces are ready.")
+                            .padding(.top, 28)
+                    } else {
+                        ScreenHeading(title: "Let's get connected.", subtitle: "Use your invitation to bring your workspaces along.").padding(.top, 28)
+                    }
+                    if model.phase == .notifyStep {
+                        notificationStep
+                    } else {
+                        invitationStep
+                    }
+                    ModelMessage()
+                }.padding(.horizontal, 25).padding(.vertical, 24)
+                    .frame(minHeight: geometry.size.height, alignment: .center)
+            }
         }
         .sheet(isPresented: $showLink) {
             VStack(alignment: .leading, spacing: 12) {
@@ -85,6 +88,7 @@ struct OnboardingView: View {
         case .found(let host):
             VStack(alignment: .leading, spacing: 12) {
                 Text("Your invitation is ready").themeFont(15, .semibold)
+                Text("Server: \(host)").themeFont(13).foregroundStyle(Theme.muted)
                 Text("You were invited to connect this phone.").themeFont(13).foregroundStyle(Theme.muted)
                 DisclosureGroup { Text(host).themeFont(12).frame(maxWidth: .infinity, alignment: .leading) } label: {
                     Text("Connection details").frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
