@@ -1451,7 +1451,7 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
         {
             "label": "Send a message",
             "action": {
-                "op": "relay.send",
+                "op": "message.send",
                 "args": {"workspace": first["actions"][0]["action"]["args"]["workspace"]},
             },
         }
