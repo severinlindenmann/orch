@@ -4,9 +4,22 @@ import Foundation
 /// (`GET /v1/phone/updates`) plus the open questions, no second store.
 struct Ticket: Identifiable, Equatable, Sendable {
     enum Status: Int, Comparable, Sendable {
-        case needsYou, working, done
+        case needsYou, review, working, backlog, done
         static func < (a: Status, b: Status) -> Bool { a.rawValue < b.rawValue }
-        var title: String { switch self { case .needsYou: "Needs you"; case .working: "Working on"; case .done: "Done" } }
+        var title: String {
+            switch self { case .needsYou: "Needs you"; case .review: "Check this"; case .working: "Working on"; case .backlog: "Backlog"; case .done: "Done" }
+        }
+        /// The ticket's own status word from `ticket_view.status` (open|ready|active|waiting|review|done|dropped). Unknown words: nil.
+        init?(ticketStatus word: String?) {
+            switch word {
+            case "open", "ready": self = .backlog
+            case "active": self = .working
+            case "waiting": self = .needsYou
+            case "review": self = .review
+            case "done", "dropped": self = .done
+            default: return nil
+            }
+        }
     }
     let id: String
     let workspace: String
@@ -32,6 +45,8 @@ struct Ticket: Identifiable, Equatable, Sendable {
         switch status {
         case .needsYou: return "Waiting for your answer"
         case .working: return "Working on it"
+        case .review: return "Check this"
+        case .backlog: return "Not started"
         case .done:
             switch kind {
             case "failure": return first.isEmpty ? "Did not work" : "Did not work — \(first)"
@@ -45,6 +60,8 @@ struct Ticket: Identifiable, Equatable, Sendable {
         switch status {
         case .needsYou: "exclamationmark.circle.fill"
         case .working: "circle.dotted"
+        case .review: "eye.circle.fill"
+        case .backlog: "circle"
         case .done: kind == "result" ? "checkmark.circle.fill" : "xmark.circle.fill"
         }
     }
@@ -66,8 +83,9 @@ enum TicketBuilder {
             let key = "\(u.workspace)|\(u.ticket)"
             var st = status(forKind: u.kind)
             if st == .needsYou { st = .working }   // only a real open question counts (below)
-            // A quiet sync note carries the ticket's own status: a finished ticket is Done whatever the note's kind.
-            if st == .working, ["done", "dropped"].contains(u.ticketView?.status ?? "") { st = .done }
+            // The ticket's own status (when the snapshot carries a known one) decides, whatever the note's kind: an agent's
+            // "done" arrives as review, a person's Done as done. The update kind only decides for old snapshots without a status (failure and stopped keep their own sign when the ticket is done).
+            if let own = Ticket.Status(ticketStatus: u.ticketView?.status) { st = own }
             byKey[key] = Ticket(id: key, workspace: u.workspace, workspaceName: u.workspaceName, ticket: u.ticket,
                                 title: u.ticketView?.title ?? u.title ?? u.text, text: u.text, status: st, kind: u.kind, at: u.at, question: nil,
                                 key: u.key, view: u.ticketView)

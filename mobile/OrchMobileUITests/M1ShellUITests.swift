@@ -18,10 +18,10 @@ final class M1ShellUITests: XCTestCase {
         XCTAssertTrue(room.waitForExistence(timeout: 15))
         room.tap()
         XCTAssertTrue(app.buttons["general-ws_pilatus001"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["segment-open"].exists && app.buttons["segment-done"].exists)
-        // t_q3sum1 has its result already: it lives under Done, not Open.
-        XCTAssertFalse(app.buttons["ticket-ws_pilatus001|t_q3sum1"].waitForExistence(timeout: 2), "a finished topic is not under Open")
-        app.buttons["segment-done"].tap()
+        XCTAssertTrue(app.buttons["done-toggle"].exists)
+        // t_q3sum1 has its result already: it lives under the collapsed Done group.
+        XCTAssertFalse(app.buttons["ticket-ws_pilatus001|t_q3sum1"].waitForExistence(timeout: 2), "a finished topic is collapsed under Done")
+        app.buttons["done-toggle"].tap()
         let topic = app.buttons["ticket-ws_pilatus001|t_q3sum1"]
         XCTAssertTrue(topic.waitForExistence(timeout: 10))
         topic.tap()
@@ -135,8 +135,8 @@ final class M1ShellUITests: XCTestCase {
             }
             var app = paired(extra)
             XCTAssertTrue(app.buttons["room-ws_pilatus001"].waitForExistence(timeout: 15)); try snap(app, "1-chats")
-            app.buttons["room-ws_pilatus001"].tap(); XCTAssertTrue(app.buttons["segment-done"].waitForExistence(timeout: 10)); try snap(app, "2-workspace-open")
-            app.buttons["segment-done"].tap(); try snap(app, "3-workspace-done")
+            app.buttons["room-ws_pilatus001"].tap(); XCTAssertTrue(app.buttons["done-toggle"].waitForExistence(timeout: 10)); try snap(app, "2-workspace-open")
+            app.buttons["done-toggle"].tap(); try snap(app, "3-workspace-done")
             app.terminate()
             app = paired(extra + ["-startTab", "settings"])
             XCTAssertTrue(app.buttons["Sign out"].waitForExistence(timeout: 15)); try snap(app, "4-settings")
