@@ -41,23 +41,49 @@ print(json.dumps(st))
     return s
 
 
-OFF = {"on": False, "default_hours": 12, "hours_choices": [4, 8, 12, 24], "awake": None, "since": None,
-       "ends_at": None, "machine": "Acme PC", "ended": None}
+OFF = {
+    "on": False,
+    "default_hours": 12,
+    "hours_choices": [4, 8, 12, 24],
+    "awake": None,
+    "since": None,
+    "ends_at": None,
+    "machine": "Acme PC",
+    "ended": None,
+}
 
 
 def test_op_table_builds_the_relay_commands():
     by = actions.actor()
     assert actions.build_argv("mobile.set", {"on": True}) == ["relay", "mobile", "on", "--by", by, "--json"]
-    assert actions.build_argv("mobile.set", {"on": True, "hours": 8}) == ["relay", "mobile", "on", "--hours=8", "--by", by, "--json"]
+    assert actions.build_argv("mobile.set", {"on": True, "hours": 8}) == [
+        "relay",
+        "mobile",
+        "on",
+        "--hours=8",
+        "--by",
+        by,
+        "--json",
+    ]
     assert actions.build_argv("mobile.set", {"on": False})[:3] == ["relay", "mobile", "off"]
     assert actions.build_argv("mobile.hours", {"hours": 24})[:4] == ["relay", "mobile", "hours", "24"]
     assert actions.build_argv("mobile.ack", {})[:3] == ["relay", "mobile", "ack"]
 
 
-@pytest.mark.parametrize("op,args", [("mobile.set", {}), ("mobile.set", {"on": "yes"}), ("mobile.set", {"on": True, "hours": 5}),
-                                     ("mobile.set", {"on": True, "hours": True}), ("mobile.set", {"on": False, "hours": 4}),
-                                     ("mobile.set", {"on": True, "x": 1}), ("mobile.hours", {"hours": "8"}),
-                                     ("mobile.hours", {}), ("mobile.ack", {"x": 1})])
+@pytest.mark.parametrize(
+    "op,args",
+    [
+        ("mobile.set", {}),
+        ("mobile.set", {"on": "yes"}),
+        ("mobile.set", {"on": True, "hours": 5}),
+        ("mobile.set", {"on": True, "hours": True}),
+        ("mobile.set", {"on": False, "hours": 4}),
+        ("mobile.set", {"on": True, "x": 1}),
+        ("mobile.hours", {"hours": "8"}),
+        ("mobile.hours", {}),
+        ("mobile.ack", {"x": 1}),
+    ],
+)
 def test_bad_mobile_args_are_refused(act_server, act_orch, op, args):
     assert post(act_server, {"op": op, "args": args})[0] == 400
     assert [c for c in acts(act_orch) if c[2:3] != ["status"]] == []
@@ -70,7 +96,18 @@ def test_act_runs_one_command_through_the_server(act_server, act_orch):
 
 
 def test_state_carries_mobile_mode_only_for_the_live_page(ws, tmp_path):
-    orch = fake(tmp_path, {**OFF, "ended": {"at": "2026-11-07T10:00:00Z", "reason": "restart", "text": "Mobile mode ended when the computer restarted.", "x": 1}})
+    orch = fake(
+        tmp_path,
+        {
+            **OFF,
+            "ended": {
+                "at": "2026-11-07T10:00:00Z",
+                "reason": "restart",
+                "text": "Mobile mode ended when the computer restarted.",
+                "x": 1,
+            },
+        },
+    )
     live = load_state(ws, orch_bin=str(orch), with_settings=True)["mobile_mode"]
     assert live["on"] is False and live["default_hours"] == 12 and live["ended"]["reason"] == "restart"
     assert "x" not in live["ended"]
@@ -83,7 +120,9 @@ def test_no_switch_when_the_relay_is_not_on(ws, act_orch):
 
 
 def test_odd_values_are_cleaned(ws, tmp_path):
-    orch = fake(tmp_path, {**OFF, "default_hours": 7, "awake": "maybe", "hours_choices": [3, 4], "machine": "x" * 500})
+    orch = fake(
+        tmp_path, {**OFF, "default_hours": 7, "awake": "maybe", "hours_choices": [3, 4], "machine": "x" * 500}
+    )
     m = load_mobile(ws, str(orch))
     assert m["default_hours"] == 12 and m["awake"] is None and m["hours_choices"] == [4]
     assert len(m["machine"]) == 60
@@ -91,6 +130,7 @@ def test_odd_values_are_cleaned(ws, tmp_path):
 
 def test_web_files_are_served(server):
     import urllib.request
+
     for n in ("mobile-mode.js", "index.html"):
         body = urllib.request.urlopen(f"{server}/{n}").read().decode()
         assert "mm-toggle" in body or "orch:state" in body

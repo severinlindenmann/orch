@@ -1,5 +1,6 @@
 """Mobile mode is the one feature of the relay add-on the dashboard shows. Everything that names the add-on lives
 in this file (the other dashboard sources name no add-on; a test keeps it that way)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,6 +10,7 @@ HOURS = (4, 8, 12, 24)
 
 def _actions():
     from . import actions  # imported late: actions builds its op table from this file
+
     return actions
 
 
@@ -56,15 +58,30 @@ def load_mobile(root: Path, orch_bin: str | None) -> dict | None:
     """Mobile mode from `orch relay mobile status --json` (the relay add-on). None when the add-on is not on here:
     the page then shows no switch. Only the fields the page uses, strings cut short."""
     from .data import run_orch  # late: data imports this file
+
     d = run_orch(orch_bin, ["relay", "mobile", "status", "--json"], root)
     if not isinstance(d, dict) or not isinstance(d.get("on"), bool):
         return None
     s = lambda v, n=80: v[:n] if isinstance(v, str) else None
     ended = d.get("ended")
-    ended = {"reason": s(ended.get("reason"), 10), "text": s(ended.get("text"), 200), "at": s(ended.get("at"), 30)} \
-        if isinstance(ended, dict) and ended.get("text") else None
+    ended = (
+        {
+            "reason": s(ended.get("reason"), 10),
+            "text": s(ended.get("text"), 200),
+            "at": s(ended.get("at"), 30),
+        }
+        if isinstance(ended, dict) and ended.get("text")
+        else None
+    )
     choices = [h for h in (d.get("hours_choices") or []) if h in (4, 8, 12, 24)] or [4, 8, 12, 24]
     dh = d.get("default_hours")
-    return {"on": d["on"], "default_hours": dh if dh in choices else 12, "hours_choices": choices,
-            "awake": d.get("awake") if d.get("awake") in ("ok", "could_not_keep_awake") else None,
-            "since": s(d.get("since"), 30), "ends_at": s(d.get("ends_at"), 30), "machine": s(d.get("machine"), 60), "ended": ended}
+    return {
+        "on": d["on"],
+        "default_hours": dh if dh in choices else 12,
+        "hours_choices": choices,
+        "awake": d.get("awake") if d.get("awake") in ("ok", "could_not_keep_awake") else None,
+        "since": s(d.get("since"), 30),
+        "ends_at": s(d.get("ends_at"), 30),
+        "machine": s(d.get("machine"), 60),
+        "ended": ended,
+    }
