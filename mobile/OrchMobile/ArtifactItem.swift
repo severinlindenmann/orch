@@ -284,7 +284,7 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
         guard let stripped = stripHints(from: data) else { return ("text/plain; charset=utf-8", data) }   // still changing: never rendered as markup
         return (base + "; charset=utf-8", stripped)
     }
-    static let hintWorld = WKContentWorld.world(name: "orch-hints")
+    @MainActor static let hintWorld = WKContentWorld.world(name: "orch-hints")
     /// Runs at document start in an isolated world (the page cannot reach or change it; the DOM is shared): DNS prefetch forced off on every
     /// such meta, connection hints removed now and whenever the page adds one. A backstop: the server-side strip and the rule list come first.
     static let noHints = """
