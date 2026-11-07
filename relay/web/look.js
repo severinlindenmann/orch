@@ -5,9 +5,9 @@
 (function () {
   const D = window.ORCH_LOOK_DATA;
   const NS = "http://www.w3.org/2000/svg";
-  const colorById = {};
+  const colorById = Object.create(null);
   D.colors.forEach((c) => (colorById[c.id] = c));
-  const iconById = {};
+  const iconById = Object.create(null);
   D.icons.forEach((i) => (iconById[i.id] = i));
 
   function clean(name) {
@@ -59,7 +59,7 @@
     svg.setAttribute("stroke-linecap", "round");
     svg.setAttribute("stroke-linejoin", "round");
     svg.setAttribute("aria-hidden", "true");
-    for (const [tag, attrs] of D.drawings[id] || []) {
+    for (const [tag, attrs] of (Object.hasOwn(D.drawings, id) && D.drawings[id]) || []) {
       const e = document.createElementNS(NS, tag);
       for (const k in attrs) e.setAttribute(k, attrs[k]);
       svg.appendChild(e);
@@ -176,7 +176,7 @@
   // The name goes in with textContent only; nothing from the response becomes markup.
   async function fileHeader(id) {
     try {
-      const r = await fetch("/f/" + encodeURIComponent(id) + "/meta", { cache: "no-store", referrer: "no-referrer" });
+      const r = await fetch("/f/" + encodeURIComponent(id) + "/meta", { cache: "no-store", referrerPolicy: "no-referrer" });
       if (!r.ok) return;
       const w = (await r.json()).workspace;
       const host = document.querySelector(".public-brand");

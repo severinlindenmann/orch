@@ -315,6 +315,7 @@
     form.scrollIntoView({ block: 'nearest' });
     form.querySelector('[data-cancel]').addEventListener('click', () => closeEditor(workspace.id));
     decorate(form);
+    if (window.OrchLookAdmin) form.querySelector('.field-spaced').append(window.OrchLookAdmin.row(workspace, b => api(path('workspaces', workspace.id), 'PATCH', b))); // look hook
     bindSave(form, async body => {
       await api(path('workspaces', workspace.id), 'PATCH', body);
       afterRender = () => document.querySelector(`[data-edit-id="${CSS.escape(workspace.id)}"]`)?.focus();

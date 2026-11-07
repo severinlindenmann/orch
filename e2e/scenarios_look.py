@@ -66,3 +66,32 @@ def look4(e):
     check(m.status == 200 and m.json() == {"workspace": None}, f"meta after off: {m.text}")
     http("PATCH", e.pub.url + "/v1/me", ws_hdr(pid, tok), {"show_on_shared_pages": True})
     return "meta on/off"
+
+
+@scenario("LOOK-5")
+def look5(e):
+    """Playwright: both admin portals show the badge picker before connect and the locked 409 text after."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    import pwd
+
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir)  # the run uses a temp HOME
+    nm = home / "orch-dev/.trun6q-e2e/node_modules"
+    node = shutil.which("node") or str(next((home / ".nvm/versions/node").glob("*/bin/node"), ""))
+    if not (nm / "playwright").is_dir() or not node or node == ".":
+        from lib import Skip
+        raise Skip("playwright or node not installed")
+    for kind, srv in (("relay", e.rel), ("publish", e.pub)):
+        r = srv.admin.call("POST", "/admin/api/workspaces", {"name": e.label("Portal" + kind), "description": "d", "tags": []})
+        check(r.status == 201, f"add: {r}")
+        j = r.json()
+        wid = j["id"]
+        e.cleanup.append(lambda s=srv, w=wid: s.admin.call("DELETE", f"/admin/api/workspaces/{w}"))
+        script = Path(__file__).parent / "look_portal_check.mjs"
+        env = {**e.env, "PW_DIR": str(nm), "HOME": str(home)}
+        p = subprocess.run([node, str(script), kind, srv.admin.base, srv.admin.token, wid, e.label("Portal" + kind), j["token"], srv.url],
+                           capture_output=True, text=True, timeout=120, env=env, cwd=str(nm.parent))
+        check(p.returncode == 0, f"{kind} portal: {p.stdout[-300:]} {p.stderr[-600:]}")
+    return "both portals"
