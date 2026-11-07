@@ -249,7 +249,13 @@ def _tracked(root: Path, rel: str) -> bool:
     try:
         return (
             subprocess.run(
-                ["git", "ls-files", "--error-unmatch", "--", rel],
+                [
+                    "git",
+                    "ls-files",
+                    "--error-unmatch",
+                    "--",
+                    f":(icase){rel}",
+                ],  # .ORCH/... tracked is this file too
                 cwd=root,
                 capture_output=True,
                 env=env,
@@ -348,12 +354,34 @@ def check_private_path(root: Path, path: Path) -> None:
             raise Refused(f"{cur} is a link; orch will not store private files there.")
     if not _inside(base, cur) and cur.exists():
         raise Refused(f"{path} points outside .orch; orch will not store private files there.")
+    # The names on disk, not only in the string: on a case-insensitive disk (macOS, Windows) .orch/secrets opens a
+    # folder spelled .ORCH/Secrets, and a short name or a trailing dot opens another one. Every part that exists
+    # must carry exactly this name in its folder.
+    parent = root
+    for part in (".orch", *rel_in.parts):
+        if not os.path.lexists(parent / part):
+            break
+        try:
+            names = os.listdir(parent)
+        except OSError:
+            raise Refused(f"orch cannot list {parent}. Nothing was stored.") from None
+        if part not in names:
+            raise Refused(
+                f"{parent / part} is spelled differently on disk; orch will not store private files there."
+            )
+        parent = parent / part
     if not _in_git_repo(root):
         return
     rel = path.absolute().relative_to(root.absolute()).as_posix()
     try:
         t = subprocess.run(
-            ["git", "ls-files", "--error-unmatch", "--", rel],
+            [
+                "git",
+                "ls-files",
+                "--error-unmatch",
+                "--",
+                f":(icase){rel}",
+            ],  # .ORCH/... tracked is this file too
             cwd=root,
             capture_output=True,
             env=_git_env(),

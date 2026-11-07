@@ -334,6 +334,6 @@ def test_write_atomic_replaces_a_planted_link(tmp_path):
     victim = tmp_path / "victim.txt"
     victim.write_text("keep me")
     (tmp_path / "x.json").symlink_to(victim)
-    net.write_atomic(tmp_path / "x.json", b"{}", True)
+    net.write_atomic(tmp_path / "x.json", b"{}")  # private=True outside .orch is refused (test_init)
     assert victim.read_text() == "keep me" and not (tmp_path / "x.json").is_symlink()
     assert not list(tmp_path.glob(".*.tmp"))

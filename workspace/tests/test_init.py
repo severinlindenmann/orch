@@ -798,6 +798,48 @@ def test_private_path_refuses_names_windows_would_alias(proj, rel):
         harness.check_private_path(proj, proj.joinpath(*rel))
 
 
+def test_private_write_refused_when_git_tracks_another_case_of_the_file(proj):
+    """A repo that tracks .ORCH/secrets/x.json: on a case-insensitive disk (macOS, Windows)
+    .orch/secrets/x.json IS that tracked file. git ls-files matches with case, so the guard asks
+    without case and checks the names on disk. A case-sensitive disk refuses too (odd repo, no leak)."""
+    from orch import net
+
+    _git_repo(proj)
+    (proj / ".gitignore").write_text("/.orch/\n", encoding="utf-8")
+    (proj / "t.json").write_text("{}", encoding="utf-8")
+    _git(proj, "add", ".gitignore")
+    _git(
+        proj,
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        f"100644,{_git(proj, 'hash-object', '-w', 't.json').strip()},.ORCH/secrets/x.json",
+    )
+    _git(proj, "commit", "-qm", "tracked upper case")
+    _git(proj, "checkout", "-q", "--", ".ORCH/secrets/x.json")
+    with pytest.raises(skills.Refused):
+        net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
+    assert "x.json" not in _git(proj, "status", "--porcelain")
+
+
+def test_private_write_refused_when_the_folder_on_disk_is_spelled_differently(proj):
+    from orch import harness
+
+    (proj / ".orch" / "Secrets").mkdir(parents=True)
+    if not (proj / ".orch" / "secrets").exists():
+        pytest.skip("case-sensitive disk: .orch/secrets is another folder")
+    with pytest.raises(skills.Refused):
+        harness.check_private_path(proj, proj / ".orch" / "secrets" / "x.json")
+
+
+def test_a_private_write_outside_any_orch_folder_is_refused(proj):
+    from orch import net
+
+    with pytest.raises(skills.Refused):
+        net.write_atomic(proj / "ORCH~1" / "secrets" / "x.json", b"{}", private=True)
+    assert not (proj / "ORCH~1" / "secrets" / "x.json").exists() or sys.platform == "win32"
+
+
 def test_outbox_probe_is_checked_at_protect_time(proj):
     from orch import harness
 
