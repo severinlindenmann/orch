@@ -55,6 +55,12 @@ class HarnessTests(unittest.TestCase):
         finally:
             r.stop()
 
+    def test_report_header_shows_build_label(self):
+        with tempfile.TemporaryDirectory() as d:
+            run = {"sha": "abcdef123456", "mode": "full", "started": "now", "elapsed": "1 min", "n": 1, "build_label": "TF 42"}
+            h = report.render(run, [], [], {"found": 0, "clicked": 0, "percent": 0}, Path(d)).read_text()
+            self.assertIn("build TF 42", h)
+
     def test_report_renders_findings_first(self):
         with tempfile.TemporaryDirectory() as d:
             run = {"sha": "abcdef123456", "mode": "quick", "started": "now", "elapsed": "1 min", "n": 1, "timing_fail": False}
