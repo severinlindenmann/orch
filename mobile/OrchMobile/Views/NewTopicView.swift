@@ -55,17 +55,17 @@ struct NewTopicScreen: View {
     /// When the workspace acks within a few seconds the new topic opens by itself.
     private func opened() {
         guard let ws = selected?.id else { return }
-        let before = Set(model.workspaceSummaries.first { $0.id == ws }?.topics.compactMap { $0.ticket?.ticket } ?? [])
+        // The message was just queued or sent, so its "starting" conversation exists; follow it until the workspace's ack names the ticket.
+        let starting = model.workspaceSummaries.first { $0.id == ws }?.topics.first { $0.isStarting }?.id
         model.path = [.workspace(ws)]
         if asSheet { dismiss() }
+        guard let starting else { return }
         Task { @MainActor in
-            for _ in 0..<8 {
+            for _ in 0..<10 {
                 try? await Task.sleep(for: .milliseconds(700))
                 await model.reloadMessages(); await model.refreshUpdates()
                 guard model.path == [.workspace(ws)] else { return }   // the person went elsewhere
-                if let t = model.workspaceSummaries.first(where: { $0.id == ws })?.topics.first(where: { $0.ticket != nil && !before.contains($0.ticket!.ticket ?? "") })?.ticket?.ticket {
-                    model.path = [.workspace(ws), .ticket(workspace: ws, ticket: t)]; return
-                }
+                if case .topic(_, let t) = model.resolve(starting) { model.path = [.workspace(ws), .ticket(workspace: ws, ticket: t)]; return }
             }
         }
     }
