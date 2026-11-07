@@ -649,7 +649,7 @@
       input.value = '';
       locks.delete(key);
       render();
-      window.orch.toast('Task added', 'ok');
+      window.orch.toast('Added: ' + (text.length > 40 ? text.slice(0, 40) + '…' : text), 'ok');
     });
     return form;
   }
@@ -846,7 +846,7 @@
     return h('dl', {}, rows);
   }
   const FULL_WARNING = 'Full: the agent can change or delete anything in this folder and run any command without asking.';
-  const PERMISSION_CHOICES = [['ask', 'Ask', 'The agent asks before it changes anything.'], ['auto', 'Auto', 'The agent works on its own and asks only for risky things.'], ['full', 'Full', 'The agent never asks.']];
+  const PERMISSION_CHOICES = [['ask', 'Ask', 'The agent asks before it changes anything.'], ['auto', 'Auto', 'The agent works on its own and asks only for risky things.'], ['full', 'Full', 'The agent never asks. It changes things without asking. Only use this if you trust it.']];
   function permissionsCard(settings) {
     const current = PERMISSION_CHOICES.some(([value]) => value === settings.permissions) ? settings.permissions : 'auto';
     const rows = PERMISSION_CHOICES.map(([value, label, hint]) => {
@@ -868,6 +868,15 @@
           settingsText('p', {className:'meta'}, on ? 'AGENTS.md has a short orch entry. Turn off to remove it.' : 'Off: orch files stay on this computer and your team sees nothing.')),
         h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Share with team', 'data-key':'settings-switch-share', 'data-action':'settings-share', disabled:snapshot || settingsBusy.has('share')}))));
   }
+  // The CLI hint stays out of the page: a missing sign-in is said in plain words.
+  const plainTest = reason => /not logged in|\/login/i.test(String(reason || '')) ? 'Claude is not signed in yet.' : reason;
+  function workflowCard(settings) {
+    return h('div', {className:'stack', 'data-key':'settings-workflow'}, h('h2', {className:'set-sub'}, 'Workflow'),
+      h('div', {className:'card'}, h('div', {className:'card-row'},
+        h('div', {className:'grow'}, settingsText('h3', {}, 'Agents may mark tickets Done'),
+          settingsText('p', {className:'meta'}, 'Off: agents send finished work to Review and you decide when it is Done.')),
+        h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Agents may mark tickets Done', 'aria-checked':!!settings.agents_may_finish, 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')}))));
+  }
   function settingsPage() {
     const settings = state.settings;
     const agents = array(settings.agents).map(agent => {
@@ -882,7 +891,7 @@
     array(settings.agents).forEach((agent, i) => {
       if (snapshot) return;
       const test = h('button', {type:'button', className:'btn ghost sm', 'data-action':'agent-test', 'data-name':agent.name, 'data-key':'settings-test-' + agent.name, disabled:settingsBusy.has('test-' + agent.name)}, 'Test');
-      const note = agentTests[agent.name] ? h('span', {className:'meta test-note ' + (agentTests[agent.name].ok ? 'ok' : 'bad')}, agentTests[agent.name].reason) : null;
+      const note = agentTests[agent.name] ? h('span', {className:'meta test-note ' + (agentTests[agent.name].ok ? 'ok' : 'bad')}, plainTest(agentTests[agent.name].reason)) : null;
       if (note) agents[i].append(note);
       agents[i].append(test);
     });
@@ -899,13 +908,13 @@
       h('div', {className:'tabs', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Agent'], ['addons', 'Add-ons']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))),
       panel('general', [snapshot ? null : window.OrchMobileMode?.settingsSection(h), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
         h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
-        h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), settingsText('p', {className:'grow set-ctl mono'}, settings.folder)))),
-        shareCard(settings)]),
+        h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'}, settingsText('p', {className:'mono'}, settings.folder), h('p', {className:'meta'}, 'Stored on this computer'))))),
+        shareCard(settings), workflowCard(settings)]),
       panel('agent', [h('p', {className:'meta'}, 'Pick the default. It is saved right away.'), h('div', {className:'card'}, h('div', {role:'radiogroup', 'aria-label':'Default agent'}, agents),
         snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own agent'))),
         permissionsCard(settings)]),
-      panel('addons', h('div', {className:'card'}, array(settings.addons).map(addonRow))),
-      card('workflow', 'Workflow', '', h('div', {className:'card-row'}, h('span', {className:'grow'}, 'Agents may mark tickets Done'), h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Agents may mark tickets Done', 'aria-checked':!!settings.agents_may_finish, 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')}))));
+      panel('addons', h('div', {className:'card'}, array(settings.addons).map(addonRow)))
+    );
   }
   // An agent that is started with a command: a small form that opens in the list; the command is shown before it is added.
   function openAgentForm(control) {
@@ -925,7 +934,7 @@
     const cancel = () => { locks.delete('settings-add-slot'); render(); };
     const back = button('Back', 'ghost sm', () => { preview.hidden = true; fields.hidden = false; });
     const fields = el('div', 'add-form');
-    fields.append(row('Name', nameIn, '2–32 characters: lowercase letters, numbers or hyphens, a letter first.'), row('Command', cmdIn, '{prompt} is replaced with the ticket and its tasks.'), row('How the task goes in', via), err);
+    fields.append(row('Name', nameIn, '2–32 characters: lowercase letters, numbers or hyphens, a letter first.'), row('Command', cmdIn, 'Type the command you use to start your tool. {prompt} is where the ticket text goes.'), row('How the task goes in', via), err);
     const next = button('Save', 'primary sm', () => {
       const draft = {name:nameIn.value.trim(), command:cmdIn.value, prompt_via:via.value};
       err.textContent = !/^[a-z][a-z0-9-]{1,31}$/.test(draft.name) ? 'Name: 2–32 characters, a lowercase letter first, then lowercase letters, numbers or hyphens.'
@@ -965,7 +974,10 @@
       await window.orch.close(d);
     });
     actions.append(confirm);
-    d.append(settingsText('pre', {className:cls}, text), actions);
+    const [lead, ...rest] = String(text).split('\n');
+    if (rest.length && cls === 'preserve-lines') {
+      d.append(settingsText('p', {}, lead), h('details', {className:'consent-details'}, h('summary', {}, 'Details'), settingsText('pre', {className:cls}, rest.join('\n'))), actions);
+    } else d.append(settingsText('pre', {className:cls}, text), actions);
     window.orch.open(d);
   }
   async function settingsSend(op, args, key) {
@@ -1524,7 +1536,7 @@
       if (snapshot || settingsBusy.has('share')) return;
       const on = state.settings?.share !== true;
       const result = await settingsSend('share.set', {on}, 'share');
-      if (result.ok) window.orch.toast(on ? 'Shared. AGENTS.md has the orch entry.' : 'Not shared any more.', 'ok');
+      if (result.ok) window.orch.toast(on ? 'Shared. Your team can now see this workspace.' : 'Not shared any more.', 'ok');
       return;
     }
     if (action === 'settings-addon') {
