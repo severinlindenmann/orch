@@ -16,7 +16,7 @@ function describe(el, pageName) {
   const labelled = (el.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => document.getElementById(id)?.textContent || '').join(' ');
   const name = clean(labelled || el.getAttribute('aria-label') || Array.from(el.labels || []).map(x => x.textContent).join(' ') || (tag === 'input' && ['submit', 'button'].includes(el.type) ? el.value : '') || (tag === 'input' || tag === 'textarea' || tag === 'select' ? '' : el.innerText) || el.querySelector('img[alt]')?.getAttribute('alt') || el.getAttribute('title'));
   const fallback = clean(el.getAttribute('placeholder') || el.id || (el.href ? new URL(el.href, location.href).pathname : ''));
-  const norm = (name || fallback).split(' · ')[0].split(';')[0].replace(/\d{3,}/g, '#').replace(/ \d+$/, '').slice(0, 60);
+  const norm = (name || fallback).split(' · ')[0].split(';')[0].split(': ')[0].replace(/\d{3,}/g, '#').replace(/ \d+$/, '').slice(0, 60);
   return { key: `${pageName}|${role}|${norm}`, role, name, unnamed: !name, href: tag === 'a' ? el.href : null };
 }
 function substitute(value, env) {
@@ -79,7 +79,10 @@ export async function run(opts) {
     const isCovered = key => covered.has(ck(key)) || [...patterns].some(p => p.endsWith('|*') ? key.startsWith(p.slice(0, -1)) : p === key);
     async function census(pageName, id) {
       const items = [];
-      for (const el of await page.locator(CONTROL).all()) {
+      // while a dialog is open only its own controls count (a click behind it would close it)
+      const modal = page.locator('dialog[open], [role=dialog], [aria-modal=true]').filter({ visible: true }).first();
+      const scope = (await modal.count()) ? modal.locator(CONTROL) : page.locator(CONTROL);
+      for (const el of await scope.all()) {
         if (!await el.isVisible()) continue;
         const item = await el.evaluate(describe, pageName);
         const map = result.census[pageName] ||= {};
@@ -96,20 +99,24 @@ export async function run(opts) {
         await clickCensusOnce(pageName, step, timeout);
         if (covered.size + unclickable.size === before) break;
       }
+      if (await modalOpen()) await page.keyboard.press('Escape');  // a dialog a census click opened: close it for the next step
     }
+    const modalOpen = async () => (await page.locator('dialog[open], [role=dialog], [aria-modal=true]').filter({ visible: true }).count()) > 0;
     async function clickCensusOnce(pageName, step, timeout) {
       const items = await census(pageName, step.id);
       const restore = substitute(step.actions.find(a => a.do === 'goto')?.path || page.url(), env);
       for (const item of items) {
         if (process.env.STEPPER_DEBUG) console.error('census', pageName, item.key, isCovered(item.key) ? 'covered' : 'todo');
         if (isCovered(item.key)) continue;
-        if (/delete|remove|sign out|reset|stop|wipe|leave|disconnect/i.test(item.name) || skipRegexes.some(r => r.test(item.key)) || (item.href && new URL(item.href).origin !== base.origin)) { skipped.add(item.key); continue; }
+        if (/\b(delete|remove|sign out|reset|stop|wipe|leave|disconnect)\b/i.test(item.name) || skipRegexes.some(r => r.test(item.key)) || (item.href && new URL(item.href).origin !== base.origin)) { skipped.add(item.key); continue; }
         // Resolve again after navigation, since earlier locator indexes may have changed.
         const fresh = (await census(pageName, step.id)).find(x => x.key === item.key);
         if (!fresh) { if (process.env.STEPPER_DEBUG) console.error('  vanished', item.key); continue; }
         const before = page.url();
-        try { await fresh.el.click({ timeout: Math.min(timeout, 2500) }); covered.add(ck(item.key)); } catch (e) { unclickable.add(ck(item.key)); await page.keyboard.press('Escape'); continue; }
-        await page.keyboard.press('Escape');
+        try { await fresh.el.click({ timeout: Math.min(timeout, 2500) }); covered.add(ck(item.key)); } catch (e) {
+          try { await fresh.el.click({ timeout: 1500, force: true }); covered.add(ck(item.key)); } catch (e2) { unclickable.add(ck(item.key)); if (!(await modalOpen())) await page.keyboard.press('Escape'); continue; }
+        }
+        if (!(await modalOpen())) await page.keyboard.press('Escape');
         if (page.url() !== before) await page.goto(new URL(restore, base).href, { waitUntil: 'domcontentloaded', timeout });
       }
     }

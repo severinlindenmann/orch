@@ -77,13 +77,13 @@ def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
         if not tok:
             L.step("B00", "Claude login for real-agent runs", lambda st: (_ for _ in ()).throw(Blocked("E2E_CLAUDE_TOKEN is not set (Proton Pass lookup failed)")))
             return L
-        agent_line = "claude -p {prompt} --permission-mode acceptEdits --max-turns 20 --allowedTools 'Bash(orch:*)' Read Write Edit"
-        cfg.write_text(f'[workspace]\nagent = "e2eagent"\n\n[agents.e2eagent]\nadapter = "generic"\ncommand = {json.dumps(agent_line)}\n\n[automation]\ninterval = 2\n')
+        # the built-in claude adapter already runs with a narrow --allowedTools list (orch check/ask/log/link/needs/wait ...) and resumes after an answer;
+        # the generic adapter does not resume a -p run after `orch ask` (found 7 Nov: the task was never finished), so keep the default agent
         e.sh(["orch", "stop"], cwd=w, timeout=60)
         e.sh(["orch", "start", "--no-open"], cwd=w, timeout=120, env={"CLAUDE_CODE_OAUTH_TOKEN": tok})
         env.refresh_urls()
         dash = env.urls.get("reports")
-        L.notes.append("REAL Claude agent (narrow allowed tools); the login is only in this workspace's processes; latencies include the model")
+        L.notes.append("REAL Claude agent (built-in adapter, narrow allowed tools); the login is only in this workspace's processes; latencies include the model")
     else:
         script = env.root / "fake-agent.sh"
         script.write_text(FAKE_AGENT)
@@ -147,6 +147,18 @@ def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
     for i in range(1, runs + 1):
         L.step(f"B{i:02d}", f"Create ticket, Start, question, answer, done (run {i})", one_run(i),
                expect="chip changes to working fast, question in Needs you, answer shown, ticket Done")
+    if real_agents:
+        def skill_seen(st):
+            import glob
+            hits = []
+            for f in glob.glob(str(e.home / ".claude" / "projects" / "**" / "*.jsonl"), recursive=True):
+                if ".agents/skills/orch" in Path(f).read_text(errors="replace"):
+                    hits.append(Path(f).name)
+            if not hits:
+                raise RuntimeError("no Claude transcript mentions .agents/skills/orch: the agent did not find or read the orch skill there")
+            st["note"] = f"{len(hits)} transcript(s) mention .agents/skills/orch"
+        L.step("B-skill", "A real agent run finds the orch skill through .agents/skills/orch (transcript)", skill_seen,
+               expect="the agent's own transcript reads or quotes .agents/skills/orch")
     L.probe("B-start", "Start click to dashboard shows a run", samples["start_to_working"], 2, 4)
     L.probe("B-needs", "Agent asks to Needs you on Home", samples["ask_to_needs"], 3, 5)
     L.probe("B-answer", "Answer click to history line", samples["answer_to_history"], 2, 4)
