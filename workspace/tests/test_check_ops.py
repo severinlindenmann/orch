@@ -64,7 +64,7 @@ def test_reopen_keeps_old_proof_in_history(proj, run, validate, new_ticket):
     c = t["checklist"][0]
     assert c["done"] is False and c["evidence"] == []
     assert "looked fine" in t["history"][-1]["text"]
-    assert run("ticket", "status", tid, "done")[0] == 2
+    assert run("ticket", "status", tid, "done", "--by", "agent:generic")[0] == 2
 
 
 def test_start_stop_and_single_doing(proj, run, validate, new_ticket):

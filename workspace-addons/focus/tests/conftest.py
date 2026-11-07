@@ -20,7 +20,7 @@ def ticket(**kw):
             {"id": "c2", "text": "Review totals", "done": False, "state": "doing", "evidence": []},
         ],
         "questions": [], "history": [{"at": "2026-11-06T08:00:00Z", "by": "human:anna", "via": "cli", "text": "Created"}],
-        "links": [],
+        "refs": [],
     }  # fmt: skip
     t.update(kw)
     return t

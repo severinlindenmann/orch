@@ -13,7 +13,7 @@
     "name": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{1,31}$",
-      "not": { "enum": ["orch", "core", "ticket", "check", "log", "ask", "answer", "link", "ext", "wait", "addon", "addons", "update", "init", "publish", "relay", "config", "help", "version", "view", "start", "stop", "status", "run", "needs", "agents"] },
+      "not": { "enum": ["orch", "core", "ticket", "check", "log", "ask", "answer", "ref", "ext", "wait", "addon", "addons", "update", "init", "publish", "relay", "config", "help", "version", "view", "start", "stop", "status", "run", "needs", "agents"] },
       "description": "Command `orch <name>`, ext key ext.<name>, folder .orch/addons/<name>/, config table [<name>], skill folder orch-<name>, AGENTS markers orch:addon:<name>."
     },
     "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
@@ -63,11 +63,11 @@
     "needs": { "type": "boolean", "default": false, "description": "true = the add-on has `orch <name> needs --json` (rows of needs.schema.json) for `orch needs`." },
     "ticket_links": {
       "type": "array", "maxItems": 16,
-      "description": "Link types this add-on knows (ticket links, workspace/src/orch/links.py). While the add-on is on, `orch link add` gives a matching address this kind, and its links show with label, icon and status; off, they show as known site or plain Link. Kinds are unique in the manifest; 'link' is reserved.",
+      "description": "Reference types this add-on knows (ticket refs, workspace/src/orch/refs.py). While the add-on is on, `orch ref add` gives a matching address this kind, and its references show with label, icon and status; off, they show as known site or plain Reference. Kinds are unique; url, ticket, artifact and file are reserved.",
       "items": {
         "type": "object", "required": ["kind", "label", "icon", "match"], "additionalProperties": false,
         "properties": {
-          "kind": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$", "not": { "const": "link" } },
+          "kind": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}(?::[a-z0-9][a-z0-9-]{0,31})?$", "not": { "enum": ["url", "ticket", "artifact", "file"] } },
           "label": { "$ref": "#/$defs/text", "maxLength": 24 },
           "icon": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$", "description": "Icon name; the page shows the known site's tile when the address is a known site, else a tile with the label's first letters." },
           "match": {
@@ -97,7 +97,7 @@
         "properties": {
           "summary": { "$ref": "#/$defs/text", "maxLength": 80 },
           "who": { "enum": ["anyone", "people"], "default": "anyone" },
-          "writes": { "type": "array", "items": { "type": "string", "pattern": "^(links|ext\\.[a-z][a-z0-9-]{1,31})$" } }
+          "writes": { "type": "array", "items": { "type": "string", "pattern": "^(refs|ext\\.[a-z][a-z0-9-]{1,31})$" } }
         }
       }
     },

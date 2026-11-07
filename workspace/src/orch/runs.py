@@ -426,6 +426,11 @@ def claim(
         if any(not i.get("delivered_at") for i in _pending_read(root, tid)):
             rec["pending"] = True
         _write(root, rec)
+    try:
+        label = adapters.load(agent, root)["label"]
+    except Refused:
+        label = agent
+    tickets.mark_working(root, tid, by, label)
     notify_working(root)
     return rec
 
