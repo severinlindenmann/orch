@@ -230,7 +230,7 @@ final class AppModel {
     /// Wait before the one automatic retry of a first load that found the network not ready yet (tests shorten it).
     var retryDelay: Duration = .seconds(1)
 
-    /// Keeps an open chat current: refreshes every `interval` until the calling task is cancelled (the chat closes).
+    /// Keeps lists and chats current: the app shell runs one loop while paired and active, cancelling it in the background.
     func watchWhileOpen(every interval: Duration = .seconds(4)) async {
         while !Task.isCancelled {
             try? await Task.sleep(for: interval)
@@ -239,7 +239,7 @@ final class AppModel {
         }
     }
 
-    /// `quiet`: the background poll of an open chat, it must not flip `isLoading`.
+    /// `quiet`: the periodic refresh must not flip `isLoading`.
     func refresh(retry: Bool = true, quiet: Bool = false) async {
         guard phase == .ready || phase == .notifyStep, credentials != nil else { return }
         if !quiet { isLoading = true }

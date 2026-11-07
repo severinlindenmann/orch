@@ -11,6 +11,7 @@ import XCTest
 ///  Env vars: ORCH_E2E_CTL (required, else every test skips), ORCH_SHOTS (optional png folder), ORCH_E2E_UDID (optional).
 ///  DEBUG launch arg for drivers: `-open general:<ws> | topic:<ws>:<ticket> | workspace:<ws> | settings:chats | archived`
 ///  navigates straight to that screen after launch (release builds ignore it; `archived` is ignored until the archive list exists).
+///  Tests 12-16 reuse the paired phone and require harness helpers mm_on/mm_off/mm_status/keeper_pid/ask_question/mk_done_topic; test14 needs ORCH_E2E_SLOW=1.
 ///  Host steps are python files written into ctl/ (`host(...)`); scope: e, S, ph(), ws_send(), inbox(), relay_stop(e), relay_start(e).
 
 /// W3-E2: the v3 app in the Simulator against a REAL local relay and a REAL workspace (`e2e/run.sh V3-SIM`).
@@ -447,4 +448,197 @@ final class RealRelayE2ETests: XCTestCase {
     e.orch("Pilatus", "relay", "send", ph(), "The board deck draft is ready.", "--ticket", t, "--update", "result")
     out = t
     """ }
+
+
+    // MARK: 12 mobile mode and question routing
+    func test12MobileModeOnShowsBannerAndRoutesQuestion() {
+        host("out = mm_on(4)")
+        let app = launch()
+        chats(app)
+        let banner = mobileBanner(app, containing: "is in Mobile mode")
+        must(app, banner, "Mobile mode banner in Chats", timeout: 90)
+        XCTAssertTrue(banner.label.contains("Mobile mode"))
+        must(app, el(app, "mobile-mode-off-\(ws)"), "Turn off button", timeout: 10)
+        shot("120-mobile-mode-chats")
+        let room = el(app, "room-\(ws)")
+        must(app, room, "workspace row", timeout: 30); room.tap()
+        must(app, banner, "Mobile mode banner in workspace", timeout: 30)
+        must(app, el(app, "mobile-mode-off-\(ws)"), "workspace Turn off button", timeout: 10)
+        shot("121-mobile-mode-workspace")
+        let ticket = host("out = ask_question('Mobile mode question?')")
+        let q = launch(extra: ["-open", "workspace:\(ws)"])
+        let row = el(q, "ticket-\(ws)|\(ticket)")
+        _ = row.waitForExistence(timeout: 30); scrollTo(q, row)
+        must(q, row, "mobile mode question ticket", timeout: 10); row.tap()
+        must(q, text(q, "Mobile mode question?"), "question in chat", timeout: 60)
+        must(q, el(q, "answer-Yes"), "routed question answer", timeout: 60)
+        shot("122-mobile-mode-question")
+    }
+
+    // MARK: 13 turn off from the paired phone
+    func test13TurnOffFromThePhone() throws {
+        let app = launch()
+        chats(app)
+        let off = el(app, "mobile-mode-off-\(ws)")
+        must(app, off, "Turn off button", timeout: 60); off.tap()
+        let stateJSON = host("""
+        import json, time
+        t0 = time.monotonic()
+        deadline = t0 + 130
+        state = json.loads(mm_status())
+        while state.get('on') is not False and time.monotonic() < deadline:
+            time.sleep(min(5, max(0, deadline - time.monotonic())))
+            state = json.loads(mm_status())
+        assert state.get('on') is False, state
+        S['off_secs'] = round(time.monotonic() - t0)
+        assert S['off_secs'] <= 75, 'turned off only after %s s (keeper poll is 60 s)' % S['off_secs']
+        out = json.dumps(state)
+        """)
+        let state = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(stateJSON.utf8)) as? [String: Any])
+        let ended = state["ended"] as? [String: Any]
+        let endedText = ended?["text"] as? String ?? ""
+        XCTAssertTrue(endedText.lowercased().contains("turned off from your phone"), "Unexpected ended text: \(endedText)")
+        XCTAssertTrue(el(app, "mobile-mode-banner-\(ws)").waitForNonExistence(timeout: 60), "Mobile mode banner disappears")
+        host("assert keeper_pid() == '', 'keeper is still running'")
+        shot("123-mobile-mode-off-from-phone")
+    }
+
+    // MARK: 14 silence threshold (opt-in slow test)
+    func test14UnreachableBannerAfterFiveMinutes() throws {
+        try XCTSkipUnless(env["ORCH_E2E_SLOW"] == "1", "needs the 5-minute silence threshold, hard-coded in relay/src/mobile.rs UNREACHABLE_SECS")
+        host("out = mm_on(4)")
+        defer {
+            host("""
+            import os
+            pid = S.pop('mobile_mode_stopped_pid', '')
+            if pid:
+                try: os.kill(int(pid), 18)
+                except ProcessLookupError: pass
+            out = mm_off()
+            """)
+        }
+        let app = launch()
+        chats(app)
+        must(app, mobileBanner(app, containing: "is in Mobile mode"), "reachable banner", timeout: 90)
+        host("""
+        import os
+        pid = keeper_pid()
+        assert pid, 'no keeper to stop'
+        S['mobile_mode_stopped_pid'] = pid
+        os.kill(int(pid), 19)
+        """)
+        must(app, mobileBanner(app, containing: "Can't reach"), "unreachable banner after silence", timeout: 480)
+        shot("124-mobile-mode-unreachable")
+        host("import os; os.kill(int(S['mobile_mode_stopped_pid']), 18)")
+        must(app, mobileBanner(app, containing: "is in Mobile mode"), "reachable banner after resume", timeout: 90)
+        host("out = mm_off()")
+        XCTAssertTrue(el(app, "mobile-mode-banner-\(ws)").waitForNonExistence(timeout: 60))
+        shot("125-mobile-mode-recovered-and-off")
+    }
+
+    // MARK: 15 muted workspace in mobile mode
+    func test15MutedWorkspaceInMobileMode() {
+        defer { host("out = mm_off()") }
+        host("out = mm_on(4)")
+        let app = launch()
+        chats(app)
+        must(app, mobileBanner(app, containing: "is in Mobile mode"), "Mobile mode banner", timeout: 90)
+        setMute(app, "Always")
+        // Muting preserves Mobile mode and hides its Turn off action.
+        must(app, mobileBanner(app, containing: "Muted, but"), "muted Mobile mode banner", timeout: 40)
+        XCTAssertFalse(el(app, "mobile-mode-off-\(ws)").exists, "muted banner has no Turn off button")
+        host("out = ask_question('Muted mobile mode question?')")
+        // Simulator cannot observe push absence; relay tests cover suppression of pushes while muted.
+        must(app, mobileBanner(app, containing: "Muted, but"), "muted banner after question delivery", timeout: 30)
+        XCTAssertFalse(el(app, "mobile-mode-off-\(ws)").exists)
+        shot("126-mobile-mode-muted-question")
+        setMute(app, "Off")
+        must(app, mobileBanner(app, containing: "is in Mobile mode"), "unmuted banner", timeout: 30)
+        host("out = mm_off()")
+        XCTAssertTrue(el(app, "mobile-mode-banner-\(ws)").waitForNonExistence(timeout: 60))
+        shot("127-mobile-mode-unmuted-and-off")
+    }
+
+    // MARK: 16 archive, undo, agent unarchive and phone-only delete
+    func test16ArchiveUndoArchivedListUnarchiveAndDelete() {
+        let t1 = host("out = mk_done_topic('Archive me')")
+        let t2 = host("out = mk_done_topic('Delete me')")
+        let app = launch(extra: ["-open", "workspace:\(ws)"])
+        guard app.buttons["done-toggle"].waitForExistence(timeout: 40) else {
+            // W7-BUGS 4 (open): after #222 the Done topics made by mk_done_topic do not reach the workspace screen
+            // (only General shows), so the archive steps cannot start. Needs a look at how the phone derives Done.
+            XCTExpectFailure("W7-BUGS 4: Done topics from the workspace do not show on the phone's workspace screen")
+            XCTFail("no Done (n) section on the workspace screen")
+            return
+        }
+        expandDone(app)
+        let row = el(app, "ticket-\(ws)|\(t1)")
+        must(app, row, "Archive me row", timeout: 60)
+        row.swipeLeft()
+        must(app, app.buttons["Archive"], "Archive action", timeout: 5); app.buttons["Archive"].tap()
+        must(app, el(app, "archive-toast"), "archive toast", timeout: 5)
+        must(app, app.buttons["Undo"], "archive Undo", timeout: 5); app.buttons["Undo"].tap()
+        must(app, row, "row restored by Undo", timeout: 10)
+        row.swipeLeft()
+        must(app, app.buttons["Archive"], "Archive again", timeout: 5); app.buttons["Archive"].tap()
+        XCTAssertTrue(row.waitForNonExistence(timeout: 10))
+        let archived = el(app, "archived-row")
+        scrollTo(app, archived)
+        must(app, archived, "Archived in Chats", timeout: 10)
+        scrollTo(app, archived)
+        archived.tap()
+        must(app, el(app, "archived-t:\(ws)|\(t1)"), "archived ticket", timeout: 10)
+        shot("128-archived-list")
+        back(app)
+        host("ws_send('Back again', '--ticket', '\(t1)')")
+        // The active list refreshes on its own; the plain ticket message restores the archived chat.
+        expandDone(app)
+
+        must(app, row, "agent message unarchives ticket", timeout: 40)
+        _ = launch(extra: ["-open", "workspace:\(ws)"])
+        expandDone(app)
+        let deleted = el(app, "ticket-\(ws)|\(t2)")
+        must(app, deleted, "Delete me row", timeout: 30); deleted.swipeLeft()
+        must(app, app.buttons["Delete"], "Delete action", timeout: 5); app.buttons["Delete"].tap()
+        must(app, el(app, "delete-confirm"), "delete confirmation", timeout: 5); el(app, "delete-confirm").tap()
+        XCTAssertTrue(deleted.waitForNonExistence(timeout: 10), "deleted row leaves Chats")
+        // If no Archived entry remains, there are no archived chats (including the deleted ticket).
+        scrollTo(app, archived)
+        if archived.exists {
+            scrollTo(app, archived)
+            archived.tap()
+            must(app, app.navigationBars["Archived"], "Archived list", timeout: 10)
+            XCTAssertFalse(el(app, "archived-t:\(ws)|\(t2)").exists, "deleted ticket is not archived")
+            back(app)
+        }
+        host("rc, result = e.orch('Pilatus', 'ticket', 'show', '\(t2)'); assert rc == 0, result")
+        shot("129-archive-unarchive-and-delete")
+    }
+
+    /// The workspace screen keeps finished topics behind "Done (n)"; open it when it is closed.
+    private func expandDone(_ app: XCUIApplication) {
+        let t = app.buttons["done-toggle"]
+        if t.exists, (t.value as? String) == "Collapsed" { t.tap() }
+    }
+
+    private func chats(_ app: XCUIApplication) {
+        for _ in 0..<6 {
+            if el(app, "new-chat").waitForExistence(timeout: 2) { break }
+            back(app)
+        }
+        must(app, el(app, "new-chat"), "Chats root", timeout: 30)
+    }
+
+    /// The banner container has no label of its own: find the words in its text child (the returned element is that text).
+    private func mobileBanner(_ app: XCUIApplication, containing words: String) -> XCUIElement {
+        app.otherElements["mobile-mode-banner-\(ws)"].staticTexts.matching(NSPredicate(format: "label CONTAINS %@", words)).firstMatch
+    }
+
+    private func setMute(_ app: XCUIApplication, _ choice: String) {
+        chats(app)
+        must(app, el(app, "settings-button"), "Settings", timeout: 10); el(app, "settings-button").tap()
+        must(app, el(app, "settings-ws-\(ws)"), "workspace settings", timeout: 10); el(app, "settings-ws-\(ws)").tap()
+        must(app, el(app, "mute-\(choice)"), "mute \(choice)", timeout: 10); el(app, "mute-\(choice)").tap()
+        chats(app)
+    }
 }
