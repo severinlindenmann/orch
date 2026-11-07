@@ -21,27 +21,33 @@ final class ComposerVisibleUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 15), "text field exists \(when)", file: file, line: line)
         for (name, e) in [("text field", field), ("mic", mic), ("plus", plus)] {
             let hittable = NSPredicate(format: "isHittable == true")
-            let r = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: hittable, object: e)], timeout: 10)
+            let r = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: hittable, object: e)], timeout: 15)
             XCTAssertEqual(r, .completed, "\(name) hittable \(when)", file: file, line: line)
             XCTAssertTrue(app.frame.contains(e.frame), "\(name) on screen \(when)", file: file, line: line)
         }
         XCTAssertFalse(app.keyboards.firstMatch.exists, "keyboard closed \(when)", file: file, line: line)
     }
 
+    /// Closes the open sheet and waits until it is really gone (the dismiss animation is slow on a busy runner).
+    private func closeSheet(_ app: XCUIApplication, gone: [String] = ["media-close", "media-choices", "media-send"]) {
+        app.buttons["media-close"].tap()
+        for id in gone {
+            XCTAssertTrue(app.descendants(matching: .any)[id].firstMatch.waitForNonExistence(timeout: 10), "\(id) gone after dismiss")
+        }
+    }
+
     private func plusAndLocation(_ app: XCUIApplication, _ where_: String) {
         assertComposerHittable(app, "at start of \(where_)")
         el(app, "composer-attach").tap()
         XCTAssertTrue(app.buttons["media-close"].waitForExistence(timeout: 10))
-        app.buttons["media-close"].tap()
-        XCTAssertTrue(app.buttons["media-close"].waitForNonExistence(timeout: 10))
+        closeSheet(app)
         assertComposerHittable(app, "after closing the + sheet in \(where_)")
         el(app, "composer-attach").tap()
         let loc = app.buttons["media-location"]
         XCTAssertTrue(loc.waitForExistence(timeout: 10)); loc.tap()
         let share = app.buttons["media-send"]
         XCTAssertTrue(share.waitForExistence(timeout: 15))
-        app.buttons["media-close"].tap()
-        XCTAssertTrue(share.waitForNonExistence(timeout: 10))
+        closeSheet(app)
         assertComposerHittable(app, "after dismissing the location sheet in \(where_)")
     }
 
@@ -60,6 +66,7 @@ final class ComposerVisibleUITests: XCTestCase {
         let close = app.buttons["artifact-close"]
         XCTAssertTrue(close.waitForExistence(timeout: 15)); close.tap()
         XCTAssertTrue(close.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(el(app, "artifact-looks-good").waitForNonExistence(timeout: 10), "viewer gone after dismiss")
         assertComposerHittable(app, "after closing the artifact viewer in the topic (\(label))")
         app.terminate()
     }
