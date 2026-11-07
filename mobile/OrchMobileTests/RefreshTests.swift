@@ -31,6 +31,7 @@ final class RefreshTests: XCTestCase {
 
     func testActiveShellKeepsRefreshingUntilCancelled() async throws {
         let m = pairedModel()
+        m.watchInMock = true
         let t = Task { await m.watchWhileOpen(every: .milliseconds(30)) }
         try await Task.sleep(for: .milliseconds(300))
         t.cancel()
