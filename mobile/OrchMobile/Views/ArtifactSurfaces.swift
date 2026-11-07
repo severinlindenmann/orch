@@ -49,7 +49,7 @@ enum PublishWebView {
         configuration.websiteDataStore = .nonPersistent()
         configuration.setURLSchemeHandler(handler, forURLScheme: NetworkBlock.scheme)
         let controller = WKUserContentController()
-        controller.addUserScript(WKUserScript(source: NetworkBlock.noHints, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        controller.addUserScript(WKUserScript(source: NetworkBlock.noHints, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: NetworkBlock.hintWorld))
         controller.addUserScript(WKUserScript(source: NetworkBlock.noWebRTC, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         controller.addUserScript(WKUserScript(source: AnchorScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: AnchorScript.world))
         if let pins { controller.add(pins, contentWorld: AnchorScript.world, name: AnchorScript.handler) }

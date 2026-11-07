@@ -254,7 +254,7 @@ final class PublishWebViewTests: XCTestCase {
         for type in ["application/xhtml+xml", "image/svg+xml", "text/xml", "application/xml", "text/html; charset=utf-8"] {
             let out = NetworkBlock.serve(type: type, data: Data("<root>\(hint)<p>kept</p></root>".utf8))
             XCTAssertEqual(String(decoding: out.data, as: UTF8.self), "<root><p>kept</p></root>", type)
-            XCTAssertNotEqual(out.type, "application/octet-stream", type)
+            XCTAssertEqual(out.type, String(type.split(separator: ";")[0]) + "; charset=utf-8", type)
         }
     }
     func testNonUTF8MarkupAndUnknownTypesAreServedAsOctetStream() {
@@ -264,8 +264,23 @@ final class PublishWebViewTests: XCTestCase {
             XCTAssertEqual(NetworkBlock.serve(type: type, data: Data("<p>x</p>".utf8)).type, "application/octet-stream", type)
         }
         for ok in ["text/css", "image/png", "font/woff2", "application/json", "application/pdf", "text/javascript"] {
-            XCTAssertEqual(NetworkBlock.serve(type: ok, data: Data("x".utf8)).type, ok)
+            let isText = ["text/css", "application/json", "text/javascript"].contains(ok)
+            XCTAssertEqual(NetworkBlock.serve(type: ok, data: Data("x".utf8)).type, isText ? ok + "; charset=utf-8" : ok)
         }
+    }
+    func testPublishersCharsetIsNeverPassedOn() {
+        let out = NetworkBlock.serve(type: "text/html; charset=iso-8859-1", data: Data("<p>caf\u{e9}</p>".utf8))
+        XCTAssertEqual(out.type, "text/html; charset=utf-8", "WebKit decodes the bytes that were checked")
+        XCTAssertEqual(NetworkBlock.serve(type: "IMAGE/PNG; foo=bar", data: Data([1])).type, "image/png")
+    }
+    func testDNSPrefetchMetaIsStrippedAndForcedOff() async throws {
+        let on = #"<head><META content="on" http-equiv="X-DNS-Prefetch-Control"><meta http-equiv='x-dns-prefetch-control' content='on'></head><p>kept</p>"#
+        XCTAssertEqual(String(decoding: NetworkBlock.stripHints(from: Data(on.utf8)), as: UTF8.self), "<head></head><p>kept</p>")
+        // A page that adds or flips such a meta itself: the isolated script turns every one of them off again.
+        let (web, _, _) = try await open("<head></head><body><script>var m=document.createElement('meta'); m.httpEquiv='x-dns-prefetch-control'; m.content='on'; document.head.appendChild(m); setTimeout(function(){ m.content='on'; }, 100);</script></body>")
+        try await Task.sleep(for: .milliseconds(500))
+        let values = try await web.evaluateJavaScript("Array.from(document.querySelectorAll('meta[http-equiv]')).map(function(m){return m.content;}).join(',')") as? String
+        XCTAssertEqual(values, "off")
     }
     func testHintScriptRemovesAddedHintsAndTurnsPrefetchOff() async throws {
         let (web, _, _) = try await open("<head></head><body><script>var l=document.createElement('link'); l.rel='preconnect'; l.href='http://127.0.0.1:9'; document.head.appendChild(l);</script></body>")

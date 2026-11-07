@@ -278,9 +278,13 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
         let base = declared.split(separator: ";").first.map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? ""
         guard allowedTypes.contains(base) else { return ("application/octet-stream", data) }
         if textTypes.contains(base), String(data: data, encoding: .utf8) == nil { return ("application/octet-stream", data) }
-        return (base == declared.lowercased() ? declared : base, markupTypes.contains(base) ? stripHints(from: data) : data)
+        // Only the normalized type leaves here (never the publisher's parameters); text is always declared UTF-8, the encoding that was checked.
+        guard textTypes.contains(base) else { return (base, data) }
+        return (base + "; charset=utf-8", markupTypes.contains(base) ? stripHints(from: data) : data)
     }
-    /// Runs at document start in the page's world: DNS prefetch off, connection hints removed now and whenever the page adds one.
+    static let hintWorld = WKContentWorld.world(name: "orch-hints")
+    /// Runs at document start in an isolated world (the page cannot reach or change it; the DOM is shared): DNS prefetch forced off on every
+    /// such meta, connection hints removed now and whenever the page adds one. A backstop: the server-side strip and the rule list come first.
     static let noHints = """
     (function () {
       var hint = /(^|\\s)(preconnect|dns-prefetch|prefetch|preload|prerender|modulepreload)(\\s|$)/i;
@@ -289,12 +293,18 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
       }
       function meta() {
         try {
-          if (document.querySelector('meta[http-equiv="x-dns-prefetch-control"]')) return;
+          var found = false;
+          document.querySelectorAll('meta[http-equiv]').forEach(function (m) {
+            if ((m.getAttribute('http-equiv') || '').toLowerCase() !== 'x-dns-prefetch-control') return;
+            found = true;
+            if (m.getAttribute('content') !== 'off') m.setAttribute('content', 'off');
+          });
+          if (found) return;
           var m = document.createElement('meta'); m.setAttribute('http-equiv', 'x-dns-prefetch-control'); m.setAttribute('content', 'off');
           (document.head || document.documentElement).appendChild(m);
         } catch (e) {}
       }
-      new MutationObserver(function () { meta(); clean(); }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['rel'] });
+      new MutationObserver(function () { meta(); clean(); }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['rel', 'content', 'http-equiv'] });
       meta(); clean();
     })();
     """
@@ -304,8 +314,11 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
         let pattern = #"<link\b[^>]*\brel\s*=\s*(?:"[^"]*\b(?:preconnect|dns-prefetch|prefetch|prerender)\b[^"]*"|'[^']*\b(?:preconnect|dns-prefetch|prefetch|prerender)\b[^']*'|(?:preconnect|dns-prefetch|prefetch|prerender)\b)[^>]*>"#
         guard let expression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return data }
         let range = NSRange(html.startIndex..., in: html)
-        guard expression.firstMatch(in: html, range: range) != nil else { return data }
+        let metaPattern = #"<meta\b[^>]*\bhttp-equiv\s*=\s*["']?\s*x-dns-prefetch-control\b[^>]*>"#
+        guard let metas = try? NSRegularExpression(pattern: metaPattern, options: [.caseInsensitive]) else { return data }
+        guard expression.firstMatch(in: html, range: range) != nil || metas.firstMatch(in: html, range: range) != nil else { return data }
         html = expression.stringByReplacingMatches(in: html, range: range, withTemplate: "")
+        html = metas.stringByReplacingMatches(in: html, range: NSRange(html.startIndex..., in: html), withTemplate: "")
         return Data(html.utf8)
     }
     /// Runs at document start in every frame, in the page's world: WebRTC (not covered by the rule list) becomes a throwing stub
