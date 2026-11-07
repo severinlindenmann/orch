@@ -262,6 +262,38 @@ final class PublishWebViewTests: XCTestCase {
         XCTAssertEqual(hash, "#end", "a #fragment link still works")
     }
 
+    /// The page shadows the properties a naive guard would read, then activates a link; and a closed shadow root cannot hide a link from the tap listener.
+    func testLinkGuardSurvivesTamperingAndClosedShadowRoots() async throws {
+        let host = try await LoopbackHost.start()
+        defer { host.stop() }
+        _ = try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(host.port)/sanity")!)
+        XCTAssertGreaterThan(host.connections, 0, "the host is reachable, so the test can fail")
+        let before = host.connections
+        let base = "http://127.0.0.1:\(host.port)"
+        let html = """
+        <body><a id=att href="\(base)/att">x</a><div id=h></div>
+        <script>
+        Object.defineProperty(Node.prototype, 'nodeType', { get: function () { return 3; }, configurable: true });
+        Object.defineProperty(Event.prototype, 'type', { get: function () { return 'nothing'; }, configurable: true });
+        Object.defineProperty(Element.prototype, 'closest', { value: function () { return null; }, configurable: true });
+        Object.defineProperty(HTMLAnchorElement.prototype, 'href', { get: function () { return 'orch-page://page/x'; }, configurable: true });
+        var a = document.getElementById('att');
+        a.click();
+        a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        var d = document.createElement('a'); d.href = '\(base)/detached'; d.click();
+        var s = document.getElementById('h').attachShadow({ mode: 'closed' });
+        var sa = document.createElement('a'); sa.id = 'sa'; sa.href = '\(base)/shadow'; sa.textContent = 'in shadow'; s.appendChild(sa);
+        </script></body>
+        """
+        let web = try await openProduction(html)
+        // The page cannot reach its closed root any more (it was made open); a native click from the isolated world is what a tap does.
+        let open = try await web.evaluateJavaScript("document.getElementById('h').shadowRoot !== null", in: nil, contentWorld: NetworkBlock.hintWorld) as? Bool
+        XCTAssertEqual(open, true, "attachShadow was forced to open")
+        _ = try await web.evaluateJavaScript("document.getElementById('h').shadowRoot.getElementById('sa').click()", in: nil, contentWorld: NetworkBlock.hintWorld)
+        try await Task.sleep(for: .milliseconds(1000))
+        XCTAssertEqual(host.connections, before, "no connection reached the host")
+    }
+
     func testFreshAboutBlankFrameStillHasTheWebRTCStub() async throws {
         let web = try await openProduction("<body><script>var f = document.body.appendChild(document.createElement('iframe')); try { new f.contentWindow.RTCPeerConnection(); window.__r = 'works'; } catch (e) { window.__r = 'throws'; }</script></body>")
         let r = try await web.evaluateJavaScript("window.__r") as? String

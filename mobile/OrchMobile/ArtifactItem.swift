@@ -353,18 +353,30 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
     /// roots included: no listener could see those). Non-writable wrappers; the originals are captured at document start.
     static let linkClickGuard = """
     (function () {
+      // Everything the guard reads is captured now, before any page script can shadow it; it is only ever called through `apply`.
       var apply = Reflect.apply, URLc = URL, getAttr = Element.prototype.getAttribute, closest = Element.prototype.closest;
-      var click = HTMLElement.prototype.click, dispatch = EventTarget.prototype.dispatchEvent;
+      function getter(proto, name) { return Object.getOwnPropertyDescriptor(proto, name).get; }
+      var nodeType = getter(Node.prototype, 'nodeType'), baseURI = getter(Node.prototype, 'baseURI'), eventType = getter(Event.prototype, 'type');
+      var click = HTMLElement.prototype.click, dispatch = EventTarget.prototype.dispatchEvent, attach = Element.prototype.attachShadow;
       function external(el) {
         try {
-          var a = el && el.nodeType === 1 ? apply(closest, el, ['a[href],area[href],a']) : null;
+          var a = el && apply(nodeType, el, []) === 1 ? apply(closest, el, ['a[href],area[href],a']) : null;
           if (!a) return false;
           var raw = apply(getAttr, a, ['href']); if (raw === null) raw = apply(getAttr, a, ['xlink:href']); if (raw === null) return false;
-          return new URLc(raw, document.baseURI).protocol !== 'orch-page:';
+          return new URLc(raw, apply(baseURI, document, [])).protocol !== 'orch-page:';
         } catch (e) { return true; }
       }
-      Object.defineProperty(HTMLElement.prototype, 'click', { value: function () { if (external(this)) return; return apply(click, this, []); }, writable: false, configurable: false });
-      Object.defineProperty(EventTarget.prototype, 'dispatchEvent', { value: function (ev) { if (ev && ev.type === 'click' && external(this)) return false; return apply(dispatch, this, [ev]); }, writable: false, configurable: false });
+      function lock(proto, name, value) { Object.defineProperty(proto, name, { value: value, writable: false, configurable: false }); }
+      lock(HTMLElement.prototype, 'click', function () { if (external(this)) return; return apply(click, this, []); });
+      lock(EventTarget.prototype, 'dispatchEvent', function (ev) {
+        var kind; try { kind = apply(eventType, ev, []); } catch (e) { kind = null; }
+        if (kind === 'click' && external(this)) return false;
+        return apply(dispatch, this, [ev]);
+      });
+      // A closed shadow root hides its links from the click listener: every root is made open.
+      lock(Element.prototype, 'attachShadow', function (init) {
+        return apply(attach, this, [{ mode: 'open', delegatesFocus: !!(init && init.delegatesFocus) }]);
+      });
     })();
     """
     /// Runs at document start in every frame, in the page's world: WebRTC (not covered by the rule list) becomes a throwing stub
