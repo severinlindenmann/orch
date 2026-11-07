@@ -742,6 +742,62 @@
    ]
   },
   {
+   "id": "A25",
+   "name": "Settings General: Name/Folder, Team and Mobile mode on one panel; Team switch on and off",
+   "page": "settings-general",
+   "expect": "the General panel shows Name, Folder, Team (Share with team) and Mobile mode together",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click",
+     "sel": "#settings-tab-general"
+    },
+    {
+     "do": "expect_text",
+     "text": "Folder"
+    },
+    {
+     "do": "expect_text",
+     "text": "Team"
+    },
+    {
+     "do": "expect_text",
+     "text": "Share with team"
+    },
+    {
+     "do": "expect_text",
+     "text": "Mobile mode"
+    },
+    {
+     "do": "click",
+     "sel": "[aria-label='Share with team']"
+    },
+    {
+     "do": "wait",
+     "ms": 1500
+    },
+    {
+     "do": "expect_text",
+     "text": "AGENTS.md has a short orch entry"
+    },
+    {
+     "do": "click",
+     "sel": "[aria-label='Share with team']"
+    },
+    {
+     "do": "wait",
+     "ms": 1500
+    },
+    {
+     "do": "expect_text",
+     "text": "orch files stay on this computer"
+    }
+   ]
+  },
+  {
    "id": "A23",
    "name": "Settings Agent: try an agent, open and close 'Add your own agent'",
    "page": "settings-agent",
