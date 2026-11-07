@@ -11,7 +11,8 @@
   "\\|switch\\|",
   "Turn on",
   "\\|Stop",
-  "Move to"
+  "Move to",
+  "Send a message"
  ],
  "steps": [
   {
