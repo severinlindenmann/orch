@@ -142,7 +142,7 @@ def apply_agent_files(root: Path) -> list[str]:
     places = _skill_places(root)
     harness.protect_local(root, _exclude_lines(root))  # first, so a refused link cannot leave secrets visible
     sk = harness.harness_dir(root) / "skills"
-    names = sorted(p.name for p in sk.iterdir() if p.is_dir()) if sk.is_dir() else []
+    names = _harness_skill_names(root)
     refused = None  # one refused link must not stop the others or the local instruction file
     for where in places:
         for n in names:
@@ -176,17 +176,31 @@ def _shared_skills(root: Path) -> list[Path]:
     base = root / ".agents" / "skills"
     if not base.is_dir() or harness.is_link(base):
         return []
-    return sorted(
-        p for p in base.iterdir() if p.is_dir() and not harness.is_link(p) and (p / ".orch-shared").exists()
-    )
+    out = []
+    for p in sorted(base.iterdir()):
+        if p.is_dir() and not harness.is_link(p) and (p / ".orch-shared").exists():
+            if harness.safe_skill_name(p.name):
+                out.append(p)
+            else:
+                harness.skip_note(f"the shared skill folder {p.name!r}")
+    return out
+
+
+def _harness_skill_names(root: Path) -> list[str]:
+    sk = harness.harness_dir(root) / "skills"
+    names = sorted(p.name for p in sk.iterdir() if p.is_dir()) if sk.is_dir() else []
+    ok = [n for n in names if harness.safe_skill_name(n)]
+    for n in names:
+        if n not in ok:
+            harness.skip_note(f"the skill folder {n!r}")
+    return ok
 
 
 def _exclude_lines(root: Path) -> list[str]:
     """Root-relative patterns of the links and local instruction files orch makes here."""
     from orch import adapters
 
-    sk = harness.harness_dir(root) / "skills"
-    names = sorted(p.name for p in sk.iterdir() if p.is_dir()) if sk.is_dir() else []
+    names = [harness.glob_escape(n) for n in _harness_skill_names(root)]
     lines = [
         f".agents/skills/{n}" for n in names
     ]  # exact names: a user's own `orchestrator` skill stays visible
@@ -196,7 +210,8 @@ def _exclude_lines(root: Path) -> list[str]:
         if f.get("skills_link"):
             lines += [f"{f['skills_link']}/{s}" for s in names]
     for sh in _shared_skills(root):
-        lines += [f".agents/skills/{sh.name}/", *[f"{w}/{sh.name}" for w in _skill_places(root)[1:]]]
+        en = harness.glob_escape(sh.name)
+        lines += [f".agents/skills/{en}/", *[f"{w}/{en}" for w in _skill_places(root)[1:]]]
     return list(dict.fromkeys(lines))
 
 
