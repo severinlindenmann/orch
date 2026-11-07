@@ -20,6 +20,12 @@ pub const UNREACHABLE_SECS: i64 = 300;
 
 /// `POST /v1/heartbeat`: `{mobile_mode: {on, since, ends_at, machine, ended?}}` (phone-api.schema.json `heartbeat_request`).
 pub async fn heartbeat(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<Json<Value>> {
+    let ws = {
+        let c = app.db.lock().unwrap();
+        let ws = auth::workspace(&c, &h)?;
+        heartbeat_limit(&c, &ws, now())?;
+        ws
+    };
     let v = parse_body(&body)?;
     crate::phone::check("heartbeat_request", &v)?;
     let m = &v["mobile_mode"];
@@ -34,7 +40,6 @@ pub async fn heartbeat(State(app): State<AppState>, h: HeaderMap, body: Bytes) -
     }
     let (stored, push) = {
         let c = app.db.lock().unwrap();
-        let ws = auth::workspace(&c, &h)?;
         let (was_on, unreach, old_machine): (i64, i64, Option<String>) = c.query_row(
             "SELECT mm_on,mm_unreach,mm_machine FROM workspaces WHERE id=?1",
             [&ws],
@@ -51,7 +56,7 @@ pub async fn heartbeat(State(app): State<AppState>, h: HeaderMap, body: Bytes) -
             ],
         )?;
         let push = match (was_on != 0, on) {
-            (true, false) => Some((
+            (true, false) if claim_ended_push(&c, &ws, now())? => Some((
                 "mobile_mode_ended",
                 old_machine,
                 m["ended"].as_str().map(String::from),
@@ -70,6 +75,36 @@ pub async fn heartbeat(State(app): State<AppState>, h: HeaderMap, body: Bytes) -
         notify(&app, &ws, kind, machine.as_deref(), ended.as_deref()).await;
     }
     Ok(Json(json!({"mobile_mode": stored})))
+}
+
+/// Keep only the six admitted requests in the rolling minute, including invalid bodies.
+fn heartbeat_limit(c: &Connection, ws: &str, at: i64) -> Res<()> {
+    let stored: String = c.query_row(
+        "SELECT mm_heartbeats FROM workspaces WHERE id=?1",
+        [ws],
+        |r| r.get(0),
+    )?;
+    let mut recent: Vec<i64> = serde_json::from_str(&stored).map_err(internal)?;
+    recent.retain(|t| *t > at - 60);
+    if recent.len() >= 6 {
+        let mut err = rate_limited();
+        err.message = "Too many heartbeats. Try again in a minute.".into();
+        return Err(err);
+    }
+    recent.push(at);
+    c.execute(
+        "UPDATE workspaces SET mm_heartbeats=?2 WHERE id=?1",
+        rusqlite::params![ws, serde_json::to_string(&recent).map_err(internal)?],
+    )?;
+    Ok(())
+}
+
+/// Reserve the notification while holding the database lock, before sending asynchronously.
+fn claim_ended_push(c: &Connection, ws: &str, at: i64) -> rusqlite::Result<bool> {
+    Ok(c.execute(
+        "UPDATE workspaces SET mm_last_ended_push=?2 WHERE id=?1 AND (mm_last_ended_push IS NULL OR mm_last_ended_push<=?2-600)",
+        rusqlite::params![ws, at],
+    )? != 0)
 }
 
 /// Text of a Mobile mode push (relay-api.md table; `vectors/mobile-mode-v1.json` `pushes`).
@@ -127,33 +162,46 @@ fn targets(c: &Connection, ws: &str) -> Vec<(bool, String)> {
         .collect()
 }
 
-/// Workspaces in Mobile mode that were not heard from for 5 minutes and were not announced yet: push once.
+/// Expire leases first, then announce workspaces silent for five minutes.
 pub async fn sweep(app: &AppState, at: i64) {
-    let due: Vec<(String, Option<String>)> = {
+    let due = {
         let c = app.db.lock().unwrap();
         let Ok(mut st) = c.prepare(
-            "SELECT id,mm_machine FROM workspaces WHERE mm_on=1 AND mm_unreach=0 AND COALESCE(last_seen,0)<?1",
+            "SELECT id,mm_machine,mm_ends_at,mm_unreach,COALESCE(last_seen,0) FROM workspaces WHERE mm_on=1",
         ) else {
             return;
         };
-        let rows: Vec<(String, Option<String>)> = st
-            .query_map([at - UNREACHABLE_SECS], |r| Ok((r.get(0)?, r.get(1)?)))
-            .map(|r| r.flatten().collect())
+        let rows = st
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                ))
+            })
+            .map(|r| r.flatten().collect::<Vec<_>>())
             .unwrap_or_default();
-        for (id, _) in &rows {
-            let _ = c.execute("UPDATE workspaces SET mm_unreach=1 WHERE id=?1", [id]);
+        let mut due = Vec::new();
+        for (id, machine, ends_at, unreach, last_seen) in rows {
+            if store::mobile_mode_expired(ends_at.as_deref(), at) {
+                if c.execute("UPDATE workspaces SET mm_on=0,mm_since=NULL,mm_ends_at=NULL,mm_machine=NULL,mm_unreach=0 WHERE id=?1", [&id]).is_ok()
+                    && claim_ended_push(&c, &id, at).unwrap_or(false) {
+                    due.push((id, machine, "mobile_mode_ended", Some("lease")));
+                }
+            } else if unreach == 0
+                && last_seen < at - UNREACHABLE_SECS
+                && c.execute("UPDATE workspaces SET mm_unreach=1 WHERE id=?1", [&id])
+                    .is_ok()
+            {
+                due.push((id, machine, "mobile_mode_unreachable", None));
+            }
         }
-        rows
+        due
     };
-    for (ws, machine) in due {
-        notify(
-            app,
-            &ws,
-            "mobile_mode_unreachable",
-            machine.as_deref(),
-            None,
-        )
-        .await;
+    for (ws, machine, kind, ended) in due {
+        notify(app, &ws, kind, machine.as_deref(), ended).await;
     }
 }
 

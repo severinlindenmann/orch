@@ -55,21 +55,29 @@ def test_commands_per_platform():
     w = lambda n: "/x/" + n  # noqa: E731
     assert keepawake.command("darwin", 42, 100, w) == ["caffeinate", "-dimsu", "-w", "42"]
     c = keepawake.command("linux", 1, 5000, w)
-    assert (
-        c[0] == "systemd-inhibit"
-        and "--what=sleep:idle:handle-lid-switch" in c
-        and c[-2:] == ["sleep", "5000"]
-    )
+    assert c == [
+        "systemd-inhibit",
+        "--what=sleep:idle:handle-lid-switch",
+        "--who=orch",
+        "--why=Mobile mode",
+        "--mode=block",
+        "tail",
+        "--pid=1",
+        "-f",
+        "/dev/null",
+    ]
     assert keepawake.command("linux", 1, 5, lambda n: None) is None
     assert keepawake.command("freebsd", 1, 5, w) is None
 
 
-def test_acquire_release_child_only():
+@pytest.mark.parametrize("platform,method", [("darwin", "caffeinate"), ("linux", "systemd-inhibit")])
+def test_acquire_release_child_only(platform, method):
     made = []
     h = keepawake.acquire(
-        100, 7, "darwin", popen=lambda c, **k: made.append(FakeProc(c)) or made[-1], which=lambda n: n
+        100, 7, platform, popen=lambda c, **k: made.append(FakeProc(c)) or made[-1], which=lambda n: n
     )
-    assert h.method == "caffeinate" and h.alive()
+    assert h.method == method and h.alive()
+    assert made[0].cmd == keepawake.command(platform, 7, 100, which=lambda n: n)
     h.release()
     h.release()
     assert made[0].ended
@@ -257,7 +265,7 @@ MID = "m_" + "a" * 16
         ("ph_aaaaaaaaaa", -10, False, False),
     ],
 )
-def test_phone_off_control(on_state, frm, delta, paired, off):
+def test_phone_off_control(on_state, beats, frm, delta, paired, off):
     mm.turn_on(on_state, 4)
     put_dir(on_state, [{"id": "ph_aaaaaaaaaa", "name": "P"}] if paired else [])
     m = ctl_at(MID, delta, frm)
@@ -269,6 +277,13 @@ def test_phone_off_control(on_state, frm, delta, paired, off):
     relay._handle_mobile_off(on_state, m)
     assert mm.status(on_state)["on"] is (not off)
     assert MID in relay.seen(on_state)
+    if off:
+        ended = mm.status(on_state)["ended"]
+        assert ended["reason"] == "phone"
+        assert ended["text"] == "Turned off from your phone"
+        assert ended["by"] == frm
+        assert mm.payload(on_state) == {"on": False, "ended": "off"}
+        assert beats[-1] == {"on": False, "ended": "off"}
 
 
 def test_old_control_does_not_end_a_newer_mobile_mode(on_state):
@@ -337,3 +352,34 @@ def test_machine_name_is_plain_one_line(monkeypatch, tmp_path):
     ws.mkdir()
     assert mm.machine_name(ws) == "Acme ws"  # empty name: the workspace name, cleaned the same way
     assert mm.machine_name() == "this computer"
+
+
+def test_phone_off_does_not_end_mode_restarted_after_decision(on_state, monkeypatch, beats):
+    put_dir(on_state, [{"id": "ph_aaaaaaaaaa", "name": "P"}])
+    now = datetime.now(UTC)
+    monkeypatch.setattr(mm, "_now", lambda: now)
+    original_since = mm.turn_on(on_state, 4)["since"]
+    turn_off = mm.turn_off
+
+    def restart_before_off(root, reason="off", if_since=None, by=None):
+        assert if_since == original_since
+        turn_off(root)
+        monkeypatch.setattr(mm, "_now", lambda: now + timedelta(seconds=1))
+        new_since = mm.turn_on(root, 4)["since"]
+        count = len(beats)
+        result = turn_off(root, reason, if_since=if_since, by=by)
+        assert result["on"] and result["since"] == new_since
+        assert len(beats) == count
+        return result
+
+    monkeypatch.setattr(mm, "turn_off", restart_before_off)
+    relay._handle_mobile_off(on_state, ctl_at(MID, 0))
+    assert mm.status(on_state)["on"]
+
+
+def test_conditional_off_leaves_ended_state_unchanged(on_state, beats):
+    since = mm.turn_on(on_state, 4)["since"]
+    ended = mm.turn_off(on_state)
+    count = len(beats)
+    assert mm.turn_off(on_state, "phone", if_since=since, by="ph_aaaaaaaaaa") == ended
+    assert len(beats) == count

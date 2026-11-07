@@ -26,7 +26,7 @@ HEARTBEAT = 60  # seconds between heartbeats to the relay
 START_WAIT = 6.0
 ENDED_WORDS = {
     "off": "Mobile mode was turned off.",
-    "phone": "Mobile mode was turned off from your phone.",
+    "phone": "Turned off from your phone",
     "lease": "Mobile mode ended after its time ran out.",
     "restart": "Mobile mode ended when the computer restarted.",
 }
@@ -105,12 +105,14 @@ def settle(root: Path, now: datetime | None = None) -> dict:
     return d
 
 
-def _end(root: Path, d: dict, reason: str, now: datetime | None = None) -> dict:
+def _end(root: Path, d: dict, reason: str, now: datetime | None = None, by=None) -> dict:
     d = {
         "default_hours": d.get("default_hours"),
         "on": False,
         "ended": {"at": _iso(now or _now()), "reason": reason, "text": ENDED_WORDS[reason]},
     }
+    if by is not None:
+        d["ended"]["by"] = by
     if d["default_hours"] is None:
         del d["default_hours"]
     _write(root, d)
@@ -237,10 +239,15 @@ def turn_on(root: Path, hours=None, spawn=None) -> dict:
     return status(root)
 
 
-def turn_off(root: Path, reason: str = "off") -> dict:
-    d = _read(root)
-    if d.get("on"):
-        _end(root, d, reason if reason in ENDED_WORDS else "off")
+def turn_off(root: Path, reason: str = "off", if_since=None, by=None) -> dict:
+    from orch.relay import locked
+
+    with locked(root):
+        d = _read(root)
+        if if_since is not None and (not d.get("on") or d.get("since") != if_since):
+            return status(root)
+        if d.get("on"):
+            _end(root, d, reason if reason in ENDED_WORDS else "off", by=by)
     heartbeat(root)
     return status(root)
 
