@@ -68,6 +68,10 @@ def look4(e):
     return "meta on/off"
 
 
+def _items(j):
+    return j.get("items", j.get("workspaces", [])) if isinstance(j, dict) else j
+
+
 @scenario("LOOK-1")
 def look1(e):
     """orch look list = 100 icons / 12 colours; an agent sets the look and the relay shows it (look_by workspace);
@@ -82,7 +86,7 @@ def look1(e):
     e.orch(n, "look", "set", "--icon", "wallet", "--color", "amber", by="agent:claude")
     who = e.rapi(n, "GET", "/v1/whoami").json()
     check((who["icon"], who["color"], who["look_by"]) == ("wallet", "amber", "workspace"), f"whoami {who}")
-    adm = next(w for w in e.rel.admin.call("GET", "/admin/api/workspaces").json() if w["id"] == wid)
+    adm = next(w for w in _items(e.rel.admin.call("GET", "/admin/api/workspaces").json()) if w["id"] == wid)
     check((adm["icon"], adm["color"], adm["look_by"]) == ("wallet", "amber", "workspace"), f"admin {adm}")
     r = e.rel.admin.call("PATCH", f"/admin/api/workspaces/{wid}", {"icon": "code"})
     check(r.status == 409, f"admin change after the workspace chose: {r}")
