@@ -152,18 +152,22 @@ def locked(root: Path, tid: str):
             procs.unlink(lock)
 
 
-def _atomic(path: Path, text: str, mode: int = 0o666) -> None:
-    if (
-        mode == 0o600
-    ):  # a private file (agent environment, hooks, stdin): stored only if git leaves this exact file alone
-        from orch import harness
+def _check_private(path: Path) -> None:
+    """A private file (agent environment, hooks, stdin) is stored only if git leaves this exact file alone."""
+    from orch import harness
 
-        for anc in path.parents:
-            if anc.name.lower() == ".orch":
-                harness.check_private_path(
-                    anc.parent, path
-                )  # refuses, writes nothing, if git would show or track it
-                break
+    for anc in path.parents:
+        if anc.name.lower() == ".orch":
+            harness.check_private_path(
+                anc.parent, path
+            )  # refuses, writes nothing, if git would show or track it
+            return
+    raise Refused(f"{path} is not inside .orch; orch will not store private files there.")
+
+
+def _atomic(path: Path, text: str, mode: int = 0o666) -> None:
+    if mode == 0o600:
+        _check_private(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
     try:
