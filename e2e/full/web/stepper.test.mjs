@@ -58,5 +58,5 @@ test('browser lane continues after failure and covers controls', { timeout: 1950
     const shot = result.steps[0].shots.find(s => s.vp === width);
     assert.ok(shot); await access(join(dir, 'full', shot.file));
   }
-  await access(join(dir, 'full', 'trace.zip'));
+  await assert.rejects(access(join(dir, 'full', 'trace.zip')), 'no trace unless STEPPER_TRACE is set (traces keep typed values)');
 });

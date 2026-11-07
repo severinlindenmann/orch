@@ -17,11 +17,12 @@ for a in "$@"; do
     *) EXTRA="$EXTRA $a" ;; esac
 done
 df -k "$REAL_HOME" | awk 'NR==2 && $4 < 5000000 { print "under 5 GB free: stop"; exit 1 }'
-[ -d "$HERE/web/node_modules" ] || (cd "$HERE/web" && npm i --no-audit --no-fund --silent)
+[ -d "$HERE/web/node_modules" ] || (cd "$HERE/web" && npm_config_cache="$REAL_HOME/.npm" npm i --no-audit --no-fund --silent)
 ROOT=$(mktemp -d "$REAL_HOME/.tf-fe2e-XXXX")
 OHOME=$(mktemp -d "$REAL_HOME/.orch-e2e-XXXX")   # ORCH_HOME is only trusted under the real home outside any git repo
 KEEP=0; case "$EXTRA" in *--keep-root*) KEEP=1 ;; esac
-trap '[ "$KEEP" = 1 ] || rm -rf "$ROOT" "$OHOME"' EXIT INT TERM
+trap '[ "$KEEP" = 1 ] || rm -rf "$ROOT" "$OHOME"' EXIT
+trap 'exit 130' INT TERM
 mkdir -p "$ROOT/home" "$ROOT/tools"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$REAL_HOME/orch-dev/.cargo-target-v2}"
 

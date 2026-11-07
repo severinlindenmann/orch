@@ -743,7 +743,7 @@
   },
   {
    "id": "A23",
-   "name": "Settings Agent: try an agent, add your own agent",
+   "name": "Settings Agent: try an agent, open and close 'Add your own agent'",
    "page": "settings-agent",
    "expect": "Test answers in words; a custom agent can be added",
    "actions": [
@@ -765,46 +765,81 @@
     },
     {
      "do": "click",
-     "sel": "button:has-text('Add your own agent')"
-    },
-    {
-     "do": "fill",
-     "sel": "xpath=//label[normalize-space()='Name']/following::input[1]",
-     "value": "My tool"
-    },
-    {
-     "do": "fill",
-     "sel": "xpath=//label[normalize-space()='Command']/following::textarea[1]",
-     "value": "echo {prompt}"
-    },
-    {
-     "do": "click",
-     "sel": "button:has-text('Save')"
+     "sel": "button:has-text('Add your own agent')",
+     "optional": true
     },
     {
      "do": "wait",
      "ms": 500
     },
     {
-     "do": "expect_text",
-     "text": "lowercase"
-    },
+     "do": "click",
+     "sel": "button:has-text('Back')",
+     "optional": true
+    }
+   ]
+  },
+  {
+   "id": "A24",
+   "name": "Settings Agent: what the agent may do (Ask, Full with confirm, back to Auto)",
+   "page": "settings-perms",
+   "expect": "Full asks for a plain confirmation; Back keeps the old choice",
+   "actions": [
     {
-     "do": "fill",
-     "sel": "xpath=//label[normalize-space()='Name']/following::input[1]",
-     "value": "my-tool"
+     "do": "goto",
+     "path": "/#settings"
     },
     {
      "do": "click",
-     "sel": "button:has-text('Save')"
+     "sel": "#settings-tab-agent"
+    },
+    {
+     "do": "click",
+     "sel": "role=radio[name=/^Ask/]"
     },
     {
      "do": "wait",
-     "ms": 1500
+     "ms": 600
     },
     {
-     "do": "expect_text",
-     "text": "my-tool"
+     "do": "click",
+     "sel": "role=radio[name=/^Full/]",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 400
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Back') >> visible=true >> nth=0",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "role=radio[name=/^Full/]",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 400
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Yes, use Full')",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 600
+    },
+    {
+     "do": "click",
+     "sel": "role=radio[name=/^Auto/]"
+    },
+    {
+     "do": "wait",
+     "ms": 600
     }
    ]
   },

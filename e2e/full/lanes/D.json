@@ -274,13 +274,29 @@
      "sel": "a:has-text('Add workspace') >> nth=0"
     },
     {
+     "do": "click",
+     "sel": "a:has-text('Cancel') >> visible=true >> nth=0",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "a:has-text('Add workspace') >> nth=0",
+     "optional": true
+    },
+    {
      "do": "fill",
      "sel": "label=Workspace name",
      "value": "E2E extra {{stamp}}"
     },
     {
      "do": "fill",
-     "sel": "input[aria-label='Add tag']",
+     "sel": "label=Description (optional)",
+     "value": "made by the e2e",
+     "optional": true
+    },
+    {
+     "do": "fill",
+     "sel": "label=Add tag",
      "value": "extra",
      "optional": true
     },
@@ -293,6 +309,24 @@
      "do": "check",
      "sel": "role=checkbox[name='Apps']",
      "force": true,
+     "optional": true
+    },
+    {
+     "do": "check",
+     "sel": "role=checkbox[name='Permanent files']",
+     "force": true,
+     "optional": true
+    },
+    {
+     "do": "check",
+     "sel": "role=checkbox[name='Temporary files']",
+     "force": true,
+     "optional": true
+    },
+    {
+     "do": "select",
+     "sel": "label=Sharing >> nth=0",
+     "value": "",
      "optional": true
     },
     {

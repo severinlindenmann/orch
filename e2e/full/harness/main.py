@@ -80,6 +80,8 @@ def load_history() -> dict:
 
 
 def main() -> int:
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # the finally block still tears the environment down
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["quick", "full"], default="quick")
     ap.add_argument("--sha", default="")
@@ -89,6 +91,7 @@ def main() -> int:
     ap.add_argument("--no-windows", action="store_true")
     ap.add_argument("--phone", action="store_true", help="run lane P (Simulator); only after the mobile v3 lanes merged")
     ap.add_argument("--real-agents", action="store_true", help="lane B with real Claude (needs E2E_CLAUDE_TOKEN)")
+    ap.add_argument("--udid", default="", help="Simulator for lane P (default: the first booted one)")
     ap.add_argument("--no-review", action="store_true")
     ap.add_argument("--review-shots", type=int, default=24)
     ap.add_argument("--viewports", default="1280,720,390")
@@ -128,6 +131,8 @@ def main() -> int:
     findings: list[dict] = []
     env = None
     rcv = None
+    aborted = False
+    leaked: list = []
     try:
         # S: setup
         S = Lane("S", "Setup", outdir / "S")
@@ -214,13 +219,14 @@ def main() -> int:
         if "U" in want:
             lanes.append({**_save(lanes_py.lane_u(env, outdir / "U", rcv)), "dir": "U"})
         if "P" in want:
-            lanes.append({**_phone_lane(env, outdir / "P"), "dir": "P"})
+            lanes.append({**_save(lanes_py.lane_p(env, outdir / "P", repo, a.udid)), "dir": "P"})
         if "X" in want:
             lanes.append({**_windows_lane(env, outdir / "X"), "dir": "X"})
         if "Z" in want:
             prod = dict(kv.split("=", 1) for kv in a.prod.split(",") if "=" in kv)
             lanes.append({**_save(lanes_py.lane_z(env, outdir / "Z", prod)), "dir": "Z"})
     except Exception as x:  # noqa: BLE001
+        aborted = True
         log("run aborted:", x)
         findings.append({"lane": "S", "kind": "run", "severity": "blocking", "step": "", "shots": [], "title": "Run aborted",
                          "now": f"{type(x).__name__}: {x}", "proposal": "Fix the environment bring-up, rerun."})
@@ -228,7 +234,7 @@ def main() -> int:
         if rcv:
             rcv.stop()
         if env:
-            env.down(log)
+            leaked = env.down(log) or []
         if wt:
             subprocess.run(["git", "-C", str(src), "worktree", "remove", "--force", str(wt)], capture_output=True)
     for l in lanes:
@@ -249,6 +255,28 @@ def main() -> int:
             for f in q:
                 f["shots"] = [os.path.relpath(p, outdir) for p in f["shots"]]
             findings += q
+    # findings other lanes/sessions dropped as JSON in state/e2e-full/extra-findings (shots are absolute paths, copied into the report)
+    for jf in sorted((STATE / "extra-findings").glob("*.json")) if (STATE / "extra-findings").exists() else []:
+        try:
+            for f in json.loads(jf.read_text()):
+                shots = []
+                for sp in f.get("shots", []):
+                    src = Path(sp)
+                    if src.exists():
+                        dst = outdir / "extra" / jf.stem
+                        dst.mkdir(parents=True, exist_ok=True)
+                        shutil.copy(src, dst / src.name)
+                        shots.append(f"extra/{jf.stem}/{src.name}")
+                findings.append({**f, "shots": shots, "kind": f.get("kind", "external")})
+        except (OSError, ValueError) as x:
+            log("extra findings", jf, "unreadable:", x)
+    if leaked:
+        findings.append({"lane": "S", "kind": "run", "severity": "blocking", "step": "", "shots": [], "title": "Processes left running after tear-down",
+                         "now": f"{len(leaked)} add-on server(s) were still running and were ended: {leaked}", "proposal": "Stop every add-on server on `orch stop`."})
+    bad = _secrets_in(outdir, env)
+    if bad:
+        findings.append({"lane": "S", "kind": "run", "severity": "blocking", "step": "", "shots": [], "title": "A secret was found in the report folder",
+                         "now": f"{bad}", "proposal": "Never write typed keys into step results, shots or traces."})
     seen, uniq = set(), []
     for f in findings:
         k = (f.get("lane"), f.get("kind"), f.get("title"))
@@ -273,7 +301,7 @@ def main() -> int:
     page = report.render(runinfo, lanes, findings, census, outdir)
     steps = [s for l in lanes for s in l["steps"]]
     if not a.no_history:
-      hist["runs"].append({"run": runname, "sha": sha, "mode": a.mode, "pass": sum(s["status"] == "pass" for s in steps),
+        hist["runs"].append({"run": runname, "sha": sha, "mode": a.mode, "pass": sum(s["status"] == "pass" for s in steps),
                          "fail": sum(s["status"] == "fail" for s in steps), "findings": len(findings),
                          "probes": {p["id"]: p["median"] for l in lanes for p in l.get("probes", {}).values()}})
     STATE.mkdir(parents=True, exist_ok=True)
@@ -283,8 +311,25 @@ def main() -> int:
     url = f"http://develop.netbird.cloud:{a.serve_port}/{runname}/"
     log(f"REPORT {url}  ({page})")
     nfail = sum(s["status"] == "fail" for s in steps)
+    missing = [l for l in want if l not in {x["lane"] for x in lanes}]
+    nblocked = sum(s["status"] == "blocked" for s in steps)
     status("e2e full run " + a.mode, "done", f"{len(steps)} steps, {nfail} fail, {len(findings)} findings: {url}")
-    return 1 if nfail else 0
+    return 1 if (nfail or aborted or nblocked or missing or leaked or bad) else 0
+
+
+def _secrets_in(outdir: Path, env) -> list[str]:
+    """Names of secrets whose value appears in a file of the report folder (text files and archives are read as bytes)."""
+    if not env:
+        return []
+    names = {k: v for k, v in env.vars.items() if k.endswith("_token") and v}
+    found = []
+    for p in outdir.rglob("*"):
+        if p.is_file() and p.stat().st_size < 50_000_000:
+            data = p.read_bytes()
+            for k, v in names.items():
+                if v.encode() in data:
+                    found.append(f"{k} in {p.relative_to(outdir)}")
+    return found
 
 
 def _save(L: Lane) -> dict:
@@ -292,20 +337,10 @@ def _save(L: Lane) -> dict:
 
 
 def _prune(reports: Path, keep: int):
-    dirs = sorted(p for p in reports.iterdir() if p.is_dir())
+    import re
+    dirs = sorted(p for p in reports.iterdir() if p.is_dir() and not p.is_symlink() and re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{8}-(quick|full)", p.name))
     for d in dirs[:-keep]:
         shutil.rmtree(d)  # exact report folders of this harness only
-
-
-def _phone_lane(env, out: Path) -> dict:
-    """Lane P: wraps the V3-SIM driver of PR #207 (RealRelayE2ETests) once it has merged. Until then: skipped, with the reason."""
-    L = Lane("P", "Phone (Simulator)", out)
-    from lane import Skipped
-
-    def s(st):
-        raise Skipped("waiting for the mobile v3 lanes (PR #207 V3-SIM, #208 Mobile mode, archive) to merge; steps are added then")
-    L.step("P00", "Phone lane", s)
-    return L.save()
 
 
 def _windows_lane(env, out: Path) -> dict:

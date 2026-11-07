@@ -66,7 +66,8 @@ export async function run(opts) {
     context = await browser.newContext({ viewport: { width: widths[0], height: height(widths[0]) }, ignoreHTTPSErrors: true, serviceWorkers: 'block', extraHTTPHeaders: env.headers?.[lane.base] || {} });
     await context.route('**/*', route => allowedOrigins.has(new URL(route.request().url()).origin) ? route.continue() : route.abort('blockedbyclient'));
     await context.addInitScript(() => window.addEventListener('unhandledrejection', e => console.error(`Unhandled rejection: ${String(e.reason)}`)));
-    await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+    // Playwright traces store typed values (admin keys): only with STEPPER_TRACE=1, never in an unattended run
+    if (process.env.STEPPER_TRACE) await context.tracing.start({ screenshots: true, snapshots: false, sources: false });
     const page = await context.newPage();
     page.on('dialog', dialog => dialog.dismiss().catch(() => {}));
     page.on('console', msg => { if (current && msg.type() === 'error' && !current.expected.console.some(s => msg.text().includes(s))) current.console.push(msg.text()); });
@@ -159,7 +160,7 @@ export async function run(opts) {
         default: throw new Error(`Unknown action: ${a.do}`);
       }
       if (key) covered.add(ck(key));
-      for (const p of a.covers ? [].concat(a.covers) : []) patterns.add(p);
+      for (const p of a.covers ? [].concat(a.covers) : []) { patterns.add(p); if (!p.endsWith('|*')) covered.add(p.split('|').slice(-2).join('|')); }
     }
     async function shot(step, width) {
       if (step.noshot) return;
@@ -239,7 +240,7 @@ export async function run(opts) {
     const clicked = keys.filter(k => covered.has(k) || isCovered('x|' + k)).length;
     result.coverage = opts.censusOnly ? { found: keys.length } : { found: keys.length, clicked, percent: keys.length ? 100 * clicked / keys.length : 100, uncovered: keys.filter(k => !(covered.has(k) || isCovered('x|' + k))), skipped_destructive: [...new Set([...skipped].map(ck))], unclickable: [...unclickable], allowlisted };
   } finally {
-    if (context) await context.tracing.stop({ path: join(out, 'trace.zip') }).finally(() => browser.close());
+    if (context) await (process.env.STEPPER_TRACE ? context.tracing.stop({ path: join(out, 'trace.zip') }) : Promise.resolve()).finally(() => browser.close());
     else await browser.close();
   }
   result.ms = Date.now() - start;

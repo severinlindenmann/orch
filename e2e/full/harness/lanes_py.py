@@ -5,6 +5,7 @@ Timing probes are what the owner cares about most: how fast does the dashboard (
 from __future__ import annotations
 
 import json
+import os
 import stat
 import time
 from pathlib import Path
@@ -61,18 +62,20 @@ echo "$(python3 -c 'import time;print(time.time())') done" >> "$FAKE_LOG"
 def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
     L = Lane("B", "Agent run and latency", out)
     e = env.e
-    ws = "Pilatus"
+    ws = "Reports"  # not Pilatus: lane A edits the settings of Pilatus at the same time
     w = e.ws(ws)
-    dash = env.urls.get("pilatus")
+    dash = env.urls.get("reports")
     if not dash:
         L.step("B00", "dashboard of Pilatus is up", lambda st: (_ for _ in ()).throw(Blocked("no dashboard url")))
         return L
     fake_log = env.root / "fake-agent.log"
     cfg = w / ".orch" / "config.toml"
     if real_agents:
-        agent_line = ("claude -p {prompt} --permission-mode acceptEdits --max-turns 20 "
-                      "--allowedTools 'Bash(orch:*)' Read Write Edit")
-        cfg.write_text(f'[workspace]\nagent = "e2eagent"\n\n[agents.e2eagent]\nadapter = "generic"\ncommand = {json.dumps(agent_line)}\n\n[automation]\ninterval = 2\n')
+        # the workspace's own default agent (Claude through its adapter, tmux when available); the login comes from the environment
+        if not os.environ.get("E2E_CLAUDE_TOKEN"):
+            L.step("B00", "Claude login for real-agent runs", lambda st: (_ for _ in ()).throw(Blocked("E2E_CLAUDE_TOKEN is not set (Proton Pass lookup failed)")))
+            return L
+        L.notes.append("REAL Claude agent (default agent of the workspace); latencies include the model")
     else:
         script = env.root / "fake-agent.sh"
         script.write_text(FAKE_AGENT)
@@ -85,7 +88,9 @@ def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
     def one_run(i: int):
         def go(st):
             title = f"Write hello {i}"
-            r = act(dash, "ticket.new", {"title": title, "note": "Write hello.txt with the greeting I choose."})
+            note = ("Ask me which greeting to write with `orch ask` (options Hi and Hello), then write hello.txt with my answer, "
+                    "then mark the task done with the file as proof." if real_agents else "Write hello.txt with the greeting I choose.")
+            r = act(dash, "ticket.new", {"title": title, "note": note})
             if r.status != 200:
                 raise RuntimeError(f"ticket.new {r.status} {r.text[:150]}")
             tid = next(t["id"] for t in r.json()["tickets"] if t["title"] == title)
@@ -97,7 +102,7 @@ def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
                 raise RuntimeError(f"run.start {rs.status} {rs.text[:150]}")
             a = poll(dash, lambda s: bool(s.get("runs", {}).get(tid)) or _ticket(s, tid).get("status") == "active", 40)
             samples["start_to_working"].append(a if a is not None else 40.0)
-            n = poll(dash, lambda s: any(tid in json.dumps(x) for x in s.get("needs", [])), 60)
+            n = poll(dash, lambda s: any(tid in json.dumps(x) for x in s.get("needs", [])), 240 if real_agents else 60)
             if n is None:
                 raise RuntimeError("the question never reached 'Needs you'")
             samples["ask_to_needs"].append(time.time() - t0 - (a or 0))
@@ -116,7 +121,7 @@ def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
             h = poll(dash, lambda s: "answered" in json.dumps(_ticket(s, tid).get("history", [])).lower(), 20)
             samples["answer_to_history"].append(h if h is not None else 20.0)
             all_done = lambda s: bool(_ticket(s, tid).get("checklist")) and all(c.get("done") for c in _ticket(s, tid)["checklist"])
-            d = poll(dash, all_done, 90)
+            d = poll(dash, all_done, 300 if real_agents else 90)
             if d is None:
                 s_ = state(dash)
                 raise RuntimeError("the task was never checked off: " + json.dumps({"ticket": _ticket(s_, tid), "run": s_.get("runs", {}).get(tid),
@@ -414,7 +419,7 @@ def lane_u(env, out: Path, rcv: Receiver) -> Lane:
             if not rcv.wait(n + 1, 30):
                 ev = lib.http("GET", f"{e.rel.url}/v1/sub/{sub['token']}/events")
                 lg = admin.call("GET", f"/admin/api/subscribers/{sub['id']}/log").text[:300]
-                raise RuntimeError(f"no push within 30 s; send rc={rc_} {(se_ or so_)[:120]}; events {ev.status} {ev.text[:150]}; log {lg}")
+                raise RuntimeError(f"no push within 30 s; send rc={rc_} {(se_ or so_)[:120]}; events {ev.status} ({len(ev.text)} bytes); log {len(lg)} bytes")
             lat.append(time.time() - t0)
         sig_ok(rcv.got[-1])
         r = lib.http("GET", f"{e.rel.url}/v1/sub/{sub['token']}/events")
@@ -428,7 +433,7 @@ def lane_u(env, out: Path, rcv: Receiver) -> Lane:
     def retry(st):
         rcv.fail_first = len(rcv.got) + 1  # the next delivery gets a 500
         n = len(rcv.got)
-        e.sh(["orch", "relay", "send", "phones", "will fail first", "--update", "note"], cwd=e.ws("Pilatus"), timeout=60)
+        e.sh(["orch", "relay", "send", "phones", "will fail first", "--update", "note", "--ticket", env.vars.get("ticket_id", "t_none")], cwd=e.ws("Pilatus"), timeout=60)
         if not rcv.wait(n + 1, 20):
             raise RuntimeError("the update was not even attempted")
         time.sleep(1)
@@ -469,6 +474,114 @@ def lane_u(env, out: Path, rcv: Receiver) -> Lane:
             raise RuntimeError("a revoked subscriber can still pull")
     L.step("U06", "Revoke the subscriber: pulling stops", revoke, expect="pull refused")
     return L
+
+
+# ---------------------------------------------------------------------------------------------- lane P (phone, Simulator)
+
+TEST_LINE = None
+
+
+def parse_xcode_tests(text: str) -> list[dict]:
+    """Per test case results from xcodebuild output: [{name, status, secs}]."""
+    import re
+    out = []
+    for m in re.finditer(r"Test Case '-\[(?:\S+\.)?(\w+) (\w+)\]' (passed|failed|skipped) \(([\d.]+) seconds\)", text):
+        out.append({"cls": m.group(1), "name": m.group(2), "status": m.group(3), "secs": float(m.group(4))})
+    return out
+
+
+def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
+    """Phone lane on the V3-SIM driver (PR #207): `e2e/run.sh V3-SIM` starts its own local relay + workspace and writes ctl/info.json;
+    RealRelayE2ETests (XCUITest) drives the app in the Simulator against it. One harness step per XCTest case, shots collected.
+    No second phone driver: new phone steps (Mobile mode banner, archive, ...) are XCTests of that class or `-open` targets."""
+    import re
+    import shutil
+    import subprocess
+    L = Lane("P", "Phone (Simulator)", out)
+    sim = repo / "e2e" / "scenarios_phone_v3.py"
+    tests = repo / "mobile" / "OrchMobileUITests" / "RealRelayE2ETests.swift"
+    if not (tests.exists() and "V3-SIM" in sim.read_text() if sim.exists() else False):
+        L.step("P00", "Phone driver present", lambda st: (_ for _ in ()).throw(Skipped(
+            "RealRelayE2ETests / V3-SIM (PR #207) are not in this checkout yet")))
+        return L
+    if not shutil.which("xcodebuild"):
+        L.step("P00", "Xcode", lambda st: (_ for _ in ()).throw(Skipped("xcodebuild not found")))
+        return L
+    if not udid:
+        r = subprocess.run(["xcrun", "simctl", "list", "devices", "booted", "-j"], capture_output=True, text=True)
+        try:
+            devs = [d for v in json.loads(r.stdout)["devices"].values() for d in v if d.get("state") == "Booted"]
+        except ValueError:
+            devs = []
+        udid = devs[0]["udid"] if devs else ""
+    if not udid:
+        L.step("P00", "A booted Simulator", lambda st: (_ for _ in ()).throw(Skipped("no booted iPhone Simulator (set --udid or boot one)")))
+        return L
+    shots = out / "shots"
+    host = {}
+
+    def start(st):
+        log = open(out / "v3sim.log", "w")
+        p = subprocess.Popen(["sh", str(repo / "e2e" / "run.sh"), "V3-SIM"], stdout=log, stderr=log, cwd=repo, start_new_session=True)
+        host["p"] = p
+        end = time.time() + 600
+        while time.time() < end:
+            txt = (out / "v3sim.log").read_text()
+            m = re.search(r"tmp (\S+)", txt)
+            if m and (Path(m.group(1)) / "ctl" / "info.json").exists():
+                host["ctl"] = Path(m.group(1)) / "ctl"
+                return
+            if p.poll() is not None:
+                raise RuntimeError("V3-SIM harness ended early: " + txt[-300:])
+            time.sleep(2)
+        raise RuntimeError("V3-SIM harness did not publish ctl/info.json in 10 minutes")
+    L.step("P01", "Start the V3-SIM host (local relay, workspace, invitation)", start, expect="ctl/info.json with the pair link")
+    if "ctl" not in host:
+        _p_stop(host)
+        return L
+    try:
+        xo = out / "xcodebuild.log"
+        t0 = time.time()
+        r = subprocess.run(["xcodebuild", "test", "-project", "OrchMobile.xcodeproj", "-scheme", "OrchMobile", "-destination", f"id={udid}",
+                            "-only-testing:OrchMobileUITests/RealRelayE2ETests"], cwd=repo / "mobile", capture_output=True, text=True,
+                           timeout=3600, env={**os.environ, "TEST_RUNNER_ORCH_E2E_CTL": str(host["ctl"]),
+                                              "TEST_RUNNER_ORCH_SHOTS": str(shots), "ORCH_E2E_UDID": udid})
+        xo.write_text(r.stdout + r.stderr)
+        cases = parse_xcode_tests(r.stdout)
+        L.notes.append(f"xcodebuild {time.time() - t0:.0f} s, {len(cases)} test cases, exit {r.returncode}")
+        for c in cases:
+            def one(st, c=c):
+                st["ms_override"] = int(c["secs"] * 1000)
+                if c["status"] == "skipped":
+                    raise Skipped("XCTest skipped it")
+                if c["status"] == "failed":
+                    raise RuntimeError("XCTest failed; see xcodebuild.log")
+            st = L.step("P-" + c["name"], f"{c['cls']}.{c['name']}", one, expect="XCUITest passes against the local relay")
+            st["ms"] = int(c["secs"] * 1000)
+            png = shots / f"{c['name']}.png"
+            if png.exists():
+                st["shots"].append({"vp": "phone", "file": f"shots/{png.name}", "hscroll": False})
+        if not cases:
+            L.step("P02", "XCTest run", lambda st: (_ for _ in ()).throw(RuntimeError("no test cases in the xcodebuild output: " + r.stdout[-300:])))
+    finally:
+        _p_stop(host)
+    return L
+
+
+def _p_stop(host: dict) -> None:
+    import signal
+    ctl = host.get("ctl")
+    if ctl:
+        (ctl / "stop").write_text("stop")
+    p = host.get("p")
+    if p:
+        try:
+            p.wait(60)
+        except Exception:  # noqa: BLE001
+            try:
+                os.killpg(p.pid, signal.SIGTERM)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------------------------- lane Z

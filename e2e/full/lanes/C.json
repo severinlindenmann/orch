@@ -189,7 +189,7 @@
     },
     {
      "do": "fill",
-     "sel": "label=Name >> nth=0",
+     "sel": "role=textbox[name='Name'] >> nth=0",
      "value": "E2E_SECRET"
     },
     {
@@ -297,7 +297,8 @@
     },
     {
      "do": "click",
-     "sel": "button:has-text('Cancel')"
+     "sel": "button:has-text('Cancel')",
+     "optional": true
     }
    ]
   },

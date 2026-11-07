@@ -1,7 +1,7 @@
 """Environment bring-up and tear-down for the full e2e: relay + publish from develop, 3 workspaces, receiver.
 
 Reuses e2e/main.py `E` (clean env, workspaces, relay/publish connect). One root per run under /Users/<me>/.tf-fe2e-XXXX.
-Everything started here is recorded in <root>/pids.json and ended by PID only (never pkill).
+Everything started here is ended by PID (process group for session leaders) only, never pkill.
 """
 from __future__ import annotations
 
@@ -39,6 +39,8 @@ class Env:
     # -- bring-up -------------------------------------------------------------------------------
     def up(self, log=print) -> dict:
         e = self.e
+        if os.environ.get("E2E_CLAUDE_TOKEN"):  # real-agent runs: the agent's login, in memory and in the child environment only
+            e.env["CLAUDE_CODE_OAUTH_TOKEN"] = os.environ["E2E_CLAUDE_TOKEN"]
         e.home.mkdir(parents=True, exist_ok=True)
         (e.home / ".gitconfig").write_text("[init]\n\tdefaultBranch = main\n")
         t = time.time()
@@ -103,7 +105,9 @@ class Env:
     def env_json(self) -> dict:
         d = {"urls": self.urls, "vars": self.vars, "headers": {}, "root": str(self.root), "sha": self.sha,
              "workspaces": {n: str(self.e.ws(n)) for n in WORKSPACES}}
-        (self.root / "env.json").write_text(json.dumps(d, indent=1))
+        p = self.root / "env.json"
+        p.write_text(json.dumps(d, indent=1))
+        p.chmod(0o600)  # holds the admin keys of this run
         return d
 
     # -- helpers for lanes ---------------------------------------------------------------------
@@ -133,7 +137,10 @@ class Env:
         for pid in e.pids:
             for sig in (signal.SIGTERM, signal.SIGKILL):
                 try:
-                    os.kill(pid, sig)
+                    try:
+                        os.killpg(pid, sig)  # started with start_new_session: its children too
+                    except OSError:
+                        os.kill(pid, sig)
                 except OSError:
                     break
                 time.sleep(0.4)
