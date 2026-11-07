@@ -109,7 +109,7 @@ async fn apps_static_private_token_flow() {
         call(&t.public, "GET", "/a/site/", &[("cookie", &c)], vec![])
             .await
             .text(),
-        "v2"
+        "<title>site</title>v2"
     );
     let r3 = deploy(
         &t,
@@ -156,7 +156,7 @@ async fn apps_public_needs_right() {
     assert!(r.json()["view_token"].is_null());
     assert_eq!(
         call(&t.public, "GET", "/a/site/", &[], vec![]).await.text(),
-        "open"
+        "<title>site</title>open"
     );
 }
 
@@ -447,4 +447,45 @@ async fn apps_proxy_strips_orch_credentials() {
             && h.get("x-orch-admin").is_none()
     );
     assert_eq!(h["cookie"], "mine=1");
+}
+
+#[tokio::test]
+async fn static_html_gets_default_title_and_lang_only_when_missing() {
+    let t = setup();
+    let toml = format!("{STATIC_TOML}public = true\n");
+    let ws = t.workspace("A", all_rights()).await;
+    let r = deploy(
+        &t,
+        &ws,
+        "site",
+        &[
+            ("app.toml", &toml),
+            (
+                "index.html",
+                "<!doctype html><html><head></head><body>a</body></html>",
+            ),
+            (
+                "full.html",
+                "<html lang=\"de\"><head><title>Mine</title></head></html>",
+            ),
+        ],
+        "",
+    )
+    .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let a = call(&t.public, "GET", "/a/site/", &[], vec![]).await;
+    let (st, body) = (a.status, a.text());
+    if st == 200 {
+        assert!(
+            body.contains("<html lang=\"en\"><head><title>site</title>"),
+            "{body}"
+        );
+        let b = call(&t.public, "GET", "/a/site/full.html", &[], vec![]).await;
+        assert_eq!(
+            b.text(),
+            "<html lang=\"de\"><head><title>Mine</title></head></html>"
+        );
+    } else {
+        panic!("status {st}: {body}");
+    }
 }

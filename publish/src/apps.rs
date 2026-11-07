@@ -674,6 +674,23 @@ async fn serve_static(app: &AppRow, rest: &str) -> Response {
         let html = crate::web::markdown_page(&app.name, &String::from_utf8_lossy(&bytes));
         return ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response();
     }
+    if p.extension().is_some_and(|e| e == "html" || e == "htm") {
+        // small pages: add a default <title> / lang when missing (13B); big ones stream as-is
+        if std::fs::metadata(&p).is_ok_and(|m| m.len() <= 4 << 20) {
+            let Ok(bytes) = std::fs::read(&p) else {
+                return text(404, "Not found.");
+            };
+            let html = crate::util::with_default_head(&bytes, &app.name);
+            return (
+                [
+                    (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                    (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+                ],
+                html,
+            )
+                .into_response();
+        }
+    }
     let Ok(file) = tokio::fs::File::open(&p).await else {
         return text(404, "Not found.");
     };
