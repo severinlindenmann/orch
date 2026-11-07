@@ -95,10 +95,7 @@ struct Waveform: View {
 }
 
 func voiceRateText(_ rate: Double) -> String { rate == 1.5 ? "1.5x" : "\(Int(rate))x" }
-private func voiceDurationText(_ duration: Double) -> String {
-    let seconds = duration.isFinite ? max(0, Int(duration)) : 0
-    return String(format: "%d:%02d", seconds / 60, seconds % 60)
-}
+private func voiceDurationText(_ duration: Double) -> String { clockText(duration) }
 
 struct OwnVoiceBubble: View {
     let item: ConvItem

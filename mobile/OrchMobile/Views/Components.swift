@@ -204,3 +204,10 @@ struct StatusLine: View {
 struct PresenceDot: View {
     var body: some View { Circle().fill(Theme.brand).frame(width: 6, height: 6).accessibilityHidden(true) }
 }
+
+
+/// Voice note, memo and recording timer text: two-digit minutes and seconds ("00:01", "01:30").
+func clockText(_ seconds: Double) -> String {
+    let n = seconds.isFinite ? max(0, Int(seconds)) : 0
+    return String(format: "%02d:%02d", n / 60, n % 60)
+}

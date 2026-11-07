@@ -204,7 +204,7 @@ struct Composer: View {
             .foregroundStyle(filled ? Theme.onBrand : Theme.brand).background(filled ? Theme.brand : .clear, in: Circle()) }
             .buttonStyle(PressStyle()).accessibilityLabel(label).accessibilityIdentifier(id)
     }
-    private func clock(_ seconds: Double) -> String { let n = Int(seconds); return String(format: "%d:%02d", n / 60, n % 60) }
+    private func clock(_ seconds: Double) -> String { clockText(seconds) }
     private func sendText() async {
         guard let target, !busy else { return }
         busy = true; error = nil; micError = false

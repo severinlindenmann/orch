@@ -153,7 +153,7 @@ struct ConversationView: View {
                 }
                 .onChange(of: model.focusedQuestion) { _, focus in focusQuestion(focus, proxy: proxy) }
                 .task(id: items.count) {
-                    if !loaded || atBottom { rememberRead() }
+                    rememberRead(bottomSeen: !loaded || atBottom)
                     loaded = true
                     if scrolledQuestion != model.focusedQuestion { focusQuestion(model.focusedQuestion, proxy: proxy) }
                 }
@@ -187,7 +187,12 @@ struct ConversationView: View {
             } else { Text("Nothing here yet").themeFont(17).foregroundStyle(Theme.muted) }
         }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 48)
     }
-    private func rememberRead() { seenIncoming = Set(items.filter(\.incoming).map(\.id)); model.markRead(resolved) }
+    /// The open conversation is read: new incoming messages are marked read while it is on screen, even when scrolled up
+    /// (only the jump button's own count waits until the bottom was seen).
+    private func rememberRead(bottomSeen: Bool = true) {
+        if bottomSeen { seenIncoming = Set(items.filter(\.incoming).map(\.id)) }
+        model.markRead(resolved)
+    }
     private func focusQuestion(_ focus: String?, proxy: ScrollViewProxy) {
         guard let focus, items.contains(where: { $0.id == focus }) else { return }
         scrolledQuestion = focus
