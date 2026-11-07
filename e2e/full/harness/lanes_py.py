@@ -967,7 +967,7 @@ def lane_l(env, out: Path, repo: Path) -> Lane:
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=2400, cwd=repo, env=_host_env())
     log.write_text(r.stdout + r.stderr)
     seen = {}
-    for m in re.finditer(r"^(LOOK-\d+)\s+(PASS|FAIL|SKIP)\s*(.*)$", r.stdout, re.M):
+    for m in re.finditer(r"^(LOOK-\d+)[ \t]+(PASS|FAIL|SKIP)[ \t]*(.*)$", r.stdout, re.M):
         seen[m.group(1)] = (m.group(2), m.group(3).strip())
     for sid in ids:
         status, why = seen.get(sid, ("FAIL", "no result line in the output: " + (r.stderr or r.stdout)[-200:]))
