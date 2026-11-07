@@ -277,8 +277,8 @@ function usedBy(data,kind,itemName,saved,kinds){
   const whole=input('whole','',{type:'checkbox',checked:n===members.length,'aria-label':(g?g.name:'No group')+': whole group'});whole.indeterminate=n>0&&n<members.length;
   whole.onclick=e=>e.stopPropagation();whole.onchange=()=>run(async()=>{for(const w of members)if(has(w)!==whole.checked)await put(w,whole.checked)});
   const rows=members.map(w=>{const c=input('assign','',{type:'checkbox',checked:has(w)});c.onchange=()=>run(()=>put(w,c.checked));return el('label',{},c,uiIcon('workspace'),w.name)});
-  return el('details',{class:'used-group '+gClass(g),open:n>0&&n<members.length},el('summary',{},el('span',{class:'chev'},uiIcon('chevron-right')),whole,el('span',{class:'ghead'},uiIcon('group'),g?g.name:'No group'),el('span',{class:'used-state'+(state==='whole group'?' whole':'')},'· '+members.length+(members.length===1?' workspace':' workspaces')+' · '+state)),el('div',{class:'used-ws'},rows))}
- function render(){const open=new Set([...box.querySelectorAll('details[open]')].map(d=>d.dataset.k));box.replaceChildren(...[...groupList.map(g=>[g,workspaces.filter(w=>w.group===g.id)]),[null,workspaces.filter(w=>!w.group)]].filter(([,m])=>m.length).map(([g,m])=>{const d=block(g,m);d.dataset.k=g?g.id:'none';if(open.has(d.dataset.k))d.open=true;return d}))}
+  const det=el('details',{class:'used-group '+gClass(g),open:n>0&&n<members.length},el('summary',{},el('span',{class:'chev'},uiIcon('chevron-right')),el('span',{class:'ghead'},uiIcon('group'),g?g.name:'No group'),el('span',{class:'used-state'+(state==='whole group'?' whole':'')},'· '+members.length+(members.length===1?' workspace':' workspaces')+' · '+state)),el('div',{class:'used-ws'},rows));det.whole=whole;return det}
+ function render(){const open=new Set([...box.querySelectorAll('details[open]')].map(d=>d.dataset.k));box.replaceChildren(...[...groupList.map(g=>[g,workspaces.filter(w=>w.group===g.id)]),[null,workspaces.filter(w=>!w.group)]].filter(([,m])=>m.length).map(([g,m])=>{const d=block(g,m);d.dataset.k=g?g.id:'none';if(open.has(d.dataset.k))d.open=true;return el('div',{class:'used-block'},d.whole,d)}))}
  render();return box}
 async function config(v){
  const data=await api('/shared');if(v!==epoch)return;const groups=[['credentials','Secrets'],['mcp','MCP'],['skills','Skills']],cards={credentials:[],mcp:[],skills:[]};
@@ -370,7 +370,7 @@ function subscribersPage(){
    el('div',{class:'sub-actions'},button('Activity',()=>subscriberActivity(s,activity),'ghost'),menu));
  });
  const curl=el('details',{class:'card sub-try'},el('summary',{},'Try it with curl'),subscriberCurl());
- show(el('header',{class:'page-heading'},el('h1',{tabindex:-1},'Subscribers'),el('p',{class:'muted'},'Other systems and agents that listen to your relay. They see what your phones would see for the workspaces you pick.')),panel('Your subscribers · '+subList.length,...(rows.length?rows:[empty('No subscribers yet','Add one to let a chat bot, a script or another agent follow your workspaces.',button('Add subscriber',()=>subscriberDialog(),'primary'))])),curl,activity);
+ show(el('header',{class:'page-heading'},el('h1',{tabindex:-1},'Subscribers'),el('p',{class:'muted'},'Other systems and agents that listen to your relay. They see what your phones would see for the workspaces you pick.')),panel('Your subscribers · '+subList.length,...(rows.length?rows:[empty('No subscribers yet','Add one to let a chat app, a script or another agent follow your workspaces.',button('Add subscriber',()=>subscriberDialog(),'primary'))])),curl,activity);
 }
 async function subscriberActivity(s,host){
  const v=epoch,card=panel('Activity · '+s.name),content=el('div'),filters=el('div',{class:'row'});let revision=0;

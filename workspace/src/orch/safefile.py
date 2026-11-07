@@ -59,6 +59,26 @@ def open_file_ref(root: Path, path: str, max_bytes: int) -> bytes | None:
     return _read_parts(root, [], parts, max_bytes)
 
 
+def file_ref_ok(root: Path, path) -> bool:
+    """The add/show-time twin of open_file_ref's rules: every part plain, none named .orch or .git, no part a
+    link, and the real path not inside the workspace's .orch folder. Nothing is opened or read."""
+    parts = _parts(path)
+    if parts is None or any(p.rstrip(". ").lower() in (".orch", ".git") for p in parts):
+        return False
+    cur = Path(os.path.realpath(root))
+    for part in parts:
+        cur = cur / part
+        if cur.is_symlink():
+            return False
+    return not _inside_orch(root, cur)
+
+
+def _inside_orch(root: Path, p: Path) -> bool:
+    orch = Path(os.path.realpath(root)) / ".orch"
+    real = Path(os.path.realpath(p))
+    return real == orch or orch in real.parents
+
+
 def _read_parts(root: Path, head: list[str], parts: list[str], max_bytes: int) -> bytes | None:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     dir_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_DIRECTORY", 0)

@@ -1,4 +1,5 @@
 # Round 5
+- Grouped workspace topics by Working / Waiting / Review / Backlog with Done collapsed; renamed Links to References with URL, ticket, artifact and plain file-path rows. Added static `statuses-references.html` review screens.
 - Removed all bottom-tab rendering, styles, badges and reserved space; Chats is the only root.
 - Added a matching 44 pt Settings gear at top-left; Settings pushes and Back returns to Chats.
 - Removed asleep banners; headers and workspace rows share five-minute online and dated last-seen presence.

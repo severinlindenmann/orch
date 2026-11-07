@@ -39,6 +39,7 @@ struct ChatsListView: View {
                 Group {
                     switch route {
                     case .workspace(let id): WorkspaceView(workspaceId: id)
+                    case .general(let id): ChatRoomView(workspaceId: id)
                     case .ticket(let ws, let ticket): TicketChatView(workspaceId: ws, ticketId: ticket)
                     case .info(let ws, let ticket):
                         ConversationInfoView(conversation: ticket.map { .topic(workspace: ws, ticket: $0) } ?? .general(workspace: ws))

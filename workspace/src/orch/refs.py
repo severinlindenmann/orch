@@ -307,7 +307,7 @@ def detect(root: Path, tid: str, value: str, kind=None, title=None, kinds=(), *,
     local = absolute or path == ".." or path.startswith("../")
     if not local and not Path(os.path.realpath(root / path)).is_relative_to(root.resolve()):
         raise Refused("That project path points outside the project.")
-    if (not local and safefile._parts(path) is None) or any(
+    if (not local and not safefile.file_ref_ok(root, path)) or any(
         p.rstrip(". ").lower() in (".orch", ".git") for p in path.split("/")
     ):
         raise Refused("Choose a project file outside .orch and .git.")
