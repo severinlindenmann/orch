@@ -43,7 +43,9 @@ enum AudioSession {
     func setRate(_ rate: Float)
     var currentTime: TimeInterval { get }
     var duration: TimeInterval { get }
+    func seek(to time: TimeInterval)
 }
+extension AudioPlaying { func seek(to time: TimeInterval) {} }
 @MainActor protocol Synthesizing: AnyObject {
     func speak(_ text: String, lang: String, rate: Float, onFinish: @escaping @MainActor () -> Void)
     func stop()
@@ -64,6 +66,7 @@ enum AudioSession {
     func setRate(_ rate: Float) { player?.rate = rate }
     var currentTime: TimeInterval { player?.currentTime ?? 0 }
     var duration: TimeInterval { player?.duration ?? 0 }
+    func seek(to time: TimeInterval) { player?.currentTime = max(0, min(time, player?.duration ?? 0)) }
     func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully: Bool) { let f = finish; Task { @MainActor in f?() } }
 }
 
@@ -108,6 +111,9 @@ final class SpeechPlayer {
     private(set) var current: SpeechClip?
     /// Set when the relay refused with a reason a person should know ("Read-aloud budget used up. Using the phone's voice.").
     private(set) var notice: String?
+    /// 0...1 position in the current clip (updated while it plays; 0 for the phone's own voice).
+    private(set) var progress: Double = 0
+    private var progressTask: Task<Void, Never>?
 
     typealias Fetch = @Sendable (_ messageId: String, _ lang: String?) async throws -> Data
     private let fetch: Fetch
@@ -162,13 +168,18 @@ final class SpeechPlayer {
         rate = r; audio.setRate(Float(r)); updateNowPlaying()
     }
     func skipToNext() { finishCurrent(played: false) }
+    /// Scrub the current clip (fraction 0...1). No effect with the phone's own voice.
+    func seek(to fraction: Double) {
+        guard !usingPhoneVoice, audio.duration > 0 else { return }
+        audio.seek(to: audio.duration * max(0, min(1, fraction))); progress = max(0, min(1, fraction)); updateNowPlaying()
+    }
 
     // MARK: Playing
 
     private func stopAll(keepNotice: Bool) {
         generation += 1; job?.cancel(); job = nil
         audio.stop(); synth.stop()
-        state = .idle; usingPhoneVoice = false
+        state = .idle; usingPhoneVoice = false; progressTask?.cancel(); progress = 0
         if !keepNotice { notice = nil }
         clearNowPlaying()
     }
@@ -183,7 +194,7 @@ final class SpeechPlayer {
                 guard gen == self.generation, !Task.isCancelled else { return }
                 AudioSession.playback()
                 try self.audio.start(data: data, rate: Float(self.rate)) { [weak self] in self?.ended(gen) }
-                self.state = .playing(clip.messageId); self.updateNowPlaying()
+                self.state = .playing(clip.messageId); self.updateNowPlaying(); self.trackProgress(gen)
             } catch {
                 guard gen == self.generation, !Task.isCancelled else { return }
                 self.fallBack(clip, because: error, gen)
@@ -245,6 +256,17 @@ final class SpeechPlayer {
         state = .playing(clip.messageId)
         synth.speak(SpokenText.make(text: clip.text, summary: clip.summary), lang: clip.lang, rate: Float(rate)) { [weak self] in self?.ended(gen) }
         updateNowPlaying()
+    }
+
+    private func trackProgress(_ gen: Int) {
+        progressTask?.cancel()
+        progressTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard let self, gen == self.generation else { return }
+                if case .playing = self.state, self.audio.duration > 0 { self.progress = self.audio.currentTime / self.audio.duration }
+            }
+        }
     }
 
     private func ended(_ gen: Int) {

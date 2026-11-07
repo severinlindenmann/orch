@@ -7,8 +7,6 @@ struct NewTopicScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var selectedId: String?
-    @State private var text = ""
-    @State private var sending = false
     @State private var picking = false
     @FocusState private var focused: Bool
     private var selected: WorkspaceSummary? {
@@ -30,21 +28,8 @@ struct NewTopicScreen: View {
                             .buttonStyle(PressStyle()).accessibilityLabel("Choose workspace, \(name)").accessibilityIdentifier("workspace-picker")
                     } else { recipientPill }
                 }
-                // PLACEHOLDER composer: replaced by Composer.swift (lane M2)
-                HStack(alignment: .bottom, spacing: 6) {
-                    Button {} label: { Image(systemName: "plus").frame(width: 44, height: 44) }
-                        .disabled(true).accessibilityLabel("Add attachment")
-                    TextField("Message…", text: $text, axis: .vertical)
-                        .themeFont(17).lineLimit(1...6).padding(.horizontal, 14).padding(.vertical, 12)
-                        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 24))
-                        .overlay(RoundedRectangle(cornerRadius: 24).stroke(Theme.borderStrong, lineWidth: 1.5))
-                        .focused($focused).accessibilityIdentifier("topic-field").disabled(sending)
-                    Button { send() } label: {
-                        Group { if sending { ProgressView().tint(Theme.onBrand) } else { Image(systemName: "arrow.up").themeFont(20, .semibold) } }
-                            .foregroundStyle(Theme.onBrand).frame(width: 44, height: 44)
-                            .background(Theme.brand, in: Circle()).opacity(canSend ? 1 : 0.5)
-                    }.buttonStyle(PressStyle()).disabled(!canSend).accessibilityLabel("Start topic").accessibilityIdentifier("topic-start")
-                }
+                Composer(target: selected.map { .newTopic(workspace: $0.id) }, placeholder: "Message…", autoFocus: true,
+                         reply: .constant(nil), onSent: { opened() }, fieldId: "topic-field", sendId: "topic-start")
                 Text("Start something with \(name).").themeFont(13).foregroundStyle(Theme.muted)
                 if selected == nil { Text("Add a workspace first.").themeFont(15).foregroundStyle(Theme.muted) }
                 ModelMessage()
@@ -53,10 +38,8 @@ struct NewTopicScreen: View {
         .background(Theme.bg.ignoresSafeArea()).foregroundStyle(Theme.text)
         .navigationTitle(asSheet ? "" : "New topic").navigationBarTitleDisplayMode(.inline)
         .presentationBackground(Theme.surface).presentationDragIndicator(.visible)
-        .interactiveDismissDisabled(sending)
         .task {
             if selectedId == nil { selectedId = selected?.id }
-            if !UserDefaults.standard.bool(forKey: "autoMic") { focused = true }
         }
         .sheet(isPresented: $picking, onDismiss: {
             // The picker took the keyboard with it: give the field focus back once it is gone.
@@ -71,29 +54,23 @@ struct NewTopicScreen: View {
             if model.workspaceSummaries.count > 1 { Image(systemName: "chevron.down").themeFont(10).accessibilityHidden(true) }
         }.padding(.horizontal, 16).frame(minHeight: 44).background(Theme.surface3, in: Capsule()).foregroundStyle(Theme.text)
     }
-    private var canSend: Bool { selected != nil && !sending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    private func send() {
-        guard canSend, let ws = selected?.id else { return }
-        sending = true; focused = false
-        let priorSendTick = model.sendTick
-        let priorErrorTick = model.errorTick
-        let priorQueuedIds = Set(model.chatData.outbox.map(\.id))
-        Task {
-            await model.startTopic(workspaceId: ws, text: text.trimmingCharacters(in: .whitespacesAndNewlines))
-            sending = false
-            // A sheet can already sit above this workspace route. Require evidence
-            // of a sent/queued text as well, so a failed send keeps its draft.
-            let opened: Bool
-            switch model.path.last {
-            case .workspace(let id): opened = id == ws
-            case .ticket(let id, _): opened = id == ws
-            default: opened = false
-            }
-            let queued = model.chatData.outbox.contains { $0.workspace == ws && !priorQueuedIds.contains($0.id) }
-            let accepted = model.sendTick > priorSendTick || queued
-            if opened && accepted && model.errorTick == priorErrorTick {
-                text = ""
-                if asSheet { dismiss() }
+    /// The first message is queued or sent: leave the sheet and show the workspace (the topic reads "Starting topic…").
+    /// When the workspace acks within a few seconds the new topic opens by itself.
+    private func opened() {
+        guard let ws = selected?.id else { return }
+        model.path = [.workspace(ws)]
+        if asSheet { dismiss() }
+        Task { @MainActor in
+            for _ in 0..<15 {
+                // Newest text this phone sent to the workspace; the workspace's ack names the ticket it started.
+                let mine = model.messages.filter { $0.fromPhone && $0.workspaceId == ws }.max { $0.message.createdAt < $1.message.createdAt }
+                if let mine, let ticket = mine.message.ticket ?? model.ack(for: mine.id)?.ticket,
+                   model.path == [.workspace(ws)] {
+                    model.path = [.workspace(ws), .ticket(workspace: ws, ticket: ticket)]; return
+                }
+                try? await Task.sleep(for: .milliseconds(700))
+                await model.reloadMessages(); await model.refreshUpdates()
+                guard model.path == [.workspace(ws)] else { return }   // the person went elsewhere
             }
         }
     }

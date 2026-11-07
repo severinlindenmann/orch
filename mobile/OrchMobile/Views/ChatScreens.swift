@@ -1,269 +1,283 @@
 import SwiftUI
 
-private struct ChatScroll: View {
-    @Environment(AppModel.self) private var model
-    let chatKey: String
-    let items: [ChatItem]
-    let workspaceName: String
+struct ConversationHooks {
+    var composer = ComposerHooks.none
+    var openArtifact: (String) -> Void = { _ in }
+    static var none: ConversationHooks { ConversationHooks() }
+}
 
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    ForEach(items) { item in
-                        ChatItemView(item: item, workspaceName: workspaceName).id(item.id)
-                    }
-                    Color.clear.frame(height: 1).id("bottom")
-                }.padding(.horizontal, 14).padding(.vertical, 12)
-            }
-            .scrollDismissesKeyboard(.interactively).defaultScrollAnchor(.bottom)
-            .task { await model.watchWhileOpen() }
-            .task(id: items.count) {
-                model.markRead(chatKey, items: items)
-                if let f = model.focusedQuestion, items.contains(where: { $0.id == f }) {
-                    try? await Task.sleep(for: .milliseconds(250))
-                    withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(f, anchor: .center) }
-                }
-            }
+/// A tappable "RIG-4 started ›" line under General: the workspace acked a message with a new ticket.
+struct StartedChip: Identifiable, Equatable {
+    let id: String          // the ack's message id: one chip per ack
+    let at: String
+    let workspace: String
+    let ticket: String
+    let label: String
+}
+
+/// Pure rules of the conversation screen (unit-tested).
+enum ConversationRules {
+    /// An open question is stale once the workspace has moved on: a later result/failure/stopped line exists.
+    static func isStale(index: Int, in items: [ConvItem]) -> Bool {
+        let q = items[index]
+        guard q.kind == .question, q.answer == nil else { return false }
+        return items.dropFirst(index + 1).contains { $0.side == .them && $0.kind == .message && $0.label != nil }
+    }
+
+    /// General only: acks (a workspace text with `reply_to`) naming a ticket for a General text of this phone.
+    static func startedChips(messages: [PhoneMessage], workspace: String, key: (String) -> String?) -> [StartedChip] {
+        let general = Set(messages.filter { $0.fromPhone && $0.workspaceId == workspace && $0.message.body.general == true }.map(\.id))
+        var seen = Set<String>(), out: [StartedChip] = []
+        for pm in messages.sorted(by: { $0.message.createdAt < $1.message.createdAt }) where !pm.fromPhone && pm.workspaceId == workspace {
+            guard pm.message.body.update?.kind == "ack", let t = pm.message.ticket, let r = pm.message.replyTo, general.contains(r),
+                  seen.insert(pm.id).inserted else { continue }
+            out.append(StartedChip(id: pm.id, at: pm.message.createdAt, workspace: workspace, ticket: t, label: "\(pm.message.key ?? key(t) ?? "Topic") started"))
         }
+        return out
     }
 }
 
-/// Workspace chatroom: my texts, its texts, system lines, ticket cards, questions.
+private enum ConversationFormat {
+    nonisolated(unsafe) static let day: DateFormatter = { let f = DateFormatter(); f.dateFormat = "EEE d MMM"; return f }()
+    nonisolated(unsafe) static let iso = ISO8601DateFormatter()
+    nonisolated(unsafe) static let isoFraction: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); f.formatOptions.insert(.withFractionalSeconds); return f }()
+}
+
 struct ChatRoomView: View {
-    @Environment(AppModel.self) private var model
     let workspaceId: String
-
-    var body: some View {
-        let w = model.workspace(workspaceId)
-        let name = w?.displayName ?? "Workspace"
-        let items = ChatBuilder.workspaceItems(workspaceId, model.chatData)
-        VStack(spacing: 0) {
-            OfflineBanner()
-            if items.isEmpty && model.hasLoaded {
-                emptyState(name).frame(maxHeight: .infinity)
-            } else {
-                ChatScroll(chatKey: ReadState.workspaceKey(workspaceId), items: items, workspaceName: name)
-            }
-            Composer(placeholder: "Message \(name)…", note: "A new message starts a new ticket") { text in
-                if case .failed = await model.sendChat(to: workspaceId, text: text) { return false }
-                return true
-            }
-        }.background(Theme.bg.ignoresSafeArea()).navigationBarTitleDisplayMode(.inline).toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 8) {
-                        Avatar(name: name, size: 30)
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(name).themeFont(16, .semibold)
-                            Text(w.map { lastSeenText($0.lastSeen, online: $0.online) } ?? "").themeFont(11).foregroundStyle(Theme.muted).lineLimit(1)
-                        }
-                    }.accessibilityElement(children: .combine).accessibilityIdentifier("chat-title")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink(value: ChatRoute.info(workspace: workspaceId, ticket: nil)) { Image(systemName: "info.circle") }.accessibilityLabel("Chat info")
-                }
-            }
-    }
-
-    private func emptyState(_ name: String) -> some View {
-        VStack(spacing: 10) {
-            Image(systemName: "bubble.left").font(.system(size: 32)).foregroundStyle(Theme.brand)
-            Text("Say hello to \(name)").themeFont(17, .semibold)
-            Text("Your first message starts a ticket.").themeFont(14).foregroundStyle(Theme.muted)
-        }.accessibilityIdentifier("room-empty")
-    }
+    var body: some View { ConversationView(id: .general(workspace: workspaceId)) }
 }
 
-/// One ticket, one conversation: pinned tasks, history, proof.
 struct TicketChatView: View {
-    @Environment(AppModel.self) private var model
     let workspaceId: String
     let ticketId: String
-    @State private var tasksOpen = false
+    var body: some View { ConversationView(id: .topic(workspace: workspaceId, ticket: ticketId)) }
+}
+
+struct ConversationView: View {
+    let id: ConversationID
+    var hooks = ConversationHooks.none
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var reply: ReplyPreview?
+    @State private var tasksShown = false
+    @State private var atBottom = true
+    @State private var loaded = false
+    @State private var scrolledQuestion: String?
+    @State private var seenIncoming: Set<String> = []
+    private var resolved: ConversationID { model.resolve(id) }
+    private var items: [ConvItem] { model.conversationItems(resolved) }
+    private var workspaceName: String { model.workspace(resolved.workspace)?.name ?? "Workspace" }
+    private var ticket: Ticket? { model.tickets.first { $0.workspace == resolved.workspace && $0.ticket == resolved.ticket && resolved.ticket != nil } }
+    private var title: String {
+        switch resolved {
+        case .general: workspaceName
+        case .starting: "New topic"
+        case .topic: ticket.map { [$0.key, $0.displayTitle].compactMap { $0 }.joined(separator: " · ") } ?? "Topic"
+        }
+    }
+    private func working(_ items: [ConvItem]) -> Bool {
+        if let ticket { return TopicStatus(ticket) == .working }
+        if case .general = resolved { return items.last?.side == .me && items.last?.receipt == .started }
+        return false
+    }
+    private func unread(_ items: [ConvItem]) -> Int { items.filter { $0.incoming && !seenIncoming.contains($0.id) }.count }
 
     var body: some View {
-        let t = model.ticket(workspaceId, ticketId)
-        let name = model.workspace(workspaceId)?.displayName ?? "Workspace"
-        let agent = t?.view?.agent ?? "Agent"
-        let items = ChatBuilder.ticketItems(workspaceId, ticketId, model.chatData)
+        let items = self.items
         VStack(spacing: 0) {
+            if model.speech.isActive { MiniPlayer() }
             OfflineBanner()
-            if let v = t?.view, !v.checklist.isEmpty { tasksCard(v).padding(.horizontal, 14).padding(.top, 8) }
-            if items.isEmpty && model.hasLoaded {
-                VStack(spacing: 8) { Text("Nothing here yet").themeFont(16, .semibold); Text("Updates and results show up in this chat.").themeFont(14).foregroundStyle(Theme.muted) }
-                    .frame(maxHeight: .infinity)
-            } else {
-                ChatScroll(chatKey: ReadState.ticketKey(workspaceId, ticketId), items: items, workspaceName: agent)
-            }
-            Composer(placeholder: "Message \(agent)…", note: ChatBuilder.composerNote(running: t?.view?.running)) { text in
-                if case .failed = await model.sendChat(to: workspaceId, text: text, ticket: ticketId) { return false }
-                return true
-            }
-        }.background(Theme.bg.ignoresSafeArea()).navigationBarTitleDisplayMode(.inline).toolbarColorScheme(.dark, for: .navigationBar)
+            if let ticket { summary(ticket) }
+            messages(items)
+        }.background(Theme.bg).foregroundStyle(Theme.text).accessibilityElement(children: .contain).accessibilityIdentifier("conversation-view")
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    VStack(spacing: 2) {
-                        HStack(spacing: 6) { KeyTag(key: t?.key); Text(t?.displayTitle ?? "Ticket").themeFont(16, .semibold).lineLimit(1) }
-                        HStack(spacing: 6) { if let t { StatusPill(status: t.status, kind: t.kind) }; Text(agent).themeFont(11).foregroundStyle(Theme.muted); Text("· \(name)").themeFont(11).foregroundStyle(Theme.muted) }
-                    }.accessibilityElement(children: .combine).accessibilityIdentifier("chat-title")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title).themeFont(16, .semibold).lineLimit(1).accessibilityIdentifier("chat-title")
+                        presence
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink(value: ChatRoute.info(workspace: workspaceId, ticket: ticketId)) { Image(systemName: "info.circle") }.accessibilityLabel("Chat info")
+                    NavigationLink(value: ChatRoute.info(workspace: resolved.workspace, ticket: resolved.ticket)) {
+                        Image(systemName: "info.circle").themeFont(18).frame(minWidth: 44, minHeight: 44)
+                    }.accessibilityLabel("Chat info").accessibilityIdentifier("chat-info")
                 }
             }
-    }
-
-    private func tasksCard(_ v: TicketSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button { withAnimation(.easeOut(duration: 0.2)) { tasksOpen.toggle() } } label: {
-                HStack {
-                    Text("Tasks \(v.doneCount)/\(v.totalCount)").themeFont(14, .semibold)
-                    Spacer()
-                    Image(systemName: tasksOpen ? "chevron.up" : "chevron.down").foregroundStyle(Theme.muted)
-                }.frame(minHeight: 36).contentShape(Rectangle())
-            }.buttonStyle(PressStyle()).accessibilityIdentifier("tasks-toggle")
-            ProgressBar(done: v.doneCount, total: v.totalCount)
-            if tasksOpen {
-                ForEach(Array(v.checklist.enumerated()), id: \.offset) { _, task in
-                    HStack(spacing: 8) {
-                        Image(systemName: task.done ? "checkmark.circle.fill" : "circle").foregroundStyle(task.done ? Theme.brand : Theme.muted)
-                        Text(task.text).themeFont(13).foregroundStyle(task.done ? Theme.muted : Theme.text)
-                    }.accessibilityElement(children: .combine)
-                }
-            } else if let next = v.checklist.first(where: { !$0.done }) {
-                Text(next.text).themeFont(12).foregroundStyle(Theme.muted)
-            }
-        }.orchCard(padding: 12).accessibilityIdentifier("tasks-card")
-    }
-}
-
-/// New chat, step 1: where should it go?
-struct NewChatView: View {
-    @Environment(AppModel.self) private var model
-    @State private var selected: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Eyebrow(text: "NEW CONVERSATION")
-            Text("Where should it go?").themeFont(26, .semibold)
-            Text("Pick the workspace for this topic.").themeFont(14).foregroundStyle(Theme.muted)
-            ScrollView {
-                VStack(spacing: 8) {
-                    ForEach(model.workspaces) { w in
-                        Button { selected = w.id } label: {
-                            HStack(spacing: 12) {
-                                Avatar(name: w.displayName, size: 38)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(w.displayName).themeFont(16, .semibold)
-                                    Text(lastSeenText(w.lastSeen, online: w.online)).themeFont(12).foregroundStyle(Theme.muted)
-                                }
-                                Spacer()
-                                Image(systemName: selected == w.id ? "largecircle.fill.circle" : "circle").foregroundStyle(selected == w.id ? Theme.brand : Theme.muted)
-                            }.padding(12).background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected == w.id ? Theme.brand : Theme.border))
-                                .contentShape(Rectangle())
-                        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("pick-\(w.id)")
-                    }
+            .navigationBarTitleDisplayMode(.inline).toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarBackground(Theme.surface, for: .navigationBar).toolbarBackground(.visible, for: .navigationBar)
+            .tint(Theme.brand)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    if working(items) { StatusLine("\(workspaceName) is working…") }
+                    Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(running: ticket?.view?.running), reply: $reply, hooks: hooks.composer)
                 }
             }
-            Button {
-                if let selected { model.path.append(.newTopic(selected)) }
-            } label: { Text("Continue") }.buttonStyle(PrimaryButtonStyle(muted: selected == nil)).disabled(selected == nil).accessibilityIdentifier("pick-continue")
-        }.padding(16).background(Theme.bg.ignoresSafeArea()).navigationTitle("New chat").navigationBarTitleDisplayMode(.inline)
-            .onAppear { if model.workspaces.count == 1 { selected = model.workspaces.first?.id } }
+            .sheet(isPresented: $tasksShown) { tasksSheet }
+            .task { await model.watchWhileOpen() }
     }
-}
-
-/// New chat, step 2: the first message. The workspace answers with a ticket.
-struct NewTopicView: View {
-    @Environment(AppModel.self) private var model
-    let workspaceId: String
-    @State private var text = ""
-    @State private var sending = false
-    @State private var voice: VoiceInput?
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        let name = model.workspace(workspaceId)?.displayName ?? "Workspace"
-        let mic = MicInput(voice: voice)
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) { Avatar(name: name, size: 30); Text(name).themeFont(14).foregroundStyle(Theme.muted) }
-            TextField(mic.recording ? "Recording your voice…" : mic.transcribing ? "Writing it down…" : "What do you need?", text: $text, axis: .vertical)
-                .lineLimit(5...12).focused($focused).themeFont(17).disabled(mic.busy || sending)
-                .padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: 14)).overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.borderStrong))
-                .accessibilityIdentifier("topic-field")
-            HStack(spacing: 10) {
-                MicButton(voice: voice, text: $text, disabled: sending)
-                Text(voice?.error ?? mic.label).themeFont(12, .medium).foregroundStyle(voice?.error != nil ? Theme.danger : Theme.muted)
-                    .accessibilityIdentifier("mic-status")
-            }
-            Spacer()
-            let ok = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !sending && !mic.busy
-            Button { sending = true; Task { await model.startTopic(workspaceId: workspaceId, text: text); sending = false } } label: { Text(sending ? "Starting…" : "Start") }
-                .buttonStyle(PrimaryButtonStyle(muted: !ok)).disabled(!ok).accessibilityIdentifier("topic-start")
-            Text("This starts a new ticket. You get a message when there is a result, a question or a problem.").themeFont(12).foregroundStyle(Theme.muted)
-        }.padding(16).background(Theme.bg.ignoresSafeArea()).navigationTitle("New topic in \(name)").navigationBarTitleDisplayMode(.inline)
-            .onAppear { if !UserDefaults.standard.bool(forKey: "autoMic") { focused = true } }
-            .task {
-                if voice == nil { voice = MicInput.make(model) }
-                if UserDefaults.standard.bool(forKey: "autoMic") { await voice?.toggle(current: text) }
-            }
-            .onChange(of: voice?.transcript) { _, t in if let t { text = t } }
-            .onDisappear { voice?.stop() }
+    @ViewBuilder private var presence: some View {
+        if case .starting = resolved { Text("Starting topic…").themeFont(13).foregroundStyle(Theme.muted) }
+        else {
+            HStack(spacing: 4) {
+                if resolved.ticket != nil { Text("\(workspaceName) ·") }
+                if model.presence(of: resolved.workspace).isOnline { PresenceDot() }
+                Text(model.presence(of: resolved.workspace).text().lowercased())
+            }.themeFont(13).foregroundStyle(Theme.muted)
+        }
     }
-}
-
-/// Chat info: details and the media, links and files kept with a ticket (or the whole workspace).
-struct ChatInfoView: View {
-    @Environment(AppModel.self) private var model
-    let workspaceId: String
-    let ticketId: String?
-    @State private var tab = 0
-
-    var body: some View {
-        let w = model.workspace(workspaceId)
-        let t = ticketId.flatMap { model.ticket(workspaceId, $0) }
-        let wsTickets = model.tickets.filter { $0.workspace == workspaceId && $0.ticket != nil }
-        let atts: [TicketSnapshot.Attachment] = (t.map { [$0] } ?? wsTickets).flatMap { $0.view?.attachments ?? [] }
-        let media = atts.filter { $0.kind == "image" }, links = atts.filter { $0.kind == "link" }, files = atts.filter { $0.kind == "file" }
+    private func summary(_ ticket: Ticket) -> some View {
+        Button { tasksShown = true } label: {
+            HStack {
+                Text("\(ticket.view?.doneCount ?? 0) of \(ticket.view?.totalCount ?? 0) · \(TopicStatus(ticket).label)")
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.down")
+            }.themeFont(13).foregroundStyle(Theme.muted).padding(.horizontal, 18).frame(minHeight: 44)
+                .background(Theme.surface).overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+        }.buttonStyle(PressStyle()).accessibilityLabel("Tasks, \(ticket.view?.doneCount ?? 0) of \(ticket.view?.totalCount ?? 0), \(TopicStatus(ticket).label)")
+            .accessibilityIdentifier("tasks-toggle")
+    }
+    private var tasksSheet: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if let t {
-                    Text(t.displayTitle).themeFont(24, .semibold)
-                    HStack { KeyTag(key: t.key); StatusPill(status: t.status, kind: t.kind) }
-                    if let a = t.view?.agent { detail("Agent", a) }
-                    detail("Workspace", w?.displayName ?? t.workspaceName)
-                    detail("Updated", ChatBuilder.timeText(t.at))
-                    if let s = t.view?.summary ?? Optional(t.text), !s.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) { Eyebrow(text: "WHERE IT STANDS"); Text(s).themeFont(15) }
-                            .padding(.leading, 12).overlay(alignment: .leading) { Rectangle().fill(Theme.brand).frame(width: 3) }
-                    }
-                } else {
-                    Avatar(name: w?.displayName ?? "W", size: 52)
-                    Text(w?.displayName ?? "Workspace").themeFont(24, .semibold)
-                    Text(w.map { lastSeenText($0.lastSeen, online: $0.online) } ?? "").themeFont(14).foregroundStyle(Theme.muted)
-                    if let d = w?.description { Text(d).themeFont(15) }
-                    Eyebrow(text: "\(wsTickets.count) TICKETS")
-                    ForEach(wsTickets) { x in
-                        HStack(spacing: 8) { KeyTag(key: x.key); Text(x.displayTitle).themeFont(14).lineLimit(1); Spacer(); StatusPill(status: x.status, kind: x.kind) }
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text("Tasks").themeFont(18, .semibold)
+                    Spacer()
+                    Button { tasksShown = false } label: { Image(systemName: "xmark").frame(width: 44, height: 44).background(Theme.surface3, in: Circle()) }
+                        .accessibilityLabel("Close tasks").accessibilityIdentifier("tasks-close")
+                }
+                Text("\(title) · \(ticket.map { TopicStatus($0).label } ?? "")").themeFont(13).foregroundStyle(Theme.muted)
+                if let view = ticket?.view {
+                    ProgressBar(done: view.doneCount, total: view.totalCount)
+                    ForEach(Array(view.checklist.enumerated()), id: \.offset) { _, task in
+                        HStack(spacing: 16) {
+                            Image(systemName: task.done ? "checkmark" : "circle").foregroundStyle(Theme.brand).accessibilityHidden(true)
+                            Text(task.text).themeFont(15).fixedSize(horizontal: false, vertical: true)
+                        }.frame(minHeight: 38).accessibilityElement(children: .combine).accessibilityValue(task.done ? "Done" : "Not done")
+                        Divider().overlay(Theme.border)
                     }
                 }
-                Picker("", selection: $tab) {
-                    Text("Media \(media.count)").tag(0); Text("Links \(links.count)").tag(1); Text("Files \(files.count)").tag(2)
-                }.pickerStyle(.segmented).accessibilityIdentifier("info-tabs")
-                let shown = [media, links, files][tab]
-                if shown.isEmpty { Text("Nothing here yet.").themeFont(14).foregroundStyle(Theme.muted) }
-                else if tab == 0 {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8)], spacing: 8) { ForEach(shown) { AttachmentTile(attachment: $0) } }
-                } else {
-                    ForEach(shown) { AttachmentTile(attachment: $0).padding(.vertical, 4) }
-                }
-            }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
-        }.background(Theme.bg.ignoresSafeArea()).navigationTitle("Chat info").navigationBarTitleDisplayMode(.inline)
+            }.padding(16)
+        }.foregroundStyle(Theme.text).presentationBackground(Theme.surface)
+            .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
     }
-
-    private func detail(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) { Text(label).themeFont(12).foregroundStyle(Theme.muted); Text(value).themeFont(15) }
+    private enum Row: Identifiable {
+        case item(ConvItem, index: Int)
+        case chip(StartedChip)
+        var id: String { switch self { case .item(let i, _): i.id; case .chip(let c): "chip-" + c.id } }
+        var at: String { switch self { case .item(let i, _): i.at; case .chip(let c): c.at } }
+    }
+    private func rows(_ items: [ConvItem]) -> [Row] {
+        var all = items.enumerated().map { Row.item($0.element, index: $0.offset) }
+        if case .general(let ws) = resolved {
+            all += ConversationRules.startedChips(messages: model.messages, workspace: ws, key: { model.ticket(ws, $0)?.key }).map(Row.chip)
+            all.sort { ($0.at, $0.id) < ($1.at, $1.id) }
+        }
+        return all
+    }
+    private func messages(_ items: [ConvItem]) -> some View {
+        let language = LanguageLabel.conversationLanguage(items)
+        let rows = rows(items)
+        let waiting = Dictionary(model.outbox.items.compactMap { o in ThrottleNote.text(for: o).map { (o.clientId, $0) } }, uniquingKeysWith: { a, _ in a })
+        return ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    if items.isEmpty { emptyState }
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { n, row in
+                        if n == 0 || dayKey(row.at) != dayKey(rows[n - 1].at) { DayDivider(dayLabel(row.at)) }
+                        Group {
+                            switch row {
+                            case .item(let item, let index): self.row(item, index: index, items: items, language: language, waiting: waiting)
+                            case .chip(let chip): chipView(chip)
+                            }
+                        }.id(row.id)
+                    }
+                    Color.clear.frame(height: 1).id("conversation-bottom")
+                }.padding(.horizontal, 16).padding(.vertical, 10)
+            }.defaultScrollAnchor(.bottom).scrollDismissesKeyboard(.interactively)
+                .accessibilityIdentifier("message-list")
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height + geometry.contentInsets.bottom - 45
+                } action: { _, bottom in
+                    atBottom = bottom
+                    if bottom { rememberRead() }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if !atBottom {
+                        Button { scroll(proxy, to: "conversation-bottom", anchor: .bottom) } label: { JumpToLatestButton(count: unread(items)) }
+                            .buttonStyle(PressStyle()).accessibilityIdentifier("jump-latest").padding(12)
+                    }
+                }
+                .onChange(of: items.last?.id) { _, _ in
+                    if atBottom || items.last?.side == .me { scroll(proxy, to: "conversation-bottom", anchor: .bottom) }
+                    rememberRead(bottomSeen: atBottom)   // the open conversation is read, also while scrolled up
+                }
+                .onChange(of: model.focusedQuestion) { _, focus in focusQuestion(focus, proxy: proxy) }
+                .task(id: items.count) {
+                    rememberRead(bottomSeen: !loaded || atBottom)
+                    loaded = true
+                    if scrolledQuestion != model.focusedQuestion { focusQuestion(model.focusedQuestion, proxy: proxy) }
+                }
+        }
+    }
+    private func chipView(_ chip: StartedChip) -> some View {
+        Button { model.path.append(.ticket(workspace: chip.workspace, ticket: chip.ticket)) } label: {
+            HStack(spacing: 4) { Text(chip.label); Image(systemName: "chevron.right").themeFont(11, .semibold) }
+                .themeFont(13, .semibold).foregroundStyle(Theme.brand).padding(.horizontal, 14).frame(minHeight: 44)
+                .background(Theme.surface2, in: Capsule())
+        }.buttonStyle(PressStyle()).frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("\(chip.label). Open topic").accessibilityIdentifier("started-chip-\(chip.ticket)")
+    }
+    @ViewBuilder private func row(_ item: ConvItem, index: Int, items: [ConvItem], language: String, waiting: [String: String]) -> some View {
+        let retry: () -> Void = { Task { await model.retrySend(item.clientId ?? "") } }
+        let discard: () -> Void = { model.discardSend(item.clientId ?? "") }
+        let replyHere: () -> Void = { reply = ReplyPreview(messageId: item.id, title: "Answering \(workspaceName)", quote: item.preview) }
+        let wait = item.clientId.flatMap { waiting[$0] }
+        if item.kind == .question {
+            let stale = ConversationRules.isStale(index: index, in: items)
+            QuestionCard(item: item, conversationId: resolved, onReply: { question in
+                reply = ReplyPreview(messageId: question.id, title: "Answering \(workspaceName)", quote: question.message.body.text)
+            }, onOpenArtifact: hooks.openArtifact, isStale: stale)
+        } else if item.side == .me && item.voice != nil {
+            OwnVoiceBubble(item: item, conversationLanguage: language, onRetry: retry, onDiscard: discard, onReply: replyHere, waitNote: wait)
+        } else if item.side == .them && item.canPlay && item.speak != nil {
+            AgentMemoBubble(item: item, conversationId: resolved, workspaceName: workspaceName, onReply: replyHere)
+        } else {
+            MessageBubble(item: item, conversationId: resolved, conversationLanguage: language, workspaceName: workspaceName,
+                          quotedText: item.replyTo.flatMap { key in items.first { $0.id == key }?.preview },
+                          onRetry: retry, onDiscard: discard, onOpenArtifact: hooks.openArtifact, onReply: replyHere, waitNote: wait)
+        }
+    }
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "bubble.left.and.bubble.right").themeFont(32).foregroundStyle(Theme.brand)
+            if case .general = resolved {
+                Text("Say hello to \(workspaceName)").themeFont(20, .semibold)
+                Text("Anything you write here goes to General.").themeFont(15).foregroundStyle(Theme.muted)
+            } else { Text("Nothing here yet").themeFont(17).foregroundStyle(Theme.muted) }
+        }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 48)
+    }
+    /// The open conversation is read: new incoming messages are marked read while it is on screen, even when scrolled up
+    /// (only the jump button's own count waits until the bottom was seen).
+    private func rememberRead(bottomSeen: Bool = true) {
+        if bottomSeen { seenIncoming = Set(items.filter(\.incoming).map(\.id)) }
+        model.markRead(resolved)
+    }
+    private func focusQuestion(_ focus: String?, proxy: ScrollViewProxy) {
+        guard let focus, items.contains(where: { $0.id == focus }) else { return }
+        scrolledQuestion = focus
+        scroll(proxy, to: focus, anchor: .center)
+    }
+    private func scroll(_ proxy: ScrollViewProxy, to id: String, anchor: UnitPoint) {
+        if reduceMotion { proxy.scrollTo(id, anchor: anchor) }
+        else { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: anchor) } }
+    }
+    private func date(_ iso: String) -> Date? { ConversationFormat.iso.date(from: iso) ?? ConversationFormat.isoFraction.date(from: iso) }
+    private func dayKey(_ iso: String) -> String { date(iso).map { String(Calendar.current.startOfDay(for: $0).timeIntervalSince1970) } ?? String(iso.prefix(10)) }
+    private func dayLabel(_ iso: String) -> String {
+        guard let date = date(iso) else { return String(iso.prefix(10)) }
+        if Calendar.current.isDateInToday(date) { return "Today" }
+        if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
+        return ConversationFormat.day.string(from: date)
     }
 }
