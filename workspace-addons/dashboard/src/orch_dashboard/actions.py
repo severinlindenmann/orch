@@ -420,7 +420,10 @@ def _audit(root: Path, op: str, args: dict) -> None:
 
 def human_env(root: Path, orch_bin: str) -> dict:
     """Browser actions are the person's actions, even if an agent launched the server."""
-    from orch.adapters import _registry
+    try:
+        from orch.adapters import _registry
+    except ImportError:
+        raise Unavailable("The orch tool is not available here.") from None
 
     names = {"ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET"}
     prefixes = []
