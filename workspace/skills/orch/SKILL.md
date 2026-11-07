@@ -96,6 +96,14 @@ Read the parent first, work only in yours, keep it at most 3 levels deep. Close 
 
 If work remains, leave it visible (open steps, a log line).
 
+**Pick the workspace icon and colour** (once; when `orch look show` says nobody has)
+
+    orch look show                        # who chose, if anyone
+    orch look list                        # 100 icons, 12 colours
+    orch look set --icon <id> --color <token>     # fit the folder name and what the work is about
+
+Choose from the list, never invent an id. If a person already chose, `orch look set` is refused: leave it.
+
 ## Rules
 - Plans may change. There are no signing or planning gates.
 - Keep unknown fields and other add-ons' keys when you edit a ticket file. Prefer the commands.

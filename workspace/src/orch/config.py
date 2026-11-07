@@ -211,12 +211,15 @@ def _headers(lines: list[str]) -> list[tuple[int, str]]:
     return out
 
 
-def set_key(root: Path, table: str, key: str, value: str | int | bool) -> None:
-    """Set `key = "value"` inside [table], creating the table (and file) when needed."""
+def set_key(root: Path, table: str, key: str, value: str | int | bool | None) -> None:
+    """Set `key = "value"` inside [table], creating the table (and file) when needed.
+    `None` removes the key (and writes nothing when there is none)."""
     p = path(root)
-    p.parent.mkdir(parents=True, exist_ok=True)
     lines = p.read_text(encoding="utf-8").splitlines(keepends=True) if p.is_file() else []
-    new = f"{key} = {_value(value)}\n"
+    if value is None and not any(re.match(rf"^\s*{re.escape(key)}\s*=", x) for x in lines):
+        return
+    p.parent.mkdir(parents=True, exist_ok=True)
+    new = "" if value is None else f"{key} = {_value(value)}\n"
     start = end = None
     for i, name in _headers(lines):
         if start is not None and end is None:
@@ -232,9 +235,11 @@ def set_key(root: Path, table: str, key: str, value: str | int | bool) -> None:
         key_re = re.compile(rf"^\s*{re.escape(key)}\s*=")
         for i in range(start + 1, end):
             if key_re.match(lines[i]):
-                lines[i] = new
+                lines[i : i + 1] = [new] if new else []
                 break
         else:
+            if not new:
+                return
             at = end
             while at > start + 1 and not lines[at - 1].strip():
                 at -= 1  # keep blank lines that separate the next table

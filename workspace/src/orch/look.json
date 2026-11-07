@@ -1,0 +1,1098 @@
+{
+ "version": "look-v1",
+ "description": "Workspace icon and colour allowlists (contracts/look.md). Order of `colors` is frozen: the Automatic colour is colors[djb2_32(name) % 12]. Icon drawings: look/icons/<id>.svg (Lucide 1.70.0, ISC licence, look/LICENSE-lucide.txt).",
+ "source": {
+  "set": "lucide-static",
+  "version": "1.70.0",
+  "license": "ISC"
+ },
+ "badge": {
+  "tint_dark": {
+   "surface": "#15181d",
+   "alpha": 0.18
+  },
+  "tint_light": {
+   "surface": "#ffffff",
+   "alpha": 0.14
+  }
+ },
+ "categories": [
+  {
+   "id": "work",
+   "label": "Work"
+  },
+  {
+   "id": "home",
+   "label": "Home & family"
+  },
+  {
+   "id": "money",
+   "label": "Money"
+  },
+  {
+   "id": "health",
+   "label": "Health & sport"
+  },
+  {
+   "id": "code",
+   "label": "Code & tech"
+  },
+  {
+   "id": "design",
+   "label": "Design & media"
+  },
+  {
+   "id": "learn",
+   "label": "Writing & learning"
+  },
+  {
+   "id": "travel",
+   "label": "Travel & places"
+  },
+  {
+   "id": "shop",
+   "label": "Shop & food"
+  },
+  {
+   "id": "symbols",
+   "label": "Nature & symbols"
+  }
+ ],
+ "icons": [
+  {
+   "id": "briefcase",
+   "category": "work",
+   "label": "Briefcase",
+   "keywords": [
+    "job",
+    "office"
+   ],
+   "lucide": "briefcase"
+  },
+  {
+   "id": "office",
+   "category": "work",
+   "label": "Office",
+   "keywords": [
+    "company",
+    "building"
+   ],
+   "lucide": "building-2"
+  },
+  {
+   "id": "presentation",
+   "category": "work",
+   "label": "Presentation",
+   "keywords": [
+    "slides",
+    "meeting"
+   ],
+   "lucide": "presentation"
+  },
+  {
+   "id": "calendar",
+   "category": "work",
+   "label": "Calendar",
+   "keywords": [
+    "date",
+    "plan"
+   ],
+   "lucide": "calendar"
+  },
+  {
+   "id": "checklist",
+   "category": "work",
+   "label": "Checklist",
+   "keywords": [
+    "tasks",
+    "todo"
+   ],
+   "lucide": "clipboard-list"
+  },
+  {
+   "id": "folder",
+   "category": "work",
+   "label": "Folder",
+   "keywords": [
+    "files"
+   ],
+   "lucide": "folder"
+  },
+  {
+   "id": "inbox",
+   "category": "work",
+   "label": "Inbox",
+   "keywords": [
+    "mail",
+    "tray"
+   ],
+   "lucide": "inbox"
+  },
+  {
+   "id": "mail",
+   "category": "work",
+   "label": "Mail",
+   "keywords": [
+    "email",
+    "letter"
+   ],
+   "lucide": "mail"
+  },
+  {
+   "id": "phone",
+   "category": "work",
+   "label": "Phone",
+   "keywords": [
+    "call"
+   ],
+   "lucide": "phone"
+  },
+  {
+   "id": "team",
+   "category": "work",
+   "label": "Team",
+   "keywords": [
+    "people",
+    "group"
+   ],
+   "lucide": "users"
+  },
+  {
+   "id": "house",
+   "category": "home",
+   "label": "House",
+   "keywords": [
+    "home"
+   ],
+   "lucide": "house"
+  },
+  {
+   "id": "sofa",
+   "category": "home",
+   "label": "Sofa",
+   "keywords": [
+    "living",
+    "room"
+   ],
+   "lucide": "sofa"
+  },
+  {
+   "id": "baby",
+   "category": "home",
+   "label": "Baby",
+   "keywords": [
+    "child",
+    "kids"
+   ],
+   "lucide": "baby"
+  },
+  {
+   "id": "dog",
+   "category": "home",
+   "label": "Dog",
+   "keywords": [
+    "pet"
+   ],
+   "lucide": "dog"
+  },
+  {
+   "id": "cat",
+   "category": "home",
+   "label": "Cat",
+   "keywords": [
+    "pet"
+   ],
+   "lucide": "cat"
+  },
+  {
+   "id": "flower",
+   "category": "home",
+   "label": "Flower",
+   "keywords": [
+    "garden"
+   ],
+   "lucide": "flower-2"
+  },
+  {
+   "id": "tree",
+   "category": "home",
+   "label": "Tree",
+   "keywords": [
+    "garden",
+    "forest"
+   ],
+   "lucide": "tree-pine"
+  },
+  {
+   "id": "key",
+   "category": "home",
+   "label": "Key",
+   "keywords": [
+    "rent",
+    "flat"
+   ],
+   "lucide": "key-round"
+  },
+  {
+   "id": "bed",
+   "category": "home",
+   "label": "Bed",
+   "keywords": [
+    "sleep"
+   ],
+   "lucide": "bed-double"
+  },
+  {
+   "id": "kitchen",
+   "category": "home",
+   "label": "Kitchen",
+   "keywords": [
+    "cook",
+    "food"
+   ],
+   "lucide": "utensils"
+  },
+  {
+   "id": "repairs",
+   "category": "home",
+   "label": "Repairs",
+   "keywords": [
+    "fix",
+    "tools",
+    "diy",
+    "handyman"
+   ],
+   "lucide": "wrench"
+  },
+  {
+   "id": "cleaning",
+   "category": "home",
+   "label": "Cleaning",
+   "keywords": [
+    "clean",
+    "household",
+    "chores"
+   ],
+   "lucide": "spray-can"
+  },
+  {
+   "id": "wallet",
+   "category": "money",
+   "label": "Wallet",
+   "keywords": [
+    "money"
+   ],
+   "lucide": "wallet"
+  },
+  {
+   "id": "savings",
+   "category": "money",
+   "label": "Savings",
+   "keywords": [
+    "piggy",
+    "bank"
+   ],
+   "lucide": "piggy-bank"
+  },
+  {
+   "id": "cash",
+   "category": "money",
+   "label": "Cash",
+   "keywords": [
+    "money",
+    "bill"
+   ],
+   "lucide": "banknote"
+  },
+  {
+   "id": "card",
+   "category": "money",
+   "label": "Card",
+   "keywords": [
+    "payment"
+   ],
+   "lucide": "credit-card"
+  },
+  {
+   "id": "receipt",
+   "category": "money",
+   "label": "Receipt",
+   "keywords": [
+    "bill",
+    "invoice"
+   ],
+   "lucide": "receipt"
+  },
+  {
+   "id": "growth",
+   "category": "money",
+   "label": "Growth",
+   "keywords": [
+    "chart",
+    "invest"
+   ],
+   "lucide": "trending-up"
+  },
+  {
+   "id": "bank",
+   "category": "money",
+   "label": "Bank",
+   "keywords": [
+    "tax",
+    "government"
+   ],
+   "lucide": "landmark"
+  },
+  {
+   "id": "calculator",
+   "category": "money",
+   "label": "Calculator",
+   "keywords": [
+    "accounting"
+   ],
+   "lucide": "calculator"
+  },
+  {
+   "id": "legal",
+   "category": "money",
+   "label": "Legal",
+   "keywords": [
+    "law",
+    "contract"
+   ],
+   "lucide": "scale"
+  },
+  {
+   "id": "health",
+   "category": "health",
+   "label": "Health",
+   "keywords": [
+    "heart"
+   ],
+   "lucide": "heart-pulse"
+  },
+  {
+   "id": "doctor",
+   "category": "health",
+   "label": "Doctor",
+   "keywords": [
+    "medical"
+   ],
+   "lucide": "stethoscope"
+  },
+  {
+   "id": "pill",
+   "category": "health",
+   "label": "Medicine",
+   "keywords": [
+    "pill"
+   ],
+   "lucide": "pill"
+  },
+  {
+   "id": "gym",
+   "category": "health",
+   "label": "Gym",
+   "keywords": [
+    "fitness"
+   ],
+   "lucide": "dumbbell"
+  },
+  {
+   "id": "apple",
+   "category": "health",
+   "label": "Apple",
+   "keywords": [
+    "food",
+    "fruit"
+   ],
+   "lucide": "apple"
+  },
+  {
+   "id": "bike",
+   "category": "health",
+   "label": "Bike",
+   "keywords": [
+    "cycling"
+   ],
+   "lucide": "bike"
+  },
+  {
+   "id": "mind",
+   "category": "health",
+   "label": "Mind",
+   "keywords": [
+    "brain",
+    "think"
+   ],
+   "lucide": "brain"
+  },
+  {
+   "id": "salad",
+   "category": "health",
+   "label": "Food",
+   "keywords": [
+    "diet",
+    "salad"
+   ],
+   "lucide": "salad"
+  },
+  {
+   "id": "walk",
+   "category": "health",
+   "label": "Walk",
+   "keywords": [
+    "steps"
+   ],
+   "lucide": "footprints"
+  },
+  {
+   "id": "code",
+   "category": "code",
+   "label": "Code",
+   "keywords": [
+    "dev"
+   ],
+   "lucide": "code"
+  },
+  {
+   "id": "terminal",
+   "category": "code",
+   "label": "Terminal",
+   "keywords": [
+    "shell",
+    "cli"
+   ],
+   "lucide": "terminal"
+  },
+  {
+   "id": "bug",
+   "category": "code",
+   "label": "Bug",
+   "keywords": [
+    "issue"
+   ],
+   "lucide": "bug"
+  },
+  {
+   "id": "branch",
+   "category": "code",
+   "label": "Branch",
+   "keywords": [
+    "git"
+   ],
+   "lucide": "git-branch"
+  },
+  {
+   "id": "database",
+   "category": "code",
+   "label": "Database",
+   "keywords": [
+    "data"
+   ],
+   "lucide": "database"
+  },
+  {
+   "id": "server",
+   "category": "code",
+   "label": "Server",
+   "keywords": [
+    "host"
+   ],
+   "lucide": "server"
+  },
+  {
+   "id": "chip",
+   "category": "code",
+   "label": "Chip",
+   "keywords": [
+    "hardware",
+    "cpu"
+   ],
+   "lucide": "cpu"
+  },
+  {
+   "id": "cloud",
+   "category": "code",
+   "label": "Cloud",
+   "keywords": [
+    "online"
+   ],
+   "lucide": "cloud"
+  },
+  {
+   "id": "robot",
+   "category": "code",
+   "label": "Robot",
+   "keywords": [
+    "bot",
+    "ai",
+    "agent"
+   ],
+   "lucide": "bot"
+  },
+  {
+   "id": "puzzle",
+   "category": "code",
+   "label": "Puzzle",
+   "keywords": [
+    "plugin",
+    "addon"
+   ],
+   "lucide": "puzzle"
+  },
+  {
+   "id": "palette",
+   "category": "design",
+   "label": "Palette",
+   "keywords": [
+    "paint",
+    "colour"
+   ],
+   "lucide": "palette"
+  },
+  {
+   "id": "design",
+   "category": "design",
+   "label": "Design",
+   "keywords": [
+    "pen",
+    "vector"
+   ],
+   "lucide": "pen-tool"
+  },
+  {
+   "id": "brush",
+   "category": "design",
+   "label": "Brush",
+   "keywords": [
+    "art"
+   ],
+   "lucide": "brush"
+  },
+  {
+   "id": "camera",
+   "category": "design",
+   "label": "Camera",
+   "keywords": [
+    "photo"
+   ],
+   "lucide": "camera"
+  },
+  {
+   "id": "image",
+   "category": "design",
+   "label": "Image",
+   "keywords": [
+    "picture"
+   ],
+   "lucide": "image"
+  },
+  {
+   "id": "film",
+   "category": "design",
+   "label": "Film",
+   "keywords": [
+    "video",
+    "movie"
+   ],
+   "lucide": "film"
+  },
+  {
+   "id": "music",
+   "category": "design",
+   "label": "Music",
+   "keywords": [
+    "song"
+   ],
+   "lucide": "music"
+  },
+  {
+   "id": "mic",
+   "category": "design",
+   "label": "Microphone",
+   "keywords": [
+    "podcast",
+    "voice"
+   ],
+   "lucide": "mic"
+  },
+  {
+   "id": "layout",
+   "category": "design",
+   "label": "Layout",
+   "keywords": [
+    "grid"
+   ],
+   "lucide": "layout-grid"
+  },
+  {
+   "id": "type",
+   "category": "design",
+   "label": "Type",
+   "keywords": [
+    "font",
+    "text"
+   ],
+   "lucide": "type"
+  },
+  {
+   "id": "book",
+   "category": "learn",
+   "label": "Book",
+   "keywords": [
+    "read"
+   ],
+   "lucide": "book-open"
+  },
+  {
+   "id": "writing",
+   "category": "learn",
+   "label": "Writing",
+   "keywords": [
+    "write",
+    "pencil",
+    "edit"
+   ],
+   "lucide": "pencil"
+  },
+  {
+   "id": "notebook",
+   "category": "learn",
+   "label": "Notebook",
+   "keywords": [
+    "notes",
+    "journal"
+   ],
+   "lucide": "notebook-pen"
+  },
+  {
+   "id": "school",
+   "category": "learn",
+   "label": "School",
+   "keywords": [
+    "study",
+    "university"
+   ],
+   "lucide": "graduation-cap"
+  },
+  {
+   "id": "library",
+   "category": "learn",
+   "label": "Library",
+   "keywords": [
+    "books"
+   ],
+   "lucide": "library"
+  },
+  {
+   "id": "news",
+   "category": "learn",
+   "label": "News",
+   "keywords": [
+    "newspaper"
+   ],
+   "lucide": "newspaper"
+  },
+  {
+   "id": "document",
+   "category": "learn",
+   "label": "Document",
+   "keywords": [
+    "file",
+    "text"
+   ],
+   "lucide": "file-text"
+  },
+  {
+   "id": "idea",
+   "category": "learn",
+   "label": "Idea",
+   "keywords": [
+    "light",
+    "bulb"
+   ],
+   "lucide": "lightbulb"
+  },
+  {
+   "id": "plane",
+   "category": "travel",
+   "label": "Plane",
+   "keywords": [
+    "flight",
+    "trip"
+   ],
+   "lucide": "plane"
+  },
+  {
+   "id": "car",
+   "category": "travel",
+   "label": "Car",
+   "keywords": [
+    "drive"
+   ],
+   "lucide": "car"
+  },
+  {
+   "id": "train",
+   "category": "travel",
+   "label": "Train",
+   "keywords": [
+    "rail"
+   ],
+   "lucide": "train-front"
+  },
+  {
+   "id": "map",
+   "category": "travel",
+   "label": "Map",
+   "keywords": [
+    "trip"
+   ],
+   "lucide": "map"
+  },
+  {
+   "id": "compass",
+   "category": "travel",
+   "label": "Compass",
+   "keywords": [
+    "explore"
+   ],
+   "lucide": "compass"
+  },
+  {
+   "id": "mountain",
+   "category": "travel",
+   "label": "Mountain",
+   "keywords": [
+    "hike"
+   ],
+   "lucide": "mountain"
+  },
+  {
+   "id": "tent",
+   "category": "travel",
+   "label": "Tent",
+   "keywords": [
+    "camping"
+   ],
+   "lucide": "tent"
+  },
+  {
+   "id": "globe",
+   "category": "travel",
+   "label": "Globe",
+   "keywords": [
+    "world",
+    "web"
+   ],
+   "lucide": "globe"
+  },
+  {
+   "id": "ship",
+   "category": "travel",
+   "label": "Ship",
+   "keywords": [
+    "boat"
+   ],
+   "lucide": "ship"
+  },
+  {
+   "id": "pin",
+   "category": "travel",
+   "label": "Place",
+   "keywords": [
+    "location",
+    "pin"
+   ],
+   "lucide": "map-pin"
+  },
+  {
+   "id": "cart",
+   "category": "shop",
+   "label": "Cart",
+   "keywords": [
+    "shop",
+    "buy"
+   ],
+   "lucide": "shopping-cart"
+  },
+  {
+   "id": "store",
+   "category": "shop",
+   "label": "Store",
+   "keywords": [
+    "shop"
+   ],
+   "lucide": "store"
+  },
+  {
+   "id": "package",
+   "category": "shop",
+   "label": "Package",
+   "keywords": [
+    "parcel",
+    "box"
+   ],
+   "lucide": "package"
+  },
+  {
+   "id": "truck",
+   "category": "shop",
+   "label": "Truck",
+   "keywords": [
+    "delivery"
+   ],
+   "lucide": "truck"
+  },
+  {
+   "id": "coffee",
+   "category": "shop",
+   "label": "Coffee",
+   "keywords": [
+    "cafe"
+   ],
+   "lucide": "coffee"
+  },
+  {
+   "id": "pizza",
+   "category": "shop",
+   "label": "Pizza",
+   "keywords": [
+    "food"
+   ],
+   "lucide": "pizza"
+  },
+  {
+   "id": "wine",
+   "category": "shop",
+   "label": "Wine",
+   "keywords": [
+    "drink"
+   ],
+   "lucide": "wine"
+  },
+  {
+   "id": "chef",
+   "category": "shop",
+   "label": "Chef",
+   "keywords": [
+    "cook",
+    "restaurant"
+   ],
+   "lucide": "chef-hat"
+  },
+  {
+   "id": "gift",
+   "category": "shop",
+   "label": "Gift",
+   "keywords": [
+    "present"
+   ],
+   "lucide": "gift"
+  },
+  {
+   "id": "tag",
+   "category": "shop",
+   "label": "Tag",
+   "keywords": [
+    "price",
+    "label"
+   ],
+   "lucide": "tag"
+  },
+  {
+   "id": "sun",
+   "category": "symbols",
+   "label": "Sun",
+   "keywords": [
+    "day"
+   ],
+   "lucide": "sun"
+  },
+  {
+   "id": "moon",
+   "category": "symbols",
+   "label": "Moon",
+   "keywords": [
+    "night"
+   ],
+   "lucide": "moon"
+  },
+  {
+   "id": "leaf",
+   "category": "symbols",
+   "label": "Leaf",
+   "keywords": [
+    "nature"
+   ],
+   "lucide": "leaf"
+  },
+  {
+   "id": "flame",
+   "category": "symbols",
+   "label": "Flame",
+   "keywords": [
+    "fire",
+    "hot"
+   ],
+   "lucide": "flame"
+  },
+  {
+   "id": "bolt",
+   "category": "symbols",
+   "label": "Bolt",
+   "keywords": [
+    "energy",
+    "fast"
+   ],
+   "lucide": "zap"
+  },
+  {
+   "id": "star",
+   "category": "symbols",
+   "label": "Star",
+   "keywords": [
+    "favourite"
+   ],
+   "lucide": "star"
+  },
+  {
+   "id": "rocket",
+   "category": "symbols",
+   "label": "Rocket",
+   "keywords": [
+    "launch",
+    "startup"
+   ],
+   "lucide": "rocket"
+  },
+  {
+   "id": "shield",
+   "category": "symbols",
+   "label": "Shield",
+   "keywords": [
+    "safe",
+    "security"
+   ],
+   "lucide": "shield"
+  },
+  {
+   "id": "sparkles",
+   "category": "symbols",
+   "label": "Sparkles",
+   "keywords": [
+    "magic",
+    "new"
+   ],
+   "lucide": "sparkles"
+  },
+  {
+   "id": "flag",
+   "category": "symbols",
+   "label": "Flag",
+   "keywords": [
+    "goal"
+   ],
+   "lucide": "flag"
+  },
+  {
+   "id": "party",
+   "category": "symbols",
+   "label": "Celebration",
+   "keywords": [
+    "party",
+    "birthday",
+    "event",
+    "wedding"
+   ],
+   "lucide": "party-popper"
+  },
+  {
+   "id": "volunteer",
+   "category": "symbols",
+   "label": "Volunteering",
+   "keywords": [
+    "charity",
+    "club",
+    "help",
+    "association"
+   ],
+   "lucide": "hand-heart"
+  }
+ ],
+ "colors": [
+  {
+   "id": "teal",
+   "label": "Teal",
+   "dark": "#2fc6a3",
+   "light": "#0b6b56"
+  },
+  {
+   "id": "green",
+   "label": "Green",
+   "dark": "#4ade80",
+   "light": "#11703a"
+  },
+  {
+   "id": "lime",
+   "label": "Lime",
+   "dark": "#a3e635",
+   "light": "#456e0c"
+  },
+  {
+   "id": "amber",
+   "label": "Amber",
+   "dark": "#fbbf24",
+   "light": "#a14a07"
+  },
+  {
+   "id": "orange",
+   "label": "Orange",
+   "dark": "#fb923c",
+   "light": "#ad3a0b"
+  },
+  {
+   "id": "red",
+   "label": "Red",
+   "dark": "#f87171",
+   "light": "#b91c1c"
+  },
+  {
+   "id": "pink",
+   "label": "Pink",
+   "dark": "#f472b6",
+   "light": "#be185d"
+  },
+  {
+   "id": "violet",
+   "label": "Violet",
+   "dark": "#a78bfa",
+   "light": "#6d28d9"
+  },
+  {
+   "id": "indigo",
+   "label": "Indigo",
+   "dark": "#818cf8",
+   "light": "#4338ca"
+  },
+  {
+   "id": "blue",
+   "label": "Blue",
+   "dark": "#60a5fa",
+   "light": "#1d4ed8"
+  },
+  {
+   "id": "cyan",
+   "label": "Cyan",
+   "dark": "#22d3ee",
+   "light": "#0b6680"
+  },
+  {
+   "id": "slate",
+   "label": "Slate",
+   "dark": "#94a3b8",
+   "light": "#475569"
+  }
+ ]
+}

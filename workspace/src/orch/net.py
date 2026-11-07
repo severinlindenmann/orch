@@ -205,7 +205,7 @@ def auth_headers(cfg: dict) -> dict:
 def connect_service(root: Path, name: str, skill: str, url: str, workspace: str, token: str, prefix: str):
     """Shared part of `orch publish|relay connect`: init if needed, check token, save."""
     from orch import init as init_mod
-    from orch import skillrender, skills
+    from orch import look, skillrender, skills
 
     url = clean_url(url)
     if not token.startswith(prefix):
@@ -219,6 +219,7 @@ def connect_service(root: Path, name: str, skill: str, url: str, workspace: str,
     if name == "publish":
         skillrender.remember_rights(root, who)
     skillrender.refresh_skills(root)
+    look.on_connect(root, name, who)
     return who
 
 
