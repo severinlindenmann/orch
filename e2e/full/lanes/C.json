@@ -11,7 +11,8 @@
   "Delete",
   "Remove",
   "Sign out",
-  "\\|Cancel$"
+  "\\|Cancel$",
+  "\\|Close$"
  ],
  "steps": [
   {
@@ -294,6 +295,15 @@
     {
      "do": "click_all_census",
      "page": "relay-sub-dialog"
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Close')",
+     "optional": true
+    },
+    {
+     "do": "click",
+     "sel": "button:has-text('Add subscriber') >> nth=0"
     },
     {
      "do": "click",
