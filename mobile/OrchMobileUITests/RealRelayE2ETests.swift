@@ -165,6 +165,13 @@ final class RealRelayE2ETests: XCTestCase {
             must(app, text(app, "plan the offsite"), "the text that started the topic, first in the topic")
             must(app, text(app, "I started a topic for the offsite"), "the agent's reply inside the topic")
             sleep(1); shot("21-topic-from-chip"); back(app)
+            // Chats list rows carry the last line, a time and the unread pill (not an empty row).
+            back(app)
+            let row = app.buttons["room-\(ws)"]
+            must(app, row, "Chats row")
+            sleep(1); shot("22-chats-rows")
+            XCTAssertTrue(row.label.localizedCaseInsensitiveContains("offsite"), "row shows the last line: \(row.label)")
+            XCTAssertTrue(row.label.range(of: "[0-9]{1,2}:[0-9]{2}|Yesterday|[A-Z][a-z]{2} ", options: .regularExpression) != nil, "row shows a time: \(row.label)")
         }
     }
 
