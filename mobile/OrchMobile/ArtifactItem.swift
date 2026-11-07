@@ -228,7 +228,9 @@ enum AnchorScript {
 enum NetworkBlock {
     static let identifier = "orch-no-network"
     static let rules = #"""
-    [{"trigger":{"url-filter":"^(https?|wss?|ftp)://.*"},"action":{"type":"block"}}]
+    [{"trigger":{"url-filter":"^https?://"},"action":{"type":"block"}},
+     {"trigger":{"url-filter":"^wss?://"},"action":{"type":"block"}},
+     {"trigger":{"url-filter":"^ftp://"},"action":{"type":"block"}}]
     """#
     /// The custom scheme the viewer serves decrypted pages from.
     static let scheme = "orch-page"

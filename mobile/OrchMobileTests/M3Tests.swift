@@ -206,7 +206,7 @@ final class AnchorScriptTests: XCTestCase {
         web.navigationDelegate = nav
         await withCheckedContinuation { c in
             nav.done = c
-            web.loadHTMLString("<body style='margin:0'><section id=hero><h1 style='margin:0;height:200px'>Good things</h1></section><p>Second paragraph</p></body>", baseURL: nil)
+            web.loadHTMLString("<meta name=viewport content='width=device-width'><body style='margin:0'><section id=hero><h1 style='margin:0;height:200px'>Good things</h1></section><p>Second paragraph</p></body>", baseURL: nil)
         }
         _ = try await web.evaluateJavaScript(AnchorScript.setMode(true))
         _ = try await web.evaluateJavaScript("""
