@@ -34,7 +34,7 @@ final class PageSchemeHandler: NSObject, WKURLSchemeHandler {
                        "Referrer-Policy": "no-referrer", "Cache-Control": "no-store"]
         guard let response = HTTPURLResponse(url: url, statusCode: file == nil ? 404 : 200, httpVersion: "HTTP/1.1", headerFields: headers) else { return }
         urlSchemeTask.didReceive(response)
-        urlSchemeTask.didReceive(file?.data ?? Data())
+        urlSchemeTask.didReceive(file.map { $0.type.lowercased().hasPrefix("text/html") ? NetworkBlock.stripHints(from: $0.data) : $0.data } ?? Data())
         urlSchemeTask.didFinish()
     }
     func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {}
@@ -61,7 +61,7 @@ enum PublishWebView {
         view.configuration.userContentController.add(rules)
         return true
     }
-    static func isLocal(_ url: URL?) -> Bool { url?.scheme?.lowercased() == NetworkBlock.scheme || url?.absoluteString == "about:blank" }
+    static func isLocal(_ url: URL?) -> Bool { url?.scheme?.lowercased() == NetworkBlock.scheme }
 }
 
 @MainActor

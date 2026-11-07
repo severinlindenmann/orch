@@ -239,7 +239,7 @@ struct ConversationView: View {
             ?? ticket?.view?.attachments.first { $0.id == id || $0.blobId == id || $0.artifactId == id }.map { ArtifactItem($0, in: resolved) }
             ?? model.tickets.lazy.compactMap { $0.view?.attachments.first { $0.id == id } }.first.map { ArtifactItem($0, in: resolved) }
         guard let item = found else { return }
-        if item.kind == .link { if let url = item.url { openURL(url) } } else { viewing = item }
+        if item.kind == .link { if let url = item.safeLinkURL { openURL(url) } } else { viewing = item }
     }
     private func chipView(_ chip: StartedChip) -> some View {
         Button { model.path.append(.ticket(workspace: chip.workspace, ticket: chip.ticket)) } label: {

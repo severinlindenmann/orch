@@ -63,4 +63,22 @@ final class WiringUITests: XCTestCase {
         must(app, general, "General row"); general.tap()
         must(app, el(app, "voice-play"), "memo play button")
     }
+
+    /// Screenshots for the PR when the shots folder exists.
+    func testShots() throws {
+        let home = ProcessInfo.processInfo.environment["SIMULATOR_HOST_HOME"] ?? NSHomeDirectory()
+        let out = URL(fileURLWithPath: home).appendingPathComponent("orch-dev/state/mobile-v3-messenger/build/shots/w3a")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: out.path), "no shots folder")
+        func snap(_ app: XCUIApplication, _ name: String) throws { sleep(2); try app.screenshot().pngRepresentation.write(to: out.appendingPathComponent("app-\(name).png")) }
+        var app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_q3sum1"])
+        must(app, el(app, "artifact-a_bbbbbbbbbbbb"), "card"); try snap(app, "1-topic-result-card")
+        el(app, "chat-info").tap(); must(app, app.buttons["info-tab-photos"], "info"); try snap(app, "2-info")
+        app.terminate()
+        app = launch(["-openChat", "ws_pilatus001"])
+        must(app, app.buttons["general-ws_pilatus001"], "general"); app.buttons["general-ws_pilatus001"].tap()
+        must(app, el(app, "voice-play"), "memo"); try snap(app, "3-general-memo")
+        el(app, "composer-attach").tap(); must(app, app.buttons["media-fake-photo"], "picker"); try snap(app, "4-picker")
+        app.buttons["media-fake-photo"].tap(); must(app, app.buttons["media-send"], "preview"); try snap(app, "5-photo-preview")
+        app.buttons["media-send"].tap(); sleep(3); try snap(app, "6-photo-sent")
+    }
 }

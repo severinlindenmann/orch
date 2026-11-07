@@ -67,6 +67,9 @@ struct ArtifactItem: Identifiable, Equatable, Sendable {
         mime == "application/pdf" || (name?.lowercased().hasSuffix(".pdf") ?? false)
     }
 
+    /// The address to open for a link item: only http/https with a host (an agent-sent tel:, sms:, javascript: or app scheme is never opened).
+    var safeLinkURL: URL? { SafeLink.url(url?.absoluteString) }
+
     /// "Web page preview · v2".
     var subtitle: String {
         let k: String
@@ -258,6 +261,16 @@ enum NetworkBlock {
     static let scheme = "orch-page"
     /// Sent with every page file: nothing but the local files, no network from script.
 static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'"
+    /// `<link rel="preconnect | dns-prefetch | prefetch | prerender">` makes the web view open a connection before any rule applies: removed from pages.
+    static func stripHints(from data: Data) -> Data {
+        guard var html = String(data: data, encoding: .utf8) else { return data }
+        let pattern = #"<link\b[^>]*\brel\s*=\s*(?:"[^"]*\b(?:preconnect|dns-prefetch|prefetch|prerender)\b[^"]*"|'[^']*\b(?:preconnect|dns-prefetch|prefetch|prerender)\b[^']*'|(?:preconnect|dns-prefetch|prefetch|prerender)\b)[^>]*>"#
+        guard let expression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return data }
+        let range = NSRange(html.startIndex..., in: html)
+        guard expression.firstMatch(in: html, range: range) != nil else { return data }
+        html = expression.stringByReplacingMatches(in: html, range: range, withTemplate: "")
+        return Data(html.utf8)
+    }
     /// Runs at document start in every frame, in the page's world: WebRTC (not covered by the rule list) becomes a throwing stub
     /// that cannot be deleted or replaced. Frames and workers are blocked by the CSP, so no fresh realm can bring it back.
     static let noWebRTC = """

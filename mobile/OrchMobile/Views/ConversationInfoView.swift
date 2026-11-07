@@ -205,8 +205,7 @@ struct ConversationInfoView: View {
         switch item.kind {
         case .image, .html, .pdf: viewer = item
         case .link:
-            guard let url = item.url, ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
-                  url.host != nil else { return }
+            guard let url = item.safeLinkURL else { return }
             openURL(url)
         case .file:
             if !ArtifactItem.previewName(item.name ?? item.title).previewable { viewer = item; return }   // share only, never previewed in the app

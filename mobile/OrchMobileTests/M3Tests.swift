@@ -1,4 +1,5 @@
 import XCTest
+import Network
 import WebKit
 @testable import OrchMobile
 
@@ -101,14 +102,18 @@ final class PublishVectorTests: XCTestCase {
 
 final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var respond: (URLRequest) -> (Int, Data) = { _ in (200, Data()) }
+    /// A request that never answers; `stopped` counts requests that were cancelled.
+    nonisolated(unsafe) static var hang = false
+    nonisolated(unsafe) static var stopped = 0
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if Self.hang { return }
         let (code, data) = Self.respond(request)
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data); client?.urlProtocolDidFinishLoading(self)
     }
-    override func stopLoading() {}
+    override func stopLoading() { if Self.hang { Self.stopped += 1 } }
 }
 
 // MARK: Comment pins and anchors
@@ -208,13 +213,20 @@ final class PublishWebViewTests: XCTestCase {
     }
 
     func testPageCannotReachTheNetworkOrUseWebRTC() async throws {
+        // A real host that answers every request and counts the connections: the page must never reach it.
+        let host = try await LoopbackHost.start()
+        defer { host.stop() }
+        _ = try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(host.port)/sanity")!)
+        XCTAssertGreaterThan(host.connections, 0, "the host is reachable, so the test can fail")
+        let before = host.connections
         let html = """
+        <head><link rel="preconnect" href="http://127.0.0.1:\(host.port)"><link rel='dns-prefetch' href='http://127.0.0.1:\(host.port)'></head>
         <body><script>
         var r = {}; window.__r = r;
-        fetch('https://127.0.0.1:9/x').then(function(){ r.fetch = 'ok'; }, function(){ r.fetch = 'blocked'; });
-        var x = new XMLHttpRequest(); x.open('GET', 'https://127.0.0.1:9/x'); x.onload = function(){ r.xhr = 'ok'; }; x.onerror = function(){ r.xhr = 'blocked'; }; x.send();
-        try { var w = new WebSocket('wss://127.0.0.1:9/x'); w.onopen = function(){ r.ws = 'ok'; }; w.onerror = function(){ r.ws = 'blocked'; }; } catch (e) { r.ws = 'blocked'; }
-        var i = new Image(); i.onload = function(){ r.img = 'ok'; }; i.onerror = function(){ r.img = 'blocked'; }; i.src = 'https://127.0.0.1:9/p.png';
+        fetch('http://127.0.0.1:\(host.port)/x').then(function(){ r.fetch = 'ok'; }, function(){ r.fetch = 'blocked'; });
+        var x = new XMLHttpRequest(); x.open('GET', 'http://127.0.0.1:\(host.port)/x'); x.onload = function(){ r.xhr = 'ok'; }; x.onerror = function(){ r.xhr = 'blocked'; }; x.send();
+        try { var w = new WebSocket('ws://127.0.0.1:\(host.port)/x'); w.onopen = function(){ r.ws = 'ok'; }; w.onerror = function(){ r.ws = 'blocked'; }; } catch (e) { r.ws = 'blocked'; }
+        var i = new Image(); i.onload = function(){ r.img = 'ok'; }; i.onerror = function(){ r.img = 'blocked'; }; i.src = 'http://127.0.0.1:\(host.port)/p.png';
         try { new RTCPeerConnection(); r.rtc = 'present'; } catch (e) { r.rtc = 'gone'; }
         </script></body>
         """
@@ -227,6 +239,20 @@ final class PublishWebViewTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(200))
         }
         XCTAssertEqual(result, ["fetch": "blocked", "xhr": "blocked", "ws": "blocked", "img": "blocked", "rtc": "gone"])
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(host.connections, before, "no connection reached the host: not by script, not by a preconnect hint")
+    }
+
+    func testPreconnectAndPrefetchHintsAreStripped() {
+        let html = #"<head><link rel="stylesheet" href="a.css"><link rel="preconnect" href="https://x.example"><link href="https://y.example" REL='dns-prefetch'><link rel="icon preload prefetch" href="z"><link rel=prerender href=q></head><p>kept</p>"#
+        let out = String(decoding: NetworkBlock.stripHints(from: Data(html.utf8)), as: UTF8.self)
+        XCTAssertEqual(out, #"<head><link rel="stylesheet" href="a.css"></head><p>kept</p>"#)
+    }
+
+    func testAboutBlankIsNotALocalPage() {
+        XCTAssertTrue(PublishWebView.isLocal(URL(string: "orch-page://page/index.html")))
+        XCTAssertFalse(PublishWebView.isLocal(URL(string: "about:blank")))
+        XCTAssertFalse(PublishWebView.isLocal(URL(string: "https://example.org")))
     }
 
     func testWebRTCStaysGoneEvenIfThePageTriesToRestoreIt() async throws {
@@ -305,6 +331,19 @@ final class M3HelperTests: XCTestCase {
         XCTAssertEqual(InfoGrouping.entries(in: .links, from: all).map(\.item.title), ["Doc"])
         XCTAssertEqual(InfoGrouping.entries(in: .artifacts, from: all).map(\.item.title), ["Page", "PR 1"], "newest first")
     }
+    func testClosingTheViewerCancelsTheDownload() async throws {
+        let c = try json("publish-blob-v1")["good"] as! [String: Any]
+        let link = PublishLink(URL(string: "https://p.example.org/f/x1\(c["url_fragment"] as! String)")!)!
+        StubURLProtocol.hang = true; StubURLProtocol.stopped = 0
+        defer { StubURLProtocol.hang = false }
+        let cfg = URLSessionConfiguration.ephemeral; cfg.protocolClasses = [StubURLProtocol.self]
+        let fetcher = PublishFetcher(session: URLSession(configuration: cfg))
+        let task = Task { try await fetcher.load(link) }
+        try await Task.sleep(for: .milliseconds(300))
+        task.cancel()
+        do { _ = try await task.value; XCTFail("cancelled") } catch { XCTAssertTrue(error is CancellationError, "\(error)") }
+        XCTAssertEqual(StubURLProtocol.stopped, 1, "the data task was cancelled, not left running")
+    }
     func testDownloadIsCapped() async throws {
         let c = try json("publish-blob-v1")["good"] as! [String: Any]
         let link = PublishLink(URL(string: "https://p.example.org/f/x1\(c["url_fragment"] as! String)")!)!
@@ -313,6 +352,14 @@ final class M3HelperTests: XCTestCase {
         var f = PublishFetcher(session: URLSession(configuration: cfg)); f.maxBytes = 1000
         do { _ = try await f.load(link); XCTFail("over the cap") } catch { XCTAssertEqual(error as? PublishError, .broken) }
         XCTAssertEqual(PublishFetcher.maxBlobBytes, 100 * 1_048_576 + 65_536 + 36)
+    }
+    func testAgentLinksOpenOnlyAsWebAddresses() {
+        func link(_ raw: String) -> ArtifactItem { ArtifactItem(TicketSnapshot.Attachment(kind: "pr", title: "PR", url: raw)) }
+        XCTAssertNotNil(link("https://github.com/x/pull/1").safeLinkURL)
+        XCTAssertNotNil(link("http://example.org/a").safeLinkURL)
+        for bad in ["javascript:alert(1)", "tel:+41000000", "sms:+41000000", "orch://pair?code=x", "myapp://open", "file:///etc/passwd", "https:///nohost", "mailto:a@b.c"] {
+            XCTAssertNil(link(bad).safeLinkURL, bad)
+        }
     }
     func testPreviewIsDecidedOnTheSanitizedName() {
         let long = String(repeating: "a", count: 120) + ".pdf"      // cut to 100 characters: the extension is gone
@@ -328,4 +375,34 @@ final class M3HelperTests: XCTestCase {
             XCTAssertFalse(ArtifactItem.canPreview(fileName: no), no)
         }
     }
+}
+
+/// A loopback HTTP host that answers every request with 200 and counts connections (the page sandbox test must never reach it).
+final class LoopbackHost: @unchecked Sendable {
+    private let listener: NWListener
+    private let lock = NSLock()
+    private var count = 0
+    var port: UInt16 { listener.port?.rawValue ?? 0 }
+    var connections: Int { lock.lock(); defer { lock.unlock() }; return count }
+    private init(_ l: NWListener) { listener = l }
+    static func start() async throws -> LoopbackHost {
+        let host = LoopbackHost(try NWListener(using: .tcp, on: .any))
+        host.listener.newConnectionHandler = { c in
+            host.lock.lock(); host.count += 1; host.lock.unlock()
+            c.start(queue: .global())
+            c.receive(minimumIncompleteLength: 1, maximumLength: 4096) { _, _, _, _ in
+                let body = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                c.send(content: Data(body.utf8), completion: .contentProcessed { _ in c.cancel() })
+            }
+        }
+        await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in
+            nonisolated(unsafe) var resumed = false
+            host.listener.stateUpdateHandler = { state in
+                if case .ready = state, !resumed { resumed = true; k.resume() }
+            }
+            host.listener.start(queue: .global())
+        }
+        return host
+    }
+    func stop() { listener.cancel() }
 }
