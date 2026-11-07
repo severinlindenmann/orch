@@ -546,6 +546,26 @@ def test_project_symlink_outside_refused(proj, run, tid):  # noqa: F811
     assert run("ref", "add", tid, "outside/private.txt")[0] == 2
 
 
+def test_symlink_into_orch_refused_at_add(proj, run, tid):  # noqa: F811
+    (proj / "notes").mkdir()
+    (proj / "notes" / "sneak").symlink_to(proj / ".orch" / "config.toml")
+    (proj / "dirlink").symlink_to(proj / ".orch", target_is_directory=True)
+    assert run("ref", "add", tid, "notes/sneak")[0] == 2
+    assert run("ref", "add", tid, "dirlink/config.toml")[0] == 2
+
+
+def test_phone_view_checks_every_part_of_a_file_ref(proj, tid):  # noqa: F811
+    (proj / "docs").mkdir()
+    (proj / "docs" / "sneak").symlink_to(proj / ".orch" / "config.toml")
+    (proj / "docs" / "ok.md").write_text("x")
+    base = {"id": tid, "refs": []}
+    for path in ("docs/.orch/config.toml", "docs/.git/config", "docs/sneak", "docs/../x"):
+        rows = phone_view.reference_views(proj, {**base, "refs": [{"kind": "file", "path": path}]})
+        assert rows == [], path
+    ok = phone_view.reference_views(proj, {**base, "refs": [{"kind": "file", "path": "docs/ok.md"}]})
+    assert [r["path"] for r in ok] == ["docs/ok.md"]
+
+
 def test_namespaced_kind(proj, run, tid):  # noqa: F811
     ref = jrun(run, "ref", "add", tid, "https://example.com/pr", "--kind", "github:pr")
     assert ref["kind"] == "github:pr"

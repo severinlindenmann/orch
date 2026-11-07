@@ -4,23 +4,27 @@ struct WorkspaceView: View {
     @AppStorage("workspaceAliasRevision") private var aliasRevision = 0
     let workspaceId: String
     @Environment(AppModel.self) private var model
-    @State private var done = false
+    @State private var showDone = false
     @State private var newTopic = false
     @State private var deleting: ConversationID?
     @State private var toast: ArchiveToast?
     private var summary: WorkspaceSummary? { model.workspaceSummaries.first { $0.id == workspaceId } }
     private var name: String { summary.map { WorkspaceAlias.name(for: $0.workspace) } ?? "Workspace" }
     private var topics: [TopicSummary] {
-        (summary.map { model.split($0).topics } ?? []).filter { topic in
-            let open = topic.isStarting || topic.status == .working || topic.status == .waitingOnYou
-            return done ? !open : open
+        summary.map { model.split($0).topics } ?? []
+    }
+
+    private func activeGroups(_ topics: [TopicSummary]) -> [(status: TopicStatus, topics: [TopicSummary])] {
+        [TopicStatus.working, .waitingOnYou, .review, .backlog].compactMap { status in
+            let group = topics.filter { $0.isStarting ? status == .working : $0.status == status }
+            return group.isEmpty ? nil : (status, group)
         }
     }
 
     /// Finished topics by outcome, built once per render (empty groups left out).
     private func doneGroups(_ topics: [TopicSummary]) -> [(status: TopicStatus, topics: [TopicSummary])] {
         [TopicStatus.done, .stopped, .didntWork].compactMap { status in
-            let group = topics.filter { $0.status == status }
+            let group = topics.filter { !$0.isStarting && $0.status == status }
             return group.isEmpty ? nil : (status, group)
         }
     }
@@ -28,22 +32,39 @@ struct WorkspaceView: View {
     var body: some View {
         let _ = aliasRevision
         let parts = summary.map { model.split($0) }
+        let finished = doneGroups(topics)
         List {
             Group {
                 ModelMessage()
                 MobileModeBanner(workspaceId: workspaceId)
                 if parts?.general ?? true { generalCard }
-                segments
             }.listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
             if topics.isEmpty { emptyState.listRowBackground(Color.clear).listRowSeparator(.hidden) }
-            else if done {
-                ForEach(doneGroups(topics), id: \.status) { group in
-                    Section {
-                        ForEach(group.topics) { topic in topicRow(topic) }
-                    } header: { Text(group.status.label).themeFont(13, .semibold).foregroundStyle(Theme.muted) }
+            ForEach(activeGroups(topics), id: \.status) { group in
+                Section {
+                    ForEach(group.topics) { topic in topicRow(topic) }
+                } header: { Text(group.status.label).themeFont(13, .semibold).foregroundStyle(Theme.muted) }
+            }
+            if !finished.isEmpty {
+                Section {
+                    Button { showDone.toggle() } label: {
+                        HStack {
+                            Text("Done (\(finished.reduce(0) { $0 + $1.topics.count }))").themeFont(17, .semibold)
+                            Spacer()
+                            Image(systemName: showDone ? "chevron.down" : "chevron.right").accessibilityHidden(true)
+                        }.frame(minHeight: 44)
+                    }
+                    .foregroundStyle(Theme.muted).listRowBackground(Theme.surface)
+                    .accessibilityIdentifier("done-toggle")
+                    .accessibilityValue(showDone ? "Expanded" : "Collapsed")
                 }
-            } else {
-                Section { ForEach(topics) { topic in topicRow(topic) } }
+                if showDone {
+                    ForEach(finished, id: \.status) { group in
+                        Section {
+                            ForEach(group.topics) { topic in topicRow(topic) }
+                        } header: { Text(group.status.label).themeFont(13, .semibold).foregroundStyle(Theme.muted) }
+                    }
+                }
             }
             if let count = parts?.archived.count, count > 0 {
                 Section {
@@ -123,21 +144,6 @@ struct WorkspaceView: View {
             .contextMenu { chatMenu(.general(workspace: workspaceId), status: nil) }
     }
 
-    private var segments: some View {
-        HStack(spacing: 0) {
-            segment("Open", selected: !done) { done = false }
-            segment("Done", selected: done) { done = true }
-        }.padding(4).background(Theme.surface2, in: RoundedRectangle(cornerRadius: 12))
-    }
-    private func segment(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title).themeFont(15, .semibold).foregroundStyle(selected ? Theme.brand : Theme.muted)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .background(selected ? Theme.surface3 : Theme.surface2, in: RoundedRectangle(cornerRadius: 10))
-        }.buttonStyle(PressStyle()).accessibilityIdentifier("segment-\(title.lowercased())")
-            .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-
     @ViewBuilder private func topicRow(_ topic: TopicSummary) -> some View {
         if !topic.isStarting, let ticket = topic.id.ticket {
             NavigationLink(value: ChatRoute.ticket(workspace: workspaceId, ticket: ticket)) { topicLabel(topic) }
@@ -150,7 +156,7 @@ struct WorkspaceView: View {
 
     private func topicLabel(_ topic: TopicSummary) -> some View {
         HStack(spacing: 18) {
-            Image(systemName: topic.isStarting ? "circle" : symbol(topic.status))
+            Image(systemName: topic.isStarting ? "clock" : symbol(topic.status))
                 .themeFont(20).foregroundStyle(color(topic.status)).frame(width: 24).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text([topic.key, topic.title].compactMap { $0 }.joined(separator: " · "))
@@ -164,10 +170,11 @@ struct WorkspaceView: View {
     private func subtitle(_ topic: TopicSummary) -> String {
         if topic.isStarting { return "Starting topic…" }
         let day = ShellTime.day(topic.lastAt)
-        return topic.status.label + (done && !day.isEmpty ? " · " + day : "")
+        let finished = [TopicStatus.done, .stopped, .didntWork].contains(topic.status)
+        return topic.status.chip + (finished && !day.isEmpty ? " · " + day : "")
     }
     private func symbol(_ status: TopicStatus) -> String {
-        switch status { case .working, .waitingOnYou: "clock"; case .done: "checkmark"; case .stopped: "stop.fill"; case .didntWork: "exclamationmark.triangle" }
+        switch status { case .working, .waitingOnYou: "clock"; case .review: "eye"; case .backlog: "circle"; case .done: "checkmark"; case .stopped: "stop.fill"; case .didntWork: "exclamationmark.triangle" }
     }
     private func color(_ status: TopicStatus) -> Color {
         switch status { case .waitingOnYou: Theme.warn; case .stopped: Theme.muted; case .didntWork: Theme.danger; default: Theme.brand }
