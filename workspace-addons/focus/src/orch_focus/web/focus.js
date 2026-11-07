@@ -377,9 +377,10 @@
     busy = true;
     if (!document.hidden) {
       try {
-        const r = await fetch(P + '/api/t/' + TID + (fresh ? '?fresh=1' : '')); fresh = false;
+        const f = fresh; fresh = false;  // a push that arrives during the fetch stays set for the next one
+        const r = await fetch(P + '/api/t/' + TID + (f ? '?fresh=1' : ''));
         if (r.ok) apply(await r.json());
-        else if (r.status === 404 && firstRender) { root.replaceChildren(h('div', {class: 'fx-pick'}, h('h1', {text: 'No such ticket'}), h('a', {href: INAPP ? '/#home' : '/', target: INAPP ? '_top' : '_self', text: 'All tickets'}))); return; }
+        else if (r.status === 404 && firstRender) { busy = false; root.replaceChildren(h('div', {class: 'fx-pick'}, h('h1', {text: 'No such ticket'}), h('a', {href: INAPP ? '/#home' : '/', target: INAPP ? '_top' : '_self', text: 'All tickets'}))); return; }
       } catch (e) { /* try again */ }
     }
     busy = false; lastFetch = Date.now();

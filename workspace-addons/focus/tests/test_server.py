@@ -394,15 +394,17 @@ def test_events_client_cap_is_20(server):
             c.close()
 
 
-def test_fresh_view_skips_the_one_second_cache(server, fake_orch):
+def test_fresh_view_refetches_once_per_change(server, fake_orch, ws):
+    fresh = f"/api/t/{TID}?fresh=1"
     assert req(server, "GET", f"/api/t/{TID}")[0] == 200
     n = len(calls(fake_orch))
     assert req(server, "GET", f"/api/t/{TID}")[0] == 200
     assert len(calls(fake_orch)) == n  # cached
-    assert req(server, "GET", f"/api/t/{TID}?fresh=1")[0] == 200
-    assert len(calls(fake_orch)) == n  # fresh is ignored for an answer under 0.4 s old
-    import time
-
-    time.sleep(0.45)
-    assert req(server, "GET", f"/api/t/{TID}?fresh=1")[0] == 200
-    assert len(calls(fake_orch)) > n
+    assert req(server, "GET", fresh)[0] == 200
+    n2 = len(calls(fake_orch))
+    assert n2 > n  # the first fresh refetches
+    assert req(server, "GET", fresh)[0] == 200
+    assert len(calls(fake_orch)) == n2  # nothing changed since: no stampede
+    (ws / ".orch/tickets/t_new00002.json").write_text("{}")
+    assert req(server, "GET", fresh)[0] == 200
+    assert len(calls(fake_orch)) > n2  # a change refetches, however young the cache
