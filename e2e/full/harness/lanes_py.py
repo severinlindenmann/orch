@@ -771,7 +771,7 @@ def _lane_p_run(L, env, out: Path, repo: Path, udid: str) -> Lane:
                             "-derivedDataPath", dd, "-parallel-testing-enabled", "NO",
                             "-only-testing:OrchMobileUITests/RealRelayE2ETests"], cwd=repo / "mobile", capture_output=True, text=True,
                            timeout=3600, env={**_host_env(), "TEST_RUNNER_ORCH_E2E_CTL": str(host["ctl"]),
-                                              "TEST_RUNNER_ORCH_SHOTS": str(shots), "ORCH_E2E_UDID": udid})
+                                              "TEST_RUNNER_ORCH_SHOTS": str(shots), "ORCH_E2E_UDID": udid, "TEST_RUNNER_ORCH_E2E_UDID": udid})
         xo.write_text(r.stdout + r.stderr)
         cases = parse_xcode_tests(r.stdout)
         L.notes.append(f"xcodebuild {time.time() - t0:.0f} s, {len(cases)} test cases, exit {r.returncode}")
