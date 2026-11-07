@@ -321,12 +321,14 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
             #"<link\b[^>]*\brel\s*=\s*(?:"[^"]*\b\#(hint)\b[^"]*"|'[^']*\b\#(hint)\b[^']*'|\#(hint)\b)[^>]*>"#,
             #"<meta\b[^>]*\bhttp-equiv\s*=\s*["']?\s*x-dns-prefetch-control\b[^>]*>"#,
         ].compactMap { try? NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
-        guard patterns.count == 2 else { return nil }
+        // Declarative shadow roots are made open: a closed root hides its links from the click listener.
+        guard patterns.count == 2, let shadow = try? NSRegularExpression(pattern: #"\b(shadowroot(?:mode)?)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)"#, options: [.caseInsensitive]) else { return nil }
         for _ in 0..<passes {
             let before = html
             for expression in patterns {
                 html = expression.stringByReplacingMatches(in: html, range: NSRange(html.startIndex..., in: html), withTemplate: " ")
             }
+            html = shadow.stringByReplacingMatches(in: html, range: NSRange(html.startIndex..., in: html), withTemplate: "$1=\"open\"")
             if html == before { return html == String(decoding: data, as: UTF8.self) ? data : Data(html.utf8) }
         }
         return nil
@@ -356,14 +358,15 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
       // Everything the guard reads is captured now, before any page script can shadow it; it is only ever called through `apply`.
       var apply = Reflect.apply, URLc = URL, getAttr = Element.prototype.getAttribute, closest = Element.prototype.closest;
       function getter(proto, name) { return Object.getOwnPropertyDescriptor(proto, name).get; }
+      var protocol = getter(URL.prototype, 'protocol');
       var nodeType = getter(Node.prototype, 'nodeType'), baseURI = getter(Node.prototype, 'baseURI'), eventType = getter(Event.prototype, 'type');
       var click = HTMLElement.prototype.click, dispatch = EventTarget.prototype.dispatchEvent, attach = Element.prototype.attachShadow;
       function external(el) {
         try {
-          var a = el && apply(nodeType, el, []) === 1 ? apply(closest, el, ['a[href],area[href],a']) : null;
+          var a = el && apply(nodeType, el, []) === 1 ? apply(closest, el, ['a[href],area[href],a[*|href]']) : null;
           if (!a) return false;
           var raw = apply(getAttr, a, ['href']); if (raw === null) raw = apply(getAttr, a, ['xlink:href']); if (raw === null) return false;
-          return new URLc(raw, apply(baseURI, document, [])).protocol !== 'orch-page:';
+          return apply(protocol, new URLc(raw, apply(baseURI, document, [])), []) !== 'orch-page:';
         } catch (e) { return true; }
       }
       function lock(proto, name, value) { Object.defineProperty(proto, name, { value: value, writable: false, configurable: false }); }
@@ -372,6 +375,15 @@ static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-sr
         var kind; try { kind = apply(eventType, ev, []); } catch (e) { kind = null; }
         if (kind === 'click' && external(this)) return false;
         return apply(dispatch, this, [ev]);
+      });
+      // Declarative shadow roots created from a string (setHTMLUnsafe / parseHTMLUnsafe) are made open, like attachShadow's.
+      var replace = String.prototype.replace, str = String, declarative = /(shadowroot(?:mode)?)\\s*=\\s*("[^"]*"|'[^']*'|[^\\s>]+)/gi;
+      function opened(html) { return apply(replace, str(html), [declarative, '$1="open"']); }
+      [[Element.prototype, 'setHTMLUnsafe'], [window.ShadowRoot && ShadowRoot.prototype, 'setHTMLUnsafe'], [Document, 'parseHTMLUnsafe']].forEach(function (pair) {
+        var target = pair[0], name = pair[1];
+        if (!target || typeof target[name] !== 'function') return;
+        var original = target[name];
+        lock(target, name, function (html, options) { return apply(original, this, [opened(html), options]); });
       });
       // A closed shadow root hides its links from the click listener: every root is made open.
       lock(Element.prototype, 'attachShadow', function (init) {

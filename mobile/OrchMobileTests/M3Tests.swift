@@ -294,8 +294,38 @@ final class PublishWebViewTests: XCTestCase {
         XCTAssertEqual(host.connections, before, "no connection reached the host")
     }
 
+    /// Three more ways round the guard: a replaced URL, declarative shadow roots (from the server markup and from setHTMLUnsafe), a bare <a> inside a link.
+    func testLinkGuardSurvivesUrlTamperDeclarativeShadowAndNestedAnchors() async throws {
+        let host = try await LoopbackHost.start()
+        defer { host.stop() }
+        _ = try? await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(host.port)/sanity")!)
+        let before = host.connections
+        let base = "http://127.0.0.1:\(host.port)"
+        let html = """
+        <body><a id=att href="\(base)/att">x</a>
+        <div id=decl><template shadowrootmode="closed"><a id=sa href="\(base)/decl">decl</a></template></div>
+        <div id=unsafe></div>
+        <script>
+        Object.defineProperty(URL.prototype, 'protocol', { get: function () { return 'orch-page:'; }, configurable: true });
+        window.URL = function () { this.protocol = 'orch-page:'; };
+        document.getElementById('att').click();
+        var u = document.getElementById('unsafe');
+        if (u.setHTMLUnsafe) u.setHTMLUnsafe('<template shadowrootmode=closed><a id=sb href="\(base)/unsafe">unsafe</a></template>');
+        var outer = document.createElement('a'); outer.href = '\(base)/nested'; var inner = document.createElement('a');
+        var span = document.createElement('span'); inner.appendChild(span); outer.appendChild(inner); document.body.appendChild(outer);
+        span.click();
+        </script></body>
+        """
+        let web = try await openProduction(html)
+        let js = "(function(){ var r=[]; ['decl','unsafe'].forEach(function(id){ var root=document.getElementById(id).shadowRoot; r.push(root ? 'open' : 'none'); if(root){ var a=root.querySelector('a'); if(a) a.click(); } }); return r.join(','); })()"
+        let state = try await web.evaluateJavaScript(js, in: nil, contentWorld: NetworkBlock.hintWorld) as? String
+        XCTAssertTrue(state?.hasPrefix("open") == true, "the declarative root was made open: \(state ?? "nil")")
+        try await Task.sleep(for: .milliseconds(1000))
+        XCTAssertEqual(host.connections, before, "no connection reached the host")
+    }
+
     func testFreshAboutBlankFrameStillHasTheWebRTCStub() async throws {
-        let web = try await openProduction("<body><script>var f = document.body.appendChild(document.createElement('iframe')); try { new f.contentWindow.RTCPeerConnection(); window.__r = 'works'; } catch (e) { window.__r = 'throws'; }</script></body>")
+        let web = try await openProduction("<body><script>try { var f = document.body.appendChild(document.createElement('iframe')); try { new f.contentWindow.RTCPeerConnection(); window.__r = 'works'; } catch (e) { window.__r = 'throws'; } } catch (e) { window.__r = 'error ' + e; }</script></body>")
         let r = try await web.evaluateJavaScript("window.__r") as? String
         XCTAssertEqual(r, "throws")
     }
@@ -380,6 +410,12 @@ final class PublishWebViewTests: XCTestCase {
         let html = Data("<link rel=preconnect href=//x>".utf8)
         XCTAssertNil(NetworkBlock.stripHints(from: html, passes: 0), "no pass left to prove it stable")
         XCTAssertNotNil(NetworkBlock.stripHints(from: html))
+    }
+    func testDeclarativeShadowRootsAreServedOpen() {
+        let html = #"<template shadowrootmode=closed><a href=x></a></template><template ShadowRoot='closed'></template><template shadowrootmode = "closed"></template>"#
+        let out = String(decoding: NetworkBlock.stripHints(from: Data(html.utf8))!, as: UTF8.self).lowercased()
+        XCTAssertFalse(out.contains("closed"), out)
+        XCTAssertEqual(out.components(separatedBy: "=\"open\"").count - 1, 3)
     }
     func testPublishersCharsetIsNeverPassedOn() {
         let out = NetworkBlock.serve(type: "text/html; charset=iso-8859-1", data: Data("<p>caf\u{e9}</p>".utf8))
