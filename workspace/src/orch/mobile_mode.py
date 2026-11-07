@@ -13,12 +13,12 @@ import platform as _platform
 import subprocess
 import sys
 import time
+import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from orch import keepawake, net, procs
 from orch.errors import Refused
-from orch.text import clean_untrusted
 
 HOURS = (4, 8, 12, 24)
 DEFAULT_HOURS = 12
@@ -137,10 +137,35 @@ def status(root: Path) -> dict:
     return out
 
 
-def machine_name() -> str:
-    """One line of plain text, at most 60 characters: no control, bidi or zero-width characters."""
-    name = " ".join(clean_untrusted(_platform.node().split(".")[0], 200).replace("\n", " ").split())
-    return name[:60] or "this computer"
+_IGNORABLE = (0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x3164, 0xFFA0)
+_IGNORABLE_RANGES = ((0x180B, 0x180F), (0xFE00, 0xFE0F), (0xE0100, 0xE01EF))
+
+
+def _plain_line(text) -> str:
+    """The relay's one-line rule (contracts: machine_name): NFC, only letters, marks, numbers, punctuation,
+    symbols and spaces, at most 2 marks in a row, whitespace collapsed, at most 60 characters."""
+    out, marks = [], 0
+    for ch in unicodedata.normalize("NFC", str(text)):
+        cat, cp = unicodedata.category(ch), ord(ch)
+        if ch.isspace():
+            ch, cat = " ", "Zs"
+        if cp in _IGNORABLE or any(a <= cp <= b for a, b in _IGNORABLE_RANGES):
+            continue
+        if cat[0] not in "LMNPS" and cat != "Zs":
+            continue
+        marks = marks + 1 if cat[0] == "M" else 0
+        if marks <= 2:
+            out.append(ch)
+    return " ".join("".join(out).split())[:60].strip()
+
+
+def machine_name(root: Path | None = None) -> str:
+    """This computer's name as the relay accepts it (empty: the workspace folder name, then a plain word)."""
+    return (
+        _plain_line(_platform.node().split(".")[0])
+        or (_plain_line(root.name) if root else "")
+        or "this computer"
+    )
 
 
 def payload(root: Path) -> dict:

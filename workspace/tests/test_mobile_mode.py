@@ -256,9 +256,17 @@ def test_cli_status_and_hours(on_state, run):
     assert code == 0 and "off" in out.lower()
 
 
-def test_machine_name_is_plain_one_line(monkeypatch):
-    monkeypatch.setattr(mm._platform, "node", lambda: "Ac‮me​ \n PC\x00" + "x" * 80 + ".local")
+def test_machine_name_is_plain_one_line(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        mm._platform, "node", lambda: "Ac\u202eme\u200b \n PC\x00\u034f" + "x" * 80 + ".local"
+    )
     n = mm.machine_name()
-    assert n.startswith("Acme PC") and "‮" not in n and "​" not in n and "\n" not in n and len(n) <= 60
-    monkeypatch.setattr(mm._platform, "node", lambda: "")
+    assert n.startswith("Acme PC") and len(n) <= 60
+    assert not any(c in n for c in "\u202e\u200b\n\x00\u034f")
+    monkeypatch.setattr(mm._platform, "node", lambda: "e" + "\u0301" * 5)  # at most 2 marks in a row
+    assert mm.machine_name() == "\u00e9\u0301\u0301"
+    monkeypatch.setattr(mm._platform, "node", lambda: "   \n\u200b ")
+    ws = tmp_path / "Acme\u202e ws"
+    ws.mkdir()
+    assert mm.machine_name(ws) == "Acme ws"  # empty name: the workspace name, cleaned the same way
     assert mm.machine_name() == "this computer"
