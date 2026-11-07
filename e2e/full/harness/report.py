@@ -40,7 +40,7 @@ def render(run: dict, lanes: list[dict], findings: list[dict], census: dict, out
     findings = sorted(findings, key=lambda f: (sev_order.get(f.get("severity"), 3), f.get("lane", ""), f.get("step", "")))
     h = [f"<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
          f"<title>orch full e2e {e(run['sha'][:8])}</title><style>{CSS}</style><main>"]
-    h.append(f"<h1>orch full e2e: {e(run['mode'])} on {e(run['sha'][:10])}</h1>")
+    h.append(f"<h1>orch full e2e: {e(run['mode'])} on {e(run['sha'][:10])}{(' · build ' + e(run['build_label'])) if run.get('build_label') else ''}</h1>")
     h.append(f"<p class=lab>{e(run['started'])} - {e(run['elapsed'])} - run {e(run.get('n'))} (timings are "
              f"{'a gate' if run.get('timing_fail') else 'report-only'})</p><div class=sum>")
     for k, v in cnt.items():

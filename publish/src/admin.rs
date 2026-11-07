@@ -23,6 +23,8 @@ pub fn router(st: State) -> Router {
         .route("/admin/style.css", get(css))
         .route("/admin/portal.js", get(js))
         .route("/admin/kit.js", get(kit_js))
+        .route("/admin/look.js", get(look_js))
+        .route("/admin/look.css", get(look_css))
         .route("/_/favicon.svg", get(web::favicon_svg))
         .route("/_/apple-touch-icon.png", get(web::touch_icon))
         .route("/admin/api/workspaces", get(ws_list).post(ws_create))
@@ -80,6 +82,18 @@ async fn kit_js() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         include_str!("../web/admin-kit.js"),
+    )
+}
+async fn look_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../web/look-bundle.js"),
+    )
+}
+async fn look_css() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        include_str!("../web/look.css"),
     )
 }
 async fn js() -> impl IntoResponse {

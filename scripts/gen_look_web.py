@@ -30,3 +30,10 @@ print("ok", len(js))
 
 import shutil
 shutil.copyfile(root / "publish/web/look.js", root / "relay/web/look.js")
+
+# One script for the admin portals: data + look.js + look-admin.js (served as /admin/look.js)
+for d in ("relay", "publish"):
+    parts = [(root / d / "web" / "look-data.js").read_text(), (root / "publish/web/look.js").read_text(), (root / "publish/web/look-admin.js").read_text()]
+    (root / d / "web" / "look-bundle.js").write_text("\n".join(parts))
+shutil.copyfile(root / "publish/web/look.css", root / "relay/web/look.css")
+shutil.copyfile(root / "publish/web/look-admin.js", root / "relay/web/look-admin.js")

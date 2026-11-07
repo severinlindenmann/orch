@@ -273,5 +273,12 @@
     return out;
   }
 
-  return {phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  // Narrow board: which column opens first, and the quiet label of a column chip.
+  function firstColumnWithTickets(counts) {
+    const keys = Object.keys(counts || {});
+    return keys.find(k => counts[k] > 0) || keys[0] || '';
+  }
+  const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
+
+  return {firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });
