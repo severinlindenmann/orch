@@ -585,9 +585,9 @@ final class RealRelayE2ETests: XCTestCase {
         let t2 = host("out = mk_done_topic('Delete me')")
         let app = launch(extra: ["-open", "workspace:\(ws)"])
         // The workspace's Done tickets sit behind "Done (n)" on its screen (W7-BUGS 4: strict again)
-        must(app, app.buttons["done-toggle"], "Done (n) section on the workspace screen", timeout: 40)
-        expandDone(app)
+        openDone(app)
         let row = el(app, "ticket-\(ws)|\(t1)")
+        scrollTo(app, row)
         must(app, row, "Archive me row", timeout: 60)
         row.swipeLeft()
         must(app, app.buttons["Archive"], "Archive action", timeout: 5); app.buttons["Archive"].tap()
@@ -611,8 +611,9 @@ final class RealRelayE2ETests: XCTestCase {
 
         must(app, row, "agent message unarchives ticket", timeout: 40)
         _ = launch(extra: ["-open", "workspace:\(ws)"])
-        expandDone(app)
+        openDone(app)
         let deleted = el(app, "ticket-\(ws)|\(t2)")
+        scrollTo(app, deleted)
         must(app, deleted, "Delete me row", timeout: 30); deleted.swipeLeft()
         must(app, app.buttons["Delete"], "Delete action", timeout: 5); app.buttons["Delete"].tap()
         must(app, el(app, "delete-confirm"), "delete confirmation", timeout: 5); el(app, "delete-confirm").tap()
@@ -628,6 +629,15 @@ final class RealRelayE2ETests: XCTestCase {
         }
         host("rc, result, _err = e.orch('Pilatus', 'ticket', 'show', '\(t2)'); assert rc == 0, result")  // the ticket stays in the workspace
         shot("129-archive-unarchive-and-delete")
+    }
+
+    /// Done sits below the open topics: in a busy workspace it is off screen. Scroll to it, then open it.
+    private func openDone(_ app: XCUIApplication) {
+        let toggle = app.buttons["done-toggle"]
+        let end = Date().addingTimeInterval(40)
+        while !toggle.exists && Date() < end { app.swipeUp(); sleep(1) }
+        must(app, toggle, "Done (n) section on the workspace screen", timeout: 5)
+        expandDone(app)
     }
 
     /// The workspace screen keeps finished topics behind "Done (n)"; open it when it is closed.
