@@ -351,3 +351,53 @@ def test_a_done_ticket_is_listed_and_opens_as_a_board(server, ws):
     st, body, _ = req(server, "GET", f"/api/t/{TID}")
     v = json.loads(body)
     assert st == 200 and v["state"] == "done" and v["run"]["running"] is False and v["ticket"]["history"]
+
+
+def test_events_stream_pushes_a_change_and_keeps_the_fence(server, ws):
+    import time
+
+    port = server.server_address[1]
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+    c.request("GET", "/api/events", headers={"Host": f"127.0.0.1:{port}"})
+    r = c.getresponse()
+    try:
+        assert r.status == 200 and r.getheader("Content-Type") == "text/event-stream"
+        assert r.readline() == b"event: rev\n"
+        first = r.readline()
+        r.readline()
+        start = time.monotonic()
+        (ws / ".orch/tickets/t_new00001.json").write_text("{}")
+        assert r.readline() == b"event: rev\n"
+        assert r.readline() != first
+        assert time.monotonic() - start < 1
+    finally:
+        r.close()
+        c.close()
+    assert req(server, "GET", "/api/events", headers={"Origin": "https://foreign.example"})[0] == 403
+    assert req(server, "GET", "/api/events", headers={"Host": "evil.example"})[0] == 403
+
+
+def test_events_client_cap_is_20(server):
+    conns = []
+    port = server.server_address[1]
+    try:
+        for _ in range(20):
+            c = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+            conns.append(c)
+            c.request("GET", "/api/events", headers={"Host": f"127.0.0.1:{port}"})
+            r = c.getresponse()
+            assert r.status == 200
+            assert r.readline() == b"event: rev\n"
+        assert req(server, "GET", "/api/events")[0] == 503
+    finally:
+        for c in conns:
+            c.close()
+
+
+def test_fresh_view_skips_the_one_second_cache(server, fake_orch):
+    assert req(server, "GET", f"/api/t/{TID}")[0] == 200
+    n = len(calls(fake_orch))
+    assert req(server, "GET", f"/api/t/{TID}")[0] == 200
+    assert len(calls(fake_orch)) == n  # cached
+    assert req(server, "GET", f"/api/t/{TID}?fresh=1")[0] == 200
+    assert len(calls(fake_orch)) > n

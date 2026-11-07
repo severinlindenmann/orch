@@ -369,18 +369,33 @@
   }
 
   /* ---- polling ---- */
-  let timer = null;
+  let timer = null, fresh = false, live = false;
   async function poll() {
     clearTimeout(timer);
     if (!document.hidden) {
       try {
-        const r = await fetch(P + '/api/t/' + TID);
+        const r = await fetch(P + '/api/t/' + TID + (fresh ? '?fresh=1' : '')); fresh = false;
         if (r.ok) apply(await r.json());
         else if (r.status === 404 && firstRender) { root.replaceChildren(h('div', {class: 'fx-pick'}, h('h1', {text: 'No such ticket'}), h('a', {href: INAPP ? '/#home' : '/', target: INAPP ? '_top' : '_self', text: 'All tickets'}))); return; }
       } catch (e) { /* try again */ }
     }
-    timer = setTimeout(poll, view && view.run.running ? 1500 : 3000);
+    timer = setTimeout(poll, live ? (view && view.run.running ? 3000 : 15000) : view && view.run.running ? 1500 : 3000);
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+  /* A push (server-sent events) tells the page at once when a ticket or run file changed; the poll above is the
+     slow fallback while the stream is up and the normal pace while it is down. Under the dashboard the stream is
+     the dashboard's own (same origin, no proxy); opened directly it is Focus's own. */
+  if (typeof EventSource !== 'undefined') {
+    let stream, pending;
+    const connect = () => {
+      stream = new EventSource('/api/events');
+      stream.onopen = () => { live = true; };
+      stream.onerror = () => { live = false; };
+      stream.addEventListener('rev', () => { clearTimeout(pending); pending = setTimeout(() => { fresh = true; poll(); }, 30); });
+    };
+    connect();
+    window.addEventListener('pagehide', () => { stream.close(); live = false; });
+    window.addEventListener('pageshow', e => { if (e.persisted) connect(); });
+  }
   build(); wire(); poll();
 })();
