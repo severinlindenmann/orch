@@ -9,6 +9,8 @@ import XCTest
 ///         -scheme OrchMobile -destination id=<simulator udid> -only-testing:OrchMobileUITests/RealRelayE2ETests/<test names, comma-free: repeat the flag>
 ///     test00 pairs with the invitation (single use: do not rerun it against the same harness).
 ///  Env vars: ORCH_E2E_CTL (required, else every test skips), ORCH_SHOTS (optional png folder), ORCH_E2E_UDID (optional).
+///  DEBUG launch arg for drivers: `-open general:<ws> | topic:<ws>:<ticket> | workspace:<ws> | settings:chats | archived`
+///  navigates straight to that screen after launch (release builds ignore it; `archived` is ignored until the archive list exists).
 ///  Host steps are python files written into ctl/ (`host(...)`); scope: e, S, ph(), ws_send(), inbox(), relay_stop(e), relay_start(e).
 
 /// W3-E2: the v3 app in the Simulator against a REAL local relay and a REAL workspace (`e2e/run.sh V3-SIM`).

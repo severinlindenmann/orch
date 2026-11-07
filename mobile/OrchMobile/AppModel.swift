@@ -576,6 +576,19 @@ final class AppModel {
             if d.bool(forKey: "openInfo") { path.append(.info(workspace: ws, ticket: d.string(forKey: "openTicket"))) }
         }
         if d.bool(forKey: "openNewChat"), phase == .ready { path = [.newChat] }
+        #if DEBUG
+        // `-open general:<ws>` | `topic:<ws>:<ticket>` | `workspace:<ws>` | `settings:chats` | `archived` (ignored until the archive exists)
+        if phase == .ready, let target = d.string(forKey: "open") {
+            let p = target.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+            switch p.first {
+            case "general" where p.count == 2: path = [.workspace(p[1]), .general(p[1])]
+            case "topic" where p.count == 3: path = [.workspace(p[1]), .ticket(workspace: p[1], ticket: p[2])]
+            case "workspace" where p.count == 2: path = [.workspace(p[1])]
+            case "settings": tab = .settings
+            default: break
+            }
+        }
+        #endif
         if phase == .ready { if !useMock { await PushPermission.registerIfAuthorized() } }
     }
 }
