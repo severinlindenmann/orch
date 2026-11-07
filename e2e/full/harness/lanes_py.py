@@ -545,6 +545,119 @@ def lane_r(env, out: Path) -> Lane:
     return L
 
 
+# ---------------------------------------------------------------------------------------------- lane N (multi-workspace)
+
+
+def lane_n(env, out: Path) -> Lane:
+    """Three workspaces together: one phone sees all three, phone to each workspace, workspace to workspace both ways,
+    a relay group (talk inside the group, shared secret given to its members)."""
+    L = Lane("N", "Multi-workspace", out)
+    e = env.e
+    admin = e.rel.admin
+    ids = {"Pilatus": env.vars["relay_id_pilatus"], "Reports": env.vars["relay_id_reports"], "Home": env.vars["relay_id_home"]}
+    ph: dict = {}
+
+    def pair(st):
+        r = admin.call("POST", "/admin/api/phones", {"name": "E2E three-workspace phone", "workspaces": list(ids.values())})
+        if r.status != 201:
+            raise RuntimeError(f"add phone {r.status} {r.text[:150]}")
+        code = r.json()["link"].split("code=")[1]
+        p = lib.http("POST", e.rel.url + "/v1/phone/pair", None, {"code": code, "name": "E2E three-workspace phone"})
+        if p.status != 201:
+            raise RuntimeError(f"pair {p.status}")
+        ph.update(id=p.json()["phone_id"], token=p.json()["token"])
+    L.step("N00", "Pair one phone with all three workspaces", pair)
+
+    def ph_call(method, path, body=None):
+        return lib.http(method, e.rel.url + path, {"X-Orch-Phone": ph["id"], "Authorization": f"Bearer {ph['token']}"}, body)
+
+    def sees_three(st):
+        items = (ph_call("GET", "/v1/phone/workspaces").json() or {}).get("items", [])
+        got = {w["id"]: w for w in items}
+        missing = [n for n, i in ids.items() if i not in got]
+        if missing:
+            raise RuntimeError(f"the phone does not list {missing}; it lists {[w.get('name') for w in items]}")
+        names = {w.get("name") for w in items}
+        st["note"] = "phone lists: " + ", ".join(sorted(str(n) for n in names))
+    L.step("N01", "The phone lists all three workspaces with their names", sees_three, expect="Pilatus, Reports and Home all listed")
+
+    def phone_to_each(name):
+        def go(st):
+            import uuid
+            body = f"hello {name} from the phone {int(time.time())}"
+            r = ph_call("POST", "/v1/phone/send", {"to": ids[name], "client_id": str(uuid.uuid4()), "text": body})
+            if r.status not in (200, 201):
+                raise RuntimeError(f"phone send {r.status} {r.text[:150]}")
+            t0 = time.time()
+            end = t0 + 20
+            while time.time() < end:
+                rc, o, _ = e.sh(["orch", "relay", "inbox", "--json"], cwd=e.ws(name), timeout=30)
+                if body in o:
+                    st["note"] = f"{time.time() - t0:.1f} s"
+                    return
+                time.sleep(0.5)
+            raise RuntimeError(f"the text never reached the inbox of {name}")
+        return go
+    for n in ("Pilatus", "Reports", "Home"):
+        L.step(f"N-phone-{n}", f"Phone sends a text to {n}, its inbox gets it", phone_to_each(n), expect="in the inbox within 20 s")
+
+    def w2w(frm, to, ok=True):
+        def go(st):
+            body = f"{frm} to {to} {int(time.time())}"
+            rc, o, err = e.sh(["orch", "relay", "send", ids[to], body], cwd=e.ws(frm), timeout=60)
+            if not ok:
+                if rc == 0:
+                    raise RuntimeError(f"{frm} could send to {to} without a rule")
+                if not (err or o).strip():
+                    raise RuntimeError("the refusal has no reason")
+                st["note"] = (err or o).strip()[:160]
+                return
+            if rc:
+                raise RuntimeError((err or o)[-200:])
+            end = time.time() + 20
+            while time.time() < end:
+                if body in e.sh(["orch", "relay", "inbox", "--json"], cwd=e.ws(to), timeout=30)[1]:
+                    return
+                time.sleep(0.5)
+            raise RuntimeError(f"{to} never got it")
+        return go
+    L.step("N-w2w-1", "Pilatus to Reports arrives (rule allows it)", w2w("Pilatus", "Reports"))
+    L.step("N-w2w-2", "Reports to Pilatus arrives (rule allows text)", w2w("Reports", "Pilatus"))
+    L.step("N-w2w-3", "Home to Pilatus is refused in words (no rule)", w2w("Home", "Pilatus", ok=False))
+
+    grp: dict = {}
+
+    def group(st):
+        r = admin.call("POST", "/admin/api/groups", {"name": "E2E group", "talk": True, "defaults": {"credentials": True}})
+        if r.status != 201:
+            raise RuntimeError(f"create group {r.status} {r.text[:150]}")
+        grp["id"] = r.json()["id"]
+        for n in ("Home", "Reports"):
+            p = admin.call("PATCH", f"/admin/api/workspaces/{ids[n]}", {"group": grp["id"]})
+            if p.status != 200:
+                raise RuntimeError(f"put {n} in the group: {p.status} {p.text[:150]}")
+        for n in ("Home", "Reports"):
+            e.sh(["orch", "relay", "refresh"], cwd=e.ws(n), timeout=60)
+    L.step("N-group-1", "Create a group that may talk inside itself and put Home and Reports in it", group, expect="group with two members")
+
+    L.step("N-group-2", "Inside the group Home can send to Reports without a rule", w2w("Home", "Reports"))
+
+    def shared(st):
+        r = admin.call("PUT", "/admin/api/shared/credentials/E2E_TEAM_KEY", {"value": "team-secret-value"})
+        if r.status != 200:
+            raise RuntimeError(f"add shared secret {r.status} {r.text[:150]}")
+        sh = admin.call("GET", "/admin/api/shared").json() or {}
+        assign = sh.get("assign", {})
+        miss = [n for n in ("Home", "Reports") if "E2E_TEAM_KEY" not in (assign.get(ids[n], {}) or {}).get("credentials", [])]
+        if miss:
+            raise RuntimeError(f"the shared secret was not given to {miss}: {json.dumps(assign)[:200]}")
+        if "E2E_TEAM_KEY" in (assign.get(ids["Pilatus"], {}) or {}).get("credentials", []):
+            raise RuntimeError("Pilatus is not in the group but got the group's secret")
+        st["note"] = "Home and Reports have it, Pilatus does not; the value is never shown"
+    L.step("N-group-3", "A shared secret goes to the group members only", shared, expect="Home and Reports get it, Pilatus does not")
+    return L
+
+
 # ---------------------------------------------------------------------------------------------- lane U
 
 

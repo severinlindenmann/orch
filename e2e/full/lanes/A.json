@@ -1071,6 +1071,39 @@
    ]
   },
   {
+   "id": "A29",
+   "name": "Settings Agent: pick the custom agent and go back to the default",
+   "page": "settings-agent-radio",
+   "expect": "selecting the own agent shows its command; the default can be picked again",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/#settings"
+    },
+    {
+     "do": "click",
+     "sel": "#settings-tab-agent"
+    },
+    {
+     "do": "click",
+     "sel": "role=radio[name=/my-tool/]",
+     "optional": true
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    },
+    {
+     "do": "click",
+     "sel": "role=radio[name=/^Claude/] >> nth=0"
+    },
+    {
+     "do": "wait",
+     "ms": 500
+    }
+   ]
+  },
+  {
    "id": "A26",
    "name": "Ticket page: References card with a link added in the page",
    "page": "refs",
