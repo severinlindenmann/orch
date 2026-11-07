@@ -357,6 +357,63 @@ def lane_m(env, out: Path) -> Lane:
     return L
 
 
+# ---------------------------------------------------------------------------------------------- lane G (harness files and Share with team)
+
+
+def lane_g(env, out: Path) -> Lane:
+    """After init in a git repo: nothing new in `git status`; the orch skill is found through .agents/skills/orch; Share with team on/off."""
+    import subprocess
+    L = Lane("G", "Harness files and Share with team", out)
+    e = env.e
+
+    def clean(name):
+        def go(st):
+            w = e.ws(name)
+            r = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=w, capture_output=True, text=True, env=e.env)
+            import re
+            # orch's own data (.orch/addons.json, config.toml, tickets) is meant to be committed; only the harness files must not show up
+            harness = re.compile(r"^.. (\.agents|\.claude|CLAUDE|AGENTS\.md|\.gitattributes|\.orch/(harness|skills|run|secrets|inbox|tmp))")
+            dirty = [ln for ln in r.stdout.splitlines() if harness.match(ln)]
+            st["note"] = f"{len(r.stdout.splitlines())} paths in git status, none of them harness files" if not dirty else ""
+            if dirty:
+                raise RuntimeError("git status is not clean after init: " + "; ".join(dirty[:6]))
+        return go
+    for name in ("Pilatus", "Reports"):
+        L.step(f"G-clean-{name}", f"git status is clean in {name} after init (no .agents, .claude, CLAUDE.local.md, .orch files)",
+               clean(name), expect="no output from git status --porcelain")
+
+    def skill(st):
+        w = e.ws("Pilatus")
+        p = w / ".agents" / "skills" / "orch"
+        if not (p.exists() and (p / "SKILL.md").exists()):
+            raise RuntimeError(".agents/skills/orch/SKILL.md is missing: an agent cannot find the orch skill there")
+        r = subprocess.run(["git", "check-ignore", "-q", ".agents/skills/orch/SKILL.md"], cwd=w, env=e.env)
+        st["note"] = "skill present; " + ("ignored by git" if r.returncode == 0 else "NOT ignored but status is clean (excluded locally)")
+    L.step("G-skill", "The orch skill is in .agents/skills/orch", skill, expect="SKILL.md found")
+
+    dash = env.urls.get("reports")
+    w = e.ws("Reports")
+
+    def team(on: bool):
+        def go(st):
+            r = act(dash, "share.set", {"on": on})
+            if r.status != 200:
+                raise RuntimeError(f"share.set {r.status} {r.text[:150]}")
+            agents = (w / "AGENTS.md").read_text() if (w / "AGENTS.md").exists() else ""
+            ga = (w / ".gitattributes").read_text() if (w / ".gitattributes").exists() else ""
+            has_block, has_attr = "orch" in agents.lower(), "merge=union" in ga
+            if on and not (has_block and has_attr):
+                raise RuntimeError(f"Team on: AGENTS.md block {has_block}, .gitattributes entry {has_attr}")
+            if not on and (has_attr or "<!-- orch" in agents.lower()):
+                raise RuntimeError(f"Team off: AGENTS.md block still {has_block}, .gitattributes entry still {has_attr}")
+            st["note"] = f"AGENTS.md block {has_block}, .gitattributes merge=union {has_attr}"
+        return go
+    L.step("G-team-on", "Settings > General: Share with team ON writes the AGENTS.md block and the .gitattributes entry", team(True),
+           expect="both exist")
+    L.step("G-team-off", "Share with team OFF removes both again", team(False), expect="both gone")
+    return L
+
+
 # ---------------------------------------------------------------------------------------------- lane U
 
 

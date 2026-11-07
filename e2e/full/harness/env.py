@@ -142,6 +142,11 @@ class Env:
                 except OSError:
                     break
                 time.sleep(0.4)
+        # live agent runs live in their own tmux server (socket orch-<hash>); end the ones that run inside this root
+        import re
+        ps = subprocess.run(["ps", "-axo", "command="], capture_output=True, text=True).stdout
+        for sock in {m.group(1) for ln in ps.splitlines() if str(self.root) in ln for m in [re.search(r"tmux -L (orch-\w+)", ln)] if m}:
+            subprocess.run(["tmux", "-L", sock, "kill-server"], capture_output=True)
         leaked = e2emain.leaked_servers(self.root)
         if leaked:
             log(f"LEAK: add-on servers still running: {leaked}")
