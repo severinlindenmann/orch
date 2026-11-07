@@ -558,3 +558,23 @@ def test_ticket_screens_use_plain_wording_and_one_chip():
     assert "'Not chosen yet'" not in src.split("const agent = sessions.length")[1].split("\n")[0]
     assert "New tickets start here." in src and "Finished tickets appear here." in src
     assert "hideStatus = t => !snapshot && !!activityText(t)" in src
+
+
+@node
+def test_unique_needs_counts_each_question_once():
+    rows = [
+        {"id": "core:q:t_1:q1", "ticket": "t_1", "answer": {"question": "q1"}},
+        {"id": "addon:q:t_1:q1", "ticket": "t_1", "answer": {"question": "q1"}},
+        {"id": "core:q:t_1:q2", "ticket": "t_1", "answer": {"question": "q2"}},
+        {"id": "core:down:x", "ticket": None},
+    ]
+    assert [r["id"] for r in call("uniqueNeeds", rows)] == ["core:q:t_1:q1", "core:q:t_1:q2", "core:down:x"]
+    assert call("uniqueNeeds", None) == []
+
+
+@node
+def test_in_needs_only_for_listed_questions():
+    rows = [{"id": "a", "ticket": "t_1", "answer": {"question": "q1"}}, {"id": "b", "ticket": "t_2"}]
+    assert call("inNeeds", rows, "t_1") is True
+    assert call("inNeeds", rows, "t_2") is False
+    assert call("inNeeds", rows, "t_3") is False
