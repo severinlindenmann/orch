@@ -372,3 +372,9 @@ def test_artifacts_tab_reads_files_only_through_the_checked_endpoints():
     assert "'/api/artifacts/'" in js and "'/api/file'" in js
     assert "innerHTML" not in js[js.index("function artifactsPanel") : js.index("function detail(")]
     assert "pre.textContent" in js  # file text is never parsed as html
+
+
+def test_ticket_details_hide_raw_id_and_home_badge_is_named():
+    js = (WEBDIR / "app.js").read_text()
+    assert "field('Ticket', h('span', {className:'ed-ro mono'}, t.id))" not in js
+    assert "' waiting for you', 'aria-label'" in js
