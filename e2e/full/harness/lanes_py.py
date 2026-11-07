@@ -707,7 +707,7 @@ def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
     if not udid:
         # this lane's own Simulator (never one that is already booted: other lanes drive those); deleted by its exact UDID at the end
         r = subprocess.run(["xcrun", "simctl", "create", "e2e-full-phone", "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-                            "com.apple.CoreSimulator.SimRuntime.iOS-27-1"], capture_output=True, text=True)
+                            "com.apple.CoreSimulator.SimRuntime.iOS-27-0"], capture_output=True, text=True)
         udid = r.stdout.strip()
         if r.returncode or not udid:
             L.step("P00", "Create the lane's Simulator", lambda st: (_ for _ in ()).throw(RuntimeError("simctl create failed: " + (r.stderr or r.stdout)[-200:])))
