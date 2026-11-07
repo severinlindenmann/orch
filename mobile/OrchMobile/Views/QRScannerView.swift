@@ -15,7 +15,7 @@ struct QRScannerView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScannerCamera(onCode: onCode, onUnavailable: { unavailable = true })
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
                     .accessibilityLabel("Scan invitation QR code")
             }
             Button("Close") { dismiss() }.buttonStyle(SecondaryButtonStyle())

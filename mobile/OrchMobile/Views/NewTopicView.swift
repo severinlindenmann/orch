@@ -52,7 +52,7 @@ struct NewTopicScreen: View {
         HStack(spacing: 6) {
             Text(name).themeFont(15, .semibold)
             if model.workspaceSummaries.count > 1 { Image(systemName: "chevron.down").themeFont(10).accessibilityHidden(true) }
-        }.padding(.horizontal, 16).frame(minHeight: 44).background(Theme.surface3, in: Capsule()).foregroundStyle(Theme.text)
+        }.padding(.horizontal, 16).frame(minHeight: 44).background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).foregroundStyle(Theme.text)
     }
     /// The first message is queued or sent: leave the sheet and show the workspace (the topic reads "Starting topic…").
     /// When the workspace acks within a few seconds the new topic opens by itself.

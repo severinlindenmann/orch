@@ -44,7 +44,7 @@ struct PrimaryButtonStyle: ButtonStyle {
         configuration.label.themeFont(14, .semibold)
             .frame(maxWidth: .infinity, minHeight: 48)
             .foregroundStyle(muted || !enabled ? Theme.text.opacity(0.75) : Theme.onBrand)
-            .background(muted || !enabled ? Theme.surface3 : Theme.brand, in: RoundedRectangle(cornerRadius: 8))
+            .background(muted || !enabled ? Theme.surface3 : Theme.brand, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
             .opacity(configuration.isPressed ? 0.8 : 1)
             .contentShape(Rectangle())
     }
@@ -63,8 +63,8 @@ struct SecondaryButtonStyle: ButtonStyle {
             .frame(maxWidth: .infinity, minHeight: 46)
             .foregroundStyle(Theme.text)
             .background(configuration.isPressed ? Theme.surface3 : Theme.surface2,
-                        in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.borderStrong))
+                        in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(Theme.borderStrong))
             .contentShape(Rectangle())
     }
 }
@@ -92,7 +92,7 @@ struct WideButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.foregroundStyle(color)
             .frame(maxWidth: .infinity, minHeight: 48)
-            .overlay { if bordered { RoundedRectangle(cornerRadius: 8).stroke(Theme.borderStrong) } }
+            .overlay { if bordered { RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(Theme.borderStrong) } }
             .contentShape(Rectangle())
             .opacity(configuration.isPressed ? 0.6 : 1)
     }
@@ -103,8 +103,8 @@ extension View {
     func skeleton(_ loading: Bool) -> some View { modifier(DelayedSkeleton(loading: loading)) }
     func orchCard(border: Color = Theme.border, padding: CGFloat = 16) -> some View {
         self.padding(padding).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(border))
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(border))
     }
 }
 

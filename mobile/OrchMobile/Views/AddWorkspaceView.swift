@@ -56,8 +56,8 @@ struct AddWorkspaceView: View {
                         TextField("orch://pair?…", text: $linkText).themeFont(16)
                             .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                             .textContentType(.URL).submitLabel(.continue).onSubmit { validate(linkText) }
-                            .padding(14).background(Theme.surface2, in: RoundedRectangle(cornerRadius: 10))
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(error == nil ? Theme.borderStrong : Theme.danger))
+                            .padding(14).background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(error == nil ? Theme.borderStrong : Theme.danger))
                             .accessibilityLabel("Invitation link").accessibilityIdentifier("invite-field")
                             .onChange(of: linkText) { _, _ in error = nil }
                         Button("Continue") { validate(linkText) }.buttonStyle(PrimaryButtonStyle()).accessibilityIdentifier("invite-continue")

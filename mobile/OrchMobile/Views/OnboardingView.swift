@@ -39,8 +39,8 @@ struct OnboardingView: View {
                 TextField("orch://pair?…", text: $link)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .keyboardType(.URL).textContentType(.URL).submitLabel(.continue).onSubmit { submitLink() }.padding(14).frame(minHeight: 48)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(linkError == nil ? Theme.borderStrong : Theme.danger))
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(linkError == nil ? Theme.borderStrong : Theme.danger))
                     .accessibilityLabel("Invitation link").accessibilityIdentifier("invite-field")
                     .onChange(of: link) { _, _ in linkError = nil }
                 if let linkError {

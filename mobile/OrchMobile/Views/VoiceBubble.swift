@@ -26,7 +26,7 @@ struct Waveform: View {
             HStack(spacing: max(1, (proxy.size.width - 84) / 27)) {
                 ForEach(0..<28, id: \.self) { index in
                     let level = levels.isEmpty ? 0.2 : levels[min(levels.count - 1, index * levels.count / 28)]
-                    RoundedRectangle(cornerRadius: 3)
+                    RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous)
                         .fill(Double(index) / 28 < (progress ?? 0) ? Theme.brand : tint)
                         .frame(width: min(3, proxy.size.width / 55), height: max(4, 28 * min(1, max(0, level))))
                 }
@@ -131,7 +131,7 @@ struct OwnVoiceBubble: View {
                 scrubber
                 Button { player.cycleRate() } label: {
                     Text(voiceRateText(player.rate)).themeFont(13)
-                        .frame(width: 44, height: 44).background(Theme.surface3, in: RoundedRectangle(cornerRadius: 12))
+                        .frame(width: 44, height: 44).background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                 }.accessibilityIdentifier("voice-speed").accessibilityLabel("Playback speed")
                     .accessibilityValue(voiceRateText(player.rate))
             }
@@ -148,8 +148,8 @@ struct OwnVoiceBubble: View {
             }
         }.foregroundStyle(Theme.text).buttonStyle(PressStyle())
             .padding(.vertical, 11).padding(.horizontal, 13)
-            .background(Theme.brand.opacity(0.14), in: RoundedRectangle(cornerRadius: 17))
-            .overlay(RoundedRectangle(cornerRadius: 17).stroke(Theme.brand.opacity(0.3)))
+            .background(Theme.brand.opacity(0.14), in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous).stroke(Theme.brand.opacity(0.3)))
             .containerRelativeFrame(.horizontal) { width, _ in width * 0.8 }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .task(id: item.voice?.blobId) { await loadAudio() }
@@ -233,7 +233,7 @@ struct AgentMemoBubble: View {
                     }.frame(height: 44).accessibilityIdentifier("voice-scrub")
                     Button { model.speech.cycleRate() } label: {
                         Text(voiceRateText(model.speech.rate)).themeFont(13).frame(width: 44, height: 44)
-                            .background(Theme.surface3, in: RoundedRectangle(cornerRadius: 12))
+                            .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                     }.accessibilityIdentifier("voice-speed").accessibilityLabel("Playback speed")
                         .accessibilityValue(voiceRateText(model.speech.rate))
                 }
@@ -257,7 +257,7 @@ struct AgentMemoBubble: View {
                     Text(item.text).themeFont(17).textSelection(.enabled).accessibilityIdentifier("voice-transcript")
                 }
             }.padding(.vertical, 11).padding(.horizontal, 13)
-                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 17))
+                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
             if current, let notice = model.speech.notice {
                 Text(notice).themeFont(13).foregroundStyle(Theme.muted)
             }
