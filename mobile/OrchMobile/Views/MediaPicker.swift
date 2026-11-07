@@ -103,21 +103,21 @@ struct MediaPicker: View {
         VStack(alignment: .leading, spacing: 12) {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: tileWidth), spacing: 8)], spacing: 16) {
                 Button { errorText = nil; cameraOptions = true } label: {
-                    tile("Camera", icon: "camera", color: Theme.brand)
+                    MediaTile(label: "Camera", icon: "camera", color: Theme.brand)
                 }
                 .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
                 .accessibilityLabel("Camera").accessibilityIdentifier("media-camera")
                 PhotosPicker(selection: $photos, maxSelectionCount: 10, matching: .images) {
-                    tile("Photos", icon: "photo", color: Theme.purple)
+                    MediaTile(label: "Photos", icon: "photo", color: Theme.purple)
                 }
                 .accessibilityLabel("Photos").accessibilityIdentifier("media-photos")
                 Button { errorText = nil; importer = true } label: {
-                    tile("Files", icon: "doc", color: Theme.warn)
+                    MediaTile(label: "Files", icon: "doc", color: Theme.warn)
                 }
                 .accessibilityLabel("Files").accessibilityIdentifier("media-files")
                 Button {
                     errorText = nil; step = .location; locationRequest = UUID()
-                } label: { tile("Location", icon: "mappin.and.ellipse", color: Theme.brand) }
+                } label: { MediaTile(label: "Location", icon: "mappin.and.ellipse", color: Theme.brand) }
                 .accessibilityLabel("Location").accessibilityIdentifier("media-location")
             }
             .buttonStyle(.plain)
@@ -126,17 +126,6 @@ struct MediaPicker: View {
                 Text("No camera on this device.").themeFont(14).foregroundStyle(Theme.muted)
             }
         }
-    }
-
-    private func tile(_ label: String, icon: String, color: Color) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon).themeFont(22).foregroundStyle(color)
-                .frame(width: 56, height: 56)
-                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 18))
-            Text(label).themeFont(13).fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, minHeight: 88)
-        .contentShape(Rectangle())
     }
 
     private var preview: some View {
@@ -487,5 +476,22 @@ private struct MediaMapPicture: View {
         }
         Self.cache[cacheKey] = image
         picture = image
+    }
+}
+
+/// One source tile (a struct, not a method: the PhotosPicker label closure is not main-actor isolated).
+private struct MediaTile: View {
+    let label: String
+    let icon: String
+    let color: Color
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon).themeFont(22).foregroundStyle(color)
+                .frame(width: 56, height: 56)
+                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 18))
+            Text(label).themeFont(13).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 88)
+        .contentShape(Rectangle())
     }
 }
