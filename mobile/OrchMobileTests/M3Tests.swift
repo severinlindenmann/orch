@@ -105,10 +105,11 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     /// A request that never answers; `stopped` counts requests that were cancelled.
     nonisolated(unsafe) static var hang = false
     nonisolated(unsafe) static var stopped = 0
+    nonisolated(unsafe) static var started = 0
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        if Self.hang { return }
+        if Self.hang { Self.started += 1; return }
         let (code, data) = Self.respond(request)
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data); client?.urlProtocolDidFinishLoading(self)
@@ -396,14 +397,18 @@ final class M3HelperTests: XCTestCase {
     func testClosingTheViewerCancelsTheDownload() async throws {
         let c = try json("publish-blob-v1")["good"] as! [String: Any]
         let link = PublishLink(URL(string: "https://p.example.org/f/x1\(c["url_fragment"] as! String)")!)!
-        StubURLProtocol.hang = true; StubURLProtocol.stopped = 0
+        StubURLProtocol.hang = true; StubURLProtocol.stopped = 0; StubURLProtocol.started = 0
         defer { StubURLProtocol.hang = false }
         let cfg = URLSessionConfiguration.ephemeral; cfg.protocolClasses = [StubURLProtocol.self]
         let fetcher = PublishFetcher(session: URLSession(configuration: cfg))
         let task = Task { try await fetcher.load(link) }
-        try await Task.sleep(for: .milliseconds(300))
+        // wait until the request is really in flight (slow CI simulators), then cancel
+        for _ in 0..<100 where StubURLProtocol.started == 0 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(StubURLProtocol.started, 1, "the download started")
         task.cancel()
         do { _ = try await task.value; XCTFail("cancelled") } catch { XCTAssertTrue(error is CancellationError, "\(error)") }
+        // URLSession calls stopLoading on its own queue, shortly after the cancel
+        for _ in 0..<100 where StubURLProtocol.stopped == 0 { try await Task.sleep(for: .milliseconds(50)) }
         XCTAssertEqual(StubURLProtocol.stopped, 1, "the data task was cancelled, not left running")
     }
     func testDownloadIsCapped() async throws {
