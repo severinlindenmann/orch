@@ -481,11 +481,14 @@ def lane_r(env, out: Path) -> Lane:
     L = Lane("R", "References", out)
     e = env.e
     w = e.ws("Pilatus")
-    tid = env.vars["ticket_id"]
     other = None
 
     def run(*a):
         return e.sh(["orch", *a], cwd=w, timeout=60)
+
+    # its own ticket: lane A adds references to the fixture ticket in parallel, which would renumber the list this lane checks
+    rc0, o0, _ = run("ticket", "new", "References lane ticket", "--json")
+    tid = json.loads(o0)["id"]
 
     def mk(st):
         nonlocal other
@@ -540,7 +543,7 @@ def lane_r(env, out: Path) -> Lane:
             raise RuntimeError((err or o)[-200:])
         rc, o, err = run("ref", "list", tid)
         if "example.com" in o:
-            raise RuntimeError("ref rm 1 did not remove the first reference")
+            raise RuntimeError("ref rm 1 did not remove the first reference; list now: " + o.replace("\n", " | ")[:400])
     L.step("R06", "Remove a reference by its number", rm)
     return L
 
