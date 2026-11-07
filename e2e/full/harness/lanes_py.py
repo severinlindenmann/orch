@@ -694,7 +694,7 @@ def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
     import shutil
     import subprocess
     L = Lane("P", "Phone (Simulator)", out)
-    sim = repo / "e2e" / "scenarios_phone_v3.py"
+    sim = repo / "e2e" / "scenarios_sim.py"
     tests = repo / "mobile" / "OrchMobileUITests" / "RealRelayE2ETests.swift"
     if not (tests.exists() and "V3-SIM" in sim.read_text() if sim.exists() else False):
         L.step("P00", "Phone driver present", lambda st: (_ for _ in ()).throw(Skipped(
@@ -703,16 +703,30 @@ def lane_p(env, out: Path, repo: Path, udid: str = "") -> Lane:
     if not shutil.which("xcodebuild"):
         L.step("P00", "Xcode", lambda st: (_ for _ in ()).throw(Skipped("xcodebuild not found")))
         return L
+    own_sim = False
     if not udid:
-        r = subprocess.run(["xcrun", "simctl", "list", "devices", "booted", "-j"], capture_output=True, text=True)
-        try:
-            devs = [d for v in json.loads(r.stdout)["devices"].values() for d in v if d.get("state") == "Booted"]
-        except ValueError:
-            devs = []
-        udid = devs[0]["udid"] if devs else ""
-    if not udid:
-        L.step("P00", "A booted Simulator", lambda st: (_ for _ in ()).throw(Skipped("no booted iPhone Simulator (set --udid or boot one)")))
-        return L
+        # this lane's own Simulator (never one that is already booted: other lanes drive those); deleted by its exact UDID at the end
+        r = subprocess.run(["xcrun", "simctl", "create", "e2e-full-phone", "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+                            "com.apple.CoreSimulator.SimRuntime.iOS-27-1"], capture_output=True, text=True)
+        udid = r.stdout.strip()
+        if r.returncode or not udid:
+            L.step("P00", "Create the lane's Simulator", lambda st: (_ for _ in ()).throw(RuntimeError("simctl create failed: " + (r.stderr or r.stdout)[-200:])))
+            return L
+        own_sim = True
+        subprocess.run(["xcrun", "simctl", "boot", udid], capture_output=True)
+        subprocess.run(["xcrun", "simctl", "bootstatus", udid, "-b"], capture_output=True, timeout=300)
+        L.notes.append(f"own Simulator e2e-full-phone {udid} (deleted at the end)")
+    try:
+        return _lane_p_run(L, env, out, repo, udid)
+    finally:
+        if own_sim:
+            subprocess.run(["xcrun", "simctl", "shutdown", udid], capture_output=True)
+            subprocess.run(["xcrun", "simctl", "delete", udid], capture_output=True)
+
+
+def _lane_p_run(L, env, out: Path, repo: Path, udid: str) -> Lane:
+    import re
+    import subprocess
     shots = out / "shots"
     host = {}
 
