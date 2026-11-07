@@ -117,7 +117,7 @@ struct WorkspaceView: View {
                 ShellChevron()
             }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
-        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("general-\(workspaceId)")
+        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("general-\(workspaceId)").navigationLinkIndicatorVisibility(.hidden)
             .swipeActions(edge: .trailing, allowsFullSwipe: true) { chatMenu(.general(workspace: workspaceId), status: nil) }
             .contextMenu { chatMenu(.general(workspace: workspaceId), status: nil) }
     }
@@ -140,7 +140,7 @@ struct WorkspaceView: View {
     @ViewBuilder private func topicRow(_ topic: TopicSummary) -> some View {
         if !topic.isStarting, let ticket = topic.id.ticket {
             NavigationLink(value: ChatRoute.ticket(workspace: workspaceId, ticket: ticket)) { topicLabel(topic) }
-                .foregroundStyle(Theme.text).accessibilityIdentifier("ticket-\(workspaceId)|\(ticket)")
+                .foregroundStyle(Theme.text).accessibilityIdentifier("ticket-\(workspaceId)|\(ticket)").navigationLinkIndicatorVisibility(.hidden)
                 .listRowBackground(Theme.surface).listRowInsets(EdgeInsets()).listRowSeparatorTint(Theme.border)
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) { chatMenu(topic.id, status: topic.status) }
                 .contextMenu { chatMenu(topic.id, status: topic.status) }
