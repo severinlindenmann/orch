@@ -88,12 +88,13 @@
     const run = state.runs?.[t.id], live = run?.claim?.live;
     const agent = run?.claim?.label || array(state.settings?.agents).find(a => a.name === run?.claim?.agent)?.label || capitalise(run?.claim?.agent || array(state.settings?.agents).find(a => a.chosen)?.label || 'agent');
     const busy = starting.has(t.id) || (run?.running && !['idle', 'attention'].includes(live?.state));
-    const text = starting.has(t.id) ? 'Starting ' + agent + '...' : questions(t).length || live?.state === 'attention' ? 'Waiting for your answer' : t.status === 'review' ? 'Check this' : busy ? agent + ' is working' : '';
+    const text = starting.has(t.id) ? 'Starting ' + agent + '...' : questions(t).length || live?.state === 'attention' ? 'Waiting for your answer' : t.status === 'review' ? 'Ready for your review' : busy ? agent + ' is working' : '';
     return {run, live, agent, busy, text};
   }
+  const needsList = () => window.DashHelpers.uniqueNeeds(state?.needs);
   const activityText = t => activityInfo(t).text;
   // one line of the question a waiting ticket asks, under its title
-  const questionLine = t => { const q = snapshot ? '' : window.DashHelpers.questionPreview(t); return q ? h('p', {className:'meta question-line'}, clean(q)) : null; };
+  const questionLine = t => { const q = snapshot || window.DashHelpers.inNeeds(needsList(), t.id) ? '' : window.DashHelpers.questionPreview(t); return q ? h('p', {className:'meta question-line'}, clean(q)) : null; };
   function activity(t) {
     if (snapshot) return null;
     const {live, agent, busy, text} = activityInfo(t);
@@ -101,12 +102,12 @@
     const seconds = live?.since ? Math.max(0, Math.floor((Date.now() - Date.parse(live.since)) / 1000)) : null;
     const why = window.DashHelpers.plainWhy(live?.why, agent);
     const open = live?.state === 'attention' ? liveLinkFor(t) : null;
-    return h('div', {className:'activity', 'data-key':'activity-' + t.id}, chip(text, busy && (starting.has(t.id) || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'),
+    return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(chip(text, busy && (starting.has(t.id) || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === 'Ready for your review' ? {title:'Ready for your review'} : {}),
       why || Number.isFinite(seconds) ? h('p', {className:'meta'}, [why, Number.isFinite(seconds) ? window.DashHelpers.ago(live.since, Date.now()) : ''].filter(Boolean).join(' · ')) : null,
       open ? h('a', {className:'btn outline xs', href:open.url, 'data-key':'activity-open-' + t.id}, 'Open the live session') : null);
   }
   const reviewActions = t => !snapshot && t.status === 'review' ? h('div', {className:'row'}, [['done', 'Mark done'], ['active', 'Send back']].map(([status, label]) => h('button', {type:'button', className:'btn outline xs', 'data-action':'status-set', 'data-ticket':t.id, 'data-status':status}, label))) : null;
-  const statusItems = (t, scope) => STATUS_CHOICES.map(([value, label]) => h('button', {type:'button', className:'menu-item' + (t.status === value ? ' sel' : ''), role:'menuitemradio', 'aria-checked':t.status === value, 'data-action':'status-set', 'data-ticket':t.id, 'data-status':value, 'data-key':'status-' + scope + '-' + t.id + '-' + value}, label));
+  const statusItems = (t, scope) => STATUS_CHOICES.map(([value, label]) => h('button', {type:'button', className:'menu-item' + (t.status === value ? ' sel' : ''), role:'menuitemradio', 'aria-checked':t.status === value, 'data-action':'status-set', 'data-ticket':t.id, 'data-status':value, 'data-key':'status-' + scope + '-' + t.id + '-' + value, title:value === 'open' ? 'Backlog: not started yet' : null}, label));
   const statusControl = (t, scope) => {
     if (snapshot) return statusChip(t);
     const items = statusItems(t, scope);
@@ -139,7 +140,7 @@
     return h('div', {className:'card-row', 'data-key':'need-' + row.id, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null}, h('span', {className:'need-icon ' + (row.tone === 'bad' ? 'bad' : row.tone === 'warn' ? 'warn' : 'muted')}, iconEl(row.tone === 'bad' ? 'stop' : row.tone === 'warn' ? 'shield' : 'note')), h('div', {className:'grow'}, h('h3', {}, clean(window.DashHelpers.plainWhy(row.text, by || 'The agent') || row.text)), h('p', {className:'meta'}, meta)), h('time', {datetime:row.since || ''}, age(row.since)), action);
   }
   function home() {
-    const needs = array(state.needs);
+    const needs = needsList();
     const rows = window.DashHelpers.agentRows(state.tickets, state.runs, Date.now());
     const working = rows.filter(row => ['working', 'needs', 'stuck'].includes(row.state));
     const current = sorted(tickets().filter(activeTicket));
@@ -202,7 +203,7 @@
       questionLine(t), activity(t), reviewActions(t), cardLinks(t),
       tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':'0', 'aria-valuemax':String(tasks.length), 'aria-valuenow':String(done), 'aria-label':'Tasks done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, done + '/' + tasks.length)) : null);
   }
-  const COLUMN_EMPTY = {open:'New tickets start here.', ready:'Tickets ready to start wait here.', active:'Tickets being worked on show here.', waiting:'Tickets waiting for an answer show here.', review:'Tickets to check show here.', done:'Finished tickets appear here.'};
+  const COLUMN_EMPTY = {open:'Backlog: not started yet. New tickets start here.', ready:'Tickets ready to start wait here.', active:'Tickets being worked on show here.', waiting:'Tickets waiting for an answer show here.', review:'Tickets to check show here.', done:'Finished tickets appear here.'};
   function board() {
     const visible = sorted(tickets().filter(t => t.status !== 'dropped'));
     const counts = {};
@@ -1080,7 +1081,7 @@
       crumb.replaceChildren(pageName, ' › ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || last);
     } else crumb.textContent = pageName;
     const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
-    reconcile(nav, fragment(navLink('#home', 'Home', 'page', array(state.needs).length ? h('span', {className:'count', title:array(state.needs).length + ' waiting for you', 'aria-label':array(state.needs).length + ' waiting for you'}, array(state.needs).length) : null), navLink('#tickets', 'Tickets', 'table'), state.general ? navLink('#general', 'General', 'text') : null,
+    reconcile(nav, fragment(navLink('#home', 'Home', 'page', needsList().length ? h('span', {className:'count', title:needsList().length + ' waiting for you', 'aria-label':needsList().length + ' waiting for you'}, needsList().length) : null), navLink('#tickets', 'Tickets', 'table'), state.general ? navLink('#general', 'General', 'text') : null,
       addons().some(a => a.dashboard) ? h('p', {className:'eyebrow'}, 'Add-ons') : null, addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon))));
     reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'user') : null));
     if (changed) {
