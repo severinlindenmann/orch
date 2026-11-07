@@ -254,3 +254,11 @@ def test_cli_status_and_hours(on_state, run):
     assert json.loads(out)["on"] is True
     code, out, _ = run("relay", "mobile", "off")
     assert code == 0 and "off" in out.lower()
+
+
+def test_machine_name_is_plain_one_line(monkeypatch):
+    monkeypatch.setattr(mm._platform, "node", lambda: "Ac‮me​ \n PC\x00" + "x" * 80 + ".local")
+    n = mm.machine_name()
+    assert n.startswith("Acme PC") and "‮" not in n and "​" not in n and "\n" not in n and len(n) <= 60
+    monkeypatch.setattr(mm._platform, "node", lambda: "")
+    assert mm.machine_name() == "this computer"

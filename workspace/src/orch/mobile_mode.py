@@ -18,6 +18,7 @@ from pathlib import Path
 
 from orch import keepawake, net, procs
 from orch.errors import Refused
+from orch.text import clean_untrusted
 
 HOURS = (4, 8, 12, 24)
 DEFAULT_HOURS = 12
@@ -137,7 +138,9 @@ def status(root: Path) -> dict:
 
 
 def machine_name() -> str:
-    return ((_platform.node() or "this computer").split(".")[0] or "this computer")[:60]
+    """One line of plain text, at most 60 characters: no control, bidi or zero-width characters."""
+    name = " ".join(clean_untrusted(_platform.node().split(".")[0], 200).replace("\n", " ").split())
+    return name[:60] or "this computer"
 
 
 def payload(root: Path) -> dict:
