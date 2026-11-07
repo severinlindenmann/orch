@@ -173,6 +173,17 @@ def test_topic_from_a_general_message(proj, run, conn):
     check_sent_valid(conn)
 
 
+def test_reply_to_a_text_that_started_a_topic_stays_in_that_topic(proj, run, conn):
+    conn.inbox.append(msg(GEN, {"text": "Bitte Rechnung CSV exportieren", "general": True}))
+    run("relay", "inbox")
+    run("relay", "topic", "--from", GEN, "CSV export")
+    (t,) = tickets_listed(run)
+    assert run("relay", "send", PHONE, "Done soon", "--reply-to", GEN)[0] == 0
+    sent = conn.sent[-1]
+    assert sent["ticket"] == t["id"] and "general" not in sent["body"] and sent["reply_to"] == GEN
+    check_sent_valid(conn)
+
+
 def test_topic_refuses_what_is_not_a_phone_text(proj, run, conn):
     conn.inbox.append({**msg("m_ws000000000000a1", {"text": "hello"}), "from": "ws_reports001"})
     run("relay", "inbox")

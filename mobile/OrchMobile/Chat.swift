@@ -204,8 +204,9 @@ enum ChatBuilder {
 
     // MARK: Composer wording
 
-    static func composerNote(running: Bool?) -> String {
-        running == true ? "Goes in after this step" : "Saved for the next run"
+    /// Mockup: an open topic (running or run state unknown) says "Goes in after this step"; only a finished one "Saved for the next run".
+    static func composerNote(running: Bool?, finished: Bool = false) -> String {
+        finished && running != true ? "Saved for the next run" : "Goes in after this step"
     }
 
     /// Display time: "9:41" today, otherwise a short date.

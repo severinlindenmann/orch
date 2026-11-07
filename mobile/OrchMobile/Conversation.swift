@@ -203,12 +203,13 @@ enum ConversationBuilder {
         let m = pm.message, ws = pm.workspaceId
         if pm.fromPhone {
             if let t = m.ticket { return .topic(workspace: ws, ticket: t) }
-            if m.body.general == true { return .general(workspace: ws) }
+            if m.body.general == true { return .general(workspace: ws) }   // stays in General; the topic it started also shows it first (items)
             if let t = ix.ticketOfPhoneText[pm.id] { return .topic(workspace: ws, ticket: t) }
             return .starting(workspace: ws, id: pendingKey(pm))
         }
         if let k = m.body.update?.kind, !["result", "failure", "stopped"].contains(k) { return nil }   // ack, working, note, question
         if let t = m.ticket { return .topic(workspace: ws, ticket: t) }
+        if m.body.general != true, let r = m.replyTo, let t = ix.ticketOfPhoneText[r] { return .topic(workspace: ws, ticket: t) }
         return .general(workspace: ws)
     }
 
@@ -263,6 +264,7 @@ enum ConversationBuilder {
         for pm in d.messages where pm.workspaceId == id.workspace {
             if let c = pm.clientId ?? pm.message.body.clientId { listed.insert(c) }
             if conversation(of: pm, ix, d) == id { out.append(bubble(pm, ix, d)) }
+            else if case .topic(_, let t) = id, pm.fromPhone, pm.message.ticket == nil, ix.ticketOfPhoneText[pm.id] == t { out.append(bubble(pm, ix, d)) }   // General text that started this topic
         }
         for o in d.outbox where o.kind == .send && o.workspace == id.workspace && !listed.contains(o.clientId) && outboxConversation(o) == id {
             out.append(queuedBubble(o))
