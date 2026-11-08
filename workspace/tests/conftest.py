@@ -25,6 +25,9 @@ def _snapshot_real_tool_home():
                     if p.name == ".fallback-trace.log" and not p.is_symlink():
                         trace = p.read_text(encoding="utf-8", errors="replace").splitlines()
                     continue
+                if p.is_dir() and not p.is_symlink():
+                    files[str(p)] = "dir"  # a folder's mtime moves when the trace file is made or rotated
+                    continue
                 st = p.stat()
                 digest = hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
                 files[str(p)] = (st.st_size, digest, st.st_mtime_ns)
@@ -105,6 +108,12 @@ def pytest_sessionfinish(session, exitstatus):
         bad = bad or ours
     if bad:
         session.exitstatus = 1
+    reg = os.environ.get("ORCH_TEST_SESSION_PIDS")
+    if reg and os.path.basename(reg).startswith("orch-test-pids-"):
+        try:
+            os.unlink(reg)  # exact path made in pytest_configure
+        except OSError:
+            pass
 
 
 @pytest.fixture

@@ -689,8 +689,43 @@ def _trace_lines(h):
     return [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines()] if f.exists() else []
 
 
+def _trace_on(h):
+    (h / ".orch-tool").mkdir(exist_ok=True)
+    (h / ".orch-tool" / ".trace-fallbacks").write_text("", encoding="utf-8")
+
+
+def test_fallback_trace_is_off_without_the_machine_switch(proj, monkeypatch):
+    h = addons.real_home()
+    monkeypatch.delenv("ORCH_HOME")
+    monkeypatch.delenv("ORCH_HOME_STRICT")
+    assert addons.home() == h / ".orch-tool"
+    assert not (h / ".orch-tool").exists()  # a normal install: home() only reads
+
+
+def test_fallback_trace_logs_only_real_subcommands_and_never_blocks(proj, monkeypatch):
+    h = addons.real_home()
+    _trace_on(h)
+    monkeypatch.delenv("ORCH_HOME")
+    monkeypatch.delenv("ORCH_HOME_STRICT")
+    for argv, cmd in (
+        (["orch", "sk-abc123def", "hunter2"], "orch"),  # word-shaped secrets are not subcommands
+        (["orch", "addon", "sk-abc"], "orch addon"),
+        (["pytest", "addon", "list"], "pytest addon list"),
+    ):
+        monkeypatch.setattr(sys, "argv", argv)
+        addons.home()
+        assert _trace_lines(h)[-1]["cmd"] == cmd
+    if not hasattr(os, "mkfifo"):
+        return
+    log = h / ".orch-tool" / ".fallback-trace.log"
+    log.unlink()
+    os.mkfifo(log)  # nobody reads it: a blocking open would hang every orch command
+    assert addons.home() == h / ".orch-tool"
+
+
 def test_fallback_trace_unset_has_the_fields_and_never_argument_values(proj, monkeypatch):
     h = addons.real_home()
+    _trace_on(h)
     monkeypatch.delenv("ORCH_HOME")
     monkeypatch.delenv("ORCH_HOME_STRICT")
     monkeypatch.setattr(
@@ -723,6 +758,7 @@ def test_fallback_trace_unset_has_the_fields_and_never_argument_values(proj, mon
 
 def test_fallback_trace_untrusted_gets_its_reason_and_strict_writes_nothing(proj, monkeypatch):
     h = addons.real_home()
+    _trace_on(h)
     monkeypatch.delenv("ORCH_HOME_STRICT")
     monkeypatch.setenv("ORCH_HOME", str(proj / "inside"))
     addons.home()
@@ -740,22 +776,38 @@ def test_fallback_trace_untrusted_gets_its_reason_and_strict_writes_nothing(proj
 
 def test_fallback_trace_rotates_over_256kb(proj, monkeypatch):
     h = addons.real_home()
+    _trace_on(h)
     monkeypatch.delenv("ORCH_HOME")
     monkeypatch.delenv("ORCH_HOME_STRICT")
     d = h / ".orch-tool"
-    d.mkdir()
     (d / ".fallback-trace.log").write_text("x" * (256 * 1024 + 1), encoding="utf-8")
     addons.home()
     assert (d / ".fallback-trace.log.1").stat().st_size == 256 * 1024 + 1
     assert len(_trace_lines(h)) == 1
 
 
+def test_fallback_trace_rotation_failure_truncates(proj, monkeypatch):
+    h = addons.real_home()
+    _trace_on(h)
+    monkeypatch.delenv("ORCH_HOME")
+    monkeypatch.delenv("ORCH_HOME_STRICT")
+    log = h / ".orch-tool" / ".fallback-trace.log"
+    log.write_text("x" * (256 * 1024 + 1), encoding="utf-8")
+
+    def boom(*a, **k):
+        raise OSError("no")
+
+    monkeypatch.setattr(os, "replace", boom)
+    addons.home()
+    assert log.stat().st_size < 1000 and len(_trace_lines(h)) == 1
+
+
 def test_fallback_trace_does_not_follow_a_symlink_and_fixes_the_mode(proj, monkeypatch):
     h = addons.real_home()
+    _trace_on(h)
     monkeypatch.delenv("ORCH_HOME")
     monkeypatch.delenv("ORCH_HOME_STRICT")
     d = h / ".orch-tool"
-    d.mkdir()
     target = h / "victim.txt"
     target.write_text("keep", encoding="utf-8")
     (d / ".fallback-trace.log").symlink_to(target)

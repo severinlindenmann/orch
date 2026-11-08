@@ -19,6 +19,7 @@ import os
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -197,17 +198,27 @@ def _trusted_home(h: Path, root: Path | None = None) -> bool:
 
 
 _TRACE_MAX = 256 * 1024
-_WORD = re.compile(r"[a-z][a-z0-9-]{0,30}")
 
 
 def _trace_command() -> str:
-    """The program name and up to two leading subcommand words ("orch addon list"). No other argument is
-    ever logged: values, options and free text can hold secrets."""
+    """The program name and up to two leading words that are real orch subcommands ("orch addon list"),
+    checked against orch's own parser. Anything else (values, free text, another program's arguments when
+    orch runs inside it) is never logged: it can hold secrets."""
     words = [os.path.basename(sys.argv[0] or "?")[:40]]
-    for a in sys.argv[1:3]:
-        if not _WORD.fullmatch(a):
-            break
-        words.append(a)
+    try:
+        import argparse
+
+        from orch import cli
+
+        p = cli.build_parser()
+        for a in sys.argv[1:3]:
+            sub = next((x for x in p._actions if isinstance(x, argparse._SubParsersAction)), None)
+            if sub is None or a not in sub.choices:
+                break
+            words.append(a)
+            p = sub.choices[a]
+    except Exception:  # noqa: BLE001 - the program name alone is enough
+        pass
     return " ".join(words)
 
 
@@ -215,8 +226,8 @@ def _trace_fallback(real: Path, reason: str) -> None:
     """One line in <real>/.fallback-trace.log each time home() falls back to the real ~/.orch-tool, to find
     who uses it. Best effort, never raises; refuses a symlinked folder or file (O_NOFOLLOW); mode 0600."""
     try:
-        if real.is_symlink():
-            return
+        if real.is_symlink() or not (real / ".trace-fallbacks").is_file():
+            return  # opt-in per machine (a dev Mac): a normal install never writes it
         line = json.dumps(
             {
                 "time": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -231,12 +242,28 @@ def _trace_fallback(real: Path, reason: str) -> None:
         log = real / ".fallback-trace.log"
         try:
             if not log.is_symlink() and log.stat().st_size > _TRACE_MAX:
-                os.replace(log, real / ".fallback-trace.log.1")  # a line may be lost in a race: accepted
+                # a unique name first, so two processes rotating at once can not drop a generation
+                tmp = real / f".fallback-trace.log.tmp-{os.getpid()}-{secrets.token_hex(4)}"
+                try:
+                    os.replace(log, tmp)
+                    os.replace(tmp, real / ".fallback-trace.log.1")
+                except OSError:
+                    for f in (tmp, log):  # rotation failed: never let the log grow without a bound
+                        try:
+                            if not f.is_symlink() and f.exists():
+                                os.truncate(f, 0)
+                        except OSError:
+                            pass
         except OSError:
             pass
-        fd = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+        flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        fd = os.open(log, flags, 0o600)
         try:
-            os.fchmod(fd, 0o600)
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return  # a FIFO or device there must not block or feed orch
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd, 0o600)
             os.write(fd, (line + "\n").encode("utf-8"))
         finally:
             os.close(fd)
