@@ -638,6 +638,12 @@ CG_FILE_MAX = 26214400
 CG_TASK_RANK = {"waiting_start": 0, "waiting_approval": 1, "queued": 2, "working": 3, "done": 4, "failed": 4, "denied": 4}
 CG_ALLOW_OPTIONS = ["once", "always", "no"]  # wire values; the UI shows "Allow once / Always / No"
 CG_ORDER_BUFFER = 50
+CG_ORDER_TIMEOUT_S = 600  # quiet group: skip a gap after 10 minutes
+CG_MAX_OPEN_GROUPS_PER_HOST = 20
+CG_CREATED_PER_HOUR = 5
+# allow answer (wire) -> allow message -> group_event.approved.mode / denied
+CG_ALLOW_MAP = {"once": {"allow_mode": "once", "approved_mode": "once"}, "always": {"allow_mode": "permanent", "approved_mode": "always"}, "no": {"status": "denied"}}
+CG_LEGACY_WORDS = {"allow once": "once", "once": "once", "always": "always", "ignore": "no", "no": "no"}
 CG_RATE = {"msgs_per_min": 20, "files_per_min": 3}
 
 
@@ -670,7 +676,7 @@ def cg_rules(m, ctx=None):
     ctx = ctx or {}
     b, out = m.get("body") or {}, []
     g = b.get("group")
-    if m.get("type") == "question" and "scope" in b and b.get("options") != CG_ALLOW_OPTIONS:
+    if m.get("type") == "question" and b.get("allow_question") is True and b.get("options") != CG_ALLOW_OPTIONS and not ctx.get("legacy_sender"):
         out.append("a permission (allow) question has the wire options once, always, no (UI words are only shown)")
     if not isinstance(g, dict):
         return out
@@ -752,13 +758,18 @@ def cg_receive(m, ctx):
     b, out = m.get("body") or {}, []
     g = b.get("group") if isinstance(b.get("group"), dict) else None
     if g:
+        if ctx.get("receiver_role") in ("member", "phone") and m.get("from") != g.get("host"):
+            out.append("G3: at a member or phone, from != group.host is always dropped (also for a known group)")
+        ge = b.get("group_event")
+        if isinstance(ge, dict) and ge.get("kind") == "created":
+            if ctx.get("open_groups_of_host", 0) >= CG_MAX_OPEN_GROUPS_PER_HOST:
+                out.append("dropped: this host already has 20 open groups here")
+            if ctx.get("created_last_hour", 0) >= CG_CREATED_PER_HOUR:
+                out.append("dropped: this host is over 5 `created` events an hour")
         # The group key is (host, id): an id held under another host is a different group, never a conflict.
         o = b.get("origin")
         if isinstance(o, dict) and [g.get("host"), g.get("id"), o.get("id")] in [list(x) for x in ctx.get("seen_origins", [])]:
             out.append("duplicate: this (host, group.id, origin.id) was already stored")
-        od = cg_order(m, ctx)
-        if od == "drop":
-            out.append("dropped: seq is not above the last applied seq")
     hs = ctx.get("host_state")
     if g and hs is not None and m.get("from") != g.get("host"):
         frm = m.get("from")
@@ -781,22 +792,78 @@ def cg_receive(m, ctx):
     return out
 
 
+def cg_parse_allow_answer(text):
+    """Wire value is exact lowercase once|always|no. Old clients: trimmed, case-insensitive, single spaces:
+    'Allow once', 'Always', 'Ignore', 'No'. Anything else: None (not an allow answer)."""
+    if text in CG_ALLOW_OPTIONS:
+        return text
+    return CG_LEGACY_WORDS.get(" ".join(str(text).split()).casefold())
+
+
+def cg_card(q, ctx):
+    """Phone approval card for a member's allow question: buttons only for the wire options; old wording -> 'Answer in Bank'."""
+    return "buttons" if q.get("options") == CG_ALLOW_OPTIONS else "answer_in_bank"
+
+
+def cg_store(m, ctx):
+    """Receiver stores a group under (host, id). Returns (key, 'new'|'existing'); never a conflict between hosts."""
+    g = m["body"]["group"]
+    key = [g["host"], g["id"]]
+    return key, ("existing" if key in [[k["host"], k["id"]] for k in ctx.get("known_groups", [])] else "new")
+
+
+def cg_applied_after(m, ctx):
+    """applied_seq after this message (see cg_order)."""
+    od, seq = ctx["order"], m["body"]["group"]["seq"]
+    out = cg_order(m, ctx)
+    ap = od.get("applied_seq")
+    if ap is None:
+        ap = (od["from_seq"] if od.get("from_seq") is not None else seq) - 1
+    if out == "apply":
+        return seq
+    if out == "skip_gap_and_apply":
+        # skip to just below the lowest buffered seq (or this one), apply the contiguous run
+        have = sorted(set(od.get("buffered", [])) | {seq})
+        cur = have[0]
+        for x in have[1:]:
+            if x == cur + 1:
+                cur = x
+            else:
+                break
+        return cur
+    return ap
+
+
 def cg_order(m, ctx):
-    """Stateful checks (G9 task status, closed, membership) run in group.seq order. Returns apply | buffer |
-    apply_in_order_and_log | drop, or None when the message has no seq or the context has no `order`."""
+    """Stateful checks (G9 task status, closed, membership) run in group.seq order (G12). Returns:
+    apply | buffer | skip_gap_and_apply (buffer of 50 full, or oldest buffered message waited 10 min: skip the gap,
+    apply the contiguous run, late seqs below applied_seq count as old) | late_show_no_state (seq <= applied_seq:
+    shown, but changes no state). Initial applied_seq = from_seq - 1, or first seen seq - 1. None when no seq/context."""
     seq, od = ((m.get("body") or {}).get("group") or {}).get("seq"), ctx.get("order")
     if seq is None or od is None:
         return None
-    if seq <= od["applied_seq"]:
-        return "drop"
-    if seq == od["applied_seq"] + 1:
+    ap = od.get("applied_seq")
+    if ap is None:
+        ap = (od["from_seq"] if od.get("from_seq") is not None else seq) - 1
+    if seq <= ap:
+        return "late_show_no_state"
+    if seq == ap + 1:
         return "apply"
-    return "apply_in_order_and_log" if len(od.get("buffered", [])) >= CG_ORDER_BUFFER else "buffer"
+    if len(od.get("buffered", [])) >= CG_ORDER_BUFFER or (od.get("buffered") and od.get("oldest_age_s", 0) >= CG_ORDER_TIMEOUT_S):
+        return "skip_gap_and_apply"
+    return "buffer"
 
 
 def cg_shown_as(m, ctx):
-    """How a phone labels a host copy with by: you. Only a phone of its own account or the host's dashboard is 'You'."""
-    o = (m.get("body") or {}).get("origin") or {}
+    """How a phone labels a copy. Only a host copy with by: you is 'You' (origin = a phone of its own account or the
+    host's dashboard); any other ph_ is 'Other phone'. None when the message is not by: you."""
+    b = m.get("body") or {}
+    if b.get("by") != "you":
+        return None
+    o = b.get("origin") or {}
+    g = b.get("group") or {}
+    if m.get("from") != g.get("host"):
+        return "Other phone"
     return "You" if o.get("from") == "dashboard" or o.get("from") in ctx.get("own_phones", []) else "Other phone"
 
 
@@ -826,10 +893,24 @@ for f in cg_files:
         errs.append(f"expected shown_as {exp['shown_as']}")
     if "order" in exp and cg_order(m, ctx) != exp["order"]:
         errs.append(f"expected order {exp['order']}, got {cg_order(m, ctx)}")
-    if "stored_as" in exp:
-        og = m["body"]["group"]
-        if [og["host"], og["id"]] != exp["stored_as"]:
-            errs.append("expected group key (host, id) differs")
+    if "applied_after" in exp and cg_applied_after(m, ctx) != exp["applied_after"]:
+        errs.append(f"expected applied_seq {exp['applied_after']}, got {cg_applied_after(m, ctx)}")
+    if "stored_as" in exp and (cg_store(m, ctx)[0] != exp["stored_as"] or cg_store(m, ctx)[1] != exp.get("store", "new")):
+        errs.append(f"expected store {exp['stored_as']} {exp.get('store', 'new')}, got {cg_store(m, ctx)}")
+    if "card" in exp and cg_card(m["body"], ctx) != exp["card"]:
+        errs.append(f"expected card {exp['card']}")
+    for ans, want_ in (exp.get("parse") or {}).items():
+        if cg_parse_allow_answer(ans) != want_:
+            errs.append(f"parse {ans!r} expected {want_}")
+    if "map" in exp:
+        mp = exp["map"]
+        if CG_ALLOW_MAP.get(cg_parse_allow_answer(mp["answer"])) != {k: v for k, v in mp.items() if k != "answer"}:
+            errs.append("allow answer mapping differs from the table")
+        ge = (m["body"].get("group_event") or {})
+        if ge.get("kind") == "approved" and ge.get("mode") != mp.get("approved_mode"):
+            errs.append("approved.mode must be the mapped value")
+        if ge.get("kind") == "denied" and mp.get("status") != "denied":
+            errs.append("denied event needs answer no")
     want = f.name.startswith("valid-")
     if bool(errs) == want:
         fails.append(f"vectors/chat-groups/{f.name}: expected {'valid' if want else 'invalid'}, got {errs[0] if errs else 'valid'}")

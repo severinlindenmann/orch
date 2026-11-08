@@ -1,8 +1,8 @@
 {
-  "why": "Rule 3: seq 5 is not above applied seq 6 -> an old or replayed message, dropped.",
+  "why": "G12: a member joined with member_added.from_seq 5: initial applied_seq = from_seq - 1, so seq 5 applies at once.",
   "message": {
     "schema": "orch.msg/1",
-    "id": "m_60599de5ca95203d",
+    "id": "m_624f30bfd20c45b9",
     "from": "ws_fin0000001",
     "to": "ws_ban0000001",
     "type": "text",
@@ -46,7 +46,7 @@
       "by": "ws_hom0000001",
       "via": "helper",
       "origin": {
-        "id": "m_ord0000000000005",
+        "id": "m_ord0000000000051",
         "from": "ws_hom0000001",
         "at": "2026-11-08T10:06:00Z"
       }
@@ -54,11 +54,13 @@
   },
   "context": {
     "order": {
-      "applied_seq": 6,
+      "applied_seq": null,
+      "from_seq": 5,
       "buffered": []
     }
   },
   "expect": {
-    "order": "drop"
+    "order": "apply",
+    "applied_after": 5
   }
 }

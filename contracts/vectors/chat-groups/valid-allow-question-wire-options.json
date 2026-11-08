@@ -17,7 +17,19 @@
         "no"
       ],
       "recommended": "once",
-      "scope": "tasks from Finance"
+      "scope": "tasks from Finance",
+      "allow_question": true
+    }
+  },
+  "expect": {
+    "card": "buttons",
+    "parse": {
+      "once": "once",
+      "always": "always",
+      "no": "no",
+      "Always": "always",
+      "  Allow once ": "once",
+      "IGNORE": "no"
     }
   }
 }

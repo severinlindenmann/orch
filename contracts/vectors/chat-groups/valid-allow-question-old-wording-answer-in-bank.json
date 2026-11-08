@@ -1,0 +1,35 @@
+{
+  "why": "G11: a member still on the old wording (Allow once / Always / Ignore) is read-only for the phone: the card says 'Answer in Bank', no buttons; old answers parse case-insensitively (Always, Ignore).",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_allowqzzzzzzzzbb",
+    "from": "ws_ban0000001",
+    "to": "phones",
+    "type": "question",
+    "created_at": "2026-11-08T10:03:00Z",
+    "ticket": "t_bank3a",
+    "body": {
+      "question_id": "q1",
+      "text": "Let Finance give tasks to Bank?",
+      "options": [
+        "Allow once",
+        "Always",
+        "Ignore"
+      ],
+      "recommended": "Allow once",
+      "scope": "tasks from Finance",
+      "allow_question": true
+    }
+  },
+  "context": {
+    "legacy_sender": true
+  },
+  "expect": {
+    "card": "answer_in_bank",
+    "parse": {
+      "Always": "always",
+      "Allow once": "once",
+      "Ignore": "no"
+    }
+  }
+}

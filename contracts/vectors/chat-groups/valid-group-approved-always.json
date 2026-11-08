@@ -1,5 +1,5 @@
 {
-  "why": "Rule 4: group_event.approved.mode is once | always (same words as the allow question). The allow message's own mode once|permanent is unchanged.",
+  "why": "G11 mapping: phone answer always -> allow message mode permanent -> group_event.approved.mode always.",
   "message": {
     "schema": "orch.msg/1",
     "id": "m_4fbd74bc9313222f",
@@ -61,6 +61,13 @@
         "delegate": "m_delegatebank0000",
         "mode": "always"
       }
+    }
+  },
+  "expect": {
+    "map": {
+      "answer": "always",
+      "allow_mode": "permanent",
+      "approved_mode": "always"
     }
   }
 }

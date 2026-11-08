@@ -59,6 +59,7 @@
     }
   },
   "expect": {
-    "order": "apply"
+    "order": "apply",
+    "applied_after": 7
   }
 }

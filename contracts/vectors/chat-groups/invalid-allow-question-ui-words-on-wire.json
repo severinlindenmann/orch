@@ -17,7 +17,8 @@
         "Ignore"
       ],
       "recommended": "Allow once",
-      "scope": "tasks from Finance"
+      "scope": "tasks from Finance",
+      "allow_question": true
     }
   }
 }

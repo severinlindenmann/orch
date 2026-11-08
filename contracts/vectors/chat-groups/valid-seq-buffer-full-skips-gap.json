@@ -1,8 +1,8 @@
 {
-  "why": "Rule 3: the bounded buffer (50 per group) is full -> apply what is in order, log the gap, continue.",
+  "why": "G12: 50 messages (8..57) are buffered behind the missing 7 and seq 58 arrives -> skip the gap, apply the contiguous run 8..58, applied_seq becomes 58; a late 7 is old.",
   "message": {
     "schema": "orch.msg/1",
-    "id": "m_094b65c528177449",
+    "id": "m_460ee5a337f7e78d",
     "from": "ws_fin0000001",
     "to": "ws_ban0000001",
     "type": "text",
@@ -41,12 +41,12 @@
             }
           }
         ],
-        "seq": 60
+        "seq": 58
       },
       "by": "ws_hom0000001",
       "via": "helper",
       "origin": {
-        "id": "m_ord0000000000060",
+        "id": "m_ord0000000000058",
         "from": "ws_hom0000001",
         "at": "2026-11-08T10:06:00Z"
       }
@@ -106,10 +106,12 @@
         55,
         56,
         57
-      ]
+      ],
+      "oldest_age_s": 30
     }
   },
   "expect": {
-    "order": "apply_in_order_and_log"
+    "order": "skip_gap_and_apply",
+    "applied_after": 58
   }
 }

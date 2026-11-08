@@ -1,5 +1,5 @@
 {
-  "why": "Rule 3: seq 9 arrives while 7 and 8 are missing -> buffered (not dropped, not applied) until the gap fills.",
+  "why": "G12: seq 9 arrives while 7 and 8 are missing, buffer small and young -> buffered.",
   "message": {
     "schema": "orch.msg/1",
     "id": "m_c3d579589808d3f4",
@@ -55,10 +55,12 @@
   "context": {
     "order": {
       "applied_seq": 6,
-      "buffered": []
+      "buffered": [],
+      "oldest_age_s": 0
     }
   },
   "expect": {
-    "order": "buffer"
+    "order": "buffer",
+    "applied_after": 6
   }
 }
