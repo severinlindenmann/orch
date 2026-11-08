@@ -300,39 +300,52 @@ def test_a_stale_state_lock_is_broken_and_a_fresh_one_is_kept(proj):
     assert phone_view._break_stale_lock(lock) is False and lock.exists()
 
 
+class _Child:
+    """A stand-in for the detached `orch run start`: it claims the ticket (a run started) or ends without."""
+
+    def __init__(self, proj, tid, claims: bool):
+        self.claimed = claims and runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+
+    def poll(self):
+        return 0
+
+
+def _spawns(monkeypatch, proj, claims=True):
+    calls = []
+
+    def spawn(root, argv, env):
+        calls.append((argv, env))
+        tid = argv[argv.index("start") + 1]
+        return _Child(proj, tid, claims)
+
+    monkeypatch.setattr(runs, "_spawn_detached", spawn)
+    monkeypatch.setattr(runs, "RESTART_WAIT_SECONDS", 1)
+    return calls
+
+
 def test_a_live_session_that_ends_with_input_waiting_starts_the_next_run_once(proj, run, monkeypatch):
-    """F5 (delta review): the next run starts by itself (same path as Continue), once per waiting item."""
+    """F5: the next run starts by itself (same path as Continue), once per waiting item."""
     import sys
 
-    started = []
-    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: started.append(argv) or True)
+    started = _spawns(monkeypatch, proj)
     tid = _new(run)
     states = []
     for _ in range(2):  # the second time the same item waits: an agent that quits at once is not restarted
-        rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+        rec = runs.read(proj, tid) or runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
         if not runs.undelivered(proj, tid):
             runs.pending_add(proj, tid, "human:t", "answer", "Answer to your question q1: Blue")
         runs.wrap_live(proj, rec["run"], tid, "claude", [sys.executable, "-c", "pass"], None)
         states.append(_status(proj, tid))
-    assert len(started) == 1 and started[0][-8:] == [
-        "run",
-        "start",
-        tid,
-        "--agent",
-        "claude",
-        "--by",
-        "human:t",
-        "--restart",
-    ]
-    # Working while the next run is on its way; Ready once no further run will come (input still queued)
+    assert len(started) == 1
+    assert started[0][0][-7:] == ["run", "start", tid, "--agent", "claude", "--by", "human:t"]
+    # Working while the next run holds it; Ready once no further run will come (input still queued)
     assert states == ["active", "ready"] and runs.undelivered(proj, tid)
 
 
 def test_a_stopped_live_session_does_not_start_again(proj, run, monkeypatch):
     import sys
 
-    started = []
-    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: started.append(argv) or True)
+    started = _spawns(monkeypatch, proj)
     tid = _new(run)
     rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
     runs.pending_add(proj, tid, "human:t", "message", "One more thing")
@@ -353,13 +366,23 @@ def _ended_live(proj, tid, text="Answer to your question q1: Blue"):
 
 
 def test_a_failed_restart_can_be_tried_again(proj, run, monkeypatch):
-    """Delta F5-1: a spawn that did not start clears the mark, so the waiting answer can start the agent."""
+    """A spawn that did not start clears the mark, so the waiting answer can start the agent."""
     tries = []
-    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: tries.append(argv) and False)
+    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: tries.append(argv) and None)
     tid = _new(run)
     _ended_live(proj, tid)
     assert len(tries) == 1 and not any(i.get("restarted") for i in runs.undelivered(proj, tid))
     assert _status(proj, tid) == "ready"  # nobody will read it now: Ready, the input stays queued
+
+
+def test_a_start_that_was_refused_clears_its_own_marks_in_the_wrapper(proj, run, monkeypatch):
+    """INVARIANT: the ending run's wrapper sees no claim come (the child was refused or died) and clears its
+    own marks and settles, right there; no CLI path is involved."""
+    _spawns(monkeypatch, proj, claims=False)
+    tid = _new(run)
+    _ended_live(proj, tid)
+    assert _status(proj, tid) == "ready" and runs.read(proj, tid) is None
+    assert not any(i.get("restarted") for i in runs.undelivered(proj, tid))
 
 
 def test_a_broken_adapter_list_leaves_the_ticket_settled_and_no_marks(proj, run, monkeypatch):
@@ -375,37 +398,35 @@ def test_a_broken_adapter_list_leaves_the_ticket_settled_and_no_marks(proj, run,
 
 def test_a_spawn_that_raises_clears_the_marks(proj, run, monkeypatch):
     monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: (_ for _ in ()).throw(OSError("x")))
+    monkeypatch.setattr(runs, "RESTART_WAIT_SECONDS", 1)
     tid = _new(run)
     _ended_live(proj, tid)
     assert _status(proj, tid) == "ready"
     assert not any(i.get("restarted") for i in runs.undelivered(proj, tid))
 
 
-def test_a_refused_restart_start_settles_the_ticket(proj, run, monkeypatch):
-    """Delta-3 (2): `orch run start` with ORCH_VIA=restart that is refused leaves no Working ticket."""
-    tid = _new(run)
-    tickets.set_status(proj, tid, "active", "human:t")
-    runs.pending_add(proj, tid, "human:t", "answer", "Answer to your question q1: Blue")
-    items = runs._pending_read(proj, tid)
-    items[0]["restarted"] = tickets.now()
-    runs._pending_write(proj, tid, items)
-    code, _, err = run("run", "start", tid, "--agent", "nosuchagent", "--restart")
-    assert code != 0
-    assert _status(proj, tid) == "ready"
-    assert not any(i.get("restarted") for i in runs.undelivered(proj, tid))
+def test_no_cli_flag_or_variable_touches_restart_marks(proj, run):
+    """INVARIANT: only runs.restart_for_input / clear_restarted / settle_orphan name the mark;
+    `orch run start` has no restart flag, and no orch module reads a restart variable."""
+    import argparse
+    import pathlib
+    import re
 
+    from orch import cli
 
-def test_a_refused_start_from_the_agents_shell_leaves_the_marks(proj, run, monkeypatch):
-    """Delta-4 (2): only orch's own restart (--restart) clears marks; an inherited variable does nothing."""
-    tid = _new(run)
-    tickets.set_status(proj, tid, "active", "human:t")
-    runs.pending_add(proj, tid, "human:t", "answer", "Answer to your question q1: Blue")
-    items = runs._pending_read(proj, tid)
-    items[0]["restarted"] = tickets.now()
-    runs._pending_write(proj, tid, items)
-    monkeypatch.setenv("ORCH_VIA", "restart")
-    assert run("run", "start", tid, "--agent", "nosuchagent")[0] != 0
-    assert _status(proj, tid) == "active" and runs.undelivered(proj, tid)[0].get("restarted")
+    src = pathlib.Path(runs.__file__).parent
+    for f in src.glob("*.py"):
+        text = f.read_text(encoding="utf-8")
+        if f.name != "runs.py":
+            assert '"restarted"' not in text and "clear_restarted" not in text, f.name
+        assert not re.search(r"environ[^\n]*restart|ORCH_RESTART", text), f.name
+    parser = cli.build_parser() if hasattr(cli, "build_parser") else None
+    if parser is not None:
+        sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+        run_sub = next(a for a in sub.choices["run"]._actions if isinstance(a, argparse._SubParsersAction))
+        assert not any("--restart" in o for a in run_sub.choices["start"]._actions for o in a.option_strings)
+    with pytest.raises(SystemExit):  # an unknown option
+        run("run", "start", "t_abcdefg", "--restart")
 
 
 def test_a_lock_timeout_in_the_restart_still_settles(proj, run, monkeypatch):
@@ -438,39 +459,35 @@ def test_a_restart_that_never_came_is_settled_by_the_next_status_check(proj, run
 
 
 def test_a_new_message_restarts_even_after_an_earlier_one_did(proj, run, monkeypatch):
-    """Delta F5-1: the once-only mark is per item, not for every later message."""
-    started = []
-    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: started.append(argv) or True)
+    """The once-only mark is per item, not for every later message."""
+    started = _spawns(monkeypatch, proj, claims=False)  # nobody claims: each restart is cleared again...
     tid = _new(run)
     _ended_live(proj, tid)
-    _ended_live(proj, tid, text=None)  # the same item again: no second restart
     _ended_live(proj, tid, text="One more thing")
-    assert len(started) == 2
+    assert len(started) == 2  # ...so both ends try once more for what still waits
 
 
 def test_the_restart_is_not_the_ended_runs_own_call(proj, run, monkeypatch):
-    """Delta F5-3: the detached start gets no agent or run variables; it is marked via=restart."""
-    envs, argvs = [], []
-    monkeypatch.setattr(
-        runs, "_spawn_detached", lambda root, argv, env: envs.append(env) or argvs.append(argv) or True
-    )
+    """The detached start gets no agent or run variables and no restart trigger at all."""
+    calls = _spawns(monkeypatch, proj)
     for k, v in {
         "ORCH_RUN": "r_abcdefgh",
         "ORCH_TICKET": "t_abcdef",
         "ORCH_AGENT": "claude",
         "CLAUDECODE": "1",
+        "ORCH_VIA": "dashboard",
     }.items():
         monkeypatch.setenv(k, v)
     tid = _new(run)
     _ended_live(proj, tid)
-    (env,) = envs
+    ((argv, env),) = calls
     assert not {"ORCH_RUN", "ORCH_TICKET", "ORCH_AGENT", "CLAUDECODE", "ORCH_VIA"} & set(env)
-    assert argvs[0][-1] == "--restart"  # the hidden flag, never an inherited variable
+    assert not any("restart" in a for a in argv)
 
 
 def test_no_ready_flicker_while_the_restart_is_on_its_way(proj, run, monkeypatch):
     """Delta F5-2: settle is skipped when the next run was started."""
-    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: True)
+    _spawns(monkeypatch, proj)
     called = []
     monkeypatch.setattr(runs, "settle", lambda *a, **k: called.append(a))
     tid = _new(run)

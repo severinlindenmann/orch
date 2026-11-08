@@ -39,9 +39,6 @@ def add_parsers(sub, common) -> None:
             x.add_argument("--mode", choices=("oneshot", "live"), default="oneshot")
         if name == "start":
             x.add_argument("--mode", choices=("oneshot", "live"), help="default: live in tmux when possible")
-            # orch's own restart after a live session ended with input waiting (runs.restart_for_input): on
-            # a refusal its marks are cleared and the ticket settled. Hidden; never inherited like a variable.
-            x.add_argument("--restart", action="store_true", help=argparse.SUPPRESS)
         if name == "send":
             x.add_argument("text", nargs="?", help="what to tell the agent")
             x.add_argument("--file", help="read the text from this file")
@@ -357,25 +354,17 @@ def dispatch(args, root: Path) -> bool:
         p = {k: v for k, v in p.items() if k not in ("stdin", "item_ids")}
         _out(args, p, "\n".join(p["argv"]))
     elif sub == "start":
-        try:
-            r = runs.start(
-                root,
-                tid,
-                by,
-                fresh=args.fresh,
-                take_over=args.take_over,
-                allow=args.allow,
-                mode=args.mode,
-                text=args.text,
-                agent=args.agent,
-            )
-        except Exception:
-            if args.restart:  # orch's own restart did not come: the ticket is not left Working with nobody
-                with contextlib.suppress(Exception):
-                    runs.clear_restarted(root, tid)
-                with contextlib.suppress(Exception):
-                    runs.settle(root, tid, "orch", ignore_input=True)
-            raise
+        r = runs.start(
+            root,
+            tid,
+            by,
+            fresh=args.fresh,
+            take_over=args.take_over,
+            allow=args.allow,
+            mode=args.mode,
+            text=args.text,
+            agent=args.agent,
+        )
         for note in r["notes"]:
             print(note, file=sys.stderr)
         how = "Continued the earlier conversation" if r["resumed"] else "Started fresh from the ticket"

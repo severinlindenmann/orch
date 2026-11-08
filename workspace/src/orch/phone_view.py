@@ -232,9 +232,15 @@ def _state_locked(root: Path, wait: float = 10.0):
                 ours = mine.read_bytes() == token
             except OSError:
                 ours = False  # can not tell: treat it as someone else's
-            if not ours:
-                with contextlib.suppress(OSError):
-                    os.link(mine, lock)  # put it back (fails, and is dropped, only if a newer one is there)
+            if not ours:  # put it back; dropped only if a newer one is there already
+                try:
+                    os.link(mine, lock)
+                except FileExistsError:
+                    pass
+                except OSError:  # no hard links on this file system: rename back when the place is still free
+                    with contextlib.suppress(OSError):
+                        if not lock.exists():
+                            os.rename(mine, lock)
             with contextlib.suppress(OSError):
                 mine.unlink()
 

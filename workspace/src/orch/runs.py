@@ -545,7 +545,10 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
         return {"released": True, "pending": waiting}
 
 
-ORPHAN_GRACE_SECONDS = 120  # a Working ticket with no run gets this long for its agent to start
+# A Working ticket with no run gets this long for its agent to start. A start (also orch's own restart) writes
+# its claim within seconds: Python start-up plus at most the 10 s run-lock wait, before tmux or the agent tool
+# start at all (they run under the claim). 120 s is far above that worst case.
+ORPHAN_GRACE_SECONDS = 120
 
 
 def running(root: Path, tid: str) -> bool:
@@ -572,6 +575,12 @@ def settle(root: Path, tid: str, by: str, say: bool = True, ignore_input: bool =
     return False
 
 
+# RESTART MARKS (pending item field "restarted").
+# INVARIANT: restart marks are set and cleared only by the ending run's own wrapper
+# (wrap_live -> restart_for_input, here) and by the settle_orphan status pass. No CLI flag,
+# env variable or argument reachable by an agent can set or clear them; the agent's environment
+# carries no restart trigger (the restart is an ordinary `orch run start` with a clean
+# environment). tests/test_lifecycle.py checks that nothing else in orch names the field.
 def restart_for_input(root: Path, tid: str, name: str, by: str) -> bool:
     """A live session ended while a person's answer or message still waited to go in: start the next run
     (same resume path as Continue), so it does not sit there with nobody to read it. Once per waiting item:
@@ -588,7 +597,7 @@ def restart_for_input(root: Path, tid: str, name: str, by: str) -> bool:
 
 
 def _restart_for_input(root: Path, tid: str, name: str, by: str, ids: set[str]) -> bool:
-    argv = procs.orch_python_argv("run", "start", tid, "--agent", name, "--by", by, "--restart")
+    argv = procs.orch_python_argv("run", "start", tid, "--agent", name, "--by", by)
     env = adapters.human_environ(os.environ)  # not the ended run's own call
     with locked(root, tid):
         if read(root, tid):
@@ -605,28 +614,48 @@ def _restart_for_input(root: Path, tid: str, name: str, by: str, ids: set[str]) 
             if i["id"] in ids:
                 i["restarted"] = tickets.now()
         _pending_write(root, tid, all_)
-    if _spawn_detached(root, argv, env):
+    proc = _spawn_detached(root, argv, env)
+    if proc is not None and _claimed_soon(root, tid, proc):
         return True
+    # the start was refused, died or did not claim in time: this wrapper clears its own marks right here
     clear_restarted(root, tid, ids)
     ids.clear()
     return False
 
 
-def clear_restarted(root: Path, tid: str, ids: set[str] | None = None) -> None:
-    """A restart did not come (could not be spawned, or the start was refused): its items may start the agent
-    another time. ids None = every waiting item."""
+RESTART_WAIT_SECONDS = 20
+
+
+def _claimed_soon(root: Path, tid: str, proc) -> bool:
+    """Wait (bounded) until the started `orch run start` holds the ticket. False when it ended without a claim
+    or did not claim within RESTART_WAIT_SECONDS. (A live start may close this ending session meanwhile; then
+    the claim is there already.)"""
+    end = time.monotonic() + RESTART_WAIT_SECONDS
+    while time.monotonic() < end:
+        if read(root, tid):
+            return True
+        if proc.poll() is not None:  # it ended: one last look (it may have claimed right before)
+            return read(root, tid) is not None
+        time.sleep(0.1)
+    return read(root, tid) is not None
+
+
+def clear_restarted(root: Path, tid: str, ids: set[str]) -> None:
+    """Restart marks owner only (see RESTART MARKS above): those items may start the agent another time."""
+    if not ids:
+        return
     with locked(root, tid):
         all_ = _pending_read(root, tid)
         for i in all_:
-            if (ids is None and not i.get("delivered_at")) or (ids is not None and i["id"] in ids):
+            if i["id"] in ids:
                 i.pop("restarted", None)
         _pending_write(root, tid, all_)
 
 
-def _spawn_detached(root: Path, argv: list[str], env: dict) -> bool:
+def _spawn_detached(root: Path, argv: list[str], env: dict):
     kw: dict = {"start_new_session": True} if os.name != "nt" else {"creationflags": 0x00000200 | 0x00000008}
     try:
-        subprocess.Popen(
+        return subprocess.Popen(
             argv,
             cwd=root,
             stdin=subprocess.DEVNULL,
@@ -636,8 +665,7 @@ def _spawn_detached(root: Path, argv: list[str], env: dict) -> bool:
             **kw,
         )
     except OSError:
-        return False
-    return True
+        return None
 
 
 def settle_orphan(root: Path, tid: str, at: float | None = None) -> bool:

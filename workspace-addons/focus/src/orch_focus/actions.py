@@ -179,7 +179,8 @@ def _without_agent(environ) -> dict:
 
         print("orch could not check who is acting here:", file=sys.stderr)  # the full text: server side only
         traceback.print_exc(file=sys.stderr)
-        where = Path(getattr(e, "filename", "") or "").name  # never a full path or file content in the page
+        fn = getattr(e, "filename", None)
+        where = Path(fn).name if isinstance(fn, str) and fn else ""  # never a full path or file content
         why = e.__class__.__name__ + (f" in {where}" if where else "")
         raise Unavailable(f"orch could not check who is acting here ({why}). Fix that and try again.") from None
 
