@@ -863,10 +863,6 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
             chat_groups.note_answer_kept(root, asked, msg)  # a later answer is kept as a note
         return f"not applied to {asked['ticket']}: {e}", None
     _to_waiting_agent(root, t["id"], q, by)
-    if asked.get("group"):
-        from orch import chat_groups
-
-        chat_groups.after_answer(root, msg, t["id"])
     return f"answered {asked['question_id']} on {asked['ticket']} (via {via})", asked["ticket"]
 
 
@@ -967,13 +963,6 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
 # ---- phone texts and the allow question (SA-01, SA-12, UX-02) -----------------------------------
 
 ALLOW_OPTIONS = ("Allow once", "Always", "Ignore")
-_ALLOW_WORDS = {
-    "allow once": "once",
-    "once": "once",
-    "always": "permanent",
-    "ignore": "ignore",
-    "no": "ignore",
-}
 
 
 def _by_relay(frm: str) -> str:
@@ -1425,7 +1414,7 @@ def _allow_ticket(root: Path, mid: str) -> str | None:
     return None
 
 
-def _ensure_allow_question(root: Path, msg: dict) -> str:
+def _ensure_allow_question(root: Path, msg: dict, notify: bool = True) -> str:
     """A delegate/start without an allow becomes a waiting ticket with the relay:allow question, once."""
     if (tid := _allow_ticket(root, msg["id"])) is not None:
         return tid
@@ -1447,12 +1436,24 @@ def _ensure_allow_question(root: Path, msg: dict) -> str:
     grouped = msg_group(msg) and msg["type"] == "delegate"
     options = ["once", "always", "no"] if grouped else list(ALLOW_OPTIONS)  # G11 wire words
     _, q = tickets.ask(root, tid, text, options, None, by, kind="relay:allow", action=json.dumps(action))
-    if grouped:  # a task from a group: the host hears "waiting for approval", our phones get the question
-        from orch import chat_groups
-
-        with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
-            chat_groups.waiting_approval(root, msg, tid, q["id"])
+    if (
+        grouped and notify
+    ):  # a task from a group: the host hears "waiting for approval", our phones the question
+        _group_waiting(root, msg, tid)
     return tid
+
+
+def _group_waiting(root: Path, msg: dict, tid: str) -> None:
+    """The group side of a new allow question (host: waiting_approval; phones: the question). Never inside
+    relay.lock. Safe to call twice: the group side records the allow ticket and sends once."""
+    if not (msg_group(msg) and msg.get("type") == "delegate" and tid):
+        return
+    from orch import chat_groups
+
+    with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError, StopIteration):
+        t = tickets.load(root, tid)
+        q = next(x for x in t["questions"] if x.get("kind") == "relay:allow")
+        chat_groups.waiting_approval(root, msg, tid, q["id"])
 
 
 def _drop_note(root: Path, mid: str, note: str) -> None:
@@ -1469,7 +1470,8 @@ def _person(answered_by) -> str:
 
 def apply_allow_answers(root: Path) -> list[str]:
     """Apply each answered relay:allow question once (any surface answered it). Returns notes."""
-    notes = []
+    notes: list[str] = []
+    denied: list[str] = []
     with locked(root):
         for t in tickets.list_all(root):
             r = t.get("ext", {}).get("relay", {})
@@ -1482,7 +1484,11 @@ def apply_allow_answers(root: Path) -> list[str]:
             )
             if q is None or r.get("allow_applied") == q["id"]:
                 continue
-            choice = _ALLOW_WORDS.get(" ".join(str(q["answer"]).split()).casefold())
+            from orch import chat_groups
+
+            choice = {"once": "once", "always": "permanent", "no": "ignore"}.get(
+                chat_groups.parse_allow_answer(q["answer"])
+            )
             if choice is None:
                 if r.get("allow_note") != q["id"]:
                     ans = clean_untrusted(str(q["answer"]), 100)
@@ -1505,7 +1511,7 @@ def apply_allow_answers(root: Path) -> list[str]:
                 q.get("answered_by") or "unknown",
             )
             if choice == "ignore":
-                _group_denied(root, mid)
+                denied.append(mid)  # told to the group after relay.lock is released
                 _drop_note(root, mid, f"ignored by {who} ({via})")
                 if mid not in seen(root):
                     _mark_seen(root, mid)
@@ -1527,6 +1533,8 @@ def apply_allow_answers(root: Path) -> list[str]:
 
             tickets.apply_op(root, t["id"], op)
             notes.append(label)
+    for mid in denied:  # outside relay.lock
+        _group_denied(root, mid)
     return notes
 
 
@@ -1629,16 +1637,22 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                     )
                     continue
             elif typ in ("answer", "allow"):
+                after = None  # group hooks run after relay.lock is released (lock order: relay, never inside)
                 with locked(root):
                     if m["id"] not in seen(root):  # another reader may have handled it meanwhile
                         if typ == "answer":
                             note, applied = _apply_answer(root, m)
+                            if applied and msg_group(m):
+                                after = "answer"
                         else:
                             note = _store_allow(root, m)
-                            if not msg_group(m):
-                                _group_allow(root, m)
+                            after = "allow"
                         auto = True
                         _mark_seen(root, m["id"])  # last
+                if after == "answer":
+                    _group_after_answer(root, m, applied)
+                elif after == "allow":
+                    _group_allow(root, m)
             elif _is_mobile_off(m):
                 note, auto = _handle_mobile_off(root, m), True
             elif typ == "text" and str(m.get("from", "")).startswith("ph_"):
@@ -1673,7 +1687,8 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                 continue
             elif typ in ("delegate", "start") and not _allowed_or_made(root, m):
                 with locked(root):
-                    applied = _ensure_allow_question(root, m)
+                    applied = _ensure_allow_question(root, m, notify=False)
+                _group_waiting(root, m, applied)  # after relay.lock is released
                 note = f"waiting for your answer on {applied}"
                 auto = True
             if not auto and (
@@ -1730,6 +1745,13 @@ def _group_denied(root: Path, mid: str) -> None:
 
     with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
         chat_groups.denied(root, mid)
+
+
+def _group_after_answer(root: Path, m: dict, ticket: str | None) -> None:
+    from orch import chat_groups
+
+    with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
+        chat_groups.after_answer(root, m, ticket)
 
 
 def _group_allow(root: Path, m: dict) -> None:

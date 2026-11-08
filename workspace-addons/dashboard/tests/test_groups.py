@@ -152,3 +152,54 @@ def test_group_ops_run_orch_with_exact_argv(act_server, act_orch):
     assert add[:5] == ["relay", "group", "add", "t_abcdef", "ws_1"]
     assert rm[:5] == ["relay", "group", "remove", "t_abcdef", "ws_1"]
     json.dumps(say)
+
+
+def test_groups_pass_only_cleaned_fields(ws, tmp_path):
+    listing = {
+        "hosted": [],
+        "joined": [
+            {
+                "host": "ws_fin0000001",
+                "id": "grp_t_zzzzzz",
+                "title": "T",
+                "members": [
+                    {"ws": "ws_a", "name": "A", "look": {"icon": "<script>", "color": "red"}},
+                    {"ws": "ws_b", "name": "B", "look": {"icon": "house", "color": "amber", "x": "y"}},
+                ],
+                "card": {
+                    "title": "C",
+                    "ticket": "t_abcdef",
+                    "evil": "x",
+                    "done": "many",
+                    "total": 3,
+                    "rev": 2,
+                    "checklist": [{"text": "a", "done": True, "x": 1}],
+                    "question": {"text": "q", "evil": 1},
+                },
+                "log": [
+                    {
+                        "id": "m_1",
+                        "seq": 1,
+                        "type": "text",
+                        "text": "hi",
+                        "shown": "F",
+                        "authority": True,
+                        "task": {"status": "done", "evil": "no"},
+                        "event": {"kind": "closed", "evil": "no"},
+                        "file": {"name": "n.txt", "evil": "no"},
+                    }
+                ],
+            }
+        ],
+    }
+    g = load_groups(ws, str(fake(tmp_path, listing)))["joined"][0]
+    assert g["members"][0]["look"] is None and g["members"][1]["look"] == {"icon": "house", "color": "amber"}
+    assert "evil" not in g["card"] and g["card"]["done"] is None and g["card"]["total"] == 3
+    assert g["card"]["checklist"] == [{"text": "a", "done": True}] and g["card"]["question"] == {"text": "q"}
+    item = g["log"][0]
+    assert (
+        item["authority"] is False
+        and item["task"] == {"status": "done"}
+        and item["event"] == {"kind": "closed"}
+    )
+    assert item["file"] == {"name": "n.txt"}

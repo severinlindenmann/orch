@@ -1575,3 +1575,234 @@ def test_secrets_folder_is_matched_without_case_or_trailing_dots(proj, run, rel,
     code, _, err = run("relay", "group", "share", host, str(d / "key.txt"))
     assert code != 0 and "password" in err
     assert not rel.blobs
+
+
+# ---- second review (8 Nov): status, bombs, intents, delegate, re-add, bounds, G11 denial, lock order
+
+
+def test_task_status_is_set_only_after_every_check_and_a_repeat_is_silent(proj, run, rel, grp):
+    host, gid, d = grp
+    bad = task_msg(HOME, gid, host, d, "done", "result", task={"ticket": "nope"}, id=mid("bd1"))
+    assert "is not valid" in inbox(run, rel, bad)[0]["note"]
+    st = json.loads((proj / ".orch/secrets/groups.json").read_text())
+    assert st["hosted"][gid]["tasks"][d]["status"] == "waiting_start"  # the dropped message changed nothing
+    inbox(run, rel, task_msg(HOME, gid, host, d, "denied", "failure", id=mid("dn1")))
+    first = len([m for m in rel.sent if m["body"].get("group_event", {}).get("kind") == "denied"])
+    assert first == 3  # one event: members and phones
+    rel.sent.clear()
+    for i in range(3):  # the same status again with fresh ids: no event, no fan-out, no push
+        out = inbox(run, rel, task_msg(HOME, gid, host, d, "denied", "failure", id=mid(f"dn{i + 2}")))
+        assert "already denied" in out[0]["note"]
+    assert gout(rel) == []
+
+
+def test_pdf_decompression_bomb_is_refused_not_expanded():
+    import zlib
+
+    c = zlib.compressobj()
+    parts = [c.compress(b"\0" * (1 << 20)) for _ in range(cg.INFLATE_MAX // (1 << 20) + 20)] + [c.flush()]
+    bomb = b"%PDF-1.4\nstream\n" + b"".join(parts) + b"\nendstream\n%%EOF"
+    assert len(bomb) < 1_000_000
+    with pytest.raises(cg.Refused, match="too large once it is opened"):
+        cg.check_file(bomb, "x.pdf")
+    ok = b"%PDF-1.4\nstream\n" + zlib.compress(b"plain words") + b"\nendstream\n%%EOF"
+    assert cg.check_file(ok, "ok.pdf") == "application/pdf"
+
+
+def test_file_publish_is_idempotent_and_replays_the_same_bytes(proj, run, rel, grp, monkeypatch):
+    host, gid, d = grp
+    f = proj / "a.txt"
+    f.write_text("fine words")
+    path = proj / ".orch/secrets/groups.json"
+    real = cg._send
+    calls = []
+
+    def die(*a, **k):
+        calls.append(1)
+        raise SystemExit("killed")
+
+    monkeypatch.setattr(cg, "_send", die)
+    with pytest.raises(SystemExit):
+        cg.share_file(proj, host, f, "A file")
+    g = json.loads(path.read_text())["hosted"][gid]
+    assert len(g["pending"]) == 1 and next(iter(g["pending"].values()))["kind"] == "file"
+    seq_before = g["seq"]
+    monkeypatch.setattr(cg, "_send", real)
+    # a workspace joins after the crash: the replay must not include it, and must not renumber
+    rel.snapshot["workspaces"]["workspaces"].append(entry("ws_late000001", "Late", "house", "amber"))
+    run("relay", "refresh")
+    rel.sent.clear()
+    run("relay", "inbox")
+    files = [m for m in rel.sent if m["type"] == "file"]
+    assert {m["to"] for m in files} == {HOME, BANK}
+    assert {m["body"]["group"]["seq"] for m in files} == {seq_before}
+    assert all(w["ws"] != "ws_late000001" for m in files for w in m["body"]["group"]["members"])
+    assert json.loads(path.read_text())["hosted"][gid]["pending"] == {}
+
+
+def test_delegate_after_send_never_falls_back_and_unsent_is_never_recorded(proj, run, rel, host, monkeypatch):
+    real_publish = cg._publish
+
+    def boom(*a, **k):
+        if k.get("task"):  # the group card after the task went
+            raise cg.Refused("card failed")
+        return real_publish(*a, **k)
+
+    monkeypatch.setattr(cg, "_publish", boom)
+    code, _, err = run("relay", "delegate", "Home", "Once only", "--text", "x", "--ticket", host, "--group")
+    assert code == 0, err
+    assert len(sent(rel, type="delegate")) == 1  # no plain second delegate: the member runs it once
+    st = json.loads((proj / ".orch/secrets/groups.json").read_text())
+    assert len(st["hosted"]["grp_" + host]["delegates"][HOME]) == 1
+    monkeypatch.setattr(cg, "_publish", real_publish)
+    real_send = cg._send
+    monkeypatch.setattr(cg, "_send", lambda *a, **k: None if a[2] == "delegate" else real_send(*a, **k))
+    rel.sent.clear()
+    code, _, err = run("relay", "delegate", "Bank", "Not sent", "--text", "x", "--ticket", host, "--group")
+    assert code == 0, err
+    st = json.loads((proj / ".orch/secrets/groups.json").read_text())
+    assert BANK not in st["hosted"]["grp_" + host]["delegates"]  # nothing recorded for the unsent group task
+    assert len(sent(rel, type="delegate")) == 1 and "group" not in sent(rel, type="delegate")[0]["body"]
+
+
+def test_an_agent_cannot_add_back_a_member_a_person_removed(proj, run, rel, host, monkeypatch):
+    run("relay", "group", "add", host, HOME)
+    with monkeypatch.context() as mp:
+        mp.setattr(tickets, "require_human", lambda *a, **k: None)
+        assert run("relay", "group", "remove", host, "Home")[0] == 0
+    monkeypatch.setenv("CLAUDECODE", "1")  # an agent session, no terminal
+    code, _, err = run("relay", "group", "add", host, "Home")
+    assert code != 0 and "Only a human" in err
+    code, _, err = run("relay", "delegate", "Home", "Sneaky", "--text", "x", "--ticket", host, "--group")
+    assert not [m for m in sent(rel, type="delegate") if "group" in m["body"]]
+
+
+def test_member_side_fields_are_bounded_and_cleaned(proj, run, rel, member):
+    m = from_host("text", {"text": "hi"}, seq=1, id=mid("bnd"))
+    m["created_at"] = "not a time <script>"
+    m["body"]["by"] = "<img src=x>"
+    m["body"]["group"]["title"] = "T" * 5000
+    m["body"]["group"]["members"] = [
+        {"ws": FIN, "name": "F" * 900, "look": {"icon": "<script>", "color": "red"}},
+        {"ws": WS, "name": "Me", "look": {"icon": "house", "color": "amber", "x": "y"}},
+        {"ws": "not-a-ws", "name": "Evil"},
+    ]
+    m["body"]["task"] = {
+        "delegate": "m_" + "a" * 16,
+        "status": "working",
+        "ticket": "../../x",
+        "title": "t" * 900,
+    }
+    inbox(run, rel, m)
+    j = _joined(proj)
+    assert len(j["title"]) <= 120 and [x["ws"] for x in j["members"]] == [FIN, WS]
+    assert len(j["members"][0]["name"]) <= 60 and "look" not in j["members"][0]
+    assert j["members"][1]["look"] == {"icon": "house", "color": "amber"}
+    item = j["log"][0]
+    assert item["at"] is None and item["by"] is None and "ticket" not in item["task"]
+    assert len(item["task"]["title"]) <= 120
+    bad_header = from_host("text", {"text": "x"}, seq=2, id=mid("bnd2"), i="b2")
+    bad_header["body"]["group"]["id"] = "grp_t_UPPER!!"
+    bad_header["ticket"] = "t_UPPER!!"
+    assert "header is not valid" in inbox(run, rel, bad_header)[0]["note"]
+
+
+def test_denied_reaches_the_host_even_when_the_first_report_failed(proj, run, rel, member, monkeypatch):
+    real = cg._report
+
+    def lose_first(root, st, j, delegate, status, *a, **k):
+        return None if status == "waiting_approval" else real(root, st, j, delegate, status, *a, **k)
+
+    monkeypatch.setattr(cg, "_report", lose_first)
+    d = from_host("delegate", {"title": "Do it", "text": "x"}, id=mid("dlg-lost"))
+    inbox(run, rel, d)
+    t = next(t for t in tickets.list_all(proj) if t["questions"])
+    rel.sent.clear()
+    run("answer", t["id"], "q1", "no", "--via", "cli")
+    run("relay", "inbox")
+    task = [m for m in sent(rel, to=FIN) if m["body"].get("task")]
+    assert [m["body"]["task"]["status"] for m in task] == ["denied"]
+
+
+def _spy_lock_order(monkeypatch, proj):
+    held = []
+    real = cg._state
+
+    @contextlib.contextmanager
+    def spy(root):
+        held.append((proj / ".orch" / "relay.lock").exists())  # is relay.lock held while we take groups.lock?
+        with real(root) as st:
+            yield st
+
+    monkeypatch.setattr(cg, "_state", spy)
+    return held
+
+
+import contextlib  # noqa: E402
+
+
+def test_group_hooks_never_run_inside_relay_lock_member_side(proj, run, rel, member, monkeypatch):
+    held = _spy_lock_order(monkeypatch, proj)
+    d = from_host("delegate", {"title": "Do it", "text": "x"}, id=mid("dlg-lock"))
+    inbox(run, rel, d)  # waiting_approval hook
+    t = next(t for t in tickets.list_all(proj) if t["questions"])
+    run("answer", t["id"], "q1", "no", "--via", "cli")
+    run("relay", "inbox")  # denied hook
+    assert held and not any(held)
+
+
+def test_group_hooks_never_run_inside_relay_lock_host_side(proj, run, rel, grp, monkeypatch):
+    host, gid, d = grp
+    tickets.ask(proj, host, "Where is it?", [], None, "agent:t")
+    run("relay", "group", "ask", host, "Home", "q1")
+    qm = sent(rel, type="question")[0]
+    held = _spy_lock_order(monkeypatch, proj)
+    inbox(
+        run,
+        rel,
+        task_msg(HOME, gid, host, d, "waiting_approval", "ack", task={"question_message": mid("hq")}),
+    )
+    ans = {
+        "schema": "orch.msg/1", "id": mid("lockans"), "from": HOME, "to": WS, "type": "answer",
+        "created_at": "2026-11-08T10:06:00Z", "reply_to": qm["id"], "ticket": host,
+        "body": {"question_id": "q1", "answer": "y", "group": qm["body"]["group"], "by": HOME, "via": "helper"},  # noqa: E501
+    }  # fmt: skip
+    inbox(run, rel, ans)  # after_answer hook
+    allow = {"schema": "orch.msg/1", "id": mid("lockalw"), "from": HOME, "to": WS, "type": "allow",
+             "created_at": "2026-11-08T10:04:00Z", "reply_to": d,
+             "body": {"mode": "once", "kind": "delegate", "token": "ora_" + "x" * 22}}  # fmt: skip
+    inbox(run, rel, allow)  # on_allow hook
+    assert held and not any(held)
+    assert [m for m in rel.sent if m["body"].get("group_event", {}).get("kind") == "approved"]
+
+
+def test_sync_and_an_answer_at_the_same_time_lose_nothing(proj, run, rel, grp):
+    import threading
+
+    host, gid, d = grp
+    tickets.ask(proj, host, "Where is it?", [], None, "agent:t")
+    run("relay", "group", "ask", host, "Home", "q1")
+    qm = sent(rel, type="question")[0]
+    ans = {
+        "schema": "orch.msg/1", "id": mid("thr-ans"), "from": HOME, "to": WS, "type": "answer",
+        "created_at": "2026-11-08T10:06:00Z", "reply_to": qm["id"], "ticket": host,
+        "body": {"question_id": "q1", "answer": "thread answer", "group": qm["body"]["group"], "by": HOME,
+                 "via": "helper"},
+    }  # fmt: skip
+    rel.inbox.append(ans)
+    errs = []
+
+    def syncer():
+        try:
+            for _ in range(5):
+                relay.sync_groups(proj)
+        except Exception as e:  # noqa: BLE001
+            errs.append(e)
+
+    th = threading.Thread(target=syncer)
+    th.start()
+    relay.inbox(proj, 0)
+    th.join()
+    assert not errs
+    assert tickets.load(proj, host)["questions"][0]["answer"] == "thread answer"
+    assert [m for m in gout(rel) if m["body"]["text"] == "thread answer"]  # the group saw the answer

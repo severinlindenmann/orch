@@ -515,12 +515,29 @@ def read_shared(path: Path, root: Path, confined: bool) -> bytes:
         os.close(fd)
 
 
+INFLATE_MAX = 50 * 1024 * 1024  # all inflated PDF streams together: a bomb is refused, not expanded
+
+
 def _pdf_text(data: bytes) -> str:
-    """Rough text of a PDF for the secret scan: the raw bytes plus every inflated stream."""
+    """Rough text of a PDF for the secret scan: the raw bytes plus every inflated stream. Streams are inflated
+    in 1 MB steps with a running cap (INFLATE_MAX); a file that expands past it is refused."""
     out = [data.decode("latin-1")]
+    total = 0
     for m in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", data, re.S):
-        with contextlib.suppress(zlib.error):
-            out.append(zlib.decompress(m.group(1)).decode("latin-1"))
+        d = zlib.decompressobj()
+        chunk = m.group(1)
+        try:
+            while chunk:
+                part = d.decompress(chunk, 1 << 20)
+                total += len(part)
+                if total > INFLATE_MAX:
+                    raise Refused("This file is too large once it is opened, so it was not shared")
+                out.append(part.decode("latin-1"))
+                if d.eof:
+                    break
+                chunk = d.unconsumed_tail
+        except zlib.error:
+            continue
     return "\n".join(out)
 
 
@@ -633,11 +650,17 @@ def _entry(root: Path, ws: str) -> dict | None:
     return next((w for w in relay._read_dir(root).get("workspaces", []) if w.get("id") == ws), None)
 
 
-def _look(entry: dict | None) -> dict | None:
-    lk = (entry or {}).get("look")
-    if isinstance(lk, dict) and isinstance(lk.get("icon"), str) and isinstance(lk.get("color"), str):
+def _valid_look(lk) -> dict | None:
+    """A look is {icon, color} from the allowlists of orch.look, nothing else."""
+    from orch import look
+
+    if isinstance(lk, dict) and lk.get("icon") in look.ICON_IDS and lk.get("color") in look.COLOR_IDS:
         return {"icon": lk["icon"], "color": lk["color"]}
     return None
+
+
+def _look(entry: dict | None) -> dict | None:
+    return _valid_look((entry or {}).get("look"))
 
 
 def _own_look(root: Path) -> dict | None:
@@ -859,6 +882,11 @@ def add_member(
         cur = g["members"].get(ws)
         if ws == me or (cur and not cur.get("left_at")):
             return {"group": g["id"], "ws": ws, "added": False}
+        if cur and cur.get("left_at") and cur.get("reason") == "removed":
+            # a person's removal is not undone by an agent
+            tickets.require_human(
+                f"Add {cur.get('name') or ws} back to the group?", "adding a removed workspace again"
+            )
         if len(_active(g, True)) >= MAX_MEMBERS:
             raise Refused("A group has at most 8 members.")
         g["members"][ws] = {
@@ -1027,6 +1055,7 @@ def _publish(
     errors: list | None = None,
     members: bool = True,
     recipients: list[str] | None = None,
+    snap: dict | None = None,
 ) -> int:
     """Fan one group message out: one copy per other member and one to the phones, same type (text), fan-out
     ids, one group seq (the same seq on a retry of the same origin). Never back to the sender."""
@@ -1044,8 +1073,10 @@ def _publish(
         g["origins"][origin_id] = {"seq": seq, "at": at}
         g["origins"] = dict(list(g["origins"].items())[-ORIGINS_KEEP:])
         # intent record: with the seq saved first, a crash before the sends is replayed by `sync` with the
-        # origin id, seq and time, so the retry is byte-identical (the relay dedupes it)
+        # origin id, seq, time, member list and recipients as they were, so the retry is byte-identical
+        snap = {"gw": _wire(g), "recipients": list(_active(g) if recipients is None else recipients)}
         g.setdefault("pending", {})[origin_id] = {
+            "snap": snap,
             "text": text,
             "origin_from": origin_from,
             "at": at,
@@ -1061,9 +1092,10 @@ def _publish(
         _persist(root)
     by, via, phone = _by_via(origin_from, host, via)
     text = phone_view.redact(text)[:TEXT_MAX]
+    snap = snap or {"gw": _wire(g), "recipients": list(_active(g) if recipients is None else recipients)}
     base = {
         "text": text,
-        "group": _wire(g, seq),
+        "group": {**snap["gw"], "seq": seq},
         "by": by,
         "via": via,
         "origin": {"id": origin_id, "from": origin_from, "at": at},
@@ -1077,7 +1109,7 @@ def _publish(
     if update:
         base["update"] = update
     if members:
-        for ws in _active(g) if recipients is None else recipients:
+        for ws in snap["recipients"]:
             if ws == origin_from or ws in exclude:
                 continue
             _send(
@@ -1107,10 +1139,17 @@ def _publish(
 
 
 def replay_pending(root: Path, g: dict) -> None:
-    """Send again what was recorded before a crash (same origin id, seq and time)."""
+    """Send again what was recorded before a crash (same origin id, seq, time, members and recipients)."""
     for oid, spec in list(g.get("pending", {}).items()):
         try:
-            _publish(root, g, origin_id=oid, **{**spec, "exclude": tuple(spec.get("exclude") or ())})
+            if spec.get("kind") == "file":
+                a = {
+                    k: spec[k]
+                    for k in ("origin_from", "blob_id", "name", "size", "sha", "mime", "ttl", "only")
+                }
+                _publish_file(root, g, oid, **a, errors=[], snap=spec["snap"], view=spec.get("view"))
+            else:
+                _publish(root, g, origin_id=oid, **{**spec, "exclude": tuple(spec.get("exclude") or ())})
         except Refused:
             g["pending"].pop(oid, None)  # it can't be sent any more (e.g. the phone was unpaired)
 
@@ -1208,6 +1247,7 @@ def delegate(
     from orch import relay
 
     held = _is_member(root, tid, ws)
+    sent = False
     try:
         add_member(root, tid, ws, by, need=("text", "delegate"))
         gid = "grp_" + tid
@@ -1227,24 +1267,37 @@ def delegate(
                 body["checklist"] = [_line(c, 200) for c in checklist[:20]]
             if tok := relay._received_token(root, ws, "delegate", None):
                 body["allow_token"] = tok
-            g["delegates"].setdefault(ws, []).append(mid)
-            g["tasks"][mid] = {"ws": ws, "status": "waiting_start", "title": body["title"]}
+            if g["seq"] >= SEQ_MAX:
+                raise Refused("This group has used up its message numbers.")
             msg = _send(root, ws, "delegate", body, tid, mid=mid)
-            task = {"delegate": mid, "ws": ws, "title": body["title"], "status": "waiting_start"}
-            _publish(
-                root,
-                g,
-                text=f"Task for {g['members'][ws]['name']}: {body['title']}"[:TEXT_MAX],
-                origin_id=relay.new_id(),
-                origin_from=g["host"],
-                at=tickets.now(),
-                task=task,
-                update={"kind": "note"},
-            )
+            if msg is None:  # not sent: nothing is recorded, the caller may still send a plain delegate
+                raise Refused("The task could not be sent to the group.")
+            sent = True
+            g["delegates"].setdefault(ws, []).append(mid)  # recorded only after a successful send (G9)
+            g["tasks"][mid] = {"ws": ws, "status": "waiting_start", "title": body["title"]}
+            task = {
+                "delegate": mid,
+                "ws": ws,
+                "title": _line(body["title"], TITLE_MAX),
+                "status": "waiting_start",
+            }
+            try:
+                _publish(
+                    root,
+                    g,
+                    text=f"Task for {g['members'][ws]['name']}: {body['title']}"[:TEXT_MAX],
+                    origin_id=relay.new_id(),
+                    origin_from=g["host"],
+                    at=tickets.now(),
+                    task=task,
+                    update={"kind": "note"},
+                )
+            except Refused:
+                pass  # the task went; only the card for the group is missing
         _history(root, tid, by, f"Task for {ws} (group): {title}"[:2000])
-        return msg or {"id": mid, "sent": False}
+        return msg
     except Refused:
-        if not held:  # the task didn't go: the workspace is not left in the group
+        if not sent and not held:  # the task didn't go: the workspace is not left in the group
             _drop_member_quietly(root, tid, ws)
         raise
 
@@ -1304,17 +1357,49 @@ def _publish_file(
     ttl: str,
     only: str | None,
     errors: list,
+    snap: dict | None = None,
+    view: dict | None = None,
 ) -> None:
-    host, at = g["host"], tickets.now()
-    if g["seq"] >= SEQ_MAX:
-        raise Refused("This group has used up its message numbers.")
-    g["seq"] += 1
-    seq = g["seq"]
-    g["origins"][oid] = {"seq": seq, "at": at}
-    _persist(root)
-    by, via, _ = _by_via(origin_from, host)
+    host = g["host"]
+    prev = g["origins"].get(oid)
+    if prev:  # the same origin again (a retry or a replay): same seq and time, nothing new is numbered
+        seq, at = prev["seq"], prev["at"]
+    else:
+        if g["seq"] >= SEQ_MAX:
+            raise Refused("This group has used up its message numbers.")
+        at = tickets.now()
+        g["seq"] += 1
+        seq = g["seq"]
+        g["origins"][oid] = {"seq": seq, "at": at}
+    snap = snap or {"gw": _wire(g), "recipients": list(_active(g))}
     share = {"kind": "image" if mime.startswith("image/") else "file", "title": ttl, "mime": mime}
-    for ws in _active(g):
+    if view is None and not only:
+        view = phone_view.view_for(root, g["ticket"]) or {
+            "title": g["title"],
+            "status": "open",
+            "running": False,
+            "checklist": [],
+            "done": 0,
+            "total": 0,
+            "history_tail": [],
+            "attachments": [],
+        }
+        atts = [a for a in view.get("attachments", []) if a.get("blob_id") != blob_id]
+        atts.insert(
+            0,
+            {"kind": share["kind"], "title": ttl, "blob_id": blob_id, "name": name, "size": size, "at": at},
+        )
+        view["attachments"] = atts
+        phone_view.fit(view)
+    if not prev:  # intent record, saved before anything is sent (G12)
+        g.setdefault("pending", {})[oid] = {
+            "kind": "file", "origin_from": origin_from, "blob_id": blob_id, "name": name, "size": size,
+            "sha": sha, "mime": mime, "ttl": ttl, "only": only, "snap": snap, "view": view,
+        }  # fmt: skip
+        _persist(root)
+    by, via, _ = _by_via(origin_from, host)
+    gw = {**snap["gw"], "seq": seq}
+    for ws in snap["recipients"]:
         if ws == origin_from or (only and ws != only):
             continue
         body = {
@@ -1323,54 +1408,30 @@ def _publish_file(
             "size": size,
             "sha256": sha,
             "text": ttl,
-            "group": _wire(g, seq),
+            "group": gw,
             "by": by,
             "via": via,
             "share": share,
             "origin": {"id": oid, "from": origin_from, "at": at},
         }
         _send(root, ws, "file", body, g["ticket"], fanout_id(host, oid, ws), at=at, errors=errors)
-    if only:
-        return
-    view = phone_view.view_for(root, g["ticket"]) or {
-        "title": g["title"],
-        "status": "open",
-        "running": False,
-        "checklist": [],
-        "done": 0,
-        "total": 0,
-        "history_tail": [],
-        "attachments": [],
-    }
-    atts = [a for a in view.get("attachments", []) if a.get("blob_id") != blob_id]
-    atts.insert(
-        0,
-        {
-            "kind": "image" if share["kind"] == "image" else "file",
-            "title": ttl,
-            "blob_id": blob_id,
-            "name": name,
-            "size": size,
-            "at": at,
-        },
-    )
-    view["attachments"] = atts
-    phone_view.fit(view)
-    pb = {
-        "text": ttl,
-        "group": _wire(g, seq),
-        "by": by,
-        "via": via,
-        "origin": {"id": oid, "from": origin_from, "at": at},
-        "update": {"kind": "note"},
-        "ticket_view": view,
-        "shared_files": [blob_id],
-    }
-    if msg := _send(
-        root, "phones", "text", pb, g["ticket"], fanout_id(host, oid, "phones"), at=at, errors=errors
-    ):
-        _remember_copy(g, msg["id"])
+    if not only:
+        pb = {
+            "text": ttl,
+            "group": gw,
+            "by": by,
+            "via": via,
+            "origin": {"id": oid, "from": origin_from, "at": at},
+            "update": {"kind": "note"},
+            "ticket_view": view,
+            "shared_files": [blob_id],
+        }
+        if msg := _send(
+            root, "phones", "text", pb, g["ticket"], fanout_id(host, oid, "phones"), at=at, errors=errors
+        ):
+            _remember_copy(g, msg["id"])
     g["msgs"] += 1
+    g.get("pending", {}).pop(oid, None)
 
 
 # ---- host: what members and phones send ----------------------------------------------------------------
@@ -1494,7 +1555,6 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
         rec = g["tasks"].get(task["delegate"])
         if rec is None:
             return _drop(st, m, "unknown delegate")
-        rec["status"] = task["status"]
         clean_task = {"delegate": task["delegate"], "ws": frm, "status": task["status"]}
         for k, rx in (("ticket", TICKET_RE), ("key", KEY_RE), ("question_message", MID_RE)):
             if k not in task:
@@ -1502,9 +1562,17 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
             if not (isinstance(task[k], str) and rx.fullmatch(task[k])):  # member-supplied: shape-checked
                 return _drop(st, m, f"task.{k} is not valid")
             clean_task[k] = task[k]
+        clean_task["title"] = _line(task.get("title") or rec.get("title") or "", TITLE_MAX)
+        if rec["status"] == clean_task["status"]:  # a repeated status: told once, never again (no push)
+            return {
+                "handled": True,
+                "auto": True,
+                "note": f"task is already {rec['status']}",
+                "applied": None,
+            }
+        rec["status"] = clean_task["status"]  # only now: every check has passed
         if "ticket" in clean_task:
             rec["ticket"], rec["key"] = clean_task["ticket"], clean_task.get("key")
-        clean_task["title"] = _line(task.get("title") or rec.get("title") or "", TITLE_MAX)
         task = clean_task
         _history(root, g["ticket"], f"agent:{_line(name, 60)}", f"Task for {name}: {task['status']}")
     else:
@@ -1582,6 +1650,10 @@ def _host_file(root: Path, st: dict, g: dict, m: dict, errors: list) -> dict:
     from orch import relay
 
     b, frm = m["body"], m["from"]
+    if (
+        m["id"] in g["origins"]
+    ):  # numbered and saved before: `sync` finishes the sends, nothing is fetched twice
+        return {"handled": True, "auto": False, "note": "group file already taken", "applied": g["ticket"]}
     if not isinstance(b.get("share"), dict):
         return _drop(st, m, "a group file needs body.share")
     name = relay.safe_name(phone_view.redact(str(b.get("name", "file"))))[:120] or "file"
@@ -1749,7 +1821,10 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
     host, gid = gw["host"], gw["id"]
     if frm != host:
         return _drop(st, m, "group message from a workspace that is not the group's host")
-    if me not in members_of(gw):
+    cw = _clean_wire(gw)  # what is kept of the header: shape-checked ids, one-line names, allowlisted looks
+    if cw is None:
+        return _drop(st, m, "the group header is not valid")
+    if me not in [x["ws"] for x in cw["members"]]:
         return _drop(st, m, "this workspace is not in the group")
     if typ == "answer":
         return _drop(st, m, "answers go to the host, not to members")
@@ -1778,9 +1853,9 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
         j = st["joined"][key] = {
             "host": host,
             "id": gid,
-            "ticket": m.get("ticket"),
-            "title": gw["title"],
-            "members": gw["members"],
+            "ticket": _opt(TICKET_RE, m.get("ticket")),
+            "title": cw["title"],
+            "members": cw["members"],
             "from_seq": None,
             "seq_max": 0,
             "log": [],
@@ -1797,7 +1872,7 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
         return _drop(st, m, "this group is closed for this workspace")
     ev = b.get("group_event") if isinstance(b.get("group_event"), dict) else None
     seq = gw.get("seq")
-    j["title"], j["members"] = gw["title"], gw["members"]  # the latest list from the host ("per <host>")
+    j["title"], j["members"] = cw["title"], cw["members"]  # the latest list from the host ("per <host>")
     if ev and ev.get("kind") == "member_added" and ev.get("ws") == me and j["from_seq"] is None:
         j["from_seq"] = int(ev.get("from_seq") or seq or 1)
     if j["from_seq"] is None and seq is not None:
@@ -1944,14 +2019,14 @@ def _member_apply(st: dict, j: dict, m: dict, me: str, late: bool = False) -> di
         if card.get("rev", 0) >= old.get("rev", 0):
             j["card"] = _clean_card(card)
         return {"handled": True, "auto": True, "note": f"ticket card from {_host_name(j)}", "applied": None}
-    by = b.get("by")
+    by = b.get("by") if b.get("by") == "you" or _opt(WS_RE, b.get("by")) else None
     # `by: you` from another workspace is never owner authority: shown as "<host> (person)", untrusted data
     shown = f"{_host_name(j)} (person)" if by == "you" else _member_name(j, by)
     item = {
         "id": m["id"],
         "seq": seq,
         "type": typ,
-        "at": m.get("created_at"),
+        "at": _opt(TIME_RE, m.get("created_at")),
         "by": by,
         "shown": shown,
         "authority": False,
@@ -1960,23 +2035,19 @@ def _member_apply(st: dict, j: dict, m: dict, me: str, late: bool = False) -> di
     if late:
         item["late"] = True
     if ev:
-        item["event"] = {
-            k: v for k, v in ev.items() if k in ("kind", "ws", "name", "from_seq", "reason", "mode")
-        }
+        item["event"] = _c_event(ev)
     if isinstance(b.get("task"), dict):
-        item["task"] = {
-            k: v for k, v in b["task"].items() if k in ("delegate", "ws", "ticket", "key", "title", "status")
-        }
+        item["task"] = _c_task(b["task"])
     if typ == "file" and isinstance(b.get("share"), dict):
         item["file"] = {
-            "blob_id": b.get("blob_id"),
-            "name": _line(b.get("name", ""), 200),
-            "size": b.get("size"),
-            "sha256": b.get("sha256"),
-            "title": clean_untrusted(str(b["share"].get("title", "")), 120),
+            "blob_id": _opt(BLOB_RE, b.get("blob_id")),
+            "name": _line(b.get("name") or "", 200),
+            "size": _int_in(b.get("size"), 0, FILE_MAX),
+            "sha256": _opt(SHA_RE, b.get("sha256")),
+            "title": _line(b["share"].get("title") or "", 120),
         }
     if typ == "question":
-        item["question_id"] = b.get("question_id")
+        item["question_id"] = _opt(QID_RE, b.get("question_id"))
     j["log"] = [*j["log"], item][-LOG_KEEP:]
     if typ == "delegate":
         j["tasks"].setdefault(m["id"], {"ticket": None, "status": None})
@@ -1993,28 +2064,99 @@ def _member_apply(st: dict, j: dict, m: dict, me: str, late: bool = False) -> di
     return {"handled": True, "auto": not waits, "note": note, "applied": None}
 
 
+WS_RE = re.compile(r"ws_[a-z0-9]{10}")
+GID_RE = re.compile(r"grp_t_[a-z0-9]{6,16}")
+QID_RE = re.compile(r"q[0-9]{1,6}")
+SHA_RE = re.compile(r"[0-9a-f]{64}")
+BLOB_RE = re.compile(r"b_[a-z0-9]{16}")
+TIME_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]{8,16}(Z|[+-][0-9:]{5})")
+TASK_STATUSES = tuple(TASK_RANK)
+
+
+def _int_in(v, lo: int, hi: int) -> int | None:
+    return v if isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi else None
+
+
+def _opt(rx: re.Pattern, v) -> str | None:
+    return v if isinstance(v, str) and rx.fullmatch(v) else None
+
+
+def _clean_wire(gw: dict) -> dict | None:
+    """The group header a member keeps: shape-checked ids, one-line cleaned title and names, looks from the
+    allowlist, at most 8 members. None when the id or host is not a real one."""
+    if not (_opt(GID_RE, gw.get("id")) and _opt(WS_RE, gw.get("host"))):
+        return None
+    members = []
+    for x in (gw.get("members") if isinstance(gw.get("members"), list) else [])[:MAX_MEMBERS]:
+        if isinstance(x, dict) and _opt(WS_RE, x.get("ws")):
+            item = {"ws": x["ws"], "name": _line(x.get("name") or x["ws"], 60) or x["ws"]}
+            if lk := _valid_look(x.get("look")):
+                item["look"] = lk
+            members.append(item)
+    out = {"id": gw["id"], "host": gw["host"], "title": _line(gw.get("title") or "", TITLE_MAX) or "Group"}
+    out["members"] = members
+    return out
+
+
+def _c_task(t: dict) -> dict:
+    out: dict = {}
+    for k, rx in (("delegate", MID_RE), ("ws", WS_RE), ("ticket", TICKET_RE), ("key", KEY_RE)):
+        if v := _opt(rx, t.get(k)):
+            out[k] = v
+    if t.get("status") in TASK_STATUSES:
+        out["status"] = t["status"]
+    if isinstance(t.get("title"), str):
+        out["title"] = _line(t["title"], TITLE_MAX)
+    return out
+
+
+def _c_event(ev: dict) -> dict:
+    out: dict = {}
+    if ev.get("kind") in (
+        "created",
+        "member_added",
+        "member_left",
+        "approval_needed",
+        "approved",
+        "denied",
+        "closed",
+    ):
+        out["kind"] = ev["kind"]
+    if v := _opt(WS_RE, ev.get("ws")):
+        out["ws"] = v
+    if isinstance(ev.get("name"), str):
+        out["name"] = _line(ev["name"], 60)
+    if (v := _int_in(ev.get("from_seq"), 1, SEQ_MAX)) is not None:
+        out["from_seq"] = v
+    if ev.get("reason") in ("left", "removed"):
+        out["reason"] = ev["reason"]
+    if ev.get("mode") in ("once", "always"):
+        out["mode"] = ev["mode"]
+    return out
+
+
 def _clean_card(c: dict) -> dict:
     q = c.get("question") if isinstance(c.get("question"), dict) else None
     return {
-        "ticket": c.get("ticket"),
-        "key": c.get("key"),
-        "title": clean_untrusted(str(c.get("title", "")), TITLE_MAX),
-        "status": clean_untrusted(str(c.get("status", "")), 20),
-        "summary": clean_untrusted(str(c.get("summary", "")), 280),
+        "ticket": _opt(TICKET_RE, c.get("ticket")),
+        "key": _opt(KEY_RE, c.get("key")),
+        "title": _line(c.get("title") or "", TITLE_MAX),
+        "status": _line(c.get("status") or "", 20),
+        "summary": _line(c.get("summary") or "", 280),
         "question": {
-            "question_id": q.get("question_id"),
-            "text": clean_untrusted(str(q.get("text", "")), 500),
+            "question_id": _opt(QID_RE, q.get("question_id")),
+            "text": _line(q.get("text") or "", 500),
         }
         if q
         else None,
         "checklist": [
-            {"text": clean_untrusted(str(i.get("text", "")), 200), "done": bool(i.get("done"))}
+            {"text": _line(i.get("text") or "", 200), "done": bool(i.get("done"))}
             for i in (c.get("checklist") or [])[:CARD_CHECKLIST]
             if isinstance(i, dict)
         ],
-        "done": c.get("done"),
-        "total": c.get("total"),
-        "rev": c.get("rev", 0),
+        "done": _int_in(c.get("done"), 0, 9999),
+        "total": _int_in(c.get("total"), 0, 9999),
+        "rev": _int_in(c.get("rev"), 0, SEQ_MAX) or 0,
     }
 
 
@@ -2076,7 +2218,7 @@ def _report(
         "ws": me,
         "ticket": own_tid,
         "status": status,
-        "title": _line(title, 200) or "Task",
+        "title": _line(title, TITLE_MAX) or "Task",
     }
     if key:
         task["key"] = key
@@ -2122,6 +2264,11 @@ def waiting_approval(root: Path, delegate_msg: dict, allow_tid: str, qid: str) -
         j = st["joined"].get(_jkey(gw.get("host"), gw.get("id")))
         if j is None or delegate_msg["id"] not in j["tasks"]:
             return
+        rec = j["tasks"][delegate_msg["id"]]
+        if rec.get("allow_ticket"):  # asked before (the hook may run twice): nothing is sent twice
+            return
+        rec["allow_ticket"] = allow_tid  # kept first, so a "no" always finds its way back to the host
+        _persist(root)
         t = tickets.load(root, allow_tid)
         q = next((x for x in t["questions"] if x["id"] == qid), None)
         if q is None:
@@ -2158,7 +2305,8 @@ def denied(root: Path, delegate_id: str) -> None:
     with _state(root) as st:
         for j in st["joined"].values():
             if delegate_id in j["tasks"]:
-                tid = j["tasks"][delegate_id].get("ticket")
+                rec = j["tasks"][delegate_id]
+                tid = rec.get("ticket") or rec.get("allow_ticket")
                 if tid:
                     _report(root, st, j, delegate_id, "denied", tid, "Task")
                 return
