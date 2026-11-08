@@ -194,17 +194,62 @@ def heartbeat(root: Path) -> None:
         relay.heartbeat(root, payload(root))
 
 
-def routes_to_phone(root: Path) -> bool:
-    """True when a new question should also go to the phones: mode on, relay add-on on and connected."""
+def _relay_ready(root: Path) -> bool:
     from orch import addons
 
     try:
-        if not is_on(root) or "relay" not in addons.active(root):
+        if "relay" not in addons.active(root):
             return False
         net.load_service(root, "relay")
     except Refused:
         return False
     return True
+
+
+def routes_to_phone(root: Path) -> bool:
+    """True when a new question should also go to the phones: mode on, relay add-on on and connected."""
+    try:
+        return is_on(root) and _relay_ready(root)
+    except Refused:
+        return False
+
+
+PARENT_DEPTH = 20  # a parent chain longer than this is not followed further
+
+
+def from_phone(root: Path, tid: str | None) -> bool:
+    """True when this ticket or one of its parents was started from a phone (ext.relay.origin = phone) or got
+    a phone text (ext.relay.phone). A broken parent field ends the walk as False."""
+    from orch import tickets
+
+    seen: set[str] = set()
+    while isinstance(tid, str) and tid and tid not in seen and len(seen) < PARENT_DEPTH:
+        seen.add(tid)
+        try:
+            t = tickets.load(root, tid)
+        except (Refused, OSError, ValueError):
+            return False
+        r = (t.get("ext") or {}).get("relay")
+        # started from a phone, or the owner wrote to it from a phone (relay._continue, ph_ senders only);
+        # never ext.relay.messages: peer workspace messages land there too
+        if isinstance(r, dict) and (r.get("origin") == "phone" or r.get("phone") is True):
+            return True
+        tid = t.get("parent")
+    return False
+
+
+def question_to_phone(root: Path, tid: str, run_ticket: str | None = None) -> bool:
+    """True when a new question on `tid` also goes to the phones, without --phone: the relay is on and
+    connected, and Mobile mode is on, or the ticket (or a parent) came from a phone, or the asking agent
+    runs for such a ticket (`run_ticket`, its ORCH_TICKET: a phone ticket's agent that made a new ticket).
+    A question the phone started is answered where it started; other tickets stay quiet (every question
+    is pushed)."""
+    if not _relay_ready(root):
+        return False
+    with contextlib.suppress(Refused):
+        if is_on(root):
+            return True
+    return from_phone(root, tid) or from_phone(root, run_ticket)
 
 
 def turn_on(root: Path, hours=None, spawn=None) -> dict:

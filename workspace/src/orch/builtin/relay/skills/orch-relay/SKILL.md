@@ -74,8 +74,11 @@ Read `.agents/skills/orch-relay/workspaces.json` (next to this file). Pick by de
     orch ask <id> "<question>" --option Yes --option No --recommend Yes --phone   # the answer lands in the ticket
     orch relay send phones "<short result>" --ticket <id>                         # or a phone id ph_... from workspaces.json
 
-Send `--update ack` when you start on a phone request and `--update result` when it is done
-(`orch relay send phones "<text>" --ticket <id> --update result`); only result, question, failure and stopped reach the
+A question on a ticket that came from the phone (or on a ticket you made while working on one) goes to the phone by
+itself, also without `--phone`; in Mobile mode every question does.
+Send `--update ack` when you start on a phone request and `--update result` when it is done or ready for review
+(`orch relay send phones "<text>" --ticket <id> --update result`), also for any ticket you finish while Mobile mode
+is on (`orch relay mobile status`); a status change alone reaches the phone only quietly. Only result, question, failure and stopped reach the
 phone as a push. Those updates also show the ticket on the phone: tasks, the last history lines, and proof you marked
 `--role result` or `--role check` (files are copied to the relay; other proof stays here). Never put secrets in them.
 A message from `ph_...` is the owner writing. Answer with `orch relay send ph_... "<text>"`.

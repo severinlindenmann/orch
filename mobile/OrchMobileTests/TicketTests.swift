@@ -48,6 +48,17 @@ final class TicketTests: XCTestCase {
         XCTAssertEqual(ChatBuilder.rooms(d, read: ReadState()).first?.tickets.count, 3)
     }
 
+    func testActiveWithoutARunningAgentIsNotWorking() {
+        func u(_ running: Bool?) -> TicketUpdate {
+            TicketUpdate(id: "m_n", workspace: "ws_a", workspaceName: "A", ticket: "t_1", kind: "note", title: "T", text: "Tasks: 0 of 2 done",
+                         replyTo: nil, at: "2026-11-08T08:00:00Z", ticketView: TicketSnapshot(title: "T", status: "active", running: running))
+        }
+        XCTAssertEqual(TicketBuilder.build(updates: [u(false)], questions: [], answers: [:]).map(\.status), [.backlog])
+        XCTAssertEqual(TicketBuilder.build(updates: [u(true)], questions: [], answers: [:]).map(\.status), [.working])
+        XCTAssertEqual(TicketBuilder.build(updates: [u(nil)], questions: [], answers: [:]).map(\.status), [.working], "older snapshots without running")
+        XCTAssertNotEqual(TopicStatus(TicketBuilder.build(updates: [u(false)], questions: [], answers: [:])[0]), .working)
+    }
+
     func testFailureAndStoppedAreDoneWithOwnSign() {
         func t(_ k: String) -> Ticket {
             TicketBuilder.build(updates: [TicketUpdate(id: "m", workspace: "ws_a", workspaceName: "A", ticket: "t_1", kind: k, title: "X", text: "x", replyTo: nil, at: "2026-11-05T10:00:00Z")],

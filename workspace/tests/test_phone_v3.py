@@ -841,3 +841,14 @@ def test_blob_download_is_bounded_and_state_defaults_are_repaired(proj, run, con
             limit=relay.PHONE_BLOB_MAX,
         )
     assert relay._fetch_blob(proj, "b_ph0nef1le0000003", None) is None
+
+
+def test_phone_text_marks_the_ticket_as_phone_for_questions(proj, run, new_ticket, conn):
+    from orch import mobile_mode, tickets
+
+    tid = new_ticket("Weekly report")
+    assert not mobile_mode.from_phone(proj, tid)
+    conn.inbox.append(msg(M1, {"text": "More please"}, ticket=tid))
+    run("relay", "inbox")
+    assert tickets.load(proj, tid)["ext"]["relay"]["phone"] is True
+    assert mobile_mode.from_phone(proj, tid)
