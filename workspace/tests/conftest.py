@@ -134,6 +134,11 @@ def proj(tmp_path, monkeypatch):
     # wait for: they run the same steps in the command itself, as on other systems. test_winfinish.py covers
     # the background path (it sets needed() itself), the Windows e2e flows cover it for real.
     monkeypatch.setattr(winfinish, "needed", lambda: False)
+    # An answer starts the asking agent again (fb9). Only the tests that set up a fake agent let that happen
+    # (fixture `auto_resume`); anywhere else it would start the real agent tool found on this machine.
+    from orch import runs_live
+
+    monkeypatch.setattr(runs_live, "resume_after_answer", lambda *a, **k: None)
     return tmp_path
 
 

@@ -137,7 +137,7 @@ def test_ask_answer(proj, run, new_ticket, validate):
     validate(t)
     q = t["questions"][0]
     assert (q["answer"], q["answered_by"], q["via"]) == ("TIMESTAMP", "human:Severin", "phone")
-    assert t["status"] == "active" and t["waiting_on"] is None
+    assert t["status"] == "ready" and t["waiting_on"] is None  # answered, no agent runs: Ready, not Working
     assert run("answer", tid, "q1", "DATE")[0] == 2
 
 

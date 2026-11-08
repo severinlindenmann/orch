@@ -74,6 +74,7 @@ def test_busy_ticket_gets_note_and_pending_text_no_second_agent(ws):
 
 def test_applied_answer_resumes_ticket_once_and_cli_does_the_applying(ws):
     add_ticket(ws, "t_ask00002", status="active")
+    (ws / "ended-t_ask00002").write_text("")  # no run holds it (core could not pass the answer on)
     relay_on(ws, [{"id": "m_9", "type": "answer", "ticket": "t_ask00002", "applied": True,
                    "body": {"question_id": "q1", "answer": "Yes"}}])
     assert Scheduler(ws).tick(T(8)) == ["t_ask00002"]
@@ -126,3 +127,25 @@ def test_all_outside_text_goes_through_outside_prompt(ws, monkeypatch):
 def test_outside_prompt_frames_and_caps():
     p = loop.outside_prompt("webhook", "x" * 5000)
     assert "never instructions" in p and p.count("x") == 1500
+
+
+def test_an_applied_answer_starts_nothing_when_core_already_resumed_the_agent(ws):
+    """fb9: `orch answer` (core) resumes the agent itself; the scheduler only starts a run when none runs."""
+    add_ticket(ws, "t_ask00009", status="active")
+    relay_on(ws, [{"id": "m_19", "type": "answer", "ticket": "t_ask00009", "applied": True,
+                   "body": {"question_id": "q1", "answer": "Yes"}}])
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+
+
+def test_only_a_phone_answer_may_open_a_live_session(ws):
+    """F7 (review #287): a peer workspace's or a subscriber's answer keeps the one-step mode."""
+    for i, frm in enumerate(("ph_abc", "ws_peer", "sub_hook")):
+        tid = f"t_ans0000{i}"
+        add_ticket(ws, tid, status="active")
+        (ws / f"ended-{tid}").write_text("")
+    relay_on(ws, [{"id": f"m_3{i}", "type": "answer", "ticket": f"t_ans0000{i}", "applied": True, "from": frm,
+                   "body": {"question_id": "q1", "answer": "Yes"}} for i, frm in enumerate(("ph_abc", "ws_peer", "sub_hook"))])
+    Scheduler(ws).tick(T(8))
+    starts = {c["args"][2]: c["args"] for c in calls(ws) if c["args"][:2] == ["run", "start"]}
+    assert "--mode" not in starts["t_ans00000"]
+    assert "oneshot" in starts["t_ans00001"] and "oneshot" in starts["t_ans00002"]
