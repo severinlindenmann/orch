@@ -3,9 +3,9 @@
 const expanded = new Set();
 const treeExpanded = new Set(), treeSeen = new Set(), treeAll = new Set(), ticketTabs = new Map();
 let ticketSearch = '', ticketMine = false;
-function filterTickets(items, query, mine) {
+function filterTickets(items, query, mine, me = '') {
   const needle = String(query || '').trim().toLowerCase();
-  return items.filter(t => (!mine || !String(t.owner || '').startsWith('agent:')) &&
+  return items.filter(t => (!mine || (me ? String(t.owner || '') === me : !String(t.owner || '').startsWith('agent:'))) &&
     (!needle || [t.title, t.key, t.owner, t.note].some(value => String(value || '').toLowerCase().includes(needle))));
 }
 function ticketParents(items) {
@@ -13,7 +13,7 @@ function ticketParents(items) {
   for (const t of items) for (const id of Array.isArray(t.children) ? t.children : []) if (!parents.has(id) && id !== t.id) parents.set(id, t.id);
   return items.map(t => t.parent || !parents.has(t.id) ? t : {...t, parent:parents.get(t.id)});
 }
-function filteredTickets() { return filterTickets(ticketParents(tickets()), ticketSearch, ticketMine); }
+function filteredTickets() { return filterTickets(ticketParents(tickets()), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : ''); }
 function ticketFilters() {
   const input = h('input', {className:'input', type:'search', placeholder:'Search tickets', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
   input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; render(); });
