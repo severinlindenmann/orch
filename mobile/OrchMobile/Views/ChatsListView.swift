@@ -13,6 +13,9 @@ struct ChatsListView: View {
     @State private var sheet: ShellSheet?
     @State private var pendingSheet: ShellSheet?
     @State private var showSettings = false
+    // Concatenated Text can't take themeFont: these follow Dynamic Type live (ScaledMetric reads the environment).
+    @ScaledMetric private var questionKeySize: CGFloat = 13
+    @ScaledMetric private var questionTitleSize: CGFloat = 17
     private let filters = ["All", "Unread", "Needs you"]
 
     var body: some View {
@@ -181,8 +184,8 @@ struct ChatsListView: View {
                                 Image(systemName: "bubble.left").themeFont(20).foregroundStyle(Theme.warn).accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("\(key.map { "\($0) " } ?? "")")
-                                        .font(Theme.font(13)).foregroundColor(Theme.muted)
-                                    + Text(title).font(Theme.font(17, .semibold)).foregroundColor(Theme.text)
+                                        .font(.system(size: questionKeySize)).foregroundColor(Theme.muted)
+                                    + Text(title).font(.system(size: questionTitleSize, weight: .semibold)).foregroundColor(Theme.text)
                                     Text(question.message.body.text).themeFont(13).foregroundStyle(Theme.muted).lineLimit(2)
                                 }.frame(maxWidth: .infinity, alignment: .leading).multilineTextAlignment(.leading)
                                 ShellChevron()

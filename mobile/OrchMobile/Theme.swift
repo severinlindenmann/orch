@@ -14,12 +14,8 @@ enum Theme {
     static let warn = Color(hex: 0xfbbf24), danger = Color(hex: 0xf87171), purple = Color(hex: 0xb392f0)
 }
 
-extension Theme {
-    /// Fixed design sizes that still follow the user's Dynamic Type setting.
-    static func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: UIFontMetrics.default.scaledValue(for: size), weight: weight)
-    }
-}
+// No static Theme.font(size): a size read once in body does not follow a live Dynamic Type change (the a11y audit
+// flags it). Use themeFont(_:) on views, or an @ScaledMetric size for concatenated Text.
 
 /// Scales with the live Dynamic Type setting (ScaledMetric reads the environment), so a text-size change
 /// re-lays out the open screen without resetting view identity (drafts, sheets and confirmations survive).
