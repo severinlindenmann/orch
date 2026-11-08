@@ -12,8 +12,8 @@ from jsonschema import Draft202012Validator
 from orch_dashboard.data import load_addons, load_state
 from orch_dashboard.views import ViewPuller, check_view
 
-from .conftest import CONTRACTS, VIEW
 from . import webjs
+from .conftest import CONTRACTS, VIEW
 
 SCHEMA = json.loads((CONTRACTS.parent / "addon-view.schema.json").read_text())
 VALIDATOR = Draft202012Validator(SCHEMA)

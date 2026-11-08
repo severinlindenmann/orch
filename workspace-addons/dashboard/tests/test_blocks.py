@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from .conftest import VIEW
 from . import webjs
+from .conftest import VIEW
 
 WEB = Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "web"
 HARNESS = Path(__file__).parent / "blocks_harness.js"

@@ -23,6 +23,7 @@ def test_manifest():
 def test_web_has_no_inline_styles():
     """CSP is style-src 'self': inline style attributes would be silently blocked."""
     from orch_dashboard.server import web_file
+
     from . import webjs
 
     assert 'style="' not in webjs.all_js() and ' style=' not in web_file("index.html").decode()

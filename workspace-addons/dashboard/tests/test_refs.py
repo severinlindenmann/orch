@@ -10,8 +10,8 @@ import pytest
 
 from orch_dashboard import actions, data
 
-from .test_act import acts, calls, post
 from . import webjs
+from .test_act import acts, calls, post
 
 ADDONS = [
     {
