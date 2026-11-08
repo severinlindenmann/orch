@@ -93,6 +93,7 @@ def tui(proj, tmp_path, monkeypatch):
         _until(lambda: "ready" in _pane(proj, tid), "fake TUI up")
         rec = runs.claim(proj, tid, "human:t", agent, "live", pid=os.getpid())
         rec["live"] = {"state": "idle", "since": tickets.now()}
+        rec["up"] = True
         runs._write(proj, rec)
         return rec
 
@@ -186,6 +187,7 @@ def _stuck(proj, run, monkeypatch, pane=None, mode="0", text="Please add a rain 
     tid = _ticket(run)
     rec = runs.claim(proj, tid, "human:t", agent, "live", pid=os.getpid())
     rec["live"] = {"state": "idle", "since": tickets.now()}
+    rec["up"] = True
     runs._write(proj, rec)
     line = runs_live.notice_line(tid, False)
     sent = []
@@ -409,7 +411,15 @@ def test_no_notice_is_typed_while_a_dialog_shows(proj, run, monkeypatch):
 
 @pytest.mark.parametrize(
     "pane",
-    ["Overwrite? (y/n)", "  ❯ 1. Keep going", "Do you want this?", "Do you trust the files in this folder?"],
+    [
+        "Overwrite? (y/n)",
+        "  ❯ 1. Keep going",
+        "Do you want this?",
+        "Do you trust the files in this folder?",
+        "Trust this folder?",
+        "Trust the workspace",
+        "Would you like to trust these files?",
+    ],
 )
 def test_a_tool_without_its_own_dialog_rule_gets_the_generic_one(proj, run, monkeypatch, pane):
     config.add_agent(proj, "fake", "true {prompt}", "true --interactive")
@@ -623,3 +633,12 @@ def test_a_working_run_or_one_waiting_for_a_person_is_never_counted(proj, run, m
             is None
         )
     assert "blocked" not in memo
+
+
+def test_no_notice_while_the_tool_never_said_it_is_up(proj, run, monkeypatch):
+    tid, rn, sent, _ = _idle_with_input(proj, run, monkeypatch)
+    rec = runs.read(proj, tid)
+    rec.pop("up", None)  # idle, but no hook ever said the tool is up
+    runs._write(proj, rec)
+    n = len(sent)
+    assert runs_live.deliver(proj, tid) == 0 and len(sent) == n
