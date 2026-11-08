@@ -312,7 +312,11 @@ def dispatch(args, root: Path) -> bool:
         if not tid:
             raise Refused("Say which ticket: orch run input <ticket>")
         tickets.load(root, tid)
-        text, n = runs_live.read_input(root, tid, os.environ.get("ORCH_RUN"))
+        run_env = os.environ.get("ORCH_RUN")
+        agent = bool(run_env or tickets.agent_tool())
+        if agent and os.environ.get("ORCH_TICKET") and os.environ["ORCH_TICKET"] != tid:
+            raise Refused(f"This run works on {os.environ['ORCH_TICKET']}, not on {tid}.")
+        text, n = runs_live.read_input(root, tid, run_env, agent)
         _out(args, {"ticket": tid, "items": n, "text": text}, text or f"Nothing new on {_name(root, tid)}.")
     elif sub == "send":
         _send(args, root, tid, by)

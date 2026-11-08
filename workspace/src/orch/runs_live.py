@@ -246,26 +246,48 @@ def clean(text: str) -> str:
 QUICK = 3  # tmux timeout on the submit-check path: a hung tmux never keeps the wrapper waiting long
 NONE_POLLS = 20  # checks in a row that could not tell (a dialog, copy mode): counted like "still unsent"
 NUDGES = 2  # notices for the same waiting input the agent took but did not read; then a one-step run
-_ASCII = re.compile(r"[^\x20-\x7e]")
+
+
+_TID = re.compile(r"t_[a-z0-9]{6,16}")
+_NOTICE = {
+    True: "Your task for orch ticket {tid} is ready. Read it with: orch run input {tid}",
+    False: "New input on orch ticket {tid}. Read it with: orch run input {tid}",
+}
 
 
 def notice_line(tid: str, start: bool) -> str:
-    """The only text orch types into a live session. ASCII, one line, no person's words."""
-    if start:
-        text = f"Your task for orch ticket {tid} is ready. Read it with: orch run input {tid}"
-    else:
-        text = f"New input on orch ticket {tid}. Read it with: orch run input {tid}"
-    return _ASCII.sub("", clean(text))
+    """The only text orch types into a live session: a constant template plus a ticket id that matches the
+    strict id pattern (anything else is refused). ASCII, one line, no person's words."""
+    if not isinstance(tid, str) or not _TID.fullmatch(tid):
+        raise Refused("orch types a notice only for a ticket id like t_abc123.")
+    line = _NOTICE[bool(start)].format(tid=tid)
+    assert line.isascii() and line.isprintable()
+    return line
 
 
 def input_text(items: list[dict]) -> str:
-    """What `orch run input` prints: a start prompt as it is, everything else as '- <by>: <text>'."""
-    start = [i["text"] for i in items if i.get("via") == "start"]
+    """What `orch run input` prints: the start prompt (orch's own text), then each item as
+    '- <sender from the record>:' with every line of its text indented, so a text cannot forge another
+    sender's line. Control characters are removed (a person's terminal may show this)."""
+    start = [clean(i["text"]) for i in items if i.get("via") == "start"]
     rest = [i for i in items if i.get("via") != "start"]
     parts = start[-1:]  # a newer start prompt replaces an older one
     if rest:
-        parts.append("New input:\n" + "\n".join(f"- {i['by']}: {i['text']}" for i in rest))
+        blocks = []
+        for i in rest:
+            body = "\n".join("    " + ln for ln in clean(i["text"]).splitlines() or [""])
+            blocks.append(f"- {clean(str(i['by']))}:\n{body}")
+        parts.append("New input:\n" + "\n".join(blocks))
     return "\n\n".join(parts)
+
+
+def _screen_free(root: Path, tid: str, dialog: str | None) -> bool:
+    """Before orch types its notice: the pane is readable, not in copy mode, and shows no dialog."""
+    pane = tmux(root, "capture-pane", "-p", "-t", target(tid), timeout=QUICK)
+    d = tmux(root, "display-message", "-p", "-t", target(tid), "#{pane_in_mode} #{cursor_y}", timeout=QUICK)
+    if pane.returncode != 0 or d.returncode != 0 or (d.stdout.split() or ["?"])[0] != "0":
+        return False
+    return not _dialog_shows(pane.stdout, dialog)
 
 
 def _type_line(root: Path, tid: str, line: str, timeout: float = 20) -> bool:
@@ -301,6 +323,8 @@ def deliver(root: Path, tid: str) -> int:
                 runs._write(root, rec)
             return 0
         line = notice_line(tid, any(i.get("via") == "start" for i in items))
+        if not _screen_free(root, tid, _dialog_rule(rec["agent"], root)):
+            return 0  # a dialog or a screen orch cannot read: the wrapper's watcher tries again shortly
         if not _type_line(root, tid, line):
             return 0
         rec = runs.read(root, tid) or rec
@@ -311,21 +335,29 @@ def deliver(root: Path, tid: str) -> int:
         return len(items)
 
 
-def read_input(root: Path, tid: str, run: str | None) -> tuple[str, int]:
-    """`orch run input`: the agent reads what waits for it; this is what marks it delivered."""
+def read_input(root: Path, tid: str, run: str | None, agent: bool) -> tuple[str, int]:
+    """`orch run input`. An agent (agent: its tool's environment or ORCH_RUN) reads only as the live run
+    that holds the ticket (run == the claim's run, not being stopped): that read marks the input delivered
+    and is the sign the notice was taken. A person (no agent environment) only looks: nothing is marked,
+    nothing changes for the run. Anyone else is refused."""
+    if not _TID.fullmatch(tid):
+        raise Refused("Say which ticket: orch run input <ticket id>")
+    if not agent:
+        return input_text(runs.undelivered(root, tid)), 0
     with runs.locked(root, tid):
         rec = runs.read(root, tid)
-        if run and rec and rec["run"] != run:
-            raise Refused(f"Another run works on {tid} now.")
+        if not run or not rec or rec["run"] != run or rec.get("mode") != "live":
+            raise Refused(f"Only the live run working on {tid} reads its input.")
+        if rec.get("stop_requested"):
+            raise Refused(f"The live session on {tid} is closing; the input waits for the next start.")
         items = runs.undelivered(root, tid)
         if items:
             runs.mark_delivered_locked(root, tid, [i["id"] for i in items])
-        rec = runs.read(root, tid)
-        if rec and rec.get("mode") == "live" and (not run or rec["run"] == run):
-            rec.pop("submit", None)  # the agent has it: nothing more to check or type
-            rec["live"] = {"state": "working", "since": tickets.now()}
-            rec["renewed_at"] = tickets.now()
-            runs._write(root, rec)
+        rec = runs.read(root, tid) or rec
+        rec.pop("submit", None)  # the agent has it: nothing more to check or type
+        rec["live"] = {"state": "working", "since": tickets.now()}
+        rec["renewed_at"] = tickets.now()
+        runs._write(root, rec)
     if items:
         runs.notify_working(root)
     return input_text(items), len(items)
@@ -340,6 +372,24 @@ def _log_submit(root: Path, tid: str, run: str, what: str) -> None:
         f = runs.run_dir(root) / "live-submit.log"
         with open(f, "a", encoding="utf-8") as fh:
             fh.write(f"{tickets.now()} {tid} {run} {what}\n")
+
+
+# for a tool whose adapter names no dialog of its own
+_GENERIC_DIALOG = r"Do you want|\(y/n\)|^\s*❯\s*\d|\bTrust\b"
+_BOTTOM_DIALOG = re.compile(r"Esc to cancel", re.IGNORECASE)  # counts only in the bottom rows
+
+
+def _dialog_rule(agent: str, root: Path) -> str:
+    return (adapters.load(agent, root).get("live") or {}).get("dialog") or _GENERIC_DIALOG
+
+
+def _dialog_shows(pane: str, dialog: str | None) -> bool:
+    """The tool's dialog anywhere on the visible pane (a false match only costs a key orch does not send),
+    or "Esc to cancel" in the bottom rows (where a tool draws its menus; in output above it means nothing)."""
+    if dialog and re.search(dialog, pane, re.IGNORECASE | re.MULTILINE):
+        return True
+    bottom = [ln for ln in pane.splitlines() if ln.strip()][-6:]
+    return bool(_BOTTOM_DIALOG.search("\n".join(bottom)))
 
 
 _BORDER = re.compile(r"^\s*[╭╰┌└]?[─━═]{20,}[╮╯┐┘]?\s*$")
@@ -372,7 +422,7 @@ def _look(root: Path, tid: str, line: str, dialog: str | None) -> tuple[bool | N
         return None, digest
     # the tool's dialog anywhere on the visible pane: no Enter (a false match only costs the extra Enter, and
     # such checks count towards the give-up); the box rows below only locate the notice line
-    if dialog and re.search(dialog, pane.stdout, re.IGNORECASE | re.MULTILINE):
+    if _dialog_shows(pane.stdout, dialog):
         return None, digest
     lines = pane.stdout.split("\n")
     a, b = _box_rows(lines, cy)
@@ -412,7 +462,7 @@ def _check_submit(root: Path, tid: str, run: str, t: float, end, stop) -> str | 
         else:
             if age < SUBMIT_CHECK_SECONDS or not session_exists(root, tid):
                 return None
-            dialog = (adapters.load(rec["agent"], root).get("live") or {}).get("dialog")
+            dialog = _dialog_rule(rec["agent"], root)
             unsent, digest = _look(root, tid, s.get("line") or "", dialog)
             if digest and digest != s.get("pane"):
                 s["pane"], s["quiet"] = digest, runs._iso(t)
@@ -432,7 +482,7 @@ def _check_submit(root: Path, tid: str, run: str, t: float, end, stop) -> str | 
             and (enters == 1 or age >= SUBMIT_WATCHDOG_SECONDS)
         ):
             again, _ = _look(root, tid, s.get("line") or "", dialog)  # the screen may have changed meanwhile
-            if again is True and _enter(root, tid, QUICK):
+            if again is True and not (stop is not None and stop.is_set()) and _enter(root, tid, QUICK):
                 s["enters"] = enters + 1
                 if age >= SUBMIT_WATCHDOG_SECONDS:
                     s["watchdog"] = True
@@ -519,6 +569,11 @@ def watch_submit(root: Path, tid: str, run: str, proc: subprocess.Popen, guard=N
                 return
             if rec.get("submit"):
                 check_submit(root, tid, run, end=proc.terminate, guard=guard, stop=stop)
+            elif (rec.get("live") or {}).get("state") == "idle" and rec.get("pending"):
+                # input waits while the agent is idle (a dialog kept the notice back): try again
+                with guard if guard is not None else contextlib.nullcontext():
+                    if not (stop is not None and stop.is_set()):
+                        deliver(root, tid)
         except Exception:  # never take the wrapper down
             continue
 

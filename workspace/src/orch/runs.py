@@ -1072,7 +1072,7 @@ def term_release(root: Path, tid: str, run: str, current: dict) -> None:
     _terminating = True
     if current.get("stop") is not None:  # a live run's submit watcher: stop it and wait out its check
         current["stop"].set()
-        current["guard"].acquire(timeout=5)
+        current["guard"].acquire(timeout=30)  # longer than the worst check: lock wait 10 s + tmux 5 x 3 s
     proc = current.get("proc")
     if proc is not None and proc.poll() is None:
         kill_tree(proc.pid)
@@ -1242,7 +1242,7 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
     rc = proc.wait()
     current["stop"].set()  # nothing more is checked or written by the watcher from here on
     if watcher is not None:
-        watcher.join(15)  # one check at most (its tmux calls time out after 3 s)
+        watcher.join(30)  # one check at most: run lock wait 10 s + its tmux calls (3 s each)
     if new_session and rc == 0:
         tickets.record_session(root, tid, name, new_session, host())
     now = read(root, tid)
