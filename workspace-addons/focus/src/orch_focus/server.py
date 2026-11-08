@@ -199,6 +199,7 @@ class Tracker:
         if run is None and claim.get("run") is not None:
             claim = {**claim, "run": None}  # an id that is not a run id is unknown
         v = self._shape(ticket, status, claim, board, events, self.is_generic(claim, tid))
+        v["page_key"] = proofs.page_key(tid)
         v["retry_error"] = None if v["run"]["running"] else self.perms.failed.get(tid)
         return v
 
@@ -376,9 +377,9 @@ class Handler(BaseHTTPRequestHandler):
             one = lambda k: (q.get(k) or [""])[0]
             code, body, ctype, extra = proofs.read(self.root, one("t"), one("n"), one("m") or "view")
             return self._send(code, body, ctype, {"Cross-Origin-Resource-Policy": "same-origin", **extra})
-        m = re.fullmatch(r"/page/(t_[a-z0-9]{6,16})/(.+)", path)
+        m = re.fullmatch(r"/page/(t_[a-z0-9]{6,16})/([0-9a-f]{16})/(.+)", path)
         if m:  # a page of a ticket and the files it loads, by path so relative links resolve (proofs.read_page)
-            code, body, ctype, extra = proofs.read_page(self.root, m.group(1), unquote(m.group(2)))
+            code, body, ctype, extra = proofs.read_page(self.root, m.group(1), m.group(2), unquote(m.group(3)))
             return self._send(code, body, ctype, {"Cross-Origin-Resource-Policy": "same-origin", **extra})
         if path == "/" or re.fullmatch(r"(/t)?/t/t_[a-z0-9]{6,16}", path):
             pre = self.headers.get("X-Forwarded-Prefix") or ""

@@ -15,8 +15,11 @@ own: the name goes to the helper as it came. What it decides is how the bytes ar
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import re
+import secrets
 from pathlib import Path
 
 VIEW_MAX = 2 * 1024 * 1024
@@ -54,6 +57,20 @@ ASSETS = {
     **IMAGES,
 }  # fmt: skip
 PDF = "default-src 'none'; frame-ancestors 'self'"
+
+
+# The key in a page URL (/page/<ticket>/<key>/<file>): HMAC of the ticket id under a secret made at server start.
+# Only the fenced /api/t/<ticket> answer carries it, so a foreign website cannot build a URL for <script src> or
+# <link href> even when it guesses the ticket id and the file name. It changes with every start of Focus.
+_PAGE_SECRET = secrets.token_bytes(32)
+
+
+def page_key(tid: str) -> str:
+    return hmac.new(_PAGE_SECRET, str(tid).encode(), hashlib.sha256).hexdigest()[:16]
+
+
+def page_key_ok(tid: str, key: str) -> bool:
+    return hmac.compare_digest(page_key(tid), str(key))
 
 
 def ext_of(name: str) -> str:
@@ -98,13 +115,16 @@ def read(root: Path, tid, name, mode: str) -> tuple[int, bytes, str, dict]:
     return 200, data, IMAGES.get(ext) or "text/plain; charset=utf-8", {"Content-Security-Policy": SANDBOX}
 
 
-def read_page(root: Path, tid, name) -> tuple[int, bytes, str, dict]:
-    """One file of a page (the page itself or something it loads), for GET /page/<ticket>/<name>. The same one
+def read_page(root: Path, tid, key, name) -> tuple[int, bytes, str, dict]:
+    """One file of a page (the page itself or something it loads), for GET /page/<ticket>/<key>/<name>. The key must
+    be the one of this ticket (page_key), else a plain 404. The same one
     reader as above, so `..`, links, hard links and FIFOs are refused there; the kind comes from the extension and
     only the kinds in ASSETS are served."""
     try:
         from orch import safefile
     except ImportError:
+        return NOPE
+    if not isinstance(tid, str) or not page_key_ok(tid, key):
         return NOPE
     ctype = ASSETS.get(ext_of(name)) if isinstance(name, str) else None
     if ctype is None:

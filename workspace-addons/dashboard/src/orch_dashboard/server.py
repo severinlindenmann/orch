@@ -43,15 +43,32 @@ TYPES = {
 
 PROXY = re.compile(r"/addon/([a-z][a-z0-9-]{1,31})(/(?:[A-Za-z0-9_./-]|%20)*)?")
 # An add-on may show an agent's page in a sandboxed frame (no same-origin): the frame and the files it loads come
-# with an opaque origin, so their requests are cross-site. Only GET of /page/<ticket>/<file> is let through for
+# with an opaque origin, so their requests are cross-site. Only GET of /page/<ticket>/<key>/<file> is let through for
 # that, and only when the add-on answers with its own sandbox Content-Security-Policy, which is then kept, not
 # replaced; any other answer to such a request is a 403.
-PAGE_PATH = re.compile(r"/page/t_[a-z0-9]{6,16}/.+")
+PAGE_PATH = re.compile(r"/page/t_[a-z0-9]{6,16}/[0-9a-f]{16}/.+")  # ticket, key (unguessable), file
 LOCAL = re.compile(r"http://(?:127\.0\.0\.1|localhost):(\d{1,5})/?")
 PROXY_CSP = (
     "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'self'; base-uri 'none'"
 )
 PROXY_BODY = 16384
+
+
+def _sandboxed(csp: str | None) -> bool:
+    """A real `sandbox` directive without allow-same-origin/top-navigation/popups/forms (not just the word)."""
+    for d in (csp or "").split(";"):
+        tok = d.split()
+        if tok and tok[0].lower() == "sandbox":
+            bad = {
+                "allow-same-origin",
+                "allow-top-navigation",
+                "allow-popups",
+                "allow-forms",
+                "allow-top-navigation-by-user-activation",
+                "allow-popups-to-escape-sandbox",
+            }
+            return not bad & {t.lower() for t in tok[1:]}
+    return False
 PROXY_MAX_REPLY = 4 * 1024 * 1024
 
 
@@ -143,7 +160,7 @@ class Handler(BaseHTTPRequestHandler):
         if len(data) > PROXY_MAX_REPLY:
             return self._send(502, b"That page is too large.", "text/plain; charset=utf-8")
         extra = {"X-Revision": rev} if rev else {}
-        if method == "GET" and PAGE_PATH.fullmatch(rest) and "sandbox" in (page_csp or ""):
+        if method == "GET" and PAGE_PATH.fullmatch(rest) and _sandboxed(page_csp):
             extra["Cross-Origin-Resource-Policy"] = "cross-origin"
             return self._send(r.status, data, ctype, extra, csp=page_csp)
         if cross:
