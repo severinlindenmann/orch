@@ -42,6 +42,7 @@ struct ChatsListView: View {
                     case .ticket(let ws, let ticket): TicketChatView(workspaceId: ws, ticketId: ticket)
                     case .info(let ws, let ticket):
                         ConversationInfoView(conversation: ticket.map { .topic(workspace: ws, ticket: $0) } ?? .general(workspace: ws))
+                    case .group(let host, let id): GroupRoomView(key: GroupKey(host: host, id: id))
                     case .newChat: NewTopicScreen(workspaceId: nil)
                     case .newTopic(let ws): NewTopicScreen(workspaceId: ws)
                     }
@@ -139,6 +140,7 @@ struct ChatsListView: View {
                     }
                 }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
             }
+            GroupsSection()
             if model.archivedCount > 0 { archivedRow }
         }
     }
