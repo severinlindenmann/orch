@@ -1,0 +1,69 @@
+{
+  "why": "Ticket card for a member at join: read only, no history, no files; targeted, no seq.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_sharedcard000000",
+    "from": "ws_fin0000001",
+    "to": "ws_hom0000001",
+    "type": "text",
+    "created_at": "2026-11-08T10:03:00Z",
+    "ticket": "t_fin14a",
+    "key": "FIN-14",
+    "body": {
+      "text": "From Finance · FIN-14",
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          }
+        ]
+      },
+      "by": "ws_fin0000001",
+      "via": "helper",
+      "shared_ticket": {
+        "ticket": "t_fin14a",
+        "key": "FIN-14",
+        "title": "Pay car tax 2027",
+        "status": "waiting",
+        "summary": "Pay the 2027 car tax by 30 Nov.",
+        "question": {
+          "question_id": "q1",
+          "text": "Which account paid the 2025 car tax?"
+        },
+        "checklist": [
+          {
+            "text": "Get the 2027 bill",
+            "done": true
+          },
+          {
+            "text": "Check last year's account",
+            "done": false
+          },
+          {
+            "text": "Pay",
+            "done": false
+          }
+        ],
+        "done": 1,
+        "total": 3,
+        "rev": 1
+      }
+    }
+  }
+}

@@ -38,7 +38,7 @@ if [ $addons = 1 ]; then
     n=$(basename "$d")
     # a touched add-on, or any add-on when workspace/contracts changed (CI filter), runs its checks
     if has "^workspace-addons/$n/" || [ $workspace = 1 ]; then
-      extra=""; [ "$n" = dashboard ] && extra='&& node --check src/orch_dashboard/web/app.js && node --check src/orch_dashboard/web/blocks.js'
+      extra=""; [ "$n" = dashboard ] && extra='&& node --check src/orch_dashboard/web/app.js && for f in src/orch_dashboard/web/pages/*.js; do node --check $f || exit 1; done && node --check src/orch_dashboard/web/blocks.js'
       step light "addon:$n" "$d" sh -c "uv sync -q && uv run ruff check . $extra && uv run pytest -q -n 4 -m 'not slow'"
     fi
   done
