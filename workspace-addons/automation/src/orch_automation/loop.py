@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -27,6 +28,8 @@ FAST_FAIL_SECONDS = 10
 KIND = "automation:failure"
 KINDS = (KIND,)
 TRY_AGAIN, LEAVE = "Try again", "Leave it"
+PHONE_RE = re.compile(r"ph_[A-Za-z0-9_-]{1,64}")
+GENERAL_NOTE = "General conversation"  # `orch relay inbox` note of a phone text in General
 BUSY_TEXT = "More work arrived for this ticket: read the newest note on it."
 
 
@@ -276,11 +279,15 @@ class Scheduler:
                 return None  # act_on_answers handles our own failure question
             return tid if self.start_run(tid, f"relay answer {mid}", now, phone=True) == "started" else None
         if kind == "text" and str(m.get("from", "")).startswith("ph_") and isinstance(m.get("ticket"), str):
-            # a follow-up text: the relay queued it for the running agent; only an idle ticket needs a run
-            tid = m["ticket"]
-            if not str(m.get("note", "")).startswith("added to") or orchcli.run_running(self.root, tid) is not False:
+            # a follow-up text (or one in General): the relay queued it for the agent; only an idle ticket needs a run
+            tid, note = m["ticket"], str(m.get("note", ""))
+            general = note == GENERAL_NOTE
+            if not (note.startswith("added to") or general) or orchcli.run_running(self.root, tid) is not False:
                 return None
-            return tid if self.start_run(tid, f"phone text {mid}", now, phone=True) == "started" else None
+            hint = (f"A phone text in the General conversation is waiting for you. Answer it: "
+                    f'orch relay send {m["from"]} "<your answer>" --ticket {tid}') \
+                if general and PHONE_RE.fullmatch(str(m["from"])) else None
+            return tid if self.start_run(tid, f"phone text {mid}", now, hint, phone=True) == "started" else None
         if kind == "webhook":
             wid = body.get("webhook_id")
             for t in read_tickets(self.root):

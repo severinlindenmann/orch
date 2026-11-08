@@ -178,3 +178,31 @@ def test_runs_for_the_phone_are_not_forced_to_one_step(ws):
     Scheduler(ws).tick(T(8))
     start = next(c["args"] for c in calls(ws) if c["args"][:2] == ["run", "start"])
     assert "--mode" not in start
+
+
+def test_a_general_text_starts_the_agent_on_the_general_ticket(ws):
+    """fb1B: a phone text in General was queued on the hidden General ticket and nothing ever answered it."""
+    from conftest import calls, runs_started
+
+    add_ticket(ws, "t_general1", status="open")
+    (ws / "ended-t_general1").write_text("")
+    relay_on(ws)
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_7", "type": "text", "from": "ph_abc", "ticket": "t_general1",
+                                                 "applied": True, "note": "General conversation",
+                                                 "body": {"text": "hello", "general": True}}]))
+    assert Scheduler(ws).tick(T(8)) == ["t_general1"] and runs_started(ws) == ["t_general1"]
+    start = next(c["args"] for c in calls(ws) if c["args"][:2] == ["run", "start"])
+    assert "--mode" not in start  # a person is waiting on the phone: a live session when the machine can
+    told = json.loads((ws / ".orch/tickets/t_general1.json").read_text())["history"][0]["text"]
+    assert "orch relay send ph_abc" in told and "--ticket t_general1" in told
+
+
+def test_a_general_text_while_the_agent_runs_starts_nothing(ws):
+    from conftest import runs_started
+
+    add_ticket(ws, "t_general2", status="active")
+    relay_on(ws)
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_8", "type": "text", "from": "ph_abc", "ticket": "t_general2",
+                                                 "applied": True, "note": "General conversation",
+                                                 "body": {"text": "hello", "general": True}}]))
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
