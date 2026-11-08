@@ -64,6 +64,9 @@ _IMAGE_KINDS = {  # magic bytes -> the file extensions that type may carry
 }
 
 
+_PACKED_MAGIC = (b"%PDF", b"PK\x03\x04", b"\xd0\xcf\x11\xe0")
+
+
 def _is_image(data: bytes, name: str) -> bool:
     """A real image of the type its extension names (png, jpeg, gif, webp); its bytes are still scanned."""
     ext = Path(name).suffix.lower()
@@ -82,6 +85,8 @@ def _scan(data: bytes, name: str) -> str:
     xlsx or any other packed or binary file, or text with NULs; such a file is not sent, fail closed). Text
     (UTF-8, or UTF-32/UTF-16 with a BOM) is scanned as text; an image whose type matches its extension is
     scanned as its raw bytes (text in metadata or after the image is still caught)."""
+    if data.startswith(_PACKED_MAGIC):  # pdf, zip/OOXML, OLE office: never sent, even when all ASCII
+        return "unknown"
     for bom, codec in (
         ((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"), "utf-32"),  # before UTF-16: same first two bytes
         ((b"\xff\xfe", b"\xfe\xff"), "utf-16"),

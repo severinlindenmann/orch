@@ -322,3 +322,26 @@ def test_images_are_still_scanned_and_utf32_is_read(proj, run, new_ticket, conn,
         h["text"] for h in tickets.load(proj, tid)["history"] if "was not sent to the phone" in h["text"]
     ]
     assert len(lines) == (0 if said is None else 1) and all(said in ln for ln in lines)
+
+
+@pytest.mark.parametrize(
+    "name,data",
+    [
+        (
+            "plain.pdf",
+            b"%PDF-1.4\n1 0 obj\n<< /Length 20 >>\nstream\nBT (hello) Tj ET\nendstream\nendobj\n%%EOF\n",
+        ),
+        ("hex.pdf", b"%PDF-1.4\n<< /Filter /ASCIIHexDecode >>\nstream\n48656c6c6f>\nendstream\n%%EOF\n"),
+        ("doc.docx", b"PK\x03\x04plain-ascii-looking-zip-header"),
+        ("old.doc", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),
+    ],
+)
+def test_pdf_zip_and_ole_files_are_never_sent_even_when_ascii(proj, run, new_ticket, conn, name, data):  # noqa: F811
+    tid = new_ticket("Packed")
+    artifact(proj, tid, name, data)
+    assert run("ask", tid, f"See artifacts/{name}")[0] == 0
+    assert phone_view.view_for(proj, tid)["attachments"] == []
+    lines = [
+        h["text"] for h in tickets.load(proj, tid)["history"] if "was not sent to the phone" in h["text"]
+    ]
+    assert len(lines) == 1 and "can't be checked" in lines[0]
