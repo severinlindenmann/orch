@@ -12,6 +12,9 @@ HOME = Path.home()
 HEAVY = HOME / "orch-dev/state/v2-plan-2026-11-05/build/heavy.sh"
 CARGO = HOME / ".rustup/toolchains/stable-aarch64-apple-darwin/bin"
 tmp = Path(tempfile.mkdtemp(prefix=".tf-upg-", dir=HOME / "orch-dev"))
+# orch trusts ORCH_HOME only outside any repo (~/orch-dev is one); otherwise it falls back to ~/.orch-tool.
+(HOME / ".orch-test").mkdir(exist_ok=True)
+ohome = Path(tempfile.mkdtemp(prefix="upg-", dir=HOME / ".orch-test"))
 pids: list[subprocess.Popen] = []
 ok_all = True
 
@@ -50,7 +53,8 @@ def ports(n):
 
 def start(bins, data, ps):
     rp, ra, pp, pa = ps
-    base = {"PATH": "/usr/bin:/bin", "HOME": str(tmp), "ORCH_HOME": str(tmp / ".orch-tool"), "LANG": "C.UTF-8"}
+    base = {"PATH": "/usr/bin:/bin", "HOME": str(ohome), "ORCH_HOME": str(ohome / ".orch-tool"),
+            "ORCH_HOME_STRICT": "1", "LANG": "C.UTF-8"}
     renv = {**base, "ORCH_RELAY_DATA_DIR": str(data / "relay"), "ORCH_RELAY_MASTER_KEY_FILE": str(data / "master.key"),
             "ORCH_RELAY_LISTEN": f"127.0.0.1:{rp}", "ORCH_RELAY_ADMIN_LISTEN": f"127.0.0.1:{ra}",
             "ORCH_RELAY_ADMIN_TOKEN": "r" * 24, "ORCH_RELAY_PUBLIC_ORIGIN": f"http://127.0.0.1:{rp}"}
@@ -208,5 +212,6 @@ finally:
         if wt.exists():
             subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(wt)])
     shutil.rmtree(tmp, ignore_errors=True)
+    shutil.rmtree(ohome, ignore_errors=True)
 say("RESULT: " + ("PASS" if ok_all else "FAIL"))
 sys.exit(0 if ok_all else 1)
