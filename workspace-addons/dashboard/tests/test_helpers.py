@@ -671,3 +671,9 @@ def test_ui2_small_bugs_in_markup_and_css():
     assert "mm-when" in mm and ".mm-bar.live{flex-wrap:nowrap}" in css and "@media(max-width:480px){.mm-bar.live{flex-wrap:wrap}" in css
     # 6: a skeleton is in the page before the first data arrives
     assert 'class="loading-home"' in html and 'aria-busy="true"' in html
+
+
+@node
+def test_history_line_shows_names_not_actor_ids():
+    line = call("historyLine", {"text": "agent:claude finished the work and moved it to Review"}, [])
+    assert line == "Claude finished the work and moved it to Review"
