@@ -420,7 +420,7 @@ def test_no_bare_waiting_status_label_left():
 
 def test_v1_home_and_ticket_controls():
     js = webjs.all_js()
-    home = js[js.index("function changeUnavailable") : js.index("function generalPage")]
+    home = js[js.index("function changeUnavailable") : js.index("// Chat (former General)")]
     tickets = js[js.index("function filterTickets") : js.index("function ticketNotFound")]
     assert "row.answer.recommended" in home and "' · Suggested'" in home
     assert "act('answer', {ticket:row.ticket, question:row.answer.question, answer:option})" in home
