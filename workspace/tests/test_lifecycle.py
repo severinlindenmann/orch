@@ -310,12 +310,13 @@ def test_a_live_session_that_ends_with_queued_input_is_ready_and_keeps_the_input
     assert runs.read(proj, tid) is None and _status(proj, tid) == "ready"
     assert [i["text"] for i in runs.undelivered(proj, tid)] == ["Answer to your question q1: Blue"]
     code, out, _ = run("run", "status", tid, "--json")
-    assert json.loads(out)["pending_ids"] == [runs.undelivered(proj, tid)[0]["id"]]  # for the automation host
+    assert json.loads(out)["human_pending_ids"] == [runs.undelivered(proj, tid)[0]["id"]]  # for automation
 
 
 def test_the_run_wrapper_never_starts_runs(proj):
-    """Only the automation host starts runs for queued input: nothing in core that runs inside or after an
-    agent (the run wrapper, the CLI) starts `orch run start`, and no flag or variable asks for it."""
+    """INVARIANT 1: only the automation host starts runs for queued input. Nothing in core that runs inside
+    or after an agent (the run wrapper, the CLI) starts `orch run start`; no flag or variable asks for it.
+    (INVARIANT 2 is test_only_human_pending_input_is_offered_to_start_a_run.)"""
     import pathlib
     import re
 
@@ -325,6 +326,24 @@ def test_the_run_wrapper_never_starts_runs(proj):
         assert not re.search(r'orch_python_argv\(\s*"run",\s*"start"', text), f.name
         assert "restart_for_input" not in text and '"restarted"' not in text, f.name
         assert not re.search(r"ORCH_RESTART|--restart\b", text), f.name
+
+
+def test_only_human_pending_input_is_offered_to_start_a_run(proj, run, monkeypatch):
+    """INVARIANT 2: only human-authored pending input (owner, phone, dashboard; never agent:*) starts a run,
+    once per item. Core lists only those (human_pending_ids); the automation host acts only on them."""
+    tid = _new(run)
+    runs.pending_add(proj, tid, "agent:claude", "message", "continue")  # an agent queues for itself
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
+    runs.pending_add(proj, tid, "human:owner", "message", "pretending")  # written from inside an agent
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    assert runs.human_waiting(proj, tid) == []
+    code, out, _ = run("run", "status", tid, "--json")
+    assert json.loads(out)["human_pending_ids"] == []
+    human = runs.pending_add(proj, tid, "human:owner", "answer", "Blue")
+    phone = runs.pending_add(proj, tid, "iPhone", "message", "and dessert", via="phone")
+    assert [i["id"] for i in runs.human_waiting(proj, tid)] == [human["id"], phone["id"]]
+    code, out, _ = run("run", "status", tid, "--json")
+    assert json.loads(out)["human_pending_ids"] == [human["id"], phone["id"]]
 
 
 def test_a_working_ticket_with_queued_input_and_no_run_is_ready_after_the_grace(proj, run):

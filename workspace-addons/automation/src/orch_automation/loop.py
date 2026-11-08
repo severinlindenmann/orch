@@ -25,6 +25,7 @@ def scheduled(t: dict) -> bool:
     rec = ((t.get("ext") or {}).get("automation") or {}).get("recurring") is True
     return t.get("status") in OPEN or (rec and t.get("status") == "done")
 FAST_FAIL_SECONDS = 10
+QUEUED_TRIES = 3  # starts that failed for one waiting input before it is left for a person
 KIND = "automation:failure"
 KINDS = (KIND,)
 TRY_AGAIN, LEAVE = "Try again", "Leave it"
@@ -180,28 +181,46 @@ class Scheduler:
                 started.append(t["id"])
         return started
 
-    def queued_input(self, now: datetime) -> list[str]:
-        """Only the automation host starts runs for queued input; the run wrapper never starts runs.
-        A Ready ticket with input waiting for a run (a person's answer or message that came after its agent
-        stopped) and no run gets one run, at most once per input item. The ids are saved before the start, so a
-        crash or restart never starts it twice."""
-        started = []
-        state = load_state(self.root)
+    def queued_input(self, now: datetime, skip: list[str] | None = None) -> list[str]:
+        """INVARIANT 1: only the automation host starts runs for queued input; the run wrapper never does.
+        INVARIANT 2: only human-authored pending input (owner, phone, dashboard; never agent:*) starts a run,
+        once per item. Core lists only those (`orch run status` human_pending_ids), so an agent that queues
+        input for itself or another ticket never starts anything here.
+
+        A Ready ticket with such input and no run gets one run. The ids are saved before the start (never twice
+        after a crash); a start that definitely failed gives them back, at most QUEUED_TRIES times per id. The
+        saved set is only the ids still waiting (no cap that could forget one). Same gates as the other starts:
+        a ticket switched off here (paused) is left alone, and a ticket started this pass is skipped."""
+        started: list[str] = []
+        skip = list(skip or [])
         for t in read_tickets(self.root):
-            if t.get("status") != "ready":
+            tid = t["id"]
+            if tid in skip or t.get("status") != "ready" or not self.may_start(t):
                 continue
-            st = orchcli.run_status(self.root, t["id"])
+            st = orchcli.run_status(self.root, tid)
             if not st or st.get("running") is not False:
                 continue
-            ids = [i for i in st.get("pending_ids") or [] if isinstance(i, str)]
-            done = [i for i in state.get(t["id"], {}).get("queued_started") or [] if isinstance(i, str)]
-            new = [i for i in ids if i not in done]
+            ids = [i for i in st.get("human_pending_ids") or [] if isinstance(i, str)]
+            mine = load_state(self.root).get(tid, {})
+            tries = {k: v for k, v in (mine.get("queued_tries") or {}).items() if k in ids and isinstance(v, int)}
+            done = [i for i in mine.get("queued_started") or [] if i in ids]  # only what still waits
+            new = [i for i in ids if i not in done and tries.get(i, 0) < QUEUED_TRIES]
             if not new:
+                update_state(self.root, tid, queued_started=done, queued_tries=tries)
                 continue
-            update_state(self.root, t["id"], queued_started=[*done, *new][-200:])  # first: never twice
-            if self.start_run(t["id"], "input was waiting for it", now, phone=True) == "started":
-                started.append(t["id"])
+            update_state(self.root, tid, queued_started=done + new, queued_tries=tries)  # first: never twice
+            res = self.start_run(tid, "input was waiting for it", now, phone=True)
+            if res == "started":
+                started.append(tid)
+            elif res == "failed":  # it did not start: those ids may try again (a few times)
+                for i in new:
+                    tries[i] = tries.get(i, 0) + 1
+                update_state(self.root, tid, queued_started=done, queued_tries=tries)
         return started
+
+    def may_start(self, t: dict) -> bool:
+        """The gates every start from this loop respects: a ticket switched off here is left alone."""
+        return ((t.get("ext") or {}).get("automation") or {}).get("paused") is not True
 
     # -- pass ---------------------------------------------------------------
     def tick(self, now: datetime) -> list[str]:
@@ -210,7 +229,7 @@ class Scheduler:
         self.check_watch()
         started: list[str] = self.act_on_answers(now)
         started += self.phone_tickets(now)
-        started += [t for t in self.queued_input(now) if t not in started]
+        started += self.queued_input(now, skip=started)
         state = load_state(self.root)
         for t in read_tickets(self.root):
             tid = t["id"]
