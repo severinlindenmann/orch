@@ -17,10 +17,11 @@ final class AppModel {
     private(set) var pairedWorkspaces: [WorkspaceRef] = []
 
     // Data
-    private(set) var workspaces: [Workspace] = []
+    private(set) var workspaces: [Workspace] = [] { didSet { rebuildGroups() } }
     private(set) var questions: [Question] = []
     /// Texts between this phone and its workspaces, newest first.
-    private(set) var messages: [PhoneMessage] = []
+    private(set) var messages: [PhoneMessage] = [] { didSet { rebuildGroups() } }
+    private(set) var groups = GroupSnapshot(groups: [], dropped: [])
     /// Newest work update per ticket (`GET /v1/phone/updates`).
     private(set) var updates: [TicketUpdate] = []
     /// question message id -> the answer this phone sent
@@ -310,6 +311,18 @@ final class AppModel {
         }
         outbox.reconcile(with: messages)
     }
+    private func rebuildGroups() {
+        let names = Dictionary(workspaces.map { ($0.id, $0.displayName) }, uniquingKeysWith: { first, _ in first })
+        let snapshot = GroupStore.build(messages: messages, workspaces: names, ownPhoneId: credentials?.phoneId ?? "",
+                                        ownMessageIds: Set(messages.filter(\.fromPhone).map(\.id)))
+        #if DEBUG
+        for drop in snapshot.dropped where !groups.dropped.contains(drop) {
+            print("group drop \(drop.rule) \(drop.messageId)")
+        }
+        #endif
+        if groups != snapshot { groups = snapshot }
+    }
+
     private func merge(_ items: [PhoneMessage]) {
         var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
         for m in items { byId[m.id] = m }          // newer data (delivered_at) replaces the old copy
