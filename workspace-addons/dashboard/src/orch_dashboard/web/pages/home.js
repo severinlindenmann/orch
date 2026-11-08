@@ -1,52 +1,123 @@
 'use strict';
-// Home page and the General (phone conversation) page.
+// Page controls use direct listeners; h() only sets attributes.
+function changeUnavailable() {
+  if (document.getElementById('connection')?.hidden !== false) return false;
+  window.orch.toast("Can't reach orch. Your change was not sent.", 'error');
+  return true;
+}
+function changeError(result) {
+  return result.status === 0 ? "Can't reach orch. Your change was not sent." : result.text;
+}
+function ticketTitle(t) {
+  return h('div', {className:'row ticket-title'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, typeof t.key === 'string' ? h('span', {className:'meta mono'}, t.key + ' ') : null, clean(t.title))), statusChip(t));
+}
+function parentLine(t) {
+  const parent = ticketOf(t.parent || tickets().find(p => array(p.children).includes(t.id))?.id);
+  return parent ? h('p', {className:'meta'}, 'Part of ', h('a', {href:href(parent.id)}, clean(parent.title))) : null;
+}
 function ticketRow(t) {
-  const meta = [typeof t.key === 'string' ? t.key : '', statusWord(shown(t)), name(t.owner), t.due ? 'Due ' + date(t.due) : '', snapshot ? '' : activityNote(t)].filter(Boolean);
-  const parent = ticketOf(t.parent);
-  let late = '';
-  if (overdue(t)) {
-    const days = Math.round((Date.parse(today()) - Date.parse(t.due)) / 86400000);
-    late = chip('Overdue ' + days + (days === 1 ? ' day' : ' days'), 'error');
-  }
-  return h('div', {className:'card-row ticket-row', 'data-key':'ticket-' + t.id}, h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, meta.join(' · ')), questionLine(t), parent ? h('p', {className:'meta'}, 'Part of ', clean(parent.title)) : null), h('div', {className:'row'}, late, activity(t, 'row'), statusControl(t, 'row')));
+  return h('div', {className:'card-row home-ticket', 'data-key':'ticket-' + t.id}, ticketTitle(t));
 }
 function needRow(row, newest) {
-  const t = ticketOf(row.ticket);
-  const claim = state.runs?.[row.ticket]?.claim;
-  const by = name(row.agent || row.by || claim?.agent || claim?.by);
-  const meta = [typeof t?.key === 'string' ? clean(t.key) : '', by, t && clean(t.title)].filter(Boolean).join(' · ');
-  const choice = window.DashHelpers.needAction(row);
-  const action = snapshot
-    ? (t ? h('a', {className:'btn outline sm', href:href(t.id)}, 'Open') : null)
-    : h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id}, choice.label);
-  return h('div', {className:'card-row', 'data-key':'need-' + row.id, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null}, h('span', {className:'need-icon ' + (row.tone === 'bad' ? 'bad' : row.tone === 'warn' ? 'warn' : 'muted')}, iconEl(row.tone === 'bad' ? 'stop' : row.tone === 'warn' ? 'shield' : 'note')), h('div', {className:'grow'}, h('h3', {}, clean(window.DashHelpers.plainWhy(row.text, by || 'The agent') || window.DashHelpers.plainNames(row.text))), h('p', {className:'meta'}, meta)), h('time', {datetime:row.since || ''}, age(row.since)), action);
+  const t = ticketOf(row.ticket), choice = window.DashHelpers.needAction(row);
+  const options = array(row.answer?.options), key = 'need-' + row.id;
+  let actions = null;
+  if (!snapshot && options.length) {
+    actions = h('div', {className:'row answer-options'}, options.map(option => {
+      const control = button(option + (option === row.answer.recommended ? ' · Suggested' : ''), 'outline sm', async event => {
+        if (changeUnavailable() || locks.has(key)) return;
+        const host = event.currentTarget.closest('[data-need-row]');
+        locks.add(key);
+        host.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        try {
+          const result = await act('answer', {ticket:row.ticket, question:row.answer.question, answer:option});
+          window.orch.toast(result.ok ? 'Answered' : changeError(result), result.ok ? 'ok' : 'error');
+        } finally {
+          locks.delete(key);
+          host.querySelectorAll('button').forEach(b => { b.disabled = false; });
+          render();
+        }
+      });
+      control.dataset.key = key + '-option-' + option;
+      return control;
+    }));
+  } else if (!snapshot) {
+    actions = h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id}, choice.label);
+  }
+  const question = array(t?.questions).find(q => q.id === row.answer?.question)?.text || row.title || row.text;
+  return h('div', {className:'card-row home-need', 'data-key':key, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null},
+    t ? ticketTitle(t) : h('h3', {}, clean(row.title)), h('p', {}, clean(window.DashHelpers.plainWhy(question, 'The agent'))),
+    h('p', {className:'meta'}, 'Next step · ', options.length ? 'Choose an answer' : choice.label), actions, t ? parentLine(t) : null);
+}
+function workingRow(t) {
+  const tasks = array(t.checklist), done = tasks.filter(task => task.done).length;
+  const claim = state.runs?.[t.id]?.claim, task = tasks.find(task => !task.done);
+  return h('div', {className:'card-row home-work', 'data-key':'ticket-' + t.id}, ticketTitle(t),
+    task ? h('p', {}, clean(task.text || task.title)) : null,
+    h('p', {className:'meta'}, [capitalise(name(claim?.label || claim?.agent || t.owner)), age(claim?.started_at)].filter(Boolean).join(' · ')),
+    tasks.length ? h('div', {className:'segments', role:'progressbar', 'aria-label':'Tasks done', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done}, tasks.map(task => h('span', {className:task.done ? 'complete' : ''}))) : null,
+    h('div', {className:'row'}, h('span', {className:'meta grow'}, done + ' of ' + tasks.length + ' tasks done'), h('a', {className:'btn ghost sm', href:href(t.id)}, 'Watch →')));
+}
+function resultRow(t) {
+  return h('div', {className:'card-row home-result', 'data-key':'ticket-' + t.id}, ticketTitle(t),
+    h('p', {className:'meta'}, 'Next step · Read the result, then mark done'),
+    h('div', {className:'row'}, h('a', {className:'btn outline sm', href:href(t.id)}, 'Open result'), snapshot ? null : button('Mark done', 'outline sm', () => moveTicket(t.id, 'done'))));
+}
+function messageTicket(text) {
+  if (snapshot) return;
+  const {d, actions} = dialog('Make a ticket');
+  const title = h('input', {className:'input', 'aria-label':'Title', required:true, maxlength:200, value:text.split('\n')[0].slice(0, 200)});
+  const note = h('textarea', {className:'input', 'aria-label':'Note (optional)', rows:5}, text);
+  const create = button('Create', 'primary', async () => {
+    if (!title.value.trim()) { title.reportValidity(); return; }
+    if (changeUnavailable()) return;
+    create.disabled = true;
+    const result = await act('ticket.new', {title:title.value.trim(), note:note.value});
+    create.disabled = false;
+    if (result.ok) { await window.orch.close(d); window.orch.toast('Ticket created', 'ok'); }
+    else window.orch.toast(changeError(result), 'error');
+  });
+  actions.append(create);
+  d.append(h('label', {className:'message-field'}, 'Title', title), h('label', {className:'message-field'}, 'Note (optional)', note), actions);
+  window.orch.open(d);
+}
+function homeSection(key, title, body) {
+  return h('section', {className:'home-section', 'data-key':key, id:key === 'needs-you' ? key : null}, h('h2', {}, title), h('div', {className:'card'}, body));
 }
 function home() {
-  const needs = needsList();
-  const rows = window.DashHelpers.agentRows(state.tickets, state.runs, Date.now());
-  const working = rows.filter(row => ['working', 'needs', 'stuck'].includes(row.state));
-  // a ticket whose agent is still starting (the click is answered, the session is not up yet) counts as starting
-  const gettingStarted = new Set([...starting, ...rows.filter(row => row.state === 'starting').map(row => row.ticket)]);
-  const startingText = gettingStarted.size ? gettingStarted.size + (gettingStarted.size === 1 ? ' agent starting' : ' agents starting') : '';
-  const current = sorted(tickets().filter(activeTicket));
-  const oldest = needs.map(n => parse(n.since)).filter(Boolean).sort((a, b) => a - b)[0];
-  const newest = needs.slice().sort((a, b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-  const history = tickets().flatMap(t => window.DashHelpers.dedupeHistory(array(t.history), t.checklist).map(entry => ({entry, title:t.title, checklist:t.checklist}))).sort((a, b) => (Date.parse(b.entry.at) || 0) - (Date.parse(a.entry.at) || 0)).slice(0, 5);
+  const needs = needsList(), all = tickets();
+  const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
+  const review = sorted(all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id)));
+  const used = new Set([...needs.map(n => n.ticket), ...working.map(t => t.id), ...review.map(t => t.id)]);
+  const finished = all.filter(t => t.status === 'done' && (() => {
+    const at = parse(t.done_at || t.completed_at || t.updated_at);
+    return at && at.toDateString() === now().toDateString();
+  })());
+  const message = array(state.general?.history).filter(e => e.via === 'phone' && e.text).sort((a,b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0))[0];
+  const text = message && String(message.text).replace(/^From [^:]{1,100}: /, '');
+  const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
+  const agent = capitalise(name(state.runs?.[working[0]?.id]?.claim?.label || state.runs?.[working[0]?.id]?.claim?.agent || array(state.settings?.agents).find(a => a.chosen)?.label || 'Agent'));
+  const hour = now().getHours();
   const stopped = array(state.services).some(s => s.running === false);
   const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;
-  const agents = rows.slice(0, 5).map(row => h('div', {className:'card-row', 'data-key':'agent-' + row.agent + '-' + row.ticket}, h('span', {className:'dot ' + (row.state === 'stuck' ? 'needs' : row.state)}), h('div', {className:'grow'}, h('h3', {}, capitalise(name(row.agent) || 'Agent') + ' · ' + ({working:'working', starting:'getting started', needs:'needs you', stuck:'may be stuck', idle:'idle'}[row.state])), h('p', {className:'meta'}, row.state === 'idle' ? 'Last worked ' + window.DashHelpers.ago(row.since, Date.now()) : [clean(ticketOf(row.ticket)?.title), age(row.since)].filter(Boolean).join(' · ')))));
-  const links = pageLinks();
-  const recent = history.map(({entry, title, checklist}) => {
-    const line = clean(window.DashHelpers.historyLine(entry, checklist));
-    return h('div', {className:'card-row'}, h('div', {className:'grow'}, h('h3', {}, line.length > 80 ? line.slice(0, 79) + '…' : line), h('p', {className:'meta'}, [name(entry.by), clean(title), age(entry.at)].filter(Boolean).join(' · '))));
-  });
-  return fragment(heading('Today', now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + [window.DashHelpers.needsYou(needs.length), working.length + (working.length === 1 ? ' agent working' : ' agents working'), startingText].filter(Boolean).join(' · ')), banner,
-    h('div', {className:'columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      card('needs-you', 'Needs you', needs.length + (oldest ? ' · oldest ' + age(oldest) : ''), needs.length ? needs.map(n => needRow(n, newest)) : emptyRow('Nothing needs you right now.'), true),
-      card('your-tickets', 'Your tickets', current.length + (current.some(overdue) ? ' · ' + current.filter(overdue).length + ' overdue' : ''), current.length ? current.map(ticketRow) : tickets().length ? h('div', {className:'card-row'}, h('p', {className:'grow muted'}, 'Nothing open. Finished tickets are under Tickets.'), newButton()) : firstTicket(), true)),
-    h('aside', {className:'stack', 'data-key':'right'},
-      card('agents', 'Agents', working.length + ' working' + (gettingStarted.size ? ' · ' + gettingStarted.size + ' starting' : ''), [agents.length ? agents : emptyRow('No one is working on your tickets. Open a ticket and press Start.'), links.length ? h('div', {className:'card-row'}, links.map(link => h('a', {className:'meta', href:link.url}, 'Watch live in ' + capitalise(link.label) + ' →'))) : null]),
-      card('recently', 'Recently', '', recent.length ? recent : emptyRow('No recent activity.')))));
+  return fragment(heading('Good ' + (hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'), now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + needs.length + (needs.length === 1 ? ' question for you · ' : ' questions for you · ') + agent + ' is working on ' + working.length + (working.length === 1 ? ' ticket' : ' tickets')), banner,
+    h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
+      homeSection('needs-you', 'Needs you (' + needs.length + ')', needs.length ? needs.map(n => needRow(n, newest)) : emptyRow('Nothing needs you right now.')),
+      homeSection('working-now', 'Working now', working.length ? working.map(workingRow) : emptyRow('No tickets are being worked on.')),
+      homeSection('check-result', 'Check result (' + review.length + ')', review.length ? review.map(resultRow) : emptyRow('No results to check.')),
+      h('div', {className:'card card-row', 'data-key':'everything-else'}, h('span', {className:'grow muted'}, 'Everything else (' + all.filter(t => activeTicket(t) && !used.has(t.id)).length + ')'), h('a', {className:'btn ghost sm', href:'#tickets'}, 'View Tickets →'))),
+    h('aside', {className:'stack', 'data-key':'right'}, message ? card('messages', 'Messages', '', h('div', {className:'card-row home-message', 'data-key':'message-' + (message.at || text)}, h('p', {}, clean(text)), snapshot ? null : button('Make a ticket', 'outline sm', () => messageTicket(text)))) : null,
+      card('finished-today', 'Finished today', '', finished.length ? finished.map(ticketRow) : emptyRow('Nothing finished today yet.')))));
+}
+function loadingView() {
+  const shape = kind => h('div', {className:'card skeleton-card ' + kind, 'aria-hidden':'true'}, h('div', {className:'skeleton-line'}), h('div', {className:'skeleton-line short'}), h('div', {className:'skeleton-line'}));
+  return h('div', {className:'loading-home', 'data-key':'loading', 'aria-busy':'true'}, h('p', {role:'status'}, 'Loading your workspace…'),
+    h('div', {className:'skeleton-heading', 'aria-hidden':'true'}), h('div', {className:'columns'}, h('div', {className:'stack'}, shape('question'), shape('work'), shape('result')), h('aside', {className:'stack'}, shape('message'), shape('finished'))));
+}
+function connectionNotice(connectionEl, hadState) {
+  connectionEl.replaceChildren(h('p', {className:'grow'}, hadState ? "Can't reach orch. Showing the last update, trying again every few seconds." : "Can't reach orch yet. Trying again shortly."),
+    button('Try now', 'outline sm', () => refresh()), h('details', {}, h('summary', {}, 'Details'), h('p', {}, 'Is the computer asleep? orch runs on the computer that owns this workspace. Wake it up and check that it is connected. This page will try again shortly.')));
+  connectionEl.hidden = false;
 }
 // The General conversation with the phone: every text both ways, newest last. Read only.
 function generalPage() {

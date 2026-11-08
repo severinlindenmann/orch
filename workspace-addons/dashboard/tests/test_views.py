@@ -416,3 +416,24 @@ def test_no_bare_waiting_status_label_left():
         assert not re.search(r"""['"]Waiting['"]""", text), f.name  # a bare "Waiting" label
         assert not re.search(r"""\bstatus\s*=\s*['"]waiting['"]""", text), f.name  # "Agent · waiting"
         assert not re.search(r"""\bwaiting:\s*['"]waiting['"]""", text, re.IGNORECASE), f.name
+
+
+def test_v1_home_and_ticket_controls():
+    js = webjs.all_js()
+    home = js[js.index("function changeUnavailable") : js.index("function generalPage")]
+    tickets = js[js.index("function filterTickets") : js.index("function ticketNotFound")]
+    assert "row.answer.recommended" in home and "' · Suggested'" in home
+    assert "act('answer', {ticket:row.ticket, question:row.answer.question, answer:option})" in home
+    assert "host.querySelectorAll('button')" in home and "locks.delete(key)" in home
+    assert "function loadingView()" in home and "'data-key':'loading'" in home
+    assert "function connectionNotice(connectionEl, hadState)" in home
+    assert "connectionNotice(connection, !!state)" in js
+    assert "main.replaceChildren(loadingView())" in js
+    assert "[t.title, t.key, t.owner, t.note]" in tickets and "startsWith('agent:')" in tickets
+    assert "'data-key':'ticket-search'" in tickets and "aria-pressed" in tickets
+    # The shell's unused old delegation and shared CSS are outside this lane's edit scope.
+    for old in ("Jump to", "status-jumps", "board-jump", "boardCol"):
+        assert old not in tickets
+    css = (WEBDIR / "pages" / "tickets.css").read_text()
+    assert ".board .kanban-col{display:block" in css
+    assert "prefers-reduced-motion:reduce" in (WEBDIR / "pages" / "home.css").read_text()
