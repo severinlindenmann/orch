@@ -141,6 +141,13 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--reply-to", help="id of the message this answers")
     x.add_argument("--speak", action="store_true", help="a phone can read this out loud (long answers)")
     x.add_argument("--summary", help="what to read out instead of the whole text (with --speak)")
+    x.add_argument(
+        "--ref",
+        action="append",
+        default=[],
+        metavar="KIND:VALUE",
+        help="a card in Chat: ticket:<KEY>, reference:<url> or file:<path> (repeat)",
+    )
     x = rel.add_parser(
         "topic", parents=[common], help="turn a phone message (from General) into a ticket of its own"
     )
@@ -520,7 +527,13 @@ def run_relay(args, root: Path, out) -> None:
             m = relay.send_file(root, args.workspace, Path(args.file), args.text or None, t)
         elif args.text:
             speak = relay.speak_hint(root, t, args.text, args.summary) if args.speak else None
-            m = relay.send_text(root, args.workspace, args.text, t, args.update, args.reply_to, speak=speak)
+            refs = [
+                {"kind": k, ("key" if k == "ticket" else "url" if k == "reference" else "path"): v}
+                for k, _, v in (r.partition(":") for r in args.ref)
+            ]
+            m = relay.send_text(
+                root, args.workspace, args.text, t, args.update, args.reply_to, speak=speak, refs=refs
+            )
         else:
             raise Refused("Nothing to send. Give a text or --file.")
         out(args, m, _sent_line(root, m, "Message sent to {}."))

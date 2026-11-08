@@ -14,6 +14,7 @@ import secrets
 import sys
 import tempfile
 import time
+import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,7 +35,7 @@ OPEN_STATUSES = tuple(s for s in STATUS_WORDS if s not in ("done", "dropped"))
 REVIEW_MESSAGE = "Moved to Review, not Done. A person marks a ticket Done."
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
-PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "summary")
+PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "done_when", "summary")
 VIA_RE = re.compile(r"^[a-z][a-z0-9-]{1,15}$")
 KIND_RE = re.compile(r"^(plain|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$")
 DOING_STALE_SECONDS = 2 * 3600
@@ -401,6 +402,7 @@ _FIELD_WORDS = {
     "owner": "owner",
     "due": "due date",
     "note": "note",
+    "done_when": "done criteria",
     "summary": "summary",
     "status": "status",
     "waiting_on": "wait",
@@ -517,7 +519,7 @@ def create(
     }
     if parent is not None:
         ticket["parent"] = parent
-    for k, v in fields.items():  # owner, due, note: part of the one "Created" line
+    for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
         ticket["ext"] = ext
@@ -659,6 +661,8 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
 
     def op(ticket):
+        if ticket.get("general") is True:
+            raise Refused("The Chat is not a ticket: it is never finished, dropped or reopened.")
         target, actor = _finish_status(root, ticket, status, by)
         if target in ("open", "ready") and not actor.startswith("agent:"):
             ticket.pop("started", None)
@@ -674,20 +678,22 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
     return apply_op(root, tid, op)[0]
 
 
-# ---------------------------------------------------------------- plain fields (owner, due, note, summary)
+# ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
 
 
 def clean_field(key: str, value):
-    """Validate owner, due, note or summary (None or empty clears it); returns the value to store."""
+    """Validate a plain field (None or empty clears it); returns the value to store."""
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
     if not isinstance(value, str):
         raise Refused(f"{key} must be text.")
-    v = value.strip()
+    v = value if key in ("note", "done_when") else value.strip()
     if key == "owner" and len(v) > 64:
         raise Refused("An owner is at most 64 characters.")
     if key == "note" and len(v) > 2000:
         raise Refused("A note is at most 2000 characters.")
+    if key == "done_when" and len(v) > 2000:
+        raise Refused("The done criteria are at most 2000 characters.")
     if key == "summary" and len(v) > 200:
         raise Refused("A summary is at most 200 characters.")
     if key == "due":
@@ -716,7 +722,7 @@ def edit(
     fields: dict | None = None,
     if_revision: int | None = None,
 ) -> dict:
-    """Rename and/or set owner, due, note (`fields`)."""
+    """Rename and/or set owner, due, note, done_when (`fields`)."""
     if title is not None:
         title = title.strip()
         if not title or len(title) > 200:
@@ -1193,6 +1199,60 @@ def ext_unset(
     return apply_op(root, tid, op, if_revision=if_revision)[0]
 
 
+_SECRET_FOLDER_RE = re.compile(r"\.orch[/\\]+secrets|\borch secrets\b|\bsecrets folder\b", re.I)
+_SECRET_WORD = (
+    r"(?:passwords?|passcodes?|passphrases?|passwort|passw\u00f6rter|kennwort|zugangsdaten|api[\s_-]?keys?"
+    r"|(?:access|auth|bearer|login|api)[\s_-]?tokens?|tokens?|secrets?|private[\s_-]?keys?"
+    r"|api[\s_-]?schl\u00fcssel|schl\u00fcssel|credentials?|login details)"
+    r"(?![\s-]*(?:reset|protected|rotat|expir|set up))"
+)
+_GAP = r"(?:(?!rotat|expir|reset|protect|whether|set up)[^.?!\n]){0,40}?"
+_HAND_OVER = (
+    r"(?:give|send|paste|provide|enter|share|tell|upload|supply|attach|what's"
+    r"|gib|schick\w*|sende\w*|teile\w*|nenne\w*|eingeben)"
+)
+_SECRET_ASK_RE = re.compile(r"\b" + _HAND_OVER + r"\b" + _GAP + r"\b" + _SECRET_WORD + r"\b", re.I)
+_PAT_ASK_RE = re.compile(r"\b" + _HAND_OVER + r"\b" + _GAP + r"\bPAT\b", re.I)
+_INVISIBLE_RE = re.compile("[\u200b-\u200f\u2060\ufeff\u00ad]")
+_MACHINE_VALUE_RE = re.compile(r"[A-Za-z0-9_.:-]{1,80}")
+_MACHINE_KEYS = {"op", "run", "peer", "key", "id", "tid", "ticket"}
+_REQUEST_RES = (
+    re.compile(r"\bneed\s+(?:your|you to give|you to send)\b[^.?!\n]{0,20}?\b" + _SECRET_WORD + r"\b", re.I),
+    re.compile(r"\byour\s+" + _SECRET_WORD + r"\s+please\b", re.I),
+    re.compile(r"\breply\s+with\s+(?:your\s+|the\s+)?" + _SECRET_WORD + r"\b", re.I),
+    re.compile(r"\bwhich\s+" + _SECRET_WORD + r"\s+(?:should|do)\s+i\s+use\b", re.I),
+    re.compile(r"\bbrauche\s+(?:dein|deinen|ihr|ihren)\w*\s+" + _SECRET_WORD + r"\b", re.I),
+)
+
+
+def _labels(value, key: str = "") -> list[str]:
+    """Every text of an add-on action (keys too), except the machine-only fields."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        out = []
+        for k, v in value.items():
+            if str(k).lower() in _MACHINE_KEYS and isinstance(v, str) and _MACHINE_VALUE_RE.fullmatch(v):
+                continue  # a machine-only token; natural language and nested data are still scanned
+            out += [str(k), *_labels(v, str(k))]
+        return out
+    if isinstance(value, list):
+        return [x for v in value for x in _labels(v, key)]
+    return []
+
+
+def _asks_for_secret(text: str) -> bool:
+    """Light guard for `orch ask` (defence in depth; the skill text is the real control): the secrets
+    folder, or asking a person to hand over a credential."""
+    text = _INVISIBLE_RE.sub("", unicodedata.normalize("NFKC", text)).replace("\u2019", "'")
+    return bool(
+        _SECRET_FOLDER_RE.search(text)
+        or _SECRET_ASK_RE.search(text)
+        or _PAT_ASK_RE.search(text)
+        or any(r.search(text) for r in _REQUEST_RES)
+    )
+
+
 def ask(
     root: Path,
     tid: str,
@@ -1218,6 +1278,19 @@ def ask(
             act = None
         if not isinstance(act, dict):
             raise Refused("--action must be a JSON object.")
+
+    for part in (text, *options, *([recommended] if recommended else []), *_labels(act)):
+        if _asks_for_secret(part):
+            with contextlib.suppress(Exception):  # the attempt stays visible in the history
+                apply_op(
+                    root, tid, lambda t: add_history(t, by, "A question was refused: it asked for a secret.")
+                )
+            raise Refused(
+                "A question must never ask for a password, token, API key or other credential, "
+                "and never mention the secrets folder. Ask whether access is set up instead "
+                "(for example: Is access to the service set up for this workspace?), "
+                "and say in the ticket summary what is missing."
+            )
 
     def op(ticket):
         for old in ticket["questions"]:  # the same open question is not asked twice
@@ -1338,6 +1411,11 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         raise Refused('A patch is a JSON object, e.g. \'{"title": "New"}\'.') from None
     if not isinstance(obj, dict) or not obj:
         raise Refused("A patch is a JSON object with at least one field.")
+    if "status" in obj:
+        from orch import chat
+
+        if chat.is_helper(root):
+            raise Refused("The Chat helper does not change a ticket's status.")
     bad = sorted(set(obj) - set(PATCH_FIELDS))
     if bad:
         raise Refused(f"A patch can change only: {', '.join(PATCH_FIELDS)} (not {bad[0]}).")
@@ -1345,7 +1423,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         t = obj["title"]
         if not isinstance(t, str) or not t.strip() or len(t.strip()) > 200:
             raise Refused("A title needs 1 to 200 characters.")
-    for k in ("owner", "due", "note", "summary"):
+    for k in ("owner", "due", "note", "done_when", "summary"):
         if k in obj:
             clean_field(k, obj[k])
     w = obj.get("waiting_on")
@@ -1365,7 +1443,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
             status, actor = _finish_status(root, ticket, status, by)
             if status in ("open", "ready") and not actor.startswith("agent:"):
                 ticket.pop("started", None)
-        for k in ("owner", "due", "note", "summary"):
+        for k in ("owner", "due", "note", "done_when", "summary"):
             if k in obj:
                 _set_field(ticket, k, obj[k])
         if "waiting_on" in obj:
