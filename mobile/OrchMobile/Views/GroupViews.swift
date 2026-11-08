@@ -61,14 +61,16 @@ enum GroupRoomRules {
         }
     }
 
-    static func eventText(_ event: GroupEvent, group: PhoneGroup) -> String {
+    static func eventText(_ event: GroupEvent, group: PhoneGroup, ownAnswer: String?) -> String {
         let name = group.name(of: event.ws ?? "")
         switch event.kind {
         case "created": return "Group started from ticket \(group.ticketKey ?? "") · \(group.title)"
         case "member_added": return "\(group.hostName) helper added \(name) to this group"
         case "member_left": return "\(name) left this group"
-        case "approved": return "You allowed \(name) \(event.mode == "always" ? "always" : "once")"
-        case "denied": return "You said no to \(name)"
+        case "approved":
+            let mode = event.mode == "always" ? "always" : "once"
+            return ownAnswer != nil ? "You allowed \(name) \(mode)" : "\(name) allowed \(group.hostName) \(mode)"
+        case "denied": return ownAnswer != nil ? "You said no to \(name)" : "\(name) said no"
         case "closed": return "This group is done"
         default: return ""
         }
@@ -76,6 +78,15 @@ enum GroupRoomRules {
 }
 
 extension AppModel {
+    func ownGroupAnswer(for event: GroupEvent, in group: PhoneGroup) -> String? {
+        guard let delegate = event.delegate,
+              let questionId = group.messages.compactMap(\.event).last(where: {
+                  $0.kind == "approval_needed" && $0.delegate == delegate
+              })?.questionMessage,
+              !answeredElsewhere.contains(questionId) else { return nil }
+        return answers[questionId] ?? pendingAnswers[questionId] ?? queuedAnswers[questionId]
+    }
+
     /// Resolve again at send time: every text opts in using the newest host copy.
     @discardableResult
     func sendGroup(_ draft: MessageDraft, key: GroupKey) async throws -> OutboxItem {
@@ -85,7 +96,7 @@ extension AppModel {
         }
         var draft = draft
         draft.replyTo = reply
-        return try await send(draft, to: .topic(workspace: key.host, ticket: ticket))
+        return try await sendInternal(draft, to: .topic(workspace: key.host, ticket: ticket))
     }
 }
 

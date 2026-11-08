@@ -52,12 +52,12 @@ struct GroupRoomView: View {
     }
 
     private func header(_ group: PhoneGroup) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 16) {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left").frame(width: 44, height: 44)
                     .background(Theme.surface2, in: Circle())
             }.accessibilityLabel("Back").accessibilityIdentifier("group-back")
-            GroupBadges(group: group)
+            GroupBadges(group: group).padding(.trailing, 10)
             VStack(alignment: .leading, spacing: 6) {
                 Button { members = true } label: {
                     Text(group.title).themeFont(17, .semibold).multilineTextAlignment(.leading)
@@ -80,7 +80,7 @@ struct GroupRoomView: View {
         if let event = message.event {
             if event.kind == "approval_needed" { GroupApprovalView(event: event, group: group, late: message.late) }
             else {
-                let text = GroupRoomRules.eventText(event, group: group)
+                let text = GroupRoomRules.eventText(event, group: group, ownAnswer: model.ownGroupAnswer(for: event, in: group))
                 if !text.isEmpty { pill(text, external: group.isExternal(event.ws ?? "")) }
             }
         }
@@ -197,8 +197,10 @@ struct GroupApprovalView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let result { (group.isExternal(result.ws ?? "") ? Text(GroupRoomRules.eventText(result, group: group)).italic().foregroundColor(Theme.muted) : Text(GroupRoomRules.eventText(result, group: group))).themeFont(15) }
-            else if let questionId = event.questionMessage, let answer = model.answers[questionId] {
+            if let result {
+                let text = GroupRoomRules.eventText(result, group: group, ownAnswer: model.ownGroupAnswer(for: result, in: group))
+                (group.isExternal(result.ws ?? "") ? Text(text).italic().foregroundColor(Theme.muted) : Text(text)).themeFont(15)
+            } else if let answer = model.ownGroupAnswer(for: event, in: group) {
                 group.memberText(event.ws ?? "", prefix: answer.lowercased() == "no" ? "You said no to " : "You allowed ", suffix: answer.lowercased() == "no" ? "" : " \(answer.lowercased() == "always" ? "always" : "once")").themeFont(15)
             } else {
                 switch GroupStore.approvalCard(for: event, in: group, questions: model.questions, late: late) {

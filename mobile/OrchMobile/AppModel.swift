@@ -412,6 +412,21 @@ final class AppModel {
     /// invalid draft. A text for a topic of the relay add-on resolves later via `ConversationBuilder.resolve`.
     @discardableResult
     func send(_ draft: MessageDraft, to target: SendTarget) async throws -> OutboxItem {
+        var draft = draft
+        if let replyTo = draft.replyTo, isGroupCopy(replyTo) { draft.replyTo = nil }
+        return try await sendInternal(draft, to: target)
+    }
+
+    func isGroupCopy(_ id: String) -> Bool {
+        groups.groups.contains { group in
+            group.messages.contains {
+                $0.id == id && $0.message.message.from == group.key.host && $0.message.message.to == "phones"
+            }
+        }
+    }
+
+    /// Group sends explicitly opt into fan-out; plain sends strip group-copy quotes first.
+    func sendInternal(_ draft: MessageDraft, to target: SendTarget) async throws -> OutboxItem {
         let item = try outbox.enqueue(draft, to: target)
         await flushOutbox()
         if let now = outbox.item(clientId: item.clientId) { return now }
