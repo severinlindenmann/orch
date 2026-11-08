@@ -83,9 +83,31 @@ def test_stop_leaves_the_ticket_ready(proj, run, gen, one_step):
     tid = _new(run)
     run("run", "start", tid)
     _wait(proj, tid, gone=False)
-    assert run("run", "stop", tid)[0] == 0
+    code, _, err = run("run", "stop", tid)
+    assert code == 0, err
     _wait(proj, tid)
     assert _status_soon(proj, tid, "ready") == "ready"
+
+
+def test_a_run_lock_is_never_empty(proj, monkeypatch):
+    """A stop could hit the wrapper between creating its run lock and writing its name into it; that empty
+    lock looked like a live writer for 30 s and the stop gave up ("busy"). The lock is now linked into place
+    with the name already in it."""
+    from orch import procs
+
+    lock = proj / ".orch/run/tickets/t_lockaa.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    runs._create_lock(lock)
+    assert lock.read_text() == procs.own_token()
+    lock.unlink()
+
+    def stopped_half_way(*a, **k):
+        raise KeyboardInterrupt  # the process is stopped after the temp file, before the link
+
+    monkeypatch.setattr(runs.os, "link", stopped_half_way)
+    with pytest.raises(KeyboardInterrupt):
+        runs._create_lock(lock)
+    assert not lock.exists() and not list(lock.parent.glob(".*.new"))
 
 
 def test_a_working_ticket_with_no_agent_is_settled_by_the_next_status_check(proj, run):

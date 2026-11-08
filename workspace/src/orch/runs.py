@@ -128,6 +128,31 @@ def _break_dead(lock: Path) -> bool:
             mine.unlink()
 
 
+def _create_lock(lock: Path) -> None:
+    """Create the lock with our token already in it: written to a private temp file first, then linked into
+    place (atomic, refuses an existing lock). A process stopped half-way never leaves an EMPTY lock behind,
+    which nobody could tell apart from a live writer for LOCK_STALE_SECONDS. Without hard links: the plain
+    O_EXCL create and write, as before."""
+    tmp = lock.with_name(f".{lock.name}.{secrets.token_hex(4)}.new")
+    try:
+        fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(procs.own_token())
+        try:
+            os.link(tmp, lock)
+            return
+        except (FileExistsError, PermissionError):
+            raise
+        except OSError:  # no hard links on this file system
+            pass
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+    fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    with os.fdopen(fd, "w") as f:
+        f.write(procs.own_token())
+
+
 _held: set[Path] = set()  # run locks this process holds right now
 _terminating = False  # the SIGTERM handler is running: it interrupted whatever else this process was doing
 
@@ -137,17 +162,16 @@ def locked(root: Path, tid: str):
     """The per-ticket run lock. Free when its holder is verifiably dead, or old with no holder named."""
     lock = run_dir(root) / "tickets" / f"{tid}.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
-    if _terminating and lock in _held:
-        # The signal arrived while this very process was inside the lock; the interrupted code never continues
-        # (the handler ends the process), so waiting for it would only time out and leave the claim behind.
+    if _terminating and (lock in _held or _lock_text(lock) == procs.own_token()):
+        # The signal arrived while this very process was inside the lock (or had just taken it); the
+        # interrupted code never continues (the handler ends the process), so waiting for it would only time
+        # out and leave the claim behind.
         yield
         return
     end = time.monotonic() + 10
     while True:
         try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(fd, "w") as f:
-                f.write(procs.own_token())
+            _create_lock(lock)
             break
         except (
             FileExistsError,
