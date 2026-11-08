@@ -15,6 +15,7 @@ from orch import (
     cli_addons,
     cli_clients,
     cli_config,
+    cli_chat,
     cli_look,
     cli_needs,
     cli_run,
@@ -447,6 +448,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_needs.add_parsers(sub, common)
     cli_config.add_parsers(sub, common)
     cli_look.add_parsers(sub, common)
+    cli_chat.add_parsers(sub, common)
     p.formatter_class = argparse.RawDescriptionHelpFormatter
     notes = []
     if addon_lines:
@@ -524,7 +526,7 @@ def run(args: argparse.Namespace) -> None:
         pass
     elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
         pass
-    elif cli_look.dispatch(args, root):
+    elif cli_chat.dispatch(args, root) or cli_look.dispatch(args, root):
         pass
     elif cmd == "ticket" and sub == "new":
         t = tickets.create(

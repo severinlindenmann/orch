@@ -657,6 +657,8 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
 
     def op(ticket):
+        if ticket.get("general") is True:
+            raise Refused("The Chat is not a ticket: it is never finished, dropped or reopened.")
         target, actor = _finish_status(root, ticket, status, by)
         if target != "waiting":
             ticket["waiting_on"] = None
