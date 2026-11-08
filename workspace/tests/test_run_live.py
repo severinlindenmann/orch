@@ -164,17 +164,32 @@ def test_send_to_an_idle_agent_goes_in_at_once(proj, run, lab):
     _generic_live(proj)
     tid = _ticket(run)
     run("run", "start", tid)
-    # deliver() needs the tool "up" and idle: wait for both, not only the idle state (a CI race, 8 Nov)
-    _until(
-        lambda: (
-            (r := runs.read(proj, tid))["live"]["state"] == "idle"
-            and r.get("up")
-            and len(_lines(lab, "input")) == 1
-        )
-    )
+    _until(lambda: runs.read(proj, tid)["live"]["state"] == "idle" and len(_lines(lab, "input")) == 1)
     code, out, _ = run("run", "send", tid, "Also October")
     assert out.strip() == "Sent."
     _until(lambda: len(_lines(lab, "input")) == 2)
+
+
+@needs_tmux
+def test_send_is_sent_when_the_watcher_typed_the_notice_first(proj, run, lab, monkeypatch):
+    """The wrapper's watcher can type the notice between our queueing and our own deliver(): the run is then
+    "working" with a notice out, and the input must still be reported as sent (it was a CI flake)."""
+    _generic_live(proj)
+    tid = _ticket(run)
+    run("run", "start", tid)
+    _until(lambda: runs.read(proj, tid)["live"]["state"] == "idle" and len(_lines(lab, "input")) == 1)
+    add = runs.pending_add
+
+    def watcher_wins(*a, **kw):
+        item = add(*a, **kw)
+        assert runs_live.deliver(proj, tid) == 1  # what retry_deliver does on its next poll
+        return item
+
+    monkeypatch.setattr(runs, "pending_add", watcher_wins)
+    result = runs_live.send(proj, tid, "human:t", "Also October")
+    assert result["delivered"] == 1 and runs_live.send_text(result, tid) == "Sent."
+    _until(lambda: len(_lines(lab, "input")) == 2)
+    assert len(_lines(lab, "input")) == 2, "typed once"
 
 
 def test_send_without_a_run_is_saved_for_the_next_start(proj, run):
