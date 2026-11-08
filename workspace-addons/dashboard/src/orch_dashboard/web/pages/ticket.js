@@ -607,7 +607,7 @@ function ticketDoneLine(t) {
 }
 
 function detail(t) {
-  if (!t) return fragment(heading('Ticket not found'), h('a', {href:'#tickets'}, 'All tickets'));
+  if (!t) return ticketNotFound();
   const openQuestions = questions(t), selected = ticketTabs.get(t.id) || 'overview';
   const run = state.runs?.[t.id], sessions = array(t.sessions).slice().sort((a, b) => (Date.parse(b.last_used) || 0) - (Date.parse(a.last_used) || 0));
   const agent = window.DashHelpers.agentLine(t, run, Date.now(), null).agent;

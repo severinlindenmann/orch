@@ -361,16 +361,17 @@ def test_an_agent_that_is_starting_is_a_starting_row_not_idle_or_lost():
     assert [(r["agent"], r["state"], r["ticket"]) for r in rows] == [("claude", "starting", "t_a")]
 
 
-def test_ticket_row_chip_has_no_note_under_it_so_it_lines_up_with_move_to():
-    """4A follow-up: "just now" goes under the title (meta line); the row's chip stands alone beside Move to."""
+def test_ticket_rows_use_one_status_chip_and_inline_next_step():
     src = webjs.all_js()
-    assert "activity(t, 'row')" in src and "where === 'row' ? '' : activityNote(t)" in src
-    assert "snapshot ? '' : activityNote(t)]" in src  # the note joins the row's subtitle line
+    tree = src[src.index("function treeBranch") : src.index("let ticketView")]
+    assert tree.count("statusChip(t)") == 1
+    assert "ticketNext(t)" in tree and "ticketMenu(t, 'tree')" in tree
+    assert "activity(t," not in tree
 
 
 def test_home_counts_a_starting_ticket_and_the_sidebar_badge_has_words():
     src = webjs.all_js()
-    assert "agent starting" in src and "Getting started…" in src
+    assert "working-now" in src and "Getting started…" in src
     assert "needsYou(needsList().length)" in src  # 5A: the badge says what it counts
 
 
@@ -577,11 +578,11 @@ def test_agent_line_waiting_text_has_no_command():
 
 def test_ticket_screens_use_plain_wording_and_one_chip():
     src = webjs.all_js()
-    assert "Open a ticket and press Start" in src and "No agent is working right now" not in src
-    assert "plainWhy(row.text" in src  # Needs-you rows carry no command text
+    assert "No tickets are being worked on." in src and "No agent is working right now" not in src
+    assert "plainWhy(question" in src  # Needs-you rows carry no command text
     assert "seconds + ' s ago'" not in src  # one calm time format
     assert "'Not chosen yet'" not in src.split("const agent = window.DashHelpers.agentLine")[1].split("\n")[0]
-    assert "New tickets show here." in src and "Finished tickets show here." in src
+    assert "Ideas to plan" in src and "Finished work" in src
     assert "hideStatus" not in src and "'Needs you'" in src  # 10A: short board chip; 7A: no chip beside the banner
 
 
@@ -697,7 +698,7 @@ def test_plain_names_and_history_dedupe():
     assert [e["at"] for e in kept] == ["2026-11-08T08:00:00Z", "2026-11-08T09:30:00Z"]
     assert len(kept) == 2
     src = webjs.all_js() + (WEB / "blocks.js").read_text()
-    assert src.count("plainNames") >= 2 and src.count("dedupeHistory") >= 2
+    assert "plainNames" in src and "dedupeHistory" in src  # ticket history still uses both; Home no longer repeats it
 
 
 @node
