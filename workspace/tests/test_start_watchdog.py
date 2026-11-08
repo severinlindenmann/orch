@@ -125,7 +125,7 @@ def test_input_of_a_start_that_hangs_twice_waits_for_the_next_start(proj, run, t
     """Review #292: when both tries hang, the person's text is not lost: it is undelivered again."""
     import test_rev292_adversarial as A
 
-    A._always_hangs(tmp_path, monkeypatch, ignore_term=False)
+    calls = A._always_hangs(tmp_path, monkeypatch, ignore_term=False)
     monkeypatch.setenv("ORCH_RUN_START_WATCHDOG_SECONDS", "1")
     tid = _setup(proj, run)
     runs.pending_add(proj, tid, "human:t", "message", "Also invite Anna")
@@ -133,6 +133,8 @@ def test_input_of_a_start_that_hangs_twice_waits_for_the_next_start(proj, run, t
     _wait(proj, tid, timeout=30)
     assert [i["text"] for i in runs.undelivered(proj, tid)] == ["Also invite Anna"]
     assert any("delivered again after a hang" in h["text"] for h in tickets.load(proj, tid)["history"])
+    # delta-3: the drain loop ends on a hang: the input put back is not picked up again in this run
+    assert len(calls.read_text().splitlines()) == 2 and runs.read(proj, tid) is None
 
 
 def test_input_is_kept_when_the_fresh_start_after_a_missing_session_hangs(proj, run, tmp_path, monkeypatch):
