@@ -772,11 +772,11 @@ def test_links_fail_closed(ws, monkeypatch):
 
 def test_addon_repeat_and_copy_argv():
     common = ['--by', actions.actor(), '--json', '--', 't_abcdef']
-    assert actions.build_argv('addon.act', dict(addon='automation', verb='repeat', target='t_abcdef', value='every day at 9')) == ['automation', 'act', 'repeat', '--value=every day at 9', *common]
-    assert actions.build_argv('addon.act', dict(addon='automation', verb='copy', target='t_abcdef')) == ['automation', 'act', 'copy', *common]
+    assert actions.build_argv('addon.act', {"addon": 'automation', "verb": 'repeat', "target": 't_abcdef', "value": 'every day at 9'}) == ['automation', 'act', 'repeat', '--value=every day at 9', *common]
+    assert actions.build_argv('addon.act', {"addon": 'automation', "verb": 'copy', "target": 't_abcdef'}) == ['automation', 'act', 'copy', *common]
     for verb, value in [('copy', 'daily'), ('repeat', 'x' * 201), ('repeat', '')]:
         with pytest.raises(actions.BadRequest):
-            actions.build_argv('addon.act', dict(addon='automation', verb=verb, target='t_abcdef', value=value))
+            actions.build_argv('addon.act', {"addon": 'automation', "verb": verb, "target": 't_abcdef', "value": value})
 
 
 @pytest.mark.parametrize('who', [None, {}, {'error': 'No connection'}, {'id': ''}])

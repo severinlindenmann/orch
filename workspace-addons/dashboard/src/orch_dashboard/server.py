@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 from . import actions, reffiles, ticketfiles
-from .data import load_links, load_addons, load_services, load_state
+from .data import load_addons, load_links, load_services, load_state
 from .events import Revisions
 from .views import ViewPuller
 

@@ -640,7 +640,7 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
             continue
         expires = f.get("expires_at")
         try:
-            when = datetime.fromisoformat(expires.replace("Z", "+00:00"))
+            when = datetime.fromisoformat(expires)
             expired = (when if when.tzinfo else when.replace(tzinfo=UTC)) <= datetime.now(UTC)
         except (ValueError, TypeError, AttributeError):
             expired = False

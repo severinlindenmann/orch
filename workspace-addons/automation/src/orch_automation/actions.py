@@ -29,7 +29,7 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
     if verb == "repeat":
         if not isinstance(value, str) or not value.strip() or len(value) > 200 or "\x00" in value:
             raise Bad("Say when in at most 200 characters.")
-        from .cli import repeat, Refused
+        from .cli import Refused, repeat
         try:
             return {**repeat(root, target, value, False, by=by), "text": "Schedule saved."}
         except Refused as e:

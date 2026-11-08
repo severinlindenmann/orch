@@ -151,7 +151,7 @@ def test_repeat_button_sets_schedule_and_actor(ws):
 
 def test_copy_button_uses_safe_new_and_log(ws, monkeypatch):
     from orch_automation import orchcli
-    original = dict(id='t_plain001', title='--title', note='--note', owner='Sam', parent='t_parent1', status='done')
+    original = {"id": 't_plain001', "title": '--title', "note": '--note', "owner": 'Sam', "parent": 't_parent1', "status": 'done'}
     monkeypatch.setattr(orchcli, 'tickets', lambda root: [original])
     writes = []
     def call(root, *args, **kw):
@@ -176,6 +176,7 @@ def test_copy_creates_an_open_ticket_through_core_cli(ws, tmp_path, monkeypatch)
     pytest.importorskip("cryptography", reason="real core CLI needs cryptography")
     import sys
     from pathlib import Path
+
     from orch_automation import orchcli
     core = Path(__file__).resolve().parents[3] / 'workspace' / 'src'
     wrapper = tmp_path / 'core-orch'

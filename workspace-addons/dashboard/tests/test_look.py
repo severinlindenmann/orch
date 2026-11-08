@@ -227,7 +227,7 @@ def test_workspace_needs_are_local_and_cached(ws, tmp_path, monkeypatch):
         if args[0] == 'look':
             return {'icon': 'house'}
         if args[0] == 'status':
-            return [dict(workspace=str(p), name=p.name) for p in (ws, other, tmp_path / 'Missing')]
+            return [{"workspace": str(p), "name": p.name} for p in (ws, other, tmp_path / 'Missing')]
         assert args == ['needs', '--json'] and timeout == 3
         seen.append(root)
         return [{}, {}] if root == ws else None

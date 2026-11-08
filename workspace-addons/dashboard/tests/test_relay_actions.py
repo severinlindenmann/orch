@@ -4,7 +4,6 @@ import pytest
 
 from orch_dashboard import actions
 
-
 MID = "m_0123456789abcdef"
 CASES = [
     ("relay.reply", {"to": "My.phone-1", "message": MID, "text": "--hello"},

@@ -693,7 +693,7 @@ if sys.argv[1:3] == ["publish", "list"]:
     code, body, _ = get(act_server + '/api/links')
     assert code == 200
     rows = json.loads(body)['links']
-    assert rows[0] == dict(id='f_a', name='Report', size=3, expires_at='2020-01-01T00:00:00Z', expired=True, link='https://example.test/f/a#k=secretsecretsecret1', copy=True)
+    assert rows[0] == {"id": 'f_a', "name": 'Report', "size": 3, "expires_at": '2020-01-01T00:00:00Z', "expired": True, "link": 'https://example.test/f/a#k=secretsecretsecret1', "copy": True}
     assert rows[1]['link'] is None and rows[1]['copy'] is False
     assert 'hidden' not in body.decode() and '"key"' not in body.decode()
     c = http.client.HTTPConnection('127.0.0.1', int(act_server.rsplit(':', 1)[1]))
