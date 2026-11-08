@@ -101,6 +101,9 @@ LINKED = "This file has a second name (a link), so it was not shared"
 UNCHECKED_IMAGE = "We couldn't check this image's hidden data, so it was not shared"
 UNCHECKED_ASK = "We couldn't check this file for passwords. Share it anyway?"
 UNCHECKED_ASK_IMAGE = "We couldn't check this image's hidden data. Share it anyway?"
+HIDDEN_FOLDER = "Files in hidden or secrets folders are not shared"
+UNCHECKED_HIDDEN = "We couldn't check this file because it is in a hidden folder, so it was not shared"
+UNCHECKED_ASK_HIDDEN = "We couldn't check this file because it is in a hidden folder. Share it anyway?"
 
 
 class Unchecked(Refused):
@@ -497,34 +500,69 @@ def _drop_artifacts(parts: tuple[str, ...] | list[str]) -> tuple[str, ...] | lis
     return parts
 
 
+def _path_rule(
+    parts: tuple[str, ...] | list[str], artifacts_ok: bool = False, outside: bool = False
+) -> str | None:
+    """Which path rule a file hits: "name" (.env*, key and token files: a secret by its name),
+    "folder" (a `secrets` folder, or a hidden folder inside the workspace: agent config, keys, .orch,
+    .git) or "hidden" (a hidden folder outside the workspace: orch can't tell what it is, a person may
+    share it anyway). None = ok."""
+    if artifacts_ok:
+        parts = _drop_artifacts(parts)
+    if not parts or _SECRET_PATH.search(parts[-1]):
+        return "name"
+    rule = None
+    for x in list(parts[:-1]):
+        n = x.rstrip(". ").lower()  # Secrets, SECRETS and "secrets." are the same folder on macOS and Windows
+        if n == "secrets" or (x.startswith(".") and x not in (".", "..") and not outside):
+            return "folder"
+        if x.startswith(".") and x not in (".", ".."):
+            rule = "hidden"
+    return rule
+
+
 def _secret_parts(parts: tuple[str, ...] | list[str], artifacts_ok: bool = False) -> bool:
     """The folder and file rules on path parts: a `secrets` folder, any hidden folder (agent config, keys,
     .orch, .git), .env*, key and token files."""
-    if artifacts_ok:
-        parts = _drop_artifacts(parts)
-    dirs = list(parts[:-1])
-    for x in dirs:
-        n = x.rstrip(". ").lower()  # Secrets, SECRETS and "secrets." are the same folder on macOS and Windows
-        if n == "secrets" or (x.startswith(".") and x not in (".", "..")):
-            return True
-    return bool(_SECRET_PATH.search(parts[-1])) if parts else True
+    return _path_rule(parts, artifacts_ok) is not None
+
+
+_RULE_RANK = {None: 0, "hidden": 1, "folder": 2, "name": 3}
+
+
+def path_rule(path: Path, root: Path | None = None, artifacts_ok: bool = False) -> str | None:
+    """_path_rule on the path as given and on the real path (symlinks resolved), the strictest wins.
+    Folders count below `root` when the file is inside it; a file outside it is checked on its full
+    path, where a hidden folder (e.g. a temp folder in the home) only means "could not check", not
+    "holds a password"."""
+    worst = None
+    for p in {Path(path), Path(path).resolve()}:
+        parts, outside = p.parts, root is not None
+        if root is not None:
+            for base in (Path(root).resolve(), Path(root)):
+                try:
+                    parts, outside = p.relative_to(base).parts, False
+                    break
+                except ValueError:
+                    continue
+        r = _path_rule(parts, artifacts_ok and not outside, outside)
+        if _RULE_RANK[r] > _RULE_RANK[worst]:
+            worst = r
+    return worst
 
 
 def secret_path(path: Path, root: Path | None = None, artifacts_ok: bool = False) -> bool:
     """True for a file that must never leave (see _secret_parts). Checked on the path as given and on the real
     path (symlinks resolved); folders count below `root` when the file is inside it."""
-    for p in {Path(path), Path(path).resolve()}:
-        parts = p.parts
-        if root is not None:
-            for base in (Path(root).resolve(), Path(root)):
-                try:
-                    parts = p.relative_to(base).parts
-                    break
-                except ValueError:
-                    continue
-        if _secret_parts(parts, artifacts_ok):
-            return True
-    return False
+    return path_rule(path, root, artifacts_ok) in ("name", "folder")
+
+
+def _refuse_path(rule: str | None) -> None:
+    """The plain line for a path rule: only a secret file NAME says "password" (only a real match may)."""
+    if rule == "name":
+        raise Refused(LOOKS_LIKE_SECRET)
+    if rule is not None:
+        raise Refused(HIDDEN_FOLDER)
 
 
 def _artifact_contained(path: Path, real: Path, root: Path) -> None:
@@ -568,8 +606,7 @@ def read_shared(path: Path, root: Path, confined: bool) -> bytes:
             parts = Path(os.path.abspath(path)).relative_to(os.path.abspath(root)).parts
         except ValueError:
             raise Refused("A file outside this workspace is only shared after a person's click.") from None
-        if _secret_parts(parts):
-            raise Refused(LOOKS_LIKE_SECRET)
+        _refuse_path(_path_rule(parts))
         try:
             data = safefile.open_file_ref(Path(root), "/".join(parts), FILE_MAX + 1)
         except safefile.TooLarge:
@@ -579,8 +616,9 @@ def read_shared(path: Path, root: Path, confined: bool) -> bytes:
         return data
     real = path.resolve()
     _artifact_contained(path, real, root)
-    if secret_path(path, root, artifacts_ok=True):  # a person's click: ticket artifacts are open
-        raise Refused(LOOKS_LIKE_SECRET)
+    rule = path_rule(path, root, artifacts_ok=True)  # a person's click: ticket artifacts are open
+    if rule != "hidden":  # a hidden folder outside the workspace: asked in _checked (place_unchecked)
+        _refuse_path(rule)
     try:
         fd = os.open(real, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     except OSError:
@@ -605,12 +643,26 @@ def read_shared(path: Path, root: Path, confined: bool) -> bytes:
 INFLATE_MAX = 50 * 1024 * 1024  # all inflated PDF streams together: a bomb is refused, not expanded
 
 
-def _pdf_text(data: bytes) -> str:
+_PDF_IMAGE_FILTERS = {b"DCTDecode", b"JPXDecode", b"CCITTFaxDecode", b"JBIG2Decode"}
+
+
+def _pdf_filters(data: bytes, start: int) -> list[bytes]:
+    """The /Filter names of the stream that starts at `start` (from its dictionary, after the last ` obj`)."""
+    head = data[max(0, start - 4096) : start]
+    at = head.rfind(b" obj")
+    head = head[at:] if at >= 0 else head
+    f = re.search(rb"/Filter\s*(\[[^\]]*\]|/\w+)", head)
+    return re.findall(rb"/(\w+)", f.group(1)) if f else []
+
+
+def _pdf_text(data: bytes, strict: bool = False) -> str:
     """Rough text of a PDF for the secret scan: the raw bytes plus every inflated stream. Streams are inflated
-    in 1 MB steps with a running cap (INFLATE_MAX); a file that expands past it is refused."""
+    in 1 MB steps with a running cap (INFLATE_MAX); a file that expands past it is refused. `strict`: a stream
+    that can't be inflated and is not a picture (another text filter, or broken) can't be read: Unchecked
+    (never "holds a password"). A stream without a filter is plain bytes, already in the raw text."""
     out = [data.decode("latin-1")]
     total = 0
-    for m in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", data, re.S):
+    for m in re.finditer(rb"(?<!end)stream\r?\n(.*?)\r?\nendstream", data, re.S):
         d = zlib.decompressobj()
         chunk = m.group(1)
         try:
@@ -630,6 +682,9 @@ def _pdf_text(data: bytes) -> str:
                     raise Refused("This file is too large once it is opened, so it was not shared")
                 out.append(tail.decode("latin-1"))
         except zlib.error:
+            filters = _pdf_filters(data, m.start())
+            if strict and filters and not set(filters) <= _PDF_IMAGE_FILTERS:
+                raise Unchecked(UNCHECKED) from None
             continue
     return "\n".join(out)
 
@@ -641,7 +696,10 @@ def has_secret(data: bytes, mime: str, allow_unchecked: bool = False) -> bool:
         return phone_view._has_secret(data)
     if mime == "application/pdf" and not allow_unchecked and re.search(rb"/Encrypt\b", data):
         raise Unchecked(UNCHECKED)
-    text = _pdf_text(data) if mime == "application/pdf" else data.decode("utf-8", "replace")
+    if mime == "application/pdf":
+        text = _pdf_text(data, strict=not allow_unchecked)
+    else:
+        text = data.decode("utf-8", "replace")
     if any(rx.search(text) for rx in phone_view._SECRET_PATTERNS):
         return True
     return any(
@@ -667,9 +725,14 @@ def check_file(data: bytes, name: str, allow_unchecked: bool = False, host_side:
     return mime
 
 
-def _checked(data: bytes, name: str, by_click: bool, confirm) -> str:
+def _checked(data: bytes, name: str, by_click: bool, confirm, place_unchecked: bool = False) -> str:
     """check_file; when the content can't be read (Unchecked) and a person clicked, ask them inside the human
-    confirmation (`confirm(question) -> bool`) and only then look the other way. Never for an agent."""
+    confirmation (`confirm(question) -> bool`) and only then look the other way. Never for an agent.
+    `place_unchecked`: the file sits in a hidden folder outside the workspace (path_rule "hidden"); the same
+    question first, then the content is still checked."""
+    if place_unchecked:
+        if not (by_click and confirm is not None and confirm(UNCHECKED_ASK_HIDDEN)):
+            raise Unchecked(UNCHECKED_HIDDEN)
     try:
         return check_file(data, name)
     except Unchecked as e:
@@ -1453,7 +1516,8 @@ def share_file(
     data = read_shared(path, root, confined=not by_click)
     if not by_click and (sniff(data, path.name) or "").startswith("image/"):
         raise Refused("A person has to click to share a picture.")
-    mime = _checked(data, path.name, by_click, confirm)
+    hidden = by_click and path_rule(path, root, artifacts_ok=True) == "hidden"
+    mime = _checked(data, path.name, by_click, confirm, hidden)
     if by_click:
         tickets.require_human("Share this file with the group?", "sharing a file")
     gid = ensure_group(root, tid, by)
@@ -2609,7 +2673,7 @@ def share_member(
     tickets.require_human("Share this file with the group?", "sharing a file")
     path = Path(path)
     data = read_shared(path, root, confined=False)  # the person's click chose it
-    mime = _checked(data, path.name, True, confirm)
+    mime = _checked(data, path.name, True, confirm, path_rule(path, root, artifacts_ok=True) == "hidden")
     with _state(root) as st:
         j = st["joined"].get(_jkey(host, gid))
         if j is None or j["left"] or j["closed"]:
