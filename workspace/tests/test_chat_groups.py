@@ -905,6 +905,7 @@ def test_member_delegate_needs_the_persons_allow_then_reports(proj, run, rel, me
     qp = sent(rel, to="phones", type="question")[0]
     assert qp["body"]["options"] == ["once", "always", "no"] and qp["body"]["scope"] == "tasks from Finance"
     assert "group" not in qp["body"]
+    assert qp["body"]["group_ref"] == {"host": FIN, "id": "grp_t_fin14a"}  # contract 3.2: not body.group
     assert (
         wa["body"]["task"]["status"] == "waiting_approval"
         and wa["body"]["task"]["question_message"] == qp["id"]

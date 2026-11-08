@@ -315,13 +315,14 @@ def parse_allow_answer(text) -> str | None:
     return LEGACY_WORDS.get(" ".join(str(text).split()).casefold())
 
 
-def card_kind(q: dict) -> str:
-    """The phone's approval card: buttons only for a marked question with exactly the wire options."""
-    return (
-        "buttons"
-        if q.get("allow_question") is True and q.get("options") == ALLOW_OPTIONS
-        else "answer_in_bank"
-    )
+def card_kind(q: dict, shown_in: dict | None = None) -> str:
+    """The phone's approval card: buttons only for a marked question with exactly the wire options, and, when
+    the card is shown in a group (`shown_in` = {host, id}), only when the question's group_ref is that group."""
+    if not (q.get("allow_question") is True and q.get("options") == ALLOW_OPTIONS):
+        return "answer_in_bank"
+    if shown_in is not None and q.get("group_ref") != shown_in:
+        return "answer_in_bank"
+    return "buttons"
 
 
 def store_key(m: dict, ctx: dict) -> tuple[list, str]:
@@ -2477,7 +2478,13 @@ def say_member(root: Path, host: str, gid: str, text: str, via: str = "helper") 
 
 
 def share_member(
-    root: Path, host: str, gid: str, path: Path, title: str | None = None, by_click: bool = False
+    root: Path,
+    host: str,
+    gid: str,
+    path: Path,
+    title: str | None = None,
+    by_click: bool = False,
+    unchecked_ok: bool = False,
 ) -> dict:
     """Member: share a file with the group (to the host only). Only after its person's click."""
     from orch import relay

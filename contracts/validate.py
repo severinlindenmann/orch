@@ -804,7 +804,12 @@ def cg_parse_allow_answer(text):
 
 def cg_card(q, ctx):
     """Phone approval card for a member's allow question: buttons only for the wire options; old wording -> 'Answer in Bank'."""
-    return "buttons" if q.get("allow_question") is True and q.get("options") == CG_ALLOW_OPTIONS else "answer_in_bank"
+    if not (q.get("allow_question") is True and q.get("options") == CG_ALLOW_OPTIONS):
+        return "answer_in_bank"
+    shown = (ctx or {}).get("shown_in_group")
+    if shown is not None and q.get("group_ref") != shown:  # the card belongs to one group only
+        return "answer_in_bank"
+    return "buttons"
 
 
 def cg_store(m, ctx):

@@ -37,7 +37,7 @@ def test_vector(f):
     if "stored_as" in exp:
         assert cg.store_key(m, ctx) == (exp["stored_as"], exp.get("store", "new"))
     if "card" in exp:
-        assert cg.card_kind(m["body"]) == exp["card"]
+        assert cg.card_kind(m["body"], ctx.get("shown_in_group")) == exp["card"]
     for ans, want in (exp.get("parse") or {}).items():
         assert cg.parse_allow_answer(ans) == want
     if "map" in exp:

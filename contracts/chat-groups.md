@@ -128,7 +128,9 @@ matches it by `reply_to` = its delegate). The member's allow question to `phones
    ticket with the `relay:allow` question (existing `_ensure_allow_question`) and **must** also send that question to
    `phones` as an existing `question` message (wire options `once`, `always`, `no`, shown as "Allow once / Always / No" (rule G11); `scope` "tasks from <host name>";
    **without** `body.group`: it is the member's own question; the phone ties it to the group through the host's
-   `approval_needed.question_message`). **NEW** (rule G11): the member marks its question `body.allow_question: true`; the
+   `approval_needed.question_message`) and **carries `body.group_ref: {host, id}`** (**NEW**: the group key it was asked
+   for, never `body.group`; the phone shows buttons only when `group_ref` equals the group the card is shown in, missing or
+   different means "Answer in <member>", so a host cannot show it in a second group). **NEW** (rule G11): the member marks its question `body.allow_question: true`; the
    wire options are `once` / `always` / `no` and the answer text is one of them; the UI text is "Allow once / Always /
    No". Mapping (one table):
 

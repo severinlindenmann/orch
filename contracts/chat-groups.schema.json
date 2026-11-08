@@ -133,6 +133,16 @@
           "const": true,
           "description": "NEW. Marks a member's own relay:allow question to phones (no body.group). The validator and the phone key on this, never on `scope`. Its options are exactly once, always, no."
         },
+        "group_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["host", "id"],
+          "properties": {
+            "host": {"type": "string", "pattern": "^ws_[a-z0-9]{6,32}$"},
+            "id": {"type": "string", "pattern": "^grp_t_[a-z0-9]{6,16}$"}
+          },
+          "description": "NEW. On a member's allow question to phones (allow_question: true): the group key (host, id) the question was asked for. NOT body.group (allow messages stay group-free, G11). The phone builds buttons only when this equals the group it shows the card in; missing or different -> 'Answer in <member>'."
+        },
         "to_person": {
           "const": true,
           "description": "NEW. Host copy to phones: a helper text addressed to the person (it answers or asks the person). Part of the push set; without it a helper text copy to phones is quiet (update.kind note)."
