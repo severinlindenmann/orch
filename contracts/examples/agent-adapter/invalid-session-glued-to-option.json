@@ -59,7 +59,7 @@
           "--settings",
           "{orch_hooks_file}"
         ],
-        "send": "bracketed-paste+Enter",
+        "send": "notice-line+Enter",
         "interrupt_keys": [
           "Escape"
         ],
@@ -148,7 +148,7 @@
       },
       "live": {
         "fresh": "{interactive}",
-        "send": "bracketed-paste+Enter",
+        "send": "notice-line+Enter",
         "interrupt_keys": [],
         "idle_signal": "orch:run-done",
         "events": null

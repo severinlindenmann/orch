@@ -22,6 +22,7 @@ import secrets
 import socket
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from datetime import UTC, datetime
@@ -1069,6 +1070,9 @@ def term_release(root: Path, tid: str, run: str, current: dict) -> None:
     """What the SIGTERM handler does before the process ends: stop the agent tree, then leave the claim."""
     global _terminating
     _terminating = True
+    if current.get("stop") is not None:  # a live run's submit watcher: stop it and wait out its check
+        current["stop"].set()
+        current["guard"].acquire(timeout=5)
     proc = current.get("proc")
     if proc is not None and proc.poll() is None:
         kill_tree(proc.pid)
@@ -1203,7 +1207,9 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         return 1
     set_process(root, tid, run, os.getpid())
     env = {**_agent_environ(), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
-    current: dict = {}
+    # guard: in-process lock between the submit watcher thread and the SIGTERM handler (the run lock is per
+    # process, so it does not keep them apart); stop: set by either, the watcher writes nothing after it
+    current: dict = {"guard": threading.Lock(), "stop": threading.Event()}
     _on_term(root, tid, run, current)
     if os.name != "nt":
         import signal
@@ -1228,15 +1234,15 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
     # another user of it in this wrapper.
     watcher = None
     with contextlib.suppress(Exception):
-        import threading
-
         from orch import runs_live
 
-        watcher = threading.Thread(target=runs_live.watch_submit, args=(root, tid, run, proc), daemon=True)
+        args = (root, tid, run, proc, current["guard"], current["stop"])
+        watcher = threading.Thread(target=runs_live.watch_submit, args=args, daemon=True)
         watcher.start()
     rc = proc.wait()
+    current["stop"].set()  # nothing more is checked or written by the watcher from here on
     if watcher is not None:
-        watcher.join(25)  # its loop ends with the agent; one check (tmux calls time out at 20 s) at most
+        watcher.join(15)  # one check at most (its tmux calls time out after 3 s)
     if new_session and rc == 0:
         tickets.record_session(root, tid, name, new_session, host())
     now = read(root, tid)

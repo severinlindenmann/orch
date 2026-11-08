@@ -87,14 +87,16 @@ def target(tid: str) -> str:
     return f"={tid}:"  # exact session name, its only pane
 
 
-def tmux(root: Path, *args: str, input: str | None = None) -> subprocess.CompletedProcess:
+def tmux(
+    root: Path, *args: str, input: str | None = None, timeout: float = 20
+) -> subprocess.CompletedProcess:
     env = {k: v for k, v in os.environ.items() if k != "TMUX"}  # never nest in the person's own tmux
     return subprocess.run(
         ["tmux", "-L", socket_name(root), *args],
         input=input,
         capture_output=True,
         text=True,
-        timeout=20,
+        timeout=timeout,
         env=env,
     )
 
@@ -230,34 +232,58 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")  # keeps \n and \t only
 
 
 def clean(text: str) -> str:
-    """Pasted text is data: no escape sequences or other control characters reach the agent's terminal
-    (an old tmux may pass `ESC[201~` through and end the bracketed paste early)."""
+    """Text is data: no escape sequences or other control characters reach the agent's terminal."""
     return _CONTROL.sub("", text)
 
 
-def _format(items: list[dict], flat: bool) -> str:
-    parts = []
-    for i in items:
-        t = clean(i["text"] if i.get("via") == "start" else f"From {i['by']}: {i['text']}")
-        parts.append(t)
-    text = "\n".join(parts)
-    return " ".join(text.split()) if flat else text
+# ---------------------------------------------------------------- the notice line
+#
+# orch never types or pastes a person's text into the agent's screen. It types ONE short fixed ASCII line
+# (the notice), then Enter as its own key; the agent reads the input itself with `orch run input <ticket>`,
+# and that read is what marks it delivered. So nothing a person wrote can end a bracketed paste, be collapsed
+# by the tool, or answer a dialog; and "delivered" means the agent really has it.
+
+QUICK = 3  # tmux timeout on the submit-check path: a hung tmux never keeps the wrapper waiting long
+NONE_POLLS = 20  # checks in a row that could not tell (a dialog, copy mode): counted like "still unsent"
+NUDGES = 2  # notices for the same waiting input the agent took but did not read; then a one-step run
+_ASCII = re.compile(r"[^\x20-\x7e]")
 
 
-def _paste(root: Path, tid: str, buf: str, text: str) -> bool:
-    """Bracketed paste of text into the session's pane (text is clean(): no ESC can end the paste early)."""
-    if tmux(root, "load-buffer", "-b", buf, "-", input=text).returncode != 0:
+def notice_line(tid: str, start: bool) -> str:
+    """The only text orch types into a live session. ASCII, one line, no person's words."""
+    if start:
+        text = f"Your task for orch ticket {tid} is ready. Read it with: orch run input {tid}"
+    else:
+        text = f"New input on orch ticket {tid}. Read it with: orch run input {tid}"
+    return _ASCII.sub("", clean(text))
+
+
+def input_text(items: list[dict]) -> str:
+    """What `orch run input` prints: a start prompt as it is, everything else as '- <by>: <text>'."""
+    start = [i["text"] for i in items if i.get("via") == "start"]
+    rest = [i for i in items if i.get("via") != "start"]
+    parts = start[-1:]  # a newer start prompt replaces an older one
+    if rest:
+        parts.append("New input:\n" + "\n".join(f"- {i['by']}: {i['text']}" for i in rest))
+    return "\n\n".join(parts)
+
+
+def _type_line(root: Path, tid: str, line: str, timeout: float = 20) -> bool:
+    """The notice as literal keys (send-keys -l: no key names, no paste), then Enter as its own key."""
+    if tmux(root, "send-keys", "-t", target(tid), "-l", line, timeout=timeout).returncode != 0:
         return False
-    return tmux(root, "paste-buffer", "-p", "-d", "-b", buf, "-t", target(tid)).returncode == 0
+    time.sleep(PASTE_DELAY)
+    _enter(root, tid, timeout)
+    return True
 
 
-def _enter(root: Path, tid: str) -> bool:
-    """Enter as its own key, never inside the pasted text."""
-    return tmux(root, "send-keys", "-t", target(tid), "Enter").returncode == 0
+def _enter(root: Path, tid: str, timeout: float = 20) -> bool:
+    return tmux(root, "send-keys", "-t", target(tid), "Enter", timeout=timeout).returncode == 0
 
 
 def deliver(root: Path, tid: str) -> int:
-    """Paste what waits, once, if (and only if) the agent said it is idle. Returns how many items went in."""
+    """Tell the agent input waits, once, if (and only if) it said it is idle: type the notice line. Returns
+    how many items wait. The items stay undelivered until the agent reads them (read_input)."""
     with runs.locked(root, tid):
         rec = runs.read(root, tid)
         if not rec or rec.get("mode") != "live" or (rec.get("live") or {}).get("state") != "idle":
@@ -267,36 +293,46 @@ def deliver(root: Path, tid: str) -> int:
         items = runs.undelivered(root, tid)
         if not items or not session_exists(root, tid):
             return 0
-        flat = not adapters.caps(rec["agent"], root)["hooks"]  # no bracketed paste to rely on: one line
-        text = _format(items, flat)
-        if not _paste(root, tid, f"orch-{rec['run']}", text):
+        old = rec.get("submit") or {}
+        nudges = int(old.get("nudges") or 0)
+        if nudges >= NUDGES:  # it took the notice and went idle without reading, twice: the wrapper ends it
+            if not old.get("stale"):
+                rec["submit"] = {**old, "stale": True}
+                runs._write(root, rec)
             return 0
-        # the text is in the prompt box now: delivered, never pasted twice; if this Enter is lost too,
-        # watch_submit sends it again
-        time.sleep(PASTE_DELAY)  # let the paste land before Enter
-        _enter(root, tid)
-        ids = [i["id"] for i in items]
-        runs.mark_delivered_locked(root, tid, ids)
+        line = notice_line(tid, any(i.get("via") == "start" for i in items))
+        if not _type_line(root, tid, line):
+            return 0
         rec = runs.read(root, tid) or rec
         rec["live"] = {"state": "working", "since": tickets.now()}
         rec["renewed_at"] = tickets.now()
-        # not known to be submitted yet: the prompt hook (`working`) clears this; watch_submit checks it
-        rec["submit"] = {"at": tickets.now(), "items": ids, "tail": _tail(text), "enters": 1}
+        rec["submit"] = {"at": tickets.now(), "line": line, "enters": 1, "nudges": nudges + 1}
         runs._write(root, rec)
         return len(items)
 
 
-TAIL_MIN = 12
-_DIALOG = re.compile(r"Do you want|❯\s*1\.|\(y/n\)|\bAllow\b", re.IGNORECASE)
+def read_input(root: Path, tid: str, run: str | None) -> tuple[str, int]:
+    """`orch run input`: the agent reads what waits for it; this is what marks it delivered."""
+    with runs.locked(root, tid):
+        rec = runs.read(root, tid)
+        if run and rec and rec["run"] != run:
+            raise Refused(f"Another run works on {tid} now.")
+        items = runs.undelivered(root, tid)
+        if items:
+            runs.mark_delivered_locked(root, tid, [i["id"] for i in items])
+        rec = runs.read(root, tid)
+        if rec and rec.get("mode") == "live" and (not run or rec["run"] == run):
+            rec.pop("submit", None)  # the agent has it: nothing more to check or type
+            rec["live"] = {"state": "working", "since": tickets.now()}
+            rec["renewed_at"] = tickets.now()
+            runs._write(root, rec)
+    if items:
+        runs.notify_working(root)
+    return input_text(items), len(items)
 
 
 def _squeeze(text: str) -> str:
     return "".join(text.split())
-
-
-def _tail(text: str) -> str:
-    """The end of the pasted text, without whitespace (a prompt box wraps and indents lines)."""
-    return _squeeze(text)[-40:]
 
 
 def _log_submit(root: Path, tid: str, run: str, what: str) -> None:
@@ -306,40 +342,60 @@ def _log_submit(root: Path, tid: str, run: str, what: str) -> None:
             fh.write(f"{tickets.now()} {tid} {run} {what}\n")
 
 
-def _look(root: Path, tid: str, tail: str) -> tuple[bool | None, str]:
-    """(unsent, pane hash). unsent: True when the end of the pasted text sits in the prompt box (the line with
-    the cursor and the two above it), False when it does not, None when that cannot be told safely: the pane
-    is in copy mode, a dialog shows (an Enter would answer it), the tail is too short, or tmux failed."""
-    pane = tmux(root, "capture-pane", "-p", "-t", target(tid))
+_BORDER = re.compile(r"^\s*[╭╰┌└]?[─━═]{20,}[╮╯┐┘]?\s*$")
+
+
+def _box_rows(lines: list[str], cy: int) -> tuple[int, int]:
+    """The prompt box: the rows between the last two border lines when the tool draws them, else the cursor
+    line and the two above it."""
+    borders = [i for i, ln in enumerate(lines) if _BORDER.match(ln)]
+    if len(borders) >= 2:
+        return borders[-2] + 1, borders[-1]
+    return max(0, cy - 2), cy + 1
+
+
+def _look(root: Path, tid: str, line: str, dialog: str | None) -> tuple[bool | None, str]:
+    """(unsent, pane hash). unsent: True when the notice line still sits in the prompt box, False when it does
+    not, None when that cannot be told safely: copy mode, the tool's dialog shows outside the box (an Enter
+    would answer it), or tmux failed."""
+    pane = tmux(root, "capture-pane", "-p", "-t", target(tid), timeout=QUICK)
     if pane.returncode != 0:
         return None, ""
     digest = hashlib.sha256(pane.stdout.encode("utf-8")).hexdigest()[:16]
-    if len(tail) < TAIL_MIN:
-        return None, digest
-    d = tmux(root, "display-message", "-p", "-t", target(tid), "#{pane_in_mode} #{cursor_y}")
+    d = tmux(root, "display-message", "-p", "-t", target(tid), "#{pane_in_mode} #{cursor_y}", timeout=QUICK)
     try:
         in_mode, y = d.stdout.split()
         cy = int(y)
     except ValueError:
         return None, digest
-    lines = pane.stdout.split("\n")
-    if d.returncode != 0 or in_mode != "0" or _DIALOG.search("\n".join(lines[-15:])):
+    if d.returncode != 0 or in_mode != "0":
         return None, digest
-    box = _squeeze("".join(lines[max(0, cy - 2) : cy + 1]))
-    return tail in box, digest
+    lines = pane.stdout.split("\n")
+    a, b = _box_rows(lines, cy)
+    outside = [ln for ln in lines[:a] + lines[b:] if ln.strip()]
+    if dialog and re.search(dialog, "\n".join(outside[-15:]), re.IGNORECASE | re.MULTILINE):
+        return None, digest
+    return _squeeze(line) in _squeeze("".join(lines[a:b])), digest
 
 
-def check_submit(root: Path, tid: str, run: str, now: float | None = None, end=None) -> str | None:
-    """Pasted input with no sign of having been submitted. Enter is sent again only while the text still
-    sits in the prompt box (never at a dialog, never blind): after SUBMIT_CHECK_SECONDS, and a last time
-    after SUBMIT_WATCHDOG_SECONDS. Still there after SUBMIT_GIVE_UP_SECONDS with the pane unchanged for
-    SUBMIT_QUIET_SECONDS: the input is put back (live_retry: the next start works one step at a time) and
-    `end` ends the session. A tool with hooks shows submission with its prompt hook (`working`); one
-    without, by the text missing from its prompt box in two checks in a row. Decide and act under the run
-    lock, so a prompt hook landing meanwhile is never followed by a stray Enter.
-    Returns what was done: "enter", "sent", "gave_up" or None."""
-    t = time.time() if now is None else now
-    gave_up = None
+def check_submit(
+    root: Path, tid: str, run: str, now: float | None = None, end=None, guard=None, stop=None
+) -> str | None:
+    """A notice line with no sign the agent took it. Enter is sent again only while the line still sits in the
+    prompt box and no dialog shows: after SUBMIT_CHECK_SECONDS, and a last time after SUBMIT_WATCHDOG_SECONDS
+    (each re-checked right before the key). The input is given up on (put back with live_retry: the next start
+    works one step at a time; `end` ends the session) after SUBMIT_GIVE_UP_SECONDS with the pane unchanged for
+    SUBMIT_QUIET_SECONDS and the line still there (or NONE_POLLS checks in a row that could not tell), or when
+    the agent took the notice twice and never read the input (stale). The agent reading its input
+    (`orch run input`) ends all of this. guard/stop: the wrapper's in-process lock and stop flag (the SIGTERM
+    handler takes the guard; after stop nothing is written). Returns "enter", "gave_up" or None."""
+    with guard if guard is not None else contextlib.nullcontext():
+        if stop is not None and stop.is_set():
+            return None
+        return _check_submit(root, tid, run, time.time() if now is None else now, end, stop)
+
+
+def _check_submit(root: Path, tid: str, run: str, t: float, end, stop) -> str | None:
     with runs.locked(root, tid):
         rec = runs.read(root, tid)
         if not rec or rec["run"] != run or rec.get("mode") != "live" or not rec.get("submit"):
@@ -349,40 +405,56 @@ def check_submit(root: Path, tid: str, run: str, now: float | None = None, end=N
             age = t - runs._parse(s["at"])
         except (KeyError, ValueError):
             return None
-        if age < SUBMIT_CHECK_SECONDS or not session_exists(root, tid):
-            return None
-        hooks = adapters.caps(rec["agent"], root)["hooks"]
-        unsent, digest = _look(root, tid, s.get("tail") or "")
-        enters = int(s.get("enters") or 1)
-        did = None
-        if not hooks and unsent is False:
-            s["absent"] = int(s.get("absent") or 0) + 1
-            if s["absent"] >= 2:  # gone in two checks in a row: a redraw did not just hide it
-                rec.pop("submit", None)
-                runs._write(root, rec)
-                return "sent"
-        elif unsent is True:
-            s["absent"] = 0
-        if s.get("watchdog"):
-            if digest != s.get("pane"):  # the pane changes: something works, never give up on it
+        if s.get("stale"):
+            stuck = True
+            unsent = None
+        else:
+            if age < SUBMIT_CHECK_SECONDS or not session_exists(root, tid):
+                return None
+            dialog = (adapters.load(rec["agent"], root).get("live") or {}).get("dialog")
+            unsent, digest = _look(root, tid, s.get("line") or "", dialog)
+            if digest and digest != s.get("pane"):
                 s["pane"], s["quiet"] = digest, runs._iso(t)
             quiet = t - runs._parse(s.get("quiet") or s["at"])
-            if unsent is True and age >= SUBMIT_GIVE_UP_SECONDS and quiet >= SUBMIT_QUIET_SECONDS:
-                gave_up = _give_up_locked(root, rec, s)
-        elif unsent is True and (age >= SUBMIT_WATCHDOG_SECONDS or enters == 1):
-            if _enter(root, tid):
-                last = age >= SUBMIT_WATCHDOG_SECONDS
+            s["unknown"] = int(s.get("unknown") or 0) + 1 if unsent is None else 0
+            enters = int(s.get("enters") or 1)
+            stuck = (
+                age >= SUBMIT_GIVE_UP_SECONDS
+                and quiet >= SUBMIT_QUIET_SECONDS
+                and ((s.get("watchdog") and unsent is True) or s["unknown"] >= NONE_POLLS)
+            )
+        did = None
+        if (
+            not stuck
+            and unsent is True
+            and not s.get("watchdog")
+            and (enters == 1 or age >= SUBMIT_WATCHDOG_SECONDS)
+        ):
+            again, _ = _look(root, tid, s.get("line") or "", dialog)  # the screen may have changed meanwhile
+            if again is True and _enter(root, tid, QUICK):
                 s["enters"] = enters + 1
-                if last:
-                    s.update(watchdog=True, pane=digest, quiet=runs._iso(t))
+                if age >= SUBMIT_WATCHDOG_SECONDS:
+                    s["watchdog"] = True
                 did = "enter"
                 _log_submit(
                     root,
                     tid,
                     run,
-                    f"Enter again ({s['enters']}): the text still sat in the box at {int(age)} s",
+                    f"Enter again ({s['enters']}): the notice still sat in the box at {int(age)} s",
                 )
-        if gave_up is None:
+        elif (
+            not stuck
+            and age >= SUBMIT_GIVE_UP_SECONDS + 60
+            and not s.get("noisy")
+            and quiet < SUBMIT_QUIET_SECONDS
+        ):
+            s["noisy"] = True
+            _log_submit(root, tid, run, "the pane never goes quiet: no give-up while it changes")
+        if stop is not None and stop.is_set():
+            return None  # the wrapper is ending: no write after stop
+        if stuck:
+            _give_up_locked(root, rec)
+        else:
             if s != rec["submit"]:
                 rec["submit"] = s
                 runs._write(root, rec)
@@ -392,34 +464,36 @@ def check_submit(root: Path, tid: str, run: str, now: float | None = None, end=N
         tickets.log(
             root,
             tid,
-            f"{label} did not take the input in its live session, so the session was closed. "
+            f"{label} did not take the new input in its live session, so the session was closed. "
             "The input is kept and goes in with the next start, one step at a time.",
             f"agent:{rec['agent']}",
         )
-    _log_submit(
-        root, tid, run, "gave up: the text sat unsent and the pane did not change; input queued again"
-    )
+    _log_submit(root, tid, run, "gave up: the agent did not take the notice; input queued for a one-step run")
     if end is not None:
         end()
     return "gave_up"
 
 
-def _give_up_locked(root: Path, rec: dict, s: dict) -> bool:
-    """Under the run lock: put the input back for a one-step start (never lost), end this run's claim on it.
-    A session whose only input was its start prompt gets a note item, so the next start is one step too."""
+def _give_up_locked(root: Path, rec: dict) -> None:
+    """Under the run lock: the waiting input gets live_retry (the next start is one step at a time); a start
+    prompt is dropped (the next start builds it again), and if nothing else waits, a note item is queued so
+    the next start is one step too. Never lost, never a live loop."""
     tid = rec["ticket"]
     items = runs._pending_read(root, tid)
     back = False
     for i in items:
-        if i["id"] in s["items"] and i.get("via") != "start":  # the start prompt is built again
-            i.pop("delivered_at", None)
+        if i.get("delivered_at"):
+            continue
+        if i.get("via") == "start":
+            i["delivered_at"] = tickets.now()
+        else:
             i["live_retry"] = True
             back = True
     runs._pending_write(root, tid, items)
     if not back:
         note = runs._pending_add_locked(
             root, tid, "orch", "event",
-            "The live session did not take the start prompt. Continue the work on this ticket.",
+            "The live session did not take its task. Continue the work on this ticket.",
             "live_retry", None,
         )  # fmt: skip
         items = runs._pending_read(root, tid)
@@ -432,19 +506,18 @@ def _give_up_locked(root: Path, rec: dict, s: dict) -> bool:
     rec["pending"] = True
     rec["stop_requested"] = tickets.now()  # our own end, set before the agent is ended
     runs._write(root, rec)
-    return True
 
 
-def watch_submit(root: Path, tid: str, run: str, proc: subprocess.Popen) -> None:
-    """In the pane's wrapper, for the whole session: check_submit on input pasted and not yet submitted."""
-    while proc.poll() is None:
+def watch_submit(root: Path, tid: str, run: str, proc: subprocess.Popen, guard=None, stop=None) -> None:
+    """In the pane's wrapper, for the whole session: check_submit while a notice waits to be taken."""
+    while proc.poll() is None and not (stop is not None and stop.is_set()):
         time.sleep(SUBMIT_POLL)
         try:
             rec = runs.read(root, tid)
             if not rec or rec["run"] != run:
                 return
             if rec.get("submit"):
-                check_submit(root, tid, run, end=proc.terminate)
+                check_submit(root, tid, run, end=proc.terminate, guard=guard, stop=stop)
         except Exception:  # never take the wrapper down
             continue
 
@@ -455,8 +528,6 @@ def _set_state(root: Path, tid: str, run: str, state: str) -> bool:
         if not rec or rec["run"] != run:
             return False
         rec["live"] = {"state": state, "since": tickets.now()}
-        if state == "working":
-            rec.pop("submit", None)  # the tool took a prompt: what was pasted went in
         if state in ("idle", "working"):
             rec["up"] = True  # the tool has been up: a later notice is never a first-run screen
         rec["renewed_at"] = tickets.now()

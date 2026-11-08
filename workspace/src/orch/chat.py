@@ -508,6 +508,7 @@ HELPER_COMMANDS = {
     ("run", "claim"): ("run", {"ticket", "agent", "pid"}, ("ticket",)),
     ("run", "release"): ("run", {"ticket", "run"}, ("ticket",)),
     ("run", "done"): ("run", {"ticket", "run"}, ("ticket",)),
+    ("run", "input"): ("run", {"ticket"}, ("ticket",)),
     ("run", "status"): ("run", {"ticket"}, ("ticket",)),
     ("run", "session"): ("run", {"ticket", "agent"}, ("ticket",)),
     ("run", "argv"): ("run", {"ticket", "agent", "session"}, ("ticket",)),
