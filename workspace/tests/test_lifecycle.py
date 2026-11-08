@@ -219,10 +219,11 @@ def test_an_answer_given_in_the_dashboard_resumes_the_agent(proj, run, gen, one_
     assert "Answered q1: Friday" in log.read_text(encoding="utf-8")
 
 
-def test_a_live_session_that_ends_with_input_waiting_stays_working(proj, run):
+def test_a_live_session_that_ends_with_input_waiting_stays_working(proj, run, monkeypatch):
     """F5 (review #287): an answer or message still waiting to go in keeps the ticket Working."""
     import sys
 
+    monkeypatch.setattr(runs, "restart_for_input", lambda *a: False)
     tid = _new(run)
     rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
     runs.pending_add(proj, tid, "human:t", "answer", "Answer to your question q1: Blue")
@@ -254,3 +255,78 @@ def test_two_pulls_at_once_send_one_result(proj, run, monkeypatch):
     for t in ts:
         t.join()
     assert got == ["result"]
+
+
+def test_a_result_that_could_not_be_sent_is_pushed_on_the_next_pull(proj, run, monkeypatch):
+    """F6 (delta review): a failed send undoes the claim, status too, so the retry is a result again."""
+    from orch import relay
+
+    tid = _new(run)
+    phone_view.update_state(
+        proj, lambda st: st["tickets"].update({tid: {"to": "phones", "sig": "x", "at": 0, "status": "open"}})
+    )
+    tickets.set_status(proj, tid, "review", "human:t")
+    calls = []
+
+    def flaky(root, to, text, t, kind, **k):
+        calls.append(kind)
+        if len(calls) == 1:
+            raise Refused("The relay could not be reached.")
+
+    monkeypatch.setattr(relay, "send_text", flaky)
+    assert phone_view.sync(proj) == []
+    assert phone_view.sync(proj) == [tid] and calls == ["result", "result"]
+
+
+def test_a_busy_state_file_after_a_send_does_not_fail_the_send(proj, run, monkeypatch):
+    tid = _new(run)
+
+    def busy(root, fn):
+        raise Refused("The phone view state is busy. Try again in a moment.")
+
+    monkeypatch.setattr(phone_view, "update_state", busy)
+    phone_view.remember(proj, tid, "phones")  # no exception: the message already went out
+
+
+def test_a_stale_state_lock_is_broken_and_a_fresh_one_is_kept(proj):
+    lock = phone_view.net.secrets_dir(proj) / "phone-views.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("")
+    os.utime(lock, (time.time() - 60, time.time() - 60))
+    assert phone_view._break_stale_lock(lock) is True and not lock.exists()
+    lock.write_text("")
+    assert phone_view._break_stale_lock(lock) is False and lock.exists()
+
+
+def test_a_live_session_that_ends_with_input_waiting_starts_the_next_run_once(proj, run, monkeypatch):
+    """F5 (delta review): the next run starts by itself (same path as Continue), once per waiting item."""
+    import sys
+
+    started = []
+    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv: started.append(argv) or True)
+    tid = _new(run)
+    for _ in range(2):  # the second time the same item waits: an agent that quits at once is not restarted
+        rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+        if not runs.undelivered(proj, tid):
+            runs.pending_add(proj, tid, "human:t", "answer", "Answer to your question q1: Blue")
+        runs.wrap_live(proj, rec["run"], tid, "claude", [sys.executable, "-c", "pass"], None)
+    assert (
+        len(started) == 1
+        and started[0][-6:] == ["run", "start", tid, "--agent", "claude", "--by", "human:t"][-6:]
+    )
+    assert _status(proj, tid) == "active"  # Working: the next run is on its way
+
+
+def test_a_stopped_live_session_does_not_start_again(proj, run, monkeypatch):
+    import sys
+
+    started = []
+    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv: started.append(argv) or True)
+    tid = _new(run)
+    rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+    runs.pending_add(proj, tid, "human:t", "message", "One more thing")
+    rec = runs.read(proj, tid)
+    rec["stop_requested"] = tickets.now()
+    runs._write(proj, rec)
+    runs.wrap_live(proj, rec["run"], tid, "claude", [sys.executable, "-c", "pass"], None)
+    assert started == []

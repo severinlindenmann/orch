@@ -168,7 +168,31 @@ def save_state(root: Path, s: dict) -> None:
     net.write_json(_state_path(root), s, True)
 
 
-STATE_LOCK_STALE = 30
+STATE_LOCK_STALE = 10  # no more than the wait: a lock left by a holder that died is broken before giving up
+
+
+def _break_stale_lock(lock: Path) -> bool:
+    """Take away a lock left by a holder that died (older than STATE_LOCK_STALE; it is only ever held for one
+    file write). Rename first, so only one waiter wins; what was taken must still be the old one, else (a new
+    holder's fresh lock) it is put back without clobbering."""
+    try:
+        if time.time() - lock.stat().st_mtime <= STATE_LOCK_STALE:
+            return False
+        mine = lock.with_name(f"{lock.name}.{os.getpid()}.{time.monotonic_ns()}")
+        os.replace(lock, mine)
+    except OSError:
+        return False
+    try:
+        if time.time() - mine.stat().st_mtime > STATE_LOCK_STALE:
+            return True
+        with contextlib.suppress(OSError):
+            os.link(mine, lock)  # a live holder's lock: put it back (fails if a newer one is there already)
+        return False
+    except OSError:
+        return False
+    finally:
+        with contextlib.suppress(OSError):
+            mine.unlink()
 
 
 @contextlib.contextmanager
@@ -184,10 +208,8 @@ def _state_locked(root: Path, wait: float = 10.0):
             os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
             break
         except FileExistsError:
-            with contextlib.suppress(OSError):
-                if time.time() - lock.stat().st_mtime > STATE_LOCK_STALE:
-                    lock.unlink()  # a holder that died; the lock is only ever held for a file write
-                    continue
+            if _break_stale_lock(lock):
+                continue
             if time.monotonic() > end:
                 raise Refused("The phone view state is busy. Try again in a moment.") from None
             time.sleep(0.02)
@@ -462,7 +484,8 @@ def remember(root: Path, tid: str, to: str) -> None:
             if tid not in state["synced"][to]:
                 state["synced"][to].append(tid)
 
-    update_state(root, put)
+    with contextlib.suppress(Refused):  # the message went out already: a busy state file never makes it fail
+        update_state(root, put)
 
 
 FINISHED = ("review", "done")
@@ -495,7 +518,7 @@ def sync(root: Path, now: float | None = None) -> list[str]:
     with contextlib.suppress(Refused, OSError, ValueError):
         on = mobile_mode.routes_to_phone(root)
     all_ = tickets.list_all(root)
-    due: list[tuple[str, str, dict, bool]] = []  # (ticket id, to, ticket, finished just now)
+    due: list[tuple] = []  # (ticket id, to, ticket, finished just now, status before)
 
     def claim(state):
         # under the lock: decide what goes out and mark it as sent first, so two pulls never send it twice
@@ -507,7 +530,7 @@ def sync(root: Path, now: float | None = None) -> list[str]:
             sig = _tasks_sig(t, root)
             if sig == rec.get("sig") or now - rec.get("at", 0) < DEBOUNCE:
                 continue
-            due.append((tid, rec["to"], t, _just_finished(rec.get("status"), t)))
+            due.append((tid, rec["to"], t, _just_finished(rec.get("status"), t), rec.get("status")))
             rec.update(sig=sig, at=now, status=t.get("status"))
         for t in all_:
             tid, prev = t["id"], seen.get(t["id"])
@@ -516,11 +539,11 @@ def sync(root: Path, now: float | None = None) -> list[str]:
                 continue
             with contextlib.suppress(Refused, OSError, ValueError):
                 if on or mobile_mode.from_phone(root, tid):
-                    due.append((tid, "phones", t, True))
+                    due.append((tid, "phones", t, True, prev))
 
     update_state(root, claim)
     sent = []
-    for tid, to, t, finished in due:
+    for tid, to, t, finished, before in due:
         done, total = tickets.checks_done(t)
         try:
             if finished:
@@ -528,9 +551,16 @@ def sync(root: Path, now: float | None = None) -> list[str]:
             else:
                 relay.send_text(root, to, f"Tasks: {done} of {total} done", tid, "note", view=True)
             sent.append(tid)
-        except Refused:  # not sent: the next pull tries again
+        except Refused:  # not sent: undo the claim (also the status, so a result is pushed again next pull)
+
+            def undo(st, tid=tid, before=before):
+                if tid in st["tickets"]:
+                    st["tickets"][tid].update(sig=None, status=before, at=0)  # no debounce for the retry
+                else:
+                    st.setdefault("status", {})[tid] = before
+
             with contextlib.suppress(Refused):
-                update_state(root, lambda st, tid=tid: (st["tickets"].get(tid) or {}).update(sig=None))
+                update_state(root, undo)
     return sent
 
 

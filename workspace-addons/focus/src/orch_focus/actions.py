@@ -166,13 +166,32 @@ def build_argv(op, args) -> list[str]:
     return [*words, *flags, "--by", BY.get(op) or actor(), "--json", *(["--", *tail] if tail else [])]
 
 
+def human_env(root: Path, orch_bin: str) -> dict:
+    """Page actions are the person's actions, even if an agent launched the server: the agent tools' own
+    variables (and ORCH_AGENT/RUN/TICKET) are left out, or orch would count the click as the agent's."""
+    names = {"ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET"}
+    prefixes: list[str] = []
+    try:
+        from orch.adapters import _registry
+
+        for adapter in _registry().values():
+            detection = adapter.get("detect") or {}
+            names.update(detection.get("env_any") or [])
+            if detection.get("env_prefix"):
+                prefixes.append(detection["env_prefix"])
+    except ImportError:
+        pass  # without the orch package the fixed names still go
+    env = {k: v for k, v in os.environ.items() if k not in names and not k.startswith(tuple(prefixes))}
+    return {**env, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "focus"}
+
+
 def orch(root: Path, orch_bin: str | None, argv: list[str], timeout: int = 60) -> tuple[int, str, str]:
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
     try:
         r = subprocess.run(
             [orch_bin, *argv], check=False, cwd=root, capture_output=True, text=True, timeout=timeout,
-            stdin=subprocess.DEVNULL, env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "focus"},
+            stdin=subprocess.DEVNULL, env=human_env(root, orch_bin),
         )  # fmt: skip
     except subprocess.TimeoutExpired:
         return 124, "", "That took too long. Please try again."
