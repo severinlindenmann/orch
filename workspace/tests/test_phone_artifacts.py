@@ -291,3 +291,34 @@ def test_two_artifacts_with_the_same_content_are_sent_once(proj, run, new_ticket
     artifact(proj, tid, "second.md", b"same")
     assert run("ask", tid, "See artifacts/first.md and artifacts/second.md")[0] == 0
     assert len(phone_view.view_for(proj, tid)["attachments"]) == 1
+
+
+@pytest.mark.parametrize(
+    "name,data,sent,said",
+    [
+        # a real png that hides a key in a text chunk: its raw bytes are still scanned
+        (
+            "shot.png",
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0ctEXtpassword=hunter2hunter2\xff\xfe",
+            False,
+            "password or key",
+        ),
+        # png bytes under a .txt name: not an image, and not text either -> not sent
+        ("notes.txt", b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\xff\xfe\x00", False, "can't be checked"),
+        # UTF-32 with a secret, read as UTF-32 (not as UTF-16)
+        ("u32.txt", "token = sk-test-ABCDEFGHIJKLMNOPQRSTUV\n".encode("utf-32"), False, "password or key"),
+        ("u32ok.txt", "plain words\n".encode("utf-32"), True, None),
+        # text that decodes with NULs in it fails closed
+        ("nul.txt", "a\x00b".encode("utf-16"), False, "can't be checked"),
+    ],
+)
+def test_images_are_still_scanned_and_utf32_is_read(proj, run, new_ticket, conn, name, data, sent, said):  # noqa: F811
+    tid = new_ticket("More files")
+    artifact(proj, tid, name, data)
+    assert run("ask", tid, f"See artifacts/{name}")[0] == 0
+    view = phone_view.view_for(proj, tid)
+    assert bool(view["attachments"]) is sent
+    lines = [
+        h["text"] for h in tickets.load(proj, tid)["history"] if "was not sent to the phone" in h["text"]
+    ]
+    assert len(lines) == (0 if said is None else 1) and all(said in ln for ln in lines)

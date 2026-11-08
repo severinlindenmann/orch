@@ -56,7 +56,20 @@ HIDDEN = "[hidden]"
 _TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
 
 
-_IMAGE_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")
+_IMAGE_KINDS = {  # magic bytes -> the file extensions that type may carry
+    b"\x89PNG\r\n\x1a\n": (".png",),
+    b"\xff\xd8\xff": (".jpg", ".jpeg"),
+    b"GIF87a": (".gif",),
+    b"GIF89a": (".gif",),
+}
+
+
+def _is_image(data: bytes, name: str) -> bool:
+    """A real image of the type its extension names (png, jpeg, gif, webp); its bytes are still scanned."""
+    ext = Path(name).suffix.lower()
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ext == ".webp"
+    return any(data.startswith(magic) and ext in exts for magic, exts in _IMAGE_KINDS.items())
 
 
 def _has_secret(data: bytes) -> bool:
@@ -64,18 +77,24 @@ def _has_secret(data: bytes) -> bool:
     return any(rx.search(text) for rx in _SECRET_PATTERNS) or bool(_SECRET_KV.search(text))
 
 
-def _scan(data: bytes) -> str:
+def _scan(data: bytes, name: str) -> str:
     """One of ok, secret (looks like a password or key) or unknown (can not be checked: a PDF, zip, docx,
-    xlsx or any other packed or binary file; such a file is not sent, fail closed). Text (UTF-8, or UTF-16
-    with a BOM) is scanned as text; png, jpeg, gif and webp images are scanned as their bytes."""
-    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
-        try:
-            text = data.decode("utf-16")
-        except UnicodeDecodeError:
-            return "unknown"
-        return "secret" if _has_secret(text.encode()) else "ok"
-    image = data.startswith(_IMAGE_MAGIC) or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
-    if not image:
+    xlsx or any other packed or binary file, or text with NULs; such a file is not sent, fail closed). Text
+    (UTF-8, or UTF-32/UTF-16 with a BOM) is scanned as text; an image whose type matches its extension is
+    scanned as its raw bytes (text in metadata or after the image is still caught)."""
+    for bom, codec in (
+        ((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"), "utf-32"),  # before UTF-16: same first two bytes
+        ((b"\xff\xfe", b"\xfe\xff"), "utf-16"),
+    ):
+        if data.startswith(bom):
+            try:
+                text = data.decode(codec)
+            except UnicodeDecodeError:
+                return "unknown"
+            if "\x00" in text:
+                return "unknown"
+            return "secret" if _has_secret(text.encode()) else "ok"
+    if not _is_image(data, name):
         try:
             data.decode("utf-8")
         except UnicodeDecodeError:
@@ -435,7 +454,7 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
         if data is None:
             continue
         sha = hashlib.sha256(data).hexdigest()
-        verdict = _scan(data)
+        verdict = _scan(data, name)
         if verdict != "ok":
             why = (
                 "it looks like it holds a password or key"
