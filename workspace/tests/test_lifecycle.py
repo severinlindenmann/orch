@@ -467,3 +467,41 @@ def test_an_undo_in_the_status_branch_only_undoes_its_own_claim(proj, run, monke
     phone_view.sync(proj)
     st = phone_view.load_state(proj)
     assert st["status"][tid] == "review" and st["claims"][tid] == "someone-else"
+
+
+def test_a_run_lock_falls_back_without_hard_links_and_is_private(proj, monkeypatch):
+    """#318 review: link() says EPERM/ENOTSUP/EXDEV where hard links are missing: plain create, mode 0600."""
+    import errno
+    import stat as st
+
+    from orch import procs
+
+    lock = proj / ".orch/run/tickets/t_lockbb.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    for code in (errno.EPERM, errno.ENOTSUP, errno.EXDEV):
+
+        def no_links(*a, code=code, **k):
+            raise OSError(code, "no hard links")
+
+        monkeypatch.setattr(runs.os, "link", no_links)
+        runs._create_lock(lock)
+        assert lock.read_text() == procs.own_token()
+        assert st.S_IMODE(lock.stat().st_mode) == 0o600
+        lock.unlink()
+
+
+def test_an_nfs_eexist_on_our_own_lock_counts_as_taken(proj, monkeypatch):
+    """#318 review: NFS may report EEXIST for a link that did succeed; the lock holding our token is ours."""
+    real = runs.os.link
+
+    def link_then_eexist(src, dst, *a, **k):
+        real(src, dst)
+        raise FileExistsError(17, "File exists")
+
+    monkeypatch.setattr(runs.os, "link", link_then_eexist)
+    lock = proj / ".orch/run/tickets/t_lockcc.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    runs._create_lock(lock)  # no error: it is ours
+    lock.write_text("someone else")
+    with pytest.raises(FileExistsError):
+        runs._create_lock(lock)

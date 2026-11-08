@@ -82,9 +82,9 @@ PNG_CHUNKS = {b"IHDR", b"PLTE", b"IDAT", b"IEND", b"tRNS", b"gAMA", b"cHRM", b"s
 
 
 def _image_clean(data: bytes) -> bool:
-    """True when an image has nowhere to hide text the scan can not read: only the PNG chunks in
-    PNG_CHUNKS and nothing after its end (PNG IEND, JPEG last EOI, GIF trailer,
-    WebP RIFF size). Anything odd is False (fail closed)."""
+    """True when an image has nowhere to hide text the scan can not read. Only a PNG can be: its chunks are
+    walked (bounded), only those in PNG_CHUNKS pass, and nothing may follow IEND. Every other image type,
+    and anything odd, is False (fail closed)."""
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         pos = 8
         for _ in range(PNG_MAX_CHUNKS):
@@ -99,12 +99,7 @@ def _image_clean(data: bytes) -> bool:
                 return end == len(data)
             pos = end
         return False
-    if data.startswith(b"\xff\xd8\xff"):
-        return data.endswith(b"\xff\xd9")  # nothing after the last EOI
-    if data.startswith((b"GIF87a", b"GIF89a")):
-        return data.endswith(b"\x3b")
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return int.from_bytes(data[4:8], "little") + 8 == len(data)
+    # JPEG, GIF and WebP: no structural walk yet, so they can not be checked (fail closed)
     return False
 
 

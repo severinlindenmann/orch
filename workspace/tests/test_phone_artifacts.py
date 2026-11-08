@@ -383,20 +383,44 @@ def test_images_with_hidden_or_trailing_data_fail_closed(proj, run, new_ticket, 
     assert len(lines) == 1 and "can't be checked" in lines[0]
 
 
+def test_a_well_formed_png_is_sent(proj, run, new_ticket, conn):  # noqa: F811
+    tid = new_ticket("Images")
+    artifact(proj, tid, "ok.png", png())
+    assert run("ask", tid, "See artifacts/ok.png")[0] == 0
+    assert len(phone_view.view_for(proj, tid)["attachments"]) == 1
+
+
 @pytest.mark.parametrize(
     "name,data",
     [
-        ("ok.png", png()),
         ("ok.jpg", b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\xff\xd9"),
         ("ok.gif", b"GIF89a\x01\x00\x01\x00\x00\x00\x00;"),
         ("ok.webp", b"RIFF" + (12).to_bytes(4, "little") + b"WEBPVP8 " + b"\x00" * 4),
     ],
 )
-def test_well_formed_images_are_sent(proj, run, new_ticket, conn, name, data):  # noqa: F811
+def test_named_jpeg_gif_and_webp_are_not_sent_yet(proj, run, new_ticket, conn, name, data):  # noqa: F811
+    """Only a PNG can be walked and checked today; other image types fail closed when only named."""
     tid = new_ticket("Images")
     artifact(proj, tid, name, data)
     assert run("ask", tid, f"See artifacts/{name}")[0] == 0
-    assert len(phone_view.view_for(proj, tid)["attachments"]) == 1
+    assert phone_view.view_for(proj, tid)["attachments"] == []
+    lines = [
+        h["text"] for h in tickets.load(proj, tid)["history"] if "was not sent to the phone" in h["text"]
+    ]
+    assert len(lines) == 1 and "can't be checked" in lines[0]
+
+
+def test_a_jpeg_marked_as_evidence_still_goes_to_the_phone(proj, run, new_ticket, conn):  # noqa: F811
+    """Evidence the agent marks for the phone keeps its old behaviour; only named artifacts are strict."""
+    data = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\xff\xd9"
+    tid = new_ticket("Photo proof")
+    run("check", "add", tid, "Take the photo")
+    src = proj / "photo.jpg"
+    src.write_bytes(data)
+    code, _, err = run("check", "done", tid, "c1", "--file", str(src), "--role", "result")
+    assert code == 0, err
+    atts = phone_view.view_for(proj, tid)["attachments"]
+    assert len(atts) == 1 and atts[0]["kind"] == "image"
 
 
 def test_the_png_chunk_walk_is_bounded(monkeypatch):

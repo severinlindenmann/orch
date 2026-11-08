@@ -14,6 +14,7 @@ without a pid is "maybe stale" after the lease (30 min) with no orch write and i
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 import re
@@ -141,14 +142,18 @@ def _create_lock(lock: Path) -> None:
         try:
             os.link(tmp, lock)
             return
-        except (FileExistsError, PermissionError):
+        except FileExistsError:
+            if _lock_text(lock) == procs.own_token():
+                return  # NFS may report EEXIST for a link that did succeed: it is our lock
             raise
-        except OSError:  # no hard links on this file system
-            pass
+        except OSError as e:
+            if e.errno not in (errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV):
+                raise  # e.g. Windows "delete pending" (EACCES): the lock is busy, the caller waits
+            # no hard links on this file system: the plain create + write below
     finally:
         with contextlib.suppress(OSError):
             tmp.unlink()
-    fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(procs.own_token())
 
