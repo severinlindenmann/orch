@@ -115,7 +115,7 @@ function pageContext(snapshot = false) {
   vm.createContext(ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('function changeUnavailable'), homeSource.indexOf('function ticketTitle')), ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('function needRow'), homeSource.indexOf('function workingRow')), ctx);
-  vm.runInContext(homeSource.slice(homeSource.indexOf('function loadingView'), homeSource.indexOf('// The General conversation')), ctx);
+  vm.runInContext(homeSource.slice(homeSource.indexOf('function loadingView'), homeSource.indexOf('// Chat (former General)')), ctx);
   return {ctx, connection, toasts, calls};
 }
 test('inline options send the question and selected answer, disable together, and unlock', async () => {
