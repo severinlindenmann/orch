@@ -76,3 +76,22 @@ def test_say_action_builds_one_fixed_command():
         actions.build_argv("chat.say", {"text": "x", "by": "human:other"})
     with pytest.raises(actions.BadRequest):
         actions.build_argv("chat.say", {"text": ""})
+
+
+def test_chat_say_goes_through_the_act_fence(act_server, act_orch):
+    from .test_act import acts, post
+
+    body = {"op": "chat.say", "args": {"text": "from a web page"}}
+    port = act_server.rsplit(":", 1)[1]
+    for h in (
+        {"Origin": "https://evil.example"},
+        {"Origin": "null"},
+        {"Origin": None},
+        {"Host": "evil.example:" + port},
+        {"Sec-Fetch-Site": "cross-site"},
+    ):
+        assert post(act_server, body, h)[0] in (400, 403, 421), h
+    assert post(act_server, {}, raw="x", headers={"Content-Type": "text/plain"})[0] == 415
+    assert [c for c in acts(act_orch) if c[:2] != ["chat", "status"]] == []  # nothing reached the orch command
+    assert post(act_server, body)[0] == 200  # the page itself (same origin, JSON) can write
+    assert [c[:2] for c in acts(act_orch) if c[:2] != ["chat", "status"]] == [["chat", "say"]]
