@@ -325,7 +325,7 @@ struct ConversationView: View {
             Image(systemName: "bubble.left.and.bubble.right").themeFont(32).foregroundStyle(Theme.brand)
             if case .general = resolved {
                 Text("Say hello to \(workspaceName)").themeFont(20, .semibold)
-                Text("Anything you write here goes to General.").themeFont(15).foregroundStyle(Theme.muted)
+                Text("Anything you write here goes to Chat.").themeFont(15).foregroundStyle(Theme.muted)
             } else { Text("Nothing here yet").themeFont(17).foregroundStyle(Theme.muted) }
         }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 48)
     }
