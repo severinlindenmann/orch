@@ -158,9 +158,14 @@ _WORD = re.compile(r"[a-z0-9-]{1,24}")
 
 def _look(v):
     """Icon and colour ids only (a host-controlled look must never carry style or markup)."""
-    if isinstance(v, dict) and isinstance(v.get("icon"), str) and isinstance(v.get("color"), str):
-        if _WORD.fullmatch(v["icon"]) and _WORD.fullmatch(v["color"]):
-            return {"icon": v["icon"], "color": v["color"]}
+    if (
+        isinstance(v, dict)
+        and isinstance(v.get("icon"), str)
+        and isinstance(v.get("color"), str)
+        and _WORD.fullmatch(v["icon"])
+        and _WORD.fullmatch(v["color"])
+    ):
+        return {"icon": v["icon"], "color": v["color"]}
     return None
 
 
