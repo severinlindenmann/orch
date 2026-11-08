@@ -394,11 +394,11 @@ struct BubbleActions: ViewModifier {
     private var failed: Bool { if case .failed? = item.receipt { true } else { false } }
     func body(content: Content) -> some View {
         content
-            .accessibilityAction(named: "Reply") { onReply?() }
             .accessibilityActions {
+                if let onReply { Button("Reply", action: onReply) }
                 if failed {
-                    Button("Retry") { onRetry?() }
-                    Button("Discard") { onDiscard?() }
+                    if let onRetry { Button("Retry", action: onRetry) }
+                    if let onDiscard { Button("Discard", action: onDiscard) }
                 }
                 if item.incoming && item.canPlay { Button("Listen") { model.play(item, in: conversationId) } }
             }

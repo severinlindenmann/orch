@@ -1,0 +1,60 @@
+{
+  "why": "Group cap: 19 open groups and 4 created in the last hour is under both caps. (An old receive time outside the hour does not count.)",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_grpcreated000000",
+    "from": "ws_fin0000001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-08T10:02:00Z",
+    "ticket": "t_fin14a",
+    "key": "FIN-14",
+    "body": {
+      "text": "Finance helper started this group from FIN-14.",
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          }
+        ],
+        "seq": 1
+      },
+      "by": "ws_fin0000001",
+      "via": "helper",
+      "update": {
+        "kind": "note"
+      },
+      "group_event": {
+        "kind": "created",
+        "at": "2026-11-08T10:02:00Z",
+        "by": "ws_fin0000001"
+      }
+    }
+  },
+  "context": {
+    "open_groups_of_host": 19,
+    "now_s": 10000,
+    "creations_recv_s": [
+      1000,
+      2000,
+      9000,
+      9500
+    ]
+  }
+}
