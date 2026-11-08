@@ -27,19 +27,19 @@ enum ConversationID: Hashable, Sendable {
 }
 
 enum TopicStatus: String, Sendable, CaseIterable {
-    case working, waitingOnYou, review, backlog, done, stopped, didntWork
+    case working, waitingOnYou, review, paused, backlog, done, dropped, stopped, didntWork
     /// Short word: group headers and the info summary.
     var label: String {
         switch self {
-        case .working: "Working"; case .waitingOnYou: "Needs you"; case .review: "Ready for review"; case .backlog: "Not started"
-        case .done: "Done"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
+        case .working: "Working"; case .waitingOnYou: "Needs you"; case .review: "Ready for review"; case .paused: "Paused"; case .backlog: "Not started"
+        case .done: "Done"; case .dropped: "Dropped"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
         }
     }
     /// The chip words of the status workflow (PLAN-A section 5).
     var chip: String {
         switch self {
-        case .working: "Claude is working"; case .waitingOnYou: "Needs you"; case .review: "Ready for review"; case .backlog: "Not started"
-        case .done: "Done"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
+        case .working: "Claude is working"; case .waitingOnYou: "Needs you"; case .review: "Ready for review"; case .paused: "Paused"; case .backlog: "Not started"
+        case .done: "Done"; case .dropped: "Dropped"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
         }
     }
     init(_ t: Ticket) {
@@ -47,8 +47,9 @@ enum TopicStatus: String, Sendable, CaseIterable {
         case .needsYou: self = .waitingOnYou
         case .working: self = .working
         case .review: self = .review
+        case .paused: self = .paused
         case .backlog: self = .backlog
-        case .done: self = t.view?.status == "dropped" ? .stopped : t.kind == "failure" ? .didntWork : (t.kind == "stopped" ? .stopped : .done)
+        case .done: self = t.view?.status == "dropped" ? .dropped : t.kind == "failure" ? .didntWork : (t.kind == "stopped" ? .stopped : .done)
         }
     }
 }

@@ -337,17 +337,18 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
     var done: Int? = nil
     var total: Int? = nil
     var running: Bool? = nil
+    var started: Bool? = nil
     var attachments: [Attachment] = []
     var historyTail: [Line] = []
     /// What the ticket points at (web addresses, other tickets, files it produced, project files). Unknown kinds are left out.
     var refs: [TicketRef] = []
 
     init(title: String? = nil, status: String? = nil, agent: String? = nil, summary: String? = nil, checklist: [Task] = [],
-         running: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = [], refs: [TicketRef] = []) {
+         running: Bool? = nil, started: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = [], refs: [TicketRef] = []) {
         self.refs = refs
         self.title = title; self.status = status; self.agent = agent; self.summary = summary; self.checklist = checklist
         self.done = checklist.filter(\.done).count; self.total = checklist.count
-        self.running = running; self.attachments = attachments; self.historyTail = historyTail
+        self.running = running; self.started = started; self.attachments = attachments; self.historyTail = historyTail
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -359,11 +360,12 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         done = try? c.decodeIfPresent(Int.self, forKey: .done)
         total = try? c.decodeIfPresent(Int.self, forKey: .total)
         running = try? c.decodeIfPresent(Bool.self, forKey: .running)
+        started = try? c.decodeIfPresent(Bool.self, forKey: .started)
         attachments = (try? c.decodeIfPresent([Attachment].self, forKey: .attachments)) ?? []
         historyTail = (try? c.decodeIfPresent([Line].self, forKey: .historyTail)) ?? []
         refs = TicketRef.decodeList(c, forKey: .refs)
     }
-    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, running, attachments, historyTail, refs }
+    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, running, started, attachments, historyTail, refs }
     var doneCount: Int { done ?? checklist.filter(\.done).count }
     var totalCount: Int { total ?? checklist.count }
 }
