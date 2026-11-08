@@ -298,7 +298,7 @@
         "title",
         "members"
       ],
-      "description": "NEW. On every group message (text, question, answer, delegate, file, allow-related texts). id = \"grp_\" + the host ticket id; host = the workspace that owns that ticket; members = every workspace in the group, host included (the person and their phones are always in it and are not listed). seq is set by the host on what it sends. The group key is (host, id) everywhere (storage, dedupe, phone cache): a message whose id is held under another host is dropped.",
+      "description": "NEW. On every group message (text, question, answer, delegate, file, allow-related texts). id = \"grp_\" + the host ticket id; host = the workspace that owns that ticket; members = every workspace in the group, host included (the person and their phones are always in it and are not listed). seq is set by the host on what it sends. The group key is (host, id) everywhere (storage, dedupe, phone cache): a receiver never drops a real group because another host used the same id.",
       "properties": {
         "id": {
           "type": "string",
@@ -366,7 +366,7 @@
         "kind",
         "at"
       ],
-      "description": "NEW. Host only. created / closed: the group itself. member_added / member_left: ws joined or left (reason left|removed). approval_needed / approved / denied: a member's existing allow question about a task from the host (question_message = that member's question to the phones; mode = once|permanent on approved).",
+      "description": "NEW. Host only. created / closed: the group itself. member_added / member_left: ws joined or left (reason left|removed). approval_needed / approved / denied: a member's existing allow question about a task from the host (question_message = that member's question to the phones; mode = once|always on approved (same words as the allow question)).",
       "properties": {
         "kind": {
           "enum": [
@@ -397,7 +397,7 @@
         "mode": {
           "enum": [
             "once",
-            "permanent"
+            "always"
           ]
         },
         "question_message": {

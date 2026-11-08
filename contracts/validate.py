@@ -636,6 +636,8 @@ CG_MEMBER_ONLY = ("seen", "leave")
 CG_FILE_MAX = 26214400
 # task.status order: a status may repeat or move right, never left; the last column is final.
 CG_TASK_RANK = {"waiting_start": 0, "waiting_approval": 1, "queued": 2, "working": 3, "done": 4, "failed": 4, "denied": 4}
+CG_ALLOW_OPTIONS = ["once", "always", "no"]  # wire values; the UI shows "Allow once / Always / No"
+CG_ORDER_BUFFER = 50
 CG_RATE = {"msgs_per_min": 20, "files_per_min": 3}
 
 
@@ -663,10 +665,13 @@ def cg_quiet(m):
     return not (m.get("type") == "question" or ev in ("approval_needed", "closed") or st in ("done", "failed") or b.get("to_person") is True)
 
 
-def cg_rules(m):
+def cg_rules(m, ctx=None):
     """Message rules JSON Schema cannot express (chat-groups.md, Security G1-G8). Returns plain messages."""
+    ctx = ctx or {}
     b, out = m.get("body") or {}, []
     g = b.get("group")
+    if m.get("type") == "question" and "scope" in b and b.get("options") != CG_ALLOW_OPTIONS:
+        out.append("a permission (allow) question has the wire options once, always, no (UI words are only shown)")
     if not isinstance(g, dict):
         return out
     host, frm, to = g.get("host"), m.get("from"), m.get("to")
@@ -684,6 +689,9 @@ def cg_rules(m):
         if m.get("type") == "question" and b.get("question_kind") != "info":
             out.append("a host question to a member must be question_kind info")
         o = b.get("origin")
+        hs0 = ctx.get("host_state") or {}
+        if isinstance(o, dict) and str(o.get("from")).startswith("ph_") and "paired_phones" in hs0 and o["from"] not in hs0["paired_phones"]:
+            out.append("origin.from is a ph_ only for a phone paired to this host workspace")
         if b.get("by") == "you":
             if b.get("via") == "phone" and not (isinstance(o, dict) and o.get("from") == b.get("phone")):
                 out.append("by you via phone: origin.from must be that phone")
@@ -744,9 +752,13 @@ def cg_receive(m, ctx):
     b, out = m.get("body") or {}, []
     g = b.get("group") if isinstance(b.get("group"), dict) else None
     if g:
-        known = (ctx.get("known_groups") or {}).get(g.get("id"))
-        if known is not None and known != g.get("host"):
-            out.append("group key is (host, id): this id belongs to another host")
+        # The group key is (host, id): an id held under another host is a different group, never a conflict.
+        o = b.get("origin")
+        if isinstance(o, dict) and [g.get("host"), g.get("id"), o.get("id")] in [list(x) for x in ctx.get("seen_origins", [])]:
+            out.append("duplicate: this (host, group.id, origin.id) was already stored")
+        od = cg_order(m, ctx)
+        if od == "drop":
+            out.append("dropped: seq is not above the last applied seq")
     hs = ctx.get("host_state")
     if g and hs is not None and m.get("from") != g.get("host"):
         frm = m.get("from")
@@ -769,6 +781,25 @@ def cg_receive(m, ctx):
     return out
 
 
+def cg_order(m, ctx):
+    """Stateful checks (G9 task status, closed, membership) run in group.seq order. Returns apply | buffer |
+    apply_in_order_and_log | drop, or None when the message has no seq or the context has no `order`."""
+    seq, od = ((m.get("body") or {}).get("group") or {}).get("seq"), ctx.get("order")
+    if seq is None or od is None:
+        return None
+    if seq <= od["applied_seq"]:
+        return "drop"
+    if seq == od["applied_seq"] + 1:
+        return "apply"
+    return "apply_in_order_and_log" if len(od.get("buffered", [])) >= CG_ORDER_BUFFER else "buffer"
+
+
+def cg_shown_as(m, ctx):
+    """How a phone labels a host copy with by: you. Only a phone of its own account or the host's dashboard is 'You'."""
+    o = (m.get("body") or {}).get("origin") or {}
+    return "You" if o.get("from") == "dashboard" or o.get("from") in ctx.get("own_phones", []) else "Other phone"
+
+
 def cg_phone_group(m, ctx):
     """True when a phone text joins the group: it goes to the host ticket and reply_to names a group copy the host
     sent to phones (the group composer always sets it). Otherwise it is a host-only note (rule G8)."""
@@ -787,10 +818,18 @@ for f in cg_files:
     case = json.loads(f.read_text())
     m, ctx = case["message"], case.get("context") or {}
     errs = [e.message for e in V["message"].iter_errors(m)] + [e.message for e in V_CG.iter_errors(m)]
-    errs += cg_rules(m) + cg_receive(m, ctx)
+    errs += cg_rules(m, ctx) + cg_receive(m, ctx)
     exp = case.get("expect") or {}
     if "group_text" in exp and cg_phone_group(m, ctx) != exp["group_text"]:
         errs.append(f"phone text group_text expected {exp['group_text']}")
+    if "shown_as" in exp and cg_shown_as(m, ctx) != exp["shown_as"]:
+        errs.append(f"expected shown_as {exp['shown_as']}")
+    if "order" in exp and cg_order(m, ctx) != exp["order"]:
+        errs.append(f"expected order {exp['order']}, got {cg_order(m, ctx)}")
+    if "stored_as" in exp:
+        og = m["body"]["group"]
+        if [og["host"], og["id"]] != exp["stored_as"]:
+            errs.append("expected group key (host, id) differs")
     want = f.name.startswith("valid-")
     if bool(errs) == want:
         fails.append(f"vectors/chat-groups/{f.name}: expected {'valid' if want else 'invalid'}, got {errs[0] if errs else 'valid'}")
