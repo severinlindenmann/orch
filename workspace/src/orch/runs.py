@@ -655,6 +655,16 @@ def _items_text(items: list[dict]) -> str:
     return "\n".join(f"- {i['by']}: {_clip(i['text'], 1500)}" for i in items)
 
 
+def _done_when_plan(ticket: dict) -> list[str]:
+    if not ticket.get("done_when") or ticket.get("checklist"):
+        return []
+    return [
+        "The person described what should be true when it is done: "
+        f"{_clip(ticket['done_when'], 2000)}. Turn this into checks with `orch check add` "
+        "(one check per thing that must be true), then start."
+    ]
+
+
 def fresh_prompt(ticket: dict, items: list[dict]) -> str:
     tid = ticket["id"]
     out = [
@@ -667,6 +677,7 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]
+    out[1:1] = _done_when_plan(ticket)
     if ticket.get("note"):  # what the person asked for, in their words (not only in `orch ticket show`)
         out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")
     if ticket.get("summary"):
@@ -703,6 +714,7 @@ def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str
         parts.append("New input:\n" + _items_text(items))
     if not parts:
         parts.append(f"Continue orch ticket {tid}: {_clip(ticket.get('title', ''), 200)}.")
+    parts.extend(_done_when_plan(ticket))
     return "\n\n".join(parts)[:12000]
 
 
