@@ -132,6 +132,13 @@ def _ticket_new(a):
     return ["ticket", "new"], flags, [_text(a.get("title"), "title")]
 
 
+def _ticket_paste(a):
+    _only(a, ("text", "parent"))
+    text = _text(a.get("text"))
+    title = next(line.strip() for line in text.splitlines() if line.strip())[:80]
+    return _ticket_new({"title": title, "note": text, "parent": a.get("parent")})
+
+
 def _ticket_patch(a):
     _only(a, ("ticket", "data", "if_revision"))
     data = a.get("data")
@@ -367,6 +374,7 @@ OPS = {
     "link.stop": _link,
     "answer": _answer,
     "ticket.new": _ticket_new,
+    "ticket.paste": _ticket_paste,
     "ticket.patch": _ticket_patch,
     "ticket.edit": _ticket_edit,
     "log": _log,

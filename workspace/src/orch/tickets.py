@@ -679,7 +679,7 @@ def clean_field(key: str, value):
         return None
     if not isinstance(value, str):
         raise Refused(f"{key} must be text.")
-    v = value.strip()
+    v = value if key == "note" else value.strip()
     if key == "owner" and len(v) > 64:
         raise Refused("An owner is at most 64 characters.")
     if key == "note" and len(v) > 2000:

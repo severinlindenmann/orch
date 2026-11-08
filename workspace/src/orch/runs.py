@@ -611,6 +611,13 @@ def _items_text(items: list[dict]) -> str:
     return "\n".join(f"- {i['by']}: {_clip(i['text'], 1500)}" for i in items)
 
 
+def _description_plan(ticket: dict) -> list[str]:
+    """A description longer than a title needs a plan before work starts."""
+    if not ticket.get("checklist") and len((ticket.get("note") or "").strip()) > 200:
+        return ["Read the description, write a plan, split it into tasks with orch check add, then start."]
+    return []
+
+
 def fresh_prompt(ticket: dict, items: list[dict]) -> str:
     tid = ticket["id"]
     out = [
@@ -627,6 +634,7 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
         out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")
     if ticket.get("summary"):
         out.append(f"Where things stand: {_clip(ticket['summary'], 1500)}")
+    out.extend(_description_plan(ticket))
     todo = [c for c in ticket.get("checklist") or [] if not c.get("done")]
     if todo:
         out.append(
@@ -652,7 +660,9 @@ def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str
         if h.get("by") == f"agent:{agent}":
             continue
         news.append(f"- {h.get('by', '?')}: {_clip(h.get('text', ''), 300)}")
-    parts = []
+    parts = _description_plan(ticket)
+    if parts:
+        parts.append(f"The person's description: {ticket['note']}")
     if news:
         parts.append("New on the ticket since last time:\n" + "\n".join(news[-10:]))
     if items:

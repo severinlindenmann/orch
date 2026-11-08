@@ -142,6 +142,16 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         tickets.append(t)
     add_artifact_marks(tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
+    by_id = {t["id"]: t for t in tickets}
+    for t in tickets:
+        t.update(children=[], parts_done=0, parts_total=0)
+    for t in tickets:
+        parent = t.get("parent")
+        if isinstance(parent, str) and parent in by_id:
+            p = by_id[parent]
+            p["children"].append(t["id"])
+            p["parts_total"] += 1
+            p["parts_done"] += int(t["status"] == "done")
     return tickets, skipped
 
 
@@ -519,6 +529,26 @@ def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool
     return {i: _RUNS[(str(root), i)][1] for i in ids if _RUNS[(str(root), i)][1]}
 
 
+def add_warmth(root: Path, tickets: list[dict], statuses: dict) -> None:
+    """Count down from live.since, as idle cleanup does; heartbeats do not reset it."""
+    try:
+        from orch.config import live_idle_minutes
+    except ImportError:
+        return
+    limit, now = live_idle_minutes(root) * 60, time.time()
+    for t in tickets:
+        t.pop("warmth", None)
+        status = statuses.get(t["id"]) or {}
+        rec = status.get("claim") or {}
+        if status.get("running") is not True or rec.get("mode") != "live":
+            continue
+        try:
+            since = datetime.fromisoformat(rec["live"]["since"]).timestamp()
+        except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
+            continue
+        t["warmth"] = {"seconds_left": max(0, int(limit - (now - since)))}
+
+
 def load_state(
     root: Path,
     orch_bin: str | None = None,
@@ -527,6 +557,8 @@ def load_state(
     with_settings: bool = False,
 ) -> dict:
     """with_addons=False (snapshots by default): no add-on tabs, no ticket rows, `ext` dropped from tickets."""
+    from .actions import actor
+
     tickets, skipped = load_tickets(root, orch_bin)
     raw = run_orch(orch_bin, ["addon", "list", "--json"], root)
     addons = load_addons(root, orch_bin, raw) if with_addons else []
@@ -559,6 +591,7 @@ def load_state(
     needs = run_orch(orch_bin, ["needs", "--json"], root) if with_addons else None
     state = {
         "workspace": root.name,
+        "who": actor().removeprefix("human:"),
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "tickets": tickets,
         "skipped": skipped,
@@ -573,6 +606,7 @@ def load_state(
         if with_settings
         else None,  # only the live local server: it holds the folder path
     }
+    add_warmth(root, tickets, state["runs"])
     state["rev"] = hashlib.sha1(
         json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()
     ).hexdigest()[:12]
