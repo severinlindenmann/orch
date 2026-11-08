@@ -18,7 +18,7 @@ from . import runfiles
 from .data import run_orch, publish_connected
 from .look import LOOK_OPS
 from .look import forget as look_forget
-from .mobile import MOBILE_OPS
+from .mobile import MOBILE_OPS, MOBILE_REQUIRED_ADDONS
 
 MAX_TEXT = 2000
 TID = re.compile(r"t_[a-z0-9]{6,16}")
@@ -502,6 +502,8 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
         raise Unavailable("The orch command is not available here.")
     if op in ("link.extend", "link.stop") and not publish_connected(root, orch_bin):
         raise BadRequest("Sharing is not set up here.")
+    if op in MOBILE_REQUIRED_ADDONS and not _addon_is_on(root, orch_bin, MOBILE_REQUIRED_ADDONS[op]):
+        raise BadRequest("That add-on is not on in this workspace.")
     if op in ("addon.act", "ticket.field") and not _addon_is_on(root, orch_bin, args["addon"]):
         raise BadRequest("That add-on is not on in this workspace.")
     if op == "addon.set" and not _addon_known(root, orch_bin, args["name"]):
