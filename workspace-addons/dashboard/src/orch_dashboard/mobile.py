@@ -70,15 +70,24 @@ def _group_ticket(a):
     return acts._tid(a.get("ticket"))
 
 
+GROUP_ID = re.compile(r"grp_t_[a-z0-9]{6,16}")
+
+
 def _group_say(a):
-    """The person writes into a ticket's group chat: `orch relay group say <ticket> --dashboard -- <text>`."""
+    """Write into a group chat. As the host (`ticket`): `orch relay group say <ticket> --dashboard -- <text>`.
+    In a group this workspace was invited to (`group` + `host`): a member message to the host,
+    `orch relay group reply <host> <group> -- <text>`."""
     acts = _actions()
-    acts._only(a, ("ticket", "text"))
-    return (
-        ["relay", "group", "say", _group_ticket(a)],
-        ["--dashboard"],
-        [acts._text(a.get("text"), "message")],
-    )
+    if "ticket" in a:
+        acts._only(a, ("ticket", "text"))
+        return ["relay", "group", "say", _group_ticket(a)], ["--dashboard"], [acts._text(a.get("text"), "message")]
+    acts._only(a, ("group", "host", "text"))
+    host, group = a.get("host"), a.get("group")
+    if not (isinstance(host, str) and PEER.fullmatch(host)):
+        raise _bad("Choose the group's host.")
+    if not (isinstance(group, str) and GROUP_ID.fullmatch(group)):
+        raise _bad("Choose a group.")
+    return ["relay", "group", "reply", host, group], ["--dashboard"], [acts._text(a.get("text"), "message")]
 
 
 def _group_member(verb):
@@ -161,6 +170,7 @@ def load_groups(root: Path, orch_bin: str | None) -> dict | None:
                 "name": _short(x.get("name"), 60),
                 "look": x.get("look") if isinstance(x.get("look"), dict) else None,
                 "host": bool(x.get("host")),
+                "joined_at": _short(x.get("joined_at"), 30),
                 "left_at": _short(x.get("left_at"), 30),
                 "seen": x.get("seen") if isinstance(x.get("seen"), int) else None,
             }
@@ -176,6 +186,11 @@ def load_groups(root: Path, orch_bin: str | None) -> dict | None:
             "closed": bool(g.get("closed")),
             "seq": g.get("seq") if isinstance(g.get("seq"), int) else 0,
             "members": members(g.get("members") or []),
+            "connectable": [
+                {"ws": _short(c.get("ws"), 20), "name": _short(c.get("name"), 60)}
+                for c in g.get("connectable") or []
+                if isinstance(c, dict)
+            ],
             "tasks": [
                 {
                     k: _short(v, 120)
@@ -196,6 +211,7 @@ def load_groups(root: Path, orch_bin: str | None) -> dict | None:
             "title": _short(g.get("title"), 120),
             "closed": bool(g.get("closed")),
             "left": bool(g.get("left")),
+            "seq_max": g.get("seq_max") if isinstance(g.get("seq_max"), int) else 0,
             "members": members(g.get("members") or []),
             "card": g.get("card") if isinstance(g.get("card"), dict) else None,
             "log": [

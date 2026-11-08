@@ -23,9 +23,16 @@ LIST = {
                     "host": True,
                     "look": {"icon": "bank", "color": "teal"},
                 },
-                {"ws": "ws_hom0000001", "name": "Home", "seen": 6, "token": "SECRET"},
+                {
+                    "ws": "ws_hom0000001",
+                    "name": "Home",
+                    "seen": 6,
+                    "token": "SECRET",
+                    "joined_at": "2026-11-08T10:00:00Z",
+                },
             ],
             "tasks": [{"delegate": "m_x", "ws": "ws_hom0000001", "status": "working", "secret": "no"}],
+            "connectable": [{"ws": "ws_ban0000001", "name": "Bank", "x": 1}],
         }
     ],
     "joined": [
@@ -35,6 +42,7 @@ LIST = {
             "title": "From Finance",
             "closed": False,
             "left": False,
+            "seq_max": 9,
             "members": [],
             "card": {"title": "Pay"},
             "log": [
@@ -80,7 +88,10 @@ def test_groups_are_read_trimmed_and_only_on_the_live_page(ws, tmp_path):
         "host": False,
         "left_at": None,
         "seen": 6,
+        "joined_at": "2026-11-08T10:00:00Z",
     }
+    assert h["connectable"] == [{"ws": "ws_ban0000001", "name": "Bank"}]
+    assert g["joined"][0]["seq_max"] == 9
     assert h["tasks"] == [{"delegate": "m_x", "ws": "ws_hom0000001", "status": "working"}]
     item = g["joined"][0]["log"][0]
     assert len(item["text"]) == 600 and "evil" not in item and item["authority"] is False
@@ -102,6 +113,10 @@ def test_group_ops_run_orch_with_exact_argv(act_server, act_orch):
         ("group.say", {"ticket": "t_abcdef", "text": "hi", "by": "agent"}),
         ("group.add", {"ticket": "t_abcdef", "workspace": "--file"}),
         ("group.add", {"ticket": "t_abcdef"}),
+        ("group.say", {"group": "grp_t_abcdef", "text": "hi"}),
+        ("group.say", {"group": "../x", "host": "ws_fin0000001", "text": "hi"}),
+        ("group.say", {"group": "grp_t_abcdef", "host": "--file", "text": "hi"}),
+        ("group.say", {"group": "grp_t_abcdef", "host": "ws_fin0000001", "text": "hi", "ticket": "t_abcdef"}),
         ("group.remove", {"ticket": "t_abcdef", "workspace": "a b"}),
         ("group.remove", {"ticket": "t_abcdef", "workspace": "ws_1", "x": 1}),
     ]
@@ -119,7 +134,17 @@ def test_group_ops_run_orch_with_exact_argv(act_server, act_orch):
         post(act_server, {"op": "group.remove", "args": {"ticket": "t_abcdef", "workspace": "ws_1"}})[0]
         == 200
     )
-    say, add, rm = acts(act_orch)[-3:]
+    assert (
+        post(
+            act_server,
+            {"op": "group.say", "args": {"group": "grp_t_abcdef", "host": "ws_fin0000001", "text": "yo"}},
+        )[0]
+        == 200
+    )
+    say, add, rm, reply = acts(act_orch)[-4:]
+    assert reply[:6] == ["relay", "group", "reply", "ws_fin0000001", "grp_t_abcdef", "--dashboard"] and reply[
+        -2:
+    ] == ["--", "yo"]
     assert say[:5] == ["relay", "group", "say", "t_abcdef", "--dashboard"] and say[-2:] == [
         "--",
         "--dashboard x",
