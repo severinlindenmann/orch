@@ -17,11 +17,55 @@ final class FreshInstallTests: XCTestCase {
     func testNoMarkerClearsStaleKeychainAndShowsOnboarding() {
         Keychain.save(creds)
         let d = defaults()
+        d.set(creds.phoneId, forKey: "pairedPhoneId")
         let m = model(d)
         XCTAssertEqual(m.phase, .onboarding)
         XCTAssertNil(Keychain.load())
         XCTAssertNil(m.message)
+        XCTAssertNil(d.object(forKey: "pairedPhoneId"))
         XCTAssertTrue(d.bool(forKey: AppModel.installedMarkerKey))
+    }
+
+    func testMissingKeychainShowsPairAgainOnce() {
+        Keychain.delete()
+        let d = defaults()
+        d.set(true, forKey: AppModel.installedMarkerKey)
+        d.set(creds.phoneId, forKey: "pairedPhoneId")
+
+        let m = model(d)
+
+        XCTAssertEqual(m.message, AppModel.pairAgainMessage)
+        XCTAssertEqual(m.phase, .onboarding)
+        XCTAssertNil(d.object(forKey: "pairedPhoneId"))
+        XCTAssertNil(model(d).message)
+    }
+
+    func testMissingKeychainWithoutPreviousPairingShowsNoMessage() {
+        Keychain.delete()
+        let d = defaults()
+        d.set(true, forKey: AppModel.installedMarkerKey)
+
+        let m = model(d)
+
+        XCTAssertNil(m.message)
+        XCTAssertEqual(m.phase, .onboarding)
+    }
+
+    func testPairingRemembersPhoneAndSignOutClearsIt() async throws {
+        Keychain.delete()
+        let d = defaults()
+        let m = model(d)
+        m.openSampleInvite()
+        await m.connect(phoneName: "P")
+
+        let paired = try XCTUnwrap(m.credentials)
+        XCTAssertEqual(m.phase, .notifyStep)
+        XCTAssertEqual(d.string(forKey: "pairedPhoneId"), paired.phoneId)
+
+        await m.signOut()
+
+        XCTAssertNil(d.object(forKey: "pairedPhoneId"))
+        XCTAssertEqual(m.phase, .onboarding)
     }
 
     func testMarkerKeepsPairingAndRevokedKeepsSignedOutMessage() {

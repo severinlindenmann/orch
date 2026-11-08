@@ -232,7 +232,7 @@ def load_general(root: Path) -> dict | None:
                 if isinstance(t.get("history"), list)
                 else []
             )
-            hist = [h for h in hist if h.get("text") != "Created"]
+            hist = [h for h in hist if mobile.is_chat_entry(h)]  # messages only
             return {"id": t["id"], "history": hist[-200:]}
     return None
 

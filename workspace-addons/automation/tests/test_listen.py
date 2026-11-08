@@ -206,3 +206,15 @@ def test_a_general_text_while_the_agent_runs_starts_nothing(ws):
                                                  "applied": True, "note": "General conversation",
                                                  "body": {"text": "hello", "general": True}}]))
     assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+
+
+def test_started_line_never_has_an_empty_id(ws):
+    add_ticket(ws, "t_general3", status="open")
+    (ws / "ended-t_general3").write_text("")
+    relay_on(ws)
+    (ws / "inbox.json").write_text(json.dumps([{"id": "", "type": "text", "from": "ph_abc", "ticket": "t_general3",
+                                                 "applied": True, "note": "General conversation",
+                                                 "body": {"text": "hello", "general": True}}]))
+    Scheduler(ws).tick(T(8))
+    texts = [h["text"] for h in json.loads((ws / ".orch/tickets/t_general3.json").read_text())["history"]]
+    assert not any("()" in t or "(phone text )" in t for t in texts)

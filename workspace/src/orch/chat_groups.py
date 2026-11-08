@@ -1037,9 +1037,10 @@ def _drop_member_quietly(root: Path, tid: str, ws: str) -> None:
     _mirror_by_id(root, "grp_" + tid, "agent:relay")
 
 
-def _history(root: Path, tid: str, by: str, text: str) -> None:
+def _history(root: Path, tid: str, by: str, text: str, chat: bool = False) -> None:
+    """chat=True only for what a person or a member said in the group."""
     with contextlib.suppress(Refused, OSError):
-        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "relay"))
+        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "relay", chat=chat))
 
 
 def _by_name(g: dict, ws: str) -> str:
@@ -1282,7 +1283,11 @@ def say(
             to_person=to_person and via != "dashboard",
             errors=errors,
         )
-    _history(root, tid, by if via != "dashboard" else "human:owner", f"Group: {text}"[:2000])
+    if tool := tickets.agent_tool():  # an agent never posts as the person, whatever via says
+        who = "agent:" + str(tool)
+    else:
+        who = by if via != "dashboard" else "human:owner"
+    _history(root, tid, who, f"Group: {text}"[:2000], chat=True)
     return {"group": gid, "seq": seq, "origin": oid, "errors": errors}
 
 
@@ -1677,7 +1682,7 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
         task = clean_task
         _history(root, g["ticket"], f"agent:{_line(name, 60)}", f"Task for {name}: {task['status']}")
     else:
-        _history(root, g["ticket"], f"agent:{_line(name, 60)}", f"Group: {text}"[:2000])
+        _history(root, g["ticket"], f"agent:{_line(name, 60)}", f"Group: {text}"[:2000], chat=True)
     update = b.get("update") if isinstance(b.get("update"), dict) else None
     if update:
         update = {k: v for k, v in update.items() if k in ("kind", "title")}
@@ -1785,7 +1790,7 @@ def _host_file(root: Path, st: dict, g: dict, m: dict, errors: list) -> dict:
     _publish_file(
         root, g, m["id"], frm, blob["blob_id"], name, len(raw), blob["sha256"], mime, ttl, None, errors
     )
-    _history(root, g["ticket"], _by_name(g, frm), f"Group file: {ttl}")
+    _history(root, g["ticket"], _by_name(g, frm), f"Group file: {ttl}", chat=True)
     return {
         "handled": True,
         "auto": False,

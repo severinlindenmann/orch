@@ -4,6 +4,7 @@ in this file (the other dashboard sources name no add-on; a test keeps it that w
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from pathlib import Path
 
 HOURS = (4, 8, 12, 24)
@@ -325,14 +326,34 @@ def load_groups(root: Path, orch_bin: str | None) -> dict | None:
     return {"hosted": hosted, "joined": joined}
 
 
-CHAT_VIA = (
-    "relay",
-    "dashboard",
-)  # history entries written by the group chat (other workspaces, this dashboard)
+CHAT_FLAG_SINCE = "2026-11-08T14:15:00+00:00"  # when the core began writing chat_message on every line
+
+
+
+
+def is_chat_entry(e: dict) -> bool:
+    """A history line that is a real Chat message: the core's `chat_message: true` flag. Lines written before the
+    flag existed (no key at all) count only when they came from a person on the dashboard (human:) or from the
+    relay for a phone text ("agent:relay from ph_..."); `via` alone is env-controlled and never enough."""
+    if not isinstance(e, dict):
+        return False
+    if "chat_message" in e:
+        return e["chat_message"] is True
+    try:
+        at = datetime.fromisoformat(str(e.get("at", "")))
+    except ValueError:
+        return False
+    if at.tzinfo is None or at >= datetime.fromisoformat(CHAT_FLAG_SINCE):
+        return False  # new lines always carry the flag: a missing one is never a message
+    by, via = str(e.get("by", "")), e.get("via")
+    return (via == "dashboard" and by.startswith("human:")) or (via == "phone" and by.startswith("agent:relay from ph_"))
+
+
 
 
 def mark_chat_history(t: dict) -> None:
-    """`in_chat: true` on the history entries that are group-chat talk, so the Chat page needs no source names."""
+    """`in_chat: true` on the history entries that are real Chat/group messages, so the Chat page shows messages
+    only: never run, task, status or instruction rows."""
     for e in t["history"]:
-        if isinstance(e, dict) and e.get("via") in CHAT_VIA:
+        if is_chat_entry(e):
             e["in_chat"] = True

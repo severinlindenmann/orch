@@ -391,7 +391,7 @@ def ensure_general(root: Path, by: str) -> str:
         "checklist": [],
         "refs": [],
         "questions": [],
-        "history": [{"at": t, "by": by, "via": "cli", "text": "Created"}],
+        "history": [{"at": t, "by": by, "via": "cli", "text": "Created", "chat_message": False}],
     }
     save(root, ticket)
     return ticket["id"]
@@ -461,8 +461,10 @@ def _env_via() -> str:
     return v if re.fullmatch(r"[a-z][a-z0-9-]{1,23}", v) else "cli"
 
 
-def add_history(ticket: dict, by: str, text: str, via: str | None = None) -> None:
-    ticket["history"].append({"at": now(), "by": by, "via": via or _env_via(), "text": text})
+def add_history(ticket: dict, by: str, text: str, via: str | None = None, chat: bool = False) -> None:
+    """chat=True marks a real Chat or group message (`chat_message: true`): the only lines the Chat shows."""
+    entry = {"at": now(), "by": by, "via": via or _env_via(), "text": text, "chat_message": chat}
+    ticket["history"].append(entry)
 
 
 def parse_ext_args(pairs: list[str] | None, schema_for=None) -> dict[str, dict]:
@@ -514,7 +516,13 @@ def create(
         "refs": [],
         "questions": [],
         "history": [
-            {"at": t, "by": by, "via": _env_via(), "text": "Created" + (f" under {parent}" if parent else "")}
+            {
+                "at": t,
+                "by": by,
+                "via": _env_via(),
+                "text": "Created" + (f" under {parent}" if parent else ""),
+                "chat_message": False,
+            }
         ],
     }
     if parent is not None:
@@ -562,7 +570,21 @@ def _check_not_too_early(root: Path, ticket: dict) -> None:
         raise Refused("Not done: new input for this ticket has not reached you yet. Read it first.")
 
 
+GENERAL_REFUSAL = "The Chat is not a ticket: it is never finished, dropped or reopened."
+GENERAL_REFUSED = (
+    "open",
+    "review",
+    "done",
+    "dropped",
+    "active",
+)  # finish, reopen, Working; waiting and ready stay
+
+
 def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
+    if (
+        ticket.get("general") is True and status in GENERAL_REFUSED
+    ):  # the ONE status guard (agent, person, wrapper)
+        raise Refused(GENERAL_REFUSAL)
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
         by = "agent:" + str(agent_tool())
     if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
@@ -616,6 +638,8 @@ def ask_for_changes(root: Path, tid: str, text: str, by: str) -> dict:
 
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     def op(ticket):
+        if ticket.get("general") is True:
+            return NO_WRITE
         was_started = ticket.get("started") is True
         ticket["started"] = True
         w = ticket.get("waiting_on") or {}
@@ -643,6 +667,8 @@ def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool =
     Returns True when the ticket was moved."""
 
     def op(ticket):
+        if ticket.get("general") is True:
+            return NO_WRITE
         if ticket["status"] != "active" or (still_running is not None and still_running()):
             return NO_WRITE
         ticket["status"] = "ready"
@@ -700,8 +726,6 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
 
     def op(ticket):
-        if ticket.get("general") is True:
-            raise Refused("The Chat is not a ticket: it is never finished, dropped or reopened.")
         target, actor = _finish_status(root, ticket, status, by)
         if target in ("open", "ready") and not actor.startswith("agent:"):
             ticket.pop("started", None)
@@ -1389,7 +1413,8 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
             else:
                 ticket["waiting_on"] = None
                 if ticket["status"] == "waiting":  # Working only while an agent runs; else Ready to go on
-                    ticket["status"] = "active" if runs.running(root, tid) else "ready"
+                    chat = ticket.get("general") is True  # the Chat ticket is never Working
+                    ticket["status"] = "ready" if chat or not runs.running(root, tid) else "active"
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
         return q
 
