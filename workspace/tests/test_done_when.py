@@ -1,11 +1,11 @@
 """Done criteria follow the optional note field through writes and agent prompts."""
+
 import json
 
 import pytest
 
 from orch import runs, tickets
 from orch.errors import Refused
-
 
 TEXT = "  The export opens.\n\n  Every invoice is included.  "
 
@@ -21,8 +21,11 @@ def test_new_edit_patch_and_clear(proj, run, validate):
             if operation == "edit":
                 args = ("--done-when", value)
             else:
-                args = (json.dumps({"done_when": value}), "--if-revision",
-                        str(tickets.load(proj, tid)["revision"]))
+                args = (
+                    json.dumps({"done_when": value}),
+                    "--if-revision",
+                    str(tickets.load(proj, tid)["revision"]),
+                )
             code, _, err = run("ticket", operation, tid, *args)
             assert code == 0, err
             ticket = tickets.load(proj, tid)
@@ -39,8 +42,7 @@ def test_too_long_is_rejected(proj, run, new_ticket, operation):
     elif operation == "edit":
         args = (tid, "--done-when", "x" * 2001)
     else:
-        args = (tid, json.dumps({"done_when": "x" * 2001}),
-                "--if-revision", str(before["revision"]))
+        args = (tid, json.dumps({"done_when": "x" * 2001}), "--if-revision", str(before["revision"]))
     code, _, err = run("ticket", operation, *args)
     assert code == 2
     assert "The done criteria are at most 2000 characters." in err
@@ -61,12 +63,13 @@ def test_multiline_whitespace_and_clear(field):
 
 
 @pytest.mark.parametrize("resume", [False, True])
-@pytest.mark.parametrize("checks", [[], [{"id": "c1", "text": "Export", "done": False}],
-                                   [{"id": "c1", "text": "Export", "done": True}]])
+@pytest.mark.parametrize(
+    "checks",
+    [[], [{"id": "c1", "text": "Export", "done": False}], [{"id": "c1", "text": "Export", "done": True}]],
+)
 def test_prompt_plans_criteria_only_without_checks(resume, checks):
     ticket = {"id": "t_abcdef", "title": "Export", "done_when": TEXT, "checklist": checks}
-    prompt = (runs.resume_prompt(ticket, [], None, "codex") if resume
-              else runs.fresh_prompt(ticket, []))
+    prompt = runs.resume_prompt(ticket, [], None, "codex") if resume else runs.fresh_prompt(ticket, [])
     expected = (
         "The person described what should be true when it is done: "
         "The export opens. Every invoice is included.. Turn this into checks with "

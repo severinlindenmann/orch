@@ -675,11 +675,11 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
     return apply_op(root, tid, op)[0]
 
 
-# ---------------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
+# ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
 
 
 def clean_field(key: str, value):
-    """Validate owner, due, note, done_when or summary (None or empty clears it); returns the value to store."""
+    """Validate a plain field (None or empty clears it); returns the value to store."""
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
     if not isinstance(value, str):
