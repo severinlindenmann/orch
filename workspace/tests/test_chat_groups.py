@@ -778,7 +778,9 @@ def test_image_needs_a_click_and_size_and_count_limits(proj, run, rel, host):
     png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 50)
     code, _, err = run("relay", "group", "share", host, str(png))
     assert code != 0 and "click" in err
-    assert run("relay", "group", "share", host, str(png), "--click")[0] == 0  # not an agent session: a person
+    code, _, err = run("relay", "group", "share", host, str(png), "--click")  # not a verified PNG
+    assert code != 0 and "couldn't check this image" in err
+    assert run("relay", "group", "share", host, str(png), "--click", "--unchecked-ok")[0] == 0
     big = proj / "big.txt"
     big.write_bytes(b"a" * (cg.FILE_MAX + 1))
     code, _, err = run("relay", "group", "share", host, str(big))
@@ -927,6 +929,7 @@ def test_member_delegate_needs_the_persons_allow_then_reports(proj, run, rel, me
     qp = sent(rel, to="phones", type="question")[0]
     assert qp["body"]["options"] == ["once", "always", "no"] and qp["body"]["scope"] == "tasks from Finance"
     assert "group" not in qp["body"]
+    assert qp["body"]["group_ref"] == {"host": FIN, "id": "grp_t_fin14a"}  # contract 3.2: not body.group
     assert (
         wa["body"]["task"]["status"] == "waiting_approval"
         and wa["body"]["task"]["question_message"] == qp["id"]
@@ -970,6 +973,48 @@ def test_member_delegate_needs_the_persons_allow_then_reports(proj, run, rel, me
     )
     assert contract_errors(done[0]) == []
     del tid
+
+
+@pytest.mark.parametrize(
+    "path,expect,kind",
+    [
+        (["review"], ["working"], "working"),  # one generic note, working stays
+        (["review", "active", "review"], ["working"], "working"),  # back to active: nothing; no second note
+        (["review", "done"], ["working", "done"], "result"),
+        (["dropped"], ["failed"], "failure"),
+    ],
+)
+def test_member_ticket_transitions_report_to_host_once(proj, run, rel, member, path, expect, kind):
+    d = from_host(
+        "delegate", {"title": "Find the letter", "text": "Send the PDF"}, id=mid("dlg" + "".join(path))
+    )
+    inbox(run, rel, d)
+    allow_t = next(
+        t for t in tickets.list_all(proj) if t["questions"] and t["questions"][0].get("kind") == "relay:allow"
+    )
+    run("answer", allow_t["id"], allow_t["questions"][0]["id"], "once", "--via", "phone")
+    run("relay", "inbox")
+    run("relay", "done", d["id"])
+    run("relay", "inbox")
+    task_ticket = next(t for t in tickets.list_all(proj) if t["ext"]["relay"].get("group_task"))
+    tickets.set_status(proj, task_ticket["id"], "active", "human:test")
+    run("relay", "inbox")
+    rel.sent.clear()
+    for st in path:
+        tickets.set_status(proj, task_ticket["id"], st, "human:test")
+        run("relay", "inbox")
+        run("relay", "inbox")
+    rep = [m for m in sent(rel, to=FIN) if m["body"].get("task")]
+    reported = [m["body"]["task"]["status"] for m in rep]
+    assert reported[-len(expect) :] == expect
+    assert rep[-1]["body"]["update"]["kind"] == kind
+    for m in rep:
+        assert contract_errors(m) == []
+    if path[0] == "review":
+        note = rep[0]
+        assert note["body"]["text"].startswith("Ready for review in ") and "task" in note["body"]
+        assert note["body"]["task"]["status"] == "working" and not note["body"].get("shared_files")
+    assert len([m for m in rep if m["body"]["text"].startswith("Ready for review")]) <= 1
 
 
 def test_member_answer_to_denied_task(proj, run, rel, member):
@@ -1918,3 +1963,175 @@ def test_ordinary_allow_answers_with_the_old_words_still_work(proj, run, rel):
             assert allows and allows[0]["body"]["mode"] == mode
         else:
             assert not allows
+
+
+def test_ticket_artifacts_are_shareable_and_a_hidden_folder_is_not_called_a_password(proj, run, rel, host):
+    run("relay", "group", "add", host, HOME)
+    adir = proj / ".orch" / "tickets" / host / "artifacts"
+    adir.mkdir(parents=True)
+    f = adir / "letter.pdf"
+    f.write_bytes(pdf_bytes())  # a clean PDF with no text to extract
+    rel.sent.clear()
+    assert run("relay", "group", "share", host, str(f), "--click")[0] == 0
+    code, _, err = run(
+        "relay", "group", "share", host, str(f)
+    )  # an agent never reads .orch: plain, no "password"
+    assert code != 0  # an agent never reads .orch: the exception is a person's click only
+    # a secret-looking name or a hidden folder inside it is still refused, with the password line
+    (adir / ".ssh").mkdir()
+    (adir / ".ssh" / "a.txt").write_text("words")
+    code, _, err = run("relay", "group", "share", host, str(adir / ".ssh" / "a.txt"), "--click")
+    assert code != 0 and "password" in err
+
+
+def test_unreadable_file_is_not_called_a_password_and_needs_the_persons_ok(proj, run, rel, host, monkeypatch):
+    import os
+
+    run("relay", "group", "add", host, HOME)
+    locked = proj / "locked.pdf"
+    locked.write_bytes(b"%PDF-1.4\n1 0 obj<</Filter/Standard/V 1>>endobj trailer<</Encrypt 1 0 R>>\n%%EOF")
+    rel.sent.clear()
+    code, _, err = run("relay", "group", "share", host, str(locked), "--click")
+    assert code != 0 and "couldn't check" in err
+    assert "looks like it holds" not in err and not sent(rel, type="file")
+    code, _, err = run("relay", "group", "share", host, str(locked))  # an agent: still refused, no flag helps
+    assert code != 0 and "couldn't check" in err
+    code, _, err = run("relay", "group", "share", host, str(locked), "--unchecked-ok")
+    assert code != 0 and "couldn't check" in err
+    assert run("relay", "group", "share", host, str(locked), "--click", "--unchecked-ok")[0] == 0
+    assert len(sent(rel, type="file")) == 1
+    # a second name for the same data is refused for good: "share anyway" does not reach it
+    os.link(proj / "locked.pdf", proj / "again.pdf")
+    for extra in ([], ["--unchecked-ok"]):
+        code, _, err = run("relay", "group", "share", host, str(proj / "again.pdf"), "--click", *extra)
+        assert code != 0 and "second name" in err and "password" not in err
+    # an agent session can not say "share anyway" with a flag: it needs a yes typed at a terminal
+    monkeypatch.setenv("CLAUDECODE", "1")
+    rel.sent.clear()
+    code, _, err = run("relay", "group", "share", host, str(locked), "--click", "--unchecked-ok")
+    assert code != 0 and not sent(rel, type="file")
+    monkeypatch.delenv("CLAUDECODE")
+    # a real secret is never shared, not even with the OK
+    (proj / "n.txt").write_text("password = hunter2hunter2")
+    code, _, err = run("relay", "group", "share", host, str(proj / "n.txt"), "--click", "--unchecked-ok")
+    assert code != 0 and "looks like it holds a password" in err
+
+
+def test_images_are_scanned_and_only_a_verified_png_passes_without_the_persons_ok():
+    import struct
+    import zlib
+
+    def chunk(k, d):
+        return struct.pack(">I", len(d)) + k + d + struct.pack(">I", zlib.crc32(k + d))
+
+    base = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", b"\0" * 13) + chunk(b"IDAT", b"\0") + chunk(b"IEND", b"")
+    assert cg.check_file(base, "a.png") == "image/png"
+    hidden = base[:-12] + chunk(b"tEXt", b"note") + base[-12:]  # a text chunk: not verifiable
+    with pytest.raises(cg.Unchecked, match="couldn't check this image"):
+        cg.check_file(hidden, "a.png")
+    assert cg.check_file(hidden, "a.png", allow_unchecked=True) == "image/png"  # after the person's confirm
+    jpg = b"\xff\xd8\xff\xe0" + b"0" * 40
+    with pytest.raises(cg.Unchecked, match="couldn't check"):
+        cg.check_file(jpg, "a.jpg")
+    assert cg.check_file(jpg, "a.jpg", allow_unchecked=True) == "image/jpeg"
+    # the raw bytes are always scanned: a secret in metadata is refused, even with the OK
+    leaky = jpg + b" password = hunter2hunter2"
+    for ok in (False, True):
+        with pytest.raises(cg.Refused, match="looks like it holds a password"):
+            cg.check_file(leaky, "a.jpg", allow_unchecked=ok)
+
+
+def test_artifacts_exception_is_root_relative_click_only_and_checks_the_resolved_path(
+    proj, run, rel, host, tmp_path
+):
+    run("relay", "group", "add", host, HOME)
+    o = proj / ".orch" / "tickets"
+    for bad in (".ssh", "..", "t_abc", "T_ABCDEF1"):  # not a ticket id, or a way out
+        d = o / bad / "artifacts"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "x.txt").write_text("words")
+        code, _, err = run("relay", "group", "share", host, str(d / "x.txt"), "--click")
+        assert code != 0, bad
+    nested = (
+        proj / "sub" / ".orch" / "tickets" / host / "artifacts"
+    )  # a foreign nested .orch is not the root's
+    nested.mkdir(parents=True)
+    (nested / "x.txt").write_text("words")
+    assert run("relay", "group", "share", host, str(nested / "x.txt"), "--click")[0] != 0
+    # an agent-planted link inside artifacts that points out is refused on its resolved path
+    adir = o / host / "artifacts"
+    adir.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / ".ssh"
+    outside.mkdir()
+    (outside / "notes.txt").write_text("harmless words")
+    (adir / "link.txt").symlink_to(outside / "notes.txt")
+    (adir / "ok.txt").write_text("fine")
+    rel.sent.clear()
+    assert run("relay", "group", "share", host, str(adir / "link.txt"), "--click")[0] != 0
+    assert not sent(rel, type="file")
+    assert run("relay", "group", "share", host, str(adir / "ok.txt"), "--click")[0] == 0
+    # the shared rules are not widened: without a click (agent) and for the phone path the folder stays shut
+    assert cg._secret_parts((".orch", "tickets", host, "artifacts", "ok.txt")) is True
+    assert cg._secret_parts((".orch", "tickets", host, "artifacts", "ok.txt"), artifacts_ok=True) is False
+    assert cg._secret_parts((".orch", "tickets", ".ssh", "artifacts", "x"), artifacts_ok=True) is True
+    assert cg._secret_parts((".orch", "tickets", "..", "artifacts", "x"), artifacts_ok=True) is True
+
+
+def test_unchecked_kinds_are_told_apart_by_an_attribute():
+    with pytest.raises(cg.Unchecked) as e:
+        cg.check_file(b"\xff\xd8\xff\xe0" + b"0" * 40, "a.jpg")
+    assert e.value.image is True
+    with pytest.raises(cg.Unchecked) as e:
+        cg.check_file(b"%PDF-1.4 /Encrypt 1 0 R", "a.pdf")
+    assert e.value.image is False
+
+
+def test_click_shared_artifact_must_really_be_in_the_artifacts_folder(proj, run, rel, host, tmp_path):
+    run("relay", "group", "add", host, HOME)
+    adir = proj / ".orch" / "tickets" / host / "artifacts"
+    adir.mkdir(parents=True)
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    (docs / "x.pdf").write_bytes(pdf_bytes())
+    (adir / "link.pdf").symlink_to(docs / "x.pdf")  # an ordinary file elsewhere, not hidden
+    rel.sent.clear()
+    code, _, err = run("relay", "group", "share", host, str(adir / "link.pdf"), "--click")
+    assert code != 0 and "link" in err and not sent(rel, type="file")
+    # the same file named directly (not through artifacts) is the person's own choice and still works
+    assert run("relay", "group", "share", host, str(docs / "x.pdf"), "--click")[0] == 0
+    # the artifacts folder itself being a link is refused too
+    t2 = proj / ".orch" / "tickets" / "t_other00001"
+    t2.mkdir(parents=True)
+    (t2 / "artifacts").symlink_to(docs)
+    code, _, err = run("relay", "group", "share", host, str(t2 / "artifacts" / "x.pdf"), "--click")
+    assert code != 0 and "link" in err
+
+
+def test_card_kind_fails_closed_without_members_and_agrees_on_odd_values():
+    q = {
+        "allow_question": True,
+        "options": list(cg.ALLOW_OPTIONS),
+        "group_ref": {"host": " WS_A ", "id": "GRP_T_X"},
+    }
+    shown = {"host": "ws_a", "id": "grp_t_x"}
+    assert cg.card_kind(q, shown, "ws_m", ["ws_m"]) == "buttons"
+    assert cg.card_kind(q, shown, "ws_m", None) == "answer_in_bank"  # members unknown
+    assert cg.card_kind(q, shown, "ws_x", ["ws_m"]) == "answer_in_bank"
+    odd = {**q, "group_ref": {"host": 5, "id": "grp_t_x"}}
+    assert (
+        cg._ref_key(odd["group_ref"]) is None
+        and cg.card_kind(odd, shown, "ws_m", ["ws_m"]) == "answer_in_bank"
+    )
+
+
+def test_mixed_case_orch_folder_is_refused_even_on_a_case_insensitive_disk(proj, run, rel, host):
+    run("relay", "group", "add", host, HOME)
+    adir = proj / ".orch" / "tickets" / host / "artifacts"
+    adir.mkdir(parents=True)
+    (adir / "ok.txt").write_text("fine words")
+    for odd in (".ORCH/Tickets", ".Orch/tickets"):
+        code, _, err = run(
+            "relay", "group", "share", host, str(proj / odd / host / "Artifacts" / "ok.txt"), "--click"
+        )
+        assert code != 0 and not sent(rel, type="file")
+    assert cg.secret_path(proj / ".ORCH" / "Tickets" / host / "ARTIFACTS" / "ok.txt", proj, artifacts_ok=True)

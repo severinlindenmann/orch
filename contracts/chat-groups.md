@@ -128,7 +128,9 @@ matches it by `reply_to` = its delegate). The member's allow question to `phones
    ticket with the `relay:allow` question (existing `_ensure_allow_question`) and **must** also send that question to
    `phones` as an existing `question` message (wire options `once`, `always`, `no`, shown as "Allow once / Always / No" (rule G11); `scope` "tasks from <host name>";
    **without** `body.group`: it is the member's own question; the phone ties it to the group through the host's
-   `approval_needed.question_message`). **NEW** (rule G11): the member marks its question `body.allow_question: true`; the
+   `approval_needed.question_message`) and **carries `body.group_ref: {host, id}`** (**NEW**: the group key it was asked
+   for, never `body.group`; the phone shows buttons only when `group_ref` equals the group the card is shown in, missing or
+   different means "Answer in <member>"; the question's sender must also be a member of that group, so a host cannot show it in a second group). **NEW** (rule G11): the member marks its question `body.allow_question: true`; the
    wire options are `once` / `always` / `no` and the answer text is one of them; the UI text is "Allow once / Always /
    No". Mapping (one table):
 
@@ -163,6 +165,11 @@ matches it by `reply_to` = its delegate). The member's allow question to `phones
 | `failed` | member | `failure` | Failed |
 | `denied` | member (the person answered No) | `failure` | pill "You said no to Bank" |
 
+   **Review is not terminal.** When the member's ticket reaches `review` its own person has not accepted the result
+   yet: the task stays `working` and the member sends once only the generic text "Ready for review in <member name>"
+   (`update.kind: working`; no agent summary, no files). `done` (and the result summary) is sent only after the
+   member's person accepted it (ticket `done`); a ticket `dropped` is `failed`. A review that goes back to active sends
+   nothing, and the review note is sent once per task.
    The host forwards each to the other members and `phones` (fan-out, `task` kept) and updates the card.
 5. **Approval in the group.** The card answers the **member's own** allow question. The phone builds the card **only
    from that question itself** (never from the host's text or label) and shows answer buttons only when all hold:

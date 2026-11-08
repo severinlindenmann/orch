@@ -4,7 +4,10 @@ const snapshot = typeof window.ORCH_SNAPSHOT !== 'undefined';
 const main = document.getElementById('content');
 const nav = document.getElementById('side-nav');
 const array = value => Array.isArray(value) ? value : [];
-const clean = value => String(value ?? '').replace(/\b(?:ws|t|q|m|ph|wh|b|f)_[a-zA-Z0-9]{4,}\b/g, '').replace(/\s+·\s+·/g, ' · ').trim();
+// Workspace ids are stored as they are (answered_by, history); people read the group member's name. Filled from state.groups.
+let wsNames = new Map();
+const showWs = value => String(value ?? '').replace(/\bws_[a-zA-Z0-9]{4,}\b/g, id => wsNames.get(id) || '');
+const clean = value => showWs(value).replace(/\b(?:ws|t|q|m|ph|wh|b|f)_[a-zA-Z0-9]{4,}\b/g, '').replace(/\s+·\s+·/g, ' · ').trim();
 const name = value => clean(String(value ?? '').replace(/^(human|agent):/, ''));
 const icon = value => {
   const svg = window.icon(String(value || 'page'));
@@ -167,6 +170,7 @@ function accept(next) {
   const arrived = new Set(array(next.needs).filter(n => !seenNeeds.has(n.id)).map(n => n.id));
   array(next.needs).forEach(n => seenNeeds.add(n.id));
   state = next;
+  wsNames = new Map(['hosted', 'joined'].flatMap(k => array(state?.groups?.[k])).flatMap(g => [...array(g.members), ...array(g.connectable)]).filter(m => m && m.ws && m.name).map(m => [m.ws, String(m.name)]));
   window.dispatchEvent(new CustomEvent('orch:state', {detail: next}));
   render(first ? new Set() : arrived);
 }

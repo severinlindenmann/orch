@@ -10,7 +10,7 @@ enum GroupMock {
         Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_groupallow00001", from: bank, to: "phones", type: "question",
             createdAt: at, ticket: "t_banktax001",
             body: QuestionBody(questionId: "relay:allow", title: "Check last year's payment",
-                               text: "Bank: let Finance give tasks?", options: ["once", "always", "no"], recommended: nil, scope: "tasks from Finance", allowQuestion: true), key: "BANK-3"), workspaceName: "Bank")
+                               text: "Bank: let Finance give tasks?", options: ["once", "always", "no"], recommended: nil, scope: "tasks from Finance", allowQuestion: true, groupRef: GroupRef(host: finance, id: "grp_" + ticket)), key: "BANK-3"), workspaceName: "Bank")
     }
 
     static func messages(now: Date = Date()) -> [PhoneMessage] {

@@ -203,3 +203,57 @@ def test_groups_pass_only_cleaned_fields(ws, tmp_path):
         and item["event"] == {"kind": "closed"}
     )
     assert item["file"] == {"name": "n.txt"}
+
+
+def test_group_share_op_builds_the_click_argv_and_is_strict(act_server, act_orch):
+    bad = [
+        {"ticket": "t_abcdef"},
+        {"ticket": "t_abcdef", "file": "../secrets/x.txt"},
+        {"ticket": "t_abcdef", "file": "a/b.pdf"},
+        {"ticket": "t_abcdef", "file": ".env"},
+        {"ticket": "t_abcdef", "file": "--click"},
+        {"ticket": "t_abcdef", "file": "a.pdf", "confirm": "yes"},
+        {"ticket": "t_abcdef", "file": "a.pdf", "path": "/etc/passwd"},
+        {"ticket": "../x", "file": "a.pdf"},
+    ]
+    for args in bad:
+        assert post(act_server, {"op": "group.share", "args": args})[0] == 400, args
+    assert acts(act_orch) == []
+    assert post(act_server, {"op": "group.share", "args": {"ticket": "t_abcdef", "file": "Letter 1.pdf"}})[0] == 400
+    assert post(act_server, {"op": "group.share", "args": {"ticket": "t_abcdef", "file": "letter.pdf"}})[0] == 200
+    assert (
+        post(act_server, {"op": "group.share", "args": {"ticket": "t_abcdef", "file": "letter.pdf", "confirm": True}})[0]
+        == 200
+    )
+    first, second = acts(act_orch)[-2:]
+    path = ".orch/tickets/t_abcdef/artifacts/letter.pdf"
+    assert first[:5] == ["relay", "group", "share", "t_abcdef", path] and "--click" in first
+    assert "--unchecked-ok" not in first and "--unchecked-ok" in second and "--click" in second
+
+
+def test_ticket_page_has_the_share_button_only_for_an_open_hosted_group():
+    from tests import webjs
+
+    js = (webjs.WEB / "pages" / "ticket.js").read_text(encoding="utf-8")
+    assert "'Share with group'" in js and "act('group.share'" in js
+    assert "g.ticket === t.id && !g.closed" in js  # shown only when the ticket hosts an open group
+    assert "Share anyway" in js and "confirm:true" in js
+    assert "ticketShareButton(t, file)" in js and "kind === 'artifacts'" in js
+    app = (webjs.WEB / "app.js").read_text(encoding="utf-8")
+    assert "wsNames" in app and "state?.groups?.[k]" in app  # ws ids are shown as the member's name
+
+
+def test_ws_ids_are_shown_as_names_in_the_page_code():
+    import subprocess
+
+    from tests import webjs
+
+    app = (webjs.WEB / "app.js").read_text(encoding="utf-8")
+    start = app.index("let wsNames")
+    end = app.index("const name = value")
+    code = app[start:end] + "\nwsNames = new Map([['ws_home000001', 'Home']]);\n" + (
+        "console.log(JSON.stringify([clean('agent:ws_home000001 answered'), clean('Asked ws_unknown01 (group)')]));"
+    )
+    out = subprocess.run(["node", "-e", "const array=v=>Array.isArray(v)?v:[];" + code], check=False, capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout) == ["agent:Home answered", "Asked  (group)"]  # an unknown id is dropped, never shown raw

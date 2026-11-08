@@ -396,7 +396,26 @@ function ticketResultCard(t, ev, file = null, kind = 'evidence') {
   return h('article', {className:'card ticket-result'}, h('h3', {}, clean(title)), h('p', {}, clean(summary)),
     at ? h('time', {className:'meta', datetime:at}, helpers.stamp(at, Date.now())) : null,
     file ? ticketPreviewTile(t, file, kind) : h('div', {className:'ticket-preview'}, h('p', {}, clean(summary))),
-    file && !snapshot ? ticketButton('Open', 'outline', () => previewFile(t.id, kind, file.name)) : null);
+    file && !snapshot ? ticketButton('Open', 'outline', () => previewFile(t.id, kind, file.name)) : null,
+    file && kind === 'artifacts' ? ticketShareButton(t, file) : null);
+}
+// "Share with group": only on a ticket that hosts an open group. A file orch could not check for passwords comes
+// back with a plain line; the person is asked once and the same click repeats with confirm.
+const ticketHostsOpenGroup = t => !snapshot && array(state?.groups?.hosted).some(g => g.ticket === t.id && !g.closed);
+function ticketShareButton(t, file) {
+  if (!ticketHostsOpenGroup(t)) return null;
+  const share = async confirm => {
+    const result = await act('group.share', confirm ? {ticket:t.id, file:file.name, confirm:true} : {ticket:t.id, file:file.name});
+    if (result.ok) { window.orch.toast('Shared with the group.'); return; }
+    if (!confirm && /^We couldn't check this/.test(result.text || '')) {
+      const {d, actions} = dialog('Share anyway?', 'dialog');
+      d.append(el('p', '', String(result.text).replace(/, so it was not shared\.?$/, '.') + ' Share it anyway?'), actions);
+      actions.append(button('Cancel', 'ghost', () => window.orch.close(d)), button('Share anyway', 'primary', async () => { window.orch.close(d); share(true); }));
+      window.orch.open(d); return;
+    }
+    window.orch.toast(clean(result.text) || 'Could not share the file.', 'error');
+  };
+  return ticketButton('Share with group', 'outline', () => share(false));
 }
 function ticketArtifactPreview(t) {
   const file = array(artifactData.get(t.id)?.data?.files)[0];

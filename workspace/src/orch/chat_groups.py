@@ -96,6 +96,20 @@ FILE_TYPES = {
 }
 ONLY_THESE = "Only PDFs, pictures and text files can be shared"
 LOOKS_LIKE_SECRET = "This file looks like it holds a password, so it was not shared"
+UNCHECKED = "We couldn't check this file for passwords, so it was not shared"
+LINKED = "This file has a second name (a link), so it was not shared"
+UNCHECKED_IMAGE = "We couldn't check this image's hidden data, so it was not shared"
+UNCHECKED_ASK = "We couldn't check this file for passwords. Share it anyway?"
+UNCHECKED_ASK_IMAGE = "We couldn't check this image's hidden data. Share it anyway?"
+
+
+class Unchecked(Refused):
+    """The file could not be read well enough to look for passwords (not that one was found). A person's
+    click may share it after a plain warning; an agent never may. `image` tells the two kinds apart."""
+
+    image = False
+
+
 BUSY = "is busy, try again in a minute"
 TICKET_RE = re.compile(r"t_[a-z0-9]{6,16}")
 KEY_RE = re.compile(r"[A-Z0-9]{2,4}-[1-9][0-9]{0,8}")
@@ -315,13 +329,32 @@ def parse_allow_answer(text) -> str | None:
     return LEGACY_WORDS.get(" ".join(str(text).split()).casefold())
 
 
-def card_kind(q: dict) -> str:
-    """The phone's approval card: buttons only for a marked question with exactly the wire options."""
-    return (
-        "buttons"
-        if q.get("allow_question") is True and q.get("options") == ALLOW_OPTIONS
-        else "answer_in_bank"
-    )
+def _ref_key(ref) -> tuple[str, str] | None:
+    """The same shape on both sides: (host, id) lower-cased and stripped; None for anything else."""
+    if (
+        not isinstance(ref, dict)
+        or not isinstance(ref.get("host"), str)
+        or not isinstance(ref.get("id"), str)
+    ):
+        return None
+    return ref["host"].strip().lower(), ref["id"].strip().lower()  # non-strings: None, same as validate.py
+
+
+def card_kind(
+    q: dict, shown_in: dict | None = None, sender: str | None = None, members: list | None = None
+) -> str:
+    """The phone's approval card: buttons only for a marked question with exactly the wire options, and, when
+    the card is shown in a group (`shown_in` = {host, id}), only if the question's group_ref is that group and
+    the question's sender (`sender`) is a member of it (`members` = the shown group's workspace ids)."""
+    if not (q.get("allow_question") is True and q.get("options") == ALLOW_OPTIONS):
+        return "answer_in_bank"
+    if shown_in is not None:
+        ref = _ref_key(q.get("group_ref"))
+        if ref is None or ref != _ref_key(shown_in):
+            return "answer_in_bank"
+        if not isinstance(members, list) or sender not in members:  # unknown: no buttons
+            return "answer_in_bank"
+    return "buttons"
 
 
 def store_key(m: dict, ctx: dict) -> tuple[list, str]:
@@ -444,9 +477,31 @@ def sniff(data: bytes, name: str = "") -> str | None:
     return "text/plain"
 
 
-def _secret_parts(parts: tuple[str, ...] | list[str]) -> bool:
+_TICKET_ID = re.compile(r"t_[a-z0-9]{6,16}")
+
+
+def _drop_artifacts(parts: tuple[str, ...] | list[str]) -> tuple[str, ...] | list[str]:
+    """For a person's click only: `.orch/tickets/<ticket id>/artifacts/<file...>`, the path from the workspace
+    root (index 0, no `..`), is where a ticket's output files live, the one hidden folder a click may share
+    from. The rest of the path and the file name are still checked."""
+    p = list(parts)
+    if (
+        len(p) >= 5
+        and p[0] == ".orch"
+        and p[1] == "tickets"
+        and _TICKET_ID.fullmatch(p[2])
+        and p[3] == "artifacts"
+        and ".." not in p
+    ):
+        return ["_", *p[4:]]
+    return parts
+
+
+def _secret_parts(parts: tuple[str, ...] | list[str], artifacts_ok: bool = False) -> bool:
     """The folder and file rules on path parts: a `secrets` folder, any hidden folder (agent config, keys,
     .orch, .git), .env*, key and token files."""
+    if artifacts_ok:
+        parts = _drop_artifacts(parts)
     dirs = list(parts[:-1])
     for x in dirs:
         n = x.rstrip(". ").lower()  # Secrets, SECRETS and "secrets." are the same folder on macOS and Windows
@@ -455,17 +510,48 @@ def _secret_parts(parts: tuple[str, ...] | list[str]) -> bool:
     return bool(_SECRET_PATH.search(parts[-1])) if parts else True
 
 
-def secret_path(path: Path, root: Path | None = None) -> bool:
+def secret_path(path: Path, root: Path | None = None, artifacts_ok: bool = False) -> bool:
     """True for a file that must never leave (see _secret_parts). Checked on the path as given and on the real
     path (symlinks resolved); folders count below `root` when the file is inside it."""
     for p in {Path(path), Path(path).resolve()}:
         parts = p.parts
         if root is not None:
-            with contextlib.suppress(ValueError):
-                parts = p.relative_to(Path(root).resolve()).parts
-        if _secret_parts(parts):
+            for base in (Path(root).resolve(), Path(root)):
+                try:
+                    parts = p.relative_to(base).parts
+                    break
+                except ValueError:
+                    continue
+        if _secret_parts(parts, artifacts_ok):
             return True
     return False
+
+
+def _artifact_contained(path: Path, real: Path, root: Path) -> None:
+    """A path named inside `<root>/.orch/tickets/<id>/artifacts/` must really be there: the folder is no link
+    and the resolved file stays under it (a link to an ordinary file elsewhere is refused)."""
+    top = Path(os.path.abspath(root))
+    try:
+        parts = Path(os.path.abspath(path)).relative_to(top).parts
+    except ValueError:
+        try:
+            parts = Path(os.path.abspath(path)).relative_to(Path(root).resolve()).parts
+            top = Path(root).resolve()
+        except ValueError:
+            return
+    low = tuple(x.casefold() for x in parts)  # macOS and Windows: .ORCH/Tickets/... is the same folder
+    if not (len(low) >= 5 and low[:2] == (".orch", "tickets") and low[3] == "artifacts"):
+        return
+    folder = top.joinpath(*parts[:4])
+    real_folder = folder.resolve()
+    if (
+        real_folder != Path(os.path.abspath(folder)).resolve()
+        or folder.is_symlink()
+        or not str(real).startswith(str(real_folder) + os.sep)
+    ):
+        raise Refused(LINKED)
+    if any(top.joinpath(*parts[:i]).is_symlink() for i in range(1, 5)):
+        raise Refused(LINKED)
 
 
 def read_shared(path: Path, root: Path, confined: bool) -> bytes:
@@ -492,7 +578,8 @@ def read_shared(path: Path, root: Path, confined: bool) -> bytes:
             raise Refused(f"{path} can't be shared (not a plain file of this workspace).")
         return data
     real = path.resolve()
-    if secret_path(path, root):
+    _artifact_contained(path, real, root)
+    if secret_path(path, root, artifacts_ok=True):  # a person's click: ticket artifacts are open
         raise Refused(LOOKS_LIKE_SECRET)
     try:
         fd = os.open(real, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
@@ -503,7 +590,7 @@ def read_shared(path: Path, root: Path, confined: bool) -> bytes:
         if not stat.S_ISREG(st.st_mode):
             raise Refused(f"{path} is not a file.")
         if st.st_nlink > 1:
-            raise Refused(LOOKS_LIKE_SECRET)  # a second name for the same data: can't tell what it is
+            raise Refused(LINKED)  # a second name for the same data: can't tell what it is, never dismissible
         now = os.lstat(real)
         if (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino):
             raise Refused(f"{path} changed while it was read.")
@@ -547,10 +634,13 @@ def _pdf_text(data: bytes) -> str:
     return "\n".join(out)
 
 
-def has_secret(data: bytes, mime: str) -> bool:
-    """A text file or PDF that holds a secret pattern. Images are not scanned."""
-    if mime.startswith("image/"):
-        return False
+def has_secret(data: bytes, mime: str, allow_unchecked: bool = False) -> bool:
+    """A text file or PDF that holds a secret pattern. Images are not scanned. A PDF that is locked
+    (/Encrypt) can't be read, which is not the same as holding a password: Unchecked."""
+    if mime.startswith("image/"):  # the raw bytes (metadata, trailing text) go through the same patterns
+        return phone_view._has_secret(data)
+    if mime == "application/pdf" and not allow_unchecked and re.search(rb"/Encrypt\b", data):
+        raise Unchecked(UNCHECKED)
     text = _pdf_text(data) if mime == "application/pdf" else data.decode("utf-8", "replace")
     if any(rx.search(text) for rx in phone_view._SECRET_PATTERNS):
         return True
@@ -560,16 +650,35 @@ def has_secret(data: bytes, mime: str) -> bool:
     )
 
 
-def check_file(data: bytes, name: str) -> str:
-    """The mime of an allowed file, else Refused with the plain line."""
+def check_file(data: bytes, name: str, allow_unchecked: bool = False, host_side: bool = False) -> str:
+    """The mime of an allowed file, else Refused with the plain line. Unchecked when the file can't
+    be scanned; allow_unchecked is only for a person's click that saw the warning."""
     if len(data) > FILE_MAX:
         raise Refused("The file is bigger than 25 MB, so it was not shared")
     mime = sniff(data, name)
     if mime not in FILE_TYPES:
         raise Refused(ONLY_THESE)
-    if has_secret(data, mime):
+    if has_secret(data, mime, allow_unchecked):
         raise Refused(LOOKS_LIKE_SECRET)
+    if mime.startswith("image/") and not (allow_unchecked or host_side) and not phone_view._image_clean(data):
+        err = Unchecked(UNCHECKED_IMAGE)
+        err.image = True
+        raise err  # only a verified PNG; the person's click may accept the rest
     return mime
+
+
+def _checked(data: bytes, name: str, by_click: bool, confirm) -> str:
+    """check_file; when the content can't be read (Unchecked) and a person clicked, ask them inside the human
+    confirmation (`confirm(question) -> bool`) and only then look the other way. Never for an agent."""
+    try:
+        return check_file(data, name)
+    except Unchecked as e:
+        if not (by_click and confirm is not None):
+            raise
+        question = UNCHECKED_ASK_IMAGE if e.image else UNCHECKED_ASK
+        if not confirm(question):
+            raise
+        return check_file(data, name, allow_unchecked=True)
 
 
 # ---- state -----------------------------------------------------------------------------------------------
@@ -1333,6 +1442,7 @@ def share_file(
     to: str | None = None,
     by_click: bool = False,
     by: str = "agent:relay",
+    confirm=None,
 ) -> dict:
     """Share one file with the group (members as `file` messages + a blob each, phones as a text with the
     file in
@@ -1341,9 +1451,9 @@ def share_file(
 
     path = Path(path)
     data = read_shared(path, root, confined=not by_click)
-    mime = check_file(data, path.name)
-    if mime.startswith("image/") and not by_click:
+    if not by_click and (sniff(data, path.name) or "").startswith("image/"):
         raise Refused("A person has to click to share a picture.")
+    mime = _checked(data, path.name, by_click, confirm)
     if by_click:
         tickets.require_human("Share this file with the group?", "sharing a file")
     gid = ensure_group(root, tid, by)
@@ -1688,7 +1798,7 @@ def _host_file(root: Path, st: dict, g: dict, m: dict, errors: list) -> dict:
     if raw is None:
         return _drop(st, m, "the file could not be fetched")
     try:
-        mime = check_file(raw, name)
+        mime = check_file(raw, name, host_side=True)  # the member's person clicked; secrets are still refused
     except Refused as e:
         _send(
             root,
@@ -2225,13 +2335,19 @@ def _report(
     title: str,
     question_message: str | None = None,
     text: str | None = None,
+    repeat: bool = False,
 ) -> dict | None:
-    """The member's status text to the host (existing text + body.task), once per forward step."""
+    """The member's status text to the host (existing text + body.task), once per forward step. `repeat`
+    allows the same status again (the one "Ready for review" note)."""
     rec = j["tasks"].setdefault(delegate, {"ticket": None, "status": None})
     old = rec.get("status")
     if old is not None and (
-        TASK_RANK[status] < TASK_RANK[old] or (TASK_RANK[old] == 4 and status != old) or status == old
+        TASK_RANK[status] < TASK_RANK[old]
+        or (TASK_RANK[old] == 4 and status != old)
+        or (status == old and not repeat)
     ):
+        return None
+    if repeat and old == status and TASK_RANK[old] == 4:
         return None
     me = _me(root)
     from orch import relay
@@ -2304,6 +2420,7 @@ def waiting_approval(root: Path, delegate_msg: dict, allow_tid: str, qid: str) -
             "text": q["text"],
             "options": list(ALLOW_OPTIONS),
             "allow_question": True,
+            "group_ref": {"host": j["host"], "id": j["id"]},  # not body.group: allow messages stay group-free
             "recommended": None,
             "scope": scope[:120],
         }
@@ -2343,7 +2460,7 @@ def _status_of(root: Path, ticket: dict) -> str:
     s = ticket.get("status")
     if s in ("done", "dropped"):
         return "done" if s == "done" else "failed"
-    if s == "review":  # the work is done, a person looks at it
+    if s == "review":  # not accepted by the member's own person yet: still working (contract 3.4)
         return "working"
     rec = runs.read(root, ticket["id"])
     return "working" if rec and runs.state(rec) == "alive" else "queued"
@@ -2389,16 +2506,19 @@ def sync(root: Path) -> None:
                     gt = r.get("group_task") if isinstance(r, dict) else None
                     if isinstance(gt, dict) and gt.get("delegate") == did:
                         tid = t["id"]
-                        _report(
-                            root,
-                            st,
-                            j,
-                            did,
-                            _status_of(root, t),
-                            tid,
-                            t["title"],
-                            text=(t.get("summary") if t.get("status") == "done" else None),
-                        )
+                        status = _status_of(root, t)
+                        if t.get("status") == "review":
+                            # not accepted by the member's person yet: stay working, one generic note
+                            if not j["tasks"][did].get("review_noted") and _report(
+                                root, st, j, did, "working", tid, t["title"],
+                                text=f"Ready for review in {_own_name(root, st)}", repeat=True,
+                            ):  # fmt: skip
+                                j["tasks"][did]["review_noted"] = True
+                        else:
+                            _report(
+                                root, st, j, did, status, tid, t["title"],
+                                text=(t.get("summary") if t.get("status") == "done" else None),
+                            )  # fmt: skip
                         break
             now = _now_epoch()
             if j["seq_max"] > j["seen_seq"] and now - j["seen_sent"] >= SEEN_EVERY:
@@ -2473,7 +2593,13 @@ def say_member(root: Path, host: str, gid: str, text: str, via: str = "helper") 
 
 
 def share_member(
-    root: Path, host: str, gid: str, path: Path, title: str | None = None, by_click: bool = False
+    root: Path,
+    host: str,
+    gid: str,
+    path: Path,
+    title: str | None = None,
+    by_click: bool = False,
+    confirm=None,
 ) -> dict:
     """Member: share a file with the group (to the host only). Only after its person's click."""
     from orch import relay
@@ -2483,7 +2609,7 @@ def share_member(
     tickets.require_human("Share this file with the group?", "sharing a file")
     path = Path(path)
     data = read_shared(path, root, confined=False)  # the person's click chose it
-    mime = check_file(data, path.name)
+    mime = _checked(data, path.name, True, confirm)
     with _state(root) as st:
         j = st["joined"].get(_jkey(host, gid))
         if j is None or j["left"] or j["closed"]:

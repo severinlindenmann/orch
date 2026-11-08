@@ -1,0 +1,41 @@
+{
+  "why": "The allow question names the group it was asked for and the phone shows the card in that same group: buttons.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_allowqzzzzzzzzaa",
+    "from": "ws_ban0000001",
+    "to": "phones",
+    "type": "question",
+    "created_at": "2026-11-08T10:03:00Z",
+    "ticket": "t_bank3a",
+    "body": {
+      "question_id": "q1",
+      "text": "Let Finance give tasks to Bank?",
+      "options": [
+        "once",
+        "always",
+        "no"
+      ],
+      "recommended": "once",
+      "scope": "tasks from Finance",
+      "allow_question": true,
+      "group_ref": {
+        "host": "ws_fin0000001",
+        "id": "grp_t_fin14a"
+      }
+    }
+  },
+  "expect": {
+    "card": "buttons"
+  },
+  "context": {
+    "shown_in_group": {
+      "host": "ws_fin0000001",
+      "id": "grp_t_fin14a"
+    },
+    "group_members": [
+      "ws_fin0000001",
+      "ws_ban0000001"
+    ]
+  }
+}

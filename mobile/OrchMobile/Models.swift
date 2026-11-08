@@ -65,6 +65,7 @@ struct QuestionBody: Codable, Sendable, Equatable {
     /// Permission questions: what "Always" covers, shown as "Always allow <scope>".
     var scope: String? = nil
     var allowQuestion: Bool? = nil // allow_question via JSONCoding
+    var groupRef: GroupRef? = nil // group_ref via JSONCoding
 }
 
 struct QuestionMessage: Codable, Sendable, Equatable {
