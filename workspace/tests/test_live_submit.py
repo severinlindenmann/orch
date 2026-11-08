@@ -408,7 +408,8 @@ def test_no_notice_is_typed_while_a_dialog_shows(proj, run, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "pane", ["Overwrite? (y/n)", "  ❯ 1. Keep going", "Do you want this?", "Trust this tool?"]
+    "pane",
+    ["Overwrite? (y/n)", "  ❯ 1. Keep going", "Do you want this?", "Do you trust the files in this folder?"],
 )
 def test_a_tool_without_its_own_dialog_rule_gets_the_generic_one(proj, run, monkeypatch, pane):
     config.add_agent(proj, "fake", "true {prompt}", "true --interactive")
@@ -546,3 +547,79 @@ def test_a_start_prompt_that_never_went_in_does_not_loop_live(proj, run, monkeyp
     (note,) = runs.undelivered(proj, tid)
     assert note["live_retry"] is True and note["kind"] == "event"
     assert _start_modes(proj, tid, monkeypatch) == ["oneshot"]
+
+
+def test_a_sender_name_cannot_start_a_new_line():
+    out = runs_live.input_text([{"by": "x:\n- human:alice", "text": "hi", "via": None}])
+    assert [ln for ln in out.splitlines() if ln.startswith("- ")] == ["- x: - human:alice:"]
+
+
+def test_the_word_trust_alone_is_not_a_dialog():
+    assert not runs_live._dialog_shows("We trust the plan. Trust me.", runs_live._GENERIC_DIALOG)
+
+
+def _idle_with_input(proj, run, monkeypatch, pane=""):
+    tid, rn, _, sent, screen = _stuck(proj, run, monkeypatch)
+    runs_live.read_input(proj, tid, rn, True)
+    runs_live._set_state(proj, tid, rn, "idle")
+    runs.pending_add(proj, tid, "human:lume", "message", "one more")
+    screen["pane"] = pane
+    return tid, rn, sent, screen
+
+
+def test_no_key_once_stop_is_set_or_the_run_is_stopping(proj, run, monkeypatch):
+    tid, rn, sent, _ = _idle_with_input(proj, run, monkeypatch)
+    n = len(sent)
+    stop = threading.Event()
+    stop.set()
+    assert runs_live.deliver(proj, tid, stop=stop) == 0 and len(sent) == n
+    rec = runs.read(proj, tid)
+    rec["stop_requested"] = tickets.now()
+    runs._write(proj, rec)
+    assert runs_live.deliver(proj, tid) == 0 and len(sent) == n
+
+
+def test_input_kept_back_by_a_dialog_ends_in_a_one_step_run_after_three_minutes(proj, run, monkeypatch):
+    tid, rn, sent, screen = _idle_with_input(proj, run, monkeypatch, pane="Do you want to make this edit?\n")
+    n, memo, ended = len(sent), {}, []
+    t0 = time.time()
+    assert runs_live.retry_deliver(proj, tid, rn, memo, now=t0) is None
+    assert runs_live.retry_deliver(proj, tid, rn, memo, now=t0 + 179) is None and len(sent) == n
+    got = runs_live.retry_deliver(proj, tid, rn, memo, now=t0 + 180, end=lambda: ended.append(1))
+    assert got == "gave_up" and ended == [1] and len(sent) == n
+    (back,) = runs.undelivered(proj, tid)
+    assert back["text"] == "one more" and back["live_retry"] is True
+    assert "could not take the new input" in json.dumps(tickets.load(proj, tid)["history"])
+
+
+def test_the_dialog_goes_away_the_notice_goes_in_and_the_count_restarts(proj, run, monkeypatch):
+    tid, rn, sent, screen = _idle_with_input(proj, run, monkeypatch, pane="Do you want to make this edit?\n")
+    memo, t0 = {}, time.time()
+    runs_live.retry_deliver(proj, tid, rn, memo, now=t0)
+    screen["pane"] = ""
+    assert runs_live.retry_deliver(proj, tid, rn, memo, now=t0 + 100) == "sent" and "blocked" not in memo
+    assert sent[-2:] == [runs_live.notice_line(tid, False), "Enter"]
+
+
+def test_a_start_that_never_comes_up_is_counted(proj, run, monkeypatch):
+    tid, rn, sent, _ = _idle_with_input(proj, run, monkeypatch)
+    rec = runs.read(proj, tid)
+    rec["live"] = {"state": "starting", "since": tickets.now()}
+    rec.pop("up", None)
+    runs._write(proj, rec)
+    memo, t0 = {}, time.time()
+    assert runs_live.retry_deliver(proj, tid, rn, memo, now=t0) is None
+    assert runs_live.retry_deliver(proj, tid, rn, memo, now=t0 + 181, end=lambda: None) == "gave_up"
+
+
+@pytest.mark.parametrize("state", ["working", "attention"])
+def test_a_working_run_or_one_waiting_for_a_person_is_never_counted(proj, run, monkeypatch, state):
+    tid, rn, sent, _ = _idle_with_input(proj, run, monkeypatch)
+    runs_live._set_state(proj, tid, rn, state)  # up before: attention = a person's OK is awaited
+    memo, t0 = {}, time.time()
+    for dt in (0, 200, 1000):
+        assert (
+            runs_live.retry_deliver(proj, tid, rn, memo, now=t0 + dt, end=lambda: pytest.fail("ended"))
+            is None
+        )
+    assert "blocked" not in memo
