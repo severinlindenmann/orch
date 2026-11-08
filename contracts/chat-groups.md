@@ -130,7 +130,7 @@ matches it by `reply_to` = its delegate). The member's allow question to `phones
    **without** `body.group`: it is the member's own question; the phone ties it to the group through the host's
    `approval_needed.question_message`) and **carries `body.group_ref: {host, id}`** (**NEW**: the group key it was asked
    for, never `body.group`; the phone shows buttons only when `group_ref` equals the group the card is shown in, missing or
-   different means "Answer in <member>", so a host cannot show it in a second group). **NEW** (rule G11): the member marks its question `body.allow_question: true`; the
+   different means "Answer in <member>"; the question's sender must also be a member of that group, so a host cannot show it in a second group). **NEW** (rule G11): the member marks its question `body.allow_question: true`; the
    wire options are `once` / `always` / `no` and the answer text is one of them; the UI text is "Allow once / Always /
    No". Mapping (one table):
 

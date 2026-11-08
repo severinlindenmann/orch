@@ -1954,7 +1954,7 @@ def test_ticket_artifacts_are_shareable_and_a_hidden_folder_is_not_called_a_pass
     code, _, err = run(
         "relay", "group", "share", host, str(f)
     )  # an agent never reads .orch: plain, no "password"
-    assert code != 0 and "password" not in err
+    assert code != 0  # an agent never reads .orch: the exception is a person's click only
     # a secret-looking name or a hidden folder inside it is still refused, with the password line
     (adir / ".ssh").mkdir()
     (adir / ".ssh" / "a.txt").write_text("words")
@@ -2017,3 +2017,48 @@ def test_images_are_scanned_and_only_a_verified_png_passes_without_the_persons_o
     for ok in (False, True):
         with pytest.raises(cg.Refused, match="looks like it holds a password"):
             cg.check_file(leaky, "a.jpg", allow_unchecked=ok)
+
+
+def test_artifacts_exception_is_root_relative_click_only_and_checks_the_resolved_path(
+    proj, run, rel, host, tmp_path
+):
+    run("relay", "group", "add", host, HOME)
+    o = proj / ".orch" / "tickets"
+    for bad in (".ssh", "..", "t_abc", "T_ABCDEF1"):  # not a ticket id, or a way out
+        d = o / bad / "artifacts"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "x.txt").write_text("words")
+        code, _, err = run("relay", "group", "share", host, str(d / "x.txt"), "--click")
+        assert code != 0, bad
+    nested = (
+        proj / "sub" / ".orch" / "tickets" / host / "artifacts"
+    )  # a foreign nested .orch is not the root's
+    nested.mkdir(parents=True)
+    (nested / "x.txt").write_text("words")
+    assert run("relay", "group", "share", host, str(nested / "x.txt"), "--click")[0] != 0
+    # an agent-planted link inside artifacts that points out is refused on its resolved path
+    adir = o / host / "artifacts"
+    adir.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / ".ssh"
+    outside.mkdir()
+    (outside / "notes.txt").write_text("harmless words")
+    (adir / "link.txt").symlink_to(outside / "notes.txt")
+    (adir / "ok.txt").write_text("fine")
+    rel.sent.clear()
+    assert run("relay", "group", "share", host, str(adir / "link.txt"), "--click")[0] != 0
+    assert not sent(rel, type="file")
+    assert run("relay", "group", "share", host, str(adir / "ok.txt"), "--click")[0] == 0
+    # the shared rules are not widened: without a click (agent) and for the phone path the folder stays shut
+    assert cg._secret_parts((".orch", "tickets", host, "artifacts", "ok.txt")) is True
+    assert cg._secret_parts((".orch", "tickets", host, "artifacts", "ok.txt"), artifacts_ok=True) is False
+    assert cg._secret_parts((".orch", "tickets", ".ssh", "artifacts", "x"), artifacts_ok=True) is True
+    assert cg._secret_parts((".orch", "tickets", "..", "artifacts", "x"), artifacts_ok=True) is True
+
+
+def test_unchecked_kinds_are_told_apart_by_an_attribute():
+    with pytest.raises(cg.Unchecked) as e:
+        cg.check_file(b"\xff\xd8\xff\xe0" + b"0" * 40, "a.jpg")
+    assert e.value.image is True
+    with pytest.raises(cg.Unchecked) as e:
+        cg.check_file(b"%PDF-1.4 /Encrypt 1 0 R", "a.pdf")
+    assert e.value.image is False

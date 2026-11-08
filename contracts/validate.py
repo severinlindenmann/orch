@@ -802,13 +802,18 @@ def cg_parse_allow_answer(text):
     return CG_LEGACY_WORDS.get(" ".join(str(text).split()).casefold())
 
 
-def cg_card(q, ctx):
+def cg_card(q, ctx, sender=None):
     """Phone approval card for a member's allow question: buttons only for the wire options; old wording -> 'Answer in Bank'."""
     if not (q.get("allow_question") is True and q.get("options") == CG_ALLOW_OPTIONS):
         return "answer_in_bank"
     shown = (ctx or {}).get("shown_in_group")
-    if shown is not None and q.get("group_ref") != shown:  # the card belongs to one group only
-        return "answer_in_bank"
+    if shown is not None:
+        key = lambda r: (str(r.get("host", "")).strip().lower(), str(r.get("id", "")).strip().lower()) if isinstance(r, dict) else None
+        if key(q.get("group_ref")) is None or key(q.get("group_ref")) != key(shown):  # the card belongs to one group only
+            return "answer_in_bank"
+        members = (ctx or {}).get("group_members")
+        if members is not None and sender not in members:  # the asker must belong to the group it is shown in
+            return "answer_in_bank"
     return "buttons"
 
 
@@ -906,7 +911,7 @@ for f in cg_files:
         errs.append(f"expected applied_seq {exp['applied_after']}, got {cg_applied_after(m, ctx)}")
     if "stored_as" in exp and (cg_store(m, ctx)[0] != exp["stored_as"] or cg_store(m, ctx)[1] != exp.get("store", "new")):
         errs.append(f"expected store {exp['stored_as']} {exp.get('store', 'new')}, got {cg_store(m, ctx)}")
-    if "card" in exp and cg_card(m["body"], ctx) != exp["card"]:
+    if "card" in exp and cg_card(m["body"], ctx, m.get("from")) != exp["card"]:
         errs.append(f"expected card {exp['card']}")
     for ans, want_ in (exp.get("parse") or {}).items():
         if cg_parse_allow_answer(ans) != want_:

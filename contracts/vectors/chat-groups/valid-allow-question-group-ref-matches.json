@@ -32,6 +32,10 @@
     "shown_in_group": {
       "host": "ws_fin0000001",
       "id": "grp_t_fin14a"
-    }
+    },
+    "group_members": [
+      "ws_fin0000001",
+      "ws_ban0000001"
+    ]
   }
 }
