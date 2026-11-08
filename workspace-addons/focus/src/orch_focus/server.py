@@ -226,7 +226,7 @@ class Tracker:
         return {
             "ticket": {
                 "id": ticket.get("id"), "key": ticket.get("key"), "title": ticket.get("title"),
-                "status": ticket.get("status"),
+                "status": ticket.get("status"), "started": bool(ticket.get("started")),
                 "revision": ticket.get("revision", 0), "checklist": checks, "questions": questions,
                 "history": (ticket.get("history") or [])[-80:],
             },
@@ -300,6 +300,7 @@ class Tracker:
                         "key": t.get("key"),
                         "title": str(t.get("title", ""))[:200],
                         "status": t["status"],
+                        "started": bool(t.get("started")),
                     }
                 )
         return out[:200]

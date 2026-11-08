@@ -11,6 +11,7 @@
     "key": { "$ref": "#/$defs/key", "description": "Optional. Short display key for people, e.g. DM1-12: the workspace code ([workspace] code in .orch/config.toml) at creation, '-', and a number from the workspace counter (.orch/ticket-counter.json) that is never reused. Set once at creation and never rewritten (a new code changes only later keys). The id stays the identity everywhere; every command that takes an id also takes the key, any case. Tickets made before keys have none." },
     "title": { "type": "string", "minLength": 1, "maxLength": 200 },
     "status": { "enum": ["open", "active", "waiting", "ready", "review", "done", "dropped"] },
+    "started": { "type": "boolean", "description": "The ticket was started by an agent at least once; cleared only when a person moves it to open or ready." },
     "created_at": { "$ref": "#/$defs/time" },
     "updated_at": { "$ref": "#/$defs/time" },
     "checklist": { "type": "array", "items": { "$ref": "#/$defs/check" } },

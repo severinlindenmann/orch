@@ -75,7 +75,7 @@
   const overdue = t => activeTicket(t) && t.due && t.due < today();
   const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
   const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
-  const statusWord = t => window.DashHelpers.statusWord(t.status);
+  const statusWord = t => window.DashHelpers.statusWord(t.status, t.started);
   const chip = (text, cls = '') => h('span', {className:'chip ' + cls}, text);
   const shown = t => snapshot ? t : {...t, status: window.DashHelpers.shownStatus(t, state.runs?.[t.id])};
   const statusChip = t => { const s = shown(t); return chip(statusWord(s), s.status === 'active' ? 'active' : ''); };

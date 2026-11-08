@@ -23,7 +23,8 @@
     for (const kid of kids.flat()) if (kid != null) el.append(kid);
     return el;
   }
-  const STATUS_WORD = {open: 'To do', active: 'Doing', waiting: 'Needs you', done: 'Done', dropped: 'Dropped'};
+  const STATUS_WORD = {open: 'Not started', ready: 'Not started', active: 'Working', waiting: 'Needs you', review: 'Ready for review', done: 'Done', dropped: 'Dropped'};
+  const statusWord = (status, started) => (status === 'open' || status === 'ready') && started === true ? 'Paused' : STATUS_WORD[status] || 'Not started';
   const toast = (text, kind) => (window.orch ? window.orch.toast(text, kind) : null);
   const proof = window.FocusProof.create({h, ic, P, TID, toast});
 
@@ -43,7 +44,7 @@
     fetch(P + '/api/tickets').then(r => r.json()).then(list => {
       const box = root.querySelector('.fx-pick');
       if (!list.length) box.append(h('p', {class: 'muted', text: 'No open tickets.'}));
-      for (const t of list.slice().sort((a, b) => Number(a.status === 'done') - Number(b.status === 'done'))) box.append(h('a', {href: P + '/t/' + t.id}, h('span', {class: 'mono key', text: t.key || t.id}), h('span', {class: 'grow', text: t.title}), h('span', {class: 'meta', text: STATUS_WORD[t.status] || t.status})));
+      for (const t of list.slice().sort((a, b) => Number(a.status === 'done') - Number(b.status === 'done'))) box.append(h('a', {href: P + '/t/' + t.id}, h('span', {class: 'mono key', text: t.key || t.id}), h('span', {class: 'grow', text: t.title}), h('span', {class: 'meta', text: statusWord(t.status, t.started)})));
     });
     return;
   }
@@ -213,7 +214,7 @@
     if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a task' + task(m[1]);
     if (/^Asked q\d+, waiting$/.test(text)) return 'Asked a question';
     if ((m = /^Answered q\d+: ([\s\S]*)$/.exec(text))) return 'Answered a question: ' + m[1];
-    if ((m = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
+    if ((m = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text))) return 'Moved to ' + statusWord(m[1]);
     if ((m = /^Set ext\.([a-z][a-z0-9-]*)$/.exec(text))) return 'Updated ' + addon(m[1]) + ' settings';
     return plainNames(text);
   }
