@@ -3,6 +3,15 @@ import XCTest
 
 @MainActor
 final class ChatTests: XCTestCase {
+    func testAllowQuestionRejectsFreeTextAnswer() async {
+        defer { cleanup() }
+        let model = await pairedOffline()
+        let q = MockRelay.allowQuestion
+        await model.answer(q, with: "hello")
+        XCTAssertNil(model.answers[q.id])
+        XCTAssertFalse(model.outbox.items.contains { $0.kind == .answer })
+    }
+
     func testWriteOwnIsOnlyShownForNonAllowQuestionsWithOptions() {
         func question(options: [String]) -> Question {
             Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_weeks", from: "ws_a", to: "phones", type: "question",

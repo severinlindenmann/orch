@@ -431,10 +431,14 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
     /// Quiet light views update only the fields they carry, preserving the full ticket details.
     func overlaid(on base: TicketSnapshot?) -> TicketSnapshot {
         guard light == true, var result = base else { return self }
-        result.title = title ?? result.title
-        result.status = status ?? result.status
-        result.agent = agent ?? result.agent
-        result.summary = summary ?? result.summary
+        func nonempty(_ value: String?) -> String? {
+            guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return value
+        }
+        result.title = nonempty(title) ?? result.title
+        result.status = nonempty(status) ?? result.status
+        result.agent = nonempty(agent) ?? result.agent
+        result.summary = nonempty(summary) ?? result.summary
         result.running = running ?? result.running
         result.started = started ?? result.started
         result.light = nil

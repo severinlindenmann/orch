@@ -122,7 +122,7 @@ struct QuestionCard: View {
                 ForEach(q.message.body.options, id: \.self) { option in optionButton(q, option: option) }
             }
         }
-        if ConversationRules.showsWriteOwn(q) {
+        if !isStale, item.answer == nil, ConversationRules.showsWriteOwn(q) {
             Button { onWriteOwn(q) } label: {
                 Text("Write your own").themeFont(15).foregroundStyle(Theme.brand)
                     .frame(minHeight: 44)

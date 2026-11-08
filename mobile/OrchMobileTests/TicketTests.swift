@@ -67,8 +67,28 @@ final class TicketTests: XCTestCase {
         let ticket = try XCTUnwrap(TicketBuilder.build(updates: [lightViewUpdate("1", view: view), lightViewUpdate("2", view: nil, text: "Latest note")],
                                                      questions: [], answers: [:]).first)
         XCTAssertEqual(ticket.view, view)
-        XCTAssertEqual(ticket.status, .paused)
+        XCTAssertEqual(ticket.status, .working)
         XCTAssertEqual(ticket.text, "Latest note")
+    }
+
+    func testFailureWithoutViewUsesUpdateKind() throws {
+        let view = TicketSnapshot(title: "Fix login", status: "active", running: true)
+        let failure = TicketUpdate(id: "2", workspace: "ws_a", workspaceName: "A", ticket: "t_1", kind: "failure",
+                                   title: nil, text: "Failed", replyTo: nil, at: "2026-11-08T10:01:00Z")
+        let ticket = try XCTUnwrap(TicketBuilder.build(updates: [lightViewUpdate("1", view: view), failure],
+                                                     questions: [], answers: [:]).first)
+        XCTAssertEqual(ticket.status, .done)
+        XCTAssertEqual(ticket.kind, "failure")
+        XCTAssertEqual(ticket.view, view)
+        XCTAssertEqual(ticket.title, view.title)
+    }
+
+    func testEmptyLightViewFieldsKeepBase() {
+        let base = TicketSnapshot(title: "Fix login", status: "active", agent: "Agent", summary: "Investigating")
+        for empty in ["", " \t\n"] {
+            let light = TicketSnapshot(title: empty, status: empty, agent: empty, summary: empty, light: true)
+            XCTAssertEqual(light.overlaid(on: base), base)
+        }
     }
 
     func testLightViewDecodes() throws {

@@ -30,6 +30,7 @@ struct Composer: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @FocusState private var focused: Bool
     @State private var text = ""
+    @State private var savedDraft: String?
     @State private var error: String?
     @State private var micError = false
     @State private var attaching = false
@@ -101,6 +102,9 @@ struct Composer: View {
                         }
                     }
             }
+            if reply?.answering != nil, text.unicodeScalars.count > 1800 {
+                Text("\(text.unicodeScalars.count)/2000").themeFont(13).foregroundStyle(Theme.muted)
+            }
             if target == nil { Text(unavailableText).themeFont(13).foregroundStyle(Theme.muted) }
             else if let note, !hasAudio, reply?.answering == nil { Text(note).themeFont(13).foregroundStyle(Theme.muted).accessibilityIdentifier("composer-note") }
         }.padding(.horizontal, 8).padding(.vertical, 8)
@@ -114,13 +118,30 @@ struct Composer: View {
             .task { text = target.flatMap { Self.drafts[draftKey($0)] } ?? ""; if autoFocus && target != nil { focused = true } }
             .onChange(of: reply?.answering?.id) { _, id in
                 if id != nil {
+                    if savedDraft == nil { savedDraft = text }
+                    text = ""
                     holding = false; holdTask?.cancel(); hintTask?.cancel(); hint = false
-                    if recording || starting { collect() }
+                    if recording || starting { discard() }
                     attaching = false; focused = true
+                } else {
+                    restoreDraft()
                 }
             }
-            .onChange(of: text) { _, value in if let target { Self.drafts[draftKey(target)] = value } }
-            .onChange(of: target) { _, new in text = new.flatMap { Self.drafts[draftKey($0)] } ?? ""; discard() }
+            .onChange(of: text) { _, value in
+                if reply?.answering == nil, savedDraft == nil, let target { Self.drafts[draftKey(target)] = value }
+            }
+            .onChange(of: target) { _, new in
+                let draft = new.flatMap { Self.drafts[draftKey($0)] } ?? ""
+                if reply?.answering != nil {
+                    savedDraft = draft; reply = nil; restoreDraft()
+                }
+                text = draft; discard()
+            }
+            .onChange(of: model.answerTick) { _, _ in
+                if let q = reply?.answering, model.answers[q.id] != nil {
+                    reply = nil; restoreDraft()
+                }
+            }
             .onChange(of: recorder?.error) { _, value in if let value { error = value; micError = true; collect() } }
             .onDisappear { holding = false; holdTask?.cancel(); hintTask?.cancel(); discard() }
             .sheet(isPresented: $attaching) {
@@ -224,12 +245,25 @@ struct Composer: View {
         defer { busy = false }
         do {
             if let q = reply?.answering {
-                await model.answer(q, with: String(trimmedText.prefix(2000)))   // the workspace keeps up to 2000 characters
+                if model.answers[q.id] != nil || model.pendingAnswers[q.id] != nil {
+                    reply = nil; restoreDraft(); return
+                }
+                await model.answer(q, with: String(String.UnicodeScalarView(trimmedText.unicodeScalars.prefix(2000))))
+                if model.answers[q.id] == nil && model.queuedAnswers[q.id] == nil {
+                    error = model.message ?? "Your answer was not sent. Try again."
+                    return
+                }
+                if reply?.answering?.id == q.id { reply = nil; restoreDraft() }
             } else {
                 try await dispatch(MessageDraft(text: text, replyTo: reply?.messageId), to: target)
+                text = ""; Self.drafts[draftKey(target)] = nil; reply = nil
             }
-            text = ""; Self.drafts[draftKey(target)] = nil; reply = nil; success += 1; onSent?()
+            success += 1; onSent?()
         } catch { self.error = error.localizedDescription }
+    }
+    private func restoreDraft() {
+        guard let savedDraft else { return }
+        text = savedDraft; self.savedDraft = nil
     }
     /// A photo, file or place from the "+" sheet: goes through the outbox like any message; the picker's temp files are removed after.
     private func sendMedia(_ selection: MediaSelection) async {
