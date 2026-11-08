@@ -276,7 +276,8 @@ def input_text(items: list[dict]) -> str:
         blocks = []
         for i in rest:
             body = "\n".join("    " + ln for ln in clean(i["text"]).splitlines() or [""])
-            blocks.append(f"- {clean(str(i['by']))}:\n{body}")
+            sender = " ".join(clean(str(i["by"])).split())  # one line: a name cannot start a new line
+            blocks.append(f"- {sender}:\n{body}")
         parts.append("New input:\n" + "\n".join(blocks))
     return "\n\n".join(parts)
 
@@ -303,9 +304,10 @@ def _enter(root: Path, tid: str, timeout: float = 20) -> bool:
     return tmux(root, "send-keys", "-t", target(tid), "Enter", timeout=timeout).returncode == 0
 
 
-def deliver(root: Path, tid: str) -> int:
+def deliver(root: Path, tid: str, stop=None) -> int:
     """Tell the agent input waits, once, if (and only if) it said it is idle: type the notice line. Returns
-    how many items wait. The items stay undelivered until the agent reads them (read_input)."""
+    how many items wait. The items stay undelivered until the agent reads them (read_input). stop: the
+    wrapper's stop flag; once set (or the run is being stopped) no key goes out."""
     with runs.locked(root, tid):
         rec = runs.read(root, tid)
         if not rec or rec.get("mode") != "live" or (rec.get("live") or {}).get("state") != "idle":
@@ -325,7 +327,9 @@ def deliver(root: Path, tid: str) -> int:
         line = notice_line(tid, any(i.get("via") == "start" for i in items))
         if not _screen_free(root, tid, _dialog_rule(rec["agent"], root)):
             return 0  # a dialog or a screen orch cannot read: the wrapper's watcher tries again shortly
-        if not _type_line(root, tid, line):
+        if (stop is not None and stop.is_set()) or (runs.read(root, tid) or {}).get("stop_requested"):
+            return 0
+        if not _type_line(root, tid, line, QUICK):
             return 0
         rec = runs.read(root, tid) or rec
         rec["live"] = {"state": "working", "since": tickets.now()}
@@ -375,7 +379,7 @@ def _log_submit(root: Path, tid: str, run: str, what: str) -> None:
 
 
 # for a tool whose adapter names no dialog of its own
-_GENERIC_DIALOG = r"Do you want|\(y/n\)|^\s*❯\s*\d|\bTrust\b"
+_GENERIC_DIALOG = r"Do you want|\(y/n\)|^\s*❯\s*\d|Do you trust the files in this folder"
 _BOTTOM_DIALOG = re.compile(r"Esc to cancel", re.IGNORECASE)  # counts only in the bottom rows
 
 
@@ -559,8 +563,54 @@ def _give_up_locked(root: Path, rec: dict) -> None:
     runs._write(root, rec)
 
 
+DELIVER_GIVE_UP_SECONDS = 180.0  # input kept back this long (a dialog, a start that never came up): one-step
+
+
+def retry_deliver(root: Path, tid: str, run: str, memo: dict, now: float | None = None, end=None, stop=None):
+    """Input waits and no notice is out: while the agent is idle, type it (deliver; a dialog may have kept
+    it back). Kept back for DELIVER_GIVE_UP_SECONDS while idle, starting up, or waiting at a screen before
+    it was ever up: the input is kept with live_retry (the next start works one step at a time), one line
+    goes to the history and `end` ends the session. A run that works, or waits for a person after it was
+    up (a permission dialog), is never counted. memo: the caller's state between polls."""
+    t = time.time() if now is None else now
+    rec = runs.read(root, tid)
+    if not rec or rec["run"] != run or rec.get("submit") or not rec.get("pending"):
+        memo.pop("blocked", None)
+        return None
+    state = (rec.get("live") or {}).get("state", "starting")
+    if not (state in ("idle", "starting") or (state == "attention" and not rec.get("up"))):
+        memo.pop("blocked", None)
+        return None
+    if state == "idle" and deliver(root, tid, stop=stop):
+        memo.pop("blocked", None)
+        return "sent"
+    since = memo.setdefault("blocked", t)
+    if t - since < DELIVER_GIVE_UP_SECONDS or (stop is not None and stop.is_set()):
+        return None
+    with runs.locked(root, tid):
+        cur = runs.read(root, tid)
+        if not cur or cur["run"] != run or cur.get("submit"):
+            return None
+        _give_up_locked(root, cur)
+    label = adapters.load(rec["agent"], root)["label"]
+    with contextlib.suppress(Exception):
+        tickets.log(
+            root,
+            tid,
+            f"{label}'s live session could not take the new input for 3 minutes, so it was closed. "
+            "The input is kept and goes in with the next start, one step at a time.",
+            f"agent:{rec['agent']}",
+        )
+    _log_submit(root, tid, run, "gave up: the notice was kept back (dialog or no start) for 3 minutes")
+    memo.pop("blocked", None)
+    if end is not None:
+        end()
+    return "gave_up"
+
+
 def watch_submit(root: Path, tid: str, run: str, proc: subprocess.Popen, guard=None, stop=None) -> None:
     """In the pane's wrapper, for the whole session: check_submit while a notice waits to be taken."""
+    memo: dict = {}
     while proc.poll() is None and not (stop is not None and stop.is_set()):
         time.sleep(SUBMIT_POLL)
         try:
@@ -569,11 +619,10 @@ def watch_submit(root: Path, tid: str, run: str, proc: subprocess.Popen, guard=N
                 return
             if rec.get("submit"):
                 check_submit(root, tid, run, end=proc.terminate, guard=guard, stop=stop)
-            elif (rec.get("live") or {}).get("state") == "idle" and rec.get("pending"):
-                # input waits while the agent is idle (a dialog kept the notice back): try again
+            else:
                 with guard if guard is not None else contextlib.nullcontext():
                     if not (stop is not None and stop.is_set()):
-                        deliver(root, tid)
+                        retry_deliver(root, tid, run, memo, end=proc.terminate, stop=stop)
         except Exception:  # never take the wrapper down
             continue
 
