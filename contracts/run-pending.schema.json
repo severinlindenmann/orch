@@ -12,7 +12,8 @@
     "via": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,15}$", "description": "Optional free word: the surface it came from." },
     "kind": { "enum": ["answer", "message", "event", "text"] },
     "text": { "type": "string", "minLength": 1, "maxLength": 8000, "description": "What the agent is told, plain text." },
-    "delivered_at": { "$ref": "#/$defs/time", "description": "Set once the agent got it." }
+    "delivered_at": { "$ref": "#/$defs/time", "description": "Set once the agent got it." },
+    "human": { "type": "boolean", "description": "Optional. True when a person wrote it (the owner on a page, the CLI or the phone); false for an agent's (agent:*, or written from inside an agent). Only a person's input may make a background host start a run. Absent (older lines): human when by starts with human: or via is phone." }
   },
   "$defs": {
     "time": { "type": "string", "format": "date-time", "pattern": "Z$" }

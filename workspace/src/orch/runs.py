@@ -247,10 +247,21 @@ def kill_tree(pid: int, grace: float = 2.0) -> None:
         except (ProcessLookupError, PermissionError):
             pass
 
+    def gone() -> bool:
+        # Our own child that has ended stays a zombie (and looks alive) until it is reaped. Look without
+        # reaping (WNOWAIT): its owner still reads the real exit status (a reaped Popen reports 0), and we do
+        # not wait out the grace and then SIGKILL a process that is still in its SIGTERM handler.
+        with contextlib.suppress(ChildProcessError, OSError, AttributeError):
+            if os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None:
+                return True
+        return not services.pid_alive(pid)
+
     send(signal.SIGTERM)
     end = time.monotonic() + grace
-    while time.monotonic() < end and services.pid_alive(pid):
+    while time.monotonic() < end and not gone():
         time.sleep(0.05)
+    if gone():
+        return
     if services.pid_alive(pid):
         send(signal.SIGKILL)
 
@@ -313,6 +324,32 @@ def undelivered(root: Path, tid: str) -> list[dict]:
     return [i for i in _pending_read(root, tid) if not i.get("delivered_at")]
 
 
+def _human_author(by, via, kind, phone=None) -> bool:
+    """An ALLOWLIST (also for older lines without the field): a person's answer or message, by human:<name>,
+    or a phone text that carries the sender's phone id (only the relay's phone-text path stores it). A bare
+    name, an empty by, orch, a host, an agent, an event or a start request is never a person's input."""
+    if kind not in ("answer", "message", "text"):
+        return False
+    by = str(by or "")
+    if by.startswith("human:") and len(by) > len("human:"):
+        return True
+    return via == "phone" and isinstance(phone, str) and PHONE_ID_RE.fullmatch(phone) is not None
+
+
+def human_waiting(root: Path, tid: str) -> list[dict]:
+    """Undelivered input a person wrote (owner, phone, a page), never an agent's (agent:*, or written from
+    inside an agent) and never a run's own start prompt or slot request. Only this may start a run."""
+    out = []
+    for i in undelivered(root, tid):
+        if i.get("via") in ("start", "slots"):
+            continue
+        # the stored flag is never trusted alone: the allowlist is checked again (older lines have no flag)
+        rule = _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone"))
+        if rule and i.get("human") in (True, None):
+            out.append(i)
+    return out
+
+
 def _drop_start_prompts_locked(root: Path, tid: str) -> None:
     """A live run's first prompt waits in the pending file until the tool is up. When that run ends before
     it went in, it is removed: the next start writes its own prompt from the ticket (no nested prompt)."""
@@ -322,8 +359,19 @@ def _drop_start_prompts_locked(root: Path, tid: str) -> None:
         _pending_write(root, tid, keep)
 
 
+PHONE_ID_RE = re.compile(r"ph_[A-Za-z0-9_-]{1,64}")
+
+
 def _pending_add_locked(
-    root: Path, tid: str, by: str, kind: str, text: str, via: str | None, pid: str | None
+    root: Path,
+    tid: str,
+    by: str,
+    kind: str,
+    text: str,
+    via: str | None,
+    pid: str | None,
+    *,
+    phone: str | None = None,
 ) -> dict:
     if kind not in PENDING_KINDS:
         raise Refused(f"Input kind must be one of: {', '.join(PENDING_KINDS)}.")
@@ -335,6 +383,9 @@ def _pending_add_locked(
     items = _pending_read(root, tid)
     if pid and any(i["id"] == pid for i in items):
         return next(i for i in items if i["id"] == pid)  # same id twice = once
+    tool = tickets.agent_tool()
+    if tool:  # written from inside an agent: an agent's item whatever by says (never a person's input)
+        by = f"agent:{tool}"
     item = {
         "id": pid or "p_" + "".join(secrets.choice(_ALPHA) for _ in range(10)),
         "at": tickets.now(),
@@ -342,6 +393,9 @@ def _pending_add_locked(
         "kind": kind,
         "text": text,
     }
+    if phone is not None and not tool and PHONE_ID_RE.fullmatch(str(phone)):
+        item["phone"] = phone  # the relay's phone-text path: the sender's phone id
+    item["human"] = not tool and _human_author(by, via, kind, item.get("phone"))
     if via:
         item["via"] = via
     _pending_write(root, tid, items + [item])
@@ -356,10 +410,13 @@ def pending_add(
     text: str,
     via: str | None = None,
     pid: str | None = None,
+    *,
+    phone: str | None = None,
 ) -> dict:
-    """Queue input for a ticket (under the ticket's run lock) and flag a running claim."""
+    """Queue input for a ticket (under the ticket's run lock) and flag a running claim. phone: the sender's
+    phone id, passed only by the relay's phone-text path."""
     with locked(root, tid):
-        item = _pending_add_locked(root, tid, by, kind, text, via, pid)
+        item = _pending_add_locked(root, tid, by, kind, text, via, pid, phone=phone)
         rec = read(root, tid)
         if rec and not rec.get("pending"):
             rec["pending"] = True
@@ -501,6 +558,58 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
         for leftover in (f"env-{rec['run']}.json", f"prompt-{rec['run']}.txt", f"hooks-{rec['run']}.json"):
             (run_dir(root) / leftover).unlink(missing_ok=True)  # files made for this run only
         return {"released": True, "pending": waiting}
+
+
+# A Working ticket with no run gets this long for its agent to start. A start writes
+# its claim within seconds: Python start-up plus at most the 10 s run-lock wait, before tmux or the agent tool
+# start at all (they run under the claim). 120 s is far above that worst case.
+ORPHAN_GRACE_SECONDS = 120
+
+
+def running(root: Path, tid: str) -> bool:
+    """An agent run holds the ticket now (alive, or quiet but not known to be gone)."""
+    rec = read(root, tid)
+    return bool(rec) and state(rec) != "dead"
+
+
+def settle(root: Path, tid: str, by: str, say: bool = True, ignore_input: bool = False) -> bool:
+    """A run ended (or never came): a ticket still Working is Ready again, so every surface that shows the
+    ticket status (dashboard, Focus, phone) says what is true. Never touches a ticket a run holds now."""
+    if tickets.is_general(root, tid):
+        return False
+
+    def busy() -> bool:
+        # a run holds it, or a person's answer or message still waits to go in: that work is not over, the
+        # ticket stays Working (the next start delivers it; a one-step run already ran once more for it)
+        if running(root, tid):
+            return True
+        return not ignore_input and any(i.get("via") != "start" for i in undelivered(root, tid))
+
+    with contextlib.suppress(Exception):  # best effort: a run ending must never fail here
+        return tickets.agent_stopped(root, tid, by, busy, say)
+    return False
+
+
+# QUEUED INPUT: only the automation host starts runs for queued input; the run wrapper never starts runs.
+# A run that ends leaves what still waits in the pending file (never deleted) and the ticket Ready.
+
+
+def settle_orphan(root: Path, tid: str, at: float | None = None) -> bool:
+    """`orch run status` (the dashboard asks every few seconds): a ticket Working longer than the grace with
+    no run on it (a phone text or a person moved it, a start that never came) is Ready again. Input that waits
+    stays queued for the next start."""
+    at = time.time() if at is None else at
+    try:
+        t = tickets.load(root, tid)
+        if t.get("status") != "active" or running(root, tid):
+            return False
+        if at - _parse(t["updated_at"]) < ORPHAN_GRACE_SECONDS:
+            return False
+        return settle(root, tid, "orch", ignore_input=True)
+    except Exception as e:  # noqa: BLE001 - never fails `orch run status`, but is never silent either
+        why = f"{e.__class__.__name__}: {e}"
+        print(f"orch: could not check whether {tid} is worked on: {why}", file=sys.stderr)
+        return False
 
 
 # ---------------------------------------------------------------- what the agent is told
@@ -917,6 +1026,8 @@ def wrap(
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, f"The agent stopped with an error: {why}", f"agent:{name}")
         if release(root, tid, run, keep_if_pending=turns <= MAX_DRAIN_TURNS)["released"]:
+            # ended without finishing or asking: not Working any more (anything still waiting stays queued)
+            settle(root, tid, f"agent:{name}", ignore_input=True)
             return 0 if rc == 0 else rc
         with contextlib.suppress(Exception):
             tickets.resume_after_start_wait(root, tid, f"agent:{name}")  # the extra turn is work again
@@ -957,6 +1068,7 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
     if new_session and rc == 0:
         tickets.record_session(root, tid, name, new_session, host())
     now = read(root, tid)
+    said = None
     if now and now["run"] == run and not now.get("stop_requested"):  # a person sees it ended (not our Stop)
         said = "The live session ended."
         if rc > 0:  # a signal (negative rc) is a plain end, not an error
@@ -964,6 +1076,8 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         with contextlib.suppress(Exception):
             tickets.log(root, tid, said, f"agent:{name}")
     release(root, tid, run)  # input still waiting stays in the pending file for the next start
+    # no agent reads what waits now: Ready, the input stays queued (the automation host may start the next)
+    settle(root, tid, f"agent:{name}", say=said is None, ignore_input=True)
     (run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
     with contextlib.suppress(Exception):
         from orch import runs_live

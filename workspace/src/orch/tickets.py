@@ -539,9 +539,32 @@ def _check_can_finish(ticket: dict) -> None:
         raise Refused(f"Not done: {', '.join(bad)} is checked without evidence.")
 
 
+def _open_questions(ticket: dict) -> list[str]:
+    """Plain questions nobody answered yet (an add-on's own questions are its business)."""
+    return [
+        q["id"]
+        for q in ticket.get("questions") or []
+        if q.get("answer") is None and q.get("kind") in (None, "plain")
+    ]
+
+
+def _check_not_too_early(root: Path, ticket: dict) -> None:
+    """An agent never finishes a ticket while its own question is open or a person's new input has not
+    reached it yet: that work is not done (round 8 Nov: "never close a ticket too early")."""
+    open_ = _open_questions(ticket)
+    if open_:
+        raise Refused(f"Not done: {', '.join(open_)} is not answered yet. Wait for the answer.")
+    from orch import runs  # runs imports tickets
+
+    if any(i.get("via") not in ("start", "slots") for i in runs.undelivered(root, ticket["id"])):
+        raise Refused("Not done: new input for this ticket has not reached you yet. Read it first.")
+
+
 def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
         by = "agent:" + str(agent_tool())
+    if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
+        _check_not_too_early(root, ticket)
     if status == "done" and by.startswith("agent:"):
         _check_can_finish(ticket)
         if not config.agents_may_finish(root):
@@ -552,11 +575,13 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
 
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     def op(ticket):
+        was_started = ticket.get("started") is True
+        ticket["started"] = True
         w = ticket.get("waiting_on") or {}
         if ticket["status"] not in ("open", "ready", "review") and not (
             ticket["status"] == "waiting" and w.get("start") is True
         ):  # a start that was waiting for a sign-in (wait_for_start) is Working again
-            return NO_WRITE
+            return NO_WRITE if was_started else None
         ticket["status"] = "active"
         ticket["waiting_on"] = None
         add_history(ticket, by, f"{agent_label} started")
@@ -566,6 +591,31 @@ def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     except (Refused, FileNotFoundError):
         if ticket_path(root, tid).exists():
             raise
+
+
+STOPPED_TEXT = "The agent stopped before the work was finished. Continue goes on where it left off."
+
+
+def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool = True) -> bool:
+    """No agent works on the ticket any more: a Working ticket is Ready again (Working is shown only while
+    an agent runs). still_running() is asked under the ticket lock, so a run that started meanwhile wins.
+    Returns True when the ticket was moved."""
+
+    def op(ticket):
+        if ticket["status"] != "active" or (still_running is not None and still_running()):
+            return NO_WRITE
+        ticket["status"] = "ready"
+        ticket["waiting_on"] = None
+        if say:
+            add_history(ticket, by, STOPPED_TEXT)
+        return True
+
+    try:
+        return apply_op(root, tid, op)[1] is True
+    except (Refused, FileNotFoundError):
+        if ticket_path(root, tid).exists():
+            raise
+        return False
 
 
 def wait_for_start(root: Path, tid: str, reason: str, by: str) -> None:
@@ -610,6 +660,8 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
 
     def op(ticket):
         target, actor = _finish_status(root, ticket, status, by)
+        if target in ("open", "ready") and not actor.startswith("agent:"):
+            ticket.pop("started", None)
         if target != "waiting":
             ticket["waiting_on"] = None
         elif isinstance(ticket.get("waiting_on"), dict):
@@ -1203,6 +1255,7 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
     if not text.strip():
         raise Refused("An answer needs text.")
     text = text.strip()
+    from orch import runs  # runs imports tickets
 
     def op(ticket):
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
@@ -1218,9 +1271,13 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
         q["answer"], q["answered_by"], q["via"] = ans, by, via
         w = ticket.get("waiting_on")
         if w and w.get("kind") == "question" and w.get("ref") == qid:
-            ticket["waiting_on"] = None
-            if ticket["status"] == "waiting":
-                ticket["status"] = "active"
+            still = _open_questions(ticket)
+            if still:  # more questions wait: the ticket keeps waiting, on the oldest of them
+                ticket["waiting_on"] = {"kind": "question", "ref": still[0]}
+            else:
+                ticket["waiting_on"] = None
+                if ticket["status"] == "waiting":  # Working only while an agent runs; else Ready to go on
+                    ticket["status"] = "active" if runs.running(root, tid) else "ready"
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
         return q
 
@@ -1306,6 +1363,8 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         actor = by
         if "status" in obj:
             status, actor = _finish_status(root, ticket, status, by)
+            if status in ("open", "ready") and not actor.startswith("agent:"):
+                ticket.pop("started", None)
         for k in ("owner", "due", "note", "summary"):
             if k in obj:
                 _set_field(ticket, k, obj[k])

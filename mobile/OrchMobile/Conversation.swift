@@ -87,6 +87,8 @@ struct ConvItem: Identifiable, Equatable, Sendable {
     var canPlay: Bool = false
     var replyTo: String? = nil
     var receipt: Receipt? = nil
+    /// With receipt .started: when the workspace last acked or picked up this text (the General "is working…" line times out from here).
+    var workingSince: String? = nil
     /// Phone texts: the client_id (also the id of an outbox item).
     var clientId: String? = nil
     var question: Question? = nil
@@ -202,13 +204,20 @@ enum ConversationBuilder {
             if m.createdAt > (ix.startedAt[r] ?? "") { ix.startedAt[r] = m.createdAt }
             if let t = m.ticket, m.body.update?.kind == "ack" { ix.ticketOfPhoneText[r] = t }
         }
+        // a question on the ticket: the work waits for the owner ("Needs you"), so the text is no longer "Working"
+        for q in d.questions {
+            guard let t = q.message.ticket else { continue }
+            let k = "\(q.message.from)|\(t)"
+            if q.message.createdAt > (ix.endedAt[k] ?? "") { ix.endedAt[k] = q.message.createdAt }
+        }
         return ix
     }
 
-    /// A workspace message that says no agent works on its ticket now.
+    /// A workspace message that says no agent works on its ticket now: a result, failure, stopped or question update, or a
+    /// snapshot without a run or waiting for the owner.
     static func ends(_ m: TextMessage) -> Bool {
-        if let k = m.body.update?.kind, ["result", "failure", "stopped"].contains(k) { return true }
-        return m.body.ticketView?.running == false
+        if let k = m.body.update?.kind, ["result", "failure", "stopped", "question"].contains(k) { return true }
+        return m.body.ticketView?.running == false || m.body.ticketView?.status == "waiting"
     }
 
     /// The "Working" receipt of this phone text: acked or picked up, and nothing on its ticket said the work stopped since.
@@ -251,7 +260,10 @@ enum ConversationBuilder {
         item.label = label(b.update?.kind); item.speak = b.speak; item.replyTo = m.replyTo
         if !pm.fromPhone, b.update?.kind == "result" { item.artifacts = b.ticketView?.attachments ?? [] }
         if !pm.fromPhone { item.canPlay = d.speak == .always || (b.speak != nil && d.speak != .never) }
-        if pm.fromPhone { item.receipt = receipt(pm, ix); item.clientId = pendingKey(pm) }
+        if pm.fromPhone {
+            item.receipt = receipt(pm, ix); item.clientId = pendingKey(pm)
+            if item.receipt == .started { item.workingSince = ix.startedAt[pm.id] }
+        }
         return item
     }
 

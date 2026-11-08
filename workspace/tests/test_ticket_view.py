@@ -3,6 +3,7 @@ uploaded as blobs, secrets hidden, sent with result/failure/stopped/question upd
 task changes."""
 
 import json
+import time
 from pathlib import Path
 
 import jsonschema
@@ -370,3 +371,88 @@ def test_phone_chat_hides_settings_notes_and_names_the_phone(proj, new_ticket, m
     assert shown == [("My iPhone", "person", "Make the Q3 chart")]
     assert not any("settings" in h["text"] for h in hist)
     assert not any(PHONE in h["who"] for h in hist)
+
+
+def _review(proj, tid):
+    tickets.set_status(proj, tid, "review", "human:t")
+
+
+def test_a_followed_ticket_that_moves_to_review_pushes_a_result(proj, run, new_ticket, conn):
+    """fb11: the phone hears that the work is finished, not only a quiet task count."""
+    tid = new_ticket("Make the html")
+    run("relay", "send", "phones", "On it", "--ticket", tid, "--update", "ack")
+    run("ticket", "summary", tid, "The page is in the artifacts folder.")
+    st = phone_view.load_state(proj)["tickets"][tid]
+    _review(proj, tid)
+    assert phone_view.sync(proj, now=st["at"] + 100) == [tid]
+    m = conn.sent[-1]
+    assert m["body"]["update"]["kind"] == "result"
+    assert m["body"]["text"] == "Ready for your review: Make the html\nThe page is in the artifacts folder."
+    assert_valid(m["body"]["ticket_view"])
+    n = len(conn.sent)
+    assert phone_view.sync(proj, now=st["at"] + 1000) == [] and len(conn.sent) == n  # once
+
+
+def test_no_second_result_when_the_agent_sent_one(proj, run, new_ticket, conn):
+    tid = new_ticket("Agent says it")
+    run("relay", "send", "phones", "On it", "--ticket", tid, "--update", "ack")
+    _review(proj, tid)
+    run("relay", "send", "phones", "Finished", "--ticket", tid, "--update", "result")
+    n = len(conn.sent)
+    st = phone_view.load_state(proj)["tickets"][tid]
+    phone_view.sync(proj, now=st["at"] + 100)
+    assert [m["body"]["update"]["kind"] for m in conn.sent[n:]] in ([], ["note"])
+
+
+def test_mobile_mode_finished_ticket_pushes_a_result(proj, run, new_ticket, conn, monkeypatch):
+    from orch import mobile_mode
+
+    monkeypatch.setattr(mobile_mode, "routes_to_phone", lambda root: True)
+    tid = new_ticket("Nobody follows me")
+    assert phone_view.sync(proj) == []  # first look: only remembered
+    _review(proj, tid)
+    assert phone_view.sync(proj) == [tid]
+    m = conn.sent[-1]
+    assert m["to"] == "phones" and m["body"]["update"]["kind"] == "result" and m["ticket"] == tid
+    n = len(conn.sent)
+    assert phone_view.sync(proj, now=time.time() + 100) == [] and len(conn.sent) == n
+
+
+def test_without_mobile_mode_an_unfollowed_ticket_sends_nothing(proj, run, new_ticket, conn):
+    tid = new_ticket("Quiet")
+    phone_view.sync(proj)
+    _review(proj, tid)
+    n = len(conn.sent)
+    assert phone_view.sync(proj) == [] and len(conn.sent) == n
+
+
+def test_a_child_of_a_phone_ticket_pushes_its_result_without_mobile_mode(proj, run, new_ticket, conn):
+    parent = new_ticket("From the phone")
+    tickets.ext_set(proj, parent, "relay", json.dumps({"origin": "phone", "from": "ph_x"}), "human:t")
+    child = json.loads(run("ticket", "new", "Part of it", "--parent", parent, "--json")[1])["id"]
+    phone_view.sync(proj)
+    _review(proj, child)
+    assert child in phone_view.sync(proj)
+    assert conn.sent[-1]["body"]["update"]["kind"] == "result" and conn.sent[-1]["ticket"] == child
+
+
+@pytest.mark.parametrize("started", [None, False, True])
+def test_view_started_optional_and_schema_valid(proj, new_ticket, started):
+    ticket = tickets.load(proj, new_ticket())
+    if started is not None:
+        ticket["started"] = started
+    view = phone_view.build(proj, ticket, [])
+    assert_valid(view)
+    assert view.get("started") is True if started is True else "started" not in view
+
+
+def test_view_started_signature_preserves_old_hash():
+    import hashlib
+
+    ticket = {"status": "ready", "checklist": [{"text": "Task", "done": False}]}
+    old = hashlib.sha256(json.dumps([[["Task", False]], "ready", None]).encode()).hexdigest()[:16]
+    assert phone_view._tasks_sig(ticket) == old
+    ticket["started"] = False
+    assert phone_view._tasks_sig(ticket) == old
+    ticket["started"] = True
+    assert phone_view._tasks_sig(ticket) != old

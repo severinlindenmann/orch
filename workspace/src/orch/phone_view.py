@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import os
 import re
 import time
 import urllib.parse
@@ -165,6 +166,92 @@ def load_state(root: Path) -> dict:
 
 def save_state(root: Path, s: dict) -> None:
     net.write_json(_state_path(root), s, True)
+
+
+STATE_LOCK_STALE = 10  # no more than the wait: a lock left by a holder that died is broken before giving up
+
+
+def _break_stale_lock(lock: Path) -> bool:
+    """Take away a lock left by a holder that died (older than STATE_LOCK_STALE; it is only ever held for one
+    file write). Rename first, so only one waiter wins; what was taken must still be the old one, else (a new
+    holder's fresh lock) it is put back without clobbering."""
+    try:
+        if time.time() - lock.stat().st_mtime <= STATE_LOCK_STALE:
+            return False
+        mine = lock.with_name(f"{lock.name}.{os.getpid()}.{time.monotonic_ns()}")
+        os.replace(lock, mine)
+    except OSError:
+        return False
+    try:
+        if time.time() - mine.stat().st_mtime > STATE_LOCK_STALE:
+            return True
+        with contextlib.suppress(OSError):
+            os.link(mine, lock)  # a live holder's lock: put it back (fails if a newer one is there already)
+        return False
+    except OSError:
+        return False
+    finally:
+        with contextlib.suppress(OSError):
+            mine.unlink()
+
+
+@contextlib.contextmanager
+def _state_locked(root: Path, wait: float = 10.0):
+    """One read-modify-write of phone-views.json at a time (sync, sync_open, remember, view_for may run in
+    several orch processes at once). Its own lock, held only around the file, never around a send: remember()
+    runs inside the relay lock (an ack while the inbox is handled), and the relay lock is not reentrant."""
+    lock = net.secrets_dir(root) / "phone-views.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    end = time.monotonic() + wait
+    token = f"{os.getpid()}-{time.monotonic_ns()}".encode()
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            try:
+                os.write(fd, token)
+            finally:
+                os.close(fd)
+            break
+        except FileExistsError:
+            if _break_stale_lock(lock):
+                continue
+            if time.monotonic() > end:
+                raise Refused("The phone view state is busy. Try again in a moment.") from None
+            time.sleep(0.02)
+    try:
+        yield
+    finally:
+        # only our own lock goes, never one a later holder made: take it aside first (atomic), then check
+        mine = lock.with_name(f"{lock.name}.{token.decode()}.rel")
+        try:
+            os.replace(lock, mine)
+        except OSError:
+            mine = None  # nothing taken aside: nothing to remove
+        if mine is not None:
+            try:
+                ours = mine.read_bytes() == token
+            except OSError:
+                ours = False  # can not tell: treat it as someone else's
+            if not ours:  # put it back; dropped only if a newer one is there already
+                try:
+                    os.link(mine, lock)
+                except FileExistsError:
+                    pass
+                except OSError:  # no hard links on this file system: rename back when the place is still free
+                    with contextlib.suppress(OSError):
+                        if not lock.exists():
+                            os.rename(mine, lock)
+            with contextlib.suppress(OSError):
+                mine.unlink()
+
+
+def update_state(root: Path, fn) -> dict:
+    """fn(state) changes the freshly read state under the lock; it is then saved. Returns the state."""
+    with _state_locked(root):
+        st = load_state(root)
+        fn(st)
+        save_state(root, st)
+        return st
 
 
 def _upload(root: Path, data: bytes, state: dict) -> dict | None:
@@ -358,6 +445,8 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
         "history_tail": hist,
         "attachments": atts,
     }
+    if ticket.get("started") is True:
+        view["started"] = True
     if shared_refs := reference_views(root, ticket):
         view["refs"] = shared_refs
     if agent:
@@ -391,52 +480,134 @@ def view_for(root: Path, tid: str) -> dict | None:
     except (Refused, ValueError, KeyError, OSError):
         return None
     state = load_state(root)
-    atts = attachments(root, ticket, state)
-    save_state(root, state)
+    atts = attachments(root, ticket, state)  # uploads: never under the lock; only the new blobs are merged
+    blobs = state["blobs"]
+    update_state(root, lambda st: st["blobs"].update(blobs))
     return build(root, ticket, atts)
 
 
-def _tasks_sig(ticket: dict) -> str:
+def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
+    """What the phone's snapshot depends on: tasks, status and whether an agent runs now (so "<agent> is
+    working" on the phone ends when the agent stops, not only when a task changes)."""
     items = [[c.get("text"), bool(c.get("done"))] for c in ticket.get("checklist") or []]
-    return hashlib.sha256(json.dumps([items, ticket.get("status")]).encode()).hexdigest()[:16]
+    running = _agent(root, ticket)[1] if root is not None else None
+    data = [items, ticket.get("status"), running]
+    if ticket.get("started") is True:
+        data.append(True)
+    return hashlib.sha256(json.dumps(data).encode()).hexdigest()[:16]
 
 
 def remember(root: Path, tid: str, to: str) -> None:
     """The phone follows this ticket now: later task changes go to `to` quietly."""
     if not (to == "phones" or to.startswith("ph_")):
         return
-    state = load_state(root)
     try:
-        sig = _tasks_sig(tickets.load(root, tid))
+        ticket = tickets.load(root, tid)
     except (Refused, ValueError, KeyError, OSError):
         return
-    state["tickets"][tid] = {"to": to, "sig": sig, "at": time.time()}
-    if to.startswith("ph_"):  # this phone has a chat for the ticket now: sync_open skips it
-        state.setdefault("synced", {}).setdefault(to, [])
-        if tid not in state["synced"][to]:
-            state["synced"][to].append(tid)
-    save_state(root, state)
+    sig, status = _tasks_sig(ticket, root), ticket.get("status")
+
+    def put(state):
+        state["tickets"][tid] = {"to": to, "sig": sig, "at": time.time(), "status": status}
+        if to.startswith("ph_"):  # this phone has a chat for the ticket now: sync_open skips it
+            state.setdefault("synced", {}).setdefault(to, [])
+            if tid not in state["synced"][to]:
+                state["synced"][to].append(tid)
+
+    with contextlib.suppress(Refused):  # the message went out already: a busy state file never makes it fail
+        update_state(root, put)
+
+
+FINISHED = ("review", "done")
+
+
+def result_text(ticket: dict) -> str:
+    """The pushed "it is finished" text: the title, then where things stand."""
+    word = "Ready for your review" if ticket.get("status") == "review" else "Done"
+    text = f"{word}: {_clip(ticket.get('title', ''), 120)}"
+    if ticket.get("summary"):
+        text += f"\n{_clip(ticket['summary'], 400)}"
+    return text
+
+
+def _just_finished(prev, ticket: dict) -> bool:
+    return prev is not None and prev not in FINISHED and ticket.get("status") in FINISHED
 
 
 def sync(root: Path, now: float | None = None) -> list[str]:
-    """Quiet snapshots (kind note, never pushed) for followed tickets whose tasks changed, at most
-    one per ticket every DEBOUNCE seconds (a change in between waits for the next pull).
+    """Snapshots for followed tickets whose tasks, status or running agent changed, at most one per ticket
+    every DEBOUNCE seconds (a change in between waits for the next pull). Quiet (kind note, never pushed),
+    except when the ticket just moved to Review or Done: then a pushed `result` (fb11), unless the agent sent
+    one itself (remember() then already saw the new status). A ticket nobody follows yet that moves to Review
+    or Done sends its result to the phones too, in Mobile mode or when it (or a parent) came from the phone.
     Returns the ticket ids sent."""
-    from orch import relay
+    from orch import mobile_mode, relay
 
     now = time.time() if now is None else now
+    on = False
+    with contextlib.suppress(Refused, OSError, ValueError):
+        on = mobile_mode.routes_to_phone(root)
+    all_ = tickets.list_all(root)
+    due: list[tuple] = []  # (ticket id, to, ticket, finished just now, status before, claimed sig or None)
+
+    def claim(state):
+        # under the lock: decide what goes out and mark it as sent first, so two pulls never send it twice
+        seen = state.setdefault("status", {})
+        for tid, rec in state["tickets"].items():
+            t = next((x for x in all_ if x["id"] == tid), None)
+            if t is None:
+                continue
+            sig = _tasks_sig(t, root)
+            if sig == rec.get("sig") or now - rec.get("at", 0) < DEBOUNCE:
+                continue
+            due.append((tid, rec["to"], t, _just_finished(rec.get("status"), t), rec.get("status"), sig))
+            rec.update(sig=sig, at=now, status=t.get("status"))
+        nonce = f"{os.getpid()}-{time.monotonic_ns()}"  # which pass claimed it (the undo checks it)
+        for t in all_:
+            tid, prev = t["id"], seen.get(t["id"])
+            seen[tid] = t.get("status")
+            if tid in state["tickets"] or not _just_finished(prev, t):
+                continue
+            with contextlib.suppress(Refused, OSError, ValueError):
+                if on or mobile_mode.from_phone(root, tid):
+                    due.append((tid, "phones", t, True, prev, None))
+                    state.setdefault("claims", {})[tid] = nonce
+        claims[0] = nonce
+
+    claims = [None]
+
+    update_state(root, claim)
     sent = []
-    for tid, rec in list(load_state(root)["tickets"].items()):
+    for tid, to, t, finished, before, claimed in due:
+        done, total = tickets.checks_done(t)
         try:
-            ticket = tickets.load(root, tid)
-        except (Refused, ValueError, KeyError, OSError):
-            continue
-        if _tasks_sig(ticket) == rec.get("sig") or now - rec.get("at", 0) < DEBOUNCE:
-            continue
-        done, total = tickets.checks_done(ticket)
-        with contextlib.suppress(Refused):
-            relay.send_text(root, rec["to"], f"Tasks: {done} of {total} done", tid, "note", view=True)
+            if finished:
+                relay.send_text(root, to, result_text(t), tid, "result")
+            else:
+                relay.send_text(root, to, f"Tasks: {done} of {total} done", tid, "note", view=True)
             sent.append(tid)
+        except Refused:  # not sent: undo the claim (also the status, so a result is pushed again next pull)
+
+            def undo(st, tid=tid, before=before, claimed=claimed):
+                # compare and set: only our own claim is undone, never a newer one another pull made meanwhile
+                rec = st["tickets"].get(tid)
+                if claimed is not None:
+                    if rec is None or rec.get("sig") != claimed:
+                        return
+                    rec.update(sig=None, at=0)  # no debounce for the retry
+                    if before is None:
+                        rec.pop("status", None)
+                    else:
+                        rec["status"] = before
+                elif rec is None and st.get("claims", {}).get(tid) == claims[0]:  # ours, not a later claim
+                    st["claims"].pop(tid, None)
+                    if before is None:
+                        st["status"].pop(tid, None)
+                    else:
+                        st["status"][tid] = before
+
+            with contextlib.suppress(Refused):
+                update_state(root, undo)
     return sent
 
 
@@ -483,8 +654,14 @@ def sync_open(root: Path, now: float | None = None) -> list[str]:
             except Refused:
                 break  # the relay is away or refuses this phone: the next pull tries again
             have.add(t["id"])
-            done_for[ph] = sorted(have)
-            save_state(root, {**load_state(root), "synced": done_for})
+
+            def mark(st, ph=ph, tid=t["id"]):
+                got = st.setdefault("synced", {}).setdefault(ph, [])
+                if tid not in got:
+                    got.append(tid)
+                    got.sort()
+
+            update_state(root, mark)
             if t["id"] not in sent:
                 sent.append(t["id"])
     return sent

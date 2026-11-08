@@ -164,10 +164,14 @@ def _holder_line(rec: dict, tid: str, root: Path | None = None) -> str:
 def _status(args, root: Path) -> None:
     tid = args.ticket
     tickets.load(root, tid)
+    runs.settle_orphan(root, tid)  # Working with no agent for a while: Ready (status matches reality)
     rec = runs.read(root, tid)
     waiting = len(runs.undelivered(root, tid))
     if not rec:
-        data = {"ticket": tid, "running": False, "pending": waiting}
+        # human_pending_ids: input a person wrote that waits for a run (the automation host starts one for it,
+        # once per id). An agent's queued input is never in it.
+        human = [i["id"] for i in runs.human_waiting(root, tid)]
+        data = {"ticket": tid, "running": False, "pending": waiting, "human_pending_ids": human}
         if waiting:  # input is really queued for a run
             text = (
                 "Queued. Nothing will start it: no background add-on is running here. "

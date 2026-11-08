@@ -440,21 +440,32 @@ def _audit(root: Path, op: str, args: dict) -> None:
         pass  # the change is done; a missing log must not turn it into an error
 
 
+def _without_agent(environ) -> dict:
+    """environ without the agent tools' variables, from orch's one list (orch.adapters.human_environ). When
+    that list can not be read, the action is refused: it never runs with an agent's variables (fail closed)."""
+    try:
+        from orch.adapters import human_environ
+
+        return human_environ(environ)
+    except Exception as e:  # noqa: BLE001 - an old orch or a bad adapter file
+        import sys
+        import traceback
+
+        print("orch could not check who is acting here:", file=sys.stderr)  # the full text: server side only
+        traceback.print_exc(file=sys.stderr)
+        fn = getattr(e, "filename", None)
+        where = Path(fn).name if isinstance(fn, str) and fn else ""  # never a full path or file content
+        why = e.__class__.__name__ + (f" in {where}" if where else "")
+        raise Unavailable(f"orch could not check who is acting here ({why}). Fix that and try again.") from None
+
+
 def human_env(root: Path, orch_bin: str) -> dict:
     """Browser actions are the person's actions, even if an agent launched the server."""
     try:
-        from orch.adapters import _registry
+        import orch.adapters  # noqa: F401
     except ImportError:
         raise Unavailable("The orch tool is not available here.") from None
-
-    names = {"ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET"}
-    prefixes = []
-    for adapter in _registry().values():
-        detection = adapter.get("detect") or {}
-        names.update(detection.get("env_any") or [])
-        if detection.get("env_prefix"):
-            prefixes.append(detection["env_prefix"])
-    env = {k: v for k, v in os.environ.items() if k not in names and not k.startswith(tuple(prefixes))}
+    env = _without_agent(os.environ)
     return {**env, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "dashboard"}
 
 

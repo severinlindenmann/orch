@@ -475,14 +475,11 @@ final class RealRelayE2ETests: XCTestCase {
         host("out = mm_on(4)")
         let app = launch()
         chats(app)
-        let banner = mobileBanner(app, containing: "is in Mobile mode")
-        must(app, banner, "Mobile mode banner in Chats", timeout: 90)
+        // The banner moved off the Chats list (round-8): it sits on the workspace screen.
+        openWorkspace(app)
+        let banner = mobileBanner(app, containing: "Mobile mode on")
+        must(app, banner, "Mobile mode banner in workspace", timeout: 90)
         XCTAssertTrue(banner.label.contains("Mobile mode"))
-        must(app, el(app, "mobile-mode-off-\(ws)"), "Turn off button", timeout: 10)
-        shot("120-mobile-mode-chats")
-        let room = el(app, "room-\(ws)")
-        must(app, room, "workspace row", timeout: 30); room.tap()
-        must(app, banner, "Mobile mode banner in workspace", timeout: 30)
         must(app, el(app, "mobile-mode-off-\(ws)"), "workspace Turn off button", timeout: 10)
         shot("121-mobile-mode-workspace")
         let ticket = host("out = ask_question('Mobile mode question?')")
@@ -538,8 +535,8 @@ final class RealRelayE2ETests: XCTestCase {
             """)
         }
         let app = launch()
-        chats(app)
-        must(app, mobileBanner(app, containing: "is in Mobile mode"), "reachable banner", timeout: 90)
+        chats(app); openWorkspace(app)
+        must(app, mobileBanner(app, containing: "Mobile mode on"), "reachable banner", timeout: 90)
         host("""
         import os, signal
         pid = keeper_pid()
@@ -550,7 +547,7 @@ final class RealRelayE2ETests: XCTestCase {
         must(app, mobileBanner(app, containing: "Can't reach"), "unreachable banner after silence", timeout: 480)
         shot("124-mobile-mode-unreachable")
         host("import os, signal; os.kill(int(S['mobile_mode_stopped_pid']), signal.SIGCONT)")
-        must(app, mobileBanner(app, containing: "is in Mobile mode"), "reachable banner after resume", timeout: 90)
+        must(app, mobileBanner(app, containing: "Mobile mode on"), "reachable banner after resume", timeout: 90)
         host("out = mm_off()")
         XCTAssertTrue(el(app, "mobile-mode-banner-\(ws)").waitForNonExistence(timeout: 60))
         shot("125-mobile-mode-recovered-and-off")
@@ -561,19 +558,19 @@ final class RealRelayE2ETests: XCTestCase {
         defer { host("out = mm_off()") }
         host("out = mm_on(4)")
         let app = launch()
-        chats(app)
-        must(app, mobileBanner(app, containing: "is in Mobile mode"), "Mobile mode banner", timeout: 90)
-        setMute(app, "Always")
+        chats(app); openWorkspace(app)
+        must(app, mobileBanner(app, containing: "Mobile mode on"), "Mobile mode banner", timeout: 90)
+        setMute(app, "Always"); openWorkspace(app)
         // Muting preserves Mobile mode and hides its Turn off action.
-        must(app, mobileBanner(app, containing: "Muted, but"), "muted Mobile mode banner", timeout: 40)
+        must(app, mobileBanner(app, containing: "Mobile mode muted"), "muted Mobile mode banner", timeout: 40)
         XCTAssertFalse(el(app, "mobile-mode-off-\(ws)").exists, "muted banner has no Turn off button")
         host("out = ask_question('Muted mobile mode question?')")
         // Simulator cannot observe push absence; relay tests cover suppression of pushes while muted.
-        must(app, mobileBanner(app, containing: "Muted, but"), "muted banner after question delivery", timeout: 30)
+        must(app, mobileBanner(app, containing: "Mobile mode muted"), "muted banner after question delivery", timeout: 30)
         XCTAssertFalse(el(app, "mobile-mode-off-\(ws)").exists)
         shot("126-mobile-mode-muted-question")
-        setMute(app, "Off")
-        must(app, mobileBanner(app, containing: "is in Mobile mode"), "unmuted banner", timeout: 30)
+        setMute(app, "Off"); openWorkspace(app)
+        must(app, mobileBanner(app, containing: "Mobile mode on"), "unmuted banner", timeout: 30)
         host("out = mm_off()")
         XCTAssertTrue(el(app, "mobile-mode-banner-\(ws)").waitForNonExistence(timeout: 60))
         shot("127-mobile-mode-unmuted-and-off")
@@ -644,6 +641,12 @@ final class RealRelayE2ETests: XCTestCase {
     private func expandDone(_ app: XCUIApplication) {
         let t = app.buttons["done-toggle"]
         if t.exists, (t.value as? String) == "Collapsed" { t.tap() }
+    }
+
+    /// From the Chats list into the workspace screen (where the Mobile mode banner lives).
+    private func openWorkspace(_ app: XCUIApplication) {
+        let room = el(app, "room-\(ws)")
+        must(app, room, "workspace row", timeout: 30); room.tap()
     }
 
     private func chats(_ app: XCUIApplication) {
