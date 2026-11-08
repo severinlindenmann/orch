@@ -36,6 +36,7 @@ from orch.text import clean_untrusted
 
 MAX_MEMBERS = 8
 TEXT_MAX = 4000
+BUF_MAX = 50  # group messages kept per group while an earlier one is missing
 TITLE_MAX = 120
 CARD_MAX = 4096
 CARD_CHECKLIST = 20
@@ -1479,7 +1480,7 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
     key = _jkey(host, gid)
     j = st["joined"].get(key)
     if j is None:
-        # a group first seen is accepted from its paired host (a workspace in our directory), never from a stranger
+        # a group first seen is accepted from its paired host (in our directory), never from a stranger
         if _entry(root, host) is None:
             return _drop(st, m, "the group's host is not a workspace connected to this one")
         j = st["joined"][key] = {
@@ -1511,6 +1512,40 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
         j["from_seq"] = seq
     if seq is not None and j["from_seq"] is not None and seq < j["from_seq"]:
         return _drop(st, m, "before this workspace joined")
+    if seq is not None:  # group-wide: the stateful checks run in seq order; an early one waits (bounded)
+        nxt = j.get("next_seq") or j["from_seq"]
+        buf = j.setdefault("buf", {})
+        if seq > nxt:
+            if str(seq) in buf:
+                return _drop(st, m, "already waiting for this group message")
+            if len(buf) < BUF_MAX:
+                buf[str(seq)] = m
+                return {
+                    "handled": True,
+                    "auto": True,
+                    "note": f"group {_host_name(j)}: kept until the earlier messages arrive",
+                    "applied": None,
+                }
+            # the buffer is full: stop waiting, show the gap, go on in order from the oldest we hold
+            nxt = min([seq, *(int(k) for k in buf)])
+            if str(nxt) != str(seq):
+                buf[str(seq)] = m
+                m = buf.pop(str(nxt))
+                seq = nxt
+        res = _member_apply(st, j, m, me)
+        j["next_seq"] = max(nxt, seq) + 1 if seq >= nxt else nxt
+        while str(j["next_seq"]) in buf:
+            _member_apply(st, j, buf.pop(str(j["next_seq"])), me)
+            j["next_seq"] += 1
+        return res
+    return _member_apply(st, j, m, me)
+
+
+def _member_apply(st: dict, j: dict, m: dict, me: str) -> dict:
+    """The state changes of one group message for a member, called in seq order."""
+    b, typ, gw = m["body"], m["type"], m["body"]["group"]
+    ev = b.get("group_event") if isinstance(b.get("group_event"), dict) else None
+    seq = gw.get("seq")
     o = b.get("origin") if isinstance(b.get("origin"), dict) else None
     if o:
         if o["id"] in j["origins"]:

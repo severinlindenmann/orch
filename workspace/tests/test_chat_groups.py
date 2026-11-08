@@ -1165,3 +1165,55 @@ def test_group_answer_without_group_body_is_ignored_and_never_a_person(proj, run
     assert (
         q["answer"] == "y" and q["answered_by"] == f"agent:{HOME}"
     )  # from the asked record, not the message
+
+
+def _joined(proj):
+    return json.loads((proj / ".orch/secrets/groups.json").read_text())["joined"][f"{FIN}/grp_t_fin14a"]
+
+
+def _added(seq=1):
+    return from_host(
+        "text",
+        {
+            "text": "added",
+            "group_event": {
+                "kind": "member_added",
+                "at": "2026-11-08T10:00:00Z",
+                "ws": WS,
+                "name": "Pilatus Workspace",
+                "from_seq": seq,
+            },
+        },
+        seq=seq,
+        id=mid(f"ma{seq}"),
+    )
+
+
+def test_stateful_checks_run_in_seq_order_early_messages_wait(proj, run, rel, member):
+    inbox(run, rel, _added(1))
+    closed = from_host(
+        "text",
+        {"text": "done", "group_event": {"kind": "closed", "at": "2026-11-08T10:00:00Z"}},
+        seq=3,
+        id=mid("cl3"),
+    )
+    assert "kept until" in inbox(run, rel, closed)[0]["note"]
+    j = _joined(proj)
+    assert j["closed"] is False and list(j["buf"]) == ["3"]  # the close waits for seq 2
+    inbox(run, rel, from_host("text", {"text": "talk before the close"}, seq=2, id=mid("t2")))
+    j = _joined(proj)
+    assert [x["seq"] for x in j["log"]] == [1, 2, 3] and j["closed"] is True and j["buf"] == {}
+    assert j["next_seq"] == 4 and j["seq_max"] == 3
+
+
+def test_out_of_order_buffer_is_bounded_and_the_gap_is_given_up(proj, run, rel, member):
+    inbox(run, rel, _added(1))
+    for i in range(cg.BUF_MAX):
+        inbox(run, rel, from_host("text", {"text": f"m{i}"}, seq=3 + i, id=mid(f"b{i}")))
+    assert len(_joined(proj)["buf"]) == cg.BUF_MAX
+    # one more early message while seq 2 is still missing: stop waiting, go on in order, the gap shows
+    inbox(run, rel, from_host("text", {"text": "overflow"}, seq=3 + cg.BUF_MAX, id=mid("bx")))
+    j = _joined(proj)
+    assert len(j["buf"]) <= cg.BUF_MAX
+    seqs = [x["seq"] for x in j["log"]]
+    assert seqs == sorted(seqs) and seqs[0] == 1 and 3 in seqs and 2 not in seqs
