@@ -97,16 +97,22 @@
   const needsList = () => window.DashHelpers.uniqueNeeds(state?.needs);
   // one line of the question a waiting ticket asks, under its title
   const questionLine = t => { const q = snapshot || window.DashHelpers.inNeeds(needsList(), t.id) ? '' : window.DashHelpers.questionPreview(t); return q ? h('p', {className:'meta question-line'}, clean(q)) : null; };
-  function activity(t, where = '') {
-    if (snapshot) return null;
-    const {live, agent, busy, text: full} = activityInfo(t);
-    if (!full || (where === 'head' && questions(t).length)) return null;  // the banner is the one place for an open question
-    const text = full;
+  // "why · just now" under a ticket row's title; board and tree rows keep it under the chip
+  function activityNote(t) {
+    const {live, agent, text} = activityInfo(t);
     const seconds = live?.since ? Math.max(0, Math.floor((Date.now() - Date.parse(live.since)) / 1000)) : null;
     const why = window.DashHelpers.plainWhy(live?.why, agent);
+    return !text ? '' : [why, Number.isFinite(seconds) ? window.DashHelpers.ago(live.since, Date.now()) : ''].filter(Boolean).join(' · ');
+  }
+  function activity(t, where = '') {
+    if (snapshot) return null;
+    const {live, busy, text: full} = activityInfo(t);
+    if (!full || (where === 'head' && questions(t).length)) return null;  // the banner is the one place for an open question
+    const text = full;
+    const note = where === 'row' ? '' : activityNote(t);  // in a row the chip sits on the Move to line, the note goes under the title
     const open = live?.state === 'attention' ? liveLinkFor(t) : null;
     return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === 'Ready for your review' ? {title:'Ready for your review'} : text === 'Needs you' ? {title:'The agent asked you something'} : {}),
-      why || Number.isFinite(seconds) ? h('p', {className:'meta'}, [why, Number.isFinite(seconds) ? window.DashHelpers.ago(live.since, Date.now()) : ''].filter(Boolean).join(' · ')) : null,
+      note ? h('p', {className:'meta'}, note) : null,
       open ? h('a', {className:'btn outline xs', href:open.url, 'data-key':'activity-open-' + t.id}, 'Open the live session') : null);
   }
   const reviewActions = t => !snapshot && t.status === 'review' ? h('div', {className:'row'}, [['done', 'Mark done'], ['active', 'Send back']].map(([status, label]) => h('button', {type:'button', className:'btn outline xs', 'data-action':'status-set', 'data-ticket':t.id, 'data-status':status}, label))) : null;
@@ -122,14 +128,14 @@
   const newButton = () => snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'new'}, 'New ticket');
   const firstTicket = () => h('div', {className:'card-row'}, h('p', {className:'grow muted'}, 'Your first ticket starts here.'), newButton());
   function ticketRow(t) {
-    const meta = [typeof t.key === 'string' ? t.key : '', statusWord(shown(t)), name(t.owner), t.due ? 'Due ' + date(t.due) : ''].filter(Boolean);
+    const meta = [typeof t.key === 'string' ? t.key : '', statusWord(shown(t)), name(t.owner), t.due ? 'Due ' + date(t.due) : '', snapshot ? '' : activityNote(t)].filter(Boolean);
     const parent = ticketOf(t.parent);
     let late = '';
     if (overdue(t)) {
       const days = Math.round((Date.parse(today()) - Date.parse(t.due)) / 86400000);
       late = chip('Overdue ' + days + (days === 1 ? ' day' : ' days'), 'error');
     }
-    return h('div', {className:'card-row ticket-row', 'data-key':'ticket-' + t.id}, h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, meta.join(' · ')), questionLine(t), parent ? h('p', {className:'meta'}, 'Part of ', clean(parent.title)) : null), h('div', {className:'row'}, late, activity(t), statusControl(t, 'row')));
+    return h('div', {className:'card-row ticket-row', 'data-key':'ticket-' + t.id}, h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, meta.join(' · ')), questionLine(t), parent ? h('p', {className:'meta'}, 'Part of ', clean(parent.title)) : null), h('div', {className:'row'}, late, activity(t, 'row'), statusControl(t, 'row')));
   }
   function needRow(row, newest) {
     const t = ticketOf(row.ticket);
