@@ -170,6 +170,7 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
             if not isinstance(t.get(k), list):
                 t[k] = []
         _mark_missing_proofs(root, t)
+        mobile.mark_chat_history(t)
         tickets.append(t)
     add_artifact_marks(tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
@@ -629,12 +630,9 @@ def load_state(
         "needs": needs if isinstance(needs, list) else [],
         "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
         "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},
-        "mobile_mode": mobile.load_mobile(root, orch_bin)
-        if with_settings
-        else None,  # the live page only, never a snapshot
-        "look": look.load_look(root, orch_bin, fresh)
-        if with_settings
-        else None,  # the live page only, never a snapshot
+        "groups": mobile.load_groups(root, orch_bin) if with_addons else None,  # group chats; snapshots carry none
+        "mobile_mode": mobile.load_mobile(root, orch_bin) if with_settings else None,  # the live page only, never a snapshot
+        "look": look.load_look(root, orch_bin, fresh) if with_settings else None,  # the live page only, never a snapshot
         "settings": load_settings(root, orch_bin)
         if with_settings
         else None,  # only the live local server: it holds the folder path

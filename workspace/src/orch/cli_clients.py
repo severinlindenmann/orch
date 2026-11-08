@@ -158,6 +158,11 @@ def add_parsers(sub, common) -> None:
     x.add_argument("title")
     x.add_argument("--text", default="")
     x.add_argument("--check", action="append", default=[], help="checklist item (repeat)")
+    x.add_argument(
+        "--group",
+        action="store_true",
+        help="open the ticket's group chat with that workspace (needs --ticket)",
+    )
     x = rel.add_parser("start", parents=[common, t], help="start a named task on another workspace")
     x.add_argument("workspace")
     x.add_argument("key")
@@ -170,6 +175,7 @@ def add_parsers(sub, common) -> None:
     rel.add_parser("refresh", parents=[common], help="update settings and the workspace list")
     x = rel.add_parser("download", parents=[common], help="save the file of a file message")
     x.add_argument("id")
+    _add_group(rel, common)
     w = rel.add_parser("webhook", help="addresses that turn outside calls into messages").add_subparsers(
         dest="wsub", required=True
     )
@@ -180,6 +186,104 @@ def add_parsers(sub, common) -> None:
     w.add_parser("list", parents=[common], help="list webhooks")
     x = w.add_parser("delete", parents=[common], help="delete a webhook")
     x.add_argument("id")
+
+
+def _add_group(rel, common) -> None:
+    g = rel.add_parser("group", help="group chats across workspaces (hosted by the ticket's workspace)")
+    gs = g.add_subparsers(dest="gsub", required=True)
+    gs.add_parser("list", parents=[common], help="groups this workspace hosts or was invited to")
+    x = gs.add_parser("say", parents=[common], help="host: write into the ticket's group")
+    x.add_argument("ticket")
+    x.add_argument("text")
+    x.add_argument("--to-person", action="store_true", help="the text is addressed to the person (pushed)")
+    x.add_argument("--dashboard", action="store_true", help="written by the person at this dashboard")
+    x = gs.add_parser("add", parents=[common], help="host: add a connected workspace to the ticket's group")
+    x.add_argument("ticket")
+    x.add_argument("workspace")
+    x = gs.add_parser("remove", parents=[common], help="host: remove a member")
+    x.add_argument("ticket")
+    x.add_argument("workspace")
+    x = gs.add_parser(
+        "ask", parents=[common], help="host: send an information question of the ticket to a member"
+    )
+    x.add_argument("ticket")
+    x.add_argument("workspace")
+    x.add_argument("question", help="question id on the ticket (q1)")
+    x = gs.add_parser("share", parents=[common], help="host: share a file with the group")
+    x.add_argument("ticket")
+    x.add_argument("file")
+    x.add_argument("--title")
+    x.add_argument("--click", action="store_true", help="a person chose to share it (needed for pictures)")
+    x = gs.add_parser("reply", parents=[common], help="member: write into a group")
+    x.add_argument("host")
+    x.add_argument("group")
+    x.add_argument("text")
+    x.add_argument("--dashboard", action="store_true", help="written by the person at this dashboard")
+    x = gs.add_parser("answer", parents=[common], help="member: answer a group question")
+    x.add_argument("message")
+    x.add_argument("text")
+    x = gs.add_parser(
+        "send-file", parents=[common], help="member: share a file with the group (a person's click)"
+    )
+    x.add_argument("host")
+    x.add_argument("group")
+    x.add_argument("file")
+    x.add_argument("--title")
+    x.add_argument("--click", action="store_true")
+    x = gs.add_parser("leave", parents=[common], help="member: leave a group")
+    x.add_argument("host")
+    x.add_argument("group")
+
+
+def run_group(args, root: Path, out) -> None:
+    from orch import chat_groups as cg
+
+    by, sub = tickets.current_actor(), args.gsub
+    tid = tickets.resolve(root, getattr(args, "ticket", None)) if hasattr(args, "ticket") else None
+    ws = relay.resolve(root, args.workspace) if hasattr(args, "workspace") else None
+    if sub == "list":
+        v = cg.view(root)
+        rows = [f"{g['title']} ({g['id']}) - hosted, {len(g['members'])} members" for g in v["hosted"]]
+        rows += [f"{g['title']} ({g['host']}/{g['id']}) - invited" for g in v["joined"]]
+        out(args, v, "\n".join(rows) or "No groups.")
+    elif sub == "say":
+        r = cg.say(root, tid, args.text, "dashboard" if args.dashboard else "helper", args.to_person, by)
+        out(args, r, "Written into the group.")
+    elif sub == "add":
+        r = cg.add_member(root, tid, ws, by)
+        out(args, r, "Added to the group." if r["added"] else "Already in the group.")
+    elif sub == "remove":
+        tickets.require_human("Remove this workspace from the group?", "removing a member")
+        r = cg.remove_member(root, tid, ws, by)
+        out(args, r, "Removed from the group.")
+    elif sub == "ask":
+        m = cg.ask(root, tid, ws, args.question, by)
+        out(args, m, _sent_line(root, m, "Question sent to {}."))
+    elif sub == "share":
+        r = cg.share_file(root, tid, Path(args.file), args.title, None, args.click, by)
+        out(args, r, "Shared with the group.")
+    elif sub == "reply":
+        if args.dashboard:
+            tickets.require_human("Write into the group as yourself?", "writing as the person")
+        m = cg.say_member(
+            root,
+            relay.resolve(root, args.host),
+            args.group,
+            args.text,
+            "dashboard" if args.dashboard else "helper",
+        )
+        out(args, m, "Written into the group.")
+    elif sub == "answer":
+        m = cg.answer(root, args.message, args.text)
+        out(args, m, "Answer sent.")
+    elif sub == "send-file":
+        m = cg.share_member(
+            root, relay.resolve(root, args.host), args.group, Path(args.file), args.title, args.click
+        )
+        out(args, m, "Shared with the group.")
+    elif sub == "leave":
+        r = cg.leave(root, relay.resolve(root, args.host), args.group)
+        out(args, r, "You left the group.")
 
 
 def run_publish(args, root: Path, out) -> None:
@@ -324,6 +428,8 @@ def run_relay(args, root: Path, out) -> None:
     t = getattr(args, "ticket", None)
     if sub not in ("connect", "status", "outbox", "view"):
         _resend_waiting(root)
+    if sub == "group":
+        return run_group(args, root, out)
     if sub == "connect":
         who, line = relay.connect(root, args.url, args.workspace, args.token)
         out(
@@ -435,7 +541,7 @@ def run_relay(args, root: Path, out) -> None:
         r = relay.topic(root, args.message, args.title, tickets.current_actor())
         out(args, r, f"Started {r['key'] or r['ticket']} ({r['ticket']}). The phone shows it as a topic now.")
     elif sub == "delegate":
-        m = relay.send_delegate(root, args.workspace, args.title, args.text, args.check, t)
+        m = relay.send_delegate(root, args.workspace, args.title, args.text, args.check, t, args.group)
         out(args, m, _sent_line(root, m, "Task handed to {}. It starts once they allow it."))
     elif sub == "start":
         m = relay.send_start(root, args.workspace, args.key, args.text, t)
@@ -509,6 +615,10 @@ def _inbox_line(i: dict, root: Path) -> str:
     at = f" ({net.when(m['created_at'])})" if m.get("created_at") else ""
     head = f"{kind} from {relay.name_of(root, m['from'])}{at}"
     tail = f"  [{m['id']}]"
+    if relay.msg_group(m) and not i.get("auto"):  # outside text: cleaned and framed, never instructions (G10)
+        from orch import chat_groups
+
+        return f"{head}: {chat_groups.prompt_text(m)}{tail}"
     if i["note"]:
         return f"{head}: {i['note']}{tail}"
     reply = f' - reply: orch relay send {m["from"]} "<text>"' if m["from"].startswith("ph_") else ""

@@ -129,16 +129,4 @@ function connectionNotice(connectionEl, hadState) {
     button('Try now', 'outline sm', () => refresh()), h('details', {}, h('summary', {}, 'Details'), h('p', {}, 'Is the computer asleep? orch runs on the computer that owns this workspace. Wake it up and check that it is connected. This page will try again shortly.')));
   connectionEl.hidden = false;
 }
-// The General conversation with the phone: every text both ways, newest last. Read only.
-function generalPage() {
-  const g = state.general, list = array(g?.history).slice().sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
-  const rows = list.map((entry, i) => {
-    const rich = g && entry.via === 'phone' ? phoneEntry(g.id, entry) : null;
-    const mine = entry.via !== 'phone';
-    return h('div', {className:'card-row chat-row' + (mine ? ' chat-out' : ''), 'data-key':'general-' + i + '-' + (entry.at || '')},
-      h('div', {className:'grow'}, rich || h('p', {}, clean(window.DashHelpers.historyLine(entry, []))), h('p', {className:'meta'}, [name(entry.by), surface(entry.via)].filter(Boolean).join(' · '))),
-      h('time', {datetime:entry.at || ''}, age(entry.at)));
-  });
-  return fragment(heading('General', 'Texts from the phone that belong to no ticket.'),
-    h('section', {className:'card', 'data-key':'general-card'}, rows.length ? rows : emptyRow('No messages yet. Texts from the phone that are not about a ticket show up here.')));
-}
+// Chat (former General) lives in pages/chat.js.

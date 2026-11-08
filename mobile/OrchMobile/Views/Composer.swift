@@ -13,6 +13,8 @@ struct Composer: View {
     /// Accessibility ids of the text field and send button (the New topic screen keeps its older ids).
     var fieldId = "composer-field"
     var sendId = "composer-send"
+    var groupKey: GroupKey?
+    var unavailableText: String
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -38,11 +40,15 @@ struct Composer: View {
     @State private var playing = false
     @State private var playhead = 0.0
     @State private var playbackTask: Task<Void, Never>?
-    @MainActor private static var drafts: [SendTarget: String] = [:]
+    private struct DraftKey: Hashable { let target: SendTarget; let group: GroupKey? }
+    @MainActor private static var drafts: [DraftKey: String] = [:]
+    private func draftKey(_ target: SendTarget) -> DraftKey { DraftKey(target: target, group: groupKey) }
 
     init(target: SendTarget?, placeholder: String = "Message…", note: String? = nil, autoFocus: Bool = false,
          reply: Binding<ReplyPreview?>, onSent: (() -> Void)? = nil,
-         fieldId: String = "composer-field", sendId: String = "composer-send") {
+         fieldId: String = "composer-field", sendId: String = "composer-send", groupKey: GroupKey? = nil,
+         unavailableText: String = "Starting topic…") {
+        self.groupKey = groupKey; self.unavailableText = unavailableText
         self.fieldId = fieldId; self.sendId = sendId
         self.target = target; self.placeholder = placeholder; self.note = note; self.autoFocus = autoFocus
         _reply = reply; self.onSent = onSent
@@ -85,7 +91,7 @@ struct Composer: View {
                         }
                     }
             }
-            if target == nil { Text("Starting topic…").themeFont(13).foregroundStyle(Theme.muted) }
+            if target == nil { Text(unavailableText).themeFont(13).foregroundStyle(Theme.muted) }
             else if let note, !hasAudio { Text(note).themeFont(13).foregroundStyle(Theme.muted).accessibilityIdentifier("composer-note") }
         }.padding(.horizontal, 8).padding(.vertical, 8)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous))
@@ -95,9 +101,9 @@ struct Composer: View {
             .foregroundStyle(Theme.text).tint(Theme.brand)
             .sensoryFeedback(.success, trigger: success).sensoryFeedback(.warning, trigger: cancellation)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: hasAudio)
-            .task { text = target.flatMap { Self.drafts[$0] } ?? ""; if autoFocus && target != nil { focused = true } }
-            .onChange(of: text) { _, value in if let target { Self.drafts[target] = value } }
-            .onChange(of: target) { _, new in text = new.flatMap { Self.drafts[$0] } ?? ""; discard() }
+            .task { text = target.flatMap { Self.drafts[draftKey($0)] } ?? ""; if autoFocus && target != nil { focused = true } }
+            .onChange(of: text) { _, value in if let target { Self.drafts[draftKey(target)] = value } }
+            .onChange(of: target) { _, new in text = new.flatMap { Self.drafts[draftKey($0)] } ?? ""; discard() }
             .onChange(of: recorder?.error) { _, value in if let value { error = value; micError = true; collect() } }
             .onDisappear { holding = false; holdTask?.cancel(); hintTask?.cancel(); discard() }
             .sheet(isPresented: $attaching) {
@@ -108,7 +114,7 @@ struct Composer: View {
     private var composeRow: some View {
         HStack(alignment: .bottom, spacing: 8) {
             control("plus", "Attach", "composer-attach") { focused = false; attaching = true }.disabled(target == nil || busy)
-            TextField(target == nil ? "Starting topic…" : placeholder, text: $text, axis: .vertical)
+            TextField(target == nil ? unavailableText : placeholder, text: $text, axis: .vertical)
                 .themeFont(17).lineLimit(1...5).padding(.horizontal, 12).padding(.vertical, 10)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.xl - 8, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: Theme.Radius.xl - 8, style: .continuous).stroke(Theme.borderStrong))
@@ -189,13 +195,17 @@ struct Composer: View {
             .buttonStyle(PressStyle()).accessibilityLabel(label).accessibilityIdentifier(id)
     }
     private func clock(_ seconds: Double) -> String { clockText(seconds) }
+    private func dispatch(_ draft: MessageDraft, to target: SendTarget) async throws {
+        if let groupKey { try await model.sendGroup(draft, key: groupKey) }
+        else { try await model.send(draft, to: target) }
+    }
     private func sendText() async {
         guard let target, !busy else { return }
         busy = true; error = nil; micError = false
         defer { busy = false }
         do {
-            try await model.send(MessageDraft(text: text, replyTo: reply?.messageId), to: target)
-            text = ""; Self.drafts[target] = nil; reply = nil; success += 1; onSent?()
+            try await dispatch(MessageDraft(text: text, replyTo: reply?.messageId), to: target)
+            text = ""; Self.drafts[draftKey(target)] = nil; reply = nil; success += 1; onSent?()
         } catch { self.error = error.localizedDescription }
     }
     /// A photo, file or place from the "+" sheet: goes through the outbox like any message; the picker's temp files are removed after.
@@ -207,7 +217,7 @@ struct Composer: View {
         case .files(let files, let caption): draft = MessageDraft(text: caption, files: files, replyTo: reply?.messageId)
         case .location(let place): draft = MessageDraft(location: place, replyTo: reply?.messageId)
         }
-        do { try await model.send(draft, to: target); reply = nil; success += 1; onSent?() }
+        do { try await dispatch(draft, to: target); reply = nil; success += 1; onSent?() }
         catch { self.error = error.localizedDescription; micError = false }
     }
     private func startRecording(lock: Bool) async {
@@ -243,7 +253,7 @@ struct Composer: View {
         do {
             while let segment = segments.first {
                 let draft = await model.voiceDraft(for: segment)
-                try await model.send(MessageDraft(voice: draft, replyTo: replyId), to: target)
+                try await dispatch(MessageDraft(voice: draft, replyTo: replyId), to: target)
                 segments.removeFirst(); try? FileManager.default.removeItem(at: segment.url)
             }
             locked = false; reply = nil; success += 1; onSent?()

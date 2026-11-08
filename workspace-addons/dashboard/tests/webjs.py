@@ -2,7 +2,7 @@
 from pathlib import Path
 
 WEB = Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "web"
-PAGES = ("home", "tickets", "ticket", "newticket", "settings")
+PAGES = ("home", "tickets", "ticket", "newticket", "settings", "chat")
 
 
 def all_js() -> str:
