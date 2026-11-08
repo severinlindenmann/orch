@@ -41,8 +41,16 @@ struct MobileModeBanner: View {
 
     /// "Can't reach" depends on the clock (last call > 5 min), not only on data: re-evaluate every 15 s, because an unchanged
     /// list poll no longer redraws the screen (#244).
+    /// Mobile mode on for a workspace in scope. Decided without the clock, so a workspace with Mobile mode off adds no view at all
+    /// (an empty TimelineView is still an empty List row with its insets and a gap in a stack).
+    private var anyOn: Bool {
+        model.workspaces.contains { (workspaceId == nil || $0.id == workspaceId) && $0.mobileMode?.on == true }
+    }
+
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 15)) { context in banner(now: context.date) }
+        if anyOn {
+            TimelineView(.periodic(from: .now, by: 15)) { context in banner(now: context.date) }
+        }
     }
 
     @ViewBuilder

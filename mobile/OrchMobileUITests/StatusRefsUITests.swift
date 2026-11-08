@@ -86,4 +86,25 @@ final class StatusRefsUITests: XCTestCase {
         last.tap()   // opens the topic, not the New topic sheet
         XCTAssertTrue(app.descendants(matching: .any)["chat-info"].waitForExistence(timeout: 10))
     }
+
+    /// Mobile mode off: no empty banner row. General sits right below the header (workspace screen) and the search field right
+    /// below the title row (chats list).
+    func testNoEmptyBannerGapWithMobileModeOff() {
+        let app = launch("ws_pilatus001")
+        let general = app.buttons["general-ws_pilatus001"]
+        XCTAssertTrue(general.waitForExistence(timeout: 20))
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'mobile-mode-banner-'")).firstMatch.exists)
+        let nav = app.navigationBars.firstMatch
+        XCTAssertLessThan(general.frame.minY - nav.frame.maxY, 40, "General sits right below the header")
+        shot(app, "7-workspace-no-gap")
+        app.terminate()
+
+        let chats = XCUIApplication()
+        chats.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES"]
+        chats.launch()
+        let search = el(chats, "chat-search"), top = el(chats, "new-chat")
+        XCTAssertTrue(search.waitForExistence(timeout: 20))
+        XCTAssertLessThan(search.frame.minY - top.frame.maxY, 40, "search sits right below the title row")
+        shot(chats, "8-chats-no-gap")
+    }
 }
