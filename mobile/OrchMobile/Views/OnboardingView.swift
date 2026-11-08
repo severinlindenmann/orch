@@ -3,6 +3,7 @@ import UIKit
 
 struct OnboardingView: View {
     @Environment(AppModel.self) private var model
+    @State private var invitationShown = false
     @State private var showLink = false
     @State private var showScanner = false
     @State private var link = ""
@@ -19,13 +20,23 @@ struct OnboardingView: View {
                     if model.phase == .notifyStep {
                         ScreenHeading(title: "You're connected.", subtitle: model.pairedWorkspaces.count == 1 ? "1 workspace is ready." : "\(model.pairedWorkspaces.count) workspaces are ready.")
                             .padding(.top, 28)
+                    } else if invitationShown || hasInvitation {
+                        ScreenHeading(title: "Your invitation.", subtitle: "Paste the link you received, or scan its QR code.").padding(.top, 28)
                     } else {
-                        ScreenHeading(title: "Let's get connected.", subtitle: "Use your invitation to bring your workspaces along.").padding(.top, 28)
+                        ScreenHeading(title: "Let's get connected.", subtitle: "Bring your workspaces along. You'll need an invitation from your computer.").padding(.top, 28)
                     }
                     if model.phase == .notifyStep {
                         notificationStep
-                    } else {
+                    } else if invitationShown || hasInvitation {
                         invitationStep
+                    } else {
+                        Button("Use invitation") { invitationShown = true }.buttonStyle(PrimaryButtonStyle())
+                        Text("Paste a link or scan a QR code in the next step.").themeFont(13).foregroundStyle(Theme.muted)
+                        #if DEBUG
+                        Button { model.openSampleInvite() } label: { Text("Try a demo") }
+                            .buttonStyle(WideButtonStyle(color: Theme.muted)).themeFont(12)
+                            .accessibilityIdentifier("sample-invite")
+                        #endif
                     }
                     ModelMessage()
                 }.padding(.horizontal, 25).padding(.vertical, 24)
@@ -54,6 +65,8 @@ struct OnboardingView: View {
             QRScannerView { code in model.openInvite(code); showScanner = false }
         }
     }
+
+    private var hasInvitation: Bool { if case .none = model.inviteState { false } else { true } }
 
     private func submitLink() {
                     let clean = link.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -106,12 +119,11 @@ struct OnboardingView: View {
     private var notificationStep: some View {
         VStack(spacing: 18) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Know when you're needed.").themeFont(17, .semibold)
-                Text("Get notified when your work needs an answer.")
+                Image(systemName: "bell").foregroundStyle(Theme.brand)
+                Text("Get told when something needs you").themeFont(17, .semibold)
+                Text("Questions and finished work, straight to your phone.")
                     .themeFont(13).foregroundStyle(Theme.muted)
-                ForEach(model.pairedWorkspaces) { workspace in
-                    Text(workspace.displayName).themeFont(14).padding(.vertical, 6)
-                }
+
             }.orchCard()
             Button("Allow notifications") { finish(true) }.buttonStyle(PrimaryButtonStyle())
             Button { finish(false) } label: { Text("Not now") }.buttonStyle(WideButtonStyle(color: Theme.muted)).themeFont(15)

@@ -119,10 +119,11 @@ struct ChatsListView: View {
                 .skeleton(true).accessibilityHidden(true)
         } else if model.workspaceSummaries.isEmpty {
             VStack(spacing: 14) {
-                OrbitMark().frame(width: 48, height: 48)
-                Text("No workspaces yet").themeFont(20, .semibold)
-                Text("Add a workspace with the invitation you were sent.").themeFont(15).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
-                Button("Add workspace") { sheet = .addWorkspace }.buttonStyle(SecondaryButtonStyle())
+                Image(systemName: "bubble.left").themeFont(32).foregroundStyle(Theme.brand)
+                    .frame(width: 70, height: 70).background(Theme.surface, in: RoundedRectangle(cornerRadius: 24))
+                Text("No chats yet").themeFont(20, .semibold)
+                Text("Add your workspace to talk to its helper and keep up with your tickets.").themeFont(15).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                Button("Add a workspace") { sheet = .addWorkspace }.buttonStyle(PrimaryButtonStyle())
             }.frame(maxWidth: .infinity).padding(.vertical, 50).accessibilityIdentifier("chats-empty")
         } else {
             attentionCards

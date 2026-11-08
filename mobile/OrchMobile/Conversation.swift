@@ -73,6 +73,8 @@ struct ConvItem: Identifiable, Equatable, Sendable {
     /// ISO time; sorts the conversation. Queued items use their creation time.
     let at: String
     let side: Side
+    var by: String? = nil
+    var day: String? = nil
     var kind: Kind = .message
     var text: String = ""
     var attachments: [MessageAttachment] = []
@@ -253,10 +255,19 @@ enum ConversationBuilder {
 
     private static func label(_ kind: String?) -> String? { ChatBuilder.label(forKind: kind) }
 
-    private static func bubble(_ pm: PhoneMessage, _ ix: Index, _ d: ConversationInputs) -> ConvItem {
+    private static func bubble(_ pm: PhoneMessage, _ ix: Index, _ d: ConversationInputs, chat: Bool = false) -> ConvItem {
         let m = pm.message, b = m.body
-        var item = ConvItem(id: pm.id, at: m.createdAt, side: pm.fromPhone ? .me : .them, text: b.text, attachments: b.attachments, voice: b.voice,
+        var item = ConvItem(id: pm.id, at: m.createdAt, side: chat ? ChatDay.side(by: b.by, via: b.via, fromPhone: pm.fromPhone) : (pm.fromPhone ? .me : .them), text: b.text, attachments: b.attachments, voice: b.voice,
                             location: b.location, feedback: b.feedback)
+        if chat {
+            item.by = b.by; item.day = b.day
+            if pm.fromPhone, item.day == nil {
+                item.day = d.messages.filter {
+                    !$0.fromPhone && $0.workspaceId == pm.workspaceId && $0.message.replyTo == pm.id &&
+                        isReceipt($0.message) && $0.message.body.day != nil
+                }.max { $0.message.createdAt < $1.message.createdAt }?.message.body.day
+            }
+        }
         item.label = label(b.update?.kind); item.speak = b.speak; item.replyTo = m.replyTo
         if !pm.fromPhone, b.update?.kind == "result" { item.artifacts = b.ticketView?.attachments ?? [] }
         if !pm.fromPhone { item.canPlay = d.speak == .always || (b.speak != nil && d.speak != .never) }
@@ -299,7 +310,10 @@ enum ConversationBuilder {
         var listed = Set<String>()
         for pm in d.messages where pm.workspaceId == id.workspace {
             if let c = pm.clientId ?? pm.message.body.clientId { listed.insert(c) }
-            if conversation(of: pm, ix, d) == id { out.append(bubble(pm, ix, d)) }
+            if conversation(of: pm, ix, d) == id {
+                let chat: Bool = if case .general = id { true } else { false }
+                out.append(bubble(pm, ix, d, chat: chat))
+            }
             else if case .topic(_, let t) = id, pm.fromPhone, pm.message.ticket == nil, ix.ticketOfPhoneText[pm.id] == t { out.append(bubble(pm, ix, d)) }   // General text that started this topic
         }
         for o in d.outbox where o.kind == .send && o.workspace == id.workspace && !listed.contains(o.clientId) && outboxConversation(o) == id {

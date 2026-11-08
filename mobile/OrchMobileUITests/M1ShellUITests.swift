@@ -75,10 +75,11 @@ final class M1ShellUITests: XCTestCase {
         var tries = 0
         while !voice.isHittable && tries < 4 { app.swipeUp(); tries += 1 }
         voice.tap()
+        app.buttons["voice-replies-menu"].tap()
         let always2 = app.buttons["speak-always"]
         XCTAssertTrue(always2.waitForExistence(timeout: 5))
         always2.tap()
-        XCTAssertTrue(app.buttons["speak-always"].isSelected || app.buttons["speak-always"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["voice-replies-menu"].exists)
     }
 
     /// Add workspace sheet: a bad link is explained inline and the typed text stays.
@@ -86,6 +87,7 @@ final class M1ShellUITests: XCTestCase {
         let app = paired()
         app.buttons["new-chat"].tap()
         app.buttons["compose-add-workspace"].tap()
+        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
         XCTAssertTrue(app.buttons["Paste invitation link"].waitForExistence(timeout: 5))
         app.buttons["Paste invitation link"].tap()
         let field = app.textFields["invite-field"]
@@ -104,6 +106,7 @@ final class M1ShellUITests: XCTestCase {
         XCTAssertTrue(app.buttons["add-workspace"].waitForExistence(timeout: 10))
         app.buttons["add-workspace"].tap()
         func enter(_ link: String) {
+            if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
             XCTAssertTrue(app.buttons["Paste invitation link"].waitForExistence(timeout: 5))
             app.buttons["Paste invitation link"].tap()
             let field = app.textFields["invite-field"]
@@ -141,7 +144,7 @@ final class M1ShellUITests: XCTestCase {
             app.terminate()
             app = paired(extra + ["-startTab", "settings"])
             XCTAssertTrue(app.buttons["Sign out"].waitForExistence(timeout: 15)); try snap(app, "4-settings")
-            app.buttons["voice-settings"].tap(); XCTAssertTrue(app.buttons["speak-always"].waitForExistence(timeout: 5)); try snap(app, "5-voice")
+            app.buttons["voice-settings"].tap(); XCTAssertTrue(app.buttons["voice-replies-menu"].waitForExistence(timeout: 5)); try snap(app, "5-voice")
             app.terminate()
             app = paired(extra)
             app.buttons["new-chat"].tap(); XCTAssertTrue(app.buttons["compose-new-topic"].waitForExistence(timeout: 5)); try snap(app, "6-compose")
@@ -149,6 +152,7 @@ final class M1ShellUITests: XCTestCase {
             app.terminate(); extra = extra + []
             app = paired(extra)
             app.buttons["new-chat"].tap(); app.buttons["compose-add-workspace"].tap()
+            if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
             XCTAssertTrue(app.buttons["Paste invitation link"].waitForExistence(timeout: 5)); try snap(app, "8-add-workspace")
             app.terminate()
         }
