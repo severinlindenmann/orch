@@ -308,7 +308,7 @@ def load_groups(root: Path, orch_bin: str | None) -> dict | None:
     return {"hosted": hosted, "joined": joined}
 
 
-CHAT_FLAG_SINCE = "2026-11-08T14:15:00Z"  # when the core began writing chat_message on every line
+CHAT_FLAG_SINCE = "2026-11-08T14:15:00+00:00"  # when the core began writing chat_message on every line
 
 
 

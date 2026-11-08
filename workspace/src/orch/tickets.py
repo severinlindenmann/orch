@@ -391,7 +391,7 @@ def ensure_general(root: Path, by: str) -> str:
         "checklist": [],
         "refs": [],
         "questions": [],
-        "history": [{"at": t, "by": by, "via": "cli", "text": "Created"}],
+        "history": [{"at": t, "by": by, "via": "cli", "text": "Created", "chat_message": False}],
     }
     save(root, ticket)
     return ticket["id"]

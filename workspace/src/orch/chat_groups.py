@@ -1202,7 +1202,11 @@ def say(
             to_person=to_person and via != "dashboard",
             errors=errors,
         )
-    _history(root, tid, by if via != "dashboard" else "human:owner", f"Group: {text}"[:2000], chat=True)
+    if tool := tickets.agent_tool():  # an agent never posts as the person, whatever via says
+        who = "agent:" + str(tool)
+    else:
+        who = by if via != "dashboard" else "human:owner"
+    _history(root, tid, who, f"Group: {text}"[:2000], chat=True)
     return {"group": gid, "seq": seq, "origin": oid, "errors": errors}
 
 

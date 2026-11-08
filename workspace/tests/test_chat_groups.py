@@ -864,6 +864,17 @@ def test_group_talk_in_the_host_ticket_carries_the_chat_flag_and_other_lines_do_
     assert all(e["chat_message"] is False for e in hist if not e["text"].startswith("Group"))
 
 
+def test_an_agent_never_posts_group_talk_as_the_person(proj, run, rel, grp, monkeypatch):
+    host, gid, d = grp
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setattr(
+        tickets, "require_human", lambda *a, **k: None
+    )  # even if a person confirmed at a terminal
+    cg.say(proj, host, "as the owner?", via="dashboard")
+    line = [e for e in tickets.load(proj, host)["history"] if e["text"].startswith("Group: as the owner")]
+    assert line and all(e["by"] == "agent:claude" for e in line)
+
+
 # ---- member side -------------------------------------------------------------------------------------------
 
 FIN = "ws_fin0000001"
