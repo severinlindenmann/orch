@@ -723,3 +723,27 @@ def test_status_words_started(status, word, started):
     expected = "Paused" if status in ("open", "ready") and started is True else word
     assert call("statusWord", status, started) == expected
     assert call("columnOf", "ready") == "open"
+
+
+@node
+def test_failed_agent_start_is_plain_with_a_retry():
+    now = 1793923200000
+    ref = "The agent could not be started: [Errno 2] No such file or directory: 'claude'"
+    t = {
+        "id": "t_a",
+        "status": "waiting",
+        "questions": [],
+        "sessions": [],
+        "waiting_on": {"kind": "external", "ref": ref, "start": True},
+    }
+    settings = {"agents": [{"name": "claude", "label": "Claude", "chosen": True}]}
+    w = call("agentLine", t, None, now, None, settings)
+    assert w["state"] == "failed" and w["startFailed"] is True
+    assert w["status"] == "Claude could not start: the claude program was not found"
+    assert w["primary"] == {"label": "Retry", "op": "run.start", "args": {"ticket": "t_a"}}
+    assert "Errno" not in w["status"]
+    assert call("startFailure", {**t, "status": "active"}, None, settings) is None
+    t["waiting_on"] = {"kind": "question", "ref": "q1"}
+    assert call("startFailure", t, None, settings) is None
+    assert call("plainStartReason", "The agent did not start") == "it did not start"
+    assert call("plainStartReason", "[Errno 13] Permission denied: '/x/claude'") == "it is not allowed to run"
