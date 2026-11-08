@@ -232,6 +232,9 @@ struct GroupApprovalView: View {
         }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
             .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m).stroke(Theme.warn.opacity(0.35)))
+            // A container: without this the id is copied onto every child (the text, each button), so the card itself
+            // was not one element and its buttons could not be found under it (e2e P4.3, VoiceOver).
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("group-approval")
     }
 }
