@@ -359,7 +359,7 @@ def test_board_moves_use_ticket_patch_with_the_revision_and_keyboard_menu():
     assert "act('ticket.patch', {ticket:t.id, data:{status}, if_revision:t.revision})" in move
     assert "if (!t || t.status === status" in move  # dropping on the same column does nothing
     card = js[js.index("function boardCard") : js.index("function board()")]
-    assert "statusItems(t, 'card')" in card and "aria-label" in card  # the menu is the keyboard way to move
+    assert "statusItems(t, 'card', STATUS_CHOICES)" in card and "aria-label" in card  # the menu is the keyboard way to move
     assert "slice(0, cap)" in js and "boardMore" in js  # Done shows 3 until asked
     assert (
         "localStorage" in js
@@ -377,7 +377,7 @@ def test_artifacts_tab_reads_files_only_through_the_checked_endpoints():
 def test_ticket_details_hide_raw_id_and_home_badge_is_named():
     js = (WEBDIR / "app.js").read_text()
     assert "field('Ticket', h('span', {className:'ed-ro mono'}, t.id))" not in js
-    assert "' waiting for you', 'aria-label'" in js
+    assert "needsYou(needsList().length)" in js
 
 
 def test_settings_wording_and_one_toast_at_a_time():
@@ -397,3 +397,10 @@ def test_settings_wording_and_one_toast_at_a_time():
     motion = (WEBDIR / "kit" / "motion.js").read_text()
     assert "toastQueue" not in motion and "host.replaceChildren()" in motion and "remaining=4000" in motion
     assert ".mm-hours .btn.ghost:hover{background:transparent" in (WEBDIR / "style.css").read_text()
+
+
+def test_no_waiting_for_your_answer_wording_left():
+    """Same words as the phone: the chip and badge say "Needs you" / "N need you"."""
+    for f in list(WEBDIR.glob("*.js")) + list((WEBDIR.parent.parent.parent.parent / "focus/src/orch_focus/web").glob("*.js")):
+        text = f.read_text().lower()
+        assert "waiting for your answer" not in text and "waiting on you" not in text, f.name

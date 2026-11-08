@@ -582,6 +582,41 @@ def test_check_add_and_permissions_are_checked(act_server, act_orch):
     assert post(act_server, {"op": "check.add", "args": {"ticket": "t_abcdef", "text": "x" * 500}})[0] == 200
 
 
+def test_check_set_ticks_and_reopens_with_a_fixed_note(act_server, act_orch):
+    bad = [
+        ("check.set", {"ticket": "t_abcdef", "check": "c1"}),
+        ("check.set", {"ticket": "t_abcdef", "check": "c1", "done": "yes"}),
+        ("check.set", {"ticket": "t_abcdef", "check": "--x", "done": True}),
+        ("check.set", {"ticket": "t_abcdef", "check": "c1", "done": True, "note": "mine"}),
+        ("check.set", {"ticket": "../x", "check": "c1", "done": True}),
+    ]
+    for op, args in bad:
+        assert post(act_server, {"op": op, "args": args})[0] == 400, (op, args)
+    assert acts(act_orch) == []
+    assert post(act_server, {"op": "check.set", "args": {"ticket": "t_abcdef", "check": "c1", "done": True}})[0] == 200
+    assert post(act_server, {"op": "check.set", "args": {"ticket": "t_abcdef", "check": "c1", "done": False}})[0] == 200
+    done, reopen = acts(act_orch)[-2:]
+    assert done[:4] == ["check", "done", "t_abcdef", "c1"] and "--note=Ticked off in the dashboard" in done
+    assert reopen[:4] == ["check", "reopen", "t_abcdef", "c1"]
+
+
+def test_relay_send_runs_orch_relay_send_with_the_text_after_dashes(act_server, act_orch):
+    bad = [
+        ("message.send", {"workspace": "ws_1"}),
+        ("message.send", {"workspace": "--file", "text": "hi"}),
+        ("message.send", {"workspace": "a b", "text": "hi"}),
+        ("message.send", {"workspace": "ws_1", "text": "  "}),
+        ("message.send", {"workspace": "ws_1", "text": "x" * 2001}),
+        ("message.send", {"workspace": "ws_1", "text": "hi", "file": "/etc/passwd"}),
+    ]
+    for op, args in bad:
+        assert post(act_server, {"op": op, "args": args})[0] == 400, (op, args)
+    assert acts(act_orch) == []
+    assert post(act_server, {"op": "message.send", "args": {"workspace": "ws_1", "text": "--file /etc/passwd"}})[0] == 200
+    sent = acts(act_orch)[-1]
+    assert sent[:3] == ["relay", "send", "ws_1"] and sent[-2:] == ["--", "--file /etc/passwd"]
+
+
 def test_permissions_setting_is_read_and_logged(ws, act_orch):
     from orch_dashboard.actions import run_op
     from orch_dashboard.data import load_settings

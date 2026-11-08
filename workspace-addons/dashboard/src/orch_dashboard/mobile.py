@@ -1,8 +1,9 @@
-"""Mobile mode is the one feature of the relay add-on the dashboard shows. Everything that names the add-on lives
+"""Mobile mode and the Relay tab's "Send a message" are what the dashboard shows of the relay add-on. Everything that names the add-on lives
 in this file (the other dashboard sources name no add-on; a test keeps it that way)."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 HOURS = (4, 8, 12, 24)
@@ -51,7 +52,25 @@ def _mobile_ack(a):
     return ["relay", "mobile", "ack"], [], []
 
 
-MOBILE_OPS = {"mobile.set": _mobile_set, "mobile.hours": _mobile_hours, "mobile.ack": _mobile_ack}
+PEER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+
+
+def _relay_send(a):
+    """Send a text to a workspace or phone from the Relay tab: `orch relay send <peer> -- <text>`."""
+    acts = _actions()
+    acts._only(a, ("workspace", "text"))
+    peer = a.get("workspace")
+    if not (isinstance(peer, str) and PEER.fullmatch(peer)):
+        raise _bad("Choose who to send to.")
+    return ["relay", "send", peer], [], [acts._text(a.get("text"), "message")]
+
+
+MOBILE_OPS = {
+    "mobile.set": _mobile_set,
+    "mobile.hours": _mobile_hours,
+    "mobile.ack": _mobile_ack,
+    "message.send": _relay_send,
+}
 
 
 def load_mobile(root: Path, orch_bin: str | None) -> dict | None:

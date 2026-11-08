@@ -1444,10 +1444,18 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
     people, recent = v["blocks"]
     assert v["notice"] == "Connected. Send messages and files to other workspaces."
     assert people["title"] == "Workspaces you can talk to · 1"
-    assert (
-        people["items"][0]["title"] == "Reports"
-        and people["items"][0]["chips"][0]["label"] == "Messages and files"
-    )
+    first = people["items"][0]
+    assert first["title"] == "Reports" and first["subtitle"] == "Workspace · messages and files"
+    assert all(c["label"] != "Messages and files" for c in first["chips"])  # plain text, not a pill
+    assert first["actions"] == [
+        {
+            "label": "Send a message",
+            "action": {
+                "op": "message.send",
+                "args": {"workspace": first["actions"][0]["action"]["args"]["workspace"]},
+            },
+        }
+    ]
     details = {d["label"]: d["value"] for d in people["items"][0]["detail"]}
     assert details["You may give them tasks"] == "Not yet"
     items = recent["items"]

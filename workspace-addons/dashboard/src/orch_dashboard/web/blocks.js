@@ -90,6 +90,16 @@ const OrchBlocks = (() => {
     if (label) node.dataset.label = label;
     return true;
   }
+  // "Send a message" (a list row): a visible button on the row. The DOM carries only the peer id (checked here).
+  const PEER = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+  function sendButton(it) {
+    const a = arr(it.actions).find(x => x && x.action && x.action.op === 'message.send' && x.action.args && PEER.test(String(x.action.args.workspace)));
+    if (!a) return null;
+    const b = el('button', 'btn outline sm send-msg', a.label || 'Send a message'); b.type = 'button';
+    b.dataset.sendTo = String(a.action.args.workspace); b.dataset.who = String(it.title || '');
+    b.setAttribute('aria-label', (a.label || 'Send a message') + ' to ' + String(it.title || ''));
+    return b;
+  }
   function toggleEl(t) {
     const b = el('button', 'switch'); b.type = 'button';
     b.setAttribute('role', 'switch'); b.setAttribute('aria-checked', t.on ? 'true' : 'false'); b.setAttribute('aria-label', String(t.label));
@@ -122,16 +132,18 @@ const OrchBlocks = (() => {
   }
   function accordionItem(it, key) {
     const li = el('li', 'acc-li'), sw = it.toggle ? toggleEl(it.toggle) : null;
-    const buttons = arr(it.actions).map(a => {
+    const sendBtn = sendButton(it);
+    const buttons = arr(it.actions).filter(a => !(a && a.action && a.action.op === 'message.send')).map(a => {
       const b = el('button', 'btn outline sm' + (a.tone === 'bad' ? ' danger' : ''), a.label); b.type = 'button';
       if (a.confirm) b.dataset.confirm = String(a.confirm);
       return actionAttrs(b, a.action, a.label) ? b : null;
     }).filter(Boolean);
     const expandable = arr(it.detail).length || arr(it.tickets).length || buttons.length;
+    const finish = () => { if (sendBtn) li.append(sendBtn); if (sw) li.append(sw); return li; };
     const main = el('span', 'li-main'); main.append(el('span', 'li-title', it.title));
     if (it.subtitle) main.append(el('small', 'li-sub', it.subtitle));
     if (arr(it.chips).length) { const c = el('span', 'tags'); c.append(...it.chips.map(chip)); main.append(c); }
-    if (!expandable) { const row = el('div', 'li-row grow'); row.append(toneDot(it.tone), main); li.append(row); if (sw) li.append(sw); return li; }
+    if (!expandable) { const row = el('div', 'li-row grow'); row.append(toneDot(it.tone), main); li.append(row); return finish(); }
     const d = el('details', 'acc grow'); d.dataset.key = key;
     const sum = el('summary', 'li-row'); sum.append(el('span', 'chev'), toneDot(it.tone), main);
     const panel = el('div', 'acc-panel');
@@ -139,8 +151,7 @@ const OrchBlocks = (() => {
     if (arr(it.tickets).length) panel.append(ticketLinks(it.tickets));
     if (buttons.length) { const row = el('div', 'row acc-actions'); row.append(...buttons); panel.append(row); }
     d.append(sum, panel); li.append(d);
-    if (sw) li.append(sw);
-    return li;
+    return finish();
   }
 
   const draw = {

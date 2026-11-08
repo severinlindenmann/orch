@@ -6,7 +6,7 @@
   else root.DashHelpers = api;
 })(typeof self !== 'undefined' ? self : this, function () {
   const arr = v => Array.isArray(v) ? v : [];
-  const STATUS_WORD = {open: 'Backlog', ready: 'Ready', active: 'Working', waiting: 'Waiting', review: 'Review', done: 'Done', dropped: 'Dropped'};
+  const STATUS_WORD = {open: 'Not started', ready: 'Ready to start', active: 'Working', waiting: 'Needs you', review: 'Ready for review', done: 'Done', dropped: 'Dropped'};
   const FIELD_WORD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary',
     status: 'the status'};
 
@@ -89,7 +89,7 @@
       const asks = arr(t && t.questions).some(q => q && q.answer == null);
       busy.add(String(agent).replace(/^(agent|human):/, ''));
       const idle = !asks && run.state !== 'maybe-stale' && run.claim && run.claim.live && run.claim.live.state === 'idle';  // a live session waiting for a message
-      out.push({agent: String(agent).replace(/^(agent|human):/, ''), state: run.state === 'maybe-stale' ? 'stuck' : asks ? 'needs' : idle ? 'idle' : 'working',
+      out.push({agent: String(agent).replace(/^(agent|human):/, ''), state: run.state === 'maybe-stale' ? 'stuck' : asks ? 'needs' : idle ? 'idle' : run.claim && run.claim.live && run.claim.live.state === 'starting' ? 'starting' : 'working',
         ticket: tid, since: idle ? run.claim.live.since : run.claim && run.claim.started_at});
     }
     const last = new Map();
@@ -99,7 +99,7 @@
       if (!last.has(s.agent) || at > last.get(s.agent).at) last.set(s.agent, {at, ticket: t.id});
     }
     for (const [agent, v] of last) if (nowMs - v.at >= 0) out.push({agent, state: 'idle', ticket: v.ticket, since: new Date(v.at).toISOString()});
-    const rank = {needs: 0, stuck: 1, working: 2, idle: 3};
+    const rank = {needs: 0, stuck: 1, working: 2, starting: 2, idle: 3};
     return out.sort((a, b) => rank[a.state] - rank[b.state]);
   }
 
@@ -132,7 +132,7 @@
       primary: start('Start anyway', {take_over: true}), items: [stop]};
     if (r && r.running === true) {
       const by = claim.by ? ' · started by ' + noPrefix(claim.by) : '';
-      if (asks) return {state: 'needs', agent, status: 'waiting for your answer' + since, primary: {label: 'Answer', op: 'answer'}, items: [stop, fresh]};
+      if (asks) return {state: 'needs', agent, status: 'needs your answer' + since, primary: {label: 'Answer', op: 'answer'}, items: [stop, fresh]};
       const waits = claim.live && claim.live.state === 'attention' ? (plainWhy(claim.live.why, agent) || 'waiting for your OK in the live session') : '';
       if (waits) return {state: 'needs', agent, status: waits, primary: liveLink ? {label: 'Open ' + liveLink.label, op: 'open', url: liveLink.url} : stop,
         items: liveLink ? [stop] : []};
@@ -145,7 +145,7 @@
     }
     if (r && r.state === 'dead') return {state: 'failed', agent, status: 'the last run ended without finishing',
       primary: start('Try again'), items: [fresh]};
-    if (asks) return {state: 'needs', agent, status: 'waiting for your answer', primary: {label: 'Answer', op: 'answer'}, items: [fresh]};
+    if (asks) return {state: 'needs', agent, status: 'needs your answer', primary: {label: 'Answer', op: 'answer'}, items: [fresh]};
     if (sessions[0]) {
       const when = Date.parse(sessions[0].last_used);
       return {state: 'resume', agent, status: 'last worked ' + (Number.isNaN(when) ? 'earlier' : span(nowMs - when) === 'just now' ? 'just now' : span(nowMs - when) + ' ago'),
@@ -174,7 +174,7 @@
     return t.status === 'active' && live && live.state === 'attention' ? 'waiting' : t.status;
   }
 
-  /* True while the yellow "Waiting for your answer" chip shows (an open question, or the agent needs you): the plain
+  /* True while the yellow "Needs you" chip shows (an open question, or the agent needs you): the plain
      Waiting status chip is then left out, so the ticket shows one chip. */
   function showsAnswerChip(ticket, run) {
     const t = ticket || {}, live = run && run.claim && run.claim.live;
@@ -304,7 +304,8 @@
     const keys = Object.keys(counts || {});
     return keys.find(k => counts[k] > 0) || keys[0] || '';
   }
+  const needsYou = n => n + (n === 1 ? ' needs you' : ' need you');  // same words as the phone
   const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
 
-  return {uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

@@ -178,6 +178,24 @@ def _check_add(a):
     return ["check", "add", _tid(a.get("ticket"))], [], [text.strip()]
 
 
+CID = re.compile(r"c[0-9]{1,4}")
+TICKED_NOTE = "Ticked off in the dashboard"
+
+
+def _check_set(a):
+    """Tick a task on or off by hand: `orch check done <ticket> <task> --note ...` or `orch check reopen`.
+    Proof for a person's tick is the fixed note above; only a task id of this ticket is accepted."""
+    _only(a, ("ticket", "check", "done"))
+    cid = a.get("check")
+    if not (isinstance(cid, str) and CID.fullmatch(cid)):
+        raise BadRequest("Choose a task.")
+    if type(a.get("done")) is not bool:
+        raise BadRequest("Say done or not done.")
+    if a["done"]:
+        return ["check", "done", _tid(a.get("ticket")), cid], [f"--note={TICKED_NOTE}"], []
+    return ["check", "reopen", _tid(a.get("ticket")), cid], [], []
+
+
 def _ref_add(a):
     _only(a, ("ticket", "target"))
     return ["ref", "add", _tid(a.get("ticket"))], [], [_text(a.get("target"), "reference")]
@@ -335,6 +353,7 @@ OPS = {
     "ticket.edit": _ticket_edit,
     "log": _log,
     "check.add": _check_add,
+    "check.set": _check_set,
     "run.start": _run_start,
     "run.stop": _run_stop,
     "addon.start": _addon_start,

@@ -323,8 +323,17 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .mm-chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)}
 .mm-hours{display:flex;gap:6px;flex-wrap:wrap}
 @media(max-width:720px){.mm-toggle{margin-left:0}.mm-bar{padding:10px 12px}}
-.status-sum-icon{padding:2px 6px;min-width:0}
-.status-sum-icon .chev{margin:0}
 .mm-hours .btn.ghost:hover{background:transparent;border-color:var(--text-muted)}
 .mm-hours .btn[aria-checked=true]{cursor:default}
 .consent-details{margin:8px 0}.consent-details summary{cursor:pointer;color:var(--text-muted)}
+/* owner decisions 7 Nov: task checkbox, question banner, Move to, editable-field look */
+.task-check{display:inline-grid;place-items:center;width:24px;height:24px;min-width:24px;padding:0;border:1.5px solid var(--border-strong);border-radius:6px;background:transparent;color:var(--on-brand);cursor:pointer}
+.task-check:hover{border-color:var(--brand)}.task-check:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.task-check.on{background:var(--brand);border-color:var(--brand)}
+.question-banner{align-items:center;gap:12px}.question-banner .banner-q{font-weight:600;overflow-wrap:anywhere}
+.ticket-details .ed{border-color:var(--border);padding-right:44px}
+.ticket-details .ed:after{content:"Edit";position:absolute;right:8px;top:6px;font-size:12px;color:var(--text-muted)}
+.ticket-details .ed:hover,.ticket-details .ed:focus-visible{border-color:var(--brand)}
+.status-menu>.status-sum{gap:4px}
+.board .activity .chip{white-space:normal}
+.acc-li>.send-msg{margin:6px 12px 0 0;flex:none;white-space:nowrap}

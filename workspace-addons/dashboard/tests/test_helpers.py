@@ -35,7 +35,7 @@ def call(fn, *args):
         ("Status open -> active", "Moved to Working"),
         ("Check c2 done", "Finished a task"),
         ("Status active -> done", "Moved to Done"),
-        ("Patched status (status done -> open)", "Moved to Backlog"),
+        ("Patched status (status done -> open)", "Moved to Not started"),
         ("Something the agent wrote", "Something the agent wrote"),
     ],
 )
@@ -352,6 +352,20 @@ def test_a_live_session_waiting_for_a_message_is_idle_not_working():
 
 
 @node
+def test_an_agent_that_is_starting_is_a_starting_row_not_idle_or_lost():
+    """4A: the live state 'starting' shows as its own row so the Home header can say '1 agent starting'."""
+    run = {"running": True, "state": "alive", "claim": {"agent": "claude", "live": {"state": "starting"}}}
+    rows = call("agentRows", [T], {"t_a": run}, 1793923200000)
+    assert [(r["agent"], r["state"], r["ticket"]) for r in rows] == [("claude", "starting", "t_a")]
+
+
+def test_home_counts_a_starting_ticket_and_the_sidebar_badge_has_words():
+    src = (WEB / "app.js").read_text()
+    assert "agent starting" in src and "Getting started…" in src
+    assert "needsYou(needsList().length)" in src  # 5A: the badge says what it counts
+
+
+@node
 def test_cron_in_plain_words():
     for cron, words in [
         ("30 7 * * *", "Every day at 07:30"),
@@ -442,11 +456,11 @@ def test_first_run_note_is_not_shown_as_an_answer():
 @pytest.mark.parametrize(
     "status,word",
     [
-        ("open", "Backlog"),
-        ("ready", "Ready"),
+        ("open", "Not started"),
+        ("ready", "Ready to start"),
         ("active", "Working"),
-        ("waiting", "Waiting"),
-        ("review", "Review"),
+        ("waiting", "Needs you"),
+        ("review", "Ready for review"),
         ("done", "Done"),
     ],
 )
@@ -505,11 +519,16 @@ def test_one_chip_while_a_question_is_open(ticket, live, want):
     assert call("showsAnswerChip", ticket, run) is want
 
 
-def test_the_status_menu_stays_reachable_while_a_question_is_open():
-    """Only the duplicate plain chip is dropped (icon-only summary); statusControl never returns nothing."""
+def test_the_move_to_control_is_a_visible_labelled_button():
+    """6A: one visible "Move to" button with four places; no chevron-only summary, no jargon in the choices."""
     src = (WEB / "app.js").read_text()
-    assert "if (hideStatus(t)) return null" not in src
-    assert "status-sum-icon" in src
+    assert "status-sum-icon" not in src
+    assert "'Move to'" in src
+    choices = src.split("const MOVE_CHOICES = ")[1].split("];")[0]
+    assert [w for w in ("Not started", "Working", "Ready for review", "Done") if w in choices] == [
+        "Not started", "Working", "Ready for review", "Done"
+    ]
+    assert "Backlog" not in src
 
 
 @node
@@ -556,8 +575,8 @@ def test_ticket_screens_use_plain_wording_and_one_chip():
     assert "plainWhy(row.text" in src  # Needs-you rows carry no command text
     assert "seconds + ' s ago'" not in src  # one calm time format
     assert "'Not chosen yet'" not in src.split("const agent = sessions.length")[1].split("\n")[0]
-    assert "New tickets start here." in src and "Finished tickets appear here." in src
-    assert "hideStatus = t => !snapshot && !!activityText(t)" in src
+    assert "New tickets show here." in src and "Finished tickets show here." in src
+    assert "hideStatus" not in src and "'Needs you'" in src  # 10A: short board chip; 7A: no chip beside the banner
 
 
 @node
@@ -578,3 +597,17 @@ def test_in_needs_only_for_listed_questions():
     assert call("inNeeds", rows, "t_1") is True
     assert call("inNeeds", rows, "t_2") is False
     assert call("inNeeds", rows, "t_3") is False
+
+
+@node
+@pytest.mark.parametrize("n,want", [(0, "0 need you"), (1, "1 needs you"), (2, "2 need you")])
+def test_needs_you_count_words_match_the_phone(n, want):
+    assert call("needsYou", n) == want
+
+
+def test_groups_are_in_the_phone_order_and_old_phrases_are_gone():
+    src = (WEB / "app.js").read_text()
+    choices = src.split("const STATUS_CHOICES = ")[1].split("];")[0]
+    order = [w for w in ("Needs you", "Working", "Ready for review", "Not started", "Done") if w in choices]
+    assert order == sorted(order, key=choices.index) and len(order) == 5
+    assert "question needs you" not in src and "questions need you" not in src
