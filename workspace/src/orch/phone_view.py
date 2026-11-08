@@ -445,6 +445,8 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
         "history_tail": hist,
         "attachments": atts,
     }
+    if ticket.get("started") is True:
+        view["started"] = True
     if shared_refs := reference_views(root, ticket):
         view["refs"] = shared_refs
     if agent:
@@ -489,7 +491,10 @@ def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
     working" on the phone ends when the agent stops, not only when a task changes)."""
     items = [[c.get("text"), bool(c.get("done"))] for c in ticket.get("checklist") or []]
     running = _agent(root, ticket)[1] if root is not None else None
-    return hashlib.sha256(json.dumps([items, ticket.get("status"), running]).encode()).hexdigest()[:16]
+    data = [items, ticket.get("status"), running]
+    if ticket.get("started") is True:
+        data.append(True)
+    return hashlib.sha256(json.dumps(data).encode()).hexdigest()[:16]
 
 
 def remember(root: Path, tid: str, to: str) -> None:

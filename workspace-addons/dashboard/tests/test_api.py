@@ -703,3 +703,13 @@ if sys.argv[1:3] == ["publish", "list"]:
 
 def test_links_off(server):
     assert json.loads(get(server + '/api/links')[1]) == {'links': []}
+
+
+def test_state_preserves_started(ws):
+    path = ws / ".orch" / "tickets" / "t_7k3f9q.json"
+    ticket = json.loads(path.read_text())
+    ticket.update(status="ready", started=True)
+    path.write_text(json.dumps(ticket))
+    result = next(t for t in load_state(ws)["tickets"] if t["id"] == ticket["id"])
+    assert result["started"] is True
+    assert result["status"] == "ready"

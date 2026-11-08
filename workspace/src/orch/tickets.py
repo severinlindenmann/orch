@@ -575,11 +575,13 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
 
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     def op(ticket):
+        was_started = ticket.get("started") is True
+        ticket["started"] = True
         w = ticket.get("waiting_on") or {}
         if ticket["status"] not in ("open", "ready", "review") and not (
             ticket["status"] == "waiting" and w.get("start") is True
         ):  # a start that was waiting for a sign-in (wait_for_start) is Working again
-            return NO_WRITE
+            return NO_WRITE if was_started else None
         ticket["status"] = "active"
         ticket["waiting_on"] = None
         add_history(ticket, by, f"{agent_label} started")
@@ -658,6 +660,8 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
 
     def op(ticket):
         target, actor = _finish_status(root, ticket, status, by)
+        if target in ("open", "ready") and not actor.startswith("agent:"):
+            ticket.pop("started", None)
         if target != "waiting":
             ticket["waiting_on"] = None
         elif isinstance(ticket.get("waiting_on"), dict):
@@ -1359,6 +1363,8 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         actor = by
         if "status" in obj:
             status, actor = _finish_status(root, ticket, status, by)
+            if status in ("open", "ready") and not actor.startswith("agent:"):
+                ticket.pop("started", None)
         for k in ("owner", "due", "note", "summary"):
             if k in obj:
                 _set_field(ticket, k, obj[k])

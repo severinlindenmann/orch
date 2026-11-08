@@ -434,3 +434,25 @@ def test_a_child_of_a_phone_ticket_pushes_its_result_without_mobile_mode(proj, r
     _review(proj, child)
     assert child in phone_view.sync(proj)
     assert conn.sent[-1]["body"]["update"]["kind"] == "result" and conn.sent[-1]["ticket"] == child
+
+
+@pytest.mark.parametrize("started", [None, False, True])
+def test_view_started_optional_and_schema_valid(proj, new_ticket, started):
+    ticket = tickets.load(proj, new_ticket())
+    if started is not None:
+        ticket["started"] = started
+    view = phone_view.build(proj, ticket, [])
+    assert_valid(view)
+    assert view.get("started") is True if started is True else "started" not in view
+
+
+def test_view_started_signature_preserves_old_hash():
+    import hashlib
+
+    ticket = {"status": "ready", "checklist": [{"text": "Task", "done": False}]}
+    old = hashlib.sha256(json.dumps([[["Task", False]], "ready", None]).encode()).hexdigest()[:16]
+    assert phone_view._tasks_sig(ticket) == old
+    ticket["started"] = False
+    assert phone_view._tasks_sig(ticket) == old
+    ticket["started"] = True
+    assert phone_view._tasks_sig(ticket) != old
