@@ -166,23 +166,24 @@ def build_argv(op, args) -> list[str]:
     return [*words, *flags, "--by", BY.get(op) or actor(), "--json", *(["--", *tail] if tail else [])]
 
 
+# Used only when orch's own list can not be read (orch.adapters.human_environ is the one source).
+_AGENT_NAMES = ("ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET", "ORCH_VIA", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
+_AGENT_PREFIXES = ("CODEX_",)
+
+
+def _without_agent(environ) -> dict:
+    try:
+        from orch.adapters import human_environ
+
+        return human_environ(environ)
+    except Exception:  # noqa: BLE001 - an old orch or a bad adapter file: still never fail open
+        return {k: v for k, v in environ.items() if k not in _AGENT_NAMES and not k.startswith(_AGENT_PREFIXES)}
+
+
 def human_env(root: Path, orch_bin: str) -> dict:
     """Page actions are the person's actions, even if an agent launched the server: the agent tools' own
     variables (and ORCH_AGENT/RUN/TICKET) are left out, or orch would count the click as the agent's."""
-    names = {"ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET"}
-    prefixes: list[str] = []
-    try:
-        from orch.adapters import _registry
-
-        for adapter in _registry().values():
-            detection = adapter.get("detect") or {}
-            names.update(detection.get("env_any") or [])
-            if detection.get("env_prefix"):
-                prefixes.append(detection["env_prefix"])
-    except ImportError:
-        pass  # without the orch package the fixed names still go
-    env = {k: v for k, v in os.environ.items() if k not in names and not k.startswith(tuple(prefixes))}
-    return {**env, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "focus"}
+    return {**_without_agent(os.environ), "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "focus"}
 
 
 def orch(root: Path, orch_bin: str | None, argv: list[str], timeout: int = 60) -> tuple[int, str, str]:

@@ -303,7 +303,7 @@ def test_a_live_session_that_ends_with_input_waiting_starts_the_next_run_once(pr
     import sys
 
     started = []
-    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv: started.append(argv) or True)
+    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: started.append(argv) or True)
     tid = _new(run)
     for _ in range(2):  # the second time the same item waits: an agent that quits at once is not restarted
         rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
@@ -321,7 +321,7 @@ def test_a_stopped_live_session_does_not_start_again(proj, run, monkeypatch):
     import sys
 
     started = []
-    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv: started.append(argv) or True)
+    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: started.append(argv) or True)
     tid = _new(run)
     rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
     runs.pending_add(proj, tid, "human:t", "message", "One more thing")
@@ -330,3 +330,114 @@ def test_a_stopped_live_session_does_not_start_again(proj, run, monkeypatch):
     runs._write(proj, rec)
     runs.wrap_live(proj, rec["run"], tid, "claude", [sys.executable, "-c", "pass"], None)
     assert started == []
+
+
+def _ended_live(proj, tid, text="Answer to your question q1: Blue"):
+    import sys
+
+    rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+    if text:
+        runs.pending_add(proj, tid, "human:t", "answer", text)
+    runs.wrap_live(proj, rec["run"], tid, "claude", [sys.executable, "-c", "pass"], None)
+
+
+def test_a_failed_restart_can_be_tried_again(proj, run, monkeypatch):
+    """Delta F5-1: a spawn that did not start clears the mark, so the waiting answer can start the agent."""
+    tries = []
+    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: tries.append(argv) and False)
+    tid = _new(run)
+    _ended_live(proj, tid)
+    assert len(tries) == 1 and not any(i.get("restarted") for i in runs.undelivered(proj, tid))
+    assert _status(proj, tid) == "active"  # still waiting to be read: Working, not Ready
+
+
+def test_a_new_message_restarts_even_after_an_earlier_one_did(proj, run, monkeypatch):
+    """Delta F5-1: the once-only mark is per item, not for every later message."""
+    started = []
+    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: started.append(argv) or True)
+    tid = _new(run)
+    _ended_live(proj, tid)
+    _ended_live(proj, tid, text=None)  # the same item again: no second restart
+    _ended_live(proj, tid, text="One more thing")
+    assert len(started) == 2
+
+
+def test_the_restart_is_not_the_ended_runs_own_call(proj, run, monkeypatch):
+    """Delta F5-3: the detached start gets no agent or run variables; it is marked via=restart."""
+    envs = []
+    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: envs.append(env) or True)
+    for k, v in {
+        "ORCH_RUN": "r_abcdefgh",
+        "ORCH_TICKET": "t_abcdef",
+        "ORCH_AGENT": "claude",
+        "CLAUDECODE": "1",
+    }.items():
+        monkeypatch.setenv(k, v)
+    tid = _new(run)
+    _ended_live(proj, tid)
+    (env,) = envs
+    assert env["ORCH_VIA"] == "restart"
+    assert not {"ORCH_RUN", "ORCH_TICKET", "ORCH_AGENT", "CLAUDECODE"} & set(env)
+
+
+def test_no_ready_flicker_while_the_restart_is_on_its_way(proj, run, monkeypatch):
+    """Delta F5-2: settle is skipped when the next run was started."""
+    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: True)
+    called = []
+    monkeypatch.setattr(runs, "settle", lambda *a, **k: called.append(a))
+    tid = _new(run)
+    _ended_live(proj, tid)
+    assert called == []
+
+
+@pytest.mark.skipif(not hasattr(os, "waitid"), reason="os.waitid is not available here")
+def test_kill_tree_keeps_the_exit_status_of_our_child():
+    """R1: kill_tree looks at its ended child without reaping it (a reaped Popen reports 0)."""
+    import subprocess
+
+    p = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    time.sleep(0.1)
+    runs.kill_tree(p.pid)
+    assert p.wait(timeout=5) < 0
+
+
+def test_the_state_lock_leaves_a_later_holders_lock_alone(proj):
+    """Delta F6-1: a holder whose lock was taken away never deletes the lock someone else made since."""
+    lock = phone_view.net.secrets_dir(proj) / "phone-views.lock"
+    with phone_view._state_locked(proj):
+        lock.unlink()
+        lock.write_text("someone-else")
+    assert lock.read_text() == "someone-else"
+
+
+def test_a_failed_send_does_not_undo_a_newer_claim(proj, run, monkeypatch):
+    """Delta F6-2: the undo is compare and set on the claimed signature."""
+    from orch import relay
+
+    tid = _new(run)
+    phone_view.update_state(
+        proj, lambda st: st["tickets"].update({tid: {"to": "phones", "sig": "x", "at": 0, "status": "open"}})
+    )
+    tickets.set_status(proj, tid, "review", "human:t")
+
+    def newer_then_fail(root, to, text, t, kind, **k):
+        phone_view.update_state(root, lambda st: st["tickets"][t].update(sig="newer", status="review"))
+        raise Refused("The relay could not be reached.")
+
+    monkeypatch.setattr(relay, "send_text", newer_then_fail)
+    phone_view.sync(proj)
+    rec = phone_view.load_state(proj)["tickets"][tid]
+    assert rec["sig"] == "newer" and rec["status"] == "review"
+
+
+def test_an_undo_never_leaves_a_status_of_none(proj, run, monkeypatch):
+    """Delta F6-3: a ticket first seen with no status before: the key is removed, not set to None."""
+    from orch import relay
+
+    tid = _new(run)
+    phone_view.update_state(
+        proj, lambda st: st["tickets"].update({tid: {"to": "phones", "sig": "x", "at": 0}})
+    )
+    monkeypatch.setattr(relay, "send_text", lambda *a, **k: (_ for _ in ()).throw(Refused("away")))
+    phone_view.sync(proj)
+    assert "status" not in phone_view.load_state(proj)["tickets"][tid]
