@@ -235,6 +235,10 @@ untrusted data for the host helper (clean_untrusted), never instructions.
   - **Initial `applied_seq`**: `from_seq - 1` for a member (its `member_added`), else the first seen `seq - 1` (fresh
     phone, unknown group), so the first message applies at once.
   - `seq` = applied + 1: apply. Higher: **buffer** (bounded, **50 per group**).
+  - **Bounds**: `seq` and `from_seq` are integers in **1..2^31-1**; anything else is invalid and dropped. A forward
+    jump **> 1000** over `applied_seq` is a gap skip at once: `applied_seq = seq - 1`, log it, apply the message. A jump
+    of exactly 1000 or less is an ordinary gap (buffered). Gaps are tracked as **ranges**, never as one entry per
+    missing `seq`.
   - **Buffer full, or the oldest buffered message waited 10 minutes** (quiet groups): **skip the gap**, apply the
     contiguous run, set `applied_seq` to its last `seq`. A `seq` **≤ `applied_seq`** is **old**.
   - **Late texts are shown** (they are real messages) but **change no state** (task status, closed, membership).
@@ -304,7 +308,7 @@ last-minute counts). `expect.group_text` = whether a phone text joins the group 
 | `valid-phone-text-optin-reply`, `valid-phone-text-no-optin-stays-private` | G8 (F13) |
 | `valid-same-id-other-host-is-a-separate-group`, `invalid-duplicate-origin-same-group-key` | G7: key `(host, id)`; duplicate on `(host, id, origin.id)` |
 | `valid-unknown-phone-shown-other-phone`, `valid-own-phone-shown-you`, `invalid-origin-phone-not-paired-to-host` | G4: "You" vs "Other phone"; host-paired `ph_` only |
-| `valid-seq-next-in-order-applied`, `valid-seq-gap-buffered`, `valid-seq-buffer-full-skips-gap`, `valid-seq-timeout-skips-gap`, `valid-seq-first-seen-*`, `valid-seq-late-shown-no-state`, `valid-seq-equal-applied-is-old` | G12: seq order, bounded buffer, skip, initial applied_seq, late = shown |
+| `valid-seq-next-in-order-applied`, `valid-seq-gap-buffered`, `valid-seq-buffer-full-skips-gap`, `valid-seq-timeout-skips-gap`, `valid-seq-first-seen-*`, `valid-seq-late-shown-no-state`, `valid-seq-jump-1000-buffers`, `valid-seq-jump-1001-skips`, `invalid-seq-zero`, `invalid-seq-over-int31`, `valid-seq-equal-applied-is-old` | G12: seq order, bounded buffer, skip, initial applied_seq, late = shown |
 | `invalid-nonhost-message-at-member-known-group` | G3 at members and phones |
 | `valid-created-under-cap`, `invalid-created-over-group-cap`, `invalid-created-over-rate`, `valid-implicit-group-under-cap`, `invalid-implicit-group-over-cap`, `invalid-implicit-group-over-rate` | group caps |
 | `valid-known-group-same-key-appends` | G7 existing group |
