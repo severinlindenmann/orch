@@ -33,8 +33,21 @@ from orch.procs import pid_started
 LEASE_SECONDS = 30 * 60
 LOCK_STALE_SECONDS = 30
 MAX_DRAIN_TURNS = 10
+HANG_AGAIN = (
+    "The agent hung before it could read the latest input; it is delivered again after a hang with the next "
+    "start. Check if it already acted on it."
+)
+START_WATCHDOG_SECONDS = 90  # a streaming agent that prints nothing for this long after its start is hung
 PENDING_KINDS = ("answer", "message", "event", "text")
 _ALPHA = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+
+def start_watchdog_seconds() -> float:
+    """START_WATCHDOG_SECONDS; ORCH_RUN_START_WATCHDOG_SECONDS changes it (tests)."""
+    try:
+        return float(os.environ.get("ORCH_RUN_START_WATCHDOG_SECONDS", START_WATCHDOG_SECONDS))
+    except ValueError:
+        return START_WATCHDOG_SECONDS
 
 
 def lease_seconds() -> float:
@@ -324,19 +337,16 @@ def undelivered(root: Path, tid: str) -> list[dict]:
     return [i for i in _pending_read(root, tid) if not i.get("delivered_at")]
 
 
-def _human_author(by, via, kind) -> bool:
-    """An ALLOWLIST (also for older lines without the field): a person's answer or message, by human:<name> or
-    from the phone. Everything else (agent:*, orch itself, a background host, an event or a start request)
-    is not a person's input."""
+def _human_author(by, via, kind, phone=None) -> bool:
+    """An ALLOWLIST (also for older lines without the field): a person's answer or message, by human:<name>,
+    or a phone text that carries the sender's phone id (only the relay's phone-text path stores it). A bare
+    name, an empty by, orch, a host, an agent, an event or a start request is never a person's input."""
     if kind not in ("answer", "message", "text"):
         return False
-    by = str(by)
-    if by.startswith("human:"):
+    by = str(by or "")
+    if by.startswith("human:") and len(by) > len("human:"):
         return True
-    # from the phone: only with a person as the author (the phone's name or its ph_ id), never orch itself,
-    # a host or an agent that passes the word on
-    system = by == "orch" or by.startswith(("agent:", "automation:", "system:"))
-    return via == "phone" and not system and (by.startswith("ph_") or ":" not in by)
+    return via == "phone" and isinstance(phone, str) and PHONE_ID_RE.fullmatch(phone) is not None
 
 
 def human_waiting(root: Path, tid: str) -> list[dict]:
@@ -347,7 +357,7 @@ def human_waiting(root: Path, tid: str) -> list[dict]:
         if i.get("via") in ("start", "slots"):
             continue
         # the stored flag is never trusted alone: the allowlist is checked again (older lines have no flag)
-        rule = _human_author(i.get("by", ""), i.get("via"), i.get("kind"))
+        rule = _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone"))
         if rule and i.get("human") in (True, None):
             out.append(i)
     return out
@@ -362,8 +372,19 @@ def _drop_start_prompts_locked(root: Path, tid: str) -> None:
         _pending_write(root, tid, keep)
 
 
+PHONE_ID_RE = re.compile(r"ph_[A-Za-z0-9_-]{1,64}")
+
+
 def _pending_add_locked(
-    root: Path, tid: str, by: str, kind: str, text: str, via: str | None, pid: str | None
+    root: Path,
+    tid: str,
+    by: str,
+    kind: str,
+    text: str,
+    via: str | None,
+    pid: str | None,
+    *,
+    phone: str | None = None,
 ) -> dict:
     if kind not in PENDING_KINDS:
         raise Refused(f"Input kind must be one of: {', '.join(PENDING_KINDS)}.")
@@ -384,8 +405,10 @@ def _pending_add_locked(
         "by": by,
         "kind": kind,
         "text": text,
-        "human": not tool and _human_author(by, via, kind),
     }
+    if phone is not None and not tool and PHONE_ID_RE.fullmatch(str(phone)):
+        item["phone"] = phone  # the relay's phone-text path: the sender's phone id
+    item["human"] = not tool and _human_author(by, via, kind, item.get("phone"))
     if via:
         item["via"] = via
     _pending_write(root, tid, items + [item])
@@ -400,10 +423,13 @@ def pending_add(
     text: str,
     via: str | None = None,
     pid: str | None = None,
+    *,
+    phone: str | None = None,
 ) -> dict:
-    """Queue input for a ticket (under the ticket's run lock) and flag a running claim."""
+    """Queue input for a ticket (under the ticket's run lock) and flag a running claim. phone: the sender's
+    phone id, passed only by the relay's phone-text path."""
     with locked(root, tid):
-        item = _pending_add_locked(root, tid, by, kind, text, via, pid)
+        item = _pending_add_locked(root, tid, by, kind, text, via, pid, phone=phone)
         rec = read(root, tid)
         if rec and not rec.get("pending"):
             rec["pending"] = True
@@ -421,6 +447,24 @@ def mark_delivered_locked(root: Path, tid: str, ids: list[str]) -> None:
     if rec is not None:
         rec["pending"] = any(not i.get("delivered_at") for i in items)
         _write(root, rec)
+
+
+def undeliver(root: Path, tid: str, ids: list[str]) -> bool:
+    """The agent may never have read these (its start hung): they wait again for the next start, not lost.
+    Returns True when something was put back."""
+    if not ids:
+        return False
+    with locked(root, tid):
+        items = _pending_read(root, tid)
+        for i in items:
+            if i["id"] in ids:
+                i.pop("delivered_at", None)
+        _pending_write(root, tid, items)
+        rec = read(root, tid)
+        if rec is not None:
+            rec["pending"] = True
+            _write(root, rec)
+    return True
 
 
 def mark_delivered(root: Path, tid: str, ids: list[str]) -> None:
@@ -611,6 +655,16 @@ def _items_text(items: list[dict]) -> str:
     return "\n".join(f"- {i['by']}: {_clip(i['text'], 1500)}" for i in items)
 
 
+def _done_when_plan(ticket: dict) -> list[str]:
+    if not ticket.get("done_when") or ticket.get("checklist"):
+        return []
+    return [
+        "The person described what should be true when it is done: "
+        f"{_clip(ticket['done_when'], 2000)}. Turn this into checks with `orch check add` "
+        "(one check per thing that must be true), then start."
+    ]
+
+
 def fresh_prompt(ticket: dict, items: list[dict]) -> str:
     tid = ticket["id"]
     out = [
@@ -623,6 +677,7 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]
+    out[1:1] = _done_when_plan(ticket)
     if ticket.get("note"):  # what the person asked for, in their words (not only in `orch ticket show`)
         out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")
     if ticket.get("summary"):
@@ -659,6 +714,7 @@ def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str
         parts.append("New input:\n" + _items_text(items))
     if not parts:
         parts.append(f"Continue orch ticket {tid}: {_clip(ticket.get('title', ''), 200)}.")
+    parts.extend(_done_when_plan(ticket))
     return "\n\n".join(parts)[:12000]
 
 
@@ -686,6 +742,8 @@ def plan(
     a = adapters.load(name, root)
     items = undelivered(root, tid) if items is None else items
     sid = None if fresh else tickets.sessions_for(ticket, name, host())
+    if sid and adapters.transcript_exists(name, sid, root) is False:
+        sid = None  # the tool never saved that conversation: resuming it can only fail, start fresh
     # a one-shot run streams its steps into its log (Focus shows them; the log is never empty until the end)
     v = {
         "allow": adapters.allow_patterns(allow),
@@ -873,9 +931,19 @@ def open_log(path: Path):
 
 
 def _run_turn(
-    argv: list[str], root: Path, stdin: str | None, log: Path, env: dict, on_started=None, on_proc=None
+    argv: list[str],
+    root: Path,
+    stdin: str | None,
+    log: Path,
+    env: dict,
+    on_started=None,
+    on_proc=None,
+    watchdog: float | None = None,
+    flags: dict | None = None,
 ):
-    """One agent process. Returns (exit code, the output of this turn)."""
+    """One agent process. Returns (exit code, the output of this turn). watchdog: an agent that wrote no
+    output within that many seconds is hung: its process tree is ended (kill_tree: SIGTERM, then SIGKILL)
+    and flags["hung"] is set."""
     log.parent.mkdir(parents=True, exist_ok=True)
     start = log.stat().st_size if log.exists() else 0
     with open_log(log) as out:
@@ -900,6 +968,17 @@ def _run_turn(
             with contextlib.suppress(OSError):
                 proc.stdin.write(stdin.encode("utf-8"))
                 proc.stdin.close()
+        if watchdog:
+            end = time.monotonic() + watchdog
+            while proc.poll() is None:
+                if log.stat().st_size > start:
+                    break  # it is alive: no watch once it said anything
+                if time.monotonic() > end:
+                    kill_tree(proc.pid)
+                    if flags is not None:
+                        flags["hung"] = True
+                    break
+                time.sleep(0.2)
         rc = proc.wait()
     with open(log, "rb") as f:
         f.seek(start)
@@ -986,10 +1065,14 @@ def wrap(
         current["proc"] = proc
         set_process_fields(root, tid, run, agent_pid=proc.pid, agent_pid_started=pid_started(proc.pid))
 
+    # only an agent that streams its steps is expected to say something at once; others may work quietly
+    streams = adapters.caps(name, root).get("stream") and mode == "oneshot"
+    watch = start_watchdog_seconds() if streams else None
     turns = 0
     while True:
         ids = list(item_ids or [])
         turn_items = [i for i in _pending_read(root, tid) if i["id"] in ids]
+        flags: dict = {}
         rc, out = _run_turn(
             argv,
             root,
@@ -998,13 +1081,32 @@ def wrap(
             env,
             (lambda ids=ids: mark_delivered(root, tid, ids)) if ids else None,
             on_proc,
+            watch,
+            flags,
         )
-        if resumed and rc != 0 and adapters.session_missing(name, out, root):
+        if flags.get("hung"):  # no sign of life: stop it and start fresh once (its session was never saved)
+            with contextlib.suppress(Exception):
+                said = f"The agent showed no sign of life for {round(watch)} seconds. orch stopped it and "
+                tickets.log(root, tid, said + "started it again fresh.", "orch")
+            p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
+            argv, stdin, new_session, resumed = p["argv"], p["stdin"], p["session"], False
+            flags.clear()
+            rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc, watch, flags)
+        elif resumed and rc != 0 and adapters.session_missing(name, out, root):
             # only "that session does not exist" starts fresh; the input of this turn goes in with it
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
-            rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc)
+            flags.clear()
+            rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc, watch, flags)
+        if flags.get("hung"):  # the last try hung too: no further try; this turn's input waits for the next
+            again = [i["id"] for i in turn_items if i.get("via") != "start"]  # a start prompt is made anew
+            if undeliver(root, tid, again):
+                with contextlib.suppress(Exception):
+                    tickets.log(root, tid, HANG_AGAIN, "orch")
         sid = new_session or adapters.parse_session(name, out, root)
+        unsaved = flags.get("hung") or adapters.transcript_exists(name, sid or "", root) is False
+        if sid and new_session and unsaved:
+            sid = None  # orch chose the id, but the tool never saved that conversation: never resume it
         if not sid and resumed and rc == 0:  # a continued conversation: it was used now ("last worked")
             sid = tickets.sessions_for(tickets.load(root, tid), name, host())
         if sid:
@@ -1022,7 +1124,8 @@ def wrap(
                     )
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, f"The agent stopped with an error: {why}", f"agent:{name}")
-        if release(root, tid, run, keep_if_pending=turns <= MAX_DRAIN_TURNS)["released"]:
+        drain = turns <= MAX_DRAIN_TURNS and not flags.get("hung")
+        if release(root, tid, run, keep_if_pending=drain)["released"]:
             # ended without finishing or asking: not Working any more (anything still waiting stays queued)
             settle(root, tid, f"agent:{name}", ignore_input=True)
             return 0 if rc == 0 else rc

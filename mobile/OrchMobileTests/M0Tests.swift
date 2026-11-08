@@ -394,6 +394,19 @@ final class ConversationTests: XCTestCase {
                                     body: TextBody(text: "Ready for your review: Test ticket", update: TextUpdate(kind: "result"), ticketView: TicketSnapshot(status: "review", running: false))))
         XCTAssertEqual(receipt(result), .delivered)
         XCTAssertTrue(ConversationBuilder.items(topic, result).contains { $0.id == "m_r" && $0.side == .them }, "the result shows in the ticket chat")
+        // a question for the owner ends it too (lane C rehearsal: "✓✓ Working" while the topic said Needs you):
+        // a question update, a snapshot with status waiting, or the question itself
+        for body in [TextBody(text: "Which colour?", update: TextUpdate(kind: "question")),
+                     TextBody(text: "Waiting for your answer", update: TextUpdate(kind: "note"), ticketView: TicketSnapshot(status: "waiting", running: true))] {
+            var asked = d
+            asked.messages.append(text("m_q", from: ws, to: me, at: "2026-11-08T08:05:30Z", ticket: "t_dem2", body: body))
+            XCTAssertEqual(receipt(asked), .delivered, body.text)
+        }
+        var question = d
+        question.questions = [Question(message: QuestionMessage(schema: "orch.relay.message.v1", id: "m_qq", from: ws, to: "phones", type: "question", createdAt: "2026-11-08T08:05:40Z", ticket: "t_dem2",
+                                                                body: QuestionBody(questionId: "q1", title: "T", text: "Which?", options: ["A", "B"], recommended: nil)),
+                                       workspaceName: "Pilatus")]
+        XCTAssertEqual(receipt(question), .delivered)
         // a later pick-up of the same text (a new run) shows Working again
         result.messages.append(text("m_w2", from: ws, to: me, at: "2026-11-08T08:07:00Z", ticket: "t_dem2", body: TextBody(text: "Working on it", update: TextUpdate(kind: "working")), replyTo: "m_p"))
         XCTAssertEqual(receipt(result), .started)
@@ -405,6 +418,46 @@ final class ConversationTests: XCTestCase {
                                body: TextBody(text: "Tasks", update: TextUpdate(kind: "note"), ticketView: TicketSnapshot(status: "ready", running: false)))]
         XCTAssertEqual(receipt(fresh), .delivered)
     }
+    /// General "<ws> is working…" ends on a later workspace text or after the timeout, without a new message.
+    func testGeneralWorkingLineEndsOnReplyOrTimeout() throws {
+        let g = ConversationID.general(workspace: ws)
+        var d = ConversationInputs()
+        d.messages = [text("m_a", from: me, to: ws, at: "2026-11-08T10:00:00Z", body: TextBody(text: "hello", general: true), delivered: "2026-11-08T10:00:01Z"),
+                      text("m_w", from: ws, to: me, at: "2026-11-08T10:00:10Z", body: TextBody(text: "Working on it", update: TextUpdate(kind: "working"), general: true), replyTo: "m_a")]
+        let items = ConversationBuilder.items(g, d)
+        XCTAssertEqual(items.last?.workingSince, "2026-11-08T10:00:10Z")
+        let t0 = try XCTUnwrap(ConversationRules.date("2026-11-08T10:00:10Z"))
+        XCTAssertEqual(ConversationRules.generalWorkingTimeout, 600, "10 min without an ack/working (group-chat contract #294 §1)")
+        XCTAssertTrue(ConversationRules.generalWorking(items, now: t0.addingTimeInterval(599)))
+        XCTAssertTrue(ConversationRules.generalWorking(items, now: t0.addingTimeInterval(60)))
+        XCTAssertFalse(ConversationRules.generalWorking(items, now: t0.addingTimeInterval(ConversationRules.generalWorkingTimeout + 1)), "default timeout")
+        XCTAssertFalse(ConversationRules.generalWorking(items, now: t0.addingTimeInterval(11), timeout: 10), "overridable timeout")
+        // the "Working" receipt on the text follows the same rule: Working before the timeout, plain ✓✓ after it
+        func shown(_ its: [ConvItem], _ after: TimeInterval, timeout: TimeInterval = ConversationRules.generalWorkingTimeout) -> Receipt? {
+            ConversationRules.endingGeneralReceipts(its, now: t0.addingTimeInterval(after), timeout: timeout).first { $0.id == "m_a" }?.receipt
+        }
+        XCTAssertEqual(shown(items, 60), .started)
+        XCTAssertEqual(shown(items, ConversationRules.generalWorkingTimeout), .delivered); XCTAssertEqual(shown(items, ConversationRules.generalWorkingTimeout)?.ticks, 2)
+        XCTAssertEqual(shown(items, 11, timeout: 10), .delivered)
+        for after in [60.0, ConversationRules.generalWorkingTimeout + 1] {   // label and line agree
+            let ended = ConversationRules.endingGeneralReceipts(items, now: t0.addingTimeInterval(after))
+            XCTAssertEqual(ended.last?.receipt == .started, ConversationRules.generalWorking(ended, now: t0.addingTimeInterval(after)))
+        }
+        // a later ack/working restarts the clock
+        d.messages.append(text("m_w2", from: ws, to: me, at: "2026-11-08T10:05:00Z", body: TextBody(text: "Still on it", update: TextUpdate(kind: "working"), general: true), replyTo: "m_a"))
+        let again = ConversationBuilder.items(g, d)
+        XCTAssertTrue(ConversationRules.generalWorking(again, now: t0.addingTimeInterval(ConversationRules.generalWorkingTimeout + 1)))
+        XCTAssertEqual(ConversationRules.endingGeneralReceipts(again, now: t0.addingTimeInterval(ConversationRules.generalWorkingTimeout + 1)).first { $0.id == "m_a" }?.receipt, .started)
+        // the workspace's answer ends it at once
+        d.messages.append(text("m_r", from: ws, to: me, at: "2026-11-08T10:06:00Z", body: TextBody(text: "Hi!", general: true)))
+        XCTAssertFalse(ConversationRules.generalWorking(ConversationBuilder.items(g, d), now: t0.addingTimeInterval(60)))
+        XCTAssertEqual(ConversationRules.endingGeneralReceipts(ConversationBuilder.items(g, d), now: t0.addingTimeInterval(60)).first { $0.id == "m_a" }?.receipt,
+                       .delivered, "the reply ends the receipt too")
+        // only acked/picked-up texts count; fractional seconds parse too
+        XCTAssertFalse(ConversationRules.generalWorking([ConvItem(id: "x", at: "2026-11-08T10:00:00Z", side: .me)], now: t0))
+        XCTAssertNotNil(ConversationRules.date("2026-11-08T10:00:10.123Z"))
+    }
+
     func testSentItemInOutboxIsNotShownTwice() {
         var d = ConversationInputs()
         d.outbox = [OutboxItem(clientId: "c1", phone: me, kind: .send, workspace: ws, createdAt: "2026-11-06T10:00:00Z", general: true, text: "x", sentMessageId: "m_a")]

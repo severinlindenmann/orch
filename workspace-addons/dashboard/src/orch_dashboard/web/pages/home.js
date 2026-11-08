@@ -8,8 +8,8 @@ function changeUnavailable() {
 function changeError(result) {
   return result.status === 0 ? "Can't reach orch. Your change was not sent." : result.text;
 }
-function ticketTitle(t) {
-  return h('div', {className:'row ticket-title'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, typeof t.key === 'string' ? h('span', {className:'meta mono'}, t.key + ' ') : null, clean(t.title))), statusChip(t));
+function ticketTitle(t, needsYou = false) {
+  return h('div', {className:'row ticket-title'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, typeof t.key === 'string' ? h('span', {className:'meta mono'}, t.key + ' ') : null, clean(t.title))), needsYou || (questions(t).length && shown(t).status !== 'done') ? chip('Needs you', 'attn') : statusChip(t));
 }
 function parentLine(t) {
   const parent = ticketOf(t.parent || tickets().find(p => array(p.children).includes(t.id))?.id);
@@ -18,7 +18,7 @@ function parentLine(t) {
 function ticketRow(t) {
   return h('div', {className:'card-row home-ticket', 'data-key':'ticket-' + t.id}, ticketTitle(t));
 }
-function needRow(row, newest) {
+function needRow(row, newest, questionCount = 1) {
   const t = ticketOf(row.ticket), choice = window.DashHelpers.needAction(row);
   const options = array(row.answer?.options), key = 'need-' + row.id;
   let actions = null;
@@ -46,7 +46,8 @@ function needRow(row, newest) {
   }
   const question = array(t?.questions).find(q => q.id === row.answer?.question)?.text || row.title || row.text;
   return h('div', {className:'card-row home-need', 'data-key':key, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null},
-    t ? ticketTitle(t) : h('h3', {}, clean(row.title)), h('p', {}, clean(window.DashHelpers.plainWhy(question, 'The agent'))),
+    t ? ticketTitle(t, true) : h('h3', {}, clean(row.title)),
+    questionCount > 1 ? h('p', {className:'meta'}, questionCount + ' questions') : null, h('p', {}, clean(window.DashHelpers.plainWhy(question, 'The agent'))),
     h('p', {className:'meta'}, 'Next step · ', options.length ? 'Choose an answer' : choice.label), actions, t ? parentLine(t) : null);
 }
 function workingRow(t) {
@@ -54,7 +55,7 @@ function workingRow(t) {
   const claim = state.runs?.[t.id]?.claim, task = tasks.find(task => !task.done);
   return h('div', {className:'card-row home-work', 'data-key':'ticket-' + t.id}, ticketTitle(t),
     task ? h('p', {}, clean(task.text || task.title)) : null,
-    h('p', {className:'meta'}, [capitalise(name(claim?.label || claim?.agent || t.owner)), age(claim?.started_at)].filter(Boolean).join(' · ')),
+    h('p', {className:'meta'}, [window.DashHelpers.agentLabel ? window.DashHelpers.agentLabel(state.settings, claim) : capitalise(name(claim?.label || claim?.agent || t.owner)), age(claim?.started_at)].filter(Boolean).join(' · ')),
     tasks.length ? h('div', {className:'segments', role:'progressbar', 'aria-label':'Tasks done', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done}, tasks.map(task => h('span', {className:task.done ? 'complete' : ''}))) : null,
     h('div', {className:'row'}, h('span', {className:'meta grow'}, done + ' of ' + tasks.length + ' tasks done'), h('a', {className:'btn ghost sm', href:href(t.id)}, 'Watch →')));
 }
@@ -84,8 +85,17 @@ function messageTicket(text) {
 function homeSection(key, title, body) {
   return h('section', {className:'home-section', 'data-key':key, id:key === 'needs-you' ? key : null}, h('h2', {}, title), h('div', {className:'card'}, body));
 }
+function homeNeeds(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = row.ticket || row.id;
+    if (!groups.has(key)) groups.set(key, {row, count:0});
+    groups.get(key).count++;
+  }
+  return [...groups.values()];
+}
 function home() {
-  const needs = needsList(), all = tickets();
+  const needs = needsList(), groupedNeeds = homeNeeds(needs), all = tickets();
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
   const review = sorted(all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id)));
   const used = new Set([...needs.map(n => n.ticket), ...working.map(t => t.id), ...review.map(t => t.id)]);
@@ -96,13 +106,13 @@ function home() {
   const message = array(state.general?.history).filter(e => e.via === 'phone' && e.text).sort((a,b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0))[0];
   const text = message && String(message.text).replace(/^From [^:]{1,100}: /, '');
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-  const agent = capitalise(name(state.runs?.[working[0]?.id]?.claim?.label || state.runs?.[working[0]?.id]?.claim?.agent || array(state.settings?.agents).find(a => a.chosen)?.label || 'Agent'));
+  const agent = window.DashHelpers.agentLabel ? window.DashHelpers.agentLabel(state.settings, state.runs?.[working[0]?.id]?.claim) : capitalise(name(state.runs?.[working[0]?.id]?.claim?.label || state.runs?.[working[0]?.id]?.claim?.agent || array(state.settings?.agents).find(a => a.chosen)?.label || 'Agent'));
   const hour = now().getHours();
   const stopped = array(state.services).some(s => s.running === false);
   const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;
   return fragment(heading('Good ' + (hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'), now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + needs.length + (needs.length === 1 ? ' question for you · ' : ' questions for you · ') + agent + ' is working on ' + working.length + (working.length === 1 ? ' ticket' : ' tickets')), banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      homeSection('needs-you', 'Needs you (' + needs.length + ')', needs.length ? needs.map(n => needRow(n, newest)) : emptyRow('Nothing needs you right now.')),
+      homeSection('needs-you', 'Needs you (' + groupedNeeds.length + ')', groupedNeeds.length ? groupedNeeds.map(({row, count}) => needRow(row, newest, count)) : emptyRow('Nothing needs you right now.')),
       homeSection('working-now', 'Working now', working.length ? working.map(workingRow) : emptyRow('No tickets are being worked on.')),
       homeSection('check-result', 'Check result (' + review.length + ')', review.length ? review.map(resultRow) : emptyRow('No results to check.')),
       h('div', {className:'card card-row', 'data-key':'everything-else'}, h('span', {className:'grow muted'}, 'Everything else (' + all.filter(t => activeTicket(t) && !used.has(t.id)).length + ')'), h('a', {className:'btn ghost sm', href:'#tickets'}, 'View Tickets →'))),

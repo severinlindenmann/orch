@@ -2,8 +2,8 @@
 
 Built from the ticket file: title, status, tasks, the last 30 history lines in plain words, and
 the proof marked for the phone (evidence with role result or check: files are uploaded as relay
-blobs, URLs and PRs become links) plus the ticket's refs. Secrets are cut from every text before
-it leaves. No other file content is ever sent.
+blobs, URLs and PRs become links), artifacts named in questions, options or the summary, and the
+ticket's refs. Secrets are cut from display text before it leaves.
 
 It rides on update texts to phones (result, failure, stopped, question) and, quietly (kind note,
 never pushed), when the tasks of a ticket the phone follows change: `sync` runs on every relay
@@ -34,6 +34,7 @@ DEBOUNCE = 20  # seconds between two quiet snapshots of one ticket
 BLOB_DAYS = 30  # re-upload a cached blob after this (the relay deletes blobs after 90 days)
 HISTORY = 30
 ATTACHMENTS = 50
+ARTIFACT_BYTES = 20 * 1024 * 1024
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic"}
 
 _SECRET_PATTERNS = [
@@ -53,6 +54,59 @@ _SECRET_KV = re.compile(
 _SECRET_PARAM = re.compile(r"(?i)token|secret|key|sig|signature|password|passwd|auth|code|credential")
 HIDDEN = "[hidden]"
 _TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
+
+
+_IMAGE_KINDS = {  # magic bytes -> the file extensions that type may carry
+    b"\x89PNG\r\n\x1a\n": (".png",),
+    b"\xff\xd8\xff": (".jpg", ".jpeg"),
+    b"GIF87a": (".gif",),
+    b"GIF89a": (".gif",),
+}
+
+
+_PACKED_MAGIC = (b"%PDF", b"PK\x03\x04", b"\xd0\xcf\x11\xe0")
+
+
+def _is_image(data: bytes, name: str) -> bool:
+    """A real image of the type its extension names (png, jpeg, gif, webp); its bytes are still scanned."""
+    ext = Path(name).suffix.lower()
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ext == ".webp"
+    return any(data.startswith(magic) and ext in exts for magic, exts in _IMAGE_KINDS.items())
+
+
+def _has_secret(data: bytes) -> bool:
+    text = data.decode(errors="ignore")
+    return any(rx.search(text) for rx in _SECRET_PATTERNS) or bool(_SECRET_KV.search(text))
+
+
+def _scan(data: bytes, name: str) -> str:
+    """One of ok, secret (looks like a password or key) or unknown (can not be checked: a PDF, zip, docx,
+    xlsx or any other packed or binary file, or text with NULs; such a file is not sent, fail closed). Text
+    (UTF-8, or UTF-32/UTF-16 with a BOM) is scanned as text; an image whose type matches its extension is
+    scanned as its raw bytes (text in metadata or after the image is still caught)."""
+    if data.startswith(_PACKED_MAGIC):  # pdf, zip/OOXML, OLE office: never sent, even when all ASCII
+        return "unknown"
+    for bom, codec in (
+        ((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"), "utf-32"),  # before UTF-16: same first two bytes
+        ((b"\xff\xfe", b"\xfe\xff"), "utf-16"),
+    ):
+        if data.startswith(bom):
+            try:
+                text = data.decode(codec)
+            except UnicodeDecodeError:
+                return "unknown"
+            if "\x00" in text:
+                return "unknown"
+            return "secret" if _has_secret(text.encode()) else "ok"
+    if not _is_image(data, name):
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            return "unknown"
+        if b"\x00" in data:
+            return "unknown"
+    return "secret" if _has_secret(data) else "ok"
 
 
 def redact(text: str) -> str:
@@ -135,6 +189,27 @@ def phone_proof(root: Path, ticket: dict) -> list[dict]:
         for ev in c.get("evidence") or []:
             if ev.get("role") in PHONE_ROLES:
                 out.append(ev)
+    return out
+
+
+def named_artifacts(root: Path, ticket: dict, artifacts: list[dict] | None = None) -> list[str]:
+    """Up to 20 artifact names mentioned in questions, options or the summary, in listing order."""
+    texts = [ticket.get("summary") or ""]
+    for question in ticket.get("questions") or []:
+        texts.append(question.get("text") or "")
+        texts.extend(question.get("options") or [])
+    out = []
+    if artifacts is None:
+        artifacts = tickets.artifacts_list(root, ticket["id"])
+    for artifact in artifacts[:200]:
+        name = artifact["name"]
+        path = Path(name)
+        prefix = r"(?:artifacts/)?" if path.suffix and len(path.stem) >= 4 else r"artifacts/"
+        pattern = re.compile(r"(?<![\w./-])" + prefix + re.escape(name) + r"(?![\w/-]|\.\w)")
+        if any(pattern.search(text) for text in texts):
+            out.append(name)
+            if len(out) == 20:
+                break
     return out
 
 
@@ -301,7 +376,7 @@ def _url_art(source: str, url: str, kind_hint: str | None = None) -> tuple[str, 
 
 
 def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = True) -> list[dict]:
-    """Proof files (uploaded), proof links and ticket links, newest first, at most 50."""
+    """Proof files, named artifacts (uploaded), proof links and ticket links, newest first, at most 50."""
     tid = ticket["id"]
     at0 = ticket["updated_at"] if _TIME.fullmatch(str(ticket.get("updated_at"))) else tickets.now()
     out: list[dict] = []
@@ -361,6 +436,66 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
         if d["status"]:
             a["status"] = d["status"]
         out.append(a)
+    artifacts = tickets.artifacts_list(root, tid)[:200]
+    named = named_artifacts(root, ticket, artifacts)
+    mtimes = {a["name"]: a.get("mtime") for a in artifacts}
+    artifact_entries = []
+    artifact_bytes = 0
+    evidence_hashes = {a["rev"] for a in out if "blob_id" in a}
+    slots = max(0, ATTACHMENTS - len(out))
+    for name in named:
+        if len(artifact_entries) >= slots:
+            break
+        aid = artifact_id("file", f".orch/tickets/{tid}/artifacts/{name}")
+        if any(a["id"] == aid for a in out):
+            continue
+        room = min(tickets.MAX_PROOF_BYTES, ARTIFACT_BYTES - artifact_bytes)
+        if room <= 0:
+            break
+        try:  # safefile checks the size on the open file (fstat) before it reads: too big = never loaded
+            data = safefile.read_ticket_file(root, tid, "artifacts", name, room)
+        except safefile.TooLarge:
+            continue
+        if data is None:
+            continue
+        sha = hashlib.sha256(data).hexdigest()
+        verdict = _scan(data, name)
+        if verdict != "ok":
+            why = (
+                "it looks like it holds a password or key"
+                if verdict == "secret"
+                else "it can't be checked for passwords"
+            )
+            if state is not None:
+                skipped = state.setdefault("secret_skipped", [])
+                key = f"{name}:{sha}"
+                if key not in skipped:
+                    with contextlib.suppress(Exception):
+                        tickets.log(root, tid, f"{name} was not sent to the phone: {why}.", "orch")
+                    skipped.append(key)
+                    del skipped[:-200]
+            continue
+        if sha in evidence_hashes:  # the same content is already in the view (evidence or an artifact)
+            continue
+        b = _upload(root, data, state) if upload and state is not None else None
+        if not b:
+            continue
+        artifact_bytes += len(data)
+        evidence_hashes.add(sha)  # artifacts among themselves too
+        at = mtimes.get(name)
+        artifact_entries.append(
+            {
+                "kind": "image" if Path(name).suffix.lower() in IMAGE_EXT else "file",
+                "title": _clip(name, 200) or "file",
+                "blob_id": b["blob_id"],
+                "name": _clip(Path(name).name, 255) or "file",
+                "size": b["size"],
+                "at": at if _TIME.fullmatch(str(at)) else at0,
+                "id": aid,
+                "rev": sha,
+            }
+        )
+    out.extend(artifact_entries[:slots])
     out.sort(key=lambda a: a["at"], reverse=True)
     return out[:ATTACHMENTS]
 
@@ -445,6 +580,8 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
         "history_tail": hist,
         "attachments": atts,
     }
+    if ticket.get("started") is True:
+        view["started"] = True
     if shared_refs := reference_views(root, ticket):
         view["refs"] = shared_refs
     if agent:
@@ -478,9 +615,15 @@ def view_for(root: Path, tid: str) -> dict | None:
     except (Refused, ValueError, KeyError, OSError):
         return None
     state = load_state(root)
-    atts = attachments(root, ticket, state)  # uploads: never under the lock; only the new blobs are merged
-    blobs = state["blobs"]
-    update_state(root, lambda st: st["blobs"].update(blobs))
+    atts = attachments(root, ticket, state)  # uploads: never under the lock
+
+    def merge(st):
+        st["blobs"].update(state["blobs"])
+        skipped = st.setdefault("secret_skipped", [])
+        skipped.extend(key for key in state.get("secret_skipped", []) if key not in skipped)
+        del skipped[:-200]
+
+    update_state(root, merge)
     return build(root, ticket, atts)
 
 
@@ -489,7 +632,10 @@ def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
     working" on the phone ends when the agent stops, not only when a task changes)."""
     items = [[c.get("text"), bool(c.get("done"))] for c in ticket.get("checklist") or []]
     running = _agent(root, ticket)[1] if root is not None else None
-    return hashlib.sha256(json.dumps([items, ticket.get("status"), running]).encode()).hexdigest()[:16]
+    data = [items, ticket.get("status"), running]
+    if ticket.get("started") is True:
+        data.append(True)
+    return hashlib.sha256(json.dumps(data).encode()).hexdigest()[:16]
 
 
 def remember(root: Path, tid: str, to: str) -> None:

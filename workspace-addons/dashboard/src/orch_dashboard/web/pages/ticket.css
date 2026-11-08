@@ -61,3 +61,9 @@
 .ticket-page .input{min-height:44px}
 .ticket-page .ticket-part .grow{min-width:0;overflow-wrap:anywhere}
 .ticket-page .add-row{justify-content:flex-start;text-align:left;width:100%}
+
+.ticket-result { padding: 16px; display: grid; gap: 12px; }
+.ticket-result .ticket-preview { width: 100%; }
+.ticket-result .btn { justify-self: start; min-height: 44px; }
+.ticket-part, .ticket-heading > a, .ticket-details a { min-height: 44px; display: flex; align-items: center; }
+.ticket-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; }

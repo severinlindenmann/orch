@@ -462,7 +462,7 @@ def test_run_hooks_only_for_the_chat_ticket_and_the_helpers_own_run(proj, run, n
     from types import SimpleNamespace
 
     chat.guard(proj, SimpleNamespace(cmd="run", sub="release", ticket=gid, run="r_helper0001", json=False))
-    chat.guard(proj, SimpleNamespace(cmd="run", sub="event", ticket=None, run=None, kind="stop", json=False))
+    chat.guard(proj, SimpleNamespace(cmd="run", sub="event", ticket=None, run=None, kind="idle", json=False))
 
 
 def test_helper_relay_send_is_plain_text_to_a_paired_phone_with_safe_cards(proj, run, conn, monkeypatch):
@@ -524,3 +524,216 @@ def test_chat_id_works_for_the_host_even_though_chat_is_a_hidden_command(proj, r
     assert run("chat", "id", "--json")[0] == 0
     with pytest.raises(SystemExit):
         run("--help-all")
+
+
+# ---------------------------------------------------------------- third review round
+
+
+def test_helper_writes_need_a_named_ticket_and_no_owner_or_odd_options(proj, run, new_ticket, monkeypatch):
+    tid = new_ticket("Pay car tax")
+    gid = _helper(proj, monkeypatch)
+    for argv in (
+        ("ticket", "new", "T", "--owner", "someone"),
+        ("ticket", "new", "T", "--parent", gid),
+        ("init",),  # init is guarded too
+        ("run", "claim", gid, "--agent", "evil"),
+        ("run", "claim", gid, "--session", "s1"),
+        ("ref", "add", tid, "file:~/.ssh/id_rsa", "--kind", "file"),
+        ("ref", "add", tid, "../x", "--kind", "file"),
+        ("ref", "add", tid, "/etc/passwd"),
+        ("ref", "add", tid, ".orch/config.toml"),
+    ):
+        assert run(*argv)[0] == 2, argv
+    (proj / "plan.md").write_text("x")
+    assert (
+        run("ref", "add", tid, "plan.md")[0] == 0 and run("ref", "add", tid, "https://example.com/p")[0] == 0
+    )
+    from types import SimpleNamespace
+
+    with pytest.raises(Refused):  # a write with no ticket named
+        chat.guard(proj, SimpleNamespace(cmd="log", sub=None, id=None, text="x", json=False))
+    chat.guard(
+        proj,
+        SimpleNamespace(
+            cmd="run", sub="event", ticket=None, run=None, kind="idle", session_id=None, json=False
+        ),
+    )
+    with pytest.raises(Refused):  # 0 is a given value, not "unset"
+        chat.guard(proj, SimpleNamespace(cmd="status", sub=None, json=False, pid=0))
+
+
+def test_relay_topic_makes_a_ticket_and_is_not_a_read(proj):
+    assert chat.HELPER_COMMANDS[("relay", "topic")][0] == "plain"
+
+
+def test_more_secret_files_and_a_swap_between_check_and_read(proj):
+    for rel in (
+        "db.sqlite-wal",
+        "db.sqlite-shm",
+        "db.sqlite-journal",
+        "terraform.tfstate",
+        "terraform.tfstate.backup",
+        ".bash_history",
+        "cfg/auth.json",
+    ):
+        (proj / rel).parent.mkdir(parents=True, exist_ok=True)
+        (proj / rel).write_text("x")
+        assert chat.safe_file(proj, rel) is None, rel
+    (proj / "a.md").write_text("hello")
+    assert chat.read_file(proj, "a.md") == b"hello"
+    (proj / "big.md").write_text("x" * 100)
+    assert chat.read_file(proj, "big.md", 10) is None
+
+
+def test_ref_add_is_normalised_like_ref_add_and_symlinked_folders_are_refused(
+    proj, run, new_ticket, monkeypatch
+):
+    tid = new_ticket("Pay car tax")
+    (proj / "docs").mkdir()
+    (proj / "docs" / "a.md").write_text("x")
+    (proj / "plan.md").write_text("x")
+    secret = proj / ".orch" / "keep"
+    secret.mkdir(parents=True, exist_ok=True)
+    (secret / "s.md").write_text("secret")
+    (proj / "linked").symlink_to(secret)  # a folder that points into .orch
+    _helper(proj, monkeypatch)
+    for target in (
+        "..\\outside.md",
+        "docs\\..\\..\\x.md",
+        "../x",
+        "C:\\Users\\x\\id_rsa",
+        "/etc/passwd",
+        "docs/../.orch/config.toml",
+        "linked/s.md",
+        "plan.md:0",
+    ):
+        assert run("ref", "add", tid, target)[0] == 2, target
+    assert run("ref", "add", tid, "docs\\a.md")[0] == 0  # backslashes mean the same file, as for the person
+    assert run("ref", "add", tid, "plan.md:3")[0] == 0
+    assert chat.read_file(proj, "linked/s.md") is None and chat.helper_safe_file(proj, "linked/s.md") is None
+    assert chat.read_file(proj, "docs\\a.md") == b"x"
+
+
+# ---------------------------------------------------------------- fourth round
+
+
+def test_people_keep_the_old_file_card_rule_the_helper_gets_the_strict_one(proj):
+    (proj / "docs").mkdir()
+    (proj / "docs" / "a.md").write_text("x")
+    (proj / "~odd.md").write_text("x")
+    assert chat.safe_file(proj, "docs/a.md") == "docs/a.md"
+    assert chat.safe_file(proj, "~odd.md") == "~odd.md"  # a POSIX name a person may use
+    assert chat.helper_safe_file(proj, "~odd.md") is None
+    assert chat.helper_safe_file(proj, "docs\\a.md") == "docs/a.md"
+    assert chat.helper_safe_file(proj, "docs/../docs/a.md") == "docs/a.md"
+    assert chat.helper_safe_file(proj, "../x") is None and chat.helper_safe_file(proj, "/etc/hosts") is None
+
+
+def test_options_are_compared_with_the_parsers_own_defaults(proj, monkeypatch):
+    from types import SimpleNamespace
+
+    _helper(proj, monkeypatch)
+    # ticket list --all is a store_true flag: its default False is "not given", True is given (and allowed here)
+    chat.guard(proj, SimpleNamespace(cmd="ticket", sub="list", status=None, all=False, json=False, by=None))
+    chat.guard(proj, SimpleNamespace(cmd="ticket", sub="list", status=None, all=True, json=False, by=None))
+    with pytest.raises(Refused):  # --by differs from its default None
+        chat.guard(
+            proj, SimpleNamespace(cmd="ticket", sub="list", status=None, all=False, json=False, by="human:x")
+        )
+    with pytest.raises(Refused):  # an option the command does not list, even set to its "false" value
+        chat.guard(
+            proj,
+            SimpleNamespace(
+                cmd="ticket", sub="list", status=None, all=False, json=False, by=None, fresh=True
+            ),
+        )
+
+
+def test_ref_add_kinds_are_an_allowlist(proj, run, new_ticket, monkeypatch):
+    tid = new_ticket("A")
+    other = new_ticket("B")
+    (proj / "ok.md").write_text("x")
+    tickets.ensure_general(proj, "x")
+    _helper(proj, monkeypatch)
+    assert run("ref", "add", tid, "https://example.com/x", "--kind", "github:pr")[0] == 0
+    assert run("ref", "add", tid, other)[0] == 0
+    assert run("ref", "add", tid, "ok.md")[0] == 0
+    assert run("ref", "add", tid, f"artifact:{other}/x.md")[0] == 2
+    assert run("ref", "add", tid, tid)[0] == 2  # itself
+
+
+def test_read_file_returns_none_for_any_error(proj, monkeypatch):
+    (proj / "ok.md").write_text("hello")
+    from orch import safefile
+
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(safefile, "open_file_ref", boom)
+    assert chat.read_file(proj, "ok.md") is None
+
+
+def test_init_and_the_guard_work_in_an_empty_folder(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("ORCH_TICKET", "t_somethingelse")
+    chat.guard(tmp_path, SimpleNamespace(cmd="init", sub=None, json=False))  # no .orch here: must not raise
+    monkeypatch.delenv("ORCH_TICKET")
+    chat.guard(tmp_path, SimpleNamespace(cmd="init", sub=None, json=False))
+
+
+def test_the_run_claim_the_wrapper_may_need_still_passes_for_the_helper(proj, monkeypatch):
+    from types import SimpleNamespace
+
+    gid = _helper(proj, monkeypatch)
+    monkeypatch.setenv("ORCH_AGENT", "fake")
+    ns = dict(cmd="run", sub="claim", ticket=gid, agent="fake", pid=123, json=False, by=None, mode=None)
+    ns.pop("mode")
+    chat.guard(proj, SimpleNamespace(**ns, session=None, text=None, take_over=False))
+    with pytest.raises(Refused):
+        chat.guard(proj, SimpleNamespace(**ns, session="s1", text=None, take_over=False))
+    with pytest.raises(Refused):
+        chat.guard(proj, SimpleNamespace(**ns, session=None, text=None, take_over=True))
+
+
+def test_cards_keep_the_rule_of_whoever_added_them(proj, monkeypatch):
+    secret = proj / ".orch" / "keep"
+    secret.mkdir(parents=True, exist_ok=True)
+    (proj / "real").mkdir()
+    (proj / "real" / "r.md").write_text("fine")
+    (proj / "linked").symlink_to(proj / "real")  # a symlinked folder inside the workspace
+    # a person adds it: kept (person rule), and it opens
+    person = chat.clean_refs(proj, [{"kind": "file", "path": "linked/r.md"}])
+    assert person and person[0]["added_by"] == "person"
+    assert chat.read_file(proj, "linked/r.md", added_by="person") == b"fine"
+    chat.record(
+        proj, "m_aaaaaaaaaaaaaaaa", "you", "dashboard", "see", refs=[{"kind": "file", "path": "linked/r.md"}]
+    )
+    assert (
+        chat.read_day(proj, chat.day_key(proj))["messages"][0]["refs"][0]["path"] == "real/r.md"
+    )  # stored as the real path
+    # the helper cannot add it, and a helper-marked card in such a folder is dropped when read
+    tickets.ensure_general(proj, "x")
+    _helper(proj, monkeypatch)
+    assert chat.clean_refs(proj, [{"kind": "file", "path": "linked/r.md"}]) == []
+    assert chat.read_file(proj, "linked/r.md", added_by="helper") is None
+    assert chat.read_file(proj, "linked/r.md") is None  # no mark: strict
+    f = proj / ".orch" / "chat" / f"{chat.day_key(proj)}.json"
+    d = json.loads(f.read_text())
+    d["messages"][0]["refs"][0].update(added_by="helper", path="linked/r.md")
+    f.write_text(json.dumps(d))
+    assert chat.read_day(proj, d["day"])["messages"][0]["refs"] == []
+    # a person's card never reaches .orch, whatever the link
+    (proj / "toorch").symlink_to(secret)
+    (secret / "s.md").write_text("secret")
+    assert chat.read_file(proj, "toorch/s.md", added_by="person") is None
+
+
+def test_ref_add_web_needs_http_and_no_ref_to_the_chat_ticket(proj, run, new_ticket, monkeypatch):
+    tid = new_ticket("A")
+    gid = tickets.ensure_general(proj, "x")
+    _helper(proj, monkeypatch)
+    for target in ("file:///etc/passwd", "ftp://example.com/x", "javascript:alert(1)", gid):
+        assert run("ref", "add", tid, target)[0] == 2, target
+    assert run("ref", "add", tid, "https://example.com/ok")[0] == 0

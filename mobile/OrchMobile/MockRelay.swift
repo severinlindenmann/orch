@@ -41,7 +41,13 @@ actor MockRelay: RelayAPI {
 
     init(latency: Duration? = nil) {
         if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
+        if UserDefaults.standard.bool(forKey: "mockGroups") {
+            for (id, name) in GroupMock.names where names[id] == nil { names[id] = name }
+            received.append(contentsOf: GroupMock.messages())
+            all.append(GroupMock.question(at: Self.now()))
+        }
         if UserDefaults.standard.bool(forKey: "mockMemo") { received.append(Self.memo) }
+        if UserDefaults.standard.bool(forKey: "mockChatDays") { let d = Self.chatDays(); sentMessages += d.sent; received += d.received }
         let ms = UserDefaults.standard.integer(forKey: "mockLatencyMs")
         self.latency = latency ?? .milliseconds(ms > 0 ? ms : 150)
     }
@@ -132,6 +138,22 @@ actor MockRelay: RelayAPI {
                                       ticket: ticket, kind: kind, title: title, text: text, replyTo: replyTo, at: ISO8601DateFormatter().string(from: Date()), key: key, ticketView: view))
     }
 
+    /// Screenshot hook `-mockChatDays YES`: a Chat with a closed day (History) and today's messages with `by`/`day` (round-8 draft).
+    private static func chatDays() -> (sent: [PhoneMessage], received: [PhoneMessage]) {
+        let f = ISO8601DateFormatter()
+        let now = Date()
+        func text(_ id: String, _ ago: TimeInterval, mine: Bool, _ t: String, by: String, day: String) -> PhoneMessage {
+            var body = TextBody(text: t, general: true); body.by = by; body.via = mine ? "phone" : "helper"; body.day = day
+            return PhoneMessage(message: TextMessage(id: id, from: mine ? "ph_iphone0001" : Self.pilatus, to: mine ? Self.pilatus : "ph_iphone0001", type: "text",
+                                                     createdAt: f.string(from: now.addingTimeInterval(-ago)), ticket: nil, body: body), workspaceName: "Pilatus Workspace")
+        }
+        let today = ChatDay.key(for: now), yesterday = ChatDay.key(for: now.addingTimeInterval(-86_400))
+        return ([text("m_cd_y1", 90_000, mine: true, "That's everything for today, thanks.", by: "you", day: yesterday),
+                 text("m_cd_t1", 600, mine: true, "Good morning. What is due next?", by: "you", day: today)],
+                [text("m_cd_y2", 89_900, mine: false, "All set. Your tickets are saved.", by: Self.pilatus, day: yesterday),
+                 text("m_cd_t2", 540, mine: false, "Your car tax is due on 30 Nov.", by: Self.pilatus, day: today)])
+    }
+
     /// Simulator and test hook: a workspace writes to the phone after launch (a text push arrived).
     func deliverText(from workspace: String, text: String) {
         counter += 1
@@ -174,6 +196,9 @@ actor MockRelay: RelayAPI {
         ]
         if names["ws_home000001"] != nil {
             list.append(Workspace(id: "ws_home000001", name: "Home", description: "", tags: [], online: false, lastSeen: nil, openQuestions: 0))
+        }
+        for (id, name) in names.sorted(by: { $0.key < $1.key }) where !list.contains(where: { $0.id == id }) {
+            list.append(Workspace(id: id, name: name, description: "", tags: [], online: true, lastSeen: Self.now(), openQuestions: open(id)))
         }
         return list.filter { !removed.contains($0.id) }.map { var w = $0; w.mutedUntil = mutes[w.id] ?? nil; return w }
     }
@@ -344,7 +369,7 @@ actor MockRelay: RelayAPI {
     /// A small bar chart for the fake `b_chart` blob; anything else is not found.
     func blob(id: String) async throws -> Data {
         try await check()
-        guard id == "b_chart" else { throw RelayError.api(status: 404, code: "not_found", message: "Image not found.") }
+        guard id == "b_chart" || (UserDefaults.standard.bool(forKey: "mockGroups") && id == "b_0123456789abcdef") else { throw RelayError.api(status: 404, code: "not_found", message: "Image not found.") }
         let r = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 140))
         return r.pngData { c in
             UIColor(red: 0.08, green: 0.09, blue: 0.11, alpha: 1).setFill(); c.fill(CGRect(x: 0, y: 0, width: 240, height: 140))

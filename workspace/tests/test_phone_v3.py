@@ -551,12 +551,12 @@ def test_a_refused_phone_message_is_marked_seen_and_the_next_one_is_processed(
     tid = new_ticket("T")
     real = runs.pending_add
 
-    def boom(root, t, who, kind, text, via=None, pid=None):
+    def boom(root, t, who, kind, text, via=None, pid=None, **kw):
         if "poison" in text:
             from orch.errors import Refused
 
             raise Refused("too big")
-        return real(root, t, who, kind, text, via, pid)
+        return real(root, t, who, kind, text, via, pid, **kw)
 
     monkeypatch.setattr(runs, "pending_add", boom)
     conn.inbox.append(msg(M1, {"text": "poison"}, ticket=tid))
@@ -852,3 +852,13 @@ def test_phone_text_marks_the_ticket_as_phone_for_questions(proj, run, new_ticke
     run("relay", "inbox")
     assert tickets.load(proj, tid)["ext"]["relay"]["phone"] is True
     assert mobile_mode.from_phone(proj, tid)
+
+
+def test_a_phone_text_into_a_ticket_is_a_persons_input_with_its_phone_id(proj, run, new_ticket, conn):
+    """Delta-10: only the relay's phone-text path stores the sender's phone id; that makes it a person's."""
+    tid = new_ticket("T")
+    conn.inbox.append(msg("m_phone00000000a79", {"text": "and dessert"}, ticket=tid))
+    run("relay", "inbox")
+    (item,) = [i for i in runs.undelivered(proj, tid) if "dessert" in i["text"]]
+    assert item["via"] == "phone" and item["phone"].startswith("ph_") and item["human"] is True
+    assert runs.human_waiting(proj, tid) == [item]

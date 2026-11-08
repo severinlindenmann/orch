@@ -9,6 +9,7 @@
   "owner": "Severin",
   "due": "2026-11-10",
   "note": "Finance needs it before the month-end close.",
+  "done_when": "Finance can open the CSV and reconcile every Q3 invoice.",
   "parent": "t_k2m7wq",
   "summary": "CSV is built and checked. Waiting for your pick of the date format.",
   "sessions": [

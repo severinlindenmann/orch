@@ -1,0 +1,65 @@
+{
+  "why": "G12: seq 9 arrives while 7 and 8 are missing, buffer small and young -> buffered.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_c3d579589808d3f4",
+    "from": "ws_fin0000001",
+    "to": "ws_ban0000001",
+    "type": "text",
+    "created_at": "2026-11-08T10:06:02Z",
+    "ticket": "t_fin14a",
+    "key": "FIN-14",
+    "body": {
+      "text": "Found it: the 2025 letter says CHF 412.",
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          },
+          {
+            "ws": "ws_ban0000001",
+            "name": "Bank",
+            "look": {
+              "icon": "wallet",
+              "color": "blue"
+            }
+          }
+        ],
+        "seq": 9
+      },
+      "by": "ws_hom0000001",
+      "via": "helper",
+      "origin": {
+        "id": "m_ord0000000000009",
+        "from": "ws_hom0000001",
+        "at": "2026-11-08T10:06:00Z"
+      }
+    }
+  },
+  "context": {
+    "order": {
+      "applied_seq": 6,
+      "buffered": []
+    }
+  },
+  "expect": {
+    "order": "buffer",
+    "applied_after": 6
+  }
+}

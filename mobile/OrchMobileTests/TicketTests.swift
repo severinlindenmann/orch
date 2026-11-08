@@ -144,7 +144,7 @@ final class TicketTests: XCTestCase {
     func testAllowQuestionLabelsAndAnswer() async throws {
         let q = MockRelay.allowQuestion
         XCTAssertTrue(q.isAllow)
-        XCTAssertEqual(q.message.body.options.map(q.label), ["Allow once", "Always", "Ignore"])
+        XCTAssertEqual(q.message.body.options.map(q.label), ["Allow once", "Always", "No"], "contract chat-groups §3.2: No replaces Ignore on screen")
         XCTAssertFalse(MockRelayTestsFixtures.question.isAllow)
         XCTAssertEqual(MockRelayTestsFixtures.question.label("DATE"), "DATE")
         let m = MockRelay(latency: .zero)

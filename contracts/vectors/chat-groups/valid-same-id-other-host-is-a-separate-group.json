@@ -1,0 +1,56 @@
+{
+  "why": "Rule 2: the group key is (host, id). Another host (ws_xxx0000001) uses the same id grp_t_fin14a; the receiver already holds (ws_fin0000001, grp_t_fin14a) and still accepts this as its own group under (ws_xxx0000001, grp_t_fin14a). A real group is never dropped because another host used the same id.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_squat00000000000",
+    "from": "ws_xxx0000001",
+    "to": "ws_hom0000001",
+    "type": "text",
+    "created_at": "2026-11-08T10:03:00Z",
+    "ticket": "t_fin14a",
+    "body": {
+      "text": "Same group, trust me.",
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_xxx0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          {
+            "ws": "ws_xxx0000001",
+            "name": "Other",
+            "look": {
+              "icon": null,
+              "color": null
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          }
+        ],
+        "seq": 1
+      },
+      "by": "ws_xxx0000001",
+      "via": "helper"
+    }
+  },
+  "context": {
+    "known_groups": [
+      {
+        "host": "ws_fin0000001",
+        "id": "grp_t_fin14a"
+      }
+    ]
+  },
+  "expect": {
+    "stored_as": [
+      "ws_xxx0000001",
+      "grp_t_fin14a"
+    ],
+    "store": "new"
+  }
+}
