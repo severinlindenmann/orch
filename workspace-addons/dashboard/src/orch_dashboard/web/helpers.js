@@ -10,7 +10,7 @@
   /* The ONE source of status words and order (board columns, Home, ticket page, Move to, history, lists).
      Lifecycle order. "ready" is the same place as "open" (no separate word); "waiting" shows as "Needs you". */
   const STATUS_ORDER = ['open', 'active', 'waiting', 'review', 'done'];
-  const statusWord = status => STATUS_WORD[status] || 'Not started';
+  const statusWord = (status, started) => (status === 'open' || status === 'ready') && started === true ? 'Paused' : STATUS_WORD[status] || 'Not started';
   const columnOf = status => status === 'ready' ? 'open' : status;
   const STATUS_CHOICES = STATUS_ORDER.map(s => [s, STATUS_WORD[s]]);
   // "Move to" offers four places; Waiting is decided by the agent.

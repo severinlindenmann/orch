@@ -57,7 +57,7 @@ AGENT = re.compile(r"[a-z][a-z0-9-]{1,31}")
 MAX_COMMAND = 500
 MAX_TASK = 500
 PERMISSIONS = ("ask", "auto", "full")
-PATCH_KEYS = ("title", "status", "owner", "due", "note", "summary")
+PATCH_KEYS = ("title", "status", "owner", "due", "note", "done_when", "summary")
 STATUSES = ("open", "ready", "active", "waiting", "review", "done")
 
 
@@ -121,14 +121,14 @@ def _answer(a):
 
 
 def _ticket_new(a):
-    _only(a, ("title", "parent", "owner", "due", "note"))
+    _only(a, ("title", "parent", "owner", "due", "note", "done_when"))
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
-    for k in ("owner", "due", "note"):
+    for k in ("owner", "due", "note", "done_when"):
         if a.get(k):
             v = _text(a[k], k)
             if k == "due" and not DAY.fullmatch(v):
                 raise BadRequest("The due day must look like 2026-11-30.")
-            flags.append(f"--{k}={v}")
+            flags.append(f"--{k.replace('_', '-')}={v}")
     return ["ticket", "new"], flags, [_text(a.get("title"), "title")]
 
 
@@ -143,7 +143,7 @@ def _ticket_patch(a):
         if k == "due" and not (isinstance(v, str) and DAY.fullmatch(v)):
             raise BadRequest("The due day must look like 2026-11-30.")
         if k not in ("status", "due"):
-            _text(v, k, empty=k in ("owner", "note"))
+            _text(v, k, empty=k in ("owner", "note", "done_when"))
     rev = _rev(a.get("if_revision"), required=True)
     return (
         ["ticket", "patch", _tid(a.get("ticket"))],
@@ -153,14 +153,14 @@ def _ticket_patch(a):
 
 
 def _ticket_edit(a):
-    _only(a, ("ticket", "title", "owner", "due", "note", "if_revision"))
+    _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "if_revision"))
     flags = []
-    for k in ("title", "owner", "due", "note"):
+    for k in ("title", "owner", "due", "note", "done_when"):
         if k in a:
             v = _text(a[k], k, empty=k != "title")
             if k == "due" and not DAY.fullmatch(v):
                 raise BadRequest("The due day must look like 2026-11-30.")
-            flags.append(f"--{k}={v}")
+            flags.append(f"--{k.replace('_', '-')}={v}")
     if not flags:
         raise BadRequest("Nothing to change.")
     rev = _rev(a.get("if_revision"))
@@ -237,6 +237,12 @@ def _ticket_field(a):
 def _log(a):
     _only(a, ("ticket", "text"))
     return ["log", _tid(a.get("ticket"))], [], [_text(a.get("text"))]
+
+
+def _chat_say(a):
+    """The person writes in Chat (history by "you", via dashboard; the background host starts the helper)."""
+    _only(a, ("text",))
+    return ["chat", "say"], [], [_text(a.get("text"))]
 
 
 def _run_start(a):
@@ -352,6 +358,7 @@ OPS = {
     "ticket.patch": _ticket_patch,
     "ticket.edit": _ticket_edit,
     "log": _log,
+    "chat.say": _chat_say,
     "check.add": _check_add,
     "check.set": _check_set,
     "run.start": _run_start,
@@ -440,21 +447,32 @@ def _audit(root: Path, op: str, args: dict) -> None:
         pass  # the change is done; a missing log must not turn it into an error
 
 
+def _without_agent(environ) -> dict:
+    """environ without the agent tools' variables, from orch's one list (orch.adapters.human_environ). When
+    that list can not be read, the action is refused: it never runs with an agent's variables (fail closed)."""
+    try:
+        from orch.adapters import human_environ
+
+        return human_environ(environ)
+    except Exception as e:  # noqa: BLE001 - an old orch or a bad adapter file
+        import sys
+        import traceback
+
+        print("orch could not check who is acting here:", file=sys.stderr)  # the full text: server side only
+        traceback.print_exc(file=sys.stderr)
+        fn = getattr(e, "filename", None)
+        where = Path(fn).name if isinstance(fn, str) and fn else ""  # never a full path or file content
+        why = e.__class__.__name__ + (f" in {where}" if where else "")
+        raise Unavailable(f"orch could not check who is acting here ({why}). Fix that and try again.") from None
+
+
 def human_env(root: Path, orch_bin: str) -> dict:
     """Browser actions are the person's actions, even if an agent launched the server."""
     try:
-        from orch.adapters import _registry
+        import orch.adapters  # noqa: F401
     except ImportError:
         raise Unavailable("The orch tool is not available here.") from None
-
-    names = {"ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET"}
-    prefixes = []
-    for adapter in _registry().values():
-        detection = adapter.get("detect") or {}
-        names.update(detection.get("env_any") or [])
-        if detection.get("env_prefix"):
-            prefixes.append(detection["env_prefix"])
-    env = {k: v for k, v in os.environ.items() if k not in names and not k.startswith(tuple(prefixes))}
+    env = _without_agent(os.environ)
     return {**env, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "dashboard"}
 
 

@@ -126,6 +126,7 @@ def test_leave_it_runs_nothing_but_is_recorded(ws):
 def test_one_answer_leads_to_exactly_one_run(ws):
     """review-49-50 F1: an answer from the relay is applied by the CLI; the loop starts one run, then not again."""
     add_ticket(ws, "t_ask00001", status="active")
+    (ws / "ended-t_ask00001").write_text("")  # no run holds it (core could not pass the answer on)
     (ws / ".orch/secrets").mkdir(parents=True)
     (ws / ".orch/secrets/relay.json").write_text("{}")
     (ws / "inbox.json").write_text(json.dumps([{"id": "m_1", "type": "answer", "ticket": "t_ask00001", "applied": True,
@@ -270,3 +271,192 @@ def test_a_finished_repeat_runs_again_and_is_opened(ws):
     cs = [c["args"] for c in calls(ws)]
     assert ["ticket", "status", "t_rec00009", "open"] in [a[:4] for a in cs]
     assert not any(a[:3] == ["run", "start", "t_done0001"] for a in cs)
+
+
+def test_a_ready_ticket_with_queued_input_gets_exactly_one_run(ws):
+    """Only the automation host starts runs for queued input: a live session ended with a person's answer
+    still waiting -> the ticket is Ready with that input queued -> one run, once per input item."""
+    add_ticket(ws, "t_queue001", status="ready")
+    (ws / "ended-t_queue001").write_text("")
+    (ws / "pending-t_queue001").write_text(json.dumps(["p_answer0001"]))
+    # a fresh Scheduler per pass: the fake run "ends" at once, which the fast-fail watch would report
+    assert Scheduler(ws).tick(T(8)) == ["t_queue001"]
+    assert Scheduler(ws).tick(T(8, 1)) == [] and Scheduler(ws).tick(T(8, 2)) == []  # same item: never again
+    (ws / "pending-t_queue001").write_text(json.dumps(["p_answer0001", "p_message002"]))
+    assert Scheduler(ws).tick(T(8, 3)) == ["t_queue001"]  # a new item: one more run
+    starts = [c["args"] for c in calls(ws) if c["args"][:2] == ["run", "start"]]
+    assert len(starts) == 2 and all("--mode" not in a for a in starts)
+
+
+def test_a_text_in_chat_starts_the_helper_once(ws):
+    """The Chat's hidden ticket is in no list: core names it (orch chat status); the same queued-input rules
+    apply (a person's text only, once per item, nothing while a run holds it)."""
+    (ws / "chat-ticket").write_text("t_chat0001")
+    (ws / "pending-t_chat0001").write_text(json.dumps(["p_phone00001"]))
+    (ws / "ended-t_chat0001").write_text("")
+    assert Scheduler(ws).tick(T(8)) == ["t_chat0001"]
+    assert Scheduler(ws).tick(T(8, 1)) == []  # same item: never again
+    (ws / "pending-t_chat0001").write_text(json.dumps(["p_phone00001", "p_phone00002"]))
+    assert Scheduler(ws).tick(T(8, 2)) == ["t_chat0001"]  # a new text: one more run
+    (ws / "pending-t_chat0001").write_text(json.dumps(["p_phone00001", "p_phone00002", "p_phone00003"]))
+    (ws / "ended-t_chat0001").unlink()  # the helper is running: it reads the text itself
+    assert Scheduler(ws).tick(T(8, 3)) == []
+    (ws / "pending-t_chat0001").write_text(json.dumps([]))  # only agent input (core lists none): nothing
+    (ws / "ended-t_chat0001").write_text("")
+    assert Scheduler(ws).tick(T(8, 4)) == []
+
+
+def test_a_paused_chat_starts_no_helper(ws):
+    (ws / "chat-ticket").write_text("t_chat0002")
+    (ws / "chat-paused").write_text("")
+    (ws / "pending-t_chat0002").write_text(json.dumps(["p_phone00001"]))
+    (ws / "ended-t_chat0002").write_text("")
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+
+
+def test_queued_input_on_a_running_or_not_ready_ticket_starts_nothing(ws):
+    add_ticket(ws, "t_queue002", status="ready")  # a run holds it (no ended- file)
+    (ws / "pending-t_queue002").write_text(json.dumps(["p_x00000001"]))
+    add_ticket(ws, "t_queue003", status="waiting")
+    (ws / "ended-t_queue003").write_text("")
+    (ws / "pending-t_queue003").write_text(json.dumps(["p_x00000002"]))
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+
+
+def test_agent_queued_input_starts_nothing(ws):
+    """INVARIANT 2: core lists only a person's input; an agent's own queued input never reaches this pass."""
+    add_ticket(ws, "t_queue004", status="ready")
+    (ws / "ended-t_queue004").write_text("")
+    (ws / "pending-t_queue004").write_text(json.dumps([]))  # core: an agent queued "continue" (not listed)
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+
+
+def test_a_failed_start_gives_the_input_back_at_most_three_times(ws):
+    add_ticket(ws, "t_queue005", status="ready")
+    (ws / "ended-t_queue005").write_text("")
+    (ws / "pending-t_queue005").write_text(json.dumps(["p_answer0005"]))
+    (ws / "noagent").write_text("")  # every start fails
+    for m in range(5):  # (a failed start also asks the person; here the ticket is put back to Ready each time)
+        t = json.loads((ws / ".orch/tickets/t_queue005.json").read_text())
+        t.update(status="ready", questions=[])
+        (ws / ".orch/tickets/t_queue005.json").write_text(json.dumps(t))
+        Scheduler(ws).tick(T(8, m))
+    assert runs_started(ws).count("t_queue005") == 3
+    t = json.loads((ws / ".orch/tickets/t_queue005.json").read_text())
+    assert sum("could not start an agent after 3 tries" in str(h.get("text")) for h in t["history"]) == 1
+    (ws / "noagent").unlink()
+    (ws / "pending-t_queue005").write_text(json.dumps(["p_answer0005", "p_answer0006"]))
+    assert Scheduler(ws).tick(T(9)) == ["t_queue005"]  # a new item still starts
+
+
+def test_the_seen_set_keeps_only_what_still_waits(ws):
+    from orch_automation.runner import load_state
+
+    add_ticket(ws, "t_queue006", status="ready")
+    (ws / "ended-t_queue006").write_text("")
+    (ws / "pending-t_queue006").write_text(json.dumps(["p_a0000001"]))
+    Scheduler(ws).tick(T(8))
+    (ws / "pending-t_queue006").write_text(json.dumps([]))  # delivered
+    Scheduler(ws).tick(T(8, 1))
+    assert load_state(ws)["t_queue006"]["queued_started"] == []
+
+
+def test_a_ticket_started_this_pass_or_switched_off_is_skipped(ws):
+    add_ticket(ws, "t_queue007", status="ready", ext={"automation": {"paused": True}})
+    (ws / "ended-t_queue007").write_text("")
+    (ws / "pending-t_queue007").write_text(json.dumps(["p_b0000001"]))
+    s = Scheduler(ws)
+    assert s.queued_input(T(8), skip=[]) == []  # switched off
+    add_ticket(ws, "t_queue008", status="ready")
+    (ws / "ended-t_queue008").write_text("")
+    (ws / "pending-t_queue008").write_text(json.dumps(["p_b0000002"]))
+    assert s.queued_input(T(8), skip=["t_queue008"]) == []  # already started this pass
+    assert runs_started(ws) == []
+
+
+def test_a_start_with_an_unknown_result_gives_the_ids_back(ws, monkeypatch):
+    from orch_automation import orchcli
+
+    monkeypatch.setattr(orchcli, "run_start", lambda *a, **k: {"result": "blocked"})
+    add_ticket(ws, "t_queue009", status="ready")
+    (ws / "ended-t_queue009").write_text("")
+    (ws / "pending-t_queue009").write_text(json.dumps(["p_c0000001"]))
+    Scheduler(ws).tick(T(8))
+    from orch_automation.runner import load_state
+
+    st = load_state(ws)["t_queue009"]
+    assert st["queued_started"] == [] and st["queued_tries"] == {"p_c0000001": 1}
+
+
+def test_orch_json_is_read_from_stdout_only(ws, tmp_path, monkeypatch):
+    """Delta-8 (6): warnings on stderr never break the JSON."""
+    import stat
+    import sys
+
+    from orch_automation import orchcli
+
+    f = tmp_path / "orch-noisy"
+    f.write_text(f"#!{sys.executable}\nimport sys\nprint('orch: a warning', file=sys.stderr)\nprint('{{\"ok\": true}}')\n")
+    f.chmod(f.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("ORCH_BIN", str(f))
+    assert orchcli.call(ws, "run", "status", "t_x", by=False) == {"ok": True}
+
+
+def test_input_a_busy_run_holds_starts_nothing_while_it_runs(ws):
+    add_ticket(ws, "t_queue010", status="ready")
+    (ws / "ended-t_queue010").write_text("")
+    (ws / "pending-t_queue010").write_text(json.dumps(["p_d0000001"]))
+    (ws / "busy-t_queue010").write_text("")  # the start finds a run holding it: "pending"
+    Scheduler(ws).tick(T(8))
+    (ws / "ended-t_queue010").unlink()  # that run keeps going
+    for m in (10, 31, 45):
+        Scheduler(ws).tick(T(8, m))
+    assert runs_started(ws).count("t_queue010") == 1  # no new start while it runs
+
+
+def test_a_capped_id_is_never_tried_or_said_again(ws):
+    add_ticket(ws, "t_queue011", status="ready")
+    (ws / "ended-t_queue011").write_text("")
+    (ws / "pending-t_queue011").write_text(json.dumps(["p_e0000001"]))
+    (ws / "noagent").write_text("")
+    for m in range(6):
+        t = json.loads((ws / ".orch/tickets/t_queue011.json").read_text())
+        t.update(status="ready", questions=[])
+        (ws / ".orch/tickets/t_queue011.json").write_text(json.dumps(t))
+        Scheduler(ws).tick(T(8, m))
+    t = json.loads((ws / ".orch/tickets/t_queue011.json").read_text())
+    assert runs_started(ws).count("t_queue011") == 3
+    assert sum("after 3 tries" in str(h.get("text")) for h in t["history"]) == 1
+
+
+def test_input_a_run_left_unread_may_start_one_run_after_it_ended(ws):
+    add_ticket(ws, "t_queue012", status="ready")
+    (ws / "ended-t_queue012").write_text("")
+    (ws / "pending-t_queue012").write_text(json.dumps(["p_f0000001"]))
+    (ws / "busy-t_queue012").write_text("")
+    Scheduler(ws).tick(T(8))  # pending: a run holds it
+    (ws / "busy-t_queue012").unlink()  # that run ended without reading it
+    assert Scheduler(ws).tick(T(8, 1)) == ["t_queue012"]  # given back, then exactly one run for it
+    assert Scheduler(ws).tick(T(8, 2)) == []
+
+
+def test_input_the_holding_run_read_starts_nothing(ws):
+    add_ticket(ws, "t_queue013", status="ready")
+    (ws / "ended-t_queue013").write_text("")
+    (ws / "pending-t_queue013").write_text(json.dumps(["p_g0000001"]))
+    (ws / "busy-t_queue013").write_text("")
+    Scheduler(ws).tick(T(8))  # pending
+    (ws / "busy-t_queue013").unlink()
+    (ws / "pending-t_queue013").write_text(json.dumps([]))  # the run read it before it ended
+    assert Scheduler(ws).tick(T(8, 1)) == [] and runs_started(ws).count("t_queue013") == 1
+
+
+def test_an_unknown_status_changes_nothing(ws, monkeypatch):
+    from orch_automation import orchcli
+    from orch_automation.runner import load_state, update_state
+
+    add_ticket(ws, "t_queue014", status="ready")
+    update_state(ws, "t_queue014", queued_started=["p_h0000001"], queued_held=["p_h0000001"])
+    monkeypatch.setattr(orchcli, "run_status", lambda root, tid: None)
+    assert Scheduler(ws).tick(T(8)) == []
+    assert load_state(ws)["t_queue014"]["queued_held"] == ["p_h0000001"]

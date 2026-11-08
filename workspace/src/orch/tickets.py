@@ -35,7 +35,7 @@ OPEN_STATUSES = tuple(s for s in STATUS_WORDS if s not in ("done", "dropped"))
 REVIEW_MESSAGE = "Moved to Review, not Done. A person marks a ticket Done."
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
-PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "summary")
+PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "done_when", "summary")
 VIA_RE = re.compile(r"^[a-z][a-z0-9-]{1,15}$")
 KIND_RE = re.compile(r"^(plain|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$")
 DOING_STALE_SECONDS = 2 * 3600
@@ -402,6 +402,7 @@ _FIELD_WORDS = {
     "owner": "owner",
     "due": "due date",
     "note": "note",
+    "done_when": "done criteria",
     "summary": "summary",
     "status": "status",
     "waiting_on": "wait",
@@ -518,7 +519,7 @@ def create(
     }
     if parent is not None:
         ticket["parent"] = parent
-    for k, v in fields.items():  # owner, due, note: part of the one "Created" line
+    for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
         ticket["ext"] = ext
@@ -540,9 +541,32 @@ def _check_can_finish(ticket: dict) -> None:
         raise Refused(f"Not done: {', '.join(bad)} is checked without evidence.")
 
 
+def _open_questions(ticket: dict) -> list[str]:
+    """Plain questions nobody answered yet (an add-on's own questions are its business)."""
+    return [
+        q["id"]
+        for q in ticket.get("questions") or []
+        if q.get("answer") is None and q.get("kind") in (None, "plain")
+    ]
+
+
+def _check_not_too_early(root: Path, ticket: dict) -> None:
+    """An agent never finishes a ticket while its own question is open or a person's new input has not
+    reached it yet: that work is not done (round 8 Nov: "never close a ticket too early")."""
+    open_ = _open_questions(ticket)
+    if open_:
+        raise Refused(f"Not done: {', '.join(open_)} is not answered yet. Wait for the answer.")
+    from orch import runs  # runs imports tickets
+
+    if any(i.get("via") not in ("start", "slots") for i in runs.undelivered(root, ticket["id"])):
+        raise Refused("Not done: new input for this ticket has not reached you yet. Read it first.")
+
+
 def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
         by = "agent:" + str(agent_tool())
+    if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
+        _check_not_too_early(root, ticket)
     if status == "done" and by.startswith("agent:"):
         _check_can_finish(ticket)
         if not config.agents_may_finish(root):
@@ -553,11 +577,13 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
 
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     def op(ticket):
+        was_started = ticket.get("started") is True
+        ticket["started"] = True
         w = ticket.get("waiting_on") or {}
         if ticket["status"] not in ("open", "ready", "review") and not (
             ticket["status"] == "waiting" and w.get("start") is True
         ):  # a start that was waiting for a sign-in (wait_for_start) is Working again
-            return NO_WRITE
+            return NO_WRITE if was_started else None
         ticket["status"] = "active"
         ticket["waiting_on"] = None
         add_history(ticket, by, f"{agent_label} started")
@@ -567,6 +593,31 @@ def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     except (Refused, FileNotFoundError):
         if ticket_path(root, tid).exists():
             raise
+
+
+STOPPED_TEXT = "The agent stopped before the work was finished. Continue goes on where it left off."
+
+
+def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool = True) -> bool:
+    """No agent works on the ticket any more: a Working ticket is Ready again (Working is shown only while
+    an agent runs). still_running() is asked under the ticket lock, so a run that started meanwhile wins.
+    Returns True when the ticket was moved."""
+
+    def op(ticket):
+        if ticket["status"] != "active" or (still_running is not None and still_running()):
+            return NO_WRITE
+        ticket["status"] = "ready"
+        ticket["waiting_on"] = None
+        if say:
+            add_history(ticket, by, STOPPED_TEXT)
+        return True
+
+    try:
+        return apply_op(root, tid, op)[1] is True
+    except (Refused, FileNotFoundError):
+        if ticket_path(root, tid).exists():
+            raise
+        return False
 
 
 def wait_for_start(root: Path, tid: str, reason: str, by: str) -> None:
@@ -610,7 +661,11 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
 
     def op(ticket):
+        if ticket.get("general") is True:
+            raise Refused("The Chat is not a ticket: it is never finished, dropped or reopened.")
         target, actor = _finish_status(root, ticket, status, by)
+        if target in ("open", "ready") and not actor.startswith("agent:"):
+            ticket.pop("started", None)
         if target != "waiting":
             ticket["waiting_on"] = None
         elif isinstance(ticket.get("waiting_on"), dict):
@@ -623,20 +678,22 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
     return apply_op(root, tid, op)[0]
 
 
-# ---------------------------------------------------------------- plain fields (owner, due, note, summary)
+# ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
 
 
 def clean_field(key: str, value):
-    """Validate owner, due, note or summary (None or empty clears it); returns the value to store."""
+    """Validate a plain field (None or empty clears it); returns the value to store."""
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
     if not isinstance(value, str):
         raise Refused(f"{key} must be text.")
-    v = value.strip()
+    v = value if key in ("note", "done_when") else value.strip()
     if key == "owner" and len(v) > 64:
         raise Refused("An owner is at most 64 characters.")
     if key == "note" and len(v) > 2000:
         raise Refused("A note is at most 2000 characters.")
+    if key == "done_when" and len(v) > 2000:
+        raise Refused("The done criteria are at most 2000 characters.")
     if key == "summary" and len(v) > 200:
         raise Refused("A summary is at most 200 characters.")
     if key == "due":
@@ -665,7 +722,7 @@ def edit(
     fields: dict | None = None,
     if_revision: int | None = None,
 ) -> dict:
-    """Rename and/or set owner, due, note (`fields`)."""
+    """Rename and/or set owner, due, note, done_when (`fields`)."""
     if title is not None:
         title = title.strip()
         if not title or len(title) > 200:
@@ -1271,6 +1328,7 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
     if not text.strip():
         raise Refused("An answer needs text.")
     text = text.strip()
+    from orch import runs  # runs imports tickets
 
     def op(ticket):
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
@@ -1286,9 +1344,13 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
         q["answer"], q["answered_by"], q["via"] = ans, by, via
         w = ticket.get("waiting_on")
         if w and w.get("kind") == "question" and w.get("ref") == qid:
-            ticket["waiting_on"] = None
-            if ticket["status"] == "waiting":
-                ticket["status"] = "active"
+            still = _open_questions(ticket)
+            if still:  # more questions wait: the ticket keeps waiting, on the oldest of them
+                ticket["waiting_on"] = {"kind": "question", "ref": still[0]}
+            else:
+                ticket["waiting_on"] = None
+                if ticket["status"] == "waiting":  # Working only while an agent runs; else Ready to go on
+                    ticket["status"] = "active" if runs.running(root, tid) else "ready"
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
         return q
 
@@ -1349,6 +1411,11 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         raise Refused('A patch is a JSON object, e.g. \'{"title": "New"}\'.') from None
     if not isinstance(obj, dict) or not obj:
         raise Refused("A patch is a JSON object with at least one field.")
+    if "status" in obj:
+        from orch import chat
+
+        if chat.is_helper(root):
+            raise Refused("The Chat helper does not change a ticket's status.")
     bad = sorted(set(obj) - set(PATCH_FIELDS))
     if bad:
         raise Refused(f"A patch can change only: {', '.join(PATCH_FIELDS)} (not {bad[0]}).")
@@ -1356,7 +1423,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         t = obj["title"]
         if not isinstance(t, str) or not t.strip() or len(t.strip()) > 200:
             raise Refused("A title needs 1 to 200 characters.")
-    for k in ("owner", "due", "note", "summary"):
+    for k in ("owner", "due", "note", "done_when", "summary"):
         if k in obj:
             clean_field(k, obj[k])
     w = obj.get("waiting_on")
@@ -1374,7 +1441,9 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         actor = by
         if "status" in obj:
             status, actor = _finish_status(root, ticket, status, by)
-        for k in ("owner", "due", "note", "summary"):
+            if status in ("open", "ready") and not actor.startswith("agent:"):
+                ticket.pop("started", None)
+        for k in ("owner", "due", "note", "done_when", "summary"):
             if k in obj:
                 _set_field(ticket, k, obj[k])
         if "waiting_on" in obj:
