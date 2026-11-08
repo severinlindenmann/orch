@@ -13,6 +13,7 @@
   const MAX_ROWS = 500;
 
   function create({h, ic, P, TID, toast}) {
+    let agent = 'agent';
     let pageKey = '';  /* from the ticket view (page_key): without it a page URL is a 404 */
     const base = name => String(name || '').split('/').pop();
     const prefix = '.orch/tickets/' + TID + '/evidence/';
@@ -44,6 +45,7 @@
     const url = (ev, mode) => mode === 'page' ? pageUrl(ev) : P + '/api/file?t=' + encodeURIComponent(TID) + '&n=' + encodeURIComponent(fileName(ev)) + '&m=' + mode;
 
     function title(ev, kind) {
+      if (ev.type === 'file') return window.FocusHelpers.plainFileName(ev.ref) || 'File';
       if (ev.title) return String(ev.title);
       if (kind === 'text') return String(ev.ref || ev.text || 'Note');
       if (ev.type === 'file') return base(ev.ref) || 'File';
@@ -59,7 +61,7 @@
       const pr = ok ? /\/pull\/(\d+)/.exec(u.pathname) : /^PR\s*#?(\d+)$/i.exec(ref) || /^#(\d+)$/.exec(ref);
       return {ok, href: ok ? u.href : '', host: ok ? u.hostname : '', label: ev.type === 'pr' && pr ? 'PR #' + pr[1] : ok ? u.hostname + (u.pathname === '/' ? '' : u.pathname) : ref};
     }
-    const who = ev => String(ev.by || '').startsWith('human:') ? ['●', 'You'] : ['○', 'Agent says'];
+    const who = ev => String(ev.by || '').startsWith('human:') ? ['●', 'You'] : ['○', agent + ' says'];
     function when(at) {
       const d = new Date(at);
       return at && !isNaN(d) ? d.toLocaleString(undefined, {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false}) : '';
@@ -106,12 +108,12 @@
     }
     function tile(item, onOpen) {
       const {c, ev} = item, kind = kindOf(ev), [icon, label] = KINDS[kind], [mark, markText] = who(ev);
-      const extension = extOf(fileName(ev) || ''), badge = extension.toUpperCase() || (kind === 'text' ? 'TXT' : label);
+      const extension = extOf(fileName(ev) || ''), badge = label;
       const head = h('span', {class: 'fx-pt-k'}, h('span', {icon}), h('span', {class: 'fx-pt-badge', text: badge}), h('span', {text: label}), h('time', {datetime: ev.at || '', text: when(ev.at)}));
       const thumb = h('span', {class: 'fx-pt-preview'}, h('span', {icon}), h('span', {text: kind === 'page' ? 'Open to see the page' : badge}));
       const btn = h('button', {type: 'button', class: 'fx-ptile fx-k-' + kind, title: c.text || '', 'aria-haspopup': 'dialog', onclick: () => onOpen(btn)},
         head, thumb, h('span', {class: 'fx-pt-t', text: title(ev, kind)}),
-        h('span', {class: 'fx-pt-m'}, h('span', {class: 'fx-pt-who ' + (mark === '●' ? 'you' : 'agent'), text: mark + ' ' + markText})));
+        window.FocusHelpers.cleanOutcome(ev.text) ? h('span', {class: 'fx-pt-m'}, h('span', {class: 'fx-pt-who ' + (mark === '●' ? 'you' : 'agent'), text: mark + ' ' + markText + ': ' + window.FocusHelpers.cleanOutcome(ev.text)})) : null);
       const excerpt = text => thumb.replaceChildren(h('pre', {text: String(text).slice(0, 2048).split('\n').slice(0, 8).join('\n')}));
       if (kind === 'text') excerpt(ev.text || ev.ref || '');
       const textFile = ['doc', 'code', 'table'].includes(kind) && extension !== 'svg';
@@ -257,7 +259,8 @@
       pv.icon.replaceChildren(h('span', {icon}));
       pv.title.textContent = title(ev, kind);
       pv.meta.textContent = '';
-      pv.meta.append(h('span', {class: 'fx-pt-who ' + (mark === '●' ? 'you' : 'agent'), text: mark + ' ' + markText}), ' · ' + label + (when(ev.at) ? ' · ' + when(ev.at) : '') + (c.text ? ' · ' + c.text : ''));
+      if (window.FocusHelpers.cleanOutcome(ev.text)) pv.meta.append(h('span', {class: 'fx-pt-who ' + (mark === '●' ? 'you' : 'agent'), text: mark + ' ' + markText}), ' · ');
+      pv.meta.append(label + (when(ev.at) ? ' · ' + when(ev.at) : '') + (c.text ? ' · ' + c.text : ''));
       pv.count.textContent = items.length > 1 ? (idx + 1) + ' of ' + items.length : '';
       pv.prev.hidden = pv.next.hidden = items.length < 2;
       pv.dl.hidden = name === null;
@@ -337,14 +340,14 @@
     function fileCard(ev, name, why, signal) {
       const sizeEl = h('dd', {text: '…'});
       const card = h('div', {class: 'fx-pv-file'}, why ? note(why, false) : null,
-        h('dl', {class: 'fx-pv-dl'}, h('dt', {text: 'Name'}), h('dd', {text: base(name || ev.ref) || 'File'}), h('dt', {text: 'Size'}), sizeEl, h('dt', {text: 'Saved'}), h('dd', {text: when(ev.at) || 'unknown'})),
+        h('details', {}, h('summary', {text: 'Details'}), h('dl', {class: 'fx-pv-dl'}, h('dt', {text: 'Name'}), h('dd', {text: base(name || ev.ref) || 'File'}), h('dt', {text: 'Size'}), sizeEl, h('dt', {text: 'Saved'}), h('dd', {text: when(ev.at) || 'unknown'}))),
         name !== null ? h('a', {class: 'btn primary', href: url(ev, 'dl'), download: base(name)}, h('span', {icon: 'download'}), h('span', {text: 'Download'})) : null);
       if (name === null) sizeEl.textContent = 'unknown';
       else fetch(url(ev, 'info'), {signal}).then(r => r.ok ? r.json() : null).then(j => { sizeEl.textContent = j ? sizeText(j.size) : 'over 25 MB or not available'; }).catch(() => { sizeEl.textContent = 'unknown'; });
       return card;
     }
 
-    return {tile, open, close, isOpen, kindOf, setPageKey: k => { pageKey = /^[0-9a-f]{16}$/.test(k) ? k : ''; }};
+    return {setAgent: label => { agent = label; }, tile, open, close, isOpen, kindOf, setPageKey: k => { pageKey = /^[0-9a-f]{16}$/.test(k) ? k : ''; }};
   }
 
   window.FocusProof = {create};
