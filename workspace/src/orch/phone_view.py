@@ -706,7 +706,8 @@ def _light_sig(ticket: dict) -> str:
 
 
 def light_view(root: Path, ticket: dict) -> dict:
-    """A LIGHT ticket_view (`light: true`): title, status, started, running, summary, agent, updated_at only. The
+    """A LIGHT ticket_view (`light: true`): title, status, started, running, summary, agent, updated_at only.
+    The
     phone overlays these on its last full snapshot. No questions, no checklist, history or files."""
     agent, running = _agent(root, ticket)
     view: dict = {
@@ -733,7 +734,8 @@ def _set_light_baseline(state: dict, ticket: dict, now: float) -> None:
 
 def sync_light(root: Path, now: float | None = None) -> list[tuple[str, str]]:
     """Every ticket a phone already lists (a ticket_view went to it before) gets a LIGHT quiet update when its
-    status, title, summary, started or needs flag changes: kind note, never pushed, no question content. Tickets
+    status, title, summary, started or waiting flag changes: kind note, never pushed, no question content.
+    Tickets
     the phone never listed get nothing. Returns (phone, ticket id) pairs sent."""
     from orch import relay
 
@@ -769,7 +771,9 @@ def sync_light(root: Path, now: float | None = None) -> list[tuple[str, str]]:
     sent = []
     for ph, tid, t, before in due:
         try:
-            relay.send_text(root, ph, f"Status: {t.get('status', 'open')}", tid, "note", view=light_view(root, t))
+            relay.send_text(
+                root, ph, f"Status: {t.get('status', 'open')}", tid, "note", view=light_view(root, t)
+            )
             sent.append((ph, tid))
         except Refused:  # not sent: the next pull tries again
 

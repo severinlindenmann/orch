@@ -298,8 +298,9 @@ function agentBar(t) {
   const session = array(t.sessions).slice().sort((a, b) => (Date.parse(b.last_used) || 0) - (Date.parse(a.last_used) || 0))[0];
   const step = array(t.checklist).find(task => task.state === 'doing');
   return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'},
-    h('span', {className:'dot ' + (run?.running ? 'working' : 'idle'), 'aria-hidden':'true'}),
-    h('span', {className:'ab-text grow'}, h('strong', {}, name(line.agent)), ' · ', clean(step?.text || line.status)), ticketWarmth(t, run, session),
+    h('span', {className:'dot ' + (line.startFailed ? 'error' : run?.running ? 'working' : 'idle'), 'aria-hidden':'true'}),
+    line.startFailed ? h('span', {className:'ab-text grow', 'data-key':'start-failed'}, clean(line.status))
+      : h('span', {className:'ab-text grow'}, h('strong', {}, name(line.agent)), ' · ', clean(step?.text || line.status)), line.startFailed ? null : ticketWarmth(t, run, session),
     snapshot ? null : h('div', {className:'ab-actions'}, liveLink ? h('a', {className:'btn outline', href:liveLink.url}, 'Watch live') : null,
       run?.running ? ticketButton('Stop', 'outline', () => act('run.stop', {ticket:t.id})) : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
 }
@@ -469,12 +470,12 @@ function focusTicketAnswer() {
 function taskRows(t) {
   return array(t.checklist).map((task, i) => {
     const meta = [ticketActor(task.owner || task.by), clean(window.DashHelpers.cleanOutcome(task.summary))].filter(Boolean).join(' · ');
-    const mark = snapshot || !task.id ? (task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot ' + (task.state === 'doing' ? 'working' : 'idle')}))
+    const mark = snapshot || !task.id ? (task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot ' + (task.state === 'doing' && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'working' : 'idle')}))
       : h('button', {type:'button', className:'task-check' + (task.done ? ' on' : ''), role:'checkbox', 'aria-checked':String(!!task.done), 'aria-label':clean(task.text), 'data-key':'task-check-' + task.id}, task.done ? iconEl('check') : null);
     if (!snapshot && task.id) mark.onclick = () => toggleTask(t.id, task.id);
     return h('div', {className:'card-row ticket-task-row', 'data-key':'task-' + (task.id || i)}, mark,
-      h('div', {className:'grow'}, h('h3', {}, task.state === 'doing' ? h('span', {className:'ticket-spinner', title:'Agent is working', 'aria-label':'Agent is working'}) : null, clean(task.text)), meta ? h('p', {className:'meta'}, meta) : null,
-        h('p', {className:'meta task-proof'}, ticketTaskOutcome(task))));
+      h('div', {className:'grow'}, h('h3', {}, task.state === 'doing' && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? h('span', {className:'ticket-spinner', title:'Agent is working', 'aria-label':'Agent is working'}) : null, clean(task.text)), meta ? h('p', {className:'meta'}, meta) : null,
+        h('p', {className:'meta task-proof'}, task.state === 'doing' && window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'Not started yet.' : ticketTaskOutcome(task))));
   });
 }
 // "+ Add task": one line, Enter adds it (orch check add). The draft is kept while the page refreshes.

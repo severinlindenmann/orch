@@ -236,6 +236,25 @@
     return (ev && (cleanOutcome(ev.summary) || cleanOutcome(ev.text) || (ev.type === 'note' ? cleanOutcome(ev.ref) : ''))) || (task.done ? 'Completed.' : task.state === 'doing' ? 'Working on this task.' : 'Not started yet.');
   }
 
+  /* The cause of a failed agent start in plain words ("the agent program was not found"), from waiting_on.ref. */
+  function plainStartReason(ref) {
+    let s = String(ref || '').replace(/^The agent could not be started:\s*/i, '').trim();
+    const missing = /No such file or directory:?\s*'([^']+)'/i.exec(s) || /\[Errno 2\][^']*'([^']+)'/.exec(s);
+    if (missing) return 'the ' + missing[1].split(/[\\/]/).pop() + ' program was not found';
+    if (/Errno 13|Permission denied/i.test(s)) return 'it is not allowed to run';
+    s = s.replace(/\[Errno \d+\]\s*/g, '').replace(/['"]/g, '').replace(/\s+/g, ' ').trim().replace(/[.:]$/, '');
+    if (!s || /^The agent did not start$/i.test(s)) return 'it did not start';
+    return s.length > 100 ? s.slice(0, 99) + '…' : s.charAt(0).toLowerCase() + s.slice(1);
+  }
+
+  /* {agent, reason, text} when the ticket waits because the agent could not be started (waiting_on.start), else null. */
+  function startFailure(ticket, run, settings) {
+    const t = ticket || {}, w = t.waiting_on;
+    if (t.status !== 'waiting' || !w || w.start !== true || (run && run.running === true)) return null;
+    const agent = agentLabel(settings, (run && run.claim) || {}), reason = plainStartReason(w.ref);
+    return {agent, reason, text: agent + ' could not start: ' + reason};
+  }
+
   /* The ONE agent line under the ticket title. state: working | starting | background | stuck | needs | failed | resume | new.
      primary = the main action {label, op, args} (op is a dashboard op, or "open" with a url); items = the rest, under "...". */
   function agentLine(ticket, run, nowMs, liveLink, settings) {
@@ -264,6 +283,8 @@
       if (claim.live && claim.live.state === 'idle') return {state: 'idle', agent, status: 'live session open, waiting for a message' + by, primary: live || stop, items: live ? [stop] : []};
       return {state: 'working', agent, status: 'working' + by + since, primary: live || stop, items: live ? [stop] : []};
     }
+    const sf = startFailure(t, r, settings);
+    if (sf) return {state: 'failed', agent, status: sf.text, startFailed: true, primary: start('Retry'), items: []};
     if (r && r.state === 'dead') return {state: 'failed', agent, status: 'the last run ended without finishing',
       primary: start('Try again'), items: [fresh]};
     if (asks) return {state: 'needs', agent, status: 'needs your answer', primary: {label: 'Answer', op: 'answer'}, items: [fresh]};
@@ -433,5 +454,5 @@
   const needsYou = n => n + (n === 1 ? ' needs you' : ' need you');  // same words as the phone
   const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
 
-  return {agentLabel, childrenOf, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {agentLabel, childrenOf, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });
