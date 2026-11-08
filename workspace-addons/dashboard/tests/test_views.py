@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator
 from orch_dashboard.data import load_addons, load_state
 from orch_dashboard.views import ViewPuller, check_view
 
+from . import webjs
 from .conftest import CONTRACTS, VIEW
 
 SCHEMA = json.loads((CONTRACTS.parent / "addon-view.schema.json").read_text())
@@ -188,7 +189,7 @@ def test_page_has_no_inline_code_and_loads_the_kit():
 
 def test_page_code_names_no_addon_and_has_no_blinking_needs():
     js = (
-        ((WEBDIR / "app.js").read_text() + (WEBDIR / "style.css").read_text())
+        (webjs.all_js() + (WEBDIR / "style.css").read_text())
         .replace(".focus(", ".(")
         .replace(":focus", ":")
     )
@@ -214,7 +215,7 @@ def test_server_serves_the_kit_files_and_nothing_else_under_kit(server):
 
 def test_no_html_strings_for_server_text_in_the_page_code():
     """Text from tickets, people and add-ons goes through DOM builders (textContent); only icons use innerHTML."""
-    for line in (WEBDIR / "app.js").read_text().splitlines():
+    for line in webjs.all_js().splitlines():
         for bad in ("insertAdjacentHTML", "outerHTML", "document.write", "eval("):
             assert bad not in line, line
         if "innerHTML" in line:
@@ -353,7 +354,7 @@ def test_a_done_ticket_with_an_open_live_session_gets_its_run_status(tmp_path, m
 
 
 def test_board_moves_use_ticket_patch_with_the_revision_and_keyboard_menu():
-    js = (WEBDIR / "app.js").read_text()
+    js = webjs.all_js()
     move = js[js.index("async function moveTicket") :]
     move = move[: move.index("function list()")]
     assert "act('ticket.patch', {ticket:t.id, data:{status}, if_revision:t.revision})" in move
@@ -368,20 +369,20 @@ def test_board_moves_use_ticket_patch_with_the_revision_and_keyboard_menu():
 
 
 def test_artifacts_tab_reads_files_only_through_the_checked_endpoints():
-    js = (WEBDIR / "app.js").read_text()
+    js = webjs.all_js()
     assert "'/api/artifacts/'" in js and "'/api/file'" in js
     assert "innerHTML" not in js[js.index("function artifactsPanel") : js.index("function detail(")]
     assert "pre.textContent" in js  # file text is never parsed as html
 
 
 def test_ticket_details_hide_raw_id_and_home_badge_is_named():
-    js = (WEBDIR / "app.js").read_text()
+    js = webjs.all_js()
     assert "field('Ticket', h('span', {className:'ed-ro mono'}, t.id))" not in js
     assert "needsYou(needsList().length)" in js
 
 
 def test_settings_wording_and_one_toast_at_a_time():
-    js = (WEBDIR / "app.js").read_text()
+    js = webjs.all_js()
     for text in (
         "Off: agents send finished work to Review and you decide when it is Done.",
         "'Workflow'",
