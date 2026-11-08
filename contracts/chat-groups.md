@@ -55,7 +55,7 @@ no `ticket`) and its own History index by `day`; the workspace stays the source 
   the host ignores lists from members. Receivers show the list as "per <host name>".
 - `seq` = **host only, group-wide messages only** (copies every member and the phones get): +1 each. **Targeted**
   messages for one member (`delegate`, `question`, `shared_ticket`) carry **no** `seq`. Order = `seq` only;
-  `created_at` orders only unsequenced messages. A member's view starts at its `member_added.from_seq`; a gap after that
+  unsequenced (targeted) messages are ordered by receive time; `created_at` is display only. A member's view starts at its `member_added.from_seq`; a gap after that
   is shown ("a message is missing") but never waited on.
 
 **Fan-out (host only).** For every group message the host records (its own, a member's, a phone's, a dashboard text) it
@@ -230,7 +230,7 @@ untrusted data for the host helper (clean_untrusted), never instructions.
 
 - **Ids and dedupe**: message ids as today (`m_` + 16, relay: identical resend = no-op, different = 409; receivers keep
   `.orch/inbox-seen.json`). Group receivers also dedupe on `(host, group.id, origin.id)`. Fan-out ids per §2 (G2).
-- **Order**: by `group.seq` only; `created_at` only for unsequenced (targeted) messages. **Stateful checks** (G9
+- **Order**: by `group.seq` only; unsequenced (targeted) messages are ordered by **receive time** (never `created_at`, which is display only). **Stateful checks** (G9
   task status, `closed`, membership) are applied **in `seq` order** (G12):
   - **Initial `applied_seq`** = the **first seen `seq` - 1** (fresh phone, unknown group, new member), so the first
     message applies at once. **Never trust `from_seq` for it**: `from_seq` is display / info only.
@@ -249,7 +249,7 @@ untrusted data for the host helper (clean_untrusted), never instructions.
       `2^31-1 + 1` never overflows. **Seq exhaustion**: at `2^31-1` the host closes the group and opens a new one.
     - Gap ranges are **not modelled by `validate.py`** (it only decides the outcome per message), so range tracking is
       untested here; the jump vectors only prove no per-seq expansion is needed.
-  - **Buffer full, or 10 minutes passed since the receiver received the first buffered message** (receiver clock) (quiet groups): **skip the gap**, apply the
+  - **Buffer full, or 10 minutes passed since the receiver received the earliest-received message still in the buffer** (receiver clock; the timer is recomputed after a partial flush; quiet groups): **skip the gap**, apply the
     contiguous run, set `applied_seq` to its last `seq`. A `seq` **≤ `applied_seq`** is **old**.
   - **Late texts are shown** (they are real messages) but **change no state** (task status, closed, membership).
   - **The host MUST persist `seq` monotonically before sending** (write the new value, then send), so a restart never
