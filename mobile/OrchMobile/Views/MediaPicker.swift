@@ -53,10 +53,8 @@ struct MediaPicker: View {
         ScrollView {
             VStack(alignment: .leading, spacing: step == .choices ? 0 : 16) {
                 HStack {
-                    if step != .choices {
-                        Text(title).themeFont(20, .semibold)
-                            .accessibilityAddTraits(.isHeader)
-                    }
+                    Text(title).themeFont(20, .semibold)
+                        .accessibilityAddTraits(.isHeader)
                     Spacer()
                     Button { finished = true; removePrepared(drafts); dismiss() } label: {
                         Image(systemName: "xmark").frame(width: 44, height: 44)
@@ -116,7 +114,7 @@ struct MediaPicker: View {
     }
 
     private var title: String {
-        switch step { case .choices: "Share something"; case .preview: "Preview"; case .location: "Current location" }
+        switch step { case .choices: "Add to Chat"; case .preview: "Preview"; case .location: "Current location" }
     }
 
     private var choices: some View {
@@ -137,9 +135,9 @@ struct MediaPicker: View {
                 #endif
                 importer = true
             } label: {
-                MediaTile(label: "File", icon: "doc", color: Theme.warn)
+                MediaTile(label: "Files", icon: "doc", color: Theme.warn)
             }
-            .accessibilityLabel("File").accessibilityIdentifier(fileChoiceID)
+            .accessibilityLabel("Files").accessibilityIdentifier(fileChoiceID)
             Button {
                 errorText = nil; step = .location; locationRequest = UUID()
             } label: { MediaTile(label: "Location", icon: "mappin.and.ellipse", color: Theme.brand) }
