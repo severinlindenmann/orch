@@ -524,3 +524,50 @@ def test_chat_id_works_for_the_host_even_though_chat_is_a_hidden_command(proj, r
     assert run("chat", "id", "--json")[0] == 0
     with pytest.raises(SystemExit):
         run("--help-all")
+
+
+# ---------------------------------------------------------------- the Chat ticket is never finished; helper stays in orch
+
+
+def test_general_never_leaves_its_status_by_any_path(proj, conn, run):
+    gid = _general(proj, conn, run)
+    before = tickets.load(proj, gid)["status"]
+    for by in ("agent:claude", "human:me"):
+        for status in ("done", "review", "dropped", "ready"):
+            with pytest.raises(Refused):
+                tickets.set_status(proj, gid, status, by)  # `orch done` and set_status
+    rev = tickets.load(proj, gid)["revision"]
+    with pytest.raises(Refused):
+        tickets.patch(proj, gid, rev, json.dumps({"status": "review"}), "human:me")
+    with pytest.raises(Refused):
+        tickets.patch(proj, gid, rev, json.dumps({"status": "done"}), "agent:claude")
+    t = tickets.load(proj, gid)
+    assert t["status"] == before
+
+
+def test_general_is_not_touched_by_the_run_wrapper_hooks(proj, conn, run):
+    gid = _general(proj, conn, run)
+    t0 = tickets.load(proj, gid)
+    n = len(t0["history"])
+    tickets.mark_working(proj, gid, "agent:relay", "Claude")
+    tickets.agent_stopped(proj, gid, "agent:relay")
+    tickets.wait_for_start(proj, gid, "no sign-in", "agent:relay")
+    t1 = tickets.load(proj, gid)
+    assert (t1["status"], len(t1["history"])) == (t0["status"], n)
+
+
+def test_only_real_messages_carry_chat_message(proj, conn, run):
+    gid = _general(proj, conn, run, "hello there")
+    tickets.apply_op(proj, gid, lambda t: tickets.add_history(t, "agent:x", "Claude started"))
+    hist = tickets.load(proj, gid)["history"]
+    flagged = [e["text"] for e in hist if e.get("chat_message") is True]
+    assert "Claude started" not in flagged and flagged
+
+
+def test_helper_prompt_and_skill_stay_inside_orch(proj):
+    gid = tickets.ensure_general(proj, "phone:Marco")
+    prompt = chat.helper_prompt(proj, tickets.load(proj, gid), [], "")
+    skill = (Path(__file__).resolve().parents[1] / "skills" / "orch" / "SKILL.md").read_text()
+    for text in (prompt, skill):
+        assert "only use orch tools and the files in this workspace" in text
+        assert "connectors" in text

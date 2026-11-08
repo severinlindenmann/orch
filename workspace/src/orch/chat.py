@@ -306,7 +306,7 @@ def say(root: Path, text: str, by: str | None = None) -> dict:
     gid = tickets.ensure_general(root, who)
     mid = relay.new_id()
     entry = record(root, mid, "you", "dashboard", text)
-    tickets.apply_op(root, gid, lambda t: tickets.add_history(t, who, text, "dashboard"))
+    tickets.apply_op(root, gid, lambda t: tickets.add_history(t, who, text, "dashboard", chat=True))
     runs.pending_add(root, gid, who, "message", text, "dashboard", "p_" + mid[2:])
     sent = None
     with contextlib.suppress(Refused, OSError):
@@ -379,6 +379,13 @@ def status(root: Path, now=None) -> dict:
     }
 
 
+STAY_IN_ORCH = (
+    "You can only use orch tools and the files in this workspace. Never offer, suggest or use other services, "
+    "accounts or connectors (email, calendar, drives, chat apps or similar), even if your environment lists some. "
+    "If asked for one, say you cannot and offer an orch ticket instead."
+)
+
+
 def helper_prompt(root: Path, ticket: dict, items: list[dict], news: str) -> str:
     """What a fresh helper session starts with (the Chat of one workspace, one persistent helper)."""
     tid = ticket["id"]
@@ -393,6 +400,7 @@ def helper_prompt(root: Path, ticket: dict, items: list[dict], news: str) -> str
         "You may make tickets (orch ticket new), write notes and answer questions. You never sign, approve, "
         "publish, close, drop or delete anything, and you never answer a permission question: those are for "
         "the person.",
+        STAY_IN_ORCH,
         "Your conversation is cleared every day at 04:00; keep nothing you need in your head: make a ticket.",
     ]
     if news:

@@ -656,7 +656,7 @@ def send_text(
         # a real text to the General conversation: kept in its history: the dashboard shows both ways
         try:
             gid = tickets.ensure_general(root, tickets.current_actor())
-            tickets.apply_op(root, gid, lambda t: tickets.add_history(t, tickets.current_actor(), text))
+            tickets.apply_op(root, gid, lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True))
             chat.record(
                 root, msg["id"], body["by"], body["via"], text, msg["created_at"], reply_to, refs=refs
             )
@@ -1305,7 +1305,7 @@ def _continue(
         r["phone"] = (
             True  # the owner wrote to it from a phone: its questions go there too (mobile_mode.from_phone)
         )
-        tickets.add_history(t, by, text, "phone")
+        tickets.add_history(t, by, text, "phone", chat=general)
         t["waiting_on"] = None
         if general:
             return

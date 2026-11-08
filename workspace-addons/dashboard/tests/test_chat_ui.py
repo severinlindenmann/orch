@@ -54,11 +54,13 @@ def test_group_talk_is_marked_by_the_data_layer(ws):
     path = next(tdir.glob("t_weekly01.json"))
     t = json.loads(path.read_text())
     t["history"] = [
-        {"at": "2026-11-08T10:00:00+01:00", "by": "agent:Home", "text": "hi", "via": "relay"},
-        {"at": "2026-11-08T10:01:00+01:00", "by": "human:me", "text": "yo", "via": "dashboard"},
+        {"at": "2026-11-08T10:00:00+01:00", "by": "agent:Home", "text": "hi", "via": "relay", "chat_message": True},
+        {"at": "2026-11-08T10:01:00+01:00", "by": "human:me", "text": "yo", "via": "dashboard", "chat_message": True},
+        {"at": "2026-11-08T10:01:30+01:00", "by": "agent:Home", "text": "Added a task", "via": "relay"},
+        {"at": "2026-11-08T10:01:40+01:00", "by": "agent:Home", "text": "Claude started", "via": "dashboard"},
         {"at": "2026-11-08T10:02:00+01:00", "by": "agent:x", "text": "note", "via": "cli"},
     ]
     path.write_text(json.dumps(t))
     got = next(x for x in load_tickets(ws)[0] if x["id"] == "t_weekly01")["history"]
-    assert [bool(e.get("in_chat")) for e in got] == [True, True, False]
+    assert [bool(e.get("in_chat")) for e in got] == [True, True, False, False, False]
     assert "in_chat === true" in JS and "rel' + 'ay" not in JS

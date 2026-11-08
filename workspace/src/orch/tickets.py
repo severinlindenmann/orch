@@ -459,8 +459,12 @@ def _env_via() -> str:
     return v if re.fullmatch(r"[a-z][a-z0-9-]{1,23}", v) else "cli"
 
 
-def add_history(ticket: dict, by: str, text: str, via: str | None = None) -> None:
-    ticket["history"].append({"at": now(), "by": by, "via": via or _env_via(), "text": text})
+def add_history(ticket: dict, by: str, text: str, via: str | None = None, chat: bool = False) -> None:
+    """chat=True marks a real Chat/group message (`chat_message: true`): the only history lines the Chat shows."""
+    entry = {"at": now(), "by": by, "via": via or _env_via(), "text": text}
+    if chat:
+        entry["chat_message"] = True
+    ticket["history"].append(entry)
 
 
 def parse_ext_args(pairs: list[str] | None, schema_for=None) -> dict[str, dict]:
@@ -560,7 +564,12 @@ def _check_not_too_early(root: Path, ticket: dict) -> None:
         raise Refused("Not done: new input for this ticket has not reached you yet. Read it first.")
 
 
+GENERAL_REFUSAL = "The Chat is not a ticket: it is never finished, dropped or reopened."
+
+
 def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
+    if ticket.get("general") is True:  # the ONE status guard: nobody (agent, person, wrapper) moves the Chat ticket
+        raise Refused(GENERAL_REFUSAL)
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
         by = "agent:" + str(agent_tool())
     if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
@@ -575,6 +584,8 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
 
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     def op(ticket):
+        if ticket.get("general") is True:
+            return NO_WRITE
         w = ticket.get("waiting_on") or {}
         if ticket["status"] not in ("open", "ready", "review") and not (
             ticket["status"] == "waiting" and w.get("start") is True
@@ -600,6 +611,8 @@ def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool =
     Returns True when the ticket was moved."""
 
     def op(ticket):
+        if ticket.get("general") is True:
+            return NO_WRITE
         if ticket["status"] != "active" or (still_running is not None and still_running()):
             return NO_WRITE
         ticket["status"] = "ready"
@@ -657,8 +670,6 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
 
     def op(ticket):
-        if ticket.get("general") is True:
-            raise Refused("The Chat is not a ticket: it is never finished, dropped or reopened.")
         target, actor = _finish_status(root, ticket, status, by)
         if target != "waiting":
             ticket["waiting_on"] = None
