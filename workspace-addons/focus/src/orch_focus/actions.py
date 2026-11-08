@@ -174,7 +174,13 @@ def _without_agent(environ) -> dict:
 
         return human_environ(environ)
     except Exception as e:  # noqa: BLE001 - an old orch or a bad adapter file
-        why = " ".join(str(e).split())[:200] or e.__class__.__name__
+        import sys
+        import traceback
+
+        print("orch could not check who is acting here:", file=sys.stderr)  # the full text: server side only
+        traceback.print_exc(file=sys.stderr)
+        where = Path(getattr(e, "filename", "") or "").name  # never a full path or file content in the page
+        why = e.__class__.__name__ + (f" in {where}" if where else "")
         raise Unavailable(f"orch could not check who is acting here ({why}). Fix that and try again.") from None
 
 
