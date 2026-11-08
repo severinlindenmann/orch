@@ -1,0 +1,19 @@
+{
+  "why": "Chat (former General): a helper text to the phones, Chat day 2026-11-08 (after the 04:00 cut), reply to the phone's text.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_chat0000000000a1",
+    "from": "ws_fin0000001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-08T10:03:00Z",
+    "reply_to": "m_phonetext0000010",
+    "body": {
+      "general": true,
+      "text": "The car tax letter is in Documents/2027.",
+      "by": "ws_fin0000001",
+      "via": "helper",
+      "day": "2026-11-08"
+    }
+  }
+}

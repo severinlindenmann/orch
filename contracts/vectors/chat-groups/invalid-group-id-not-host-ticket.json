@@ -1,0 +1,28 @@
+{
+  "why": "Forged group id: the host's group id must be grp_ + the message's own ticket.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_wrongid000000010",
+    "from": "ws_fin0000001",
+    "to": "ws_hom0000001",
+    "type": "text",
+    "created_at": "2026-11-08T10:03:00Z",
+    "ticket": "t_fin14a",
+    "key": "FIN-14",
+    "body": {
+      "text": "hi",
+      "group": {
+        "id": "grp_t_other99",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          "ws_fin0000001",
+          "ws_hom0000001"
+        ],
+        "seq": 4
+      },
+      "by": "ws_fin0000001",
+      "via": "helper"
+    }
+  }
+}

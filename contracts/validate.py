@@ -1,7 +1,8 @@
 """Check every contract example (tickets incl. ext.automation, run records, pending input, Needs you rows,
 agent adapters and their config entries, messages, workspaces, add-on manifests and views), the publish
 crypto vectors, the workspace look (look.json, look/icons, vectors/look-v1.json), and the phone API v3 (every /v1/phone example in review/relay-api.examples.json against
-phone-api.schema.json, plus vectors/phone-v3-v1.json). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
+phone-api.schema.json, plus vectors/phone-v3-v1.json), and Chat + group chat (vectors/chat-groups/*.json against message.schema.json,
+chat-groups.schema.json and the host rules in cg_rules). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py
 """
@@ -619,6 +620,98 @@ for case in lvec["connect"]:
         fails.append(f"look vector connect {case['name']}: got {look_connect(case['local'], case['remote'])}")
 if not {200, 422}.issubset({c["status"] for c in lvec["me_patch"]}) or 409 not in {c["status"] for c in lvec["admin_patch"]}:
     fails.append("look vectors: need 200 and 422 me_patch cases and a 409 admin_patch case")
+
+# Chat and group chat across workspaces (chat-groups.md): every vectors/chat-groups/*.json is one orch.msg/1 message
+# that must pass message.schema.json, chat-groups.schema.json and the host rules below; valid-* pass, invalid-* fail.
+_msg_schema = _expand(json.loads((HERE / "message.schema.json").read_text()))
+_cg_schema = _expand(json.loads((HERE / "chat-groups.schema.json").read_text()))
+V_CG = Draft202012Validator(
+    _cg_schema,
+    registry=Registry().with_resource(_msg_schema["$id"], Resource.from_contents(_msg_schema)),
+    format_checker=FormatChecker(),
+)
+CG_HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files")
+CG_MEMBER_ONLY = ("seen", "leave")
+CG_FILE_MAX = 26214400
+
+
+def cg_fanout_id(origin_id, to):
+    """Id of the host's copy of a group message for one recipient: retries give the same id (relay: 200 no-op)."""
+    return "m_" + hashlib.sha256(f"{origin_id}\n{to}".encode()).hexdigest()[:16]
+
+
+def cg_rules(m):
+    """Group rules JSON Schema cannot express (chat-groups.md, Security). Returns a list of plain messages."""
+    b, out = m.get("body") or {}, []
+    g = b.get("group")
+    if not isinstance(g, dict):
+        return out
+    host, frm, to = g.get("host"), m.get("from"), m.get("to")
+    if host not in g.get("members", []):
+        out.append("group.members must include the host")
+    if frm == host:
+        if g.get("id") != "grp_" + str(m.get("ticket")):
+            out.append("host message: group.id must be grp_ + the message's ticket (the host ticket)")
+        if "seq" not in g:
+            out.append("host message: group.seq is required")
+        if b.get("by") == "you" and b.get("via") == "phone" and "origin" not in b:
+            out.append("a phone's text reaches the group only as a host copy with origin")
+        if isinstance(b.get("task"), dict) and b["task"].get("ws") == host:
+            out.append("task.ws is the member that got the task, never the host")
+        o = b.get("origin")
+        if isinstance(o, dict) and o.get("from") != "dashboard" and str(to).startswith("ws_") and m.get("id") != cg_fanout_id(o["id"], to):
+            out.append("host copy to a workspace: id must be the fan-out id of (origin.id, to)")
+        if str(to).startswith("ws_") and to not in g.get("members", []):
+            out.append("host sends group messages only to members")
+        for k in CG_MEMBER_ONLY:
+            if k in b:
+                out.append(f"body.{k} is for members only")
+        if "shared_files" in b:
+            have = {a.get("blob_id") for a in (b.get("ticket_view") or {}).get("attachments", [])}
+            if not set(b["shared_files"]) <= have:
+                out.append("shared_files must be blob ids of body.ticket_view.attachments")
+            if to != "phones" and not str(to).startswith("ph_"):
+                out.append("shared_files is for texts to phones; workspaces get file messages")
+        st = b.get("shared_ticket")
+        if isinstance(st, dict):
+            if st.get("ticket") != m.get("ticket"):
+                out.append("shared_ticket must describe the host ticket")
+            if len(json.dumps(st, separators=(",", ":"), ensure_ascii=False).encode()) > 4096:
+                out.append("shared_ticket is over 4096 bytes")
+    elif str(frm).startswith("ws_"):
+        if to != host:
+            out.append("members send group messages only to the host (only the host fans out)")
+        if frm not in g.get("members", []):
+            out.append("sender is not a member")
+        if b.get("by") != frm:
+            out.append("a member's message is by the member itself (never by 'you')")
+        for k in CG_HOST_ONLY:
+            if k in b:
+                out.append(f"body.{k} is sent only by the host")
+        if isinstance(b.get("task"), dict):
+            if b["task"].get("ws") != frm:
+                out.append("task.ws must be the sending member")
+            if b["task"].get("status") == "waiting_start":
+                out.append("only the host says waiting_start")
+    else:
+        out.append("only workspaces send body.group (phones write to the host ticket; the relay builds phone texts)")
+    if m.get("type") == "file" and "share" in b and int(b.get("size", 0)) > CG_FILE_MAX:
+        out.append("a shared file is at most 25 MB")
+    return out
+
+
+cg_dir = HERE / "vectors" / "chat-groups"
+cg_files = sorted(cg_dir.glob("*.json"))
+for f in cg_files:
+    case = json.loads(f.read_text())
+    m = case["message"]
+    errs = [e.message for e in V["message"].iter_errors(m)] + [e.message for e in V_CG.iter_errors(m)] + cg_rules(m)
+    want = f.name.startswith("valid-")
+    if bool(errs) == want:
+        fails.append(f"vectors/chat-groups/{f.name}: expected {'valid' if want else 'invalid'}, got {errs[0] if errs else 'valid'}")
+for prefix in ("valid-", "invalid-"):
+    if not any(f.name.startswith(prefix) for f in cg_files):
+        fails.append(f"vectors/chat-groups: needs at least one {prefix}* vector")
 
 if fails:
     print("\n".join("FAIL " + f for f in fails))

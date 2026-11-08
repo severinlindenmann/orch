@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/chat-groups.schema.json",
+  "title": "orch Chat and group chat body fields v1",
+  "description": "NEW body fields for Chat (one workspace, former General) and group chats across workspaces (chat-groups.md). A message is a normal orch.msg/1 message (message.schema.json, unchanged); these fields ride in `body`, which already allows unknown fields, so the relay stores and forwards them without a change. Rules JSON Schema cannot express (host = sender, fan-out ids, member checks) are in chat-groups.md and checked by validate.py. Unknown fields are allowed and kept.",
+  "allOf": [
+    { "$ref": "https://orch.severin.io/contracts/message.schema.json" },
+    { "properties": { "body": { "$ref": "#/$defs/body" } } }
+  ],
+  "$defs": {
+    "ws": { "type": "string", "pattern": "^ws_[a-z0-9]{10}$" },
+    "ph": { "type": "string", "pattern": "^ph_[a-z0-9]{10}$" },
+    "mid": { "type": "string", "pattern": "^m_[a-z0-9]{16}$" },
+    "tid": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" },
+    "key": { "type": "string", "pattern": "^[A-Z0-9]{2,4}-[1-9][0-9]{0,8}$" },
+    "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "line": {
+      "type": "string", "minLength": 1, "maxLength": 120,
+      "pattern": "^[\\p{Zs}]*[\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}][\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}\\p{Zs}]*$",
+      "description": "One line of plain text (same character rule as body.update.title)."
+    },
+    "body": {
+      "type": "object",
+      "properties": {
+        "group": { "$ref": "#/$defs/group" },
+        "by": { "$ref": "#/$defs/by" },
+        "via": { "enum": ["phone", "dashboard", "helper"] },
+        "phone": { "$ref": "#/$defs/ph" },
+        "day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "NEW. Chat only: the Chat day this text belongs to (local date of the sending workspace, day starts 04:00 local)." },
+        "origin": { "$ref": "#/$defs/origin" },
+        "echo_of": { "$ref": "#/$defs/mid", "description": "NEW. Host copy to `phones` of a phone's own group text: the phone that sent it hides the copy." },
+        "group_event": { "$ref": "#/$defs/group_event" },
+        "task": { "$ref": "#/$defs/task" },
+        "shared_ticket": { "$ref": "#/$defs/shared_ticket" },
+        "share": { "$ref": "#/$defs/share" },
+        "shared_files": {
+          "type": "array", "minItems": 1, "maxItems": 10, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^b_[a-z0-9]{16}$" },
+          "description": "NEW. Host text to `phones` only: the blob ids of body.ticket_view.attachments this group message shares (the phone shows them as file cards in the group)."
+        },
+        "seen": {
+          "type": "object", "additionalProperties": false, "required": ["seq"],
+          "properties": { "seq": { "type": "integer", "minimum": 0 } },
+          "description": "NEW. Member -> host only: every group message up to this seq is stored. Quiet, never fanned out."
+        },
+        "leave": { "const": true, "description": "NEW. Member -> host only: this workspace leaves the group." },
+        "text": { "type": "string", "maxLength": 20000 }
+      },
+      "allOf": [
+        { "if": { "required": ["group"] }, "then": { "properties": { "text": { "maxLength": 4000 } } } },
+        { "if": { "required": ["by"], "properties": { "by": { "const": "you" } } }, "then": { "required": ["via"], "properties": { "via": { "enum": ["phone", "dashboard"] } } } },
+        { "if": { "required": ["by"], "properties": { "by": { "$ref": "#/$defs/ws" } } }, "then": { "required": ["via"], "properties": { "via": { "enum": ["helper", "dashboard"] } } } },
+        { "if": { "required": ["via"], "properties": { "via": { "const": "phone" } } }, "then": { "required": ["phone"] } },
+        { "if": { "anyOf": [{ "required": ["group_event"] }, { "required": ["seen"] }, { "required": ["leave"] }, { "required": ["origin"] }, { "required": ["shared_ticket"] }, { "required": ["shared_files"] }, { "required": ["echo_of"] }] }, "then": { "required": ["group"] } },
+        { "if": { "required": ["shared_files"] }, "then": { "required": ["ticket_view"] } },
+        { "if": { "required": ["day"] }, "then": { "not": { "required": ["group"] } } }
+      ]
+    },
+    "group": {
+      "type": "object", "additionalProperties": false, "required": ["id", "host", "title", "members"],
+      "description": "NEW. On every group message (text, question, answer, delegate, file, allow-related texts). id = \"grp_\" + the host ticket id; host = the workspace that owns that ticket; members = every workspace in the group, host included (the person and their phones are always in it and are not listed). seq is set by the host on what it sends.",
+      "properties": {
+        "id": { "type": "string", "pattern": "^grp_t_[a-z0-9]{6,16}$" },
+        "host": { "$ref": "#/$defs/ws" },
+        "title": { "$ref": "#/$defs/line" },
+        "members": { "type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": { "$ref": "#/$defs/ws" } },
+        "seq": { "type": "integer", "minimum": 1, "description": "Host only: the group's message number, +1 per group message the host records. Receivers sort by it." }
+      }
+    },
+    "by": {
+      "description": "NEW. Who wrote it: \"you\" = the person (via phone or dashboard), a ws_ id = that workspace (its helper, or a person at that workspace's dashboard).",
+      "oneOf": [{ "const": "you" }, { "$ref": "#/$defs/ws" }]
+    },
+    "origin": {
+      "type": "object", "additionalProperties": false, "required": ["id", "from", "at"],
+      "description": "NEW. Host fan-out copy: the original message (from a member, a phone or the host itself). Receivers dedupe on (group.id, origin.id).",
+      "properties": {
+        "id": { "$ref": "#/$defs/mid" },
+        "from": { "type": "string", "pattern": "^(ws_[a-z0-9]{10}|ph_[a-z0-9]{10}|dashboard)$" },
+        "at": { "$ref": "#/$defs/time" }
+      }
+    },
+    "group_event": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "at"],
+      "description": "NEW. Host only. created / closed: the group itself. member_added / member_left: ws joined or left (reason left|removed). approval_needed / approved / denied: a member's existing allow question about a task from the host (question_message = that member's question to the phones; mode = once|permanent on approved).",
+      "properties": {
+        "kind": { "enum": ["created", "member_added", "member_left", "approval_needed", "approved", "denied", "closed"] },
+        "ws": { "$ref": "#/$defs/ws" },
+        "at": { "$ref": "#/$defs/time" },
+        "by": { "$ref": "#/$defs/by" },
+        "reason": { "enum": ["left", "removed"] },
+        "mode": { "enum": ["once", "permanent"] },
+        "question_message": { "$ref": "#/$defs/mid" },
+        "delegate": { "$ref": "#/$defs/mid" }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "enum": ["member_added", "member_left", "approval_needed", "approved", "denied"] } } }, "then": { "required": ["ws"] } },
+        { "if": { "properties": { "kind": { "const": "member_left" } } }, "then": { "required": ["reason"] } },
+        { "if": { "properties": { "kind": { "const": "approved" } } }, "then": { "required": ["mode", "delegate"] } },
+        { "if": { "properties": { "kind": { "enum": ["approval_needed", "denied"] } } }, "then": { "required": ["delegate"] } }
+      ]
+    },
+    "task": {
+      "type": "object", "additionalProperties": false, "required": ["delegate", "ws", "status"],
+      "description": "NEW. A task card: the host's delegate message, the member that got it, its own ticket there and the status. Members send it on their update texts; the host forwards it (and alone may say waiting_start).",
+      "properties": {
+        "delegate": { "$ref": "#/$defs/mid" },
+        "ws": { "$ref": "#/$defs/ws" },
+        "ticket": { "$ref": "#/$defs/tid" },
+        "key": { "$ref": "#/$defs/key" },
+        "title": { "$ref": "#/$defs/line" },
+        "status": { "enum": ["waiting_start", "waiting_approval", "queued", "working", "done", "failed", "denied"] },
+        "question_message": { "$ref": "#/$defs/mid" }
+      },
+      "allOf": [
+        { "if": { "properties": { "status": { "enum": ["queued", "working", "done", "failed"] } } }, "then": { "required": ["ticket", "key"] } },
+        { "if": { "properties": { "status": { "const": "waiting_approval" } } }, "then": { "required": ["question_message"] } }
+      ]
+    },
+    "shared_ticket": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ticket", "key", "title", "status", "summary", "question", "checklist", "done", "total", "rev"],
+      "description": "NEW. Host only: what members may know about the host ticket (read-only card \"From Finance · FIN-14\"). Never the history, other questions, files or refs. Plain text, redacted; at most 4096 bytes as compact UTF-8 JSON (validate.py).",
+      "properties": {
+        "ticket": { "$ref": "#/$defs/tid" },
+        "key": { "$ref": "#/$defs/key" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "status": { "enum": ["open", "active", "waiting", "ready", "review", "done", "dropped"] },
+        "summary": { "type": "string", "maxLength": 280 },
+        "question": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "additionalProperties": false, "required": ["question_id", "text"],
+              "properties": { "question_id": { "type": "string", "pattern": "^q[0-9]{1,4}$" }, "text": { "type": "string", "minLength": 1, "maxLength": 500 } }
+            }
+          ]
+        },
+        "checklist": {
+          "type": "array", "maxItems": 20,
+          "items": { "type": "object", "additionalProperties": false, "required": ["text", "done"], "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 200 }, "done": { "type": "boolean" } } }
+        },
+        "done": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 1, "description": "+1 each time the host sends a changed card; the highest wins." }
+      }
+    },
+    "share": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "title", "mime"],
+      "description": "NEW. On a `file` message inside a group: what the shared file is. mime is the type the SENDER checked from the bytes (chat-groups.md allowlist); receivers check again.",
+      "properties": {
+        "kind": { "enum": ["image", "file"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "mime": { "enum": ["application/pdf", "image/png", "image/jpeg", "image/heic", "image/webp", "text/plain", "text/markdown", "text/csv"] },
+        "artifact_id": { "type": "string", "pattern": "^a_[0-9a-f]{12}$" },
+        "rev": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$" }
+      }
+    }
+  }
+}

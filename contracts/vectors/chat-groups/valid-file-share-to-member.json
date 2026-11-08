@@ -1,0 +1,40 @@
+{
+  "why": "Artifact shared with a member: a normal file message (relay checks pair rule files + uploader) with body.group and body.share.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_fileshare0000010",
+    "from": "ws_fin0000001",
+    "to": "ws_ban0000001",
+    "type": "file",
+    "created_at": "2026-11-08T10:03:00Z",
+    "ticket": "t_fin14a",
+    "key": "FIN-14",
+    "body": {
+      "blob_id": "b_bill2027pdf00001",
+      "name": "car-tax-2027.pdf",
+      "size": 183422,
+      "sha256": "b0d51c58c8b9c1f458fadf16c7d375630ef51da4df81915893b05c0fa4ed8bc6",
+      "text": "The 2027 bill",
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          "ws_fin0000001",
+          "ws_hom0000001",
+          "ws_ban0000001"
+        ],
+        "seq": 8
+      },
+      "by": "ws_fin0000001",
+      "via": "helper",
+      "share": {
+        "kind": "file",
+        "title": "Car tax bill 2027",
+        "mime": "application/pdf",
+        "artifact_id": "a_3f9c1e2d4b5a",
+        "rev": "b0d51c58c8b9c1f458fadf16c7d375630ef51da4df81915893b05c0fa4ed8bc6"
+      }
+    }
+  }
+}
