@@ -528,26 +528,51 @@ def _secret_parts(parts: tuple[str, ...] | list[str], artifacts_ok: bool = False
 
 
 _RULE_RANK = {None: 0, "hidden": 1, "folder": 2, "name": 3}
+# well-known credential folders: a hard no even outside the workspace (never "could not check")
+_CRED_DIRS = {
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".kube",
+    ".docker",
+    ".config",
+    ".azure",
+    ".password-store",
+    ".gcloud",
+    ".orch-tool",
+    "keychains",
+    ".netrc.d",
+}
 
 
 def path_rule(path: Path, root: Path | None = None, artifacts_ok: bool = False) -> str | None:
     """_path_rule on the path as given and on the real path (symlinks resolved), the strictest wins.
-    Folders count below `root` when the file is inside it; a file outside it is checked on its full
-    path, where a hidden folder (e.g. a temp folder in the home) only means "could not check", not
-    "holds a password"."""
+    Folders count below `root` when the file is inside it. "hidden" (could not check, a person may share
+    anyway) only for a file named OUTSIDE the workspace with no link anywhere on its path (as given ==
+    real path) and no credential folder (_CRED_DIRS) on it; a link that leads into a hidden folder, or a
+    credential folder, is "folder" (a hard no)."""
+    given = Path(os.path.abspath(path))
+    real = given.resolve()
+    inside_given = False
     worst = None
-    for p in {Path(path), Path(path).resolve()}:
+    for p in {given, real}:
         parts, outside = p.parts, root is not None
         if root is not None:
-            for base in (Path(root).resolve(), Path(root)):
+            for base in (Path(root).resolve(), Path(os.path.abspath(root))):
                 try:
                     parts, outside = p.relative_to(base).parts, False
                     break
                 except ValueError:
                     continue
+        if p == given and not outside:
+            inside_given = True
         r = _path_rule(parts, artifacts_ok and not outside, outside)
+        if r == "hidden" and any(x.lower() in _CRED_DIRS for x in parts[:-1]):
+            r = "folder"
         if _RULE_RANK[r] > _RULE_RANK[worst]:
             worst = r
+    if worst == "hidden" and (inside_given or given != real):
+        worst = "folder"  # reached through a link (or named inside the workspace): never downgraded
     return worst
 
 

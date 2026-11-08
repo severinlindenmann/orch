@@ -833,6 +833,18 @@ def test_clean_pdfs_are_shared_and_only_a_real_match_says_password(proj, run, re
         "relay", "group", "share", host, str(away / "secrets" / "a.txt"), "--click", "--unchecked-ok"
     )
     assert code != 0 and "hidden or secrets folders" in err
+    # credential folders stay a hard no outside the workspace, directly or through a link in the workspace
+    ssh = away / ".ssh"
+    ssh.mkdir()
+    (ssh / "m.pdf").write_bytes(text)
+    (proj / "via-ssh.pdf").symlink_to(ssh / "m.pdf")
+    (proj / "via-hidden.pdf").symlink_to(out / "m.pdf")  # a link to an ordinary hidden folder: no downgrade
+    (away / "plain").mkdir()
+    (away / "plain" / "to-hidden.pdf").symlink_to(out / "m.pdf")  # outside, but through a link
+    for f in (ssh / "m.pdf", proj / "via-ssh.pdf", proj / "via-hidden.pdf", away / "plain" / "to-hidden.pdf"):
+        blobs = len(rel.blobs)
+        code, _, err = run("relay", "group", "share", host, str(f), "--click", "--unchecked-ok")
+        assert code != 0 and "hidden or secrets folders" in err and len(rel.blobs) == blobs, (f, err)
     (out / "id_rsa").write_text("x")
     code, _, err = run("relay", "group", "share", host, str(out / "id_rsa"), "--click", "--unchecked-ok")
     assert code != 0 and "looks like it holds a password" in err
