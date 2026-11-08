@@ -356,8 +356,8 @@ def _box_rows(lines: list[str], cy: int) -> tuple[int, int]:
 
 def _look(root: Path, tid: str, line: str, dialog: str | None) -> tuple[bool | None, str]:
     """(unsent, pane hash). unsent: True when the notice line still sits in the prompt box, False when it does
-    not, None when that cannot be told safely: copy mode, the tool's dialog shows outside the box (an Enter
-    would answer it), or tmux failed."""
+    not, None when that cannot be told safely: copy mode, the tool's dialog shows anywhere on the pane (an
+    Enter would answer it), or tmux failed."""
     pane = tmux(root, "capture-pane", "-p", "-t", target(tid), timeout=QUICK)
     if pane.returncode != 0:
         return None, ""
@@ -370,11 +370,12 @@ def _look(root: Path, tid: str, line: str, dialog: str | None) -> tuple[bool | N
         return None, digest
     if d.returncode != 0 or in_mode != "0":
         return None, digest
+    # the tool's dialog anywhere on the visible pane: no Enter (a false match only costs the extra Enter, and
+    # such checks count towards the give-up); the box rows below only locate the notice line
+    if dialog and re.search(dialog, pane.stdout, re.IGNORECASE | re.MULTILINE):
+        return None, digest
     lines = pane.stdout.split("\n")
     a, b = _box_rows(lines, cy)
-    outside = [ln for ln in lines[:a] + lines[b:] if ln.strip()]
-    if dialog and re.search(dialog, "\n".join(outside[-15:]), re.IGNORECASE | re.MULTILINE):
-        return None, digest
     return _squeeze(line) in _squeeze("".join(lines[a:b])), digest
 
 
