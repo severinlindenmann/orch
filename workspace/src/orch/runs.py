@@ -324,6 +324,21 @@ def undelivered(root: Path, tid: str) -> list[dict]:
     return [i for i in _pending_read(root, tid) if not i.get("delivered_at")]
 
 
+def human_waiting(root: Path, tid: str) -> list[dict]:
+    """Undelivered input a person wrote (owner, phone, dashboard), never an agent's (agent:*, or written from
+    inside an agent) and never a run's own start prompt or slot request. Only this may start a run."""
+    out = []
+    for i in undelivered(root, tid):
+        if i.get("via") in ("start", "slots"):
+            continue
+        human = i.get("human")
+        if human is None:  # an item from before the field: by its author
+            human = str(i.get("by", "")).startswith("human:") or i.get("via") == "phone"
+        if human is True:
+            out.append(i)
+    return out
+
+
 def _drop_start_prompts_locked(root: Path, tid: str) -> None:
     """A live run's first prompt waits in the pending file until the tool is up. When that run ends before
     it went in, it is removed: the next start writes its own prompt from the ticket (no nested prompt)."""
@@ -346,12 +361,16 @@ def _pending_add_locked(
     items = _pending_read(root, tid)
     if pid and any(i["id"] == pid for i in items):
         return next(i for i in items if i["id"] == pid)  # same id twice = once
+    tool = tickets.agent_tool()
+    if tool:  # written from inside an agent: an agent's item whatever by says (never a person's input)
+        by = f"agent:{tool}"
     item = {
         "id": pid or "p_" + "".join(secrets.choice(_ALPHA) for _ in range(10)),
         "at": tickets.now(),
         "by": by,
         "kind": kind,
         "text": text,
+        "human": not tool and not str(by).startswith("agent:"),  # a person's input (owner, phone, dashboard)
     }
     if via:
         item["via"] = via
@@ -553,14 +572,17 @@ def settle_orphan(root: Path, tid: str, at: float | None = None) -> bool:
     no run on it (a phone text or a person moved it, a start that never came) is Ready again. Input that waits
     stays queued for the next start."""
     at = time.time() if at is None else at
-    with contextlib.suppress(Exception):
+    try:
         t = tickets.load(root, tid)
         if t.get("status") != "active" or running(root, tid):
             return False
         if at - _parse(t["updated_at"]) < ORPHAN_GRACE_SECONDS:
             return False
         return settle(root, tid, "orch", ignore_input=True)
-    return False
+    except Exception as e:  # noqa: BLE001 - never fails `orch run status`, but is never silent either
+        why = f"{e.__class__.__name__}: {e}"
+        print(f"orch: could not check whether {tid} is worked on: {why}", file=sys.stderr)
+        return False
 
 
 # ---------------------------------------------------------------- what the agent is told

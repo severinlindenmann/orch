@@ -295,3 +295,52 @@ def test_queued_input_on_a_running_or_not_ready_ticket_starts_nothing(ws):
     (ws / "ended-t_queue003").write_text("")
     (ws / "pending-t_queue003").write_text(json.dumps(["p_x00000002"]))
     assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+
+
+def test_agent_queued_input_starts_nothing(ws):
+    """INVARIANT 2: core lists only a person's input; an agent's own queued input never reaches this pass."""
+    add_ticket(ws, "t_queue004", status="ready")
+    (ws / "ended-t_queue004").write_text("")
+    (ws / "pending-t_queue004").write_text(json.dumps([]))  # core: an agent queued "continue" (not listed)
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+
+
+def test_a_failed_start_gives_the_input_back_at_most_three_times(ws):
+    add_ticket(ws, "t_queue005", status="ready")
+    (ws / "ended-t_queue005").write_text("")
+    (ws / "pending-t_queue005").write_text(json.dumps(["p_answer0005"]))
+    (ws / "noagent").write_text("")  # every start fails
+    for m in range(5):  # (a failed start also asks the person; here the ticket is put back to Ready each time)
+        t = json.loads((ws / ".orch/tickets/t_queue005.json").read_text())
+        t.update(status="ready", questions=[])
+        (ws / ".orch/tickets/t_queue005.json").write_text(json.dumps(t))
+        Scheduler(ws).tick(T(8, m))
+    assert runs_started(ws).count("t_queue005") == 3
+    (ws / "noagent").unlink()
+    (ws / "pending-t_queue005").write_text(json.dumps(["p_answer0005", "p_answer0006"]))
+    assert Scheduler(ws).tick(T(9)) == ["t_queue005"]  # a new item still starts
+
+
+def test_the_seen_set_keeps_only_what_still_waits(ws):
+    from orch_automation.runner import load_state
+
+    add_ticket(ws, "t_queue006", status="ready")
+    (ws / "ended-t_queue006").write_text("")
+    (ws / "pending-t_queue006").write_text(json.dumps(["p_a0000001"]))
+    Scheduler(ws).tick(T(8))
+    (ws / "pending-t_queue006").write_text(json.dumps([]))  # delivered
+    Scheduler(ws).tick(T(8, 1))
+    assert load_state(ws)["t_queue006"]["queued_started"] == []
+
+
+def test_a_ticket_started_this_pass_or_switched_off_is_skipped(ws):
+    add_ticket(ws, "t_queue007", status="ready", ext={"automation": {"paused": True}})
+    (ws / "ended-t_queue007").write_text("")
+    (ws / "pending-t_queue007").write_text(json.dumps(["p_b0000001"]))
+    s = Scheduler(ws)
+    assert s.queued_input(T(8), skip=[]) == []  # switched off
+    add_ticket(ws, "t_queue008", status="ready")
+    (ws / "ended-t_queue008").write_text("")
+    (ws / "pending-t_queue008").write_text(json.dumps(["p_b0000002"]))
+    assert s.queued_input(T(8), skip=["t_queue008"]) == []  # already started this pass
+    assert runs_started(ws) == []

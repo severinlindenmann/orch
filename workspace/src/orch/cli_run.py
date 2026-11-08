@@ -166,11 +166,12 @@ def _status(args, root: Path) -> None:
     tickets.load(root, tid)
     runs.settle_orphan(root, tid)  # Working with no agent for a while: Ready (status matches reality)
     rec = runs.read(root, tid)
-    queued = [i for i in runs.undelivered(root, tid) if i.get("via") not in ("start", "slots")]
     waiting = len(runs.undelivered(root, tid))
     if not rec:
-        # pending_ids: input that waits for a run (the automation host starts one for it, once per id)
-        data = {"ticket": tid, "running": False, "pending": waiting, "pending_ids": [i["id"] for i in queued]}
+        # human_pending_ids: input a person wrote that waits for a run (the automation host starts one for it,
+        # once per id). An agent's queued input is never in it.
+        human = [i["id"] for i in runs.human_waiting(root, tid)]
+        data = {"ticket": tid, "running": False, "pending": waiting, "human_pending_ids": human}
         if waiting:  # input is really queued for a run
             text = (
                 "Queued. Nothing will start it: no background add-on is running here. "
