@@ -84,7 +84,7 @@ struct Question: Codable, Sendable, Equatable, Identifiable {
     let workspaceName: String
     var id: String { message.id }
     /// A `relay:allow` question: a workspace handed over a task that is not allowed yet (SA-12). Answered like any question.
-    var isAllow: Bool { message.body.options.contains("Once") && message.body.options.contains("Always") }
+    var isAllow: Bool { (message.body.options.contains("Once") || message.body.options.contains("Allow once")) && message.body.options.contains("Always") }
     /// Button wording; the raw option is what gets sent. "Always allow <scope>" when the workspace named a scope.
     func label(_ option: String) -> String {
         guard isAllow else { return option }
@@ -135,14 +135,28 @@ struct TextBody: Codable, Sendable, Equatable {
     var location: LocationShare? = nil
     var feedback: Feedback? = nil
     var ticketView: TicketSnapshot? = nil
+    var group: GroupInfo? = nil
+    var groupEvent: GroupEvent? = nil
+    var origin: GroupOrigin? = nil
+    var echoOf: String? = nil
+    var toPerson: Bool? = nil
+    var task: GroupTask? = nil
+    var sharedFiles: [String]? = nil
 
     init(text: String = "", update: TextUpdate? = nil, clientId: String? = nil, general: Bool? = nil, speak: SpeakHint? = nil,
          attachments: [MessageAttachment] = [], voice: VoiceMemo? = nil, location: LocationShare? = nil, feedback: Feedback? = nil,
-         ticketView: TicketSnapshot? = nil) {
+         ticketView: TicketSnapshot? = nil,
+         group: GroupInfo? = nil, groupEvent: GroupEvent? = nil, by: String? = nil, via: String? = nil, phone: String? = nil,
+         origin: GroupOrigin? = nil, echoOf: String? = nil, toPerson: Bool? = nil, task: GroupTask? = nil, sharedFiles: [String]? = nil) {
         self.text = text; self.update = update; self.clientId = clientId; self.general = general; self.speak = speak
         self.attachments = attachments; self.voice = voice; self.location = location; self.feedback = feedback; self.ticketView = ticketView
+        self.group = group; self.groupEvent = groupEvent; self.by = by; self.via = via; self.phone = phone
+        self.origin = origin; self.echoOf = echoOf; self.toPerson = toPerson; self.task = task; self.sharedFiles = sharedFiles
     }
-    private enum CodingKeys: String, CodingKey { case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView, by, via, phone, day }
+    private enum CodingKeys: String, CodingKey {
+        case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView
+        case group, groupEvent, by, via, phone, day, origin, echoOf, toPerson, task, sharedFiles
+    }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
@@ -159,6 +173,13 @@ struct TextBody: Codable, Sendable, Equatable {
         location = try? c.decodeIfPresent(LocationShare.self, forKey: .location)
         feedback = try? c.decodeIfPresent(Feedback.self, forKey: .feedback)
         ticketView = try? c.decodeIfPresent(TicketSnapshot.self, forKey: .ticketView)
+        group = try? c.decodeIfPresent(GroupInfo.self, forKey: .group)
+        groupEvent = try? c.decodeIfPresent(GroupEvent.self, forKey: .groupEvent)
+        origin = try? c.decodeIfPresent(GroupOrigin.self, forKey: .origin)
+        echoOf = try? c.decodeIfPresent(String.self, forKey: .echoOf)
+        toPerson = try? c.decodeIfPresent(Bool.self, forKey: .toPerson)
+        task = try? c.decodeIfPresent(GroupTask.self, forKey: .task)
+        sharedFiles = try? c.decodeIfPresent([String].self, forKey: .sharedFiles)
     }
     func encode(to e: Encoder) throws {
         var c = e.container(keyedBy: CodingKeys.self)

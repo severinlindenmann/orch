@@ -46,8 +46,10 @@ enum ChatDay {
         return query.isEmpty ? days : days.filter { $0.items.contains { $0.preview.localizedCaseInsensitiveContains(query) } }
     }
 
-    static func side(by: String?, fromPhone: Bool) -> ConvItem.Side {
-        if let by { return by == "you" ? .me : .them }
-        return fromPhone ? .me : .them
+    /// The transport direction decides; `by` may only add "you typed it on the dashboard" to a workspace text
+    /// (contract chat-groups §1/G4: only the Chat's own workspace speaks as "you", and only via the dashboard).
+    static func side(by: String?, via: String? = nil, fromPhone: Bool) -> ConvItem.Side {
+        if fromPhone { return .me }
+        return by == "you" && via == "dashboard" ? .me : .them
     }
 }

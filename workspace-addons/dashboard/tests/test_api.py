@@ -675,3 +675,13 @@ def test_event_handler_flushes_initial_and_changed_revision_without_a_listener(w
         revisions.close()
         thread.join(1)
     assert revisions.clients == 0
+
+
+def test_state_preserves_started(ws):
+    path = ws / ".orch" / "tickets" / "t_7k3f9q.json"
+    ticket = json.loads(path.read_text())
+    ticket.update(status="ready", started=True)
+    path.write_text(json.dumps(ticket))
+    result = next(t for t in load_state(ws)["tickets"] if t["id"] == ticket["id"])
+    assert result["started"] is True
+    assert result["status"] == "ready"

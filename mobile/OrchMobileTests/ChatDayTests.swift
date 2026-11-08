@@ -55,8 +55,10 @@ final class ChatDayTests: XCTestCase {
         XCTAssertNil(body.by); XCTAssertNil(body.via); XCTAssertNil(body.phone); XCTAssertNil(body.day)
         XCTAssertEqual(ChatDay.side(by: nil, fromPhone: true), .me)
         XCTAssertEqual(ChatDay.side(by: nil, fromPhone: false), .them)
-        XCTAssertEqual(ChatDay.side(by: "you", fromPhone: false), .me)
-        XCTAssertEqual(ChatDay.side(by: "ws_a", fromPhone: true), .them)
+        XCTAssertEqual(ChatDay.side(by: "you", via: "dashboard", fromPhone: false), .me, "the person typed it on the dashboard")
+        XCTAssertEqual(ChatDay.side(by: "you", fromPhone: false), .them, "a workspace text without via dashboard never speaks as you")
+        XCTAssertEqual(ChatDay.side(by: "you", via: "helper", fromPhone: false), .them)
+        XCTAssertEqual(ChatDay.side(by: "ws_a", fromPhone: true), .me, "the transport direction wins: this phone wrote it")
         XCTAssertEqual(try JSONDecoder().decode(TextBody.self, from: JSONEncoder().encode(body)), body)
         var incoming = body
         incoming.by = "you"; incoming.via = "phone"; incoming.phone = "ph_1"; incoming.day = "2026-11-08"

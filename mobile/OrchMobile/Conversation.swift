@@ -257,7 +257,7 @@ enum ConversationBuilder {
 
     private static func bubble(_ pm: PhoneMessage, _ ix: Index, _ d: ConversationInputs, chat: Bool = false) -> ConvItem {
         let m = pm.message, b = m.body
-        var item = ConvItem(id: pm.id, at: m.createdAt, side: chat ? ChatDay.side(by: b.by, fromPhone: pm.fromPhone) : (pm.fromPhone ? .me : .them), text: b.text, attachments: b.attachments, voice: b.voice,
+        var item = ConvItem(id: pm.id, at: m.createdAt, side: chat ? ChatDay.side(by: b.by, via: b.via, fromPhone: pm.fromPhone) : (pm.fromPhone ? .me : .them), text: b.text, attachments: b.attachments, voice: b.voice,
                             location: b.location, feedback: b.feedback)
         if chat {
             item.by = b.by; item.day = b.day

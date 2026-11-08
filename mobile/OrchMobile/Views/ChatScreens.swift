@@ -372,7 +372,7 @@ struct ConversationView: View {
         let wait = isGeneral && item.receipt == .queued ? ChatDay.queuedNote : item.clientId.flatMap { waiting[$0] }
         if isGeneral && item.by != nil && item.side == .them &&
             (index == 0 || items[index - 1].by != item.by || items[index - 1].side != .them) {
-            ChatHelperLabel(workspace: model.workspace(item.by ?? resolved.workspace) ?? model.workspace(resolved.workspace))
+            ChatHelperLabel(workspace: model.workspace(resolved.workspace))  // never a name from `by`: a workspace speaks only for itself in its Chat
         }
         if item.kind == .question && historyDay == nil {
             let stale = ConversationRules.isStale(index: index, in: items)
