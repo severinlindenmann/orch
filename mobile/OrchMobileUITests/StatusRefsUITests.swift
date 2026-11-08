@@ -39,7 +39,7 @@ final class StatusRefsUITests: XCTestCase {
 
     func testWorkingGroupShowsTheChip() {
         let app = launch("ws_reports001")
-        XCTAssertTrue(app.staticTexts["Working"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Working · 1"].waitForExistence(timeout: 20), "group header with its count")
         XCTAssertTrue(app.buttons["ticket-ws_reports001|t_9k2m4q"].exists)
         XCTAssertTrue(app.staticTexts["Claude is working"].exists)
         XCTAssertFalse(app.buttons["done-toggle"].exists, "no finished topic, no Done group")

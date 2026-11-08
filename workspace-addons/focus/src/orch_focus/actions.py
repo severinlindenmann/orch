@@ -133,7 +133,24 @@ def _check_plain(name):
     return fn
 
 
+def _ticket_done(a):
+    _only(a, ("ticket", "if_revision"))
+    rev = _rev(a.get("if_revision"))
+    if rev is None:
+        raise BadRequest("The ticket revision is required.")
+    return ["ticket", "patch", _t(a)], [f"--if-revision={rev}"], [json.dumps({"status": "done"})]
+
+
+def _mobile_set(a):
+    _only(a, ("on",))
+    if not isinstance(a.get("on"), bool):
+        raise BadRequest("Say on or off.")
+    return ["relay", "mobile", "on" if a["on"] else "off"], [], []
+
+
 OPS = {
+    "mobile.set": _mobile_set,
+    "ticket.done": _ticket_done,
     "answer": _answer,
     "run.start": _run_start,
     "run.stop": _run_stop,
@@ -144,7 +161,7 @@ OPS = {
     "check.remove": _check_plain("remove"),
     "check.reopen": _check_plain("reopen"),
 }
-BY = {"run.start": "focus"}  # who a start is recorded as (the page is the starter); other ops: the person
+BY = {"run.start": "focus", "mobile.set": "focus"}  # who a start is recorded as (the page is the starter); other ops: the person
 
 
 def actor() -> str:

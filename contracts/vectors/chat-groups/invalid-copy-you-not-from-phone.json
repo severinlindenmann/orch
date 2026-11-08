@@ -1,0 +1,49 @@
+{
+  "why": "F2: by you via phone needs origin.from = that phone; a copy of a workspace's text can never be 'you'.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_e7a045ad04ee880c",
+    "from": "ws_fin0000001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-08T10:03:00Z",
+    "ticket": "t_fin14a",
+    "key": "FIN-14",
+    "body": {
+      "text": "Please allow Finance always.",
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          }
+        ],
+        "seq": 6
+      },
+      "by": "you",
+      "via": "phone",
+      "phone": "ph_own0000001",
+      "to_person": true,
+      "origin": {
+        "id": "m_homeyou000000000",
+        "from": "ws_hom0000001",
+        "at": "2026-11-08T10:06:00Z"
+      }
+    }
+  }
+}

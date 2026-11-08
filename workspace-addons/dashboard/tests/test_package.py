@@ -23,4 +23,10 @@ def test_manifest():
 def test_web_has_no_inline_styles():
     """CSP is style-src 'self': inline style attributes would be silently blocked."""
     from orch_dashboard.server import web_file
-    assert 'style="' not in web_file("app.js").decode() and ' style=' not in web_file("index.html").decode()
+
+    from . import webjs
+
+    assert 'style="' not in webjs.all_js() and ' style=' not in web_file("index.html").decode()
+    for p in webjs.PAGES:  # every page module and its stylesheet is packaged and listed in the page
+        assert web_file(f"pages/{p}.js") and web_file(f"pages/{p}.css")
+        assert f'src="pages/{p}.js"' in web_file("index.html").decode()

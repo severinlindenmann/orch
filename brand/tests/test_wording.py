@@ -22,6 +22,7 @@ WORD = re.compile(r"(?<![A-Za-z])(" + "|".join(sorted(map(re.escape, NEVER), key
 
 UI_GLOBS = [
     "workspace-addons/*/src/**/web/*.js",
+    "workspace-addons/*/src/**/web/pages/*.js",
     "workspace-addons/*/src/**/web/*.html",
     "workspace/src/orch_ui/static/*.js",
     "workspace/src/orch_ui/static/*.html",
