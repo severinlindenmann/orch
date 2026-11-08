@@ -337,3 +337,9 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .status-menu>.status-sum{gap:4px}
 .board .activity .chip{white-space:normal}
 .acc-li>.send-msg{margin:6px 12px 0 0;flex:none;white-space:nowrap}
+/* round 8 Nov B1: the whole Home ticket row opens the ticket (stretched link; Move to and links stay above it) */
+.ticket-row{position:relative}
+.ticket-row h3 a::after{content:"";position:absolute;inset:0}
+.ticket-row:hover{background:var(--surface-2)}
+.ticket-row .status-menu,.ticket-row .activity a{position:relative;z-index:1}
+.ticket-row:has(.menu[open]){z-index:5}

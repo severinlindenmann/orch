@@ -75,15 +75,13 @@
   const overdue = t => activeTicket(t) && t.due && t.due < today();
   const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
   const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
-  const statusWord = t => ({open:'Not started', ready:'Ready to start', active:'Working', waiting:'Needs you', review:'Ready for review', done:'Done'}[t.status] || 'Not started');
+  const statusWord = t => window.DashHelpers.statusWord(t.status);
   const chip = (text, cls = '') => h('span', {className:'chip ' + cls}, text);
   const shown = t => snapshot ? t : {...t, status: window.DashHelpers.shownStatus(t, state.runs?.[t.id])};
   const statusChip = t => { const s = shown(t); return chip(statusWord(s), s.status === 'active' ? 'active' : ''); };
-  // Same order as the phone: Needs you, Working, Ready for review, Not started, Done.
-  const STATUS_CHOICES = [['waiting', 'Needs you'], ['active', 'Working'], ['review', 'Ready for review'], ['open', 'Not started'], ['ready', 'Ready to start'], ['done', 'Done']];
-  // "Move to" offers four places; Ready to start counts as Not started and Waiting as Working (the agent decides Waiting).
-  const MOVE_CHOICES = [['open', 'Not started'], ['active', 'Working'], ['review', 'Ready for review'], ['done', 'Done']];
-  const moveHome = status => ({ready:'open', waiting:'active'}[status] || status);
+  // Lifecycle order, one word per status: all from helpers.js.
+  const STATUS_CHOICES = window.DashHelpers.STATUS_CHOICES, MOVE_CHOICES = window.DashHelpers.MOVE_CHOICES;
+  const moveHome = status => status === 'waiting' ? 'active' : window.DashHelpers.columnOf(status);
   const starting = new Set();
   // The one chip of a ticket: what the agent or the person has to do now ('' when nothing).
   function activityInfo(t) {
@@ -91,7 +89,7 @@
     const agent = run?.claim?.label || array(state.settings?.agents).find(a => a.name === run?.claim?.agent)?.label || capitalise(run?.claim?.agent || array(state.settings?.agents).find(a => a.chosen)?.label || 'agent');
     const getting = starting.has(t.id) || live?.state === 'starting';
     const busy = getting || (run?.running && !['idle', 'attention'].includes(live?.state));
-    const text = getting ? 'Getting started…' : questions(t).length || live?.state === 'attention' ? 'Needs you' : t.status === 'review' ? 'Ready for your review' : busy ? agent + ' is working' : '';
+    const text = getting ? 'Getting started…' : questions(t).length || live?.state === 'attention' ? 'Needs you' : t.status === 'review' ? 'Ready for review' : busy ? agent + ' is working' : '';
     return {run, live, agent, busy, text};
   }
   const needsList = () => window.DashHelpers.uniqueNeeds(state?.needs);
@@ -108,10 +106,11 @@
     if (snapshot) return null;
     const {live, busy, text: full} = activityInfo(t);
     if (!full || (where === 'head' && questions(t).length)) return null;  // the banner is the one place for an open question
+    if (full === 'Ready for review' && ['head', 'board'].includes(where)) return null;  // the status chip / column already says it: one chip
     const text = full;
     const note = where === 'row' ? '' : activityNote(t);  // in a row the chip sits on the Move to line, the note goes under the title
     const open = live?.state === 'attention' ? liveLinkFor(t) : null;
-    return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === 'Ready for your review' ? {title:'Ready for your review'} : text === 'Needs you' ? {title:'The agent asked you something'} : {}),
+    return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === 'Ready for review' ? {title:'Ready for review'} : text === 'Needs you' ? {title:'The agent asked you something'} : {}),
       note ? h('p', {className:'meta'}, note) : null,
       open ? h('a', {className:'btn outline xs', href:open.url, 'data-key':'activity-open-' + t.id}, 'Open the live session') : null);
   }
@@ -188,8 +187,8 @@
     const late = children.filter(i => rows[i].late);
     return fragment(h('div', {className:'card-row ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
       row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, h('span', {className:'chevron ' + (open ? '' : 'closed')}, iconEl('down'))) : null,
-      h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, [typeof t.key === 'string' ? t.key : '', row.depth ? statusWord(shown(t)) : '', name(t.owner), t.due ? 'Due ' + date(t.due) : '', row.children ? row.done + ' of ' + row.children + ' done' : ''].filter(Boolean).join(' · ')), questionLine(t),
-        !row.depth && row.parentMissing ? h('p', {className:'meta'}, 'Part of a ticket that is not here') : null), activity(t), statusControl(t, 'tree')),
+      h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), h('p', {className:'meta'}, [typeof t.key === 'string' ? t.key : '', row.depth ? statusWord(shown(t)) : '', name(t.owner), t.due ? 'Due ' + date(t.due) : '', row.children ? row.done + ' of ' + row.children + ' done' : '', snapshot ? '' : activityNote(t)].filter(Boolean).join(' · ')), questionLine(t),
+        !row.depth && row.parentMissing ? h('p', {className:'meta'}, 'Part of a ticket that is not here') : null), activity(t, 'row'), statusControl(t, 'tree')),
       open ? children.filter(i => !rows[i].late || treeAll.has(t.id)).map(i => treeBranch(rows, i)) : null,
       open && late.length && !treeAll.has(t.id) ? h('div', {className:'card-row child', 'data-key':'tree-all-' + t.id}, h('button', {type:'button', className:'btn ghost sm', 'data-action':'tree-all', 'data-ticket':t.id}, 'Show all ' + children.length)) : null);
   }
@@ -215,14 +214,14 @@
       questionLine(t), activity(t, 'board'), reviewActions(t), cardLinks(t),
       tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':'0', 'aria-valuemax':String(tasks.length), 'aria-valuenow':String(done), 'aria-label':'Tasks done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, done + '/' + tasks.length)) : null);
   }
-  const COLUMN_EMPTY = {open:'New tickets show here.', ready:'Tickets ready to start show here.', active:'Tickets being worked on show here.', waiting:'Tickets waiting for an answer show here.', review:'Tickets to check show here.', done:'Finished tickets show here.'};
+  const COLUMN_EMPTY = {open:'New tickets show here.', active:'Tickets being worked on show here.', waiting:'Tickets waiting for an answer show here.', review:'Tickets to check show here.', done:'Finished tickets show here.'};
   function board() {
     const visible = sorted(tickets().filter(t => t.status !== 'dropped'));
     const counts = {};
-    STATUS_CHOICES.forEach(([status]) => { counts[status] = visible.filter(t => t.status === status).length; });
+    STATUS_CHOICES.forEach(([status]) => { counts[status] = visible.filter(t => window.DashHelpers.columnOf(t.status) === status).length; });
     const shown = boardCol in counts ? boardCol : window.DashHelpers.firstColumnWithTickets(counts);
     const cols = STATUS_CHOICES.map(([status, label]) => {
-      const mine = visible.filter(t => t.status === status);
+      const mine = visible.filter(t => window.DashHelpers.columnOf(t.status) === status);
       const cap = status === 'done' && !boardMore.has('done') ? 3 : mine.length;
       return h('section', {className:'kanban-col' + (status === shown ? ' is-shown' : ''), 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + mine.length},
         h('div', {className:'col-head'}, h('span', {className:'dot idle'}), h('h2', {}, label), h('span', {className:'status-count'}, String(mine.length))),
@@ -257,7 +256,7 @@
     const rows = window.DashHelpers.treeRows(tickets().filter(t => t.status !== 'dropped'));
     if (ticketView === 'board' && tickets().length) return fragment(heading('Tickets'), viewToggle(), board());
     return fragment(heading('Tickets'), viewToggle(), !tickets().length ? card('empty', 'Tickets', '', firstTicket()) : STATUS_CHOICES.map(([status, title]) => {
-      const group = rows.map((row, i) => ({row, i})).filter(({row}) => row.depth === 0 && row.ticket.status === status);
+      const group = rows.map((row, i) => ({row, i})).filter(({row}) => row.depth === 0 && window.DashHelpers.columnOf(row.ticket.status) === status);
       if (!group.length) return null;
       const body = group.map(({i}) => treeBranch(rows, i));
       if (!['done', 'dropped'].includes(status)) return card('group-' + status, title, group.length, body);
