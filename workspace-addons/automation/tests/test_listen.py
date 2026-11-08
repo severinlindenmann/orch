@@ -220,38 +220,29 @@ def test_started_line_never_has_an_empty_id(ws):
     assert not any("()" in t or "(phone text )" in t for t in texts)
 
 
-def queue_answer(ws, tid, delivered=False, human=True, iid="p_1"):
-    d = ws / ".orch/run/pending"
-    d.mkdir(parents=True, exist_ok=True)
-    item = {"id": iid, "at": "2026-11-04T08:00:00Z", "by": "human:lume", "kind": "answer", "text": "Week 45", "human": human}
-    if delivered:
-        item["delivered_at"] = "2026-11-04T08:00:05Z"
-    with open(d / f"{tid}.jsonl", "a") as f:
-        f.write(json.dumps(item) + "\n")
-
-
-def test_dashboard_answer_on_phone_ticket_without_run_starts_one_run(ws):
+def test_answer_to_one_of_several_questions_resumes_a_stopped_phone_ticket_once(ws):
     from conftest import runs_started
 
-    add_ticket(ws, "t_ph000005", status="active", created_at="2026-11-04T07:50:00Z",
+    # q1 answered on the dashboard, q2 is still open: the ticket keeps waiting, no run holds it
+    add_ticket(ws, "t_ph000009", status="waiting", waiting_on={"kind": "question", "ref": "q2"},
                ext={"relay": {"origin": "phone"}, "automation": {"phone_started": True}})
-    (ws / "ended-t_ph000005").write_text("")  # the first run is over
-    queue_answer(ws, "t_ph000005")
+    (ws / "ended-t_ph000009").write_text("")
+    (ws / "pending-t_ph000009").write_text(json.dumps(["p_1"]))
     s = Scheduler(ws)
-    assert s.tick(T(8)) == ["t_ph000005"]
-    assert s.tick(T(8, 1)) == [] and Scheduler(ws).tick(T(8, 2)) == []  # once, also after a restart
-    assert runs_started(ws) == ["t_ph000005"]
+    assert s.tick(T(8)) == ["t_ph000009"]
+    assert s.tick(T(8, 1)) == [] and Scheduler(ws).tick(T(8, 2)) == []
+    assert runs_started(ws) == ["t_ph000009"]
 
 
-def test_answer_with_a_live_run_or_already_delivered_starts_nothing(ws):
+def test_one_run_when_both_ready_and_waiting_rules_could_apply(ws):
     from conftest import runs_started
 
-    add_ticket(ws, "t_ph000006", status="active")  # a run is alive: the notice is typed into it
-    queue_answer(ws, "t_ph000006")
-    add_ticket(ws, "t_ph000007", status="active")
-    (ws / "ended-t_ph000007").write_text("")
-    queue_answer(ws, "t_ph000007", delivered=True)
-    add_ticket(ws, "t_ph000008", status="active")
-    (ws / "ended-t_ph000008").write_text("")
-    queue_answer(ws, "t_ph000008", human=False)
-    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+    add_ticket(ws, "t_ph000010", status="ready")
+    add_ticket(ws, "t_ph000011", status="waiting", waiting_on={"kind": "question", "ref": "q2"})
+    add_ticket(ws, "t_ph000012", status="waiting", waiting_on={"kind": "time", "until": "2026-12-01T00:00:00Z"})
+    for tid in ("t_ph000010", "t_ph000011", "t_ph000012"):
+        (ws / f"ended-{tid}").write_text("")
+        (ws / f"pending-{tid}").write_text(json.dumps(["p_1"]))
+    s = Scheduler(ws)
+    assert sorted(s.tick(T(8))) == ["t_ph000010", "t_ph000011"]  # a time wait is not an answer: left alone
+    assert s.tick(T(8, 1)) == [] and sorted(runs_started(ws)) == ["t_ph000010", "t_ph000011"]

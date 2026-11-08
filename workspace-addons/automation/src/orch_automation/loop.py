@@ -187,7 +187,7 @@ class Scheduler:
         once per item. Core lists only those (`orch run status` human_pending_ids), so an agent that queues
         input for itself or another ticket never starts anything here.
 
-        A Ready ticket with such input and no run gets one run. The ids are saved before the start (never twice
+        A Ready ticket (or one waiting on another open question) with such input and no run gets one run. The ids are saved before the start (never twice
         after a crash); a start that definitely failed gives them back, at most QUEUED_TRIES times per id. The
         saved set is only the ids still waiting (no cap that could forget one). Same gates as the other starts:
         a ticket switched off here (paused) is left alone, and a ticket started this pass is skipped."""
@@ -196,7 +196,11 @@ class Scheduler:
         for t in [*read_tickets(self.root), *self.chat_stub()]:
             tid = t["id"]
             self._give_back_after_holder(tid)
-            if tid in skip or t.get("status") != "ready" or not self.may_start(t):
+            if tid in skip or not self.may_start(t) or not (
+                    t.get("status") == "ready"
+                    # a person answered one of several open questions: the ticket keeps waiting (on the next one),
+                    # but the answer still resumes the agent (it is queued and no run exists to read it)
+                    or (t.get("status") == "waiting" and (t.get("waiting_on") or {}).get("kind") == "question")):
                 continue
             st = orchcli.run_status(self.root, tid)
             if not st or st.get("running") is not False:
@@ -261,42 +265,6 @@ class Scheduler:
         """The gates every start from this loop respects: a ticket switched off here is left alone."""
         return ((t.get("ext") or {}).get("automation") or {}).get("paused") is not True
 
-    def queued_answers(self, now: datetime, skip: list[str]) -> list[str]:
-        """A person's answer is queued (undelivered) for a ticket nobody works on: one run resumes it. This is
-        how a dashboard answer wakes an agent that has stopped, also on phone-started tickets. The id of the
-        item is saved first, so the same answer never starts a second run."""
-        pdir = self.root / ".orch" / "run" / "pending"
-        started = []
-        try:
-            files = sorted(pdir.glob("t_*.jsonl"))
-        except OSError:
-            return started
-        for f in files:
-            tid = f.stem
-            if tid in skip or not orchcli.ID_RE.match(tid):
-                continue
-            item = None
-            try:
-                for line in f.read_text().splitlines():
-                    try:
-                        it = json.loads(line)
-                    except ValueError:
-                        continue
-                    if isinstance(it, dict) and it.get("kind") == "answer" and it.get("human") is True \
-                            and not it.get("delivered_at") and isinstance(it.get("id"), str):
-                        item = it
-            except OSError:
-                continue
-            if not item or load_state(self.root).get(tid, {}).get("answer_run") == item["id"]:
-                continue
-            t = orchcli.ticket(self.root, tid)
-            if not t or t["status"] not in OPEN or orchcli.run_running(self.root, tid) is not False:
-                continue
-            update_state(self.root, tid, answer_run=item["id"])
-            if self.start_run(tid, "you answered a question", now) == "started":
-                started.append(tid)
-        return started
-
     # -- pass ---------------------------------------------------------------
     def tick(self, now: datetime) -> list[str]:
         """One pass. Returns the ticket ids a run was started for."""
@@ -304,7 +272,6 @@ class Scheduler:
         self.check_watch()
         started: list[str] = self.act_on_answers(now)
         started += self.phone_tickets(now)
-        started += self.queued_answers(now, started)
         started += self.queued_input(now, skip=started)
         state = load_state(self.root)
         for t in read_tickets(self.root):
