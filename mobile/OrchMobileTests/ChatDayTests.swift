@@ -44,7 +44,10 @@ final class ChatDayTests: XCTestCase {
         XCTAssertEqual(ChatDay.key(of: item, calendar: zurich), "2026-11-07")
         var helper = body; helper.by = "ws_a"
         input.messages = [message(helper, from: "ph_1")]
-        XCTAssertEqual(ConversationBuilder.items(.general(workspace: "ws_a"), input).first?.side, .them)
+        XCTAssertEqual(ConversationBuilder.items(.general(workspace: "ws_a"), input).first?.side, .me, "the transport decides: a phone text stays mine whatever `by` says")
+        var spoof = body; spoof.via = "helper"
+        input.messages = [message(spoof)]
+        XCTAssertEqual(ConversationBuilder.items(.general(workspace: "ws_a"), input).first?.side, .them, "by: you without via dashboard never moves a workspace text to my side")
         input.messages = [message(body, ticket: "t_1")]
         let ticketItem = try XCTUnwrap(ConversationBuilder.items(.topic(workspace: "ws_a", ticket: "t_1"), input).first)
         XCTAssertEqual(ticketItem.side, .them); XCTAssertNil(ticketItem.by); XCTAssertNil(ticketItem.day)
