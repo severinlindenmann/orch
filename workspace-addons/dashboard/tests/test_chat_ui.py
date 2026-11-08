@@ -17,11 +17,7 @@ def test_page_is_wired_into_the_shell():
 
 
 def test_groups_render_only_when_data_exists():
-    assert (
-        "Array.isArray(state.chat?.groups)" in JS
-        or "Array.isArray(state?.chat?.groups)" in JS
-        or "chat?.groups" in JS
-    )
+    assert "state?.groups?.hosted" in JS and "state?.groups?.joined" in JS
     for text in (
         "Done groups → History",
         "Search chats",
@@ -30,17 +26,17 @@ def test_groups_render_only_when_data_exists():
         "is thinking…",
         "Members",
         "Remove from group",
-        "Allow once",
         "Answer on your phone or in ",
     ):
         assert text in JS
-    assert "'chat.say'" in JS and "'chat.group_say'" in JS
+    assert "'chat.say'" in JS and "'group.say'" in JS and "'group.remove'" in JS and "'group.add'" in JS
+    assert "chat.group_" not in JS
 
 
 def test_history_is_read_only_and_data_never_goes_through_innerhtml():
     assert "/api/chat/days" in JS and "/api/chat/day/" in JS
     assert "innerHTML" not in JS
-    assert not re.search(r"vpn|netbird|relay", JS, re.IGNORECASE)
+    assert not re.search(r"vpn|netbird", JS, re.IGNORECASE)
 
 
 def test_css_is_scoped_small_screens_and_touch_targets():

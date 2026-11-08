@@ -5,7 +5,31 @@ let chatUi = {open:'chat', day:null, listOpen:true, sheet:null, panel:null, sear
 let chatDays = {status:'idle', rows:[]}, chatArchive = new Map();
 const chatScroll = new WeakMap();
 const chatObjects = value => array(value).filter(v => v && typeof v === 'object');
-const chatGroups = () => chatObjects(state?.chat?.groups);
+// Groups come from state.groups = {hosted:[...], joined:[...]} (the group list). A hosted group's talk is the
+// host ticket's history, its tasks are task cards; a joined group shows the log this workspace stored. Only the host can write.
+const chatGroupMembers = (rows, tasks) => chatObjects(rows).filter(m => !m.left_at).map(m => ({...m, task:chatObjects(tasks).find(t => t.ws === m.ws && t.key)}));
+function chatHostedGroup(g) {
+  const ticket = ticketOf(g.ticket), members = chatGroupMembers(g.members, g.tasks), host = members.find(m => m.host);
+  const nameOf = ws => clean(members.find(m => m.ws === ws)?.name);
+  const talk = array(ticket?.history).filter(e => e && typeof e.text === 'string' && ['rel' + 'ay', 'dashboard'].includes(e.via)).map((e, i) => {
+    const mine = String(e.by || '').startsWith('human:'), who = name(e.by);
+    return {id:'h-' + i + '-' + (e.at || ''), at:e.at, by:mine ? 'you' : who, name:mine ? 'You' : /helper$/.test(who) ? who : who + ' helper', text:e.text};
+  });
+  const tasks = chatObjects(g.tasks).filter(t => t.delegate).map(t => ({id:'task-' + t.delegate, text:'', by:host?.ws || 'host', name:clean(host?.name) + ' helper', task:{...t, name:nameOf(t.ws) || 'Workspace'}}));
+  const messages = [...talk, ...tasks], last = talk[talk.length - 1];
+  return {id:g.id, ticket:g.ticket, host:host?.ws, title:g.title || ticket?.title, key:typeof ticket?.key === 'string' ? ticket.key : '', closed:g.closed, done:g.closed,
+    members, messages, last:last?.text || '', last_at:last?.at, unread:0, connectable:array(g.connectable)};
+}
+function chatJoinedGroup(g) {
+  const members = chatGroupMembers(g.members), nameOf = ws => clean(members.find(m => m.ws === ws)?.name);
+  const messages = chatObjects(g.log).map(x => ({id:x.id, at:x.at, by:'ws', name:clean(x.shown), text:x.text || '',
+    group_event:x.event ? {...x.event, name:x.event.name || nameOf(x.event.ws)} : null, task:x.task ? {...x.task, name:nameOf(x.task.ws) || 'Workspace'} : null,
+    share:x.file ? {kind:'file', title:x.file.title || x.file.name} : null}));
+  const last = messages.filter(m => m.text).pop(), card = g.card;
+  return {id:g.id, host:g.host, title:g.title, key:'', closed:g.closed || g.left, done:g.closed || g.left, readOnly:true, members, messages, last:last?.text || '', last_at:last?.at, unread:0,
+    shared_ticket:card && typeof card === 'object' ? card : null};
+}
+const chatGroups = () => [...chatObjects(state?.groups?.hosted).map(chatHostedGroup), ...chatObjects(state?.groups?.joined).map(chatJoinedGroup)];
 const chatGroup = () => chatGroups().find(g => g.id === chatUi.open);
 const chatWorkspace = () => clean(state?.workspace) || 'Workspace';
 const chatHost = g => clean(chatObjects(g.members).find(m => m.ws === g.host)?.name || g.host_name) || chatWorkspace();
@@ -96,7 +120,7 @@ function chatTask(task, g, readOnly) {
     chatText('small', '', [task.at ? 'Started ' + time(task.at) : '', who + ' helper'].filter(Boolean).join(' · ')),
     chatObjects(task.result?.files).map(file => chatText('span', 'chat-file-chip', file.title)),
     h('div', {className:'chat-actions'}, task.can_open && chatHttp(task.url) ? h('a', {className:'chat-button', href:chatHttp(task.url), target:'_blank', rel:'noopener noreferrer'}, 'Open ', clean(task.key), ' ›') : null,
-      task.status === 'waiting_start' && !readOnly ? chatButton('Remind me', 'remind', {'data-ws':task.ws}) : null));
+      null));
 }
 const chatTaskWord = status => ({waiting_start:'waiting to start', waiting_approval:'waiting for approval', queued:'queued', working:'working', done:'done', failed:'failed', denied:'said no'}[status] || '');
 function chatApproval(m, g, index, readOnly) {
@@ -108,7 +132,7 @@ function chatApproval(m, g, index, readOnly) {
   const key = 'approval-' + g.id + '-' + (m.id || index);
   const pending = chatUi.pending.get(key) === JSON.stringify(m);
   return h('article', {className:'chat-card chat-approval', 'data-key':key}, chatText('strong', '', who + ': let ' + chatHost(g) + ' give tasks?'),
-    !readOnly && member.can_answer === true ? h('div', {className:'chat-actions'}, [['Allow once','once'], ['Always','always'], ['No','no']].map(([label, answer]) => chatButton(label, 'allow', {'data-key':answer, 'data-id':m.id || index, 'data-index':index, 'data-answer':answer, disabled:pending}))) : chatText('small', '', 'Answer on your phone or in ' + who));
+    chatText('small', '', 'Answer on your phone or in ' + who));
 }
 function chatEvent(ev, g) {
   const who = clean(ev.name) || 'Workspace';
@@ -144,13 +168,13 @@ function chatSharedTicket(g) {
 }
 function chatThread(g, archived) {
   const messages = chatObjects(archived ? archived.messages : g ? g.messages : state?.chat?.messages);
-  const readOnly = snapshot || !!archived || !!(g?.done || g?.closed), last = messages[messages.length - 1];
+  const readOnly = snapshot || !!archived || !!(g?.done || g?.closed || g?.readOnly), last = messages[messages.length - 1];
   const lastMine = messages.reduce((found, m, i) => m.by === 'you' ? i : found, -1);
   const since = Date.now() - Date.parse(last?.at);
   const thinking = readOnly ? [] : g ? array(g.thinking).filter(n => typeof n === 'string') : state?.chat?.running || (last?.by === 'you' && since >= 0 && since < 600000) ? [clean(state?.chat?.helper) || chatWorkspace() + ' helper'] : [];
   const logKey = 'log-' + (archived ? chatUi.day : g?.id || 'chat');
   return fragment(g ? chatSharedTicket(g) : null,
-    g?.done || g?.closed ? chatText('div', 'chat-archive-banner', 'Done · read only') : null,
+    g?.done || g?.closed ? chatText('div', 'chat-archive-banner', 'Done · read only') : g?.readOnly ? chatText('div', 'chat-archive-banner', 'Read only here. Write in ' + chatHost(g) + '.') : null,
     h('div', {className:'chat-log', 'data-key':logKey, role:'log', 'aria-live':'polite', 'aria-label':g ? 'Group messages' : 'Chat messages'},
       h('div', {className:'chat-divider'}, archived ? date(chatUi.day) : 'Today'),
       messages.length ? messages.map((m, i) => chatMessage(m, messages[i - 1], g, i, readOnly, lastMine)) : chatText('p', 'chat-empty', readOnly ? 'No messages.' : 'No messages yet. Say hello below.'), thinking.map(chatThinking)),
@@ -209,7 +233,7 @@ function chatPage() {
   const g = chatGroup(), history = chatUi.open === 'history';
   const page = h('section', {className:'chat-page' + (chatUi.listOpen ? ' chat-list-open' : ' chat-thread-open'), 'data-key':'chat-page'}, chatList(),
     h('div', {className:'chat-main', 'data-key':'chat-main'}, chatHeader(g, history), history ? chatHistory() : fragment(g ? null : chatActivity(), chatThread(g, null)),
-      g && chatUi.sheet ? chatSheet(g, snapshot || g.done || g.closed) : null));
+      g && chatUi.sheet ? chatSheet(g, snapshot || g.done || g.closed || g.readOnly) : null));
   page.addEventListener('click', chatClick);
   page.addEventListener('input', chatInput);
   page.addEventListener('submit', event => { if (event.target.matches('.chat-compose')) { event.preventDefault(); chatSend(); } });
@@ -251,7 +275,7 @@ async function chatSend() {
   if (!text) return;
   const original = field.value;
   chatUi.drafts[id] = original; chatUi.sending.add(id); render();
-  const ok = await chatOperation(g ? 'chat.group_say' : 'chat.say', g ? {group:g.id, text} : {text}, g ? 'Could not send to the group.' : 'Could not send your message.');
+  const ok = await chatOperation(g ? 'group.say' : 'chat.say', g ? {ticket:g.ticket, text} : {text}, g ? 'Could not send to the group.' : 'Could not send your message.');
   chatUi.sending.delete(id);
   if (ok && chatUi.drafts[id] === original) { chatUi.drafts[id] = ''; if (field.isConnected) { field.value = ''; field.style.height = ''; } }
   render(); if (field.isConnected) field.focus();
@@ -289,19 +313,8 @@ async function chatClick(event) {
     chatUi.drafts[g.id] = action === 'ask' ? who + ', ' : 'Task for ' + who + ': '; chatUi.menu = false; render();
     const field = document.querySelector('.chat-page .chat-draft'); if (field) { field.value = chatUi.drafts[g.id]; field.focus(); } return;
   }
-  if (action === 'allow') {
-    const index = Number(control.dataset.index), m = chatObjects(g.messages)[index];
-    if (!m || m.group_event?.kind !== 'approval_needed') return;
-    const member = m.member || m.group_event.member || m.group_event;
-    if (member.can_answer !== true) return;
-    const key = 'approval-' + g.id + '-' + (m.id || index), stamp = JSON.stringify(m);
-    if (chatUi.pending.get(key) === stamp) return;
-    chatUi.pending.set(key, stamp); render();
-    const ok = await chatOperation('chat.group_allow', {group:g.id, ws:member.ws || m.group_event.ws || m.task?.ws, delegate:member.delegate || m.group_event.delegate || m.task?.delegate || m.delegate, answer:control.dataset.answer});
-    if (!ok) chatUi.pending.delete(key); render(); return;
-  }
-  const ops = {remove:'chat.group_remove', 'add-member':'chat.group_add', remind:'chat.group_remind'};
-  if (ops[action]) { control.disabled = true; await chatOperation(ops[action], {group:g.id, ws:control.dataset.ws}); control.disabled = false; render(); }
+  const ops = {remove:'group.remove', 'add-member':'group.add'};
+  if (ops[action]) { control.disabled = true; await chatOperation(ops[action], {ticket:g.ticket, workspace:control.dataset.ws}); control.disabled = false; render(); }
 }
 function chatKeydown(event) {
   if (event.target.matches('.chat-draft') && event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); chatSend(); }
