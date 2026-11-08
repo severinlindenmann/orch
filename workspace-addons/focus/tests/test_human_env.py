@@ -32,8 +32,9 @@ def test_without_orchs_list_the_action_is_refused(monkeypatch, tmp_path):
     import pytest
 
     def broken(environ):
-        raise RuntimeError("agents.json: bad")
+        raise RuntimeError("agents.json: bad token=sk-secret in /Users/x/.orch/config.toml")
 
     monkeypatch.setattr(orch.adapters, "human_environ", broken)
-    with pytest.raises(actions.Unavailable):
+    with pytest.raises(actions.Unavailable) as e:
         actions.human_env(Path(tmp_path), "/bin/orch")
+    assert "RuntimeError" in str(e.value) and "sk-secret" not in str(e.value) and "/Users/x" not in str(e.value)

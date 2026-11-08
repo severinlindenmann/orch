@@ -314,10 +314,16 @@ def test_a_live_session_that_ends_with_input_waiting_starts_the_next_run_once(pr
             runs.pending_add(proj, tid, "human:t", "answer", "Answer to your question q1: Blue")
         runs.wrap_live(proj, rec["run"], tid, "claude", [sys.executable, "-c", "pass"], None)
         states.append(_status(proj, tid))
-    assert (
-        len(started) == 1
-        and started[0][-6:] == ["run", "start", tid, "--agent", "claude", "--by", "human:t"][-6:]
-    )
+    assert len(started) == 1 and started[0][-8:] == [
+        "run",
+        "start",
+        tid,
+        "--agent",
+        "claude",
+        "--by",
+        "human:t",
+        "--restart",
+    ]
     # Working while the next run is on its way; Ready once no further run will come (input still queued)
     assert states == ["active", "ready"] and runs.undelivered(proj, tid)
 
@@ -383,11 +389,52 @@ def test_a_refused_restart_start_settles_the_ticket(proj, run, monkeypatch):
     items = runs._pending_read(proj, tid)
     items[0]["restarted"] = tickets.now()
     runs._pending_write(proj, tid, items)
-    monkeypatch.setenv("ORCH_VIA", "restart")
-    code, _, err = run("run", "start", tid, "--agent", "nosuchagent")
+    code, _, err = run("run", "start", tid, "--agent", "nosuchagent", "--restart")
     assert code != 0
     assert _status(proj, tid) == "ready"
     assert not any(i.get("restarted") for i in runs.undelivered(proj, tid))
+
+
+def test_a_refused_start_from_the_agents_shell_leaves_the_marks(proj, run, monkeypatch):
+    """Delta-4 (2): only orch's own restart (--restart) clears marks; an inherited variable does nothing."""
+    tid = _new(run)
+    tickets.set_status(proj, tid, "active", "human:t")
+    runs.pending_add(proj, tid, "human:t", "answer", "Answer to your question q1: Blue")
+    items = runs._pending_read(proj, tid)
+    items[0]["restarted"] = tickets.now()
+    runs._pending_write(proj, tid, items)
+    monkeypatch.setenv("ORCH_VIA", "restart")
+    assert run("run", "start", tid, "--agent", "nosuchagent")[0] != 0
+    assert _status(proj, tid) == "active" and runs.undelivered(proj, tid)[0].get("restarted")
+
+
+def test_a_lock_timeout_in_the_restart_still_settles(proj, run, monkeypatch):
+    """Delta-4 (1): any error inside the restart (here the run lock) never leaves the ticket Working."""
+    from orch.errors import Refused as R
+
+    def busy(*a, **k):
+        raise R("Ticket is busy (retried for 10 s). Try again.")
+
+    import sys
+
+    tid = _new(run)
+    rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+    runs.pending_add(proj, tid, "human:t", "answer", "Answer to your question q1: Blue")
+    monkeypatch.setattr(runs, "_pending_write", busy)
+    runs.wrap_live(proj, rec["run"], tid, "claude", [sys.executable, "-c", "pass"], None)
+    assert _status(proj, tid) == "ready"
+
+
+def test_a_restart_that_never_came_is_settled_by_the_next_status_check(proj, run):
+    """Delta-4 (1): the spawned start died before it began: after the grace the ticket is Ready again."""
+    tid = _new(run)
+    tickets.set_status(proj, tid, "active", "human:t")
+    runs.pending_add(proj, tid, "human:t", "answer", "Answer to your question q1: Blue")
+    items = runs._pending_read(proj, tid)
+    items[0]["restarted"] = runs._iso(time.time() - 600)
+    runs._pending_write(proj, tid, items)
+    assert runs.settle_orphan(proj, tid, at=time.time() + 600) is True
+    assert _status(proj, tid) == "ready" and not runs.undelivered(proj, tid)[0].get("restarted")
 
 
 def test_a_new_message_restarts_even_after_an_earlier_one_did(proj, run, monkeypatch):
@@ -403,8 +450,10 @@ def test_a_new_message_restarts_even_after_an_earlier_one_did(proj, run, monkeyp
 
 def test_the_restart_is_not_the_ended_runs_own_call(proj, run, monkeypatch):
     """Delta F5-3: the detached start gets no agent or run variables; it is marked via=restart."""
-    envs = []
-    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: envs.append(env) or True)
+    envs, argvs = [], []
+    monkeypatch.setattr(
+        runs, "_spawn_detached", lambda root, argv, env: envs.append(env) or argvs.append(argv) or True
+    )
     for k, v in {
         "ORCH_RUN": "r_abcdefgh",
         "ORCH_TICKET": "t_abcdef",
@@ -415,8 +464,8 @@ def test_the_restart_is_not_the_ended_runs_own_call(proj, run, monkeypatch):
     tid = _new(run)
     _ended_live(proj, tid)
     (env,) = envs
-    assert env["ORCH_VIA"] == "restart"
-    assert not {"ORCH_RUN", "ORCH_TICKET", "ORCH_AGENT", "CLAUDECODE"} & set(env)
+    assert not {"ORCH_RUN", "ORCH_TICKET", "ORCH_AGENT", "CLAUDECODE", "ORCH_VIA"} & set(env)
+    assert argvs[0][-1] == "--restart"  # the hidden flag, never an inherited variable
 
 
 def test_no_ready_flicker_while_the_restart_is_on_its_way(proj, run, monkeypatch):

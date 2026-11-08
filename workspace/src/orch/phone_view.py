@@ -223,13 +223,20 @@ def _state_locked(root: Path, wait: float = 10.0):
     finally:
         # only our own lock goes, never one a later holder made: take it aside first (atomic), then check
         mine = lock.with_name(f"{lock.name}.{token.decode()}.rel")
-        with contextlib.suppress(OSError):
+        try:
             os.replace(lock, mine)
-            if mine.read_bytes() != token:
+        except OSError:
+            mine = None  # nothing taken aside: nothing to remove
+        if mine is not None:
+            try:
+                ours = mine.read_bytes() == token
+            except OSError:
+                ours = False  # can not tell: treat it as someone else's
+            if not ours:
                 with contextlib.suppress(OSError):
-                    os.link(mine, lock)  # someone else's: put it back (fails if a newer one is there)
-        with contextlib.suppress(OSError):
-            mine.unlink()
+                    os.link(mine, lock)  # put it back (fails, and is dropped, only if a newer one is there)
+            with contextlib.suppress(OSError):
+                mine.unlink()
 
 
 def update_state(root: Path, fn) -> dict:
