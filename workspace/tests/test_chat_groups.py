@@ -895,10 +895,7 @@ def test_member_delegate_needs_the_persons_allow_then_reports(proj, run, rel, me
     # the host hears waiting_approval + the question's message id; the phones get the allow question
     wa = [m for m in sent(rel, to=FIN) if m["body"].get("task")][0]
     qp = sent(rel, to="phones", type="question")[0]
-    assert (
-        qp["body"]["options"] == ["Allow once", "Always", "No"]
-        and qp["body"]["scope"] == "tasks from Finance"
-    )
+    assert qp["body"]["options"] == ["once", "always", "no"] and qp["body"]["scope"] == "tasks from Finance"
     assert "group" not in qp["body"]
     assert (
         wa["body"]["task"]["status"] == "waiting_approval"
@@ -917,7 +914,7 @@ def test_member_delegate_needs_the_persons_allow_then_reports(proj, run, rel, me
         "type": "answer",
         "created_at": "2026-11-08T10:04:00Z",
         "reply_to": qp["id"],
-        "body": {"question_id": q["id"], "answer": "Allow once"},
+        "body": {"question_id": q["id"], "answer": "once"},
     }
     rel.sent.clear()
     inbox(run, rel, phone_ans)

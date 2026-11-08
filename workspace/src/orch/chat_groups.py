@@ -1406,9 +1406,9 @@ def on_allow(root: Path, m: dict) -> None:
     with _state(root) as st:
         for g in st["hosted"].values():
             if rid in g["delegates"].get(m["from"], []) and m["from"] in _active(g):
-                mode = "permanent" if m.get("body", {}).get("mode") == "permanent" else "once"
+                mode = "always" if m.get("body", {}).get("mode") == "permanent" else "once"
                 name = g["members"][m["from"]]["name"]
-                word = "once" if mode == "once" else "always"
+                word = mode
                 _event(
                     root,
                     st,
@@ -1710,7 +1710,7 @@ def waiting_approval(root: Path, delegate_msg: dict, allow_tid: str, qid: str) -
             "question_id": q["id"],
             "title": t["title"],
             "text": q["text"],
-            "options": ["Allow once", "Always", "No"],
+            "options": ["once", "always", "no"],
             "recommended": None,
             "scope": scope[:120],
         }
