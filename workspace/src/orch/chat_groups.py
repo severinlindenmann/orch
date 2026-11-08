@@ -1126,9 +1126,14 @@ def _tick(g: dict, ws: str, is_file: bool) -> None:
 
 
 def _drop(st: dict, m: dict, why: str) -> dict:
+    """Refuse a message. Nothing is remembered about its id: only a message that passed all checks is recorded
+    (a forged message must not be able to use up the id a real one will have)."""
     why = why.removeprefix("dropped: ")
-    st["processed"][m["id"]] = {"auto": True, "note": "dropped: " + why}
-    return {"handled": True, "auto": True, "note": "dropped: " + why, "applied": None}
+    return {"handled": True, "auto": True, "dropped": True, "note": "dropped: " + why, "applied": None}
+
+
+def _pkey(m: dict) -> str:
+    return f"{m.get('from')}/{m.get('id')}"
 
 
 def receive(root: Path, m: dict) -> dict | None:
@@ -1142,7 +1147,7 @@ def receive(root: Path, m: dict) -> dict | None:
     me = _me(root)
     g_wire = m["body"]["group"]
     with _state(root) as st:
-        if (done := st["processed"].get(m["id"])) is not None:
+        if (done := st["processed"].get(_pkey(m))) is not None:
             if done.get("pass"):
                 return {"pass": True}
             return {
@@ -1163,9 +1168,9 @@ def receive(root: Path, m: dict) -> dict | None:
         else:
             res = _member_receive(root, st, m)
         if res.get("pass"):
-            st["processed"][m["id"]] = {"pass": True}
-        elif res.get("handled"):
-            st["processed"][m["id"]] = {"auto": res.get("auto", True), "note": res.get("note", "")}
+            st["processed"][_pkey(m)] = {"pass": True}
+        elif res.get("handled") and not res.get("dropped"):
+            st["processed"][_pkey(m)] = {"auto": res.get("auto", True), "note": res.get("note", "")}
         return res
 
 

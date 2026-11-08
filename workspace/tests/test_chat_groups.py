@@ -417,6 +417,33 @@ def test_task_status_moves_forward_only_and_only_for_own_delegates(proj, run, re
     )
 
 
+def test_a_refused_forgery_does_not_use_up_the_id_of_the_real_message(proj, run, rel, grp):
+    host, gid, d = grp
+    real_id = mid("contested")
+    forged = group_msg(STRANGER, gid, host, MEMBERS + [(STRANGER, "X")], {"text": "fake"}, id=real_id)
+    res = cg.receive(proj, forged)
+    assert res["dropped"] is True
+    st = json.loads((proj / ".orch/secrets/groups.json").read_text())
+    assert st["processed"] == {}  # nothing recorded for a message that failed the checks
+    real = group_msg(HOME, gid, host, MEMBERS, {"text": "the real one"}, id=real_id)
+    res = cg.receive(proj, real)
+    assert not res.get("dropped") and res["handled"]
+    st = json.loads((proj / ".orch/secrets/groups.json").read_text())
+    assert list(st["processed"]) == [f"{HOME}/{real_id}"]  # keyed by sender and id
+    # the same id again from the forger is still refused (its own key), the real one stays recorded
+    assert cg.receive(proj, forged)["dropped"] is True
+
+
+def test_refused_group_message_is_marked_seen_for_its_sender_only(proj, run, rel, grp):
+    host, gid, d = grp
+    contested = mid("c2")
+    inbox(
+        run, rel, group_msg(STRANGER, gid, host, MEMBERS + [(STRANGER, "X")], {"text": "fake"}, id=contested)
+    )
+    seen = json.loads((proj / ".orch/inbox-seen.json").read_text())
+    assert f"{STRANGER}/{contested}" in seen and contested not in seen
+
+
 def test_member_cannot_say_waiting_start_or_claim_another_ws(proj, run, rel, grp):
     host, gid, d = grp
     out = inbox(run, rel, task_msg(HOME, gid, host, d, "waiting_start", "ack"))

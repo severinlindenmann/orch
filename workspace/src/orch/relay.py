@@ -1586,7 +1586,12 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
     pending = []
     for f in d.glob("m_*.json"):  # everything saved and not yet seen, also from earlier pulls
         m = net.read_json(f, None)
-        if isinstance(m, dict) and m.get("id") == f.stem and f.stem not in seen(root):
+        if (
+            isinstance(m, dict)
+            and m.get("id") == f.stem
+            and f.stem not in seen(root)
+            and f"{m.get('from')}/{f.stem}" not in seen(root)
+        ):
             pending.append(m)
     out = []
     for m in sorted(
@@ -1602,8 +1607,8 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
             if gres is not None and gres.get("handled"):
                 note, applied, auto = gres["note"], gres.get("applied"), bool(gres.get("auto"))
                 if auto:
-                    with locked(root):
-                        _mark_seen(root, m["id"])
+                    with locked(root):  # keyed by sender too: a refused forgery can't use up a real id
+                        _mark_seen(root, f"{m.get('from')}/{m['id']}")
                 else:
                     out.append(
                         {"message": m, "note": note, "auto": False, "applied": applied, "allowed": None}
@@ -1683,7 +1688,7 @@ def _group_step(root: Path, m: dict) -> dict | None:
 
     if m.get("type") == "allow" and msg_group(m):
         with locked(root):
-            _mark_seen(root, m["id"])
+            _mark_seen(root, f"{m.get('from')}/{m['id']}")
         return {
             "handled": True,
             "auto": True,
