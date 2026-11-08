@@ -6,6 +6,7 @@
 #   8-15 min behind other lanes' cargo and Simulator runs). Last line: "local-gate: PASS (...)" or "local-gate: FAIL (...)".
 # Env: HEAVY (default the v2 build heavy.sh), LANE (tag for the lock, default local-gate), BASE (default origin/develop).
 set -u
+export ORCH_HOME_STRICT=1   # an untrusted ORCH_HOME is an error, never a silent fallback to the real ~/.orch-tool
 ROOT=$(git rev-parse --show-toplevel) || exit 2; cd "$ROOT" || exit 2
 HEAVY=${HEAVY:-$HOME/orch-dev/state/v2-plan-2026-11-05/build/heavy.sh}; LANE=${LANE:-local-gate}; BASE=${BASE:-origin/develop}
 export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH"  # cargo on this Mac
@@ -37,7 +38,7 @@ if [ $addons = 1 ]; then
     n=$(basename "$d")
     # a touched add-on, or any add-on when workspace/contracts changed (CI filter), runs its checks
     if has "^workspace-addons/$n/" || [ $workspace = 1 ]; then
-      extra=""; [ "$n" = dashboard ] && extra='&& node --check src/orch_dashboard/web/app.js && node --check src/orch_dashboard/web/blocks.js'
+      extra=""; [ "$n" = dashboard ] && extra='&& node --check src/orch_dashboard/web/app.js && for f in src/orch_dashboard/web/pages/*.js; do node --check $f || exit 1; done && node --check src/orch_dashboard/web/blocks.js'
       step light "addon:$n" "$d" sh -c "uv sync -q && uv run ruff check . $extra && uv run pytest -q -n 4 -m 'not slow'"
     fi
   done

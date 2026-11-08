@@ -133,7 +133,16 @@ def _check_plain(name):
     return fn
 
 
+def _ticket_done(a):
+    _only(a, ("ticket", "if_revision"))
+    rev = _rev(a.get("if_revision"))
+    if rev is None:
+        raise BadRequest("The ticket revision is required.")
+    return ["ticket", "patch", _t(a)], [f"--if-revision={rev}"], [json.dumps({"status": "done"})]
+
+
 OPS = {
+    "ticket.done": _ticket_done,
     "answer": _answer,
     "run.start": _run_start,
     "run.stop": _run_stop,

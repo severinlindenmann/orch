@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="detached wrapper tests 
 
 
 @pytest.fixture
-def gen(proj, monkeypatch):
+def gen(proj, monkeypatch, subprocess_home):
     """The generic fake agent as the folder's agent; its log says what it was told."""
     log = proj.parent / f"{proj.name}-agent.log"
     monkeypatch.setenv("ORCH_CMD", f"{shlex.quote(sys.executable)} -m orch")
@@ -178,7 +178,9 @@ def test_resume_is_used_when_there_is_a_session_and_allow_goes_to_argv_only(proj
     assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) != old
 
 
-def test_failed_resume_falls_back_to_fresh_once_and_records_the_new_id(proj, run, tmp_path, monkeypatch):
+def test_failed_resume_falls_back_to_fresh_once_and_records_the_new_id(
+    proj, run, tmp_path, monkeypatch, subprocess_home
+):
     calls = _fake_claude(tmp_path, monkeypatch, resume_works=False)
     config.set_key(proj, "workspace", "agent", "claude")
     config.set_permissions(proj, "ask")  # no `claude --help` probe in the fake's call log
@@ -250,7 +252,7 @@ def test_a_plain_failure_does_not_fall_back_to_fresh(proj, run, tmp_path, monkey
     assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) == old
 
 
-def test_the_fresh_fallback_carries_the_pending_input(proj, run, tmp_path, monkeypatch):
+def test_the_fresh_fallback_carries_the_pending_input(proj, run, tmp_path, monkeypatch, subprocess_home):
     calls = _fake_claude(tmp_path, monkeypatch, resume_works=False)
     config.set_key(proj, "workspace", "agent", "claude")
     config.set_permissions(proj, "ask")  # no `claude --help` probe in the fake's call log
