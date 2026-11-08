@@ -22,7 +22,7 @@ _wait = test_run_wrap._wait
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="detached wrapper tests use shell stubs")
 
 
-# ------------------------------------------------------------- F1: actor spoof starts an agent / answers phones
+# ---------------------------------------------- F1: actor spoof starts an agent / answers phones
 
 
 def test_F1_agent_env_with_by_human_SHOULD_count_as_agent(proj, run, gen, one_step, monkeypatch):
@@ -43,7 +43,8 @@ def test_F1_agent_env_with_by_human_SHOULD_count_as_agent(proj, run, gen, one_st
 
 
 def test_F1b_agent_env_SHOULD_not_answer_a_phone_question_as_human(proj, run, monkeypatch):
-    """Same spoof against the existing guard 'This question was sent to the phones. Only a human answers it.'"""
+    """Same spoof against the existing guard 'This question was sent to the phones. Only a human answers
+    it.'"""
     tid = L._new(run)
     qid = L._ask(run, tid, "Pay the invoice?", "Yes", "No")
     monkeypatch.setattr(relay, "asked_to_phones", lambda root, t, q: True)
@@ -52,7 +53,7 @@ def test_F1b_agent_env_SHOULD_not_answer_a_phone_question_as_human(proj, run, mo
     assert code != 0, "an agent answered a phone question by claiming to be human"
 
 
-# ------------------------------------------------------------- F2: resume starts the default agent, not the asker
+# ---------------------------------------------- F2: resume starts the default agent, not the asker
 
 
 def test_F2_resume_SHOULD_start_the_agent_that_asked(proj, run, gen, one_step):
@@ -75,8 +76,8 @@ def test_F2_resume_SHOULD_start_the_agent_that_asked(proj, run, gen, one_step):
 
 
 def test_F3_peer_workspace_answer_is_labelled_agent_never_human():
-    """_answer_by: a peer (not ph_/sub_) may send answered_by human:<anything>; it is recorded as agent:<peer>,
-    so a peer's own label never decides that a person answered (which starts the agent)."""
+    """_answer_by: a peer (not ph_/sub_) may send answered_by human:<anything>; it is recorded as
+    agent:<peer>, so a peer's own label never decides that a person answered (which starts the agent)."""
     by, via = relay._answer_by({"from": "ws_peer", "body": {"answered_by": "human:owner"}})
     assert (by, via) == ("agent:ws_peer", "relay")
     by, _ = relay._answer_by({"from": "ws_peer", "body": {"answered_by": "agent:claude"}})
@@ -148,7 +149,8 @@ def test_settle_orphan_skips_a_ticket_with_queued_input(proj, run):
 
 def test_settle_under_lock_sees_a_run_that_claimed_meanwhile(proj, run, monkeypatch):
     """agent_stopped asks still_running() inside the ticket lock: a claim that lands first wins.
-    (mark_working needs the ticket lock we are inside, so it is skipped here; claim's record write is what counts.)"""
+    (mark_working needs the ticket lock we are inside, so it is skipped here; claim's record write is what
+    counts.)"""
     monkeypatch.setattr(tickets, "mark_working", lambda *a, **k: None)
     tid = L._new(run)
     tickets.set_status(proj, tid, "active", "human:t")
