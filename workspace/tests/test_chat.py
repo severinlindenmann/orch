@@ -412,3 +412,115 @@ def test_helper_cannot_reach_the_chat_ticket_through_a_key_or_patch_data(proj, r
     monkeypatch.setenv("ORCH_TICKET", gid)
     with pytest.raises(Refused):
         tickets.patch(proj, gid, 1, '{"status": "done"}', "agent:x")  # also checked inside tickets.patch
+
+
+# ---------------------------------------------------------------- the delta review: per-command arguments, run hooks, cards
+
+
+def _helper(proj, monkeypatch, run_id="r_helper0001"):
+    gid = tickets.ensure_general(proj, "x")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("ORCH_TICKET", gid)
+    monkeypatch.setenv("ORCH_RUN", run_id)
+    return gid
+
+
+def test_update_is_not_exempt_and_by_phone_and_extras_are_refused(proj, run, new_ticket, monkeypatch):
+    tid = new_ticket("Pay car tax")
+    _helper(proj, monkeypatch)
+    for argv in (
+        ("update",),
+        ("log", tid, "x", "--by", "human:marco"),  # never writes as the person
+        ("check", "add", tid, "x", "--by", "human:marco"),
+        ("ticket", "new", "T", "--by", "human:marco"),
+        ("ref", "add", tid, "https://example.com", "--by", "human:marco"),
+        ("ticket", "new", "T", "--ext", 'x={"a": 1}'),
+        ("ticket", "list", "--by", "human:marco"),
+        ("relay", "send", "phones", "x", "--file", "report.md"),
+        ("run", "send", tid, "go"),
+        ("ticket", "show", "NOPE-1"),  # does not resolve: refused, not skipped
+    ):
+        assert run(*argv)[0] == 2, argv
+    # without --by the actor is forced to the agent whatever it would claim
+    run("log", tid, "note from the helper")
+    assert tickets.load(proj, tid)["history"][-1]["by"].startswith("agent:")
+
+
+def test_run_hooks_only_for_the_chat_ticket_and_the_helpers_own_run(proj, run, new_ticket, monkeypatch):
+    tid = new_ticket("Other")
+    gid = _helper(proj, monkeypatch)
+    for argv in (
+        ("run", "done", tid),
+        ("run", "release", tid),
+        ("run", "claim", tid),
+        ("run", "event", "--kind", "session", "--run", "r_someoneelse"),
+        ("run", "release", gid, "--run", "r_someoneelse"),
+    ):
+        code, _, err = run(*argv)
+        assert code == 2 and "cannot do that" in err, (argv, err)
+    # the Chat ticket with its own run id passes the guard (what happens then is the run code's business)
+    from types import SimpleNamespace
+
+    chat.guard(proj, SimpleNamespace(cmd="run", sub="release", ticket=gid, run="r_helper0001", json=False))
+    chat.guard(proj, SimpleNamespace(cmd="run", sub="event", ticket=None, run=None, kind="stop", json=False))
+
+
+def test_helper_relay_send_is_plain_text_to_a_paired_phone_with_safe_cards(proj, run, conn, monkeypatch):
+    gid = _general(proj, conn, run)
+    run("relay", "refresh")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("ORCH_TICKET", gid)
+    ok = run(
+        "relay",
+        "send",
+        pv3.PHONE,
+        "Done.",
+        "--ticket",
+        gid,
+        "--reply-to",
+        pv3.GEN,
+        "--ref",
+        "reference:https://example.com",
+    )
+    assert ok[0] == 0, ok
+    for argv in (
+        ("relay", "send", "ph_notpaired01", "x", "--ticket", gid),
+        ("relay", "send", "ws_other00001", "x"),
+        ("relay", "send", pv3.PHONE, "x", "--update", "result", "--ticket", gid),
+        ("relay", "send", pv3.PHONE, "x", "--ticket", gid, "--ref", "file:.env"),
+        ("relay", "send", pv3.PHONE, "x", "--ticket", gid, "--ref", "file:.orch/config.toml"),
+        ("relay", "send", pv3.PHONE, "x", "--ticket", "t_otherticket1"),
+    ):
+        assert run(*argv)[0] == 2, argv
+
+
+def test_hard_linked_and_more_secret_files_are_no_cards(proj):
+    (proj / "doc.txt").write_text("x")
+    import os
+
+    os.link(proj / "doc.txt", proj / "copy.txt")
+    assert chat.safe_file(proj, "doc.txt") is None and chat.safe_file(proj, "copy.txt") is None  # two names
+    for rel in (".kube/config", ".docker/config.json", ".pgpass", ".htpasswd", "web/.htpasswd"):
+        (proj / rel).parent.mkdir(parents=True, exist_ok=True)
+        (proj / rel).write_text("x")
+        assert chat.safe_file(proj, rel) is None, rel
+    (proj / "ok.md").write_text("hello")
+    assert chat.read_file(proj, "ok.md") == b"hello"
+    assert chat.read_file(proj, ".kube/config") is None
+
+
+def test_a_hand_edited_day_file_never_crashes_a_read(proj):
+    chat.record(proj, "m_aaaaaaaaaaaaaaaa", "you", "phone", "x")
+    f = proj / ".orch" / "chat" / f"{chat.day_key(proj)}.json"
+    d = json.loads(f.read_text())
+    d["messages"] += ["junk", 5, {"id": "m_b", "text": "y", "refs": ["junk", {"kind": "file", "path": 7}]}]
+    f.write_text(json.dumps(d))
+    out = chat.read_day(proj, d["day"])["messages"]
+    assert [m["id"] for m in out] == ["m_aaaaaaaaaaaaaaaa", "m_b"] and out[1]["refs"] == []
+    assert chat.days(proj)
+
+
+def test_chat_id_works_for_the_host_even_though_chat_is_a_hidden_command(proj, run):
+    assert run("chat", "id", "--json")[0] == 0
+    with pytest.raises(SystemExit):
+        run("--help-all")

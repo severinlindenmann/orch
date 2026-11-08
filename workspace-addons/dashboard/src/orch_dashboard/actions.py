@@ -240,7 +240,7 @@ def _log(a):
 
 
 def _chat_say(a):
-    """The person writes in Chat (history by "you", via dashboard; the automation host starts the helper)."""
+    """The person writes in Chat (history by "you", via dashboard; the background host starts the helper)."""
     _only(a, ("text",))
     return ["chat", "say"], [], [_text(a.get("text"))]
 

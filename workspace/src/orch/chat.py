@@ -27,8 +27,8 @@ MAX_TEXT = 20000  # Chat keeps 20000 characters (contract section 5)
 REF_KINDS = ("ticket", "reference", "file")
 # a file card names a file inside the workspace; never under .orch/ or .git/, never a key, token or login file
 _NOT_FILES = re.compile(
-    r"(^|/)(\.orch|\.git|\.ssh|\.gnupg|\.aws|secrets)(/|$)"
-    r"|(^|/)(\.env[^/]*|\.npmrc|\.netrc|\.pypirc|\.git-credentials|id_(rsa|dsa|ecdsa|ed25519)[^/]*)$"
+    r"(^|/)(\.orch|\.git|\.ssh|\.gnupg|\.aws|\.kube|\.docker|secrets)(/|$)"
+    r"|(^|/)(\.env[^/]*|\.npmrc|\.netrc|\.pypirc|\.git-credentials|\.pgpass|\.htpasswd|id_(rsa|dsa|ecdsa|ed25519)[^/]*)$"
     r"|\.(pem|key|p8|p12|pfx|jks|kdbx|sqlite3?|db)(\.[^/]*)?$|token|credential|secret|password",
     re.I,
 )
@@ -99,6 +99,9 @@ def _read_day(root: Path, day: str) -> dict:
     d = net.read_json(_day_path(root, day), None)
     if not isinstance(d, dict) or not isinstance(d.get("messages"), list):
         return {"schema": "orch.chat-day/1", "day": day, "messages": []}
+    d["messages"] = [
+        m for m in d["messages"] if isinstance(m, dict)
+    ]  # a hand-edited file never crashes a read
     return d
 
 
@@ -164,9 +167,23 @@ def safe_file(root: Path, rel_path: str) -> str | None:
         rel = real.relative_to(base).as_posix()
     except (ValueError, OSError):
         return None
-    if not real.is_file() or _NOT_FILES.search(rel):
+    try:
+        if (
+            not real.is_file() or real.stat().st_nlink > 1 or _NOT_FILES.search(rel)
+        ):  # a hard link may be a secret
+            return None
+    except OSError:
         return None
     return rel
+
+
+def read_file(root: Path, rel_path: str, max_bytes: int = 5_000_000) -> bytes | None:
+    """The bytes of a file card, for whoever serves it: checked now (safe_file), then opened without following
+    links (safefile.open_file_ref). None = not allowed."""
+    from orch import safefile
+
+    p = safe_file(root, rel_path)
+    return safefile.open_file_ref(root, p, max_bytes) if p else None
 
 
 def refs_in_text(root: Path, text: str) -> list[dict]:
@@ -233,16 +250,17 @@ def read_day(root: Path, day: str) -> dict:
     """One day, read only: {day, today, messages}."""
     d = _read_day(root, day)
     msgs = []
-    for m in d["messages"]:
+    for m in d["messages"]:  # _read_day keeps only dict entries
         if isinstance(
             m.get("refs"), list
         ):  # a file card is checked again now (a link may have changed since)
-            m = {
-                **m,
-                "refs": [
-                    r for r in m["refs"] if r.get("kind") != "file" or safe_file(root, r.get("path", ""))
-                ],
-            }
+            ok = [
+                r
+                for r in m["refs"]
+                if isinstance(r, dict)
+                and (r.get("kind") != "file" or safe_file(root, str(r.get("path", ""))))
+            ]
+            m = {**m, "refs": ok}
         msgs.append(m)
     return {"day": day, "today": day == day_key(root), "messages": msgs}
 
@@ -384,43 +402,41 @@ def helper_prompt(root: Path, ticket: dict, items: list[dict], news: str) -> str
 
 # ---------------------------------------------------------------- the helper's role (enforced here, not in the prompt)
 
-# The Chat helper may run exactly these (cmd, sub) pairs and nothing else (an allowlist: a new command is
-# refused until it is listed here). The run hooks the wrapper itself calls are included; start/stop/send/attach
-# of runs are not.
-HELPER_ALLOWED = frozenset(
-    {
-        ("ticket", "new"),
-        ("ticket", "show"),
-        ("ticket", "list"),
-        ("ticket", "tree"),
-        ("log", None),
-        ("check", "add"),
-        ("ref", "add"),
-        ("ref", "list"),
-        ("relay", "send"),
-        ("relay", "topic"),
-        ("chat", "status"),
-        ("chat", "days"),
-        ("chat", "day"),
-        ("chat", "id"),
-        ("needs", None),
-        ("status", None),
-        ("run", "claim"),
-        ("run", "release"),
-        ("run", "status"),
-        ("run", "session"),
-        ("run", "argv"),
-        ("run", "event"),
-        ("run", "done"),
-    }
-)
-HELPER_FLAGS_DENIED = (
-    "take_over",
-    "fresh",
-    "force",
-    "file",
-)  # --take-over, --fresh, --force, relay send --file
-HELPER_TARGET_FIELDS = ("id", "ticket", "parent")
+# The Chat helper may run exactly these (cmd, sub) pairs, each with exactly these arguments (argparse dests), and
+# nothing else: a new command or option is refused until it is listed here. HELPER_TARGETS names the dests that
+# hold a ticket (keys are resolved; a target that does not resolve is refused). `--by`, `--phone`, `--take-over`,
+# `--fresh`, `--file`, `--update` are in no list. kind: "write" targets must not be the Chat ticket, "read" may be,
+# "run" (the wrapper's hooks) must be the Chat ticket and, when given, the helper's own run (ORCH_RUN).
+HELPER_COMMANDS = {
+    ("ticket", "new"): ("write", {"title", "parent", "owner", "due", "note"}, ("parent",)),
+    ("ticket", "show"): ("read", {"id"}, ("id",)),
+    ("ticket", "list"): ("read", {"status", "all"}, ()),
+    ("ticket", "tree"): ("read", {"id"}, ("id",)),
+    ("log", None): ("write", {"id", "text"}, ("id",)),
+    ("check", "add"): ("write", {"id", "text"}, ("id",)),
+    ("ref", "add"): ("write", {"id", "target", "kind", "title"}, ("id",)),
+    ("ref", "list"): ("read", {"id"}, ("id",)),
+    ("relay", "send"): (
+        "relay",
+        {"workspace", "text", "reply_to", "ticket", "summary", "speak", "ref"},
+        ("ticket",),
+    ),
+    ("relay", "topic"): ("read", {"message", "title"}, ()),
+    ("chat", "status"): ("read", set(), ()),
+    ("chat", "days"): ("read", set(), ()),
+    ("chat", "day"): ("read", {"day"}, ()),
+    ("chat", "id"): ("read", set(), ()),
+    ("needs", None): ("read", set(), ()),
+    ("status", None): ("read", set(), ()),
+    ("run", "claim"): ("run", {"ticket", "agent", "session", "pid", "text"}, ("ticket",)),
+    ("run", "release"): ("run", {"ticket", "run"}, ("ticket",)),
+    ("run", "done"): ("run", {"ticket", "run"}, ("ticket",)),
+    ("run", "status"): ("run", {"ticket"}, ("ticket",)),
+    ("run", "session"): ("run", {"ticket", "agent"}, ("ticket",)),
+    ("run", "argv"): ("run", {"ticket", "agent", "session"}, ("ticket",)),
+    ("run", "event"): ("run", {"ticket", "kind", "run", "session_id"}, ("ticket",)),
+}
+_NO_DEST = {"cmd", "sub", "json", "wsub", "func"}
 _PHONE_TARGET = re.compile(r"phones|ph_[a-z0-9]{10}")
 
 
@@ -436,38 +452,49 @@ def is_helper(root: Path) -> bool:
 def guard(root: Path, args) -> None:
     """The helper makes tickets, notes and answers to the person. It never signs, approves, publishes, closes,
     drops, deletes, answers a question, starts or stops another run, or changes the Chat ticket (general flag,
-    ext.chat, sessions, status): everything outside HELPER_ALLOWED is refused (Refused, exit 2)."""
+    ext.chat, sessions, status): everything outside HELPER_COMMANDS is refused (Refused, exit 2)."""
+    import os
+
     if not is_helper(root):
         return
+    no = Refused(
+        "The Chat helper cannot do that. It can make tickets, notes and answers; the rest is the person's."
+    )
     cmd, sub = getattr(args, "cmd", None), getattr(args, "sub", None)
-    if (cmd, sub) not in HELPER_ALLOWED or getattr(args, "wsub", None) is not None:
-        raise Refused(
-            "The Chat helper cannot do that. It can make tickets, notes and answers; the rest is the person's."
-        )
-    if any(getattr(args, f, None) for f in HELPER_FLAGS_DENIED):
-        raise Refused("The Chat helper cannot use that option.")
+    entry = HELPER_COMMANDS.get((cmd, sub))
+    if entry is None:
+        raise no
+    kind, allowed, targets = entry
+    used = {k for k, v in vars(args).items() if k not in _NO_DEST and v not in (None, False, "", [], ())}
+    if used - allowed or getattr(args, "wsub", None) is not None:
+        raise no
     gid = tickets.general_id(root)
-    for f in HELPER_TARGET_FIELDS:  # every field that names a ticket, keys resolved to ids
+    for f in targets:
         v = getattr(args, f, None)
-        if isinstance(v, str) and v:
-            try:
-                v = tickets.resolve(root, v)
-            except Refused:
-                continue
-            if v == gid and (cmd, sub) not in {
-                ("ticket", "show"),
-                ("ticket", "list"),
-                ("ticket", "tree"),
-                ("run", "claim"),
-                ("run", "release"),
-                ("run", "status"),
-                ("run", "session"),
-                ("run", "argv"),
-                ("run", "event"),
-                ("run", "done"),
-                ("relay", "send"),
-            }:
-                raise Refused("The Chat conversation itself is not changed by the helper.")
-    if cmd == "relay" and sub == "send":
-        if not _PHONE_TARGET.fullmatch(str(getattr(args, "workspace", ""))) or getattr(args, "update", None):
-            raise Refused("The Chat helper answers the person's phone with a plain text only.")
+        if not v:
+            if kind == "run" and f == "ticket":
+                continue  # the hook's default is ORCH_TICKET = the Chat ticket
+            continue
+        try:
+            rid = tickets.resolve(root, v)
+        except Refused:
+            raise no from None
+        if not isinstance(rid, str) or not tickets._ID_RE.fullmatch(rid):
+            raise no  # not a ticket we can name: refused, never skipped
+        if kind in ("run", "relay") and rid != gid or kind == "write" and rid == gid:
+            raise no
+    if kind == "run" and getattr(args, "run", None) not in (None, os.environ.get("ORCH_RUN")):
+        raise no  # only the helper's own run
+    if kind == "relay":
+        to = str(getattr(args, "workspace", ""))
+        try:
+            to = relay.resolve(root, to)
+        except Refused:
+            raise no from None
+        paired = {p.get("id") for p in relay._read_dir(root).get("phones", []) if isinstance(p, dict)}
+        if not _PHONE_TARGET.fullmatch(to) or (to != "phones" and to not in paired):
+            raise Refused("The Chat helper answers the person's paired phones with a plain text only.")
+        for r in getattr(args, "ref", None) or []:  # cards: checked now, again when stored and when read
+            k, _, v = str(r).partition(":")
+            if k not in REF_KINDS or (k == "file" and not safe_file(root, v)):
+                raise Refused("That card is not allowed.")
