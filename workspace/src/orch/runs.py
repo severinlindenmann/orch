@@ -247,10 +247,20 @@ def kill_tree(pid: int, grace: float = 2.0) -> None:
         except (ProcessLookupError, PermissionError):
             pass
 
+    def gone() -> bool:
+        # Our own child that has ended stays a zombie (and looks alive) until it is reaped: reap it, so we
+        # do not wait out the grace and then SIGKILL a process that is still in its SIGTERM handler.
+        with contextlib.suppress(ChildProcessError, OSError):
+            if os.waitpid(pid, os.WNOHANG)[0] == pid:
+                return True
+        return not services.pid_alive(pid)
+
     send(signal.SIGTERM)
     end = time.monotonic() + grace
-    while time.monotonic() < end and services.pid_alive(pid):
+    while time.monotonic() < end and not gone():
         time.sleep(0.05)
+    if gone():
+        return
     if services.pid_alive(pid):
         send(signal.SIGKILL)
 
@@ -517,8 +527,14 @@ def settle(root: Path, tid: str, by: str, say: bool = True) -> bool:
     ticket status (dashboard, Focus, phone) says what is true. Never touches a ticket a run holds now."""
     if tickets.is_general(root, tid):
         return False
+
+    def busy() -> bool:
+        # a run holds it, or a person's answer or message still waits to go in: that work is not over, the
+        # ticket stays Working (the next start delivers it; a one-step run already ran once more for it)
+        return running(root, tid) or any(i.get("via") != "start" for i in undelivered(root, tid))
+
     with contextlib.suppress(Refused, OSError, ValueError):
-        return tickets.agent_stopped(root, tid, by, lambda: running(root, tid), say)
+        return tickets.agent_stopped(root, tid, by, busy, say)
     return False
 
 

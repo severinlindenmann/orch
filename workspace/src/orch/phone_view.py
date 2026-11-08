@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import os
 import re
 import time
 import urllib.parse
@@ -165,6 +166,45 @@ def load_state(root: Path) -> dict:
 
 def save_state(root: Path, s: dict) -> None:
     net.write_json(_state_path(root), s, True)
+
+
+STATE_LOCK_STALE = 30
+
+
+@contextlib.contextmanager
+def _state_locked(root: Path, wait: float = 10.0):
+    """One read-modify-write of phone-views.json at a time (sync, sync_open, remember, view_for may run in
+    several orch processes at once). Its own lock, held only around the file, never around a send: remember()
+    runs inside the relay lock (an ack while the inbox is handled), and the relay lock is not reentrant."""
+    lock = net.secrets_dir(root) / "phone-views.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    end = time.monotonic() + wait
+    while True:
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+            break
+        except FileExistsError:
+            with contextlib.suppress(OSError):
+                if time.time() - lock.stat().st_mtime > STATE_LOCK_STALE:
+                    lock.unlink()  # a holder that died; the lock is only ever held for a file write
+                    continue
+            if time.monotonic() > end:
+                raise Refused("The phone view state is busy. Try again in a moment.") from None
+            time.sleep(0.02)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            lock.unlink()
+
+
+def update_state(root: Path, fn) -> dict:
+    """fn(state) changes the freshly read state under the lock; it is then saved. Returns the state."""
+    with _state_locked(root):
+        st = load_state(root)
+        fn(st)
+        save_state(root, st)
+        return st
 
 
 def _upload(root: Path, data: bytes, state: dict) -> dict | None:
@@ -391,8 +431,9 @@ def view_for(root: Path, tid: str) -> dict | None:
     except (Refused, ValueError, KeyError, OSError):
         return None
     state = load_state(root)
-    atts = attachments(root, ticket, state)
-    save_state(root, state)
+    atts = attachments(root, ticket, state)  # uploads: never under the lock; only the new blobs are merged
+    blobs = state["blobs"]
+    update_state(root, lambda st: st["blobs"].update(blobs))
     return build(root, ticket, atts)
 
 
@@ -408,21 +449,20 @@ def remember(root: Path, tid: str, to: str) -> None:
     """The phone follows this ticket now: later task changes go to `to` quietly."""
     if not (to == "phones" or to.startswith("ph_")):
         return
-    state = load_state(root)
     try:
-        sig = _tasks_sig(tickets.load(root, tid), root)
+        ticket = tickets.load(root, tid)
     except (Refused, ValueError, KeyError, OSError):
         return
-    try:
-        status = tickets.load(root, tid).get("status")
-    except (Refused, ValueError, KeyError, OSError):
-        status = None
-    state["tickets"][tid] = {"to": to, "sig": sig, "at": time.time(), "status": status}
-    if to.startswith("ph_"):  # this phone has a chat for the ticket now: sync_open skips it
-        state.setdefault("synced", {}).setdefault(to, [])
-        if tid not in state["synced"][to]:
-            state["synced"][to].append(tid)
-    save_state(root, state)
+    sig, status = _tasks_sig(ticket, root), ticket.get("status")
+
+    def put(state):
+        state["tickets"][tid] = {"to": to, "sig": sig, "at": time.time(), "status": status}
+        if to.startswith("ph_"):  # this phone has a chat for the ticket now: sync_open skips it
+            state.setdefault("synced", {}).setdefault(to, [])
+            if tid not in state["synced"][to]:
+                state["synced"][to].append(tid)
+
+    update_state(root, put)
 
 
 FINISHED = ("review", "done")
@@ -451,40 +491,46 @@ def sync(root: Path, now: float | None = None) -> list[str]:
     from orch import mobile_mode, relay
 
     now = time.time() if now is None else now
-    sent = []
-    state = load_state(root)
-    for tid, rec in list(state["tickets"].items()):
-        try:
-            ticket = tickets.load(root, tid)
-        except (Refused, ValueError, KeyError, OSError):
-            continue
-        if _tasks_sig(ticket, root) == rec.get("sig") or now - rec.get("at", 0) < DEBOUNCE:
-            continue
-        done, total = tickets.checks_done(ticket)
-        with contextlib.suppress(Refused):
-            if _just_finished(rec.get("status"), ticket):
-                relay.send_text(root, rec["to"], result_text(ticket), tid, "result")
-            else:
-                relay.send_text(root, rec["to"], f"Tasks: {done} of {total} done", tid, "note", view=True)
-            sent.append(tid)
+    on = False
     with contextlib.suppress(Refused, OSError, ValueError):
         on = mobile_mode.routes_to_phone(root)
-        state = load_state(root)  # send_text -> remember() wrote it meanwhile
+    all_ = tickets.list_all(root)
+    due: list[tuple[str, str, dict, bool]] = []  # (ticket id, to, ticket, finished just now)
+
+    def claim(state):
+        # under the lock: decide what goes out and mark it as sent first, so two pulls never send it twice
         seen = state.setdefault("status", {})
-        for t in tickets.list_all(root):
+        for tid, rec in state["tickets"].items():
+            t = next((x for x in all_ if x["id"] == tid), None)
+            if t is None:
+                continue
+            sig = _tasks_sig(t, root)
+            if sig == rec.get("sig") or now - rec.get("at", 0) < DEBOUNCE:
+                continue
+            due.append((tid, rec["to"], t, _just_finished(rec.get("status"), t)))
+            rec.update(sig=sig, at=now, status=t.get("status"))
+        for t in all_:
             tid, prev = t["id"], seen.get(t["id"])
             seen[tid] = t.get("status")
-            if (
-                tid not in state["tickets"]
-                and tid not in sent
-                and _just_finished(prev, t)
-                and (on or mobile_mode.from_phone(root, tid))
-            ):
-                with contextlib.suppress(Refused):
-                    relay.send_text(root, "phones", result_text(t), tid, "result")
-                    sent.append(tid)
-                    state = {**load_state(root), "status": seen}
-        save_state(root, {**load_state(root), "status": seen})
+            if tid in state["tickets"] or not _just_finished(prev, t):
+                continue
+            with contextlib.suppress(Refused, OSError, ValueError):
+                if on or mobile_mode.from_phone(root, tid):
+                    due.append((tid, "phones", t, True))
+
+    update_state(root, claim)
+    sent = []
+    for tid, to, t, finished in due:
+        done, total = tickets.checks_done(t)
+        try:
+            if finished:
+                relay.send_text(root, to, result_text(t), tid, "result")
+            else:
+                relay.send_text(root, to, f"Tasks: {done} of {total} done", tid, "note", view=True)
+            sent.append(tid)
+        except Refused:  # not sent: the next pull tries again
+            with contextlib.suppress(Refused):
+                update_state(root, lambda st, tid=tid: (st["tickets"].get(tid) or {}).update(sig=None))
     return sent
 
 
@@ -531,8 +577,14 @@ def sync_open(root: Path, now: float | None = None) -> list[str]:
             except Refused:
                 break  # the relay is away or refuses this phone: the next pull tries again
             have.add(t["id"])
-            done_for[ph] = sorted(have)
-            save_state(root, {**load_state(root), "synced": done_for})
+
+            def mark(st, ph=ph, tid=t["id"]):
+                got = st.setdefault("synced", {}).setdefault(ph, [])
+                if tid not in got:
+                    got.append(tid)
+                    got.sort()
+
+            update_state(root, mark)
             if t["id"] not in sent:
                 sent.append(t["id"])
     return sent

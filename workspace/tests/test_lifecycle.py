@@ -217,3 +217,40 @@ def test_an_answer_given_in_the_dashboard_resumes_the_agent(proj, run, gen, one_
     assert runs.read(proj, tid) is not None
     _wait(proj, tid)
     assert "Answered q1: Friday" in log.read_text(encoding="utf-8")
+
+
+def test_a_live_session_that_ends_with_input_waiting_stays_working(proj, run):
+    """F5 (review #287): an answer or message still waiting to go in keeps the ticket Working."""
+    import sys
+
+    tid = _new(run)
+    rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+    runs.pending_add(proj, tid, "human:t", "answer", "Answer to your question q1: Blue")
+    runs.wrap_live(proj, rec["run"], tid, "claude", [sys.executable, "-c", "pass"], None)
+    assert runs.read(proj, tid) is None and _status(proj, tid) == "active"
+    assert runs.settle_orphan(proj, tid, at=time.time() + 3600) is False  # the queued input keeps it
+
+
+def test_two_pulls_at_once_send_one_result(proj, run, monkeypatch):
+    """F6 (review #287): phone-views.json is read, changed and written under its lock; a result goes once."""
+    import threading
+
+    from orch import relay
+
+    got = []
+    monkeypatch.setattr(
+        relay, "send_text", lambda root, to, text, tid, kind, **k: got.append(kind) or time.sleep(0.2)
+    )
+    tid = _new(run)
+    monkeypatch.setattr(phone_view, "_tasks_sig", lambda t, root=None: t.get("status"))
+    phone_view.update_state(
+        proj,
+        lambda st: st["tickets"].update({tid: {"to": "phones", "sig": "open", "at": 0, "status": "open"}}),
+    )
+    tickets.set_status(proj, tid, "review", "human:t")
+    ts = [threading.Thread(target=phone_view.sync, args=(proj,)) for _ in range(4)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert got == ["result"]

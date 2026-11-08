@@ -353,21 +353,26 @@ def pass_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
     return resume_after_answer(root, tid, q, by)
 
 
-def _asked_by_agent(ticket: dict, qid: str) -> bool:
-    return any(
-        str(h.get("by", "")).startswith("agent:")
-        and re.match(rf"Asked {re.escape(qid)}\b", str(h.get("text")))
-        for h in ticket.get("history") or []
-    )
+def _asker(ticket: dict, qid: str) -> str | None:
+    """The agent name that asked qid (the exact line `orch ask` writes), else None."""
+    for h in ticket.get("history") or []:
+        who = str(h.get("by", ""))
+        if who.startswith("agent:") and re.fullmatch(rf"Asked {re.escape(qid)}, waiting", str(h.get("text"))):
+            return who.partition(":")[2]
+    return None
 
 
 def resume_after_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
     ticket = tickets.load(root, tid)
-    agent_q = q.get("kind") in (None, "plain") and _asked_by_agent(ticket, q["id"])
-    if not agent_q or ticket.get("status") in ("done", "dropped") or tickets._open_questions(ticket):
+    asker = _asker(ticket, q["id"]) if q.get("kind") in (None, "plain") else None
+    if not asker or ticket.get("status") in ("done", "dropped") or tickets._open_questions(ticket):
         return None  # tickets.answer left it Ready (not Working): nobody works on it
     try:
-        return runs.start(root, tid, by)
+        adapters.load(asker, root)
+    except Refused:
+        asker = None  # not a registry name (e.g. an add-on's agent:<name>): the folder's agent goes on
+    try:
+        return runs.start(root, tid, by, agent=asker)
     except Refused as e:  # no agent set, sessions full (queued), ...: the answer is saved either way
         with contextlib.suppress(Exception):
             tickets.log(root, tid, f"The agent could not be started again after the answer: {e}", "orch")

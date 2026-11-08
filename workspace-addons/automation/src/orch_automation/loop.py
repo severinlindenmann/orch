@@ -277,7 +277,9 @@ class Scheduler:
             if any(q.get("id") == body.get("question_id") and q.get("kind") in KINDS
                    for q in (asked or {}).get("questions") or []):
                 return None  # act_on_answers handles our own failure question
-            return tid if self.start_run(tid, f"relay answer {mid}", now, phone=True) == "started" else None
+            # only a person on the phone waits for a live session; a peer workspace or a subscriber does not
+            phone = str(m.get("from", "")).startswith("ph_")
+            return tid if self.start_run(tid, f"relay answer {mid}", now, phone=phone) == "started" else None
         if kind == "text" and str(m.get("from", "")).startswith("ph_") and isinstance(m.get("ticket"), str):
             # a follow-up text (or one in General): the relay queued it for the agent; only an idle ticket needs a run
             tid, note = m["ticket"], str(m.get("note", ""))
