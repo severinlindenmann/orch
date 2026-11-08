@@ -214,6 +214,9 @@ def _add_group(rel, common) -> None:
     x.add_argument("file")
     x.add_argument("--title")
     x.add_argument("--click", action="store_true", help="a person chose to share it (needed for pictures)")
+    x.add_argument(
+        "--unchecked-ok", action="store_true", help="with --click: share although it could not be checked"
+    )
     x = gs.add_parser("reply", parents=[common], help="member: write into a group")
     x.add_argument("host")
     x.add_argument("group")
@@ -230,6 +233,9 @@ def _add_group(rel, common) -> None:
     x.add_argument("file")
     x.add_argument("--title")
     x.add_argument("--click", action="store_true")
+    x.add_argument(
+        "--unchecked-ok", action="store_true", help="with --click: share although it could not be checked"
+    )
     x = gs.add_parser("leave", parents=[common], help="member: leave a group")
     x.add_argument("host")
     x.add_argument("group")
@@ -260,7 +266,9 @@ def run_group(args, root: Path, out) -> None:
         m = cg.ask(root, tid, ws, args.question, by)
         out(args, m, _sent_line(root, m, "Question sent to {}."))
     elif sub == "share":
-        r = cg.share_file(root, tid, Path(args.file), args.title, None, args.click, by)
+        r = cg.share_file(
+            root, tid, Path(args.file), args.title, None, args.click, by, args.click and args.unchecked_ok
+        )
         out(args, r, "Shared with the group.")
     elif sub == "reply":
         if args.dashboard:
@@ -278,7 +286,13 @@ def run_group(args, root: Path, out) -> None:
         out(args, m, "Answer sent.")
     elif sub == "send-file":
         m = cg.share_member(
-            root, relay.resolve(root, args.host), args.group, Path(args.file), args.title, args.click
+            root,
+            relay.resolve(root, args.host),
+            args.group,
+            Path(args.file),
+            args.title,
+            args.click,
+            args.click and args.unchecked_ok,
         )
         out(args, m, "Shared with the group.")
     elif sub == "leave":

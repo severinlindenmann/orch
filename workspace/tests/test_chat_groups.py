@@ -611,7 +611,7 @@ def test_info_question_and_answer_flow(proj, run, rel, host):
     assert out[0]["note"].startswith("answered q1")
     t = tickets.load(proj, host)
     q = t["questions"][0]
-    assert q["answer"] == "Household account." and q["answered_by"] == f"agent:{HOME}"  # never a person
+    assert q["answer"] == "Household account." and q["answered_by"] == "agent:Home"  # never a person
     assert sent(rel, to="phones")  # the group sees the answer
     # a second answer is kept as a note, the first one stays
     ans2 = {**ans, "id": mid("ans2"), "body": {**ans["body"], "answer": "Another account."}}
@@ -1218,7 +1218,7 @@ def test_group_answer_without_group_body_is_ignored_and_never_a_person(proj, run
     inbox(run, rel, ok)
     q = tickets.load(proj, host)["questions"][0]
     assert (
-        q["answer"] == "y" and q["answered_by"] == f"agent:{HOME}"
+        q["answer"] == "y" and q["answered_by"] == "agent:Home"
     )  # from the asked record, not the message
 
 
@@ -1937,3 +1937,46 @@ def test_ordinary_allow_answers_with_the_old_words_still_work(proj, run, rel):
             assert allows and allows[0]["body"]["mode"] == mode
         else:
             assert not allows
+
+
+def test_ticket_artifacts_are_shareable_and_a_hidden_folder_is_not_called_a_password(proj, run, rel, host):
+    run("relay", "group", "add", host, HOME)
+    adir = proj / ".orch" / "tickets" / host / "artifacts"
+    adir.mkdir(parents=True)
+    f = adir / "letter.pdf"
+    f.write_bytes(pdf_bytes())  # a clean PDF with no text to extract
+    rel.sent.clear()
+    assert run("relay", "group", "share", host, str(f), "--click")[0] == 0
+    code, _, err = run("relay", "group", "share", host, str(f))  # an agent never reads .orch: plain, no "password"
+    assert code != 0 and "password" not in err
+    # a secret-looking name or a hidden folder inside it is still refused, with the password line
+    (adir / ".ssh").mkdir()
+    (adir / ".ssh" / "a.txt").write_text("words")
+    code, _, err = run("relay", "group", "share", host, str(adir / ".ssh" / "a.txt"), "--click")
+    assert code != 0 and "password" in err
+
+
+def test_unreadable_file_is_not_called_a_password_and_needs_the_persons_ok(proj, run, rel, host):
+    import os
+
+    run("relay", "group", "add", host, HOME)
+    locked = proj / "locked.pdf"
+    locked.write_bytes(b"%PDF-1.4\n1 0 obj<</Filter/Standard/V 1>>endobj trailer<</Encrypt 1 0 R>>\n%%EOF")
+    rel.sent.clear()
+    code, _, err = run("relay", "group", "share", host, str(locked), "--click")
+    assert code != 0 and "couldn't check" in err
+    assert "looks like it holds" not in err and not sent(rel, type="file")
+    code, _, err = run("relay", "group", "share", host, str(locked))  # an agent: still refused, no flag helps
+    assert code != 0 and "couldn't check" in err
+    code, _, err = run("relay", "group", "share", host, str(locked), "--unchecked-ok")
+    assert code != 0 and "couldn't check" in err
+    assert run("relay", "group", "share", host, str(locked), "--click", "--unchecked-ok")[0] == 0
+    assert len(sent(rel, type="file")) == 1
+    # a second name for the same data can't be told apart: same plain warning, same one OK
+    os.link(proj / "locked.pdf", proj / "again.pdf")
+    code, _, err = run("relay", "group", "share", host, str(proj / "again.pdf"), "--click")
+    assert code != 0 and "couldn't check" in err and "looks like it holds" not in err
+    # a real secret is never shared, not even with the OK
+    (proj / "n.txt").write_text("password = hunter2hunter2")
+    code, _, err = run("relay", "group", "share", host, str(proj / "n.txt"), "--click", "--unchecked-ok")
+    assert code != 0 and "looks like it holds a password" in err
