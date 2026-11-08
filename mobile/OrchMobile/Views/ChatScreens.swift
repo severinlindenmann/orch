@@ -91,7 +91,16 @@ struct ConversationView: View {
         VStack(spacing: 0) {
             if model.speech.isActive { MiniPlayer() }
             OfflineBanner()
-            if let ticket { summary(ticket) }
+            if let ticket {
+                summary(ticket)
+                HStack {
+                    Text("Chat").themeFont(17, .semibold)
+                    Spacer()
+                    if let answered = ConversationRules.answeredText(in: items) {
+                        Text(answered).themeFont(13).foregroundStyle(Theme.muted)
+                    }
+                }.padding(.horizontal, 16).padding(.vertical, 12)
+            }
             messages(items)
         }
             // Keep the message area dark without letting it paint the status-bar safe area.
@@ -142,7 +151,12 @@ struct ConversationView: View {
     private func summary(_ ticket: Ticket) -> some View {
         Button { tasksShown = true } label: {
             HStack {
-                Text(ConversationRules.summaryText(done: ticket.view?.doneCount ?? 0, total: ticket.view?.totalCount ?? 0, status: TopicStatus(ticket).label))
+                if [.waitingOnYou, .review].contains(TopicStatus(ticket)) {
+                    TicketStatusChip(status: TopicStatus(ticket))
+                }
+                if !([.waitingOnYou, .review].contains(TopicStatus(ticket)) && (ticket.view?.totalCount ?? 0) == 0) {
+                    Text(ConversationRules.summaryText(done: ticket.view?.doneCount ?? 0, total: ticket.view?.totalCount ?? 0, status: TopicStatus(ticket).label))
+                }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.down")
             }.themeFont(13).foregroundStyle(Theme.muted).padding(.horizontal, 18).frame(minHeight: 44)
@@ -195,7 +209,7 @@ struct ConversationView: View {
     private func messages(_ items: [ConvItem]) -> some View {
         let language = LanguageLabel.conversationLanguage(items)
         let rows = rows(items)
-        let waiting = Dictionary(model.outbox.items.compactMap { o in ThrottleNote.text(for: o).map { (o.clientId, $0) } }, uniquingKeysWith: { a, _ in a })
+        let waiting = Dictionary(model.outbox.items.compactMap { o in QueuedNote.text(for: o).map { (o.clientId, $0) } }, uniquingKeysWith: { a, _ in a })
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 8) {
@@ -261,7 +275,7 @@ struct ConversationView: View {
             let stale = ConversationRules.isStale(index: index, in: items)
             QuestionCard(item: item, conversationId: resolved, onReply: { question in
                 reply = ReplyPreview(messageId: question.id, title: "Answering \(workspaceName)", quote: question.message.body.text)
-            }, onOpenArtifact: openArtifact, isStale: stale)
+            }, onOpenArtifact: openArtifact, isStale: stale, position: ConversationRules.openPosition(of: item.id, in: items))
         } else if item.side == .me && item.voice != nil {
             OwnVoiceBubble(item: item, conversationLanguage: language, onRetry: retry, onDiscard: discard, onReply: replyHere, waitNote: wait)
         } else if item.side == .them && item.canPlay && item.speak != nil {
@@ -303,5 +317,15 @@ struct ConversationView: View {
         if Calendar.current.isDateInToday(date) { return "Today" }
         if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
         return ConversationFormat.day.string(from: date)
+    }
+}
+
+struct TicketStatusChip: View {
+    let status: TopicStatus
+    private var color: Color { status == .waitingOnYou ? Theme.warn : status == .review ? Theme.brand : Theme.muted }
+    var body: some View {
+        Text(status.label).themeFont(13, .medium).foregroundStyle(color)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(color.opacity(0.16), in: Capsule())
     }
 }
