@@ -274,8 +274,7 @@ async function refresh() {
     connection.hidden = true;
     if (!state || next.rev !== state.rev) accept(next);
   } catch (_) {
-    connection.textContent = state ? 'Can’t refresh right now. Showing the last update; trying again shortly.' : 'Can’t load your workspace right now. Trying again shortly.';
-    connection.hidden = false;
+    connectionNotice(connection, !!state);
   } finally { fetching = false; }
 }
 function dialog(title, cls = 'dialog', lock = '') {
@@ -448,7 +447,6 @@ main.addEventListener('click', async event => {
     render(); return;
   }
   if (action === 'board-more') { if (boardMore.has('done')) boardMore.delete('done'); else boardMore.add('done'); render(); return; }
-  if (action === 'board-jump') { boardCol = control.dataset.status; render(); return; }
   if (action === 'file-preview') { previewFile(control.dataset.ticket, control.dataset.kind, control.dataset.name); return; }
   if (action === 'new') ticketForm();
   if (action === 'inline') startInline(control);
@@ -488,6 +486,7 @@ window.addEventListener('hashchange', async () => {
 });
 if (snapshot) accept(window.ORCH_SNAPSHOT || {});
 else {
+  main.replaceChildren(loadingView());
   refresh();
   let poll = setInterval(refresh, 3000), pending;
   const cadence = up => { clearInterval(poll); poll = setInterval(refresh, up ? 20000 : 3000); };
