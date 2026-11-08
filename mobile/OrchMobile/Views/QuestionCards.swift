@@ -4,6 +4,7 @@ struct QuestionCard: View {
     let item: ConvItem
     let conversationId: ConversationID
     var onReply: (Question) -> Void
+    var onWriteOwn: (Question) -> Void = { _ in }
     var onOpenArtifact: (String) -> Void
     var isStale: Bool = false
     var position: (n: Int, of: Int)? = nil
@@ -120,6 +121,13 @@ struct QuestionCard: View {
             FlowLayout(spacing: 12) {
                 ForEach(q.message.body.options, id: \.self) { option in optionButton(q, option: option) }
             }
+        }
+        if ConversationRules.showsWriteOwn(q) {
+            Button { onWriteOwn(q) } label: {
+                Text("Write your own").themeFont(15).foregroundStyle(Theme.brand)
+                    .frame(minHeight: 44)
+            }.buttonStyle(.plain).accessibilityIdentifier("question-write-own")
+                .disabled(model.pendingAnswers[q.id] != nil)
         }
     }
 
