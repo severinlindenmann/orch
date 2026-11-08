@@ -307,9 +307,23 @@ def load_groups(root: Path, orch_bin: str | None) -> dict | None:
     return {"hosted": hosted, "joined": joined}
 
 
+def is_chat_entry(e: dict) -> bool:
+    """A history line that is a real Chat message: the core's `chat_message: true` flag. Lines written before the
+    flag existed (no key at all) count only when they came from a person on the dashboard (human:) or from the
+    relay for a phone text ("agent:relay from ph_..."); `via` alone is env-controlled and never enough."""
+    if not isinstance(e, dict):
+        return False
+    if "chat_message" in e:
+        return e["chat_message"] is True
+    by, via = str(e.get("by", "")), e.get("via")
+    return (via == "dashboard" and by.startswith("human:")) or (via == "phone" and by.startswith("agent:relay from ph_"))
+
+
+
+
 def mark_chat_history(t: dict) -> None:
-    """`in_chat: true` on the history entries the core wrote as real Chat/group messages (`chat_message: true`),
-    so the Chat page shows messages only: never run, task, status or instruction rows."""
+    """`in_chat: true` on the history entries that are real Chat/group messages, so the Chat page shows messages
+    only: never run, task, status or instruction rows."""
     for e in t["history"]:
-        if isinstance(e, dict) and e.get("chat_message") is True:
+        if is_chat_entry(e):
             e["in_chat"] = True
