@@ -451,3 +451,20 @@ def test_cli_ask_sends_phone_ticket_questions_to_the_phone(on_state, run, monkey
     monkeypatch.setenv("ORCH_TICKET", phone)  # the phone ticket's agent asks on a ticket it made
     assert run("ask", other, "Which size?", "--option", "S", "--by", "agent:claude")[0] == 0
     assert [s[0] for s in sent] == [phone, other]
+
+
+def test_question_to_phone_continued_ticket_and_broken_parent(on_state, monkeypatch):
+    from orch import tickets
+
+    _connect(on_state)
+    cont = tickets.create(on_state, "Dashboard ticket the phone wrote to", "human:sev")["id"]
+    assert not mm.question_to_phone(on_state, cont)
+    tickets.apply_op(on_state, cont, lambda tk: tk.setdefault("ext", {}).update(relay={"messages": ["m_1"]}))
+    assert mm.question_to_phone(on_state, cont)
+    bad = tickets.create(on_state, "Broken parent", "human:sev")["id"]
+    for parent in (["t_x"], 7):
+        p = tickets.ticket_path(on_state, bad)
+        d = json.loads(p.read_text())
+        d["parent"] = parent
+        p.write_text(json.dumps(d))
+        assert not mm.from_phone(on_state, bad)
