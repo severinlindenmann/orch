@@ -25,7 +25,9 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import os
 import re
+import stat
 import time
 import zlib
 from pathlib import Path
@@ -93,6 +95,9 @@ FILE_TYPES = {
 ONLY_THESE = "Only PDFs, pictures and text files can be shared"
 LOOKS_LIKE_SECRET = "This file looks like it holds a password, so it was not shared"
 BUSY = "is busy, try again in a minute"
+TICKET_RE = re.compile(r"t_[a-z0-9]{6,16}")
+KEY_RE = re.compile(r"[A-Z0-9]{2,4}-[1-9][0-9]{0,8}")
+MID_RE = re.compile(r"m_[a-z0-9]{16}")
 _PERMISSION_WORDS = re.compile(
     r"(?i)\b(allow once|once|always|approve|approval|publish|sign|verdict|permission)\b"
 )
@@ -100,7 +105,6 @@ _SECRET_PATH = re.compile(
     r"(?i)(^\.env(\..*)?$|\.(pem|key|p12|pfx|p8|keystore|kdbx)$|^id_(rsa|dsa|ecdsa|ed25519)|"
     r"^\.netrc$|^\.npmrc$|^\.pypirc$|credentials?(\.|$)|secrets?(\.|$)|token|passw)"
 )
-_SECRET_DIRS = {"secrets", ".ssh", ".gnupg", ".aws", ".claude", ".codex", ".gemini", ".config"}
 
 
 # ---- pure rules (the contract's validate.py: cg_*) ------------------------------------------------------
@@ -415,17 +419,58 @@ def sniff(data: bytes, name: str = "") -> str | None:
     return "text/plain"
 
 
-def secret_path(path: Path) -> bool:
-    """True for a file that must never leave: .orch/secrets, .env*, key and token files, agent config.
-    Checked on
-    the real path (symlinks resolved) and on the path as given."""
+def secret_path(path: Path, root: Path | None = None) -> bool:
+    """True for a file that must never leave: anything in a hidden folder (agent config, keys, .orch/secrets;
+    only .orch/tickets/ is open), a `secrets` folder, .env*, key and token files. Checked on the path as
+    given and on the real path (symlinks resolved); folders count below `root` when the file is inside it."""
     for p in {Path(path), Path(path).resolve()}:
         parts = p.parts
-        if any(x in _SECRET_DIRS for x in parts[:-1]) or ".orch" in parts[:-1] and "secrets" in parts:
+        if root is not None:
+            with contextlib.suppress(ValueError):
+                parts = p.relative_to(Path(root).resolve()).parts
+        dirs = parts[:-1]
+        if any(x == "secrets" for x in dirs):
+            return True
+        hidden = [i for i, x in enumerate(dirs) if x.startswith(".") and x not in (".", "..")]
+        if hidden and not (dirs[hidden[0] : hidden[0] + 2] == (".orch", "tickets") and len(hidden) == 1):
             return True
         if _SECRET_PATH.search(p.name):
             return True
     return False
+
+
+def read_shared(path: Path, root: Path, confined: bool) -> bytes:
+    """The bytes of a file to share, read from ONE open file: the real path is checked and opened with
+    O_NOFOLLOW; the open file must be a regular file with one link only that still is what the path names (no
+    swap, no hard link to a secret). An agent's share (confined) stays in this workspace."""
+    path = Path(path)
+    real = path.resolve()
+    if secret_path(path, root):
+        raise Refused(LOOKS_LIKE_SECRET)
+    if confined:
+        try:
+            real.relative_to(Path(root).resolve())
+        except ValueError:
+            raise Refused("A file outside this workspace is only shared after a person's click.") from None
+    try:
+        fd = os.open(real, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        raise Refused(f"{path} is not a file.") from None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise Refused(f"{path} is not a file.")
+        if st.st_nlink > 1:
+            raise Refused(LOOKS_LIKE_SECRET)  # a second name for the same data: can't tell what it is
+        now = os.lstat(real)
+        if (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino):
+            raise Refused(f"{path} changed while it was read.")
+        if st.st_size > FILE_MAX:
+            raise Refused("The file is bigger than 25 MB, so it was not shared")
+        with os.fdopen(os.dup(fd), "rb") as f:
+            return f.read(FILE_MAX + 1)
+    finally:
+        os.close(fd)
 
 
 def _pdf_text(data: bytes) -> str:
@@ -484,16 +529,29 @@ def _save(root: Path, st: dict) -> None:
     net.write_json(_path(root), st, True)
 
 
+_ACTIVE: dict | None = None  # the state of the open `_state` block (so a seq can be saved before sending)
+
+
+def _persist(root: Path) -> None:
+    """Write the state now. Called after a group seq is taken and before its message is sent (G12): a crash
+    can lose a send (a gap, shown and skipped) but never reuse the number for other content."""
+    if _ACTIVE is not None:
+        _save(root, _ACTIVE)
+
+
 @contextlib.contextmanager
 def _state(root: Path):
     """Load, yield, save the group state under .orch/groups.lock (not reentrant: never nest)."""
     from orch import relay
 
+    global _ACTIVE
     with relay.locked(root, 10.0, "groups.lock"):
         st = _load(root)
+        _ACTIVE = st
         try:
             yield st
         finally:
+            _ACTIVE = None
             _save(root, st)
 
 
@@ -694,22 +752,24 @@ def _event(
     errors: list | None = None,
     **fields,
 ) -> int:
-    """A group-wide `group_event` (host only): seq +1, to every member (or `to_members`) and the phones."""
-    g["seq"] += 1
-    seq, me, at = g["seq"], g["host"], tickets.now()
+    """A group-wide `group_event` (host only): a normal fan-out with its own origin id (fan-out ids), to every
+    member (or `to_members`) and the phones."""
+    from orch import relay
+
+    me, at, oid = g["host"], tickets.now(), relay.new_id()
     ev = {"kind": kind, "at": at, "by": me, **{k: v for k, v in fields.items() if v is not None}}
-    body = {"text": text, "group": _wire(g, seq), "by": me, "via": "helper", "group_event": ev}
-    members = _active(g) if to_members is None else to_members
-    for ws in members:
-        _send(root, ws, "text", dict(body), g["ticket"], errors=errors)
-    pb = dict(body)
-    pbm = {"type": "text", "body": pb}
-    if quiet(pbm):
-        pb["update"] = {"kind": "note"}
-    if msg := _send(root, "phones", "text", pb, g["ticket"], errors=errors):
-        _remember_copy(g, msg["id"])
-    g["msgs"] += 1
-    return seq
+    _publish(
+        root,
+        g,
+        text=text,
+        origin_id=oid,
+        origin_from=me,
+        at=at,
+        extra={"group_event": ev},
+        recipients=to_members,
+        errors=errors,
+    )
+    return g["origins"][oid]["seq"]
 
 
 def _remember_copy(g: dict, mid: str) -> None:
@@ -797,6 +857,20 @@ def remove_member(root: Path, tid: str, ws: str, by: str = "human:owner", reason
         )
     _mirror_by_id(root, "grp_" + tid, by)
     return {"group": "grp_" + tid, "ws": ws, "reason": reason}
+
+
+def _is_member(root: Path, tid: str, ws: str) -> bool:
+    g = _load(root)["hosted"].get("grp_" + tid)
+    return bool(g and g["members"].get(ws) and not g["members"][ws].get("left_at"))
+
+
+def _drop_member_quietly(root: Path, tid: str, ws: str) -> None:
+    """Take a workspace out again without an event (it never got the task): the record only."""
+    with _state(root) as st:
+        g = st["hosted"].get("grp_" + tid)
+        if g and g["members"].get(ws) and ws != g["host"]:
+            g["members"][ws]["left_at"], g["members"][ws]["reason"] = tickets.now(), "removed"
+    _mirror_by_id(root, "grp_" + tid, "agent:relay")
 
 
 def _history(root: Path, tid: str, by: str, text: str) -> None:
@@ -903,6 +977,7 @@ def _publish(
     extra: dict | None = None,
     errors: list | None = None,
     members: bool = True,
+    recipients: list[str] | None = None,
 ) -> int:
     """Fan one group message out: one copy per other member and one to the phones, same type (text), fan-out
     ids, one group seq (the same seq on a retry of the same origin). Never back to the sender."""
@@ -917,6 +992,22 @@ def _publish(
         seq = g["seq"]
         g["origins"][origin_id] = {"seq": seq, "at": at}
         g["origins"] = dict(list(g["origins"].items())[-ORIGINS_KEEP:])
+        # intent record: with the seq saved first, a crash before the sends is replayed by `sync` with the
+        # origin id, seq and time, so the retry is byte-identical (the relay dedupes it)
+        g.setdefault("pending", {})[origin_id] = {
+            "text": text,
+            "origin_from": origin_from,
+            "at": at,
+            "via": via,
+            "exclude": list(exclude),
+            "update": update,
+            "to_person": to_person,
+            "task": task,
+            "extra": extra,
+            "members": members,
+            "recipients": recipients,
+        }
+        _persist(root)
     by, via, phone = _by_via(origin_from, host, via)
     text = phone_view.redact(text)[:TEXT_MAX]
     base = {
@@ -935,7 +1026,7 @@ def _publish(
     if update:
         base["update"] = update
     if members:
-        for ws in _active(g):
+        for ws in _active(g) if recipients is None else recipients:
             if ws == origin_from or ws in exclude:
                 continue
             _send(
@@ -960,7 +1051,17 @@ def _publish(
     ):
         _remember_copy(g, msg["id"])
     g["msgs"] += 1
+    g.get("pending", {}).pop(origin_id, None)
     return seq
+
+
+def replay_pending(root: Path, g: dict) -> None:
+    """Send again what was recorded before a crash (same origin id, seq and time)."""
+    for oid, spec in list(g.get("pending", {}).items()):
+        try:
+            _publish(root, g, origin_id=oid, **{**spec, "exclude": tuple(spec.get("exclude") or ())})
+        except Refused:
+            g["pending"].pop(oid, None)  # it can't be sent any more (e.g. the phone was unpaired)
 
 
 def say(
@@ -1055,40 +1156,46 @@ def delegate(
     (rule G9) with status waiting_start; the group sees a task card."""
     from orch import relay
 
-    add_member(root, tid, ws, by, need=("text", "delegate"))
-    gid = "grp_" + tid
-    mid = relay.new_id()
-    with _state(root) as st:
-        g = st["hosted"][gid]
-        if g["closed"]:
-            raise Refused("This group is closed.")
-        body: dict = {
-            "title": _line(title, 200) or "Task",
-            "text": phone_view.redact(text)[:4000],
-            "group": _wire(g),
-            "by": g["host"],
-            "via": "helper",
-        }
-        if checklist:
-            body["checklist"] = [_line(c, 200) for c in checklist[:20]]
-        if tok := relay._received_token(root, ws, "delegate", None):
-            body["allow_token"] = tok
-        g["delegates"].setdefault(ws, []).append(mid)
-        g["tasks"][mid] = {"ws": ws, "status": "waiting_start", "title": body["title"]}
-        msg = _send(root, ws, "delegate", body, tid, mid=mid)
-        task = {"delegate": mid, "ws": ws, "title": body["title"], "status": "waiting_start"}
-        _publish(
-            root,
-            g,
-            text=f"Task for {g['members'][ws]['name']}: {body['title']}"[:TEXT_MAX],
-            origin_id=relay.new_id(),
-            origin_from=g["host"],
-            at=tickets.now(),
-            task=task,
-            update={"kind": "note"},
-        )
-    _history(root, tid, by, f"Task for {ws} (group): {title}"[:2000])
-    return msg or {"id": mid, "sent": False}
+    held = _is_member(root, tid, ws)
+    try:
+        add_member(root, tid, ws, by, need=("text", "delegate"))
+        gid = "grp_" + tid
+        mid = relay.new_id()
+        with _state(root) as st:
+            g = st["hosted"][gid]
+            if g["closed"]:
+                raise Refused("This group is closed.")
+            body: dict = {
+                "title": _line(title, 200) or "Task",
+                "text": phone_view.redact(text)[:4000],
+                "group": _wire(g),
+                "by": g["host"],
+                "via": "helper",
+            }
+            if checklist:
+                body["checklist"] = [_line(c, 200) for c in checklist[:20]]
+            if tok := relay._received_token(root, ws, "delegate", None):
+                body["allow_token"] = tok
+            g["delegates"].setdefault(ws, []).append(mid)
+            g["tasks"][mid] = {"ws": ws, "status": "waiting_start", "title": body["title"]}
+            msg = _send(root, ws, "delegate", body, tid, mid=mid)
+            task = {"delegate": mid, "ws": ws, "title": body["title"], "status": "waiting_start"}
+            _publish(
+                root,
+                g,
+                text=f"Task for {g['members'][ws]['name']}: {body['title']}"[:TEXT_MAX],
+                origin_id=relay.new_id(),
+                origin_from=g["host"],
+                at=tickets.now(),
+                task=task,
+                update={"kind": "note"},
+            )
+        _history(root, tid, by, f"Task for {ws} (group): {title}"[:2000])
+        return msg or {"id": mid, "sent": False}
+    except Refused:
+        if not held:  # the task didn't go: the workspace is not left in the group
+            _drop_member_quietly(root, tid, ws)
+        raise
 
 
 # ---- host: sharing files ------------------------------------------------------------------------------
@@ -1109,18 +1216,14 @@ def share_file(
     from orch import relay
 
     path = Path(path)
-    if not path.is_file():
-        raise Refused(f"{path} is not a file.")
-    if secret_path(path):
-        raise Refused(LOOKS_LIKE_SECRET)
-    data = path.read_bytes()
+    data = read_shared(path, root, confined=not by_click)
     mime = check_file(data, path.name)
     if mime.startswith("image/") and not by_click:
         raise Refused("A person has to click to share a picture.")
     if by_click:
         tickets.require_human("Share this file with the group?", "sharing a file")
     gid = ensure_group(root, tid, by)
-    name = relay.safe_name(path.name)
+    name = relay.safe_name(phone_view.redact(path.name))[:120] or "file"
     ttl = _line(title or name, 120) or name
     blob = relay._api(root, "POST", "/v1/blobs", data, 300)[1]
     sha = hashlib.sha256(data).hexdigest()
@@ -1155,6 +1258,7 @@ def _publish_file(
     g["seq"] += 1
     seq = g["seq"]
     g["origins"][oid] = {"seq": seq, "at": at}
+    _persist(root)
     by, via, _ = _by_via(origin_from, host)
     share = {"kind": "image" if mime.startswith("image/") else "file", "title": ttl, "mime": mime}
     for ws in _active(g):
@@ -1338,15 +1442,16 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
         if rec is None:
             return _drop(st, m, "unknown delegate")
         rec["status"] = task["status"]
-        if task.get("ticket"):
-            rec["ticket"], rec["key"] = task.get("ticket"), task.get("key")
         clean_task = {"delegate": task["delegate"], "ws": frm, "status": task["status"]}
-        for k in ("ticket", "key"):
-            if isinstance(task.get(k), str):
-                clean_task[k] = task[k]
-        clean_task["title"] = _line(task.get("title") or rec.get("title") or "", 200)
-        if task.get("question_message"):
-            clean_task["question_message"] = task["question_message"]
+        for k, rx in (("ticket", TICKET_RE), ("key", KEY_RE), ("question_message", MID_RE)):
+            if k not in task:
+                continue
+            if not (isinstance(task[k], str) and rx.fullmatch(task[k])):  # member-supplied: shape-checked
+                return _drop(st, m, f"task.{k} is not valid")
+            clean_task[k] = task[k]
+        if "ticket" in clean_task:
+            rec["ticket"], rec["key"] = clean_task["ticket"], clean_task.get("key")
+        clean_task["title"] = _line(task.get("title") or rec.get("title") or "", TITLE_MAX)
         task = clean_task
         _history(root, g["ticket"], f"agent:{_line(name, 60)}", f"Task for {name}: {task['status']}")
     else:
@@ -1354,6 +1459,11 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
     update = b.get("update") if isinstance(b.get("update"), dict) else None
     if update:
         update = {k: v for k, v in update.items() if k in ("kind", "title")}
+        if update.get("kind") not in ("ack", "working", "note", "result", "failure", "stopped"):
+            update.pop("kind", None)
+        if "title" in update:
+            update["title"] = _line(update["title"], TITLE_MAX)
+        update = update if update.get("kind") else None
     _publish(
         root,
         g,
@@ -1368,8 +1478,8 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
         errors=errors,
     )
     if task and task["status"] == "waiting_approval" and task.get("question_message"):
-        if m["id"] not in g["approvals"]:
-            g["approvals"] = [*g["approvals"], m["id"]][-50:]
+        if task["delegate"] not in g["approvals"]:  # one pushed approval per delegate, whatever is repeated
+            g["approvals"] = [*g["approvals"], task["delegate"]][-50:]
             _event(
                 root,
                 st,
@@ -1421,7 +1531,7 @@ def _host_file(root: Path, st: dict, g: dict, m: dict, errors: list) -> dict:
     b, frm = m["body"], m["from"]
     if not isinstance(b.get("share"), dict):
         return _drop(st, m, "a group file needs body.share")
-    name = relay.safe_name(str(b.get("name", "file")))
+    name = relay.safe_name(phone_view.redact(str(b.get("name", "file"))))[:120] or "file"
     try:
         raw = relay._fetch_blob(root, b.get("blob_id"), b.get("size"), b.get("sha256"))
     except relay.Transient:
@@ -1442,6 +1552,8 @@ def _host_file(root: Path, st: dict, g: dict, m: dict, errors: list) -> dict:
     if g["bytes"] + len(raw) > GROUP_BYTES_MAX:
         return _drop(st, m, "the group reached its limit for shared files")
     blob = relay._api(root, "POST", "/v1/blobs", raw, 300)[1]
+    if blob.get("sha256") != hashlib.sha256(raw).hexdigest() or blob.get("size") != len(raw):
+        return _drop(st, m, "the relay stored something different from the file")
     g["bytes"] += len(raw)
     ttl = _line(b["share"].get("title") or name, 120) or name
     _publish_file(
@@ -1520,7 +1632,12 @@ def on_allow(root: Path, m: dict) -> None:
         return
     with _state(root) as st:
         for g in st["hosted"].values():
-            if rid in g["delegates"].get(m["from"], []) and m["from"] in _active(g):
+            if (
+                not g["closed"]
+                and rid in g["delegates"].get(m["from"], [])
+                and rid in g["approvals"]  # only after the approval was asked for
+                and m["from"] in _active(g)
+            ):
                 mode = "always" if m.get("body", {}).get("mode") == "permanent" else "once"
                 name = g["members"][m["from"]]["name"]
                 word = mode
@@ -1579,24 +1696,32 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
     host, gid = gw["host"], gw["id"]
     if frm != host:
         return _drop(st, m, "group message from a workspace that is not the group's host")
-    # Joined groups are keyed by (host, id) only: no id held for another host blocks a group (G7 is only
-    # about the ids this workspace hosts itself), and nobody can name a group id of one of our own tickets.
-    own = {g_id: me for g_id in st["hosted"]}
-    errs = receive_errors(m, {"known_groups": own})
-    if not errs and gid.startswith("grp_") and tickets.ticket_path(root, gid[4:]).exists():
-        errs = ["group id names one of this workspace's own tickets"]
-    if errs:
-        return _drop(st, m, errs[0])
     if me not in members_of(gw):
         return _drop(st, m, "this workspace is not in the group")
     if typ == "answer":
         return _drop(st, m, "answers go to the host, not to members")
     key = _jkey(host, gid)
     j = st["joined"].get(key)
+    # Joined groups are keyed by (host, id) only (G7): nothing held for another host, nothing about our own
+    # tickets, can block or reveal a group here.
     if j is None:
         # a group first seen is accepted from its paired host (in our directory), never from a stranger
         if _entry(root, host) is None:
             return _drop(st, m, "the group's host is not a workspace connected to this one")
+        now = _now_epoch()
+        made = [t for t in st.setdefault("created_log", {}).get(host, []) if now - t < 3600]
+        ctx = {
+            "receiver_role": "member",
+            "known_groups": [{"host": x["host"], "id": x["id"]} for x in st["joined"].values()],
+            "open_groups_of_host": sum(
+                1 for x in st["joined"].values() if x["host"] == host and not x["closed"] and not x["left"]
+            ),
+            "created_last_hour": len(made),
+        }
+        if errs := receive_errors(m, ctx):  # the caps: 20 open groups, 5 new groups an hour, per host
+            st["created_log"][host] = made
+            return _drop(st, m, errs[0])
+        st["created_log"][host] = [*made, now]  # any creation counts, explicit `created` or implicit
         j = st["joined"][key] = {
             "host": host,
             "id": gid,
@@ -1626,36 +1751,114 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
         j["from_seq"] = seq
     if seq is not None and j["from_seq"] is not None and seq < j["from_seq"]:
         return _drop(st, m, "before this workspace joined")
-    if seq is not None:  # group-wide: the stateful checks run in seq order; an early one waits (bounded)
-        nxt = j.get("next_seq") or j["from_seq"]
-        buf = j.setdefault("buf", {})
-        if seq > nxt:
-            if str(seq) in buf:
-                return _drop(st, m, "already waiting for this group message")
-            if len(buf) < BUF_MAX:
-                buf[str(seq)] = m
-                return {
-                    "handled": True,
-                    "auto": True,
-                    "note": f"group {_host_name(j)}: kept until the earlier messages arrive",
-                    "applied": None,
-                }
-            # the buffer is full: stop waiting, show the gap, go on in order from the oldest we hold
-            nxt = min([seq, *(int(k) for k in buf)])
-            if str(nxt) != str(seq):
-                buf[str(seq)] = m
-                m = buf.pop(str(nxt))
-                seq = nxt
-        res = _member_apply(st, j, m, me)
-        j["next_seq"] = max(nxt, seq) + 1 if seq >= nxt else nxt
-        while str(j["next_seq"]) in buf:
-            _member_apply(st, j, buf.pop(str(j["next_seq"])), me)
-            j["next_seq"] += 1
-        return res
-    return _member_apply(st, j, m, me)
+    if seq is None:
+        return _member_apply(st, j, m, me)
+    # group-wide: the stateful checks (closed, left, card) run in seq order (G12)
+    nxt = j.get("next_seq") or j["from_seq"]
+    buf = j.setdefault("buf", {})
+    if seq < nxt:  # late: shown, but it changes no state
+        return _member_apply(st, j, m, me, late=True)
+    if seq > nxt:
+        if str(seq) in buf:
+            return _drop(st, m, "already waiting for this group message")
+        entry = {"at": _now_epoch(), "m": _reduce(m)}
+        full = len(buf) >= BUF_MAX or len(json.dumps(buf)) + len(json.dumps(entry)) > BUF_BYTES_MAX
+        if not full:
+            buf[str(seq)] = entry
+            return {
+                "handled": True,
+                "auto": True,
+                "note": f"group {_host_name(j)}: kept until the earlier messages arrive",
+                "applied": None,
+            }
+        buf[str(seq)] = entry  # the buffer is full: stop waiting, show the gap, go on from the oldest we hold
+        return _skip_gap(st, j, me, current=m["id"])
+    res = _member_apply(st, j, m, me)
+    j["next_seq"] = seq + 1
+    _drain(st, j, me)
+    return res
 
 
-def _member_apply(st: dict, j: dict, m: dict, me: str) -> dict:
+def _drain(st: dict, j: dict, me: str) -> None:
+    buf = j.setdefault("buf", {})
+    while str(j["next_seq"]) in buf:
+        _member_apply(st, j, buf.pop(str(j["next_seq"]))["m"], me)
+        j["next_seq"] += 1
+
+
+def _skip_gap(st: dict, j: dict, me: str, current: str | None = None) -> dict:
+    """Give up waiting for the missing messages: go on from the lowest one we hold (the gap stays visible)."""
+    buf = j.setdefault("buf", {})
+    if not buf:
+        return {"handled": True, "auto": True, "note": "", "applied": None}
+    low = min(int(k) for k in buf)
+    j["next_seq"] = low
+    res = {
+        "handled": True,
+        "auto": True,
+        "note": f"group {_host_name(j)}: a message is missing",
+        "applied": None,
+    }
+    first = buf.pop(str(low))["m"]
+    r = _member_apply(st, j, first, me)
+    if first["id"] == current:
+        res = r
+    j["next_seq"] = low + 1
+    _drain(st, j, me)
+    return res
+
+
+def prune_ended(st: dict, keep_s: float = 86400) -> None:
+    """Closed or left groups are forgotten a day after they ended (nothing grows without bound)."""
+    now = _now_epoch()
+    for k in [k for k, j in st["joined"].items() if j.get("ended_at") and now - j["ended_at"] > keep_s]:
+        del st["joined"][k]
+
+
+def expire_buffers(st: dict, me: str) -> None:
+    """After 10 quiet minutes with a gap, the oldest waiting message is applied and the gap skipped."""
+    now = _now_epoch()
+    for j in st["joined"].values():
+        buf = j.get("buf") or {}
+        if (
+            buf
+            and now - min(e["at"] for e in buf.values()) >= BUF_TIMEOUT_S
+            and not (j["left"] or j["closed"])
+        ):
+            _skip_gap(st, j, me)
+
+
+_KEEP_BODY = (
+    "text",
+    "by",
+    "via",
+    "origin",
+    "group_event",
+    "task",
+    "share",
+    "blob_id",
+    "name",
+    "size",
+    "sha256",
+    "question_id",
+    "update",
+)
+
+
+def _reduce(m: dict) -> dict:
+    """What a buffered message keeps: the fields `_member_apply` reads, cleaned and cut."""
+    b = m["body"]
+    body = {k: b[k] for k in _KEEP_BODY if k in b}
+    if "text" in body:
+        body["text"] = clean_untrusted(str(body["text"]), TEXT_MAX)
+    if isinstance(body.get("update"), dict):
+        body["update"] = {k: v for k, v in body["update"].items() if k in ("kind", "title")}
+    g = b["group"]
+    body["group"] = {k: g[k] for k in ("id", "host", "title", "members", "seq") if k in g}
+    return {k: m[k] for k in ("id", "from", "to", "type", "created_at", "ticket") if k in m} | {"body": body}
+
+
+def _member_apply(st: dict, j: dict, m: dict, me: str, late: bool = False) -> dict:
     """The state changes of one group message for a member, called in seq order."""
     b, typ, gw = m["body"], m["type"], m["body"]["group"]
     ev = b.get("group_event") if isinstance(b.get("group_event"), dict) else None
@@ -1665,12 +1868,12 @@ def _member_apply(st: dict, j: dict, m: dict, me: str) -> dict:
         if o["id"] in j["origins"]:
             return _drop(st, m, "already have this group message")
         j["origins"] = [*j["origins"], o["id"]][-ORIGINS_KEEP:]
-    if seq is not None:
+    if seq is not None and not late:
         j["seq_max"] = max(j["seq_max"], seq)
-    if ev and ev.get("kind") == "closed":
-        j["closed"] = True
-    if ev and ev.get("kind") == "member_left" and ev.get("ws") == me:
-        j["left"] = True
+    if ev and ev.get("kind") == "closed" and not late:
+        j["closed"], j["ended_at"] = True, _now_epoch()
+    if ev and ev.get("kind") == "member_left" and ev.get("ws") == me and not late:
+        j["left"], j["ended_at"] = True, _now_epoch()
     if isinstance(b.get("shared_ticket"), dict):
         old = j.get("card") or {}
         card = b["shared_ticket"]
@@ -1690,6 +1893,8 @@ def _member_apply(st: dict, j: dict, m: dict, me: str) -> dict:
         "authority": False,
         "text": clean_untrusted(str(b.get("text", "")), TEXT_MAX),
     }
+    if late:
+        item["late"] = True
     if ev:
         item["event"] = {
             k: v for k, v in ev.items() if k in ("kind", "ws", "name", "from_seq", "reason", "mode")
@@ -1701,7 +1906,7 @@ def _member_apply(st: dict, j: dict, m: dict, me: str) -> dict:
     if typ == "file" and isinstance(b.get("share"), dict):
         item["file"] = {
             "blob_id": b.get("blob_id"),
-            "name": clean_untrusted(str(b.get("name", "")), 200),
+            "name": _line(b.get("name", ""), 200),
             "size": b.get("size"),
             "sha256": b.get("sha256"),
             "title": clean_untrusted(str(b["share"].get("title", "")), 120),
@@ -1862,7 +2067,8 @@ def waiting_approval(root: Path, delegate_msg: dict, allow_tid: str, qid: str) -
             "question_id": q["id"],
             "title": t["title"],
             "text": q["text"],
-            "options": ["once", "always", "no"],
+            "options": list(ALLOW_OPTIONS),
+            "allow_question": True,
             "recommended": None,
             "scope": scope[:120],
         }
@@ -1901,7 +2107,7 @@ def _status_of(root: Path, ticket: dict) -> str:
     s = ticket.get("status")
     if s in ("done", "dropped"):
         return "done" if s == "done" else "failed"
-    if s in ("ready", "review"):
+    if s == "review":  # the work is done, a person looks at it
         return "working"
     rec = runs.read(root, ticket["id"])
     return "working" if rec and runs.state(rec) == "alive" else "queued"
@@ -1918,7 +2124,11 @@ def sync(root: Path) -> None:
     with _state(root) as st:
         if not st["hosted"] and not st["joined"]:
             return
+        me = _me(root)
+        expire_buffers(st, me)
+        prune_ended(st)
         for g in list(st["hosted"].values()):
+            replay_pending(root, g)
             if g["closed"]:
                 continue
             try:
@@ -1982,7 +2192,7 @@ def leave(root: Path, host: str, gid: str) -> dict:
             "update": {"kind": "note"},
         }
         _send(root, host, "text", body, j.get("ticket"))
-        j["left"] = True
+        j["left"], j["ended_at"] = True, _now_epoch()
     return {"group": gid, "host": host, "left": True}
 
 
@@ -2036,11 +2246,7 @@ def share_member(
         raise Refused("A person has to click to share a file from this workspace.")
     tickets.require_human("Share this file with the group?", "sharing a file")
     path = Path(path)
-    if not path.is_file():
-        raise Refused(f"{path} is not a file.")
-    if secret_path(path):
-        raise Refused(LOOKS_LIKE_SECRET)
-    data = path.read_bytes()
+    data = read_shared(path, root, confined=False)  # the person's click chose it
     mime = check_file(data, path.name)
     with _state(root) as st:
         j = st["joined"].get(_jkey(host, gid))
@@ -2050,7 +2256,7 @@ def share_member(
         sha = hashlib.sha256(data).hexdigest()
         if blob.get("sha256") != sha or blob.get("size") != len(data):
             raise Refused("The relay stored something different from the file. Not sent.")
-        name = relay.safe_name(path.name)
+        name = relay.safe_name(phone_view.redact(path.name))[:120] or "file"
         ttl = _line(title or name, 120) or name
         body = {
             "blob_id": blob["blob_id"],
@@ -2067,6 +2273,19 @@ def share_member(
 
 
 # ---- lists (CLI and dashboard) ------------------------------------------------------------------------
+
+
+def connectable(root: Path, g: dict) -> list[dict]:
+    """Connected workspaces (text both ways) that are not in the group: who the host may still add."""
+    from orch import relay
+
+    held = set(_active(g, True))
+    out = []
+    for w in relay._read_dir(root).get("workspaces", []):
+        cs, af = w.get("can_send") or {}, w.get("accepts_from") or {}
+        if w.get("id") not in held and cs.get("text") and af.get("text"):
+            out.append({"ws": w["id"], "name": _line(w.get("name") or w["id"], 60)})
+    return out
 
 
 def view(root: Path) -> dict:
@@ -2095,6 +2314,7 @@ def view(root: Path) -> dict:
                     for ws, m in g["members"].items()
                 ],
                 "tasks": [{"delegate": d, **{k: v for k, v in r.items()}} for d, r in g["tasks"].items()],
+                "connectable": connectable(root, g),
             }
         )
     joined = []
@@ -2109,6 +2329,7 @@ def view(root: Path) -> dict:
                 "closed": j["closed"],
                 "left": j["left"],
                 "card": j.get("card"),
+                "seq_max": j.get("seq_max", 0),
                 "log": j["log"][-50:],
             }
         )

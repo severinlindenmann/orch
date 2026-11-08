@@ -668,12 +668,18 @@ def send_file(root: Path, target: str, path: Path, text: str | None, ticket: str
 
 
 def send_delegate(
-    root: Path, target: str, title: str, text: str, checklist: list[str], ticket: str | None
+    root: Path,
+    target: str,
+    title: str,
+    text: str,
+    checklist: list[str],
+    ticket: str | None,
+    group: bool = False,
 ) -> dict:
     to = resolve(root, target)
-    if ticket and to.startswith("ws_") and not tickets.is_general(root, ticket):
-        # a task from a ticket opens the ticket's group (chat-groups.md); a workspace that can't join gets the
-        # plain delegate as before
+    if group and ticket and to.startswith("ws_") and not tickets.is_general(root, ticket):
+        # only when asked for (--group): the ticket's group opens and its card is shared with the workspace
+        # (chat-groups.md); a workspace that can't join gets the plain delegate, and is not left a member
         from orch import chat_groups
 
         try:
@@ -801,7 +807,9 @@ def _answer_by(msg: dict, asked: dict | None = None) -> tuple[str, str]:
     # Only a phone is a person. A subscriber or another workspace is another system: always agent:, never
     # human: (a person's answer starts the agent again; a peer must not decide that by its own label).
     ok_prefix = "human:" if frm.startswith("ph_") else "agent:"
-    if not (isinstance(by, str) and by.startswith(ok_prefix)):
+    if not (isinstance(by, str) and by.startswith(ok_prefix)) or (
+        asked is not None and asked.get("group") and not frm.startswith("ph_")
+    ):  # we asked a group member: recorded by its id from the asked record, whatever the answer says
         by = f"human:{frm}" if frm.startswith("ph_") else f"agent:{frm}"
     via = "phone" if frm.startswith("ph_") else "subscriber" if frm.startswith("sub_") else "relay"
     return by, via
@@ -1437,7 +1445,7 @@ def _ensure_allow_question(root: Path, msg: dict) -> str:
     }
     text = f"{peer} wants {me or 'this workspace'} to: {task}. Allow it?"
     grouped = msg_group(msg) and msg["type"] == "delegate"
-    options = ["Allow once", "Always", "No"] if grouped else list(ALLOW_OPTIONS)
+    options = ["once", "always", "no"] if grouped else list(ALLOW_OPTIONS)  # G11 wire words
     _, q = tickets.ask(root, tid, text, options, None, by, kind="relay:allow", action=json.dumps(action))
     if grouped:  # a task from a group: the host hears "waiting for approval", our phones get the question
         from orch import chat_groups
@@ -1474,7 +1482,7 @@ def apply_allow_answers(root: Path) -> list[str]:
             )
             if q is None or r.get("allow_applied") == q["id"]:
                 continue
-            choice = _ALLOW_WORDS.get(str(q["answer"]).strip().casefold())
+            choice = _ALLOW_WORDS.get(" ".join(str(q["answer"]).split()).casefold())
             if choice is None:
                 if r.get("allow_note") != q["id"]:
                     ans = clean_untrusted(str(q["answer"]), 100)

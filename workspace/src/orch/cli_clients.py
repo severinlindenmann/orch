@@ -151,6 +151,11 @@ def add_parsers(sub, common) -> None:
     x.add_argument("title")
     x.add_argument("--text", default="")
     x.add_argument("--check", action="append", default=[], help="checklist item (repeat)")
+    x.add_argument(
+        "--group",
+        action="store_true",
+        help="open the ticket's group chat with that workspace (needs --ticket)",
+    )
     x = rel.add_parser("start", parents=[common, t], help="start a named task on another workspace")
     x.add_argument("workspace")
     x.add_argument("key")
@@ -206,6 +211,7 @@ def _add_group(rel, common) -> None:
     x.add_argument("host")
     x.add_argument("group")
     x.add_argument("text")
+    x.add_argument("--dashboard", action="store_true", help="written by the person at this dashboard")
     x = gs.add_parser("answer", parents=[common], help="member: answer a group question")
     x.add_argument("message")
     x.add_argument("text")
@@ -250,7 +256,15 @@ def run_group(args, root: Path, out) -> None:
         r = cg.share_file(root, tid, Path(args.file), args.title, None, args.click, by)
         out(args, r, "Shared with the group.")
     elif sub == "reply":
-        m = cg.say_member(root, relay.resolve(root, args.host), args.group, args.text)
+        if args.dashboard:
+            tickets.require_human("Write into the group as yourself?", "writing as the person")
+        m = cg.say_member(
+            root,
+            relay.resolve(root, args.host),
+            args.group,
+            args.text,
+            "dashboard" if args.dashboard else "helper",
+        )
         out(args, m, "Written into the group.")
     elif sub == "answer":
         m = cg.answer(root, args.message, args.text)
@@ -514,7 +528,7 @@ def run_relay(args, root: Path, out) -> None:
         r = relay.topic(root, args.message, args.title, tickets.current_actor())
         out(args, r, f"Started {r['key'] or r['ticket']} ({r['ticket']}). The phone shows it as a topic now.")
     elif sub == "delegate":
-        m = relay.send_delegate(root, args.workspace, args.title, args.text, args.check, t)
+        m = relay.send_delegate(root, args.workspace, args.title, args.text, args.check, t, args.group)
         out(args, m, _sent_line(root, m, "Task handed to {}. It starts once they allow it."))
     elif sub == "start":
         m = relay.send_start(root, args.workspace, args.key, args.text, t)

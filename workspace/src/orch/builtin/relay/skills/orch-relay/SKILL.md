@@ -77,6 +77,10 @@ or close anything.
     orch relay group share <ticket> <file> [--title "<name>"] # pdf, picture or text file, max 25 MB, no secrets
     orch relay group reply <host> <group id> "<text>"         # you were invited: write into the group
     orch relay group answer <message id> "<text>"             # you were asked an information question
+    orch relay group send-file <host> <group id> <file> --click  # the human's click shares a file with the group
+    orch relay group leave <host> <group id>
+
+The human removes a member with `orch relay group remove <ticket> <workspace>` (never run it yourself).
 
 Pictures and files from this workspace are shared only after the human's click. Members never get write access to the
 host's ticket. `orch relay group list` shows the groups.

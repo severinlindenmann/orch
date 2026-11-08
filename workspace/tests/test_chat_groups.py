@@ -150,7 +150,15 @@ def all_contract_clean(rel):
 
 def test_delegate_from_a_ticket_starts_the_group(proj, run, rel, host):
     code, out, err = run(
-        "relay", "delegate", "Home", "Find the 2025 letter", "--text", "Send the PDF", "--ticket", host
+        "relay",
+        "delegate",
+        "Home",
+        "Find the 2025 letter",
+        "--text",
+        "Send the PDF",
+        "--ticket",
+        host,
+        "--group",
     )
     assert code == 0, err
     gid = "grp_" + host
@@ -212,7 +220,7 @@ def test_at_most_eight_members(proj, run, rel, host):
 
 
 def test_fan_out_one_copy_per_member_and_phones(proj, run, rel, host):
-    run("relay", "delegate", "Home", "Find the letter", "--text", "x", "--ticket", host)
+    run("relay", "delegate", "Home", "Find the letter", "--text", "x", "--ticket", host, "--group")
     run("relay", "group", "add", host, BANK)
     gid = "grp_" + host
     rel.sent.clear()
@@ -236,7 +244,7 @@ def test_fan_out_one_copy_per_member_and_phones(proj, run, rel, host):
 
 
 def test_talk_text_is_cleaned_and_secrets_are_hidden(proj, run, rel, host):
-    run("relay", "delegate", "Home", "T", "--text", "x", "--ticket", host)
+    run("relay", "delegate", "Home", "T", "--text", "x", "--ticket", host, "--group")
     run("relay", "group", "add", host, BANK)
     rel.sent.clear()
     inbox(
@@ -280,7 +288,7 @@ def test_dashboard_text_is_by_you(proj, run, rel, host):
 
 @pytest.fixture
 def grp(proj, run, rel, host):
-    run("relay", "delegate", "Home", "Find the letter", "--text", "x", "--ticket", host)
+    run("relay", "delegate", "Home", "Find the letter", "--text", "x", "--ticket", host, "--group")
     run("relay", "group", "add", host, BANK)
     d = sent(rel, type="delegate")[0]["id"]
     rel.sent.clear()
@@ -891,7 +899,7 @@ def test_member_delegate_needs_the_persons_allow_then_reports(proj, run, rel, me
         t for t in tickets.list_all(proj) if t["questions"] and t["questions"][0].get("kind") == "relay:allow"
     )
     q = allow_t["questions"][0]
-    assert q["options"] == ["Allow once", "Always", "No"]
+    assert q["options"] == ["once", "always", "no"]
     # the host hears waiting_approval + the question's message id; the phones get the allow question
     wa = [m for m in sent(rel, to=FIN) if m["body"].get("task")][0]
     qp = sent(rel, to="phones", type="question")[0]
@@ -925,7 +933,7 @@ def test_member_delegate_needs_the_persons_allow_then_reports(proj, run, rel, me
     rel.sent.clear()
     run("relay", "inbox")
     reports = [m["body"]["task"]["status"] for m in sent(rel, to=FIN) if m["body"].get("task")]
-    assert reports == ["queued"]
+    assert reports == ["queued"]  # a Ready ticket waits for its agent
     task_ticket = next(t for t in tickets.list_all(proj) if t["ext"]["relay"].get("group_task"))
     # the task finishes: done once, never twice; the report carries our own ticket
     tickets.set_status(proj, task_ticket["id"], "done", "human:test")
@@ -1038,12 +1046,14 @@ def test_a_joined_group_never_blocks_our_own_group_or_names_our_ticket(proj, run
     inbox(run, rel, squat)
     st = json.loads((proj / ".orch/secrets/groups.json").read_text())
     assert list(st["joined"]) == [f"{STRANGER}/grp_t_squat1"]
-    # a group id that is grp_ + one of our own tickets is refused outright
+    # a group id equal to one of our own tickets is just another group, keyed by (host, id): no drop
     own = from_host(
         "text", {"text": "I host your ticket"}, gid="grp_" + t["id"], seq=1, id=mid("sq2"), i="own"
     )
     own["ticket"] = t["id"]
-    assert "own tickets" in inbox(run, rel, own)[0]["note"]
+    inbox(run, rel, own)
+    st = json.loads((proj / ".orch/secrets/groups.json").read_text())
+    assert f"{FIN}/grp_{t['id']}" in st["joined"]
     # and our group for that ticket is made as always
     rel.snapshot["workspaces"]["workspaces"].append(entry(HOME, "Home", "house", "amber"))
     run("relay", "refresh")
@@ -1057,7 +1067,10 @@ def test_delegate_falls_back_to_plain_when_the_group_cannot_open(proj, run, rel,
         raise cg.Refused("nope")
 
     monkeypatch.setattr(cg, "delegate", boom)
-    assert run("relay", "delegate", "Home", "Plain after all", "--text", "x", "--ticket", host)[0] == 0
+    assert (
+        run("relay", "delegate", "Home", "Plain after all", "--text", "x", "--ticket", host, "--group")[0]
+        == 0
+    )
     d = sent(rel, type="delegate")[0]
     assert "group" not in d["body"]
 
@@ -1217,3 +1230,257 @@ def test_out_of_order_buffer_is_bounded_and_the_gap_is_given_up(proj, run, rel, 
     assert len(j["buf"]) <= cg.BUF_MAX
     seqs = [x["seq"] for x in j["log"]]
     assert seqs == sorted(seqs) and seqs[0] == 1 and 3 in seqs and 2 not in seqs
+
+
+def test_seq_is_saved_before_anything_is_sent_and_a_crash_is_replayed(proj, run, rel, grp, monkeypatch):
+    host, gid, d = grp
+    path = proj / ".orch/secrets/groups.json"
+    real_send = cg._send
+    seen_on_disk = []
+
+    def spy(*a, **k):
+        g = json.loads(path.read_text())["hosted"][gid]
+        seen_on_disk.append((g["seq"], list(g.get("pending", {}))))
+        raise SystemExit("killed")  # the process dies at the first send
+
+    monkeypatch.setattr(cg, "_send", spy)
+    before = json.loads(path.read_text())["hosted"][gid]["seq"]
+    with pytest.raises(SystemExit):
+        cg.say(proj, host, "Will it survive?")
+    assert seen_on_disk[0][0] == before + 1 and len(seen_on_disk[0][1]) == 1  # saved first, with an intent
+    monkeypatch.setattr(cg, "_send", real_send)
+    rel.sent.clear()
+    run("relay", "inbox")  # sync replays the intent: same seq, same ids, nothing lost
+    copies = [m for m in gout(rel) if m["body"]["text"] == "Will it survive?"]
+    assert {m["to"] for m in copies} == {HOME, BANK, "phones"}
+    assert {m["body"]["group"]["seq"] for m in copies} == {before + 1}
+    assert json.loads(path.read_text())["hosted"][gid]["pending"] == {}
+    run("relay", "inbox")
+    assert len([m for m in gout(rel) if m["body"]["text"] == "Will it survive?"]) == 3  # replayed once
+
+
+def test_group_events_carry_an_origin_and_fanout_ids(proj, run, rel, host):
+    run("relay", "group", "add", host, HOME)
+    evs = [m for m in rel.sent if m["body"].get("group_event")]
+    assert evs
+    for m in evs:
+        o = m["body"]["origin"]
+        assert o["from"] == WS and m["id"] == cg.fanout_id(WS, o["id"], m["to"])
+        assert contract_errors(m) == []
+
+
+def _new_group_msg(i, seq=1):
+    gid = f"grp_t_cap{i:04d}"
+    m = from_host("text", {"text": f"hello {i}"}, gid=gid, seq=seq, id=mid(f"cap{i}"), i=f"cap{i}")
+    m["ticket"] = gid[4:]
+    return m
+
+
+def test_member_caps_open_groups_and_creations_per_host(proj, run, rel, member, monkeypatch):
+    clock = [10_000.0]
+    monkeypatch.setattr(cg, "_now_epoch", lambda: clock[0])
+    for i in range(cg.MAX_OPEN_GROUPS_PER_HOST):
+        inbox(run, rel, _new_group_msg(i))
+        clock[0] += 3601  # slow enough for the hourly cap
+    over = inbox(run, rel, _new_group_msg(99))
+    assert "20 open groups" in over[0]["note"]
+    st = json.loads((proj / ".orch/secrets/groups.json").read_text())
+    assert len(st["joined"]) == cg.MAX_OPEN_GROUPS_PER_HOST and f"{FIN}/grp_t_cap0099" not in st["joined"]
+
+
+def test_member_caps_new_groups_an_hour(proj, run, rel, member, monkeypatch):
+    monkeypatch.setattr(cg, "_now_epoch", lambda: 50_000.0)
+    for i in range(cg.CREATED_PER_HOUR):
+        inbox(run, rel, _new_group_msg(i))
+    assert "5 new groups an hour" in inbox(run, rel, _new_group_msg(50))[0]["note"]
+    # a message into a group we already hold is no creation
+    inbox(run, rel, _new_group_msg(0, seq=2))
+    assert len(json.loads((proj / ".orch/secrets/groups.json").read_text())["joined"]) == cg.CREATED_PER_HOUR
+
+
+def test_ended_groups_are_pruned_and_the_buffer_keeps_little(proj, run, rel, member, monkeypatch):
+    clock = [1_000.0]
+    monkeypatch.setattr(cg, "_now_epoch", lambda: clock[0])
+    inbox(run, rel, _added(1))
+    big = from_host(
+        "text",
+        {"text": "x" * 3000, "evil": "y" * 5000},
+        seq=3,
+        id=mid("bigbuf"),
+    )
+    inbox(run, rel, big)
+    entry = _joined(proj)["buf"]["3"]["m"]
+    assert "evil" not in entry["body"] and len(json.dumps(entry)) < 4500
+    closed = from_host(
+        "text",
+        {"text": "done", "group_event": {"kind": "closed", "at": "2026-11-08T10:00:00Z"}},
+        seq=2,
+        id=mid("clz"),
+    )
+    inbox(run, rel, closed)
+    assert _joined(proj)["closed"] is True
+    clock[0] += 86400 + 10
+    run("relay", "inbox")
+    assert json.loads((proj / ".orch/secrets/groups.json").read_text())["joined"] == {}
+
+
+def test_a_gap_is_skipped_after_ten_minutes_and_late_messages_change_no_state(
+    proj, run, rel, member, monkeypatch
+):
+    clock = [1_000.0]
+    monkeypatch.setattr(cg, "_now_epoch", lambda: clock[0])
+    inbox(run, rel, _added(1))
+    inbox(run, rel, from_host("text", {"text": "three"}, seq=3, id=mid("g3")))
+    run("relay", "inbox")
+    assert [x["seq"] for x in _joined(proj)["log"]] == [1]  # still waiting for seq 2
+    clock[0] += cg.BUF_TIMEOUT_S + 1
+    run("relay", "inbox")  # sync: the oldest waiting message is applied, the gap is skipped
+    j = _joined(proj)
+    assert [x["seq"] for x in j["log"]] == [1, 3] and j["buf"] == {} and j["next_seq"] == 4
+    late_close = from_host(
+        "text",
+        {"text": "closed", "group_event": {"kind": "closed", "at": "2026-11-08T10:00:00Z"}},
+        seq=2,
+        id=mid("lc2"),
+    )
+    inbox(run, rel, late_close)
+    j = _joined(proj)
+    assert j["closed"] is False and j["log"][-1]["late"] is True and j["seq_max"] == 3
+
+
+@pytest.mark.parametrize(
+    "word,mode",
+    [("once", "once"), ("Allow  ONCE ", "once"), ("always", "permanent"), (" Always", "permanent")],
+)
+def test_allow_answers_wire_and_old_wording_map_to_the_allow_message(proj, run, rel, member, word, mode):
+    d = from_host("delegate", {"title": "Do it", "text": "x"}, id=mid("dlg" + word))
+    inbox(run, rel, d)
+    t = next(t for t in tickets.list_all(proj) if t["questions"])
+    rel.sent.clear()
+    assert run("answer", t["id"], "q1", word, "--via", "cli")[0] == 0
+    run("relay", "inbox")
+    allow = sent(rel, to=FIN, type="allow")[0]
+    assert allow["body"]["mode"] == mode and allow["reply_to"] == d["id"]
+
+
+def test_allow_answer_no_and_ignore_deny_the_task(proj, run, rel, member):
+    d = from_host("delegate", {"title": "Do it", "text": "x"}, id=mid("dlgno"))
+    inbox(run, rel, d)
+    t = next(t for t in tickets.list_all(proj) if t["questions"])
+    rel.sent.clear()
+    run("answer", t["id"], "q1", "Ignore", "--via", "cli")
+    run("relay", "inbox")
+    assert not sent(rel, type="allow")
+    assert cg.parse_allow_answer("Ignore") == "no" and cg.parse_allow_answer("maybe") is None
+    assert (
+        cg.card_kind({"allow_question": True, "options": ["Allow once", "Always", "No"]}) == "answer_in_bank"
+    )
+
+
+def test_agent_shares_stay_in_the_workspace_and_hard_links_are_refused(
+    proj, run, rel, host, tmp_path_factory
+):
+    import os
+
+    run("relay", "group", "add", host, HOME)
+    outside = tmp_path_factory.mktemp("elsewhere") / "far.txt"
+    outside.write_text("just words")
+    code, _, err = run("relay", "group", "share", host, str(outside))
+    assert code != 0 and "outside this workspace" in err
+    assert run("relay", "group", "share", host, str(outside), "--click")[0] == 0  # a person chose it
+    secret = proj / ".orch" / "secrets"
+    secret.mkdir(parents=True, exist_ok=True)
+    (secret / "token.txt").write_text("harmless words")
+    os.link(secret / "token.txt", proj / "notes.txt")  # a second name for a secret file
+    code, _, err = run("relay", "group", "share", host, str(proj / "notes.txt"))
+    assert code != 0 and "password" in err
+    (proj / "ok.txt").write_text("fine words")
+    assert run("relay", "group", "share", host, str(proj / "ok.txt"))[0] == 0
+    # a hidden folder in the workspace is never shared, a ticket's own files are open
+    hid = proj / ".agentcfg"
+    hid.mkdir()
+    (hid / "x.txt").write_text("words")
+    assert run("relay", "group", "share", host, str(hid / "x.txt"))[0] != 0
+    tdir = proj / ".orch" / "tickets" / host
+    tdir.mkdir(parents=True)
+    (tdir / "proof.txt").write_text("proof words")
+    assert run("relay", "group", "share", host, str(tdir / "proof.txt"))[0] == 0
+
+
+def test_a_ticket_delegate_is_plain_unless_the_group_is_asked_for(proj, run, rel, host):
+    assert run("relay", "delegate", "Home", "Just a task", "--text", "x", "--ticket", host)[0] == 0
+    d = sent(rel, type="delegate")[0]
+    assert "group" not in d["body"] and not (proj / ".orch/secrets/groups.json").exists()
+    assert not [m for m in rel.sent if "shared_ticket" in m["body"]]  # the ticket card is not shared either
+
+
+def test_a_failed_group_delegate_leaves_nobody_in_the_group(proj, run, rel, host, monkeypatch):
+    def boom(*a, **k):
+        raise cg.Refused("group is broken")
+
+    run("relay", "group", "say", host, "start")  # the group exists
+    monkeypatch.setattr(cg, "_publish", boom)  # fails after the member was added
+    code, _, err = run("relay", "delegate", "Home", "Task", "--text", "x", "--ticket", host, "--group")
+    assert code == 0, err
+    assert "group" not in sent(rel, type="delegate")[-1]["body"]  # the plain delegate went
+    st = json.loads((proj / ".orch/secrets/groups.json").read_text())
+    assert st["hosted"]["grp_" + host]["members"][HOME]["left_at"]  # rolled back
+
+
+def test_one_pushed_approval_per_delegate_and_member_fields_are_shape_checked(proj, run, rel, grp):
+    host, gid, d = grp
+    qm = mid("homeq2")
+    for i in range(3):
+        inbox(
+            run,
+            rel,
+            task_msg(
+                HOME, gid, host, d, "waiting_approval", "ack", task={"question_message": qm}, id=mid(f"wa{i}")
+            ),
+        )
+    needs = [m for m in rel.sent if m["body"].get("group_event", {}).get("kind") == "approval_needed"]
+    assert {m["to"] for m in needs} == {HOME, BANK, "phones"} and len(needs) == 3  # one event, three copies
+    rel.sent.clear()
+    for bad in ({"ticket": "x" * 500}, {"key": "evil\nkey"}, {"question_message": "not-an-id"}):
+        odd = task_msg(HOME, gid, host, d, "working", "working", task=bad, id=mid("odd" + str(bad)[:8]))
+        assert "is not valid" in inbox(run, rel, odd)[0]["note"]
+    assert not gout(rel)  # nothing forwarded
+    long_title = task_msg(
+        HOME, gid, host, d, "working", "working", task={"title": "T" * 900}, id=mid("odd-t")
+    )
+    inbox(run, rel, long_title)
+    t = sent(rel, to="phones")[0]["body"]["task"]
+    assert len(t["title"]) <= 120 and contract_errors(sent(rel, to=BANK)[0]) == []
+
+
+def test_approval_needs_a_valid_question_message_and_approved_needs_it_open(proj, run, rel, grp):
+    host, gid, d = grp
+    inbox(
+        run,
+        rel,
+        task_msg(
+            HOME, gid, host, d, "waiting_approval", "ack", task={"question_message": "junk"}, id=mid("wajunk")
+        ),
+    )
+    assert not [m for m in rel.sent if m["body"].get("group_event", {}).get("kind") == "approval_needed"]
+    allow = {
+        "schema": "orch.msg/1",
+        "id": mid("alw9"),
+        "from": HOME,
+        "to": WS,
+        "type": "allow",
+        "created_at": "2026-11-08T10:04:00Z",
+        "reply_to": d,
+        "body": {"mode": "once", "kind": "delegate", "token": "ora_" + "x" * 22},
+    }
+    inbox(run, rel, allow)  # no approval was asked for: no "approved"
+    assert not [m for m in rel.sent if m["body"].get("group_event", {}).get("kind") == "approved"]
+
+
+def test_file_names_are_redacted(proj, run, rel, host):
+    run("relay", "group", "add", host, HOME)
+    f = proj / ("ghp_" + "a" * 30 + ".txt")
+    f.write_text("fine words")
+    assert run("relay", "group", "share", host, str(f))[0] == 0
+    fm = sent(rel, to=HOME, type="file")[0]
+    assert "ghp_" not in fm["body"]["name"]
