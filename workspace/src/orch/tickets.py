@@ -1141,6 +1141,34 @@ def ext_unset(
     return apply_op(root, tid, op, if_revision=if_revision)[0]
 
 
+_SECRET_FOLDER_RE = re.compile(r"\.orch[/\\]+secrets", re.I)
+_SECRET_WORD = (
+    r"(?:passwords?|passcodes?|passphrases?|api[\s_-]?keys?|(?:access|auth|bearer|secret|login|api)[\s_-]?tokens?"
+    r"|private[\s_-]?keys?|credentials?|login details)"
+)
+_SECRET_ASK_RE = re.compile(
+    r"\b(?:give|send|paste|provide|enter|type|share|tell|upload|supply|attach|what(?:'s| is)|need|your|the)\b"
+    r"[^.?!\n]{0,40}?\b" + _SECRET_WORD + r"\b",
+    re.I,
+)
+
+
+def _strings(value) -> list[str]:
+    """Every text inside an add-on action (labels the person may see)."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [x for v in value.values() for x in _strings(v)]
+    if isinstance(value, list):
+        return [x for v in value for x in _strings(v)]
+    return []
+
+
+def _asks_for_secret(text: str) -> bool:
+    """Light guard for `orch ask`: the secrets folder, or asking a person to hand over a credential."""
+    return bool(_SECRET_FOLDER_RE.search(text) or _SECRET_ASK_RE.search(text))
+
+
 def ask(
     root: Path,
     tid: str,
@@ -1166,6 +1194,15 @@ def ask(
             act = None
         if not isinstance(act, dict):
             raise Refused("--action must be a JSON object.")
+
+    for part in (text, *options, *([recommended] if recommended else []), *_strings(act)):
+        if _asks_for_secret(part):
+            raise Refused(
+                "A question must never ask for a password, token, API key or other credential, "
+                "and never mention the secrets folder. Ask whether access is set up instead "
+                "(for example: Is access to the service set up for this workspace?), "
+                "and say in the ticket summary what is missing."
+            )
 
     def op(ticket):
         for old in ticket["questions"]:  # the same open question is not asked twice

@@ -237,3 +237,50 @@ def test_history_says_where_a_change_came_from(proj, run, monkeypatch):
     assert t["history"][0]["via"] == "cli"
     monkeypatch.setenv("ORCH_VIA", "dashboard")
     assert "ORCH_VIA" not in runs._agent_environ()  # an agent started from the page writes as itself
+
+
+@pytest.mark.parametrize(
+    "text, options",
+    [
+        (
+            "Where do I get the weekly data?",
+            ["Give me the real CRM export URL (and credentials in .orch/secrets/ if needed)"],
+        ),
+        ("Please paste your API key", []),
+        ("What is the admin password?", ["Skip"]),
+        ("Send me the access token for the CRM", []),
+        ("Is the key in .ORCH\\Secrets\\x?", []),
+    ],
+)
+def test_ask_refuses_secrets(proj, run, new_ticket, text, options):
+    tid = new_ticket()
+    args = ["ask", tid, text] + [a for o in options for a in ("--option", o)]
+    code, _, err = run(*args)
+    assert code == 2
+    assert "never ask for a password" in err
+    assert not read(proj, tid)["questions"]
+
+
+def test_ask_allows_plain_access_question(proj, run, new_ticket):
+    tid = new_ticket()
+    code, _, _ = run(
+        "ask",
+        tid,
+        "Is access to the CRM set up for this workspace?",
+        "--option",
+        "Yes",
+        "--option",
+        "I will set it up myself",
+    )
+    assert code == 0
+
+
+def test_ask_refuses_secret_in_recommended_and_action(proj, run, new_ticket):
+    tid = new_ticket()
+    code, _, err = run("ask", tid, "Which way?", "--recommend", "Paste your API key from .orch/secrets")
+    assert code == 2 and "never ask for a password" in err
+    code, _, err = run(
+        "ask", tid, "Retry?", "--kind", "scheduler:failure", "--action", '{"label": "Send me the password"}'
+    )
+    assert code == 2 and "never ask for a password" in err
+    assert not read(proj, tid)["questions"]
