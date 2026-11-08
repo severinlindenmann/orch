@@ -757,6 +757,13 @@ def _send_card(root: Path, g: dict, ws: str, force: bool = False) -> dict | None
 # ---- host: talk, questions, tasks -------------------------------------------------------------------------
 
 
+def paired_phone(root: Path, ph: str) -> bool:
+    """A phone paired to THIS workspace (in its own directory): only those may be named in origin.from."""
+    from orch import relay
+
+    return any(p.get("id") == ph for p in relay._read_dir(root).get("phones", []))
+
+
 def _by_via(origin_from: str, host: str, phone_ws_via: str = "helper") -> tuple[str, str, str | None]:
     if origin_from.startswith("ph_"):
         return "you", "phone", origin_from
@@ -785,6 +792,8 @@ def _publish(
     """Fan one group message out: one copy per other member and one to the phones, same type (text), fan-out
     ids, one group seq (the same seq on a retry of the same origin). Never back to the sender."""
     host = g["host"]
+    if origin_from.startswith("ph_") and not paired_phone(root, origin_from):
+        raise Refused("That phone is not paired to this workspace.")
     prev = g["origins"].get(origin_id)
     if prev:
         seq, at = prev["seq"], prev["at"]
@@ -1418,6 +1427,8 @@ def phone_text(root: Path, tid: str, msg: dict) -> bool:
     Returns True when it was fanned out. Anything else stays a host-only note."""
     if not (isinstance(msg.get("reply_to"), str) and str(msg.get("from", "")).startswith("ph_")):
         return False
+    if not paired_phone(root, msg["from"]):
+        return False  # origin.from (ph_) is only ever a phone paired to this workspace
     with _state(root) as st:
         g = st["hosted"].get("grp_" + tid)
         if g is None or g["closed"]:

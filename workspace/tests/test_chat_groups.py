@@ -555,6 +555,22 @@ def test_phone_text_joins_only_as_a_reply_to_a_group_copy(proj, run, rel, grp):
     assert not [m for m in rel.sent if m["body"].get("origin")]
 
 
+def test_unpaired_phone_never_joins_or_appears_as_origin(proj, run, rel, grp):
+    host, gid, d = grp
+    run("relay", "group", "say", host, "Hello group")
+    copy = sent(rel, to="phones")[-1]["id"]
+    rel.sent.clear()
+    stranger = phone_text("Hi from a phone nobody paired", reply_to=copy, ticket=host, i=9)
+    stranger["from"] = "ph_unpaired001"
+    inbox(run, rel, stranger)
+    assert not [m for m in rel.sent if m["body"].get("origin")]
+    with pytest.raises(cg.Refused):
+        g = json.loads((proj / ".orch/secrets/groups.json").read_text())["hosted"][gid]
+        cg._publish(
+            proj, g, text="x", origin_id=mid("up"), origin_from="ph_unpaired001", at="2026-11-08T10:00:00Z"
+        )
+
+
 # ---- 6. questions and answers -----------------------------------------------------------------------------
 
 
