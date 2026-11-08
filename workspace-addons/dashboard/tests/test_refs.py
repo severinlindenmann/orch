@@ -11,6 +11,7 @@ import pytest
 from orch_dashboard import actions, data
 
 from .test_act import acts, calls, post
+from . import webjs
 
 ADDONS = [
     {
@@ -187,7 +188,7 @@ def test_links_get_one_view_from_the_core_module():
 
 
 def test_page_renders_links_with_text_only_and_safe_hrefs():
-    src = (data.Path(data.__file__).parent / "web" / "app.js").read_text()
+    src = webjs.all_js()
     for fn in (
         "function linkRow",
         "function linksCard",
@@ -254,7 +255,7 @@ def test_link_type_is_an_allowlist_and_the_domain_is_the_registrable_part():
     assert data.host_parts("https://www.github.com/a") == ("", "github.com")
     assert data.host_parts("https://shop.example.co.uk/") == ("shop.", "example.co.uk")
     assert data.host_parts("http://10.0.0.5:8080/") == ("", "10.0.0.5")
-    src = (data.Path(data.__file__).parent / "web" / "app.js").read_text()
+    src = webjs.all_js()
     css = (data.Path(data.__file__).parent / "web" / "style.css").read_text()
     assert (
         "if (bh !== linkHost(v)) return" in src
@@ -273,7 +274,7 @@ def test_a_host_the_browser_reads_differently_is_shown_as_a_plain_link():
         pytest.skip("node is not installed")
     url = "https://github.com\\@evil.example/"
     head, dom = data.host_parts(url)
-    src = (data.Path(data.__file__).parent / "web" / "app.js").read_text()
+    src = webjs.all_js()
     lines = [
         ln for ln in src.splitlines() if ln.strip().startswith(("const browserHost =", "const linkHost ="))
     ]

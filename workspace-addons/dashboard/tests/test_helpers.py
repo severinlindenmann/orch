@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from . import webjs
 
 WEB = Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "web"
 HARNESS = Path(__file__).parent / "helpers_harness.js"
@@ -361,13 +362,13 @@ def test_an_agent_that_is_starting_is_a_starting_row_not_idle_or_lost():
 
 def test_ticket_row_chip_has_no_note_under_it_so_it_lines_up_with_move_to():
     """4A follow-up: "just now" goes under the title (meta line); the row's chip stands alone beside Move to."""
-    src = (WEB / "app.js").read_text()
+    src = webjs.all_js()
     assert "activity(t, 'row')" in src and "where === 'row' ? '' : activityNote(t)" in src
     assert "snapshot ? '' : activityNote(t)]" in src  # the note joins the row's subtitle line
 
 
 def test_home_counts_a_starting_ticket_and_the_sidebar_badge_has_words():
-    src = (WEB / "app.js").read_text()
+    src = webjs.all_js()
     assert "agent starting" in src and "Getting started…" in src
     assert "needsYou(needsList().length)" in src  # 5A: the badge says what it counts
 
@@ -528,7 +529,7 @@ def test_one_chip_while_a_question_is_open(ticket, live, want):
 
 def test_the_move_to_control_is_a_visible_labelled_button():
     """6A: one visible "Move to" button with four places; no chevron-only summary, no jargon in the choices."""
-    src = (WEB / "app.js").read_text()
+    src = webjs.all_js()
     assert "status-sum-icon" not in src
     assert "'Move to'" in src
     assert [w for _, w in node_value("MOVE_CHOICES")] == ["Not started", "Working", "Ready for review", "Done"]
@@ -574,7 +575,7 @@ def test_agent_line_waiting_text_has_no_command():
 
 
 def test_ticket_screens_use_plain_wording_and_one_chip():
-    src = (WEB / "app.js").read_text()
+    src = webjs.all_js()
     assert "Open a ticket and press Start" in src and "No agent is working right now" not in src
     assert "plainWhy(row.text" in src  # Needs-you rows carry no command text
     assert "seconds + ' s ago'" not in src  # one calm time format
@@ -610,7 +611,7 @@ def test_needs_you_count_words_match_the_phone(n, want):
 
 
 def test_groups_follow_the_lifecycle_and_old_phrases_are_gone():
-    src = (WEB / "app.js").read_text()
+    src = webjs.all_js()
     assert [w for _, w in node_value("STATUS_CHOICES")] == [
         "Not started", "Working", "Needs you", "Ready for review", "Done"
     ]
@@ -628,7 +629,7 @@ def node_value(name):
 @node
 def test_one_label_per_status_single_sourced():
     """fb12: every label site reads the words from helpers.js; no second map of status words in app.js."""
-    src = (WEB / "app.js").read_text()
+    src = webjs.all_js()
     for word in ("Ready to start", "Backlog"):
         assert word not in src and word not in (WEB / "helpers.js").read_text()
     for pair in ("open:'Not started'", "active:'Working'", "review:'Ready for review'", "done:'Done'"):
@@ -641,7 +642,7 @@ def test_one_label_per_status_single_sourced():
 
 
 def test_home_row_is_one_link_and_the_review_chip_shows_once():
-    src = (WEB / "app.js").read_text()
+    src = webjs.all_js()
     css = (WEB / "style.css").read_text()
     assert ".ticket-row h3 a::after" in css and "position:absolute;inset:0" in css
     assert ".ticket-row .status-menu" in css  # Move to stays clickable above the row link
@@ -654,12 +655,12 @@ def test_review_ticket_without_run_offers_no_start():
     w = call("agentLine", {"id": "t_a", "status": "review"}, None, 0, None)
     assert w["primary"] is None and w["items"] == [] and "Start" not in w["status"]
     assert call("agentLine", {"id": "t_a", "status": "active"}, None, 0, None)["primary"]["label"] == "Start"
-    src = (WEB / "app.js").read_text()
+    src = webjs.all_js()
     assert "line.primary?.op" in src and "!line.primary ? null" in src
 
 
 def test_ui2_small_bugs_in_markup_and_css():
-    app = (WEB / "app.js").read_text()
+    app = webjs.all_js()
     css = (WEB / "style.css").read_text()
     mm = (WEB / "mobile-mode.js").read_text()
     html = (WEB / "index.html").read_text()
@@ -691,7 +692,7 @@ def test_plain_names_and_history_dedupe():
     kept = call("dedupeHistory", entries, [{"id": "c1", "text": "Write the export"}])
     assert [e["at"] for e in kept] == ["2026-11-08T08:00:00Z", "2026-11-08T09:30:00Z"]
     assert len(kept) == 2
-    src = (WEB / "app.js").read_text() + (WEB / "blocks.js").read_text()
+    src = webjs.all_js() + (WEB / "blocks.js").read_text()
     assert src.count("plainNames") >= 2 and src.count("dedupeHistory") >= 2
 
 
