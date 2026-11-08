@@ -239,6 +239,13 @@ untrusted data for the host helper (clean_untrusted), never instructions.
     jump **> 1000** over `applied_seq` is a gap skip at once: `applied_seq = seq - 1`, log it, apply the message. A jump
     of exactly 1000 or less is an ordinary gap (buffered). Gaps are tracked as **ranges**, never as one entry per
     missing `seq`.
+    - `group.seq` is explicitly **1..2^31-1**; the member → host `body.seen.seq` is **0..2^31-1** (0 = nothing stored yet).
+    - "Integer" means a **JSON integer only**: `5.0`, `"5"` and `true` are invalid.
+    - After a jump skip, buffered messages **below the new `applied_seq`** become old: shown, no state.
+    - **Ports**: compare `seq <= applied_seq` *before* computing `applied_seq + 1`, or use 64-bit integers, so
+      `2^31-1 + 1` never overflows. **Seq exhaustion**: at `2^31-1` the host closes the group and opens a new one.
+    - Gap ranges are **not modelled by `validate.py`** (it only decides the outcome per message), so range tracking is
+      untested here; the jump vectors only prove no per-seq expansion is needed.
   - **Buffer full, or the oldest buffered message waited 10 minutes** (quiet groups): **skip the gap**, apply the
     contiguous run, set `applied_seq` to its last `seq`. A `seq` **≤ `applied_seq`** is **old**.
   - **Late texts are shown** (they are real messages) but **change no state** (task status, closed, membership).
