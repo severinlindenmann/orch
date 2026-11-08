@@ -447,8 +447,9 @@ def _without_agent(environ) -> dict:
         from orch.adapters import human_environ
 
         return human_environ(environ)
-    except Exception:  # noqa: BLE001 - an old orch or a bad adapter file
-        raise Unavailable("orch could not check who is acting here. Update orch and try again.") from None
+    except Exception as e:  # noqa: BLE001 - an old orch or a bad adapter file
+        why = " ".join(str(e).split())[:200] or e.__class__.__name__
+        raise Unavailable(f"orch could not check who is acting here ({why}). Fix that and try again.") from None
 
 
 def human_env(root: Path, orch_bin: str) -> dict:

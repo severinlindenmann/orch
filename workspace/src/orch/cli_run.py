@@ -354,17 +354,24 @@ def dispatch(args, root: Path) -> bool:
         p = {k: v for k, v in p.items() if k not in ("stdin", "item_ids")}
         _out(args, p, "\n".join(p["argv"]))
     elif sub == "start":
-        r = runs.start(
-            root,
-            tid,
-            by,
-            fresh=args.fresh,
-            take_over=args.take_over,
-            allow=args.allow,
-            mode=args.mode,
-            text=args.text,
-            agent=args.agent,
-        )
+        try:
+            r = runs.start(
+                root,
+                tid,
+                by,
+                fresh=args.fresh,
+                take_over=args.take_over,
+                allow=args.allow,
+                mode=args.mode,
+                text=args.text,
+                agent=args.agent,
+            )
+        except BaseException:
+            if os.environ.get("ORCH_VIA") == "restart":  # orch's own restart after a live session: it did not
+                with contextlib.suppress(Exception):  # come, so the ticket is not left Working with nobody
+                    runs.clear_restarted(root, tid)
+                    runs.settle(root, tid, "orch", ignore_input=True)
+            raise
         for note in r["notes"]:
             print(note, file=sys.stderr)
         how = "Continued the earlier conversation" if r["resumed"] else "Started fresh from the ticket"

@@ -554,7 +554,7 @@ def running(root: Path, tid: str) -> bool:
     return bool(rec) and state(rec) != "dead"
 
 
-def settle(root: Path, tid: str, by: str, say: bool = True) -> bool:
+def settle(root: Path, tid: str, by: str, say: bool = True, ignore_input: bool = False) -> bool:
     """A run ended (or never came): a ticket still Working is Ready again, so every surface that shows the
     ticket status (dashboard, Focus, phone) says what is true. Never touches a ticket a run holds now."""
     if tickets.is_general(root, tid):
@@ -563,7 +563,9 @@ def settle(root: Path, tid: str, by: str, say: bool = True) -> bool:
     def busy() -> bool:
         # a run holds it, or a person's answer or message still waits to go in: that work is not over, the
         # ticket stays Working (the next start delivers it; a one-step run already ran once more for it)
-        return running(root, tid) or any(i.get("via") != "start" for i in undelivered(root, tid))
+        if running(root, tid):
+            return True
+        return not ignore_input and any(i.get("via") != "start" for i in undelivered(root, tid))
 
     with contextlib.suppress(Refused, OSError, ValueError):
         return tickets.agent_stopped(root, tid, by, busy, say)
@@ -575,6 +577,11 @@ def restart_for_input(root: Path, tid: str, name: str, by: str) -> bool:
     (same resume path as Continue), so it does not sit there with nobody to read it. Once per waiting item:
     an agent that ends again at once is not started over and over. The start runs as its own process (this
     may be the ending session's own pane, which a new live start replaces)."""
+    try:  # everything that can fail comes before any item is marked
+        argv = procs.orch_python_argv("run", "start", tid, "--agent", name, "--by", by)
+        env = {**adapters.human_environ(os.environ), "ORCH_VIA": "restart"}  # not the ended run's own call
+    except Exception:  # noqa: BLE001 - e.g. a broken adapter file: no restart, the ticket is settled
+        return False
     with locked(root, tid):
         if read(root, tid):
             return False  # a run holds it already
@@ -590,17 +597,24 @@ def restart_for_input(root: Path, tid: str, name: str, by: str) -> bool:
             if i["id"] in ids:
                 i["restarted"] = tickets.now()
         _pending_write(root, tid, all_)
-    argv = procs.orch_python_argv("run", "start", tid, "--agent", name, "--by", by)
-    env = {**adapters.human_environ(os.environ), "ORCH_VIA": "restart"}  # not the ended run's own call
-    if _spawn_detached(root, argv, env):
-        return True
-    with locked(root, tid):  # it did not start: the items may start the agent another time
+    try:
+        if _spawn_detached(root, argv, env):
+            return True
+    except Exception:  # noqa: BLE001 - the marks must never stay behind
+        pass
+    clear_restarted(root, tid, ids)
+    return False
+
+
+def clear_restarted(root: Path, tid: str, ids: set[str] | None = None) -> None:
+    """A restart did not come (could not be spawned, or the start was refused): its items may start the agent
+    another time. ids None = every waiting item."""
+    with locked(root, tid):
         all_ = _pending_read(root, tid)
         for i in all_:
-            if i["id"] in ids:
+            if (ids is None and not i.get("delivered_at")) or (ids is not None and i["id"] in ids):
                 i.pop("restarted", None)
         _pending_write(root, tid, all_)
-    return False
 
 
 def _spawn_detached(root: Path, argv: list[str], env: dict) -> bool:
@@ -1145,8 +1159,9 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
     release(root, tid, run)  # input still waiting stays in the pending file for the next start
     # it ended by itself (not our Stop): an answer or message still waiting starts the next run
     restarting = said is not None and restart_for_input(root, tid, name, rec.get("by") or f"agent:{name}")
-    if not restarting:  # the next run is on its way: no Working -> Ready -> Working flicker
-        settle(root, tid, f"agent:{name}", say=said is None)  # the end line above already says it
+    if not restarting:  # (else the next run is on its way: no Working -> Ready -> Working flicker)
+        # no agent will read what waits now: Ready (it stays queued for the next start), never Working
+        settle(root, tid, f"agent:{name}", say=said is None, ignore_input=True)
     (run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
     with contextlib.suppress(Exception):
         from orch import runs_live

@@ -219,8 +219,10 @@ def test_an_answer_given_in_the_dashboard_resumes_the_agent(proj, run, gen, one_
     assert "Answered q1: Friday" in log.read_text(encoding="utf-8")
 
 
-def test_a_live_session_that_ends_with_input_waiting_stays_working(proj, run, monkeypatch):
-    """F5 (review #287): an answer or message still waiting to go in keeps the ticket Working."""
+def test_a_live_session_that_ends_with_input_and_no_restart_is_ready_with_the_input_kept(
+    proj, run, monkeypatch
+):
+    """F5 (delta-3): no next run can come: Ready (never Working with nobody), the input stays queued."""
     import sys
 
     monkeypatch.setattr(runs, "restart_for_input", lambda *a: False)
@@ -228,8 +230,8 @@ def test_a_live_session_that_ends_with_input_waiting_stays_working(proj, run, mo
     rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
     runs.pending_add(proj, tid, "human:t", "answer", "Answer to your question q1: Blue")
     runs.wrap_live(proj, rec["run"], tid, "claude", [sys.executable, "-c", "pass"], None)
-    assert runs.read(proj, tid) is None and _status(proj, tid) == "active"
-    assert runs.settle_orphan(proj, tid, at=time.time() + 3600) is False  # the queued input keeps it
+    assert runs.read(proj, tid) is None and _status(proj, tid) == "ready"
+    assert [i["text"] for i in runs.undelivered(proj, tid)] == ["Answer to your question q1: Blue"]
 
 
 def test_two_pulls_at_once_send_one_result(proj, run, monkeypatch):
@@ -305,16 +307,19 @@ def test_a_live_session_that_ends_with_input_waiting_starts_the_next_run_once(pr
     started = []
     monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: started.append(argv) or True)
     tid = _new(run)
+    states = []
     for _ in range(2):  # the second time the same item waits: an agent that quits at once is not restarted
         rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
         if not runs.undelivered(proj, tid):
             runs.pending_add(proj, tid, "human:t", "answer", "Answer to your question q1: Blue")
         runs.wrap_live(proj, rec["run"], tid, "claude", [sys.executable, "-c", "pass"], None)
+        states.append(_status(proj, tid))
     assert (
         len(started) == 1
         and started[0][-6:] == ["run", "start", tid, "--agent", "claude", "--by", "human:t"][-6:]
     )
-    assert _status(proj, tid) == "active"  # Working: the next run is on its way
+    # Working while the next run is on its way; Ready once no further run will come (input still queued)
+    assert states == ["active", "ready"] and runs.undelivered(proj, tid)
 
 
 def test_a_stopped_live_session_does_not_start_again(proj, run, monkeypatch):
@@ -348,7 +353,41 @@ def test_a_failed_restart_can_be_tried_again(proj, run, monkeypatch):
     tid = _new(run)
     _ended_live(proj, tid)
     assert len(tries) == 1 and not any(i.get("restarted") for i in runs.undelivered(proj, tid))
-    assert _status(proj, tid) == "active"  # still waiting to be read: Working, not Ready
+    assert _status(proj, tid) == "ready"  # nobody will read it now: Ready, the input stays queued
+
+
+def test_a_broken_adapter_list_leaves_the_ticket_settled_and_no_marks(proj, run, monkeypatch):
+    """Delta-3 (1): an error while preparing the restart never escapes and never leaves marks behind."""
+    from orch import adapters
+
+    monkeypatch.setattr(adapters, "human_environ", lambda environ: (_ for _ in ()).throw(RuntimeError("bad")))
+    tid = _new(run)
+    _ended_live(proj, tid)
+    assert _status(proj, tid) == "ready" and runs.read(proj, tid) is None
+    assert not any(i.get("restarted") for i in runs.undelivered(proj, tid))
+
+
+def test_a_spawn_that_raises_clears_the_marks(proj, run, monkeypatch):
+    monkeypatch.setattr(runs, "_spawn_detached", lambda root, argv, env: (_ for _ in ()).throw(OSError("x")))
+    tid = _new(run)
+    _ended_live(proj, tid)
+    assert _status(proj, tid) == "ready"
+    assert not any(i.get("restarted") for i in runs.undelivered(proj, tid))
+
+
+def test_a_refused_restart_start_settles_the_ticket(proj, run, monkeypatch):
+    """Delta-3 (2): `orch run start` with ORCH_VIA=restart that is refused leaves no Working ticket."""
+    tid = _new(run)
+    tickets.set_status(proj, tid, "active", "human:t")
+    runs.pending_add(proj, tid, "human:t", "answer", "Answer to your question q1: Blue")
+    items = runs._pending_read(proj, tid)
+    items[0]["restarted"] = tickets.now()
+    runs._pending_write(proj, tid, items)
+    monkeypatch.setenv("ORCH_VIA", "restart")
+    code, _, err = run("run", "start", tid, "--agent", "nosuchagent")
+    assert code != 0
+    assert _status(proj, tid) == "ready"
+    assert not any(i.get("restarted") for i in runs.undelivered(proj, tid))
 
 
 def test_a_new_message_restarts_even_after_an_earlier_one_did(proj, run, monkeypatch):
@@ -441,3 +480,22 @@ def test_an_undo_never_leaves_a_status_of_none(proj, run, monkeypatch):
     monkeypatch.setattr(relay, "send_text", lambda *a, **k: (_ for _ in ()).throw(Refused("away")))
     phone_view.sync(proj)
     assert "status" not in phone_view.load_state(proj)["tickets"][tid]
+
+
+def test_an_undo_in_the_status_branch_only_undoes_its_own_claim(proj, run, monkeypatch):
+    """Delta-3 (4): a later pass that claimed the same status keeps its claim when an older send fails."""
+    from orch import mobile_mode, relay
+
+    monkeypatch.setattr(mobile_mode, "routes_to_phone", lambda root: True)
+    tid = _new(run)
+    phone_view.sync(proj)  # first look
+    tickets.set_status(proj, tid, "review", "human:t")
+
+    def later_claim_then_fail(root, to, text, t, kind, **k):
+        phone_view.update_state(root, lambda st: st.setdefault("claims", {}).update({t: "someone-else"}))
+        raise Refused("The relay could not be reached.")
+
+    monkeypatch.setattr(relay, "send_text", later_claim_then_fail)
+    phone_view.sync(proj)
+    st = phone_view.load_state(proj)
+    assert st["status"][tid] == "review" and st["claims"][tid] == "someone-else"

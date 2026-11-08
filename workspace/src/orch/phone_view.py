@@ -221,9 +221,15 @@ def _state_locked(root: Path, wait: float = 10.0):
     try:
         yield
     finally:
+        # only our own lock goes, never one a later holder made: take it aside first (atomic), then check
+        mine = lock.with_name(f"{lock.name}.{token.decode()}.rel")
         with contextlib.suppress(OSError):
-            if lock.read_bytes() == token:  # only our own lock: never one a later holder made
-                lock.unlink()
+            os.replace(lock, mine)
+            if mine.read_bytes() != token:
+                with contextlib.suppress(OSError):
+                    os.link(mine, lock)  # someone else's: put it back (fails if a newer one is there)
+        with contextlib.suppress(OSError):
+            mine.unlink()
 
 
 def update_state(root: Path, fn) -> dict:
@@ -538,6 +544,7 @@ def sync(root: Path, now: float | None = None) -> list[str]:
                 continue
             due.append((tid, rec["to"], t, _just_finished(rec.get("status"), t), rec.get("status"), sig))
             rec.update(sig=sig, at=now, status=t.get("status"))
+        nonce = f"{os.getpid()}-{time.monotonic_ns()}"  # which pass claimed it (the undo checks it)
         for t in all_:
             tid, prev = t["id"], seen.get(t["id"])
             seen[tid] = t.get("status")
@@ -546,6 +553,10 @@ def sync(root: Path, now: float | None = None) -> list[str]:
             with contextlib.suppress(Refused, OSError, ValueError):
                 if on or mobile_mode.from_phone(root, tid):
                     due.append((tid, "phones", t, True, prev, None))
+                    state.setdefault("claims", {})[tid] = nonce
+        claims[0] = nonce
+
+    claims = [None]
 
     update_state(root, claim)
     sent = []
@@ -558,9 +569,8 @@ def sync(root: Path, now: float | None = None) -> list[str]:
                 relay.send_text(root, to, f"Tasks: {done} of {total} done", tid, "note", view=True)
             sent.append(tid)
         except Refused:  # not sent: undo the claim (also the status, so a result is pushed again next pull)
-            now_status = t.get("status")
 
-            def undo(st, tid=tid, before=before, claimed=claimed, now_status=now_status):
+            def undo(st, tid=tid, before=before, claimed=claimed):
                 # compare and set: only our own claim is undone, never a newer one another pull made meanwhile
                 rec = st["tickets"].get(tid)
                 if claimed is not None:
@@ -571,7 +581,8 @@ def sync(root: Path, now: float | None = None) -> list[str]:
                         rec.pop("status", None)
                     else:
                         rec["status"] = before
-                elif rec is None and st.get("status", {}).get(tid) == now_status:
+                elif rec is None and st.get("claims", {}).get(tid) == claims[0]:  # ours, not a later claim
+                    st["claims"].pop(tid, None)
                     if before is None:
                         st["status"].pop(tid, None)
                     else:
