@@ -1,7 +1,8 @@
 """Check every contract example (tickets incl. ext.automation, run records, pending input, Needs you rows,
 agent adapters and their config entries, messages, workspaces, add-on manifests and views), the publish
 crypto vectors, the workspace look (look.json, look/icons, vectors/look-v1.json), and the phone API v3 (every /v1/phone example in review/relay-api.examples.json against
-phone-api.schema.json, plus vectors/phone-v3-v1.json). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
+phone-api.schema.json, plus vectors/phone-v3-v1.json), and Chat + group chat (vectors/chat-groups/*.json against message.schema.json,
+chat-groups.schema.json and the host rules in cg_rules). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py
 """
@@ -619,6 +620,183 @@ for case in lvec["connect"]:
         fails.append(f"look vector connect {case['name']}: got {look_connect(case['local'], case['remote'])}")
 if not {200, 422}.issubset({c["status"] for c in lvec["me_patch"]}) or 409 not in {c["status"] for c in lvec["admin_patch"]}:
     fails.append("look vectors: need 200 and 422 me_patch cases and a 409 admin_patch case")
+
+# Chat and group chat across workspaces (chat-groups.md): every vectors/chat-groups/*.json is one orch.msg/1 message
+# (+ optional `context`: what the receiver already holds, and `expect`) that must pass message.schema.json,
+# chat-groups.schema.json, the message rules (cg_rules) and the receiver rules (cg_receive); valid-* pass, invalid-* fail.
+_msg_schema = _expand(json.loads((HERE / "message.schema.json").read_text()))
+_cg_schema = _expand(json.loads((HERE / "chat-groups.schema.json").read_text()))
+V_CG = Draft202012Validator(
+    _cg_schema,
+    registry=Registry().with_resource(_msg_schema["$id"], Resource.from_contents(_msg_schema)),
+    format_checker=FormatChecker(),
+)
+CG_HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind")
+CG_MEMBER_ONLY = ("seen", "leave")
+CG_FILE_MAX = 26214400
+# task.status order: a status may repeat or move right, never left; the last column is final.
+CG_TASK_RANK = {"waiting_start": 0, "waiting_approval": 1, "queued": 2, "working": 3, "done": 4, "failed": 4, "denied": 4}
+CG_RATE = {"msgs_per_min": 20, "files_per_min": 3}
+
+
+def cg_fanout_id(host, origin_id, to):
+    """Id of the host's copy of a group message for one recipient: retries give the same id (relay: 200 no-op)."""
+    return "m_" + hashlib.sha256(f"{host}\n{origin_id}\n{to}".encode()).hexdigest()[:16]
+
+
+def cg_members(g):
+    return [x.get("ws") for x in g.get("members", []) if isinstance(x, dict)]
+
+
+def cg_targeted(m):
+    """A host message for one member only (not a copy of a group-wide message): it carries no group.seq."""
+    b = m.get("body") or {}
+    return m.get("type") in ("delegate", "question") or "shared_ticket" in b
+
+
+def cg_quiet(m):
+    """Copies to phones are pushed only for: questions, approval_needed, member_added for no one (quiet), task done /
+    failed, closed, and texts addressed to the person (body.to_person). Everything else is quiet (update.kind note)."""
+    b = m.get("body") or {}
+    ev = (b.get("group_event") or {}).get("kind")
+    st = (b.get("task") or {}).get("status")
+    return not (m.get("type") == "question" or ev in ("approval_needed", "closed") or st in ("done", "failed") or b.get("to_person") is True)
+
+
+def cg_rules(m):
+    """Message rules JSON Schema cannot express (chat-groups.md, Security G1-G8). Returns plain messages."""
+    b, out = m.get("body") or {}, []
+    g = b.get("group")
+    if not isinstance(g, dict):
+        return out
+    host, frm, to = g.get("host"), m.get("from"), m.get("to")
+    if len(set(cg_members(g))) != len(cg_members(g)):
+        out.append("group.members: each ws once")
+    if host not in cg_members(g):
+        out.append("group.members must include the host")
+    if frm == host:
+        if g.get("id") != "grp_" + str(m.get("ticket")):
+            out.append("host message: group.id must be grp_ + the message's ticket (the host ticket)")
+        if cg_targeted(m) and "seq" in g:
+            out.append("a targeted host message (delegate, question, shared_ticket) carries no group.seq")
+        if not cg_targeted(m) and "seq" not in g:
+            out.append("a group-wide host message needs group.seq")
+        if m.get("type") == "question" and b.get("question_kind") != "info":
+            out.append("a host question to a member must be question_kind info")
+        o = b.get("origin")
+        if b.get("by") == "you":
+            if b.get("via") == "phone" and not (isinstance(o, dict) and o.get("from") == b.get("phone")):
+                out.append("by you via phone: origin.from must be that phone")
+            if b.get("via") == "dashboard" and isinstance(o, dict) and o.get("from") != "dashboard":
+                out.append("by you via dashboard: origin.from must be dashboard")
+        if isinstance(b.get("task"), dict) and b["task"].get("ws") == host:
+            out.append("task.ws is the member that got the task, never the host")
+        if isinstance(o, dict) and (str(to).startswith("ws_") or to == "phones") and m.get("id") != cg_fanout_id(host, o["id"], to):
+            out.append("host copy: id must be the fan-out id of (host, origin.id, to)")
+        if to == "phones" and m.get("type") == "text" and cg_quiet(m) and (b.get("update") or {}).get("kind") != "note":
+            out.append("copy to phones outside the push set must be quiet (update.kind note)")
+        if str(to).startswith("ws_"):
+            if to not in cg_members(g):
+                out.append("host sends group messages only to members")
+            if "ticket_view" in b or "shared_files" in b:
+                out.append("ticket_view and shared_files never go to workspaces")
+        for k in CG_MEMBER_ONLY:
+            if k in b:
+                out.append(f"body.{k} is for members only")
+        if "shared_files" in b:
+            have = {x.get("blob_id") for x in (b.get("ticket_view") or {}).get("attachments", [])}
+            if not set(b["shared_files"]) <= have:
+                out.append("shared_files must be blob ids of body.ticket_view.attachments")
+        st = b.get("shared_ticket")
+        if isinstance(st, dict):
+            if st.get("ticket") != m.get("ticket"):
+                out.append("shared_ticket must describe the host ticket")
+            if len(json.dumps(st, separators=(",", ":"), ensure_ascii=False).encode()) > 4096:
+                out.append("shared_ticket is over 4096 bytes")
+    elif str(frm).startswith("ws_"):
+        if to != host:
+            out.append("members send group messages only to the host (only the host fans out)")
+        if frm not in cg_members(g):
+            out.append("sender is not a member")
+        if b.get("by") != frm:
+            out.append("a member's message is by the member itself (never by 'you')")
+        if "seq" in g:
+            out.append("only the host sets group.seq")
+        for k in CG_HOST_ONLY + ("ticket_view",):
+            if k in b:
+                out.append(f"body.{k} is sent only by the host")
+        if isinstance(b.get("task"), dict):
+            if b["task"].get("ws") != frm:
+                out.append("task.ws must be the sending member")
+            if b["task"].get("status") == "waiting_start":
+                out.append("only the host says waiting_start")
+    else:
+        out.append("only workspaces send body.group (phones write to the host ticket; the relay builds phone texts)")
+    if m.get("type") == "allow":
+        out.append("allow messages carry no body.group (the host matches them by reply_to)")
+    if m.get("type") == "file" and "share" in b and int(b.get("size", 0)) > CG_FILE_MAX:
+        out.append("a shared file is at most 25 MB")
+    return out
+
+
+def cg_receive(m, ctx):
+    """What the receiver checks against what it already holds (context). Returns plain messages (= drop + log)."""
+    b, out = m.get("body") or {}, []
+    g = b.get("group") if isinstance(b.get("group"), dict) else None
+    if g:
+        known = (ctx.get("known_groups") or {}).get(g.get("id"))
+        if known is not None and known != g.get("host"):
+            out.append("group key is (host, id): this id belongs to another host")
+    hs = ctx.get("host_state")
+    if g and hs is not None and m.get("from") != g.get("host"):
+        frm = m.get("from")
+        if frm not in hs.get("members", []):
+            out.append("dropped: not a current member (left, removed or never added)")
+        if hs.get("closed"):
+            out.append("dropped: the group is closed")
+        rate = hs.get("last_minute", {}).get(frm, {})
+        if rate.get("msgs", 0) >= CG_RATE["msgs_per_min"] or (m.get("type") == "file" and rate.get("files", 0) >= CG_RATE["files_per_min"]):
+            out.append("dropped: member over its rate limit")
+        t = b.get("task")
+        if isinstance(t, dict):
+            if t.get("delegate") not in hs.get("delegates_sent", {}).get(frm, []):
+                out.append("task.delegate is not a delegate the host sent to this member")
+            old = hs.get("task_status", {}).get(t.get("delegate"))
+            if old is not None:
+                ro, rn = CG_TASK_RANK[old], CG_TASK_RANK.get(t.get("status"), -1)
+                if rn < ro or (ro == 4 and t.get("status") != old):
+                    out.append(f"task status may not go from {old} to {t.get('status')}")
+    return out
+
+
+def cg_phone_group(m, ctx):
+    """True when a phone text joins the group: it goes to the host ticket and reply_to names a group copy the host
+    sent to phones (the group composer always sets it). Otherwise it is a host-only note (rule G8)."""
+    hs = ctx.get("host_state") or {}
+    return (
+        str(m.get("from")).startswith("ph_")
+        and m.get("type") == "text"
+        and m.get("ticket") == hs.get("ticket")
+        and m.get("reply_to") in hs.get("group_copies", [])
+    )
+
+
+cg_dir = HERE / "vectors" / "chat-groups"
+cg_files = sorted(cg_dir.glob("*.json"))
+for f in cg_files:
+    case = json.loads(f.read_text())
+    m, ctx = case["message"], case.get("context") or {}
+    errs = [e.message for e in V["message"].iter_errors(m)] + [e.message for e in V_CG.iter_errors(m)]
+    errs += cg_rules(m) + cg_receive(m, ctx)
+    exp = case.get("expect") or {}
+    if "group_text" in exp and cg_phone_group(m, ctx) != exp["group_text"]:
+        errs.append(f"phone text group_text expected {exp['group_text']}")
+    want = f.name.startswith("valid-")
+    if bool(errs) == want:
+        fails.append(f"vectors/chat-groups/{f.name}: expected {'valid' if want else 'invalid'}, got {errs[0] if errs else 'valid'}")
+for prefix in ("valid-", "invalid-"):
+    if not any(f.name.startswith(prefix) for f in cg_files):
+        fails.append(f"vectors/chat-groups: needs at least one {prefix}* vector")
 
 if fails:
     print("\n".join("FAIL " + f for f in fails))
