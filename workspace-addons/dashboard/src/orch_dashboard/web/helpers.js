@@ -236,7 +236,7 @@
     return (ev && (cleanOutcome(ev.summary) || cleanOutcome(ev.text) || (ev.type === 'note' ? cleanOutcome(ev.ref) : ''))) || (task.done ? 'Completed.' : task.state === 'doing' ? 'Working on this task.' : 'Not started yet.');
   }
 
-  /* The cause of a failed agent start in plain words ("the claude program was not found"), from waiting_on.ref. */
+  /* The cause of a failed agent start in plain words ("the agent program was not found"), from waiting_on.ref. */
   function plainStartReason(ref) {
     let s = String(ref || '').replace(/^The agent could not be started:\s*/i, '').trim();
     const missing = /No such file or directory:?\s*'([^']+)'/i.exec(s) || /\[Errno 2\][^']*'([^']+)'/.exec(s);

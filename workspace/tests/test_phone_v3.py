@@ -865,7 +865,7 @@ def test_a_phone_text_into_a_ticket_is_a_persons_input_with_its_phone_id(proj, r
 
 
 def test_phone_free_text_answer_to_a_question_with_options_is_applied(proj, run, new_ticket, conn):
-    """"Write your own": an answer that is not one of the options is stored as written (cleaned), not refused,
+    """ "Write your own": an answer that is not one of the options is stored as written (cleaned), not refused,
     and the ticket goes on like after an option (no agent runs: Ready)."""
     tid = new_ticket()
     run("ask", tid, "DATE or TIMESTAMP?", "--option", "DATE", "--option", "TIMESTAMP", "--phone")
