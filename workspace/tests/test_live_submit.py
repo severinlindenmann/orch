@@ -1,5 +1,6 @@
-"""Input pasted into a live session is submitted: bracketed paste, then Enter as its own key; the pane's wrapper
-checks it went in (Enter again), and a session that never takes it is ended with the input kept for a one-step run.
+"""Input pasted into a live session is submitted: bracketed paste, then Enter as its own key; the pane's
+wrapper checks it went in (Enter again), and a session that never takes it is ended with the input kept for a
+one-step run.
 
 P1.7 (8 Nov): a resumed session got the paste but not the Enter; the text sat unsent in the prompt box."""
 
@@ -253,7 +254,9 @@ def test_input_a_live_session_did_not_take_starts_a_one_step_run(proj, run, monk
         raise Stop
 
     monkeypatch.setattr(runs_live, "available", lambda a: True)
-    monkeypatch.setattr(runs_live, "start_live", lambda *a, **k: modes.append("live") or (_ for _ in ()).throw(Stop))
+    monkeypatch.setattr(
+        runs_live, "start_live", lambda *a, **k: modes.append("live") or (_ for _ in ()).throw(Stop)
+    )
     monkeypatch.setattr(runs, "claim", claim)
     config.set_key(proj, "workspace", "agent", "claude")
     with pytest.raises(Stop):
