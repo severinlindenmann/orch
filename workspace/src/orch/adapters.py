@@ -354,6 +354,26 @@ def session_mode(name: str, root: Path | None = None) -> str:
     return load(name, root)["session"]["id"]
 
 
+def transcript_exists(
+    name: str, sid: str, root: Path, environ: Mapping[str, str] | None = None
+) -> bool | None:
+    """Has the tool saved the conversation of session `sid` for this folder (adapter session.transcript)?
+    None = cannot tell (nothing declared, or the tool has no folder for this workspace at all, e.g. a path it
+    names differently): orch then trusts the recorded id. False = the folder is there but not this session:
+    resuming it would only fail with "no conversation found"."""
+    t = (load(name, root).get("session") or {}).get("transcript")
+    if not t or not SESSION_RE.match(sid or ""):
+        return None
+    env = os.environ if environ is None else environ
+    base = Path(env.get(t.get("dir_env") or "", "") or Path(env.get("HOME") or Path.home()) / t["home"])
+    folder = re.sub(r"[^A-Za-z0-9]", "-", str(root.resolve()))
+    parts = [folder if k == "{folder}" else k.replace("{session}", sid) for k in t["path"]]
+    f = base.joinpath(*parts)
+    if not f.parent.is_dir():
+        return None
+    return f.is_file()
+
+
 def session_missing(name: str, output: str, root: Path | None = None) -> bool:
     """True when the output says the resumed session does not exist (the only case for starting fresh)."""
     pat = load(name, root)["session"].get("missing")
