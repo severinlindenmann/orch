@@ -637,3 +637,18 @@ def test_full_and_light_views_fall_back_to_the_note(proj, run, new_ticket, conn)
     assert phone_view.light_view(proj, t)["summary"] == full["summary"]
     _bump(proj, tid, summary="Indoor plan ready")
     assert phone_view.build(proj, tickets.load(proj, tid), [])["summary"] == "Indoor plan ready"
+
+
+def test_phone_paired_later_gets_light_updates_for_dashboard_tickets(proj, run, new_ticket, conn):
+    """The supervisor's case: the old phone stays paired, a new phone is paired later; a dashboard ticket's
+    status changes reach BOTH phones, never only the first one."""
+    tid = new_ticket("Plan the spring fair")
+    phone_view.sync_open(proj)  # listed on the first phone
+    new = "ph_newphone002"
+    _second_phone(proj, conn, new)
+    assert tid in phone_view.sync_open(proj), "the new phone pulls its list: the ticket is listed there too"
+    st = phone_view.load_state(proj)
+    assert tid in st["synced"][PHONE] and tid in st["synced"][new]
+    _bump(proj, tid, status="waiting", started=True)
+    got = phone_view.sync_light(proj, now=time.time() + 10)
+    assert sorted(got) == sorted([(PHONE, tid), (new, tid)])
