@@ -139,6 +139,7 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
             if not isinstance(t.get(k), list):
                 t[k] = []
         _mark_missing_proofs(root, t)
+        mobile.mark_chat_history(t)
         tickets.append(t)
     add_artifact_marks(tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
