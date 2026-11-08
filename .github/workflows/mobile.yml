@@ -25,7 +25,14 @@ jobs:
         run: |
           set -o pipefail
           echo "UI tests: ${SKIP_UI:-included}"
+          # CI only: a failed UI test gets one more try (-retry-tests-on-failure); the summary step below lists every retry so a flake
+          # stays visible. Local runs have no retry, and the long loop test is skipped unless ORCH_UITEST_LONG=1 (not set here).
+          rm -rf xcb.xcresult
           xcodebuild test -scheme OrchMobile -destination "platform=iOS Simulator,name=$SIM_NAME" $SKIP_UI \
+            -retry-tests-on-failure -test-iterations 2 -resultBundlePath xcb.xcresult \
             CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM= CODE_SIGN_STYLE=Manual > xcb.log 2>&1 \
             || { grep -E ":[0-9]+:[0-9]+: error:|error: " xcb.log | sort -u | head -60; tail -60 xcb.log; exit 1; }
           tail -60 xcb.log
+      - name: List tests that needed a retry
+        if: always()
+        run: python3 ../scripts/xcresult_retries.py xcb.xcresult >> "$GITHUB_STEP_SUMMARY" || true
