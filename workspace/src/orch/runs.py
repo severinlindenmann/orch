@@ -545,18 +545,34 @@ def restart_for_input(root: Path, tid: str, name: str, by: str) -> bool:
     an agent that ends again at once is not started over and over. The start runs as its own process (this
     may be the ending session's own pane, which a new live start replaces)."""
     with locked(root, tid):
-        items = [i for i in _pending_read(root, tid) if not i.get("delivered_at") and i.get("via") != "start"]
-        if not items or any(i.get("restarted") for i in items) or read(root, tid):
-            return False
+        if read(root, tid):
+            return False  # a run holds it already
         all_ = _pending_read(root, tid)
+        ids = {
+            i["id"]
+            for i in all_
+            if not i.get("delivered_at") and i.get("via") != "start" and not i.get("restarted")
+        }
+        if not ids:
+            return False  # nothing new waits: each item restarts the agent once at most
         for i in all_:
-            if i["id"] in {x["id"] for x in items}:
+            if i["id"] in ids:
                 i["restarted"] = tickets.now()
         _pending_write(root, tid, all_)
-    return _spawn_detached(root, procs.orch_python_argv("run", "start", tid, "--agent", name, "--by", by))
+    argv = procs.orch_python_argv("run", "start", tid, "--agent", name, "--by", by)
+    env = {**adapters.human_environ(os.environ), "ORCH_VIA": "restart"}  # not the ended run's own call
+    if _spawn_detached(root, argv, env):
+        return True
+    with locked(root, tid):  # it did not start: the items may start the agent another time
+        all_ = _pending_read(root, tid)
+        for i in all_:
+            if i["id"] in ids:
+                i.pop("restarted", None)
+        _pending_write(root, tid, all_)
+    return False
 
 
-def _spawn_detached(root: Path, argv: list[str]) -> bool:
+def _spawn_detached(root: Path, argv: list[str], env: dict) -> bool:
     kw: dict = {"start_new_session": True} if os.name != "nt" else {"creationflags": 0x00000200 | 0x00000008}
     try:
         subprocess.Popen(
@@ -565,7 +581,7 @@ def _spawn_detached(root: Path, argv: list[str]) -> bool:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            env=_agent_environ(),
+            env=env,
             **kw,
         )
     except OSError:
@@ -1050,11 +1066,10 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         with contextlib.suppress(Exception):
             tickets.log(root, tid, said, f"agent:{name}")
     release(root, tid, run)  # input still waiting stays in the pending file for the next start
-    if (
-        said is not None
-    ):  # it ended by itself (not our Stop): an answer or message still waiting starts the next
-        restart_for_input(root, tid, name, rec.get("by") or f"agent:{name}")
-    settle(root, tid, f"agent:{name}", say=said is None)  # the end line above already says it
+    # it ended by itself (not our Stop): an answer or message still waiting starts the next run
+    restarting = said is not None and restart_for_input(root, tid, name, rec.get("by") or f"agent:{name}")
+    if not restarting:  # the next run is on its way: no Working -> Ready -> Working flicker
+        settle(root, tid, f"agent:{name}", say=said is None)  # the end line above already says it
     (run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
     with contextlib.suppress(Exception):
         from orch import runs_live

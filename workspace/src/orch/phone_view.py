@@ -203,9 +203,14 @@ def _state_locked(root: Path, wait: float = 10.0):
     lock = net.secrets_dir(root) / "phone-views.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
     end = time.monotonic() + wait
+    token = f"{os.getpid()}-{time.monotonic_ns()}".encode()
     while True:
         try:
-            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            try:
+                os.write(fd, token)
+            finally:
+                os.close(fd)
             break
         except FileExistsError:
             if _break_stale_lock(lock):
@@ -217,7 +222,8 @@ def _state_locked(root: Path, wait: float = 10.0):
         yield
     finally:
         with contextlib.suppress(OSError):
-            lock.unlink()
+            if lock.read_bytes() == token:  # only our own lock: never one a later holder made
+                lock.unlink()
 
 
 def update_state(root: Path, fn) -> dict:
@@ -518,7 +524,7 @@ def sync(root: Path, now: float | None = None) -> list[str]:
     with contextlib.suppress(Refused, OSError, ValueError):
         on = mobile_mode.routes_to_phone(root)
     all_ = tickets.list_all(root)
-    due: list[tuple] = []  # (ticket id, to, ticket, finished just now, status before)
+    due: list[tuple] = []  # (ticket id, to, ticket, finished just now, status before, claimed sig or None)
 
     def claim(state):
         # under the lock: decide what goes out and mark it as sent first, so two pulls never send it twice
@@ -530,7 +536,7 @@ def sync(root: Path, now: float | None = None) -> list[str]:
             sig = _tasks_sig(t, root)
             if sig == rec.get("sig") or now - rec.get("at", 0) < DEBOUNCE:
                 continue
-            due.append((tid, rec["to"], t, _just_finished(rec.get("status"), t), rec.get("status")))
+            due.append((tid, rec["to"], t, _just_finished(rec.get("status"), t), rec.get("status"), sig))
             rec.update(sig=sig, at=now, status=t.get("status"))
         for t in all_:
             tid, prev = t["id"], seen.get(t["id"])
@@ -539,11 +545,11 @@ def sync(root: Path, now: float | None = None) -> list[str]:
                 continue
             with contextlib.suppress(Refused, OSError, ValueError):
                 if on or mobile_mode.from_phone(root, tid):
-                    due.append((tid, "phones", t, True, prev))
+                    due.append((tid, "phones", t, True, prev, None))
 
     update_state(root, claim)
     sent = []
-    for tid, to, t, finished, before in due:
+    for tid, to, t, finished, before, claimed in due:
         done, total = tickets.checks_done(t)
         try:
             if finished:
@@ -552,12 +558,24 @@ def sync(root: Path, now: float | None = None) -> list[str]:
                 relay.send_text(root, to, f"Tasks: {done} of {total} done", tid, "note", view=True)
             sent.append(tid)
         except Refused:  # not sent: undo the claim (also the status, so a result is pushed again next pull)
+            now_status = t.get("status")
 
-            def undo(st, tid=tid, before=before):
-                if tid in st["tickets"]:
-                    st["tickets"][tid].update(sig=None, status=before, at=0)  # no debounce for the retry
-                else:
-                    st.setdefault("status", {})[tid] = before
+            def undo(st, tid=tid, before=before, claimed=claimed, now_status=now_status):
+                # compare and set: only our own claim is undone, never a newer one another pull made meanwhile
+                rec = st["tickets"].get(tid)
+                if claimed is not None:
+                    if rec is None or rec.get("sig") != claimed:
+                        return
+                    rec.update(sig=None, at=0)  # no debounce for the retry
+                    if before is None:
+                        rec.pop("status", None)
+                    else:
+                        rec["status"] = before
+                elif rec is None and st.get("status", {}).get(tid) == now_status:
+                    if before is None:
+                        st["status"].pop(tid, None)
+                    else:
+                        st["status"][tid] = before
 
             with contextlib.suppress(Refused):
                 update_state(root, undo)
