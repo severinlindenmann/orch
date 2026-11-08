@@ -37,7 +37,7 @@ function permissionsCard(settings) {
       h('div', {className:'grow'}, settingsText('h3', {}, label), settingsText('p', {className:'meta'}, hint)));
   });
   return h('div', {className:'stack', 'data-key':'settings-permissions'}, h('h2', {className:'set-sub'}, 'What the agent may do'),
-    h('div', {className:'card'}, h('div', {role:'radiogroup', 'aria-label':'What the agent may do'}, rows),
+    h('div', {className:'card'}, h('div', {className:'permission-choices', role:'radiogroup', 'aria-label':'What the agent may do'}, rows),
       current === 'full' ? h('p', {className:'card-row bad', role:'note'}, FULL_WARNING) : null));
 }
 // Share with team: off by default; on writes one short entry into the team's AGENTS.md (the orch files stay local).
@@ -61,41 +61,41 @@ function workflowCard(settings) {
 function settingsPage() {
   const settings = state.settings;
   const agents = array(settings.agents).map(agent => {
-    const radio = h('input', {type:'radio', name:'settings-agent', value:agent.name, 'data-key':'settings-agent-' + agent.name, 'data-settings-agent':agent.name, disabled:settingsBusy.has('agent') || (!agent.found && agent.status !== 'your command')});
+    const radio = h('input', {type:'radio', 'aria-label':agent.label, name:'settings-agent', value:agent.name, 'data-key':'settings-agent-' + agent.name, 'data-settings-agent':agent.name, disabled:settingsBusy.has('agent') || (!agent.found && agent.status !== 'your command')});
     radio.checked = !!agent.chosen;
     const missing = !agent.found && agent.status !== 'your command';
     const status = agent.status === 'your command' ? 'Your own agent' : agent.found ? 'Found' + (agent.version ? ' · version ' + agent.version : '') : 'Not found on this computer';
-    return h('label', {className:'card-row agent-opt' + (missing ? ' off' : '') + (agent.chosen ? ' sel' : ''), 'data-key':'settings-agent-row-' + agent.name}, radio,
+    return h('div', {className:'card card-row agent-opt agent-card' + (missing ? ' off' : '') + (agent.chosen ? ' sel' : ''), 'data-key':'settings-agent-row-' + agent.name}, radio,
       h('div', {className:'grow'}, settingsText('h3', {}, agent.label), settingsText('p', {className:'meta'}, status)),
       agent.chosen ? h('span', {className:'chip active def'}, 'Default') : null);
   }).map(row => row);
   array(settings.agents).forEach((agent, i) => {
     if (snapshot) return;
     const test = h('button', {type:'button', className:'btn ghost sm', 'data-action':'agent-test', 'data-name':agent.name, 'data-key':'settings-test-' + agent.name, disabled:settingsBusy.has('test-' + agent.name)}, 'Test');
-    const note = agentTests[agent.name] ? h('span', {className:'meta test-note ' + (agentTests[agent.name].ok ? 'ok' : 'bad')}, plainTest(agentTests[agent.name].reason)) : null;
-    if (note) agents[i].append(note);
+    const note = agentTests[agent.name] ? h('p', {role:'status', className:'meta test-note'}, plainTest(agentTests[agent.name].reason)) : null;
     agents[i].append(test);
+    if (note) agents[i].append(note);
   });
   const panel = (id, body) => h('section', {className:'set-sec', id:'settings-panel-' + id, 'data-key':'settings-panel-' + id, role:'tabpanel', 'aria-labelledby':'settings-tab-' + id, hidden:settingsTab !== id, tabindex:'0'}, body);
   const addonRow = addon => {
     const more = addon.name !== 'dashboard' && addon.active && addon.detail?.connected, open = addonOpen.has(addon.name);
-    return h('div', {className:'ad-row', 'data-key':'settings-addon-' + addon.name},
-      h('div', {className:'ad-h'}, h('div', {className:'grow'}, settingsText('h3', {}, capitalise(addon.name)), h('span', {className:'meta'}, addonSummary(addon))),
+    return h('div', {className:'card ad-row', 'data-key':'settings-addon-' + addon.name},
+      h('div', {className:'ad-h'}, h('div', {className:'grow'}, settingsText('h3', {}, addonLabel(addon)), settingsText('p', {className:'meta'}, addon.description)),
         more ? h('button', {type:'button', className:'ad-more', 'aria-expanded':open, 'data-action':'addon-more', 'data-name':addon.name}, h('span', {className:'chevron'}, iconEl('down')), 'Details') : null,
-        addon.name === 'dashboard' ? h('span', {className:'always'}, 'Always on') : h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':addon.name + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:settingsBusy.has('addon-' + addon.name)})),
+        addon.name === 'dashboard' ? h('span', {className:'always'}, 'Always on') : h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':addonLabel(addon) + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')),
       more ? h('div', {className:'ad-b', hidden:!open}, addonFacts(addon)) : null);
   };
-  return h('div', {className:'settings stack'}, heading('Settings'),
-    h('div', {className:'tabs', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Agent'], ['addons', 'Add-ons']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))),
+  return fragment(h('div', {className:'settings stack', 'data-key':'settings-root'}, heading('Settings'),
+    h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Agent'], ...(array(settings.addons).some(a => a.name === 'relay' && a.active) ? [['relay', 'Phone & workspaces']] : []), ['addons', 'Add-ons']].map(([id, label]) => id === 'relay' ? h('a', {href:'#addon/relay', 'data-key':'settings-relay'}, label) : h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
     panel('general', [snapshot ? null : window.OrchMobileMode?.settingsSection(h), snapshot ? null : window.OrchLook?.settingsSection(), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
-      h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'}, settingsText('p', {className:'mono'}, settings.folder), h('p', {className:'meta'}, 'Stored on this computer'))))),
+      h('details', {className:'settings-details'}, h('summary', {}, 'Details'), h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'}, settingsText('p', {className:'mono'}, settings.folder), h('p', {className:'meta'}, 'Stored on this computer')))))),
       shareCard(settings), workflowCard(settings)]),
-    panel('agent', [h('p', {className:'meta'}, 'Pick the default. It is saved right away.'), h('div', {className:'card'}, h('div', {role:'radiogroup', 'aria-label':'Default agent'}, agents),
+    panel('agent', [h('p', {className:'meta'}, 'Pick the default. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Default agent'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own agent'))),
       permissionsCard(settings)]),
-    panel('addons', h('div', {className:'card'}, array(settings.addons).map(addonRow)))
-  );
+    panel('addons', h('div', {className:'settings-addon-grid'}, array(settings.addons).map(addonRow)))))
+  ));
 }
 // An agent that is started with a command: a small form that opens in the list; the command is shown before it is added.
 function openAgentForm(control) {
@@ -173,7 +173,8 @@ async function settingsSend(op, args, key) {
 
 const addonViews = Object.create(null), addonBusy = new Set();
 let addonTimer, activeAddon = null;
-const addonLabel = a => a?.dashboard?.label || a?.label || a?.name || 'Add-on';
+const addonLabels = {relay:'Phone & workspaces', publish:'Shared links'};
+const addonLabel = a => addonLabels[typeof a === 'string' ? a : a?.name] || a?.dashboard?.label || a?.label || a?.name || 'Add-on';
 function pageFrame(r) {
   const src = '/addon/' + r.id + '/' + r.path;
   const frame = h('iframe', {className:'embed', 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
@@ -207,7 +208,10 @@ function paintAddon(id) {
     const walker = document.createTreeWalker(blocks, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) walker.currentNode.data = clean(walker.currentNode.data);
   }
+  if (!snapshot && id === 'automation') template.append(automationCard());
+  if (!snapshot && id === 'publish' && sharedLinks !== null) template.append(sharedLinksCard());
   reconcile(host, template);
+  bindAddonControls(host);
   host.querySelectorAll('[data-action="retry-addon"]').forEach(n => { n.disabled = false; });
   window.scrollTo(...scroll);
 }
@@ -226,6 +230,7 @@ async function loadAddon(id, manual = false) {
   } catch (_) {
     addonViews[id] = addonViews[id]?.view ? {...addonViews[id], state:'stale'} : {state:'error', message:'No answer.'};
   } finally { addonBusy.delete(id); }
+  if (id === 'publish' && !snapshot) await loadSharedLinks();
   if (route().kind === 'addon' && route().id === id) paintAddon(id);
 }
 function startAddon(id) {
@@ -266,7 +271,9 @@ function messageSend(control) {
     const text = area.value.trim();
     if (!text || go.disabled) return;
     go.disabled = true;
-    const result = await act('message.send', {workspace:peer, text});
+    const args = {workspace:peer, text};
+    if (control.dataset.replyTo !== undefined) args.reply_to = control.dataset.replyTo;
+    const result = await act('message.send', args);
     go.disabled = false;
     if (!result.ok) { window.orch.toast(result.text || 'That did not work.', 'error'); return; }
     await window.orch.close(d);
@@ -281,4 +288,89 @@ function messageSend(control) {
 async function copyText(control) {
   try { await navigator.clipboard.writeText(control.dataset.copy); window.orch.toast('Copied', 'ok'); }
   catch (_) { window.orch.toast('Could not copy. Select the text and copy it.', 'error'); }
+}
+
+const repeatPresets = ['every day at 9', 'every weekday at 9', 'every monday at 9', 'every hour'];
+function automationCard() {
+  return h('section', {className:'card pad stack addon-native', 'data-key':'automation-repeats'},
+    h('h2', {}, 'Repeats'), h('div', {className:'actions'},
+      h('button', {type:'button', className:'btn primary', 'data-native':'repeat'}, '+ Repeat a ticket'),
+      h('button', {type:'button', className:'btn outline', 'data-native':'copy'}, 'Copy a ticket')));
+}
+function automationDialog(verb) {
+  if (snapshot) return;
+  const {d, actions} = dialog(verb === 'repeat' ? 'Repeat a ticket' : 'Copy a ticket', 'dialog');
+  const ticket = h('select', {className:'input', name:'ticket'});
+  tickets().filter(t => !['done', 'dropped'].includes(t.status)).forEach(t => ticket.append(new Option(t.title || t.id, t.id)));
+  const preset = h('select', {className:'input', name:'repeat'});
+  repeatPresets.forEach(value => preset.append(new Option(capitalise(value).replace('monday', 'Monday'), value)));
+  const fields = h('div', {className:'form-fields'}, h('label', {}, 'Ticket', ticket),
+    verb === 'repeat' ? h('label', {}, 'Repeat', preset) : null);
+  if (!ticket.options.length) fields.append(h('p', {className:'meta'}, 'No open tickets yet.'));
+  const save = button(verb === 'repeat' ? 'Save' : 'Copy ticket', 'primary', async () => {
+    if (save.disabled || !ticket.value) return;
+    save.disabled = true;
+    const args = {addon:'automation', verb, target:ticket.value};
+    if (verb === 'repeat') args.value = preset.value;
+    const result = await act('addon.act', args);
+    window.orch.toast(result.ok ? (verb === 'repeat' ? 'Repeat saved.' : 'Ticket copied.') : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    save.disabled = false;
+    if (result.ok) await window.orch.close(d);
+    await loadAddon('automation');
+  });
+  save.disabled = !ticket.options.length;
+  actions.append(save); d.append(fields, actions); window.orch.open(d);
+}
+let sharedLinks = null;
+async function loadSharedLinks() {
+  try {
+    const res = await fetch('/api/links', {cache:'no-store'});
+    if (res.status !== 200) { sharedLinks = null; return; }
+    const data = await res.json();
+    sharedLinks = Array.isArray(data.links) ? data.links : null;
+  } catch (_) { sharedLinks = null; }
+}
+function sharedLinksCard() {
+  return h('section', {className:'card pad stack addon-native', 'data-key':'shared-links'}, h('h2', {}, 'Links'),
+    sharedLinks.length ? sharedLinks.map(link => {
+      const expiry = link.expires_at;
+      const date = expiry ? new Date(typeof expiry === 'number' ? expiry * 1000 : expiry) : null;
+      const expired = link.expired === true || (date && date.getTime() <= Date.now());
+      const control = (verb, label) => h('button', {type:'button', className:'btn outline', 'data-native':verb, 'data-link-id':link.id,
+        disabled:verb === 'link-copy' && !link.copy, title:verb === 'link-copy' && !link.copy ? 'This link is not available to copy.' : null}, label);
+      return h('article', {className:'shared-link stack', 'data-key':'shared-link-' + link.id},
+        settingsText('h3', {}, link.name), expired ? h('span', {className:'chip'}, 'Expired') : null,
+        settingsText('p', {className:'meta'}, date ? 'Link valid until ' + (Number.isNaN(date.getTime()) ? String(expiry) : date.toLocaleDateString()) : 'No end date'),
+        link.size != null ? settingsText('p', {className:'meta'}, typeof link.size === 'number' ? link.size.toLocaleString() + ' bytes' : link.size) : null,
+        h('div', {className:'actions'}, control('link-copy', 'Copy link'), control('link-extend', 'Extend'), control('link-stop', 'Stop sharing')),
+        h('details', {}, h('summary', {}, 'Details'), settingsText('p', {className:'meta'}, link.id), link.details ? settingsText('p', {}, link.details) : null));
+    }) : h('p', {className:'meta'}, 'No shared links yet.'));
+}
+async function sharedLinkAction(control) {
+  if (snapshot || control.disabled) return;
+  const link = sharedLinks?.find(link => String(link.id) === control.dataset.linkId);
+  if (!link) return;
+  if (control.dataset.native === 'link-copy') {
+    if (!link.copy) return;
+    try { await navigator.clipboard.writeText(link.link); window.orch.toast('Link copied.', 'ok'); }
+    catch (_) { window.orch.toast('Could not copy the link.', 'error'); }
+    return;
+  }
+  const stop = control.dataset.native === 'link-stop';
+  const send = async () => {
+    control.disabled = true;
+    const result = stop ? await act('link.stop', {id:link.id}) : await act('link.extend', {id:link.id, days:7});
+    window.orch.toast(result.ok ? (stop ? 'Sharing stopped.' : 'Link extended.') : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    await loadSharedLinks();
+    paintAddon('publish');
+    control.disabled = false;
+  };
+  if (stop) settingsConfirm('Stop sharing ' + link.name + '?', 'The link stops working.', '', 'Stop sharing', send);
+  else await send();
+}
+// Rebind after reconciliation: retained DOM nodes must use the current link data.
+function bindAddonControls(host) {
+  host.querySelectorAll('[data-native]').forEach(control => {
+    control.onclick = () => ['repeat', 'copy'].includes(control.dataset.native) ? automationDialog(control.dataset.native) : sharedLinkAction(control);
+  });
 }

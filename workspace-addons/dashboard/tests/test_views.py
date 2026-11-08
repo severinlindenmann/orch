@@ -188,8 +188,13 @@ def test_page_has_no_inline_code_and_loads_the_kit():
 
 
 def test_page_code_names_no_addon_and_has_no_blinking_needs():
+    # 8 Nov (owner-accepted drafts d20/d22/d23): pages/settings.js carries the native extras of the Automation, Shared
+    # links and Phone & workspaces tabs, so it is the one page module allowed to name those add-ons.
+    other_pages = "\n".join(
+        (webjs.WEB / "pages" / f"{p}.js").read_text(encoding="utf-8") for p in webjs.PAGES if p != "settings"
+    )
     js = (
-        (webjs.all_js() + (WEBDIR / "style.css").read_text())
+        (other_pages + (webjs.WEB / "app.js").read_text(encoding="utf-8") + (WEBDIR / "style.css").read_text())
         .replace(".focus(", ".(")
         .replace(":focus", ":")
     )
