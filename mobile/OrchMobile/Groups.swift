@@ -95,35 +95,49 @@ enum ApprovalCard: Equatable { case buttons(Question), answerInWorkspace(String)
 
 /// Receive-order state, independent of transcript display order.
 struct GroupOrder {
-    enum Outcome: String { case apply, buffer, skipGapAndApply = "skip_gap_and_apply", lateShowNoState = "late_show_no_state" }
+    enum Outcome: String { case apply, buffer, skipJumpAndApply = "skip_jump_and_apply", skipGapAndApply = "skip_gap_and_apply", lateShowNoState = "late_show_no_state" }
     var appliedSeq: Int?
     var buffered: [Int: Date] = [:]
     private(set) var released: [Int] = []
+    private(set) var superseded: [Int] = []
     private(set) var gaps: [Range<Int>] = []
 
     init(appliedSeq: Int? = nil, fromSeq: Int? = nil, buffered: [Int: Date] = [:]) {
-        self.appliedSeq = appliedSeq ?? fromSeq.map {
-            let (previous, overflow) = $0.subtractingReportingOverflow(1)
-            return overflow ? Int.min : previous
-        }
+        // from_seq is display information; only the first received seq seeds state.
+        self.appliedSeq = appliedSeq
         self.buffered = buffered
     }
 
-    mutating func receive(seq: Int, createdAt: Date, now: Date) -> Outcome {
+    mutating func receive(seq: Int, receivedAt: Date, now: Date) -> Outcome {
         released = []
+        superseded = []
         // Defense in depth for direct callers as well as cached host messages.
         guard (1...Int(Int32.max)).contains(seq) else { return .lateShowNoState }
         if appliedSeq == nil { appliedSeq = seq - 1 }
         guard seq > appliedSeq! else { return .lateShowNoState }
-        buffered[seq] = buffered[seq] ?? createdAt
+        let (distance, overflow) = seq.subtractingReportingOverflow(appliedSeq!)
+        if overflow || distance > 1000 {
+            if appliedSeq! < seq - 1 { recordGap((appliedSeq! + 1)..<seq) }
+            appliedSeq = seq - 1
+            superseded = buffered.keys.filter { $0 <= appliedSeq! }.sorted()
+            for old in superseded { buffered.removeValue(forKey: old) }
+            buffered[seq] = buffered[seq] ?? receivedAt
+            drain()
+            #if DEBUG
+            print("GroupOrder: seq jump > 1000; skip gap and apply \(seq)")
+            #endif
+            return .skipJumpAndApply
+        }
+        buffered[seq] = buffered[seq] ?? receivedAt
         drain()
-        let skipped = skipExpired(now: max(now, createdAt))
+        let skipped = skipExpired(now: max(now, receivedAt))
         return skipped ? .skipGapAndApply : released.isEmpty ? .buffer : .apply
     }
 
     /// Also called when rebuilding a quiet group with no newly arrived message.
     mutating func flush(now: Date) {
         released = []
+        superseded = []
         _ = skipExpired(now: now)
     }
 
@@ -134,12 +148,6 @@ struct GroupOrder {
             appliedSeq = next
             released.append(next)
         }
-    }
-
-    private var hasLargeJump: Bool {
-        guard let applied = appliedSeq, let highest = buffered.keys.max(), highest > applied else { return false }
-        let (distance, overflow) = highest.subtractingReportingOverflow(applied)
-        return overflow || distance > 50
     }
 
     private mutating func recordGap(_ range: Range<Int>) {
@@ -158,13 +166,7 @@ struct GroupOrder {
     private mutating func skipExpired(now: Date) -> Bool {
         var skipped = false
         while let oldest = buffered.values.min(), let lowest = buffered.keys.min() {
-            let largeJump = hasLargeJump
-            guard buffered.count > 50 || largeJump || now.timeIntervalSince(oldest) >= 600 else { break }
-            if largeJump {
-                #if DEBUG
-                print("GroupOrder: seq jump > 50 counts as buffer full; skip lowest gap immediately")
-                #endif
-            }
+            guard buffered.count > 50 || now.timeIntervalSince(oldest) >= 600 else { break }
             if let applied = appliedSeq {
                 let (next, overflow) = applied.addingReportingOverflow(1)
                 if !overflow, lowest > next { recordGap(next..<lowest) }
@@ -255,7 +257,7 @@ enum GroupStore {
     }
 
     static func build(messages: [PhoneMessage], workspaces: [String: String],
-                      ownPhoneId: String, ownMessageIds: Set<String>, now: Date = Date()) -> GroupSnapshot {
+                      ownPhoneId: String, ownMessageIds: Set<String>, receivedAt: [String: Date] = [:], arrival: [String: Int] = [:], now: Date = Date()) -> GroupSnapshot {
         var held: [GroupKey: [GroupMessage]] = [:]
         var tasks: [GroupKey: [String: GroupTask]] = [:]
         var closed = Set<GroupKey>(), ids: [GroupKey: Set<String>] = [:], origins: [GroupKey: Set<String>] = [:]
@@ -264,17 +266,6 @@ enum GroupStore {
         var latest: [GroupKey: PhoneMessage] = [:]
         var creations: [String: [Date]] = [:]
         var clocks: [GroupKey: Date] = [:]
-        let formatter = ISO8601DateFormatter()
-        let fractionalFormatter = ISO8601DateFormatter()
-        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        func date(_ m: PhoneMessage) -> Date? {
-            let raw = m.message.createdAt
-            if let parsed = formatter.date(from: raw) ?? fractionalFormatter.date(from: raw) {
-                return min(parsed, now)
-            }
-            guard let seconds = Double(raw), seconds.isFinite else { return nil }
-            return min(Date(timeIntervalSince1970: seconds), now)
-        }
         func apply(_ m: PhoneMessage, key: GroupKey, late: Bool = false) {
             let body = m.message.body, info = body.group!
             if !late {
@@ -296,38 +287,41 @@ enum GroupStore {
                 quiet: ["ack", "working", "note"].contains(body.update?.kind ?? ""), message: m, late: late))
         }
         func release(_ key: GroupKey) {
+            for seq in orders[key]?.superseded ?? [] {
+                if let m = pending[key]?.removeValue(forKey: seq) { apply(m, key: key, late: true) }
+            }
             for seq in orders[key]?.released ?? [] {
                 if let m = pending[key]?.removeValue(forKey: seq) { apply(m, key: key) }
             }
         }
-        // The API is newest first. Preserve arrival order for sequenced messages;
-        // insert targeted messages by created_at without reordering sequenced arrivals.
-        let arrivals = Array(messages.reversed())
-        let sequenced = arrivals.filter { $0.message.body.group?.seq != nil }
-        var slots: [Int: [PhoneMessage]] = [:]
-        for m in arrivals.filter({ $0.message.body.group?.seq == nil }).sorted(by: { $0.message.createdAt < $1.message.createdAt }) {
-            let slot = sequenced.lastIndex { $0.message.createdAt <= m.message.createdAt }.map { $0 + 1 } ?? 0
-            slots[slot, default: []].append(m)
-        }
-        var incoming = slots[0] ?? []
-        for (i, m) in sequenced.enumerated() { incoming.append(m); incoming += slots[i + 1] ?? [] }
+        // Explicit relay arrival order survives display sorting. Missing entries use reversed array order.
+        let incoming = messages.reversed().enumerated().sorted {
+            let a = arrival[$0.element.id] ?? $0.offset, b = arrival[$1.element.id] ?? $1.offset
+            return a == b ? $0.offset < $1.offset : a < b
+        }.map(\.element)
         for m in incoming {
             let body = m.message.body
             guard let info = body.group else { continue }
             let key = GroupKey(host: info.host, id: info.id)
+            if info.seq == nil {
+                if let drop = accept(m, workspaces: workspaces) { dropped.append(drop); continue }
+                guard orders[key] != nil else {
+                    dropped.append(GroupDrop(messageId: m.id, rule: "G12", reason: "group message without seq"))
+                    continue
+                }
+                apply(m, key: key, late: true)
+                continue
+            }
             if ids[key]?.contains(m.id) == true { continue }
             if let origin = body.origin, origins[key]?.contains(origin.id) == true {
                 dropped.append(GroupDrop(messageId: m.id, rule: "G7", reason: "Duplicate group origin")); continue
             }
             if let drop = accept(m, workspaces: workspaces) { dropped.append(drop); continue }
-            guard let time = date(m) else {
-                dropped.append(GroupDrop(messageId: m.id, rule: "G12", reason: "bad created_at")); continue
-            }
+            let time = receivedAt[m.id] ?? now
             if orders[key] == nil {
                 let recent = (creations[key.host] ?? []).filter { $0 > time.addingTimeInterval(-3600) && $0 <= time }
                 let open = keys.filter { $0.host == key.host && !closed.contains($0) }.count
-                guard keys.filter({ $0.host == key.host }).count < 100,
-                      GroupCaps.accepts(openGroups: open, createdLastHour: recent.count) else {
+                guard GroupCaps.accepts(openGroups: open, createdLastHour: recent.count) else {
                     dropped.append(GroupDrop(messageId: m.id, rule: "cap", reason: "Host group creation cap exceeded")); continue
                 }
                 creations[key.host, default: []].append(time)
@@ -335,21 +329,18 @@ enum GroupStore {
                 orders[key] = GroupOrder()
                 latest[key] = m
             }
-            clocks[key] = max(clocks[key] ?? time, time)
             ids[key, default: []].insert(m.id)
             if let origin = body.origin { origins[key, default: []].insert(origin.id) }
             if let seq = info.seq {
-                let outcome = orders[key]!.receive(seq: seq, createdAt: time, now: clocks[key]!)
+                let clock = max(clocks[key] ?? time, time)
+                let outcome = orders[key]!.receive(seq: seq, receivedAt: time, now: clock)
                 if outcome == .lateShowNoState { apply(m, key: key, late: true) }
                 else {
+                    clocks[key] = clock
                     // A repeated buffered seq cannot replace its original payload.
                     if pending[key]?[seq] == nil { pending[key, default: [:]][seq] = m }
                     release(key)
                 }
-            } else {
-                orders[key]!.flush(now: clocks[key]!)
-                release(key)
-                apply(m, key: key, late: true)
             }
         }
         for key in keys {
@@ -382,7 +373,7 @@ enum GroupStore {
     private static func ordered<T>(_ messages: [T], fields: (T) -> (seq: Int?, at: String, id: String)) -> [T] {
         let sequenced = messages.filter { fields($0).seq != nil }.sorted {
             let a = fields($0), b = fields($1)
-            return (a.seq ?? 0, a.at, a.id) < (b.seq ?? 0, b.at, b.id)
+            return (a.seq ?? 0, a.id) < (b.seq ?? 0, b.id)
         }
         var slots: [Int: [T]] = [:]
         for m in messages.filter({ fields($0).seq == nil }).sorted(by: {

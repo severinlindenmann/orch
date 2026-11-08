@@ -17,7 +17,7 @@ final class GroupStoreTests: XCTestCase {
         return PhoneMessage(message: decoded, workspaceName: workspaces[decoded.from] ?? "Unknown")
     }
 
-    private func message(_ id: String, seq: Int? = nil, at: String = "10", host: String? = nil,
+    private func message(_ id: String, seq: Int? = 1, at: String = "10", host: String? = nil,
                          from: String? = nil, to: String = "phones", ticket: String? = "t_fin14a", edit: (inout TextBody) -> Void = { _ in }) -> PhoneMessage {
         let host = host ?? finance
         var body = TextBody(text: id, group: GroupInfo(id: "grp_t_fin14a", host: host, title: "Tax", members: members, seq: seq))
@@ -27,8 +27,12 @@ final class GroupStoreTests: XCTestCase {
     }
 
     /// Fixtures are written oldest first for readability; the phone API supplies newest first.
-    private func build(_ oldestFirst: [PhoneMessage], own: Set<String> = []) -> GroupSnapshot {
-        GroupStore.build(messages: oldestFirst.reversed(), workspaces: workspaces, ownPhoneId: phone, ownMessageIds: own)
+    private func build(_ oldestFirst: [PhoneMessage], own: Set<String> = [],
+                       receivedAt: [String: Date] = [:], arrival: [String: Int] = [:], now: Date = Date(timeIntervalSince1970: 1000)) -> GroupSnapshot {
+        let times = Dictionary(oldestFirst.map { ($0.id, receivedAt[$0.id] ?? Date(timeIntervalSince1970: 0)) },
+                               uniquingKeysWith: { first, _ in first })
+        return GroupStore.build(messages: oldestFirst.reversed(), workspaces: workspaces, ownPhoneId: phone,
+                                ownMessageIds: own, receivedAt: times, arrival: arrival, now: now)
     }
     private func group(_ messages: [PhoneMessage]) throws -> PhoneGroup { try XCTUnwrap(build(messages).groups.first) }
 
@@ -131,7 +135,7 @@ final class GroupStoreTests: XCTestCase {
                 $0.by = outsider
                 $0.group = GroupInfo(id: "grp_t_fin14a", host: self.finance, title: "Tax",
                     members: [GroupMember(ws: self.finance, name: "Fake host"),
-                              GroupMember(ws: self.home, name: "You"), GroupMember(ws: outsider, name: supplied)])
+                              GroupMember(ws: self.home, name: "You"), GroupMember(ws: outsider, name: supplied)], seq: 1)
             }
             let g = try group([m])
             XCTAssertEqual(g.names, [finance: "Finance", home: "Home", outsider: expected])
@@ -241,8 +245,8 @@ final class GroupStoreTests: XCTestCase {
 
     func testStatefulChecksMergeUnsequencedMessagesByTimeSlot() throws {
         let close = message("closed", seq: 9, at: "30") { $0.groupEvent = GroupEvent(kind: "closed") }
-        let earlier = message("earlier", at: "20")
-        let later = message("later", at: "40")
+        let earlier = message("earlier", seq: nil, at: "20")
+        let later = message("later", seq: nil, at: "40")
         let sequenced = message("seq", seq: 8, at: "10")
         let snapshot = build([sequenced, close, later, earlier])
         XCTAssertEqual(snapshot.groups.first?.messages.map(\.id), ["seq", "earlier", "closed", "later"])
@@ -255,9 +259,9 @@ final class GroupStoreTests: XCTestCase {
             $0.group = GroupInfo(id: "grp_t_fin14a", host: self.finance, title: "New title",
                                 members: self.members + [GroupMember(ws: self.bank, name: "Bank")], seq: 5)
         }
-        let g = try group([message("before", at: "00"), message("s2", seq: 2, at: "10"),
-                           message("b", at: "20"), message("a", at: "20"), latest,
-                           message("s1", seq: 1, at: "40"), message("after", at: "50") { $0.group = latest.message.body.group.map { GroupInfo(id: $0.id, host: $0.host, title: $0.title, members: $0.members) } }])
+        let g = try group([message("s2", seq: 2, at: "10"), message("before", seq: nil, at: "00"),
+                           message("b", seq: nil, at: "20"), message("a", seq: nil, at: "20"), latest,
+                           message("s1", seq: 1, at: "40"), message("after", seq: nil, at: "50") { $0.group = latest.message.body.group.map { GroupInfo(id: $0.id, host: $0.host, title: $0.title, members: $0.members) } }])
         XCTAssertEqual(g.messages.map(\.id), ["before", "s1", "s2", "a", "b", "s5", "after"])
         XCTAssertEqual(g.gaps, [3..<5])
         XCTAssertEqual(g.members.last?.ws, bank)
@@ -267,7 +271,7 @@ final class GroupStoreTests: XCTestCase {
             $0.group = GroupInfo(id: "grp_t_fin14a", host: self.finance, title: "Renamed", members: self.members, seq: 5)
         }
         XCTAssertEqual(try group([latest, equalSeq]).title, "New title")
-        XCTAssertEqual(try group([message("b", at: "10"), message("a", at: "10")]).messages.map(\.id), ["a", "b"])
+        XCTAssertEqual(try group([message("b", seq: 1, at: "10"), message("a", seq: 1, at: "10")]).messages.map(\.id), ["a", "b"])
     }
 
     func testEventsQuietAndClosure() throws {
@@ -331,7 +335,7 @@ final class GroupStoreTests: XCTestCase {
     func testApprovalRequiresTheOpenMemberQuestionAndEveryCondition() throws {
         let g = try group([message("group") {
             $0.group = GroupInfo(id: "grp_t_fin14a", host: self.finance, title: "Tax",
-                                members: self.members + [GroupMember(ws: self.bank, name: "You")])
+                                members: self.members + [GroupMember(ws: self.bank, name: "You")], seq: 1)
         }])
         let event = GroupEvent(kind: "approval_needed", ws: bank, delegate: "d", questionMessage: "q")
         func question(id: String = "q", from: String? = nil, options: [String] = ["once", "always", "no"],
@@ -405,9 +409,11 @@ final class GroupStoreTests: XCTestCase {
         let close = message("close", seq: 2, at: "2", host: home) {
             $0.groupEvent = GroupEvent(kind: "closed")
         }
-        // Even a clamped clock of 1000 must not flush B before its close arrives.
+        // Only this group’s receive clock can flush its gap before the close arrives.
         let snapshot = GroupStore.build(messages: [start, buffered, future, close].reversed(),
-            workspaces: workspaces, ownPhoneId: phone, ownMessageIds: [], now: Date(timeIntervalSince1970: 1000))
+            workspaces: workspaces, ownPhoneId: phone, ownMessageIds: [], receivedAt: ["start": Date(timeIntervalSince1970: 0),
+                "buffered": Date(timeIntervalSince1970: 1), "future": Date(timeIntervalSince1970: 2),
+                "close": Date(timeIntervalSince1970: 3)], now: Date(timeIntervalSince1970: 1000))
         let g = try XCTUnwrap(snapshot.groups.first { $0.key.host == home })
         XCTAssertTrue(g.closed)
         XCTAssertEqual(g.gaps, [])
@@ -417,7 +423,7 @@ final class GroupStoreTests: XCTestCase {
         XCTAssertEqual(snapshot.dropped.map(\.rule), ["closed"])
     }
 
-    func testFutureCreatedAtIsClampedAndBadDatesAreDropped() throws {
+    func testCreatedAtIsDisplayOnlyAndMissingReceiveTimesUseNow() throws {
         let now = Date(timeIntervalSince1970: 1000)
         let start = message("start", seq: 1, at: "0")
         let future = message("future", seq: 3, at: "2999-01-01T00:00:00Z")
@@ -440,8 +446,8 @@ final class GroupStoreTests: XCTestCase {
         XCTAssertEqual(capped.dropped.map(\.rule), ["cap"])
         for at in ["garbage", "", "NaN", "inf"] {
             let bad = build([message("bad", seq: 1, at: at)])
-            XCTAssertTrue(bad.groups.isEmpty)
-            XCTAssertEqual(bad.dropped, [GroupDrop(messageId: "bad", rule: "G12", reason: "bad created_at")])
+            XCTAssertEqual(bad.groups.first?.messages.map(\.id), ["bad"])
+            XCTAssertTrue(bad.dropped.isEmpty)
         }
     }
 
@@ -451,7 +457,7 @@ final class GroupStoreTests: XCTestCase {
             $0.groupEvent = GroupEvent(kind: "closed")
             $0.group = GroupInfo(id: "grp_t_fin14a", host: self.finance, title: "Wrong", members: [self.members[0]])
         }
-        let task = message("task", at: "30") {
+        let task = message("task", seq: nil, at: "30") {
             $0.task = GroupTask(delegate: "d", ws: self.home, status: "done")
         }
         let g = try group([start, close, task])
@@ -462,9 +468,9 @@ final class GroupStoreTests: XCTestCase {
         XCTAssertEqual(g.title, "Tax")
         XCTAssertEqual(g.members, members)
         XCTAssertEqual(g.appliedSeq, 1)
-        let implicit = try group([close])
-        XCTAssertFalse(implicit.closed)
-        XCTAssertTrue(try XCTUnwrap(implicit.messages.first).late)
+        let unknown = build([close])
+        XCTAssertTrue(unknown.groups.isEmpty)
+        XCTAssertEqual(unknown.dropped, [GroupDrop(messageId: "close", rule: "G12", reason: "group message without seq")])
     }
 
     func testPhoneIgnoresMemberFromSeqForInitialAppliedSequence() throws {
@@ -499,7 +505,7 @@ final class GroupStoreTests: XCTestCase {
     func testLargeJumpSkipsImmediatelyWithBoundedGapStorage() throws {
         let now = Date(timeIntervalSince1970: 10)
         var order = GroupOrder(appliedSeq: 5)
-        XCTAssertEqual(order.receive(seq: 1_000_000, createdAt: now, now: now), .skipGapAndApply)
+        XCTAssertEqual(order.receive(seq: 1_000_000, receivedAt: now, now: now), .skipJumpAndApply)
         XCTAssertEqual(order.appliedSeq, 1_000_000)
         XCTAssertEqual(order.released, [1_000_000])
         XCTAssertTrue(order.buffered.isEmpty)
@@ -515,14 +521,15 @@ final class GroupStoreTests: XCTestCase {
         XCTAssertTrue(snapshot.dropped.isEmpty)
     }
 
-    func testJumpBoundaryPreservesLowestFirstDrain() {
+    func testJumpBoundarySupersedesBufferedMessages() {
         let now = Date(timeIntervalSince1970: 10)
         var order = GroupOrder(appliedSeq: 5)
-        XCTAssertEqual(order.receive(seq: 55, createdAt: now, now: now), .buffer)
-        XCTAssertEqual(order.receive(seq: 56, createdAt: now, now: now), .skipGapAndApply)
-        XCTAssertEqual(order.released, [55, 56])
-        XCTAssertEqual(order.gaps, [6..<55])
-        XCTAssertEqual(order.appliedSeq, 56)
+        XCTAssertEqual(order.receive(seq: 1005, receivedAt: now, now: now), .buffer)
+        XCTAssertEqual(order.receive(seq: 1006, receivedAt: now, now: now), .skipJumpAndApply)
+        XCTAssertEqual(order.released, [1006])
+        XCTAssertEqual(order.superseded, [1005])
+        XCTAssertEqual(order.gaps, [6..<1006])
+        XCTAssertEqual(order.appliedSeq, 1006)
         XCTAssertTrue(order.buffered.isEmpty)
     }
 
@@ -531,12 +538,12 @@ final class GroupStoreTests: XCTestCase {
         for initial: Int? in [nil, Int.min, Int.max, 5] {
             var order = GroupOrder(appliedSeq: initial, fromSeq: Int.min)
             for seq in [Int.max, Int.min, 0, -5, Int(Int32.max) + 1] {
-                XCTAssertEqual(order.receive(seq: seq, createdAt: now, now: now), .lateShowNoState)
+                XCTAssertEqual(order.receive(seq: seq, receivedAt: now, now: now), .lateShowNoState)
                 XCTAssertTrue(order.buffered.isEmpty)
                 XCTAssertTrue(order.gaps.isEmpty)
                 XCTAssertTrue(order.released.isEmpty)
             }
-            _ = order.receive(seq: 1, createdAt: now, now: now)
+            _ = order.receive(seq: 1, receivedAt: now, now: now)
             order.flush(now: now)
             XCTAssertLessThanOrEqual(order.gaps.count, 1)
             XCTAssertTrue(order.buffered.isEmpty)
@@ -547,14 +554,14 @@ final class GroupStoreTests: XCTestCase {
         XCTAssertEqual(extreme.appliedSeq, Int.max)
 
         var order = GroupOrder(appliedSeq: 1)
-        for seq in stride(from: 100, through: 6_000, by: 100) {
-            XCTAssertEqual(order.receive(seq: seq, createdAt: now, now: now), .skipGapAndApply)
+        for seq in stride(from: 2000, through: 120_000, by: 2000) {
+            XCTAssertEqual(order.receive(seq: seq, receivedAt: now, now: now), .skipJumpAndApply)
             XCTAssertLessThanOrEqual(order.gaps.count, 50)
             XCTAssertTrue(order.buffered.isEmpty)
         }
         XCTAssertEqual(order.gaps.count, 50)
-        XCTAssertEqual(order.gaps.first, 1_001..<1_100)
-        XCTAssertEqual(order.gaps.last, 5_901..<6_000)
+        XCTAssertEqual(order.gaps.first, 20_001..<22_000)
+        XCTAssertEqual(order.gaps.last, 118_001..<120_000)
     }
 
     func testOrderVectors() throws {
@@ -564,13 +571,163 @@ final class GroupStoreTests: XCTestCase {
             let name = String(file.dropLast(5)), object = try vectorObject(name)
             let context = try XCTUnwrap((object["context"] as? [String: Any])?["order"] as? [String: Any])
             let expect = try XCTUnwrap(object["expect"] as? [String: Any])
-            let m = try vector(name), now = try XCTUnwrap(ISO8601DateFormatter().date(from: m.message.createdAt))
-            let age = context["oldest_age_s"] as? Double ?? 0
-            let buffered = Dictionary(uniqueKeysWithValues: (context["buffered"] as? [Int] ?? []).map { ($0, now.addingTimeInterval(-age)) })
+            let m = try vector(name)
+            let now = Date(timeIntervalSince1970: context["now_s"] as? Double ?? 1000)
+            let firstReceive = Date(timeIntervalSince1970: context["first_buffered_recv_s"] as? Double ?? now.timeIntervalSince1970)
+            let buffered = Dictionary(uniqueKeysWithValues: (context["buffered"] as? [Int] ?? []).map { ($0, firstReceive) })
             var order = GroupOrder(appliedSeq: context["applied_seq"] as? Int, fromSeq: context["from_seq"] as? Int, buffered: buffered)
-            let outcome = order.receive(seq: try XCTUnwrap(m.message.body.group?.seq), createdAt: now, now: now)
+            let outcome = order.receive(seq: try XCTUnwrap(m.message.body.group?.seq), receivedAt: now, now: now)
             XCTAssertEqual(outcome.rawValue, expect["order"] as? String, name)
             XCTAssertEqual(order.appliedSeq, expect["applied_after"] as? Int, name)
+        }
+    }
+
+    func testFinalContractVectorsInStore() throws {
+        let now = Date(timeIntervalSince1970: 1005)
+        for name in ["invalid-seq-zero", "invalid-seq-over-int31"] {
+            let snapshot = build([try vector(name)], now: now)
+            XCTAssertTrue(snapshot.groups.isEmpty, name)
+            XCTAssertEqual(snapshot.dropped.map(\.rule), ["G12"], name)
+        }
+        let seqless = try vector("invalid-groupwide-without-seq")
+        let shown = try XCTUnwrap(build([message("start", seq: 6), seqless]).groups.first)
+        XCTAssertEqual(shown.appliedSeq, 6)
+        XCTAssertEqual(shown.title, "Tax")
+        XCTAssertEqual(shown.members, members)
+        XCTAssertTrue(try XCTUnwrap(shown.messages.first { $0.id == seqless.id }).late)
+
+        for name in ["valid-seq-jump-1000-buffers", "valid-seq-jump-1001-skips",
+                     "valid-seq-created-at-future-does-not-flush"] {
+            let m = try vector(name)
+            let start = message("start", seq: 6)
+            let pending = message("pending", seq: 8) {
+                $0.groupEvent = GroupEvent(kind: "closed")
+            }
+            let otherStart = message("other-start", seq: 1, host: home)
+            let otherGap = message("other-gap", seq: 3, host: home)
+            let input = [start, pending, otherStart, otherGap, m]
+            let times = Dictionary(uniqueKeysWithValues: input.map { ($0.id, Date(timeIntervalSince1970: 1000)) })
+            let snapshot = build(input, receivedAt: times, now: now)
+            let g = try XCTUnwrap(snapshot.groups.first { $0.key.host == finance })
+            let skips = name == "valid-seq-jump-1001-skips"
+            XCTAssertEqual(g.appliedSeq, skips ? 1007 : 6, name)
+            XCTAssertEqual(g.gaps, skips ? [7..<1007] : [], name)
+            XCTAssertEqual(Set(g.messages.map(\.id)), skips ? Set(["start", "pending", m.id]) : Set(["start"]), name)
+            XCTAssertFalse(g.closed, name)
+            if skips { XCTAssertTrue(try XCTUnwrap(g.messages.first { $0.id == "pending" }).late) }
+            let other = try XCTUnwrap(snapshot.groups.first { $0.key.host == home })
+            XCTAssertEqual(other.appliedSeq, 1, name)
+            XCTAssertEqual(other.messages.map(\.id), ["other-start"], name)
+            XCTAssertTrue(snapshot.dropped.isEmpty, name)
+        }
+    }
+
+    func testReceiveOrderOverridesCreatedAtAndInputOrder() throws {
+        let start = message("start", seq: 1, at: "2099-01-01T00:00:00Z")
+        let close = message("close", seq: 2, at: "garbage") { $0.groupEvent = GroupEvent(kind: "closed") }
+        let times = ["start": Date(timeIntervalSince1970: 10), "close": Date(timeIntervalSince1970: 11)]
+        for input in [[start, close], [close, start]] {
+            let snapshot = build(input, receivedAt: times, arrival: ["start": 0, "close": 1], now: Date(timeIntervalSince1970: 12))
+            let g = try XCTUnwrap(snapshot.groups.first)
+            XCTAssertEqual(g.messages.map(\.id), ["start", "close"])
+            XCTAssertTrue(g.closed)
+            XCTAssertTrue(g.messages.allSatisfy { !$0.late })
+            XCTAssertTrue(snapshot.dropped.isEmpty)
+        }
+    }
+
+    func testArrivalOrderAcrossGroupsIgnoresHostDatesAndReceiveTimeTies() throws {
+        let first = message("first", seq: 2, at: "2099", host: home)
+        let second = message("second", seq: 1, at: "2000")
+        let backdated = message("backdated", seq: 900, at: "1900", host: home)
+        // This is the host-date-sorted display array, not relay arrival order.
+        let snapshot = GroupStore.build(messages: [first, second, backdated], workspaces: workspaces,
+            ownPhoneId: phone, ownMessageIds: [], arrival: ["first": 0, "second": 1, "backdated": 2],
+            now: Date(timeIntervalSince1970: 10))
+        XCTAssertEqual(snapshot.groups.map(\.key.host), [home, finance])
+        let g = try XCTUnwrap(snapshot.groups.first)
+        XCTAssertEqual(g.appliedSeq, 2)
+        XCTAssertEqual(g.messages.map(\.id), ["first"])
+        XCTAssertTrue(g.gaps.isEmpty)
+        XCTAssertTrue(snapshot.dropped.isEmpty)
+    }
+
+    func testUnknownSeqlessMessagesDoNotCreateGroupsOrConsumeCaps() {
+        let unknown = (0..<6).map { index in
+            message("unknown-\(index)", seq: nil, ticket: "t_\(index)") {
+                $0.group = GroupInfo(id: "grp_t_\(index)", host: self.finance, title: "Unknown", members: self.members)
+            }
+        }
+        let valid = (0..<5).map { index in
+            message("unknown-\(index)", seq: 1, ticket: "t_\(index)") {
+                $0.group = GroupInfo(id: "grp_t_\(index)", host: self.finance, title: "Valid", members: self.members, seq: 1)
+            }
+        }
+        XCTAssertTrue(build(unknown).groups.isEmpty)
+        let snapshot = build(unknown + valid)
+        XCTAssertEqual(snapshot.dropped, unknown.map {
+            GroupDrop(messageId: $0.id, rule: "G12", reason: "group message without seq")
+        })
+        XCTAssertEqual(snapshot.groups.count, 5)
+        XCTAssertTrue(snapshot.groups.allSatisfy { $0.title == "Valid" && $0.appliedSeq == 1 })
+    }
+
+    func testKnownSeqlessMessagesDoNotReserveIdsOrOriginsOrChangeState() throws {
+        let unsequenced = message("reused", seq: nil) {
+            $0.origin = GroupOrigin(id: "origin", from: self.finance, at: "0")
+            $0.groupEvent = GroupEvent(kind: "closed")
+            $0.task = GroupTask(delegate: "d", ws: self.home, status: "done")
+            $0.group = GroupInfo(id: "grp_t_fin14a", host: self.finance, title: "Ignored", members: self.members)
+        }
+        let sameId = message("reused", seq: 2)
+        let sameOrigin = message("origin-copy", seq: 3) { $0.origin = unsequenced.message.body.origin }
+        let snapshot = build([message("start"), unsequenced, unsequenced, sameId, sameOrigin])
+        let g = try XCTUnwrap(snapshot.groups.first)
+        XCTAssertTrue(snapshot.dropped.isEmpty)
+        XCTAssertEqual(g.messages.count, 5)
+        XCTAssertEqual(g.messages.filter(\.late).count, 2)
+        XCTAssertEqual(g.appliedSeq, 3)
+        XCTAssertEqual(g.title, "Tax")
+        XCTAssertFalse(g.closed)
+        XCTAssertTrue(g.tasks.isEmpty)
+    }
+
+    func testSeqlessAndOldMessagesDoNotAdvanceClockOrFlush() throws {
+        for seq: Int? in [nil, 1] {
+            let input = [message("start", seq: 1), message("pending", seq: 3),
+                         message("late", seq: seq), message("next", seq: 4), message("fill", seq: 2)]
+            let times = ["start": 0.0, "pending": 1, "late": 10000, "next": 2, "fill": 3]
+                .mapValues { Date(timeIntervalSince1970: $0) }
+            let snapshot = build(input, receivedAt: times, now: Date(timeIntervalSince1970: 4))
+            let g = try XCTUnwrap(snapshot.groups.first)
+            XCTAssertTrue(snapshot.dropped.isEmpty)
+            XCTAssertEqual(g.appliedSeq, 4)
+            XCTAssertTrue(g.gaps.isEmpty)
+            XCTAssertEqual(g.messages.filter(\.late).map(\.id), ["late"])
+            XCTAssertEqual(Set(g.messages.map(\.id)), Set(input.map(\.id)))
+        }
+    }
+
+    func testRateVectorsUseReceiveTimesInStore() throws {
+        for name in ["valid-created-under-cap", "valid-implicit-group-under-cap",
+                     "invalid-created-over-rate", "invalid-implicit-group-over-rate"] {
+            let context = try XCTUnwrap(try vectorObject(name)["context"] as? [String: Any])
+            let seconds = try XCTUnwrap(context["creations_recv_s"] as? [Double])
+            let now = Date(timeIntervalSince1970: try XCTUnwrap(context["now_s"] as? Double))
+            var times: [String: Date] = [:]
+            var input = seconds.enumerated().map { index, seconds in
+                let m = message("prior-\(index)", seq: 1, at: "2099-01-01T00:00:00Z", ticket: "t_prior\(index)") {
+                    $0.group = GroupInfo(id: "grp_t_prior\(index)", host: self.finance, title: "Prior", members: self.members, seq: 1)
+                }
+                times[m.id] = Date(timeIntervalSince1970: seconds)
+                return m
+            }
+            let candidate = try vector(name)
+            times[candidate.id] = now
+            input.append(candidate)
+            let snapshot = build(input, receivedAt: times, now: now)
+            XCTAssertEqual(snapshot.dropped.map(\.messageId), name.hasPrefix("invalid") ? [candidate.id] : [], name)
+            XCTAssertEqual(snapshot.dropped.map(\.rule), name.hasPrefix("invalid") ? ["cap"] : [], name)
         }
     }
 
@@ -578,7 +735,9 @@ final class GroupStoreTests: XCTestCase {
         let start = message("start", seq: 1, at: "0")
         let done = message("done", seq: 3, at: "1") { $0.task = GroupTask(delegate: "d", ws: self.home, status: "done") }
         func snapshot(_ input: [PhoneMessage], now: Double) -> GroupSnapshot {
-            GroupStore.build(messages: input.reversed(), workspaces: workspaces, ownPhoneId: phone, ownMessageIds: [], now: Date(timeIntervalSince1970: now))
+            let seconds: [String: Double] = ["start": 0, "done": 1, "tick": 601, "working": 602, "close": 603, "second": 2]
+            return GroupStore.build(messages: input.reversed(), workspaces: workspaces, ownPhoneId: phone, ownMessageIds: [],
+                receivedAt: seconds.mapValues { Date(timeIntervalSince1970: $0) }, now: Date(timeIntervalSince1970: now))
         }
         let buffered = snapshot([start, done], now: 600)
         XCTAssertEqual(buffered.groups.first?.messages.map(\.id), ["start"])
@@ -602,7 +761,7 @@ final class GroupStoreTests: XCTestCase {
         XCTAssertFalse(g.closed)
         XCTAssertEqual(g.members, members)
         XCTAssertEqual(g.gaps, [2..<3])
-        XCTAssertEqual(g.messages.filter(\.late).map(\.id), ["working", "close"])
+        XCTAssertEqual(g.messages.filter(\.late).map(\.id), ["close", "working"])
         let filled = snapshot([start, done, message("second", seq: 2, at: "2")], now: 3)
         XCTAssertEqual(filled.groups.first?.messages.map(\.id), ["start", "second", "done"])
         XCTAssertEqual(filled.groups.first?.appliedSeq, 3)
@@ -643,27 +802,33 @@ final class GroupStoreTests: XCTestCase {
                      "valid-implicit-group-under-cap", "invalid-implicit-group-over-cap", "invalid-implicit-group-over-rate"] {
             let object = try vectorObject(name), context = try XCTUnwrap(object["context"] as? [String: Any])
             XCTAssertEqual(GroupCaps.accepts(openGroups: try XCTUnwrap(context["open_groups_of_host"] as? Int),
-                                            createdLastHour: context["created_last_hour"] as? Int ?? 0), name.hasPrefix("valid-"), name)
+                                            createdLastHour: (context["creations_recv_s"] as? [Double] ?? []).filter {
+                                                $0 > (context["now_s"] as? Double ?? 0) - 3600 && $0 <= (context["now_s"] as? Double ?? 0)
+                                            }.count), name.hasPrefix("valid-"), name)
         }
+        var receiveTimes: [String: Date] = [:]
         func creation(_ n: Int, at: Int, host: String? = nil, close: Bool = false) -> PhoneMessage {
-            message("new\(n)", at: String(format: "%06d", at), host: host, ticket: "t_\(n)") {
+            receiveTimes["new\(n)"] = Date(timeIntervalSince1970: Double(at))
+            return message("new\(n)", at: "untrusted display date", host: host, ticket: "t_\(n)") {
                 $0.group = GroupInfo(id: "grp_t_\(n)", host: host ?? self.finance, title: "Group", members: self.members, seq: 1)
                 if close { $0.groupEvent = GroupEvent(kind: "closed") }
             }
         }
+        func receivedBuild(_ messages: [PhoneMessage]) -> GroupSnapshot {
+            build(messages, receivedAt: receiveTimes, now: receiveTimes.values.max() ?? Date())
+        }
         let firstFive = (0..<5).map { creation($0, at: $0) }
-        XCTAssertEqual(build(firstFive + [creation(5, at: 5)]).dropped.map(\.rule), ["cap"])
-        XCTAssertTrue(build(firstFive + [creation(5, at: 3600)]).dropped.isEmpty)
-        XCTAssertTrue(build(firstFive + [creation(5, at: 5, host: home)]).dropped.isEmpty)
+        XCTAssertEqual(receivedBuild(firstFive + [creation(5, at: 5)]).dropped.map(\.rule), ["cap"])
+        XCTAssertTrue(receivedBuild(firstFive + [creation(5, at: 3600)]).dropped.isEmpty)
+        XCTAssertTrue(receivedBuild(firstFive + [creation(5, at: 5, host: home)]).dropped.isEmpty)
         let twenty = (0..<20).map { creation($0, at: $0 * 3600) }
-        XCTAssertEqual(build(twenty + [creation(20, at: 72000)]).dropped.map(\.rule), ["cap"])
-        XCTAssertTrue(build(twenty.dropLast() + [creation(19, at: 68400, close: true), creation(20, at: 72000)]).dropped.isEmpty)
+        XCTAssertEqual(receivedBuild(twenty + [creation(20, at: 72000)]).dropped.map(\.rule), ["cap"])
+        XCTAssertTrue(receivedBuild(twenty.dropLast() + [creation(19, at: 68400, close: true), creation(20, at: 72000)]).dropped.isEmpty)
         let retained = (0..<101).map { creation($0, at: $0 * 3601, close: true) }
-        let capped = build(retained)
-        XCTAssertEqual(capped.groups.count, 100)
-        XCTAssertTrue(capped.groups.allSatisfy(\.closed))
-        XCTAssertEqual(capped.dropped.map(\.messageId), ["new100"])
-        XCTAssertEqual(capped.dropped.map(\.rule), ["cap"])
+        let snapshot = receivedBuild(retained)
+        XCTAssertEqual(snapshot.groups.count, 101)
+        XCTAssertTrue(snapshot.groups.allSatisfy(\.closed))
+        XCTAssertTrue(snapshot.dropped.isEmpty)
     }
 
     func testAllowVectorsAndMapping() throws {
