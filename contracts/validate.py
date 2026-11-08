@@ -638,6 +638,7 @@ CG_FILE_MAX = 26214400
 CG_TASK_RANK = {"waiting_start": 0, "waiting_approval": 1, "queued": 2, "working": 3, "done": 4, "failed": 4, "denied": 4}
 CG_ALLOW_OPTIONS = ["once", "always", "no"]  # wire values; the UI shows "Allow once / Always / No"
 CG_ORDER_BUFFER = 50
+CG_ORDER_MAX_JUMP = 1000  # a forward jump above this over applied_seq is a gap skip
 CG_ORDER_TIMEOUT_S = 600  # quiet group: skip a gap after 10 minutes
 CG_MAX_OPEN_GROUPS_PER_HOST = 20
 CG_CREATED_PER_HOUR = 5
@@ -764,7 +765,8 @@ def cg_receive(m, ctx):
             # any group creation counts: an explicit `created` or the first message seen from the host
             if ctx.get("open_groups_of_host", 0) >= CG_MAX_OPEN_GROUPS_PER_HOST:
                 out.append("dropped: this host already has 20 open groups here")
-            if ctx.get("created_last_hour", 0) >= CG_CREATED_PER_HOUR:
+            recent = [t for t in ctx.get("creations_recv_s", []) if ctx.get("now_s", 0) - t < 3600]  # receive times, not created_at
+            if len(recent) >= CG_CREATED_PER_HOUR:
                 out.append("dropped: this host is over 5 `created` events an hour")
         # The group key is (host, id): an id held under another host is a different group, never a conflict.
         o = b.get("origin")
@@ -818,8 +820,8 @@ def cg_applied_after(m, ctx):
     out = cg_order(m, ctx)
     ap = od.get("applied_seq")
     if ap is None:
-        ap = (od["from_seq"] if od.get("from_seq") is not None else seq) - 1
-    if out == "apply":
+        ap = seq - 1  # first seen seq - 1; from_seq is display only, never trusted
+    if out in ("apply", "skip_jump_and_apply"):
         return seq
     if out == "skip_gap_and_apply":
         # skip to just below the lowest buffered seq (or this one), apply the contiguous run
@@ -836,20 +838,22 @@ def cg_applied_after(m, ctx):
 
 def cg_order(m, ctx):
     """Stateful checks (G9 task status, closed, membership) run in group.seq order (G12). Returns:
-    apply | buffer | skip_gap_and_apply (buffer of 50 full, or oldest buffered message waited 10 min: skip the gap,
+    apply | buffer | skip_jump_and_apply (jump > 1000 over applied_seq: applied_seq = seq - 1, log, apply; no per-seq gap entries, gaps are ranges) | skip_gap_and_apply (buffer of 50 full, or oldest buffered message waited 10 min: skip the gap,
     apply the contiguous run, late seqs below applied_seq count as old) | late_show_no_state (seq <= applied_seq:
-    shown, but changes no state). Initial applied_seq = from_seq - 1, or first seen seq - 1. None when no seq/context."""
+    shown, but changes no state). Initial applied_seq = first seen seq - 1 (from_seq is never used). Time = the receiver's own clock (now_s, first_buffered_recv_s), never a message's created_at. None when no seq/context."""
     seq, od = ((m.get("body") or {}).get("group") or {}).get("seq"), ctx.get("order")
     if seq is None or od is None:
         return None
     ap = od.get("applied_seq")
     if ap is None:
-        ap = (od["from_seq"] if od.get("from_seq") is not None else seq) - 1
+        ap = seq - 1  # first seen seq - 1; from_seq is display only, never trusted
     if seq <= ap:
         return "late_show_no_state"
     if seq == ap + 1:
         return "apply"
-    if len(od.get("buffered", [])) >= CG_ORDER_BUFFER or (od.get("buffered") and od.get("oldest_age_s", 0) >= CG_ORDER_TIMEOUT_S):
+    if seq - ap > CG_ORDER_MAX_JUMP:
+        return "skip_jump_and_apply"
+    if len(od.get("buffered", [])) >= CG_ORDER_BUFFER or (od.get("buffered") and od.get("now_s", 0) - od.get("first_buffered_recv_s", od.get("now_s", 0)) >= CG_ORDER_TIMEOUT_S):
         return "skip_gap_and_apply"
     return "buffer"
 

@@ -1,12 +1,12 @@
 {
-  "why": "Group cap: more than 5 `created` events an hour from one host are dropped.",
+  "why": "Caps use the receiver's receive times: 5 group creations were received in the last hour (even if their created_at values are spread over days), so a 6th is dropped.",
   "message": {
     "schema": "orch.msg/1",
     "id": "m_grpcreated000000",
     "from": "ws_fin0000001",
     "to": "phones",
     "type": "text",
-    "created_at": "2026-11-08T10:02:00Z",
+    "created_at": "2026-01-01T00:00:00Z",
     "ticket": "t_fin14a",
     "key": "FIN-14",
     "body": {
@@ -49,6 +49,13 @@
   },
   "context": {
     "open_groups_of_host": 3,
-    "created_last_hour": 5
+    "now_s": 10000,
+    "creations_recv_s": [
+      6500,
+      7000,
+      8000,
+      9000,
+      9900
+    ]
   }
 }

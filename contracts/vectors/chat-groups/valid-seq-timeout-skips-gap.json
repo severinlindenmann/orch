@@ -1,5 +1,5 @@
 {
-  "why": "G12: quiet group: seq 9 has waited 10 minutes for 7 and 8; seq 10 arrives -> skip the gap, apply 9..10.",
+  "why": "G12: quiet group: seq 9 was RECEIVED 601 s ago (receiver clock) behind missing 7 and 8; seq 10 arrives -> skip the gap, apply 9..10.",
   "message": {
     "schema": "orch.msg/1",
     "id": "m_07c7af21b89aed74",
@@ -58,7 +58,8 @@
       "buffered": [
         9
       ],
-      "oldest_age_s": 601
+      "now_s": 1601,
+      "first_buffered_recv_s": 1000
     }
   },
   "expect": {

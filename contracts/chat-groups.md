@@ -232,15 +232,29 @@ untrusted data for the host helper (clean_untrusted), never instructions.
   `.orch/inbox-seen.json`). Group receivers also dedupe on `(host, group.id, origin.id)`. Fan-out ids per §2 (G2).
 - **Order**: by `group.seq` only; `created_at` only for unsequenced (targeted) messages. **Stateful checks** (G9
   task status, `closed`, membership) are applied **in `seq` order** (G12):
-  - **Initial `applied_seq`**: `from_seq - 1` for a member (its `member_added`), else the first seen `seq - 1` (fresh
-    phone, unknown group), so the first message applies at once.
+  - **Initial `applied_seq`** = the **first seen `seq` - 1** (fresh phone, unknown group, new member), so the first
+    message applies at once. **Never trust `from_seq` for it**: `from_seq` is display / info only.
+  - **Time rule**: never use a peer's `created_at` for ordering, timeouts or rate limits. `created_at` is a claim of
+    the sender and display only. Every timer and counter uses the **receiver's own receive time**.
+  - A group-wide message **without `seq`** (host) is invalid and **changes no state**.
   - `seq` = applied + 1: apply. Higher: **buffer** (bounded, **50 per group**).
-  - **Buffer full, or the oldest buffered message waited 10 minutes** (quiet groups): **skip the gap**, apply the
+  - **Bounds**: `seq` and `from_seq` are integers in **1..2^31-1**; anything else is invalid and dropped. A forward
+    jump **> 1000** over `applied_seq` is a gap skip at once: `applied_seq = seq - 1`, log it, apply the message. A jump
+    of exactly 1000 or less is an ordinary gap (buffered). Gaps are tracked as **ranges**, never as one entry per
+    missing `seq`.
+    - `group.seq` is explicitly **1..2^31-1**; the member → host `body.seen.seq` is **0..2^31-1** (0 = nothing stored yet).
+    - "Integer" means a **JSON integer only**: `5.0`, `"5"` and `true` are invalid.
+    - After a jump skip, buffered messages **below the new `applied_seq`** become old: shown, no state.
+    - **Ports**: compare `seq <= applied_seq` *before* computing `applied_seq + 1`, or use 64-bit integers, so
+      `2^31-1 + 1` never overflows. **Seq exhaustion**: at `2^31-1` the host closes the group and opens a new one.
+    - Gap ranges are **not modelled by `validate.py`** (it only decides the outcome per message), so range tracking is
+      untested here; the jump vectors only prove no per-seq expansion is needed.
+  - **Buffer full, or 10 minutes passed since the receiver received the first buffered message** (receiver clock) (quiet groups): **skip the gap**, apply the
     contiguous run, set `applied_seq` to its last `seq`. A `seq` **≤ `applied_seq`** is **old**.
   - **Late texts are shown** (they are real messages) but **change no state** (task status, closed, membership).
   - **The host MUST persist `seq` monotonically before sending** (write the new value, then send), so a restart never
     reuses or resets numbers. (Chosen over an `(epoch, seq)` pair: one number, no extra field.)
-- **Group caps**: a receiver accepts at most **20 open groups per host** and **5 group creations an hour per host**;
+- **Group caps**: a receiver accepts at most **20 open groups per host** and **5 group creations an hour per host, counted by the receiver's receive time** (never `created_at`);
   a creation is **any** first message of a new `(host, id)` (an explicit `created` or a group first seen from its host,
   §2); beyond that it drops and logs, so a paired host cannot create unbounded groups or buffers.
 - **Stopped member**: the relay keeps its messages in the inbox (existing); it gets them on its next call. **`body.seen
@@ -287,7 +301,7 @@ untrusted data for the host helper (clean_untrusted), never instructions.
 
 ## Vectors (`vectors/chat-groups/`)
 
-Each file: `{why, message, context?, expect?}`. `context` = what the receiver already holds (`known_groups` = [{host, id}]; `seen_origins` = [[host, id, origin.id]]; `order` = {applied_seq (null = fresh), from_seq?, buffered, oldest_age_s}; `own_phones`; `receiver_role`; `open_groups_of_host`, `created_last_hour`;  `paired_phones` (in `host_state`);
+Each file: `{why, message, context?, expect?}`. `context` = what the receiver already holds (`known_groups` = [{host, id}]; `seen_origins` = [[host, id, origin.id]]; `order` = {applied_seq (null = fresh), from_seq? (ignored), buffered, now_s, first_buffered_recv_s}; `own_phones`; `receiver_role`; `open_groups_of_host`, `creations_recv_s` + `now_s`;  `paired_phones` (in `host_state`);
 `host_state` = members, delegates sent per member, task status per delegate, group copies sent to phones, closed,
 last-minute counts). `expect.group_text` = whether a phone text joins the group (G8); `expect.shown_as`, `order`, `applied_after`, `stored_as` + `store`, `card`, `parse`, `map` for G4, G12, G7, G11.
 
@@ -304,7 +318,7 @@ last-minute counts). `expect.group_text` = whether a phone text joins the group 
 | `valid-phone-text-optin-reply`, `valid-phone-text-no-optin-stays-private` | G8 (F13) |
 | `valid-same-id-other-host-is-a-separate-group`, `invalid-duplicate-origin-same-group-key` | G7: key `(host, id)`; duplicate on `(host, id, origin.id)` |
 | `valid-unknown-phone-shown-other-phone`, `valid-own-phone-shown-you`, `invalid-origin-phone-not-paired-to-host` | G4: "You" vs "Other phone"; host-paired `ph_` only |
-| `valid-seq-next-in-order-applied`, `valid-seq-gap-buffered`, `valid-seq-buffer-full-skips-gap`, `valid-seq-timeout-skips-gap`, `valid-seq-first-seen-*`, `valid-seq-late-shown-no-state`, `valid-seq-equal-applied-is-old` | G12: seq order, bounded buffer, skip, initial applied_seq, late = shown |
+| `valid-seq-next-in-order-applied`, `valid-seq-gap-buffered`, `valid-seq-buffer-full-skips-gap`, `valid-seq-timeout-skips-gap`, `valid-seq-first-seen-*`, `valid-seq-late-shown-no-state`, `valid-seq-created-at-future-does-not-flush`, `invalid-groupwide-without-seq`, `valid-seq-jump-1000-buffers`, `valid-seq-jump-1001-skips`, `invalid-seq-zero`, `invalid-seq-over-int31`, `valid-seq-equal-applied-is-old` | G12: seq order, bounded buffer, skip, initial applied_seq, late = shown |
 | `invalid-nonhost-message-at-member-known-group` | G3 at members and phones |
 | `valid-created-under-cap`, `invalid-created-over-group-cap`, `invalid-created-over-rate`, `valid-implicit-group-under-cap`, `invalid-implicit-group-over-cap`, `invalid-implicit-group-over-rate` | group caps |
 | `valid-known-group-same-key-appends` | G7 existing group |
