@@ -1219,17 +1219,24 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         return 127
     current["proc"] = proc
     set_process_fields(root, tid, run, agent_pid=proc.pid, agent_pid_started=pid_started(proc.pid))
-    with contextlib.suppress(Exception):  # pasted input really goes in (Enter again, else a one-step run)
-        import threading
-
-        from orch import runs_live
-
-        threading.Thread(target=runs_live.watch_submit, args=(root, tid, run, proc), daemon=True).start()
     with contextlib.suppress(Exception):  # the tool's first-run screens: passed here, never blocks the run
         from orch import runs_live
 
         runs_live.watch_start(root, tid, run, name, proc)
+    # pasted input really goes in (Enter again, else a one-step run). Started only after watch_start and
+    # joined before anything else here: the run lock is per process, so this thread must never overlap
+    # another user of it in this wrapper.
+    watcher = None
+    with contextlib.suppress(Exception):
+        import threading
+
+        from orch import runs_live
+
+        watcher = threading.Thread(target=runs_live.watch_submit, args=(root, tid, run, proc), daemon=True)
+        watcher.start()
     rc = proc.wait()
+    if watcher is not None:
+        watcher.join(25)  # its loop ends with the agent; one check (tmux calls time out at 20 s) at most
     if new_session and rc == 0:
         tickets.record_session(root, tid, name, new_session, host())
     now = read(root, tid)
