@@ -23,6 +23,7 @@ from .permissions import Permissions
 from .revisions import Revisions
 from .tail import Tail
 
+
 def agent_label(claim: dict | None, agents: list[dict] | None) -> str:
     """Resolve the adapter's display label, including tickets without a claim."""
     claim, agents = claim or {}, agents or []
