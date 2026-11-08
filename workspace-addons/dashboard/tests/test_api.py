@@ -687,13 +687,13 @@ if sys.argv[1:3] == ["addon", "list"]:
 if sys.argv[1:3] == ["publish", "whoami"]:
     print('{"id":"w_local"}'); sys.exit(0)
 if sys.argv[1:3] == ["publish", "list"]:
-    print(json.dumps({"files":[{"id":"f_a","name":"Report","size":3,"expires_at":"2020-01-01T00:00:00Z","url":"https://example.test/f/a","key":"secret"},{"id":"f_b","name":"Other","size":4,"expires_at":None,"url":"https://example.test/f/b"}],"apps":[{"token":"hidden"}]})); sys.exit(0)
+    print(json.dumps({"files":[{"id":"f_a","name":"Report","size":3,"expires_at":"2020-01-01T00:00:00Z","url":"https://example.test/f/a","key":"secretsecretsecret1"},{"id":"f_b","name":"Other","size":4,"expires_at":None,"url":"https://example.test/f/b"}],"apps":[{"token":"hidden"}]})); sys.exit(0)
 ''' + script[pos:]
     act_orch.write_text(script)
     code, body, _ = get(act_server + '/api/links')
     assert code == 200
     rows = json.loads(body)['links']
-    assert rows[0] == dict(id='f_a', name='Report', size=3, expires_at='2020-01-01T00:00:00Z', expired=True, link='https://example.test/f/a#k=secret', copy=True)
+    assert rows[0] == dict(id='f_a', name='Report', size=3, expires_at='2020-01-01T00:00:00Z', expired=True, link='https://example.test/f/a#k=secretsecretsecret1', copy=True)
     assert rows[1]['link'] is None and rows[1]['copy'] is False
     assert 'hidden' not in body.decode() and '"key"' not in body.decode()
     c = http.client.HTTPConnection('127.0.0.1', int(act_server.rsplit(':', 1)[1]))

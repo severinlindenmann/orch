@@ -635,11 +635,18 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
             continue
         expires = f.get("expires_at")
         try:
-            expired = datetime.fromisoformat(expires.replace("Z", "+00:00")) <= datetime.now(UTC)
+            when = datetime.fromisoformat(expires.replace("Z", "+00:00"))
+            expired = (when if when.tzinfo else when.replace(tzinfo=UTC)) <= datetime.now(UTC)
         except (ValueError, TypeError, AttributeError):
             expired = False
         key, url = f.get("key"), f.get("url")
-        link = url.split("#", 1)[0] + "#k=" + key if isinstance(key, str) and key and isinstance(url, str) else None
+        ok = (
+            isinstance(key, str)
+            and re.fullmatch(r"[A-Za-z0-9_-]{16,128}", key)
+            and isinstance(url, str)
+            and re.fullmatch(r"https://[A-Za-z0-9.:\[\]-]+/[!-~]*", url.split("#", 1)[0])
+        )
+        link = url.split("#", 1)[0] + "#k=" + key if ok else None
         links.append({"id": f["id"], "name": f.get("name"), "size": f.get("size"),
                       "expires_at": expires, "expired": expired, "link": link, "copy": link is not None})
     return {"links": links}
