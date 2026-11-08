@@ -1,5 +1,7 @@
 import Foundation
 
+struct GroupRef: Codable, Sendable, Equatable { let host: String; let id: String }
+
 struct GroupInfo: Codable, Sendable, Equatable {
     let id: String
     let host: String
@@ -434,6 +436,7 @@ enum GroupStore {
            task.ticket != nil,
            let q = questions.first(where: {
                $0.id == event.questionMessage && $0.message.from == ws && $0.isGroupAllow &&
+               $0.message.body.groupRef == GroupRef(host: group.key.host, id: group.key.id) &&
                ($0.message.ticket != nil && task.ticket == $0.message.ticket) &&
                $0.message.body.scope?.trimmingCharacters(in: .whitespacesAndNewlines)
                    .caseInsensitiveCompare("tasks from \(group.hostName)") == .orderedSame
