@@ -183,9 +183,10 @@ final class OnboardingFlowUITests: XCTestCase {
         app.launch()
         let box = app.buttons["Sign out"]
         XCTAssertTrue(box.waitForExistence(timeout: 15))
-        // Settings grew (Chats section): scroll until the box is on screen
-        for _ in 0..<6 where !box.isHittable { app.swipeUp() }
+        // Settings grew (Chats section): scroll until the whole box is on screen, above the home indicator
+        app.revealWhole(box)
         XCTAssertTrue(box.isHittable, "Sign out is on screen")
+        XCTAssertLessThan(box.frame.maxY, app.frame.maxY - 44, "the whole box is above the home indicator")
         XCTAssertGreaterThanOrEqual(box.frame.height, 44)
         box.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.5)).tap()
         XCTAssertTrue(app.buttons["signout-confirm"].waitForExistence(timeout: 3))
