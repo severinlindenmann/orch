@@ -27,6 +27,7 @@ SUBCOMMANDS = (
     "stop",
     "event",
     "done",
+    "input",
 )
 
 
@@ -34,7 +35,7 @@ def add_parsers(sub, common) -> None:
     r = sub.add_parser("run", help=argparse.SUPPRESS).add_subparsers(dest="sub")
     for name in SUBCOMMANDS:
         x = r.add_parser(name, parents=[common], help=argparse.SUPPRESS)
-        x.add_argument("ticket", nargs="?" if name in ("event", "done") else None)
+        x.add_argument("ticket", nargs="?" if name in ("event", "done", "input") else None)
         if name in ("claim", "argv"):
             x.add_argument("--mode", choices=("oneshot", "live"), default="oneshot")
         if name == "start":
@@ -307,6 +308,16 @@ def dispatch(args, root: Path) -> bool:
         )
     elif sub == "done":
         _done(args, root, tid)
+    elif sub == "input":
+        if not tid:
+            raise Refused("Say which ticket: orch run input <ticket>")
+        tickets.load(root, tid)
+        run_env = os.environ.get("ORCH_RUN")
+        agent = bool(run_env or tickets.agent_tool())
+        if agent and os.environ.get("ORCH_TICKET") and os.environ["ORCH_TICKET"] != tid:
+            raise Refused(f"This run works on {os.environ['ORCH_TICKET']}, not on {tid}.")
+        text, n = runs_live.read_input(root, tid, run_env, agent)
+        _out(args, {"ticket": tid, "items": n, "text": text}, text or f"Nothing new on {_name(root, tid)}.")
     elif sub == "send":
         _send(args, root, tid, by)
     elif sub == "attach":

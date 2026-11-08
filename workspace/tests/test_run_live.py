@@ -96,6 +96,25 @@ def _claude_live(proj):
     config.set_permissions(proj, "ask")  # no flag, and no `claude --help` probe in the fake's call log
 
 
+def _notices(typed, tid):
+    """How many notice lines orch typed into the fake tool (never a person's text)."""
+    return typed.read_text().count(f"orch run input {tid}") if typed.exists() else 0
+
+
+def _take(run, tid, proj):
+    """What the agent reads after a notice: `orch run input` as the run that holds the ticket (marks it
+    delivered)."""
+    old = os.environ.get("ORCH_RUN")
+    os.environ["ORCH_RUN"] = runs.read(proj, tid)["run"]
+    try:
+        return run("run", "input", tid)[1]
+    finally:
+        if old is None:
+            os.environ.pop("ORCH_RUN", None)
+        else:
+            os.environ["ORCH_RUN"] = old
+
+
 def _hook(run, *args, stdin=None, monkeypatch=None):
     return run("run", "event", *args)
 
@@ -133,7 +152,7 @@ def test_live_start_pastes_the_prompt_and_input_only_when_idle(proj, run, lab):
     code, out, _ = run("run", "done", tid)
     assert "1 message from you waiting: sent." in out
     _until(lambda: len(_lines(lab, "input")) == 2, what="the sent text")
-    assert _lines(lab, "input")[1] == "From human:anna: Use CHF"
+    assert _lines(lab, "input")[1] == "New input: | - human:anna: |     Use CHF"
     assert runs.undelivered(proj, tid) == []
     run("run", "done", tid)
     time.sleep(0.5)
@@ -241,7 +260,9 @@ def test_claude_live_hooks_session_idle_close_and_resume(proj, run, lab, tmp_pat
     )  # fmt: skip
     assert proc.returncode == 0 and proc.stderr == ""
     assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) == SID
-    _until(lambda: typed.exists() and "Do the thing" in typed.read_text(), what="prompt typed")
+    _until(lambda: _notices(typed, tid) == 1, what="notice typed")
+    assert "Do the thing" not in typed.read_text()  # orch types only its notice line
+    assert "Do the thing" in _take(run, tid, proj)
     # an attention hook shows in status
     run("run", "event", "--run", r["run"], "--kind", "attention")
     assert "waiting for your OK" in run("run", "status", tid)[1]
@@ -440,11 +461,11 @@ def test_wrap_reads_only_its_own_env_file(proj, run, lab):
     assert code == 2 and other.exists()
 
 
-def test_pasted_text_has_no_control_characters():
+def test_typed_text_has_no_control_characters():
     dirty = "ok\x1b[201~ rm -rf\x07 \x00done\x7f\x9b\tkeep\nline2"
     assert runs_live.clean(dirty) == "ok[201~ rm -rf done\tkeep\nline2"
-    out = runs_live._format([{"by": "human:x\x1b", "text": dirty}], flat=False)
-    assert "\x1b" not in out and "\x07" not in out and "keep\nline2" in out
+    line = runs_live.notice_line("t_abc123", False)
+    assert line.isascii() and "\n" not in line and line.endswith("orch run input t_abc123")
 
 
 def test_lock_holder_checks_never_assume_dead_without_proof(proj, new_ticket):
@@ -594,7 +615,8 @@ def test_claude_idle_notice_lets_input_in_but_a_permission_notice_never_does(
         == f"orch run event --run {r['run']} --kind working"
     )
     run("run", "event", "--run", r["run"], "--kind", "session")
-    _until(lambda: typed.exists() and "Do the thing" in typed.read_text(), what="prompt typed")
+    _until(lambda: _notices(typed, tid) == 1, what="notice typed")
+    assert "Do the thing" in _take(run, tid, proj)
     run("run", "event", "--run", r["run"], "--kind", "idle")
     # a person types in the live session: the prompt hook says working; a permission notice = attention
     run("run", "event", "--run", r["run"], "--kind", "working")
@@ -604,26 +626,27 @@ def test_claude_idle_notice_lets_input_in_but_a_permission_notice_never_does(
     assert _notice(proj, r["run"], perm).returncode == 0
     assert runs.read(proj, tid)["live"]["state"] == "attention"
     time.sleep(0.5)
-    assert "Use CHF" not in typed.read_text() and len(runs.undelivered(proj, tid)) == 1
+    assert _notices(typed, tid) == 1 and len(runs.undelivered(proj, tid)) == 1
     # even right after a Stop (state idle), a permission notice never pastes
     run("run", "event", "--run", r["run"], "--kind", "idle")  # delivers the waiting text
-    _until(lambda: "Use CHF" in typed.read_text(), what="text after idle")
+    _until(lambda: _notices(typed, tid) == 2, what="notice after idle")
+    assert "Use CHF" in _take(run, tid, proj)
     run("run", "event", "--run", r["run"], "--kind", "idle")
     run("run", "send", tid, "Also October")  # goes in at once (idle)
-    _until(lambda: "Also October" in typed.read_text(), what="sent while idle")
-    rec = runs.read(proj, tid)
-    rec["live"]["state"] = "idle"
-    runs._write(proj, rec)
-    runs.pending_add(proj, tid, "human:anna", "message", "Not into the dialog")
+    _until(lambda: _notices(typed, tid) == 3, what="sent while idle")
+    assert "Also October" in _take(run, tid, proj)
+    # a permission dialog opens while the agent works, then input arrives: it waits (the wrapper's watcher
+    # also types a notice only for an idle agent with no dialog on screen)
     _notice(proj, r["run"], {"message": "Claude needs your permission to use Write"})
-    time.sleep(0.5)
-    assert "Not into the dialog" not in typed.read_text()
+    runs.pending_add(proj, tid, "human:anna", "message", "Not into the dialog")
+    time.sleep(1.0)
+    assert _notices(typed, tid) == 3
     assert runs.read(proj, tid)["live"]["state"] == "attention"
     # an idle notice while a dialog may be open (attention) changes nothing; after Stop it lets input in
     idle_note = {"notification_type": "idle_prompt", "message": "Claude is waiting for your input"}
     assert _notice(proj, r["run"], idle_note).returncode == 0
     time.sleep(0.5)
-    assert "Not into the dialog" not in typed.read_text()
+    assert _notices(typed, tid) == 3
     assert runs.read(proj, tid)["live"]["state"] == "attention"
     # a notice type decides alone: a permission prompt whose text looks idle stays attention
     perm_idle_text = {"notification_type": "permission_prompt", "message": "Claude is waiting for your input"}
@@ -636,13 +659,16 @@ def test_claude_idle_notice_lets_input_in_but_a_permission_notice_never_does(
     _notice(proj, r["run"], {"notification_type": "elicitation_dialog", "message": "waiting for your input"})
     assert runs.read(proj, tid)["live"]["state"] == "attention"
     run("run", "event", "--run", r["run"], "--kind", "idle")
-    _until(lambda: "Not into the dialog" in typed.read_text(), what="text after Stop")
+    _until(lambda: _notices(typed, tid) == 4, what="notice after Stop")
+    assert "Not into the dialog" in _take(run, tid, proj)
     rec = runs.read(proj, tid)  # the agent finished that turn too (idle, nothing waiting)
     rec["live"]["state"] = "idle"
     runs._write(proj, rec)
     runs.pending_add(proj, tid, "human:anna", "message", "After the notice")
     _notice(proj, r["run"], idle_note)
-    _until(lambda: "After the notice" in typed.read_text(), what="text after the idle notice")
+    _until(lambda: _notices(typed, tid) == 5, what="notice after the idle notice")
+    assert "After the notice" in _take(run, tid, proj)
+    assert "Use CHF" not in typed.read_text() and "October" not in typed.read_text()
 
 
 @needs_tmux
@@ -657,7 +683,8 @@ def test_a_persons_answer_goes_to_the_agent_that_waits_for_it(proj, run, lab):
     code, out, _ = run("answer", tid, qid, "Yes", "--by", "human:anna")
     assert code == 0 and out.strip() == "Answered: Yes"
     _until(lambda: len(_lines(lab, "input")) == 2, what="the answer")
-    assert _lines(lab, "input")[1] == f"From human:anna: Answer to your question {qid} (Use CHF?): Yes"
+    want = f"New input: | - human:anna: |     Answer to your question {qid} (Use CHF?): Yes"
+    assert _lines(lab, "input")[1] == want
     assert runs.undelivered(proj, tid) == []
 
 

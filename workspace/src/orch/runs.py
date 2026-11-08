@@ -22,6 +22,7 @@ import secrets
 import socket
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from datetime import UTC, datetime
@@ -882,6 +883,8 @@ def start(
     a = adapters.load(name, root)
     notes = []
     live_ok = runs_live.available(a)
+    if mode is None and any(i.get("live_retry") for i in undelivered(root, tid)):
+        mode = "oneshot"  # a live session did not take this input (check_submit): one step at a time now
     if mode is None:
         mode = "live" if live_ok else "oneshot"
         if not live_ok and a["capabilities"].get("interactive_tmux") and os.name != "nt":
@@ -1067,6 +1070,9 @@ def term_release(root: Path, tid: str, run: str, current: dict) -> None:
     """What the SIGTERM handler does before the process ends: stop the agent tree, then leave the claim."""
     global _terminating
     _terminating = True
+    if current.get("stop") is not None:  # a live run's submit watcher: stop it and wait out its check
+        current["stop"].set()
+        current["guard"].acquire(timeout=30)  # longer than the worst check: lock wait 10 s + tmux 5 x 3 s
     proc = current.get("proc")
     if proc is not None and proc.poll() is None:
         kill_tree(proc.pid)
@@ -1201,7 +1207,9 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         return 1
     set_process(root, tid, run, os.getpid())
     env = {**_agent_environ(), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
-    current: dict = {}
+    # guard: in-process lock between the submit watcher thread and the SIGTERM handler (the run lock is per
+    # process, so it does not keep them apart); stop: set by either, the watcher writes nothing after it
+    current: dict = {"guard": threading.Lock(), "stop": threading.Event()}
     _on_term(root, tid, run, current)
     if os.name != "nt":
         import signal
@@ -1221,7 +1229,20 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         from orch import runs_live
 
         runs_live.watch_start(root, tid, run, name, proc)
+    # pasted input really goes in (Enter again, else a one-step run). Started only after watch_start and
+    # joined before anything else here: the run lock is per process, so this thread must never overlap
+    # another user of it in this wrapper.
+    watcher = None
+    with contextlib.suppress(Exception):
+        from orch import runs_live
+
+        args = (root, tid, run, proc, current["guard"], current["stop"])
+        watcher = threading.Thread(target=runs_live.watch_submit, args=args, daemon=True)
+        watcher.start()
     rc = proc.wait()
+    current["stop"].set()  # nothing more is checked or written by the watcher from here on
+    if watcher is not None:
+        watcher.join(30)  # one check at most: run lock wait 10 s + its tmux calls (3 s each)
     if new_session and rc == 0:
         tickets.record_session(root, tid, name, new_session, host())
     now = read(root, tid)
