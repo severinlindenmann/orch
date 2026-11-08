@@ -86,6 +86,8 @@ struct ConvItem: Identifiable, Equatable, Sendable {
     var canPlay: Bool = false
     var replyTo: String? = nil
     var receipt: Receipt? = nil
+    /// With receipt .started: when the workspace last acked or picked up this text (the General "is working…" line times out from here).
+    var workingSince: String? = nil
     /// Phone texts: the client_id (also the id of an outbox item).
     var clientId: String? = nil
     var question: Question? = nil
@@ -250,7 +252,10 @@ enum ConversationBuilder {
         item.label = label(b.update?.kind); item.speak = b.speak; item.replyTo = m.replyTo
         if !pm.fromPhone, b.update?.kind == "result" { item.artifacts = b.ticketView?.attachments ?? [] }
         if !pm.fromPhone { item.canPlay = d.speak == .always || (b.speak != nil && d.speak != .never) }
-        if pm.fromPhone { item.receipt = receipt(pm, ix); item.clientId = pendingKey(pm) }
+        if pm.fromPhone {
+            item.receipt = receipt(pm, ix); item.clientId = pendingKey(pm)
+            if item.receipt == .started { item.workingSince = ix.startedAt[pm.id] }
+        }
         return item
     }
 

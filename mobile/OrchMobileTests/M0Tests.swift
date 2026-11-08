@@ -405,6 +405,30 @@ final class ConversationTests: XCTestCase {
                                body: TextBody(text: "Tasks", update: TextUpdate(kind: "note"), ticketView: TicketSnapshot(status: "ready", running: false)))]
         XCTAssertEqual(receipt(fresh), .delivered)
     }
+    /// General "<ws> is working…" ends on a later workspace text or after the timeout, without a new message.
+    func testGeneralWorkingLineEndsOnReplyOrTimeout() throws {
+        let g = ConversationID.general(workspace: ws)
+        var d = ConversationInputs()
+        d.messages = [text("m_a", from: me, to: ws, at: "2026-11-08T10:00:00Z", body: TextBody(text: "hello", general: true), delivered: "2026-11-08T10:00:01Z"),
+                      text("m_w", from: ws, to: me, at: "2026-11-08T10:00:10Z", body: TextBody(text: "Working on it", update: TextUpdate(kind: "working"), general: true), replyTo: "m_a")]
+        let items = ConversationBuilder.items(g, d)
+        XCTAssertEqual(items.last?.workingSince, "2026-11-08T10:00:10Z")
+        let t0 = try XCTUnwrap(ConversationRules.date("2026-11-08T10:00:10Z"))
+        XCTAssertTrue(ConversationRules.generalWorking(items, now: t0.addingTimeInterval(60)))
+        XCTAssertFalse(ConversationRules.generalWorking(items, now: t0.addingTimeInterval(ConversationRules.generalWorkingTimeout + 1)), "default timeout")
+        XCTAssertFalse(ConversationRules.generalWorking(items, now: t0.addingTimeInterval(11), timeout: 10), "overridable timeout")
+        // a later ack/working restarts the clock
+        d.messages.append(text("m_w2", from: ws, to: me, at: "2026-11-08T10:05:00Z", body: TextBody(text: "Still on it", update: TextUpdate(kind: "working"), general: true), replyTo: "m_a"))
+        let again = ConversationBuilder.items(g, d)
+        XCTAssertTrue(ConversationRules.generalWorking(again, now: t0.addingTimeInterval(ConversationRules.generalWorkingTimeout + 1)))
+        // the workspace's answer ends it at once
+        d.messages.append(text("m_r", from: ws, to: me, at: "2026-11-08T10:06:00Z", body: TextBody(text: "Hi!", general: true)))
+        XCTAssertFalse(ConversationRules.generalWorking(ConversationBuilder.items(g, d), now: t0.addingTimeInterval(60)))
+        // only acked/picked-up texts count; fractional seconds parse too
+        XCTAssertFalse(ConversationRules.generalWorking([ConvItem(id: "x", at: "2026-11-08T10:00:00Z", side: .me)], now: t0))
+        XCTAssertNotNil(ConversationRules.date("2026-11-08T10:00:10.123Z"))
+    }
+
     func testSentItemInOutboxIsNotShownTwice() {
         var d = ConversationInputs()
         d.outbox = [OutboxItem(clientId: "c1", phone: me, kind: .send, workspace: ws, createdAt: "2026-11-06T10:00:00Z", general: true, text: "x", sentMessageId: "m_a")]

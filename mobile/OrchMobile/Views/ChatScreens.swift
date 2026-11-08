@@ -11,6 +11,27 @@ struct StartedChip: Identifiable, Equatable {
 
 /// Pure rules of the conversation screen (unit-tested).
 enum ConversationRules {
+    /// The General "<ws> is working…" line ends this long after the last ack/working, even with no new message.
+    static let generalWorkingTimeout: TimeInterval = 180
+
+    /// General shows "<ws> is working…" while the last item is this phone's text with a Working receipt, for at most `timeout`
+    /// after the last ack/working. A later workspace text ends it (it becomes the last item). General carries no result, failure or
+    /// stopped update and no ticket_view (contracts/relay-api.md: only ack and working), so no run-end signal can reach it; the
+    /// timeout is what ends a run that stopped without answering.
+    static func generalWorking(_ items: [ConvItem], now: Date, timeout: TimeInterval = generalWorkingTimeout) -> Bool {
+        guard let last = items.last, last.side == .me, last.receipt == .started else { return false }
+        guard let since = last.workingSince.flatMap(date) else { return true }
+        return now.timeIntervalSince(since) < timeout
+    }
+
+    static func date(_ iso: String) -> Date? {
+        let s = String(iso.prefix(while: { $0 != "~" }))
+        let f = ISO8601DateFormatter()
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.date(from: s)
+    }
+
     /// An open question is stale once the workspace has moved on: a later result/failure/stopped line exists.
     static func isStale(index: Int, in items: [ConvItem]) -> Bool {
         let q = items[index]
@@ -79,9 +100,9 @@ struct ConversationView: View {
         case .topic: ticket.map { [$0.key, $0.displayTitle].compactMap { $0 }.joined(separator: " · ") } ?? "Topic"
         }
     }
-    private func working(_ items: [ConvItem]) -> Bool {
+    private func working(_ items: [ConvItem], now: Date) -> Bool {
         if let ticket { return TopicStatus(ticket) == .working }
-        if case .general = resolved { return items.last?.side == .me && items.last?.receipt == .started }
+        if case .general = resolved { return ConversationRules.generalWorking(items, now: now) }
         return false
     }
     private func unread(_ items: [ConvItem]) -> Int { items.filter { $0.incoming && !seenIncoming.contains($0.id) }.count }
@@ -117,7 +138,10 @@ struct ConversationView: View {
             .tint(Theme.brand)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
-                    if working(items) { StatusLine("\(workspaceName) is working…") }
+                    // a clock, so the General line also ends by its timeout without a new message
+                    TimelineView(.periodic(from: .now, by: 15)) { context in
+                        if working(items, now: context.date) { StatusLine("\(workspaceName) is working…") }
+                    }
                     Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(running: ticket?.view?.running, finished: ticket.map { [.done, .stopped, .didntWork].contains(TopicStatus($0)) } ?? false), reply: $reply, )
                 }
             }
