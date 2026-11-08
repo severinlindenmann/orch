@@ -1,4 +1,5 @@
 """Chat + Groups page contracts (pages/chat.js, chat.css): feature-detected groups, no VPN names, safe DOM, 44 px targets."""
+
 import re
 
 from tests import webjs
@@ -16,9 +17,22 @@ def test_page_is_wired_into_the_shell():
 
 
 def test_groups_render_only_when_data_exists():
-    assert "Array.isArray(state.chat?.groups)" in JS or "Array.isArray(state?.chat?.groups)" in JS or "chat?.groups" in JS
-    for text in ("Done groups → History", "Search chats", "Search History", "Context cleared daily at 04:00",
-                 "is thinking…", "Members", "Remove from group", "Allow once", "Answer on your phone or in "):
+    assert (
+        "Array.isArray(state.chat?.groups)" in JS
+        or "Array.isArray(state?.chat?.groups)" in JS
+        or "chat?.groups" in JS
+    )
+    for text in (
+        "Done groups → History",
+        "Search chats",
+        "Search History",
+        "Context cleared daily at 04:00",
+        "is thinking…",
+        "Members",
+        "Remove from group",
+        "Allow once",
+        "Answer on your phone or in ",
+    ):
         assert text in JS
     assert "'chat.say'" in JS and "'chat.group_say'" in JS
 
@@ -26,7 +40,7 @@ def test_groups_render_only_when_data_exists():
 def test_history_is_read_only_and_data_never_goes_through_innerhtml():
     assert "/api/chat/days" in JS and "/api/chat/day/" in JS
     assert "innerHTML" not in JS
-    assert not re.search(r"vpn|netbird|relay", JS, re.I)
+    assert not re.search(r"vpn|netbird|relay", JS, re.IGNORECASE)
 
 
 def test_css_is_scoped_small_screens_and_touch_targets():
