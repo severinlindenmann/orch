@@ -87,7 +87,50 @@ def _relay_topic(a):
 MOBILE_REQUIRED_ADDONS = {"relay.reply": "relay", "relay.topic": "relay"}
 
 
+def _group_ticket(a):
+    acts = _actions()
+    return acts._tid(a.get("ticket"))
+
+
+GROUP_ID = re.compile(r"grp_t_[a-z0-9]{6,16}")
+
+
+def _group_say(a):
+    """Write into a group chat. As the host (`ticket`): `orch relay group say <ticket> --dashboard -- <text>`.
+    In a group this workspace was invited to (`group` + `host`): a member message to the host,
+    `orch relay group reply <host> <group> -- <text>`."""
+    acts = _actions()
+    if "ticket" in a:
+        acts._only(a, ("ticket", "text"))
+        return ["relay", "group", "say", _group_ticket(a)], ["--dashboard"], [acts._text(a.get("text"), "message")]
+    acts._only(a, ("group", "host", "text"))
+    host, group = a.get("host"), a.get("group")
+    if not (isinstance(host, str) and PEER.fullmatch(host)):
+        raise _bad("Choose the group's host.")
+    if not (isinstance(group, str) and GROUP_ID.fullmatch(group)):
+        raise _bad("Choose a group.")
+    return ["relay", "group", "reply", host, group], ["--dashboard"], [acts._text(a.get("text"), "message")]
+
+
+def _group_member(verb):
+    def op(a):
+        acts = _actions()
+        acts._only(a, ("ticket", "workspace"))
+        peer = a.get("workspace")
+        if not (isinstance(peer, str) and PEER.fullmatch(peer)):
+            raise _bad("Choose a workspace.")
+        return ["relay", "group", verb, _group_ticket(a), peer], [], []
+
+    op.__doc__ = (
+        f"{verb.title()} a workspace in a ticket's group: `orch relay group {verb} <ticket> <workspace>`."
+    )
+    return op
+
+
 MOBILE_OPS = {
+    "group.say": _group_say,
+    "group.add": _group_member("add"),
+    "group.remove": _group_member("remove"),
     "relay.reply": _relay_reply,
     "relay.topic": _relay_topic,
     "mobile.set": _mobile_set,
@@ -128,3 +171,137 @@ def load_mobile(root: Path, orch_bin: str | None) -> dict | None:
         "machine": s(d.get("machine"), 60),
         "ended": ended,
     }
+
+
+def _short(v, n=200):
+    return v[:n] if isinstance(v, str) else None
+
+
+_WORD = re.compile(r"[a-z0-9-]{1,24}")
+
+
+def _look(v):
+    """Icon and colour ids only (a host-controlled look must never carry style or markup)."""
+    if (
+        isinstance(v, dict)
+        and isinstance(v.get("icon"), str)
+        and isinstance(v.get("color"), str)
+        and _WORD.fullmatch(v["icon"])
+        and _WORD.fullmatch(v["color"])
+    ):
+        return {"icon": v["icon"], "color": v["color"]}
+    return None
+
+
+def _num(v, hi=2**31 - 1):
+    return v if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= hi else None
+
+
+def _strs(d, keys, n=200):
+    return {k: _short(d.get(k), n) for k in keys if isinstance(d.get(k), str)} if isinstance(d, dict) else None
+
+
+def _card(c):
+    """The host's ticket card, field by field: short strings, small numbers, a short checklist."""
+    if not isinstance(c, dict):
+        return None
+    q = c.get("question") if isinstance(c.get("question"), dict) else None
+    return {
+        **_strs(c, ("ticket", "key", "status"), 40),
+        "title": _short(c.get("title"), 120),
+        "summary": _short(c.get("summary"), 280),
+        "question": _strs(q, ("question_id", "text"), 500) if q else None,
+        "checklist": [
+            {"text": _short(i.get("text"), 200), "done": bool(i.get("done"))}
+            for i in (c.get("checklist") or [])[:20]
+            if isinstance(i, dict)
+        ],
+        "done": _num(c.get("done"), 9999),
+        "total": _num(c.get("total"), 9999),
+        "rev": _num(c.get("rev")) or 0,
+    }
+
+
+def load_groups(root: Path, orch_bin: str | None) -> dict | None:
+    """Group chats across workspaces from `orch relay group list --json`: the groups this workspace hosts (members,
+    seen, task cards) and those it was invited to (members as the host listed them, the ticket card, the last
+    messages). Read only; None when the add-on is not on here or there is no group."""
+    from .data import run_orch  # late: data imports this file
+
+    d = run_orch(orch_bin, ["relay", "group", "list", "--json"], root)
+    if not isinstance(d, dict) or not (d.get("hosted") or d.get("joined")):
+        return None
+
+    def members(rows):
+        return [
+            {
+                "ws": _short(x.get("ws"), 20),
+                "name": _short(x.get("name"), 60),
+                "look": _look(x.get("look")),
+                "host": bool(x.get("host")),
+                "joined_at": _short(x.get("joined_at"), 30),
+                "left_at": _short(x.get("left_at"), 30),
+                "seen": x.get("seen") if isinstance(x.get("seen"), int) else None,
+            }
+            for x in rows
+            if isinstance(x, dict)
+        ]
+
+    hosted = [
+        {
+            "id": _short(g.get("id"), 30),
+            "ticket": _short(g.get("ticket"), 20),
+            "title": _short(g.get("title"), 120),
+            "closed": bool(g.get("closed")),
+            "seq": g.get("seq") if isinstance(g.get("seq"), int) else 0,
+            "members": members(g.get("members") or []),
+            "connectable": [
+                {"ws": _short(c.get("ws"), 20), "name": _short(c.get("name"), 60)}
+                for c in g.get("connectable") or []
+                if isinstance(c, dict)
+            ],
+            "tasks": [
+                {
+                    k: _short(v, 120)
+                    for k, v in t.items()
+                    if k in ("delegate", "ws", "ticket", "key", "title", "status")
+                }
+                for t in g.get("tasks") or []
+                if isinstance(t, dict)
+            ],
+        }
+        for g in d.get("hosted") or []
+        if isinstance(g, dict)
+    ]
+    joined = [
+        {
+            "host": _short(g.get("host"), 20),
+            "id": _short(g.get("id"), 30),
+            "title": _short(g.get("title"), 120),
+            "closed": bool(g.get("closed")),
+            "left": bool(g.get("left")),
+            "seq_max": g.get("seq_max") if isinstance(g.get("seq_max"), int) else 0,
+            "members": members(g.get("members") or []),
+            "card": _card(g.get("card")),
+            "log": [
+                {
+                    "id": _short(x.get("id"), 20),
+                    "seq": _num(x.get("seq")),
+                    "type": _short(x.get("type"), 12),
+                    "at": _short(x.get("at"), 32),
+                    "shown": _short(x.get("shown"), 80),
+                    "text": _short(x.get("text"), 600),
+                    "authority": False,
+                    "late": bool(x.get("late")),
+                    "task": _strs(x.get("task"), ("delegate", "ws", "ticket", "key", "title", "status"), 120),
+                    "event": _strs(x.get("event"), ("kind", "ws", "name", "reason", "mode"), 60),
+                    "file": _strs(x.get("file"), ("blob_id", "name", "sha256", "title"), 200),
+                }
+                for x in (g.get("log") or [])[-50:]
+                if isinstance(x, dict)
+            ],
+        }
+        for g in d.get("joined") or []
+        if isinstance(g, dict)
+    ]
+    return {"hosted": hosted, "joined": joined}
