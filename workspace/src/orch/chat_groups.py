@@ -2220,13 +2220,19 @@ def _report(
     title: str,
     question_message: str | None = None,
     text: str | None = None,
+    repeat: bool = False,
 ) -> dict | None:
-    """The member's status text to the host (existing text + body.task), once per forward step."""
+    """The member's status text to the host (existing text + body.task), once per forward step. `repeat`
+    allows the same status again (the one "Ready for review" note)."""
     rec = j["tasks"].setdefault(delegate, {"ticket": None, "status": None})
     old = rec.get("status")
     if old is not None and (
-        TASK_RANK[status] < TASK_RANK[old] or (TASK_RANK[old] == 4 and status != old) or status == old
+        TASK_RANK[status] < TASK_RANK[old]
+        or (TASK_RANK[old] == 4 and status != old)
+        or (status == old and not repeat)
     ):
+        return None
+    if repeat and old == status and TASK_RANK[old] == 4:
         return None
     me = _me(root)
     from orch import relay
@@ -2338,7 +2344,7 @@ def _status_of(root: Path, ticket: dict) -> str:
     s = ticket.get("status")
     if s in ("done", "dropped"):
         return "done" if s == "done" else "failed"
-    if s == "review":  # the work is done, a person looks at it
+    if s == "review":  # not accepted by the member's own person yet: still working (contract 3.4)
         return "working"
     rec = runs.read(root, ticket["id"])
     return "working" if rec and runs.state(rec) == "alive" else "queued"
@@ -2384,16 +2390,19 @@ def sync(root: Path) -> None:
                     gt = r.get("group_task") if isinstance(r, dict) else None
                     if isinstance(gt, dict) and gt.get("delegate") == did:
                         tid = t["id"]
-                        _report(
-                            root,
-                            st,
-                            j,
-                            did,
-                            _status_of(root, t),
-                            tid,
-                            t["title"],
-                            text=(t.get("summary") if t.get("status") == "done" else None),
-                        )
+                        status = _status_of(root, t)
+                        if t.get("status") == "review":
+                            # not accepted by the member's person yet: stay working, one generic note
+                            if not rec.get("review_noted") and _report(
+                                root, st, j, did, "working", tid, t["title"],
+                                text=f"Ready for review in {_own_name(root, st)}", repeat=True,
+                            ):  # fmt: skip
+                                rec["review_noted"] = True
+                        else:
+                            _report(
+                                root, st, j, did, status, tid, t["title"],
+                                text=(t.get("summary") if t.get("status") == "done" else None),
+                            )  # fmt: skip
                         break
             now = _now_epoch()
             if j["seq_max"] > j["seen_seq"] and now - j["seen_sent"] >= SEEN_EVERY:

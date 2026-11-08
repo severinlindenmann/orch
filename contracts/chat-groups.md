@@ -163,6 +163,11 @@ matches it by `reply_to` = its delegate). The member's allow question to `phones
 | `failed` | member | `failure` | Failed |
 | `denied` | member (the person answered No) | `failure` | pill "You said no to Bank" |
 
+   **Review is not terminal.** When the member's ticket reaches `review` its own person has not accepted the result
+   yet: the task stays `working` and the member sends once only the generic text "Ready for review in <member name>"
+   (`update.kind: working`; no agent summary, no files). `done` (and the result summary) is sent only after the
+   member's person accepted it (ticket `done`); a ticket `dropped` is `failed`. A review that goes back to active sends
+   nothing, and the review note is sent once per task.
    The host forwards each to the other members and `phones` (fan-out, `task` kept) and updates the card.
 5. **Approval in the group.** The card answers the **member's own** allow question. The phone builds the card **only
    from that question itself** (never from the host's text or label) and shows answer buttons only when all hold:

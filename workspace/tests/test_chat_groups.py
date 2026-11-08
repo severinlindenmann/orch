@@ -950,6 +950,46 @@ def test_member_delegate_needs_the_persons_allow_then_reports(proj, run, rel, me
     del tid
 
 
+@pytest.mark.parametrize(
+    "path,expect,kind",
+    [
+        (["review"], ["working"], "working"),  # one generic note, working stays
+        (["review", "active", "review"], ["working"], "working"),  # back to active: nothing; no second note
+        (["review", "done"], ["working", "done"], "result"),
+        (["dropped"], ["failed"], "failure"),
+    ],
+)
+def test_member_ticket_transitions_report_to_host_once(proj, run, rel, member, path, expect, kind):
+    d = from_host("delegate", {"title": "Find the letter", "text": "Send the PDF"}, id=mid("dlg" + "".join(path)))
+    inbox(run, rel, d)
+    allow_t = next(
+        t for t in tickets.list_all(proj) if t["questions"] and t["questions"][0].get("kind") == "relay:allow"
+    )
+    run("answer", allow_t["id"], allow_t["questions"][0]["id"], "once", "--via", "phone")
+    run("relay", "inbox")
+    run("relay", "done", d["id"])
+    run("relay", "inbox")
+    task_ticket = next(t for t in tickets.list_all(proj) if t["ext"]["relay"].get("group_task"))
+    tickets.set_status(proj, task_ticket["id"], "active", "human:test")
+    run("relay", "inbox")
+    rel.sent.clear()
+    for st in path:
+        tickets.set_status(proj, task_ticket["id"], st, "human:test")
+        run("relay", "inbox")
+        run("relay", "inbox")
+    rep = [m for m in sent(rel, to=FIN) if m["body"].get("task")]
+    reported = [m["body"]["task"]["status"] for m in rep]
+    assert reported[-len(expect):] == expect
+    assert rep[-1]["body"]["update"]["kind"] == kind
+    for m in rep:
+        assert contract_errors(m) == []
+    if path[0] == "review":
+        note = rep[0]
+        assert note["body"]["text"].startswith("Ready for review in ") and "task" in note["body"]
+        assert note["body"]["task"]["status"] == "working" and not note["body"].get("shared_files")
+    assert len([m for m in rep if m["body"]["text"].startswith("Ready for review")]) <= 1
+
+
 def test_member_answer_to_denied_task(proj, run, rel, member):
     d = from_host("delegate", {"title": "Do it", "text": "x"}, id=mid("dlg2"))
     inbox(run, rel, d)
