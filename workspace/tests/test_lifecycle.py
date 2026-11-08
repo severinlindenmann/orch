@@ -339,6 +339,10 @@ def test_only_human_pending_input_is_offered_to_start_a_run(proj, run, monkeypat
     assert runs.human_waiting(proj, tid) == []
     code, out, _ = run("run", "status", tid, "--json")
     assert json.loads(out)["human_pending_ids"] == []
+    system = (("orch", "message"), ("agent:automation", "event"), ("human:t", "event"), ("watch", "text"))
+    for by, kind in system:
+        assert runs.pending_add(proj, tid, by, kind, "system note")["human"] is False  # system writers
+    assert runs.human_waiting(proj, tid) == []
     human = runs.pending_add(proj, tid, "human:owner", "answer", "Blue")
     phone = runs.pending_add(proj, tid, "iPhone", "message", "and dessert", via="phone")
     assert [i["id"] for i in runs.human_waiting(proj, tid)] == [human["id"], phone["id"]]

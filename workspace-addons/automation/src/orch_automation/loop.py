@@ -212,10 +212,18 @@ class Scheduler:
             res = self.start_run(tid, "input was waiting for it", now, phone=True)
             if res == "started":
                 started.append(tid)
-            elif res == "failed":  # it did not start: those ids may try again (a few times)
+                continue
+            # anything else gives the ids back. "pending" = a run holds the ticket after all (it reads the
+            # input): no try counted. Every other result (failed, refused, unknown) counts one try per id.
+            if res != "pending":
                 for i in new:
                     tries[i] = tries.get(i, 0) + 1
-                update_state(self.root, tid, queued_started=done, queued_tries=tries)
+            update_state(self.root, tid, queued_started=done, queued_tries=tries)
+            given_up = [i for i in new if tries.get(i, 0) >= QUEUED_TRIES]
+            if given_up:  # said once (this is the try that reached the cap): a person decides now
+                orchcli.log(self.root, tid, f"Input waiting on this ticket could not start an agent after "
+                                            f"{QUEUED_TRIES} tries. It stays queued; start the agent by hand.")
+                self.fail(tid, f"the agent could not be started for the waiting input ({QUEUED_TRIES} tries)")
         return started
 
     def may_start(self, t: dict) -> bool:
