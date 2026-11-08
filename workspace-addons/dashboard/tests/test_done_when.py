@@ -1,4 +1,5 @@
 """Done criteria are passed as plain text and available in both ticket views."""
+
 import json
 
 import pytest
@@ -23,17 +24,27 @@ def test_done_when_flag(op, value):
 @pytest.mark.parametrize("value", ["First thing.\nSecond thing.", ""])
 def test_patch_accepts_done_when(value):
     data = {"done_when": value}
-    argv = actions.build_argv("ticket.patch", {
-        "ticket": "t_abcdef", "data": data, "if_revision": 1,
-    })
+    argv = actions.build_argv(
+        "ticket.patch",
+        {
+            "ticket": "t_abcdef",
+            "data": data,
+            "if_revision": 1,
+        },
+    )
     assert json.loads(argv[-1]) == data
 
 
 @pytest.mark.parametrize("op", ["ticket.new", "ticket.edit", "ticket.patch"])
 def test_nontext_rejected(op):
-    args = {"title": "Export", "done_when": 123} if op == "ticket.new" else {
-        "ticket": "t_abcdef", "done_when": 123,
-    }
+    args = (
+        {"title": "Export", "done_when": 123}
+        if op == "ticket.new"
+        else {
+            "ticket": "t_abcdef",
+            "done_when": 123,
+        }
+    )
     if op == "ticket.patch":
         args = {"ticket": "t_abcdef", "data": {"done_when": 123}, "if_revision": 1}
     with pytest.raises(actions.BadRequest):
@@ -61,4 +72,7 @@ def test_ticket_details_and_readonly_multiline():
     assert "MULTILINE.includes(field) ? 'textarea' : 'input'" in js
     assert "MULTILINE.includes(field) && event.shiftKey" in js
     assert "MULTILINE.includes(field) ? input.value : input.value.trim()" in js
-    assert "act('ticket.edit', {ticket:t.id, [field]:value, if_revision:t.revision})" in js
+    assert (
+        "actRetry('ticket.edit', () => ({ticket:t.id, [field]:value, if_revision:(ticketOf(t.id) || t).revision})"
+        in js
+    )

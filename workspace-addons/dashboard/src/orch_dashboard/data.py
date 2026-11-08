@@ -67,10 +67,34 @@ def _json_files(folder: Path):
     return sorted(p for p in folder.glob("*.json") if p.is_file() and not p.is_symlink())
 
 
+# Slow-changing read-only answers (the add-on list is asked 2-3 times per page poll): kept 10 s, and dropped
+# whenever the page makes a change (actions.run_op calls forget_static), so a reply never shows old settings.
+STATIC_TTL = 10.0
+_STATIC_CMDS = (("addon", "list"), ("agents",))
+_STATIC: dict[tuple, tuple[float, object]] = {}
+
+
+def forget_static() -> None:
+    _STATIC.clear()
+
+
 def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float = 5.0):
     """Run `$ORCH_BIN <args>` in the workspace and return its parsed stdout JSON, or None on any failure."""
     if not orch_bin:
         return None
+    if any(tuple(args[: len(c)]) == c for c in _STATIC_CMDS):
+        key = (orch_bin, str(root), tuple(args))
+        hit = _STATIC.get(key)
+        if hit and time.monotonic() - hit[0] < STATIC_TTL:
+            return hit[1]
+        out = _run_orch(orch_bin, args, root, timeout)
+        if out is not None:
+            _STATIC[key] = (time.monotonic(), out)
+        return out
+    return _run_orch(orch_bin, args, root, timeout)
+
+
+def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
     try:
         r = subprocess.run(
             [orch_bin, *args],
@@ -458,7 +482,11 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
 
     try:  # read-only look: the entry `orch share on` writes (a link is never followed)
         f = root / "AGENTS.md"
-        share = f.is_file() and not f.is_symlink() and "<!-- orch:begin share -->" in f.read_text(encoding="utf-8")
+        share = (
+            f.is_file()
+            and not f.is_symlink()
+            and "<!-- orch:begin share -->" in f.read_text(encoding="utf-8")
+        )
     except (OSError, ValueError):
         share = False
     return {
@@ -580,8 +608,12 @@ def load_state(
         "needs": needs if isinstance(needs, list) else [],
         "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
         "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},
-        "mobile_mode": mobile.load_mobile(root, orch_bin) if with_settings else None,  # the live page only, never a snapshot
-        "look": look.load_look(root, orch_bin, fresh) if with_settings else None,  # the live page only, never a snapshot
+        "mobile_mode": mobile.load_mobile(root, orch_bin)
+        if with_settings
+        else None,  # the live page only, never a snapshot
+        "look": look.load_look(root, orch_bin, fresh)
+        if with_settings
+        else None,  # the live page only, never a snapshot
         "settings": load_settings(root, orch_bin)
         if with_settings
         else None,  # only the live local server: it holds the folder path

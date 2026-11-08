@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import runfiles
-from .data import run_orch
+from .data import forget_static, run_orch
 from .look import LOOK_OPS
 from .look import forget as look_forget
 from .mobile import MOBILE_OPS
@@ -456,7 +456,9 @@ def _without_agent(environ) -> dict:
         fn = getattr(e, "filename", None)
         where = Path(fn).name if isinstance(fn, str) and fn else ""  # never a full path or file content
         why = e.__class__.__name__ + (f" in {where}" if where else "")
-        raise Unavailable(f"orch could not check who is acting here ({why}). Fix that and try again.") from None
+        raise Unavailable(
+            f"orch could not check who is acting here ({why}). Fix that and try again."
+        ) from None
 
 
 def human_env(root: Path, orch_bin: str) -> dict:
@@ -472,6 +474,7 @@ def human_env(root: Path, orch_bin: str) -> dict:
 def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict | None]:
     """Run one op. Returns (http status, plain text, parsed json or None)."""
     argv = build_argv(op, args)
+    forget_static()  # a change may alter what the cached read-only answers say
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
     if op in ("addon.act", "ticket.field") and not _addon_is_on(root, orch_bin, args["addon"]):
@@ -513,7 +516,14 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
     if r.returncode == 0:
         if op.startswith("look."):
             look_forget(root)
-        if op in ("config.agent.add", "addon.set", "config.agent", "config.permissions", "workflow.set", "share.set"):
+        if op in (
+            "config.agent.add",
+            "addon.set",
+            "config.agent",
+            "config.permissions",
+            "workflow.set",
+            "share.set",
+        ):
             _audit(root, op, args)
         return 200, "", out if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None
