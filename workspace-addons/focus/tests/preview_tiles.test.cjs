@@ -12,6 +12,7 @@ function setup(mime = 'text/plain', content = '<script>attack()</script>\n' + 'l
   const context = {window: {}, URL, TextDecoder, Uint8Array, fetch: async url => {
     calls.push(url); return new Response(content, {headers: {'Content-Type': mime}});
   }};
+  vm.runInNewContext(fs.readFileSync(__dirname + '/../src/orch_focus/web/helpers.js', 'utf8'), context);
   vm.runInNewContext(source, context);
   const proof = context.window.FocusProof.create({h, P: '', TID: 't_inv7c2ab'});
   function tile(ext) {return proof.tile({c: {text: 'Task'}, ev: {type: 'file', ref: '.orch/tickets/t_inv7c2ab/evidence/test.' + ext}}, () => {});}

@@ -108,7 +108,7 @@ def test_ops_build_exact_argv(server, fake_orch):
     got = [
         c
         for c in calls(fake_orch)
-        if c[:2] not in (["run", "status"], ["ticket", "show"], ["run", "session"], ["ext", "set"])
+        if c[:2] not in (["run", "status"], ["ticket", "show"], ["run", "session"], ["ext", "set"], ["agents", "--json"], ["relay", "mobile"])
     ]
     assert got[0][:4] == ["run", "start", TID, "--by"] and got[0][4] == "focus"
     assert "--fresh" in got[1]
@@ -337,7 +337,7 @@ def test_ticket_key_in_view_and_list(server, ws):
     t["key"] = "MEC-4"
     p.write_text(json.dumps(t))
     assert json.loads(req(server, "GET", f"/api/t/{TID}")[1])["ticket"]["key"] == "MEC-4"
-    rows = json.loads(req(server, "GET", "/api/tickets")[1])
+    rows = json.loads(req(server, "GET", "/api/tickets")[1])["tickets"]
     assert [r["key"] for r in rows if r["id"] == TID] == ["MEC-4"]
 
 
@@ -346,7 +346,7 @@ def test_a_done_ticket_is_listed_and_opens_as_a_board(server, ws):
     t = json.loads(p.read_text())
     t["status"] = "done"
     p.write_text(json.dumps(t))
-    rows = json.loads(req(server, "GET", "/api/tickets")[1])
+    rows = json.loads(req(server, "GET", "/api/tickets")[1])["tickets"]
     assert [r["status"] for r in rows if r["id"] == TID] == ["done"]
     st, body, _ = req(server, "GET", f"/api/t/{TID}")
     v = json.loads(body)
