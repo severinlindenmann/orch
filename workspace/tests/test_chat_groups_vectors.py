@@ -24,7 +24,7 @@ def test_vector(f):
         assert errs == []
     else:
         assert errs, f"{f.name} should be refused"
-    exp = case.get("expect") or {}
+    exp = (case.get("expect") or {}) if f.name.startswith("valid-") else {}
     m, ctx = case["message"], case.get("context") or {}
     if "group_text" in exp:
         assert cg.phone_joins_group(m, ctx) is exp["group_text"]

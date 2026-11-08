@@ -316,7 +316,7 @@ def _applied(od: dict, seq: int) -> int:
 
 
 def order_step(m: dict, ctx: dict) -> str | None:
-    """Stateful checks run in group.seq order (G12): apply | buffer | skip_gap_and_apply | late_show_no_state."""
+    """Stateful checks run in group.seq order (G12): apply, buffer, skip_gap_and_apply, late_show_no_state."""
     seq, od = ((m.get("body") or {}).get("group") or {}).get("seq"), ctx.get("order")
     if seq is None or od is None:
         return None
@@ -349,7 +349,7 @@ def applied_after(m: dict, ctx: dict) -> int:
 
 
 def shown_as(m: dict, ctx: dict) -> str | None:
-    """ "You" only for a host copy by you whose origin is the host's dashboard or a phone of the viewer's account."""
+    """ "You" only for a host copy by you from the host dashboard or a phone of the viewer's account."""
     b = m.get("body") or {}
     if b.get("by") != "you":
         return None
