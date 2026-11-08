@@ -10,6 +10,7 @@ agents_block = "skills/orch-relay/AGENTS-block.md"
 gitignore = ["received/", ".orch/outbox/", ".orch/relay.lock*", ".orch/inbox/", ".agents/skills/orch-relay/workspaces.json"]
 
 [dashboard]
-label = "Relay"
+label = "Phone & workspaces"
 icon = "link"
 order = 70
+panel = "phone"

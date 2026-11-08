@@ -1,1 +1,23 @@
-/* tickets page styles: this page's rules go here (loaded after style.css). */
+.ticket-filters{flex-wrap:wrap}.ticket-filters input{min-height:44px;max-width:100%;width:240px}
+.board-tools{flex-wrap:wrap;margin-bottom:24px;gap:12px}
+.board-tools .btn,.ticket-row .btn,.ticket-card .btn,.ticket-not-found .btn{min-height:44px}
+.ticket-row .move-button,.ticket-card .move-button{width:44px;min-width:44px;min-height:44px}
+.ticket-row .menu-item,.ticket-card .menu-item{min-height:44px}
+.ticket-row{gap:12px;flex-wrap:wrap}.ticket-row .grow{min-width:180px}
+.ticket-row h3 a::after{display:none}.ticket-row h3 a{display:inline-flex;align-items:center;min-height:44px;gap:8px}
+.ticket-next{gap:10px;flex-wrap:wrap;margin-top:8px}.ticket-next .btn{position:relative;z-index:2}
+.ticket-meta{flex-wrap:wrap;gap:8px}.ticket-row .status-menu{position:relative}
+.board .board-track{grid-template-columns:repeat(5,minmax(0,1fr))}
+.board .col-head{border:0;border-top:2px solid var(--border-strong);border-radius:0;padding:12px 0;margin-bottom:0}
+.column-hint{min-height:36px;margin:0 0 12px}.board-hint{text-align:right;margin-bottom:16px}
+.board .ticket-card{padding:12px}.ticket-card h3{display:block;overflow:visible}.ticket-card h3 a{display:inline-flex;min-height:44px;align-items:center}
+.board-family .board-family{margin-left:14px;border-left:1px solid var(--border);padding-left:6px}
+.board-child h3{font-size:12px}.ticket-card .ticket-next{align-items:flex-start;flex-direction:column}
+@media(max-width:720px){
+  .board .board-track{display:grid;grid-template-columns:minmax(0,1fr);overflow:visible}
+  .board .kanban-col{display:block;min-height:0;width:100%}
+  .board .column-hint{min-height:0}.ticket-meta{width:100%}.ticket-filters{width:100%}
+  .ticket-filters input{flex:1;min-width:0}.board-family .board-family{margin-left:10px}
+}
+.not-found{text-align:center;padding:80px 16px}.not-found>.ic-wrap{display:inline-grid;place-items:center;width:64px;height:64px;border:1px solid var(--border-strong);border-radius:16px;margin-bottom:24px}
+.not-found .ticket-not-found{justify-content:center;flex-wrap:wrap}

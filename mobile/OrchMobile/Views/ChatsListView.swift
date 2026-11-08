@@ -23,7 +23,6 @@ struct ChatsListView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     header
                     ModelMessage()
-                    MobileModeBanner()
                     searchField
                     chips
                     content
@@ -127,6 +126,8 @@ struct ChatsListView: View {
             }.frame(maxWidth: .infinity).padding(.vertical, 50).accessibilityIdentifier("chats-empty")
         } else {
             attentionCards
+            let now = NowLine.counts(model.workspaceSummaries)
+            NowLine(running: now.running, newCount: now.newCount, newFrom: now.newFrom)
             let shown = model.workspaceSummaries.filter { filter == "All" || (filter == "Unread" ? $0.unread > 0 : $0.openQuestions > 0) }
             if shown.isEmpty {
                 Text("Nothing here yet.").themeFont(15).foregroundStyle(Theme.muted).padding(.vertical, 24)
@@ -161,23 +162,33 @@ struct ChatsListView: View {
 
     @ViewBuilder private var attentionCards: some View {
         let questions = model.questions.filter { model.answers[$0.id] == nil }
-        if !questions.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
+        if !questions.isEmpty && (filter == "All" || filter == "Needs you") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Needs you · \(questions.count)").themeFont(13, .semibold).foregroundStyle(Theme.warn)
+                    .accessibilityAddTraits(.isHeader)
+                VStack(spacing: 0) {
                     ForEach(questions) { question in
                         let ws = question.message.from
-                        let name = model.workspaceSummaries.first { $0.id == ws }.map { WorkspaceAlias.name(for: $0.workspace) } ?? ws
+                        let summary = model.workspaceSummaries.first { $0.id == ws }
+                        let topic = summary?.topics.first { $0.id.ticket == question.message.ticket && question.message.ticket != nil }
+                        let key = topic?.key ?? question.message.key
+                        let title = topic?.title ?? question.message.body.title ?? summary.map { WorkspaceAlias.name(for: $0.workspace) } ?? question.workspaceName
                         NavigationLink(value: question.message.ticket.map { ChatRoute.ticket(workspace: ws, ticket: $0) } ?? .workspace(ws)) {
-                            VStack(alignment: .leading, spacing: 9) {
-                                Text("\(name) · Needs you").themeFont(12, .semibold).foregroundStyle(Theme.warn).lineLimit(1)
-                                Text(question.message.body.title ?? question.message.body.text).themeFont(15, .semibold).lineLimit(2)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }.padding(16).frame(width: 220, alignment: .leading).frame(minHeight: 98)
-                                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                            HStack(spacing: 14) {
+                                Image(systemName: "bubble.left").themeFont(20).foregroundStyle(Theme.warn).accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("\(key.map { "\($0) " } ?? "")")
+                                        .font(Theme.font(13)).foregroundColor(Theme.muted)
+                                    + Text(title).font(Theme.font(17, .semibold)).foregroundColor(Theme.text)
+                                    Text(question.message.body.text).themeFont(13).foregroundStyle(Theme.muted).lineLimit(2)
+                                }.frame(maxWidth: .infinity, alignment: .leading).multilineTextAlignment(.leading)
+                                ShellChevron()
+                            }.padding(.horizontal, 16).padding(.vertical, 14).contentShape(Rectangle())
                         }.buttonStyle(PressStyle()).foregroundStyle(Theme.text)
+                        if question.id != questions.last?.id { ShellDivider() }
                     }
-                }
-            }.padding(.bottom, 12)
+                }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            }
         }
     }
 
@@ -189,7 +200,7 @@ struct ChatsListView: View {
             HStack(spacing: 12) {
                 WorkspaceBadge(name: name, icon: summary.workspace.icon, color: summary.workspace.color, size: 46, lastSeen: .some(summary.workspace.lastSeen), id: summary.id)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(name).themeFont(17, .semibold).lineLimit(2)
+                    Text("Chat · \(name)").themeFont(17, .semibold).lineLimit(2)
                     Text(starting ? "Getting started…" : summary.lastLine).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
                     if summary.openQuestions > 0 { Text(summary.openQuestions == 1 ? "1 needs you" : "\(summary.openQuestions) need you").themeFont(13).foregroundStyle(Theme.warn) }
                 }.frame(maxWidth: .infinity, alignment: .leading)

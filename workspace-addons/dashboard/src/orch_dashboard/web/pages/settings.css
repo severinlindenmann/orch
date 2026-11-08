@@ -1,1 +1,44 @@
-/* settings page styles: this page's rules go here (loaded after style.css). */
+/* Settings and native add-on cards share the kit's light/dark tokens. */
+.settings-layout{display:grid;grid-template-columns:156px minmax(0,1fr);gap:24px;align-items:start}
+.settings-content{min-width:0}
+.settings .settings-nav{display:flex;flex-direction:column;gap:4px;border:0;padding:0;align-items:stretch}
+.settings-nav button,.settings-nav a{display:flex;align-items:center;min-height:44px;padding:10px 12px;border:0;border-radius:8px;text-decoration:none;text-align:left;white-space:nowrap;color:var(--text-muted);background:transparent}
+.settings-nav button[aria-selected=true]{color:var(--text);background:var(--surface-2)}
+.settings .card{border-radius:12px}
+.settings .card-row{padding:16px}
+.settings details summary,.addon-native summary{min-height:44px;align-content:center;cursor:pointer;color:var(--text-muted)}
+.settings-details{padding:0 16px 12px}.settings-details .card-row{padding:0}
+.agent-cards{display:grid;gap:16px}
+.settings .agent-card{display:grid;grid-template-columns:24px minmax(0,1fr) auto auto;align-items:center;gap:12px;border:1px solid var(--border)}
+.settings .agent-card input,.settings .permission-choices input{width:24px;height:24px;margin:0;accent-color:var(--text)}
+.settings .agent-card .test-note{grid-column:2/-1;margin:0;color:var(--text)}
+.settings .agent-card.off{opacity:1}
+.settings .permission-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.settings [data-key=settings-permissions]>.card{border:0;background:transparent}
+.settings .permission-choices .agent-opt{border:1px solid var(--border);border-radius:12px;background:var(--surface);gap:12px;flex-wrap:wrap}
+.settings .permission-choices .sel{border-color:var(--text-muted);background:var(--surface-2)}
+.settings-addon-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.settings .ad-row{border:1px solid var(--border)}
+.settings .ad-h{padding:16px;flex-wrap:wrap;gap:16px}
+.settings .ad-h>.grow{flex-basis:100%;display:grid;gap:12px}
+.settings .ad-h>.switch{margin-left:auto;width:auto;display:inline-flex;align-items:center;gap:8px}
+.settings .ad-h>.switch::before{flex:none}
+.settings button,.addon-native button,.settings-other button{min-height:44px}
+.addon-native .actions{display:flex;gap:8px;flex-wrap:wrap}
+.shared-link{padding:16px 0;border-top:1px solid var(--border);overflow-wrap:anywhere}
+.shared-link .chip{justify-self:start;align-self:flex-start;width:fit-content}
+@media(max-width:760px){
+  .settings-layout{grid-template-columns:minmax(0,1fr);gap:20px}
+  .settings .settings-nav{flex-direction:row;overflow-x:auto;flex-wrap:nowrap}
+  .settings-nav>*{flex-shrink:0}
+  .settings-addon-grid,.settings .permission-choices{grid-template-columns:minmax(0,1fr)}
+  .settings .agent-card{grid-template-columns:24px minmax(0,1fr) auto}
+  .settings .agent-card>.btn{grid-column:2}
+}
+/* Keep the switch track compact inside a full-height touch target. */
+.settings .switch{min-height:44px;height:auto;width:44px;margin:0;background:transparent;border-radius:8px}
+.settings .switch::before{content:"";position:absolute;inset:auto;left:4px;top:12px;width:36px;height:20px;border-radius:99px;background:var(--surface-3)}
+.settings .switch::after{top:14px;left:4px}
+.settings .switch[aria-checked=true]::before{background:var(--brand)}
+.settings .ad-h>.switch{padding-left:48px;min-width:80px;color:var(--text)}
+.settings [data-key=settings-workspace]{order:-1}

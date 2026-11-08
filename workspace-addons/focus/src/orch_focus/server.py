@@ -32,7 +32,7 @@ TYPES = {
 }  # fmt: skip
 KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js")  # fmt: skip
-WEB_FILES = ("index.html", "focus.js", "proof.js", "focus.css", "logo.svg")
+WEB_FILES = ("index.html", "focus.js", "proof.js", "helpers.js", "focus.css", "logo.svg")
 PREFIX = re.compile(
     r"/addon/[a-z][a-z0-9-]{1,31}"
 )  # set by the dashboard when it shows this page under its own address
@@ -63,7 +63,40 @@ class Tracker:
         self.perms = Permissions(root, orch_bin)
         self.last_agent: dict[str, tuple[str, str]] = {}  # ticket -> (agent, mode) of its latest run
         self.ticket_cache: dict[str, tuple[float, dict | None]] = {}
+        self.lookup_cache = {}
         self.session_cache: dict[str, tuple[float, str, str | None]] = {}
+
+    def lookup(self, key, argv, ttl=30):
+        hit = self.lookup_cache.get(key)
+        if hit and time.monotonic() - hit[0] < ttl:
+            return hit[1]
+        data = None
+        try:
+            code, out, _ = actions.orch(self.root, self.orch_bin, argv, timeout=5)
+            if code == 0:
+                data = json.loads(out)
+        except (actions.Unavailable, ValueError, RecursionError):
+            pass
+        self.lookup_cache[key] = (time.monotonic(), data)
+        return data
+
+    def agents(self):
+        data = self.lookup("agents", ["agents", "--json"])
+        return [a for a in data if isinstance(a, dict)] if isinstance(data, list) else []
+
+    def mobile(self):
+        data = self.lookup("mobile", ["relay", "mobile", "status", "--json"], ttl=1)
+        available = isinstance(data, dict) and isinstance(data.get("on"), bool)
+        return {"available": available, "on": data["on"] if available else False}
+
+    def workspace(self):
+        data = self.lookup("workspace", ["status", "--json"])
+        if isinstance(data, list):
+            data = next((w for w in data if isinstance(w, dict) and w.get("workspace") == str(self.root.resolve())), {})
+        name = (data.get("name") or data.get("workspace")) if isinstance(data, dict) else None
+        if isinstance(name, dict):
+            name = name.get("name")
+        return Path(name).name if isinstance(name, str) and name else self.root.name
 
     def _started_file(self) -> Path:
         return runfiles.run_dir(self.root, "focus") / "started.json"
@@ -198,14 +231,17 @@ class Tracker:
                 self.ticket_cache.pop(tid, None)
         if run is None and claim.get("run") is not None:
             claim = {**claim, "run": None}  # an id that is not a run id is unknown
-        v = self._shape(ticket, status, claim, board, events, self.is_generic(claim, tid))
+        v = self._shape(ticket, status, claim, board, events, self.is_generic(claim, tid), self.agents())
+        mobile = self.mobile()
+        v["capabilities"] = {"phone_mode": mobile["available"]}
+        v["phone_mode"] = mobile["on"]
         v["page_key"] = proofs.page_key(tid)
         v["retry_error"] = None if v["run"]["running"] else self.perms.failed.get(tid)
         return v
 
     @staticmethod
     def _shape(
-        ticket: dict, status: dict, claim: dict, board: dict, events: list[dict], generic: bool
+        ticket: dict, status: dict, claim: dict, board: dict, events: list[dict], generic: bool, agents: list[dict] | None = None
     ) -> dict:
         checks = ticket.get("checklist") or []
         questions = ticket.get("questions") or []
@@ -223,16 +259,22 @@ class Tracker:
         else:
             state = "stopped"
         agent = claim.get("agent") or "agent"
+        agents = agents or []
+        label = (claim.get("label")
+                 or next((a.get("label") for a in agents if a.get("name") == claim.get("agent")), None)
+                 or (str(claim["agent"])[:1].upper() + str(claim["agent"])[1:] if claim.get("agent") else None)
+                 or next((a.get("label") for a in agents if a.get("chosen")), None)
+                 or "agent")
         return {
             "ticket": {
                 "id": ticket.get("id"), "key": ticket.get("key"), "title": ticket.get("title"),
-                "status": ticket.get("status"),
+                "status": ticket.get("status"), "closed_at": ticket.get("closed_at"),
                 "started": bool(ticket.get("started") or (ticket.get("ticket_view") or {}).get("started") or claim.get("run")),
                 "revision": ticket.get("revision", 0), "checklist": checks, "questions": questions,
                 "history": (ticket.get("history") or [])[-80:],
             },
             "run": {
-                "running": running, "mode": claim.get("mode"), "agent": agent, "run": claim.get("run"),
+                "running": running, "mode": claim.get("mode"), "agent": agent, "label": label, "run": claim.get("run"),
                 "started_at": claim.get("started_at"), "pending": status.get("pending", 0),
             },
             "state": state,
@@ -295,9 +337,15 @@ class Tracker:
                     "done",
                 )  # a done ticket opens as a read-only board
             ):
+                questions = [q for q in t.get("questions", []) if q.get("answer") is None]
+                started = bool(t.get("started") or (t.get("ticket_view") or {}).get("started"))
+                next_step = ("Done" if t["status"] == "done" else "Answer" if questions
+                             else "Check the result" if t["status"] == "review"
+                             else "Working…" if t["status"] == "active"
+                             else "Paused" if started or t["status"] == "waiting" else "Start")
                 out.append(
                     {
-                        "id": t["id"],
+                        "id": t["id"], "next_step": next_step, "question_count": len(questions),
                         "key": t.get("key"),
                         "title": str(t.get("title", ""))[:200],
                         "status": t["status"],
@@ -359,7 +407,9 @@ class Handler(BaseHTTPRequestHandler):
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         if path == "/api/tickets":
-            return self._json(200, self.tracker.tickets_list())
+            return self._json(200, {"workspace": self.tracker.workspace(), "tickets": self.tracker.tickets_list()})
+        if path == "/api/mobile":
+            return self._json(200, self.tracker.mobile())
         if path == "/api/events":
             return self._events()
         m = re.fullmatch(r"/api/t/(t_[a-z0-9]{6,16})", path)
@@ -371,6 +421,7 @@ class Handler(BaseHTTPRequestHandler):
                 if sig != self.tracker.seen_sig:
                     self.tracker.seen_sig = sig
                     self.tracker.ticket_cache.clear()
+                    self.tracker.lookup_cache.pop("mobile", None)
                     self.tracker.status_cache.clear()
             v = self.tracker.view(m.group(1))
             return self._json(200, v) if v else self._send(404, b"no such ticket", "text/plain")
@@ -461,6 +512,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
         except actions.Unavailable as e:
             return self._send(503, str(e).encode(), "text/plain; charset=utf-8")
+        self.tracker.lookup_cache.pop("mobile", None)
         self.tracker.status_cache.clear()
         self.tracker.ticket_cache.clear()  # the view sent back must show what this action just did
         if code == 200 and body.get("op") == "run.start":
@@ -475,7 +527,7 @@ class Handler(BaseHTTPRequestHandler):
         view = self.tracker.view(tid) if isinstance(tid, str) and TID_RE.fullmatch(tid) else None
         note = None
         if body.get("op") == "run.send":
-            note = chat.note(extra, bool(view and view["run"]["running"]), bool(view and view["live"]))
+            note = chat.note(extra, bool(view and view["run"]["running"]), bool(view and view["live"]), any(q.get("answer") is None for q in view["ticket"].get("questions", [])) if view else False)
         self._json(200, {"result": extra, "view": view, "note": note})
 
 

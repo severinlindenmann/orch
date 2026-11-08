@@ -1,9 +1,22 @@
 'use strict';
 // New ticket / edit ticket dialog.
 function ticketForm(t) {
-  const {d, actions} = dialog(t ? 'Edit ticket' : 'New ticket', t ? 'sheet' : 'dialog', t ? 'ticket-meta' : '');
+  const {d, actions} = dialog(t ? 'Edit ticket' : 'New ticket', t ? 'sheet' : 'dialog', t ? 'ticket-meta' : 'new-ticket');
   const form = el('form'), fields = el('div', 'form-fields'), inputs = {};
-  for (const field of (t ? ['owner', 'due', 'note'] : ['title', 'owner', 'due', 'note'])) {
+  let optionalFields = fields;
+  if (!t) {
+    const label = el('label', '', 'What needs doing?');
+    const input = el('textarea', 'input new-ticket-text');
+    input.name = 'text'; input.id = 'field-' + serial + '-text';
+    input.rows = 10; input.maxLength = 20000; input.required = true;
+    input.placeholder = 'Paste or write it here. A short title or a long text with many points: the agent splits it into tasks.';
+    input.addEventListener('input', () => input.setCustomValidity(input.value.trim() ? '' : 'What needs doing?'));
+    label.htmlFor = input.id; label.append(input); fields.append(label); inputs.text = input;
+    const options = el('details', 'new-ticket-options');
+    optionalFields = el('div', 'form-fields');
+    options.append(el('summary', '', 'More options'), optionalFields); fields.append(options);
+  }
+  for (const field of (t ? ['owner', 'due', 'note'] : ['owner', 'due'])) {
     const label = el('label', '', field.charAt(0).toUpperCase() + field.slice(1) + (field === 'title' ? '' : ' (optional)'));
     const input = el(field === 'note' ? 'textarea' : 'input', 'input');
     input.name = field; input.id = 'field-' + serial + '-' + field;
@@ -15,7 +28,7 @@ function ticketForm(t) {
     }
     if (field === 'title') { input.required = true; input.maxLength = 200; }
     input.value = t?.[field] || '';
-    label.htmlFor = input.id; label.append(input); fields.append(label); inputs[field] = input;
+    label.htmlFor = input.id; label.append(input); optionalFields.append(label); inputs[field] = input;
   }
   const error = el('p', 'bad'); error.setAttribute('role', 'alert');
   const reload = button('Reload ticket', 'outline sm', async () => { await refresh(); await window.orch.close(d); const latest = ticketOf(t?.id); if (latest) ticketForm(latest); });
@@ -34,14 +47,19 @@ function ticketForm(t) {
   let created = null, creationUnresolved = false;
   form.addEventListener('submit', async event => {
     event.preventDefault();
+    if (!t) inputs.text.setCustomValidity(inputs.text.value.trim() ? '' : 'What needs doing?');
     if (!form.reportValidity() || submit.disabled || creationUnresolved) return;
     submit.disabled = true; error.textContent = ''; reload.hidden = true;
     const values = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.value.trim()]));
     let result;
     if (t) result = await act('ticket.edit', {ticket:t.id, owner:values.owner, due:values.due, note:values.note, if_revision:t.revision});
     else {
+      const fullText = inputs.text.value;
+      values.title = fullText.split(/\r?\n/).map(line => line.trim()).find(Boolean).slice(0, 200);
+      values.note = /[\r\n]/.test(fullText) || fullText.trim() !== values.title ? fullText : '';
       if (!created) {
         const previous = new Set(tickets().map(t => t.id));
+        // m1-api: switch to the paste action when it lands
         result = await act('ticket.new', {title:values.title, ...Object.fromEntries(['owner', 'due', 'note'].filter(k => values[k]).map(k => [k, values[k]]))});  // one write, one history line
         if (result.ok) {
           created = tickets().filter(t => t.title === values.title && !previous.has(t.id)).sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0))[0];
@@ -62,7 +80,7 @@ function ticketForm(t) {
     if (!result.ok) {
       error.textContent = result.text + (result.status === 409 ? ' Reload the ticket before trying again.' : '');
       reload.hidden = !(t && result.status === 409);
-      if (created) { inputs.title.disabled = true; submit.textContent = 'Save details'; if (plain) plain.hidden = true; }
+      if (created) { inputs.text.disabled = true; submit.textContent = 'Save details'; if (plain) plain.hidden = true; }
       return;
     }
     window.orch.toast(t ? 'Ticket updated' : 'Ticket created', 'ok');
