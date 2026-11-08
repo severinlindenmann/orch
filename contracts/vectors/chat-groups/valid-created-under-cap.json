@@ -1,5 +1,5 @@
 {
-  "why": "Group cap: 19 open groups and 4 created in the last hour is under both caps.",
+  "why": "Group cap: 19 open groups and 4 created in the last hour is under both caps. (An old receive time outside the hour does not count.)",
   "message": {
     "schema": "orch.msg/1",
     "id": "m_grpcreated000000",
@@ -49,6 +49,12 @@
   },
   "context": {
     "open_groups_of_host": 19,
-    "created_last_hour": 4
+    "now_s": 10000,
+    "creations_recv_s": [
+      1000,
+      2000,
+      9000,
+      9500
+    ]
   }
 }

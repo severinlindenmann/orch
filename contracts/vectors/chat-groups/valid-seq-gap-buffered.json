@@ -55,8 +55,7 @@
   "context": {
     "order": {
       "applied_seq": 6,
-      "buffered": [],
-      "oldest_age_s": 0
+      "buffered": []
     }
   },
   "expect": {
