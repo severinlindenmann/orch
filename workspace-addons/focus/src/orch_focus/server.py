@@ -14,7 +14,7 @@ from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote
 
 from . import actions, adapterdata, chat, proofs, runfiles
 from .board import Board, TicketWatcher
@@ -375,6 +375,10 @@ class Handler(BaseHTTPRequestHandler):
             q = parse_qs(self.path.partition("?")[2], keep_blank_values=True)
             one = lambda k: (q.get(k) or [""])[0]
             code, body, ctype, extra = proofs.read(self.root, one("t"), one("n"), one("m") or "view")
+            return self._send(code, body, ctype, {"Cross-Origin-Resource-Policy": "same-origin", **extra})
+        m = re.fullmatch(r"/page/(t_[a-z0-9]{6,16})/(.+)", path)
+        if m:  # a page of a ticket and the files it loads, by path so relative links resolve (proofs.read_page)
+            code, body, ctype, extra = proofs.read_page(self.root, m.group(1), unquote(m.group(2)))
             return self._send(code, body, ctype, {"Cross-Origin-Resource-Policy": "same-origin", **extra})
         if path == "/" or re.fullmatch(r"(/t)?/t/t_[a-z0-9]{6,16}", path):
             pre = self.headers.get("X-Forwarded-Prefix") or ""

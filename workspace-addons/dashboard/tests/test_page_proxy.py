@@ -22,7 +22,11 @@ class Up(BaseHTTPRequestHandler):
         SEEN.append((self.command, self.path, dict(self.headers)))
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
-        self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
+        self.send_header(
+            "Content-Security-Policy",
+            "script-src 'self'; sandbox allow-scripts" if "/page/" in self.path and "/sb/" in self.path
+            else "frame-ancestors 'none'",
+        )
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -49,10 +53,13 @@ if a[:2] == ["addon", "list"]:
     print(json.dumps([
       {{"name": "viewer", "active": True, "description": "d", "dashboard": {{"label": "Viewer", "icon": "bolt"}},
         "page": {{"path": "/", "label": "Open"}}, "ticket_view": []}},
+      {{"name": "focus", "active": True, "description": "d", "dashboard": {{"label": "F", "icon": "bolt"}},
+        "page": {{"path": "/", "label": "Open"}}, "ticket_view": []}},
       {{"name": "nopage", "active": True, "description": "d", "dashboard": {{"label": "N", "icon": "bolt"}}, "ticket_view": []}}]))
 elif a[:2] == ["status", "--json"]:
     print(json.dumps([{{"workspace": {str(ws.resolve())!r}, "addons": [
       {{"addon": "viewer", "running": True, "url": "http://127.0.0.1:{port}/"}},
+      {{"addon": "focus", "running": True, "url": "http://127.0.0.1:{port}/"}},
       {{"addon": "nopage", "running": True, "url": "http://127.0.0.1:{port}/"}}]}}]))
 else:
     sys.exit(2)
@@ -171,3 +178,27 @@ def test_agent_test_op_argv_and_reply(act_orch, ws):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_focus_page_files_load_cross_site_with_their_own_sandbox_csp(stack):
+    """A sandboxed frame (opaque origin) loads its css/js cross-site: only Focus's GET /page/<ticket>/<file>."""
+    base, _ = stack
+    cross = {"Sec-Fetch-Site": "cross-site"}
+    code, _, h = call(base + "/addon/focus/page/t_abcdef/sb/a%20b/style.css", headers=cross)
+    assert code == 200
+    assert h["Content-Security-Policy"] == "script-src 'self'; sandbox allow-scripts"
+    assert h["Cross-Origin-Resource-Policy"] == "cross-origin"
+    assert SEEN[-1][1] == "/page/t_abcdef/sb/a%20b/style.css"
+    # nothing else loosens: other add-ons, other Focus paths, other methods
+    n = len(SEEN)
+    post = {**cross, "Origin": base, "Content-Type": "application/json"}
+    assert call(base + "/addon/focus/api/tickets", headers=cross)[0] == 403
+    assert call(base + "/addon/focus/page/t_abcdef/..%2fx.css", headers=cross)[0] == 404
+    assert call(base + "/addon/focus/page/t_abcdef/x.css", "POST", post, b"{}")[0] in (403, 405)
+    assert len(SEEN) == n
+    # an add-on that does not answer with a sandbox policy gets no cross-site read, whatever the path
+    assert call(base + "/addon/viewer/page/t_abcdef/x.css", headers=cross)[0] == 403
+    assert call(base + "/addon/viewer/page/t_abcdef/x.css")[0] == 200
+    # a same-site request to a non-page path keeps the dashboard's own CSP
+    _, _, h2 = call(base + "/addon/focus/t/t_abcdef")
+    assert "script-src" not in h2["Content-Security-Policy"] and "sandbox" not in h2["Content-Security-Policy"]

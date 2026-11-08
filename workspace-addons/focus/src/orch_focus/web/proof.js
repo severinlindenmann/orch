@@ -38,7 +38,9 @@
       if (CODE_EXT.has(e)) return 'code';
       return 'other';
     }
-    const url = (ev, mode) => P + '/api/file?t=' + encodeURIComponent(TID) + '&n=' + encodeURIComponent(fileName(ev)) + '&m=' + mode;
+    /* a page by path (not ?n=): its relative CSS, scripts and pictures then load from the same folder */
+    const pageUrl = ev => P + '/page/' + encodeURIComponent(TID) + '/' + fileName(ev).split('/').map(encodeURIComponent).join('/');
+    const url = (ev, mode) => mode === 'page' ? pageUrl(ev) : P + '/api/file?t=' + encodeURIComponent(TID) + '&n=' + encodeURIComponent(fileName(ev)) + '&m=' + mode;
 
     function title(ev, kind) {
       if (ev.title) return String(ev.title);
@@ -255,8 +257,8 @@
         setCopy(src.text);
         const area = h('div', {class: 'fx-pv-pagearea'});
         const showSource = () => area.replaceChildren(h('pre', {class: 'fx-pv-pre code', tabindex: '0'}, highlight(src.text, false)));
-        const showPage = () => area.replaceChildren(h('p', {class: 'fx-pv-cap', text: 'Agent preview. Scripts, forms and links are switched off.'}),
-          h('iframe', {class: 'fx-pv-frame', sandbox: '', referrerpolicy: 'no-referrer', src: url(ev, 'page'), title: title(ev, kind)}));
+        const showPage = () => area.replaceChildren(h('p', {class: 'fx-pv-cap', text: 'Agent preview. The page can run its own scripts, but it cannot reach Focus or the internet.'}),
+          h('iframe', {class: 'fx-pv-frame', sandbox: 'allow-scripts', referrerpolicy: 'no-referrer', src: url(ev, 'page'), title: title(ev, kind)}));
         const seg = [['Source', showSource], ['Page', showPage]].map(([t, fn], n) => {
           const b = h('button', {type: 'button', class: 'btn sm ' + (n ? 'ghost' : ''), 'aria-pressed': String(!n), text: t, onclick: () => { seg.forEach(x => { x.classList.toggle('ghost', x !== b); x.setAttribute('aria-pressed', String(x === b)); }); fn(); }});
           return b;

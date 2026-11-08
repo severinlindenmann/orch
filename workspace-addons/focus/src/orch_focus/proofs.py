@@ -5,8 +5,10 @@ reader: no links, no hard links, no FIFOs, folders opened one by one). This modu
 own: the name goes to the helper as it came. What it decides is how the bytes are labelled:
 
 - view: at most 2 MB, as a picture, a PDF (checked for its signature) or plain text. A page is shown as text.
-- page: an HTML file as a page, but the answer carries `sandbox` (no scripts, no forms, no network) and the
-  frame that shows it has an empty `sandbox` too.
+- page: GET /page/<ticket>/<name> (read_page below), not an /api/file mode: an HTML file as a page, with its
+  relative CSS, scripts, pictures and fonts from the same folder (the URL path is the file path, so a relative
+  link resolves to a sibling). Every answer carries `sandbox allow-scripts` (no same-origin: the page cannot
+  reach Focus), no network (connect-src none) and no forms; the frame that shows it has the same sandbox.
 - dl: any file up to 25 MB as an attachment.
 - info: {name, size} for the file card.
 """
@@ -34,7 +36,22 @@ TEXT = {
 NOPE = (404, b"not found", "text/plain", {})
 # sent with every answer of this endpoint; the page and the PDF may be framed by Focus itself
 SANDBOX = "default-src 'none'; img-src 'self'; sandbox; frame-ancestors 'self'"
-PAGE = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox; frame-ancestors 'self'"
+# A page and the files it loads: scripts and styles from its own folder or inline, pictures and fonts too, but no
+# network calls, no forms, no links out of the sandbox. `sandbox allow-scripts` has no allow-same-origin: the page
+# gets an opaque origin, so it cannot read Focus, its API or its storage, also when opened in a tab of its own.
+PAGE = (
+    "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; font-src 'self' data:; media-src 'self'; connect-src 'none'; form-action 'none'; "
+    "base-uri 'none'; sandbox allow-scripts; frame-ancestors 'self'"
+)
+# what a page may load from its folder (no JSON/text: nothing to fetch with, and no way to read a stray file)
+ASSETS = {
+    "html": "text/html; charset=utf-8", "htm": "text/html; charset=utf-8",
+    "css": "text/css; charset=utf-8", "js": "text/javascript; charset=utf-8", "mjs": "text/javascript; charset=utf-8",
+    "svg": "image/svg+xml", "ico": "image/x-icon", "avif": "image/avif",
+    "woff": "font/woff", "woff2": "font/woff2", "ttf": "font/ttf", "otf": "font/otf",
+    **IMAGES,
+}  # fmt: skip
 PDF = "default-src 'none'; frame-ancestors 'self'"
 
 
@@ -49,16 +66,14 @@ def read(root: Path, tid, name, mode: str) -> tuple[int, bytes, str, dict]:
         from orch import safefile
     except ImportError:  # no orch to read with: refuse, never read by hand
         return NOPE
-    if not isinstance(name, str) or not name or len(name) > 240 or mode not in ("view", "page", "dl", "info"):
+    if not isinstance(name, str) or not name or len(name) > 240 or mode not in ("view", "dl", "info"):
         return NOPE
     ext = ext_of(name)
     if mode == "view" and ext not in IMAGES and ext not in TEXT and ext != "pdf":
         return NOPE
-    if mode == "page" and ext not in ("html", "htm"):
-        return NOPE
     try:
         data = safefile.read_ticket_file(
-            root, tid, FOLDER, name, VIEW_MAX if mode in ("view", "page") else DL_MAX
+            root, tid, FOLDER, name, VIEW_MAX if mode == "view" else DL_MAX
         )
     except safefile.TooLarge:
         return 413, b"That file is too large to show. Download it instead.", "text/plain", {}
@@ -75,10 +90,29 @@ def read(root: Path, tid, name, mode: str) -> tuple[int, bytes, str, dict]:
             "application/octet-stream",
             {"Content-Disposition": f'attachment; filename="{safe}"', "Content-Security-Policy": SANDBOX},
         )
-    if mode == "page":
-        return 200, data, "text/html; charset=utf-8", {"Content-Security-Policy": PAGE}
     if ext == "pdf":
         if not data.startswith(b"%PDF-"):
             return 415, b"That is not a PDF. Download it instead.", "text/plain", {}
         return 200, data, "application/pdf", {"Content-Security-Policy": PDF}
     return 200, data, IMAGES.get(ext) or "text/plain; charset=utf-8", {"Content-Security-Policy": SANDBOX}
+
+
+def read_page(root: Path, tid, name) -> tuple[int, bytes, str, dict]:
+    """One file of a page (the page itself or something it loads), for GET /page/<ticket>/<name>. The same one
+    reader as above, so `..`, links, hard links and FIFOs are refused there; the kind comes from the extension and
+    only the kinds in ASSETS are served."""
+    try:
+        from orch import safefile
+    except ImportError:
+        return NOPE
+    ctype = ASSETS.get(ext_of(name)) if isinstance(name, str) else None
+    if ctype is None:
+        return NOPE
+    try:
+        data = safefile.read_ticket_file(root, tid, FOLDER, name, VIEW_MAX)
+    except safefile.TooLarge:
+        return 413, b"That file is too large to show.", "text/plain", {}
+    if data is None:
+        return NOPE
+    # CORP cross-origin: the sandboxed page has an opaque origin, so its own CSS and scripts are cross-origin to it
+    return 200, data, ctype, {"Content-Security-Policy": PAGE, "Cross-Origin-Resource-Policy": "cross-origin"}

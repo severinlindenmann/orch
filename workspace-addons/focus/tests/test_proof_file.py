@@ -17,6 +17,12 @@ def ev(ws):
     return d
 
 
+def page(srv, name, t=TID):
+    from urllib.parse import quote
+
+    return req(srv, "GET", f"/page/{t}/{quote(name, safe='/')}")
+
+
 def get(srv, name, mode="view", t=TID):
     from urllib.parse import quote
 
@@ -39,16 +45,12 @@ def test_kinds_are_labelled_and_locked_down(server, ev):
         and h["Content-Type"] == "application/pdf"
         and "frame-ancestors 'self'" in h["Content-Security-Policy"]
     )
-    # an HTML file is text in the plain view, a sandboxed page only when asked
+    # an HTML file is text in the plain view, a sandboxed page only from /page/
     st, _, h = get(server, "p.html")
     assert st == 200 and h["Content-Type"].startswith("text/plain")
-    st, _, h = get(server, "p.html", "page")
+    st, _, h = page(server, "p.html")
     assert st == 200 and h["Content-Type"].startswith("text/html")
-    assert (
-        " sandbox" in " " + h["Content-Security-Policy"] and "script-src" not in h["Content-Security-Policy"]
-    )
-    assert "default-src 'none'" in h["Content-Security-Policy"]
-    assert len([k for k in h if k.lower() == "content-security-policy"]) == 1
+    assert get(server, "p.html", "page")[0] == 404  # the old mode is gone: relative links need a path URL
 
 
 def test_not_a_pdf_and_not_a_page_and_unknown_kind(server, ev):
@@ -56,7 +58,7 @@ def test_not_a_pdf_and_not_a_page_and_unknown_kind(server, ev):
     (ev / "x.txt").write_text("x")
     (ev / "blob.bin").write_bytes(b"\0\1")
     assert get(server, "fake.pdf")[0] == 415
-    assert get(server, "x.txt", "page")[0] == 404
+    assert page(server, "x.txt")[0] == 404
     assert get(server, "blob.bin")[0] == 404  # no preview for an unknown kind ...
     st, body, h = get(server, "blob.bin", "dl")  # ... but a download
     assert (
@@ -129,3 +131,83 @@ def test_other_hosts_refused(server, ev):
 
 def test_page_and_script_are_served(server):
     assert req(server, "GET", "/web/proof.js")[0] == 200
+
+
+def test_page_loads_its_css_js_and_picture(server, ev):
+    (ev / "index.html").write_text(
+        '<link rel=stylesheet href="style.css"><script src="app.js"></script><img src="logo.png">'
+    )
+    (ev / "style.css").write_text("b{color:red}")
+    (ev / "app.js").write_text("document.title='x'")
+    (ev / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (ev / "sub").mkdir()
+    (ev / "sub" / "deep.css").write_text("i{}")
+    for name, ctype in (
+        ("index.html", "text/html"),
+        ("style.css", "text/css"),
+        ("app.js", "text/javascript"),
+        ("logo.png", "image/png"),
+        ("sub/deep.css", "text/css"),
+    ):
+        st, _body, h = page(server, name)
+        assert st == 200 and h["Content-Type"].startswith(ctype), name
+        assert h["X-Content-Type-Options"] == "nosniff"
+        assert h["Cross-Origin-Resource-Policy"] == "cross-origin"
+        csp = h["Content-Security-Policy"]
+        assert "sandbox allow-scripts" in csp and "allow-same-origin" not in csp
+        assert "connect-src 'none'" in csp and "form-action 'none'" in csp and "script-src 'self'" in csp
+        assert len([k for k in h if k.lower() == "content-security-policy"]) == 1
+    # the way a browser resolves a relative link from the page's URL
+    from urllib.parse import urljoin
+
+    base = f"/page/{TID}/sub/x.html"
+    assert urljoin(base, "deep.css") == f"/page/{TID}/sub/deep.css"
+    assert page(server, "style.css")[2]["Content-Type"].startswith("text/css")
+
+
+def test_page_only_serves_asset_kinds(server, ev):
+    (ev / "data.json").write_text("{}")
+    (ev / "notes.txt").write_text("n")
+    (ev / "blob.bin").write_bytes(b"\0")
+    for n in ("data.json", "notes.txt", "blob.bin", "nope.css"):
+        assert page(server, n)[0] == 404, n
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["../x.css", "a/../../x.css", "%2e%2e/x.css", "..%2fx.css", "/etc/x.css", "a\\b.css", "x%00.css", "a//b.css"],
+)
+def test_page_traversal_refused(server, ev, name):
+    (ev.parent / "x.css").write_text("secret")
+    st, _, _ = req(server, "GET", f"/page/{TID}/{name}")
+    assert st == 404
+
+
+def test_page_other_folder_ticket_and_host_refused(server, ws, ev):
+    (ws / ".orch" / "secrets").mkdir()
+    (ws / ".orch" / "secrets" / "k.css").write_text("secret")
+    (ev.parent / "artifacts").mkdir()
+    (ev.parent / "artifacts" / "a.css").write_text("art")
+    (ev / "ok.css").write_text("ok")
+    assert page(server, "../artifacts/a.css")[0] == 404
+    assert page(server, "../../../secrets/k.css")[0] == 404
+    assert page(server, "ok.css", t="t_../..")[0] == 404
+    st, _, _ = req(server, "GET", f"/page/{TID}/ok.css", headers={"Host": "evil.test"})
+    assert st == 403
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="refs")
+def test_page_symlink_hardlink_fifo_refused(server, ws, ev):
+    secret = ws / ".orch" / "secrets"
+    secret.mkdir()
+    (secret / "k.css").write_text("secret")
+    os.symlink(secret / "k.css", ev / "link.css")
+    os.link(secret / "k.css", ev / "hard.css")
+    os.mkfifo(ev / "pipe.css")
+    for n in ("link.css", "hard.css", "pipe.css"):
+        assert page(server, n)[0] == 404, n
+    real = ws / "elsewhere"
+    real.mkdir()
+    (real / "y.css").write_text("y")
+    os.symlink(real, ev / "dir")
+    assert page(server, "dir/y.css")[0] == 404
