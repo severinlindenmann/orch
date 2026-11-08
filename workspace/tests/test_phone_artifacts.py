@@ -313,7 +313,7 @@ def test_two_artifacts_with_the_same_content_are_sent_once(proj, run, new_ticket
             "shot.png",
             png(_chunk(b"tEXt", b"Comment\x00password=hunter2hunter2")),
             False,
-            "password or key",
+            "can't be checked",  # tEXt is not on the PNG allowlist
         ),
         # png bytes under a .txt name: not an image, and not text either -> not sent
         ("notes.txt", b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\xff\xfe\x00", False, "can't be checked"),
@@ -404,3 +404,34 @@ def test_the_png_chunk_walk_is_bounded(monkeypatch):
     many = png(*[_chunk(b"tEXt", b"a\x00b")] * 5)
     assert phone_view._image_clean(many) is False
     assert phone_view._image_clean(png()) is True
+
+
+@pytest.mark.parametrize(
+    "name,data,sent",
+    [
+        ("ok.png", png(_chunk(b"gAMA", b"\x00\x00\xb1\x8f"), _chunk(b"pHYs", b"\x00" * 9)), True),
+        ("text.png", png(_chunk(b"tEXt", b"Comment\x00hello")), False),
+        ("exif.png", png(_chunk(b"eXIf", b"MM\x00*")), False),
+        ("odd.png", png(_chunk(b"prVt", b"anything")), False),
+    ],
+)
+def test_png_allows_only_known_harmless_chunks(proj, run, new_ticket, conn, name, data, sent):  # noqa: F811
+    tid = new_ticket("Chunks")
+    artifact(proj, tid, name, data)
+    assert run("ask", tid, f"See artifacts/{name}")[0] == 0
+    assert bool(phone_view.view_for(proj, tid)["attachments"]) is sent
+
+
+@pytest.mark.parametrize(
+    "name,data",
+    [
+        ("notes.md", b"# Notes\nsee the attached %PDF-1.4 dump\n"),
+        ("pic.png", png(_chunk(b"IDAT", b"PK\x03\x04 inside the image data"))),
+        ("pic.gif", b"GIF89a\x01\x00\x01\x00\xd0\xcf\x11\xe0\x00;"),
+    ],
+)
+def test_packed_magic_anywhere_fails_closed(proj, run, new_ticket, conn, name, data):  # noqa: F811
+    tid = new_ticket("Packed inside")
+    artifact(proj, tid, name, data)
+    assert run("ask", tid, f"See artifacts/{name}")[0] == 0
+    assert phone_view.view_for(proj, tid)["attachments"] == []
