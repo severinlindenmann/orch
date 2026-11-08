@@ -494,7 +494,7 @@ def test_publish_has_a_shared_tab():
     import tomllib
 
     toml = Path(publish.__file__).parent / "builtin" / "publish" / "orch-addon.toml"
-    assert tomllib.loads(toml.read_text())["dashboard"]["label"] == "Shared"
+    assert tomllib.loads(toml.read_text())["dashboard"]["label"] == "Shared links"
 
 
 def test_net_verifies_tls_with_the_windows_store_on_windows(monkeypatch):

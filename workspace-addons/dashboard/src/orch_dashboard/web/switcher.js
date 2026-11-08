@@ -49,23 +49,44 @@
 
   function item(w) {
     const L = window.OrchLook;
-    const inner = [L.badge(w, w.name, 26), n('span', {className: 'grow ws-item-name'}, w.name)];
-    if (w.here) return n('div', {className: 'sw-item', role: 'menuitem', 'aria-current': 'true', 'data-testid': 'ws-item'}, ...inner, n('span', {className: 'sw-tick', 'aria-label': 'This workspace'}, '✓'));
-    if (w.url) return n('a', {className: 'sw-item', role: 'menuitem', href: w.url, 'data-testid': 'ws-item'}, ...inner);
-    return n('div', {className: 'sw-item off', role: 'menuitem', 'aria-disabled': 'true', 'data-testid': 'ws-item'}, ...inner, n('span', {className: 'meta'}, 'Not running'));
+    const details = n('span', {className: 'grow ws-item-details'},
+      n('span', {className: 'ws-item-name'}, w.name),
+      typeof w.type === 'string' && w.type.trim() ? n('small', {className: 'meta'}, w.type) : null);
+    const needs = Number.isInteger(w.needs)
+      ? n('span', {className: 'sw-needs'}, w.needs + (w.needs === 1 ? ' needs you' : ' need you')) : null;
+    const status = n('span', {className: 'sw-item-status'},
+      w.here ? n('span', {className: 'sw-current'}, n('span', {'aria-hidden': 'true'}, '✓ '), 'Current')
+        : w.url ? null : n('span', {className: 'meta'}, 'Not running'), needs);
+    // Running workspaces on this computer are links (switching = opening their dashboard); the current one and stopped ones are not.
+    const attrs = {className: 'sw-item' + (w.here || w.url ? '' : ' off'), role: 'menuitem', 'data-testid': 'ws-item'};
+    if (w.here) Object.assign(attrs, {'aria-current': 'true'});
+    else if (w.url) attrs.href = w.url;
+    else attrs['aria-disabled'] = 'true';
+    const row = n(w.url && !w.here ? 'a' : 'div', attrs, L.badge(w, w.name, 32), details, status);
+    if (!w.url || w.here) row.tabIndex = 0;
+    row.onclick = () => { if (w.here) { close(); box.focus(); } };
+    return row;
   }
 
   function toggle() {
     if (!look) return;
     if (menu) { close(); return; }
-    const list = (look.workspaces || []).slice().sort((a, b) => (b.here - a.here) || a.name.localeCompare(b.name));
+    // Only workspaces on this computer (owner 8 Nov): a workspace in another network is never listed.
+    const list = (look.workspaces || []).filter(w => w.here || !w.url || /^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(w.url)).sort((a, b) => (Number(!!b.here) - Number(!!a.here)) || a.name.localeCompare(b.name));
     menu = n('div', {className: 'sw-menu', role: 'menu', 'aria-label': 'Workspaces on this computer', 'data-testid': 'ws-menu'},
       n('p', {className: 'eyebrow'}, 'On this computer'), list.map(item),
-      list.length < 2 ? n('p', {className: 'meta sw-hint'}, 'Other workspaces show here while they run. Start one with orch start.') : null);
+      list.length === 0 ? n('p', {className: 'meta sw-hint'}, 'No local workspaces available.') : null);
     box.insertAdjacentElement('afterend', menu);
     menu.style.top = box.offsetTop + box.offsetHeight + 4 + 'px';
     box.setAttribute('aria-expanded', 'true');
-    menu.querySelector('a,[aria-current]')?.focus?.();
+    menu.querySelector('[role=menuitem]')?.focus();
+    menu.onkeydown = e => {
+      const rows = [...menu.querySelectorAll('[role=menuitem]')];
+      const index = rows.indexOf(document.activeElement);
+      const next = {ArrowDown: (index + 1) % rows.length, ArrowUp: (index - 1 + rows.length) % rows.length, Home: 0, End: rows.length - 1};
+      if (e.key in next) { e.preventDefault(); rows[next[e.key]]?.focus(); }
+      if (e.key === 'Tab') close();
+    };
   }
 
   document.addEventListener('click', e => { if (menu && !menu.contains(e.target) && !box.contains(e.target)) close(); });

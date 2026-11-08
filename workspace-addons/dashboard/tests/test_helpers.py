@@ -674,7 +674,7 @@ def test_ui2_small_bugs_in_markup_and_css():
     # 2: the sidebar colour and the modal dim layer fill the viewport
     assert "background:linear-gradient(to right,var(--sidebar)" in css and "body:has(dialog[open]:modal){overflow:hidden}" in css
     # 4: the end time never wraps off alone at 720; two lines only below 480
-    assert "mm-when" in mm and ".mm-bar.live{flex-wrap:nowrap}" in css and "@media(max-width:480px){.mm-bar.live{flex-wrap:wrap}" in css
+    assert "mm-desc" in mm and ".mm-bar.live{flex-wrap:nowrap}" in css and "@media(max-width:480px){.mm-bar.live{flex-wrap:wrap}" in css
     # 6: a skeleton is in the page before the first data arrives
     assert 'class="loading-home"' in html and 'aria-busy="true"' in html
 
