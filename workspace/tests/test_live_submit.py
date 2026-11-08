@@ -1,6 +1,7 @@
-"""Input pasted into a live session is submitted: bracketed paste, then Enter as its own key; the pane's
-wrapper checks it went in (Enter again), and a session that never takes it is ended with the input kept for a
-one-step run.
+"""Input into a live session: orch types ONE fixed ASCII notice line (never a person's text), then Enter as
+its own key; the agent reads the input with `orch run input`, which marks it delivered. The pane's wrapper
+checks the notice was taken (Enter again while it still sits in the prompt box, never at a dialog), and a
+session that never takes it is ended with the input kept for a one-step run.
 
 P1.7 (8 Nov): a resumed session got the paste but not the Enter; the text sat unsent in the prompt box."""
 
@@ -10,6 +11,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -20,21 +22,28 @@ _tmux = pytest.mark.skipif(
     os.name == "nt" or not shutil.which("tmux"), reason="needs tmux (not on Windows, not installed here)"
 )
 
-# A prompt box like a real TUI: turns bracketed paste on, keeps pasted text in the box, submits only on a
-# separate Enter outside the paste. For its first `deaf` seconds it drops Enter (a tool still drawing).
+# A prompt box drawn like Claude Code's: transcript, a border, the box, a border, a status line; the cursor
+# is left after the status line. It turns bracketed paste on and records any paste (orch must never paste),
+# shows typed keys in the box and submits only on Enter. For its first `deaf` seconds it drops Enter.
 FAKE_TUI = r"""
 import json, os, sys, time, tty
 out, deaf = sys.argv[1], float(sys.argv[2])
 t0 = time.monotonic()
 tty.setraw(0)
 START, END = b"\x1b[200~", b"\x1b[201~"
-box, pasting, buf = "", False, b""
+box, pasting, buf, said = "", False, b"", []
+BORDER = "─" * 60
 
-def draw(note=""):
-    os.write(1, b"\x1b[2J\x1b[H" + note.encode() + b"\r\n> " + box.replace("\n", "\r\n  ").encode() + b"\r\n")
+def record(kind, text):
+    with open(out, "a") as f:
+        f.write(json.dumps({"kind": kind, "text": text}) + "\n")
+
+def draw():
+    rows = ["ready"] + ["> " + s for s in said[-5:]] + [BORDER, "> " + box, BORDER, "  auto mode on"]
+    os.write(1, b"\x1b[2J\x1b[H" + "\r\n".join(rows).encode())
 
 os.write(1, b"\x1b[?2004h")
-draw("ready")
+draw()
 while True:
     data = os.read(0, 4096)
     if not data:
@@ -44,23 +53,20 @@ while True:
         if pasting:
             j = buf.find(END)
             if j < 0:
-                keep = next((k for k in range(len(END) - 1, 0, -1) if buf.endswith(END[:k])), 0)
-                box += buf[: len(buf) - keep].decode("utf-8", "replace").replace("\r", "\n")
-                buf = buf[len(buf) - keep :]
                 break
-            box += buf[:j].decode("utf-8", "replace").replace("\r", "\n")
+            record("paste", buf[:j].decode("utf-8", "replace"))
             buf, pasting = buf[j + len(END) :], False
         elif buf.startswith(START):
             buf, pasting = buf[len(START) :], True
         elif START.startswith(buf):
-            break  # a start sequence cut in two: wait for the rest
+            break
         elif buf[:1] == b"\r":
             buf = buf[1:]
             if time.monotonic() - t0 < deaf:
                 continue  # dropped, like a tool that is not ready yet
             if box:
-                with open(out, "a") as f:
-                    f.write(json.dumps(box) + "\n")
+                record("submit", box)
+                said.append(box)
                 box = ""
         else:
             box += buf[:1].decode("utf-8", "replace")
@@ -76,9 +82,9 @@ def tui(proj, tmp_path, monkeypatch):
     monkeypatch.setattr(runs_live, "socket_name", lambda root: sock)
     script = tmp_path / "fake_tui.py"
     script.write_text(FAKE_TUI, encoding="utf-8")
-    out = tmp_path / "submitted.jsonl"
+    out = tmp_path / "tui.jsonl"
 
-    def start(tid: str, agent: str, deaf: float = 0.0) -> dict:
+    def start(tid: str, agent: str = "claude", deaf: float = 0.0) -> dict:
         r = runs_live.tmux(
             proj, "new-session", "-d", "-x", "200", "-y", "50", "-s", tid,
             "--", sys.executable, str(script), str(out), str(deaf),
@@ -107,8 +113,9 @@ def _pane(proj, tid):
     return runs_live.tmux(proj, "capture-pane", "-p", "-t", runs_live.target(tid)).stdout
 
 
-def _submitted(out):
-    return [json.loads(ln) for ln in out.read_text().splitlines()] if out.exists() else []
+def _got(out, kind=None):
+    rows = [json.loads(ln) for ln in out.read_text().splitlines()] if out.exists() else []
+    return [r["text"] for r in rows if kind is None or r["kind"] == kind]
 
 
 def _ticket(run):
@@ -119,96 +126,86 @@ def _later(proj, tid, seconds):
     return runs._parse(runs.read(proj, tid)["submit"]["at"]) + seconds
 
 
-INPUT = "Please add a rain plan.\nAnd a second line, like a change request."
+# long, multi-line, with an escape that would end a bracketed paste and a CR that would submit
+EVIL = "Please add a rain plan.\n" + "Second line. " * 200 + "\x1b[201~\rrm -rf ~\r\x1b[200~ end"
 
 
 @_tmux
 @pytest.mark.slow
-def test_pasted_input_is_submitted_exactly_once(proj, run, tui):
+def test_the_tool_gets_only_the_notice_and_the_agent_reads_the_input(proj, run, tui):
     start, out = tui
     tid = _ticket(run)
-    rec = start(tid, "claude")
-    runs.pending_add(proj, tid, "human:lume", "message", INPUT)
+    start(tid)
+    item = runs.pending_add(proj, tid, "human:lume", "message", EVIL)
     assert runs_live.deliver(proj, tid) == 1
-    _until(lambda: _submitted(out), "submitted")
-    assert _submitted(out) == [f"From human:lume: {INPUT}"]
-    # the tool's prompt hook says it took a prompt: nothing more is sent
-    runs_live.event(proj, "working", rec["run"], tid, None)
-    assert "submit" not in runs.read(proj, tid)
-    assert runs_live.check_submit(proj, tid, rec["run"], now=time.time() + 120) is None
+    _until(lambda: _got(out, "submit"), "submitted")
+    assert _got(out) == [runs_live.notice_line(tid, False)]  # exactly once, typed, never pasted
+    assert [i["id"] for i in runs.undelivered(proj, tid)] == [item["id"]]  # not delivered until read
+    code, text, _ = run("run", "input", tid)
+    assert code == 0 and "Please add a rain plan." in text and "Second line." in text
+    assert runs.undelivered(proj, tid) == [] and "submit" not in runs.read(proj, tid)
+    assert run("run", "input", tid)[1].strip() == f"Nothing new on {tickets.load(proj, tid)['key']}."
     time.sleep(0.3)
-    assert len(_submitted(out)) == 1
+    assert len(_got(out)) == 1 and "rain" not in _pane(proj, tid)
 
 
 @_tmux
 @pytest.mark.slow
 def test_an_enter_the_tool_dropped_is_sent_again_and_submits_once(proj, run, tui):
-    """The P1.7 case: the paste lands, the Enter is lost, the text sits in the prompt box."""
+    """The P1.7 case: the line lands, the Enter is lost, the line sits in the prompt box."""
     start, out = tui
     tid = _ticket(run)
-    rec = start(tid, "claude", deaf=1.0)
-    runs.pending_add(proj, tid, "human:lume", "message", INPUT)
+    rec = start(tid, deaf=1.0)
+    runs.pending_add(proj, tid, "human:lume", "message", EVIL)
     assert runs_live.deliver(proj, tid) == 1
     time.sleep(1.2)  # the tool is ready now; its first Enter was dropped
-    assert _submitted(out) == [] and "a second line, like a change request." in _pane(proj, tid)
+    assert _got(out) == [] and "orch run input" in _pane(proj, tid)
     assert runs_live.check_submit(proj, tid, rec["run"], now=_later(proj, tid, 3)) == "enter"
-    _until(lambda: _submitted(out), "submitted after the second Enter")
-    runs_live.event(proj, "working", rec["run"], tid, None)  # its prompt hook
-    assert runs_live.check_submit(proj, tid, rec["run"], now=time.time() + 120) is None
+    _until(lambda: _got(out, "submit"), "submitted after the second Enter")
+    # the echo above the box is not the box: nothing more is sent
+    assert runs_live.check_submit(proj, tid, rec["run"], now=_later(proj, tid, 61)) is None
     time.sleep(0.3)
-    assert _submitted(out) == [f"From human:lume: {INPUT}"]
+    assert _got(out) == [runs_live.notice_line(tid, False)]
     assert "Enter again (2)" in (runs.run_dir(proj) / "live-submit.log").read_text()
 
 
-@_tmux
-@pytest.mark.slow
-def test_a_tool_without_hooks_counts_as_submitted_when_its_prompt_box_is_empty(proj, run, tui):
-    config.add_agent(proj, "fake", "true {prompt}", "true --interactive")
-    start, out = tui
-    tid = _ticket(run)
-    rec = start(tid, "fake")
-    runs.pending_add(proj, tid, "human:lume", "message", "Use CHF for every price")
-    assert runs_live.deliver(proj, tid) == 1
-    _until(lambda: _submitted(out), "submitted")
-    # gone from the prompt box in two checks in a row (one could be a redraw)
-    assert runs_live.check_submit(proj, tid, rec["run"], now=_later(proj, tid, 3)) is None
-    assert runs_live.check_submit(proj, tid, rec["run"], now=_later(proj, tid, 4)) == "sent"
-    assert "submit" not in runs.read(proj, tid)
-    assert _submitted(out) == ["From human:lume: Use CHF for every price"]
+# ---------------------------------------------------------------- the check (fake tmux)
+
+B = "─" * 40
 
 
-# ---------------------------------------------------------------- watchdog (fake tmux)
-
-RAIN = "Please add a rain plan."
-BOX = "Earlier output\n\n> From human:lume: Please add a rain plan.\n\n  auto mode on\n"  # cursor on line 2
+def _screen(box="", above="", below="  auto mode on"):
+    return "\n".join([above, B, f"> {box}", B, below, ""])
 
 
-def _stuck(proj, run, monkeypatch, pane=BOX, cursor=2, mode="0", text=RAIN, agent="claude"):
-    """A live run whose pasted input never goes in; returns (ticket, run, item, keys sent, screen).
-    screen["pane"] is what capture-pane shows (a callable: a new screen each time)."""
+def _stuck(proj, run, monkeypatch, pane=None, mode="0", text="Please add a rain plan.", agent="claude"):
+    """A live run whose notice was typed and not taken; returns (ticket, run, item, keys sent, screen).
+    screen["pane"]: what capture-pane shows (a callable: a new screen per call)."""
     tid = _ticket(run)
     rec = runs.claim(proj, tid, "human:t", agent, "live", pid=os.getpid())
     rec["live"] = {"state": "idle", "since": tickets.now()}
     runs._write(proj, rec)
-    sent, screen = [], {"pane": pane, "cursor": cursor, "mode": mode, "pasted": []}
+    line = runs_live.notice_line(tid, False)
+    sent = []
+    screen = {"pane": pane if pane is not None else _screen(line), "mode": mode}
 
     def fake(root, *a, **k):
         if a[0] == "send-keys":
             sent.append(a[-1])
-        if a[0] == "load-buffer":
-            screen["pasted"].append(k.get("input"))
+        if a[0] in ("load-buffer", "paste-buffer"):
+            raise AssertionError("orch never pastes")
         if a[0] == "capture-pane":
             pn = screen["pane"]
             return subprocess.CompletedProcess(a, 0, pn() if callable(pn) else pn, "")
         if a[0] == "display-message":
-            return subprocess.CompletedProcess(a, 0, f"{screen['mode']} {screen['cursor']}\n", "")
+            return subprocess.CompletedProcess(a, 0, f"{screen['mode']} 49\n", "")
         return subprocess.CompletedProcess(a, 0, "", "")
 
     monkeypatch.setattr(runs_live, "session_exists", lambda root, t: True)
     monkeypatch.setattr(runs_live, "tmux", fake)
     monkeypatch.setattr(runs_live, "PASTE_DELAY", 0)
     item = runs.pending_add(proj, tid, "human:lume", "message", text)
-    assert runs_live.deliver(proj, tid) == 1 and sent == ["Enter"]
+    assert runs_live.deliver(proj, tid) == 1 and sent == [line, "Enter"]
     return tid, rec["run"], item, sent, screen
 
 
@@ -216,142 +213,165 @@ def _at(proj, tid, rn, sec, **k):
     return runs_live.check_submit(proj, tid, rn, now=_later(proj, tid, sec), **k)
 
 
-def test_text_still_in_the_prompt_box_enter_again_then_end_with_the_input_kept(proj, run, monkeypatch):
+def test_a_persons_text_is_never_typed(proj, run, monkeypatch):
+    tid, _, _, sent, _ = _stuck(proj, run, monkeypatch, text=EVIL)
+    assert sent == [runs_live.notice_line(tid, False), "Enter"]
+    assert all(k.isascii() and "\x1b" not in k and "\r" not in k and "\n" not in k for k in sent)
+    assert "rain" not in "".join(sent)
+
+
+def test_notice_still_in_the_box_enter_again_then_end_with_the_input_kept(proj, run, monkeypatch):
     tid, rn, item, sent, _ = _stuck(proj, run, monkeypatch)
     ended = []
     assert _at(proj, tid, rn, 1) is None
-    assert _at(proj, tid, rn, 3) == "enter" and sent == ["Enter", "Enter"]
+    assert _at(proj, tid, rn, 3) == "enter" and sent[2:] == ["Enter"]
     assert _at(proj, tid, rn, 5) is None  # once
-    assert _at(proj, tid, rn, 61) == "enter" and sent == ["Enter"] * 3  # the watchdog's last Enter
+    assert _at(proj, tid, rn, 61) == "enter" and sent[2:] == ["Enter"] * 2  # the watchdog's last Enter
     assert _at(proj, tid, rn, 70) is None
     assert _at(proj, tid, rn, 91, end=lambda: ended.append(1)) == "gave_up"
-    assert ended == [1] and sent == ["Enter"] * 3
+    assert ended == [1] and sent[2:] == ["Enter"] * 2
     (back,) = runs.undelivered(proj, tid)
     assert back["id"] == item["id"] and back["live_retry"] is True  # never lost
     rec = runs.read(proj, tid)
     assert "submit" not in rec and rec["stop_requested"] and rec["pending"] is True and rec["live_retry"]
-    assert "did not take the input" in json.dumps(tickets.load(proj, tid)["history"])
+    assert "did not take the new input" in json.dumps(tickets.load(proj, tid)["history"])
     assert runs_live.check_submit(proj, tid, rn, now=time.time() + 300) is None  # once per item
-    assert "Enter again (2)" in (runs.run_dir(proj) / "live-submit.log").read_text()
 
 
-def test_no_blind_enter_when_the_text_is_not_in_the_prompt_box(proj, run, monkeypatch):
-    """A collapsed paste or an agent already working: the text is not in the box, so no Enter, ever."""
-    tid, rn, _, sent, _ = _stuck(proj, run, monkeypatch, pane="Working...\n\n> \n")
+def test_no_enter_when_the_box_is_empty_even_if_the_echo_shows_above_it(proj, run, monkeypatch):
+    tid, rn, _, sent, screen = _stuck(proj, run, monkeypatch, pane="")
+    screen["pane"] = _screen("", above="> " + runs_live.notice_line(tid, False))
     for sec in (3, 61, 91, 300):
         assert _at(proj, tid, rn, sec, end=lambda: pytest.fail("ended")) is None
-    assert sent == ["Enter"] and runs.read(proj, tid)["submit"]
-
-
-def test_the_text_echoed_in_the_transcript_is_not_the_prompt_box(proj, run, monkeypatch):
-    pane = "> From human:lume: Please add a rain plan.\n\nI'll add it.\n\n> \n"
-    tid, rn, _, sent, _ = _stuck(proj, run, monkeypatch, pane=pane, cursor=4)
-    assert _at(proj, tid, rn, 3) is None and _at(proj, tid, rn, 61) is None and sent == ["Enter"]
+    assert sent[2:] == []
 
 
 @pytest.mark.parametrize(
     "dialog",
-    ["Do you want to proceed?\n❯ 1. Yes\n  2. No\n", "Allow this command?\n", "Overwrite it? (y/n)\n"],
+    ["Do you want to proceed?\n❯ 1. Yes\n  2. No", "❯ 1. Yes, allow once", "Esc to cancel"],
 )
 def test_an_enter_never_answers_a_dialog(proj, run, monkeypatch, dialog):
-    tid, rn, _, sent, _ = _stuck(proj, run, monkeypatch, pane=BOX + dialog)
-    for sec in (3, 61, 91):
+    tid, rn, _, sent, screen = _stuck(proj, run, monkeypatch, pane="")
+    screen["pane"] = _screen(runs_live.notice_line(tid, False), below=dialog)
+    for sec in (3, 61):
         assert _at(proj, tid, rn, sec, end=lambda: pytest.fail("ended")) is None
-    assert sent == ["Enter"]
+    assert sent[2:] == []
+
+
+def test_plain_words_in_the_agents_output_do_not_block(proj, run, monkeypatch):
+    tid, rn, _, sent, screen = _stuck(proj, run, monkeypatch, pane="")
+    screen["pane"] = _screen(runs_live.notice_line(tid, False), above="Allow pets? (y/n) Do you want cake")
+    assert _at(proj, tid, rn, 3) == "enter"
+
+
+def test_the_screen_is_checked_again_right_before_the_key(proj, run, monkeypatch):
+    tid, rn, _, sent, screen = _stuck(proj, run, monkeypatch, pane="")
+    shots = iter([_screen(runs_live.notice_line(tid, False)), _screen("", below="Do you want to proceed?")])
+    screen["pane"] = lambda: next(shots)
+    assert _at(proj, tid, rn, 3) is None and sent[2:] == []
 
 
 def test_no_enter_while_the_pane_is_in_copy_mode(proj, run, monkeypatch):
     tid, rn, _, sent, _ = _stuck(proj, run, monkeypatch, mode="1")
-    assert _at(proj, tid, rn, 3) is None and _at(proj, tid, rn, 61) is None and sent == ["Enter"]
+    assert _at(proj, tid, rn, 3) is None and _at(proj, tid, rn, 61) is None and sent[2:] == []
 
 
-def test_a_short_input_is_never_matched_on_screen(proj, run, monkeypatch):
-    pane = "ok\n\n> ok\n"
-    tid, rn, _, sent, _ = _stuck(proj, run, monkeypatch, pane=pane, text="ok", agent="claude")
-    # the tail is "From human:lume: ok" (long enough); a bare short tail is refused by _look itself
-    assert runs_live._look(proj, tid, "ok") == (None, runs_live._look(proj, tid, "x" * 20)[1])
+def test_checks_that_cannot_tell_count_towards_the_give_up(proj, run, monkeypatch):
+    tid, rn, _, sent, _ = _stuck(proj, run, monkeypatch, mode="1")  # copy mode, quiet
+    assert _at(proj, tid, rn, 3) is None  # 1
+    got = [_at(proj, tid, rn, 91 + i, end=lambda: None) for i in range(runs_live.NONE_POLLS - 1)]
+    assert got[:-1] == [None] * (runs_live.NONE_POLLS - 2) and got[-1] == "gave_up" and sent[2:] == []
 
 
 def test_never_give_up_while_the_pane_changes(proj, run, monkeypatch):
     tid, rn, _, sent, screen = _stuck(proj, run, monkeypatch)
     assert _at(proj, tid, rn, 3) == "enter" and _at(proj, tid, rn, 61) == "enter"
     tick = iter(range(10_000))
-    screen["pane"] = lambda: f"spinner {next(tick)}\n" + BOX.split("\n", 1)[1]  # something still works
+    line = runs_live.notice_line(tid, False)
+    screen["pane"] = lambda: _screen(line, above=f"spinner {next(tick)}")  # something still works
     for sec in (91, 95, 130, 200):
         assert _at(proj, tid, rn, sec, end=lambda: pytest.fail("ended")) is None
     assert runs.read(proj, tid)["submit"]
+    assert "never goes quiet" in (runs.run_dir(proj) / "live-submit.log").read_text()
 
 
-def test_the_prompt_hook_clears_the_check(proj, run, monkeypatch):
-    tid, rn, _, sent, _ = _stuck(proj, run, monkeypatch)
+def test_reading_the_input_ends_the_check(proj, run, monkeypatch):
+    tid, rn, item, sent, _ = _stuck(proj, run, monkeypatch)
+    text, n = runs_live.read_input(proj, tid, rn)
+    assert n == 1 and "- human:lume: Please add a rain plan." in text
+    assert "submit" not in runs.read(proj, tid) and runs.undelivered(proj, tid) == []
+    assert runs_live.check_submit(proj, tid, rn, now=time.time() + 200) is None and sent[2:] == []
+    with pytest.raises(Exception, match="Another run"):
+        runs_live.read_input(proj, tid, "r_someoneelse")
+
+
+def test_a_prompt_hook_alone_does_not_count_as_read(proj, run, monkeypatch):
+    tid, rn, _, _, _ = _stuck(proj, run, monkeypatch)
     runs_live.event(proj, "working", rn, tid, None)
-    assert "submit" not in runs.read(proj, tid)
-    assert runs_live.check_submit(proj, tid, rn, now=time.time() + 200) is None and sent == ["Enter"]
+    assert runs.read(proj, tid)["submit"] and len(runs.undelivered(proj, tid)) == 1
+
+
+def test_a_notice_taken_but_never_read_ends_in_a_one_step_run(proj, run, monkeypatch):
+    tid, rn, _, sent, _ = _stuck(proj, run, monkeypatch)
+    runs_live._set_state(proj, tid, rn, "idle")  # it went idle without reading
+    assert runs_live.deliver(proj, tid) == 1  # one more notice
+    runs_live._set_state(proj, tid, rn, "idle")
+    assert runs_live.deliver(proj, tid) == 0 and runs.read(proj, tid)["submit"]["stale"]
+    assert sent.count(runs_live.notice_line(tid, False)) == 2
+    assert runs_live.check_submit(proj, tid, rn, end=lambda: None) == "gave_up"
+    (back,) = runs.undelivered(proj, tid)
+    assert back["live_retry"] is True
 
 
 @pytest.mark.slow
-def test_a_prompt_hook_landing_during_the_check_waits_for_it(proj, run, monkeypatch):
-    """Decide and Enter happen under the run lock: a hook (another process) goes after, never between."""
+def test_the_agents_read_waits_for_a_running_check(proj, run, monkeypatch):
+    """Decide and Enter happen under the run lock: `orch run input` (another process) goes after."""
     tid, rn, _, sent, screen = _stuck(proj, run, monkeypatch)
-    hook = []
+    line = runs_live.notice_line(tid, False)
+    reader = []
 
     def pane():
-        if not hook:
-            hook.append(
+        if not reader:
+            reader.append(
                 subprocess.Popen(
-                    [sys.executable, "-m", "orch", "run", "event", "--kind", "working", "--run", rn, tid],
-                    cwd=proj, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    [sys.executable, "-m", "orch", "run", "input", tid],
+                    cwd=proj, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
                 )
             )  # fmt: skip
             end = time.monotonic() + 3
-            while hook[0].poll() is None and time.monotonic() < end:
+            while reader[0].poll() is None and time.monotonic() < end:
                 time.sleep(0.05)
-            assert hook[0].poll() is None, "the hook did not wait for the run lock"
-        return BOX
+            assert reader[0].poll() is None, "the read did not wait for the run lock"
+        return _screen(line)
 
     screen["pane"] = pane
-    assert _at(proj, tid, rn, 3) == "enter" and sent == ["Enter", "Enter"]
-    assert hook[0].wait(20) == 0
-    assert "submit" not in runs.read(proj, tid)  # applied after the check, not lost
+    assert _at(proj, tid, rn, 3) == "enter"
+    out, _ = reader[0].communicate(timeout=20)
+    assert "rain plan" in out and "submit" not in runs.read(proj, tid)
 
 
-def test_paste_is_recorded_even_when_enter_fails_and_never_pasted_twice(proj, run, monkeypatch):
-    tid, rn, _, sent, screen = _stuck(proj, run, monkeypatch)
-    rec = runs.read(proj, tid)
-    assert rec["submit"] and runs.undelivered(proj, tid) == []
-    # a failed Enter at delivery: same outcome (delivered, checked later)
-    tid2 = _ticket(run)
-    r2 = runs.claim(proj, tid2, "human:t", "claude", "live", pid=os.getpid())
-    r2["live"] = {"state": "idle", "since": tickets.now()}
-    runs._write(proj, r2)
-    monkeypatch.setattr(runs_live, "_enter", lambda root, t: False)
-    runs.pending_add(proj, tid2, "human:lume", "message", "Please add a rain plan.")
-    n_before = len(screen["pasted"])
-    assert runs_live.deliver(proj, tid2) == 1
-    assert runs.undelivered(proj, tid2) == [] and runs.read(proj, tid2)["submit"]
-    runs_live._set_state(proj, tid2, r2["run"], "idle")
-    assert runs_live.deliver(proj, tid2) == 0 and len(screen["pasted"]) == n_before + 1
+def test_after_stop_the_watcher_writes_nothing(proj, run, monkeypatch):
+    tid, rn, _, sent, _ = _stuck(proj, run, monkeypatch)
+    guard, stop = threading.Lock(), threading.Event()
+    stop.set()
+    before = runs.read(proj, tid)
+    assert runs_live.check_submit(proj, tid, rn, now=_later(proj, tid, 3), guard=guard, stop=stop) is None
+    assert runs.read(proj, tid) == before and sent[2:] == []
 
 
-def test_escape_sequences_cannot_end_the_bracketed_paste(proj, run, monkeypatch):
-    evil = "Nice plan.\x1b[201~\rrm -rf ~\r\x1b[200~ and more\x07\x00"
-    for flat in (False, True):
-        out = runs_live._format([{"by": "human:x", "text": evil}], flat)
-        assert "\x1b" not in out and "\r" not in out and "\x07" not in out and "\x00" not in out
-        assert "[201~" in out  # harmless text now, no ESC in front
-    tid, rn, _, _, screen = _stuck(proj, run, monkeypatch, text=evil)
-    assert "\x1b" not in screen["pasted"][-1] and "\r" not in screen["pasted"][-1]
-
-
-def test_a_tool_without_hooks_needs_the_text_gone_twice(proj, run, monkeypatch):
-    config.add_agent(proj, "fake", "true {prompt}", "true --interactive")
-    tid, rn, _, sent, screen = _stuck(proj, run, monkeypatch, agent="fake", pane="> \n", cursor=0)
-    assert _at(proj, tid, rn, 3) is None  # gone once: maybe a redraw
-    screen["pane"] = "> From human:lume: Please add a rain plan.\n"  # back: it was a redraw
-    assert _at(proj, tid, rn, 4) == "enter"
-    screen["pane"] = "> \n"
-    assert _at(proj, tid, rn, 5) is None and runs.read(proj, tid)["submit"]
-    assert _at(proj, tid, rn, 6) == "sent" and "submit" not in runs.read(proj, tid)
+def test_the_sigterm_path_waits_for_the_watchers_check(proj, run, monkeypatch):
+    tid, rn, _, _, _ = _stuck(proj, run, monkeypatch)
+    current = {"guard": threading.Lock(), "stop": threading.Event()}
+    current["guard"].acquire()  # a check is under way
+    t = threading.Thread(target=runs.term_release, args=(proj, tid, rn, current))
+    t.start()
+    time.sleep(0.2)
+    assert current["stop"].is_set() and t.is_alive()  # waits for the check before it releases the claim
+    assert runs.read(proj, tid) is not None
+    current["guard"].release()
+    t.join(10)
+    assert runs.read(proj, tid) is None
+    runs._terminating = False
 
 
 def _start_modes(proj, tid, monkeypatch):
@@ -390,7 +410,7 @@ def test_input_a_live_session_did_not_take_starts_a_one_step_run(proj, run, monk
 
 
 def test_a_start_prompt_that_never_went_in_does_not_loop_live(proj, run, monkeypatch):
-    tid, rn, item, _, _ = _stuck(proj, run, monkeypatch)
+    tid, rn, _, _, _ = _stuck(proj, run, monkeypatch)
     items = runs._pending_read(proj, tid)
     for i in items:
         i["via"] = "start"  # the session's only input was its start prompt

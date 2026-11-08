@@ -6,7 +6,8 @@
 Default (one-shot): reads the prompt (arguments, or stdin when there are none), finds the ticket id in
 $ORCH_TICKET or in the prompt, starts and finishes the first open checklist item with `orch`, then exits.
 --interactive: stays up, reads one line of input at a time (a live run in tmux) and calls `orch run done`
-at start and after each line, which is how a generic agent says "idle".
+at start and after each line, which is how a generic agent says "idle". A notice line naming
+`orch run input` is followed: the input is read with that command (and logged as the input).
 --silent N: sleeps N seconds without any orch call (a quiet agent must keep its claim).
 
 $ORCH_CMD names the orch command (default: orch). $ORCH_TEST_AGENT_LOG (or $GENERIC_AGENT_LOG), when set, gets one line per prompt or
@@ -83,9 +84,11 @@ def main(argv: list[str]) -> int:
                 return 0
             if not line.strip():
                 continue
+            tid = tid or ticket_of(line)
+            if "orch run input" in line and tid:  # orch's notice: the input itself is read with orch
+                line = orch("run", "input", tid).stdout.strip() or line
             log("input", line)
             print(f"got: {line}", flush=True)
-            tid = tid or ticket_of(line)
             if tid:
                 orch("run", "done", tid)
         return 0
