@@ -19,12 +19,13 @@ for (const f of fs.readdirSync(OUT)) if (/^\d\d-.*\.png$/.test(f)) fs.rmSync(pat
 
 const secrets = [PT, RT];
 const scrub = s => secrets.reduce((t, x) => t.split(x).join('<token>'), String(s));
+if (!process.env.WALK_ORCH_HOME) throw new Error('WALK_ORCH_HOME is required (see run.sh): no run may fall back to the real ~/.orch-tool');
 const toolBin = path.join(TMP, '.local/bin');
 const env = {
   HOME: TMP, PATH: `${toolBin}:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
   UV_CACHE_DIR: path.join(process.env.HOME, '.cache/uv'), ORCH_REPO: REPO, LANG: 'en_US.UTF-8',
   ORCH_HOME_STRICT: '1',
-  ORCH_HOME: process.env.WALK_ORCH_HOME || '', // only trusted under the real home (see run.sh)
+  ORCH_HOME: process.env.WALK_ORCH_HOME, // only trusted under the real home (see run.sh)
 };
 function sh(cmd, cwd = TMP, input) {
   const r = spawnSync('sh', ['-c', cmd], { cwd, env, encoding: 'utf8', timeout: 180000, input });

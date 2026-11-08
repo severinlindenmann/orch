@@ -689,20 +689,36 @@ def _trace_lines(h):
     return [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines()] if f.exists() else []
 
 
-def test_fallback_trace_unset_has_the_fields_and_no_secrets(proj, monkeypatch):
+def test_fallback_trace_unset_has_the_fields_and_never_argument_values(proj, monkeypatch):
     h = addons.real_home()
     monkeypatch.delenv("ORCH_HOME")
-    monkeypatch.setattr(sys, "argv", ["orch", "x", "orn_secret123", "ghp_abc", "sk-zzz", "ok"])
+    monkeypatch.delenv("ORCH_HOME_STRICT")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["/x/bin/orch", "addon", "list", "--token", "orn_secret123", "ghp_abc", "Pay Müller 4711"],
+    )
     assert addons.home() == h / ".orch-tool"
     (line,) = _trace_lines(h)
-    assert set(line) == {"time", "pid", "ppid", "argv", "cwd", "reason"}
+    assert set(line) == {"time", "pid", "ppid", "cmd", "cwd", "reason"}
     assert line["reason"] == "unset" and line["pid"] == os.getpid() and line["cwd"] == os.getcwd()
-    assert line["argv"] == "orch x ok" and "secret" not in json.dumps(line)
+    assert line["cmd"] == "orch addon list"
     mode = (h / ".orch-tool" / ".fallback-trace.log").stat().st_mode & 0o777
     assert mode == 0o600
-    monkeypatch.setattr(sys, "argv", ["x" * 500])
-    addons.home()
-    assert len(_trace_lines(h)[-1]["argv"]) == 300
+    for argv, cmd in (
+        (["orch", "ticket", "new", "--token", "orn_x"], "orch ticket new"),  # two words at most
+        (["orch", "--token=ghp_x", "list"], "orch"),  # stops at the first option
+        (["orch", "Fix the bug", "x"], "orch"),  # free text is not a word
+        (
+            ["orch", "ghp_x"],
+            "orch",
+        ),  # a lone word is a subcommand shape: no way to tell, but no value after it
+    ):
+        monkeypatch.setattr(sys, "argv", argv)
+        addons.home()
+        assert _trace_lines(h)[-1]["cmd"] == cmd
+    raw = (h / ".orch-tool" / ".fallback-trace.log").read_text(encoding="utf-8")
+    assert "orn_secret123" not in raw and "Müller" not in raw and "--token" not in raw
 
 
 def test_fallback_trace_untrusted_gets_its_reason_and_strict_writes_nothing(proj, monkeypatch):
@@ -725,6 +741,7 @@ def test_fallback_trace_untrusted_gets_its_reason_and_strict_writes_nothing(proj
 def test_fallback_trace_rotates_over_256kb(proj, monkeypatch):
     h = addons.real_home()
     monkeypatch.delenv("ORCH_HOME")
+    monkeypatch.delenv("ORCH_HOME_STRICT")
     d = h / ".orch-tool"
     d.mkdir()
     (d / ".fallback-trace.log").write_text("x" * (256 * 1024 + 1), encoding="utf-8")
@@ -733,9 +750,10 @@ def test_fallback_trace_rotates_over_256kb(proj, monkeypatch):
     assert len(_trace_lines(h)) == 1
 
 
-def test_fallback_trace_does_not_follow_a_symlink(proj, monkeypatch):
+def test_fallback_trace_does_not_follow_a_symlink_and_fixes_the_mode(proj, monkeypatch):
     h = addons.real_home()
     monkeypatch.delenv("ORCH_HOME")
+    monkeypatch.delenv("ORCH_HOME_STRICT")
     d = h / ".orch-tool"
     d.mkdir()
     target = h / "victim.txt"
@@ -743,6 +761,52 @@ def test_fallback_trace_does_not_follow_a_symlink(proj, monkeypatch):
     (d / ".fallback-trace.log").symlink_to(target)
     assert addons.home() == d  # still works
     assert target.read_text(encoding="utf-8") == "keep"
+    (d / ".fallback-trace.log").unlink()
+    (d / ".fallback-trace.log").write_text("", encoding="utf-8")
+    (d / ".fallback-trace.log").chmod(0o666)
+    addons.home()
+    assert (d / ".fallback-trace.log").stat().st_mode & 0o777 == 0o600
+    # a symlinked tool folder is not written to at all
+    other = h / "other"
+    other.mkdir()
+    d2 = h / "x2"
+    d2.mkdir()
+    monkeypatch.setattr(addons, "real_home", lambda: d2)
+    (d2 / ".orch-tool").symlink_to(other)
+    addons.home()
+    assert list(other.iterdir()) == []
+
+
+def test_strict_refuses_unset_empty_real_and_bare_home(proj, monkeypatch):
+    h = addons.real_home()
+    for strict in ("1", "true", "yes"):  # anything but empty or 0 is on
+        monkeypatch.setenv("ORCH_HOME_STRICT", strict)
+        monkeypatch.delenv("ORCH_HOME", raising=False)
+        with pytest.raises(Refused, match="not set"):
+            addons.home()
+        for v, msg in (
+            ("", "not set"),
+            (str(h / ".orch-tool"), "real"),
+            (str(h / "x" / ".." / ".orch-tool"), "real"),
+            (str(h), "not a trusted"),
+            (str(h).upper(), "not a trusted|real"),  # case-insensitive volumes
+        ):
+            monkeypatch.setenv("ORCH_HOME", v)
+            with pytest.raises(Refused, match=msg):
+                addons.home()
+    for off in ("0", ""):
+        monkeypatch.setenv("ORCH_HOME_STRICT", off)
+        monkeypatch.delenv("ORCH_HOME", raising=False)
+        assert addons.home() == h / ".orch-tool"  # non-strict: unchanged
+
+
+def test_strict_cwd_check_ignores_case(proj, monkeypatch):
+    h = addons.real_home()
+    (h / "Work").mkdir()
+    monkeypatch.chdir(h / "Work")
+    monkeypatch.setenv("ORCH_HOME", str(h / "WORK" / "tool"))
+    with pytest.raises(Refused):
+        addons.home()
 
 
 def test_strict_trusted_orch_home_works(proj, monkeypatch):

@@ -152,17 +152,34 @@ def real_home() -> Path:
         return Path.home()
 
 
+def _fold(p: Path) -> Path:
+    return Path(str(p).casefold())  # macOS volumes ignore case: /Users/X and /users/x are one folder
+
+
+def _is_under(h: Path, base: Path) -> bool:
+    for a, b in ((h, base), (_fold(h), _fold(base))):
+        try:
+            a.relative_to(b)
+            return True
+        except ValueError:
+            pass
+    return False
+
+
+def _same(a: Path, b: Path) -> bool:
+    return a == b or _fold(a) == _fold(b)
+
+
 def _untrusted_rule(h: Path, root: Path | None = None) -> str | None:
     """Why ORCH_HOME is not trusted (None = trusted): it counts only under the user's real home, outside the
     current folder and the workspace, and with no .orch, .agents or .git in any folder from it up to home (a
     repo .envrc could aim it higher)."""
     top = real_home().resolve()
+    if _same(h, top):
+        return "home-itself"  # the tool's files would lie loose in ~
     for name, base in (("cwd", Path.cwd().resolve()), *([("workspace", root.resolve())] if root else [])):
-        try:
-            h.relative_to(base)
-        except ValueError:
-            continue
-        return name  # inside the current folder or the workspace
+        if _is_under(h, base):
+            return name  # inside the current folder or the workspace
     try:
         h.relative_to(top)
     except ValueError:
@@ -180,21 +197,32 @@ def _trusted_home(h: Path, root: Path | None = None) -> bool:
 
 
 _TRACE_MAX = 256 * 1024
-_SECRET = re.compile(r"(orn_|ghp_|sk-)")
+_WORD = re.compile(r"[a-z][a-z0-9-]{0,30}")
+
+
+def _trace_command() -> str:
+    """The program name and up to two leading subcommand words ("orch addon list"). No other argument is
+    ever logged: values, options and free text can hold secrets."""
+    words = [os.path.basename(sys.argv[0] or "?")[:40]]
+    for a in sys.argv[1:3]:
+        if not _WORD.fullmatch(a):
+            break
+        words.append(a)
+    return " ".join(words)
 
 
 def _trace_fallback(real: Path, reason: str) -> None:
     """One line in <real>/.fallback-trace.log each time home() falls back to the real ~/.orch-tool, to find
-    who uses it. Best effort: never breaks orch, never follows a symlink, no env
-    values, no token-like args."""
+    who uses it. Best effort, never raises; refuses a symlinked folder or file (O_NOFOLLOW); mode 0600."""
     try:
-        args = " ".join(a for a in sys.argv if not _SECRET.search(a))[:300]
+        if real.is_symlink():
+            return
         line = json.dumps(
             {
                 "time": datetime.now(UTC).isoformat(timespec="seconds"),
                 "pid": os.getpid(),
                 "ppid": os.getppid(),
-                "argv": args,
+                "cmd": _trace_command(),
                 "cwd": os.getcwd(),
                 "reason": reason,
             }
@@ -202,12 +230,13 @@ def _trace_fallback(real: Path, reason: str) -> None:
         real.mkdir(parents=True, exist_ok=True, mode=0o700)
         log = real / ".fallback-trace.log"
         try:
-            if log.stat().st_size > _TRACE_MAX and not log.is_symlink():
-                os.replace(log, real / ".fallback-trace.log.1")
+            if not log.is_symlink() and log.stat().st_size > _TRACE_MAX:
+                os.replace(log, real / ".fallback-trace.log.1")  # a line may be lost in a race: accepted
         except OSError:
             pass
         fd = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
         try:
+            os.fchmod(fd, 0o600)
             os.write(fd, (line + "\n").encode("utf-8"))
         finally:
             os.close(fd)
@@ -217,21 +246,31 @@ def _trace_fallback(real: Path, reason: str) -> None:
 
 def home(root: Path | None = None) -> Path:
     """The user's orch folder: ORCH_HOME when trusted (see _untrusted_rule), else ~/.orch-tool.
-    With ORCH_HOME_STRICT=1 an untrusted ORCH_HOME is an error instead of the fallback (tests, e2e).
-    Every fallback leaves one line in ~/.orch-tool/.fallback-trace.log."""
+    ORCH_HOME_STRICT (anything but empty or 0, for tests and e2e) makes every fallback an error: ORCH_HOME
+    unset or empty, untrusted, or aimed at the real folder. Every other fallback leaves one line in
+    ~/.orch-tool/.fallback-trace.log."""
     real = real_home() / ".orch-tool"
     env = os.environ.get("ORCH_HOME")
+    strict = os.environ.get("ORCH_HOME_STRICT", "") not in ("", "0")
     if not env:
+        if strict:
+            raise Refused(
+                f"ORCH_HOME is not set, and ORCH_HOME_STRICT forbids using {real}. Nothing was written."
+            )
         _trace_fallback(real, "unset")
         return real
     h = Path(env).resolve()
+    if strict and _same(h, real.resolve()):
+        raise Refused(
+            f"ORCH_HOME ({env}) is the real {real}, and ORCH_HOME_STRICT forbids it. Nothing was written."
+        )
     rule = _untrusted_rule(h, root)
     if rule is None:
         return h
-    if os.environ.get("ORCH_HOME_STRICT") == "1":
+    if strict:
         raise Refused(
             f"ORCH_HOME ({env}) is not a trusted folder (it must be under your home, outside the current "
-            f"folder and any .git/.orch/.agents folder), and ORCH_HOME_STRICT=1 forbids falling back to "
+            f"folder and any .git/.orch/.agents folder), and ORCH_HOME_STRICT forbids falling back to "
             f"{real}. Nothing was written."
         )
     print(

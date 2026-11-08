@@ -1,6 +1,8 @@
+import hashlib
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -12,20 +14,52 @@ CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 
 
 def _snapshot_real_tool_home():
+    """{path: (size, sha256, mtime_ns)} of the real ~/.orch-tool (read only), without the fallback trace; and
+    the trace lines. A path that can not be read maps to None."""
     base = _REAL_HOME_FN() / ".orch-tool"
-    out = {}
+    files, trace = {}, []
     if base.exists():
         for p in (base, *base.rglob("*")):
-            if p.name.startswith(".fallback-trace.log"):  # the one-line trace of a fallback: allowed
-                continue
             try:
-                out[str(p)] = p.stat().st_mtime_ns
+                if p.name.startswith(".fallback-trace.log"):
+                    if p.name == ".fallback-trace.log" and not p.is_symlink():
+                        trace = p.read_text(encoding="utf-8", errors="replace").splitlines()
+                    continue
+                st = p.stat()
+                digest = hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
+                files[str(p)] = (st.st_size, digest, st.st_mtime_ns)
             except OSError:
-                out[str(p)] = None
-    return out
+                files[str(p)] = None
+    return files, trace
 
 
-_REAL_TOOL_HOME_AT_START = _snapshot_real_tool_home()
+_REAL_AT_START, _TRACE_AT_START = _snapshot_real_tool_home()
+_PYTEST_TMP = Path(tempfile.gettempdir()).resolve()
+
+
+def _ours(line: dict) -> bool:
+    """A trace line written by this pytest session or its children: it has our pid or ppid (workers and
+    controller register theirs in the session folder), or ran in a pytest temp folder."""
+    pids = set()
+    reg = os.environ.get("ORCH_TEST_SESSION_PIDS")
+    if reg and Path(reg).exists():
+        pids = {int(x) for x in Path(reg).read_text().split()}
+    cwd = str(line.get("cwd", ""))
+    return (
+        line.get("pid") in pids
+        or line.get("ppid") in pids
+        or ("/pytest-of-" in cwd and cwd.startswith(str(_PYTEST_TMP)))
+    )
+
+
+def pytest_configure(config):
+    reg = os.environ.get("ORCH_TEST_SESSION_PIDS")
+    if not reg:  # the controller (or a plain run) makes the registry; xdist workers inherit the variable
+        fd, reg = tempfile.mkstemp(prefix="orch-test-pids-")
+        os.close(fd)
+        os.environ["ORCH_TEST_SESSION_PIDS"] = reg
+    with open(reg, "a") as f:
+        f.write(f"{os.getpid()}\n")
 
 
 @pytest.fixture(autouse=True)
@@ -39,18 +73,37 @@ def _strict_orch_home(monkeypatch, tmp_path_factory):
 
 
 def pytest_sessionfinish(session, exitstatus):
-    if hasattr(session.config, "workerinput"):  # xdist worker: the controller checks
+    """Read-only guard, run by the controller only. The real ~/.orch-tool must look the same after the run:
+    any file that changed fails the session (the message says: content changed, or only touched). New fallback
+    trace lines are printed; they fail the session when they come from this session's own processes, and only
+    warn when a foreign process wrote them."""
+    if hasattr(session.config, "workerinput"):
         return
-    """Read-only guard: the real ~/.orch-tool must look the same after the run as before it. (xdist workers
-    check too; another process may touch it in the meantime, so a hit names the time, not a culprit.)"""
-    now = _snapshot_real_tool_home()
-    if now != _REAL_TOOL_HOME_AT_START:
-        changed = sorted(
-            k
-            for k in set(now) | set(_REAL_TOOL_HOME_AT_START)
-            if now.get(k) != _REAL_TOOL_HOME_AT_START.get(k)
+    files, trace = _snapshot_real_tool_home()
+    bad = False
+    for k in sorted(set(files) | set(_REAL_AT_START)):
+        before, after = _REAL_AT_START.get(k), files.get(k)
+        if before != after:
+            kind = (
+                "content changed"
+                if (before and after and before[:2] != after[:2])
+                else "only touched or (re)created/removed"
+            )
+            print(f"\nREAL ~/.orch-tool CHANGED: {k}: {kind}", file=sys.stderr)
+            bad = True
+    new = [x for x in trace if x not in _TRACE_AT_START]
+    for raw in new:
+        try:
+            line = json.loads(raw)
+        except ValueError:
+            line = {}
+        ours = _ours(line)
+        print(
+            f"\nREAL ~/.orch-tool fallback trace ({'THIS SESSION' if ours else 'foreign process'}): {raw}",
+            file=sys.stderr,
         )
-        print(f"\nREAL ~/.orch-tool CHANGED during the test session: {changed}", file=sys.stderr)
+        bad = bad or ours
+    if bad:
         session.exitstatus = 1
 
 

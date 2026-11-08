@@ -39,8 +39,13 @@ def w0(e):
     ref = os.environ.get("E2E_INSTALL_REF", "develop")
     home = e.tmp / "w0home"
     (home / "proj").mkdir(parents=True)
+    # its own tool home under the REAL home (the only place orch trusts), never the real ~/.orch-tool
+    real = Path(os.environ.get("E2E_REAL_HOME") or Path.home())
+    ohome = real / f".orch-e2e-w0-{os.getpid()}"
+    ohome.mkdir()
+    e.cleanup.append(lambda: shutil.rmtree(ohome, ignore_errors=True))
     env = {"HOME": str(home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "USER": "e2e", "LANG": "C.UTF-8", "TERM": "dumb",
-           "GIT_TERMINAL_PROMPT": "0", "ORCH_REF": ref}
+           "GIT_TERMINAL_PROMPT": "0", "ORCH_REF": ref, "ORCH_HOME": str(ohome), "ORCH_HOME_STRICT": "1"}
     url = f"https://raw.githubusercontent.com/severinlindenmann/orch/{ref}/install.sh"
 
     def run(cmd, cwd=None, timeout=600):
