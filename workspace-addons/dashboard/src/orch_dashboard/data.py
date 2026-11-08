@@ -577,3 +577,34 @@ def load_state(
         json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()
     ).hexdigest()[:12]
     return state
+
+
+def publish_connected(root: Path, orch_bin: str | None) -> bool:
+    rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    if not isinstance(rows, list) or not any(
+        isinstance(r, dict) and r.get("name") == "publish" and r.get("active") is True for r in rows
+    ):
+        return False
+    who = run_orch(orch_bin, ["publish", "whoami", "--json"], root)
+    return isinstance(who, dict) and isinstance(who.get("id"), str) and bool(who["id"]) and "error" not in who
+
+
+def load_links(root: Path, orch_bin: str | None) -> dict:
+    if not publish_connected(root, orch_bin):
+        return {"links": []}
+    raw = run_orch(orch_bin, ["publish", "list", "--json"], root)
+    files = raw.get("files", []) if isinstance(raw, dict) else []
+    links = []
+    for f in files if isinstance(files, list) else []:
+        if not isinstance(f, dict) or not isinstance(f.get("id"), str) or not re.fullmatch(r"f_[a-z0-9]+", f["id"]):
+            continue
+        expires = f.get("expires_at")
+        try:
+            expired = datetime.fromisoformat(expires.replace("Z", "+00:00")) <= datetime.now(UTC)
+        except (ValueError, TypeError, AttributeError):
+            expired = False
+        key, url = f.get("key"), f.get("url")
+        link = url.split("#", 1)[0] + "#k=" + key if isinstance(key, str) and key and isinstance(url, str) else None
+        links.append({"id": f["id"], "name": f.get("name"), "size": f.get("size"),
+                      "expires_at": expires, "expired": expired, "link": link, "copy": link is not None})
+    return {"links": links}

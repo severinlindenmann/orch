@@ -246,7 +246,7 @@ def test_dashboard_source_names_no_addon():
     src = Path(actions.__file__).parent
     text = "".join((src / f).read_text() for f in ("actions.py", "server.py", "data.py"))
     assert "relay" in (src / "mobile.py").read_text()  # the one file allowed to name an add-on: Mobile mode
-    for name in ("scheduler", "automation", "relay", "focus", "publish", "wiki"):
+    for name in ("scheduler", "automation", "relay", "focus", "wiki"):
         assert not re.search(rf"\b{name}\b", text, re.IGNORECASE), name
 
 
@@ -750,3 +750,47 @@ def test_share_state_is_read_from_agents_md_only(ws):
     assert load_settings(ws, None)["share"] is False
     (ws / "AGENTS.md").write_text("# Team\n<!-- orch:begin share -->\nx\n<!-- orch:end share -->\n", encoding="utf-8")
     assert load_settings(ws, None)["share"] is True
+
+
+def test_link_commands_and_validation():
+    common = ['--by', actions.actor(), '--json']
+    assert actions.build_argv('link.extend', {'id': 'f_abc123', 'days': 7}) == ['publish', 'extend', 'f_abc123', '--days', '7', *common]
+    assert actions.build_argv('link.stop', {'id': 'f_abc123'}) == ['publish', 'delete', 'f_abc123', *common]
+    for op, args in [('link.stop', {'id': 'app'}), ('link.stop', {'id': 'f_a', 'extra': 1})] + [('link.extend', {'id': 'f_a', 'days': n}) for n in (0, 91, True, '7')]:
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv(op, args)
+
+
+def test_links_fail_closed(ws, monkeypatch):
+    from orch_dashboard import data
+    monkeypatch.setattr(data, 'run_orch', lambda *a, **kw: None)
+    with pytest.raises(actions.BadRequest, match='Sharing is not set up here.'):
+        actions.run_op(ws, 'orch', 'link.stop', {'id': 'f_a'})
+
+
+def test_addon_repeat_and_copy_argv():
+    common = ['--by', actions.actor(), '--json', '--', 't_abcdef']
+    assert actions.build_argv('addon.act', dict(addon='automation', verb='repeat', target='t_abcdef', value='every day at 9')) == ['automation', 'act', 'repeat', '--value=every day at 9', *common]
+    assert actions.build_argv('addon.act', dict(addon='automation', verb='copy', target='t_abcdef')) == ['automation', 'act', 'copy', *common]
+    for verb, value in [('copy', 'daily'), ('repeat', 'x' * 201), ('repeat', '')]:
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv('addon.act', dict(addon='automation', verb=verb, target='t_abcdef', value=value))
+
+
+@pytest.mark.parametrize('who', [None, {}, {'error': 'No connection'}, {'id': ''}])
+def test_link_auth_refuses_unreadable_identity(ws, monkeypatch, who):
+    from orch_dashboard import data
+    monkeypatch.setattr(data, 'run_orch', lambda binary, args, root: [{'name': 'publish', 'active': True}] if args[0] == 'addon' else who)
+    with pytest.raises(actions.BadRequest, match='Sharing is not set up here.'):
+        actions.run_op(ws, 'orch', 'link.stop', {'id': 'f_a'})
+
+
+def test_link_actions_are_audited(ws, monkeypatch):
+    import subprocess
+    monkeypatch.setattr(actions, 'publish_connected', lambda *a: True)
+    monkeypatch.setattr(actions, 'human_env', lambda *a: {})
+    monkeypatch.setattr(actions.subprocess, 'run', lambda *a, **kw: subprocess.CompletedProcess(a, 0, '{}', ''))
+    for op, args in [('link.extend', {'id': 'f_a', 'days': 7}), ('link.stop', {'id': 'f_a'})]:
+        assert actions.run_op(ws, 'orch', op, args)[0] == 200
+    rows = [json.loads(line) for line in (ws / '.orch/run/dashboard/actions.log').read_text().splitlines()]
+    assert [(r['op'], r['id'], r.get('days')) for r in rows] == [('link.extend', 'f_a', 7), ('link.stop', 'f_a', None)]

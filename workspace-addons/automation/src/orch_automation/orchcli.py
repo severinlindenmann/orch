@@ -15,7 +15,12 @@ def call(root: Path, *args: str, by: bool | str = True):
     """Run `orch <args> --json`. Returns parsed JSON, or None on failure / no JSON.
     `by`: True = the scheduler (BY), a string = that actor (a person pressing a dashboard button), False = no --by."""
     actor = by if isinstance(by, str) else BY
-    cmd = [os.environ.get("ORCH_BIN") or "orch", *args, "--json"] + (["--by", actor] if by else [])
+    head = list(args)
+    tail = []
+    if "--" in head:
+        cut = head.index("--")
+        head, tail = head[:cut], head[cut:]
+    cmd = [os.environ.get("ORCH_BIN") or "orch", *head, "--json"] + (["--by", actor] if by else []) + tail
     try:
         p = subprocess.run(cmd, check=False, cwd=root, capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.TimeoutExpired):
