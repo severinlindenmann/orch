@@ -151,3 +151,98 @@ def test_follow_up_text_on_an_idle_ticket_starts_a_run(ws):
     (ws / "inbox.json").write_text(json.dumps([{"id": "m_6", "type": "text", "from": "ph_abc", "ticket": "t_ph000005",
                                                  "applied": True, "note": "added to t_ph000005", "body": {"text": "more"}}]))
     assert Scheduler(ws).tick(T(8)) == ["t_ph000005"] and runs_started(ws) == ["t_ph000005"]
+
+
+def test_a_phone_ticket_made_by_the_inbox_pass_starts_in_the_same_pass(ws, monkeypatch):
+    """fb6: the inbox pass makes the ticket of a new phone text; its run starts in that pass, not one
+    interval (60 s) later on the next pass."""
+    from conftest import runs_started
+
+    def inbox(self, now):
+        phone_ticket(ws, "t_ph000010")  # what `orch relay inbox` does for a new phone text
+        return []
+
+    monkeypatch.setattr(Scheduler, "inbox", inbox)
+    relay_on(ws)
+    s = Scheduler(ws)
+    s.wake.set()  # the listener saw the text arrive
+    assert s.tick(T(8)) == ["t_ph000010"] and runs_started(ws) == ["t_ph000010"]
+
+
+def test_runs_for_the_phone_are_not_forced_to_one_step(ws):
+    """fb4: a run the phone asked for may open a live session (core decides), so it stays up for an hour
+    and can be opened with `orch run attach`; a scheduled (cron) run stays one step at a time."""
+    from conftest import calls
+
+    phone_ticket(ws, "t_ph000011")
+    Scheduler(ws).tick(T(8))
+    start = next(c["args"] for c in calls(ws) if c["args"][:2] == ["run", "start"])
+    assert "--mode" not in start
+
+
+def test_a_general_text_starts_the_agent_on_the_general_ticket(ws):
+    """fb1B: a phone text in General was queued on the hidden General ticket and nothing ever answered it."""
+    from conftest import calls, runs_started
+
+    add_ticket(ws, "t_general1", status="open")
+    (ws / "ended-t_general1").write_text("")
+    relay_on(ws)
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_7", "type": "text", "from": "ph_abc", "ticket": "t_general1",
+                                                 "applied": True, "note": "General conversation",
+                                                 "body": {"text": "hello", "general": True}}]))
+    assert Scheduler(ws).tick(T(8)) == ["t_general1"] and runs_started(ws) == ["t_general1"]
+    start = next(c["args"] for c in calls(ws) if c["args"][:2] == ["run", "start"])
+    assert "--mode" not in start  # a person is waiting on the phone: a live session when the machine can
+    told = json.loads((ws / ".orch/tickets/t_general1.json").read_text())["history"][0]["text"]
+    assert "orch relay send ph_abc" in told and "--ticket t_general1" in told
+
+
+def test_a_general_text_while_the_agent_runs_starts_nothing(ws):
+    from conftest import runs_started
+
+    add_ticket(ws, "t_general2", status="active")
+    relay_on(ws)
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_8", "type": "text", "from": "ph_abc", "ticket": "t_general2",
+                                                 "applied": True, "note": "General conversation",
+                                                 "body": {"text": "hello", "general": True}}]))
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+
+
+def test_started_line_never_has_an_empty_id(ws):
+    add_ticket(ws, "t_general3", status="open")
+    (ws / "ended-t_general3").write_text("")
+    relay_on(ws)
+    (ws / "inbox.json").write_text(json.dumps([{"id": "", "type": "text", "from": "ph_abc", "ticket": "t_general3",
+                                                 "applied": True, "note": "General conversation",
+                                                 "body": {"text": "hello", "general": True}}]))
+    Scheduler(ws).tick(T(8))
+    texts = [h["text"] for h in json.loads((ws / ".orch/tickets/t_general3.json").read_text())["history"]]
+    assert not any("()" in t or "(phone text )" in t for t in texts)
+
+
+def test_answer_to_one_of_several_questions_resumes_a_stopped_phone_ticket_once(ws):
+    from conftest import runs_started
+
+    # q1 answered on the dashboard, q2 is still open: the ticket keeps waiting, no run holds it
+    add_ticket(ws, "t_ph000009", status="waiting", waiting_on={"kind": "question", "ref": "q2"},
+               ext={"relay": {"origin": "phone"}, "automation": {"phone_started": True}})
+    (ws / "ended-t_ph000009").write_text("")
+    (ws / "pending-t_ph000009").write_text(json.dumps(["p_1"]))
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == ["t_ph000009"]
+    assert s.tick(T(8, 1)) == [] and Scheduler(ws).tick(T(8, 2)) == []
+    assert runs_started(ws) == ["t_ph000009"]
+
+
+def test_one_run_when_both_ready_and_waiting_rules_could_apply(ws):
+    from conftest import runs_started
+
+    add_ticket(ws, "t_ph000010", status="ready")
+    add_ticket(ws, "t_ph000011", status="waiting", waiting_on={"kind": "question", "ref": "q2"})
+    add_ticket(ws, "t_ph000012", status="waiting", waiting_on={"kind": "time", "until": "2026-12-01T00:00:00Z"})
+    for tid in ("t_ph000010", "t_ph000011", "t_ph000012"):
+        (ws / f"ended-{tid}").write_text("")
+        (ws / f"pending-{tid}").write_text(json.dumps(["p_1"]))
+    s = Scheduler(ws)
+    assert sorted(s.tick(T(8))) == ["t_ph000010", "t_ph000011"]  # a time wait is not an answer: left alone
+    assert s.tick(T(8, 1)) == [] and sorted(runs_started(ws)) == ["t_ph000010", "t_ph000011"]

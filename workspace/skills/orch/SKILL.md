@@ -9,6 +9,9 @@ Each ticket has an id (`t_7k3f9q`) and a short key people use (`DM1-12`). Wherev
 works too, any case: `orch check add DM1-12 "<step>"`. Say the key when you talk to a person.
 Exit code 0 = ok, 2 = refused (the reason is in plain words). Works on local files; no server needed.
 
+## Stay inside orch
+You can only use orch tools and the files in this workspace. Never offer, suggest or use other services, accounts or connectors (email, calendar, drives, chat apps or similar), even if your environment lists some. If a person asks for one, say you cannot and offer an orch ticket instead.
+
 ## When to use
 - Any request, even a small one: find or make its ticket first.
 - You need a decision from a person: ask through the ticket, then stop.
@@ -29,6 +32,7 @@ Exit code 0 = ok, 2 = refused (the reason is in plain words). Works on local fil
 
 Started by hand (not by orch)? Tell orch which ticket you work on so nobody starts a second agent on it:
 `orch run claim <id> --session <your session id>`. Finishing a piece of work in a live session: `orch run done <id>`.
+In a live session, when you see `New input on orch ticket <id>` or `Your task for orch ticket <id> is ready`, run `orch run input <id>` and act on what it prints (orch never types a person's words into your session).
 See what a run is doing with `orch run status <id>`; a person can send you a message with `orch run send <id> "<text>"`.
 
 **Finish a step**
@@ -58,6 +62,12 @@ explicitly asks for a file in the project. Proof can point at them: `orch check 
 
     orch ask <id> "<question>" --option A --option B --recommend A
     orch ask <id> "<question>" --check <c>        # tie it to a step
+
+Write the question for a person who has not seen your work, in plain words:
+- Say what you need to know and why it matters. Use names (the task, the document), never internal ids like `c1` or `q1`, and never folder or file paths such as `docs/` or `.orch/...` (a path is fine only inside a quoted error message).
+- Offer short answer options a person can click. Keep the question to one sentence or two.
+- NEVER ask the person to provide, paste or type a password, token, API key or any other credential, neither in the question nor as an option (not even "and credentials in .orch/secrets/ if needed"). `orch ask` refuses such questions.
+- If you need access you do not have: ask only "Is access to <the service> set up for this workspace?" or offer the option "I will set it up myself", and say in the ticket summary what is missing. A person sets access up outside the chat (credentials live in `.orch/secrets/`, ignored by git); you never receive them in an answer.
 
 The ticket now waits. Then stop; do not treat silence as an answer. When the answer is in `orch ticket show <id>`,
 set the ticket active again and follow it. A person answers with `orch answer <id> q1 "<answer>"`. See everything that
@@ -107,7 +117,7 @@ Choose from the list, never invent an id. If a person already chose, `orch look 
 ## Rules
 - Plans may change. There are no signing or planning gates.
 - Keep unknown fields and other add-ons' keys when you edit a ticket file. Prefer the commands.
-- Credentials live in `.orch/secrets/` (ignored by git). Never put them in a ticket.
+- Credentials live in `.orch/secrets/` (ignored by git). Never put them in a ticket, and never ask a person to give you one in a question or answer.
 - Ask the user before anything that cannot be undone.
 - More is possible with optional add-ons: `orch addon list`.
 

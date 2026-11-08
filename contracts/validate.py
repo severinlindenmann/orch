@@ -1,7 +1,8 @@
 """Check every contract example (tickets incl. ext.automation, run records, pending input, Needs you rows,
 agent adapters and their config entries, messages, workspaces, add-on manifests and views), the publish
 crypto vectors, the workspace look (look.json, look/icons, vectors/look-v1.json), and the phone API v3 (every /v1/phone example in review/relay-api.examples.json against
-phone-api.schema.json, plus vectors/phone-v3-v1.json). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
+phone-api.schema.json, plus vectors/phone-v3-v1.json), and Chat + group chat (vectors/chat-groups/*.json against message.schema.json,
+chat-groups.schema.json and the host rules in cg_rules). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py
 """
@@ -619,6 +620,322 @@ for case in lvec["connect"]:
         fails.append(f"look vector connect {case['name']}: got {look_connect(case['local'], case['remote'])}")
 if not {200, 422}.issubset({c["status"] for c in lvec["me_patch"]}) or 409 not in {c["status"] for c in lvec["admin_patch"]}:
     fails.append("look vectors: need 200 and 422 me_patch cases and a 409 admin_patch case")
+
+# Chat and group chat across workspaces (chat-groups.md): every vectors/chat-groups/*.json is one orch.msg/1 message
+# (+ optional `context`: what the receiver already holds, and `expect`) that must pass message.schema.json,
+# chat-groups.schema.json, the message rules (cg_rules) and the receiver rules (cg_receive); valid-* pass, invalid-* fail.
+_msg_schema = _expand(json.loads((HERE / "message.schema.json").read_text()))
+_cg_schema = _expand(json.loads((HERE / "chat-groups.schema.json").read_text()))
+V_CG = Draft202012Validator(
+    _cg_schema,
+    registry=Registry().with_resource(_msg_schema["$id"], Resource.from_contents(_msg_schema)),
+    format_checker=FormatChecker(),
+)
+CG_HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind")
+CG_MEMBER_ONLY = ("seen", "leave")
+CG_FILE_MAX = 26214400
+# task.status order: a status may repeat or move right, never left; the last column is final.
+CG_TASK_RANK = {"waiting_start": 0, "waiting_approval": 1, "queued": 2, "working": 3, "done": 4, "failed": 4, "denied": 4}
+CG_ALLOW_OPTIONS = ["once", "always", "no"]  # wire values; the UI shows "Allow once / Always / No"
+CG_ORDER_BUFFER = 50
+CG_ORDER_MAX_JUMP = 1000  # a forward jump above this over applied_seq is a gap skip
+CG_ORDER_TIMEOUT_S = 600  # quiet group: skip a gap after 10 minutes
+CG_MAX_OPEN_GROUPS_PER_HOST = 20
+CG_CREATED_PER_HOUR = 5
+# allow answer (wire) -> allow message -> group_event.approved.mode / denied
+CG_ALLOW_MAP = {"once": {"allow_mode": "once", "approved_mode": "once"}, "always": {"allow_mode": "permanent", "approved_mode": "always"}, "no": {"status": "denied"}}
+CG_LEGACY_WORDS = {"allow once": "once", "once": "once", "always": "always", "ignore": "no", "no": "no"}
+CG_RATE = {"msgs_per_min": 20, "files_per_min": 3}
+
+
+def cg_fanout_id(host, origin_id, to):
+    """Id of the host's copy of a group message for one recipient: retries give the same id (relay: 200 no-op)."""
+    return "m_" + hashlib.sha256(f"{host}\n{origin_id}\n{to}".encode()).hexdigest()[:16]
+
+
+def cg_members(g):
+    return [x.get("ws") for x in g.get("members", []) if isinstance(x, dict)]
+
+
+def cg_targeted(m):
+    """A host message for one member only (not a copy of a group-wide message): it carries no group.seq."""
+    b = m.get("body") or {}
+    return m.get("type") in ("delegate", "question") or "shared_ticket" in b
+
+
+def cg_quiet(m):
+    """Copies to phones are pushed only for: questions, approval_needed, member_added for no one (quiet), task done /
+    failed, closed, and texts addressed to the person (body.to_person). Everything else is quiet (update.kind note)."""
+    b = m.get("body") or {}
+    ev = (b.get("group_event") or {}).get("kind")
+    st = (b.get("task") or {}).get("status")
+    return not (m.get("type") == "question" or ev in ("approval_needed", "closed") or st in ("done", "failed") or b.get("to_person") is True)
+
+
+def cg_rules(m, ctx=None):
+    """Message rules JSON Schema cannot express (chat-groups.md, Security G1-G8). Returns plain messages."""
+    ctx = ctx or {}
+    b, out = m.get("body") or {}, []
+    g = b.get("group")
+    if m.get("type") == "question" and b.get("allow_question") is True and b.get("options") != CG_ALLOW_OPTIONS:
+        out.append("a permission (allow) question has the wire options once, always, no (UI words are only shown)")
+    if not isinstance(g, dict):
+        return out
+    host, frm, to = g.get("host"), m.get("from"), m.get("to")
+    if len(set(cg_members(g))) != len(cg_members(g)):
+        out.append("group.members: each ws once")
+    if host not in cg_members(g):
+        out.append("group.members must include the host")
+    if frm == host:
+        if g.get("id") != "grp_" + str(m.get("ticket")):
+            out.append("host message: group.id must be grp_ + the message's ticket (the host ticket)")
+        if cg_targeted(m) and "seq" in g:
+            out.append("a targeted host message (delegate, question, shared_ticket) carries no group.seq")
+        if not cg_targeted(m) and "seq" not in g:
+            out.append("a group-wide host message needs group.seq")
+        if m.get("type") == "question" and b.get("question_kind") != "info":
+            out.append("a host question to a member must be question_kind info")
+        o = b.get("origin")
+        hs0 = ctx.get("host_state") or {}
+        if isinstance(o, dict) and str(o.get("from")).startswith("ph_") and "paired_phones" in hs0 and o["from"] not in hs0["paired_phones"]:
+            out.append("origin.from is a ph_ only for a phone paired to this host workspace")
+        if b.get("by") == "you":
+            if b.get("via") == "phone" and not (isinstance(o, dict) and o.get("from") == b.get("phone")):
+                out.append("by you via phone: origin.from must be that phone")
+            if b.get("via") == "dashboard" and isinstance(o, dict) and o.get("from") != "dashboard":
+                out.append("by you via dashboard: origin.from must be dashboard")
+        if isinstance(b.get("task"), dict) and b["task"].get("ws") == host:
+            out.append("task.ws is the member that got the task, never the host")
+        if isinstance(o, dict) and (str(to).startswith("ws_") or to == "phones") and m.get("id") != cg_fanout_id(host, o["id"], to):
+            out.append("host copy: id must be the fan-out id of (host, origin.id, to)")
+        if to == "phones" and m.get("type") == "text" and cg_quiet(m) and (b.get("update") or {}).get("kind") != "note":
+            out.append("copy to phones outside the push set must be quiet (update.kind note)")
+        if str(to).startswith("ws_"):
+            if to not in cg_members(g):
+                out.append("host sends group messages only to members")
+            if "ticket_view" in b or "shared_files" in b:
+                out.append("ticket_view and shared_files never go to workspaces")
+        for k in CG_MEMBER_ONLY:
+            if k in b:
+                out.append(f"body.{k} is for members only")
+        if "shared_files" in b:
+            have = {x.get("blob_id") for x in (b.get("ticket_view") or {}).get("attachments", [])}
+            if not set(b["shared_files"]) <= have:
+                out.append("shared_files must be blob ids of body.ticket_view.attachments")
+        st = b.get("shared_ticket")
+        if isinstance(st, dict):
+            if st.get("ticket") != m.get("ticket"):
+                out.append("shared_ticket must describe the host ticket")
+            if len(json.dumps(st, separators=(",", ":"), ensure_ascii=False).encode()) > 4096:
+                out.append("shared_ticket is over 4096 bytes")
+    elif str(frm).startswith("ws_"):
+        if to != host:
+            out.append("members send group messages only to the host (only the host fans out)")
+        if frm not in cg_members(g):
+            out.append("sender is not a member")
+        if b.get("by") != frm:
+            out.append("a member's message is by the member itself (never by 'you')")
+        if "seq" in g:
+            out.append("only the host sets group.seq")
+        for k in CG_HOST_ONLY + ("ticket_view",):
+            if k in b:
+                out.append(f"body.{k} is sent only by the host")
+        if isinstance(b.get("task"), dict):
+            if b["task"].get("ws") != frm:
+                out.append("task.ws must be the sending member")
+            if b["task"].get("status") == "waiting_start":
+                out.append("only the host says waiting_start")
+    else:
+        out.append("only workspaces send body.group (phones write to the host ticket; the relay builds phone texts)")
+    if m.get("type") == "allow":
+        out.append("allow messages carry no body.group (the host matches them by reply_to)")
+    if m.get("type") == "file" and "share" in b and int(b.get("size", 0)) > CG_FILE_MAX:
+        out.append("a shared file is at most 25 MB")
+    return out
+
+
+def cg_receive(m, ctx):
+    """What the receiver checks against what it already holds (context). Returns plain messages (= drop + log)."""
+    b, out = m.get("body") or {}, []
+    g = b.get("group") if isinstance(b.get("group"), dict) else None
+    if g:
+        if ctx.get("receiver_role") in ("member", "phone") and m.get("from") != g.get("host"):
+            out.append("G3: at a member or phone, from != group.host is always dropped (also for a known group)")
+        if m.get("from") == g.get("host") and cg_store(m, ctx)[1] == "new":
+            # any group creation counts: an explicit `created` or the first message seen from the host
+            if ctx.get("open_groups_of_host", 0) >= CG_MAX_OPEN_GROUPS_PER_HOST:
+                out.append("dropped: this host already has 20 open groups here")
+            recent = [t for t in ctx.get("creations_recv_s", []) if ctx.get("now_s", 0) - t < 3600]  # receive times, not created_at
+            if len(recent) >= CG_CREATED_PER_HOUR:
+                out.append("dropped: this host is over 5 `created` events an hour")
+        # The group key is (host, id): an id held under another host is a different group, never a conflict.
+        o = b.get("origin")
+        if isinstance(o, dict) and [g.get("host"), g.get("id"), o.get("id")] in [list(x) for x in ctx.get("seen_origins", [])]:
+            out.append("duplicate: this (host, group.id, origin.id) was already stored")
+    hs = ctx.get("host_state")
+    if g and hs is not None and m.get("from") != g.get("host"):
+        frm = m.get("from")
+        if frm not in hs.get("members", []):
+            out.append("dropped: not a current member (left, removed or never added)")
+        if hs.get("closed"):
+            out.append("dropped: the group is closed")
+        rate = hs.get("last_minute", {}).get(frm, {})
+        if rate.get("msgs", 0) >= CG_RATE["msgs_per_min"] or (m.get("type") == "file" and rate.get("files", 0) >= CG_RATE["files_per_min"]):
+            out.append("dropped: member over its rate limit")
+        t = b.get("task")
+        if isinstance(t, dict):
+            if t.get("delegate") not in hs.get("delegates_sent", {}).get(frm, []):
+                out.append("task.delegate is not a delegate the host sent to this member")
+            old = hs.get("task_status", {}).get(t.get("delegate"))
+            if old is not None:
+                ro, rn = CG_TASK_RANK[old], CG_TASK_RANK.get(t.get("status"), -1)
+                if rn < ro or (ro == 4 and t.get("status") != old):
+                    out.append(f"task status may not go from {old} to {t.get('status')}")
+    return out
+
+
+def cg_parse_allow_answer(text):
+    """Wire value is exact lowercase once|always|no. Old clients: trimmed, case-insensitive, single spaces:
+    'Allow once', 'Always', 'Ignore', 'No'. Anything else: None (not an allow answer)."""
+    if text in CG_ALLOW_OPTIONS:
+        return text
+    return CG_LEGACY_WORDS.get(" ".join(str(text).split()).casefold())
+
+
+def cg_card(q, ctx, sender=None):
+    """Phone approval card for a member's allow question: buttons only for the wire options; old wording -> 'Answer in Bank'."""
+    if not (q.get("allow_question") is True and q.get("options") == CG_ALLOW_OPTIONS):
+        return "answer_in_bank"
+    shown = (ctx or {}).get("shown_in_group")
+    if shown is not None:
+
+        def key(r):  # same as chat_groups._ref_key: non-strings are invalid (None); stripped, lower-cased
+            if not (isinstance(r, dict) and isinstance(r.get("host"), str) and isinstance(r.get("id"), str)):
+                return None
+            return r["host"].strip().lower(), r["id"].strip().lower()
+
+        if key(q.get("group_ref")) is None or key(q.get("group_ref")) != key(shown):  # one group only
+            return "answer_in_bank"
+        members = (ctx or {}).get("group_members")
+        if not isinstance(members, list) or sender not in members:  # unknown members: no buttons
+            return "answer_in_bank"
+    return "buttons"
+
+
+def cg_store(m, ctx):
+    """Receiver stores a group under (host, id). Returns (key, 'new'|'existing'); never a conflict between hosts."""
+    g = m["body"]["group"]
+    key = [g["host"], g["id"]]
+    return key, ("existing" if key in [[k["host"], k["id"]] for k in ctx.get("known_groups", [])] else "new")
+
+
+def cg_applied_after(m, ctx):
+    """applied_seq after this message (see cg_order)."""
+    od, seq = ctx["order"], m["body"]["group"]["seq"]
+    out = cg_order(m, ctx)
+    ap = od.get("applied_seq")
+    if ap is None:
+        ap = seq - 1  # first seen seq - 1; from_seq is display only, never trusted
+    if out in ("apply", "skip_jump_and_apply"):
+        return seq
+    if out == "skip_gap_and_apply":
+        # skip to just below the lowest buffered seq (or this one), apply the contiguous run
+        have = sorted(set(od.get("buffered", [])) | {seq})
+        cur = have[0]
+        for x in have[1:]:
+            if x == cur + 1:
+                cur = x
+            else:
+                break
+        return cur
+    return ap
+
+
+def cg_order(m, ctx):
+    """Stateful checks (G9 task status, closed, membership) run in group.seq order (G12). Returns:
+    apply | buffer | skip_jump_and_apply (jump > 1000 over applied_seq: applied_seq = seq - 1, log, apply; no per-seq gap entries, gaps are ranges) | skip_gap_and_apply (buffer of 50 full, or 10 min on the receiver clock since the earliest-received message still in the buffer (first_buffered_recv_s, recomputed after a partial flush): skip the gap,
+    apply the contiguous run, late seqs below applied_seq count as old) | late_show_no_state (seq <= applied_seq:
+    shown, but changes no state). Initial applied_seq = first seen seq - 1 (from_seq is never used). Time = the receiver's own clock (now_s, first_buffered_recv_s), never a message's created_at. None when no seq/context."""
+    seq, od = ((m.get("body") or {}).get("group") or {}).get("seq"), ctx.get("order")
+    if seq is None or od is None:
+        return None
+    ap = od.get("applied_seq")
+    if ap is None:
+        ap = seq - 1  # first seen seq - 1; from_seq is display only, never trusted
+    if seq <= ap:
+        return "late_show_no_state"
+    if seq == ap + 1:
+        return "apply"
+    if seq - ap > CG_ORDER_MAX_JUMP:
+        return "skip_jump_and_apply"
+    if len(od.get("buffered", [])) >= CG_ORDER_BUFFER or (od.get("buffered") and od.get("now_s", 0) - od.get("first_buffered_recv_s", od.get("now_s", 0)) >= CG_ORDER_TIMEOUT_S):
+        return "skip_gap_and_apply"
+    return "buffer"
+
+
+def cg_shown_as(m, ctx):
+    """How a phone labels a copy. Only a host copy with by: you is 'You' (origin = a phone of its own account or the
+    host's dashboard); any other ph_ is 'Other phone'. None when the message is not by: you."""
+    b = m.get("body") or {}
+    if b.get("by") != "you":
+        return None
+    o = b.get("origin") or {}
+    g = b.get("group") or {}
+    if m.get("from") != g.get("host"):
+        return "Other phone"
+    return "You" if o.get("from") == "dashboard" or o.get("from") in ctx.get("own_phones", []) else "Other phone"
+
+
+def cg_phone_group(m, ctx):
+    """True when a phone text joins the group: it goes to the host ticket and reply_to names a group copy the host
+    sent to phones (the group composer always sets it). Otherwise it is a host-only note (rule G8)."""
+    hs = ctx.get("host_state") or {}
+    return (
+        str(m.get("from")).startswith("ph_")
+        and m.get("type") == "text"
+        and m.get("ticket") == hs.get("ticket")
+        and m.get("reply_to") in hs.get("group_copies", [])
+    )
+
+
+cg_dir = HERE / "vectors" / "chat-groups"
+cg_files = sorted(cg_dir.glob("*.json"))
+for f in cg_files:
+    case = json.loads(f.read_text())
+    m, ctx = case["message"], case.get("context") or {}
+    errs = [e.message for e in V["message"].iter_errors(m)] + [e.message for e in V_CG.iter_errors(m)]
+    errs += cg_rules(m, ctx) + cg_receive(m, ctx)
+    exp = case.get("expect") or {}
+    if "group_text" in exp and cg_phone_group(m, ctx) != exp["group_text"]:
+        errs.append(f"phone text group_text expected {exp['group_text']}")
+    if "shown_as" in exp and cg_shown_as(m, ctx) != exp["shown_as"]:
+        errs.append(f"expected shown_as {exp['shown_as']}")
+    if "order" in exp and cg_order(m, ctx) != exp["order"]:
+        errs.append(f"expected order {exp['order']}, got {cg_order(m, ctx)}")
+    if "applied_after" in exp and cg_applied_after(m, ctx) != exp["applied_after"]:
+        errs.append(f"expected applied_seq {exp['applied_after']}, got {cg_applied_after(m, ctx)}")
+    if "stored_as" in exp and (cg_store(m, ctx)[0] != exp["stored_as"] or cg_store(m, ctx)[1] != exp.get("store", "new")):
+        errs.append(f"expected store {exp['stored_as']} {exp.get('store', 'new')}, got {cg_store(m, ctx)}")
+    if "card" in exp and cg_card(m["body"], ctx, m.get("from")) != exp["card"]:
+        errs.append(f"expected card {exp['card']}")
+    for ans, want_ in (exp.get("parse") or {}).items():
+        if cg_parse_allow_answer(ans) != want_:
+            errs.append(f"parse {ans!r} expected {want_}")
+    if "map" in exp:
+        mp = exp["map"]
+        if CG_ALLOW_MAP.get(cg_parse_allow_answer(mp["answer"])) != {k: v for k, v in mp.items() if k != "answer"}:
+            errs.append("allow answer mapping differs from the table")
+        ge = (m["body"].get("group_event") or {})
+        if ge.get("kind") == "approved" and ge.get("mode") != mp.get("approved_mode"):
+            errs.append("approved.mode must be the mapped value")
+        if ge.get("kind") == "denied" and mp.get("status") != "denied":
+            errs.append("denied event needs answer no")
+    want = f.name.startswith("valid-")
+    if bool(errs) == want:
+        fails.append(f"vectors/chat-groups/{f.name}: expected {'valid' if want else 'invalid'}, got {errs[0] if errs else 'valid'}")
+for prefix in ("valid-", "invalid-"):
+    if not any(f.name.startswith(prefix) for f in cg_files):
+        fails.append(f"vectors/chat-groups: needs at least one {prefix}* vector")
 
 if fails:
     print("\n".join("FAIL " + f for f in fails))

@@ -4,8 +4,10 @@ struct QuestionCard: View {
     let item: ConvItem
     let conversationId: ConversationID
     var onReply: (Question) -> Void
+    var onWriteOwn: (Question) -> Void = { _ in }
     var onOpenArtifact: (String) -> Void
     var isStale: Bool = false
+    var position: (n: Int, of: Int)? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showOther = false
@@ -15,13 +17,15 @@ struct QuestionCard: View {
             VStack(alignment: .leading, spacing: 12) {
                 if item.answer != nil {
                     Text("Answered").themeFont(13).foregroundStyle(Theme.muted)
-                } else if q.isAllow {
-                    Image(systemName: "lock").themeFont(13).foregroundStyle(isStale ? Theme.muted : Theme.warn)
-                        .accessibilityLabel("Permission")
                 } else {
-                    Text("Needs you").themeFont(13, .semibold).foregroundStyle(isStale ? Theme.muted : Theme.warn)
+                    HStack(spacing: 6) {
+                        if q.isAllow {
+                            Image(systemName: "lock").accessibilityLabel("Permission")
+                        }
+                        Text(position.map { ConversationRules.needsYouText(position: $0.n, of: $0.of) } ?? "Needs you")
+                    }.themeFont(13, .semibold).foregroundStyle(isStale ? Theme.muted : Theme.warn)
                 }
-                Text(q.message.body.text).themeFont(17).fixedSize(horizontal: false, vertical: true)
+                questionText(q)
                 if isStale {
                     Text("This question is no longer open.").themeFont(13).foregroundStyle(Theme.muted)
                 } else if let answer = item.answer {
@@ -29,9 +33,6 @@ struct QuestionCard: View {
                 } else if model.sendingAnswers.contains(q.id) || model.queuedAnswers[q.id] != nil {
                     sending(q)
                 } else {
-                    if let suggested = q.message.body.recommended {
-                        Text("Suggested: \(label(q, suggested))").themeFont(13).foregroundStyle(Theme.muted)
-                    }
                     if q.message.body.options.isEmpty, let answer = model.pendingAnswers[q.id] {
                         selectedChip(q, answer: answer)
                     } else {
@@ -48,10 +49,35 @@ struct QuestionCard: View {
             }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                 .foregroundStyle(isStale ? Theme.muted : Theme.text)
                 .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(item.answer != nil || isStale ? Theme.border : .clear))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(item.answer != nil || isStale ? Theme.border : Theme.warn.opacity(0.35)))
                 .buttonStyle(PressStyle()).accessibilityElement(children: .contain)
                 .accessibilityIdentifier("question-\(q.id)")
         }
+    }
+
+    private func questionText(_ q: Question) -> some View {
+        let text = q.message.body.text
+        let attachments = model.tickets.first {
+            $0.workspace == q.message.from && $0.ticket == (q.message.ticket ?? conversationId.ticket)
+        }?.view?.attachments ?? []
+        var attributed = AttributedString(text)
+        for mention in ArtifactMentions.mentions(in: text, attachments: attachments) {
+            if let range = Range(mention.range, in: attributed),
+               let encoded = mention.attachmentId.addingPercentEncoding(withAllowedCharacters: .alphanumerics),
+               let url = URL(string: "orch-artifact://" + encoded) {
+                attributed[range].link = url
+                attributed[range].foregroundColor = Theme.brand
+                attributed[range].underlineStyle = .single
+            }
+        }
+        return Text(attributed).themeFont(17).fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("question-artifact-link")
+            .environment(\.openURL, OpenURLAction { url in
+                guard url.scheme == "orch-artifact",
+                      let id = String(url.absoluteString.dropFirst("orch-artifact://".count)).removingPercentEncoding else { return .systemAction }
+                onOpenArtifact(id)
+                return .handled
+            })
     }
 
     private func label(_ q: Question, _ option: String) -> String {
@@ -96,6 +122,13 @@ struct QuestionCard: View {
                 ForEach(q.message.body.options, id: \.self) { option in optionButton(q, option: option) }
             }
         }
+        if !isStale, item.answer == nil, ConversationRules.showsWriteOwn(q) {
+            Button { onWriteOwn(q) } label: {
+                Text("Write your own").themeFont(15).foregroundStyle(Theme.brand)
+                    .frame(minHeight: 44)
+            }.buttonStyle(.plain).accessibilityIdentifier("question-write-own")
+                .disabled(model.pendingAnswers[q.id] != nil)
+        }
     }
 
     private func previewHeading(_ option: String) -> String {
@@ -105,17 +138,22 @@ struct QuestionCard: View {
     private func optionButton(_ q: Question, option: String, title: String? = nil,
                               fullWidth: Bool = false, primary: Bool = false) -> some View {
         let pending = model.pendingAnswers[q.id]
+        let recommended = q.message.body.recommended == option
         return Button { model.chooseAnswer(q, option) } label: {
             HStack(spacing: 6) {
                 if pending == option { Image(systemName: "checkmark") }
                 Text(title ?? label(q, option)).fixedSize(horizontal: false, vertical: true)
+                if recommended {
+                    if fullWidth { Spacer(minLength: 8) }
+                    Text("Recommended").themeFont(13).foregroundStyle(Theme.brand)
+                }
             }.themeFont(15, .medium).padding(.horizontal, 12).padding(.vertical, 10)
                 .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: 44)
-                .foregroundStyle(primary ? Theme.onBrand : Theme.text)
-                .background(primary ? Theme.brand : Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                .foregroundStyle(primary && !recommended ? Theme.onBrand : Theme.text)
+                .background(recommended ? Theme.brand.opacity(0.16) : primary ? Theme.brand : Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(q.message.body.recommended == option ? Theme.brand : .clear))
                 .opacity(pending != nil && pending != option ? 0.45 : 1)
-        }.disabled(pending != nil).accessibilityLabel(option).accessibilityIdentifier("answer-\(option)")
+        }.disabled(pending != nil).accessibilityLabel(option + (recommended ? ", recommended" : "")).accessibilityIdentifier("answer-\(option)")
     }
 
     private func selectedChip(_ q: Question, answer: String, checked: Bool = true) -> some View {

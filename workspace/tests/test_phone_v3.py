@@ -107,6 +107,19 @@ def test_agent_reply_from_general_has_no_ticket_and_only_ack_working(proj, run, 
     check_sent_valid(conn)
 
 
+def test_text_sent_to_general_is_kept_in_the_general_history(proj, run, conn):
+    from orch import tickets
+
+    conn.inbox.append(msg(GEN, {"text": "hi", "general": True}))
+    run("relay", "inbox")
+    gid = tickets.general_id(proj)
+    assert run("relay", "send", PHONE, "Hallo!", "--ticket", gid)[0] == 0
+    texts = [h["text"] for h in tickets.load(proj, gid)["history"]]
+    assert texts[-1] == "Hallo!" and any("hi" in x for x in texts[:-1])
+    # the acks and "working" updates are not conversation
+    assert not any(x in ("Got it", "Working on it") for x in texts)
+
+
 def test_new_topic_is_acked_with_ticket_and_key(proj, run, conn):
     conn.inbox.append(msg(M1, {"text": "Offerte ablegen"}))
     run("relay", "inbox")
@@ -538,12 +551,12 @@ def test_a_refused_phone_message_is_marked_seen_and_the_next_one_is_processed(
     tid = new_ticket("T")
     real = runs.pending_add
 
-    def boom(root, t, who, kind, text, via=None, pid=None):
+    def boom(root, t, who, kind, text, via=None, pid=None, **kw):
         if "poison" in text:
             from orch.errors import Refused
 
             raise Refused("too big")
-        return real(root, t, who, kind, text, via, pid)
+        return real(root, t, who, kind, text, via, pid, **kw)
 
     monkeypatch.setattr(runs, "pending_add", boom)
     conn.inbox.append(msg(M1, {"text": "poison"}, ticket=tid))
@@ -828,3 +841,55 @@ def test_blob_download_is_bounded_and_state_defaults_are_repaired(proj, run, con
             limit=relay.PHONE_BLOB_MAX,
         )
     assert relay._fetch_blob(proj, "b_ph0nef1le0000003", None) is None
+
+
+def test_phone_text_marks_the_ticket_as_phone_for_questions(proj, run, new_ticket, conn):
+    from orch import mobile_mode, tickets
+
+    tid = new_ticket("Weekly report")
+    assert not mobile_mode.from_phone(proj, tid)
+    conn.inbox.append(msg(M1, {"text": "More please"}, ticket=tid))
+    run("relay", "inbox")
+    assert tickets.load(proj, tid)["ext"]["relay"]["phone"] is True
+    assert mobile_mode.from_phone(proj, tid)
+
+
+def test_a_phone_text_into_a_ticket_is_a_persons_input_with_its_phone_id(proj, run, new_ticket, conn):
+    """Delta-10: only the relay's phone-text path stores the sender's phone id; that makes it a person's."""
+    tid = new_ticket("T")
+    conn.inbox.append(msg("m_phone00000000a79", {"text": "and dessert"}, ticket=tid))
+    run("relay", "inbox")
+    (item,) = [i for i in runs.undelivered(proj, tid) if "dessert" in i["text"]]
+    assert item["via"] == "phone" and item["phone"].startswith("ph_") and item["human"] is True
+    assert runs.human_waiting(proj, tid) == [item]
+
+
+def test_phone_free_text_answer_to_a_question_with_options_is_applied(proj, run, new_ticket, conn):
+    """ "Write your own": an answer that is not one of the options is stored as written (cleaned), not refused,
+    and the ticket goes on like after an option (no agent runs: Ready)."""
+    tid = new_ticket()
+    run("ask", tid, "DATE or TIMESTAMP?", "--option", "DATE", "--option", "TIMESTAMP", "--phone")
+    q = conn.sent[0]
+    conn.inbox.append(
+        {
+            "schema": "orch.msg/1",
+            "id": "m_answer0000000042",
+            "from": PHONE,
+            "to": WS,
+            "type": "answer",
+            "created_at": "2026-11-06T10:00:00Z",
+            "ticket": tid,
+            "reply_to": q["id"],
+            "body": {
+                "question_id": "q1",
+                "answer": "Neither,<!-- x --> use a‮ UNIX epoch",
+                "answered_by": "human:severin",
+            },
+        }
+    )
+    code, out, err = run("relay", "inbox")
+    assert code == 0 and "answered q1" in out, (out, err)
+    t = json.loads(run("ticket", "show", tid, "--json")[1])
+    qq = t["questions"][0]
+    assert qq["answer"] == "Neither, use a UNIX epoch" and qq["via"] == "phone"
+    assert t["status"] == "ready" and t["waiting_on"] is None

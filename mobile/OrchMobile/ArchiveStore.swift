@@ -41,7 +41,7 @@ struct ArchiveStore: Codable, Equatable, Sendable {
     /// Delete is offered for General and for finished ticket chats only (an open ticket's chat is derived from the ticket and would reappear).
     static func canDelete(_ status: TopicStatus?) -> Bool {
         guard let status else { return true }
-        return status == .done || status == .stopped || status == .didntWork
+        return status == .done || status == .dropped || status == .stopped || status == .didntWork
     }
 }
 
@@ -72,7 +72,7 @@ extension ArchiveStore {
         let gKey = ReadState.key(summary.general.id)
         let generalArchived = isArchived(key: gKey, status: nil, lastAt: summary.general.lastAt, muted: muted, now: now)
         if generalArchived {
-            archived.append(ArchivedChat(id: summary.general.id, workspaceId: ws, title: "General", status: nil, lastAt: summary.general.lastAt, byHand: true))
+            archived.append(ArchivedChat(id: summary.general.id, workspaceId: ws, title: "Chat", status: nil, lastAt: summary.general.lastAt, byHand: true))
         }
         return (shown, !generalArchived, archived.sorted { ($0.lastAt ?? "") > ($1.lastAt ?? "") })
     }

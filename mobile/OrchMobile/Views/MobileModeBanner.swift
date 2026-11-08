@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// What the banner says for one workspace in Mobile mode (words from the plan A draft).
+/// Words and colours for a computer in Mobile mode.
 enum MobileModeBannerState: Equatable {
     case on(pc: String)
     case unreachable(pc: String, since: String?)
@@ -8,13 +8,35 @@ enum MobileModeBannerState: Equatable {
 
     var text: String {
         switch self {
-        case .on(let pc): return "\(pc) is in Mobile mode"
+        case .on(let pc): return "\(pc) · Mobile mode on"
         case .unreachable(let pc, let since):
-            return since.map { "Can't reach \(pc) since \($0). Your answers wait until it is back." }
-                ?? "Can't reach \(pc). Your answers wait until it is back."
-        case .muted(let pc): return "Muted, but \(pc) is in Mobile mode"
+            return since.map { "\(pc) · Can't reach since \($0)" }
+                ?? "\(pc) · Can't reach"
+        case .muted(let pc): return "\(pc) · Mobile mode muted"
         }
     }
+    // Tints are layered over Theme.surface by the banner.
+    static let onBackground = Theme.brand.opacity(0.22)
+    static let unreachableBackground = Theme.warn.opacity(0.18)
+    static let mutedBackground = Theme.surface3
+    static let onBorder = Theme.brand.opacity(0.5)
+
+    var background: Color {
+        switch self {
+        case .on: Self.onBackground
+        case .unreachable: Self.unreachableBackground
+        case .muted: Self.mutedBackground
+        }
+    }
+
+    var dotColor: Color {
+        switch self {
+        case .on: Theme.brand
+        case .unreachable: Theme.warn
+        case .muted: Theme.muted
+        }
+    }
+
     /// Only a reachable, unmuted computer can be turned off from here.
     var canTurnOff: Bool { if case .on = self { return true } else { return false } }
 
@@ -34,7 +56,7 @@ enum MobileModeBannerState: Equatable {
     }
 }
 
-/// Banner at the top of the chat list (`workspaceId` nil: one per workspace in Mobile mode) and of a workspace screen.
+/// Mobile mode banner below the workspace header.
 struct MobileModeBanner: View {
     @Environment(AppModel.self) private var model
     var workspaceId: String? = nil
@@ -60,17 +82,27 @@ struct MobileModeBanner: View {
             .compactMap { w in MobileModeBannerState.of(w, now: now).map { (w.id, $0) } }
         ForEach(items, id: \.0) { id, state in
             HStack(spacing: 10) {
-                Image(systemName: "bolt.horizontal.circle").foregroundStyle(Theme.brand).accessibilityHidden(true)
-                (Text(state.text) + (state.canTurnOff ? Text(" · ") : Text(""))).themeFont(14).foregroundStyle(Theme.text)
+                Circle().fill(state.dotColor).frame(width: 7, height: 7).accessibilityHidden(true)
+                Text(state.text).themeFont(13).foregroundStyle(Theme.text)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if state.canTurnOff {
                     Button { Task { await model.turnOffMobileMode(id) } } label: {
-                        Text("Turn off").themeFont(14, .semibold).foregroundStyle(Theme.brand)
-                            .frame(minHeight: 44).contentShape(Rectangle())
+                        Text("Turn off").themeFont(13, .bold).foregroundStyle(Theme.brand)
+                            .fixedSize(horizontal: true, vertical: false).frame(minHeight: 44).contentShape(Rectangle())
                     }.buttonStyle(PressStyle()).accessibilityIdentifier("mobile-mode-off-\(id)")
                 }
-                Spacer(minLength: 0)
-            }.padding(.horizontal, 12).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            }.padding(.horizontal, 12).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .background {
+                    RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).fill(Theme.surface)
+                    RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).fill(state.background)
+                }
+                .overlay {
+                    if state.canTurnOff {
+                        RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)
+                            .stroke(MobileModeBannerState.onBorder, lineWidth: 1)
+                    }
+                }
                 .accessibilityElement(children: .contain).accessibilityIdentifier("mobile-mode-banner-\(id)")
         }
     }

@@ -11,8 +11,9 @@
 .form-fields{display:grid;gap:12px;margin-top:16px}
 .form-fields label{display:grid;gap:4px}
 .preserve-lines{white-space:pre-wrap}
-.addon-rows{display:grid;grid-template-columns:minmax(80px,1fr) minmax(0,3fr);gap:8px 16px}
+.addon-rows{display:grid;grid-template-columns:minmax(80px,1fr) minmax(0,3fr);gap:8px 16px}.addon-rows .addon-page{grid-column:1/-1;margin:0}
 .addon-loading{height:56px}
+.loading-home{display:grid;gap:16px}.lh-title{height:32px;width:40%}.lh-card{height:96px}
 .chips,.tags,.stats{display:flex;gap:8px;flex-wrap:wrap}
 #addon-blocks{display:grid;gap:12px}
 .blk-title,.blk-more,.blk-none{padding:12px}
@@ -323,6 +324,9 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .mm-chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)}
 .mm-hours{display:flex;gap:6px;flex-wrap:wrap}
 @media(max-width:720px){.mm-toggle{margin-left:0}.mm-bar{padding:10px 12px}}
+/* one line down to 480px: the description gives way (ellipsis), the times never wrap; below 480px two clean lines */
+.mm-bar.live{flex-wrap:nowrap}.mm-bar.live .grow{display:flex;gap:.4em;min-width:0;white-space:nowrap}.mm-bar.live .grow b{flex:none}.mm-bar.live .mm-desc{min-width:0;overflow:hidden;text-overflow:ellipsis}.mm-bar.live .mm-when{flex:none}.mm-bar.live .btn{flex:none}
+@media(max-width:480px){.mm-bar.live{flex-wrap:wrap}.mm-bar.live .grow{flex-wrap:wrap;white-space:normal;flex-basis:calc(100% - 24px)}.mm-bar.live .mm-desc{flex:1 0 100%;overflow:visible;order:2}.mm-bar.live .mm-when{order:1}}
 .mm-hours .btn.ghost:hover{background:transparent;border-color:var(--text-muted)}
 .mm-hours .btn[aria-checked=true]{cursor:default}
 .consent-details{margin:8px 0}.consent-details summary{cursor:pointer;color:var(--text-muted)}
@@ -337,3 +341,33 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .status-menu>.status-sum{gap:4px}
 .board .activity .chip{white-space:normal}
 .acc-li>.send-msg{margin:6px 12px 0 0;flex:none;white-space:nowrap}
+/* round 8 Nov B1: the whole Home ticket row opens the ticket (stretched link; Move to and links stay above it) */
+.ticket-row{position:relative}
+.ticket-row h3 a::after{content:"";position:absolute;inset:0}
+.ticket-row:hover{background:var(--surface-2)}
+.ticket-row .status-menu,.ticket-row .activity a{position:relative;z-index:1}
+.ticket-row:has(.menu[open]){z-index:5}
+
+/* the sidebar colour and the modal dim layer fill the viewport, not the first 800 px of a tall page */
+@media(min-width:721px){.shell{background:linear-gradient(to right,var(--sidebar) 231px,var(--border) 231px 232px,transparent 232px)}}
+body:has(dialog[open]:modal){overflow:hidden}
+
+/* v3-pages: switcher + mobile mode */
+/* WCAG sRGB relative luminance, (Llighter + .05)/(Ldarker + .05):
+   Dark banner #e8eaed on #164b43 = 8.21:1.
+   Dark page #e8eaed / muted #9aa3ad on brightest stop #102925 = 12.76:1 / 6.02:1.
+   Light banner #123b35 on #bce9dc = 9.30:1.
+   Light page #123b35 / muted #365e56 on darkest stop #e3f5ef = 10.91:1 / 6.42:1.
+   Opaque banner/button colours preserve these ratios on hover and in the awake warning. */
+body.mobile-mode-on{--mm-page-start:#102925;--mm-page-end:#0e1014;--mm-banner:#164b43;--mm-ink:#e8eaed;background:linear-gradient(135deg,var(--mm-page-start),var(--mm-page-end)) fixed}
+:root[data-theme=light] body.mobile-mode-on,body.mobile-mode-on[data-theme=light],body.mobile-mode-on.light{--mm-page-start:#e3f5ef;--mm-page-end:#f5fbf8;--mm-banner:#bce9dc;--mm-ink:#123b35}
+body.mobile-mode-on .mm-bar.live{margin:16px 24px 0;padding:12px 16px;border:1px solid var(--mm-ink);border-radius:12px;background:var(--mm-banner);color:var(--mm-ink);gap:12px}
+body.mobile-mode-on .mm-bar.live .grow{display:flex;flex-wrap:wrap;white-space:normal;gap:2px 8px}
+body.mobile-mode-on .mm-bar.live .mm-desc{color:inherit;overflow:visible;white-space:normal}
+body.mobile-mode-on .mm-bar.live .btn{min-height:44px;background:var(--mm-banner);color:var(--mm-ink);border-color:currentColor}
+body.mobile-mode-on .mm-bar.live .btn:hover{background:var(--mm-banner);text-decoration:underline}
+body.mobile-mode-on .mm-bar.live .btn:focus-visible{outline:2px solid var(--mm-ink);outline-offset:3px}
+body.mobile-mode-on .mm-phone{display:block;position:relative;width:18px;height:28px;border:2px solid currentColor;border-radius:4px;flex:none}
+body.mobile-mode-on .mm-phone::after{content:'';position:absolute;bottom:3px;left:5px;width:4px;height:2px;background:currentColor}
+.mm-toggle{min-height:44px}
+@media(max-width:720px){body.mobile-mode-on .mm-bar.live{margin:12px 16px 0}}

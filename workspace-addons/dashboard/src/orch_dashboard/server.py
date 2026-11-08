@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 from . import actions, reffiles, ticketfiles
-from .data import load_addons, load_services, load_state
+from .data import load_addons, load_chat_day, load_chat_days, load_links, load_services, load_state
 from .events import Revisions
 from .views import ViewPuller
 
@@ -41,12 +41,34 @@ TYPES = {
 }
 
 
-PROXY = re.compile(r"/addon/([a-z][a-z0-9-]{1,31})(/[A-Za-z0-9_./-]*)?")
+PROXY = re.compile(r"/addon/([a-z][a-z0-9-]{1,31})(/(?:[A-Za-z0-9_./-]|%20)*)?")
+# An add-on may show an agent's page in a sandboxed frame (no same-origin): the frame and the files it loads come
+# with an opaque origin, so their requests are cross-site. Only GET of /page/<ticket>/<key>/<file> is let through for
+# that, and only when the add-on answers with its own sandbox Content-Security-Policy, which is then kept, not
+# replaced; any other answer to such a request is a 403.
+PAGE_PATH = re.compile(r"/page/t_[a-z0-9]{6,16}/[0-9a-f]{16}/.+")  # ticket, key (unguessable), file
 LOCAL = re.compile(r"http://(?:127\.0\.0\.1|localhost):(\d{1,5})/?")
 PROXY_CSP = (
     "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'self'; base-uri 'none'"
 )
 PROXY_BODY = 16384
+
+
+def _sandboxed(csp: str | None) -> bool:
+    """A real `sandbox` directive without allow-same-origin/top-navigation/popups/forms (not just the word)."""
+    for d in (csp or "").split(";"):
+        tok = d.split()
+        if tok and tok[0].lower() == "sandbox":
+            bad = {
+                "allow-same-origin",
+                "allow-top-navigation",
+                "allow-popups",
+                "allow-forms",
+                "allow-top-navigation-by-user-activation",
+                "allow-popups-to-escape-sandbox",
+            }
+            return not bad & {t.lower() for t in tok[1:]}
+    return False
 PROXY_MAX_REPLY = 4 * 1024 * 1024
 
 
@@ -106,7 +128,7 @@ class Handler(BaseHTTPRequestHandler):
         _PORTS[(str(self.root), name)] = (time.monotonic(), port)
         return port
 
-    def _proxy(self, method: str, name: str, rest: str, query: str):
+    def _proxy(self, method: str, name: str, rest: str, query: str, cross: bool = False):
         """Show an add-on's page under this server's address. The dashboard's own fence has already passed; the
         add-on's server runs its own fence on the request we forward (its Host, and for a POST its own Origin)."""
         port = self._upstream_port(name)
@@ -131,12 +153,19 @@ class Handler(BaseHTTPRequestHandler):
             r = conn.getresponse()
             data = r.read(PROXY_MAX_REPLY + 1)
             ctype, rev = r.getheader("Content-Type") or "application/octet-stream", r.getheader("X-Revision")
+            page_csp = r.getheader("Content-Security-Policy")
             conn.close()
         except (OSError, ValueError):
             return self._send(502, b"That page is not answering.", "text/plain; charset=utf-8")
         if len(data) > PROXY_MAX_REPLY:
             return self._send(502, b"That page is too large.", "text/plain; charset=utf-8")
-        self._send(r.status, data, ctype, {"X-Revision": rev} if rev else None, csp=PROXY_CSP)
+        extra = {"X-Revision": rev} if rev else {}
+        if method == "GET" and PAGE_PATH.fullmatch(rest) and _sandboxed(page_csp):
+            extra["Cross-Origin-Resource-Policy"] = "cross-origin"
+            return self._send(r.status, data, ctype, extra, csp=page_csp)
+        if cross:
+            return self._send(403, b"forbidden", "text/plain")
+        self._send(r.status, data, ctype, extra or None, csp=PROXY_CSP)
 
     def _same_origin(self) -> bool:
         origin = self.headers.get("Origin")
@@ -155,9 +184,10 @@ class Handler(BaseHTTPRequestHandler):
         if (
             px
         ):  # an add-on's page inside this app: same-site requests only (a frame of ours sends same-origin)
-            if self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
+            cross = self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none")
+            if cross and not PAGE_PATH.fullmatch(px.group(2) or ""):
                 return self._send(403, b"forbidden", "text/plain")
-            return self._proxy("GET", px.group(1), px.group(2) or "/", query)
+            return self._proxy("GET", px.group(1), px.group(2) or "/", query, cross)
         if path.startswith("/api/") and not self._same_origin():  # a foreign page must not trigger pulls
             return self._send(403, b"forbidden", "text/plain")
         if (
@@ -178,12 +208,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 code, body, ctype, {"Content-Disposition": "inline"}, csp="default-src 'none'; sandbox"
             )
+        if path == "/api/links":
+            return self._send(200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json")
         if path == "/api/state":
             return self._send(
                 200,
                 json.dumps(load_state(self.root, orch_bin=self.orch_bin, with_settings=True)).encode(),
                 "application/json",
             )
+        if path == "/api/chat/days":  # History: the days that have texts, newest first
+            d = load_chat_days(self.root, self.orch_bin)
+            return self._send(200, json.dumps(d if d is not None else []).encode(), "application/json")
+        m = re.fullmatch(r"/api/chat/day/(\d{4}-\d{2}-\d{2})", path)
+        if m:  # one day, read only
+            d = load_chat_day(self.root, self.orch_bin, m.group(1))
+            if d is None:
+                return self._send(404, b"not found", "text/plain")
+            return self._send(200, json.dumps(d).encode(), "application/json")
         m = re.fullmatch(r"/api/artifacts/(t_[a-z0-9]{6,16})", path)
         if m:  # the file list of one ticket (orch lists them); no file content here
             return self._send(
@@ -235,6 +276,8 @@ class Handler(BaseHTTPRequestHandler):
         if (
             name.startswith("kit/") and name[4:] in KIT
         ):  # the orch_ui kit, copied next to the page (a test keeps it in sync)
+            return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
+        if re.fullmatch(r"pages/(home|tickets|ticket|newticket|settings|chat)\.(js|css)", name):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         if name in (
             "index.html",

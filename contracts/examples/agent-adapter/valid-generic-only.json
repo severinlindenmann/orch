@@ -12,7 +12,7 @@
       },
       "live": {
         "fresh": "{interactive}",
-        "send": "bracketed-paste+Enter",
+        "send": "notice-line+Enter",
         "interrupt_keys": [],
         "idle_signal": "orch:run-done",
         "events": null

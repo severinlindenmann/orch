@@ -1,0 +1,14 @@
+.new-ticket .new-ticket-text {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 200px;
+  resize: vertical;
+  font-size: 16px;
+}
+.new-ticket-options > summary {
+  min-height: 44px;
+  align-content: center;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.new-ticket .input, .new-ticket .btn { min-height: 44px; }

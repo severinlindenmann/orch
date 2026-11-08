@@ -1,0 +1,29 @@
+/* Home cards share the shell's dark theme tokens. */
+.home-columns{grid-template-columns:minmax(0,1fr) 280px;align-items:start}
+.home-need,.home-work,.home-result,.home-message,.home-ticket{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:16px}
+.home-columns .ticket-title h3{margin:0;line-height:1.5}
+.home-columns p{margin:0}
+.home-columns .ticket-title a{text-decoration:none}
+.home-columns .btn,.home-columns summary,#connection .btn,#connection summary{min-height:44px}
+.home-columns .row{flex-wrap:wrap}
+.home-columns .home-message .btn{align-self:flex-start}
+.segments{display:flex;gap:4px;margin:4px 0}
+.segments span{flex:1;height:4px;border-radius:2px;background:var(--surface-3)}
+.segments .complete{background:var(--brand)}
+.message-field{display:grid;gap:8px;margin:16px 0}
+.message-field input,.message-field textarea{width:100%;min-height:44px}
+.skeleton-heading,.skeleton-line{border-radius:6px;background:var(--surface-3);animation:home-shimmer 1.8s ease-in-out infinite}
+.skeleton-heading{height:28px;width:45%;margin:20px 0 28px}
+.skeleton-card{padding:20px;display:grid;gap:20px;min-height:160px}
+.skeleton-card.question{min-height:230px}.skeleton-line{height:18px}.skeleton-line.short{width:60%}
+#connection{flex-wrap:wrap}#connection details{max-width:100%}#connection summary{display:flex;align-items:center;cursor:pointer}
+@keyframes home-shimmer{50%{opacity:.45}}
+@media(prefers-reduced-motion:reduce){.skeleton-heading,.skeleton-line{animation:none}}
+@media(max-width:900px){.home-columns{grid-template-columns:minmax(0,1fr)}}
+.home-section>h2{font-size:14px;margin:0 0 12px}
+.home-columns .ticket-title a{display:inline-flex;align-items:center;min-height:44px;gap:6px}
+.home-columns .home-need>p a{display:inline-flex;align-items:center;min-height:44px}
+
+.ticket-title .mono{white-space:nowrap}
+.ticket-title .mono{flex:none}
+.chip.attn{background:var(--warning-soft);border-color:var(--warning);color:var(--warning)}

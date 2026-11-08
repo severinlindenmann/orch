@@ -53,8 +53,23 @@ struct PinEditorSheet: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Comment \(store.editing?.n ?? 1)").themeFont(20, .semibold)
-                    .accessibilityAddTraits(.isHeader)
+                HStack {
+                    Text("Pin \(store.editing?.n ?? 1)").themeFont(20, .semibold)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer()
+                    Button(store.isEditingNew ? "Cancel" : "Delete") {
+                        if store.isEditingNew { store.cancelEdit() }
+                        else if let n = store.editing?.n {
+                            if let url = store.pins.first(where: { $0.n == n })?.voiceFile {
+                                try? FileManager.default.removeItem(at: url)
+                            }
+                            store.remove(n)
+                        }
+                    }
+                    .accessibilityIdentifier(store.isEditingNew ? "pin-cancel" : "pin-delete")
+                    .buttonStyle(PinTextButtonStyle())
+                }
+                Text("Your comment").themeFont(13).foregroundStyle(Theme.muted)
                 TextField("What should change?", text: Binding(
                     get: { store.editing?.text ?? "" }, set: { store.editing?.text = $0 }), axis: .vertical)
                     .lineLimit(2...5)
@@ -72,40 +87,7 @@ struct PinEditorSheet: View {
                     .accessibilityLabel(recorder?.isRecording == true ? "Stop recording" : "Record voice comment")
                     .accessibilityIdentifier("pin-mic")
                     .disabled(working)
-                    if let recorder, recorder.isRecording {
-                        HStack(alignment: .center, spacing: 3) {
-                            ForEach(Array(recorder.levels.enumerated()), id: \.offset) { _, level in
-                                Capsule(style: .continuous).fill(Theme.brand).frame(width: 3, height: max(3, 24 * level))
-                            }
-                        }.frame(height: 24).accessibilityHidden(true)
-                        Text("Recording \(Int(recorder.elapsed))s").themeFont(14).monospacedDigit()
-                    } else if working {
-                        ProgressView().accessibilityLabel("Preparing voice comment")
-                    } else if store.editing?.voiceFile != nil {
-                        Text("Voice comment").themeFont(14).foregroundStyle(Theme.muted)
-                        Button {
-                            store.editing?.voiceFile = nil
-                            store.editing?.transcript = nil
-                        } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
-                        .accessibilityLabel("Remove voice comment")
-                    }
-                }
-                if let message = error ?? recorder?.error {
-                    Text(message).themeFont(14).foregroundStyle(Theme.muted)
-                }
-                HStack {
-                    Button(store.isEditingNew ? "Cancel" : "Delete") {
-                        if store.isEditingNew { store.cancelEdit() }
-                        else if let n = store.editing?.n {
-                            if let url = store.pins.first(where: { $0.n == n })?.voiceFile {
-                                try? FileManager.default.removeItem(at: url)
-                            }
-                            store.remove(n)
-                        }
-                    }
-                    .accessibilityIdentifier(store.isEditingNew ? "pin-cancel" : "pin-delete")
-                    Spacer()
-                    Button("Save") {
+                    Button("Save comment") {
                         let clip = store.editing?.voiceFile
                         let previous = store.pins.first(where: { $0.n == store.editing?.n })?.voiceFile
                         if store.saveEdit() {
@@ -115,8 +97,28 @@ struct PinEditorSheet: View {
                     }
                     .disabled(store.editing?.isComplete != true || working || recorder?.isRecording == true)
                     .accessibilityIdentifier("pin-save")
+                    .buttonStyle(ArtifactActionButtonStyle(primary: true))
                 }
-                .buttonStyle(PinTextButtonStyle())
+                if let recorder, recorder.isRecording {
+                    HStack(alignment: .center, spacing: 3) {
+                        ForEach(Array(recorder.levels.enumerated()), id: \.offset) { _, level in
+                            Capsule(style: .continuous).fill(Theme.brand).frame(width: 3, height: max(3, 24 * level))
+                        }
+                    }.frame(height: 24).accessibilityHidden(true)
+                    Text("Recording \(Int(recorder.elapsed))s").themeFont(14).monospacedDigit()
+                } else if working {
+                    ProgressView().accessibilityLabel("Preparing voice comment")
+                } else if store.editing?.voiceFile != nil {
+                    Text("Voice comment").themeFont(14).foregroundStyle(Theme.muted)
+                    Button {
+                        store.editing?.voiceFile = nil
+                        store.editing?.transcript = nil
+                    } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Remove voice comment")
+                }
+                if let message = error ?? recorder?.error {
+                    Text(message).themeFont(14).foregroundStyle(Theme.muted)
+                }
             }
             .padding(20)
         }

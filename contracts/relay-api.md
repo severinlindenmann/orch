@@ -18,7 +18,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 
 | Type | Allowed when |
 |---|---|
-| text with `body.ticket_view` | as text, and: `body.update` is set (schema), `body.ticket_view` is at most 16384 bytes as compact UTF-8 JSON (else `422 invalid`), and every attachment `blob_id` was uploaded by the sender with that `size` (another sender's or a missing blob → `404`, a wrong size → `422`). The relay never reads the snapshot otherwise |
+| text with `body.ticket_view` | as text (a `ticket_view.light: true` update is a quiet status update of a ticket the phone already lists: only title, status, started, running, summary, agent, updated_at; the phone overlays them on its last full snapshot; the relay treats it like any other), and: `body.update` is set (schema), `body.ticket_view` is at most 16384 bytes as compact UTF-8 JSON (else `422 invalid`), and every attachment `blob_id` was uploaded by the sender with that `size` (another sender's or a missing blob → `404`, a wrong size → `422`). The relay never reads the snapshot otherwise |
 | text (phone fields) | `body.client_id`, `attachments`, `voice`, `location` and `feedback` are set only by the relay on the texts it builds for `POST /v1/phone/send`; a workspace text with any of them → `422 invalid` |
 | text, question | to a workspace: pair rule `text` from → to. `to: "ph_…"`: that phone is paired (signed in) and the sender is on its list, else `403 not_allowed` ("That phone is not paired with <name>. In the relay admin, open Phones and tick <name> …"). `to: "phones"` = every paired phone with the sender on its list (none = stored, reaches nobody). Only text and questions go to phones |
 | answer | `reply_to` is a `question` that `to` sent to `from` (questions to `phones` / `ph_…` are answered by phones only, `POST /v1/phone/answer`). `ticket` and `question_id` are copied from that question, not trusted from the sender |
@@ -158,7 +158,10 @@ upload of this phone (else `404 not_found`), and an attachment's `size` must equ
 **Started** = a workspace text with `body.update.kind` `ack` or `working` and `reply_to` = the phone text's id. The
 workspace **must** set `reply_to` on the ack (and on `working`) for a phone text; for topic updates the relay does not
 check it (older acks without `reply_to` stay valid), in General the schema does; the ack of a new topic carries the new
-`ticket` and its `key`, which moves the phone's text into that topic. **In General** the same receipts work without a
+`ticket` and its `key`, which moves the phone's text into that topic. Started ends (back to ✓✓) when a later text on that
+ticket is a `result`, `failure`, `stopped` or `question` update, a question, or carries a `ticket_view` with `running: false`
+or `status: "waiting"`; a later `ack`/`working`
+for the same text starts it again. **In General** the same receipts work without a
 ticket: a workspace text with `body.general: true`, no `ticket`, `reply_to` = the phone's General text and `body.update.kind`
 `ack` or `working` (only those two; no `title` needed, no `ticket_view`). These are stored and listed in
 `/v1/phone/messages`, never pushed, and not part of `/v1/phone/updates` (that view is per ticket).

@@ -7,15 +7,16 @@
       "detect": { "binary": "claude", "env_any": ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"] },
       "prompt_via": "arg",
       "oneshot": {
-        "fresh": ["claude", "-p", "--session-id", "{new_session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch run done:*),Bash(orch run status:*)", "--", "{prompt}"],
-        "resume": ["claude", "-p", "--resume", "{session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch run done:*),Bash(orch run status:*)", "--", "{prompt}"],
+        "fresh": ["claude", "-p", "--session-id", "{new_session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--", "{prompt}"],
+        "resume": ["claude", "-p", "--resume", "{session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--", "{prompt}"],
         "stream_args": ["--output-format", "stream-json", "--verbose"],
         "allow_args": ["--allowedTools", "{allow}"]
       },
       "live": {
-        "fresh": ["claude", "--session-id", "{new_session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch run done:*),Bash(orch run status:*)", "--settings", "{orch_hooks_file}"],
-        "resume": ["claude", "--resume", "{session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch run done:*),Bash(orch run status:*)", "--settings", "{orch_hooks_file}"],
-        "send": "bracketed-paste+Enter",
+        "fresh": ["claude", "--session-id", "{new_session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--settings", "{orch_hooks_file}"],
+        "resume": ["claude", "--resume", "{session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--settings", "{orch_hooks_file}"],
+        "send": "notice-line+Enter",
+        "dialog": "Do you want to (proceed|make this edit|create)|^\\s*❯\\s*\\d\\.|trust (this folder|the files)",
         "interrupt_keys": ["Escape"],
         "idle_signal": "hook:Stop",
         "attention_signal": "hook:Notification",
@@ -36,7 +37,7 @@
         "full": ["--dangerously-skip-permissions"]
       },
       "hooks": { "SessionStart": "orch run event --kind session", "Stop": "orch run event --kind idle", "Notification": "orch run event --kind attention", "UserPromptSubmit": "orch run event --kind working" },
-      "session": { "id": "chosen-by-orch", "hand_started": "hook:SessionStart", "missing": "No conversation found with session ID" },
+      "session": { "id": "chosen-by-orch", "hand_started": "hook:SessionStart", "missing": "No conversation found with session ID", "transcript": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "path": ["projects", "{folder}", "{session}.jsonl"] } },
       "capabilities": { "resume": true, "choose_session_id": true, "interactive_tmux": true, "hooks": true, "stream": true, "permission_retry": true, "subagents": true, "usage": true },
       "files": { "instructions_link": { "CLAUDE.local.md": "@AGENTS.md" }, "skills_link": ".claude/skills" }
     },
@@ -59,7 +60,7 @@
       "detect": null,
       "prompt_via": "arg",
       "oneshot": { "fresh": "{command}", "resume": null },
-      "live": { "fresh": "{interactive}", "send": "bracketed-paste+Enter", "interrupt_keys": [], "idle_signal": "orch:run-done", "events": null },
+      "live": { "fresh": "{interactive}", "send": "notice-line+Enter", "interrupt_keys": [], "idle_signal": "orch:run-done", "events": null },
       "hooks": null,
       "session": { "id": "none" },
       "capabilities": { "resume": false, "choose_session_id": false, "interactive_tmux": false, "hooks": false, "stream": false, "permission_retry": false, "subagents": false, "usage": false },

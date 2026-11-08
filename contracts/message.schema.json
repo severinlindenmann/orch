@@ -163,11 +163,16 @@
     },
     "ticket_view": {
       "type": "object", "additionalProperties": false,
-      "required": ["title", "status", "running", "checklist", "done", "total", "history_tail", "attachments"],
+      "required": ["title", "status", "running"],
+      "if": { "not": { "required": ["light"], "properties": { "light": { "const": true } } } },
+      "then": { "required": ["checklist", "done", "total", "history_tail", "attachments"] },
       "description": "Optional, only next to body.update: a snapshot of the ticket for the phone's ticket chat (title, tasks, the last history lines, proof and references). Written by the sending workspace; the relay stores it with the text, never interprets it, and refuses a text whose ticket_view is over 16384 bytes as compact UTF-8 JSON (422 invalid). The newest one of a ticket wins. Plain text everywhere, never HTML; secrets are removed by the workspace before sending.",
       "properties": {
+        "light": { "type": "boolean", "description": "true = a LIGHT status update for a ticket the phone already lists (quiet, update kind note, never pushed). It carries only title, status, started, running, summary, agent and updated_at; checklist, done, total, history_tail, attachments and refs are absent and the phone overlays the present fields on its last full snapshot (never wipes them). No flag (or false) = a full snapshot as before, which replaces the stored one." },
+        "updated_at": { "type": "string", "format": "date-time", "pattern": "Z$", "description": "When the ticket last changed (UTC). Optional; sent by light updates." },
         "title": { "type": "string", "minLength": 1, "maxLength": 200 },
         "status": { "enum": ["open", "active", "waiting", "ready", "review", "done", "dropped"] },
+        "started": { "type": "boolean", "description": "The ticket was started by an agent at least once; with status open/ready the phone says \"Paused\", else \"Not started\"." },
         "agent": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The agent working on it now or last, as a display name (e.g. Claude)." },
         "summary": { "type": "string", "maxLength": 200 },
         "running": { "type": "boolean", "description": "An agent runs on the ticket now (the phone says \"Goes in after this step\"), else \"Saved for the next run\"." },

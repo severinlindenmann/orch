@@ -19,6 +19,7 @@ import os
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -152,41 +153,158 @@ def real_home() -> Path:
         return Path.home()
 
 
-def _trusted_home(h: Path, root: Path | None = None) -> bool:
-    """ORCH_HOME counts only under the user's real home, outside the current folder and the workspace, and
-    with no .orch, .agents or .git in any folder from it up to home (a repo .envrc could aim it higher)."""
-    top = real_home().resolve()
-    for base in (Path.cwd().resolve(), *([root.resolve()] if root else [])):
+def _fold(p: Path) -> Path:
+    return Path(str(p).casefold())  # macOS volumes ignore case: /Users/X and /users/x are one folder
+
+
+def _is_under(h: Path, base: Path) -> bool:
+    for a, b in ((h, base), (_fold(h), _fold(base))):
         try:
-            h.relative_to(base)
+            a.relative_to(b)
+            return True
         except ValueError:
-            continue
-        return False  # inside the current folder or the workspace
+            pass
+    return False
+
+
+def _same(a: Path, b: Path) -> bool:
+    return a == b or _fold(a) == _fold(b)
+
+
+def _untrusted_rule(h: Path, root: Path | None = None) -> str | None:
+    """Why ORCH_HOME is not trusted (None = trusted): it counts only under the user's real home, outside the
+    current folder and the workspace, and with no .orch, .agents or .git in any folder from it up to home (a
+    repo .envrc could aim it higher)."""
+    top = real_home().resolve()
+    if _same(h, top):
+        return "home-itself"  # the tool's files would lie loose in ~
+    for name, base in (("cwd", Path.cwd().resolve()), *([("workspace", root.resolve())] if root else [])):
+        if _is_under(h, base):
+            return name  # inside the current folder or the workspace
     try:
         h.relative_to(top)
     except ValueError:
-        return False
+        return "outside-home"
     for p in (h, *h.parents):
         if p == top:
             break
         if any((p / m).exists() for m in (".orch", ".agents", ".git")):
-            return False
-    return True
+            return "marker-folder"
+    return None
+
+
+def _trusted_home(h: Path, root: Path | None = None) -> bool:
+    return _untrusted_rule(h, root) is None
+
+
+_TRACE_MAX = 256 * 1024
+
+
+def _trace_command() -> str:
+    """The program name and up to two leading words that are real orch subcommands ("orch addon list"),
+    checked against orch's own parser. Anything else (values, free text, another program's arguments when
+    orch runs inside it) is never logged: it can hold secrets."""
+    words = [os.path.basename(sys.argv[0] or "?")[:40]]
+    try:
+        import argparse
+
+        from orch import cli
+
+        p = cli.build_parser()
+        for a in sys.argv[1:3]:
+            sub = next((x for x in p._actions if isinstance(x, argparse._SubParsersAction)), None)
+            if sub is None or a not in sub.choices:
+                break
+            words.append(a)
+            p = sub.choices[a]
+    except Exception:  # noqa: BLE001 - the program name alone is enough
+        pass
+    return " ".join(words)
+
+
+def _trace_fallback(real: Path, reason: str) -> None:
+    """One line in <real>/.fallback-trace.log each time home() falls back to the real ~/.orch-tool, to find
+    who uses it. Best effort, never raises; refuses a symlinked folder or file (O_NOFOLLOW); mode 0600."""
+    try:
+        if real.is_symlink() or not (real / ".trace-fallbacks").is_file():
+            return  # opt-in per machine (a dev Mac): a normal install never writes it
+        line = json.dumps(
+            {
+                "time": datetime.now(UTC).isoformat(timespec="seconds"),
+                "pid": os.getpid(),
+                "ppid": os.getppid(),
+                "cmd": _trace_command(),
+                "cwd": os.getcwd(),
+                "reason": reason,
+            }
+        )
+        real.mkdir(parents=True, exist_ok=True, mode=0o700)
+        log = real / ".fallback-trace.log"
+        try:
+            if not log.is_symlink() and log.stat().st_size > _TRACE_MAX:
+                # a unique name first, so two processes rotating at once can not drop a generation
+                tmp = real / f".fallback-trace.log.tmp-{os.getpid()}-{secrets.token_hex(4)}"
+                try:
+                    os.replace(log, tmp)
+                    os.replace(tmp, real / ".fallback-trace.log.1")
+                except OSError:
+                    for f in (tmp, log):  # rotation failed: never let the log grow without a bound
+                        try:
+                            if not f.is_symlink() and f.exists():
+                                os.truncate(f, 0)
+                        except OSError:
+                            pass
+        except OSError:
+            pass
+        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+        flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        fd = os.open(log, flags, 0o600)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return  # a FIFO or device there must not block or feed orch
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd, 0o600)
+            os.write(fd, (line + "\n").encode("utf-8"))
+        finally:
+            os.close(fd)
+    except Exception:  # noqa: BLE001 - a trace must never break orch
+        pass
 
 
 def home(root: Path | None = None) -> Path:
-    """The user's orch folder: ORCH_HOME when trusted (see _trusted_home), else ~/.orch-tool."""
+    """The user's orch folder: ORCH_HOME when trusted (see _untrusted_rule), else ~/.orch-tool.
+    ORCH_HOME_STRICT (anything but empty or 0, for tests and e2e) makes every fallback an error: ORCH_HOME
+    unset or empty, untrusted, or aimed at the real folder. Every other fallback leaves one line in
+    ~/.orch-tool/.fallback-trace.log."""
     real = real_home() / ".orch-tool"
     env = os.environ.get("ORCH_HOME")
+    strict = os.environ.get("ORCH_HOME_STRICT", "") not in ("", "0")
     if not env:
+        if strict:
+            raise Refused(
+                f"ORCH_HOME is not set, and ORCH_HOME_STRICT forbids using {real}. Nothing was written."
+            )
+        _trace_fallback(real, "unset")
         return real
     h = Path(env).resolve()
-    if _trusted_home(h, root):
+    if strict and _same(h, real.resolve()):
+        raise Refused(
+            f"ORCH_HOME ({env}) is the real {real}, and ORCH_HOME_STRICT forbids it. Nothing was written."
+        )
+    rule = _untrusted_rule(h, root)
+    if rule is None:
         return h
+    if strict:
+        raise Refused(
+            f"ORCH_HOME ({env}) is not a trusted folder (it must be under your home, outside the current "
+            f"folder and any .git/.orch/.agents folder), and ORCH_HOME_STRICT forbids falling back to "
+            f"{real}. Nothing was written."
+        )
     print(
         f"Note: ORCH_HOME ({env}) is ignored (not a plain folder under your home); using {real}.",
         file=sys.stderr,
     )
+    _trace_fallback(real, f"untrusted:{rule}")
     return real
 
 
@@ -525,10 +643,13 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
     m["background"] = bg
     d = m.get("dashboard")
     if d is not None:
-        if not isinstance(d, dict) or set(d) - {"label", "icon", "order"}:
-            raise _bad("[dashboard] has label, icon and order")
-        if not _text_ok(d.get("label"), 16):
-            raise _bad("dashboard label is at most 16 characters")
+        if not isinstance(d, dict) or set(d) - {"label", "icon", "order", "panel"}:
+            raise _bad("[dashboard] has label, icon, order and panel")
+        if not _text_ok(d.get("label"), 24):
+            raise _bad("dashboard label is at most 24 characters")
+        # `panel`: an extra native card the dashboard knows how to draw (a fixed set)
+        if d.get("panel") not in (None, "repeats", "links", "phone"):
+            raise _bad("dashboard panel is repeats, links or phone")
         if d.get("icon") not in ICONS:
             raise _bad("dashboard icon is not in the fixed icon set")
         order = d.get("order", 50)

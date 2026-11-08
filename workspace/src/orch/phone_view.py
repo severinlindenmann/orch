@@ -2,8 +2,8 @@
 
 Built from the ticket file: title, status, tasks, the last 30 history lines in plain words, and
 the proof marked for the phone (evidence with role result or check: files are uploaded as relay
-blobs, URLs and PRs become links) plus the ticket's refs. Secrets are cut from every text before
-it leaves. No other file content is ever sent.
+blobs, URLs and PRs become links), artifacts named in questions, options or the summary, and the
+ticket's refs. Secrets are cut from display text before it leaves.
 
 It rides on update texts to phones (result, failure, stopped, question) and, quietly (kind note,
 never pushed), when the tasks of a ticket the phone follows change: `sync` runs on every relay
@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import os
 import re
 import time
 import urllib.parse
@@ -33,6 +34,7 @@ DEBOUNCE = 20  # seconds between two quiet snapshots of one ticket
 BLOB_DAYS = 30  # re-upload a cached blob after this (the relay deletes blobs after 90 days)
 HISTORY = 30
 ATTACHMENTS = 50
+ARTIFACT_BYTES = 20 * 1024 * 1024
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic"}
 
 _SECRET_PATTERNS = [
@@ -52,6 +54,90 @@ _SECRET_KV = re.compile(
 _SECRET_PARAM = re.compile(r"(?i)token|secret|key|sig|signature|password|passwd|auth|code|credential")
 HIDDEN = "[hidden]"
 _TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
+
+
+_IMAGE_KINDS = {  # magic bytes -> the file extensions that type may carry
+    b"\x89PNG\r\n\x1a\n": (".png",),
+    b"\xff\xd8\xff": (".jpg", ".jpeg"),
+    b"GIF87a": (".gif",),
+    b"GIF89a": (".gif",),
+}
+
+
+_PACKED_MAGIC = (b"%PDF", b"PK\x03\x04", b"\xd0\xcf\x11\xe0")
+
+
+def _is_image(data: bytes, name: str) -> bool:
+    """A real image of the type its extension names (png, jpeg, gif, webp); its bytes are still scanned."""
+    ext = Path(name).suffix.lower()
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ext == ".webp"
+    return any(data.startswith(magic) and ext in exts for magic, exts in _IMAGE_KINDS.items())
+
+
+PNG_MAX_CHUNKS = 10000  # a bounded walk: more chunks than this = can not be checked
+# the critical chunks and a few harmless ancillary ones; any other (tEXt, zTXt, iTXt, eXIf, iCCP, unknown)
+# could carry text the scan can not read
+PNG_CHUNKS = {b"IHDR", b"PLTE", b"IDAT", b"IEND", b"tRNS", b"gAMA", b"cHRM", b"sRGB", b"pHYs"}
+
+
+def _image_clean(data: bytes) -> bool:
+    """True when an image has nowhere to hide text the scan can not read. Only a PNG can be: its chunks are
+    walked (bounded), only those in PNG_CHUNKS pass, and nothing may follow IEND. Every other image type,
+    and anything odd, is False (fail closed)."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        pos = 8
+        for _ in range(PNG_MAX_CHUNKS):
+            if pos + 8 > len(data):
+                return False  # no IEND
+            length = int.from_bytes(data[pos : pos + 4], "big")
+            kind = data[pos + 4 : pos + 8]
+            end = pos + 12 + length  # length, type, data, crc
+            if end > len(data) or kind not in PNG_CHUNKS:  # text, exif, profiles, unknown: unreadable
+                return False
+            if kind == b"IEND":
+                return end == len(data)
+            pos = end
+        return False
+    # JPEG, GIF and WebP: no structural walk yet, so they can not be checked (fail closed)
+    return False
+
+
+def _has_secret(data: bytes) -> bool:
+    text = data.decode(errors="ignore")
+    return any(rx.search(text) for rx in _SECRET_PATTERNS) or bool(_SECRET_KV.search(text))
+
+
+def _scan(data: bytes, name: str) -> str:
+    """One of ok, secret (looks like a password or key) or unknown (can not be checked: a PDF, zip, docx,
+    xlsx or any other packed or binary file, or text with NULs; such a file is not sent, fail closed). Text
+    (UTF-8, or UTF-32/UTF-16 with a BOM) is scanned as text; an image whose type matches its extension is
+    scanned as its raw bytes (text in metadata or after the image is still caught)."""
+    if any(magic in data for magic in _PACKED_MAGIC):  # pdf, zip/OOXML, OLE office anywhere in the file
+        return "unknown"
+    for bom, codec in (
+        ((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"), "utf-32"),  # before UTF-16: same first two bytes
+        ((b"\xff\xfe", b"\xfe\xff"), "utf-16"),
+    ):
+        if data.startswith(bom):
+            try:
+                text = data.decode(codec)
+            except UnicodeDecodeError:
+                return "unknown"
+            if "\x00" in text:
+                return "unknown"
+            return "secret" if _has_secret(text.encode()) else "ok"
+    if _is_image(data, name):
+        if not _image_clean(data):  # compressed text chunks or data after the end: can not be checked
+            return "unknown"
+    else:
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            return "unknown"
+        if b"\x00" in data:
+            return "unknown"
+    return "secret" if _has_secret(data) else "ok"
 
 
 def redact(text: str) -> str:
@@ -137,6 +223,27 @@ def phone_proof(root: Path, ticket: dict) -> list[dict]:
     return out
 
 
+def named_artifacts(root: Path, ticket: dict, artifacts: list[dict] | None = None) -> list[str]:
+    """Up to 20 artifact names mentioned in questions, options or the summary, in listing order."""
+    texts = [ticket.get("summary") or ""]
+    for question in ticket.get("questions") or []:
+        texts.append(question.get("text") or "")
+        texts.extend(question.get("options") or [])
+    out = []
+    if artifacts is None:
+        artifacts = tickets.artifacts_list(root, ticket["id"])
+    for artifact in artifacts[:200]:
+        name = artifact["name"]
+        path = Path(name)
+        prefix = r"(?:artifacts/)?" if path.suffix and len(path.stem) >= 4 else r"artifacts/"
+        pattern = re.compile(r"(?<![\w./-])" + prefix + re.escape(name) + r"(?![\w/-]|\.\w)")
+        if any(pattern.search(text) for text in texts):
+            out.append(name)
+            if len(out) == 20:
+                break
+    return out
+
+
 def _proof_file(root: Path, tid: str, ev: dict) -> tuple[str, bytes] | None:
     """(name, bytes) of a copied proof file of this ticket, .orch/tickets/<tid>/evidence/<name>, never
     anything else: the ref has exactly that shape and the read goes through orch.safefile (the one reader)."""
@@ -165,6 +272,92 @@ def load_state(root: Path) -> dict:
 
 def save_state(root: Path, s: dict) -> None:
     net.write_json(_state_path(root), s, True)
+
+
+STATE_LOCK_STALE = 10  # no more than the wait: a lock left by a holder that died is broken before giving up
+
+
+def _break_stale_lock(lock: Path) -> bool:
+    """Take away a lock left by a holder that died (older than STATE_LOCK_STALE; it is only ever held for one
+    file write). Rename first, so only one waiter wins; what was taken must still be the old one, else (a new
+    holder's fresh lock) it is put back without clobbering."""
+    try:
+        if time.time() - lock.stat().st_mtime <= STATE_LOCK_STALE:
+            return False
+        mine = lock.with_name(f"{lock.name}.{os.getpid()}.{time.monotonic_ns()}")
+        os.replace(lock, mine)
+    except OSError:
+        return False
+    try:
+        if time.time() - mine.stat().st_mtime > STATE_LOCK_STALE:
+            return True
+        with contextlib.suppress(OSError):
+            os.link(mine, lock)  # a live holder's lock: put it back (fails if a newer one is there already)
+        return False
+    except OSError:
+        return False
+    finally:
+        with contextlib.suppress(OSError):
+            mine.unlink()
+
+
+@contextlib.contextmanager
+def _state_locked(root: Path, wait: float = 10.0):
+    """One read-modify-write of phone-views.json at a time (sync, sync_open, remember, view_for may run in
+    several orch processes at once). Its own lock, held only around the file, never around a send: remember()
+    runs inside the relay lock (an ack while the inbox is handled), and the relay lock is not reentrant."""
+    lock = net.secrets_dir(root) / "phone-views.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    end = time.monotonic() + wait
+    token = f"{os.getpid()}-{time.monotonic_ns()}".encode()
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            try:
+                os.write(fd, token)
+            finally:
+                os.close(fd)
+            break
+        except FileExistsError:
+            if _break_stale_lock(lock):
+                continue
+            if time.monotonic() > end:
+                raise Refused("The phone view state is busy. Try again in a moment.") from None
+            time.sleep(0.02)
+    try:
+        yield
+    finally:
+        # only our own lock goes, never one a later holder made: take it aside first (atomic), then check
+        mine = lock.with_name(f"{lock.name}.{token.decode()}.rel")
+        try:
+            os.replace(lock, mine)
+        except OSError:
+            mine = None  # nothing taken aside: nothing to remove
+        if mine is not None:
+            try:
+                ours = mine.read_bytes() == token
+            except OSError:
+                ours = False  # can not tell: treat it as someone else's
+            if not ours:  # put it back; dropped only if a newer one is there already
+                try:
+                    os.link(mine, lock)
+                except FileExistsError:
+                    pass
+                except OSError:  # no hard links on this file system: rename back when the place is still free
+                    with contextlib.suppress(OSError):
+                        if not lock.exists():
+                            os.rename(mine, lock)
+            with contextlib.suppress(OSError):
+                mine.unlink()
+
+
+def update_state(root: Path, fn) -> dict:
+    """fn(state) changes the freshly read state under the lock; it is then saved. Returns the state."""
+    with _state_locked(root):
+        st = load_state(root)
+        fn(st)
+        save_state(root, st)
+        return st
 
 
 def _upload(root: Path, data: bytes, state: dict) -> dict | None:
@@ -214,7 +407,7 @@ def _url_art(source: str, url: str, kind_hint: str | None = None) -> tuple[str, 
 
 
 def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = True) -> list[dict]:
-    """Proof files (uploaded), proof links and ticket links, newest first, at most 50."""
+    """Proof files, named artifacts (uploaded), proof links and ticket links, newest first, at most 50."""
     tid = ticket["id"]
     at0 = ticket["updated_at"] if _TIME.fullmatch(str(ticket.get("updated_at"))) else tickets.now()
     out: list[dict] = []
@@ -274,6 +467,66 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
         if d["status"]:
             a["status"] = d["status"]
         out.append(a)
+    artifacts = tickets.artifacts_list(root, tid)[:200]
+    named = named_artifacts(root, ticket, artifacts)
+    mtimes = {a["name"]: a.get("mtime") for a in artifacts}
+    artifact_entries = []
+    artifact_bytes = 0
+    evidence_hashes = {a["rev"] for a in out if "blob_id" in a}
+    slots = max(0, ATTACHMENTS - len(out))
+    for name in named:
+        if len(artifact_entries) >= slots:
+            break
+        aid = artifact_id("file", f".orch/tickets/{tid}/artifacts/{name}")
+        if any(a["id"] == aid for a in out):
+            continue
+        room = min(tickets.MAX_PROOF_BYTES, ARTIFACT_BYTES - artifact_bytes)
+        if room <= 0:
+            break
+        try:  # safefile checks the size on the open file (fstat) before it reads: too big = never loaded
+            data = safefile.read_ticket_file(root, tid, "artifacts", name, room)
+        except safefile.TooLarge:
+            continue
+        if data is None:
+            continue
+        sha = hashlib.sha256(data).hexdigest()
+        verdict = _scan(data, name)
+        if verdict != "ok":
+            why = (
+                "it looks like it holds a password or key"
+                if verdict == "secret"
+                else "it can't be checked for passwords"
+            )
+            if state is not None:
+                skipped = state.setdefault("secret_skipped", [])
+                key = f"{name}:{sha}"
+                if key not in skipped:
+                    with contextlib.suppress(Exception):
+                        tickets.log(root, tid, f"{name} was not sent to the phone: {why}.", "orch")
+                    skipped.append(key)
+                    del skipped[:-200]
+            continue
+        if sha in evidence_hashes:  # the same content is already in the view (evidence or an artifact)
+            continue
+        b = _upload(root, data, state) if upload and state is not None else None
+        if not b:
+            continue
+        artifact_bytes += len(data)
+        evidence_hashes.add(sha)  # artifacts among themselves too
+        at = mtimes.get(name)
+        artifact_entries.append(
+            {
+                "kind": "image" if Path(name).suffix.lower() in IMAGE_EXT else "file",
+                "title": _clip(name, 200) or "file",
+                "blob_id": b["blob_id"],
+                "name": _clip(Path(name).name, 255) or "file",
+                "size": b["size"],
+                "at": at if _TIME.fullmatch(str(at)) else at0,
+                "id": aid,
+                "rev": sha,
+            }
+        )
+    out.extend(artifact_entries[:slots])
     out.sort(key=lambda a: a["at"], reverse=True)
     return out[:ATTACHMENTS]
 
@@ -327,6 +580,13 @@ def reference_views(root: Path, ticket: dict) -> list[dict]:
     return out
 
 
+def shown_summary(ticket: dict) -> str:
+    """The line the phone shows on top of the ticket chat: the summary, else the ticket's note (what the
+    person asked for), so a fresh ticket made on the dashboard never shows an empty chat. Secrets cut."""
+    text = str(ticket.get("summary") or "").strip() or str(ticket.get("note") or "").strip()
+    return _clip(redact(text), 200) if text else ""
+
+
 def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
     checklist = ticket.get("checklist") or []
     done, total = tickets.checks_done(ticket)
@@ -358,12 +618,14 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
         "history_tail": hist,
         "attachments": atts,
     }
+    if ticket.get("started") is True:
+        view["started"] = True
     if shared_refs := reference_views(root, ticket):
         view["refs"] = shared_refs
     if agent:
         view["agent"] = agent
-    if ticket.get("summary"):
-        view["summary"] = _clip(ticket["summary"], 200)
+    if summary := shown_summary(ticket):
+        view["summary"] = summary
     return fit(view)
 
 
@@ -391,52 +653,288 @@ def view_for(root: Path, tid: str) -> dict | None:
     except (Refused, ValueError, KeyError, OSError):
         return None
     state = load_state(root)
-    atts = attachments(root, ticket, state)
-    save_state(root, state)
+    atts = attachments(root, ticket, state)  # uploads: never under the lock
+
+    def merge(st):
+        st["blobs"].update(state["blobs"])
+        skipped = st.setdefault("secret_skipped", [])
+        skipped.extend(key for key in state.get("secret_skipped", []) if key not in skipped)
+        del skipped[:-200]
+
+    update_state(root, merge)
     return build(root, ticket, atts)
 
 
-def _tasks_sig(ticket: dict) -> str:
+def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
+    """What the phone's snapshot depends on: tasks, status and whether an agent runs now (so "<agent> is
+    working" on the phone ends when the agent stops, not only when a task changes)."""
     items = [[c.get("text"), bool(c.get("done"))] for c in ticket.get("checklist") or []]
-    return hashlib.sha256(json.dumps([items, ticket.get("status")]).encode()).hexdigest()[:16]
+    running = _agent(root, ticket)[1] if root is not None else None
+    data = [items, ticket.get("status"), running]
+    if ticket.get("started") is True:
+        data.append(True)
+    return hashlib.sha256(json.dumps(data).encode()).hexdigest()[:16]
 
 
 def remember(root: Path, tid: str, to: str) -> None:
     """The phone follows this ticket now: later task changes go to `to` quietly."""
     if not (to == "phones" or to.startswith("ph_")):
         return
-    state = load_state(root)
     try:
-        sig = _tasks_sig(tickets.load(root, tid))
+        ticket = tickets.load(root, tid)
     except (Refused, ValueError, KeyError, OSError):
         return
-    state["tickets"][tid] = {"to": to, "sig": sig, "at": time.time()}
-    if to.startswith("ph_"):  # this phone has a chat for the ticket now: sync_open skips it
-        state.setdefault("synced", {}).setdefault(to, [])
-        if tid not in state["synced"][to]:
-            state["synced"][to].append(tid)
-    save_state(root, state)
+    sig, status = _tasks_sig(ticket, root), ticket.get("status")
+
+    phones = _paired(root) if to == "phones" else [to]
+
+    def put(state):
+        state["tickets"][tid] = {"to": to, "sig": sig, "at": time.time(), "status": status}
+        for ph in phones:  # the phone has a chat for the ticket now: sync_open skips it, light updates follow
+            _listed_now(state, ticket, ph, time.time())
+
+    with contextlib.suppress(Refused):  # the message went out already: a busy state file never makes it fail
+        update_state(root, put)
 
 
-def sync(root: Path, now: float | None = None) -> list[str]:
-    """Quiet snapshots (kind note, never pushed) for followed tickets whose tasks changed, at most
-    one per ticket every DEBOUNCE seconds (a change in between waits for the next pull).
-    Returns the ticket ids sent."""
+LIGHT_DEBOUNCE = 5  # seconds between two light updates of one ticket
+
+
+def _light_sig(ticket: dict) -> str:
+    data = [
+        ticket.get("status"),
+        ticket.get("title"),
+        shown_summary(ticket),
+        ticket.get("started") is True,
+        bool(ticket.get("waiting_on")),
+    ]
+    return hashlib.sha256(json.dumps(data).encode()).hexdigest()[:16]
+
+
+def light_view(root: Path, ticket: dict) -> dict:
+    """A LIGHT ticket_view (`light: true`): title, status, started, running, summary, agent, updated_at only.
+    The
+    phone overlays these on its last full snapshot. No questions, no checklist, history or files."""
+    agent, running = _agent(root, ticket)
+    view: dict = {
+        "light": True,
+        "title": _clip(redact(ticket.get("title", "")), 200) or "Ticket",
+        "status": ticket.get("status", "open"),
+        "running": running,
+    }
+    if ticket.get("started") is True:
+        view["started"] = True
+    if agent:
+        view["agent"] = agent
+    if summary := shown_summary(ticket):
+        view["summary"] = summary
+    at = str(ticket.get("updated_at") or "")
+    if _TIME.fullmatch(at):
+        view["updated_at"] = at
+    return view
+
+
+LIGHT_MAX = 20  # light sends per pull
+LIGHT_BACKOFF = (15, 30, 60, 120)  # seconds before a refused phone is tried again (then the last one)
+
+
+def _paired(root: Path) -> list[str]:
+    from orch import relay
+
+    phones = relay._read_dir(root).get("phones", [])
+    return [p["id"] for p in phones if str(p.get("id", "")).startswith("ph_")]
+
+
+def _listed_now(state: dict, ticket: dict, ph: str, now: float) -> None:
+    """A message with this ticket reached phone `ph`: the phone lists it now (its list is the newest update
+    per ticket), so it gets light updates from here on. The relay took a message for `ph`, so a light backoff
+    of that phone ends too (a passing refusal must not keep a phone's list stale for long)."""
+    if not ph.startswith("ph_"):
+        return
+    got = state.setdefault("synced", {}).setdefault(ph, [])
+    if ticket["id"] not in got:
+        got.append(ticket["id"])
+        got.sort()
+    _set_light_baseline(state, ticket, ph, now)
+    state.setdefault("light_phone", {}).pop(ph, None)
+
+
+def _set_light_baseline(state: dict, ticket: dict, ph: str | None, now: float) -> None:
+    """The phone got a full view of this ticket now: what it carried is the baseline for light updates."""
+    if ph and ph.startswith("ph_"):
+        state.setdefault("light", {}).setdefault(ticket["id"], {})[ph] = {
+            "sig": _light_sig(ticket),
+            "at": now,
+        }
+
+
+def sync_light(root: Path, now: float | None = None) -> list[tuple[str, str]]:
+    """Every ticket a phone lists (any ticket update reached that phone: sync_open's full view, an update to
+    the phone or to all phones) gets a LIGHT quiet update when its status, title, summary, started or waiting
+    flag changes: kind note, never pushed, no question content. State is per phone. At most LIGHT_MAX sends
+    per pull; a refusal backs only that phone off (15 s growing to at most 2 min, and any message the relay
+    takes for the phone ends it); phones that were unpaired are forgotten.
+    Returns (phone, ticket id) pairs."""
     from orch import relay
 
     now = time.time() if now is None else now
-    sent = []
-    for tid, rec in list(load_state(root)["tickets"].items()):
+    paired = {
+        p["id"] for p in relay._read_dir(root).get("phones", []) if str(p.get("id", "")).startswith("ph_")
+    }
+    all_ = {t["id"]: t for t in tickets.list_all(root)}
+    due: list[tuple[str, str, dict, str]] = []
+
+    def claim(state):
+        light = state.setdefault("light", {})
+        listed = {(tid, ph) for ph, ids in state.get("synced", {}).items() for tid in ids if ph in paired}
+        for tid in [k for k in light if k not in all_]:  # deleted tickets
+            del light[tid]
+        for tid in list(light):  # no longer listed to a paired phone
+            for ph in [x for x in light[tid] if (tid, x) not in listed]:
+                del light[tid][ph]
+            if not light[tid]:
+                del light[tid]
+        backoff = state.setdefault("light_phone", {})
+        for ph in [x for x in backoff if x not in paired]:
+            del backoff[ph]
+        for tid, ph in sorted(listed):
+            t = all_.get(tid)
+            if t is None or len(due) >= LIGHT_MAX or now < backoff.get(ph, {}).get("retry", 0):
+                continue
+            sig, rec = _light_sig(t), light.setdefault(tid, {}).get(ph)
+            if rec is None:  # first sight: what the listing carried is the baseline
+                light[tid][ph] = {"sig": sig, "at": now}
+            elif (
+                rec.get("sig") != sig
+                and now - rec.get("at", 0) >= LIGHT_DEBOUNCE
+                and now >= rec.get("retry", 0)
+            ):
+                due.append((ph, tid, t, rec.get("sig")))
+                rec.update(sig=sig, at=now)
+
+    update_state(root, claim)
+    sent: list[tuple[str, str]] = []
+    bad_phones: set[str] = set()
+    for i, (ph, tid, t, _before) in enumerate(due):
+        if ph in bad_phones:
+            continue
         try:
-            ticket = tickets.load(root, tid)
-        except (Refused, ValueError, KeyError, OSError):
+            relay.send_text(
+                root, ph, f"Status: {t.get('status', 'open')}", tid, "note", view=light_view(root, t)
+            )
+            sent.append((ph, tid))
+            if ph in (load_state(root).get("light_phone") or {}):  # recovered: forget the backoff
+                update_state(root, lambda st, ph=ph: st.get("light_phone", {}).pop(ph, None))
             continue
-        if _tasks_sig(ticket) == rec.get("sig") or now - rec.get("at", 0) < DEBOUNCE:
-            continue
-        done, total = tickets.checks_done(ticket)
+        except Refused:
+            pass
+
+        rest = tuple(d for d in due[i:] if d[0] == ph)
+
+        def undo(st, bad=ph, rest=rest):
+            for ph2, tid2, _t, before2 in rest:  # unsent ones go again later (no new sig, so nothing is lost)
+                if rec := st.get("light", {}).get(tid2, {}).get(ph2):
+                    rec.update(sig=before2, at=0)
+            b = st.setdefault("light_phone", {}).setdefault(bad, {})
+            b["fails"] = b.get("fails", 0) + 1
+            b["retry"] = now + LIGHT_BACKOFF[min(b["fails"], len(LIGHT_BACKOFF)) - 1]
+
         with contextlib.suppress(Refused):
-            relay.send_text(root, rec["to"], f"Tasks: {done} of {total} done", tid, "note", view=True)
+            update_state(root, undo)
+        bad_phones.add(ph)  # this phone waits for its backoff; the other phones still get theirs
+    return sent
+
+
+FINISHED = ("review", "done")
+
+
+def result_text(ticket: dict) -> str:
+    """The pushed "it is finished" text: the title, then where things stand."""
+    word = "Ready for your review" if ticket.get("status") == "review" else "Done"
+    text = f"{word}: {_clip(ticket.get('title', ''), 120)}"
+    if ticket.get("summary"):
+        text += f"\n{_clip(ticket['summary'], 400)}"
+    return text
+
+
+def _just_finished(prev, ticket: dict) -> bool:
+    return prev is not None and prev not in FINISHED and ticket.get("status") in FINISHED
+
+
+def sync(root: Path, now: float | None = None) -> list[str]:
+    """Snapshots for followed tickets whose tasks, status or running agent changed, at most one per ticket
+    every DEBOUNCE seconds (a change in between waits for the next pull). Quiet (kind note, never pushed),
+    except when the ticket just moved to Review or Done: then a pushed `result` (fb11), unless the agent sent
+    one itself (remember() then already saw the new status). A ticket nobody follows yet that moves to Review
+    or Done sends its result to the phones too, in Mobile mode or when it (or a parent) came from the phone.
+    Returns the ticket ids sent."""
+    from orch import mobile_mode, relay
+
+    now = time.time() if now is None else now
+    on = False
+    with contextlib.suppress(Refused, OSError, ValueError):
+        on = mobile_mode.routes_to_phone(root)
+    all_ = tickets.list_all(root)
+    due: list[tuple] = []  # (ticket id, to, ticket, finished just now, status before, claimed sig or None)
+
+    def claim(state):
+        # under the lock: decide what goes out and mark it as sent first, so two pulls never send it twice
+        seen = state.setdefault("status", {})
+        for tid, rec in state["tickets"].items():
+            t = next((x for x in all_ if x["id"] == tid), None)
+            if t is None:
+                continue
+            sig = _tasks_sig(t, root)
+            if sig == rec.get("sig") or now - rec.get("at", 0) < DEBOUNCE:
+                continue
+            due.append((tid, rec["to"], t, _just_finished(rec.get("status"), t), rec.get("status"), sig))
+            rec.update(sig=sig, at=now, status=t.get("status"))
+        nonce = f"{os.getpid()}-{time.monotonic_ns()}"  # which pass claimed it (the undo checks it)
+        for t in all_:
+            tid, prev = t["id"], seen.get(t["id"])
+            seen[tid] = t.get("status")
+            if tid in state["tickets"] or not _just_finished(prev, t):
+                continue
+            with contextlib.suppress(Refused, OSError, ValueError):
+                if on or mobile_mode.from_phone(root, tid):
+                    due.append((tid, "phones", t, True, prev, None))
+                    state.setdefault("claims", {})[tid] = nonce
+        claims[0] = nonce
+
+    claims = [None]
+
+    update_state(root, claim)
+    sent = []
+    for tid, to, t, finished, before, claimed in due:
+        done, total = tickets.checks_done(t)
+        try:
+            if finished:
+                relay.send_text(root, to, result_text(t), tid, "result")
+            else:
+                relay.send_text(root, to, f"Tasks: {done} of {total} done", tid, "note", view=True)
             sent.append(tid)
+        except Refused:  # not sent: undo the claim (also the status, so a result is pushed again next pull)
+
+            def undo(st, tid=tid, before=before, claimed=claimed):
+                # compare and set: only our own claim is undone, never a newer one another pull made meanwhile
+                rec = st["tickets"].get(tid)
+                if claimed is not None:
+                    if rec is None or rec.get("sig") != claimed:
+                        return
+                    rec.update(sig=None, at=0)  # no debounce for the retry
+                    if before is None:
+                        rec.pop("status", None)
+                    else:
+                        rec["status"] = before
+                elif rec is None and st.get("claims", {}).get(tid) == claims[0]:  # ours, not a later claim
+                    st["claims"].pop(tid, None)
+                    if before is None:
+                        st["status"].pop(tid, None)
+                    else:
+                        st["status"][tid] = before
+
+            with contextlib.suppress(Refused):
+                update_state(root, undo)
     return sent
 
 
@@ -483,8 +981,11 @@ def sync_open(root: Path, now: float | None = None) -> list[str]:
             except Refused:
                 break  # the relay is away or refuses this phone: the next pull tries again
             have.add(t["id"])
-            done_for[ph] = sorted(have)
-            save_state(root, {**load_state(root), "synced": done_for})
+
+            def mark(st, ph=ph, t=t):
+                _listed_now(st, t, ph, time.time())
+
+            update_state(root, mark)
             if t["id"] not in sent:
                 sent.append(t["id"])
     return sent

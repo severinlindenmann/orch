@@ -14,6 +14,7 @@ import secrets
 import sys
 import tempfile
 import time
+import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,7 +35,7 @@ OPEN_STATUSES = tuple(s for s in STATUS_WORDS if s not in ("done", "dropped"))
 REVIEW_MESSAGE = "Moved to Review, not Done. A person marks a ticket Done."
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
-PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "summary")
+PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "done_when", "summary")
 VIA_RE = re.compile(r"^[a-z][a-z0-9-]{1,15}$")
 KIND_RE = re.compile(r"^(plain|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$")
 DOING_STALE_SECONDS = 2 * 3600
@@ -390,7 +391,7 @@ def ensure_general(root: Path, by: str) -> str:
         "checklist": [],
         "refs": [],
         "questions": [],
-        "history": [{"at": t, "by": by, "via": "cli", "text": "Created"}],
+        "history": [{"at": t, "by": by, "via": "cli", "text": "Created", "chat_message": False}],
     }
     save(root, ticket)
     return ticket["id"]
@@ -401,6 +402,7 @@ _FIELD_WORDS = {
     "owner": "owner",
     "due": "due date",
     "note": "note",
+    "done_when": "done criteria",
     "summary": "summary",
     "status": "status",
     "waiting_on": "wait",
@@ -459,8 +461,10 @@ def _env_via() -> str:
     return v if re.fullmatch(r"[a-z][a-z0-9-]{1,23}", v) else "cli"
 
 
-def add_history(ticket: dict, by: str, text: str, via: str | None = None) -> None:
-    ticket["history"].append({"at": now(), "by": by, "via": via or _env_via(), "text": text})
+def add_history(ticket: dict, by: str, text: str, via: str | None = None, chat: bool = False) -> None:
+    """chat=True marks a real Chat or group message (`chat_message: true`): the only lines the Chat shows."""
+    entry = {"at": now(), "by": by, "via": via or _env_via(), "text": text, "chat_message": chat}
+    ticket["history"].append(entry)
 
 
 def parse_ext_args(pairs: list[str] | None, schema_for=None) -> dict[str, dict]:
@@ -512,12 +516,18 @@ def create(
         "refs": [],
         "questions": [],
         "history": [
-            {"at": t, "by": by, "via": _env_via(), "text": "Created" + (f" under {parent}" if parent else "")}
+            {
+                "at": t,
+                "by": by,
+                "via": _env_via(),
+                "text": "Created" + (f" under {parent}" if parent else ""),
+                "chat_message": False,
+            }
         ],
     }
     if parent is not None:
         ticket["parent"] = parent
-    for k, v in fields.items():  # owner, due, note: part of the one "Created" line
+    for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
         ticket["ext"] = ext
@@ -539,9 +549,46 @@ def _check_can_finish(ticket: dict) -> None:
         raise Refused(f"Not done: {', '.join(bad)} is checked without evidence.")
 
 
+def _open_questions(ticket: dict) -> list[str]:
+    """Plain questions nobody answered yet (an add-on's own questions are its business)."""
+    return [
+        q["id"]
+        for q in ticket.get("questions") or []
+        if q.get("answer") is None and q.get("kind") in (None, "plain")
+    ]
+
+
+def _check_not_too_early(root: Path, ticket: dict) -> None:
+    """An agent never finishes a ticket while its own question is open or a person's new input has not
+    reached it yet: that work is not done (round 8 Nov: "never close a ticket too early")."""
+    open_ = _open_questions(ticket)
+    if open_:
+        raise Refused(f"Not done: {', '.join(open_)} is not answered yet. Wait for the answer.")
+    from orch import runs  # runs imports tickets
+
+    if any(i.get("via") not in ("start", "slots") for i in runs.undelivered(root, ticket["id"])):
+        raise Refused("Not done: new input for this ticket has not reached you yet. Read it first.")
+
+
+GENERAL_REFUSAL = "The Chat is not a ticket: it is never finished, dropped or reopened."
+GENERAL_REFUSED = (
+    "open",
+    "review",
+    "done",
+    "dropped",
+    "active",
+)  # finish, reopen, Working; waiting and ready stay
+
+
 def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
+    if (
+        ticket.get("general") is True and status in GENERAL_REFUSED
+    ):  # the ONE status guard (agent, person, wrapper)
+        raise Refused(GENERAL_REFUSAL)
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
         by = "agent:" + str(agent_tool())
+    if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
+        _check_not_too_early(root, ticket)
     if status == "done" and by.startswith("agent:"):
         _check_can_finish(ticket)
         if not config.agents_may_finish(root):
@@ -550,13 +597,56 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
     return status, by
 
 
+def ask_for_changes(root: Path, tid: str, text: str, by: str) -> dict:
+    """A person sends a Review ticket back with a note, in ONE step: the note becomes a task, the ticket is
+    Ready (Working only when a run claims it) and the note is queued as the person's own input, so the
+    automation host starts exactly one run for it (a person's pending input is what starts runs; #287)."""
+    if not by.startswith("human:") or agent_tool():
+        raise Refused("Only a person can ask for changes.")
+    note = (text or "").strip()
+    if not note:
+        raise Refused("Say what should change.")
+    if len(note) > 2000:
+        raise Refused("A note for changes is at most 2000 characters.")
+
+    def op(ticket):
+        if ticket["status"] != "review":
+            raise Refused("This ticket is not waiting for your review.")
+        ticket["checklist"].append(
+            {
+                "id": _next_id(ticket["checklist"], "c"),
+                "text": "Change: " + note,
+                "done": False,
+                "evidence": [],
+            }
+        )
+        ticket["status"] = "ready"  # any wait the ticket has is not this review's: left as it is
+        add_history(ticket, by, "Asked for changes: " + note[:200])
+
+    from orch import runs  # runs imports tickets
+
+    if load(root, tid)["status"] != "review":
+        raise Refused("This ticket is not waiting for your review.")
+    # Queue the note first, then commit the ticket: a failure of either leaves nothing half done.
+    item = runs.pending_add(root, tid, by, "message", note, _env_via())
+    try:
+        return apply_op(root, tid, op)[0]
+    except BaseException:
+        runs.pending_discard(root, tid, item["id"])
+        raise
+
+
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     def op(ticket):
+        if ticket.get("general") is True:
+            return NO_WRITE
+        was_started = ticket.get("started") is True
+        ticket["started"] = True
         w = ticket.get("waiting_on") or {}
         if ticket["status"] not in ("open", "ready", "review") and not (
             ticket["status"] == "waiting" and w.get("start") is True
         ):  # a start that was waiting for a sign-in (wait_for_start) is Working again
-            return NO_WRITE
+            return NO_WRITE if was_started else None
         ticket["status"] = "active"
         ticket["waiting_on"] = None
         add_history(ticket, by, f"{agent_label} started")
@@ -566,6 +656,33 @@ def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     except (Refused, FileNotFoundError):
         if ticket_path(root, tid).exists():
             raise
+
+
+STOPPED_TEXT = "The agent stopped before the work was finished. Continue goes on where it left off."
+
+
+def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool = True) -> bool:
+    """No agent works on the ticket any more: a Working ticket is Ready again (Working is shown only while
+    an agent runs). still_running() is asked under the ticket lock, so a run that started meanwhile wins.
+    Returns True when the ticket was moved."""
+
+    def op(ticket):
+        if ticket.get("general") is True:
+            return NO_WRITE
+        if ticket["status"] != "active" or (still_running is not None and still_running()):
+            return NO_WRITE
+        ticket["status"] = "ready"
+        ticket["waiting_on"] = None
+        if say:
+            add_history(ticket, by, STOPPED_TEXT)
+        return True
+
+    try:
+        return apply_op(root, tid, op)[1] is True
+    except (Refused, FileNotFoundError):
+        if ticket_path(root, tid).exists():
+            raise
+        return False
 
 
 def wait_for_start(root: Path, tid: str, reason: str, by: str) -> None:
@@ -610,6 +727,8 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
 
     def op(ticket):
         target, actor = _finish_status(root, ticket, status, by)
+        if target in ("open", "ready") and not actor.startswith("agent:"):
+            ticket.pop("started", None)
         if target != "waiting":
             ticket["waiting_on"] = None
         elif isinstance(ticket.get("waiting_on"), dict):
@@ -622,20 +741,22 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
     return apply_op(root, tid, op)[0]
 
 
-# ---------------------------------------------------------------- plain fields (owner, due, note, summary)
+# ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
 
 
 def clean_field(key: str, value):
-    """Validate owner, due, note or summary (None or empty clears it); returns the value to store."""
+    """Validate a plain field (None or empty clears it); returns the value to store."""
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
     if not isinstance(value, str):
         raise Refused(f"{key} must be text.")
-    v = value.strip()
+    v = value if key in ("note", "done_when") else value.strip()
     if key == "owner" and len(v) > 64:
         raise Refused("An owner is at most 64 characters.")
     if key == "note" and len(v) > 2000:
         raise Refused("A note is at most 2000 characters.")
+    if key == "done_when" and len(v) > 2000:
+        raise Refused("The done criteria are at most 2000 characters.")
     if key == "summary" and len(v) > 200:
         raise Refused("A summary is at most 200 characters.")
     if key == "due":
@@ -664,7 +785,7 @@ def edit(
     fields: dict | None = None,
     if_revision: int | None = None,
 ) -> dict:
-    """Rename and/or set owner, due, note (`fields`)."""
+    """Rename and/or set owner, due, note, done_when (`fields`)."""
     if title is not None:
         title = title.strip()
         if not title or len(title) > 200:
@@ -1141,6 +1262,60 @@ def ext_unset(
     return apply_op(root, tid, op, if_revision=if_revision)[0]
 
 
+_SECRET_FOLDER_RE = re.compile(r"\.orch[/\\]+secrets|\borch secrets\b|\bsecrets folder\b", re.I)
+_SECRET_WORD = (
+    r"(?:passwords?|passcodes?|passphrases?|passwort|passw\u00f6rter|kennwort|zugangsdaten|api[\s_-]?keys?"
+    r"|(?:access|auth|bearer|login|api)[\s_-]?tokens?|tokens?|secrets?|private[\s_-]?keys?"
+    r"|api[\s_-]?schl\u00fcssel|schl\u00fcssel|credentials?|login details)"
+    r"(?![\s-]*(?:reset|protected|rotat|expir|set up))"
+)
+_GAP = r"(?:(?!rotat|expir|reset|protect|whether|set up)[^.?!\n]){0,40}?"
+_HAND_OVER = (
+    r"(?:give|send|paste|provide|enter|share|tell|upload|supply|attach|what's"
+    r"|gib|schick\w*|sende\w*|teile\w*|nenne\w*|eingeben)"
+)
+_SECRET_ASK_RE = re.compile(r"\b" + _HAND_OVER + r"\b" + _GAP + r"\b" + _SECRET_WORD + r"\b", re.I)
+_PAT_ASK_RE = re.compile(r"\b" + _HAND_OVER + r"\b" + _GAP + r"\bPAT\b", re.I)
+_INVISIBLE_RE = re.compile("[\u200b-\u200f\u2060\ufeff\u00ad]")
+_MACHINE_VALUE_RE = re.compile(r"[A-Za-z0-9_.:-]{1,80}")
+_MACHINE_KEYS = {"op", "run", "peer", "key", "id", "tid", "ticket"}
+_REQUEST_RES = (
+    re.compile(r"\bneed\s+(?:your|you to give|you to send)\b[^.?!\n]{0,20}?\b" + _SECRET_WORD + r"\b", re.I),
+    re.compile(r"\byour\s+" + _SECRET_WORD + r"\s+please\b", re.I),
+    re.compile(r"\breply\s+with\s+(?:your\s+|the\s+)?" + _SECRET_WORD + r"\b", re.I),
+    re.compile(r"\bwhich\s+" + _SECRET_WORD + r"\s+(?:should|do)\s+i\s+use\b", re.I),
+    re.compile(r"\bbrauche\s+(?:dein|deinen|ihr|ihren)\w*\s+" + _SECRET_WORD + r"\b", re.I),
+)
+
+
+def _labels(value, key: str = "") -> list[str]:
+    """Every text of an add-on action (keys too), except the machine-only fields."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        out = []
+        for k, v in value.items():
+            if str(k).lower() in _MACHINE_KEYS and isinstance(v, str) and _MACHINE_VALUE_RE.fullmatch(v):
+                continue  # a machine-only token; natural language and nested data are still scanned
+            out += [str(k), *_labels(v, str(k))]
+        return out
+    if isinstance(value, list):
+        return [x for v in value for x in _labels(v, key)]
+    return []
+
+
+def _asks_for_secret(text: str) -> bool:
+    """Light guard for `orch ask` (defence in depth; the skill text is the real control): the secrets
+    folder, or asking a person to hand over a credential."""
+    text = _INVISIBLE_RE.sub("", unicodedata.normalize("NFKC", text)).replace("\u2019", "'")
+    return bool(
+        _SECRET_FOLDER_RE.search(text)
+        or _SECRET_ASK_RE.search(text)
+        or _PAT_ASK_RE.search(text)
+        or any(r.search(text) for r in _REQUEST_RES)
+    )
+
+
 def ask(
     root: Path,
     tid: str,
@@ -1166,6 +1341,19 @@ def ask(
             act = None
         if not isinstance(act, dict):
             raise Refused("--action must be a JSON object.")
+
+    for part in (text, *options, *([recommended] if recommended else []), *_labels(act)):
+        if _asks_for_secret(part):
+            with contextlib.suppress(Exception):  # the attempt stays visible in the history
+                apply_op(
+                    root, tid, lambda t: add_history(t, by, "A question was refused: it asked for a secret.")
+                )
+            raise Refused(
+                "A question must never ask for a password, token, API key or other credential, "
+                "and never mention the secrets folder. Ask whether access is set up instead "
+                "(for example: Is access to the service set up for this workspace?), "
+                "and say in the ticket summary what is missing."
+            )
 
     def op(ticket):
         for old in ticket["questions"]:  # the same open question is not asked twice
@@ -1203,6 +1391,7 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
     if not text.strip():
         raise Refused("An answer needs text.")
     text = text.strip()
+    from orch import runs  # runs imports tickets
 
     def op(ticket):
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
@@ -1218,9 +1407,14 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
         q["answer"], q["answered_by"], q["via"] = ans, by, via
         w = ticket.get("waiting_on")
         if w and w.get("kind") == "question" and w.get("ref") == qid:
-            ticket["waiting_on"] = None
-            if ticket["status"] == "waiting":
-                ticket["status"] = "active"
+            still = _open_questions(ticket)
+            if still:  # more questions wait: the ticket keeps waiting, on the oldest of them
+                ticket["waiting_on"] = {"kind": "question", "ref": still[0]}
+            else:
+                ticket["waiting_on"] = None
+                if ticket["status"] == "waiting":  # Working only while an agent runs; else Ready to go on
+                    chat = ticket.get("general") is True  # the Chat ticket is never Working
+                    ticket["status"] = "ready" if chat or not runs.running(root, tid) else "active"
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
         return q
 
@@ -1281,6 +1475,11 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         raise Refused('A patch is a JSON object, e.g. \'{"title": "New"}\'.') from None
     if not isinstance(obj, dict) or not obj:
         raise Refused("A patch is a JSON object with at least one field.")
+    if "status" in obj:
+        from orch import chat
+
+        if chat.is_helper(root):
+            raise Refused("The Chat helper does not change a ticket's status.")
     bad = sorted(set(obj) - set(PATCH_FIELDS))
     if bad:
         raise Refused(f"A patch can change only: {', '.join(PATCH_FIELDS)} (not {bad[0]}).")
@@ -1288,7 +1487,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         t = obj["title"]
         if not isinstance(t, str) or not t.strip() or len(t.strip()) > 200:
             raise Refused("A title needs 1 to 200 characters.")
-    for k in ("owner", "due", "note", "summary"):
+    for k in ("owner", "due", "note", "done_when", "summary"):
         if k in obj:
             clean_field(k, obj[k])
     w = obj.get("waiting_on")
@@ -1306,7 +1505,9 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         actor = by
         if "status" in obj:
             status, actor = _finish_status(root, ticket, status, by)
-        for k in ("owner", "due", "note", "summary"):
+            if status in ("open", "ready") and not actor.startswith("agent:"):
+                ticket.pop("started", None)
+        for k in ("owner", "due", "note", "done_when", "summary"):
             if k in obj:
                 _set_field(ticket, k, obj[k])
         if "waiting_on" in obj:

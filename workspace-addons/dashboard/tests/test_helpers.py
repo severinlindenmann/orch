@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from . import webjs
+
 WEB = Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "web"
 HARNESS = Path(__file__).parent / "helpers_harness.js"
 node = pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
@@ -359,9 +361,17 @@ def test_an_agent_that_is_starting_is_a_starting_row_not_idle_or_lost():
     assert [(r["agent"], r["state"], r["ticket"]) for r in rows] == [("claude", "starting", "t_a")]
 
 
+def test_ticket_rows_use_one_status_chip_and_inline_next_step():
+    src = webjs.all_js()
+    tree = src[src.index("function treeBranch") : src.index("let ticketView")]
+    assert tree.count("ticketAttentionChip(t)") == 1  # the one chip: Needs you (yellow) or the status word
+    assert "ticketNext(t)" in tree and "ticketMenu(t, 'tree')" in tree
+    assert "activity(t," not in tree
+
+
 def test_home_counts_a_starting_ticket_and_the_sidebar_badge_has_words():
-    src = (WEB / "app.js").read_text()
-    assert "agent starting" in src and "Getting started…" in src
+    src = webjs.all_js()
+    assert "working-now" in src and "Getting started…" in src
     assert "needsYou(needsList().length)" in src  # 5A: the badge says what it counts
 
 
@@ -457,7 +467,7 @@ def test_first_run_note_is_not_shown_as_an_answer():
     "status,word",
     [
         ("open", "Not started"),
-        ("ready", "Ready to start"),
+        ("ready", "Not started"),
         ("active", "Working"),
         ("waiting", "Needs you"),
         ("review", "Ready for review"),
@@ -521,13 +531,10 @@ def test_one_chip_while_a_question_is_open(ticket, live, want):
 
 def test_the_move_to_control_is_a_visible_labelled_button():
     """6A: one visible "Move to" button with four places; no chevron-only summary, no jargon in the choices."""
-    src = (WEB / "app.js").read_text()
+    src = webjs.all_js()
     assert "status-sum-icon" not in src
     assert "'Move to'" in src
-    choices = src.split("const MOVE_CHOICES = ")[1].split("];")[0]
-    assert [w for w in ("Not started", "Working", "Ready for review", "Done") if w in choices] == [
-        "Not started", "Working", "Ready for review", "Done"
-    ]
+    assert [w for _, w in node_value("MOVE_CHOICES")] == ["Not started", "Working", "Ready for review", "Done"]
     assert "Backlog" not in src
 
 
@@ -570,12 +577,12 @@ def test_agent_line_waiting_text_has_no_command():
 
 
 def test_ticket_screens_use_plain_wording_and_one_chip():
-    src = (WEB / "app.js").read_text()
-    assert "Open a ticket and press Start" in src and "No agent is working right now" not in src
-    assert "plainWhy(row.text" in src  # Needs-you rows carry no command text
+    src = webjs.all_js()
+    assert "No tickets are being worked on." in src and "No agent is working right now" not in src
+    assert "plainWhy(question" in src  # Needs-you rows carry no command text
     assert "seconds + ' s ago'" not in src  # one calm time format
-    assert "'Not chosen yet'" not in src.split("const agent = sessions.length")[1].split("\n")[0]
-    assert "New tickets show here." in src and "Finished tickets show here." in src
+    assert "'Not chosen yet'" not in src.split("const agent = window.DashHelpers.agentLabel")[1].split("\n")[0]  # one label source
+    assert "Ideas to plan" in src and "Finished work" in src
     assert "hideStatus" not in src and "'Needs you'" in src  # 10A: short board chip; 7A: no chip beside the banner
 
 
@@ -605,9 +612,153 @@ def test_needs_you_count_words_match_the_phone(n, want):
     assert call("needsYou", n) == want
 
 
-def test_groups_are_in_the_phone_order_and_old_phrases_are_gone():
-    src = (WEB / "app.js").read_text()
-    choices = src.split("const STATUS_CHOICES = ")[1].split("];")[0]
-    order = [w for w in ("Needs you", "Working", "Ready for review", "Not started", "Done") if w in choices]
-    assert order == sorted(order, key=choices.index) and len(order) == 5
+def test_groups_follow_the_lifecycle_and_old_phrases_are_gone():
+    src = webjs.all_js()
+    assert [w for _, w in node_value("STATUS_CHOICES")] == [
+        "Not started", "Working", "Needs you", "Ready for review", "Done"
+    ]
     assert "question needs you" not in src and "questions need you" not in src
+
+
+def node_value(name):
+    out = subprocess.run(
+        ["node", "-e", f"console.log(JSON.stringify(require(process.argv[1]).{name}))", str(WEB / "helpers.js")],
+        capture_output=True, text=True, check=True,
+    )
+    return json.loads(out.stdout)
+
+
+@node
+def test_one_label_per_status_single_sourced():
+    """fb12: every label site reads the words from helpers.js; no second map of status words in app.js."""
+    src = webjs.all_js()
+    for word in ("Ready to start", "Backlog"):
+        assert word not in src and word not in (WEB / "helpers.js").read_text()
+    # Lifecycle step names are separate from status labels.
+    src = src.split("function ticketStepState")[0] + src.split("function ticketStepper")[1]
+    for pair in ("open:'Not started'", "active:'Working'", "review:'Ready for review'", "done:'Done'"):
+        assert pair not in src.replace(" ", "")
+    words = node_value("STATUS_WORD")
+    assert words["ready"] == words["open"] == "Not started" and words["waiting"] == "Needs you"
+    assert all(w in src for w in ("DashHelpers.statusWord", "DashHelpers.STATUS_CHOICES", "DashHelpers.MOVE_CHOICES"))
+    assert [s for s, _ in node_value("STATUS_CHOICES")] == node_value("STATUS_ORDER")
+    assert call("columnOf", "ready") == "open" and call("columnOf", "review") == "review"
+
+
+def test_home_row_is_one_link_and_the_review_chip_shows_once():
+    src = webjs.all_js()
+    css = (WEB / "style.css").read_text()
+    assert ".ticket-row h3 a::after" in css and "position:absolute;inset:0" in css
+    assert ".ticket-row .status-menu" in css  # Move to stays clickable above the row link
+    assert "'Ready for your review'" not in src
+    assert "['head', 'board'].includes(where)" in src
+
+
+@node
+def test_review_ticket_without_run_offers_no_start():
+    w = call("agentLine", {"id": "t_a", "status": "review"}, None, 0, None)
+    assert w["primary"] is None and w["items"] == [] and "Start" not in w["status"]
+    assert call("agentLine", {"id": "t_a", "status": "active"}, None, 0, None)["primary"]["label"] == "Start"
+    src = webjs.all_js()
+    assert "line.primary && !['answer', 'open'].includes(line.primary.op)" in src
+    assert "!['done', 'review'].includes(t.status) ? agentBar(t) : null" in src
+
+
+def test_ui2_small_bugs_in_markup_and_css():
+    app = webjs.all_js()
+    css = (WEB / "style.css").read_text()
+    mm = (WEB / "mobile-mode.js").read_text()
+    html = (WEB / "index.html").read_text()
+    # 3: an open-page row is the link alone, not "Focus page | Focus page"
+    assert "r.format === 'open-page' ? h('dd', {className:'addon-page'}, v)" in app
+    # 2: the sidebar colour and the modal dim layer fill the viewport
+    assert "background:linear-gradient(to right,var(--sidebar)" in css and "body:has(dialog[open]:modal){overflow:hidden}" in css
+    # 4: the end time never wraps off alone at 720; two lines only below 480
+    assert "mm-desc" in mm and ".mm-bar.live{flex-wrap:nowrap}" in css and "@media(max-width:480px){.mm-bar.live{flex-wrap:wrap}" in css
+    # 6: a skeleton is in the page before the first data arrives
+    assert 'class="loading-home"' in html and 'aria-busy="true"' in html
+
+
+@node
+def test_history_line_shows_names_not_actor_ids():
+    line = call("historyLine", {"text": "agent:claude finished the work and moved it to Review"}, [])
+    assert line == "Claude finished the work and moved it to Review"
+
+
+@node
+def test_plain_names_and_history_dedupe():
+    assert call("plainNames", "agent:claude finished it, human:Mia agreed") == "Claude finished it, Mia agreed"
+    at = "2026-11-08T08:00:00Z"
+    entries = [
+        {"at": at, "by": "agent:claude", "text": "Check c1 done"},
+        {"at": "2026-11-08T08:00:20Z", "by": "agent:claude", "text": "Finished a task: Write the export"},
+        {"at": "2026-11-08T09:30:00Z", "by": "agent:claude", "text": "Finished a task: Write the export"},
+    ]
+    kept = call("dedupeHistory", entries, [{"id": "c1", "text": "Write the export"}])
+    assert [e["at"] for e in kept] == ["2026-11-08T08:00:00Z", "2026-11-08T09:30:00Z"]
+    assert len(kept) == 2
+    src = webjs.all_js() + (WEB / "blocks.js").read_text()
+    assert "plainNames" in src and "dedupeHistory" in src  # ticket history still uses both; Home no longer repeats it
+
+
+@node
+def test_footer_shows_the_relay_connection():
+    on = {"settings": {"addons": [{"name": "relay", "active": True, "detail": {"connected": True}}]}}
+    assert call("footerState", on, False) == "Connected"
+    off = {"settings": {"addons": [{"name": "relay", "active": True, "detail": {"connected": False}}]}}
+    assert call("footerState", off, False) == "Not connected yet"
+    assert call("footerState", {"settings": {"addons": []}}, False) == "Local workspace"
+    assert call("footerState", on, True) == "Shared copy"
+    assert "NetBird" not in (WEB / "helpers.js").read_text()
+
+
+@node
+@pytest.mark.parametrize("status,word", [
+    ("open", "Not started"), ("ready", "Not started"), ("active", "Working"),
+    ("waiting", "Needs you"), ("review", "Ready for review"),
+    ("done", "Done"), ("dropped", "Dropped"),
+])
+@pytest.mark.parametrize("started", [None, False, True, 1])
+def test_status_words_started(status, word, started):
+    expected = "Paused" if status in ("open", "ready") and started is True else word
+    assert call("statusWord", status, started) == expected
+    assert call("columnOf", "ready") == "open"
+
+
+@node
+def test_failed_agent_start_is_plain_with_a_retry():
+    now = 1793923200000
+    ref = "The agent could not be started: [Errno 2] No such file or directory: 'claude'"
+    t = {
+        "id": "t_a",
+        "status": "waiting",
+        "questions": [],
+        "sessions": [],
+        "waiting_on": {"kind": "external", "ref": ref, "start": True},
+    }
+    settings = {"agents": [{"name": "claude", "label": "Claude", "chosen": True}]}
+    w = call("agentLine", t, None, now, None, settings)
+    assert w["state"] == "failed" and w["startFailed"] is True
+    assert w["status"] == "Claude could not start: the claude program was not found"
+    assert w["primary"] == {"label": "Retry", "op": "run.start", "args": {"ticket": "t_a"}}
+    assert "Errno" not in w["status"]
+    assert call("startFailure", {**t, "status": "active"}, None, settings) is None
+    t["waiting_on"] = {"kind": "question", "ref": "q1"}
+    assert call("startFailure", t, None, settings) is None
+    assert call("plainStartReason", "The agent did not start") == "it did not start"
+    assert call("plainStartReason", "[Errno 13] Permission denied: '/x/claude'") == "it is not allowed to run"
+
+
+@node
+def test_start_reason_never_shows_paths_commands_or_secrets():
+    r = lambda ref: call("plainStartReason", ref)
+    assert r("The agent could not be started: [Errno 2] No such file or directory: '/usr/local/bin/claude'") == (
+        "the claude program was not found"
+    )
+    assert r("[Errno 2] No such file or directory: '/x/a b; rm -rf /'") == "it did not start"
+    for raw in (
+        "boom: ghp_abcdefghijklmnopqrstuvwxyz0123 at /Users/me/secret/dir",
+        "claude --token sk-live-abcdefabcdefabcdef exited 1",
+        "",
+    ):
+        assert r(raw) == "it did not start"

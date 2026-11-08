@@ -14,6 +14,7 @@ without a pid is "maybe stale" after the lease (30 min) with no orch write and i
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 import re
@@ -21,6 +22,7 @@ import secrets
 import socket
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from datetime import UTC, datetime
@@ -33,8 +35,21 @@ from orch.procs import pid_started
 LEASE_SECONDS = 30 * 60
 LOCK_STALE_SECONDS = 30
 MAX_DRAIN_TURNS = 10
+HANG_AGAIN = (
+    "The agent hung before it could read the latest input; it is delivered again after a hang with the next "
+    "start. Check if it already acted on it."
+)
+START_WATCHDOG_SECONDS = 90  # a streaming agent that prints nothing for this long after its start is hung
 PENDING_KINDS = ("answer", "message", "event", "text")
 _ALPHA = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+
+def start_watchdog_seconds() -> float:
+    """START_WATCHDOG_SECONDS; ORCH_RUN_START_WATCHDOG_SECONDS changes it (tests)."""
+    try:
+        return float(os.environ.get("ORCH_RUN_START_WATCHDOG_SECONDS", START_WATCHDOG_SECONDS))
+    except ValueError:
+        return START_WATCHDOG_SECONDS
 
 
 def lease_seconds() -> float:
@@ -115,6 +130,40 @@ def _break_dead(lock: Path) -> bool:
             mine.unlink()
 
 
+# link() errors that mean "this file system has no hard links" (vfat, exFAT, SMB, FUSE, Windows): plain create
+_NO_LINK_ERRNOS = {errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errno.EINVAL, errno.ENOSYS}
+
+
+def _create_lock(lock: Path) -> None:
+    """Create the lock with our token already in it: written to a private temp file first, then linked into
+    place (atomic, refuses an existing lock). A process stopped half-way never leaves an EMPTY lock behind,
+    which nobody could tell apart from a live writer for LOCK_STALE_SECONDS. Without hard links: the plain
+    O_EXCL create and write, as before."""
+    tmp = lock.with_name(f".{lock.name}.{secrets.token_hex(4)}.new")
+    try:
+        fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(procs.own_token())
+        try:
+            os.link(tmp, lock)
+            return
+        except FileExistsError:
+            if _lock_text(lock) == procs.own_token():
+                return  # NFS may report EEXIST for a link that did succeed: it is our lock
+            raise
+        except OSError as e:
+            no_links = e.errno in _NO_LINK_ERRNOS or getattr(e, "winerror", None) in (1, 50)
+            if not no_links:
+                raise  # e.g. Windows "delete pending" (EACCES): the lock is busy, the caller waits
+            # no hard links on this file system: the plain create + write below
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+    fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(procs.own_token())
+
+
 _held: set[Path] = set()  # run locks this process holds right now
 _terminating = False  # the SIGTERM handler is running: it interrupted whatever else this process was doing
 
@@ -124,17 +173,16 @@ def locked(root: Path, tid: str):
     """The per-ticket run lock. Free when its holder is verifiably dead, or old with no holder named."""
     lock = run_dir(root) / "tickets" / f"{tid}.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
-    if _terminating and lock in _held:
-        # The signal arrived while this very process was inside the lock; the interrupted code never continues
-        # (the handler ends the process), so waiting for it would only time out and leave the claim behind.
+    if _terminating and (lock in _held or _lock_text(lock) == procs.own_token()):
+        # The signal arrived while this very process was inside the lock (or had just taken it); the
+        # interrupted code never continues (the handler ends the process), so waiting for it would only time
+        # out and leave the claim behind.
         yield
         return
     end = time.monotonic() + 10
     while True:
         try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(fd, "w") as f:
-                f.write(procs.own_token())
+            _create_lock(lock)
             break
         except (
             FileExistsError,
@@ -247,10 +295,21 @@ def kill_tree(pid: int, grace: float = 2.0) -> None:
         except (ProcessLookupError, PermissionError):
             pass
 
+    def gone() -> bool:
+        # Our own child that has ended stays a zombie (and looks alive) until it is reaped. Look without
+        # reaping (WNOWAIT): its owner still reads the real exit status (a reaped Popen reports 0), and we do
+        # not wait out the grace and then SIGKILL a process that is still in its SIGTERM handler.
+        with contextlib.suppress(ChildProcessError, OSError, AttributeError):
+            if os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None:
+                return True
+        return not services.pid_alive(pid)
+
     send(signal.SIGTERM)
     end = time.monotonic() + grace
-    while time.monotonic() < end and services.pid_alive(pid):
+    while time.monotonic() < end and not gone():
         time.sleep(0.05)
+    if gone():
+        return
     if services.pid_alive(pid):
         send(signal.SIGKILL)
 
@@ -313,6 +372,32 @@ def undelivered(root: Path, tid: str) -> list[dict]:
     return [i for i in _pending_read(root, tid) if not i.get("delivered_at")]
 
 
+def _human_author(by, via, kind, phone=None) -> bool:
+    """An ALLOWLIST (also for older lines without the field): a person's answer or message, by human:<name>,
+    or a phone text that carries the sender's phone id (only the relay's phone-text path stores it). A bare
+    name, an empty by, orch, a host, an agent, an event or a start request is never a person's input."""
+    if kind not in ("answer", "message", "text"):
+        return False
+    by = str(by or "")
+    if by.startswith("human:") and len(by) > len("human:"):
+        return True
+    return via == "phone" and isinstance(phone, str) and PHONE_ID_RE.fullmatch(phone) is not None
+
+
+def human_waiting(root: Path, tid: str) -> list[dict]:
+    """Undelivered input a person wrote (owner, phone, a page), never an agent's (agent:*, or written from
+    inside an agent) and never a run's own start prompt or slot request. Only this may start a run."""
+    out = []
+    for i in undelivered(root, tid):
+        if i.get("via") in ("start", "slots"):
+            continue
+        # the stored flag is never trusted alone: the allowlist is checked again (older lines have no flag)
+        rule = _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone"))
+        if rule and i.get("human") in (True, None):
+            out.append(i)
+    return out
+
+
 def _drop_start_prompts_locked(root: Path, tid: str) -> None:
     """A live run's first prompt waits in the pending file until the tool is up. When that run ends before
     it went in, it is removed: the next start writes its own prompt from the ticket (no nested prompt)."""
@@ -322,8 +407,19 @@ def _drop_start_prompts_locked(root: Path, tid: str) -> None:
         _pending_write(root, tid, keep)
 
 
+PHONE_ID_RE = re.compile(r"ph_[A-Za-z0-9_-]{1,64}")
+
+
 def _pending_add_locked(
-    root: Path, tid: str, by: str, kind: str, text: str, via: str | None, pid: str | None
+    root: Path,
+    tid: str,
+    by: str,
+    kind: str,
+    text: str,
+    via: str | None,
+    pid: str | None,
+    *,
+    phone: str | None = None,
 ) -> dict:
     if kind not in PENDING_KINDS:
         raise Refused(f"Input kind must be one of: {', '.join(PENDING_KINDS)}.")
@@ -335,6 +431,9 @@ def _pending_add_locked(
     items = _pending_read(root, tid)
     if pid and any(i["id"] == pid for i in items):
         return next(i for i in items if i["id"] == pid)  # same id twice = once
+    tool = tickets.agent_tool()
+    if tool:  # written from inside an agent: an agent's item whatever by says (never a person's input)
+        by = f"agent:{tool}"
     item = {
         "id": pid or "p_" + "".join(secrets.choice(_ALPHA) for _ in range(10)),
         "at": tickets.now(),
@@ -342,6 +441,9 @@ def _pending_add_locked(
         "kind": kind,
         "text": text,
     }
+    if phone is not None and not tool and PHONE_ID_RE.fullmatch(str(phone)):
+        item["phone"] = phone  # the relay's phone-text path: the sender's phone id
+    item["human"] = not tool and _human_author(by, via, kind, item.get("phone"))
     if via:
         item["via"] = via
     _pending_write(root, tid, items + [item])
@@ -356,15 +458,31 @@ def pending_add(
     text: str,
     via: str | None = None,
     pid: str | None = None,
+    *,
+    phone: str | None = None,
 ) -> dict:
-    """Queue input for a ticket (under the ticket's run lock) and flag a running claim."""
+    """Queue input for a ticket (under the ticket's run lock) and flag a running claim. phone: the sender's
+    phone id, passed only by the relay's phone-text path."""
     with locked(root, tid):
-        item = _pending_add_locked(root, tid, by, kind, text, via, pid)
+        item = _pending_add_locked(root, tid, by, kind, text, via, pid, phone=phone)
         rec = read(root, tid)
         if rec and not rec.get("pending"):
             rec["pending"] = True
             _write(root, rec)
         return item
+
+
+def pending_discard(root: Path, tid: str, item_id: str) -> None:
+    """Take back an item queued a moment ago (the step that goes with it failed). Never a delivered one."""
+    with locked(root, tid):
+        items = _pending_read(root, tid)
+        keep = [i for i in items if i["id"] != item_id or i.get("delivered_at")]
+        if len(keep) != len(items):
+            _pending_write(root, tid, keep)
+        rec = read(root, tid)
+        if rec is not None and rec.get("pending") and not any(not i.get("delivered_at") for i in keep):
+            rec["pending"] = False
+            _write(root, rec)
 
 
 def mark_delivered_locked(root: Path, tid: str, ids: list[str]) -> None:
@@ -377,6 +495,24 @@ def mark_delivered_locked(root: Path, tid: str, ids: list[str]) -> None:
     if rec is not None:
         rec["pending"] = any(not i.get("delivered_at") for i in items)
         _write(root, rec)
+
+
+def undeliver(root: Path, tid: str, ids: list[str]) -> bool:
+    """The agent may never have read these (its start hung): they wait again for the next start, not lost.
+    Returns True when something was put back."""
+    if not ids:
+        return False
+    with locked(root, tid):
+        items = _pending_read(root, tid)
+        for i in items:
+            if i["id"] in ids:
+                i.pop("delivered_at", None)
+        _pending_write(root, tid, items)
+        rec = read(root, tid)
+        if rec is not None:
+            rec["pending"] = True
+            _write(root, rec)
+    return True
 
 
 def mark_delivered(root: Path, tid: str, ids: list[str]) -> None:
@@ -503,6 +639,58 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
         return {"released": True, "pending": waiting}
 
 
+# A Working ticket with no run gets this long for its agent to start. A start writes
+# its claim within seconds: Python start-up plus at most the 10 s run-lock wait, before tmux or the agent tool
+# start at all (they run under the claim). 120 s is far above that worst case.
+ORPHAN_GRACE_SECONDS = 120
+
+
+def running(root: Path, tid: str) -> bool:
+    """An agent run holds the ticket now (alive, or quiet but not known to be gone)."""
+    rec = read(root, tid)
+    return bool(rec) and state(rec) != "dead"
+
+
+def settle(root: Path, tid: str, by: str, say: bool = True, ignore_input: bool = False) -> bool:
+    """A run ended (or never came): a ticket still Working is Ready again, so every surface that shows the
+    ticket status (dashboard, Focus, phone) says what is true. Never touches a ticket a run holds now."""
+    if tickets.is_general(root, tid):
+        return False
+
+    def busy() -> bool:
+        # a run holds it, or a person's answer or message still waits to go in: that work is not over, the
+        # ticket stays Working (the next start delivers it; a one-step run already ran once more for it)
+        if running(root, tid):
+            return True
+        return not ignore_input and any(i.get("via") != "start" for i in undelivered(root, tid))
+
+    with contextlib.suppress(Exception):  # best effort: a run ending must never fail here
+        return tickets.agent_stopped(root, tid, by, busy, say)
+    return False
+
+
+# QUEUED INPUT: only the automation host starts runs for queued input; the run wrapper never starts runs.
+# A run that ends leaves what still waits in the pending file (never deleted) and the ticket Ready.
+
+
+def settle_orphan(root: Path, tid: str, at: float | None = None) -> bool:
+    """`orch run status` (the dashboard asks every few seconds): a ticket Working longer than the grace with
+    no run on it (a phone text or a person moved it, a start that never came) is Ready again. Input that waits
+    stays queued for the next start."""
+    at = time.time() if at is None else at
+    try:
+        t = tickets.load(root, tid)
+        if t.get("status") != "active" or running(root, tid):
+            return False
+        if at - _parse(t["updated_at"]) < ORPHAN_GRACE_SECONDS:
+            return False
+        return settle(root, tid, "orch", ignore_input=True)
+    except Exception as e:  # noqa: BLE001 - never fails `orch run status`, but is never silent either
+        why = f"{e.__class__.__name__}: {e}"
+        print(f"orch: could not check whether {tid} is worked on: {why}", file=sys.stderr)
+        return False
+
+
 # ---------------------------------------------------------------- what the agent is told
 
 
@@ -513,6 +701,23 @@ def _clip(text: str, n: int = 600) -> str:
 
 def _items_text(items: list[dict]) -> str:
     return "\n".join(f"- {i['by']}: {_clip(i['text'], 1500)}" for i in items)
+
+
+def _description_plan(ticket: dict) -> list[str]:
+    """A description longer than a title needs a plan before work starts."""
+    if not ticket.get("checklist") and len((ticket.get("note") or "").strip()) > 200:
+        return ["Read the description, write a plan, split it into tasks with orch check add, then start."]
+    return []
+
+
+def _done_when_plan(ticket: dict) -> list[str]:
+    if not ticket.get("done_when") or ticket.get("checklist"):
+        return []
+    return [
+        "The person described what should be true when it is done: "
+        f"{_clip(ticket['done_when'], 2000)}. Turn this into checks with `orch check add` "
+        "(one check per thing that must be true), then start."
+    ]
 
 
 def fresh_prompt(ticket: dict, items: list[dict]) -> str:
@@ -527,10 +732,12 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]
+    out[1:1] = _done_when_plan(ticket)
     if ticket.get("note"):  # what the person asked for, in their words (not only in `orch ticket show`)
         out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")
     if ticket.get("summary"):
         out.append(f"Where things stand: {_clip(ticket['summary'], 1500)}")
+    out.extend(_description_plan(ticket))
     todo = [c for c in ticket.get("checklist") or [] if not c.get("done")]
     if todo:
         out.append(
@@ -556,13 +763,16 @@ def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str
         if h.get("by") == f"agent:{agent}":
             continue
         news.append(f"- {h.get('by', '?')}: {_clip(h.get('text', ''), 300)}")
-    parts = []
+    parts = _description_plan(ticket)
+    if parts:
+        parts.append(f"The person's description: {ticket['note']}")
     if news:
         parts.append("New on the ticket since last time:\n" + "\n".join(news[-10:]))
     if items:
         parts.append("New input:\n" + _items_text(items))
     if not parts:
         parts.append(f"Continue orch ticket {tid}: {_clip(ticket.get('title', ''), 200)}.")
+    parts.extend(_done_when_plan(ticket))
     return "\n\n".join(parts)[:12000]
 
 
@@ -581,10 +791,17 @@ def plan(
     """Resume or fresh, decided here once: resume only when the adapter can, this ticket has a session for
     this agent on this machine, and --fresh is not set."""
     ticket = tickets.load(root, tid)
+    if ticket.get("general") is True:
+        from orch import chat
+
+        chat.cut_session(root, tid)  # 04:00: a session of an earlier Chat day is not resumed
+        ticket = tickets.load(root, tid)
     name = agent or adapters.chosen(root)
     a = adapters.load(name, root)
     items = undelivered(root, tid) if items is None else items
     sid = None if fresh else tickets.sessions_for(ticket, name, host())
+    if sid and adapters.transcript_exists(name, sid, root) is False:
+        sid = None  # the tool never saved that conversation: resuming it can only fail, start fresh
     # a one-shot run streams its steps into its log (Focus shows them; the log is never empty until the end)
     v = {
         "allow": adapters.allow_patterns(allow),
@@ -612,7 +829,12 @@ def plan(
         new_session = str(uuid.uuid4()) if a["capabilities"]["choose_session_id"] else None
         text = prompt
         if text is None:
-            text = fresh_prompt(ticket, items)
+            if ticket.get("general") is True:
+                from orch import chat
+
+                text = chat.helper_prompt(root, ticket, items, _items_text(items) if items else "")
+            else:
+                text = fresh_prompt(ticket, items)
             if not (a.get("files") or {}).get("instructions_link"):  # this agent does not read the local file
                 from orch import harness
 
@@ -661,6 +883,8 @@ def start(
     a = adapters.load(name, root)
     notes = []
     live_ok = runs_live.available(a)
+    if mode is None and any(i.get("live_retry") for i in undelivered(root, tid)):
+        mode = "oneshot"  # a live session did not take this input (check_submit): one step at a time now
     if mode is None:
         mode = "live" if live_ok else "oneshot"
         if not live_ok and a["capabilities"].get("interactive_tmux") and os.name != "nt":
@@ -767,9 +991,19 @@ def open_log(path: Path):
 
 
 def _run_turn(
-    argv: list[str], root: Path, stdin: str | None, log: Path, env: dict, on_started=None, on_proc=None
+    argv: list[str],
+    root: Path,
+    stdin: str | None,
+    log: Path,
+    env: dict,
+    on_started=None,
+    on_proc=None,
+    watchdog: float | None = None,
+    flags: dict | None = None,
 ):
-    """One agent process. Returns (exit code, the output of this turn)."""
+    """One agent process. Returns (exit code, the output of this turn). watchdog: an agent that wrote no
+    output within that many seconds is hung: its process tree is ended (kill_tree: SIGTERM, then SIGKILL)
+    and flags["hung"] is set."""
     log.parent.mkdir(parents=True, exist_ok=True)
     start = log.stat().st_size if log.exists() else 0
     with open_log(log) as out:
@@ -794,6 +1028,17 @@ def _run_turn(
             with contextlib.suppress(OSError):
                 proc.stdin.write(stdin.encode("utf-8"))
                 proc.stdin.close()
+        if watchdog:
+            end = time.monotonic() + watchdog
+            while proc.poll() is None:
+                if log.stat().st_size > start:
+                    break  # it is alive: no watch once it said anything
+                if time.monotonic() > end:
+                    kill_tree(proc.pid)
+                    if flags is not None:
+                        flags["hung"] = True
+                    break
+                time.sleep(0.2)
         rc = proc.wait()
     with open(log, "rb") as f:
         f.seek(start)
@@ -825,6 +1070,9 @@ def term_release(root: Path, tid: str, run: str, current: dict) -> None:
     """What the SIGTERM handler does before the process ends: stop the agent tree, then leave the claim."""
     global _terminating
     _terminating = True
+    if current.get("stop") is not None:  # a live run's submit watcher: stop it and wait out its check
+        current["stop"].set()
+        current["guard"].acquire(timeout=30)  # longer than the worst check: lock wait 10 s + tmux 5 x 3 s
     proc = current.get("proc")
     if proc is not None and proc.poll() is None:
         kill_tree(proc.pid)
@@ -880,10 +1128,14 @@ def wrap(
         current["proc"] = proc
         set_process_fields(root, tid, run, agent_pid=proc.pid, agent_pid_started=pid_started(proc.pid))
 
+    # only an agent that streams its steps is expected to say something at once; others may work quietly
+    streams = adapters.caps(name, root).get("stream") and mode == "oneshot"
+    watch = start_watchdog_seconds() if streams else None
     turns = 0
     while True:
         ids = list(item_ids or [])
         turn_items = [i for i in _pending_read(root, tid) if i["id"] in ids]
+        flags: dict = {}
         rc, out = _run_turn(
             argv,
             root,
@@ -892,13 +1144,32 @@ def wrap(
             env,
             (lambda ids=ids: mark_delivered(root, tid, ids)) if ids else None,
             on_proc,
+            watch,
+            flags,
         )
-        if resumed and rc != 0 and adapters.session_missing(name, out, root):
+        if flags.get("hung"):  # no sign of life: stop it and start fresh once (its session was never saved)
+            with contextlib.suppress(Exception):
+                said = f"The agent showed no sign of life for {round(watch)} seconds. orch stopped it and "
+                tickets.log(root, tid, said + "started it again fresh.", "orch")
+            p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
+            argv, stdin, new_session, resumed = p["argv"], p["stdin"], p["session"], False
+            flags.clear()
+            rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc, watch, flags)
+        elif resumed and rc != 0 and adapters.session_missing(name, out, root):
             # only "that session does not exist" starts fresh; the input of this turn goes in with it
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
-            rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc)
+            flags.clear()
+            rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc, watch, flags)
+        if flags.get("hung"):  # the last try hung too: no further try; this turn's input waits for the next
+            again = [i["id"] for i in turn_items if i.get("via") != "start"]  # a start prompt is made anew
+            if undeliver(root, tid, again):
+                with contextlib.suppress(Exception):
+                    tickets.log(root, tid, HANG_AGAIN, "orch")
         sid = new_session or adapters.parse_session(name, out, root)
+        unsaved = flags.get("hung") or adapters.transcript_exists(name, sid or "", root) is False
+        if sid and new_session and unsaved:
+            sid = None  # orch chose the id, but the tool never saved that conversation: never resume it
         if not sid and resumed and rc == 0:  # a continued conversation: it was used now ("last worked")
             sid = tickets.sessions_for(tickets.load(root, tid), name, host())
         if sid:
@@ -916,7 +1187,10 @@ def wrap(
                     )
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, f"The agent stopped with an error: {why}", f"agent:{name}")
-        if release(root, tid, run, keep_if_pending=turns <= MAX_DRAIN_TURNS)["released"]:
+        drain = turns <= MAX_DRAIN_TURNS and not flags.get("hung")
+        if release(root, tid, run, keep_if_pending=drain)["released"]:
+            # ended without finishing or asking: not Working any more (anything still waiting stays queued)
+            settle(root, tid, f"agent:{name}", ignore_input=True)
             return 0 if rc == 0 else rc
         with contextlib.suppress(Exception):
             tickets.resume_after_start_wait(root, tid, f"agent:{name}")  # the extra turn is work again
@@ -933,7 +1207,9 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         return 1
     set_process(root, tid, run, os.getpid())
     env = {**_agent_environ(), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
-    current: dict = {}
+    # guard: in-process lock between the submit watcher thread and the SIGTERM handler (the run lock is per
+    # process, so it does not keep them apart); stop: set by either, the watcher writes nothing after it
+    current: dict = {"guard": threading.Lock(), "stop": threading.Event()}
     _on_term(root, tid, run, current)
     if os.name != "nt":
         import signal
@@ -953,10 +1229,24 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         from orch import runs_live
 
         runs_live.watch_start(root, tid, run, name, proc)
+    # pasted input really goes in (Enter again, else a one-step run). Started only after watch_start and
+    # joined before anything else here: the run lock is per process, so this thread must never overlap
+    # another user of it in this wrapper.
+    watcher = None
+    with contextlib.suppress(Exception):
+        from orch import runs_live
+
+        args = (root, tid, run, proc, current["guard"], current["stop"])
+        watcher = threading.Thread(target=runs_live.watch_submit, args=args, daemon=True)
+        watcher.start()
     rc = proc.wait()
+    current["stop"].set()  # nothing more is checked or written by the watcher from here on
+    if watcher is not None:
+        watcher.join(30)  # one check at most: run lock wait 10 s + its tmux calls (3 s each)
     if new_session and rc == 0:
         tickets.record_session(root, tid, name, new_session, host())
     now = read(root, tid)
+    said = None
     if now and now["run"] == run and not now.get("stop_requested"):  # a person sees it ended (not our Stop)
         said = "The live session ended."
         if rc > 0:  # a signal (negative rc) is a plain end, not an error
@@ -964,6 +1254,8 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         with contextlib.suppress(Exception):
             tickets.log(root, tid, said, f"agent:{name}")
     release(root, tid, run)  # input still waiting stays in the pending file for the next start
+    # no agent reads what waits now: Ready, the input stays queued (the automation host may start the next)
+    settle(root, tid, f"agent:{name}", say=said is None, ignore_input=True)
     (run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
     with contextlib.suppress(Exception):
         from orch import runs_live

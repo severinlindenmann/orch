@@ -1,0 +1,77 @@
+{
+  "why": "Member ticket HOME-7 is in review (its own person has not accepted yet): task stays working, the text is only the generic 'Ready for review in Home' - no summary, no files (contract 3.4).",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_homereview000000",
+    "from": "ws_hom0000001",
+    "to": "ws_fin0000001",
+    "type": "text",
+    "created_at": "2026-11-08T10:09:00Z",
+    "ticket": "t_home7a",
+    "key": "HOME-7",
+    "reply_to": "m_delegatehome0000",
+    "body": {
+      "text": "Ready for review in Home",
+      "update": {
+        "kind": "working",
+        "title": "Find the 2025 car tax letter"
+      },
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          }
+        ]
+      },
+      "by": "ws_hom0000001",
+      "via": "helper",
+      "task": {
+        "delegate": "m_delegatehome0000",
+        "ws": "ws_hom0000001",
+        "ticket": "t_home7a",
+        "key": "HOME-7",
+        "title": "Find the 2025 car tax letter",
+        "status": "working"
+      }
+    }
+  },
+  "context": {
+    "host_state": {
+      "ticket": "t_fin14a",
+      "members": [
+        "ws_fin0000001",
+        "ws_hom0000001",
+        "ws_ban0000001"
+      ],
+      "delegates_sent": {
+        "ws_hom0000001": [
+          "m_delegatehome0000"
+        ],
+        "ws_ban0000001": [
+          "m_delegatebank0000"
+        ]
+      },
+      "task_status": {
+        "m_delegatehome0000": "working"
+      },
+      "group_copies": [],
+      "closed": false
+    }
+  }
+}

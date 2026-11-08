@@ -13,7 +13,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import look, mobile
+from . import look, mobile, phone_delivery
+
+
+def _me() -> str:
+    from .actions import actor  # actions imports this module
+
+    return actor()
+
 
 STATUS_ORDER = ["open", "ready", "active", "waiting", "review", "done", "dropped"]
 _NAME = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
@@ -60,10 +67,34 @@ def _json_files(folder: Path):
     return sorted(p for p in folder.glob("*.json") if p.is_file() and not p.is_symlink())
 
 
+# Slow-changing read-only answers (the add-on list is asked 2-3 times per page poll): kept 10 s, and dropped
+# whenever the page makes a change (actions.run_op calls forget_static), so a reply never shows old settings.
+STATIC_TTL = 10.0
+_STATIC_CMDS = (("addon", "list"), ("agents",))
+_STATIC: dict[tuple, tuple[float, object]] = {}
+
+
+def forget_static() -> None:
+    _STATIC.clear()
+
+
 def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float = 5.0):
     """Run `$ORCH_BIN <args>` in the workspace and return its parsed stdout JSON, or None on any failure."""
     if not orch_bin:
         return None
+    if any(tuple(args[: len(c)]) == c for c in _STATIC_CMDS):
+        key = (orch_bin, str(root), tuple(args))
+        hit = _STATIC.get(key)
+        if hit and time.monotonic() - hit[0] < STATIC_TTL:
+            return hit[1]
+        out = _run_orch(orch_bin, args, root, timeout)
+        if out is not None:
+            _STATIC[key] = (time.monotonic(), out)
+        return out
+    return _run_orch(orch_bin, args, root, timeout)
+
+
+def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
     try:
         r = subprocess.run(
             [orch_bin, *args],
@@ -139,9 +170,21 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
             if not isinstance(t.get(k), list):
                 t[k] = []
         _mark_missing_proofs(root, t)
+        mobile.mark_chat_history(t)
         tickets.append(t)
+    phone_delivery.mark(root, tickets)
     add_artifact_marks(tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
+    by_id = {t["id"]: t for t in tickets}
+    for t in tickets:
+        t.update(children=[], parts_done=0, parts_total=0)
+    for t in tickets:
+        parent = t.get("parent")
+        if isinstance(parent, str) and parent in by_id:
+            p = by_id[parent]
+            p["children"].append(t["id"])
+            p["parts_total"] += 1
+            p["parts_done"] += int(t["status"] == "done")
     return tickets, skipped
 
 
@@ -189,9 +232,28 @@ def load_general(root: Path) -> dict | None:
                 if isinstance(t.get("history"), list)
                 else []
             )
-            hist = [h for h in hist if h.get("text") != "Created"]
+            hist = [h for h in hist if mobile.is_chat_entry(h)]  # messages only
             return {"id": t["id"], "history": hist[-200:]}
     return None
+
+
+def load_chat(root: Path, orch_bin: str | None) -> dict | None:
+    """`orch chat status --json`: {helper, ticket, day, messages, activity, days, running}. None = not readable."""
+    d = run_orch(orch_bin, ["chat", "status", "--json"], root)
+    return d if isinstance(d, dict) else None
+
+
+def load_chat_days(root: Path, orch_bin: str | None) -> list | None:
+    d = run_orch(orch_bin, ["chat", "days", "--json"], root)
+    return d if isinstance(d, list) else None
+
+
+def load_chat_day(root: Path, orch_bin: str | None, day: str) -> dict | None:
+    """One day of History, read only (`orch chat day <day> --json`)."""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        return None
+    d = run_orch(orch_bin, ["chat", "day", day, "--json"], root)
+    return d if isinstance(d, dict) else None
 
 
 def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
@@ -238,7 +300,12 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                 {
                     "name": a["name"],
                     "dashboard": d
-                    and {"label": d["label"][:16], "icon": d["icon"], "order": d.get("order", 50)},
+                    and {
+                        "label": d["label"][:24],
+                        "icon": d["icon"],
+                        "order": d.get("order", 50),
+                        "panel": d.get("panel") if d.get("panel") in ("repeats", "links", "phone") else None,
+                    },
                     "ticket_view": tv,
                     "page": pg and {"path": pg["path"], "label": str(pg.get("label") or "")[:40]},
                     "ticket_fields": tf,
@@ -446,7 +513,11 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
 
     try:  # read-only look: the entry `orch share on` writes (a link is never followed)
         f = root / "AGENTS.md"
-        share = f.is_file() and not f.is_symlink() and "<!-- orch:begin share -->" in f.read_text(encoding="utf-8")
+        share = (
+            f.is_file()
+            and not f.is_symlink()
+            and "<!-- orch:begin share -->" in f.read_text(encoding="utf-8")
+        )
     except (OSError, ValueError):
         share = False
     return {
@@ -519,6 +590,26 @@ def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool
     return {i: _RUNS[(str(root), i)][1] for i in ids if _RUNS[(str(root), i)][1]}
 
 
+def add_warmth(root: Path, tickets: list[dict], statuses: dict) -> None:
+    """Count down from live.since, as idle cleanup does; heartbeats do not reset it."""
+    try:
+        from orch.config import live_idle_minutes
+    except ImportError:
+        return
+    limit, now = live_idle_minutes(root) * 60, time.time()
+    for t in tickets:
+        t.pop("warmth", None)
+        status = statuses.get(t["id"]) or {}
+        rec = status.get("claim") or {}
+        if status.get("running") is not True or rec.get("mode") != "live":
+            continue
+        try:
+            since = datetime.fromisoformat(rec["live"]["since"]).timestamp()
+        except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
+            continue
+        t["warmth"] = {"seconds_left": max(0, int(limit - (now - since)))}
+
+
 def load_state(
     root: Path,
     orch_bin: str | None = None,
@@ -527,6 +618,8 @@ def load_state(
     with_settings: bool = False,
 ) -> dict:
     """with_addons=False (snapshots by default): no add-on tabs, no ticket rows, `ext` dropped from tickets."""
+    from .actions import actor
+
     tickets, skipped = load_tickets(root, orch_bin)
     raw = run_orch(orch_bin, ["addon", "list", "--json"], root)
     addons = load_addons(root, orch_bin, raw) if with_addons else []
@@ -559,21 +652,65 @@ def load_state(
     needs = run_orch(orch_bin, ["needs", "--json"], root) if with_addons else None
     state = {
         "workspace": root.name,
+        "who": actor().removeprefix("human:"),
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "me": _me() if with_settings else None,  # who "You" is in a history line (the live page only)
         "tickets": tickets,
         "skipped": skipped,
         "addons": addons,
         "general": load_general(root) if with_addons else None,  # snapshots carry no phone chat
+        # Chat (former General): helper name, today's texts with cards, the strip counts, the History list.
+        "chat": load_chat(root, orch_bin) if with_addons else None,
         "needs": needs if isinstance(needs, list) else [],
         "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
         "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},
+        "groups": mobile.load_groups(root, orch_bin) if with_addons else None,  # group chats; snapshots carry none
         "mobile_mode": mobile.load_mobile(root, orch_bin) if with_settings else None,  # the live page only, never a snapshot
         "look": look.load_look(root, orch_bin, fresh) if with_settings else None,  # the live page only, never a snapshot
         "settings": load_settings(root, orch_bin)
         if with_settings
         else None,  # only the live local server: it holds the folder path
     }
+    add_warmth(root, tickets, state["runs"])
     state["rev"] = hashlib.sha1(
         json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()
     ).hexdigest()[:12]
     return state
+
+
+def publish_connected(root: Path, orch_bin: str | None) -> bool:
+    rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    if not isinstance(rows, list) or not any(
+        isinstance(r, dict) and r.get("name") == "publish" and r.get("active") is True for r in rows
+    ):
+        return False
+    who = run_orch(orch_bin, ["publish", "whoami", "--json"], root)
+    return isinstance(who, dict) and isinstance(who.get("id"), str) and bool(who["id"]) and "error" not in who
+
+
+def load_links(root: Path, orch_bin: str | None) -> dict:
+    if not publish_connected(root, orch_bin):
+        return {"links": []}
+    raw = run_orch(orch_bin, ["publish", "list", "--json"], root)
+    files = raw.get("files", []) if isinstance(raw, dict) else []
+    links = []
+    for f in files if isinstance(files, list) else []:
+        if not isinstance(f, dict) or not isinstance(f.get("id"), str) or not re.fullmatch(r"f_[a-z0-9]+", f["id"]):
+            continue
+        expires = f.get("expires_at")
+        try:
+            when = datetime.fromisoformat(expires)
+            expired = (when if when.tzinfo else when.replace(tzinfo=UTC)) <= datetime.now(UTC)
+        except (ValueError, TypeError, AttributeError):
+            expired = False
+        key, url = f.get("key"), f.get("url")
+        ok = (
+            isinstance(key, str)
+            and re.fullmatch(r"[A-Za-z0-9_-]{16,128}", key)
+            and isinstance(url, str)
+            and re.fullmatch(r"https://[A-Za-z0-9.:\[\]-]+/[!-~]*", url.split("#", 1)[0])
+        )
+        link = url.split("#", 1)[0] + "#k=" + key if ok else None
+        links.append({"id": f["id"], "name": f.get("name"), "size": f.get("size"),
+                      "expires_at": expires, "expired": expired, "link": link, "copy": link is not None})
+    return {"links": links}

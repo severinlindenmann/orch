@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from orch import (
     __version__,
     addons,
     cli_addons,
+    cli_chat,
     cli_clients,
     cli_config,
     cli_look,
@@ -144,6 +146,8 @@ def _show(t: dict, root: Path | None = None) -> str:
         out.append("  ".join(extra))
     if t.get("note"):
         out.append(f"Note: {t['note']}")
+    if t.get("done_when"):
+        out.append(f"Done when: {t['done_when']}")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
         out.append(f"Part of: {p['title']} ({p['id']})" if p else f"Part of: {t['parent']} (parent missing)")
@@ -231,7 +235,7 @@ def _visible(root: Path, t: dict) -> dict:
     return {**t, "ext": {k: v for k, v in ext.items() if k in on}}
 
 
-_PLACEHOLDERS = {"run", "agents", "config", "share"}  # hidden until built
+_PLACEHOLDERS = {"run", "agents", "config", "share", "chat"}  # hidden until built
 ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
@@ -305,6 +309,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--owner", help="who owns it (a name)")
     x.add_argument("--due", metavar="YYYY-MM-DD", help="due day")
     x.add_argument("--note", help="a free note")
+    x.add_argument("--done-when", help="what should be true when it is done")
     x.add_argument(
         "--ext",
         action="append",
@@ -328,6 +333,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--owner", help="who owns it (a name; empty clears)")
     x.add_argument("--due", metavar="YYYY-MM-DD", help="due day (empty clears)")
     x.add_argument("--note", help="a free note (empty clears)")
+    x.add_argument("--done-when", help="what should be true when it is done (empty clears)")
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     x = t.add_parser("set", parents=[common], help="set an add-on field, e.g. marketing.budget 2400")
     x.add_argument("id")
@@ -346,11 +352,14 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--until")
     x.add_argument("--on", metavar="KIND:REF")
     x.add_argument("--clear", action="store_true", help="clear waiting_on")
+    x = t.add_parser("changes", parents=[common], help="send a ticket in Review back with a note (a person)")
+    x.add_argument("id")
+    x.add_argument("text")
     x = t.add_parser("patch", parents=[common])
     x.add_argument("id")
     x.add_argument(
         "data",
-        help='JSON object: title, status, waiting_on, owner, due, note, summary, e.g. \'{"title": "New"}\'',
+        help='JSON object: status, waiting_on, owner, due, note, done_when, e.g. \'{"title": "New"}\'',
     )
     x.add_argument("--if-revision", type=int, required=True, metavar="N")
 
@@ -446,6 +455,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_needs.add_parsers(sub, common)
     cli_config.add_parsers(sub, common)
     cli_look.add_parsers(sub, common)
+    cli_chat.add_parsers(sub, common)
     p.formatter_class = argparse.RawDescriptionHelpFormatter
     notes = []
     if addon_lines:
@@ -490,6 +500,9 @@ def run(args: argparse.Namespace) -> None:
     root = _find_root()
     by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
     cmd, sub = args.cmd, getattr(args, "sub", None)
+    from orch import chat
+
+    chat.guard(root, args)  # the Chat helper's role is enforced here (every command, init too)
 
     if cmd == "init":
         root = Path.cwd()
@@ -523,7 +536,7 @@ def run(args: argparse.Namespace) -> None:
         pass
     elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
         pass
-    elif cli_look.dispatch(args, root):
+    elif cli_chat.dispatch(args, root) or cli_look.dispatch(args, root):
         pass
     elif cmd == "ticket" and sub == "new":
         t = tickets.create(
@@ -532,7 +545,7 @@ def run(args: argparse.Namespace) -> None:
             by(),
             args.parent,
             tickets.parse_ext_args(args.ext, lambda a: addons.active_ext_schema(root, a)),
-            {k: getattr(args, k) for k in ("owner", "due", "note") if getattr(args, k)},
+            {k: getattr(args, k) for k in ("owner", "due", "note", "done_when") if getattr(args, k)},
         )
         part = f" (part of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -586,9 +599,10 @@ def run(args: argparse.Namespace) -> None:
             else f"{t['title']} - {tickets.STATUS_WORDS[t['status']]}",
         )
     elif cmd == "ticket" and sub == "edit":
-        fields = {k: getattr(args, k) for k in ("owner", "due", "note") if getattr(args, k) is not None}
+        keys = ("owner", "due", "note", "done_when")
+        fields = {k: getattr(args, k) for k in keys if getattr(args, k) is not None}
         if args.title is None and not fields:
-            raise Refused("Say what to change: --title, --owner, --due or --note.")
+            raise Refused("Say what to change: --title, --owner, --due, --note or --done-when.")
         t = tickets.edit(root, args.id, args.title, by(), fields, args.if_revision)
         _out(args, t, f"Saved (revision {t['revision']}).")
     elif cmd == "ticket" and sub == "set":
@@ -610,6 +624,9 @@ def run(args: argparse.Namespace) -> None:
         d = tickets.artifacts_dir(root, args.id)
         rel = d.relative_to(root).as_posix()
         _out(args, {"path": rel}, rel)
+    elif cmd == "ticket" and sub == "changes":
+        t = tickets.ask_for_changes(root, args.id, args.text, by())
+        _out(args, t, f"{t['title']} - sent back with your note. An agent picks it up.")
     elif cmd == "ticket" and sub == "patch":
         t = tickets.patch(root, args.id, args.if_revision, args.data, by())
         warn = _child_warning(root, t)
@@ -687,7 +704,8 @@ def run(args: argparse.Namespace) -> None:
         )
         if args.phone:
             cli_clients.send_phone_question(root, t["id"], q, args.preview, args.scope)
-        elif mobile_mode.routes_to_phone(root):  # Mobile mode: every question also goes to the phone
+        elif mobile_mode.question_to_phone(root, t["id"], os.environ.get("ORCH_TICKET")):
+            # Mobile mode, or a ticket from the phone (or one its agent made): also to the phone
             with contextlib.suppress(Refused):  # the question is saved either way
                 cli_clients.send_phone_question(root, t["id"], q)
         _out(
@@ -698,6 +716,8 @@ def run(args: argparse.Namespace) -> None:
         )
     elif cmd == "answer":
         who = by()
+        if tickets.agent_tool():  # an agent counts as an agent whatever --by says (as for finishing)
+            who = "agent:" + str(tickets.agent_tool())
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
         t, q = tickets.answer(root, args.id, args.question, args.answer, who, args.via)

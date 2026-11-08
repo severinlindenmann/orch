@@ -1,0 +1,102 @@
+{
+ "workspace": "pilatus",
+ "who": "me",
+ "look": {
+  "workspaces": [
+   {
+    "name": "pilatus",
+    "here": true,
+    "needs": 7
+   }
+  ]
+ },
+ "addons": [
+  {
+   "name": "automation",
+   "dashboard": {
+    "panel": "repeats",
+    "label": "Automation"
+   }
+  }
+ ],
+ "tickets": [
+  {
+   "id": "t_fdkgur",
+   "key": "PIL-21",
+   "title": "Team lunch 20 Nov [1605]",
+   "parent": null,
+   "children": [],
+   "parts_done": 0,
+   "parts_total": 0,
+   "status": "done",
+   "created_at": "2026-11-08T15:32:46Z",
+   "updated_at": "2026-11-08T15:34:13Z",
+   "questions": [],
+   "checklist": [],
+   "owner": null
+  },
+  {
+   "id": "t_6cbxce",
+   "key": "PIL-2",
+   "title": "Move the Lucerne office to the new floor",
+   "parent": null,
+   "children": [
+    "t_1wis33",
+    "t_fhm1w4"
+   ],
+   "parts_done": 0,
+   "parts_total": 2,
+   "status": "waiting",
+   "created_at": "2026-11-08T07:32:48Z",
+   "updated_at": "2026-11-08T13:53:25Z",
+   "questions": [],
+   "checklist": [],
+   "owner": null
+  },
+  {
+   "id": "t_hbneed",
+   "key": "PIL-3",
+   "title": "Q4 budget review with the board",
+   "parent": null,
+   "children": [],
+   "parts_done": 0,
+   "parts_total": 0,
+   "status": "ready",
+   "created_at": "2026-11-08T07:32:48Z",
+   "updated_at": "2026-11-08T12:56:20Z",
+   "questions": [],
+   "checklist": [],
+   "owner": null
+  },
+  {
+   "id": "t_1wis33",
+   "key": "PIL-11",
+   "title": "Set up the two quiet rooms",
+   "parent": "t_6cbxce",
+   "children": [],
+   "parts_done": 0,
+   "parts_total": 0,
+   "status": "open",
+   "created_at": "2026-11-08T10:44:07Z",
+   "updated_at": "2026-11-08T10:44:07Z",
+   "questions": [],
+   "checklist": [],
+   "owner": null
+  },
+  {
+   "id": "t_fhm1w4",
+   "key": "PIL-10",
+   "title": "Order six new desks for the window row",
+   "parent": "t_6cbxce",
+   "children": [],
+   "parts_done": 0,
+   "parts_total": 0,
+   "status": "open",
+   "created_at": "2026-11-08T10:44:07Z",
+   "updated_at": "2026-11-08T10:44:07Z",
+   "questions": [],
+   "checklist": [],
+   "owner": null
+  }
+ ]
+}

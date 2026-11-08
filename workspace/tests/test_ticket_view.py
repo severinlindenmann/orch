@@ -3,6 +3,7 @@ uploaded as blobs, secrets hidden, sent with result/failure/stopped/question upd
 task changes."""
 
 import json
+import time
 from pathlib import Path
 
 import jsonschema
@@ -370,3 +371,284 @@ def test_phone_chat_hides_settings_notes_and_names_the_phone(proj, new_ticket, m
     assert shown == [("My iPhone", "person", "Make the Q3 chart")]
     assert not any("settings" in h["text"] for h in hist)
     assert not any(PHONE in h["who"] for h in hist)
+
+
+def _review(proj, tid):
+    tickets.set_status(proj, tid, "review", "human:t")
+
+
+def test_a_followed_ticket_that_moves_to_review_pushes_a_result(proj, run, new_ticket, conn):
+    """fb11: the phone hears that the work is finished, not only a quiet task count."""
+    tid = new_ticket("Make the html")
+    run("relay", "send", "phones", "On it", "--ticket", tid, "--update", "ack")
+    run("ticket", "summary", tid, "The page is in the artifacts folder.")
+    st = phone_view.load_state(proj)["tickets"][tid]
+    _review(proj, tid)
+    assert phone_view.sync(proj, now=st["at"] + 100) == [tid]
+    m = conn.sent[-1]
+    assert m["body"]["update"]["kind"] == "result"
+    assert m["body"]["text"] == "Ready for your review: Make the html\nThe page is in the artifacts folder."
+    assert_valid(m["body"]["ticket_view"])
+    n = len(conn.sent)
+    assert phone_view.sync(proj, now=st["at"] + 1000) == [] and len(conn.sent) == n  # once
+
+
+def test_no_second_result_when_the_agent_sent_one(proj, run, new_ticket, conn):
+    tid = new_ticket("Agent says it")
+    run("relay", "send", "phones", "On it", "--ticket", tid, "--update", "ack")
+    _review(proj, tid)
+    run("relay", "send", "phones", "Finished", "--ticket", tid, "--update", "result")
+    n = len(conn.sent)
+    st = phone_view.load_state(proj)["tickets"][tid]
+    phone_view.sync(proj, now=st["at"] + 100)
+    assert [m["body"]["update"]["kind"] for m in conn.sent[n:]] in ([], ["note"])
+
+
+def test_mobile_mode_finished_ticket_pushes_a_result(proj, run, new_ticket, conn, monkeypatch):
+    from orch import mobile_mode
+
+    monkeypatch.setattr(mobile_mode, "routes_to_phone", lambda root: True)
+    tid = new_ticket("Nobody follows me")
+    assert phone_view.sync(proj) == []  # first look: only remembered
+    _review(proj, tid)
+    assert phone_view.sync(proj) == [tid]
+    m = conn.sent[-1]
+    assert m["to"] == "phones" and m["body"]["update"]["kind"] == "result" and m["ticket"] == tid
+    n = len(conn.sent)
+    assert phone_view.sync(proj, now=time.time() + 100) == [] and len(conn.sent) == n
+
+
+def test_without_mobile_mode_an_unfollowed_ticket_sends_nothing(proj, run, new_ticket, conn):
+    tid = new_ticket("Quiet")
+    phone_view.sync(proj)
+    _review(proj, tid)
+    n = len(conn.sent)
+    assert phone_view.sync(proj) == [] and len(conn.sent) == n
+
+
+def test_a_child_of_a_phone_ticket_pushes_its_result_without_mobile_mode(proj, run, new_ticket, conn):
+    parent = new_ticket("From the phone")
+    tickets.ext_set(proj, parent, "relay", json.dumps({"origin": "phone", "from": "ph_x"}), "human:t")
+    child = json.loads(run("ticket", "new", "Part of it", "--parent", parent, "--json")[1])["id"]
+    phone_view.sync(proj)
+    _review(proj, child)
+    assert child in phone_view.sync(proj)
+    assert conn.sent[-1]["body"]["update"]["kind"] == "result" and conn.sent[-1]["ticket"] == child
+
+
+@pytest.mark.parametrize("started", [None, False, True])
+def test_view_started_optional_and_schema_valid(proj, new_ticket, started):
+    ticket = tickets.load(proj, new_ticket())
+    if started is not None:
+        ticket["started"] = started
+    view = phone_view.build(proj, ticket, [])
+    assert_valid(view)
+    assert view.get("started") is True if started is True else "started" not in view
+
+
+def test_view_started_signature_preserves_old_hash():
+    import hashlib
+
+    ticket = {"status": "ready", "checklist": [{"text": "Task", "done": False}]}
+    old = hashlib.sha256(json.dumps([[["Task", False]], "ready", None]).encode()).hexdigest()[:16]
+    assert phone_view._tasks_sig(ticket) == old
+    ticket["started"] = False
+    assert phone_view._tasks_sig(ticket) == old
+    ticket["started"] = True
+    assert phone_view._tasks_sig(ticket) != old
+
+
+def test_light_update_for_a_listed_ticket_on_status_change(proj, run, new_ticket, conn):
+    tid = new_ticket("Made on the dashboard")
+    other = new_ticket("Never listed")
+    phone_view.update_state(
+        proj, lambda st: st.setdefault("synced", {}).setdefault(PHONE, []).append(tid)
+    )  # listed earlier
+    assert phone_view.sync_light(proj, now=1000) == [], "first look: only the baseline"
+    tickets.apply_op(proj, tid, lambda t: t.update(status="waiting", summary="Needs your answer"))
+    tickets.apply_op(proj, other, lambda t: t.update(status="waiting"))
+    assert phone_view.sync_light(proj, now=1001) == [], "debounced"
+    assert phone_view.sync_light(proj, now=1100) == [(PHONE, tid)]
+    m = conn.sent[-1]
+    assert m["ticket"] == tid and m["body"]["update"]["kind"] == "note"
+    tv = m["body"]["ticket_view"]
+    assert tv["light"] is True and tv["status"] == "waiting" and tv["summary"] == "Needs your answer"
+    assert not {"checklist", "history_tail", "attachments", "refs"} & set(tv), (
+        "nothing the phone must keep is sent"
+    )
+    assert_light_valid(tv)
+    assert all(x["ticket"] != other for x in conn.sent), "never listed: no update"
+    n = len(conn.sent)
+    assert phone_view.sync_light(proj, now=1200) == [] and len(conn.sent) == n, "once per change"
+
+
+def assert_light_valid(view):
+    errs = [f"{list(e.path)}: {e.message}" for e in view_validator().iter_errors(view)]
+    assert not errs, errs
+
+
+def _list(proj, tid, ph=PHONE):
+    phone_view.update_state(proj, lambda st: st.setdefault("synced", {}).setdefault(ph, []).append(tid))
+
+
+def _bump(proj, tid, **kw):
+    tickets.apply_op(proj, tid, lambda t: t.update(**kw))
+
+
+def test_light_title_is_redacted(proj, run, new_ticket, conn):
+    tid = new_ticket("Deploy with ghp_abcdefghijklmnopqrstuvwxyz0123")
+    tv = phone_view.light_view(proj, tickets.load(proj, tid))
+    assert "ghp_" not in tv["title"] and phone_view.HIDDEN in tv["title"]
+
+
+def test_light_is_per_phone_and_only_to_phones_that_got_the_full_view(proj, run, new_ticket, conn):
+    other = "ph_other00002"
+    conn.snapshot["workspaces"]["phones"].append(
+        {"id": other, "name": "iPad", "online": True, "last_seen": None}
+    )
+    d = proj / ".agents" / "skills" / "orch-relay" / "workspaces.json"
+    data = json.loads(d.read_text())
+    data["phones"].append({"id": other, "name": "iPad"})
+    d.write_text(json.dumps(data))
+    tid = new_ticket("Listed on one phone")
+    _list(proj, tid)
+    phone_view.sync_light(proj, now=1000)
+    _bump(proj, tid, status="waiting")
+    assert phone_view.sync_light(proj, now=1100) == [(PHONE, tid)]
+    assert all(m["to"] == PHONE for m in conn.sent if m["body"].get("ticket_view", {}).get("light"))
+    _list(proj, tid, other)  # a second phone gets its full view later: its own baseline, no light update yet
+    assert phone_view.sync_light(proj, now=1200) == []
+    _bump(proj, tid, title="Renamed")
+    assert sorted(p for p, _ in phone_view.sync_light(proj, now=1300)) == sorted([PHONE, other])
+
+
+def test_light_cap_refusal_backoff_and_no_rearm_of_good_phones(proj, run, new_ticket, conn, monkeypatch):
+    monkeypatch.setattr(phone_view, "LIGHT_MAX", 2)
+    ids = [new_ticket(f"T{i}") for i in range(4)]
+    for tid in ids:
+        _list(proj, tid)
+    phone_view.sync_light(proj, now=1000)
+    for tid in ids:
+        _bump(proj, tid, status="waiting")
+    assert len(phone_view.sync_light(proj, now=1100)) == 2, "capped per pull"
+    assert len(phone_view.sync_light(proj, now=1200)) == 2, "the rest goes in the next pull"
+    assert phone_view.sync_light(proj, now=1300) == []
+    # a refusing relay: one try, then backoff that grows; the good ones are not sent again
+    post = next(fn for m, rx, fn in conn.routes if rx == "/v1/messages")
+    calls = []
+
+    def refuse(m, q, body):
+        calls.append(1)
+        return 422, {"error": "invalid", "message": "no"}
+
+    conn.routes.insert(0, ("POST", "/v1/messages", refuse))
+    for tid in ids:
+        _bump(proj, tid, title="Again " + tid)
+    assert phone_view.sync_light(proj, now=2000) == [] and len(calls) == 1, "first refusal ends the pass"
+    assert phone_view.sync_light(proj, now=2010) == [] and len(calls) == 1, "backing off"
+    assert phone_view.sync_light(proj, now=2020) == [] and len(calls) == 2
+    assert phone_view.sync_light(proj, now=2040) == [] and len(calls) == 2, "longer wait now"
+    assert phone_view.load_state(proj)["light_phone"][PHONE]["retry"] <= 2020 + 120, "never an hour"
+    conn.routes.remove(("POST", "/v1/messages", refuse))
+    assert len(phone_view.sync_light(proj, now=2200)) == 2  # recovered: sent (capped), nothing twice
+    del post
+
+
+def test_light_state_is_pruned_and_unpaired_phones_are_forgotten(proj, run, new_ticket, conn):
+    gone, kept = new_ticket("Will be deleted"), new_ticket("Stays")
+    _list(proj, gone)
+    _list(proj, kept)
+    _list(proj, kept, "ph_revoked0001")  # not paired
+    phone_view.sync_light(proj, now=1000)
+    light = phone_view.load_state(proj)["light"]
+    assert set(light) == {gone, kept} and set(light[kept]) == {PHONE}
+    tickets.ticket_path(proj, gone).unlink()
+    phone_view.sync_light(proj, now=1100)
+    assert set(phone_view.load_state(proj)["light"]) == {kept}
+    phone_view.update_state(proj, lambda st: st["synced"][PHONE].remove(kept))
+    phone_view.sync_light(proj, now=1200)
+    assert phone_view.load_state(proj)["light"] == {}
+
+
+def _second_phone(proj, conn, ph):
+    entry = {"id": ph, "name": "iPad", "online": True, "last_seen": None}
+    conn.snapshot["workspaces"]["phones"].append(entry)
+    d = proj / ".agents" / "skills" / "orch-relay" / "workspaces.json"
+    data = json.loads(d.read_text())
+    data["phones"].append({"id": ph, "name": "iPad"})
+    d.write_text(json.dumps(data))
+
+
+def test_dashboard_ticket_listed_while_phone_backed_off_still_gets_light_updates(proj, run, new_ticket, conn):
+    """PIL-34 (8 Nov): the relay refused light updates for a while (backoff grew to an hour); a ticket made
+    on the dashboard then reached the phone's list through sync_open, but its status changes never followed.
+    Any message the relay takes for the phone ends that phone's backoff."""
+    phone_view.update_state(proj, lambda st: st.setdefault("light_phone", {}).update(
+        {PHONE: {"fails": 4, "retry": time.time() + 3600}}))  # fmt: skip
+    tid = new_ticket("Plan the spring fair")
+    assert tid in phone_view.sync_open(proj), "the phone lists it (full view)"
+    st = phone_view.load_state(proj)
+    assert tid in st["synced"][PHONE] and PHONE not in st["light_phone"]
+    _bump(proj, tid, status="waiting", started=True)
+    assert phone_view.sync_light(proj, now=time.time() + 10) == [(PHONE, tid)]
+    tv = conn.sent[-1]["body"]["ticket_view"]
+    assert tv["light"] is True and tv["status"] == "waiting" and tv["started"] is True
+
+
+def test_ticket_sent_to_all_phones_is_listed_and_gets_light_updates(proj, run, new_ticket, conn):
+    tid = new_ticket("Asked on the dashboard")
+    phone_view.update_state(proj, lambda st: st.setdefault("synced", {}).setdefault(PHONE, []))
+    code, _, err = run("relay", "send", "phones", "Indoor or outdoor?", "--ticket", tid, "--update", "result")
+    assert code == 0, err
+    assert tid in phone_view.load_state(proj)["synced"][PHONE], "a broadcast lists it on every paired phone"
+    _bump(proj, tid, status="review")
+    assert phone_view.sync_light(proj, now=time.time() + 10) == [(PHONE, tid)]
+
+
+def test_a_refusing_phone_does_not_stop_the_other_phones(proj, run, new_ticket, conn):
+    other = "ph_zother0002"
+    _second_phone(proj, conn, other)
+    tid = new_ticket("Two phones")
+    _list(proj, tid)
+    _list(proj, tid, other)
+    phone_view.sync_light(proj, now=1000)
+
+    def refuse_first(m, q, body):
+        return 422, {"error": "invalid", "message": "no"}
+
+    real = next(fn for m, rx, fn in conn.routes if rx == "/v1/messages")
+
+    def route(m, q, body):
+        return refuse_first(m, q, body) if json.loads(body)["to"] == PHONE else real(m, q, body)
+
+    conn.routes.insert(0, ("POST", "/v1/messages", route))
+    _bump(proj, tid, status="waiting")
+    assert phone_view.sync_light(proj, now=1100) == [(other, tid)]
+    assert PHONE in phone_view.load_state(proj)["light_phone"]
+
+
+def test_full_and_light_views_fall_back_to_the_note(proj, run, new_ticket, conn):
+    tid = new_ticket("Plan the spring fair")
+    _bump(proj, tid, note="Ask me one question: indoor or outdoor.")
+    t = tickets.load(proj, tid)
+    full = phone_view.build(proj, t, [])
+    assert full["summary"] == "Ask me one question: indoor or outdoor."
+    assert_valid(full)
+    assert phone_view.light_view(proj, t)["summary"] == full["summary"]
+    _bump(proj, tid, summary="Indoor plan ready")
+    assert phone_view.build(proj, tickets.load(proj, tid), [])["summary"] == "Indoor plan ready"
+
+
+def test_phone_paired_later_gets_light_updates_for_dashboard_tickets(proj, run, new_ticket, conn):
+    """The supervisor's case: the old phone stays paired, a new phone is paired later; a dashboard ticket's
+    status changes reach BOTH phones, never only the first one."""
+    tid = new_ticket("Plan the spring fair")
+    phone_view.sync_open(proj)  # listed on the first phone
+    new = "ph_newphone002"
+    _second_phone(proj, conn, new)
+    assert tid in phone_view.sync_open(proj), "the new phone pulls its list: the ticket is listed there too"
+    st = phone_view.load_state(proj)
+    assert tid in st["synced"][PHONE] and tid in st["synced"][new]
+    _bump(proj, tid, status="waiting", started=True)
+    got = phone_view.sync_light(proj, now=time.time() + 10)
+    assert sorted(got) == sorted([(PHONE, tid), (new, tid)])

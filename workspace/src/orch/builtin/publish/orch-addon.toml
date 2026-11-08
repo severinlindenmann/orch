@@ -9,6 +9,7 @@ skill = "skills/orch-publish"
 agents_block = "skills/orch-publish/AGENTS-block.md"
 
 [dashboard]
-label = "Shared"
+label = "Shared links"
 icon = "link"
 order = 60
+panel = "links"

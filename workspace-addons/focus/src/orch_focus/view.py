@@ -4,19 +4,21 @@ Live now = runs in a live session; Working now = one-shot runs. Each links to it
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import livedata
+from . import actions, livedata
+from .server import agent_label
 
 
-def _item(rec: dict, ticket: dict | None, attention: bool) -> dict:
+def _item(rec: dict, ticket: dict | None, attention: bool, agents: list[dict] | None = None) -> dict:
     live = rec.get("mode") == "live"
-    agent = str(rec.get("agent") or "agent")
+    label = agent_label(rec, agents)
     key = (ticket or {}).get("key")
     item = {
         "title": (f"{key} · " if isinstance(key, str) and key else "") + livedata.title(ticket),
-        "subtitle": f"{agent[:1].upper() + agent[1:]} · {'live session' if live else 'one run'}",
+        "subtitle": f"{label} · {'live session' if live else 'one run'}",
         "link": f"addon:t/{rec['ticket']}",
     }
     if attention:
@@ -31,10 +33,18 @@ def build(root: Path, orch_bin: str | None = None, now: datetime | None = None) 
     now = now or datetime.now(UTC)
     recs = livedata.records(root)
     titles = livedata.tickets(root, orch_bin) if recs else {}
+    agents = []
+    if recs:
+        try:
+            code, out, _ = actions.orch(root, orch_bin, ["agents", "--json"], timeout=10)
+            data = json.loads(out) if code == 0 else []
+            agents = [a for a in data if isinstance(a, dict)] if isinstance(data, list) else []
+        except (actions.Unavailable, ValueError):
+            pass
     live, work = [], []
     for rec in recs:
         attention = (rec.get("live") or {}).get("state") == "attention"
-        (live if rec.get("mode") == "live" else work).append(_item(rec, titles.get(rec["ticket"]), attention))
+        (live if rec.get("mode") == "live" else work).append(_item(rec, titles.get(rec["ticket"]), attention, agents))
     blocks: list[dict] = [
         {"type": "stat", "label": "Running now", "value": len(recs), "tone": "good" if recs else "neutral"}
     ]

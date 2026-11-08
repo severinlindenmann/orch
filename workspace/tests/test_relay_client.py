@@ -190,7 +190,7 @@ def test_answer_from_phone_updates_ticket(proj, run, new_ticket, rel):
     t = json.loads(run("ticket", "show", tid, "--json")[1])
     qq = t["questions"][0]
     assert (qq["answer"], qq["answered_by"], qq["via"]) == ("TIMESTAMP", "human:severin", "phone")
-    assert t["status"] == "active" and t["waiting_on"] is None
+    assert t["status"] == "ready" and t["waiting_on"] is None  # no agent runs: Ready, not Working
     assert "m_answer0000000001" in json.loads((proj / ".orch/inbox-seen.json").read_text())
 
 
@@ -1641,3 +1641,12 @@ def test_relay_tab_refreshes_when_settings_are_waiting(proj, run, rel):
     (proj / ".orch/inbox/m_refresh000000011.json").write_text(json.dumps(m))
     text = json.dumps(relay_view.view(proj))
     assert "Nobody yet" not in text and "Reports" in text
+
+
+def test_shown_name_is_never_a_raw_workspace_id(monkeypatch):
+    from orch import relay
+
+    monkeypatch.setattr(relay, "_directory", lambda root: [{"id": "ws_a1", "name": "Pilatus"}])
+    assert relay._shown_name(None, "ws_a1", "another workspace") == "Pilatus"
+    assert relay._shown_name(None, "ws_u5k5wqp2a5", "another workspace") == "another workspace"
+    assert relay._shown_name(None, "ws_u5k5wqp2a5", "") == ""

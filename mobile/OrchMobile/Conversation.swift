@@ -27,19 +27,19 @@ enum ConversationID: Hashable, Sendable {
 }
 
 enum TopicStatus: String, Sendable, CaseIterable {
-    case working, waitingOnYou, review, backlog, done, stopped, didntWork
+    case working, waitingOnYou, review, paused, backlog, done, dropped, stopped, didntWork
     /// Short word: group headers and the info summary.
     var label: String {
         switch self {
-        case .working: "Working"; case .waitingOnYou: "Needs you"; case .review: "Ready for review"; case .backlog: "Not started"
-        case .done: "Done"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
+        case .working: "Working"; case .waitingOnYou: "Needs you"; case .review: "Ready for review"; case .paused: "Paused"; case .backlog: "Not started"
+        case .done: "Done"; case .dropped: "Dropped"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
         }
     }
     /// The chip words of the status workflow (PLAN-A section 5).
     var chip: String {
         switch self {
-        case .working: "Claude is working"; case .waitingOnYou: "Needs you"; case .review: "Ready for review"; case .backlog: "Not started"
-        case .done: "Done"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
+        case .working: "Claude is working"; case .waitingOnYou: "Needs you"; case .review: "Ready for review"; case .paused: "Paused"; case .backlog: "Not started"
+        case .done: "Done"; case .dropped: "Dropped"; case .stopped: "Stopped"; case .didntWork: "Didn't work"
         }
     }
     init(_ t: Ticket) {
@@ -47,8 +47,9 @@ enum TopicStatus: String, Sendable, CaseIterable {
         case .needsYou: self = .waitingOnYou
         case .working: self = .working
         case .review: self = .review
+        case .paused: self = .paused
         case .backlog: self = .backlog
-        case .done: self = t.view?.status == "dropped" ? .stopped : t.kind == "failure" ? .didntWork : (t.kind == "stopped" ? .stopped : .done)
+        case .done: self = t.view?.status == "dropped" ? .dropped : t.kind == "failure" ? .didntWork : (t.kind == "stopped" ? .stopped : .done)
         }
     }
 }
@@ -72,6 +73,8 @@ struct ConvItem: Identifiable, Equatable, Sendable {
     /// ISO time; sorts the conversation. Queued items use their creation time.
     let at: String
     let side: Side
+    var by: String? = nil
+    var day: String? = nil
     var kind: Kind = .message
     var text: String = ""
     var attachments: [MessageAttachment] = []
@@ -86,6 +89,8 @@ struct ConvItem: Identifiable, Equatable, Sendable {
     var canPlay: Bool = false
     var replyTo: String? = nil
     var receipt: Receipt? = nil
+    /// With receipt .started: when the workspace last acked or picked up this text (the General "is working…" line times out from here).
+    var workingSince: String? = nil
     /// Phone texts: the client_id (also the id of an outbox item).
     var clientId: String? = nil
     var question: Question? = nil
@@ -177,7 +182,11 @@ extension ReadState {
 enum ConversationBuilder {
     struct Index {
         var ticketOfPhoneText: [String: String] = [:]     // phone text id -> ticket named by an ack
-        var started: Set<String> = []                      // phone text ids with an ack / working reply
+        /// phone text id -> time of its latest ack / working reply ("Working" receipt)
+        var startedAt: [String: String] = [:]
+        /// "<workspace>|<ticket>" -> time of the latest message that says no agent works on it now: a result, failure or
+        /// stopped update, or a snapshot with running false. A "Working" receipt older than that is over (owner 8 Nov, IMG_6624).
+        var endedAt: [String: String] = [:]
     }
 
     private static func isReceipt(_ m: TextMessage) -> Bool {
@@ -187,12 +196,37 @@ enum ConversationBuilder {
 
     static func index(_ d: ConversationInputs) -> Index {
         var ix = Index()
-        for pm in d.messages where !pm.fromPhone && isReceipt(pm.message) {
-            guard let r = pm.message.replyTo else { continue }
-            ix.started.insert(r)
-            if let t = pm.message.ticket, pm.message.body.update?.kind == "ack" { ix.ticketOfPhoneText[r] = t }
+        for pm in d.messages where !pm.fromPhone {
+            let m = pm.message
+            if let t = m.ticket, ends(m) {
+                let k = "\(pm.workspaceId)|\(t)"
+                if m.createdAt > (ix.endedAt[k] ?? "") { ix.endedAt[k] = m.createdAt }
+            }
+            guard isReceipt(m), let r = m.replyTo else { continue }
+            if m.createdAt > (ix.startedAt[r] ?? "") { ix.startedAt[r] = m.createdAt }
+            if let t = m.ticket, m.body.update?.kind == "ack" { ix.ticketOfPhoneText[r] = t }
+        }
+        // a question on the ticket: the work waits for the owner ("Needs you"), so the text is no longer "Working"
+        for q in d.questions {
+            guard let t = q.message.ticket else { continue }
+            let k = "\(q.message.from)|\(t)"
+            if q.message.createdAt > (ix.endedAt[k] ?? "") { ix.endedAt[k] = q.message.createdAt }
         }
         return ix
+    }
+
+    /// A workspace message that says no agent works on its ticket now: a result, failure, stopped or question update, or a
+    /// snapshot without a run or waiting for the owner.
+    static func ends(_ m: TextMessage) -> Bool {
+        if let k = m.body.update?.kind, ["result", "failure", "stopped", "question"].contains(k) { return true }
+        return m.body.ticketView?.running == false || m.body.ticketView?.status == "waiting"
+    }
+
+    /// The "Working" receipt of this phone text: acked or picked up, and nothing on its ticket said the work stopped since.
+    static func isWorking(_ pm: PhoneMessage, _ ix: Index) -> Bool {
+        guard let at = ix.startedAt[pm.id] else { return false }
+        guard let t = pm.message.ticket ?? ix.ticketOfPhoneText[pm.id], let end = ix.endedAt["\(pm.workspaceId)|\(t)"] else { return true }
+        return at > end
     }
 
     private static func pendingKey(_ pm: PhoneMessage) -> String { pm.clientId ?? pm.message.body.clientId ?? pm.id }
@@ -214,20 +248,33 @@ enum ConversationBuilder {
     }
 
     private static func receipt(_ pm: PhoneMessage, _ ix: Index) -> Receipt {
-        if ix.started.contains(pm.id) { return .started }
+        if isWorking(pm, ix) { return .started }
+        if ix.startedAt[pm.id] != nil { return .delivered }   // picked up, and the work on it has ended since
         return pm.deliveredAt != nil ? .delivered : .sent
     }
 
     private static func label(_ kind: String?) -> String? { ChatBuilder.label(forKind: kind) }
 
-    private static func bubble(_ pm: PhoneMessage, _ ix: Index, _ d: ConversationInputs) -> ConvItem {
+    private static func bubble(_ pm: PhoneMessage, _ ix: Index, _ d: ConversationInputs, chat: Bool = false) -> ConvItem {
         let m = pm.message, b = m.body
-        var item = ConvItem(id: pm.id, at: m.createdAt, side: pm.fromPhone ? .me : .them, text: b.text, attachments: b.attachments, voice: b.voice,
+        var item = ConvItem(id: pm.id, at: m.createdAt, side: chat ? ChatDay.side(by: b.by, via: b.via, fromPhone: pm.fromPhone) : (pm.fromPhone ? .me : .them), text: b.text, attachments: b.attachments, voice: b.voice,
                             location: b.location, feedback: b.feedback)
+        if chat {
+            item.by = b.by; item.day = b.day
+            if pm.fromPhone, item.day == nil {
+                item.day = d.messages.filter {
+                    !$0.fromPhone && $0.workspaceId == pm.workspaceId && $0.message.replyTo == pm.id &&
+                        isReceipt($0.message) && $0.message.body.day != nil
+                }.max { $0.message.createdAt < $1.message.createdAt }?.message.body.day
+            }
+        }
         item.label = label(b.update?.kind); item.speak = b.speak; item.replyTo = m.replyTo
         if !pm.fromPhone, b.update?.kind == "result" { item.artifacts = b.ticketView?.attachments ?? [] }
         if !pm.fromPhone { item.canPlay = d.speak == .always || (b.speak != nil && d.speak != .never) }
-        if pm.fromPhone { item.receipt = receipt(pm, ix); item.clientId = pendingKey(pm) }
+        if pm.fromPhone {
+            item.receipt = receipt(pm, ix); item.clientId = pendingKey(pm)
+            if item.receipt == .started { item.workingSince = ix.startedAt[pm.id] }
+        }
         return item
     }
 
@@ -263,7 +310,10 @@ enum ConversationBuilder {
         var listed = Set<String>()
         for pm in d.messages where pm.workspaceId == id.workspace {
             if let c = pm.clientId ?? pm.message.body.clientId { listed.insert(c) }
-            if conversation(of: pm, ix, d) == id { out.append(bubble(pm, ix, d)) }
+            if conversation(of: pm, ix, d) == id {
+                let chat: Bool = if case .general = id { true } else { false }
+                out.append(bubble(pm, ix, d, chat: chat))
+            }
             else if case .topic(_, let t) = id, pm.fromPhone, pm.message.ticket == nil, ix.ticketOfPhoneText[pm.id] == t { out.append(bubble(pm, ix, d)) }   // General text that started this topic
         }
         for o in d.outbox where o.kind == .send && o.workspace == id.workspace && !listed.contains(o.clientId) && outboxConversation(o) == id {
