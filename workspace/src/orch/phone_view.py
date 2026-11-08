@@ -2,8 +2,8 @@
 
 Built from the ticket file: title, status, tasks, the last 30 history lines in plain words, and
 the proof marked for the phone (evidence with role result or check: files are uploaded as relay
-blobs, URLs and PRs become links) plus the ticket's refs. Secrets are cut from every text before
-it leaves. No other file content is ever sent.
+blobs, URLs and PRs become links), artifacts named in questions, options or the summary, and the
+ticket's refs. Secrets are cut from display text before it leaves.
 
 It rides on update texts to phones (result, failure, stopped, question) and, quietly (kind note,
 never pushed), when the tasks of a ticket the phone follows change: `sync` runs on every relay
@@ -135,6 +135,23 @@ def phone_proof(root: Path, ticket: dict) -> list[dict]:
         for ev in c.get("evidence") or []:
             if ev.get("role") in PHONE_ROLES:
                 out.append(ev)
+    return out
+
+
+def named_artifacts(root: Path, ticket: dict) -> list[str]:
+    """Up to 20 artifact names mentioned in questions, options or the summary, in listing order."""
+    texts = [ticket.get("summary") or ""]
+    for question in ticket.get("questions") or []:
+        texts.append(question.get("text") or "")
+        texts.extend(question.get("options") or [])
+    out = []
+    for artifact in tickets.artifacts_list(root, ticket["id"]):
+        name = artifact["name"]
+        pattern = re.compile(r"(?<![\w./-])(?:artifacts/)?" + re.escape(name) + r"(?![\w/-])")
+        if any(pattern.search(text) for text in texts):
+            out.append(name)
+            if len(out) == 20:
+                break
     return out
 
 
@@ -301,7 +318,7 @@ def _url_art(source: str, url: str, kind_hint: str | None = None) -> tuple[str, 
 
 
 def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = True) -> list[dict]:
-    """Proof files (uploaded), proof links and ticket links, newest first, at most 50."""
+    """Proof files, named artifacts (uploaded), proof links and ticket links, newest first, at most 50."""
     tid = ticket["id"]
     at0 = ticket["updated_at"] if _TIME.fullmatch(str(ticket.get("updated_at"))) else tickets.now()
     out: list[dict] = []
@@ -340,6 +357,34 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
             )
         elif ev.get("type") == "commit" and re.fullmatch(r"[0-9a-f]{7,40}", str(ev.get("ref", ""))):
             pass  # a bare commit sha has no address to open: nothing for the phone to show
+    named = named_artifacts(root, ticket)
+    mtimes = {a["name"]: a.get("mtime") for a in tickets.artifacts_list(root, tid)} if named else {}
+    for name in named:
+        aid = artifact_id("file", f".orch/tickets/{tid}/artifacts/{name}")
+        if any(a["id"] == aid for a in out):
+            continue
+        try:
+            data = safefile.read_ticket_file(root, tid, "artifacts", name, tickets.MAX_PROOF_BYTES)
+        except safefile.TooLarge:
+            continue
+        if data is None:
+            continue
+        b = _upload(root, data, state) if upload and state is not None else None
+        if not b:
+            continue
+        at = mtimes.get(name)
+        out.append(
+            {
+                "kind": "image" if Path(name).suffix.lower() in IMAGE_EXT else "file",
+                "title": _clip(name, 200) or "file",
+                "blob_id": b["blob_id"],
+                "name": _clip(Path(name).name, 255) or "file",
+                "size": b["size"],
+                "at": at if _TIME.fullmatch(str(at)) else at0,
+                "id": aid,
+                "rev": hashlib.sha256(data).hexdigest(),
+            }
+        )
     kinds = refs.active_kinds(root) if ticket.get("refs") else []
     for ln in ticket.get("refs") or []:
         if not isinstance(ln, dict) or not (url := safe_url(ln.get("url", ""))):
