@@ -803,50 +803,55 @@ def test_clean_pdfs_are_shared_and_only_a_real_match_says_password(proj, run, re
             cg.check_file(bad, "x.pdf")
         assert "password" not in str(e.value).replace("for passwords", "")
         assert cg.check_file(bad, "x.pdf", allow_unchecked=True) == "application/pdf"
-    # the e2e case: a person's click on a file in a hidden folder outside the workspace
+    # the e2e case: a clean PDF the person picked from a hidden folder outside the workspace is a hard
+    # no with the folder line (never "password", never "share anyway"); the same PDF in a plain folder shares
     away = tmp_path.parent / f"{tmp_path.name}_out"  # proj is tmp_path: this is outside the workspace
     out = away / ".orch-test-e2e-ab12"
     out.mkdir(parents=True)
-    for n, data in (
-        ("lunch-menu.pdf", b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\n%%EOF\n"),
-        ("m.pdf", text),
-    ):
+    (away / "plain").mkdir()
+    menu = b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\n%%EOF\n"
+    for n, data in (("lunch-menu.pdf", menu), ("m.pdf", text)):
         (out / n).write_bytes(data)
+        for extra in ([], ["--unchecked-ok"]):
+            blobs = len(rel.blobs)
+            code, _, err = run("relay", "group", "share", host, str(out / n), "--click", *extra)
+            assert code != 0 and "hidden or secrets folders" in err and "password" not in err, err
+            assert len(rel.blobs) == blobs
+        (away / "plain" / n).write_bytes(data)
         rel.sent.clear()
-        blobs = len(rel.blobs)
-        code, _, err = run("relay", "group", "share", host, str(out / n), "--click")
-        assert code != 0 and "hidden folder" in err and "password" not in err and len(rel.blobs) == blobs
-        code, _, err = run("relay", "group", "share", host, str(out / n), "--click", "--unchecked-ok")
+        code, _, err = run("relay", "group", "share", host, str(away / "plain" / n), "--click")
         assert code == 0, err
         assert sent(rel, type="file")
-    # outside the workspace, a real secret is still refused with the password line, even with the OK
-    (out / "n.txt").write_text("password=hunter2\n")
-    code, _, err = run("relay", "group", "share", host, str(out / "n.txt"), "--click", "--unchecked-ok")
+    # outside the workspace, a real secret is refused with the password line, even with the OK
+    (away / "plain" / "n.txt").write_text("password=hunter2\n")
+    code, _, err = run(
+        "relay", "group", "share", host, str(away / "plain" / "n.txt"), "--click", "--unchecked-ok"
+    )
     assert code != 0 and "looks like it holds a password" in err
-    # an agent never shares from a hidden folder, and never with a flag
-    code, _, err = run("relay", "group", "share", host, str(out / "m.pdf"), "--unchecked-ok")
-    assert code != 0 and "password" not in err
-    # a secrets folder or a key name outside the workspace stays a hard no
+    # a secrets folder, a credential folder, or a link into a hidden folder: the same hard no
     (away / "secrets").mkdir()
     (away / "secrets" / "a.txt").write_text("words")
-    code, _, err = run(
-        "relay", "group", "share", host, str(away / "secrets" / "a.txt"), "--click", "--unchecked-ok"
-    )
-    assert code != 0 and "hidden or secrets folders" in err
-    # credential folders stay a hard no outside the workspace, directly or through a link in the workspace
     ssh = away / ".ssh"
     ssh.mkdir()
     (ssh / "m.pdf").write_bytes(text)
     (proj / "via-ssh.pdf").symlink_to(ssh / "m.pdf")
-    (proj / "via-hidden.pdf").symlink_to(out / "m.pdf")  # a link to an ordinary hidden folder: no downgrade
-    (away / "plain").mkdir()
+    (proj / "via-hidden.pdf").symlink_to(out / "m.pdf")
     (away / "plain" / "to-hidden.pdf").symlink_to(out / "m.pdf")  # outside, but through a link
-    for f in (ssh / "m.pdf", proj / "via-ssh.pdf", proj / "via-hidden.pdf", away / "plain" / "to-hidden.pdf"):
+    for f in (
+        away / "secrets" / "a.txt",
+        ssh / "m.pdf",
+        proj / "via-ssh.pdf",
+        proj / "via-hidden.pdf",
+        away / "plain" / "to-hidden.pdf",
+    ):
         blobs = len(rel.blobs)
         code, _, err = run("relay", "group", "share", host, str(f), "--click", "--unchecked-ok")
-        assert code != 0 and "hidden or secrets folders" in err and len(rel.blobs) == blobs, (f, err)
-    (out / "id_rsa").write_text("x")
-    code, _, err = run("relay", "group", "share", host, str(out / "id_rsa"), "--click", "--unchecked-ok")
+        assert code != 0 and "hidden or secrets folders" in err and "password" not in err, (f, err)
+        assert len(rel.blobs) == blobs
+    (away / "plain" / "id_rsa").write_text("x")
+    code, _, err = run(
+        "relay", "group", "share", host, str(away / "plain" / "id_rsa"), "--click", "--unchecked-ok"
+    )
     assert code != 0 and "looks like it holds a password" in err
 
 

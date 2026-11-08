@@ -102,8 +102,6 @@ UNCHECKED_IMAGE = "We couldn't check this image's hidden data, so it was not sha
 UNCHECKED_ASK = "We couldn't check this file for passwords. Share it anyway?"
 UNCHECKED_ASK_IMAGE = "We couldn't check this image's hidden data. Share it anyway?"
 HIDDEN_FOLDER = "Files in hidden or secrets folders are not shared"
-UNCHECKED_HIDDEN = "We couldn't check this file because it is in a hidden folder, so it was not shared"
-UNCHECKED_ASK_HIDDEN = "We couldn't check this file because it is in a hidden folder. Share it anyway?"
 
 
 class Unchecked(Refused):
@@ -500,25 +498,19 @@ def _drop_artifacts(parts: tuple[str, ...] | list[str]) -> tuple[str, ...] | lis
     return parts
 
 
-def _path_rule(
-    parts: tuple[str, ...] | list[str], artifacts_ok: bool = False, outside: bool = False
-) -> str | None:
-    """Which path rule a file hits: "name" (.env*, key and token files: a secret by its name),
-    "folder" (a `secrets` folder, or a hidden folder inside the workspace: agent config, keys, .orch,
-    .git) or "hidden" (a hidden folder outside the workspace: orch can't tell what it is, a person may
-    share it anyway). None = ok."""
+def _path_rule(parts: tuple[str, ...] | list[str], artifacts_ok: bool = False) -> str | None:
+    """Which path rule a file hits: "name" (.env*, key and token files: a secret by its name) or "folder"
+    (a `secrets` folder or any hidden folder: agent config, keys, .orch, .git, also outside the workspace).
+    None = ok. Only "name" may say "password" (_refuse_path)."""
     if artifacts_ok:
         parts = _drop_artifacts(parts)
     if not parts or _SECRET_PATH.search(parts[-1]):
         return "name"
-    rule = None
     for x in list(parts[:-1]):
         n = x.rstrip(". ").lower()  # Secrets, SECRETS and "secrets." are the same folder on macOS and Windows
-        if n == "secrets" or (x.startswith(".") and x not in (".", "..") and not outside):
+        if n == "secrets" or (x.startswith(".") and x not in (".", "..")):
             return "folder"
-        if x.startswith(".") and x not in (".", ".."):
-            rule = "hidden"
-    return rule
+    return None
 
 
 def _secret_parts(parts: tuple[str, ...] | list[str], artifacts_ok: bool = False) -> bool:
@@ -527,59 +519,33 @@ def _secret_parts(parts: tuple[str, ...] | list[str], artifacts_ok: bool = False
     return _path_rule(parts, artifacts_ok) is not None
 
 
-_RULE_RANK = {None: 0, "hidden": 1, "folder": 2, "name": 3}
-# well-known credential folders: a hard no even outside the workspace (never "could not check")
-_CRED_DIRS = {
-    ".ssh",
-    ".aws",
-    ".gnupg",
-    ".kube",
-    ".docker",
-    ".config",
-    ".azure",
-    ".password-store",
-    ".gcloud",
-    ".orch-tool",
-    "keychains",
-    ".netrc.d",
-}
+_RULE_RANK = {None: 0, "folder": 1, "name": 2}
 
 
 def path_rule(path: Path, root: Path | None = None, artifacts_ok: bool = False) -> str | None:
     """_path_rule on the path as given and on the real path (symlinks resolved), the strictest wins.
-    Folders count below `root` when the file is inside it. "hidden" (could not check, a person may share
-    anyway) only for a file named OUTSIDE the workspace with no link anywhere on its path (as given ==
-    real path) and no credential folder (_CRED_DIRS) on it; a link that leads into a hidden folder, or a
-    credential folder, is "folder" (a hard no)."""
-    given = Path(os.path.abspath(path))
-    real = given.resolve()
-    inside_given = False
+    Folders count below `root` when the file is inside it; outside it the full path counts (a hidden
+    folder anywhere, e.g. ~/.ssh, or reached through a link, is a hard no)."""
     worst = None
-    for p in {given, real}:
-        parts, outside = p.parts, root is not None
+    for p in {Path(os.path.abspath(path)), Path(path).resolve()}:
+        parts, inside = p.parts, False
         if root is not None:
             for base in (Path(root).resolve(), Path(os.path.abspath(root))):
                 try:
-                    parts, outside = p.relative_to(base).parts, False
+                    parts, inside = p.relative_to(base).parts, True
                     break
                 except ValueError:
                     continue
-        if p == given and not outside:
-            inside_given = True
-        r = _path_rule(parts, artifacts_ok and not outside, outside)
-        if r == "hidden" and any(x.lower() in _CRED_DIRS for x in parts[:-1]):
-            r = "folder"
+        r = _path_rule(parts, artifacts_ok and inside)
         if _RULE_RANK[r] > _RULE_RANK[worst]:
             worst = r
-    if worst == "hidden" and (inside_given or given != real):
-        worst = "folder"  # reached through a link (or named inside the workspace): never downgraded
     return worst
 
 
 def secret_path(path: Path, root: Path | None = None, artifacts_ok: bool = False) -> bool:
-    """True for a file that must never leave (see _secret_parts). Checked on the path as given and on the real
-    path (symlinks resolved); folders count below `root` when the file is inside it."""
-    return path_rule(path, root, artifacts_ok) in ("name", "folder")
+    """True for a file that must never leave (see _path_rule), checked on the path as given and on the
+    real path (symlinks resolved); folders count below `root` when the file is inside it."""
+    return path_rule(path, root, artifacts_ok) is not None
 
 
 def _refuse_path(rule: str | None) -> None:
@@ -641,9 +607,7 @@ def read_shared(path: Path, root: Path, confined: bool) -> bytes:
         return data
     real = path.resolve()
     _artifact_contained(path, real, root)
-    rule = path_rule(path, root, artifacts_ok=True)  # a person's click: ticket artifacts are open
-    if rule != "hidden":  # a hidden folder outside the workspace: asked in _checked (place_unchecked)
-        _refuse_path(rule)
+    _refuse_path(path_rule(path, root, artifacts_ok=True))  # a person's click: ticket artifacts are open
     try:
         fd = os.open(real, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     except OSError:
@@ -750,14 +714,9 @@ def check_file(data: bytes, name: str, allow_unchecked: bool = False, host_side:
     return mime
 
 
-def _checked(data: bytes, name: str, by_click: bool, confirm, place_unchecked: bool = False) -> str:
+def _checked(data: bytes, name: str, by_click: bool, confirm) -> str:
     """check_file; when the content can't be read (Unchecked) and a person clicked, ask them inside the human
-    confirmation (`confirm(question) -> bool`) and only then look the other way. Never for an agent.
-    `place_unchecked`: the file sits in a hidden folder outside the workspace (path_rule "hidden"); the same
-    question first, then the content is still checked."""
-    if place_unchecked:
-        if not (by_click and confirm is not None and confirm(UNCHECKED_ASK_HIDDEN)):
-            raise Unchecked(UNCHECKED_HIDDEN)
+    confirmation (`confirm(question) -> bool`) and only then look the other way. Never for an agent."""
     try:
         return check_file(data, name)
     except Unchecked as e:
@@ -1541,8 +1500,7 @@ def share_file(
     data = read_shared(path, root, confined=not by_click)
     if not by_click and (sniff(data, path.name) or "").startswith("image/"):
         raise Refused("A person has to click to share a picture.")
-    hidden = by_click and path_rule(path, root, artifacts_ok=True) == "hidden"
-    mime = _checked(data, path.name, by_click, confirm, hidden)
+    mime = _checked(data, path.name, by_click, confirm)
     if by_click:
         tickets.require_human("Share this file with the group?", "sharing a file")
     gid = ensure_group(root, tid, by)
@@ -2698,7 +2656,7 @@ def share_member(
     tickets.require_human("Share this file with the group?", "sharing a file")
     path = Path(path)
     data = read_shared(path, root, confined=False)  # the person's click chose it
-    mime = _checked(data, path.name, True, confirm, path_rule(path, root, artifacts_ok=True) == "hidden")
+    mime = _checked(data, path.name, True, confirm)
     with _state(root) as st:
         j = st["joined"].get(_jkey(host, gid))
         if j is None or j["left"] or j["closed"]:
