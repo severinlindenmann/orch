@@ -1041,3 +1041,42 @@ def test_member_file_needs_a_click(proj, run, rel, member):
     assert run("relay", "group", "send-file", FIN, "grp_t_fin14a", str(f), "--click")[0] == 0
     fm = sent(rel, type="file")[0]
     assert fm["to"] == FIN and fm["body"]["share"]["mime"] == "text/plain" and contract_errors(fm) == []
+
+
+def test_group_answer_without_group_body_is_ignored_and_never_a_person(proj, run, rel, host):
+    tickets.ask(proj, host, "Where is the letter?", [], None, "agent:t")
+    run("relay", "group", "ask", host, "Home", "q1")
+    qm = sent(rel, type="question")[0]
+    base = {
+        "schema": "orch.msg/1",
+        "from": HOME,
+        "to": WS,
+        "type": "answer",
+        "created_at": "2026-11-08T10:06:00Z",
+        "reply_to": qm["id"],
+        "ticket": host,
+    }
+    bare = {
+        **base,
+        "id": mid("nog"),
+        "body": {"question_id": "q1", "answer": "x", "answered_by": "human:owner"},
+    }
+    assert "ignored" in inbox(run, rel, bare)[0]["note"]
+    assert tickets.load(proj, host)["questions"][0]["answer"] is None
+    ok = {
+        **base,
+        "id": mid("withg"),
+        "body": {
+            "question_id": "q1",
+            "answer": "y",
+            "answered_by": "agent:Someone Else",
+            "group": qm["body"]["group"],
+            "by": HOME,
+            "via": "helper",
+        },
+    }
+    inbox(run, rel, ok)
+    q = tickets.load(proj, host)["questions"][0]
+    assert (
+        q["answer"] == "y" and q["answered_by"] == f"agent:{HOME}"
+    )  # from the asked record, not the message

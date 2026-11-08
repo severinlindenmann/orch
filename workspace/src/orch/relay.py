@@ -782,6 +782,9 @@ def _answer_asked(root: Path, msg: dict) -> tuple[dict | None, str]:
     if asked.get("group"):  # a question we asked a group member: only a current member of an open group
         from orch import chat_groups
 
+        if not msg_group(msg):
+            return None, "ignored: an answer to a group question carries body.group"
+
         if why := chat_groups.answer_allowed(root, asked, frm):
             return None, why
     return asked, ""
@@ -791,7 +794,7 @@ def msg_group(msg: dict) -> bool:
     return isinstance(msg.get("body"), dict) and isinstance(msg["body"].get("group"), dict)
 
 
-def _answer_by(msg: dict) -> tuple[str, str]:
+def _answer_by(msg: dict, asked: dict | None = None) -> tuple[str, str]:
     frm, b = str(msg.get("from", "")), msg.get("body", {})
     by = b.get("answered_by")
     if isinstance(by, str):  # untrusted: it is pasted to the agent as "From <by>: ..."
@@ -801,8 +804,8 @@ def _answer_by(msg: dict) -> tuple[str, str]:
         "human:" if frm.startswith("ph_") else "agent:" if frm.startswith("sub_") else ("human:", "agent:")
     )
     if not (isinstance(by, str) and by.startswith(ok_prefix)) or (
-        frm.startswith("ws_") and isinstance(by, str) and by.startswith("human:") and msg_group(msg)
-    ):  # a group member is never a person here (chat-groups.md G4/G10)
+        asked is not None and asked.get("group") and not frm.startswith("ph_")
+    ):  # we asked a group member: a peer is never a person here, whatever the answer says (G4/G10)
         by = f"human:{frm}" if frm.startswith("ph_") else f"agent:{frm}"
     via = "phone" if frm.startswith("ph_") else "subscriber" if frm.startswith("sub_") else "relay"
     return by, via
@@ -813,7 +816,7 @@ def _applied_ticket(root: Path, msg: dict) -> str | None:
     asked, _ = _answer_asked(root, msg)
     if not asked:
         return None
-    by, via = _answer_by(msg)
+    by, via = _answer_by(msg, asked)
     try:
         q = next(
             x for x in tickets.load(root, asked["ticket"])["questions"] if x["id"] == asked["question_id"]
@@ -837,7 +840,7 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     asked, why = _answer_asked(root, msg)
     if not asked:
         return why, None
-    by, via = _answer_by(msg)
+    by, via = _answer_by(msg, asked)
     try:
         t, q = tickets.answer(
             root,
