@@ -54,6 +54,13 @@
   },
   "context": {
     "open_groups_of_host": 3,
-    "created_last_hour": 5
+    "now_s": 10000,
+    "creations_recv_s": [
+      6500,
+      7000,
+      8000,
+      9000,
+      9900
+    ]
   }
 }
