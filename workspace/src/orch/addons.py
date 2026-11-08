@@ -647,7 +647,8 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
             raise _bad("[dashboard] has label, icon, order and panel")
         if not _text_ok(d.get("label"), 24):
             raise _bad("dashboard label is at most 24 characters")
-        if d.get("panel") not in (None, "repeats", "links", "phone"):  # extra native cards the dashboard knows how to draw
+        # `panel`: an extra native card the dashboard knows how to draw (a fixed set)
+        if d.get("panel") not in (None, "repeats", "links", "phone"):
             raise _bad("dashboard panel is repeats, links or phone")
         if d.get("icon") not in ICONS:
             raise _bad("dashboard icon is not in the fixed icon set")
