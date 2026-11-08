@@ -10,7 +10,7 @@ def note(result: dict | None, running: bool, live: bool, asking: bool = False) -
     if result.get("delivered"):
         return "Sent."
     if asking:
-        return "Answer the question — Claude continues right after."
+        return "Answer the question — the agent continues right after."
     if running:
         return "Goes in after this step."
     return "Saved for the next run."
