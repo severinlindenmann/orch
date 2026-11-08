@@ -72,6 +72,9 @@ elif args[:2] == ["run", "start"]:
     (root / log).parent.mkdir(parents=True, exist_ok=True)
     (root / log).write_text("x")
     print(json.dumps({{"run": "r_1", "agent": "fake", "resumed": False, "log": log}}))
+elif args[:2] == ["chat", "status"]:
+    cf = root / "chat-ticket"
+    print(json.dumps({{"ticket": cf.read_text().strip()}} if cf.exists() else {{"ticket": None}}))
 elif args[:2] == ["run", "status"]:
     d = {{"ticket": args[2], "running": not (root / ("ended-" + args[2])).exists()}}
     pq = root / ("pending-" + args[2])

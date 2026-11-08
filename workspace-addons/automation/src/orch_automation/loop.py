@@ -194,7 +194,7 @@ class Scheduler:
         a ticket switched off here (paused) is left alone, and a ticket started this pass is skipped."""
         started: list[str] = []
         skip = list(skip or [])
-        for t in read_tickets(self.root):
+        for t in [*read_tickets(self.root), *self.chat_stub()]:
             tid = t["id"]
             self._pending_too_long(tid, now)
             if tid in skip or t.get("status") != "ready" or not self.may_start(t):
@@ -233,6 +233,16 @@ class Scheduler:
                                             f"{QUEUED_TRIES} tries. It stays queued; start the agent by hand.")
                 self.fail(tid, f"the agent could not be started for the waiting input ({QUEUED_TRIES} tries)")
         return started
+
+    def chat_stub(self) -> list[dict]:
+        """The workspace's Chat: its hidden General ticket is in no ticket list, but a text a person wrote there
+        (phone or dashboard) starts the one persistent helper exactly like queued input on a Ready ticket:
+        same rules (human-authored only, once per item, same gates). Core says which ticket it is."""
+        st = orchcli.call(self.root, "chat", "status", by=False)
+        gid = st.get("ticket") if isinstance(st, dict) else None
+        if not isinstance(gid, str) or not orchcli.ID_RE.match(gid):
+            return []
+        return [{"id": gid, "status": "ready", "ext": {}, "chat": True}]
 
     def _pending_too_long(self, tid: str, now: datetime) -> None:
         """Input a busy run should have read but has not after QUEUED_PENDING_SECONDS: said once on the ticket."""

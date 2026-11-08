@@ -2,7 +2,6 @@
 """Chat (former General), workspace side (contracts/chat-groups.md section 1): by/via/day on Chat texts,
 the 04:00 day key, one file per day (History), the helper's daily fresh session, permissions, cards, strip."""
 
-import datetime as dt
 import json
 import os
 from pathlib import Path
@@ -13,7 +12,7 @@ import test_phone_v3 as pv3
 import test_run_wrap
 from fakes import WS
 
-from orch import chat, relay, runs, runs_live, tickets
+from orch import chat, runs, runs_live, tickets
 from orch.errors import Refused
 
 conn = pv3.conn  # a relay-connected folder with one paired phone
@@ -41,7 +40,7 @@ def _general(proj, conn, run, text="hi"):
 
 
 def test_day_key_cuts_at_four_local_wall_clock(proj, monkeypatch):
-    zurich = "[workspace]\ntz = \"Europe/Zurich\"\n"
+    zurich = '[workspace]\ntz = "Europe/Zurich"\n'
     (proj / ".orch").mkdir(exist_ok=True)
     (proj / ".orch" / "config.toml").write_text(zurich)
     assert chat.day_key(proj, "2026-11-08T02:59:00Z") == "2026-11-07"  # 03:59 local (CET): still yesterday
@@ -57,7 +56,12 @@ def test_day_key_cuts_at_four_local_wall_clock(proj, monkeypatch):
 
 def test_helper_text_has_by_via_day_and_matches_the_vector(proj, run, conn):
     gid = _general(proj, conn, run)
-    assert run("relay", "send", pv3.PHONE, "The letter is in Documents.", "--ticket", gid, "--reply-to", pv3.GEN)[0] == 0
+    assert (
+        run(
+            "relay", "send", pv3.PHONE, "The letter is in Documents.", "--ticket", gid, "--reply-to", pv3.GEN
+        )[0]
+        == 0
+    )
     sent = conn.sent[-1]
     b = sent["body"]
     assert b["general"] is True and b["by"] == WS and b["via"] == "dashboard"  # a person at the CLI, no agent
@@ -112,7 +116,8 @@ def test_own_dashboard_text_shows_in_chat_and_queues_human_input(proj, run, conn
 
 
 def test_say_without_a_relay_stays_local(proj, run):
-    code, out, _ = run("chat", "say", "Hallo", "--json", "--by", "human:marco")
+    # exactly the argv the dashboard builds: flags first, the text after "--"
+    code, out, _ = run("chat", "say", "--by", "human:marco", "--json", "--", "Hallo")
     assert code == 0 and json.loads(out)["sent"] is False
     assert chat.read_day(proj, chat.day_key(proj))["messages"][-1]["text"] == "Hallo"
 
@@ -150,8 +155,24 @@ def test_cards_from_refs_and_keys_in_the_text(proj, run, conn, new_ticket):
     gid = _general(proj, conn, run)
     (proj / "report.md").write_text("x")
     (proj / ".env").write_text("SECRET=1")
-    run("relay", "send", pv3.PHONE, f"Made {key} for it.", "--ticket", gid, "--ref", "reference:https://example.com/a",
-        "--ref", "file:report.md", "--ref", "file:.env", "--ref", "file:../outside", "--ref", "reference:javascript:alert(1)")
+    run(
+        "relay",
+        "send",
+        pv3.PHONE,
+        f"Made {key} for it.",
+        "--ticket",
+        gid,
+        "--ref",
+        "reference:https://example.com/a",
+        "--ref",
+        "file:report.md",
+        "--ref",
+        "file:.env",
+        "--ref",
+        "file:../outside",
+        "--ref",
+        "reference:javascript:alert(1)",
+    )
     refs = chat.read_day(proj, chat.day_key(proj))["messages"][-1]["refs"]
     kinds = sorted((r["kind"], r.get("key") or r.get("url") or r.get("path")) for r in refs)
     assert kinds == [("file", "report.md"), ("reference", "https://example.com/a"), ("ticket", key)]
@@ -201,7 +222,10 @@ def test_session_is_resumed_the_same_day_and_fresh_the_next(proj, run, gen, one_
     today = chat.day_key(proj)
     tickets.record_session(proj, gid, "fake", "sess-1", runs.host())
     tickets.apply_op(proj, gid, lambda t: t.setdefault("ext", {}).__setitem__("chat", {"session_day": today}))
-    assert runs.plan(proj, gid)["session"] in ("sess-1", None) and tickets.sessions_for(tickets.load(proj, gid), "fake", runs.host()) == "sess-1"
+    assert (
+        runs.plan(proj, gid)["session"] in ("sess-1", None)
+        and tickets.sessions_for(tickets.load(proj, gid), "fake", runs.host()) == "sess-1"
+    )
     # a session of an earlier Chat day: cut, the next start is empty
     tickets.apply_op(proj, gid, lambda t: t["ext"].__setitem__("chat", {"session_day": "2020-01-01"}))
     p = runs.plan(proj, gid)

@@ -40,9 +40,13 @@ def dispatch(args, root: Path) -> bool:
         _out(args, d, "\n".join(f"{m['by']}: {m['text']}" for m in d["messages"]) or "Nothing on that day.")
     elif args.sub == "say":
         if tickets.agent_tool():
-            raise Refused("Only a person writes as themselves in Chat. Use: orch relay send ... --ticket <chat>.")
+            raise Refused(
+                "Only a person writes as themselves in Chat. Use: orch relay send ... --ticket <chat>."
+            )
         r = chat.say(root, args.text, getattr(args, "by", None))
-        _out(args, r, "Sent." if r["sent"] else "Saved. It reaches your phone once the workspace is connected.")
+        _out(
+            args, r, "Sent." if r["sent"] else "Saved. It reaches your phone once the workspace is connected."
+        )
     else:
         return False
     return True

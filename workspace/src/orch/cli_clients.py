@@ -142,7 +142,10 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--speak", action="store_true", help="a phone can read this out loud (long answers)")
     x.add_argument("--summary", help="what to read out instead of the whole text (with --speak)")
     x.add_argument(
-        "--ref", action="append", default=[], metavar="KIND:VALUE",
+        "--ref",
+        action="append",
+        default=[],
+        metavar="KIND:VALUE",
         help="a card in Chat: ticket:<KEY>, reference:<url> or file:<path> (repeat)",
     )
     x = rel.add_parser(

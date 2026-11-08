@@ -610,7 +610,7 @@ def send_text(
     stopped and question updates to a phone. A snapshot the relay refuses never blocks the text:
     it goes again without one. general (or a General ticket): the text goes to the General conversation
     (body.general, no ticket, only the ack and working updates). speak: body.speak.
-    Chat texts carry body.by / via / day (contracts/chat-groups.md section 1): by = this workspace (its helper)
+    Chat texts carry body.by / via / day (chat-groups.md section 1): by = this workspace (its helper)
     unless sender is "you" (the person, from the dashboard), via = helper for an agent, else dashboard.
     refs: cards for the History (local only, never on the wire)."""
     from orch import chat, phone_view
@@ -1286,7 +1286,8 @@ def _continue(
     if general:
         text += (
             f'\n(Phone message {mid}. To make a ticket of it: orch relay topic --from {mid} "<title>". '
-            f'To answer in Chat: orch relay send {frm_of(root, mid, who)} "<answer>" --ticket {tid} --reply-to {mid}. '
+            f'To answer in Chat: orch relay send {frm_of(root, mid, who)} "<answer>" '
+            f"--ticket {tid} --reply-to {mid}. "
             "You are this workspace's helper: you may make tickets, notes and answers, never sign, approve, "
             "close or delete anything.)"
         )

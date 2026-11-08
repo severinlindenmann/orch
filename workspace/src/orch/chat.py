@@ -1,6 +1,6 @@
 """Chat: the one conversation of a workspace with the person's phones and dashboard (former General).
 
-contracts/chat-groups.md section 1. The hidden General ticket (tickets.py `general: true`) is the record and the
+contracts/chat-groups.md section 1. The hidden General ticket (`general: true`) is the record and the
 helper's session; this module holds what is only about the conversation: the Chat day (local wall time, day
 starts 04:00), one file per day under .orch/chat/ (History), the daily fresh start of the helper's session,
 cards (refs) and the numbers of the activity strip. Nothing here goes on the wire except body.by / via / day
@@ -24,7 +24,9 @@ KEY_RE = re.compile(r"\b[A-Z0-9]{2,4}-[1-9][0-9]{0,8}\b")
 MAX_DAY_MESSAGES = 2000
 MAX_TEXT = 20000  # Chat keeps 20000 characters (contract section 5)
 REF_KINDS = ("ticket", "reference", "file")
-_SECRET_NAMES = re.compile(r"(^|/)(\.env[^/]*|secrets|\.orch/secrets)(/|$)|\.(pem|key|p8|p12)$|token|credential", re.I)
+_SECRET_NAMES = re.compile(
+    r"(^|/)(\.env[^/]*|secrets|\.orch/secrets)(/|$)|\.(pem|key|p8|p12)$|token|credential", re.I
+)
 
 
 def tz_of(root: Path):
@@ -59,7 +61,7 @@ def day_key(root: Path, at=None) -> str:
 
 
 def helper_name(root: Path) -> str:
-    """"<Workspace> helper" (display rule: never sent as text)."""
+    """ "<Workspace> helper" (display rule: never sent as text)."""
     with contextlib.suppress(Exception):
         name = relay.name_of(root, relay._cfg(root)["workspace"])
         if name and not name.startswith("ws_"):
@@ -98,15 +100,34 @@ def clean_refs(root: Path, refs) -> list[dict]:
         if kind == "ticket":
             t = _find_ticket(root, str(r.get("key") or r.get("id") or ""))
             if t:
-                out.append({"kind": "ticket", "id": t["id"], "key": t.get("key"), "title": phone_view._clip(t.get("title", ""), 120)})
+                out.append(
+                    {
+                        "kind": "ticket",
+                        "id": t["id"],
+                        "key": t.get("key"),
+                        "title": phone_view._clip(t.get("title", ""), 120),
+                    }
+                )
         elif kind == "reference":
             url = phone_view.safe_url(str(r.get("url") or ""))
             if url:
-                out.append({"kind": "reference", "url": url, "title": phone_view._clip(str(r.get("title") or url), 120)})
+                out.append(
+                    {
+                        "kind": "reference",
+                        "url": url,
+                        "title": phone_view._clip(str(r.get("title") or url), 120),
+                    }
+                )
         else:
             p = _safe_file(root, str(r.get("path") or ""))
             if p:
-                out.append({"kind": "file", "path": p, "title": phone_view._clip(str(r.get("title") or Path(p).name), 120)})
+                out.append(
+                    {
+                        "kind": "file",
+                        "path": p,
+                        "title": phone_view._clip(str(r.get("title") or Path(p).name), 120),
+                    }
+                )
     return out
 
 
@@ -185,7 +206,13 @@ def days(root: Path) -> list[dict]:
             d = _read_day(root, p.stem)
             if d["messages"]:
                 last = d["messages"][-1]
-                out.append({"day": p.stem, "count": len(d["messages"]), "last": phone_view._clip(last.get("text", ""), 120)})
+                out.append(
+                    {
+                        "day": p.stem,
+                        "count": len(d["messages"]),
+                        "last": phone_view._clip(last.get("text", ""), 120),
+                    }
+                )
     return sorted(out, key=lambda x: x["day"], reverse=True)
 
 
@@ -204,7 +231,7 @@ def session_day(ticket: dict) -> str | None:
 
 
 def cut_session(root: Path, tid: str, now=None) -> bool:
-    """04:00: the helper's session of an earlier Chat day ends. Its stored session ids are dropped, so the next
+    """04:00: the helper's session of an earlier Chat day ends. Its stored session ids go, so the next
     message starts an empty one (runs.plan resumes only a stored session). Returns True when it was cut.
     The first start of a new day records the day. Called by runs.plan before every start."""
     today = day_key(root, now)
@@ -261,7 +288,11 @@ def activity(root: Path, now=None) -> dict:
     inbox = root / ".orch" / "inbox"
     for f in inbox.glob("m_*.json") if inbox.is_dir() else []:
         m = net.read_json(f, None)
-        if not isinstance(m, dict) or not str(m.get("from", "")).startswith("ws_") or m.get("type") not in relay_view_kinds():
+        if (
+            not isinstance(m, dict)
+            or not str(m.get("from", "")).startswith("ws_")
+            or m.get("type") not in relay_view_kinds()
+        ):
             continue
         if day_key(root, m.get("created_at")) == today:
             n = relay.name_of(root, m["from"])
@@ -300,7 +331,8 @@ def helper_prompt(root: Path, ticket: dict, items: list[dict], news: str) -> str
         f"You are {helper_name(root)}: the one helper of this workspace. A person writes to you in Chat from "
         f"their phone or the dashboard; this hidden ticket ({tid}) is your conversation.",
         "Read .agents/skills/orch/SKILL.md first. Answer short and in plain words, in the person's language.",
-        f'Answer with: orch relay send <phone id from the message> "<answer>" --ticket {tid} --reply-to <message id>. '
+        f'Answer with: orch relay send <phone id of the message> "<answer>" --ticket {tid} '
+        "--reply-to <message id>. "
         "Add --ref ticket:<KEY> for a ticket you made or opened, --ref reference:<url> or --ref file:<path> "
         "for something you point to: they show as cards.",
         "You may make tickets (orch ticket new), write notes and answer questions. You never sign, approve, "

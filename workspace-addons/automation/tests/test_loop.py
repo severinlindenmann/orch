@@ -288,6 +288,24 @@ def test_a_ready_ticket_with_queued_input_gets_exactly_one_run(ws):
     assert len(starts) == 2 and all("--mode" not in a for a in starts)
 
 
+def test_a_text_in_chat_starts_the_helper_once(ws):
+    """The Chat's hidden ticket is in no list: core names it (orch chat status); the same queued-input rules
+    apply (a person's text only, once per item, nothing while a run holds it)."""
+    (ws / "chat-ticket").write_text("t_chat0001")
+    (ws / "pending-t_chat0001").write_text(json.dumps(["p_phone00001"]))
+    (ws / "ended-t_chat0001").write_text("")
+    assert Scheduler(ws).tick(T(8)) == ["t_chat0001"]
+    assert Scheduler(ws).tick(T(8, 1)) == []  # same item: never again
+    (ws / "pending-t_chat0001").write_text(json.dumps(["p_phone00001", "p_phone00002"]))
+    assert Scheduler(ws).tick(T(8, 2)) == ["t_chat0001"]  # a new text: one more run
+    (ws / "pending-t_chat0001").write_text(json.dumps(["p_phone00001", "p_phone00002", "p_phone00003"]))
+    (ws / "ended-t_chat0001").unlink()  # the helper is running: it reads the text itself
+    assert Scheduler(ws).tick(T(8, 3)) == []
+    (ws / "pending-t_chat0001").write_text(json.dumps([]))  # only agent input (core lists none): nothing
+    (ws / "ended-t_chat0001").write_text("")
+    assert Scheduler(ws).tick(T(8, 4)) == []
+
+
 def test_queued_input_on_a_running_or_not_ready_ticket_starts_nothing(ws):
     add_ticket(ws, "t_queue002", status="ready")  # a run holds it (no ended- file)
     (ws / "pending-t_queue002").write_text(json.dumps(["p_x00000001"]))

@@ -239,6 +239,12 @@ def _log(a):
     return ["log", _tid(a.get("ticket"))], [], [_text(a.get("text"))]
 
 
+def _chat_say(a):
+    """The person writes in Chat (history by "you", via dashboard; the automation host starts the helper)."""
+    _only(a, ("text",))
+    return ["chat", "say"], [], [_text(a.get("text"))]
+
+
 def _run_start(a):
     _only(a, ("ticket", "fresh", "take_over"))
     flags = (["--fresh"] if _flag(a.get("fresh")) else []) + (
@@ -352,6 +358,7 @@ OPS = {
     "ticket.patch": _ticket_patch,
     "ticket.edit": _ticket_edit,
     "log": _log,
+    "chat.say": _chat_say,
     "check.add": _check_add,
     "check.set": _check_set,
     "run.start": _run_start,
