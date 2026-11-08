@@ -3,8 +3,9 @@
   tmux -L orch-<hash8(workspace)> new-session -d -s <ticket id> -- orch run _wrap <run> --live -- <agent argv>
 
 orch owns that tmux server (own socket), so a person's own tmux is never touched. The claim's pid is the pane
-process (the wrapper). Input waits in the pending file and is pasted (bracketed paste, then Enter) only when
-the agent says it is idle: the tool's own hooks call `orch run event --kind idle`, a generic agent calls
+process (the wrapper). Input waits in the pending file and is pasted (bracketed paste, then a separate Enter)
+only when the agent says it is idle (the wrapper then checks that it was submitted: watch_submit): the tool's
+own hooks call `orch run event --kind idle`, a generic agent calls
 `orch run done`. At most 4 live sessions per workspace. A session idle (or waiting for a person) for an
 hour (workspace.live_idle_minutes; 10 minutes once the ticket is in Review, Done or Dropped, and such a
 session does not count toward the limit), or on a ticket Done for that long, is closed on the next
@@ -38,6 +39,12 @@ HARD_EXTRA = 4  # most sessions over the limit that finished tickets may keep op
 FINISHED = ("review", "done", "dropped")
 PASTE_DELAY = 0.3
 STARTUP_SECONDS = 60
+# Input pasted into a live session must be submitted. A tool that is still drawing (a resumed session right
+# after its SessionStart hook) can drop the Enter and leave the text in its prompt box. The wrapper checks:
+SUBMIT_CHECK_SECONDS = 2.0  # no sign the input went in: Enter once more
+SUBMIT_WATCHDOG_SECONDS = 60.0  # still nothing: Enter a last time
+SUBMIT_GIVE_UP_SECONDS = 90.0  # still nothing: end the session; the input waits for a one-step run
+SUBMIT_POLL = 0.5
 KINDS = ("session", "idle", "working", "attention")
 
 
@@ -236,6 +243,20 @@ def _format(items: list[dict], flat: bool) -> str:
     return " ".join(text.split()) if flat else text
 
 
+def _paste(root: Path, tid: str, buf: str, text: str) -> bool:
+    """Bracketed paste of text into the session's pane, then Enter as its own key (never inside the text)."""
+    if tmux(root, "load-buffer", "-b", buf, "-", input=text).returncode != 0:
+        return False
+    if tmux(root, "paste-buffer", "-p", "-d", "-b", buf, "-t", target(tid)).returncode != 0:
+        return False
+    time.sleep(PASTE_DELAY)  # let the paste land before Enter
+    return _enter(root, tid)
+
+
+def _enter(root: Path, tid: str) -> bool:
+    return tmux(root, "send-keys", "-t", target(tid), "Enter").returncode == 0
+
+
 def deliver(root: Path, tid: str) -> int:
     """Paste what waits, once, if (and only if) the agent said it is idle. Returns how many items went in."""
     with runs.locked(root, tid):
@@ -248,20 +269,136 @@ def deliver(root: Path, tid: str) -> int:
         if not items or not session_exists(root, tid):
             return 0
         flat = not adapters.caps(rec["agent"], root)["hooks"]  # no bracketed paste to rely on: one line
-        buf = f"orch-{rec['run']}"
-        if tmux(root, "load-buffer", "-b", buf, "-", input=_format(items, flat)).returncode != 0:
+        text = _format(items, flat)
+        if not _paste(root, tid, f"orch-{rec['run']}", text):
             return 0
-        if tmux(root, "paste-buffer", "-p", "-d", "-b", buf, "-t", target(tid)).returncode != 0:
-            return 0
-        time.sleep(PASTE_DELAY)  # let the paste land before Enter
-        if tmux(root, "send-keys", "-t", target(tid), "Enter").returncode != 0:
-            return 0
-        runs.mark_delivered_locked(root, tid, [i["id"] for i in items])
+        ids = [i["id"] for i in items]
+        runs.mark_delivered_locked(root, tid, ids)
         rec = runs.read(root, tid) or rec
         rec["live"] = {"state": "working", "since": tickets.now()}
         rec["renewed_at"] = tickets.now()
+        # not known to be submitted yet: the prompt hook (`working`) clears this; watch_submit checks it
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        tail = (lines[-1] if lines else "")[-40:]
+        rec["submit"] = {"at": tickets.now(), "items": ids, "tail": tail, "enters": 1}
         runs._write(root, rec)
         return len(items)
+
+
+def _log_submit(root: Path, tid: str, run: str, what: str) -> None:
+    with contextlib.suppress(OSError):
+        f = runs.run_dir(root) / "live-submit.log"
+        with open(f, "a", encoding="utf-8") as fh:
+            fh.write(f"{tickets.now()} {tid} {run} {what}\n")
+
+
+def _unsent(root: Path, tid: str, tail: str) -> bool:
+    """True when the last line of the pasted text still shows at the bottom of the pane (the prompt box)."""
+    want = "".join(tail.split())
+    if not want:
+        return False
+    pane = tmux(root, "capture-pane", "-p", "-t", target(tid))
+    if pane.returncode != 0:
+        return False
+    bottom = [ln for ln in pane.stdout.splitlines() if ln.strip()][-20:]
+    return want in "".join("".join(bottom).split())  # a long line may wrap
+
+
+def check_submit(root: Path, tid: str, run: str, now: float | None = None, end=None) -> str | None:
+    """Pasted input that shows no sign of having been submitted gets Enter again (after SUBMIT_CHECK_SECONDS,
+    and once more after SUBMIT_WATCHDOG_SECONDS). Still nothing after SUBMIT_GIVE_UP_SECONDS: the input is
+    put back (marked live_retry, so the next start works one step at a time) and `end` ends the session.
+    A tool with hooks shows the sign with its prompt hook (`working`); one without, by its prompt box no
+    longer showing the text. Returns what was done: "enter", "sent", "gave_up" or None."""
+    rec = runs.read(root, tid)
+    if not rec or rec["run"] != run or rec.get("mode") != "live" or not rec.get("submit"):
+        return None
+    s = rec["submit"]
+    try:
+        age = (time.time() if now is None else now) - runs._parse(s["at"])
+    except (KeyError, ValueError):
+        return None
+    if age < SUBMIT_CHECK_SECONDS:
+        return None
+    if not session_exists(root, tid):
+        return None
+    hooks = adapters.caps(rec["agent"], root)["hooks"]
+    visible = _unsent(root, tid, s.get("tail") or "")
+    if not hooks and not visible:
+        _update_submit(root, tid, run, s, None)
+        return "sent"
+    enters = int(s.get("enters") or 1)
+    if s.get("watchdog"):
+        if age < SUBMIT_GIVE_UP_SECONDS:
+            return None
+        _give_up(root, tid, run, s, rec["agent"])
+        _log_submit(root, tid, run, "gave up: no sign the input went in; session ended, input queued again")
+        if end is not None:
+            end()
+        return "gave_up"
+    if age >= SUBMIT_WATCHDOG_SECONDS:
+        new = {**s, "enters": enters + 1, "watchdog": True}
+    elif enters == 1 and visible:  # the text still sits in the prompt box
+        new = {**s, "enters": 2}
+    else:
+        return None
+    if not _enter(root, tid):
+        return None
+    _update_submit(root, tid, run, s, new)
+    _log_submit(root, tid, run, f"Enter again ({new['enters']}): nothing went in after {int(age)} s")
+    return "enter"
+
+
+def _update_submit(root: Path, tid: str, run: str, old: dict, new: dict | None) -> None:
+    with runs.locked(root, tid):
+        rec = runs.read(root, tid)
+        if not rec or rec["run"] != run or rec.get("submit") != old:
+            return  # submitted meanwhile, or new input went in: that one is checked on its own
+        if new is None:
+            rec.pop("submit", None)
+        else:
+            rec["submit"] = new
+        runs._write(root, rec)
+
+
+def _give_up(root: Path, tid: str, run: str, s: dict, agent: str) -> None:
+    with runs.locked(root, tid):
+        rec = runs.read(root, tid)
+        if not rec or rec["run"] != run or rec.get("submit") != s:
+            return
+        items = runs._pending_read(root, tid)
+        for i in items:
+            if i["id"] in s["items"] and i.get("via") != "start":  # the start prompt is built again
+                i.pop("delivered_at", None)
+                i["live_retry"] = True
+        runs._pending_write(root, tid, items)
+        rec.pop("submit", None)
+        rec["pending"] = any(not i.get("delivered_at") for i in items)
+        rec["stop_requested"] = tickets.now()  # our own end: no "the live session ended" line
+        runs._write(root, rec)
+    label = adapters.load(agent, root)["label"]
+    with contextlib.suppress(Exception):
+        tickets.log(
+            root,
+            tid,
+            f"{label} did not take the input in its live session, so the session was closed. "
+            "The input is kept and goes in with the next start, one step at a time.",
+            f"agent:{agent}",
+        )
+
+
+def watch_submit(root: Path, tid: str, run: str, proc: subprocess.Popen) -> None:
+    """In the pane's wrapper, for the whole session: check_submit on input pasted and not yet submitted."""
+    while proc.poll() is None:
+        time.sleep(SUBMIT_POLL)
+        try:
+            rec = runs.read(root, tid)
+            if not rec or rec["run"] != run:
+                return
+            if rec.get("submit"):
+                check_submit(root, tid, run, end=proc.terminate)
+        except Exception:  # never take the wrapper down
+            continue
 
 
 def _set_state(root: Path, tid: str, run: str, state: str) -> bool:
@@ -270,6 +407,8 @@ def _set_state(root: Path, tid: str, run: str, state: str) -> bool:
         if not rec or rec["run"] != run:
             return False
         rec["live"] = {"state": state, "since": tickets.now()}
+        if state == "working":
+            rec.pop("submit", None)  # the tool took a prompt: what was pasted went in
         if state in ("idle", "working"):
             rec["up"] = True  # the tool has been up: a later notice is never a first-run screen
         rec["renewed_at"] = tickets.now()

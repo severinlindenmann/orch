@@ -882,6 +882,8 @@ def start(
     a = adapters.load(name, root)
     notes = []
     live_ok = runs_live.available(a)
+    if mode is None and any(i.get("live_retry") for i in undelivered(root, tid)):
+        mode = "oneshot"  # a live session did not take this input (check_submit): one step at a time now
     if mode is None:
         mode = "live" if live_ok else "oneshot"
         if not live_ok and a["capabilities"].get("interactive_tmux") and os.name != "nt":
@@ -1217,6 +1219,12 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         return 127
     current["proc"] = proc
     set_process_fields(root, tid, run, agent_pid=proc.pid, agent_pid_started=pid_started(proc.pid))
+    with contextlib.suppress(Exception):  # pasted input really goes in (Enter again, else a one-step run)
+        import threading
+
+        from orch import runs_live
+
+        threading.Thread(target=runs_live.watch_submit, args=(root, tid, run, proc), daemon=True).start()
     with contextlib.suppress(Exception):  # the tool's first-run screens: passed here, never blocks the run
         from orch import runs_live
 
