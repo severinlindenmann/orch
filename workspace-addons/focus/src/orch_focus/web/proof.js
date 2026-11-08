@@ -13,6 +13,7 @@
   const MAX_ROWS = 500;
 
   function create({h, ic, P, TID, toast}) {
+    let agent = 'agent';
     let pageKey = '';  /* from the ticket view (page_key): without it a page URL is a 404 */
     const base = name => String(name || '').split('/').pop();
     const prefix = '.orch/tickets/' + TID + '/evidence/';
@@ -44,11 +45,12 @@
     const url = (ev, mode) => mode === 'page' ? pageUrl(ev) : P + '/api/file?t=' + encodeURIComponent(TID) + '&n=' + encodeURIComponent(fileName(ev)) + '&m=' + mode;
 
     function title(ev, kind) {
+      if (ev.type === 'file') return window.FocusHelpers.plainFileName(ev.ref) || 'File';
       if (ev.title) return String(ev.title);
       if (kind === 'text') return String(ev.ref || ev.text || 'Note');
       if (ev.type === 'file') return base(ev.ref) || 'File';
       if (kind === 'link') { const l = linkInfo(ev); return l.label; }
-      return String(ev.ref || 'Proof');
+      return String(ev.ref || 'Result');
     }
     /* a link card: only https links open; "PR #88" or a commit stays text */
     function linkInfo(ev) {
@@ -59,21 +61,78 @@
       const pr = ok ? /\/pull\/(\d+)/.exec(u.pathname) : /^PR\s*#?(\d+)$/i.exec(ref) || /^#(\d+)$/.exec(ref);
       return {ok, href: ok ? u.href : '', host: ok ? u.hostname : '', label: ev.type === 'pr' && pr ? 'PR #' + pr[1] : ok ? u.hostname + (u.pathname === '/' ? '' : u.pathname) : ref};
     }
-    const who = ev => String(ev.by || '').startsWith('human:') ? ['●', 'You'] : ['○', 'Agent says'];
+    const who = ev => String(ev.by || '').startsWith('human:') ? ['●', 'You'] : ['○', agent + ' says'];
     function when(at) {
       const d = new Date(at);
       return at && !isNaN(d) ? d.toLocaleString(undefined, {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false}) : '';
     }
     const sizeText = n => n < 1024 ? n + ' bytes' : n < 1048576 ? (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
 
-    /* ---- tiles ---- */
+    /* ---- tiles: never mount a live page, PDF, SVG or GIF ---- */
+    const previewCache = new Map(), previewQueue = [];
+    let previewActive = 0;
+    function queuePreview(ev, kind) {
+      const address = url(ev, 'view');
+      if (!previewCache.has(address)) {
+        previewCache.set(address, new Promise(resolve => { previewQueue.push({ev, kind, resolve}); }));
+        drainPreviews();
+      }
+      return previewCache.get(address);
+    }
+    function drainPreviews() {
+      while (previewActive < 4 && previewQueue.length) {
+        const job = previewQueue.shift(); previewActive++;
+        readPreview(job.ev, job.kind).catch(() => null).then(job.resolve).finally(() => { previewActive--; drainPreviews(); });
+      }
+    }
+    async function readPreview(ev, kind) {
+      const response = await fetch(url(ev, 'view'));
+      if (!response.ok) return null;
+      const mime = (response.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+      if (kind === 'image') {
+        // Only the existing proofs API's PNG/JPEG/WebP content types authorize images.
+        if (!['image/png', 'image/jpeg', 'image/webp'].includes(mime)) { await response.body?.cancel(); return null; }
+        return {blob: await response.blob()};
+      }
+      if (mime !== 'text/plain') { await response.body?.cancel(); return null; }
+      const reader = response.body.getReader(), bytes = new Uint8Array(2048);
+      let used = 0;
+      try {
+        while (used < bytes.length) {
+          const {value, done} = await reader.read();
+          if (done) break;
+          const part = value.subarray(0, bytes.length - used); bytes.set(part, used); used += part.length;
+        }
+      } finally { await reader.cancel(); }
+      return {text: new TextDecoder().decode(bytes.subarray(0, used)).split('\n').slice(0, 8).join('\n')};
+    }
     function tile(item, onOpen) {
       const {c, ev} = item, kind = kindOf(ev), [icon, label] = KINDS[kind], [mark, markText] = who(ev);
-      const head = h('span', {class: 'fx-pt-k'}, h('span', {icon}), h('span', {text: label}), h('span', {class: 'grow'}), h('time', {datetime: ev.at || '', text: when(ev.at)}));
-      const thumb = kind === 'image' ? h('img', {class: 'fx-pt-img', src: url(ev, 'view'), alt: '', loading: 'lazy'}) : null;
+      const extension = extOf(fileName(ev) || ''), badge = label;
+      const head = h('span', {class: 'fx-pt-k'}, h('span', {icon}), h('span', {class: 'fx-pt-badge', text: badge}), h('span', {text: label}), h('time', {datetime: ev.at || '', text: when(ev.at)}));
+      const thumb = h('span', {class: 'fx-pt-preview'}, h('span', {icon}), h('span', {text: kind === 'page' ? 'Open to see the page' : badge}));
       const btn = h('button', {type: 'button', class: 'fx-ptile fx-k-' + kind, title: c.text || '', 'aria-haspopup': 'dialog', onclick: () => onOpen(btn)},
         head, thumb, h('span', {class: 'fx-pt-t', text: title(ev, kind)}),
-        h('span', {class: 'fx-pt-m'}, h('span', {class: 'fx-pt-who ' + (mark === '●' ? 'you' : 'agent'), text: mark + ' ' + markText})));
+        window.FocusHelpers.cleanOutcome(ev.text) ? h('span', {class: 'fx-pt-m'}, h('span', {class: 'fx-pt-who ' + (mark === '●' ? 'you' : 'agent'), text: mark + ' ' + markText + ': ' + window.FocusHelpers.cleanOutcome(ev.text)})) : null);
+      const excerpt = text => thumb.replaceChildren(h('pre', {text: String(text).slice(0, 2048).split('\n').slice(0, 8).join('\n')}));
+      if (kind === 'text') excerpt(ev.text || ev.ref || '');
+      const textFile = ['doc', 'code', 'table'].includes(kind) && extension !== 'svg';
+      const picture = kind === 'image' && ['png', 'jpg', 'jpeg', 'webp'].includes(extension);
+      if (textFile || picture) {
+        const load = () => queuePreview(ev, picture ? 'image' : 'text').then(data => {
+          if (!data) return;
+          if (data.text !== undefined) excerpt(data.text);
+          else if (data.blob) {
+            const src = URL.createObjectURL(data.blob);
+            const img = h('img', {class: 'fx-pt-img', alt: '', onload: () => URL.revokeObjectURL(src), onerror: () => URL.revokeObjectURL(src)});
+            img.src = src; thumb.replaceChildren(img);
+          }
+        });
+        if (typeof IntersectionObserver !== 'undefined') {
+          const observer = new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting)) { observer.disconnect(); load(); } });
+          observer.observe(btn);
+        } else load();
+      }
       return btn;
     }
 
@@ -133,8 +192,8 @@
       pv.title = h('h2', {class: 'fx-pv-title', id: 'fx-pv-title'});
       pv.meta = h('p', {class: 'fx-pv-meta'});
       pv.count = h('span', {class: 'fx-pv-count meta', 'aria-live': 'polite'});
-      pv.prev = h('button', {type: 'button', class: 'btn ghost icon sm fx-pv-prev', 'aria-label': 'Previous proof', title: 'Previous (←)', onclick: () => step(-1)}, h('span', {icon: 'up'}));
-      pv.next = h('button', {type: 'button', class: 'btn ghost icon sm fx-pv-next', 'aria-label': 'Next proof', title: 'Next (→)', onclick: () => step(1)}, h('span', {icon: 'down'}));
+      pv.prev = h('button', {type: 'button', class: 'btn ghost icon sm fx-pv-prev', 'aria-label': 'Previous result', title: 'Previous (←)', onclick: () => step(-1)}, h('span', {icon: 'up'}));
+      pv.next = h('button', {type: 'button', class: 'btn ghost icon sm fx-pv-next', 'aria-label': 'Next result', title: 'Next (→)', onclick: () => step(1)}, h('span', {icon: 'down'}));
       pv.copy = h('button', {type: 'button', class: 'btn ghost sm', onclick: copy}, h('span', {icon: 'text'}), h('span', {class: 'opt', text: 'Copy'}));
       pv.open = h('a', {class: 'btn ghost sm', target: '_blank', rel: 'noopener noreferrer'}, h('span', {icon: 'external'}), h('span', {class: 'opt', text: 'Open'}));
       pv.dl = h('a', {class: 'btn ghost sm'}, h('span', {icon: 'download'}), h('span', {class: 'opt', text: 'Download'}));
@@ -200,7 +259,8 @@
       pv.icon.replaceChildren(h('span', {icon}));
       pv.title.textContent = title(ev, kind);
       pv.meta.textContent = '';
-      pv.meta.append(h('span', {class: 'fx-pt-who ' + (mark === '●' ? 'you' : 'agent'), text: mark + ' ' + markText}), ' · ' + label + (when(ev.at) ? ' · ' + when(ev.at) : '') + (c.text ? ' · ' + c.text : ''));
+      if (window.FocusHelpers.cleanOutcome(ev.text)) pv.meta.append(h('span', {class: 'fx-pt-who ' + (mark === '●' ? 'you' : 'agent'), text: mark + ' ' + markText}), ' · ');
+      pv.meta.append(label + (when(ev.at) ? ' · ' + when(ev.at) : '') + (c.text ? ' · ' + c.text : ''));
       pv.count.textContent = items.length > 1 ? (idx + 1) + ' of ' + items.length : '';
       pv.prev.hidden = pv.next.hidden = items.length < 2;
       pv.dl.hidden = name === null;
@@ -280,14 +340,14 @@
     function fileCard(ev, name, why, signal) {
       const sizeEl = h('dd', {text: '…'});
       const card = h('div', {class: 'fx-pv-file'}, why ? note(why, false) : null,
-        h('dl', {class: 'fx-pv-dl'}, h('dt', {text: 'Name'}), h('dd', {text: base(name || ev.ref) || 'File'}), h('dt', {text: 'Size'}), sizeEl, h('dt', {text: 'Saved'}), h('dd', {text: when(ev.at) || 'unknown'})),
+        h('details', {}, h('summary', {text: 'Details'}), h('dl', {class: 'fx-pv-dl'}, h('dt', {text: 'Name'}), h('dd', {text: base(name || ev.ref) || 'File'}), h('dt', {text: 'Size'}), sizeEl, h('dt', {text: 'Saved'}), h('dd', {text: when(ev.at) || 'unknown'}))),
         name !== null ? h('a', {class: 'btn primary', href: url(ev, 'dl'), download: base(name)}, h('span', {icon: 'download'}), h('span', {text: 'Download'})) : null);
       if (name === null) sizeEl.textContent = 'unknown';
       else fetch(url(ev, 'info'), {signal}).then(r => r.ok ? r.json() : null).then(j => { sizeEl.textContent = j ? sizeText(j.size) : 'over 25 MB or not available'; }).catch(() => { sizeEl.textContent = 'unknown'; });
       return card;
     }
 
-    return {tile, open, close, isOpen, kindOf, setPageKey: k => { pageKey = /^[0-9a-f]{16}$/.test(k) ? k : ''; }};
+    return {setAgent: label => { agent = label; }, tile, open, close, isOpen, kindOf, setPageKey: k => { pageKey = /^[0-9a-f]{16}$/.test(k) ? k : ''; }};
   }
 
   window.FocusProof = {create};
