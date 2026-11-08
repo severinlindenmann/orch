@@ -274,7 +274,8 @@ def receive_errors(m: dict, ctx: dict) -> list[str]:
             # any group creation counts: an explicit `created` or the first message seen from the host
             if ctx.get("open_groups_of_host", 0) >= MAX_OPEN_GROUPS_PER_HOST:
                 out.append("dropped: this host already has 20 open groups here")
-            if ctx.get("created_last_hour", 0) >= CREATED_PER_HOUR:
+            recent = [t for t in ctx.get("creations_recv_s", []) if ctx.get("now_s", 0) - t < 3600]
+            if max(len(recent), ctx.get("created_last_hour", 0)) >= CREATED_PER_HOUR:  # receive times only
                 out.append("dropped: this host is over 5 new groups an hour")
         # (host, id) is the key: an id held under another host is a different group, never a conflict
         o = b.get("origin")
@@ -346,9 +347,13 @@ def order_step(m: dict, ctx: dict) -> str | None:
     if seq == ap + 1:
         return "apply"
     if seq - ap > SEQ_JUMP:
-        return "skip_gap_and_apply"  # a huge jump is one gap skip: applied_seq = seq - 1, nothing expanded
+        return "skip_jump_and_apply"  # a huge jump is one gap skip: applied_seq = seq - 1, nothing expanded
     buffered = od.get("buffered", [])
-    if len(buffered) >= BUF_MAX or (buffered and od.get("oldest_age_s", 0) >= BUF_TIMEOUT_S):
+    now = od.get("now_s", 0)
+    if len(buffered) >= BUF_MAX or (
+        buffered
+        and now - od.get("first_buffered_recv_s", now) >= BUF_TIMEOUT_S  # our own clock, never created_at
+    ):
         return "skip_gap_and_apply"
     return "buffer"
 
@@ -358,7 +363,7 @@ def applied_after(m: dict, ctx: dict) -> int:
     out = order_step(m, ctx)
     if out == "apply":
         return seq
-    if out == "skip_gap_and_apply" and seq - _applied(od, seq) > SEQ_JUMP:
+    if out == "skip_jump_and_apply":
         return seq
     if out == "skip_gap_and_apply":
         have = sorted(set(od.get("buffered", [])) | {seq})
