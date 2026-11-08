@@ -79,7 +79,9 @@ final class AppModel {
     let voiceMode: VoiceInput.Mode
 
     private let outboxDirectory: URL
+    private let defaults: UserDefaults
     static let installedMarkerKey = "installedMarker"
+    static let pairAgainMessage = "This phone needs to be paired again. Open the invitation from your computer to connect."
 
     init(useMock: Bool = AppModel.configuredMock, session: URLSession = .shared,
          voiceMode: VoiceInput.Mode = AppModel.configuredVoice, outboxDirectory: URL = Outbox.defaultDirectory(),
@@ -91,9 +93,14 @@ final class AppModel {
         self.session = session
         self.voiceMode = voiceMode
         self.outboxDirectory = outboxDirectory
+        self.defaults = defaults
         // The keychain outlives deleting the app. No marker in this app container = a fresh install: drop the stale pairing
         // quietly and show the welcome screen (the red "signed out" message is only for a real sign-out/revoke while installed).
-        if !defaults.bool(forKey: AppModel.installedMarkerKey) { Keychain.delete(); defaults.set(true, forKey: AppModel.installedMarkerKey) }
+        if !defaults.bool(forKey: AppModel.installedMarkerKey) {
+            Keychain.delete()
+            defaults.removeObject(forKey: "pairedPhoneId")
+            defaults.set(true, forKey: AppModel.installedMarkerKey)
+        }
         let creds = Keychain.load()
         // Every stored property is set first; only then is `self` used (the Observation macros need that).
         let holder = ClientHolder()
@@ -102,6 +109,10 @@ final class AppModel {
         self.speech = SpeechPlayer(fetch: { id, lang in try await holder.client().speech(messageId: id, lang: lang) },
                                    cacheDirectory: speechCache, systemControls: systemAudioControls)
         if let c = creds { credentials = c; phase = .ready } else { box.wipe() }
+        if creds == nil, defaults.object(forKey: "pairedPhoneId") != nil {
+            message = AppModel.pairAgainMessage
+            defaults.removeObject(forKey: "pairedPhoneId")
+        }
         holder.make = { [weak self] in self?.client }
     }
 
@@ -210,6 +221,7 @@ final class AppModel {
             let r = try await client.pair(code: invite.code, name: phoneName)
             let c = Credentials(relay: invite.relay, phoneId: r.phoneId, token: r.token, phoneName: phoneName)
             Keychain.save(c); credentials = c
+            defaults.set(c.phoneId, forKey: "pairedPhoneId")
             if outbox.phone != c.phoneId { outbox.wipe(); outbox = Outbox(directory: outboxDirectory, phone: c.phoneId) }
             pairedWorkspaces = r.workspaces
             inviteState = .none
@@ -627,6 +639,7 @@ final class AppModel {
     }
 
     private func reset() {
+        defaults.removeObject(forKey: "pairedPhoneId")
         for t in undoTimers.values { t.cancel() }
         undoTimers = [:]; pendingAnswers = [:]; sendingAnswers = []
         outbox.wipe(); speech.reset(); settings = PhoneSettings(); messagesNext = nil
