@@ -138,9 +138,11 @@ struct Composer: View {
                 text = draft; discard()
             }
             .onChange(of: model.answerTick) { _, _ in
-                if let q = reply?.answering, model.answers[q.id] != nil {
-                    reply = nil; restoreDraft()
-                }
+                if let q = reply?.answering, !Self.isOpen(q, in: model) { reply = nil; restoreDraft() }
+            }
+            // Answered on the dashboard or another phone: the question leaves the open list, answering mode ends.
+            .onChange(of: model.questions.map(\.id)) { _, _ in
+                if let q = reply?.answering, !Self.isOpen(q, in: model) { reply = nil; restoreDraft() }
             }
             .onChange(of: recorder?.error) { _, value in if let value { error = value; micError = true; collect() } }
             .onDisappear { holding = false; holdTask?.cancel(); hintTask?.cancel(); discard() }
@@ -245,12 +247,13 @@ struct Composer: View {
         defer { busy = false }
         do {
             if let q = reply?.answering {
-                if model.answers[q.id] != nil || model.pendingAnswers[q.id] != nil {
-                    reply = nil; restoreDraft(); return
+                // Closed meanwhile (answered here, elsewhere, or an option is being sent): keep what was typed, say why.
+                if !Self.isOpen(q, in: model) || model.pendingAnswers[q.id] != nil {
+                    savedDraft = nil; reply = nil; error = "This question is already answered."; return
                 }
                 await model.answer(q, with: String(String.UnicodeScalarView(trimmedText.unicodeScalars.prefix(2000))))
                 if model.answers[q.id] == nil && model.queuedAnswers[q.id] == nil {
-                    error = model.message ?? "Your answer was not sent. Try again."
+                    error = "Your answer was not sent. Try again."
                     return
                 }
                 if reply?.answering?.id == q.id { reply = nil; restoreDraft() }
@@ -260,6 +263,10 @@ struct Composer: View {
             }
             success += 1; onSent?()
         } catch { self.error = error.localizedDescription }
+    }
+    /// A free-text answer goes only to a question that is still open: listed by the relay and not answered on this phone.
+    static func isOpen(_ q: Question, in model: AppModel) -> Bool {
+        model.answers[q.id] == nil && model.questions.contains { $0.id == q.id }
     }
     private func restoreDraft() {
         guard let savedDraft else { return }
