@@ -12,7 +12,8 @@
   "Turn on",
   "\\|Stop",
   "Move to",
-  "Send a message"
+  "Send a message",
+  "Open Focus"
  ],
  "steps": [
   {
