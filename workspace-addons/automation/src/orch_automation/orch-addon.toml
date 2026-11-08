@@ -16,6 +16,7 @@ background = true                          # has `orch automation start|stop`
 label = "Automation"
 icon = "clock"
 order = 10
+panel = "repeats"
 
 [[ticket_view]]
 field = "cron"
