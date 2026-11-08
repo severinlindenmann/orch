@@ -12,7 +12,7 @@ struct StartedChip: Identifiable, Equatable {
 /// Pure rules of the conversation screen (unit-tested).
 enum ConversationRules {
     /// The General "<ws> is working…" line ends this long after the last ack/working, even with no new message.
-    static let generalWorkingTimeout: TimeInterval = 180
+    static let generalWorkingTimeout: TimeInterval = 600   // 10 min, the group-chat contract (#294 §1)
 
     /// General shows "<ws> is working…" while the last item is this phone's text with a Working receipt, for at most `timeout`
     /// after the last ack/working. A later workspace text ends it (it becomes the last item). General carries no result, failure or
@@ -22,6 +22,20 @@ enum ConversationRules {
         guard let last = items.last, last.side == .me, last.receipt == .started else { return false }
         guard let since = last.workingSince.flatMap(date) else { return true }
         return now.timeIntervalSince(since) < timeout
+    }
+
+    /// General: a "Working" receipt ends (plain ✓✓) once the workspace answered after it, or `timeout` after the last
+    /// ack/working — the same rule and constant as `generalWorking`, so the label and the line always agree.
+    static func endingGeneralReceipts(_ items: [ConvItem], now: Date, timeout: TimeInterval = generalWorkingTimeout) -> [ConvItem] {
+        let lastReply = items.lastIndex { $0.side == .them } ?? -1
+        return items.enumerated().map { i, item in
+            guard item.side == .me, item.receipt == .started else { return item }
+            let timedOut = item.workingSince.flatMap(date).map { now.timeIntervalSince($0) >= timeout } ?? false
+            guard i < lastReply || timedOut else { return item }
+            var ended = item
+            ended.receipt = .delivered
+            return ended
+        }
     }
 
     static func date(_ iso: String) -> Date? {
@@ -90,7 +104,13 @@ struct ConversationView: View {
     @State private var scrolledQuestion: String?
     @State private var seenIncoming: Set<String> = []
     private var resolved: ConversationID { model.resolve(id) }
-    private var items: [ConvItem] { model.conversationItems(resolved) }
+    /// One clock for the General "Working" receipt and the "is working…" line, so both end together.
+    @State private var now = Date()
+    private var items: [ConvItem] {
+        let all = model.conversationItems(resolved)
+        if case .general = resolved { return ConversationRules.endingGeneralReceipts(all, now: now) }
+        return all
+    }
     private var workspaceName: String { model.workspace(resolved.workspace)?.name ?? "Workspace" }
     private var ticket: Ticket? { model.tickets.first { $0.workspace == resolved.workspace && $0.ticket == resolved.ticket && resolved.ticket != nil } }
     private var title: String {
@@ -138,15 +158,19 @@ struct ConversationView: View {
             .tint(Theme.brand)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
-                    // a clock, so the General line also ends by its timeout without a new message
-                    TimelineView(.periodic(from: .now, by: 15)) { context in
-                        if working(items, now: context.date) { StatusLine("\(workspaceName) is working…") }
-                    }
+                    if working(items, now: now) { StatusLine("\(workspaceName) is working…") }
                     Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(running: ticket?.view?.running, finished: ticket.map { [.done, .stopped, .didntWork].contains(TopicStatus($0)) } ?? false), reply: $reply, )
                 }
             }
             .sheet(isPresented: $tasksShown) { tasksSheet }
             .fullScreenCover(item: $viewing) { ArtifactViewer(item: $0) }
+            // the clock: the General receipt and line also end by the timeout without a new message
+            .task {
+                while !Task.isCancelled {
+                    now = Date()
+                    try? await Task.sleep(for: .seconds(15))
+                }
+            }
     }
     @ViewBuilder private var presence: some View {
         if case .starting = resolved { Text("Getting started…").themeFont(13).foregroundStyle(Theme.muted) }
