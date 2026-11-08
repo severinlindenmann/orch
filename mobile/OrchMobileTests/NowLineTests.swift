@@ -13,7 +13,7 @@ final class NowLineTests: XCTestCase {
         XCTAssertNil(NowLine.scopedText(running: 0, newCount: 0))
     }
     func testGroupOrderAndHelperStatus() {
-        XCTAssertEqual(WorkspaceView.activeOrder, [.waitingOnYou, .review, .working, .backlog])
+        XCTAssertEqual(WorkspaceView.activeOrder, [.waitingOnYou, .review, .working, .paused, .backlog])
         XCTAssertEqual(WorkspaceView.helperStatus(name: "Finance", anyWorking: true, hasMessages: true), "Finance is working")
         XCTAssertEqual(WorkspaceView.helperStatus(name: "Finance", anyWorking: false, hasMessages: true), "Finance is ready")
         XCTAssertNil(WorkspaceView.helperStatus(name: "Finance", anyWorking: false, hasMessages: false))
