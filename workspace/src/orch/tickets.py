@@ -1155,15 +1155,27 @@ _HAND_OVER = (
 _SECRET_ASK_RE = re.compile(r"\b" + _HAND_OVER + r"\b[^.?!\n]{0,40}?\b" + _SECRET_WORD + r"\b", re.I)
 _PAT_ASK_RE = re.compile(r"\b" + _HAND_OVER + r"\b[^.?!\n]{0,40}?\bPAT\b", re.I)
 _INVISIBLE_RE = re.compile("[\u200b-\u200f\u2060\ufeff\u00ad]")
-_LABEL_KEYS = ("label", "title", "text", "prompt", "message", "description")
+_MACHINE_KEYS = {"op", "run", "peer", "key", "id", "tid", "ticket"}
+_REQUEST_RES = (
+    re.compile(r"\bneed\s+(?:your|you to give|you to send)\b[^.?!\n]{0,20}?\b" + _SECRET_WORD + r"\b", re.I),
+    re.compile(r"\byour\s+" + _SECRET_WORD + r"\s+please\b", re.I),
+    re.compile(r"\breply\s+with\s+(?:your\s+|the\s+)?" + _SECRET_WORD + r"\b", re.I),
+    re.compile(r"\bwhich\s+" + _SECRET_WORD + r"\s+(?:should|do)\s+i\s+use\b", re.I),
+    re.compile(r"\bbrauche\s+(?:dein|deinen|ihr|ihren)\w*\s+" + _SECRET_WORD + r"\b", re.I),
+)
 
 
 def _labels(value, key: str = "") -> list[str]:
-    """The texts of an add-on action a person may read: its label-like fields, at any depth."""
+    """Every text of an add-on action (keys too), except the machine-only fields."""
     if isinstance(value, str):
-        return [value] if key.lower() in _LABEL_KEYS else []
+        return [value]
     if isinstance(value, dict):
-        return [x for k, v in value.items() for x in _labels(v, str(k))]
+        out = []
+        for k, v in value.items():
+            if str(k).lower() in _MACHINE_KEYS:
+                continue
+            out += [str(k), *_labels(v, str(k))]
+        return out
     if isinstance(value, list):
         return [x for v in value for x in _labels(v, key)]
     return []
@@ -1173,7 +1185,12 @@ def _asks_for_secret(text: str) -> bool:
     """Light guard for `orch ask` (defence in depth; the skill text is the real control): the secrets
     folder, or asking a person to hand over a credential."""
     text = _INVISIBLE_RE.sub("", unicodedata.normalize("NFKC", text))
-    return bool(_SECRET_FOLDER_RE.search(text) or _SECRET_ASK_RE.search(text) or _PAT_ASK_RE.search(text))
+    return bool(
+        _SECRET_FOLDER_RE.search(text)
+        or _SECRET_ASK_RE.search(text)
+        or _PAT_ASK_RE.search(text)
+        or any(r.search(text) for r in _REQUEST_RES)
+    )
 
 
 def ask(

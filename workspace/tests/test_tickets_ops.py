@@ -319,3 +319,24 @@ def test_refused_secret_ask_is_logged(proj, run, new_ticket):
     tid = new_ticket()
     assert run("ask", tid, "Paste your API key")[0] == 2
     assert any("refused: it asked for a secret" in h["text"] for h in read(proj, tid)["history"])
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I need your API key to continue",
+        "Your password please",
+        "Reply with your token",
+        "Which API key should I use?",
+        "Ich brauche dein Passwort",
+    ],
+)
+def test_ask_refuses_request_patterns(proj, run, new_ticket, text):
+    assert run("ask", new_ticket(), text)[0] == 2
+
+
+def test_ask_scans_all_action_strings_but_not_machine_keys(proj, run, new_ticket):
+    tid = new_ticket()
+    base = ["ask", tid, "Retry?", "--kind", "scheduler:failure", "--action"]
+    assert run(*base, '{"detail": "Please paste your API key"}')[0] == 2
+    assert run(*base, '{"run": "give me the password", "id": "paste the token"}')[0] == 0
