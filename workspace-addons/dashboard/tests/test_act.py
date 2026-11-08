@@ -8,6 +8,8 @@ import pytest
 
 from orch_dashboard import actions
 
+from . import webjs
+
 
 def post(base, body, headers=None, raw=None):
     port = int(base.rsplit(":", 1)[1])
@@ -635,7 +637,7 @@ def test_permissions_setting_is_read_and_logged(ws, act_orch):
 
 def test_full_is_only_sent_after_the_yes_dialog():
     """The page asks (Yes/No) before it sends Full, and the op itself refuses Full without confirm."""
-    js = (Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "web" / "app.js").read_text()
+    js = webjs.all_js()
     sender = js[js.index("const mode = perm.dataset.settingsPermissions;") :]
     sender = sender[: sender.index("return;\n    }")]
     assert "settingsConfirm(" in sender and "confirm:true" in sender

@@ -1,0 +1,44 @@
+{
+  "why": "F13: same ticket, no reply_to to a group copy: a host-only note, never fanned out.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_phoneprivate0000",
+    "from": "ph_own0000001",
+    "to": "ws_fin0000001",
+    "type": "text",
+    "created_at": "2026-11-08T10:03:00Z",
+    "ticket": "t_fin14a",
+    "body": {
+      "client_id": "0f8e9a3c-2b1d-4c5e-9f70-112233445567",
+      "text": "Just between us: check the joint account."
+    }
+  },
+  "context": {
+    "host_state": {
+      "ticket": "t_fin14a",
+      "members": [
+        "ws_fin0000001",
+        "ws_hom0000001",
+        "ws_ban0000001"
+      ],
+      "delegates_sent": {
+        "ws_hom0000001": [
+          "m_delegatehome0000"
+        ],
+        "ws_ban0000001": [
+          "m_delegatebank0000"
+        ]
+      },
+      "task_status": {
+        "m_delegatehome0000": "queued"
+      },
+      "group_copies": [
+        "m_groupcopy0000000"
+      ],
+      "closed": false
+    }
+  },
+  "expect": {
+    "group_text": false
+  }
+}

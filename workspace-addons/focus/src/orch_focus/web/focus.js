@@ -23,7 +23,18 @@
     for (const kid of kids.flat()) if (kid != null) el.append(kid);
     return el;
   }
-  const STATUS_WORD = {open: 'To do', active: 'Doing', waiting: 'Needs you', done: 'Done', dropped: 'Dropped'};
+  function helpPanel() {
+    const keys = groups => groups.map(([heading, rows]) => h('section', {}, h('h3', {text: heading}), h('dl', {}, rows.map(([label, key]) => h('div', {}, h('dt', {text: label}), h('dd', {}, h('kbd', {text: key})))))));
+    return h('div', {class: 'fx-help', id: 'fx-help', hidden: true}, h('div', {class: 'fx-help-card', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'fx-help-t'},
+      h('p', {class: 'meta', text: 'Focus help'}), h('div', {class: 'row'}, h('h2', {id: 'fx-help-t', class: 'grow', text: 'A few useful keys'}), h('button', {class: 'btn ghost icon', 'data-act': 'help', 'aria-label': 'Close', icon: 'x'})),
+      h('p', {class: 'meta', text: 'Everything is also a click away.'}), h('div', {class: 'fx-help-grid'}, keys([
+        ['Move around', [['Show help', '?'], ['Close a panel', 'Esc'], ['Next control', 'Tab'], ['Show or hide tasks', '['], ['Full screen', 'F'], ['Live · Results', '1 / 2']]],
+        ['Write and choose', [['Write a message', '/'], ['Send a message', 'Enter'], ['Choose a button', 'Space'], ['Stop or continue', 'S'], ['Next or previous task', 'J / K']]],
+      ]))));
+  }
+  // Own copy of the dashboard status words; started + idle is Paused.
+  const STATUS_WORD = {open: 'Not started', ready: 'Not started', active: 'Working', waiting: 'Needs you', review: 'Ready for review', done: 'Done', dropped: 'Dropped'};
+  const statusWord = t => (t.started && ['open', 'ready', 'idle'].includes(t.status)) ? 'Paused' : STATUS_WORD[t.status] || 'Not started';
   const toast = (text, kind) => (window.orch ? window.orch.toast(text, kind) : null);
   const proof = window.FocusProof.create({h, ic, P, TID, toast});
 
@@ -39,19 +50,45 @@
   /* ---- ticket picker (no ticket in the address) ---- */
   if (!TID) {
     document.title = 'Focus · orch';
-    root.append(h('div', {class: 'fx-pick'}, h('h1', {text: 'Focus'}), h('p', {class: 'meta', text: 'Pick a ticket to watch.'})));
-    fetch(P + '/api/tickets').then(r => r.json()).then(list => {
+    root.classList.add('fx-picker');
+    root.append(h('header', {class: 'fx-top'}, h('span', {class: 'meta fx-workspace', text: 'Focus'}), h('button', {class: 'btn ghost sm', 'data-act': 'help', text: 'Help'})),
+      h('main', {class: 'fx-pick'}, h('p', {class: 'eyebrow', text: 'One ticket at a time'}), h('h1', {text: 'Where shall we focus?'}), h('p', {class: 'meta', text: 'Choose a ticket to take its next step.'})));
+    fetch(P + '/api/tickets').then(r => { if (!r.ok) throw Error(); return r.json(); }).then(payload => {
+      const list = payload.tickets;
+      root.querySelector('.fx-workspace').textContent = payload.workspace + ' / Focus';
+      root.querySelector('.fx-pick > .meta').textContent = window.FocusHelpers.attentionText(list);
       const box = root.querySelector('.fx-pick');
       if (!list.length) box.append(h('p', {class: 'muted', text: 'No open tickets.'}));
-      for (const t of list.slice().sort((a, b) => Number(a.status === 'done') - Number(b.status === 'done'))) box.append(h('a', {href: P + '/t/' + t.id}, h('span', {class: 'mono key', text: t.key || t.id}), h('span', {class: 'grow', text: t.title}), h('span', {class: 'meta', text: STATUS_WORD[t.status] || t.status})));
+      const groups = [['waiting', 'Needs you', 'Answer'], ['review', 'Check result', 'Check'], ['active', 'Working', 'Watch'], ['ready', 'Ready to start', 'Start'], ['open', 'To do', 'Start'], ['done', 'Done', 'View']];
+      for (const [status, label, action] of groups) {
+        const rows = list.filter(t => t.status === status);
+        if (!rows.length) continue;
+        box.append(h('section', {class: 'fx-pick-group fx-group-' + status}, h('h2', {}, label + ' ', h('span', {class: 'meta', text: '(' + rows.length + ')'})),
+          h('div', {class: 'card'}, rows.map(t => {
+            const next = t.next_step || action;
+            return h('a', {href: P + '/t/' + t.id + (status === 'review' ? '#results' : '')},
+              h('div', {class: 'grow'}, h('span', {class: 'mono key', text: t.key || t.id}), h('strong', {text: t.title}),
+                h('small', {text: 'Next step · ' + next})), h('span', {class: 'row-action', text: next}));
+          }))));
+      }
+    }).catch(() => root.querySelector('.fx-pick').append(h('p', {role: 'alert', text: 'Could not load tickets. Reload to try again.'})));
+    const help = helpPanel(); root.append(help);
+    const helpButton = root.querySelector('[data-act=help]');
+    const toggle = on => { help.hidden = !on; (on ? help.querySelector('button') : helpButton).focus(); };
+    root.addEventListener('click', e => { if (e.target.closest('[data-act=help]')) toggle(help.hidden); else if (e.target === help) toggle(false); });
+    document.addEventListener('keydown', e => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest('input,textarea,select')) return;
+      if (e.key === '?') { e.preventDefault(); toggle(help.hidden); }
+      if (!help.hidden && ['Escape', 'x', 'X'].includes(e.key)) toggle(false);
+      if (!help.hidden && e.key === 'Tab') { e.preventDefault(); help.querySelector('button').focus(); }
     });
     return;
   }
 
   /* ---- skeleton ---- */
   const els = {};
-  let view = null, sel = 0, firstRender = true, shownQs = new Map(), lastFeedKey = '', tab = 0, helpOpen = false;
-  const STATE = {needs: 'needs you', waiting: 'waiting for a message', stopped: 'stopped', done: 'done'};
+  let view = null, sel = 0, firstRender = true, shownQs = new Map(), lastFeedKey = '', tab = 0, changesRequested = false;
+  const STATE = {needs: 'Needs you', waiting: 'Paused', stopped: 'Paused', done: 'Done'};
 
   function build() {
     els.rail = h('button', {class: 'btn ghost icon sm', 'data-act': 'rail', 'aria-label': 'Show or hide tasks', 'aria-expanded': 'true', title: 'Tasks ( [ )', icon: 'table'});
@@ -60,7 +97,7 @@
     els.count = h('span', {text: ''});
     els.bar = h('span');
     els.prog = h('div', {class: 'progress', role: 'progressbar', 'aria-label': 'Tasks done', 'aria-valuemin': '0'}, els.bar);
-    els.agent = h('b', {text: 'Agent'});
+    els.agent = h('b', {text: ''});
     els.stateText = h('span', {text: ''});
     els.time = h('span', {class: 't', text: ''});
     els.live = h('span', {class: 'fx-live', role: 'status', 'aria-live': 'polite'}, h('span', {class: 'fx-dot'}), els.agent, els.stateText, els.time);
@@ -71,42 +108,46 @@
     els.fresh = h('button', {class: 'btn ghost sm opt', 'data-act': 'fresh', title: 'Start again without the earlier conversation', text: 'Start fresh instead', hidden: true});
     els.attachBtn = h('button', {class: 'btn ghost sm', 'data-act': 'attach', title: 'Open the live session', hidden: true}, h('span', {icon: 'external'}), h('span', {class: 'opt', text: 'Open live session'}));
     els.full = h('button', {class: 'btn ghost icon sm', 'data-act': 'full', 'aria-label': 'Full screen', 'aria-pressed': 'false', title: 'Full screen (F)', icon: 'expand'});
-    els.helpBtn = h('button', {class: 'btn ghost icon sm', 'data-act': 'help', 'aria-label': 'Keyboard shortcuts', title: 'Shortcuts (?)'}, h('kbd', {text: '?'}));
-    const top = h('header', {class: 'fx-top'}, els.rail, h('div', {class: 'fx-title'}, els.key, els.title), h('div', {class: 'fx-prog'}, els.count, els.prog), els.live,
-      h('div', {class: 'fx-tools'}, els.answer, els.stop, els.fresh, els.attachBtn, h('span', {class: 'sep opt'}), els.full, els.helpBtn, h('a', {class: 'btn ghost sm', href: INAPP ? '/#ticket/' + TID : '/', target: INAPP ? '_top' : '_self', title: INAPP ? 'Back to the ticket' : 'All tickets'}, h('span', {icon: 'x'}), h('span', {class: 'opt', text: 'Exit'}))));
+    els.helpBtn = h('button', {class: 'btn ghost icon sm fx-help-btn', 'data-act': 'help', 'aria-label': 'Keyboard shortcuts', title: 'Shortcuts (?)'}, h('kbd', {text: '?'}));
+    els.more = h('details', {class: 'fx-more'}, h('summary', {'aria-label': 'More actions', text: '⋯'}), h('div', {}, els.fresh, els.attachBtn, els.full));
+    els.phoneInput = h('input', {type: 'checkbox', role: 'switch'});
+    els.phone = h('label', {class: 'fx-phone', hidden: true}, els.phoneInput, 'Send questions to my phone');
+    els.steps = h('div', {class: 'fx-stepper'});
+    const top = h('header', {class: 'fx-top'}, els.rail, h('div', {class: 'fx-title'}, h('div', {class: 'meta'}, 'Focus / ', els.key), els.title, els.steps), h('div', {class: 'fx-prog'}, els.count, els.prog), els.live,
+      h('div', {class: 'fx-tools'}, els.stop, els.phone, els.more, els.helpBtn, h('a', {class: 'btn ghost sm fx-exit', 'aria-label': 'Exit Focus', href: INAPP ? '/#ticket/' + TID : '/', target: INAPP ? '_top' : '_self', title: INAPP ? 'Back to the ticket' : 'All tickets'}, h('span', {icon: 'x'}), h('span', {class: 'opt', text: 'Exit'}))));
     els.tasks = h('div', {id: 'fx-tasks'});
     els.helpers = h('div');
     els.railNote = h('p', {class: 'meta', style: false});
     els.addInput = h('input', {class: 'input', type: 'text', maxlength: '500', placeholder: '+ Add task', 'aria-label': 'Add a task', name: 'task'});
     els.addForm = h('form', {class: 'fx-add-task'}, els.addInput, h('button', {class: 'btn ghost xs', text: 'Add'}));
-    const rail = h('aside', {class: 'fx-rail', 'aria-label': 'Tasks'}, h('div', {}, h('p', {class: 'eyebrow'}, h('span', {text: 'Tasks'}), els.railCount = h('span')), els.tasks, els.addForm), els.helpers, els.railNote);
-    els.tabs = [['live', 'Live'], ['proof', 'Proof']].map(([id, label], i) => h('button', {class: 'fx-tab', role: 'tab', id: 'fx-t-' + id, 'aria-controls': 'fx-p-' + id, 'aria-selected': String(i === 0), tabindex: i ? '-1' : '0', title: label + ' (' + (i + 1) + ')', 'data-tab': i, text: label}));
+    const rail = h('aside', {class: 'fx-rail', 'aria-label': 'Tasks'}, h('div', {}, h('p', {class: 'eyebrow'}, h('span', {text: 'Tasks'}), els.railCount = h('span')), els.tasks, h('details', {class: 'fx-add'}, h('summary', {text: '▸ + Add task'}), els.addForm)), els.helpers, els.railNote);
+    els.tabs = [['live', 'Live'], ['proof', 'Results']].map(([id, label], i) => h('button', {class: 'fx-tab', role: 'tab', id: 'fx-t-' + id, 'aria-controls': 'fx-p-' + id, 'aria-selected': String(i === 0), tabindex: i ? '-1' : '0', title: label + ' (' + (i + 1) + ')', 'data-tab': i, text: label}));
     els.sub = h('span', {class: 'meta', text: ''});
     els.feed = h('div', {class: 'fx-feed', role: 'log', 'aria-label': 'What the agent is doing'});
     els.working = h('div', {class: 'fx-working', hidden: true});
     els.line = h('div');
     els.qs = h('div', {class: 'fx-qwrap'});
-    els.paneLive = h('div', {class: 'fx-pane', id: 'fx-p-live', role: 'tabpanel', 'aria-labelledby': 'fx-t-live'}, els.line, els.feed, els.qs, els.working);
+    els.paneLive = h('div', {class: 'fx-pane', id: 'fx-p-live', role: 'tabpanel', 'aria-labelledby': 'fx-t-live'}, els.qs, els.line, els.feed, els.working);
     els.paneProof = h('div', {class: 'fx-pane', id: 'fx-p-proof', role: 'tabpanel', 'aria-labelledby': 'fx-t-proof', hidden: true});
     els.attachBox = h('div', {class: 'fx-attach', hidden: true});
     els.msg = h('textarea', {id: 'fx-msg', rows: '1', placeholder: 'Message the agent…', 'aria-label': 'Message to the agent'});
-    els.form = h('form', {id: 'fx-form'}, els.msg, h('button', {class: 'btn primary sm', 'aria-label': 'Send', icon: 'send'}));
-    els.hint = h('p', {class: 'hint'}, h('span', {}, h('kbd', {text: 'Enter'}), ' send'), h('span', {}, h('kbd', {text: '/'}), ' write'), h('span', {}, h('kbd', {text: '?'}), ' all shortcuts'), els.hintNote = h('span'));
-    els.sent = h('p', {class: 'meta', 'aria-live': 'polite'});
-    const compose = els.compose = h('div', {class: 'fx-compose'}, els.form, els.hint);
-    const dl = [['Full screen', 'F'], ['Show or hide tasks', '['], ['Write a message', '/'], ['Stop or continue', 'S'], ['Live · Proof', '1 2'], ['Next or previous task', 'J K'], ['Close, leave full screen', 'Esc']];
-    els.help = h('div', {class: 'fx-help', id: 'fx-help', hidden: true}, h('div', {class: 'fx-help-card', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'fx-help-t'},
-      h('div', {class: 'row'}, h('h2', {id: 'fx-help-t', class: 'grow', text: 'Shortcuts'}), h('button', {class: 'btn ghost icon xs', 'data-act': 'help', 'aria-label': 'Close', icon: 'x'})),
-      h('dl', {}, dl.map(([t, k]) => h('div', {}, h('dt', {text: t}), h('dd', {}, k.split(' ').map(x => h('kbd', {text: x}))))))));
-    const stage = h('section', {class: 'fx-stage', 'aria-label': 'Agent'}, h('div', {class: 'fx-stage-h', role: 'tablist', 'aria-label': 'Agent view'}, els.tabs, h('span', {class: 'grow'}), els.sub), h('div', {class: 'fx-scan', 'aria-hidden': 'true'}), els.attachBox, els.paneLive, els.paneProof, compose, els.help);
-    root.replaceChildren(top, h('div', {class: 'fx-body'}, rail, stage));
+    els.form = h('form', {id: 'fx-form'}, els.msg, h('button', {class: 'btn sm', 'aria-label': 'Send', text: 'Send ↑'}));
+    els.messageLabel = h('label', {for: 'fx-msg', text: 'Message the agent'});
+    const compose = els.compose = h('div', {class: 'fx-compose'}, els.messageLabel, els.form);
+    els.help = helpPanel();
+    els.review = h('div', {class: 'fx-review', hidden: true}, h('div', {}, h('p', {text: 'Finished. Looks good?'}), h('p', {class: 'meta', text: 'Next step · Check result'})),
+      h('button', {class: 'btn', 'data-act': 'changes', text: 'Ask for changes'}), h('button', {class: 'btn primary', 'data-act': 'done', text: 'Mark Done'}));
+    els.complete = h('div', {class: 'fx-review', hidden: true}, h('p', {text: 'You’re all set here.'}));
+    const stage = h('section', {class: 'fx-stage', 'aria-label': 'Ticket activity'}, h('div', {class: 'fx-stage-h', role: 'tablist', 'aria-label': 'Focus views'}, els.tabs, h('span', {class: 'grow'}), els.sub), h('div', {class: 'fx-scan', 'aria-hidden': 'true'}), els.attachBox, els.paneLive, els.paneProof, compose, els.review, els.complete, els.help);
+    els.mobileTasks = h('button', {class: 'fx-mobile-tasks', 'data-act': 'rail', 'aria-controls': 'fx-tasks', 'aria-expanded': 'false'});
+    root.replaceChildren(top, els.mobileTasks, h('div', {class: 'fx-body'}, rail, stage));
     els.stopIc.innerHTML = ic('pause');
     root.querySelectorAll('[data-icon]').forEach(e => { e.innerHTML = ic(e.dataset.icon); });
   }
 
   /* ---- render ---- */
   const hhmm = at => { try { return new Date(at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hour12: false}); } catch (e) { return ''; } };
-  function evText(c) { const ev = (c.evidence || []).slice(-1)[0]; return ev ? String(ev.summary || ev.text || ev.ref || '') : ''; }
+  const evText = c => window.FocusHelpers.outcome(c);
   // When a proof was added, in the person's own time: "today 16:05", "yesterday 09:12", "5 Nov 09:12".
   function stamp(at) {
     const d = new Date(at), now = new Date();
@@ -122,42 +163,57 @@
   function apply(v) {
     const prev = view;
     view = v;
+    if (prev && prev.ticket.status !== v.ticket.status) changesRequested = false;
     const t = v.ticket;
     document.title = t.title + ' · Focus';
     els.title.textContent = t.title || '';
     els.key.textContent = typeof t.key === 'string' && t.key ? t.key : TID;  /* the short key people use, e.g. DM1-12 */
     root.dataset.state = v.state;
     if (prev && !root.hasAttribute('data-live')) root.setAttribute('data-live', '');  /* motion only after a live change */
-    els.agent.textContent = v.run.agent === 'agent' ? 'Agent' : v.run.agent.charAt(0).toUpperCase() + v.run.agent.slice(1);
-    els.stateText.textContent = v.state === 'working' ? (v.generic ? 'running' : 'working') : STATE[v.state];
+    els.agent.textContent = v.run.label || 'agent';
+    els.stateText.textContent = v.state === 'working' ? 'Working' : v.state === 'stopped' ? (t.status === 'review' ? STATUS_WORD.review : t.started || v.run.run ? 'Paused' : statusWord(t)) : STATE[v.state];
+    const phase = window.FocusHelpers.phase(v);
+    els.steps.replaceChildren(...['Plan', 'Work', 'Check', 'Done'].map((name, i) => h('span', {'aria-current': i === phase ? 'step' : null, text: name})));
+    els.phone.hidden = v.capabilities?.phone_mode !== true;
+    els.phoneInput.checked = v.phone_mode === true;
+    els.phoneInput.title = 'Send questions to my phone';
+    els.mobileTasks.textContent = 'Tasks ' + v.done + '/' + v.total;
+    els.review.querySelector('p').textContent = els.agent.textContent + ' finished — check the result';
     els.count.textContent = v.done + ' of ' + v.total;
     els.bar.style.width = (v.total ? Math.round(v.done / v.total * 100) : 0) + '%';
     els.prog.setAttribute('aria-valuemax', String(v.total));
     els.prog.setAttribute('aria-valuenow', String(v.done));
-    els.railCount.textContent = v.done + '/' + v.total;
+    els.railCount.textContent = v.total ? v.done + ' of ' + v.total : '0';
     const running = v.run.running;
+    const hasStarted = t.started || v.run.run || ['review', 'done'].includes(t.status);
     els.stopIc.innerHTML = ic(running ? 'pause' : 'play');
     els.stopL.textContent = running ? 'Stop' : 'Continue';
-    els.compose.hidden = v.state === 'done' && !running;  /* a done ticket is a read-only board; Continue starts a run */
+    els.compose.hidden = v.state === 'done' || (tab === 1 && t.status === 'review' && !changesRequested);  /* a done ticket is a read-only board; Continue starts a run */
     /* an open question: Answer is the main action; Continue and Start fresh wait until it is answered */
     const asking = v.ticket.questions.some(q => q.answer == null);
     els.answer.hidden = !asking;
-    els.stop.hidden = asking && !running;
-    els.fresh.hidden = running || asking;
+    if (!running) els.more.lastElementChild.prepend(els.stop); else els.phone.before(els.stop);
+    els.stop.hidden = (asking && !running) || (!running && !hasStarted);
+    els.fresh.hidden = running || asking || !hasStarted;
+    els.review.hidden = tab !== 1 || t.status !== 'review' || asking || running;
+    els.complete.hidden = v.state !== 'done';
     els.attachBtn.hidden = !(running && v.live);
-    els.sub.textContent = running ? (v.live ? 'live session' : 'one run') : (v.state === 'done' ? 'done' : v.run.run ? 'last run ended' : 'not started');
+    els.sub.textContent = '';
     els.msg.placeholder = 'Message ' + els.agent.textContent + '…';
-    els.hintNote.textContent = v.generic && !(running && v.live) ? 'Saved for the next run.' : (running ? 'Goes in after this step.' : '');
-    els.railNote.textContent = v.generic ? 'This agent shows its tasks and questions as it ticks them off.' : '';
+    els.msg.setAttribute('aria-label', 'Message ' + els.agent.textContent);
+    els.feed.setAttribute('aria-label', 'What ' + els.agent.textContent + ' is doing');
+    els.messageLabel.textContent = 'Message ' + els.agent.textContent;
+    els.railNote.textContent = '';
     renderTasks(v);
     renderHelpers(v);
     renderFeed(v, !firstRender);
     renderQuestions(v);
     renderProof(v);
     renderLine(v);
-    els.working.hidden = !(running && v.board.step);
+    els.working.hidden = true;
     els.working.replaceChildren(...(running && v.board.step ? [h('span', {class: 'fx-dot'}), h('span', {text: v.board.step})] : []));
     tickTimer();
+    if ((firstRender && (['review', 'done'].includes(t.status) || location.hash === '#results')) || (t.status === 'done' && prev?.ticket.status !== 'done')) els.tabs[1].click();
     firstRender = false;
   }
 
@@ -171,13 +227,13 @@
     els.tasks.replaceChildren(...checks.flatMap((c, i) => {
       const cls = c.done ? 'done' : (c.state === 'doing' ? 'doing' : '');
       const row = h('button', {class: 'fx-task ' + cls, 'data-task': String(i), 'aria-current': String(i === (sel === 0 && doing >= 0 && !els.tasks.dataset.picked ? doing : sel))},
-        h('span', {class: 'st', icon: c.done ? 'check' : false}), h('span', {}, h('span', {class: 'tt', text: c.text}), h('span', {class: 'sub', text: c.done ? evText(c) : (c.state === 'doing' ? 'working on it' : '')})));
+        h('span', {class: 'st', icon: c.done ? 'check' : false}), h('span', {}, h('span', {class: 'tt', text: c.text}), h('span', {class: 'sub', text: evText(c)})));
       row.addEventListener('click', () => { sel = i; els.tasks.dataset.picked = '1'; els.tasks.dataset.k = ''; renderTasks(view); });
       const out = [row];
       if (els.tasks.dataset.picked && i === sel) out.push(taskTools(c, i, checks));
       return out;
     }));
-    if (!checks.length) els.tasks.append(h('p', {class: 'meta', text: 'No tasks yet.'}));
+    if (!checks.length) els.tasks.append(h('p', {class: 'meta', text: 'No tasks yet'}));
   }
 
   function taskTools(c, i, checks) {
@@ -234,54 +290,87 @@
     return items.slice(-80);
   }
 
-  function renderFeed(v, animate) {
-    const items = feedItems(v);
-    const key = keyOf(items.map(i => [i.at, i.text]));
+  function renderFeed(v) {
+    const key = keyOf([v.ticket.checklist, v.state, v.run.running, v.run.run, v.ticket.started, v.board.step, v.events, v.ticket.history]);
     if (key === lastFeedKey) return;
-    const oldN = els.feed.children.length;
     lastFeedKey = key;
-    els.feed.replaceChildren(...items.map((it, i) => {
-      const fresh = animate && !reduce && i >= oldN && i === items.length - 1;
-      return h('div', {class: 'fx-step' + (i === items.length - 1 && v.run.running ? ' now' : '') + (fresh ? ' enter' : '')}, h('time', {text: hhmm(it.at)}), h('span', {class: 'ic' + (it.ok ? ' good' : ''), icon: it.icon}), h('div', {}, h('span', {class: 'what', text: it.text})));
-    }));
-    if (!items.length) els.feed.append(h('p', {class: 'fx-empty muted', text: v.run.running ? 'Waiting for the first step…' : 'Nothing has happened yet. Press Continue to start the agent.'}));
-    els.paneLive.scrollTop = els.paneLive.scrollHeight;
+    const asking = v.ticket.questions.some(q => q.answer == null);
+    const checks = v.ticket.checklist;
+    if (!v.run.running && !v.run.run && !v.ticket.started && v.state !== 'done' && !asking && !checks.length) {
+      els.feed.replaceChildren(h('div', {class: 'fx-start'}, h('span', {class: 'empty-symbol', text: '◌'}),
+        h('h2', {text: 'Give ' + els.agent.textContent + ' the first step'}),
+        h('p', {text: els.agent.textContent + ' hasn’t started yet. Start it and watch it plan the tasks here.'}),
+        h('p', {class: 'meta', text: 'Next step · Start ' + els.agent.textContent}), h('button', {class: 'btn primary', 'data-act': 'stop', text: 'Start ' + els.agent.textContent})));
+      return;
+    }
+    const story = checks.filter(c => c.done || c.state === 'doing');
+    const heading = asking ? 'Before the question' : v.state === 'done' ? 'Work completed' : v.run.running ? 'The work is taking shape' : 'Work so far';
+    const nodes = [h('h2', {text: heading})];
+    if (!asking) nodes.push(h('p', {class: 'meta', text: v.done + ' of ' + v.total + ' tasks finished.'}));
+    for (const c of story) nodes.push(h('article', {class: 'fx-story' + (!c.done && v.run.running ? ' now' : '')},
+      h('h3', {text: (c.done ? '✓ ' : v.run.running ? 'Now: ' : '') + c.text}),
+      h('p', {text: evText(c) || (!c.done && v.run.running ? v.board.step || 'Working on this task.' : '')})));
+    if (v.run.running && !story.some(c => !c.done)) nodes.push(h('article', {class: 'fx-story now'}, h('h3', {text: v.board.step || 'Waiting for the first step…'})));
+    if (!v.run.running && !asking && v.state !== 'done' && v.ticket.status !== 'review' && !v.ticket.started && !v.run.run) nodes.push(h('button', {class: 'btn primary', 'data-act': 'stop', text: 'Start ' + els.agent.textContent}));
+    const details = h('details', {class: 'fx-history'}, h('summary', {text: 'Details'}));
+    for (const it of feedItems(v)) details.append(h('div', {class: 'fx-step'}, h('time', {text: hhmm(it.at)}), h('span', {icon: it.icon}), h('span', {text: it.text})));
+    nodes.push(details);
+    els.feed.replaceChildren(...nodes);
   }
 
+  let prevQuestionLabel;
   function renderQuestions(v) {
     const open = v.ticket.questions.filter(q => q.answer == null);
+    if (prevQuestionLabel !== v.run.label) { for (const card of shownQs.values()) card.node.remove(); shownQs.clear(); prevQuestionLabel = v.run.label; }
     const ids = new Set(open.map(q => q.id));
     for (const [id, card] of shownQs) if (!ids.has(id)) { card.node.remove(); shownQs.delete(id); }
     for (const q of open) {
-      if (shownQs.has(q.id)) continue;
+      // m1-api question fields: sent_to_phone or delivered, strict booleans only.
+      const delivered = q.sent_to_phone === true;
+      if (shownQs.has(q.id)) { shownQs.get(q.id).receipt.hidden = !delivered; continue; }
       const node = h('div', {'data-row': '', class: 'fx-ask-wrap'});
       els.qs.append(node);
       const options = (q.options || []).map(o => ({text: o, suggested: o === q.recommended}));
-      const question = {ticket: TID, key: typeof v.ticket.key === 'string' ? v.ticket.key : undefined, id: q.id, title: (els.agent.textContent || 'The agent') + ' asks', text: q.text, options};
+      const question = {ticket: TID, key: typeof v.ticket.key === 'string' ? v.ticket.key : undefined, id: q.id, title: q.text, text: els.agent.textContent + ' waits for you. After you answer it continues in the same conversation.', options};
       if (window.QuestionCard) {
         window.QuestionCard.mount(node, question, {send: async (answer) => {
           const r = await act('answer', {ticket: TID, question: q.id, answer});
           return r.ok ? {status: 200, who: 'you', via: 'focus'} : {status: r.status === 409 ? 409 : (r.status || 0), message: r.message};
         }});
       }
-      shownQs.set(q.id, {node});
+      const own = node.querySelector('.qoptions .quiet');
+      if (own) own.textContent = 'Write your own…';
+      const card = node.querySelector('.qcard');
+      if (card) card.prepend(h('p', {class: 'meta', text: 'Next step · Answer ' + els.agent.textContent}));
+      const receipt = h('span', {class: 'fx-receipt', hidden: !delivered, title: 'Also sent to your phone', 'aria-label': 'Also sent to your phone', role: 'img'});
+      receipt.innerHTML = '<svg width=16 height=16 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.5 aria-hidden=true><rect x=7 y=2 width=10 height=20 rx=2 /><path d="M10 18h4" /></svg>';
+      (card || node).append(receipt);
+      shownQs.set(q.id, {node, receipt});
       if (!firstRender && window.orch) window.orch.needsIn(node);
     }
   }
 
   function renderProof(v) {
     proof.setPageKey(v.page_key);
+    proof.setAgent(v.run.label || 'agent');
     const done = v.ticket.checklist.filter(c => c.done);
     const list = [];
     for (const c of done) for (const ev of c.evidence || []) list.push({c, ev});
-    const key = keyOf(list.map(x => [x.c.id, x.ev.ref, x.ev.title, x.ev.text, x.ev.by, x.ev.at]));
-    els.tabs[1].textContent = 'Proof';
+    const key = keyOf([v.ticket.status, v.ticket.closed_at, v.ticket.history, v.run.label, list]);
+    els.tabs[1].textContent = 'Results';
     if (list.length) els.tabs[1].append(h('sup', {text: ' ' + list.length}));
     if (key === els.paneProof.dataset.k) return;
     els.paneProof.dataset.k = key;
-    els.paneProof.replaceChildren(list.length
-      ? h('div', {class: 'fx-chips'}, list.map((item, i) => proof.tile(item, from => proof.open(list, i, from))))
-      : h('p', {class: 'fx-empty muted', text: 'Proof shows here when a task is done.'}));
+    const files = list.filter(x => x.ev.type !== 'note');
+    const primary = files[files.length - 1] || list[list.length - 1];
+    const content = h('div', {class: 'fx-results'}, h('h2', {text: v.state === 'done' ? 'Work completed' : list.length ? 'Ready for your look' : 'No results yet'}),
+      h('p', {class: 'meta', text: list.length ? v.ticket.title : 'Results will appear here when a task is done.'}));
+    const completed = window.FocusHelpers.completedAt(v.ticket);
+    if (v.state === 'done' && completed) content.append(h('p', {class: 'meta', text: 'Completed ' + stamp(completed).replace(/ (\d\d:)/, ' at $1')}));
+    if (primary) content.append(proof.tile(primary, from => proof.open(list, list.indexOf(primary), from)));
+    for (const c of done) content.append(h('p', {class: 'fx-result-note', text: '✓ ' + c.text + ' — ' + evText(c)}));
+    if (files.length) content.append(h('details', {}, h('summary', {text: 'Details'}), files.map(({c, ev}) => h('p', {class: 'meta', text: c.text + ' · ' + String(ev.ref || '').split('/').pop() + (ev.summary ? ' · ' + ev.summary : '')}))));
+    els.paneProof.replaceChildren(content);
   }
 
   function renderLine(v) {
@@ -333,15 +422,22 @@
       else { if (document.fullscreenElement) { try { await document.exitFullscreen(); } catch (e) { /* ignore */ } } markFull(false); }
     };
     document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && root.classList.contains('is-full')) markFull(false); });
-    const toggleRail = () => { const closed = root.classList.toggle('rail-closed'); els.rail.setAttribute('aria-expanded', String(!closed)); };
-    if (matchMedia('(max-width: 720px)').matches) toggleRail();
-    const toggleHelp = force => { els.help.hidden = force === undefined ? !els.help.hidden : !force; if (!els.help.hidden) els.help.querySelector('button').focus(); };
-    const selectTab = i => els.tabs.forEach((b, j) => { const on = i === j; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; document.getElementById(b.getAttribute('aria-controls')).hidden = !on; });
+    const toggleRail = () => { const closed = root.classList.toggle('rail-closed'); els.rail.setAttribute('aria-expanded', String(!closed)); els.mobileTasks.setAttribute('aria-expanded', String(!closed)); };
+    const narrow = matchMedia('(max-width: 720px)');
+    if (narrow.matches) toggleRail();
+    narrow.addEventListener('change', e => { root.classList.toggle('rail-closed', e.matches); els.rail.setAttribute('aria-expanded', String(!e.matches)); els.mobileTasks.setAttribute('aria-expanded', String(!e.matches)); });
+    const toggleHelp = force => { els.help.hidden = force === undefined ? !els.help.hidden : !force; if (!els.help.hidden) els.help.querySelector('button').focus(); else els.helpBtn.focus(); };
+    const selectTab = i => { tab = i; els.review.hidden = i !== 1 || view?.ticket.status !== 'review' || view?.run.running || view?.state === 'needs'; els.compose.hidden = view?.state === 'done' || (i === 1 && view?.ticket.status === 'review' && !changesRequested); els.tabs.forEach((b, j) => { const on = i === j; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; document.getElementById(b.getAttribute('aria-controls')).hidden = !on; }); };
     els.tabs.forEach((b, i) => b.addEventListener('click', () => selectTab(i)));
     root.addEventListener('click', e => {
       const a = e.target.closest('[data-act]')?.dataset.act;
       if (a === 'rail') toggleRail(); else if (a === 'full') setFull(!root.classList.contains('is-full')); else if (a === 'help') toggleHelp();
       else if (a === 'answer') focusQuestion(); else if (a === 'stop') stopToggle(); else if (a === 'fresh') startFresh(); else if (a === 'attach') showAttach();
+      else if (a === 'changes') { changesRequested = true; els.compose.hidden = false; els.msg.placeholder = 'What would you like changed?'; els.msg.focus(); }
+      else if (a === 'done') {
+        const button = e.target.closest('button'); button.disabled = true;
+        act('ticket.done', {ticket: TID, if_revision: view.ticket.revision}).then(r => { button.disabled = false; if (!r.ok) toast(r.message, 'error'); });
+      }
       if (e.target === els.help) toggleHelp(false);
     });
     const grow = () => { els.msg.style.height = 'auto'; els.msg.style.height = Math.min(els.msg.scrollHeight, 120) + 'px'; };
@@ -367,14 +463,22 @@
       els.addInput.value = '';
       toast('Task added', 'ok');
     });
+    els.phoneInput.addEventListener('change', async () => {
+      els.phoneInput.disabled = true;
+      try { const r = await act('mobile.set', {on: els.phoneInput.checked}); if (!r.ok) toast(r.message, 'error'); await poll(); }
+      finally { els.phoneInput.disabled = false; }
+    });
     let cur = 0;
     document.addEventListener('keydown', e => {
       if (e.metaKey || e.ctrlKey || e.altKey || proof.isOpen()) return;
       if (e.target.closest('input,textarea,select')) return;
       const k = e.key;
-      if (k === 'Escape') { if (!els.help.hidden) toggleHelp(false); else if (root.classList.contains('is-full')) setFull(false); return; }
+      if (k === 'Escape' || (!els.help.hidden && k.toLowerCase() === 'x')) { if (!els.help.hidden) toggleHelp(false); else if (root.classList.contains('is-full')) setFull(false); return; }
       if (k === '?') { e.preventDefault(); toggleHelp(); return; }
-      if (!els.help.hidden) return;
+      if (!els.help.hidden) {
+        if (k === 'Tab') { e.preventDefault(); els.help.querySelector('button').focus(); }
+        return;
+      }
       if (k === 'f' || k === 'F') setFull(!root.classList.contains('is-full'));
       else if (k === '[') toggleRail();
       else if (k === '/') { e.preventDefault(); els.msg.focus(); }

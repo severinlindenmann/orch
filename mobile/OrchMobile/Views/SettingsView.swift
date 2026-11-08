@@ -91,7 +91,7 @@ struct SettingsView: View {
                                 }.buttonStyle(PressStyle()).accessibilityIdentifier("auto-archive-days")
                                     .accessibilityLabel("Archive after").accessibilityValue("\(model.archive.autoDays) days")
                             }
-                            Text("Only finished (Done) chats with no new message move to Archived. Chats waiting for you, in Review, and General never do. A new message brings a chat back.")
+                            Text("Only finished (Done) chats with no new message move to Archived. Chats waiting for you, in Review, and Chat never do. A new message brings a chat back.")
                                 .themeFont(13).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                                 .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 16)
                         }

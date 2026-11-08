@@ -62,7 +62,7 @@ extension View {
             Button("Delete chat", role: .destructive) { if let c = id.wrappedValue { onDelete(c) }; id.wrappedValue = nil }.accessibilityIdentifier("delete-confirm")
             Button("Cancel", role: .cancel) { id.wrappedValue = nil }
         } message: {
-            Text(isGeneral ? "This erases General on this phone. It cannot be undone."
+            Text(isGeneral ? "This erases Chat on this phone. It cannot be undone."
                            : "The messages leave this phone. The ticket and its history stay in your workspace and on the dashboard.")
         }
     }

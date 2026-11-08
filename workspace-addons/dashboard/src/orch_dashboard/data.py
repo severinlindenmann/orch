@@ -249,7 +249,12 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                 {
                     "name": a["name"],
                     "dashboard": d
-                    and {"label": d["label"][:16], "icon": d["icon"], "order": d.get("order", 50)},
+                    and {
+                        "label": d["label"][:24],
+                        "icon": d["icon"],
+                        "order": d.get("order", 50),
+                        "panel": d.get("panel") if d.get("panel") in ("repeats", "links", "phone") else None,
+                    },
                     "ticket_view": tv,
                     "page": pg and {"path": pg["path"], "label": str(pg.get("label") or "")[:40]},
                     "ticket_fields": tf,

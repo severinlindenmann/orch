@@ -342,15 +342,18 @@ def test_only_human_pending_input_is_offered_to_start_a_run(proj, run, monkeypat
     system = (("orch", "message"), ("agent:automation", "event"), ("human:t", "event"), ("watch", "text"))
     for by, kind in system:
         assert runs.pending_add(proj, tid, by, kind, "system note")["human"] is False  # system writers
-    for by in ("orch", "automation:loop", "agent:relay"):  # the word "phone" alone never makes it a person's
+    # the word "phone" alone never makes it a person's: only the relay's phone id does
+    names = ("orch", "automation:loop", "agent:relay", "watch", "", "automation", "Pilatus", "iPhone")
+    for by in names:
         assert runs.pending_add(proj, tid, by, "message", "relayed", via="phone")["human"] is False
+    assert runs.pending_add(proj, tid, "human:", "message", "empty name")["human"] is False
     forged = runs.pending_add(proj, tid, "agent:claude", "message", "x")
     items = runs._pending_read(proj, tid)
     next(i for i in items if i["id"] == forged["id"])["human"] = True  # a flag set by hand is not trusted
     runs._pending_write(proj, tid, items)
     assert runs.human_waiting(proj, tid) == []
     human = runs.pending_add(proj, tid, "human:owner", "answer", "Blue")
-    phone = runs.pending_add(proj, tid, "iPhone", "message", "and dessert", via="phone")
+    phone = runs.pending_add(proj, tid, "iPhone", "message", "and dessert", via="phone", phone="ph_abc123")
     assert [i["id"] for i in runs.human_waiting(proj, tid)] == [human["id"], phone["id"]]
     code, out, _ = run("run", "status", tid, "--json")
     assert json.loads(out)["human_pending_ids"] == [human["id"], phone["id"]]

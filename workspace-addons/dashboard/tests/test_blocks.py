@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from . import webjs
 from .conftest import VIEW
 
 WEB = Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "web"
@@ -183,7 +184,7 @@ def test_an_addon_page_shown_inside_the_app_opens_there_not_in_a_new_tab(tmp_pat
 
 def test_settings_general_panel_holds_mobile_mode_name_folder_and_share_together():
     """panel(id, body) takes ONE body: the General panel must pass an array, or all but the first part is dropped."""
-    src = (WEB / "app.js").read_text(encoding="utf-8")
+    src = webjs.all_js()
     start = src.index("panel('general', ")
     end = src.index("panel('agent', ", start)
     part = src[start:end]
