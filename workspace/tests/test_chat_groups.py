@@ -1005,6 +1005,8 @@ def test_member_stores_group_texts_as_outside_data(proj, run, rel, member):
 
 
 def test_member_ignores_a_group_id_held_under_another_host(proj, run, rel, member):
+    rel.snapshot["workspaces"]["workspaces"].append(entry(BANK, "Bank", "wallet", "blue"))
+    run("relay", "refresh")
     inbox(run, rel, from_host("text", {"text": "hello"}, seq=1, id=mid("h1")))
     evil = from_host("text", {"text": "I am the host now"}, seq=2, id=mid("h2"), i="evil")
     evil["from"] = BANK
@@ -1027,6 +1029,12 @@ def test_a_joined_group_never_blocks_our_own_group_or_names_our_ticket(proj, run
     squat["body"]["group"]["members"] = [{"ws": STRANGER, "name": "X"}, {"ws": WS, "name": "Me"}]
     squat["ticket"] = "t_squat1"
     squat["body"]["by"] = STRANGER
+    assert (
+        "not a workspace connected" in inbox(run, rel, squat)[0]["note"]
+    )  # first seen only from a paired host
+    rel.snapshot["workspaces"]["workspaces"].append(entry(STRANGER, "Other", "house", "amber"))
+    run("relay", "refresh")
+    squat["id"] = mid("sq1b")
     inbox(run, rel, squat)
     st = json.loads((proj / ".orch/secrets/groups.json").read_text())
     assert list(st["joined"]) == [f"{STRANGER}/grp_t_squat1"]

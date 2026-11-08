@@ -1479,6 +1479,9 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
     key = _jkey(host, gid)
     j = st["joined"].get(key)
     if j is None:
+        # a group first seen is accepted from its paired host (a workspace in our directory), never from a stranger
+        if _entry(root, host) is None:
+            return _drop(st, m, "the group's host is not a workspace connected to this one")
         j = st["joined"][key] = {
             "host": host,
             "id": gid,
