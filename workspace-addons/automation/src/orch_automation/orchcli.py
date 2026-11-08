@@ -111,6 +111,12 @@ def run_start(root: Path, tid: str, text: str | None = None, agent: str | None =
     return {"result": "failed", "reason": reason[:300]}
 
 
+def run_status(root: Path, tid: str) -> dict | None:
+    """`orch run status <tid> --json`: running, pending_ids (input waiting for a run). None = could not find out."""
+    data = call(root, "run", "status", tid, by=False)
+    return data if isinstance(data, dict) else None
+
+
 def run_running(root: Path, tid: str) -> bool | None:
     """Is a run holding the ticket right now? None = could not find out."""
     data = call(root, "run", "status", tid, by=False)

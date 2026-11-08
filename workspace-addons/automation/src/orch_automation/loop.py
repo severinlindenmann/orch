@@ -180,6 +180,29 @@ class Scheduler:
                 started.append(t["id"])
         return started
 
+    def queued_input(self, now: datetime) -> list[str]:
+        """Only the automation host starts runs for queued input; the run wrapper never starts runs.
+        A Ready ticket with input waiting for a run (a person's answer or message that came after its agent
+        stopped) and no run gets one run, at most once per input item. The ids are saved before the start, so a
+        crash or restart never starts it twice."""
+        started = []
+        state = load_state(self.root)
+        for t in read_tickets(self.root):
+            if t.get("status") != "ready":
+                continue
+            st = orchcli.run_status(self.root, t["id"])
+            if not st or st.get("running") is not False:
+                continue
+            ids = [i for i in st.get("pending_ids") or [] if isinstance(i, str)]
+            done = [i for i in state.get(t["id"], {}).get("queued_started") or [] if isinstance(i, str)]
+            new = [i for i in ids if i not in done]
+            if not new:
+                continue
+            update_state(self.root, t["id"], queued_started=[*done, *new][-200:])  # first: never twice
+            if self.start_run(t["id"], "input was waiting for it", now, phone=True) == "started":
+                started.append(t["id"])
+        return started
+
     # -- pass ---------------------------------------------------------------
     def tick(self, now: datetime) -> list[str]:
         """One pass. Returns the ticket ids a run was started for."""
@@ -187,6 +210,7 @@ class Scheduler:
         self.check_watch()
         started: list[str] = self.act_on_answers(now)
         started += self.phone_tickets(now)
+        started += [t for t in self.queued_input(now) if t not in started]
         state = load_state(self.root)
         for t in read_tickets(self.root):
             tid = t["id"]

@@ -271,3 +271,27 @@ def test_a_finished_repeat_runs_again_and_is_opened(ws):
     cs = [c["args"] for c in calls(ws)]
     assert ["ticket", "status", "t_rec00009", "open"] in [a[:4] for a in cs]
     assert not any(a[:3] == ["run", "start", "t_done0001"] for a in cs)
+
+
+def test_a_ready_ticket_with_queued_input_gets_exactly_one_run(ws):
+    """Only the automation host starts runs for queued input: a live session ended with a person's answer
+    still waiting -> the ticket is Ready with that input queued -> one run, once per input item."""
+    add_ticket(ws, "t_queue001", status="ready")
+    (ws / "ended-t_queue001").write_text("")
+    (ws / "pending-t_queue001").write_text(json.dumps(["p_answer0001"]))
+    # a fresh Scheduler per pass: the fake run "ends" at once, which the fast-fail watch would report
+    assert Scheduler(ws).tick(T(8)) == ["t_queue001"]
+    assert Scheduler(ws).tick(T(8, 1)) == [] and Scheduler(ws).tick(T(8, 2)) == []  # same item: never again
+    (ws / "pending-t_queue001").write_text(json.dumps(["p_answer0001", "p_message002"]))
+    assert Scheduler(ws).tick(T(8, 3)) == ["t_queue001"]  # a new item: one more run
+    starts = [c["args"] for c in calls(ws) if c["args"][:2] == ["run", "start"]]
+    assert len(starts) == 2 and all("--mode" not in a for a in starts)
+
+
+def test_queued_input_on_a_running_or_not_ready_ticket_starts_nothing(ws):
+    add_ticket(ws, "t_queue002", status="ready")  # a run holds it (no ended- file)
+    (ws / "pending-t_queue002").write_text(json.dumps(["p_x00000001"]))
+    add_ticket(ws, "t_queue003", status="waiting")
+    (ws / "ended-t_queue003").write_text("")
+    (ws / "pending-t_queue003").write_text(json.dumps(["p_x00000002"]))
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []

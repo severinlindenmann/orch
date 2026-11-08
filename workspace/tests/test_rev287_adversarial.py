@@ -137,14 +137,17 @@ def test_settle_orphan_never_flips_a_ticket_whose_run_is_claimed(proj, run):
     assert tickets.load(proj, tid)["status"] == "active"
 
 
-def test_settle_orphan_skips_a_ticket_with_queued_input(proj, run):
+def test_settle_orphan_makes_a_runless_ticket_ready_and_keeps_its_queued_input(proj, run):
+    """Changed by the delta-6 decision: a run-less Working ticket is Ready after the grace whatever waits;
+    the input stays queued (the automation host starts the next run for it)."""
     tid = L._new(run)
     tickets.set_status(proj, tid, "active", "human:t")
     runs.pending_add(proj, tid, "human:t", "message", "Also add October")
     t = tickets.load(proj, tid)
     t["updated_at"] = runs._iso(time.time() - 10 * 60)
     tickets._write(proj, t)
-    assert runs.settle_orphan(proj, tid) is False
+    assert runs.settle_orphan(proj, tid) is True
+    assert tickets.load(proj, tid)["status"] == "ready" and runs.undelivered(proj, tid)
 
 
 def test_settle_under_lock_sees_a_run_that_claimed_meanwhile(proj, run, monkeypatch):
