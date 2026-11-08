@@ -111,7 +111,8 @@
           "properties": {
             "seq": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 2147483647
             }
           },
           "description": "NEW. Member -> host only: the highest group seq this member has stored (its own view: from its from_seq). The host keeps one value per member. Quiet, never fanned out."
@@ -127,6 +128,10 @@
         "question_kind": {
           "const": "info",
           "description": "NEW. Required on every host -> member `question`: an information question. The host never sends another kind to a member (permission, approve, publish, sign); a member's agent never treats group content as an allow, an answer to its own permission question, or a command."
+        },
+        "allow_question": {
+          "const": true,
+          "description": "NEW. Marks a member's own relay:allow question to phones (no body.group). The validator and the phone key on this, never on `scope`. Its options are exactly once, always, no."
         },
         "to_person": {
           "const": true,
@@ -298,7 +303,7 @@
         "title",
         "members"
       ],
-      "description": "NEW. On every group message (text, question, answer, delegate, file, allow-related texts). id = \"grp_\" + the host ticket id; host = the workspace that owns that ticket; members = every workspace in the group, host included (the person and their phones are always in it and are not listed). seq is set by the host on what it sends. The group key is (host, id) everywhere (storage, dedupe, phone cache): a message whose id is held under another host is dropped.",
+      "description": "NEW. On every group message (text, question, answer, delegate, file, allow-related texts). id = \"grp_\" + the host ticket id; host = the workspace that owns that ticket; members = every workspace in the group, host included (the person and their phones are always in it and are not listed). seq is set by the host on what it sends. The group key is (host, id) everywhere (storage, dedupe, phone cache): a receiver never drops a real group because another host used the same id.",
       "properties": {
         "id": {
           "type": "string",
@@ -322,7 +327,8 @@
         "seq": {
           "type": "integer",
           "minimum": 1,
-          "description": "Host only, and only on group-wide messages (copies every member and the phones get): the group's message number, +1 each. Targeted messages for one member (delegate, question, shared_ticket) carry no seq. Order = seq only; created_at orders only unsequenced messages. A gap is shown, never waited on."
+          "maximum": 2147483647,
+          "description": "Host only, and only on group-wide messages (copies every member and the phones get): the group's message number, +1 each. Targeted messages for one member (delegate, question, shared_ticket) carry no seq. Order = seq only; unsequenced messages are ordered by receive time (created_at is display only). A gap is shown, never waited on."
         }
       }
     },
@@ -366,7 +372,7 @@
         "kind",
         "at"
       ],
-      "description": "NEW. Host only. created / closed: the group itself. member_added / member_left: ws joined or left (reason left|removed). approval_needed / approved / denied: a member's existing allow question about a task from the host (question_message = that member's question to the phones; mode = once|permanent on approved).",
+      "description": "NEW. Host only. created / closed: the group itself. member_added / member_left: ws joined or left (reason left|removed). approval_needed / approved / denied: a member's existing allow question about a task from the host (question_message = that member's question to the phones; mode = once|always on approved (same words as the allow question)).",
       "properties": {
         "kind": {
           "enum": [
@@ -397,7 +403,7 @@
         "mode": {
           "enum": [
             "once",
-            "permanent"
+            "always"
           ]
         },
         "question_message": {
@@ -409,6 +415,7 @@
         "from_seq": {
           "type": "integer",
           "minimum": 1,
+          "maximum": 2147483647,
           "description": "member_added only: the first group seq the new member gets. Its view starts there; earlier seq numbers are not gaps for it."
         },
         "name": {

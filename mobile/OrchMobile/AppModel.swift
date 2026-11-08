@@ -311,10 +311,14 @@ final class AppModel {
         }
         outbox.reconcile(with: messages)
     }
+    private var firstSeen: [String: Date] = [:]
+    private var arrival: [String: Int] = [:]
+    private var arrivalCounter = 0
+
     private func rebuildGroups() {
         let names = Dictionary(workspaces.map { ($0.id, $0.displayName) }, uniquingKeysWith: { first, _ in first })
         let snapshot = GroupStore.build(messages: messages, workspaces: names, ownPhoneId: credentials?.phoneId ?? "",
-                                        ownMessageIds: Set(messages.filter(\.fromPhone).map(\.id)))
+                                        ownMessageIds: Set(messages.filter(\.fromPhone).map(\.id)), receivedAt: firstSeen, arrival: arrival)
         #if DEBUG
         for drop in snapshot.dropped where !groups.dropped.contains(drop) {
             print("group drop \(drop.rule) \(drop.messageId)")
@@ -324,10 +328,18 @@ final class AppModel {
     }
 
     private func merge(_ items: [PhoneMessage]) {
+        for m in items.reversed() where arrival[m.id] == nil {
+            arrival[m.id] = arrivalCounter
+            arrivalCounter += 1
+            firstSeen[m.id] = Date()
+        }
         var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
         for m in items { byId[m.id] = m }          // newer data (delivered_at) replaces the old copy
         let merged = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
         if merged != messages { messages = merged }
+        let retained = Set(messages.map(\.id))
+        arrival = arrival.filter { retained.contains($0.key) }
+        firstSeen = firstSeen.filter { retained.contains($0.key) }
     }
     /// client_ids of messages the relay stored (first tick) that `/messages` has not listed yet.
     private func unlistedSentClientIds() -> Set<String> {

@@ -64,6 +64,7 @@ struct QuestionBody: Codable, Sendable, Equatable {
     var previews: [String: String]? = nil
     /// Permission questions: what "Always" covers, shown as "Always allow <scope>".
     var scope: String? = nil
+    var allowQuestion: Bool? = nil // allow_question via JSONCoding
 }
 
 struct QuestionMessage: Codable, Sendable, Equatable {
@@ -79,20 +80,48 @@ struct QuestionMessage: Codable, Sendable, Equatable {
     var key: String? = nil
 }
 
+enum AnswerWord: String, Equatable {
+    case once, always, no
+
+    static func parse(_ value: String) -> AnswerWord? {
+        if let wire = AnswerWord(rawValue: value) { return wire }
+        let old = value.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ").lowercased()
+        switch old {
+        case "allow once": return .once
+        case "always": return .always
+        case "ignore", "no": return .no
+        default: return nil
+        }
+    }
+    var allowMode: String? { self == .no ? nil : self == .always ? "permanent" : "once" }
+    /// approved events use once|always, while allow messages use once|permanent.
+    var approvedMode: String? { self == .no ? nil : rawValue }
+}
+
 struct Question: Codable, Sendable, Equatable, Identifiable {
     let message: QuestionMessage
     let workspaceName: String
     var id: String { message.id }
-    /// A `relay:allow` question: a workspace handed over a task that is not allowed yet (SA-12). Answered like any question.
-    var isAllow: Bool { (message.body.options.contains("Once") || message.body.options.contains("Allow once")) && message.body.options.contains("Always") }
-    /// Button wording; the raw option is what gets sent. "Always allow <scope>" when the workspace named a scope.
+    /// Compatibility for existing Chat cards; group cards must use isGroupAllow.
+    var isLegacyAllow: Bool {
+        guard message.body.allowQuestion == nil else { return false }
+        let options = message.body.options.map { $0.lowercased() }
+        return (options.contains("once") || options.contains("allow once")) && options.contains("always")
+    }
+    var isGroupAllow: Bool {
+        message.body.allowQuestion == true && message.body.options.count == 3 &&
+            Set(message.body.options) == Set(["once", "always", "no"])
+    }
+    var isAllow: Bool { isGroupAllow || isLegacyAllow }
+    /// Labels never change the raw option sent to the relay.
     func label(_ option: String) -> String {
         guard isAllow else { return option }
-        switch option {
-        case "Once": return "Allow once"
-        case "Always": return message.body.scope.map { "Always allow \($0)" } ?? "Always"
-        case "No": return "Ignore"
-        default: return option
+        if option == "Once" { return "Allow once" } // Existing Chat option.
+        switch AnswerWord.parse(option) {
+        case .once: return "Allow once"
+        case .always: return message.body.scope.map { "Always allow \($0)" } ?? "Always"
+        case .no: return "No"
+        case nil: return option
         }
     }
     /// The attachment id previewed next to an option, if any.
