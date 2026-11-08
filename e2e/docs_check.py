@@ -85,7 +85,7 @@ class Env:
         path = [str(self.bin), str(self.uvbin), *map(str, sorted(tools)), "/usr/bin", "/bin"]
         self.env = {
             "HOME": str(self.home), "PATH": os.pathsep.join(dict.fromkeys(path)), "USER": "docs", "LANG": "C.UTF-8",
-            "TERM": "dumb", "ORCH_REPO": str(REPO), "ORCH_HOME": str(self.orch_home),
+            "TERM": "dumb", "ORCH_REPO": str(REPO), "ORCH_HOME": str(self.orch_home), "ORCH_HOME_STRICT": "1",
             "UV_TOOL_DIR": str(self.uvtools), "UV_TOOL_BIN_DIR": str(self.uvbin),
             "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR") or str(real_home / ".cache" / "uv"),
             "GIT_AUTHOR_NAME": "docs", "GIT_AUTHOR_EMAIL": "docs@example.invalid",
