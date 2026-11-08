@@ -242,9 +242,9 @@ def _add_group(rel, common) -> None:
 
 
 def _confirm(args):
-    """The person's yes to 'share anyway' for a file orch could not check. An agent session needs a yes typed at
-    a terminal (tickets.require_human); a person at a terminal is asked; a person's dashboard (no terminal) has
-    already asked in its own dialog and says so with --unchecked-ok."""
+    """The person's yes to 'share anyway' for a file orch could not check. An agent session needs a yes
+    typed at a terminal (tickets.require_human); a person at a terminal is asked; a person's dashboard (no
+    terminal) has already asked in its own dialog and says so with --unchecked-ok."""
 
     def ask(question: str) -> bool:
         if tickets.agent_tool() is not None:

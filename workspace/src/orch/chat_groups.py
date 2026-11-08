@@ -107,6 +107,7 @@ class Unchecked(Refused):
     """The file could not be read well enough to look for passwords (not that one was found). A person's
     click may share it after a plain warning; an agent never may."""
 
+
 BUSY = "is busy, try again in a minute"
 TICKET_RE = re.compile(r"t_[a-z0-9]{6,16}")
 KEY_RE = re.compile(r"[A-Z0-9]{2,4}-[1-9][0-9]{0,8}")
@@ -328,7 +329,7 @@ def parse_allow_answer(text) -> str | None:
 
 def card_kind(q: dict, shown_in: dict | None = None) -> str:
     """The phone's approval card: buttons only for a marked question with exactly the wire options, and, when
-    the card is shown in a group (`shown_in` = {host, id}), only when the question's group_ref is that group."""
+    the card is shown in a group (`shown_in` = {host, id}), only if the question's group_ref is that group."""
     if not (q.get("allow_question") is True and q.get("options") == ALLOW_OPTIONS):
         return "answer_in_bank"
     if shown_in is not None and q.get("group_ref") != shown_in:
@@ -587,7 +588,7 @@ def has_secret(data: bytes, mime: str, allow_unchecked: bool = False) -> bool:
 
 
 def check_file(data: bytes, name: str, allow_unchecked: bool = False, host_side: bool = False) -> str:
-    """The mime of an allowed file, else Refused with the plain line. Unchecked (a Refused) when the file can't
+    """The mime of an allowed file, else Refused with the plain line. Unchecked when the file can't
     be scanned; allow_unchecked is only for a person's click that saw the warning."""
     if len(data) > FILE_MAX:
         raise Refused("The file is bigger than 25 MB, so it was not shared")

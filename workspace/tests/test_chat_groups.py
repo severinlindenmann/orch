@@ -963,7 +963,9 @@ def test_member_delegate_needs_the_persons_allow_then_reports(proj, run, rel, me
     ],
 )
 def test_member_ticket_transitions_report_to_host_once(proj, run, rel, member, path, expect, kind):
-    d = from_host("delegate", {"title": "Find the letter", "text": "Send the PDF"}, id=mid("dlg" + "".join(path)))
+    d = from_host(
+        "delegate", {"title": "Find the letter", "text": "Send the PDF"}, id=mid("dlg" + "".join(path))
+    )
     inbox(run, rel, d)
     allow_t = next(
         t for t in tickets.list_all(proj) if t["questions"] and t["questions"][0].get("kind") == "relay:allow"
@@ -982,7 +984,7 @@ def test_member_ticket_transitions_report_to_host_once(proj, run, rel, member, p
         run("relay", "inbox")
     rep = [m for m in sent(rel, to=FIN) if m["body"].get("task")]
     reported = [m["body"]["task"]["status"] for m in rep]
-    assert reported[-len(expect):] == expect
+    assert reported[-len(expect) :] == expect
     assert rep[-1]["body"]["update"]["kind"] == kind
     for m in rep:
         assert contract_errors(m) == []
@@ -1949,7 +1951,9 @@ def test_ticket_artifacts_are_shareable_and_a_hidden_folder_is_not_called_a_pass
     f.write_bytes(pdf_bytes())  # a clean PDF with no text to extract
     rel.sent.clear()
     assert run("relay", "group", "share", host, str(f), "--click")[0] == 0
-    code, _, err = run("relay", "group", "share", host, str(f))  # an agent never reads .orch: plain, no "password"
+    code, _, err = run(
+        "relay", "group", "share", host, str(f)
+    )  # an agent never reads .orch: plain, no "password"
     assert code != 0 and "password" not in err
     # a secret-looking name or a hidden folder inside it is still refused, with the password line
     (adir / ".ssh").mkdir()

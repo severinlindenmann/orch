@@ -254,6 +254,6 @@ def test_ws_ids_are_shown_as_names_in_the_page_code():
     code = app[start:end] + "\nwsNames = new Map([['ws_home000001', 'Home']]);\n" + (
         "console.log(JSON.stringify([clean('agent:ws_home000001 answered'), clean('Asked ws_unknown01 (group)')]));"
     )
-    out = subprocess.run(["node", "-e", "const array=v=>Array.isArray(v)?v:[];" + code], capture_output=True, text=True)
+    out = subprocess.run(["node", "-e", "const array=v=>Array.isArray(v)?v:[];" + code], check=False, capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     assert json.loads(out.stdout) == ["agent:Home answered", "Asked  (group)"]  # an unknown id is dropped, never shown raw
