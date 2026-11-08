@@ -23,6 +23,7 @@ const toolBin = path.join(TMP, '.local/bin');
 const env = {
   HOME: TMP, PATH: `${toolBin}:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
   UV_CACHE_DIR: path.join(process.env.HOME, '.cache/uv'), ORCH_REPO: REPO, LANG: 'en_US.UTF-8',
+  ORCH_HOME_STRICT: '1',
   ORCH_HOME: process.env.WALK_ORCH_HOME || '', // only trusted under the real home (see run.sh)
 };
 function sh(cmd, cwd = TMP, input) {

@@ -1,12 +1,55 @@
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
 
 from orch import addons, cli, winfinish
 
+_REAL_HOME_FN = addons.real_home  # the true one, before any test fakes it
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
+
+
+def _snapshot_real_tool_home():
+    base = _REAL_HOME_FN() / ".orch-tool"
+    out = {}
+    if base.exists():
+        for p in (base, *base.rglob("*")):
+            try:
+                out[str(p)] = p.stat().st_mtime_ns
+            except OSError:
+                out[str(p)] = None
+    return out
+
+
+_REAL_TOOL_HOME_AT_START = _snapshot_real_tool_home()
+
+
+@pytest.fixture(autouse=True)
+def _strict_orch_home(monkeypatch, tmp_path_factory):
+    """Every test: a faked real home with its own ORCH_HOME (a test that never asked for `proj` used to write
+    the real ~/.orch-tool/addons.json: ORCH_HOME unset = real folder); untrusted ORCH_HOME = error."""
+    fake = tmp_path_factory.mktemp("realhome")
+    monkeypatch.setattr(addons, "real_home", lambda: fake)
+    monkeypatch.setenv("ORCH_HOME", str(fake / "toolhome"))
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if hasattr(session.config, "workerinput"):  # xdist worker: the controller checks
+        return
+    """Read-only guard: the real ~/.orch-tool must look the same after the run as before it. (xdist workers
+    check too; another process may touch it in the meantime, so a hit names the time, not a culprit.)"""
+    now = _snapshot_real_tool_home()
+    if now != _REAL_TOOL_HOME_AT_START:
+        changed = sorted(
+            k
+            for k in set(now) | set(_REAL_TOOL_HOME_AT_START)
+            if now.get(k) != _REAL_TOOL_HOME_AT_START.get(k)
+        )
+        print(f"\nREAL ~/.orch-tool CHANGED during the test session: {changed}", file=sys.stderr)
+        session.exitstatus = 1
 
 
 @pytest.fixture
@@ -28,6 +71,22 @@ def proj(tmp_path, monkeypatch):
     # the background path (it sets needed() itself), the Windows e2e flows cover it for real.
     monkeypatch.setattr(winfinish, "needed", lambda: False)
     return tmp_path
+
+
+@pytest.fixture
+def subprocess_home(proj, monkeypatch):
+    """For tests that start `orch` as a child process: it cannot see the faked real_home, so ORCH_HOME must
+    be a folder the child trusts too: a fresh one under ~/.orch-test (never ~/.orch-tool), removed by path."""
+    import shutil
+    import tempfile
+
+    base = _REAL_HOME_FN() / ".orch-test"
+    base.mkdir(exist_ok=True)
+    d = Path(tempfile.mkdtemp(prefix="pytest-", dir=base))
+    monkeypatch.setattr(addons, "real_home", _REAL_HOME_FN)
+    monkeypatch.setenv("ORCH_HOME", str(d))
+    yield d
+    shutil.rmtree(d, ignore_errors=True)
 
 
 @pytest.fixture

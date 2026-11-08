@@ -175,7 +175,8 @@ def _trusted_home(h: Path, root: Path | None = None) -> bool:
 
 
 def home(root: Path | None = None) -> Path:
-    """The user's orch folder: ORCH_HOME when trusted (see _trusted_home), else ~/.orch-tool."""
+    """The user's orch folder: ORCH_HOME when trusted (see _trusted_home), else ~/.orch-tool.
+    With ORCH_HOME_STRICT=1 an untrusted ORCH_HOME is an error instead of the fallback (tests, e2e)."""
     real = real_home() / ".orch-tool"
     env = os.environ.get("ORCH_HOME")
     if not env:
@@ -183,6 +184,12 @@ def home(root: Path | None = None) -> Path:
     h = Path(env).resolve()
     if _trusted_home(h, root):
         return h
+    if os.environ.get("ORCH_HOME_STRICT") == "1":
+        raise Refused(
+            f"ORCH_HOME ({env}) is not a trusted folder (it must be under your home, outside the current "
+            f"folder and any .git/.orch/.agents folder), and ORCH_HOME_STRICT=1 forbids falling back to "
+            f"{real}. Nothing was written."
+        )
     print(
         f"Note: ORCH_HOME ({env}) is ignored (not a plain folder under your home); using {real}.",
         file=sys.stderr,

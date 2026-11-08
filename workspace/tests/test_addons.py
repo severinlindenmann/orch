@@ -609,6 +609,7 @@ def test_agents_block_cannot_forge_markers(tmp_path):
 
 
 def test_orch_home_must_be_plain_folder_under_home(proj, monkeypatch, capfd):
+    monkeypatch.delenv("ORCH_HOME_STRICT")  # the old, non-strict fallback
     h = addons.real_home()
     real = h / ".orch-tool"
     for bad in (
@@ -629,6 +630,62 @@ def test_orch_home_must_be_plain_folder_under_home(proj, monkeypatch, capfd):
     assert addons.real_home() == h
     ok = h / "cfg" / "orchhome"
     monkeypatch.setenv("ORCH_HOME", str(ok))
+    assert addons.home() == ok.resolve()
+
+
+def test_strict_untrusted_orch_home_is_an_error_and_writes_nothing(proj, run, monkeypatch):
+    h = addons.real_home()
+    real = h / ".orch-tool"
+    real_before = real.exists()
+    (h / "repo" / ".git").mkdir(parents=True)  # a temp home inside a git repo
+    for bad in (h / "repo" / "home", proj / "inside-cwd"):
+        monkeypatch.setenv("ORCH_HOME", str(bad))
+        monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+        with pytest.raises(Refused, match="ORCH_HOME_STRICT"):
+            addons.home()
+        code, out, err = run("addon", "list")
+        assert code != 0 and "ORCH_HOME_STRICT" in err and str(bad) in err
+        assert real.exists() == real_before and not bad.exists()
+        # without the switch the old fallback stays (a note, then the real folder)
+        monkeypatch.delenv("ORCH_HOME_STRICT")
+        assert addons.home() == real
+    assert not real.exists()  # home() only reads; nothing created in the faked real home
+
+
+def test_strict_cwd_above_the_home_is_an_error(proj, monkeypatch):
+    """A teardown started with the user's home as its folder made every home 'inside the current folder'."""
+    h = addons.real_home()
+    monkeypatch.chdir(h)
+    monkeypatch.setenv("ORCH_HOME", str(h / "cfg" / "orchhome"))
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    with pytest.raises(Refused):
+        addons.home()
+    with pytest.raises(Refused):
+        addons._save_registry([])
+    assert not (h / ".orch-tool").exists() and not (h / "cfg").exists()
+
+
+def test_trusted_orch_home_never_touches_the_real_tool_folder(proj, run, monkeypatch):
+    """Registry, consent, running.json and the stop/status paths all use the trusted home only."""
+    h = addons.real_home()
+    ok = h / "cfg" / "orchhome"
+    monkeypatch.setenv("ORCH_HOME", str(ok))
+    (proj / ".orch").mkdir()
+    addons._save_registry([])
+    for argv in (("addon", "list"), ("stop", "--all"), ("stop"), ("status")):
+        run(*([argv] if isinstance(argv, str) else argv))
+    from orch import services
+
+    assert services.stop(proj) is not None
+    assert services.status() == []
+    assert not (h / ".orch-tool").exists()
+    assert (ok / "addons.json").exists()
+
+
+def test_strict_trusted_orch_home_works(proj, monkeypatch):
+    ok = addons.real_home() / "cfg" / "orchhome"
+    monkeypatch.setenv("ORCH_HOME", str(ok))
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
     assert addons.home() == ok.resolve()
 
 
