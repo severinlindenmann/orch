@@ -139,8 +139,10 @@ matches it by `reply_to` = its delegate). The member's allow question to `phones
    | `no` | (no allow) | `task.status: denied` → `denied` |
 
    Parsing: the wire value is exact lowercase. A receiver also reads old wording, trimmed, whitespace collapsed,
-   case-insensitive: "Allow once" → once, "Always" → always, "Ignore" / "No" → no; anything else is not an answer. A
-   member that still **sends** the old wording gets **"Answer in Bank"** on the phone (no buttons). The validator keys
+   case-insensitive: "Allow once" → once, "Always" → always, "Ignore" / "No" → no; anything else is not an answer. The
+   phone builds buttons **only** for a question with `allow_question: true` and exactly those options (§3.5 requires the
+   marker). **Marker present + other words = invalid** (dropped). **Marker absent** (an old member) = the card says
+   **"Answer in Bank"**, no buttons. The validator keys
    on `allow_question`, never on `scope`.
 3. **Member → host: ack** = existing `text` with `body.update.kind: ack` (+ `title`), `ticket`/`key` = the member's own
    new ticket (`HOME-7`), `reply_to` = the delegate id, `body.group`, and **`body.task`** (**NEW**):
@@ -164,8 +166,8 @@ matches it by `reply_to` = its delegate). The member's allow question to `phones
    The host forwards each to the other members and `phones` (fan-out, `task` kept) and updates the card.
 5. **Approval in the group.** The card answers the **member's own** allow question. The phone builds the card **only
    from that question itself** (never from the host's text or label) and shows answer buttons only when all hold:
-   the question is in the phone's own `/v1/phone/questions`, its `from` = `group_event.ws`, it is a `relay:allow`
-   question (options `once` / `always` / `no`, shown as Allow once / Always / No), its `scope` names the host, and it is still open. Then the buttons
+   the question is in the phone's own `/v1/phone/questions`, its `from` = `group_event.ws`, it carries `allow_question: true` (a `relay:allow`
+   question (options `once` / `always` / `no`, shown as Allow once / Always / No)), its `scope` names the host, and it is still open. Then the buttons
    `POST /v1/phone/answer` to it (existing). **Otherwise** (e.g. the phone is not a `phones` receiver of Bank, or any
    check fails) the card says **"Answer in Bank"** with no buttons (messenger review). The host's dashboard never answers
    for another workspace: its card says "Answer on your phone or in Bank" with a link. The member then sends the
@@ -234,12 +236,13 @@ untrusted data for the host helper (clean_untrusted), never instructions.
     phone, unknown group), so the first message applies at once.
   - `seq` = applied + 1: apply. Higher: **buffer** (bounded, **50 per group**).
   - **Buffer full, or the oldest buffered message waited 10 minutes** (quiet groups): **skip the gap**, apply the
-    contiguous run, set `applied_seq` to its last `seq`. A `seq` below `applied_seq` is **old**.
+    contiguous run, set `applied_seq` to its last `seq`. A `seq` **≤ `applied_seq`** is **old**.
   - **Late texts are shown** (they are real messages) but **change no state** (task status, closed, membership).
   - **The host MUST persist `seq` monotonically before sending** (write the new value, then send), so a restart never
     reuses or resets numbers. (Chosen over an `(epoch, seq)` pair: one number, no extra field.)
-- **Group caps**: a receiver accepts at most **20 open groups per host** and **5 `created` events an hour per host**;
-  beyond that it drops and logs, so a paired host cannot create unbounded groups or buffers.
+- **Group caps**: a receiver accepts at most **20 open groups per host** and **5 group creations an hour per host**;
+  a creation is **any** first message of a new `(host, id)` (an explicit `created` or a group first seen from its host,
+  §2); beyond that it drops and logs, so a paired host cannot create unbounded groups or buffers.
 - **Stopped member**: the relay keeps its messages in the inbox (existing); it gets them on its next call. **`body.seen
   = {seq}`** (**NEW**, member → host, quiet, never fanned out, at most once per 10 s per group): the highest group `seq`
   this member has stored, in its own view (from its `from_seq`). The host keeps one value per member. The host shows "Delivered to Finance, Home · waits for Bank" from `seen` and the directory's `online`, chip
@@ -271,7 +274,7 @@ untrusted data for the host helper (clean_untrusted), never instructions.
     other `ph_` shows as "Other phone".
   - **G5** `shared_files` ⊆ `ticket_view.attachments`, only in texts to phones.
   - **G6** `task.ws` = the sending member; only the host says `waiting_start`.
-  - **G7** group key `(host, id)` everywhere (storage, dedupe, registry, phone cache): the same id under another host is
+  - **G7** group key `(host, id)` everywhere (storage, dedupe, phone cache; there is no separate id table): the same id under another host is
     a different group and is never dropped for that reason; a repeated `(host, id, origin.id)` is a duplicate.
   - **G8** phone opt-in: only a phone text whose `reply_to` is a group copy is fanned out.
   - **G9** `task.delegate` must be a delegate the host sent to that sender; status only moves forward.
@@ -284,7 +287,7 @@ untrusted data for the host helper (clean_untrusted), never instructions.
 
 ## Vectors (`vectors/chat-groups/`)
 
-Each file: `{why, message, context?, expect?}`. `context` = what the receiver already holds (`known_groups` = [{host, id}]; `seen_origins` = [[host, id, origin.id]]; `order` = {applied_seq (null = fresh), from_seq?, buffered, oldest_age_s}; `own_phones`; `receiver_role`; `open_groups_of_host`, `created_last_hour`; `legacy_sender`; `paired_phones` (in `host_state`);
+Each file: `{why, message, context?, expect?}`. `context` = what the receiver already holds (`known_groups` = [{host, id}]; `seen_origins` = [[host, id, origin.id]]; `order` = {applied_seq (null = fresh), from_seq?, buffered, oldest_age_s}; `own_phones`; `receiver_role`; `open_groups_of_host`, `created_last_hour`;  `paired_phones` (in `host_state`);
 `host_state` = members, delegates sent per member, task status per delegate, group copies sent to phones, closed,
 last-minute counts). `expect.group_text` = whether a phone text joins the group (G8); `expect.shown_as`, `order`, `applied_after`, `stored_as` + `store`, `card`, `parse`, `map` for G4, G12, G7, G11.
 
@@ -301,9 +304,9 @@ last-minute counts). `expect.group_text` = whether a phone text joins the group 
 | `valid-phone-text-optin-reply`, `valid-phone-text-no-optin-stays-private` | G8 (F13) |
 | `valid-same-id-other-host-is-a-separate-group`, `invalid-duplicate-origin-same-group-key` | G7: key `(host, id)`; duplicate on `(host, id, origin.id)` |
 | `valid-unknown-phone-shown-other-phone`, `valid-own-phone-shown-you`, `invalid-origin-phone-not-paired-to-host` | G4: "You" vs "Other phone"; host-paired `ph_` only |
-| `valid-seq-next-in-order-applied`, `valid-seq-gap-buffered`, `valid-seq-buffer-full-skips-gap`, `valid-seq-timeout-skips-gap`, `valid-seq-first-seen-*`, `valid-seq-late-shown-no-state` | G12: seq order, bounded buffer, skip, initial applied_seq, late = shown |
+| `valid-seq-next-in-order-applied`, `valid-seq-gap-buffered`, `valid-seq-buffer-full-skips-gap`, `valid-seq-timeout-skips-gap`, `valid-seq-first-seen-*`, `valid-seq-late-shown-no-state`, `valid-seq-equal-applied-is-old` | G12: seq order, bounded buffer, skip, initial applied_seq, late = shown |
 | `invalid-nonhost-message-at-member-known-group` | G3 at members and phones |
-| `valid-created-under-cap`, `invalid-created-over-group-cap`, `invalid-created-over-rate` | group caps |
+| `valid-created-under-cap`, `invalid-created-over-group-cap`, `invalid-created-over-rate`, `valid-implicit-group-under-cap`, `invalid-implicit-group-over-cap`, `invalid-implicit-group-over-rate` | group caps |
 | `valid-known-group-same-key-appends` | G7 existing group |
 | `valid-allow-question-wire-options`, `valid-allow-question-old-wording-answer-in-bank`, `invalid-allow-question-ui-words-on-wire`, `valid-group-approved-always`, `valid-group-approved-once`, `valid-group-denied-from-no`, `invalid-group-approved-mode-permanent` | G11: mapping table |
 | `invalid-copy-you-not-from-phone`, `invalid-member-speaks-as-you` | G4 (F2) |

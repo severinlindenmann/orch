@@ -676,7 +676,7 @@ def cg_rules(m, ctx=None):
     ctx = ctx or {}
     b, out = m.get("body") or {}, []
     g = b.get("group")
-    if m.get("type") == "question" and b.get("allow_question") is True and b.get("options") != CG_ALLOW_OPTIONS and not ctx.get("legacy_sender"):
+    if m.get("type") == "question" and b.get("allow_question") is True and b.get("options") != CG_ALLOW_OPTIONS:
         out.append("a permission (allow) question has the wire options once, always, no (UI words are only shown)")
     if not isinstance(g, dict):
         return out
@@ -760,8 +760,8 @@ def cg_receive(m, ctx):
     if g:
         if ctx.get("receiver_role") in ("member", "phone") and m.get("from") != g.get("host"):
             out.append("G3: at a member or phone, from != group.host is always dropped (also for a known group)")
-        ge = b.get("group_event")
-        if isinstance(ge, dict) and ge.get("kind") == "created":
+        if m.get("from") == g.get("host") and cg_store(m, ctx)[1] == "new":
+            # any group creation counts: an explicit `created` or the first message seen from the host
             if ctx.get("open_groups_of_host", 0) >= CG_MAX_OPEN_GROUPS_PER_HOST:
                 out.append("dropped: this host already has 20 open groups here")
             if ctx.get("created_last_hour", 0) >= CG_CREATED_PER_HOUR:
@@ -802,7 +802,7 @@ def cg_parse_allow_answer(text):
 
 def cg_card(q, ctx):
     """Phone approval card for a member's allow question: buttons only for the wire options; old wording -> 'Answer in Bank'."""
-    return "buttons" if q.get("options") == CG_ALLOW_OPTIONS else "answer_in_bank"
+    return "buttons" if q.get("allow_question") is True and q.get("options") == CG_ALLOW_OPTIONS else "answer_in_bank"
 
 
 def cg_store(m, ctx):
