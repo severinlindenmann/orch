@@ -42,7 +42,7 @@ enum GroupMock {
             copy(4, "Is the 2025 car tax letter in the household files?"),
             copy(5, "I'll look in the household files.", by: home),
             copy(6, by: home, kind: "working", task: GroupTask(delegate: "d_home", ws: home, ticket: "t_hometax001", key: "HOME-7", title: "Find the 2025 car tax letter", status: "working")),
-            copy(7, kind: "note", event: GroupEvent(kind: "approval_needed", ws: bank, delegate: "d_bank", questionMessage: "m_groupallow00001")),
+            copy(7, kind: "note", event: GroupEvent(kind: "approval_needed", ws: bank, delegate: "d_bank", questionMessage: "m_groupallow00001"), task: GroupTask(delegate: "d_bank", ws: bank, ticket: "t_banktax001", status: "waiting_approval", questionMessage: "m_groupallow00001")),
             copy(8, kind: "note", file: true),
             copy(1, kind: "note", event: GroupEvent(kind: "created"), closed: true),
             copy(2, "The car tax is paid.", closed: true),

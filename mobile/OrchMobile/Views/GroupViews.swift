@@ -1,6 +1,23 @@
 import SwiftUI
 
 enum GroupRoomRules {
+    static func openTarget(task: GroupTask, workspaces: [Workspace], tickets: [Ticket], updates: [TicketUpdate])
+        -> (workspace: String, ticket: String, label: String, title: String?)? {
+        guard workspaces.contains(where: { $0.id == task.ws }), let ticket = task.ticket else { return nil }
+        if let local = tickets.first(where: { $0.workspace == task.ws && $0.ticket == ticket }) {
+            return (task.ws, ticket, local.key ?? "ticket", local.title)
+        }
+        if let local = updates.first(where: { $0.workspace == task.ws && $0.ticket == ticket }) {
+            return (task.ws, ticket, local.key ?? "ticket", local.title)
+        }
+        return nil
+    }
+
+    static func taskHeading(target: (workspace: String, ticket: String, label: String, title: String?)?) -> String? {
+        guard let target else { return nil }
+        return [target.label, target.title].compactMap { $0 }.joined(separator: " · ")
+    }
+
     static func badgeName(group: PhoneGroup, ws: String) -> String {
         guard group.isExternal(ws) else { return group.name(of: ws) }
         let hash = Look.djb2(ws)
@@ -116,6 +133,7 @@ struct GroupBadges: View {
 }
 
 struct GroupListRow: View {
+    static func rowID(_ group: PhoneGroup) -> String { "group-\(group.key.host.utf8.count)-\(group.key.host)-\(group.key.id)" }
     @Environment(AppModel.self) private var model
     let group: PhoneGroup
     var body: some View {
@@ -132,7 +150,7 @@ struct GroupListRow: View {
                     ShellBadge(count: model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group)))
                 }
             }.padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
-        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("group-\(group.key.id)")
+        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier(Self.rowID(group))
     }
 
     private var lastLine: Text {
