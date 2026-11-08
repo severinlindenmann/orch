@@ -369,6 +369,19 @@ def test_sigterm_to_the_wrapper_ends_the_agent_through_kill_tree(proj, run, lab)
     _until(lambda: runs.read(proj, tid) is None, what="claim released")
 
 
+def test_sigterm_inside_the_run_lock_still_releases_the_claim(proj, run, lab, monkeypatch):
+    """A SIGTERM landing while the wrapper holds the run lock (it writes its agent pid there) used to
+    wait 10 s for its own lock, give up, and leave the claim behind: the flaky CI failure."""
+    tid = _ticket(run)
+    rec = runs.claim(proj, tid, "x", "fake", "oneshot")
+    monkeypatch.setattr(runs, "_terminating", False)
+    t0 = time.monotonic()
+    with runs.locked(proj, tid):
+        runs.term_release(proj, tid, rec["run"], {})
+    assert time.monotonic() - t0 < 5
+    assert runs.read(proj, tid) is None
+
+
 @pytest.mark.skipif(os.name == "nt", reason="signals")
 def test_stop_kills_an_agent_left_behind_by_a_killed_wrapper(proj, run, lab):
     py = shlex.quote(sys.executable)

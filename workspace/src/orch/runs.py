@@ -115,11 +115,20 @@ def _break_dead(lock: Path) -> bool:
             mine.unlink()
 
 
+_held: set[Path] = set()  # run locks this process holds right now
+_terminating = False  # the SIGTERM handler is running: it interrupted whatever else this process was doing
+
+
 @contextlib.contextmanager
 def locked(root: Path, tid: str):
     """The per-ticket run lock. Free when its holder is verifiably dead, or old with no holder named."""
     lock = run_dir(root) / "tickets" / f"{tid}.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
+    if _terminating and lock in _held:
+        # The signal arrived while this very process was inside the lock; the interrupted code never continues
+        # (the handler ends the process), so waiting for it would only time out and leave the claim behind.
+        yield
+        return
     end = time.monotonic() + 10
     while True:
         try:
@@ -145,9 +154,11 @@ def locked(root: Path, tid: str):
             if time.monotonic() > end:
                 raise Refused(f"Ticket {tid} is busy (retried for 10 s). Try again.") from None
             time.sleep(0.01)
+    _held.add(lock)
     try:
         yield
     finally:
+        _held.discard(lock)
         with contextlib.suppress(OSError):
             procs.unlink(lock)
 
@@ -804,14 +815,21 @@ def _on_term(root: Path, tid: str, run: str, current: dict) -> None:
     import signal
 
     def handler(signum, frame):
-        proc = current.get("proc")
-        if proc is not None and proc.poll() is None:
-            kill_tree(proc.pid)
-        with contextlib.suppress(Exception):
-            release(root, tid, run)
+        term_release(root, tid, run, current)
         os._exit(143)
 
     signal.signal(signal.SIGTERM, handler)
+
+
+def term_release(root: Path, tid: str, run: str, current: dict) -> None:
+    """What the SIGTERM handler does before the process ends: stop the agent tree, then leave the claim."""
+    global _terminating
+    _terminating = True
+    proc = current.get("proc")
+    if proc is not None and proc.poll() is None:
+        kill_tree(proc.pid)
+    with contextlib.suppress(Exception):
+        release(root, tid, run)
 
 
 def failure_text(rc: int, out: str) -> str | None:
