@@ -33,6 +33,10 @@ from orch.procs import pid_started
 LEASE_SECONDS = 30 * 60
 LOCK_STALE_SECONDS = 30
 MAX_DRAIN_TURNS = 10
+HANG_AGAIN = (
+    "The agent hung before it could read the latest input; it is delivered again after a hang with the next "
+    "start. Check if it already acted on it."
+)
 START_WATCHDOG_SECONDS = 90  # a streaming agent that prints nothing for this long after its start is hung
 PENDING_KINDS = ("answer", "message", "event", "text")
 _ALPHA = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -399,10 +403,11 @@ def mark_delivered_locked(root: Path, tid: str, ids: list[str]) -> None:
         _write(root, rec)
 
 
-def undeliver(root: Path, tid: str, ids: list[str]) -> None:
-    """The agent never read these (its start hung): they wait again for the next start, not lost."""
+def undeliver(root: Path, tid: str, ids: list[str]) -> bool:
+    """The agent may never have read these (its start hung): they wait again for the next start, not lost.
+    Returns True when something was put back."""
     if not ids:
-        return
+        return False
     with locked(root, tid):
         items = _pending_read(root, tid)
         for i in items:
@@ -413,6 +418,7 @@ def undeliver(root: Path, tid: str, ids: list[str]) -> None:
         if rec is not None:
             rec["pending"] = True
             _write(root, rec)
+    return True
 
 
 def mark_delivered(root: Path, tid: str, ids: list[str]) -> None:
@@ -1055,13 +1061,16 @@ def wrap(
             argv, stdin, new_session, resumed = p["argv"], p["stdin"], p["session"], False
             flags = {}
             rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc, watch, flags)
-            if flags.get("hung"):  # hung twice: no third try; this turn's input waits for the next start
-                undeliver(root, tid, [i["id"] for i in turn_items])
         elif resumed and rc != 0 and adapters.session_missing(name, out, root):
             # only "that session does not exist" starts fresh; the input of this turn goes in with it
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
             rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc, watch, flags)
+        if flags.get("hung"):  # the last try hung too: no further try; this turn's input waits for the next
+            again = [i["id"] for i in turn_items if i.get("via") != "start"]  # a start prompt is made anew
+            if undeliver(root, tid, again):
+                with contextlib.suppress(Exception):
+                    tickets.log(root, tid, HANG_AGAIN, "orch")
         sid = new_session or adapters.parse_session(name, out, root)
         unsaved = flags.get("hung") or adapters.transcript_exists(name, sid or "", root) is False
         if sid and new_session and unsaved:

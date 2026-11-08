@@ -132,3 +132,27 @@ def test_input_of_a_start_that_hangs_twice_waits_for_the_next_start(proj, run, t
     assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     _wait(proj, tid, timeout=30)
     assert [i["text"] for i in runs.undelivered(proj, tid)] == ["Also invite Anna"]
+    assert any("delivered again after a hang" in h["text"] for h in tickets.load(proj, tid)["history"])
+
+
+def test_input_is_kept_when_the_fresh_start_after_a_missing_session_hangs(proj, run, tmp_path, monkeypatch):
+    """Delta review #292: a hang in the session-missing retry also puts the input back."""
+    d = tmp_path / "clbin"
+    d.mkdir()
+    f = d / "claude"
+    f.write_text(
+        "#!/bin/sh\n"
+        '[ "$1" = "--help" ] && { echo "choices: auto"; exit 0; }\n'
+        'for a in "$@"; do [ "$a" = "--resume" ] && '
+        '{ echo "No conversation found with session ID: x"; exit 1; }; done\n'
+        "sleep 30; exit 0\n"
+    )
+    f.chmod(f.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setenv("ORCH_RUN_START_WATCHDOG_SECONDS", "1")
+    tid = _setup(proj, run)
+    tickets.record_session(proj, tid, "claude", "f88ec2ca-0930-42dd-9d5e-00fbbd59067d", runs.host())
+    runs.pending_add(proj, tid, "human:t", "message", "Bring dessert")
+    assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
+    _wait(proj, tid, timeout=30)
+    assert [i["text"] for i in runs.undelivered(proj, tid)] == ["Bring dessert"]
