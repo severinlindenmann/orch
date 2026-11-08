@@ -237,3 +237,132 @@ def test_history_says_where_a_change_came_from(proj, run, monkeypatch):
     assert t["history"][0]["via"] == "cli"
     monkeypatch.setenv("ORCH_VIA", "dashboard")
     assert "ORCH_VIA" not in runs._agent_environ()  # an agent started from the page writes as itself
+
+
+@pytest.mark.parametrize(
+    "text, options",
+    [
+        (
+            "Where do I get the weekly data?",
+            ["Give me the real CRM export URL (and credentials in .orch/secrets/ if needed)"],
+        ),
+        ("Please paste your API key", []),
+        ("What's the admin password?", ["Skip"]),
+        ("Send me the access token for the CRM", []),
+        ("Is the key in .ORCH\\Secrets\\x?", []),
+    ],
+)
+def test_ask_refuses_secrets(proj, run, new_ticket, text, options):
+    tid = new_ticket()
+    args = ["ask", tid, text] + [a for o in options for a in ("--option", o)]
+    code, _, err = run(*args)
+    assert code == 2
+    assert "never ask for a password" in err
+    assert not read(proj, tid)["questions"]
+
+
+def test_ask_allows_plain_access_question(proj, run, new_ticket):
+    tid = new_ticket()
+    code, _, _ = run(
+        "ask",
+        tid,
+        "Is access to the CRM set up for this workspace?",
+        "--option",
+        "Yes",
+        "--option",
+        "I will set it up myself",
+    )
+    assert code == 0
+
+
+def test_ask_refuses_secret_in_recommended_and_action(proj, run, new_ticket):
+    tid = new_ticket()
+    code, _, err = run("ask", tid, "Which way?", "--recommend", "Paste your API key from .orch/secrets")
+    assert code == 2 and "never ask for a password" in err
+    code, _, err = run(
+        "ask", tid, "Retry?", "--kind", "scheduler:failure", "--action", '{"label": "Send me the password"}'
+    )
+    assert code == 2 and "never ask for a password" in err
+    assert not read(proj, tid)["questions"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Is the API key already set up?",
+        "Should the password reset email be HTML?",
+        "Do we need a password-protected PDF?",
+        "Rotate your access tokens now?",
+    ],
+)
+def test_ask_allows_benign_auth_questions(proj, run, new_ticket, text):
+    assert run("ask", new_ticket(), text)[0] == 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Gib mir das Passwort",
+        "Bitte schick mir die Zugangsdaten",
+        "Please paste the PAT",
+        "Give me the token",
+        "Put it in the secrets folder",
+        "Send me the API\u200b key",
+        "\uff27ive me the password",
+    ],
+)
+def test_ask_refuses_more_secret_forms(proj, run, new_ticket, text):
+    assert run("ask", new_ticket(), text)[0] == 2
+
+
+def test_refused_secret_ask_is_logged(proj, run, new_ticket):
+    tid = new_ticket()
+    assert run("ask", tid, "Paste your API key")[0] == 2
+    assert any("refused: it asked for a secret" in h["text"] for h in read(proj, tid)["history"])
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I need your API key to continue",
+        "Your password please",
+        "Reply with your token",
+        "Which API key should I use?",
+        "Ich brauche dein Passwort",
+    ],
+)
+def test_ask_refuses_request_patterns(proj, run, new_ticket, text):
+    assert run("ask", new_ticket(), text)[0] == 2
+
+
+def test_ask_scans_all_action_strings_but_not_machine_keys(proj, run, new_ticket):
+    tid = new_ticket()
+    base = ["ask", tid, "Retry?", "--kind", "scheduler:failure", "--action"]
+    assert run(*base, '{"detail": "Please paste your API key"}')[0] == 2
+    assert run(*base, '{"run": "give-me-the-password", "id": "paste-the-token"}')[0] == 0
+
+
+def test_ask_scans_nested_data_under_machine_keys(proj, run, new_ticket):
+    base = ["ask", new_ticket(), "Retry?", "--kind", "scheduler:failure", "--action"]
+    assert run(*base, '{"op": {"label": "Please paste your API key"}}')[0] == 2
+    assert run(*base, '{"op": ["give me the password"]}')[0] == 2
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Should I send the password reset email?",
+        "Can you share the password-protected PDF?",
+        "Tell me whether to rotate the tokens.",
+        "What is the token expiry policy?",
+        "Which type of token should we use?",
+    ],
+)
+def test_ask_allows_more_benign_auth_questions(proj, run, new_ticket, text):
+    assert run("ask", new_ticket(), text)[0] == 0
+
+
+def test_ask_refuses_curly_apostrophe_and_natural_language_machine_key(proj, run, new_ticket):
+    assert run("ask", new_ticket(), "What\u2019s your password?")[0] == 2
+    base = ["ask", new_ticket(), "Retry?", "--kind", "scheduler:failure", "--action"]
+    assert run(*base, '{"key": "paste your API key"}')[0] == 2
