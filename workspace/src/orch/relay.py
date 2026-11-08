@@ -678,9 +678,8 @@ def send_delegate(
 
         try:
             return chat_groups.delegate(root, ticket, to, title, text, checklist)
-        except Refused as e:
-            if "connected" not in str(e) and "may not send" not in str(e):
-                raise
+        except Refused:
+            pass  # any group-setup refusal: the task still goes, as a plain delegate
     body: dict = {"title": title, "text": text}
     if checklist:
         body["checklist"] = checklist

@@ -971,10 +971,47 @@ def test_member_ignores_a_group_id_held_under_another_host(proj, run, rel, membe
     evil["body"]["group"]["host"] = BANK
     evil["body"]["by"] = BANK
     evil["body"]["group"]["members"].append({"ws": BANK, "name": "Bank"})
-    out = inbox(run, rel, evil)
-    assert "belongs to another host" in out[0]["note"]
+    inbox(run, rel, evil)
     st = json.loads((proj / ".orch/secrets/groups.json").read_text())
-    assert list(st["joined"]) == [f"{FIN}/grp_t_fin14a"]
+    # keyed by (host, id): the squatter has a group of its own and the real one is untouched
+    assert sorted(st["joined"]) == sorted([f"{FIN}/grp_t_fin14a", f"{BANK}/grp_t_fin14a"])
+    assert [x["text"] for x in st["joined"][f"{FIN}/grp_t_fin14a"]["log"]] == ["hello"]
+
+
+def test_a_joined_group_never_blocks_our_own_group_or_names_our_ticket(proj, run, rel, member):
+    # a stranger squats the id our next ticket will get: it is only a group keyed by (stranger, id)
+    t = tickets.create(proj, "Our own ticket", "human:test")
+    squat = from_host("text", {"text": "hi"}, gid="grp_t_squat1", seq=1, id=mid("sq1"))
+    squat["from"] = STRANGER
+    squat["body"]["group"]["host"] = STRANGER
+    squat["body"]["group"]["members"] = [{"ws": STRANGER, "name": "X"}, {"ws": WS, "name": "Me"}]
+    squat["ticket"] = "t_squat1"
+    squat["body"]["by"] = STRANGER
+    inbox(run, rel, squat)
+    st = json.loads((proj / ".orch/secrets/groups.json").read_text())
+    assert list(st["joined"]) == [f"{STRANGER}/grp_t_squat1"]
+    # a group id that is grp_ + one of our own tickets is refused outright
+    own = from_host(
+        "text", {"text": "I host your ticket"}, gid="grp_" + t["id"], seq=1, id=mid("sq2"), i="own"
+    )
+    own["ticket"] = t["id"]
+    assert "own tickets" in inbox(run, rel, own)[0]["note"]
+    # and our group for that ticket is made as always
+    rel.snapshot["workspaces"]["workspaces"].append(entry(HOME, "Home", "house", "amber"))
+    run("relay", "refresh")
+    assert run("relay", "group", "add", t["id"], "Home")[0] == 0
+    st = json.loads((proj / ".orch/secrets/groups.json").read_text())
+    assert "grp_" + t["id"] in st["hosted"]
+
+
+def test_delegate_falls_back_to_plain_when_the_group_cannot_open(proj, run, rel, host, monkeypatch):
+    def boom(*a, **k):
+        raise cg.Refused("nope")
+
+    monkeypatch.setattr(cg, "delegate", boom)
+    assert run("relay", "delegate", "Home", "Plain after all", "--text", "x", "--ticket", host)[0] == 0
+    d = sent(rel, type="delegate")[0]
+    assert "group" not in d["body"]
 
 
 def test_member_drops_a_group_it_is_not_in_and_non_host_messages(proj, run, rel, member):

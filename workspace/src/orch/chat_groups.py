@@ -11,7 +11,7 @@ Layout
   (G8). The tests run every vector in contracts/vectors/chat-groups/ through them.
 - state: .orch/secrets/groups.json under .orch/groups.lock. Host groups live in ["hosted"][group id];
 groups this
-  workspace was invited to in ["joined"]["<host>/<group id>"]; ["keys"] maps a group id to its host (rule G7).
+  workspace was invited to in ["joined"]["<host>/<group id>"]; keyed by (host, id) only (G7).
   The host ticket also carries ext.relay.group {id, title, members:[{ws, joined_at, left_at}], seq}.
 - host side: create/add/remove/ask/delegate/say/share, `receive` for what members and phones send, `sync`.
 - member side: `receive` for what the host sends, task reports (`sync`), `answer`, `leave`.
@@ -535,9 +535,8 @@ def _host_ticket(root: Path, tid: str) -> dict:
 def _new_group(root: Path, st: dict, t: dict) -> dict:
     me = _me(root)
     gid = "grp_" + t["id"]
-    held = st["keys"].get(gid)
-    if held not in (None, me):
-        raise Refused("That group id belongs to another workspace.")
+    if gid in st["hosted"]:
+        raise Refused("This ticket already has a group.")
     title = _line(t["title"], TITLE_MAX) or "Group"
     g = {
         "id": gid,
@@ -566,7 +565,6 @@ def _new_group(root: Path, st: dict, t: dict) -> dict:
         "approvals": [],
     }
     st["hosted"][gid] = g
-    st["keys"][gid] = me
     return g
 
 
@@ -1450,7 +1448,12 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
     host, gid = gw["host"], gw["id"]
     if frm != host:
         return _drop(st, m, "group message from a workspace that is not the group's host")
-    errs = receive_errors(m, {"known_groups": st["keys"]})
+    # Joined groups are keyed by (host, id) only: no id held for another host blocks a group (G7 is only
+    # about the ids this workspace hosts itself), and nobody can name a group id of one of our own tickets.
+    own = {g_id: me for g_id in st["hosted"]}
+    errs = receive_errors(m, {"known_groups": own})
+    if not errs and gid.startswith("grp_") and tickets.ticket_path(root, gid[4:]).exists():
+        errs = ["group id names one of this workspace's own tickets"]
     if errs:
         return _drop(st, m, errs[0])
     if me not in members_of(gw):
@@ -1478,7 +1481,6 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
             "seen_seq": 0,
             "joined_at": tickets.now(),
         }
-        st["keys"][gid] = host
     if j["left"] or j["closed"]:
         return _drop(st, m, "this group is closed for this workspace")
     ev = b.get("group_event") if isinstance(b.get("group_event"), dict) else None
