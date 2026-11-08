@@ -118,7 +118,7 @@ struct ConversationView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     if working(items) { StatusLine("\(workspaceName) is working…") }
-                    Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(running: ticket?.view?.running, finished: ticket.map { [.done, .stopped, .didntWork].contains(TopicStatus($0)) } ?? false), reply: $reply, )
+                    Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(running: ticket?.view?.running, finished: ticket.map { [.done, .dropped, .stopped, .didntWork].contains(TopicStatus($0)) } ?? false), reply: $reply, )
                 }
             }
             .sheet(isPresented: $tasksShown) { tasksSheet }

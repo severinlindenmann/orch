@@ -24,7 +24,7 @@ final class StatusRefsTests: XCTestCase {
         XCTAssertEqual(topic("open"), .backlog); XCTAssertEqual(topic("ready"), .backlog)
         XCTAssertEqual(topic("active"), .working); XCTAssertEqual(topic("waiting"), .waitingOnYou)
         XCTAssertEqual(topic("review"), .review); XCTAssertEqual(topic("done"), .done)
-        XCTAssertEqual(topic("dropped"), .stopped, "dropped is not shown as plain Done")
+        XCTAssertEqual(topic("dropped"), .dropped, "dropped is not shown as plain Done")
         XCTAssertEqual(topic(nil), .working, "an old snapshot without a status keeps working")
         XCTAssertEqual(topic("review", kind: "result"), .review, "an agent's done lands as review")
         XCTAssertEqual(topic(nil, kind: "result"), .done)
@@ -39,7 +39,7 @@ final class StatusRefsTests: XCTestCase {
     func testChipWordsAndLabels() {
         XCTAssertEqual(TopicStatus.working.chip, "Claude is working"); XCTAssertEqual(TopicStatus.waitingOnYou.chip, "Needs you")
         XCTAssertEqual(TopicStatus.review.chip, "Ready for review"); XCTAssertEqual(TopicStatus.done.chip, "Done")
-        XCTAssertEqual(TopicStatus.allCases.map(\.label), ["Working", "Needs you", "Ready for review", "Not started", "Done", "Stopped", "Didn't work"])
+        XCTAssertEqual(TopicStatus.allCases.map(\.label), ["Working", "Needs you", "Ready for review", "Paused", "Not started", "Done", "Dropped", "Stopped", "Didn't work"])
     }
 
     func testGroupingOrderOfTicketsIsNeedsYouReviewWorkingBacklogDone() {

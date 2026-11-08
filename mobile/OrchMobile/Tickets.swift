@@ -4,10 +4,10 @@ import Foundation
 /// (`GET /v1/phone/updates`) plus the open questions, no second store.
 struct Ticket: Identifiable, Equatable, Sendable {
     enum Status: Int, Comparable, Sendable {
-        case needsYou, review, working, backlog, done
+        case needsYou, review, working, paused, backlog, done
         static func < (a: Status, b: Status) -> Bool { a.rawValue < b.rawValue }
         var title: String {
-            switch self { case .needsYou: "Needs you"; case .review: "Ready for review"; case .working: "Working on"; case .backlog: "Not started"; case .done: "Done" }
+            switch self { case .needsYou: "Needs you"; case .review: "Ready for review"; case .working: "Working on"; case .paused: "Paused"; case .backlog: "Not started"; case .done: "Done" }
         }
         /// The ticket's own status word from `ticket_view.status` (open|ready|active|waiting|review|done|dropped). Unknown words: nil.
         init?(ticketStatus word: String?) {
@@ -46,6 +46,7 @@ struct Ticket: Identifiable, Equatable, Sendable {
         case .needsYou: return "Needs you"
         case .working: return "Working on it"
         case .review: return "Ready for review"
+        case .paused: return "Paused"
         case .backlog: return "Not started"
         case .done:
             switch kind {
@@ -61,6 +62,7 @@ struct Ticket: Identifiable, Equatable, Sendable {
         case .needsYou: "exclamationmark.circle.fill"
         case .working: "circle.dotted"
         case .review: "eye.circle.fill"
+        case .paused: "pause.circle"
         case .backlog: "circle"
         case .done: kind == "result" ? "checkmark.circle.fill" : "xmark.circle.fill"
         }
@@ -89,6 +91,11 @@ enum TicketBuilder {
             // "active" without a running agent (an answer on the dashboard moved it on, nobody started a run): the
             // snapshot says no agent runs, so the phone never claims "Claude is working" (owner 8 Nov, IMG_6626).
             if st == .working, u.ticketView?.running == false { st = .backlog }
+            // A ticket that was started and is now idle is Paused.
+            if let view = u.ticketView, view.started == true,
+               view.status == "ready" || view.status == "open" || (view.status == "active" && view.running == false) {
+                st = .paused
+            }
             byKey[key] = Ticket(id: key, workspace: u.workspace, workspaceName: u.workspaceName, ticket: u.ticket,
                                 title: u.ticketView?.title ?? u.title ?? u.text, text: u.text, status: st, kind: u.kind, at: u.at, question: nil,
                                 key: u.key, view: u.ticketView)
