@@ -737,3 +737,89 @@ def test_ref_add_web_needs_http_and_no_ref_to_the_chat_ticket(proj, run, new_tic
     for target in ("file:///etc/passwd", "ftp://example.com/x", "javascript:alert(1)", gid):
         assert run("ref", "add", tid, target)[0] == 2, target
     assert run("ref", "add", tid, "https://example.com/ok")[0] == 0
+
+
+# ---------------------------------------------------------------- the Chat ticket is never finished; helper stays in orch
+
+
+def test_general_never_leaves_its_status_by_any_path(proj, conn, run):
+    gid = _general(proj, conn, run)
+    before = tickets.load(proj, gid)["status"]
+    for by in ("agent:claude", "human:me"):
+        for status in ("done", "review", "dropped", "active", "open"):
+            with pytest.raises(Refused):
+                tickets.set_status(proj, gid, status, by)  # `orch done` and set_status
+    rev = tickets.load(proj, gid)["revision"]
+    with pytest.raises(Refused):
+        tickets.patch(proj, gid, rev, json.dumps({"status": "review"}), "human:me")
+    with pytest.raises(Refused):
+        tickets.patch(proj, gid, rev, json.dumps({"status": "done"}), "agent:claude")
+    t = tickets.load(proj, gid)
+    assert t["status"] == before
+
+
+def test_general_is_not_touched_by_the_run_wrapper_hooks(proj, conn, run):
+    gid = _general(proj, conn, run)
+    t0 = tickets.load(proj, gid)
+    n = len(t0["history"])
+    tickets.mark_working(proj, gid, "agent:relay", "Claude")
+    tickets.agent_stopped(proj, gid, "agent:relay")
+    tickets.wait_for_start(proj, gid, "no sign-in", "agent:relay")
+    t1 = tickets.load(proj, gid)
+    assert (t1["status"], len(t1["history"])) == (t0["status"], n)
+
+
+def test_only_real_messages_carry_chat_message(proj, conn, run):
+    gid = _general(proj, conn, run, "hello there")
+    tickets.apply_op(proj, gid, lambda t: tickets.add_history(t, "agent:x", "Claude started"))
+    hist = tickets.load(proj, gid)["history"]
+    flagged = [e["text"] for e in hist if e.get("chat_message") is True]
+    assert "Claude started" not in flagged and flagged
+
+
+def test_helper_prompt_and_skill_stay_inside_orch(proj):
+    gid = tickets.ensure_general(proj, "phone:Marco")
+    prompt = chat.helper_prompt(proj, tickets.load(proj, gid), [], "")
+    skill = (Path(__file__).resolve().parents[1] / "skills" / "orch" / "SKILL.md").read_text()
+    for text in (prompt, skill):
+        assert "only use orch tools and the files in this workspace" in text
+        assert "connectors" in text
+
+
+def test_general_may_still_wait_or_be_ready(proj, conn, run):
+    gid = _general(proj, conn, run)
+    for status in ("waiting", "ready"):
+        assert tickets.set_status(proj, gid, status, "human:me")["status"] == status
+
+
+def test_an_inbound_phone_text_in_general_carries_the_chat_flag(proj, run, conn):
+    gid = _general(proj, conn, run, "hi from phone")
+    hist = tickets.load(proj, gid)["history"]
+    assert [e["text"] for e in hist if e.get("chat_message") is True] == [
+        "From Marco's iPhone: hi from phone"
+    ]
+    assert "orch relay send" not in str([e["text"] for e in hist])  # no agent instruction row in History
+
+
+def test_an_agent_cannot_pass_a_note_off_as_a_chat_message_by_env_via(proj, conn, run, monkeypatch):
+    gid = _general(proj, conn, run)
+    monkeypatch.setenv("ORCH_VIA", "phone")
+    tickets.apply_op(proj, gid, lambda t: tickets.add_history(t, "agent:x", "sneaky note"))
+    assert not [
+        e for e in tickets.load(proj, gid)["history"] if e["text"] == "sneaky note" and e.get("chat_message")
+    ]
+
+
+def test_an_agent_text_to_chat_is_recorded_as_the_agent_whatever_by_says(proj, run, conn, monkeypatch):
+    gid = _general(proj, conn, run)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    run("relay", "send", pv3.PHONE, "answer", "--ticket", gid, "--by", "human:marco")
+    sent = [e for e in tickets.load(proj, gid)["history"] if e["text"] == "answer"]
+    assert sent and all(e["by"] == "agent:claude" and e["chat_message"] is True for e in sent)
+
+
+def test_every_new_history_line_carries_the_flag(proj):
+    t = {"history": []}
+    tickets.add_history(t, "agent:x", "note")
+    tickets.add_history(t, "human:me", "hi", chat=True)
+    assert [e["chat_message"] for e in t["history"]] == [False, True]
