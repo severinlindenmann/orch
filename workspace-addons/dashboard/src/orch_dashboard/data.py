@@ -572,6 +572,7 @@ def load_state(
         "needs": needs if isinstance(needs, list) else [],
         "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
         "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},
+        "groups": mobile.load_groups(root, orch_bin) if with_addons else None,  # group chats; snapshots carry none
         "mobile_mode": mobile.load_mobile(root, orch_bin) if with_settings else None,  # the live page only, never a snapshot
         "look": look.load_look(root, orch_bin, fresh) if with_settings else None,  # the live page only, never a snapshot
         "settings": load_settings(root, orch_bin)

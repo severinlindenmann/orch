@@ -65,7 +65,41 @@ def _relay_send(a):
     return ["relay", "send", peer], [], [acts._text(a.get("text"), "message")]
 
 
+def _group_ticket(a):
+    acts = _actions()
+    return acts._tid(a.get("ticket"))
+
+
+def _group_say(a):
+    """The person writes into a ticket's group chat: `orch relay group say <ticket> --dashboard -- <text>`."""
+    acts = _actions()
+    acts._only(a, ("ticket", "text"))
+    return (
+        ["relay", "group", "say", _group_ticket(a)],
+        ["--dashboard"],
+        [acts._text(a.get("text"), "message")],
+    )
+
+
+def _group_member(verb):
+    def op(a):
+        acts = _actions()
+        acts._only(a, ("ticket", "workspace"))
+        peer = a.get("workspace")
+        if not (isinstance(peer, str) and PEER.fullmatch(peer)):
+            raise _bad("Choose a workspace.")
+        return ["relay", "group", verb, _group_ticket(a), peer], [], []
+
+    op.__doc__ = (
+        f"{verb.title()} a workspace in a ticket's group: `orch relay group {verb} <ticket> <workspace>`."
+    )
+    return op
+
+
 MOBILE_OPS = {
+    "group.say": _group_say,
+    "group.add": _group_member("add"),
+    "group.remove": _group_member("remove"),
     "mobile.set": _mobile_set,
     "mobile.hours": _mobile_hours,
     "mobile.ack": _mobile_ack,
@@ -104,3 +138,77 @@ def load_mobile(root: Path, orch_bin: str | None) -> dict | None:
         "machine": s(d.get("machine"), 60),
         "ended": ended,
     }
+
+
+def _short(v, n=200):
+    return v[:n] if isinstance(v, str) else None
+
+
+def load_groups(root: Path, orch_bin: str | None) -> dict | None:
+    """Group chats across workspaces from `orch relay group list --json`: the groups this workspace hosts (members,
+    seen, task cards) and those it was invited to (members as the host listed them, the ticket card, the last
+    messages). Read only; None when the add-on is not on here or there is no group."""
+    from .data import run_orch  # late: data imports this file
+
+    d = run_orch(orch_bin, ["relay", "group", "list", "--json"], root)
+    if not isinstance(d, dict) or not (d.get("hosted") or d.get("joined")):
+        return None
+
+    def members(rows):
+        return [
+            {
+                "ws": _short(x.get("ws"), 20),
+                "name": _short(x.get("name"), 60),
+                "look": x.get("look") if isinstance(x.get("look"), dict) else None,
+                "host": bool(x.get("host")),
+                "left_at": _short(x.get("left_at"), 30),
+                "seen": x.get("seen") if isinstance(x.get("seen"), int) else None,
+            }
+            for x in rows
+            if isinstance(x, dict)
+        ]
+
+    hosted = [
+        {
+            "id": _short(g.get("id"), 30),
+            "ticket": _short(g.get("ticket"), 20),
+            "title": _short(g.get("title"), 120),
+            "closed": bool(g.get("closed")),
+            "seq": g.get("seq") if isinstance(g.get("seq"), int) else 0,
+            "members": members(g.get("members") or []),
+            "tasks": [
+                {
+                    k: _short(v, 120)
+                    for k, v in t.items()
+                    if k in ("delegate", "ws", "ticket", "key", "title", "status")
+                }
+                for t in g.get("tasks") or []
+                if isinstance(t, dict)
+            ],
+        }
+        for g in d.get("hosted") or []
+        if isinstance(g, dict)
+    ]
+    joined = [
+        {
+            "host": _short(g.get("host"), 20),
+            "id": _short(g.get("id"), 30),
+            "title": _short(g.get("title"), 120),
+            "closed": bool(g.get("closed")),
+            "left": bool(g.get("left")),
+            "members": members(g.get("members") or []),
+            "card": g.get("card") if isinstance(g.get("card"), dict) else None,
+            "log": [
+                {
+                    k: _short(v, 600) if isinstance(v, str) else v
+                    for k, v in x.items()
+                    if k in ("id", "seq", "type", "at", "shown", "text", "authority", "task", "event", "file")
+                }
+                for x in (g.get("log") or [])[-50:]
+                if isinstance(x, dict)
+            ],
+        }
+        for g in d.get("joined") or []
+        if isinstance(g, dict)
+    ]
+    return {"hosted": hosted, "joined": joined}
