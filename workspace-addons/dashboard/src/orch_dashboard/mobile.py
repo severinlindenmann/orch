@@ -4,6 +4,7 @@ in this file (the other dashboard sources name no add-on; a test keeps it that w
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from pathlib import Path
 
 HOURS = (4, 8, 12, 24)
@@ -106,6 +107,9 @@ def load_mobile(root: Path, orch_bin: str | None) -> dict | None:
     }
 
 
+CHAT_FLAG_SINCE = "2026-11-08T14:15:00Z"  # when the core began writing chat_message on every line
+
+
 def is_chat_entry(e: dict) -> bool:
     """A history line that is a real Chat message: the core's `chat_message: true` flag. Lines written before the
     flag existed (no key at all) count only when they came from a person on the dashboard (human:) or from the
@@ -114,6 +118,12 @@ def is_chat_entry(e: dict) -> bool:
         return False
     if "chat_message" in e:
         return e["chat_message"] is True
+    try:
+        at = datetime.fromisoformat(str(e.get("at", "")))
+    except ValueError:
+        return False
+    if at.tzinfo is None or at >= datetime.fromisoformat(CHAT_FLAG_SINCE):
+        return False  # new lines always carry the flag: a missing one is never a message
     by, via = str(e.get("by", "")), e.get("via")
     return (via == "dashboard" and by.startswith("human:")) or (via == "phone" and by.startswith("agent:relay from ph_"))
 

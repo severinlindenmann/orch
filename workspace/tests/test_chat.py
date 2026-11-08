@@ -595,3 +595,18 @@ def test_an_agent_cannot_pass_a_note_off_as_a_chat_message_by_env_via(proj, conn
     assert not [
         e for e in tickets.load(proj, gid)["history"] if e["text"] == "sneaky note" and e.get("chat_message")
     ]
+
+
+def test_an_agent_text_to_chat_is_recorded_as_the_agent_whatever_by_says(proj, run, conn, monkeypatch):
+    gid = _general(proj, conn, run)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    run("relay", "send", pv3.PHONE, "answer", "--ticket", gid, "--by", "human:marco")
+    sent = [e for e in tickets.load(proj, gid)["history"] if e["text"] == "answer"]
+    assert sent and all(e["by"] == "agent:claude" and e["chat_message"] is True for e in sent)
+
+
+def test_every_new_history_line_carries_the_flag(proj):
+    t = {"history": []}
+    tickets.add_history(t, "agent:x", "note")
+    tickets.add_history(t, "human:me", "hi", chat=True)
+    assert [e["chat_message"] for e in t["history"]] == [False, True]

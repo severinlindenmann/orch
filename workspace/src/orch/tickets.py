@@ -461,9 +461,7 @@ def _env_via() -> str:
 
 def add_history(ticket: dict, by: str, text: str, via: str | None = None, chat: bool = False) -> None:
     """chat=True marks a real Chat or group message (`chat_message: true`): the only lines the Chat shows."""
-    entry = {"at": now(), "by": by, "via": via or _env_via(), "text": text}
-    if chat:
-        entry["chat_message"] = True
+    entry = {"at": now(), "by": by, "via": via or _env_via(), "text": text, "chat_message": chat}
     ticket["history"].append(entry)
 
 

@@ -69,9 +69,10 @@ def test_group_talk_is_marked_by_the_data_layer(ws):
 def test_legacy_lines_count_only_from_a_person_or_the_relay_phone_intake_never_via_alone():
     from orch_dashboard.mobile import is_chat_entry
 
-    assert is_chat_entry({"by": "human:me", "via": "dashboard", "text": "x"})
-    assert is_chat_entry({"by": "agent:relay from ph_abc", "via": "phone", "text": "x"})
-    assert not is_chat_entry({"by": "agent:x", "via": "phone", "text": "x"})  # ORCH_VIA=phone spoof
+    assert is_chat_entry({"at": "2026-11-01T10:00:00Z", "by": "human:me", "via": "dashboard", "text": "x"})
+    assert is_chat_entry({"at": "2026-11-01T10:00:00Z", "by": "agent:relay from ph_abc", "via": "phone", "text": "x"})
+    assert not is_chat_entry({"at": "2026-11-01T10:00:00Z", "by": "agent:x", "via": "phone", "text": "x"})  # ORCH_VIA=phone spoof
     assert not is_chat_entry({"by": "agent:x", "via": "relay", "text": "Added a task"})
     assert not is_chat_entry({"by": "human:me", "via": "dashboard", "text": "x", "chat_message": False})
     assert is_chat_entry({"by": "agent:x", "via": "cli", "text": "x", "chat_message": True})
+    assert not is_chat_entry({"at": "2026-12-01T10:00:00Z", "by": "human:me", "via": "dashboard", "text": "x"})  # unflagged and new
