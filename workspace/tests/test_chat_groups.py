@@ -2122,3 +2122,16 @@ def test_card_kind_fails_closed_without_members_and_agrees_on_odd_values():
         cg._ref_key(odd["group_ref"]) is None
         and cg.card_kind(odd, shown, "ws_m", ["ws_m"]) == "answer_in_bank"
     )
+
+
+def test_mixed_case_orch_folder_is_refused_even_on_a_case_insensitive_disk(proj, run, rel, host):
+    run("relay", "group", "add", host, HOME)
+    adir = proj / ".orch" / "tickets" / host / "artifacts"
+    adir.mkdir(parents=True)
+    (adir / "ok.txt").write_text("fine words")
+    for odd in (".ORCH/Tickets", ".Orch/tickets"):
+        code, _, err = run(
+            "relay", "group", "share", host, str(proj / odd / host / "Artifacts" / "ok.txt"), "--click"
+        )
+        assert code != 0 and not sent(rel, type="file")
+    assert cg.secret_path(proj / ".ORCH" / "Tickets" / host / "ARTIFACTS" / "ok.txt", proj, artifacts_ok=True)

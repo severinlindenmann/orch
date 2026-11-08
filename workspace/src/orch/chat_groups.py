@@ -352,7 +352,7 @@ def card_kind(
         ref = _ref_key(q.get("group_ref"))
         if ref is None or ref != _ref_key(shown_in):
             return "answer_in_bank"
-        if not isinstance(members, (list, tuple, set)) or sender not in members:  # unknown: no buttons
+        if not isinstance(members, list) or sender not in members:  # unknown: no buttons
             return "answer_in_bank"
     return "buttons"
 
@@ -539,7 +539,8 @@ def _artifact_contained(path: Path, real: Path, root: Path) -> None:
             top = Path(root).resolve()
         except ValueError:
             return
-    if not (len(parts) >= 5 and parts[:2] == (".orch", "tickets") and parts[3] == "artifacts"):
+    low = tuple(x.casefold() for x in parts)  # macOS and Windows: .ORCH/Tickets/... is the same folder
+    if not (len(low) >= 5 and low[:2] == (".orch", "tickets") and low[3] == "artifacts"):
         return
     folder = top.joinpath(*parts[:4])
     real_folder = folder.resolve()
