@@ -1,8 +1,8 @@
 {
-  "why": "Host fan-out of Home's text to Bank: id = fanout id of (origin, to), by = the member, seq set by host.",
+  "why": "Host copy of Home's text to Bank: id = fan-out id of (host, origin, to), by = the member, seq set by host.",
   "message": {
     "schema": "orch.msg/1",
-    "id": "m_7046ab9c3eeec981",
+    "id": "m_379e0eb0742c4adf",
     "from": "ws_fin0000001",
     "to": "ws_ban0000001",
     "type": "text",
@@ -16,16 +16,37 @@
         "host": "ws_fin0000001",
         "title": "Pay car tax 2027",
         "members": [
-          "ws_fin0000001",
-          "ws_hom0000001",
-          "ws_ban0000001"
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          },
+          {
+            "ws": "ws_ban0000001",
+            "name": "Bank",
+            "look": {
+              "icon": "wallet",
+              "color": "blue"
+            }
+          }
         ],
         "seq": 7
       },
       "by": "ws_hom0000001",
       "via": "helper",
       "origin": {
-        "id": "m_homeanswer000100",
+        "id": "m_homeanswer000000",
         "from": "ws_hom0000001",
         "at": "2026-11-08T10:06:00Z"
       }

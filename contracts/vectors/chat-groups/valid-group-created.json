@@ -1,8 +1,8 @@
 {
-  "why": "Host fans out 'group created' to phones; seq 1; ticket = host ticket, group id = grp_ + ticket.",
+  "why": "Host -> phones, group_event created, seq 1, members with name + look; outside the push set so quiet (note).",
   "message": {
     "schema": "orch.msg/1",
-    "id": "m_grpcreated000010",
+    "id": "m_grpcreated000000",
     "from": "ws_fin0000001",
     "to": "phones",
     "type": "text",
@@ -16,13 +16,30 @@
         "host": "ws_fin0000001",
         "title": "Pay car tax 2027",
         "members": [
-          "ws_fin0000001",
-          "ws_hom0000001"
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          }
         ],
         "seq": 1
       },
       "by": "ws_fin0000001",
       "via": "helper",
+      "update": {
+        "kind": "note"
+      },
       "group_event": {
         "kind": "created",
         "at": "2026-11-08T10:02:00Z",

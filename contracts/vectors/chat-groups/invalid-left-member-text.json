@@ -1,0 +1,70 @@
+{
+  "why": "F12: messages from a workspace that is no longer a member are dropped.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_leftmember000000",
+    "from": "ws_ban0000001",
+    "to": "ws_fin0000001",
+    "type": "text",
+    "created_at": "2026-11-08T10:03:00Z",
+    "ticket": "t_bank3a",
+    "body": {
+      "text": "Still here",
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          },
+          {
+            "ws": "ws_ban0000001",
+            "name": "Bank",
+            "look": {
+              "icon": "wallet",
+              "color": "blue"
+            }
+          }
+        ]
+      },
+      "by": "ws_ban0000001",
+      "via": "helper"
+    }
+  },
+  "context": {
+    "host_state": {
+      "ticket": "t_fin14a",
+      "members": [
+        "ws_fin0000001",
+        "ws_hom0000001"
+      ],
+      "delegates_sent": {
+        "ws_hom0000001": [
+          "m_delegatehome0000"
+        ],
+        "ws_ban0000001": [
+          "m_delegatebank0000"
+        ]
+      },
+      "task_status": {
+        "m_delegatehome0000": "queued"
+      },
+      "group_copies": [],
+      "closed": false
+    }
+  }
+}

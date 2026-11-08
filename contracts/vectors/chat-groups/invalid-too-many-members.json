@@ -2,7 +2,7 @@
   "why": "At most 8 member workspaces (host included).",
   "message": {
     "schema": "orch.msg/1",
-    "id": "m_ninemembers00010",
+    "id": "m_ninemembers00000",
     "from": "ws_fin0000001",
     "to": "phones",
     "type": "text",
@@ -16,20 +16,84 @@
         "host": "ws_fin0000001",
         "title": "Pay car tax 2027",
         "members": [
-          "ws_fin0000001",
-          "ws_mem0000000",
-          "ws_mem0000001",
-          "ws_mem0000002",
-          "ws_mem0000003",
-          "ws_mem0000004",
-          "ws_mem0000005",
-          "ws_mem0000006",
-          "ws_mem0000007"
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_mem0000000",
+            "name": "Mem",
+            "look": {
+              "icon": null,
+              "color": null
+            }
+          },
+          {
+            "ws": "ws_mem0000001",
+            "name": "Mem",
+            "look": {
+              "icon": null,
+              "color": null
+            }
+          },
+          {
+            "ws": "ws_mem0000002",
+            "name": "Mem",
+            "look": {
+              "icon": null,
+              "color": null
+            }
+          },
+          {
+            "ws": "ws_mem0000003",
+            "name": "Mem",
+            "look": {
+              "icon": null,
+              "color": null
+            }
+          },
+          {
+            "ws": "ws_mem0000004",
+            "name": "Mem",
+            "look": {
+              "icon": null,
+              "color": null
+            }
+          },
+          {
+            "ws": "ws_mem0000005",
+            "name": "Mem",
+            "look": {
+              "icon": null,
+              "color": null
+            }
+          },
+          {
+            "ws": "ws_mem0000006",
+            "name": "Mem",
+            "look": {
+              "icon": null,
+              "color": null
+            }
+          },
+          {
+            "ws": "ws_mem0000007",
+            "name": "Mem",
+            "look": {
+              "icon": null,
+              "color": null
+            }
+          }
         ],
         "seq": 9
       },
       "by": "ws_fin0000001",
-      "via": "helper"
+      "via": "helper",
+      "to_person": true
     }
   }
 }

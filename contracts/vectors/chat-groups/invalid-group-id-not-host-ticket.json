@@ -1,8 +1,8 @@
 {
-  "why": "Forged group id: the host's group id must be grp_ + the message's own ticket.",
+  "why": "G1: the host's group id must be grp_ + the message's own ticket.",
   "message": {
     "schema": "orch.msg/1",
-    "id": "m_wrongid000000010",
+    "id": "m_wrongid000000000",
     "from": "ws_fin0000001",
     "to": "ws_hom0000001",
     "type": "text",
@@ -16,8 +16,22 @@
         "host": "ws_fin0000001",
         "title": "Pay car tax 2027",
         "members": [
-          "ws_fin0000001",
-          "ws_hom0000001"
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          }
         ],
         "seq": 4
       },

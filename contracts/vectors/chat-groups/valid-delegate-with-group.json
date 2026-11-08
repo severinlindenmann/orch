@@ -1,8 +1,8 @@
 {
-  "why": "Delegation link: the existing delegate message carries body.group (host -> member).",
+  "why": "Delegation link: existing delegate + body.group; targeted, so no seq.",
   "message": {
     "schema": "orch.msg/1",
-    "id": "m_delegatehome0010",
+    "id": "m_delegatehome0000",
     "from": "ws_fin0000001",
     "to": "ws_hom0000001",
     "type": "delegate",
@@ -17,10 +17,23 @@
         "host": "ws_fin0000001",
         "title": "Pay car tax 2027",
         "members": [
-          "ws_fin0000001",
-          "ws_hom0000001"
-        ],
-        "seq": 2
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          }
+        ]
       },
       "by": "ws_fin0000001",
       "via": "helper"

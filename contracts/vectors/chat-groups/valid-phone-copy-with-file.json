@@ -1,8 +1,8 @@
 {
-  "why": "Host text to phones sharing a file: phones can only fetch blobs named in body.ticket_view.attachments, so the file rides there and shared_files points at it.",
+  "why": "Text to phones sharing a file: blob in ticket_view.attachments + shared_files; addressed to the person, so pushed.",
   "message": {
     "schema": "orch.msg/1",
-    "id": "m_phonefile0000010",
+    "id": "m_phonefile0000000",
     "from": "ws_fin0000001",
     "to": "phones",
     "type": "text",
@@ -10,20 +10,42 @@
     "ticket": "t_fin14a",
     "key": "FIN-14",
     "body": {
-      "text": "Finance helper shared the 2027 bill.",
+      "text": "Here is the 2027 bill.",
       "group": {
         "id": "grp_t_fin14a",
         "host": "ws_fin0000001",
         "title": "Pay car tax 2027",
         "members": [
-          "ws_fin0000001",
-          "ws_hom0000001",
-          "ws_ban0000001"
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          },
+          {
+            "ws": "ws_ban0000001",
+            "name": "Bank",
+            "look": {
+              "icon": "wallet",
+              "color": "blue"
+            }
+          }
         ],
         "seq": 8
       },
       "by": "ws_fin0000001",
       "via": "helper",
+      "to_person": true,
       "update": {
         "kind": "note",
         "title": "Pay car tax 2027"

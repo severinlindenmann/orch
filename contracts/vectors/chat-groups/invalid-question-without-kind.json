@@ -1,0 +1,47 @@
+{
+  "why": "F9: a host question to a member must be question_kind info.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_permq00000000000",
+    "from": "ws_fin0000001",
+    "to": "ws_hom0000001",
+    "type": "question",
+    "created_at": "2026-11-08T10:03:00Z",
+    "ticket": "t_fin14a",
+    "key": "FIN-14",
+    "body": {
+      "question_id": "q2",
+      "text": "Allow Finance to publish?",
+      "options": [
+        "Once",
+        "Always",
+        "No"
+      ],
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          }
+        ]
+      },
+      "by": "ws_fin0000001",
+      "via": "helper"
+    }
+  }
+}

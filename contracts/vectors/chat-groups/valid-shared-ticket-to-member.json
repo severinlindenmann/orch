@@ -1,8 +1,8 @@
 {
-  "why": "Ticket info shared with a member at join: read-only card, no history, no files.",
+  "why": "Ticket card for a member at join: read only, no history, no files; targeted, no seq.",
   "message": {
     "schema": "orch.msg/1",
-    "id": "m_534cc8d33d1f26cc",
+    "id": "m_sharedcard000000",
     "from": "ws_fin0000001",
     "to": "ws_hom0000001",
     "type": "text",
@@ -16,18 +16,26 @@
         "host": "ws_fin0000001",
         "title": "Pay car tax 2027",
         "members": [
-          "ws_fin0000001",
-          "ws_hom0000001"
-        ],
-        "seq": 3
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          }
+        ]
       },
       "by": "ws_fin0000001",
       "via": "helper",
-      "origin": {
-        "id": "m_sharedcard000010",
-        "from": "ws_fin0000001",
-        "at": "2026-11-08T10:03:00Z"
-      },
       "shared_ticket": {
         "ticket": "t_fin14a",
         "key": "FIN-14",

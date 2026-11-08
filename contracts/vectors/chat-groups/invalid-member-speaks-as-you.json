@@ -1,8 +1,8 @@
 {
-  "why": "A member may not speak for the person: by must be the member itself.",
+  "why": "G4: a member's message is by the member itself.",
   "message": {
     "schema": "orch.msg/1",
-    "id": "m_memberasyou00010",
+    "id": "m_memberasyou00000",
     "from": "ws_hom0000001",
     "to": "ws_fin0000001",
     "type": "text",
@@ -16,8 +16,22 @@
         "host": "ws_fin0000001",
         "title": "Pay car tax 2027",
         "members": [
-          "ws_fin0000001",
-          "ws_hom0000001"
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          }
         ]
       },
       "by": "you",
