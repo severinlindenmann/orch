@@ -721,7 +721,7 @@ def test_cards_keep_the_rule_of_whoever_added_them(proj, monkeypatch):
     assert chat.read_file(proj, "linked/r.md") is None  # no mark: strict
     f = proj / ".orch" / "chat" / f"{chat.day_key(proj)}.json"
     d = json.loads(f.read_text())
-    d["messages"][0]["refs"][0]["added_by"] = "helper"
+    d["messages"][0]["refs"][0].update(added_by="helper", path="linked/r.md")
     f.write_text(json.dumps(d))
     assert chat.read_day(proj, d["day"])["messages"][0]["refs"] == []
     # a person's card never reaches .orch, whatever the link
