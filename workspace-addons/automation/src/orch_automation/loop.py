@@ -193,7 +193,7 @@ class Scheduler:
         a ticket switched off here (paused) is left alone, and a ticket started this pass is skipped."""
         started: list[str] = []
         skip = list(skip or [])
-        for t in read_tickets(self.root):
+        for t in [*read_tickets(self.root), *self.chat_stub()]:
             tid = t["id"]
             self._give_back_after_holder(tid)
             if tid in skip or t.get("status") != "ready" or not self.may_start(t):
@@ -230,6 +230,17 @@ class Scheduler:
                                             f"{QUEUED_TRIES} tries. It stays queued; start the agent by hand.")
                 self.fail(tid, f"the agent could not be started for the waiting input ({QUEUED_TRIES} tries)")
         return started
+
+    def chat_stub(self) -> list[dict]:
+        """The workspace's Chat: its hidden General ticket is in no ticket list, but a text a person wrote there
+        (phone or dashboard) starts the one persistent helper exactly like queued input on a Ready ticket:
+        same rules (human-authored only, once per item, same gates). Core says which ticket it is."""
+        st = orchcli.call(self.root, "chat", "id", by=False)  # cheap: no day files, no inbox scan
+        gid = st.get("ticket") if isinstance(st, dict) else None
+        if not isinstance(gid, str) or not orchcli.ID_RE.match(gid):
+            return []
+        ext = {"automation": {"paused": True}} if st.get("paused") is True else {}
+        return [{"id": gid, "status": "ready", "ext": ext, "chat": True}]
 
     def _give_back_after_holder(self, tid: str) -> None:
         """Ids marked while another run held the ticket ("pending"): once that run has ended, those it did not

@@ -170,7 +170,7 @@
     els.key.textContent = typeof t.key === 'string' && t.key ? t.key : TID;  /* the short key people use, e.g. DM1-12 */
     root.dataset.state = v.state;
     if (prev && !root.hasAttribute('data-live')) root.setAttribute('data-live', '');  /* motion only after a live change */
-    els.agent.textContent = v.run.label || 'agent';
+    els.agent.textContent = v.run.label;
     els.stateText.textContent = v.state === 'working' ? 'Working' : v.state === 'stopped' ? (t.status === 'review' ? STATUS_WORD.review : t.started || v.run.run ? 'Paused' : statusWord(t)) : STATE[v.state];
     const phase = window.FocusHelpers.phase(v);
     els.steps.replaceChildren(...['Plan', 'Work', 'Check', 'Done'].map((name, i) => h('span', {'aria-current': i === phase ? 'step' : null, text: name})));
@@ -352,7 +352,7 @@
 
   function renderProof(v) {
     proof.setPageKey(v.page_key);
-    proof.setAgent(v.run.label || 'agent');
+    proof.setAgent(v.run.label);
     const done = v.ticket.checklist.filter(c => c.done);
     const list = [];
     for (const c of done) for (const ev of c.evidence || []) list.push({c, ev});

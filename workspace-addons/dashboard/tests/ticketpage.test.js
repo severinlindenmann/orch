@@ -93,3 +93,75 @@ test('the review buttons show whenever the status is Review, an open question fi
   assert.ok(text.indexOf('Which colour?') < text.indexOf('Looks good'), 'the question comes first');
   assert.match(JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]})), /Looks good/);
 });
+
+test('parts resolve parent fields, case-insensitive keys and legacy arrays once', () => {
+  const p = {id:'t_parent', key:'PLAN-1', children:{total:2, closed:1, open:1}};
+  const a = {id:'t_a', parent:p.id}, b = {id:'t_b', parent:'plan-1'};
+  assert.deepEqual(helpers.childrenOf([p,a,b], p), [a,b]);
+  assert.equal(helpers.parentOf([p,a,b], b), p);
+  p.children = [a.id, b.id, p.id];
+  assert.deepEqual(helpers.childrenOf([p,a,b,a], p), [a,b]);
+  assert.equal(helpers.parentOf([p,{id:'t_a'}], {id:'t_a'}), p);
+});
+test('agent label uses adapter settings for missing and old claims', () => {
+  const settings = {agents:[{name:'claude',label:'Claude',chosen:true}]};
+  for (const claim of [undefined, {}, {agent:'claude'}, {label:'claude'}]) assert.equal(helpers.agentLabel(settings, claim), 'Claude');
+  assert.equal(helpers.agentLabel(settings, {label:'Custom'}), 'Custom');
+  assert.equal(helpers.agentLabel({agents:[{name:'custom',label:'Studio'}]}), 'Studio');
+  assert.equal(helpers.agentLabel({}, {}), 'Agent');
+  assert.equal(helpers.agentLabel(settings, {agent:'codex'}), 'Codex');
+});
+test('task outcomes and result cards use plain text without sizes', () => {
+  const ev = {type:'file',ref:'seating-plan.md',text:'seating-plan.md · 109 B',by:'agent:claude'};
+  assert.equal(helpers.outcome({done:true,evidence:[]}), 'Completed.');
+  assert.equal(helpers.outcome({done:true,evidence:[ev]}), 'Seating plan');
+  const c = context({clean:String});
+  vm.runInContext(source.slice(source.indexOf('function ticketResultCard'), source.indexOf('function ticketArtifactPreview')), c);
+  const card = c.ticketResultCard({id:'t_test'}, ev);
+  const text = JSON.stringify(card);
+  assert.match(text, /ticket-result/);
+  assert.doesNotMatch(text, /109|\.md|Agent says/);
+});
+
+test('next question stays above every tab and Answer scrolls and focuses it', () => {
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
+  const t = {id:'t_parent', title:'Plan', status:'waiting', questions:[{id:'q1',text:'First?'},{id:'q2',text:'Second?'}]};
+  let scrolled = false, focused = false;
+  const ctx = {window:{DashHelpers:helpers}, document:{addEventListener(){}}, addEventListener(){}, h,
+    array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '',
+    el:(tag, cls, text) => h(tag,{className:cls},text), fragment:(...kids) => h('fragment',{},kids),
+    card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
+    questions:t => t.questions || [], capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
+    statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
+    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},querySelector:() => ({focus(){focused=true;}})})}};
+  vm.createContext(ctx); vm.runInContext(source,ctx);
+  ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
+  vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
+  const nodes = n => typeof n === 'object' && n ? [n,...n.children.flatMap(nodes)] : [];
+  for (const tab of ['overview','tasks','questions','artifacts','history']) {
+    ctx.ticketTabs.set(t.id,tab);
+    const all = nodes(ctx.detail(t));
+    assert.equal(all.filter(n => n.attrs.className === 'card next-step next-question').length,1);
+    assert.equal(all.filter(n => n.attrs['data-question'] === 'q1').length,1);
+    assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length,1);
+    assert.ok(all.some(n => n.children.includes('No parent ticket')));
+    all.find(n => n.tag === 'button' && n.children.includes('Answer')).onclick();
+  }
+  assert.ok(scrolled && focused);
+});
+
+test('result preview tiles keep HTML static and bound text excerpts', async () => {
+  const h = (tag, attrs = {}, ...children) => ({tag, attrs, children, append(...kids){this.children.push(...kids);}});
+  const ctx = {h, window:{DashHelpers:helpers}, snapshot:false, URL, TextDecoder, fetch:async () => new Response('line\n'.repeat(1000),{headers:{'Content-Type':'text/plain'}})};
+  vm.createContext(ctx);
+  vm.runInContext(source.slice(source.indexOf('const PREVIEW_EXT'),source.indexOf('function loadArtifacts')),ctx);
+  vm.runInContext(source.slice(source.indexOf('const ticketPreviewText'),source.indexOf('function ticketResultCard')),ctx);
+  const html = ctx.ticketPreviewTile({id:'t_test'},{name:'plan.html'});
+  assert.doesNotMatch(JSON.stringify(html), /iframe|<html|src/);
+  const text = ctx.ticketPreviewTile({id:'t_test'},{name:'plan.md'});
+  await new Promise(resolve => setTimeout(resolve,20));
+  const pre = text.children.find(n => n.tag === 'pre');
+  assert.ok(pre);
+  assert.ok(pre.children[0].length <= 2048);
+  assert.ok(pre.children[0].split('\n').length <= 8);
+});

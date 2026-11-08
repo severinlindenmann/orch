@@ -19,7 +19,7 @@ def test_qa2_agent_labels(claim, expected):
     v = Tracker._shape(ticket(), {}, claim, {}, [], True,
                        [{'name': 'claude', 'label': 'Claude Code', 'chosen': True}])
     assert v['run']['label'] == expected
-    assert Tracker._shape(ticket(), {}, {}, {}, [], True)['run']['label'] == 'agent'
+    assert Tracker._shape(ticket(), {}, {}, {}, [], True)['run']['label'] == 'Agent'
 
 
 def test_qa2_cached_lookups_and_failure(ws, monkeypatch):

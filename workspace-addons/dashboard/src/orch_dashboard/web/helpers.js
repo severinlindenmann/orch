@@ -207,13 +207,36 @@
   const minutes = ms => Math.max(0, Math.round(ms / 60000));
   const span = ms => { const m = minutes(ms); return m < 1 ? 'just now' : m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : Math.round(m / 1440) + ' days'; };
 
+  function agentLabel(settings, claim = {}) {
+    claim = claim || {};
+    const agents = arr(settings && settings.agents).filter(Boolean);
+    const match = agents.find(a => a.name === claim.agent);
+    const chosen = agents.find(a => a.chosen);
+    return capital(noPrefix(claim.label || match?.label || claim.agent || chosen?.label || chosen?.name || agents[0]?.label || agents[0]?.name || 'Agent'));
+  }
+  const matchesTicket = (ref, t) => !!ref && (ref === t.id || (!!t.key && String(ref).toLowerCase() === String(t.key).toLowerCase()));
+  function childrenOf(all, t) {
+    const seen = new Set();
+    return arr(all).filter(c => c && c.id !== t.id && (matchesTicket(c.parent, t) || arr(t.children).includes(c.id)) && !seen.has(c.id) && seen.add(c.id));
+  }
+  function parentOf(all, t) {
+    return arr(all).find(p => p && p.id !== t.id && matchesTicket(t.parent, p)) ||
+      arr(all).find(p => p && p.id !== t.id && arr(p.children).includes(t.id)) || null;
+  }
+  const plainFileName = value => String(value || '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').replace(/^./, c => c.toUpperCase());
+  const cleanOutcome = value => String(value || '').replace(/\b\d+(?:\.\d+)?\s*(?:[KMGT]?i?B|bytes?)\b/gi, '').replace(/(?:[\w-]+\/)*[\w-]+\.(?:md|txt|html?|csv|json|pdf|png|jpe?g|webp)\b/gi, name => plainFileName(name)).replace(/^[\s✓✔·—,:;-]+|[\s·—,:;-]+$/g, '').replace(/\s+/g, ' ').trim();
+  function outcome(task) {
+    const ev = arr(task.evidence).slice(-1)[0];
+    return (ev && (cleanOutcome(ev.summary) || cleanOutcome(ev.text) || (ev.type === 'note' ? cleanOutcome(ev.ref) : ''))) || (task.done ? 'Completed.' : task.state === 'doing' ? 'Working on this task.' : 'Not started yet.');
+  }
+
   /* The ONE agent line under the ticket title. state: working | starting | background | stuck | needs | failed | resume | new.
      primary = the main action {label, op, args} (op is a dashboard op, or "open" with a url); items = the rest, under "...". */
-  function agentLine(ticket, run, nowMs, liveLink) {
+  function agentLine(ticket, run, nowMs, liveLink, settings) {
     const t = ticket || {}, r = run || null, id = t.id;
     const sessions = arr(t.sessions).slice().sort((a, b) => Date.parse(b.last_used || 0) - Date.parse(a.last_used || 0));
     const claim = (r && r.claim) || {};
-    const agent = capital(noPrefix(claim.label || claim.agent || (sessions[0] && sessions[0].agent) || '')) || 'Agent';
+    const agent = agentLabel(settings, claim);
     const asks = arr(t.questions).some(q => q && q.answer == null);
     const start = (label, extra) => ({label, op: 'run.start', args: {ticket: id, ...(extra || {})}});
     const stop = {label: 'Stop', op: 'run.stop', args: {ticket: id}};
@@ -401,5 +424,5 @@
   const needsYou = n => n + (n === 1 ? ' needs you' : ' need you');  // same words as the phone
   const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
 
-  return {plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {agentLabel, childrenOf, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

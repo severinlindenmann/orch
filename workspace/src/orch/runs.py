@@ -733,6 +733,11 @@ def plan(
     """Resume or fresh, decided here once: resume only when the adapter can, this ticket has a session for
     this agent on this machine, and --fresh is not set."""
     ticket = tickets.load(root, tid)
+    if ticket.get("general") is True:
+        from orch import chat
+
+        chat.cut_session(root, tid)  # 04:00: a session of an earlier Chat day is not resumed
+        ticket = tickets.load(root, tid)
     name = agent or adapters.chosen(root)
     a = adapters.load(name, root)
     items = undelivered(root, tid) if items is None else items
@@ -766,7 +771,12 @@ def plan(
         new_session = str(uuid.uuid4()) if a["capabilities"]["choose_session_id"] else None
         text = prompt
         if text is None:
-            text = fresh_prompt(ticket, items)
+            if ticket.get("general") is True:
+                from orch import chat
+
+                text = chat.helper_prompt(root, ticket, items, _items_text(items) if items else "")
+            else:
+                text = fresh_prompt(ticket, items)
             if not (a.get("files") or {}).get("instructions_link"):  # this agent does not read the local file
                 from orch import harness
 
