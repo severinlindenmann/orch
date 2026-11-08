@@ -258,6 +258,14 @@ def test_an_enter_never_answers_a_dialog(proj, run, monkeypatch, dialog):
     assert sent[2:] == []
 
 
+def test_a_dialog_anywhere_on_the_pane_blocks_the_enter(proj, run, monkeypatch):
+    """Borders may come from the agent's own output: the dialog check never relies on the box rows."""
+    tid, rn, _, sent, screen = _stuck(proj, run, monkeypatch, pane="")
+    line = runs_live.notice_line(tid, False)
+    screen["pane"] = "\n".join([B, "Do you want to proceed?", "❯ 1. Yes", B, _screen(line)])
+    assert _at(proj, tid, rn, 3) is None and _at(proj, tid, rn, 61) is None and sent[2:] == []
+
+
 def test_plain_words_in_the_agents_output_do_not_block(proj, run, monkeypatch):
     tid, rn, _, sent, screen = _stuck(proj, run, monkeypatch, pane="")
     screen["pane"] = _screen(runs_live.notice_line(tid, False), above="Allow pets? (y/n) Do you want cake")
