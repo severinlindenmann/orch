@@ -437,6 +437,19 @@ def pending_add(
         return item
 
 
+def pending_discard(root: Path, tid: str, item_id: str) -> None:
+    """Take back an item queued a moment ago (the step that goes with it failed). Never a delivered one."""
+    with locked(root, tid):
+        items = _pending_read(root, tid)
+        keep = [i for i in items if i["id"] != item_id or i.get("delivered_at")]
+        if len(keep) != len(items):
+            _pending_write(root, tid, keep)
+        rec = read(root, tid)
+        if rec is not None and rec.get("pending") and not any(not i.get("delivered_at") for i in keep):
+            rec["pending"] = False
+            _write(root, rec)
+
+
 def mark_delivered_locked(root: Path, tid: str, ids: list[str]) -> None:
     items = _pending_read(root, tid)
     for i in items:

@@ -598,15 +598,20 @@ def ask_for_changes(root: Path, tid: str, text: str, by: str) -> dict:
                 "evidence": [],
             }
         )
-        ticket["status"] = "ready"
-        ticket["waiting_on"] = None
+        ticket["status"] = "ready"  # any wait the ticket has is not this review's: left as it is
         add_history(ticket, by, "Asked for changes: " + note[:200])
 
-    t = apply_op(root, tid, op)[0]
     from orch import runs  # runs imports tickets
 
-    runs.pending_add(root, tid, by, "message", note, _env_via())
-    return t
+    if load(root, tid)["status"] != "review":
+        raise Refused("This ticket is not waiting for your review.")
+    # Queue the note first, then commit the ticket: a failure of either leaves nothing half done.
+    item = runs.pending_add(root, tid, by, "message", note, _env_via())
+    try:
+        return apply_op(root, tid, op)[0]
+    except BaseException:
+        runs.pending_discard(root, tid, item["id"])
+        raise
 
 
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:

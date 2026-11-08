@@ -231,3 +231,52 @@ def test_ask_for_changes_refusals(proj, new_ticket, monkeypatch):
     with pytest.raises(Refused, match="Say what"):
         tickets.ask_for_changes(proj, tid, "  ", "human:lume")
     assert tickets.load(proj, tid)["status"] == "review" and not runs.undelivered(proj, tid)
+
+
+def test_ask_for_changes_is_atomic(proj, new_ticket, monkeypatch):
+    """A failed ticket update takes the queued note back; a failed queue leaves the ticket in Review."""
+    tid = new_ticket()
+    tickets.set_status(proj, tid, "review", "human:lume")
+    real = tickets.apply_op
+
+    def boom(*a, **k):
+        raise Refused("disk full")
+
+    monkeypatch.setattr(tickets, "apply_op", boom)
+    with pytest.raises(Refused, match="disk full"):
+        tickets.ask_for_changes(proj, tid, "x", "human:lume")
+    monkeypatch.setattr(tickets, "apply_op", real)
+    assert not runs.undelivered(proj, tid) and tickets.load(proj, tid)["status"] == "review"
+
+    def nope(*a, **k):
+        raise Refused("no queue")
+
+    monkeypatch.setattr(runs, "pending_add", nope)
+    with pytest.raises(Refused, match="no queue"):
+        tickets.ask_for_changes(proj, tid, "x", "human:lume")
+    assert tickets.load(proj, tid)["status"] == "review"
+
+
+def test_ask_for_changes_keeps_an_unrelated_wait_and_takes_dash_notes(proj, run, new_ticket):
+    tid = new_ticket()
+    tickets.wait(proj, tid, None, "external:vendor", "human:lume")
+    tickets.set_status(proj, tid, "review", "human:lume")
+    t = tickets.load(proj, tid)
+    t["waiting_on"] = {"kind": "external", "ref": "vendor"}
+    tickets.save(proj, t)
+    code, out, err = run("ticket", "changes", "--by", "human:lume", tid, "--", "--json")
+    assert code == 0, err
+    t = tickets.load(proj, tid)
+    assert t["status"] == "ready" and t["waiting_on"] == {"kind": "external", "ref": "vendor"}
+    assert runs.undelivered(proj, tid)[0]["text"] == "--json"
+
+
+def test_two_human_items_are_two_ids_for_the_host_but_one_ticket(proj, run, new_ticket):
+    """An answer and a change note both wait: core lists both ids on ONE ticket (the host starts one run per
+    ticket per pass; the automation test covers that)."""
+    tid = new_ticket()
+    runs.pending_add(proj, tid, "human:lume", "answer", "Yes", "dashboard")
+    tickets.set_status(proj, tid, "review", "human:lume")
+    tickets.ask_for_changes(proj, tid, "Blue please", "human:lume")
+    code, out, _ = run("run", "status", tid, "--json")
+    assert code == 0 and len(json.loads(out)["human_pending_ids"]) == 2
