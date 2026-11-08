@@ -15,7 +15,10 @@ def _text(root: Path, relative: str) -> str:
             p = p / part
             if p.is_symlink():
                 return ""
-        return p.read_text(encoding="utf-8")
+        if not p.is_file():  # no pipes or devices (a read could block)
+            return ""
+        with p.open("rb") as f:
+            return f.read(1_000_000).decode("utf-8", "replace")
     except (OSError, ValueError):
         return ""
 
@@ -23,7 +26,7 @@ def _text(root: Path, relative: str) -> str:
 def _object(raw: str) -> dict:
     try:
         value = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):
         return {}
     return value if isinstance(value, dict) else {}
 
@@ -56,6 +59,7 @@ def mark(root: Path, tickets: list[dict]) -> None:
             for p in queued.glob("m_*.json"):
                 msg = _object(_text(root, f"outbox/{p.name}"))
                 if msg.get("schema") == "orch.msg/1" and msg.get("id") == p.stem:
+                    msg.pop("delivered_at", None)  # only the relay's own receipt counts
                     records.append(msg)
         except OSError:
             pass
@@ -79,7 +83,7 @@ def mark(root: Path, tickets: list[dict]) -> None:
         key = tid, qid
         found[key] = _delivered(msg.get("delivered_at")) or found.get(key)
     for ticket in tickets:
-        for question in ticket["questions"]:
+        for question in ticket.get("questions") or []:
             if not isinstance(question, dict):
                 continue
             qid = question.get("id")
