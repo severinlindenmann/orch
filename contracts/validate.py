@@ -838,7 +838,7 @@ def cg_applied_after(m, ctx):
 
 def cg_order(m, ctx):
     """Stateful checks (G9 task status, closed, membership) run in group.seq order (G12). Returns:
-    apply | buffer | skip_jump_and_apply (jump > 1000 over applied_seq: applied_seq = seq - 1, log, apply; no per-seq gap entries, gaps are ranges) | skip_gap_and_apply (buffer of 50 full, or oldest buffered message waited 10 min: skip the gap,
+    apply | buffer | skip_jump_and_apply (jump > 1000 over applied_seq: applied_seq = seq - 1, log, apply; no per-seq gap entries, gaps are ranges) | skip_gap_and_apply (buffer of 50 full, or 10 min on the receiver clock since the earliest-received message still in the buffer (first_buffered_recv_s, recomputed after a partial flush): skip the gap,
     apply the contiguous run, late seqs below applied_seq count as old) | late_show_no_state (seq <= applied_seq:
     shown, but changes no state). Initial applied_seq = first seen seq - 1 (from_seq is never used). Time = the receiver's own clock (now_s, first_buffered_recv_s), never a message's created_at. None when no seq/context."""
     seq, od = ((m.get("body") or {}).get("group") or {}).get("seq"), ctx.get("order")
