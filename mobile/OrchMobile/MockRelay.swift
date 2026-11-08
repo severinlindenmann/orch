@@ -42,6 +42,7 @@ actor MockRelay: RelayAPI {
     init(latency: Duration? = nil) {
         if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
         if UserDefaults.standard.bool(forKey: "mockMemo") { received.append(Self.memo) }
+        if UserDefaults.standard.bool(forKey: "mockChatDays") { let d = Self.chatDays(); sentMessages += d.sent; received += d.received }
         let ms = UserDefaults.standard.integer(forKey: "mockLatencyMs")
         self.latency = latency ?? .milliseconds(ms > 0 ? ms : 150)
     }
@@ -130,6 +131,22 @@ actor MockRelay: RelayAPI {
         updateCounter += 1
         updateLog.append(TicketUpdate(id: String(format: "m_upd%013d", updateCounter + 100), workspace: workspace, workspaceName: names[workspace] ?? workspace,
                                       ticket: ticket, kind: kind, title: title, text: text, replyTo: replyTo, at: ISO8601DateFormatter().string(from: Date()), key: key, ticketView: view))
+    }
+
+    /// Screenshot hook `-mockChatDays YES`: a Chat with a closed day (History) and today's messages with `by`/`day` (round-8 draft).
+    private static func chatDays() -> (sent: [PhoneMessage], received: [PhoneMessage]) {
+        let f = ISO8601DateFormatter()
+        let now = Date()
+        func text(_ id: String, _ ago: TimeInterval, mine: Bool, _ t: String, by: String, day: String) -> PhoneMessage {
+            var body = TextBody(text: t, general: true); body.by = by; body.via = mine ? "phone" : "helper"; body.day = day
+            return PhoneMessage(message: TextMessage(id: id, from: mine ? "ph_iphone0001" : Self.pilatus, to: mine ? Self.pilatus : "ph_iphone0001", type: "text",
+                                                     createdAt: f.string(from: now.addingTimeInterval(-ago)), ticket: nil, body: body), workspaceName: "Pilatus Workspace")
+        }
+        let today = ChatDay.key(for: now), yesterday = ChatDay.key(for: now.addingTimeInterval(-86_400))
+        return ([text("m_cd_y1", 90_000, mine: true, "That's everything for today, thanks.", by: "you", day: yesterday),
+                 text("m_cd_t1", 600, mine: true, "Good morning. What is due next?", by: "you", day: today)],
+                [text("m_cd_y2", 89_900, mine: false, "All set. Your tickets are saved.", by: Self.pilatus, day: yesterday),
+                 text("m_cd_t2", 540, mine: false, "Your car tax is due on 30 Nov.", by: Self.pilatus, day: today)])
     }
 
     /// Simulator and test hook: a workspace writes to the phone after launch (a text push arrived).

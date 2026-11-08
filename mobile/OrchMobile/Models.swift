@@ -123,6 +123,11 @@ struct TextBody: Codable, Sendable, Equatable {
     /// Set on the phone's own texts (the UUID of the outbox item).
     var clientId: String? = nil
     var general: Bool? = nil
+    // Incoming Chat metadata; never included in a phone send.
+    var by: String? = nil
+    var via: String? = nil
+    var phone: String? = nil
+    var day: String? = nil
     /// Workspace texts worth hearing (GET /v1/phone/speech/<id>).
     var speak: SpeakHint? = nil
     var attachments: [MessageAttachment] = []
@@ -137,13 +142,17 @@ struct TextBody: Codable, Sendable, Equatable {
         self.text = text; self.update = update; self.clientId = clientId; self.general = general; self.speak = speak
         self.attachments = attachments; self.voice = voice; self.location = location; self.feedback = feedback; self.ticketView = ticketView
     }
-    private enum CodingKeys: String, CodingKey { case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView }
+    private enum CodingKeys: String, CodingKey { case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView, by, via, phone, day }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         update = try? c.decodeIfPresent(TextUpdate.self, forKey: .update)
         clientId = try? c.decodeIfPresent(String.self, forKey: .clientId)
         general = try? c.decodeIfPresent(Bool.self, forKey: .general)
+        by = try? c.decodeIfPresent(String.self, forKey: .by)
+        via = try? c.decodeIfPresent(String.self, forKey: .via)
+        phone = try? c.decodeIfPresent(String.self, forKey: .phone)
+        day = try? c.decodeIfPresent(String.self, forKey: .day)
         speak = try? c.decodeIfPresent(SpeakHint.self, forKey: .speak)
         attachments = (try? c.decodeIfPresent([MessageAttachment].self, forKey: .attachments)) ?? []
         voice = try? c.decodeIfPresent(VoiceMemo.self, forKey: .voice)
