@@ -1,0 +1,278 @@
+# Chat and group chat across workspaces (v1)
+
+Status: contract for the 8 Nov build round. Owner decisions: `r-v2-chat-*`, `r-v2-fb1-*`, `r-v2-fb10-*`, `r-v2-fb2-*`
+(accepted draft `round/general/`, PHONE-NOTES v2). Shapes: `chat-groups.schema.json` (NEW body fields; it includes
+`message.schema.json`, which is **unchanged**). Vectors: `vectors/chat-groups/*.json`, checked by `validate.py`
+(`cg_rules` holds the rules JSON Schema cannot express).
+
+**Model (owner pick B): a group is hosted by the workspace that owns the ticket** (hub-and-spoke). The host keeps the
+record and sends one normal relay message per member and one to `phones`. **No relay server change**: every message
+below is an existing type (`text`, `question`, `answer`, `delegate`, `allow`, `file`) and passes the existing rules
+(relay-api.md, Rules 1–4); the new data rides in `body`, which already keeps unknown fields. Checked against
+`relay/src/rules.rs`: workspace→workspace messages need the pair rule of their type, `file` needs the uploader's blob,
+`answer` gets `ticket`, `key`, `question_id` and `answered_by` set by the relay, phones only get `text` and `question`.
+
+Legend: **NEW** = new field or rule from this contract. **existing** = already in message.schema.json / relay-api.md.
+
+Words (same on dashboard and phone, PHONE-NOTES.md): **Chat**, **Group**, **"<Workspace> helper"**, **Task for Home**,
+**Allow once / Always / No**, **"Finance helper is thinking…"**, **History**. The relay's admin **workspace groups**
+(`grp_<name id>`, `talk`, relay-api.md "Groups") are a different thing; chat groups use ids `grp_t_…` and live only in
+`body.group`.
+
+## 1. Chat (one workspace, former General)
+
+| Field | Status | Meaning |
+|---|---|---|
+| `body.general: true`, no `ticket` | existing | The workspace's Chat. Stored on the workspace's hidden General ticket (tickets.py `general: true`). |
+| `reply_to` | existing | The phone text a helper answers. `ack` / `working` updates in Chat need it (schema). |
+| `body.update.kind` `ack` / `working` | existing | **Thinking indicator**: `working` with `reply_to` = the person's text shows "Finance helper is thinking…" until the next helper text that is not `ack`/`working`, or **10 min** without one (same timeout on phone and dashboard, Chat and groups). Quiet: never pushed. |
+| `body.by` | **NEW** | `"you"` (the person) or a `ws_` id (that workspace's helper). Places bubbles: `you` right, others left. |
+| `body.via` | **NEW** | `phone` \| `dashboard` (with `by: you`), `helper` \| `dashboard` (with `by: ws_…`). |
+| `body.phone` | **NEW** | `ph_…` when `via: phone` (which phone wrote it). |
+| `body.day` | **NEW** | `YYYY-MM-DD`: the Chat day, by **local wall time**: the workspace's local date of `created_at`, or the date before when the local wall clock shows before 04:00 (so DST days stay right; never "minus 4 h"). The workspace sets it on every Chat text it sends; the phone groups by it and, for its own texts, uses its local date with the same 04:00 cut until the workspace's ack (which carries `day`) arrives. Never in a group message. |
+| Helper identity | **NEW** (display rule) | Never sent as text: the name is "<workspace name> helper", the avatar is the workspace look (look.md) plus a small sparkle. Agents are stored in history as `agent:<name>` as today. |
+| `body.refs` (cards) | **NEW** (display) | Not a wire field in v1: cards come from `task`, `group_event`, `shared_ticket`, `share`/`shared_files` and the existing `ticket_view` (§2–4). |
+
+**Daily cut.** At 04:00 local the workspace starts a fresh helper context for Chat (UI: "Context cleared daily at 04:00 ·
+Details"). Past days are **History** (read only, searchable). Nothing is deleted.
+
+**Who stores what.** The workspace stores every Chat text both ways in its General ticket history (the record). The
+relay stores messages as today. The phone keeps a local cache of what `/v1/phone/messages` lists (Chat texts are texts with
+no `ticket`) and its own History index by `day`; the workspace stays the source of truth.
+
+## 2. Group hosted by the ticket's workspace
+
+**`body.group`** (**NEW**, on every group message, every type): `{id, host, title, members, seq?}`
+- `id` = `"grp_"` + the host ticket id (`grp_t_fin14a`). One group per host ticket. **The group key is `(host, id)`
+  everywhere** (storage, dedupe, phone cache), because ticket ids are unique only per workspace. A receiver that already
+  holds `id` under another host **drops** the message (rule G7).
+- `host` = the `ws_` that owns that ticket. **A host message's `group.id` must equal `"grp_" + message.ticket`** (rule G1).
+- `title` = the host ticket title, one line 1–120 (the one title length; `shared_ticket.title` is the same). Redacted.
+- `members` = `[{ws, name, look?}]` (**NEW** from messenger review: name and look from the host's directory, so a phone
+  not paired with Bank can still draw "Bank helper" and its badge), host included, **≤ 8**, each `ws` once. The person
+  and their phones are always in every group and are not listed. Members copy the latest list they got from the host;
+  the host ignores lists from members. Receivers show the list as "per <host name>".
+- `seq` = **host only, group-wide messages only** (copies every member and the phones get): +1 each. **Targeted**
+  messages for one member (`delegate`, `question`, `shared_ticket`) carry **no** `seq`. Order = `seq` only;
+  `created_at` orders only unsequenced messages. A member's view starts at its `member_added.from_seq`; a gap after that
+  is shown ("a message is missing") but never waited on.
+
+**Fan-out (host only).** For every group message the host records (its own, a member's, a phone's, a dashboard text) it
+sends one copy per other member (`to: ws_…`) and one to `phones`, all as the same existing type (`text` for talk).
+- `ticket` = the host ticket, `key` = its display key (existing), so old phones show it in that ticket's topic.
+- `body.origin = {id, from, at}` (**NEW**) = the original message; `from` = `ws_…`, `ph_…` or `dashboard`.
+- **Fan-out id** (**NEW**, rule G2): every copy, to a workspace **and to `phones`** (messenger review), has
+  `id = "m_" + sha256("<host>\n<origin.id>\n<to>")[:16 hex]` with `to` = `ws_…` or `"phones"` (`cg_fanout_id`). A
+  retry sends the identical message → relay `200 {duplicate: true}`, never a second copy. Including `host` keeps another
+  workspace from pre-claiming the id from a known `origin.id`. Receivers also dedupe on `(host, group.id, origin.id)`.
+- `body.echo_of` (**NEW**): the host's copy to `phones` of a phone's own text. A phone hides it only when `echo_of` is
+  one of its own message ids (`body.phone` = this phone); the person's other phones show it as "You".
+- **Push set for copies to `phones`** (**NEW**, messenger review): pushed = `question` messages, `group_event`
+  `approval_needed` and `closed`, task `done` / `failed`, and texts addressed to the person (`body.to_person: true`).
+  Every other copy (helper-to-helper talk, joins, queued/working) carries `body.update.kind: note` (quiet; the relay
+  never pushes it). `validate.py` checks this.
+- The host never forwards a message back to its sender.
+
+**Phones in a group: explicit opt-in** (rule G8). A phone cannot set `body.group` (the relay builds phone texts from a
+fixed field list) and cannot send receipts. So: **a phone text is a group message only when it goes to the host with
+`ticket` = the host ticket and `reply_to` = a group copy the host sent to `phones`**. The group composer always sets
+`reply_to` to the newest group copy and shows **"To: Finance, Home, Bank"** above the text field. Any other phone text on
+that ticket (no `reply_to`, or a reply to a non-group text, an older phone, a private reply to the helper) stays a
+**host-only note**: recorded on the host ticket, never fanned out. The host copies a group text as `by: you, via: phone,
+phone: ph_…`, `origin.from` = that phone. Phone texts go only to the host; members get the host's copy.
+
+**Unknown groups on a phone** (fresh install, missed `created`): the phone accepts a group message from a workspace on
+its list when `from == group.host`, creates the group under `(host, id)` and shows it from that message on ("Earlier
+messages are in <host name>"). There is no history request in v1.
+
+**`body.group_event`** (**NEW**, host only, rule G3: `from` must equal `group.host`, else every receiver drops it):
+
+| kind | needs | when |
+|---|---|---|
+| `created` | – | the host helper (or the person) starts the group from a ticket. Pill "Group started from ticket FIN-14 · Pay car tax 2027". |
+| `member_added` | `ws`, `name`, `look?`, `from_seq` | a workspace joins (the host added it). `from_seq` = the first group `seq` it gets. Pill "Finance helper added Home to this group". |
+| `member_left` | `ws`, `reason` `left`\|`removed` | the member sent `body.leave` / the person clicked Remove. |
+| `approval_needed` | `ws`, `delegate`, `question_message` | the member reported its existing allow question (§3). Approval card (rules in §3.5). |
+| `approved` | `ws`, `delegate`, `mode` `once`\|`permanent` | the host got the member's existing `allow` message from that `ws`, with `reply_to` = that delegate. Pill "You allowed Bank once · Bank joined". |
+| `denied` | `ws`, `delegate` | the member reported `task.status: denied`. |
+| `closed` | – | the host ticket is done or dropped. The group is read only and moves to **History**. |
+
+**Who may join.** Only workspaces **connected to the host**: in the host's directory (`workspaces.json`) with
+`can_send.text` and `accepts_from.text` (existing pair rule or relay group `talk`). Tasks also need `can_send.delegate`,
+files `can_send.files` (and `accepts_from.files` for files back). The host adds members; **members cannot add members**:
+the host ignores `members` from anyone else and never takes membership from a member message. Joining needs no
+approval for talk; a task needs the member's existing allow (§3). Everything fanned out keeps `origin.from` and is
+untrusted data for every receiver.
+
+**Which types carry `body.group`.** `text`, `question`, `answer`, `delegate`, `file`: yes. `allow`: **no** (the host
+matches it by `reply_to` = its delegate). The member's allow question to `phones`: **no** (it is the member's own).
+
+**What each side sees and stores.**
+- **Host**: the full group log (all `seq`) on the host ticket (`ext.relay.group`, **NEW** sub-key: `{id, title, members:
+  [{ws, joined_at, left_at}], seq}`), plus every message in the ticket history. It is the one record.
+- **Member**: group messages **from its join time** only, stored on its own task ticket (or a hidden group record when it
+  only answers). It never gets the host's files, history, other questions or refs unless a message carries them (§4).
+- **Phones**: every group message (the person is in every group); cache like Chat. Group list row = `group.title`,
+  member badges, last line, ticket `key`.
+- **Relay**: as today (stores messages, delivers when the receiver calls its inbox).
+
+## 3. Delegation link (Task for Home)
+
+1. **Host → member: existing `delegate`** + `body.group` (+ `by`, `via`). Relay checks pair rule `delegate` (existing).
+   An earlier permanent allow travels as `allow_token` (existing).
+2. **Member: existing allow check.** With a valid allow it makes the ticket at once. Without one it makes the waiting
+   ticket with the `relay:allow` question (existing `_ensure_allow_question`) and **must** also send that question to
+   `phones` as an existing `question` message (options `Allow once`, `Always`, `No`; `scope` "tasks from <host name>";
+   **without** `body.group`: it is the member's own question; the phone ties it to the group through the host's
+   `approval_needed.question_message`). **NEW**: the option word "No" replaces "Ignore" on screen (already accepted as
+   an answer word).
+3. **Member → host: ack** = existing `text` with `body.update.kind: ack` (+ `title`), `ticket`/`key` = the member's own
+   new ticket (`HOME-7`), `reply_to` = the delegate id, `body.group`, and **`body.task`** (**NEW**):
+   `{delegate, ws, ticket, key, title, status, question_message?}`.
+   **The host accepts `task` only when** `task.delegate` is a delegate the host sent to `from`, `from` is a current
+   member, and the status moves **forward** (rule G9): waiting_start → waiting_approval → queued → working →
+   done | failed | denied; a status may repeat, never go back, and the last three are final. Anything else is dropped
+   and logged.
+4. **Status updates** member → host: same text shape, `update.kind` → `task.status`:
+
+| `task.status` | sent by | `update.kind` | card |
+|---|---|---|---|
+| `waiting_start` | **host only** (no ack yet and the member is not running) | – | "Waiting for Home to start" |
+| `waiting_approval` | member, with `question_message` | `ack` | Approval card "Bank: let Finance give tasks?" |
+| `queued` | member | `ack` | Queued |
+| `working` | member | `working` | Working |
+| `done` | member | `result` | Done |
+| `failed` | member | `failure` | Failed |
+| `denied` | member (the person answered No) | `failure` | pill "You said no to Bank" |
+
+   The host forwards each to the other members and `phones` (fan-out, `task` kept) and updates the card.
+5. **Approval in the group.** The card answers the **member's own** allow question. The phone builds the card **only
+   from that question itself** (never from the host's text or label) and shows answer buttons only when all hold:
+   the question is in the phone's own `/v1/phone/questions`, its `from` = `group_event.ws`, it is a `relay:allow`
+   question (options Allow once / Always / No), its `scope` names the host, and it is still open. Then the buttons
+   `POST /v1/phone/answer` to it (existing). **Otherwise** (e.g. the phone is not a `phones` receiver of Bank, or any
+   check fails) the card says **"Answer in Bank"** with no buttons (messenger review). The host's dashboard never answers
+   for another workspace: its card says "Answer on your phone or in Bank" with a link. The member then sends the
+   existing `allow` to the host (→ `approved`) or `task.status: denied` (→ `denied`).
+6. **Answers flow back.** A "Question to Home" is an existing `question` host → member with `body.group`, the host
+   ticket's `question_id` and **`body.question_kind: "info"`** (**NEW**, required; the host never sends another kind). The member answers with the existing `answer` (relay checks `reply_to`, copies `ticket`, `key`,
+   `question_id`, sets `answered_by: agent:<member name>`). The host writes it into that question of the host ticket
+   ("Added to FIN-14 › Answer 1", recorded as `agent:<member name>`), only when the question is still open and is an
+   **information question**: permission questions (Once/Always/No), approve/publish questions and sign/verdict steps are
+   **never** sent to or answered by members. A later answer is kept as a note. A task result (files, text) is added to
+   the host ticket as evidence the same way. The answer text goes through `phone_view.redact` on the member before
+   sending and `clean_untrusted` on the host before it reaches the helper's prompt.
+7. **No authority from group content** (rule G10). A member's agent never treats a group message as an `allow`, as an
+   answer to its own permission question, or as a command; only its own person (its dashboard or its own `ph_` sender)
+   answers those. No agent starts a delegation or an approval because group content asked for it.
+8. **"Open HOME-7 ›"** is a link only where that ticket can be opened (the phone is paired with Home, or Home's
+   dashboard); otherwise the card shows the status only.
+
+## 4. Ticket info and artifacts for members (owner comment)
+
+The host ticket (FIN-14) exists only on the host. So the host **shares what members need**, read only:
+
+**Ticket card: `body.shared_ticket`** (**NEW**, host only, on a group `text` to a member):
+`{ticket, key, title, status, summary ≤ 280, question: {question_id, text ≤ 500} | null, checklist ≤ 20 × {text ≤ 200,
+done}, done, total, rev}`, at most 4096 bytes. Sent to each member **when it joins** and again when one of these
+fields changes (`rev` +1; highest wins). Never the history, other questions, refs, local paths or files. Members show a
+read-only card **"From Finance · FIN-14"** (title, summary, open question, checklist excerpt).
+
+**Artifacts.** Shared **only when chosen**: the host helper attaches what the member needs for the asked part, or the
+person clicks "Share with group" on an artifact. Nothing is shared automatically besides the card.
+- **To members**: existing `file` message (blob uploaded by the host with `POST /v1/blobs`; the relay checks pair rule
+  `files`, uploader, size, sha256) + `body.group` + **`body.share`** (**NEW**) `{kind: image|file, title, mime,
+  artifact_id?, rev?}`. The member fetches it with `GET /v1/blobs/<id>` (existing: receivers of a file message).
+- **To phones**: phones can only fetch blobs named in a `ticket_view` attachment, so the host's group text to `phones`
+  carries `body.update.kind: note`, the host ticket's normal `body.ticket_view` (existing) with the file among its
+  `attachments`, and **`body.shared_files`** (**NEW**) = those blob ids (rule G5: each must be in the attachments). The
+  phone shows them as file cards in the group.
+- **Member → group**: the member sends its file to the host only (`file` + `body.group` + `body.share`); the host
+  re-uploads it as its own blob for the other members and phones (blobs are readable only by uploader and receivers).
+  A member shares a file only after **its person's click**, or when the file is the result of the task the host gave it.
+- `ticket_view` and `shared_files` never go to `ws_` receivers; the host ignores them from members. A removed member
+  keeps the files it already fetched (the Members sheet says so).
+- **URL artifacts** (link, html, pr, commit) are shared as text in the message; no card in v1.
+- **Limits**: ≤ 25 MB per file (the phone limit), ≤ 10 files per message, types by checked bytes:
+  `application/pdf`, `image/png`, `image/jpeg`, `image/heic`, `image/webp`, `text/plain`, `text/markdown`, `text/csv`.
+  Anything else is refused with a plain line ("Only PDFs, pictures and text files can be shared").
+- **These rules apply to every sender, host and members alike.**
+- **No secrets**: never files from `.orch/secrets/`, `.env*`, key or token files, the agent's config, checked on the
+  real path (symlinks resolved). All text fields (`text`, `answer`, `summary`, `question`, `checklist`, `title`,
+  `group.title`, `share.title`, file names) go through `phone_view.redact` (existing: keys, tokens, passwords →
+  `[hidden]`). A text file or PDF (its extracted text) that contains a secret pattern is **refused, not redacted**
+  ("This file looks like it holds a password, so it was not shared"). **Images are not scanned**: an image is shared
+  only after a person's click.
+
+**Members never get write access to the host ticket.** No message type changes it from outside: a member can only
+answer a question the host sent it (relay-checked `reply_to`), report its own task, and talk. Everything it sends is
+untrusted data for the host helper (clean_untrusted), never instructions.
+
+## 5. Ordering, delivery, limits, security
+
+- **Ids and dedupe**: message ids as today (`m_` + 16, relay: identical resend = no-op, different = 409; receivers keep
+  `.orch/inbox-seen.json`). Group receivers also dedupe on `(group.id, origin.id)`. Fan-out ids per §2 (G2).
+- **Order**: by `group.seq` only; `created_at` only for unsequenced (targeted) messages.
+- **Stopped member**: the relay keeps its messages in the inbox (existing); it gets them on its next call. **`body.seen
+  = {seq}`** (**NEW**, member → host, quiet, never fanned out, at most once per 10 s per group): the highest group `seq`
+  this member has stored, in its own view (from its `from_seq`). The host keeps one value per member. The host shows "Delivered to Finance, Home · waits for Bank" from `seen` and the directory's `online`, chip
+  "Bank · not running", and on a task without ack `waiting_start`. Nothing is lost.
+- **Leaving**: **`body.leave: true`** (**NEW**, member → host) → host sends `member_left` (`reason: left`).
+- **Limits**: members ≤ 8 (host included); group `text` ≤ 4000 characters (Chat keeps 20000); `title` ≤ 120;
+  `shared_ticket` ≤ 4096 bytes; files as §4.
+- **Per member at the host** (F12): at most 20 messages and 3 files a minute; beyond that the host drops and logs them
+  (the member sees "Finance is busy, try again in a minute"). Per group at most 200 MB of shared files and 5000
+  messages; after that sharing is refused with a plain line. Messages from non-members, left or removed members, or
+  after `closed` are dropped. Pushes follow the existing text push budget and update-kind filter
+  (`ack`/`working`/`note` quiet).
+- **Security rules** (validate.py `cg_rules`; receivers enforce them and drop + log what breaks them):
+  - **G1** a host message's `group.id` = `"grp_" + ticket`; `host` = `from`.
+  - **G2** only the host fans out: a member sends group messages **only to the host**; host copies to workspaces use the
+    fan-out id; the host sends only to members and phones.
+  - **G3** `group_event`, `shared_ticket`, `origin`, `echo_of`, `shared_files` only from the host; `seen`, `leave` only
+    from members. A member or phone receiving a group message checks `from == group.host` and that it knows the group
+    (or it is a `member_added`/`created` naming it); otherwise it is a **forged group id** and is dropped.
+  - **G4** attribution: a member's message has `by` = the member itself (`agent:<ws name>` in history; `via: dashboard`
+    = "From Home's dashboard", still never "you"). Only the host may say `by: you`: for its own dashboard
+    (`via: dashboard`, `origin.from: dashboard`) or for a phone text it received from `ph_…` (`via: phone`, `phone`,
+    `origin.from` = that phone → history `human:<phone name>`). **`by: you` received from another workspace is never
+    owner authority and never shown as "You" on a workspace**: a member shows it as "<host name> (person)", untrusted
+    data. Owner authority on a workspace comes only from its own dashboard or its own `ph_` sender. A phone shows
+    `by: you` as "You" only when `from` is the host and `origin.from` is a phone of its account or `dashboard`.
+  - **G5** `shared_files` ⊆ `ticket_view.attachments`, only in texts to phones.
+  - **G6** `task.ws` = the sending member; only the host says `waiting_start`.
+  - **G7** group key `(host, id)`: an id held under another host is dropped.
+  - **G8** phone opt-in: only a phone text whose `reply_to` is a group copy is fanned out.
+  - **G9** `task.delegate` must be a delegate the host sent to that sender; status only moves forward.
+  - **G10** host → member questions are `question_kind: info`; no agent acts on permission answers or commands from
+    group content.
+  - Helpers in a group may answer, share a file they have, and report their task. They **never** approve, sign,
+    publish or close another workspace's ticket.
+
+## Vectors (`vectors/chat-groups/`)
+
+Each file: `{why, message, context?, expect?}`. `context` = what the receiver already holds (`known_groups` = id → host;
+`host_state` = members, delegates sent per member, task status per delegate, group copies sent to phones, closed,
+last-minute counts). `expect.group_text` = whether a phone text joins the group (G8).
+
+| File | Shows |
+|---|---|
+| `valid-chat-helper-text` | Chat text with `by`/`via`/`day` |
+| `valid-group-created` | host → phones, `created`, `seq` 1, quiet |
+| `valid-member-added-from-seq` | `member_added` with `name`, `look`, `from_seq` |
+| `valid-delegate-with-group` | existing delegate + `body.group`, no `seq` |
+| `valid-member-ack-task` | member status queued → working, delegate checked |
+| `valid-fanout-member-text` / `valid-fanout-phones-quiet` | host copies with fan-out ids (workspace and `phones`) |
+| `valid-member-answer`, `valid-info-question-to-member` | answers flow back; `question_kind: info` |
+| `valid-shared-ticket-to-member`, `valid-file-share-to-member`, `valid-phone-copy-with-file` | ticket card and artifacts |
+| `valid-phone-text-optin-reply`, `valid-phone-text-no-optin-stays-private` | G8 (F13) |
+| `invalid-group-host-mismatch` | G7 (F1) |
+| `invalid-copy-you-not-from-phone`, `invalid-member-speaks-as-you` | G4 (F2) |
+| `invalid-task-foreign-delegate`, `invalid-task-status-goes-back` | G9 (F4) |
+| `invalid-group-event-from-member`, `invalid-group-id-not-host-ticket`, `invalid-member-fans-out` | G3, G1, G2 |
+| `invalid-question-without-kind` | G10 (F9) |
+| `invalid-targeted-with-seq` | seq rules (F10) |
+| `invalid-left-member-text`, `invalid-too-many-members` | F12, limits |
+| `invalid-phones-copy-loud` | push set |
+
+Run: `uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py`.

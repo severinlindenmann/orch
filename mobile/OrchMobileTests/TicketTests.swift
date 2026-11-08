@@ -59,6 +59,34 @@ final class TicketTests: XCTestCase {
         XCTAssertNotEqual(TopicStatus(TicketBuilder.build(updates: [u(false)], questions: [], answers: [:])[0]), .working)
     }
 
+    func testStartedIdleTicketIsPaused() {
+        func t(_ status: String, _ running: Bool?, _ started: Bool?) -> Ticket {
+            let u = TicketUpdate(id: "m_n", workspace: "ws_a", workspaceName: "A", ticket: "t_1", kind: "note", title: "T", text: "x",
+                                 replyTo: nil, at: "2026-11-08T08:00:00Z", ticketView: TicketSnapshot(title: "T", status: status, running: running, started: started))
+            return TicketBuilder.build(updates: [u], questions: [], answers: [:])[0]
+        }
+        for status in ["ready", "open", "active"] {
+            let paused = t(status, false, true)
+            XCTAssertEqual(paused.status, .paused, status); XCTAssertEqual(paused.status.title, "Paused")
+            XCTAssertEqual(paused.stateLine, "Paused"); XCTAssertEqual(paused.symbol, "pause.circle")
+            XCTAssertEqual(TopicStatus(paused), .paused); XCTAssertEqual(TopicStatus(paused).label, "Paused")
+            XCTAssertEqual(TopicStatus(paused).chip, "Paused")
+            for started: Bool? in [false, nil] {
+                let backlog = t(status, false, started)
+                XCTAssertEqual(backlog.status, .backlog, status); XCTAssertEqual(backlog.stateLine, "Not started")
+                XCTAssertEqual(TopicStatus(backlog).chip, "Not started")
+            }
+        }
+        for running: Bool? in [true, nil] {
+            XCTAssertEqual(t("ready", running, true).status, .paused)
+            XCTAssertEqual(t("open", running, true).status, .paused)
+            XCTAssertEqual(t("ready", running, nil).status, .backlog)
+            XCTAssertEqual(t("open", running, nil).status, .backlog)
+            XCTAssertEqual(t("active", running, true).status, .working)
+        }
+        XCTAssertLessThan(Ticket.Status.working, .paused); XCTAssertLessThan(Ticket.Status.paused, .backlog)
+    }
+
     /// #287: "ready" = an agent stopped or nobody started one; never Working, whatever the update kind says.
     func testReadyWithoutARunIsNotStarted() {
         for kind in ["note", "ack", "working"] {
