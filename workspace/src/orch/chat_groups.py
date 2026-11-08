@@ -97,7 +97,10 @@ FILE_TYPES = {
 ONLY_THESE = "Only PDFs, pictures and text files can be shared"
 LOOKS_LIKE_SECRET = "This file looks like it holds a password, so it was not shared"
 UNCHECKED = "We couldn't check this file for passwords, so it was not shared"
+LINKED = "This file has a second name (a link), so it was not shared"
+UNCHECKED_IMAGE = "We couldn't check this image's hidden data, so it was not shared"
 UNCHECKED_ASK = "We couldn't check this file for passwords. Share it anyway?"
+UNCHECKED_ASK_IMAGE = "We couldn't check this image's hidden data. Share it anyway?"
 
 
 class Unchecked(Refused):
@@ -488,7 +491,7 @@ def secret_path(path: Path, root: Path | None = None) -> bool:
     return False
 
 
-def read_shared(path: Path, root: Path, confined: bool, allow_unchecked: bool = False) -> bytes:
+def read_shared(path: Path, root: Path, confined: bool) -> bytes:
     """The bytes of a file to share. An agent's share (confined) stays in this workspace and goes through
     safefile.open_file_ref: the RELATIVE parts are checked for secrets and hidden folders, then each folder is
     walked with no-follow from the root and the final file is checked (regular, one link). A person's click
@@ -523,8 +526,7 @@ def read_shared(path: Path, root: Path, confined: bool, allow_unchecked: bool = 
         if not stat.S_ISREG(st.st_mode):
             raise Refused(f"{path} is not a file.")
         if st.st_nlink > 1:
-            if not allow_unchecked:  # a second name for the same data: can't tell what it is
-                raise Unchecked(UNCHECKED)
+            raise Refused(LINKED)  # a second name for the same data: can't tell what it is, never dismissible
         now = os.lstat(real)
         if (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino):
             raise Refused(f"{path} changed while it was read.")
@@ -571,8 +573,8 @@ def _pdf_text(data: bytes) -> str:
 def has_secret(data: bytes, mime: str, allow_unchecked: bool = False) -> bool:
     """A text file or PDF that holds a secret pattern. Images are not scanned. A PDF that is locked
     (/Encrypt) can't be read, which is not the same as holding a password: Unchecked."""
-    if mime.startswith("image/"):
-        return False
+    if mime.startswith("image/"):  # the raw bytes (metadata, trailing text) go through the same patterns
+        return phone_view._has_secret(data)
     if mime == "application/pdf" and not allow_unchecked and re.search(rb"/Encrypt\b", data):
         raise Unchecked(UNCHECKED)
     text = _pdf_text(data) if mime == "application/pdf" else data.decode("utf-8", "replace")
@@ -584,7 +586,7 @@ def has_secret(data: bytes, mime: str, allow_unchecked: bool = False) -> bool:
     )
 
 
-def check_file(data: bytes, name: str, allow_unchecked: bool = False) -> str:
+def check_file(data: bytes, name: str, allow_unchecked: bool = False, host_side: bool = False) -> str:
     """The mime of an allowed file, else Refused with the plain line. Unchecked (a Refused) when the file can't
     be scanned; allow_unchecked is only for a person's click that saw the warning."""
     if len(data) > FILE_MAX:
@@ -594,7 +596,23 @@ def check_file(data: bytes, name: str, allow_unchecked: bool = False) -> str:
         raise Refused(ONLY_THESE)
     if has_secret(data, mime, allow_unchecked):
         raise Refused(LOOKS_LIKE_SECRET)
+    if mime.startswith("image/") and not (allow_unchecked or host_side) and not phone_view._image_clean(data):
+        raise Unchecked(UNCHECKED_IMAGE)  # only a verified PNG; the person's click may accept the rest
     return mime
+
+
+def _checked(data: bytes, name: str, by_click: bool, confirm) -> str:
+    """check_file; when the content can't be read (Unchecked) and a person clicked, ask them inside the human
+    confirmation (`confirm(question) -> bool`) and only then look the other way. Never for an agent."""
+    try:
+        return check_file(data, name)
+    except Unchecked as e:
+        if not (by_click and confirm is not None):
+            raise
+        question = UNCHECKED_ASK_IMAGE if "image" in str(e) else UNCHECKED_ASK
+        if not confirm(question):
+            raise
+        return check_file(data, name, allow_unchecked=True)
 
 
 # ---- state -----------------------------------------------------------------------------------------------
@@ -986,23 +1004,8 @@ def _history(root: Path, tid: str, by: str, text: str) -> None:
         tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "relay"))
 
 
-def _label(root: Path | None, g: dict | None, ws: str) -> str:
-    """A name to read for a workspace id: the group's member name, else the directory's, never the raw id."""
-    n = ((g or {}).get("members", {}).get(ws, {}) or {}).get("name")
-    if not n and root is not None and ws.startswith("ws_"):
-        from orch import relay
-
-        with contextlib.suppress(Refused, OSError, KeyError, ValueError):
-            n = relay._shown_name(root, ws, "")
-    return _line(n or ("another workspace" if ws.startswith("ws_") else ws), 60)
-
-
-def g_of(root: Path, tid: str) -> dict | None:
-    return _load(root)["hosted"].get("grp_" + tid)
-
-
-def _by_name(g: dict, ws: str, root: Path | None = None) -> str:
-    return "agent:" + _label(root, g, ws)
+def _by_name(g: dict, ws: str) -> str:
+    return "agent:" + _line(g["members"].get(ws, {}).get("name") or ws, 60)
 
 
 # ---- host: the shared ticket card ----------------------------------------------------------------------
@@ -1283,7 +1286,7 @@ def ask(root: Path, tid: str, ws: str, qid: str, by: str = "agent:relay") -> dic
     asked = net.read_json(relay._asked_path(root), {})
     asked[mid] = {"ticket": tid, "question_id": qid, "to": ws, "group": gid}
     net.write_json(relay._asked_path(root), asked, True)
-    _history(root, tid, by, f"Asked {_label(root, g_of(root, tid), ws)} (group): {q['text']}"[:2000])
+    _history(root, tid, by, f"Asked {ws} (group): {q['text']}"[:2000])
     return msg
 
 
@@ -1349,7 +1352,7 @@ def delegate(
                 )
             except Refused:
                 pass  # the task went; only the card for the group is missing
-        _history(root, tid, by, f"Task for {_label(root, g_of(root, tid), ws)} (group): {title}"[:2000])
+        _history(root, tid, by, f"Task for {ws} (group): {title}"[:2000])
         return msg
     except Refused:
         if not sent and not held:  # the task didn't go: the workspace is not left in the group
@@ -1368,7 +1371,7 @@ def share_file(
     to: str | None = None,
     by_click: bool = False,
     by: str = "agent:relay",
-    unchecked_ok: bool = False,
+    confirm=None,
 ) -> dict:
     """Share one file with the group (members as `file` messages + a blob each, phones as a text with the
     file in
@@ -1376,11 +1379,10 @@ def share_file(
     from orch import relay
 
     path = Path(path)
-    ok = bool(by_click and unchecked_ok)  # the person saw "couldn't check this file" and said share anyway
-    data = read_shared(path, root, confined=not by_click, allow_unchecked=ok)
-    mime = check_file(data, path.name, ok)
-    if mime.startswith("image/") and not by_click:
+    data = read_shared(path, root, confined=not by_click)
+    if not by_click and (sniff(data, path.name) or "").startswith("image/"):
         raise Refused("A person has to click to share a picture.")
+    mime = _checked(data, path.name, by_click, confirm)
     if by_click:
         tickets.require_human("Share this file with the group?", "sharing a file")
     gid = ensure_group(root, tid, by)
@@ -1725,7 +1727,7 @@ def _host_file(root: Path, st: dict, g: dict, m: dict, errors: list) -> dict:
     if raw is None:
         return _drop(st, m, "the file could not be fetched")
     try:
-        mime = check_file(raw, name)
+        mime = check_file(raw, name, host_side=True)  # the member's person clicked; secrets are still refused
     except Refused as e:
         _send(
             root,
@@ -1745,7 +1747,7 @@ def _host_file(root: Path, st: dict, g: dict, m: dict, errors: list) -> dict:
     _publish_file(
         root, g, m["id"], frm, blob["blob_id"], name, len(raw), blob["sha256"], mime, ttl, None, errors
     )
-    _history(root, g["ticket"], _by_name(g, frm, root), f"Group file: {ttl}")
+    _history(root, g["ticket"], _by_name(g, frm), f"Group file: {ttl}")
     return {
         "handled": True,
         "auto": False,
@@ -1806,7 +1808,7 @@ def note_answer_kept(root: Path, asked: dict, m: dict) -> None:
             root,
             asked["ticket"],
             lambda t: tickets.add_history(
-                t, f"agent:{_label(root, None, m['from'])}", f"Late answer to {asked['question_id']}: {text}", "relay"
+                t, f"agent:{_line(m['from'], 60)}", f"Late answer to {asked['question_id']}: {text}", "relay"
             ),
         )
 
@@ -2526,7 +2528,7 @@ def share_member(
     path: Path,
     title: str | None = None,
     by_click: bool = False,
-    unchecked_ok: bool = False,
+    confirm=None,
 ) -> dict:
     """Member: share a file with the group (to the host only). Only after its person's click."""
     from orch import relay
@@ -2535,8 +2537,8 @@ def share_member(
         raise Refused("A person has to click to share a file from this workspace.")
     tickets.require_human("Share this file with the group?", "sharing a file")
     path = Path(path)
-    data = read_shared(path, root, confined=False, allow_unchecked=unchecked_ok)  # the person's click chose it
-    mime = check_file(data, path.name, unchecked_ok)
+    data = read_shared(path, root, confined=False)  # the person's click chose it
+    mime = _checked(data, path.name, True, confirm)
     with _state(root) as st:
         j = st["joined"].get(_jkey(host, gid))
         if j is None or j["left"] or j["closed"]:

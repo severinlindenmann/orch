@@ -112,6 +112,23 @@ def _group_say(a):
     return ["relay", "group", "reply", host, group], ["--dashboard"], [acts._text(a.get("text"), "message")]
 
 
+ARTIFACT_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}")
+
+
+def _group_share(a):
+    """Share one of the ticket's artifacts with its group, a person's click: `orch relay group share <ticket>
+    .orch/tickets/<ticket>/artifacts/<file> --click`. A file orch could not check for passwords is refused with a
+    plain line; the page asks the person and repeats with `confirm: true` (`--unchecked-ok`), which the CLI honours
+    only for a person, never for an agent session."""
+    acts = _actions()
+    acts._only(a, ("ticket", "file", "confirm"))
+    tid, name = _group_ticket(a), a.get("file")
+    if not (isinstance(name, str) and ARTIFACT_NAME.fullmatch(name) and ".." not in name):
+        raise _bad("Choose a file of this ticket.")
+    flags = ["--click"] + (["--unchecked-ok"] if acts._flag(a.get("confirm")) else [])
+    return ["relay", "group", "share", tid, f".orch/tickets/{tid}/artifacts/{name}"], flags, []
+
+
 def _group_member(verb):
     def op(a):
         acts = _actions()
@@ -129,6 +146,7 @@ def _group_member(verb):
 
 MOBILE_OPS = {
     "group.say": _group_say,
+    "group.share": _group_share,
     "group.add": _group_member("add"),
     "group.remove": _group_member("remove"),
     "relay.reply": _relay_reply,

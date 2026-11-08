@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from orch import net, publish, relay, templates, tickets
+from orch import net, publish, relay, templates, term, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -241,6 +241,27 @@ def _add_group(rel, common) -> None:
     x.add_argument("group")
 
 
+def _confirm(args):
+    """The person's yes to 'share anyway' for a file orch could not check. An agent session needs a yes typed at
+    a terminal (tickets.require_human); a person at a terminal is asked; a person's dashboard (no terminal) has
+    already asked in its own dialog and says so with --unchecked-ok."""
+
+    def ask(question: str) -> bool:
+        if tickets.agent_tool() is not None:
+            try:
+                tickets.require_human(question, "sharing a file that could not be checked")
+            except Refused:
+                return False
+            return True
+        if term.is_terminal(sys.stdin):
+            sys.stderr.write(f"{question} [y/N] ")
+            sys.stderr.flush()
+            return sys.stdin.readline().strip().lower() in ("y", "yes")
+        return bool(args.unchecked_ok)
+
+    return ask
+
+
 def run_group(args, root: Path, out) -> None:
     from orch import chat_groups as cg
 
@@ -266,9 +287,7 @@ def run_group(args, root: Path, out) -> None:
         m = cg.ask(root, tid, ws, args.question, by)
         out(args, m, _sent_line(root, m, "Question sent to {}."))
     elif sub == "share":
-        r = cg.share_file(
-            root, tid, Path(args.file), args.title, None, args.click, by, args.click and args.unchecked_ok
-        )
+        r = cg.share_file(root, tid, Path(args.file), args.title, None, args.click, by, _confirm(args))
         out(args, r, "Shared with the group.")
     elif sub == "reply":
         if args.dashboard:
@@ -292,7 +311,7 @@ def run_group(args, root: Path, out) -> None:
             Path(args.file),
             args.title,
             args.click,
-            args.click and args.unchecked_ok,
+            _confirm(args),
         )
         out(args, m, "Shared with the group.")
     elif sub == "leave":

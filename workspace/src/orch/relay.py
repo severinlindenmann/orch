@@ -814,7 +814,7 @@ def msg_group(msg: dict) -> bool:
     return isinstance(msg.get("body"), dict) and isinstance(msg["body"].get("group"), dict)
 
 
-def _answer_by(msg: dict, asked: dict | None = None, root: Path | None = None) -> tuple[str, str]:
+def _answer_by(msg: dict, asked: dict | None = None) -> tuple[str, str]:
     frm, b = str(msg.get("from", "")), msg.get("body", {})
     by = b.get("answered_by")
     if isinstance(by, str):  # untrusted: it is pasted to the agent as "From <by>: ..."
@@ -825,13 +825,7 @@ def _answer_by(msg: dict, asked: dict | None = None, root: Path | None = None) -
     if not (isinstance(by, str) and by.startswith(ok_prefix)) or (
         asked is not None and asked.get("group") and not frm.startswith("ph_")
     ):  # we asked a group member: recorded by its id from the asked record, whatever the answer says
-        shown = ""
-        if root is not None and not frm.startswith("ph_"):
-            from orch import chat_groups
-
-            g = chat_groups._load(root)["hosted"].get((asked or {}).get("group") or "")
-            shown = chat_groups._label(root, g, frm) if frm.startswith("ws_") else ""  # a name to read, not ws_...
-        by = f"human:{frm}" if frm.startswith("ph_") else f"agent:{shown or frm}"
+        by = f"human:{frm}" if frm.startswith("ph_") else f"agent:{frm}"
     via = "phone" if frm.startswith("ph_") else "subscriber" if frm.startswith("sub_") else "relay"
     return by, via
 
@@ -841,7 +835,7 @@ def _applied_ticket(root: Path, msg: dict) -> str | None:
     asked, _ = _answer_asked(root, msg)
     if not asked:
         return None
-    by, via = _answer_by(msg, asked, root)
+    by, via = _answer_by(msg, asked)
     try:
         q = next(
             x for x in tickets.load(root, asked["ticket"])["questions"] if x["id"] == asked["question_id"]
@@ -865,7 +859,7 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     asked, why = _answer_asked(root, msg)
     if not asked:
         return why, None
-    by, via = _answer_by(msg, asked, root)
+    by, via = _answer_by(msg, asked)
     try:
         t, q = tickets.answer(
             root,

@@ -611,7 +611,7 @@ def test_info_question_and_answer_flow(proj, run, rel, host):
     assert out[0]["note"].startswith("answered q1")
     t = tickets.load(proj, host)
     q = t["questions"][0]
-    assert q["answer"] == "Household account." and q["answered_by"] == "agent:Home"  # never a person
+    assert q["answer"] == "Household account." and q["answered_by"] == f"agent:{HOME}"  # never a person
     assert sent(rel, to="phones")  # the group sees the answer
     # a second answer is kept as a note, the first one stays
     ans2 = {**ans, "id": mid("ans2"), "body": {**ans["body"], "answer": "Another account."}}
@@ -778,7 +778,9 @@ def test_image_needs_a_click_and_size_and_count_limits(proj, run, rel, host):
     png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 50)
     code, _, err = run("relay", "group", "share", host, str(png))
     assert code != 0 and "click" in err
-    assert run("relay", "group", "share", host, str(png), "--click")[0] == 0  # not an agent session: a person
+    code, _, err = run("relay", "group", "share", host, str(png), "--click")  # not a verified PNG
+    assert code != 0 and "couldn't check this image" in err
+    assert run("relay", "group", "share", host, str(png), "--click", "--unchecked-ok")[0] == 0
     big = proj / "big.txt"
     big.write_bytes(b"a" * (cg.FILE_MAX + 1))
     code, _, err = run("relay", "group", "share", host, str(big))
@@ -1218,7 +1220,7 @@ def test_group_answer_without_group_body_is_ignored_and_never_a_person(proj, run
     inbox(run, rel, ok)
     q = tickets.load(proj, host)["questions"][0]
     assert (
-        q["answer"] == "y" and q["answered_by"] == "agent:Home"
+        q["answer"] == "y" and q["answered_by"] == f"agent:{HOME}"
     )  # from the asked record, not the message
 
 
@@ -1956,7 +1958,7 @@ def test_ticket_artifacts_are_shareable_and_a_hidden_folder_is_not_called_a_pass
     assert code != 0 and "password" in err
 
 
-def test_unreadable_file_is_not_called_a_password_and_needs_the_persons_ok(proj, run, rel, host):
+def test_unreadable_file_is_not_called_a_password_and_needs_the_persons_ok(proj, run, rel, host, monkeypatch):
     import os
 
     run("relay", "group", "add", host, HOME)
@@ -1972,11 +1974,42 @@ def test_unreadable_file_is_not_called_a_password_and_needs_the_persons_ok(proj,
     assert code != 0 and "couldn't check" in err
     assert run("relay", "group", "share", host, str(locked), "--click", "--unchecked-ok")[0] == 0
     assert len(sent(rel, type="file")) == 1
-    # a second name for the same data can't be told apart: same plain warning, same one OK
+    # a second name for the same data is refused for good: "share anyway" does not reach it
     os.link(proj / "locked.pdf", proj / "again.pdf")
-    code, _, err = run("relay", "group", "share", host, str(proj / "again.pdf"), "--click")
-    assert code != 0 and "couldn't check" in err and "looks like it holds" not in err
+    for extra in ([], ["--unchecked-ok"]):
+        code, _, err = run("relay", "group", "share", host, str(proj / "again.pdf"), "--click", *extra)
+        assert code != 0 and "second name" in err and "password" not in err
+    # an agent session can not say "share anyway" with a flag: it needs a yes typed at a terminal
+    monkeypatch.setenv("CLAUDECODE", "1")
+    rel.sent.clear()
+    code, _, err = run("relay", "group", "share", host, str(locked), "--click", "--unchecked-ok")
+    assert code != 0 and not sent(rel, type="file")
+    monkeypatch.delenv("CLAUDECODE")
     # a real secret is never shared, not even with the OK
     (proj / "n.txt").write_text("password = hunter2hunter2")
     code, _, err = run("relay", "group", "share", host, str(proj / "n.txt"), "--click", "--unchecked-ok")
     assert code != 0 and "looks like it holds a password" in err
+
+
+def test_images_are_scanned_and_only_a_verified_png_passes_without_the_persons_ok():
+    import struct
+    import zlib
+
+    def chunk(k, d):
+        return struct.pack(">I", len(d)) + k + d + struct.pack(">I", zlib.crc32(k + d))
+
+    base = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", b"\0" * 13) + chunk(b"IDAT", b"\0") + chunk(b"IEND", b"")
+    assert cg.check_file(base, "a.png") == "image/png"
+    hidden = base[:-12] + chunk(b"tEXt", b"note") + base[-12:]  # a text chunk: not verifiable
+    with pytest.raises(cg.Unchecked, match="couldn't check this image"):
+        cg.check_file(hidden, "a.png")
+    assert cg.check_file(hidden, "a.png", allow_unchecked=True) == "image/png"  # after the person's confirm
+    jpg = b"\xff\xd8\xff\xe0" + b"0" * 40
+    with pytest.raises(cg.Unchecked, match="couldn't check"):
+        cg.check_file(jpg, "a.jpg")
+    assert cg.check_file(jpg, "a.jpg", allow_unchecked=True) == "image/jpeg"
+    # the raw bytes are always scanned: a secret in metadata is refused, even with the OK
+    leaky = jpg + b" password = hunter2hunter2"
+    for ok in (False, True):
+        with pytest.raises(cg.Refused, match="looks like it holds a password"):
+            cg.check_file(leaky, "a.jpg", allow_unchecked=ok)
