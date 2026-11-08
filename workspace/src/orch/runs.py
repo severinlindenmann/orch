@@ -330,7 +330,13 @@ def _human_author(by, via, kind) -> bool:
     is not a person's input."""
     if kind not in ("answer", "message", "text"):
         return False
-    return str(by).startswith("human:") or via == "phone"
+    by = str(by)
+    if by.startswith("human:"):
+        return True
+    # from the phone: only with a person as the author (the phone's name or its ph_ id), never orch itself,
+    # a host or an agent that passes the word on
+    system = by == "orch" or by.startswith(("agent:", "automation:", "system:"))
+    return via == "phone" and not system and (by.startswith("ph_") or ":" not in by)
 
 
 def human_waiting(root: Path, tid: str) -> list[dict]:
@@ -340,10 +346,9 @@ def human_waiting(root: Path, tid: str) -> list[dict]:
     for i in undelivered(root, tid):
         if i.get("via") in ("start", "slots"):
             continue
-        human = i.get("human")
-        if human is None:  # an item from before the field: the same allowlist
-            human = _human_author(i.get("by", ""), i.get("via"), i.get("kind"))
-        if human is True:
+        # the stored flag is never trusted alone: the allowlist is checked again (older lines have no flag)
+        rule = _human_author(i.get("by", ""), i.get("via"), i.get("kind"))
+        if rule and i.get("human") in (True, None):
             out.append(i)
     return out
 

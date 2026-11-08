@@ -374,3 +374,43 @@ def test_orch_json_is_read_from_stdout_only(ws, tmp_path, monkeypatch):
     f.chmod(f.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv("ORCH_BIN", str(f))
     assert orchcli.call(ws, "run", "status", "t_x", by=False) == {"ok": True}
+
+
+def test_input_a_busy_run_does_not_read_is_said_once_after_30_minutes(ws):
+    add_ticket(ws, "t_queue010", status="ready")
+    (ws / "ended-t_queue010").write_text("")
+    (ws / "pending-t_queue010").write_text(json.dumps(["p_d0000001"]))
+    (ws / "busy-t_queue010").write_text("")  # the start finds a run holding it: "pending"
+    Scheduler(ws).tick(T(8))
+    (ws / "ended-t_queue010").unlink()  # that run keeps holding it and does not read the input
+    for m in (10, 31, 45):
+        Scheduler(ws).tick(T(8, m))
+    t = json.loads((ws / ".orch/tickets/t_queue010.json").read_text())
+    assert sum("waited 30 minutes" in str(h.get("text")) for h in t["history"]) == 1
+    assert runs_started(ws).count("t_queue010") == 1  # pending is not a retry storm either
+
+
+def test_a_capped_id_is_never_tried_or_said_again(ws):
+    add_ticket(ws, "t_queue011", status="ready")
+    (ws / "ended-t_queue011").write_text("")
+    (ws / "pending-t_queue011").write_text(json.dumps(["p_e0000001"]))
+    (ws / "noagent").write_text("")
+    for m in range(6):
+        t = json.loads((ws / ".orch/tickets/t_queue011.json").read_text())
+        t.update(status="ready", questions=[])
+        (ws / ".orch/tickets/t_queue011.json").write_text(json.dumps(t))
+        Scheduler(ws).tick(T(8, m))
+    t = json.loads((ws / ".orch/tickets/t_queue011.json").read_text())
+    assert runs_started(ws).count("t_queue011") == 3
+    assert sum("after 3 tries" in str(h.get("text")) for h in t["history"]) == 1
+
+
+def test_input_a_run_left_unread_may_start_one_run_after_it_ended(ws):
+    add_ticket(ws, "t_queue012", status="ready")
+    (ws / "ended-t_queue012").write_text("")
+    (ws / "pending-t_queue012").write_text(json.dumps(["p_f0000001"]))
+    (ws / "busy-t_queue012").write_text("")
+    Scheduler(ws).tick(T(8))  # pending: a run holds it
+    (ws / "busy-t_queue012").unlink()  # that run ended without reading it
+    assert Scheduler(ws).tick(T(8, 1)) == ["t_queue012"]  # given back, then one run for it
+    assert Scheduler(ws).tick(T(8, 2)) == []

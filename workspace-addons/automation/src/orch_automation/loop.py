@@ -26,6 +26,7 @@ def scheduled(t: dict) -> bool:
     return t.get("status") in OPEN or (rec and t.get("status") == "done")
 FAST_FAIL_SECONDS = 10
 QUEUED_TRIES = 3  # starts that failed for one waiting input before it is left for a person
+QUEUED_PENDING_SECONDS = 30 * 60  # input a busy run has not read after this is said once on the ticket
 KIND = "automation:failure"
 KINDS = (KIND,)
 TRY_AGAIN, LEAVE = "Try again", "Leave it"
@@ -195,6 +196,7 @@ class Scheduler:
         skip = list(skip or [])
         for t in read_tickets(self.root):
             tid = t["id"]
+            self._pending_too_long(tid, now)
             if tid in skip or t.get("status") != "ready" or not self.may_start(t):
                 continue
             st = orchcli.run_status(self.root, tid)
@@ -204,7 +206,7 @@ class Scheduler:
             mine = load_state(self.root).get(tid, {})
             tries = {k: v for k, v in (mine.get("queued_tries") or {}).items() if k in ids and isinstance(v, int)}
             done = [i for i in mine.get("queued_started") or [] if i in ids]  # only what still waits
-            new = [i for i in ids if i not in done and tries.get(i, 0) < QUEUED_TRIES]
+            new = [i for i in ids if i not in done and tries.get(i, 0) < QUEUED_TRIES]  # capped ids never again
             if not new:
                 update_state(self.root, tid, queued_started=done, queued_tries=tries)
                 continue
@@ -213,18 +215,44 @@ class Scheduler:
             if res == "started":
                 started.append(tid)
                 continue
-            # anything else gives the ids back. "pending" = a run holds the ticket after all (it reads the
-            # input): no try counted. Every other result (failed, refused, unknown) counts one try per id.
-            if res != "pending":
+            if res == "pending":  # a run holds the ticket after all: it reads the input. The ids stay marked
+                since = dict(mine.get("queued_pending_since") or {})  # (no new start each pass) but are timed
                 for i in new:
-                    tries[i] = tries.get(i, 0) + 1
+                    since.setdefault(i, fmt(now))
+                update_state(self.root, tid, queued_pending_since=since)
+                continue
+            # anything else (failed, refused, unknown) gives the ids back and counts one try per id
+            reached = []
+            for i in new:
+                tries[i] = tries.get(i, 0) + 1
+                if tries[i] == QUEUED_TRIES:  # this try moved it from cap-1 to cap: said exactly once
+                    reached.append(i)
             update_state(self.root, tid, queued_started=done, queued_tries=tries)
-            given_up = [i for i in new if tries.get(i, 0) >= QUEUED_TRIES]
-            if given_up:  # said once (this is the try that reached the cap): a person decides now
+            if reached:
                 orchcli.log(self.root, tid, f"Input waiting on this ticket could not start an agent after "
                                             f"{QUEUED_TRIES} tries. It stays queued; start the agent by hand.")
                 self.fail(tid, f"the agent could not be started for the waiting input ({QUEUED_TRIES} tries)")
         return started
+
+    def _pending_too_long(self, tid: str, now: datetime) -> None:
+        """Input a busy run should have read but has not after QUEUED_PENDING_SECONDS: said once on the ticket."""
+        mine = load_state(self.root).get(tid, {})
+        since = {k: v for k, v in (mine.get("queued_pending_since") or {}).items() if isinstance(v, str)}
+        if not since:
+            return
+        st = orchcli.run_status(self.root, tid)
+        waiting = set((st or {}).get("human_pending_ids") or []) if st and st.get("running") is False else None
+        old = [i for i, at in since.items() if (p := parse(at)) and (now - p).total_seconds() >= QUEUED_PENDING_SECONDS]
+        if waiting is not None:  # the run that held it is gone: what it did not read may start one run again
+            back = [i for i in since if i in waiting]
+            done = [i for i in mine.get("queued_started") or [] if i not in back]
+            update_state(self.root, tid, queued_started=done, queued_pending_since={})
+            return
+        if old:
+            orchcli.log(self.root, tid, "Input on this ticket has waited 30 minutes for the agent that holds it. "
+                                        "Open the ticket to check on the agent.")
+            since = {i: at for i, at in since.items() if i not in old}
+        update_state(self.root, tid, queued_pending_since=since)
 
     def may_start(self, t: dict) -> bool:
         """The gates every start from this loop respects: a ticket switched off here is left alone."""
