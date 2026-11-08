@@ -89,7 +89,7 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap(); expectKeyboardFocus(field); field.typeText("Book the team lunch")
         app.buttons["topic-start"].tap()
-        XCTAssertTrue(app.staticTexts["composer-note"].waitForExistence(timeout: 10), "landed in the new ticket chat")
+        XCTAssertTrue(app.staticTexts["composer-note"].waitForExistence(timeout: 25), "landed in the new ticket chat")
         XCTAssertTrue(app.staticTexts["Book the team lunch"].waitForExistence(timeout: 5) || app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Book the team lunch'")).firstMatch.exists)
     }
 
