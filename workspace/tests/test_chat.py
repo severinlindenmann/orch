@@ -610,5 +610,88 @@ def test_ref_add_is_normalised_like_ref_add_and_symlinked_folders_are_refused(
         assert run("ref", "add", tid, target)[0] == 2, target
     assert run("ref", "add", tid, "docs\\a.md")[0] == 0  # backslashes mean the same file, as for the person
     assert run("ref", "add", tid, "plan.md:3")[0] == 0
-    assert chat.read_file(proj, "linked/s.md") is None and chat.safe_file(proj, "linked/s.md") is None
+    assert chat.read_file(proj, "linked/s.md") is None and chat.helper_safe_file(proj, "linked/s.md") is None
     assert chat.read_file(proj, "docs\\a.md") == b"x"
+
+
+# ---------------------------------------------------------------- fourth round
+
+
+def test_people_keep_the_old_file_card_rule_the_helper_gets_the_strict_one(proj):
+    (proj / "docs").mkdir()
+    (proj / "docs" / "a.md").write_text("x")
+    (proj / "~odd.md").write_text("x")
+    assert chat.safe_file(proj, "docs/a.md") == "docs/a.md"
+    assert chat.safe_file(proj, "~odd.md") == "~odd.md"  # a POSIX name a person may use
+    assert chat.helper_safe_file(proj, "~odd.md") is None
+    assert chat.helper_safe_file(proj, "docs\\a.md") == "docs/a.md"
+    assert chat.helper_safe_file(proj, "docs/../docs/a.md") == "docs/a.md"
+    assert chat.helper_safe_file(proj, "../x") is None and chat.helper_safe_file(proj, "/etc/hosts") is None
+
+
+def test_options_are_compared_with_the_parsers_own_defaults(proj, monkeypatch):
+    from types import SimpleNamespace
+
+    _helper(proj, monkeypatch)
+    # ticket list --all is a store_true flag: its default False is "not given", True is given (and allowed here)
+    chat.guard(proj, SimpleNamespace(cmd="ticket", sub="list", status=None, all=False, json=False, by=None))
+    chat.guard(proj, SimpleNamespace(cmd="ticket", sub="list", status=None, all=True, json=False, by=None))
+    with pytest.raises(Refused):  # --by differs from its default None
+        chat.guard(
+            proj, SimpleNamespace(cmd="ticket", sub="list", status=None, all=False, json=False, by="human:x")
+        )
+    with pytest.raises(Refused):  # an option the command does not list, even set to its "false" value
+        chat.guard(
+            proj,
+            SimpleNamespace(
+                cmd="ticket", sub="list", status=None, all=False, json=False, by=None, fresh=True
+            ),
+        )
+
+
+def test_ref_add_kinds_are_an_allowlist(proj, run, new_ticket, monkeypatch):
+    tid = new_ticket("A")
+    other = new_ticket("B")
+    (proj / "ok.md").write_text("x")
+    tickets.ensure_general(proj, "x")
+    _helper(proj, monkeypatch)
+    assert run("ref", "add", tid, "https://example.com/x", "--kind", "github:pr")[0] == 0
+    assert run("ref", "add", tid, other)[0] == 0
+    assert run("ref", "add", tid, "ok.md")[0] == 0
+    assert run("ref", "add", tid, f"artifact:{other}/x.md")[0] == 2
+    assert run("ref", "add", tid, tid)[0] == 2  # itself
+
+
+def test_read_file_returns_none_for_any_error(proj, monkeypatch):
+    (proj / "ok.md").write_text("hello")
+    from orch import safefile
+
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(safefile, "open_file_ref", boom)
+    assert chat.read_file(proj, "ok.md") is None
+
+
+def test_init_and_the_guard_work_in_an_empty_folder(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("ORCH_TICKET", "t_somethingelse")
+    chat.guard(tmp_path, SimpleNamespace(cmd="init", sub=None, json=False))  # no .orch here: must not raise
+    monkeypatch.delenv("ORCH_TICKET")
+    chat.guard(tmp_path, SimpleNamespace(cmd="init", sub=None, json=False))
+
+
+def test_the_run_claim_the_wrapper_may_need_still_passes_for_the_helper(proj, monkeypatch):
+    from types import SimpleNamespace
+
+    gid = _helper(proj, monkeypatch)
+    monkeypatch.setenv("ORCH_AGENT", "fake")
+    ns = dict(cmd="run", sub="claim", ticket=gid, agent="fake", pid=123, json=False, by=None, mode=None)
+    ns.pop("mode")
+    chat.guard(proj, SimpleNamespace(**ns, session=None, text=None, take_over=False))
+    with pytest.raises(Refused):
+        chat.guard(proj, SimpleNamespace(**ns, session="s1", text=None, take_over=False))
+    with pytest.raises(Refused):
+        chat.guard(proj, SimpleNamespace(**ns, session=None, text=None, take_over=True))

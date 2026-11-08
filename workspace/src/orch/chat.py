@@ -135,7 +135,7 @@ def clean_refs(root: Path, refs) -> list[dict]:
                     }
                 )
         else:
-            p = safe_file(root, str(r.get("path") or ""))
+            p = (helper_safe_file if is_helper(root) else safe_file)(root, str(r.get("path") or ""))
             if p:
                 out.append(
                     {
@@ -158,14 +158,33 @@ def _find_ticket(root: Path, ref: str) -> dict | None:
 
 
 def safe_file(root: Path, rel_path: str) -> str | None:
-    """A file card names a file inside the workspace (real path, links resolved); secrets are never one."""
+    """A file card names a file inside the workspace (real path, links resolved); secrets are never one.
+    The rule for everyone (a person at the CLI, the dashboard): unchanged semantics."""
     if not rel_path or "\x00" in rel_path:
         return None
+    try:
+        base = root.resolve()
+        real = (base / rel_path).resolve()
+        rel = real.relative_to(base).as_posix()
+        if (
+            not real.is_file() or real.stat().st_nlink > 1 or _NOT_FILES.search(rel)
+        ):  # a hard link may be a secret
+            return None
+    except (ValueError, OSError):
+        return None
+    return rel
+
+
+def helper_safe_file(root: Path, rel_path: str) -> str | None:
+    """Stricter, for what the Chat helper (an agent) may name: backslashes mean `/`, no absolute, drive, `~` or
+    `..` path, no folder that is a link, nothing under .orch or .git (safefile.file_ref_ok), then safe_file."""
     import posixpath
     from pathlib import PureWindowsPath
 
     from orch import safefile
 
+    if not rel_path or "\x00" in rel_path:
+        return None
     rel_path = rel_path.replace("\\", "/")
     if Path(rel_path).is_absolute() or PureWindowsPath(rel_path).drive or rel_path.startswith("~"):
         return None
@@ -176,22 +195,8 @@ def safe_file(root: Path, rel_path: str) -> str | None:
         or ".." in norm.split("/")
         or not safefile.file_ref_ok(root, norm)
     ):
-        return None  # no part a link (a symlinked folder), nothing under .orch or .git
-    rel_path = norm
-    try:
-        base = root.resolve()
-        real = (base / rel_path).resolve()
-        rel = real.relative_to(base).as_posix()
-    except (ValueError, OSError):
         return None
-    try:
-        if (
-            not real.is_file() or real.stat().st_nlink > 1 or _NOT_FILES.search(rel)
-        ):  # a hard link may be a secret
-            return None
-    except OSError:
-        return None
-    return rel
+    return safe_file(root, norm)
 
 
 def read_file(root: Path, rel_path: str, max_bytes: int = 5_000_000) -> bytes | None:
@@ -199,12 +204,14 @@ def read_file(root: Path, rel_path: str, max_bytes: int = 5_000_000) -> bytes | 
     links (safefile.open_file_ref). None = not allowed."""
     from orch import safefile
 
-    p = safe_file(root, rel_path)
+    p = helper_safe_file(root, rel_path)  # strict: it is what a viewer may be handed
     if not p:
         return None
     try:
+        # open_file_ref (safefile._read_parts) opens every folder without following links, then fstat()s the file:
+        # regular file and st_nlink == 1, same dev/ino as lstat; anything else is None
         return safefile.open_file_ref(root, p, max_bytes)
-    except safefile.TooLarge:
+    except Exception:  # noqa: BLE001 - TooLarge, OSError, anything: a card that cannot be read is no card
         return None
 
 
@@ -280,7 +287,7 @@ def read_day(root: Path, day: str) -> dict:
                 r
                 for r in m["refs"]
                 if isinstance(r, dict)
-                and (r.get("kind") != "file" or safe_file(root, str(r.get("path", ""))))
+                and (r.get("kind") != "file" or helper_safe_file(root, str(r.get("path", ""))))
             ]
             m = {**m, "refs": ok}
         msgs.append(m)
@@ -467,8 +474,10 @@ def is_helper(root: Path) -> bool:
     environment is the same-user boundary: an agent that strips it is as free as it is for `orch run start`."""
     import os
 
-    gid = tickets.general_id(root)
-    return bool(gid and tickets.agent_tool() and os.environ.get("ORCH_TICKET") == gid)
+    want = os.environ.get("ORCH_TICKET")
+    if not want or not tickets.agent_tool():
+        return False  # a person (or any agent outside a run) never reads the ticket folder here: init works anywhere
+    return want == tickets.general_id(root)
 
 
 def _check_ref_add(root: Path, args, no: Refused) -> None:
@@ -477,20 +486,41 @@ def _check_ref_add(root: Path, args, no: Refused) -> None:
     from orch import refs
 
     try:
+        owner = tickets.resolve(
+            root, getattr(args, "id", None) or ""
+        )  # detect's 2nd argument: the owning ticket
         d = refs.detect(
             root,
-            "",
+            owner if isinstance(owner, str) else "",
             str(getattr(args, "target", "") or ""),
             getattr(args, "kind", None),
             getattr(args, "title", None),
         )
     except Refused:
         raise no from None
-    if d["kind"] == "file":
-        if d.get("local") or not safe_file(root, d["path"]):
-            raise no
-    elif d["kind"] == "artifact":
-        raise no
+    if d.get("url") and d["kind"] not in ("ticket", "artifact", "file"):
+        return  # a web reference
+    if d["kind"] == "ticket":
+        return
+    if d["kind"] == "file" and not d.get("local") and helper_safe_file(root, d["path"]):
+        return
+    raise no  # an allowlist: web, ticket, safe file; artifacts and anything else are refused
+
+
+def _given(args, cmd, sub) -> set[str]:
+    """The options and arguments that differ from the parser's own default (a store_false flag set to False counts)."""
+    from orch import cli
+
+    p = cli.build_parser(show_all=True)
+    try:
+        for name in (cmd, sub):
+            if name is None:
+                continue
+            action = p._subparsers._group_actions[0]  # noqa: SLF001
+            p = action.choices[name]
+    except (AttributeError, KeyError, IndexError):
+        return set(vars(args)) - _NO_DEST  # cannot find the parser: everything counts as given
+    return {k for k, v in vars(args).items() if k not in _NO_DEST and v != p.get_default(k)}
 
 
 def guard(root: Path, args) -> None:
@@ -509,19 +539,15 @@ def guard(root: Path, args) -> None:
     if entry is None:
         raise no
     kind, allowed, targets = entry
-    used = {
-        k
-        for k, v in vars(args).items()
-        if k not in _NO_DEST and v is not None and v is not False and v != "" and v != [] and v != ()
-    }  # 0 counts as given
+    used = _given(args, cmd, sub)
     if used - allowed or getattr(args, "wsub", None) is not None:
         raise no
     gid = tickets.general_id(root)
     for f in targets:
         v = getattr(args, f, None)
         if not v:
-            if kind == "write" and f == "id":
-                raise no  # a write names its ticket; there is no default that could be the Chat ticket
+            if kind == "write" and f in ("id", "ticket"):
+                raise no  # a write names its ticket: an implicit one is ORCH_TICKET, the Chat ticket
             continue  # run hooks: the default is ORCH_TICKET = the Chat ticket; parent/ticket: none given
         try:
             rid = tickets.resolve(root, v)
@@ -558,5 +584,5 @@ def guard(root: Path, args) -> None:
             raise Refused("The Chat helper answers the person's paired phones with a plain text only.")
         for r in getattr(args, "ref", None) or []:  # cards: checked now, again when stored and when read
             k, _, v = str(r).partition(":")
-            if k not in REF_KINDS or (k == "file" and not safe_file(root, v)):
+            if k not in REF_KINDS or (k == "file" and not helper_safe_file(root, v)):
                 raise Refused("That card is not allowed.")
