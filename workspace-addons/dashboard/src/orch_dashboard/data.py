@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import look, mobile
+from . import look, mobile, phone_delivery
 
 STATUS_ORDER = ["open", "ready", "active", "waiting", "review", "done", "dropped"]
 _NAME = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
@@ -140,6 +140,7 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
                 t[k] = []
         _mark_missing_proofs(root, t)
         tickets.append(t)
+    phone_delivery.mark(root, tickets)
     add_artifact_marks(tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
     by_id = {t["id"]: t for t in tickets}
