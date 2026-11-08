@@ -1393,7 +1393,7 @@ def test_agent_shares_stay_in_the_workspace_and_hard_links_are_refused(
     (secret / "token.txt").write_text("harmless words")
     os.link(secret / "token.txt", proj / "notes.txt")  # a second name for a secret file
     code, _, err = run("relay", "group", "share", host, str(proj / "notes.txt"))
-    assert code != 0 and "password" in err
+    assert code != 0  # open_file_ref refuses a file with a second link
     (proj / "ok.txt").write_text("fine words")
     assert run("relay", "group", "share", host, str(proj / "ok.txt"))[0] == 0
     # a hidden folder in the workspace is never shared, a ticket's own files are open
@@ -1404,7 +1404,13 @@ def test_agent_shares_stay_in_the_workspace_and_hard_links_are_refused(
     tdir = proj / ".orch" / "tickets" / host
     tdir.mkdir(parents=True)
     (tdir / "proof.txt").write_text("proof words")
-    assert run("relay", "group", "share", host, str(tdir / "proof.txt"))[0] == 0
+    assert run("relay", "group", "share", host, str(tdir / "proof.txt"))[0] != 0  # an agent never reads .orch
+    assert run("relay", "group", "share", host, str(tdir / "proof.txt"), "--click")[0] != 0  # nor on a click
+    # a folder that is a link to elsewhere is not followed
+    elsewhere = tmp_path_factory.mktemp("linked")
+    (elsewhere / "y.txt").write_text("words")
+    (proj / "linkdir").symlink_to(elsewhere)
+    assert run("relay", "group", "share", host, str(proj / "linkdir" / "y.txt"))[0] != 0
 
 
 def test_a_ticket_delegate_is_plain_unless_the_group_is_asked_for(proj, run, rel, host):
@@ -1484,3 +1490,29 @@ def test_file_names_are_redacted(proj, run, rel, host):
     assert run("relay", "group", "share", host, str(f))[0] == 0
     fm = sent(rel, to=HOME, type="file")[0]
     assert "ghp_" not in fm["body"]["name"]
+
+
+def test_member_bad_seq_is_dropped_and_a_huge_jump_skips_the_gap(proj, run, rel, member):
+    inbox(run, rel, _added(1))
+    for i, bad in enumerate([0, 2**31, 1.5, "9", True]):
+        m = from_host("text", {"text": "bad"}, seq=bad, id=mid(f"bs{i}"), i=f"bs{i}")
+        assert "seq" in inbox(run, rel, m)[0]["note"]
+    assert [x["seq"] for x in _joined(proj)["log"]] == [1]
+    far = 5000
+    inbox(run, rel, from_host("text", {"text": "far away"}, seq=far, id=mid("far")))
+    j = _joined(proj)
+    assert [x["seq"] for x in j["log"]] == [1, far] and j["next_seq"] == far + 1 and j["buf"] == {}
+    assert j["gap_skips"] == 1
+
+
+def test_host_seq_never_passes_the_bound(proj, run, rel, grp):
+    host, gid, d = grp
+    path = proj / ".orch/secrets/groups.json"
+    st = json.loads(path.read_text())
+    st["hosted"][gid]["seq"] = cg.SEQ_MAX
+    path.write_text(json.dumps(st))
+    code, _, err = run("relay", "group", "say", host, "one too many")
+    assert code != 0 and "message numbers" in err
+    st["hosted"][gid]["seq"] = 2**40  # damaged file: clamped when read
+    path.write_text(json.dumps(st))
+    assert cg._load(proj)["hosted"][gid]["seq"] == cg.SEQ_MAX

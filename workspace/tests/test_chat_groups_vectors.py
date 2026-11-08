@@ -61,3 +61,24 @@ def test_fanout_id_shape_and_stability():
     assert a != cg.fanout_id("ws_fin0000001", "m_homeanswer000000", "phones")
     assert a != cg.fanout_id("ws_other00001", "m_homeanswer000000", "ws_ban0000001")
     assert len(a) == 18 and a.startswith("m_")
+
+
+@pytest.mark.parametrize("bad", [0, -1, 2**31, 2**63, 1.5, "7", True, None, [1]])
+def test_seq_must_be_a_plain_int_in_range(bad):
+    base = json.loads((CONTRACTS / "vectors" / "chat-groups" / "valid-fanout-member-text.json").read_text())
+    m = base["message"]
+    m["body"]["group"]["seq"] = bad
+    assert any("group.seq" in e for e in cg.message_errors(m))
+    m["body"]["group"]["seq"] = 5
+    m["body"]["group_event"] = {"kind": "member_added", "from_seq": bad}
+    assert any("from_seq" in e for e in cg.message_errors(m))
+
+
+def test_a_huge_forward_jump_is_one_gap_skip():
+    ctx = {"order": {"applied_seq": 10, "buffered": []}}
+    jump = {"body": {"group": {"seq": 10 + cg.SEQ_JUMP + 1}}}
+    assert (
+        cg.order_step(jump, ctx) == "skip_gap_and_apply" and cg.applied_after(jump, ctx) == 11 + cg.SEQ_JUMP
+    )
+    near = {"body": {"group": {"seq": 10 + cg.SEQ_JUMP}}}
+    assert cg.order_step(near, ctx) == "buffer"

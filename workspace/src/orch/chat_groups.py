@@ -38,6 +38,8 @@ from orch.text import clean_untrusted
 
 MAX_MEMBERS = 8
 TEXT_MAX = 4000
+SEQ_MAX = 2**31 - 1
+SEQ_JUMP = 1000  # a forward jump bigger than this is a gap skip, never expanded
 BUF_MAX = 50  # group messages kept per group while an earlier one is missing
 BUF_TIMEOUT_S = 600  # a quiet group: skip a gap after 10 minutes
 BUF_BYTES_MAX = 256 * 1024  # bytes of buffered (reduced) messages per group
@@ -139,6 +141,11 @@ def quiet(m: dict) -> bool:
     )
 
 
+def valid_seq(v) -> bool:
+    """A group seq / from_seq: a real int (no bool, float or str) in 1..2^31-1."""
+    return isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= SEQ_MAX
+
+
 def message_errors(m: dict, ctx: dict | None = None) -> list[str]:
     """Rules JSON Schema cannot express (chat-groups.md, G1-G8), for a message in either direction."""
     ctx = ctx or {}
@@ -146,6 +153,17 @@ def message_errors(m: dict, ctx: dict | None = None) -> list[str]:
     g = b.get("group")
     if m.get("type") == "question" and b.get("allow_question") is True and b.get("options") != ALLOW_OPTIONS:
         out.append("a permission (allow) question has the wire options once, always, no")
+    if isinstance(g, dict) and "seq" in g and not valid_seq(g["seq"]):
+        out.append("group.seq must be an integer from 1 to 2147483647")
+    if isinstance(b.get("group_event"), dict) and "from_seq" in b["group_event"]:
+        if not valid_seq(b["group_event"]["from_seq"]):
+            out.append("group_event.from_seq must be an integer from 1 to 2147483647")
+    if isinstance(b.get("seen"), dict) and not (
+        isinstance(b["seen"].get("seq"), int)
+        and not isinstance(b["seen"].get("seq"), bool)
+        and 0 <= b["seen"]["seq"] <= SEQ_MAX
+    ):
+        out.append("seen.seq must be an integer from 0 to 2147483647")
     ge0 = b.get("group_event")
     if isinstance(ge0, dict) and "mode" in ge0 and ge0["mode"] not in ("once", "always"):
         out.append("group_event.mode is once or always")
@@ -329,6 +347,8 @@ def order_step(m: dict, ctx: dict) -> str | None:
         return "late_show_no_state"
     if seq == ap + 1:
         return "apply"
+    if seq - ap > SEQ_JUMP:
+        return "skip_gap_and_apply"  # a huge jump is one gap skip: applied_seq = seq - 1, nothing expanded
     buffered = od.get("buffered", [])
     if len(buffered) >= BUF_MAX or (buffered and od.get("oldest_age_s", 0) >= BUF_TIMEOUT_S):
         return "skip_gap_and_apply"
@@ -339,6 +359,8 @@ def applied_after(m: dict, ctx: dict) -> int:
     od, seq = ctx["order"], m["body"]["group"]["seq"]
     out = order_step(m, ctx)
     if out == "apply":
+        return seq
+    if out == "skip_gap_and_apply" and seq - _applied(od, seq) > SEQ_JUMP:
         return seq
     if out == "skip_gap_and_apply":
         have = sorted(set(od.get("buffered", [])) | {seq})
@@ -419,39 +441,54 @@ def sniff(data: bytes, name: str = "") -> str | None:
     return "text/plain"
 
 
+def _secret_parts(parts: tuple[str, ...] | list[str]) -> bool:
+    """The folder and file rules on path parts: a `secrets` folder, any hidden folder (agent config, keys,
+    .orch, .git), .env*, key and token files."""
+    dirs = list(parts[:-1])
+    if any(x == "secrets" or (x.startswith(".") and x not in (".", "..")) for x in dirs):
+        return True
+    return bool(_SECRET_PATH.search(parts[-1])) if parts else True
+
+
 def secret_path(path: Path, root: Path | None = None) -> bool:
-    """True for a file that must never leave: anything in a hidden folder (agent config, keys, .orch/secrets;
-    only .orch/tickets/ is open), a `secrets` folder, .env*, key and token files. Checked on the path as
-    given and on the real path (symlinks resolved); folders count below `root` when the file is inside it."""
+    """True for a file that must never leave (see _secret_parts). Checked on the path as given and on the real
+    path (symlinks resolved); folders count below `root` when the file is inside it."""
     for p in {Path(path), Path(path).resolve()}:
         parts = p.parts
         if root is not None:
             with contextlib.suppress(ValueError):
                 parts = p.relative_to(Path(root).resolve()).parts
-        dirs = parts[:-1]
-        if any(x == "secrets" for x in dirs):
-            return True
-        hidden = [i for i, x in enumerate(dirs) if x.startswith(".") and x not in (".", "..")]
-        if hidden and not (dirs[hidden[0] : hidden[0] + 2] == (".orch", "tickets") and len(hidden) == 1):
-            return True
-        if _SECRET_PATH.search(p.name):
+        if _secret_parts(parts):
             return True
     return False
 
 
 def read_shared(path: Path, root: Path, confined: bool) -> bytes:
-    """The bytes of a file to share, read from ONE open file: the real path is checked and opened with
-    O_NOFOLLOW; the open file must be a regular file with one link only that still is what the path names (no
-    swap, no hard link to a secret). An agent's share (confined) stays in this workspace."""
+    """The bytes of a file to share. An agent's share (confined) stays in this workspace and goes through
+    safefile.open_file_ref: the RELATIVE parts are checked for secrets and hidden folders, then each folder is
+    walked with no-follow from the root and the final file is checked (regular, one link). A person's click
+    (not confined) may name any file: the real path is opened with O_NOFOLLOW and the open file must be a
+    regular file with one link that still is what the path names (same device and inode)."""
+    from orch import safefile
+
     path = Path(path)
+    if confined:
+        try:
+            parts = Path(os.path.abspath(path)).relative_to(os.path.abspath(root)).parts
+        except ValueError:
+            raise Refused("A file outside this workspace is only shared after a person's click.") from None
+        if _secret_parts(parts):
+            raise Refused(LOOKS_LIKE_SECRET)
+        try:
+            data = safefile.open_file_ref(Path(root), "/".join(parts), FILE_MAX + 1)
+        except safefile.TooLarge:
+            raise Refused("The file is bigger than 25 MB, so it was not shared") from None
+        if data is None:
+            raise Refused(f"{path} can't be shared (not a plain file of this workspace).")
+        return data
     real = path.resolve()
     if secret_path(path, root):
         raise Refused(LOOKS_LIKE_SECRET)
-    if confined:
-        try:
-            real.relative_to(Path(root).resolve())
-        except ValueError:
-            raise Refused("A file outside this workspace is only shared after a person's click.") from None
     try:
         fd = os.open(real, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     except OSError:
@@ -521,6 +558,13 @@ def _load(root: Path) -> dict:
     for k in ("hosted", "joined", "keys", "processed"):
         if not isinstance(st.get(k), dict):
             st[k] = {}
+    for g in st["hosted"].values():  # a hand-edited or damaged number never goes past the bound
+        if (
+            not isinstance(g.get("seq"), int)
+            or isinstance(g.get("seq"), bool)
+            or not 0 <= g["seq"] <= SEQ_MAX
+        ):
+            g["seq"] = SEQ_MAX if isinstance(g.get("seq"), int) and g["seq"] > SEQ_MAX else 0
     return st
 
 
@@ -988,6 +1032,8 @@ def _publish(
     if prev:
         seq, at = prev["seq"], prev["at"]
     else:
+        if g["seq"] >= SEQ_MAX:
+            raise Refused("This group has used up its message numbers.")
         g["seq"] += 1
         seq = g["seq"]
         g["origins"][origin_id] = {"seq": seq, "at": at}
@@ -1255,6 +1301,8 @@ def _publish_file(
     errors: list,
 ) -> None:
     host, at = g["host"], tickets.now()
+    if g["seq"] >= SEQ_MAX:
+        raise Refused("This group has used up its message numbers.")
     g["seq"] += 1
     seq = g["seq"]
     g["origins"][oid] = {"seq": seq, "at": at}
@@ -1758,6 +1806,14 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
     buf = j.setdefault("buf", {})
     if seq < nxt:  # late: shown, but it changes no state
         return _member_apply(st, j, m, me, late=True)
+    if seq - (nxt - 1) > SEQ_JUMP:  # a huge forward jump: one gap skip, no buffer and no per-seq expansion
+        res = _member_apply(st, j, m, me)
+        j["next_seq"] = seq + 1
+        j["gap_skips"] = j.get("gap_skips", 0) + 1
+        for k in [k for k in buf if int(k) <= seq]:
+            del buf[k]
+        _drain(st, j, me)
+        return res
     if seq > nxt:
         if str(seq) in buf:
             return _drop(st, m, "already waiting for this group message")
