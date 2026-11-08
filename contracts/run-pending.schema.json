@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/run-pending.schema.json",
+  "title": "orch pending input v1 (one line of .orch/run/pending/<ticket id>.jsonl)",
+  "description": "Input for a ticket whose agent is busy, appended under the ticket lock. Live runs get it pasted when idle; oneshot runs get one more (resume) turn with what is left. Delivery is at-least-once, deduped by id, and survives a crash: delivered_at is set only after delivery. Gitignored.",
+  "type": "object",
+  "required": ["id", "at", "by", "kind", "text"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^p_[a-z0-9]{6,32}$", "description": "Random, unique per line; the dedupe key." },
+    "at": { "$ref": "#/$defs/time" },
+    "by": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f]+$", "description": "Free actor name, as in run.by." },
+    "via": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,15}$", "description": "Optional free word: the surface it came from." },
+    "kind": { "enum": ["answer", "message", "event", "text"] },
+    "text": { "type": "string", "minLength": 1, "maxLength": 8000, "description": "What the agent is told, plain text." },
+    "delivered_at": { "$ref": "#/$defs/time", "description": "Set once the agent got it." }
+  },
+  "$defs": {
+    "time": { "type": "string", "format": "date-time", "pattern": "Z$" }
+  }
+}

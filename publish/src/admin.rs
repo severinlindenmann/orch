@@ -3,6 +3,7 @@ use crate::api::Q;
 use crate::db::{self, Rights, Workspace};
 use crate::err::{ApiError, ApiResult};
 use crate::{apps, files, util, web, State};
+use axum::body::Bytes;
 use axum::extract::{Path, Query, State as St};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -13,10 +14,17 @@ use serde_json::{json, Value};
 
 pub fn router(st: State) -> Router {
     Router::new()
+        .route(
+            "/",
+            get(|| async { axum::response::Redirect::to("/admin") }),
+        )
         .route("/admin", get(portal))
         .route("/admin/", get(portal))
         .route("/admin/style.css", get(css))
         .route("/admin/portal.js", get(js))
+        .route("/admin/kit.js", get(kit_js))
+        .route("/admin/look.js", get(look_js))
+        .route("/admin/look.css", get(look_css))
         .route("/_/favicon.svg", get(web::favicon_svg))
         .route("/_/apple-touch-icon.png", get(web::touch_icon))
         .route("/admin/api/workspaces", get(ws_list).post(ws_create))
@@ -67,7 +75,25 @@ async fn portal(St(st): St<State>) -> Response {
 async fn css() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        web::style(),
+        include_str!("../web/admin.css"),
+    )
+}
+async fn kit_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../web/admin-kit.js"),
+    )
+}
+async fn look_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../web/look-bundle.js"),
+    )
+}
+async fn look_css() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        include_str!("../web/look.css"),
     )
 }
 async fn js() -> impl IntoResponse {
@@ -89,16 +115,23 @@ fn check(st: &State, h: &HeaderMap) -> ApiResult<()> {
     }
 }
 
-pub fn prompt(st: &State, id: &str, token: &str) -> String {
-    let u = &st.cfg.public_url;
+pub fn prompt(st: &State, w: &Workspace, token: &str) -> String {
+    let (u, id) = (&st.cfg.public_url, &w.id);
+    // The admin already typed a description: do not ask the agent to describe itself.
+    let describe = if w.description_by == "admin" && !w.description.is_empty() {
+        ""
+    } else {
+        "Then describe this workspace in one sentence and 2-4 tags:\n  orch publish profile --description \"...\" --tags a,b\n"
+    };
     format!(
-        "Connect this project to orch publish. Run in the project folder:\n  orch addon add publish --yes\n  orch publish connect {u} --workspace {id} --token {token}\nIf orch is not installed yet, run this instead:\n  macOS/Linux: curl -fsSL {u}/onboarding.sh | sh -s -- --workspace {id} --token {token}\n  Windows:     & ([scriptblock]::Create((irm {u}/onboarding.ps1))) -Workspace {id} -Token {token}\nThen describe this workspace in one sentence and 2-4 tags:\n  orch publish profile --description \"...\" --tags a,b\n"
+        "Connect this project to orch publish. Run in the project folder:\n  orch addon add publish --yes\n  orch publish connect {u} --workspace {id} --token {token}\nIf orch is not installed yet, run this instead:\n  macOS/Linux: curl -fsSL {u}/onboarding.sh | sh -s -- --workspace {id} --token {token}\n  Windows:     & ([scriptblock]::Create((irm {u}/onboarding.ps1))) -Workspace {id} -Token {token}\n{describe}"
     )
 }
 
 fn ws_json(w: &Workspace) -> Value {
     json!({"id": w.id, "name": w.name, "description": w.description, "tags": w.tags, "rights": w.rights,
-        "description_by": w.description_by, "tags_by": w.tags_by, "pending": db::Pending::json(&w.pending)})
+        "description_by": w.description_by, "tags_by": w.tags_by, "pending": db::Pending::json(&w.pending),
+        "icon": w.icon, "color": w.color, "look_by": w.look_by, "show_on_shared_pages": w.show_on_shared_pages})
 }
 
 async fn ws_list(St(st): St<State>, h: HeaderMap, Query(q): Query<Q>) -> ApiResult<Json<Value>> {
@@ -135,8 +168,12 @@ fn clean_description(d: &str) -> ApiResult<String> {
     util::valid_description(d).map_err(ApiError::invalid)
 }
 
-async fn ws_create(St(st): St<State>, h: HeaderMap, Json(b): Json<NewWs>) -> ApiResult<Response> {
+async fn ws_create(St(st): St<State>, h: HeaderMap, body: Bytes) -> ApiResult<Response> {
     check(&st, &h)?;
+    let raw: Value = serde_json::from_slice(&body).map_err(|e| ApiError::invalid(e.to_string()))?;
+    let b: NewWs =
+        serde_json::from_value(raw.clone()).map_err(|e| ApiError::invalid(e.to_string()))?;
+    let lk = crate::look::parse(&raw)?;
     if b.name.trim().is_empty() || b.name.len() > 60 {
         return Err(ApiError::invalid("The name must be 1-60 characters."));
     }
@@ -156,9 +193,17 @@ async fn ws_create(St(st): St<State>, h: HeaderMap, Json(b): Json<NewWs>) -> Api
         description_by: "admin".into(),
         tags_by: "admin".into(),
         pending: None,
+        icon: lk.icon.flatten(),
+        color: lk.color.flatten(),
+        look_by: None,
+        show_on_shared_pages: true,
+    };
+    let w = Workspace {
+        look_by: (w.icon.is_some() || w.color.is_some()).then(|| "admin".to_string()),
+        ..w
     };
     db::insert_workspace(&st.db.lock().unwrap(), &w, &util::now())?;
-    let p = prompt(&st, &w.id, &token);
+    let p = prompt(&st, &w, &token);
     Ok((
         StatusCode::CREATED,
         Json(json!({"id": w.id, "token": token, "prompt": p})),
@@ -183,10 +228,21 @@ async fn ws_patch(
     St(st): St<State>,
     h: HeaderMap,
     Path(id): Path<String>,
-    Json(b): Json<PatchWs>,
+    body: Bytes,
 ) -> ApiResult<Json<Value>> {
     check(&st, &h)?;
-    let mut w = get_ws(&st, &id)?;
+    let raw: Value = serde_json::from_slice(&body).map_err(|e| ApiError::invalid(e.to_string()))?;
+    let b: PatchWs =
+        serde_json::from_value(raw.clone()).map_err(|e| ApiError::invalid(e.to_string()))?;
+    let lk = crate::look::parse(&raw)?;
+    // Check and set under one transaction: a refused look stores nothing from this body.
+    let mut c = st.db.lock().unwrap();
+    let tx = c.transaction()?;
+    let mut w =
+        db::get_workspace(&tx, &id)?.ok_or_else(|| ApiError::not_found("No such workspace."))?;
+    if lk.has_look() {
+        crate::look::admin_allowed(&w.look_by)?;
+    }
     if let Some(n) = b.name {
         if n.trim().is_empty() || n.len() > 60 {
             return Err(ApiError::invalid("The name must be 1-60 characters."));
@@ -204,7 +260,10 @@ async fn ws_patch(
     if let Some(r) = b.rights {
         w.rights = r;
     }
-    db::update_workspace(&st.db.lock().unwrap(), &w)?;
+    db::update_workspace(&tx, &w)?;
+    crate::look::apply(&tx, &id, &lk, "admin")?;
+    tx.commit()?;
+    let w = db::get_workspace(&c, &id)?.ok_or_else(|| ApiError::not_found("No such workspace."))?;
     Ok(Json(ws_json(&w)))
 }
 
@@ -264,7 +323,7 @@ async fn ws_token(
     db::update_workspace(&c, &w)?;
     db::clear_pending(&c, &id)?;
     Ok(Json(
-        json!({"token": token, "prompt": prompt(&st, &id, &token)}),
+        json!({"token": token, "prompt": prompt(&st, &w, &token)}),
     ))
 }
 

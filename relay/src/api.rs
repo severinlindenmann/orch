@@ -34,6 +34,7 @@ pub fn router(app: AppState) -> Router {
         .route("/", get(root_page))
         .route("/v1/whoami", get(whoami))
         .route("/v1/me", axum::routing::patch(patch_me))
+        .route("/v1/heartbeat", post(crate::mobile::heartbeat))
         .route("/v1/messages", post(post_message))
         .route("/v1/inbox", get(inbox))
         .route("/v1/inbox/ack", post(ack))
@@ -54,6 +55,7 @@ pub fn router(app: AppState) -> Router {
                 .layer(DefaultBodyLimit::max(crate::transcribe::MAX_AUDIO + 1024)),
         )
         .merge(crate::phone::router())
+        .merge(crate::subs::router())
         .merge(icon_routes())
         .fallback(not_found_page)
         .layer(DefaultBodyLimit::max(MAX_JSON))
@@ -85,6 +87,7 @@ fn whoami_body(c: &rusqlite::Connection, id: &str) -> Res<Value> {
     o.remove("tags_by");
     o.insert("pending".into(), store::pending(c, id));
     o.insert("phones".into(), n.into());
+    crate::look::add_to(c, &mut card, true);
     Ok(card)
 }
 
@@ -102,8 +105,16 @@ async fn patch_me(
     body: Bytes,
 ) -> Res<(StatusCode, Json<Value>)> {
     let v = parse_body(&body)?;
-    let c = app.db.lock().unwrap();
+    let mut c = app.db.lock().unwrap();
     let me = auth::workspace(&c, &h)?;
+    if crate::look::is_look_body(&v) {
+        // Icon and colour: applied at once, not pending (contracts/look.md).
+        let p = crate::look::parse_me(&v)?;
+        let tx = c.transaction()?;
+        crate::look::apply(&tx, "workspaces", &me, &p, "workspace")?;
+        tx.commit()?;
+        return Ok((StatusCode::OK, Json(whoami_body(&c, &me)?)));
+    }
     let desc = match v.get("description") {
         None => None,
         Some(d) => Some(
@@ -214,7 +225,8 @@ async fn post_message(
     h: HeaderMap,
     body: Bytes,
 ) -> Res<(StatusCode, Json<Value>)> {
-    let msg = parse_body(&body)?;
+    let mut msg = parse_body(&body)?;
+    rules::clean_ticket_key(&mut msg);
     let (stored, push) = {
         let c = app.db.lock().unwrap();
         let me = auth::workspace(&c, &h)?;
@@ -222,6 +234,7 @@ async fn post_message(
             return Err(forbidden("`from` must be the authenticated workspace."));
         }
         rules::validate_schema(&msg).map_err(invalid)?;
+        rules::check_update_title(&msg).map_err(invalid)?;
         let id = msg["id"].as_str().unwrap_or("").to_string();
         let digest = sha256_hex(&serde_json::to_vec(&msg).unwrap());
         let old: Option<(String, String)> = c
@@ -381,7 +394,9 @@ async fn get_blob(
         let me = auth::workspace(&c, &h)?;
         let ok: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM blobs WHERE id=?1 AND uploader=?2)
-             OR EXISTS(SELECT 1 FROM messages WHERE blob_id=?1 AND type='file' AND to_addr=?2)",
+             OR EXISTS(SELECT 1 FROM messages WHERE blob_id=?1 AND type='file' AND to_addr=?2)
+             OR EXISTS(SELECT 1 FROM phone_blobs pb JOIN messages m ON m.id=pb.msg_id JOIN blobs b ON b.id=pb.blob_id
+               WHERE pb.blob_id=?1 AND m.type='text' AND m.to_addr=?2 AND b.uploader=m.from_addr)",
             params![id, me],
             |r| r.get(0),
         )?;
@@ -394,7 +409,15 @@ async fn get_blob(
         .map_err(|_| not_found("No such file."))?;
     let plain =
         crypto::open(&app.key, &id, &raw).ok_or_else(|| internal("blob does not decrypt"))?;
-    Ok(([(header::CONTENT_TYPE, "application/octet-stream")], plain).into_response())
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/octet-stream"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::CONTENT_DISPOSITION, "attachment"),
+        ],
+        plain,
+    )
+        .into_response())
 }
 
 async fn refresh(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {

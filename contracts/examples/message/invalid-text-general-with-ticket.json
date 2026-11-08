@@ -1,0 +1,13 @@
+{
+ "schema": "orch.msg/1",
+ "created_at": "2026-11-06T20:02:00Z",
+ "id": "m_g3n3ralbad000001",
+ "from": "ws_pilatus001",
+ "to": "ph_iphone0001",
+ "type": "text",
+ "ticket": "t_q3sum1",
+ "body": {
+  "text": "Hi",
+  "general": true
+ }
+}

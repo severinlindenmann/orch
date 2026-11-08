@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from conftest import CONTRACTS
 
+from orch import tickets
 from orch.errors import Refused
 
 
@@ -77,7 +78,7 @@ def test_done_refused_when_checked_without_evidence(proj, run, new_ticket):
     t = json.loads(p.read_text(encoding="utf-8"))
     t["checklist"].append({"id": "c1", "text": "x", "done": True, "evidence": []})
     p.write_text(json.dumps(t), encoding="utf-8")
-    code, _, err = run("ticket", "status", tid, "done")
+    code, _, err = run("ticket", "status", tid, "done", "--by", "agent:generic")
     assert code == 2 and "c1" in err
     assert read(proj, tid)["status"] == "open"
 
@@ -99,7 +100,7 @@ def test_log_actor(proj, run, new_ticket, monkeypatch):
     monkeypatch.setenv("CLAUDECODE", "1")
     run("log", tid, "by env")
     h = read(proj, tid)["history"]
-    assert h[-2]["by"] == "agent:codex" and h[-1]["by"] == "agent:claude-code"
+    assert h[-2]["by"] == "agent:codex" and h[-1]["by"] == "agent:claude"
     monkeypatch.delenv("CLAUDECODE")
     run("log", tid, "human")
     assert read(proj, tid)["history"][-1]["by"].startswith("human:")
@@ -112,13 +113,13 @@ def test_bad_actor_refused(proj, run, new_ticket):
 
 def test_link_and_ext(proj, run, new_ticket, validate):
     tid = new_ticket()
-    assert run("link", "add", tid, "--type", "jira", "--url", "https://j/1", "--title", "J-1")[0] == 0
-    assert run("link", "add", tid, "--type", "Bad Type", "--url", "u")[0] == 2
+    assert run("ref", "add", tid, "https://j/1", "--kind", "jira", "--title", "J-1")[0] == 0
+    assert run("ref", "add", tid, "https://example.com", "--kind", "Bad Type")[0] == 2
     assert run("ext", "set", tid, "scheduler", '{"cron":"0 8 * * 1"}')[0] == 0
     assert run("ext", "set", tid, "scheduler", "not json")[0] == 2
     t = read(proj, tid)
     validate(t)
-    assert t["links"][0]["title"] == "J-1" and t["ext"]["scheduler"]["cron"] == "0 8 * * 1"
+    assert t["refs"][0]["title"] == "J-1" and t["ext"]["scheduler"]["cron"] == "0 8 * * 1"
 
 
 def test_ask_answer(proj, run, new_ticket, validate):
@@ -195,7 +196,7 @@ def test_patch_with_revision_check(proj, run, new_ticket, validate):
     assert code == 0 and json.loads(out)["revision"] == 2
     validate(read(proj, tid))
     code, out, err = run("ticket", "patch", tid, "--if-revision", "1", '{"title": "Late"}', "--json")
-    assert code == 2 and "revision" in json.loads(out)["error"] and "Refused:" in err
+    assert code == 2 and "revision" in json.loads(out) and "Refused:" in err
     assert read(proj, tid)["title"] == "Renamed"
     w = '{"status": "waiting", "waiting_on": {"kind": "time", "until": "2030-01-01T00:00:00Z"}}'
     assert run("ticket", "patch", tid, "--if-revision", "2", w)[0] == 0
@@ -216,7 +217,8 @@ def test_patch_only_allowed_fields(proj, run, new_ticket):
     assert read(proj, tid)["revision"] == 1
     run("check", "add", tid, "step")
     assert (
-        run("ticket", "patch", tid, "--if-revision", "2", '{"status": "done"}')[0] == 2
+        run("ticket", "patch", tid, "--if-revision", "2", '{"status": "done"}', "--by", "agent:generic")[0]
+        == 2
     )  # same rule as status
 
 
@@ -251,7 +253,7 @@ def test_edit_and_show_json(proj, run, new_ticket):
     code, out, _ = run("ticket", "show", tid, "--json")
     assert json.loads(out)["title"] == "New title"
     code, out, _ = run("ticket", "show", tid)
-    assert "Status: open" in out
+    assert "Status: Backlog" in out
 
 
 def test_missing_ticket_refused(proj, run):
@@ -291,7 +293,76 @@ def test_agent_cannot_answer_a_phone_question(proj, run, new_ticket):
 def test_done_refused_while_an_item_is_unchecked(proj, run, new_ticket):
     tid = new_ticket()
     assert run("check", "add", tid, "never done")[0] == 0
-    code, _, err = run("ticket", "status", tid, "done")
+    code, _, err = run("ticket", "status", tid, "done", "--by", "agent:generic")
     assert code == 2 and "c1" in err and "not checked" in err
     assert read(proj, tid)["status"] == "open"
     assert run("ticket", "status", tid, "dropped")[0] == 0  # a dropped ticket is not affected
+
+
+def test_new_with_ext_is_one_write_and_checked(proj, run, validate):
+    code, out, _ = run(
+        "ticket", "new", "Child", "--ext", 'foo={"occurrence":"t_x:1"}', "--ext", 'bar-1={"a":1}', "--json"
+    )
+    assert code == 0
+    t = read(proj, json.loads(out)["id"])
+    validate(t)
+    assert t["ext"] == {"foo": {"occurrence": "t_x:1"}, "bar-1": {"a": 1}}
+    assert t["history"][0]["text"] == "Created"
+
+
+@pytest.mark.parametrize("bad", ["foo", "Foo={}", "foo=[1]", "foo=notjson"])
+def test_new_with_bad_ext_makes_no_ticket(proj, run, bad):
+    code, _, err = run("ticket", "new", "Nope", "--ext", bad)
+    assert code == 2 and "ext" in err.lower()
+    assert not list((proj / ".orch" / "tickets").glob("t_*.json"))
+
+
+@pytest.mark.parametrize(
+    "stored,shown",
+    [
+        ("Created", "Created"),
+        ("Asked q1, waiting", "Asked a question"),
+        ("Asked q1 on c2, waiting", "Asked q1 on c2, waiting"),
+        ("Answered q1: Yes please", "Answered a question: Yes please"),
+        ("Edited due, owner", "Changed the due date and owner"),
+        ("Edited title", "Changed the title"),
+        ("Edited note, summary, due", "Changed the note, summary and due date"),
+        ("Patched owner, status (status open -> active)", "Changed the owner and status (now Working)"),
+        ("Status open -> done", "Moved to Done"),
+        ("Status done -> open", "Moved to Backlog"),
+        ("Added check c1", "Added a task"),
+        ("Check c1 done", "Finished a task"),
+        ("Set ext.focus", "Updated Focus settings"),
+        ("Set ext.my-addon", "Updated My addon settings"),
+        ("Removed ext.focus", "Removed Focus settings"),
+        ("Removed ext.focus.a", "Removed Focus settings"),
+        ("Something the agent wrote", "Something the agent wrote"),
+    ],
+)
+def test_history_line_is_plain_words(stored, shown):
+    assert tickets.history_line(stored) == shown
+
+
+def test_history_line_names_the_task():
+    checks = [{"id": "c1", "text": "Write the test"}]
+    assert tickets.history_line("Added check c1", checks) == "Added a task: Write the test"
+    assert tickets.history_line("Check c1 done", checks) == "Finished a task: Write the test"
+    assert tickets.history_line("Check c9 done", checks) == "Finished a task"
+
+
+def test_cli_shows_task_text_in_history_but_stores_machine_text(proj, run, new_ticket):
+    tid = new_ticket()
+    run("check", "add", tid, "Write the test")
+    out = run("ticket", "show", tid)[1]
+    assert "Added a task: Write the test" in out
+    assert read(proj, tid)["history"][-1]["text"] == "Added check c1"
+
+
+def test_cli_shows_plain_history_but_stores_the_machine_text(proj, run, new_ticket):
+    tid = new_ticket()
+    run("ticket", "edit", tid, "--due", "2026-12-01", "--owner", "Anna")
+    out = run("ticket", "show", tid)[1]
+    assert "Changed the due date and owner" in out and "Edited due, owner" not in out
+    assert read(proj, tid)["history"][-1]["text"] == "Edited due, owner"
+    code, out, _ = run("log", tid, "Edited by hand")
+    assert code == 0 and "Edited by hand" in out

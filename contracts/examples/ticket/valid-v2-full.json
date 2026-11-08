@@ -1,0 +1,123 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_r4c9pz",
+  "title": "Q3 invoice export for finance",
+  "status": "waiting",
+  "created_at": "2026-11-05T08:10:00Z",
+  "updated_at": "2026-11-05T10:42:00Z",
+  "revision": 16,
+  "owner": "Severin",
+  "due": "2026-11-10",
+  "note": "Finance needs it before the month-end close.",
+  "parent": "t_k2m7wq",
+  "summary": "CSV is built and checked. Waiting for your pick of the date format.",
+  "sessions": [
+    {
+      "agent": "claude",
+      "id": "f88ec2ca-0930-42dd-9d5e-00fbbd59067d",
+      "host": "severin-mac",
+      "last_used": "2026-11-05T10:41:00Z"
+    }
+  ],
+  "checklist": [
+    {
+      "id": "c1",
+      "text": "Export Q3 invoices as CSV",
+      "done": true,
+      "evidence": [
+        {
+          "type": "command",
+          "ref": "uv run pytest tests/test_invoice_export.py -q",
+          "text": "12 passed"
+        },
+        {
+          "type": "file",
+          "ref": ".orch/tickets/t_r4c9pz/evidence/q3-invoices.csv",
+          "text": "412 rows, 3 currencies",
+          "title": "Q3 invoices",
+          "role": "result",
+          "at": "2026-11-05T10:20:00Z",
+          "by": "agent:claude"
+        }
+      ]
+    },
+    {
+      "id": "c2",
+      "text": "Ask finance which date format",
+      "done": false,
+      "evidence": []
+    },
+    {
+      "id": "c3",
+      "text": "Send the file to finance",
+      "done": false,
+      "evidence": [],
+      "state": "doing",
+      "by": "agent:claude",
+      "at": "2026-11-05T10:41:00Z"
+    }
+  ],
+  "refs": [
+    {
+      "url": "https://github.com/acme/billing/pull/17",
+      "title": "PR 17",
+      "kind": "github",
+      "at": "2026-11-05T08:10:00Z",
+      "by": "human:tester"
+    }
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "text": "Which date format should the CSV use?",
+      "options": [
+        "31.12.2026",
+        "2026-12-31"
+      ],
+      "recommended": "31.12.2026",
+      "answer": null,
+      "answered_by": null,
+      "via": null,
+      "kind": "plain",
+      "check": "c2"
+    },
+    {
+      "id": "q2",
+      "kind": "automation:failure",
+      "text": "Last night's run stopped: the agent hit its time limit.",
+      "options": [
+        "Try again",
+        "Leave it"
+      ],
+      "recommended": "Try again",
+      "answer": "Try again",
+      "answered_by": "human:severin",
+      "via": "dashboard",
+      "action": {
+        "run": "r_8f2k1m"
+      }
+    }
+  ],
+  "history": [
+    {
+      "at": "2026-11-05T08:10:00Z",
+      "by": "human:severin",
+      "text": "Created"
+    },
+    {
+      "at": "2026-11-05T09:02:00Z",
+      "by": "human:severin",
+      "via": "dashboard",
+      "text": "Answered q2: Try again"
+    },
+    {
+      "at": "2026-11-05T10:42:00Z",
+      "by": "agent:claude",
+      "text": "Asked q1, waiting"
+    }
+  ],
+  "waiting_on": {
+    "kind": "question",
+    "ref": "q1"
+  }
+}

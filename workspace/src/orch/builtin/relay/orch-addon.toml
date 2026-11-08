@@ -7,3 +7,9 @@ description = "Messages and tasks between workspaces and phones."
 run = "orch"
 skill = "skills/orch-relay"
 agents_block = "skills/orch-relay/AGENTS-block.md"
+gitignore = ["received/", ".orch/outbox/", ".orch/relay.lock*", ".orch/inbox/", ".agents/skills/orch-relay/workspaces.json"]
+
+[dashboard]
+label = "Relay"
+icon = "link"
+order = 70

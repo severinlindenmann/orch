@@ -27,6 +27,12 @@ pub struct Workspace {
     pub tags_by: String,
     /// The change the workspace proposed for itself, waiting for the owner.
     pub pending: Option<Pending>,
+    /// Workspace look (contracts/look.md): `None` = letter / Automatic colour; `look_by` = admin | workspace | None.
+    pub icon: Option<String>,
+    pub color: Option<String>,
+    pub look_by: Option<String>,
+    /// Shared file pages show the workspace name and icon (default on).
+    pub show_on_shared_pages: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -102,6 +108,10 @@ pub fn open(path: &std::path::Path) -> rusqlite::Result<Connection> {
         "pending_tags TEXT",
         "pending_at TEXT",
         "pending_rev TEXT",
+        "icon TEXT",
+        "color TEXT",
+        "look_by TEXT",
+        "show_on_shared_pages INTEGER NOT NULL DEFAULT 1",
     ] {
         let _ = c.execute(&format!("ALTER TABLE workspaces ADD COLUMN {col}"), []);
     }
@@ -131,9 +141,13 @@ fn ws_from(r: &Row) -> rusqlite::Result<Workspace> {
             }),
             None => None,
         },
+        icon: r.get(12)?,
+        color: r.get(13)?,
+        look_by: r.get(14)?,
+        show_on_shared_pages: r.get::<_, i64>(15)? != 0,
     })
 }
-const WS_COLS: &str = "id,name,description,tags,rights,token_hash,description_by,tags_by,pending_description,pending_tags,pending_at,pending_rev";
+const WS_COLS: &str = "id,name,description,tags,rights,token_hash,description_by,tags_by,pending_description,pending_tags,pending_at,pending_rev,icon,color,look_by,show_on_shared_pages";
 
 pub fn get_workspace(c: &Connection, id: &str) -> rusqlite::Result<Option<Workspace>> {
     c.query_row(
@@ -146,7 +160,7 @@ pub fn get_workspace(c: &Connection, id: &str) -> rusqlite::Result<Option<Worksp
 
 pub fn insert_workspace(c: &Connection, w: &Workspace, now: &str) -> rusqlite::Result<()> {
     c.execute(
-        "INSERT INTO workspaces(id,name,description,tags,rights,token_hash,created_at,description_by,tags_by) VALUES(?1,?2,?3,?4,?5,?6,?7,'admin','admin')",
+        "INSERT INTO workspaces(id,name,description,tags,rights,token_hash,created_at,description_by,tags_by,icon,color,look_by) VALUES(?1,?2,?3,?4,?5,?6,?7,'admin','admin',?8,?9,?10)",
         params![
             w.id,
             w.name,
@@ -154,7 +168,10 @@ pub fn insert_workspace(c: &Connection, w: &Workspace, now: &str) -> rusqlite::R
             serde_json::to_string(&w.tags).unwrap(),
             serde_json::to_string(&w.rights).unwrap(),
             w.token_hash,
-            now
+            now,
+            w.icon,
+            w.color,
+            w.look_by
         ],
     )?;
     Ok(())
@@ -253,9 +270,9 @@ pub fn list_workspaces(
         .query_map(params![after.unwrap_or(i64::MAX), limit + 1], |r| {
             Ok((
                 ws_from(r)?,
-                r.get::<_, i64>(12)?,
-                r.get::<_, i64>(13)?,
-                r.get::<_, i64>(14)?,
+                r.get::<_, i64>(16)?,
+                r.get::<_, i64>(17)?,
+                r.get::<_, i64>(18)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -297,6 +314,19 @@ pub fn get_file(c: &Connection, id: &str) -> rusqlite::Result<Option<FileRow>> {
         file_from,
     )
     .optional()
+}
+
+pub fn update_file_expiry(c: &Connection, id: &str, expires_at: &str) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE files SET expires_at=?2 WHERE id=?1",
+        params![id, expires_at],
+    )?;
+    Ok(())
+}
+
+pub fn update_file_size(c: &Connection, id: &str, size: i64) -> rusqlite::Result<()> {
+    c.execute("UPDATE files SET size=?2 WHERE id=?1", params![id, size])?;
+    Ok(())
 }
 
 pub fn delete_file(c: &Connection, id: &str) -> rusqlite::Result<()> {

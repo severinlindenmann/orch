@@ -1,0 +1,8 @@
+schema = "orch.addon/1"
+orch_api = 1
+name = "notes"
+version = "0.1.0"
+description = "Keeps notes."
+run = "orch_notes"
+skill = "skills/orch-notes"
+gitignore = ["../../.ssh/"]

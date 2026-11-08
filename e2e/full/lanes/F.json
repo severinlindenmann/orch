@@ -1,0 +1,79 @@
+{
+ "lane": "F",
+ "title": "Focus opened directly",
+ "base": "pilatus_focus",
+ "viewports": [
+  1280,
+  390
+ ],
+ "steps": [
+  {
+   "id": "F01",
+   "name": "Focus (direct) shows a CLI status change within 1 s",
+   "page": "focus-direct",
+   "expect": "the live page updates by push, under 1 s",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/t/{{ticket2_id}}"
+    },
+    {
+     "do": "wait",
+     "ms": 1500
+    },
+    {
+     "do": "shell",
+     "cmd": "{{setstatus}}",
+     "args": [
+      "ready",
+      "{{ticket2_id}}"
+     ]
+    },
+    {
+     "do": "wait",
+     "ms": 2500
+    },
+    {
+     "do": "shell",
+     "cmd": "{{setstatus}}",
+     "args": [
+      "review",
+      "{{ticket2_id}}"
+     ]
+    },
+    {
+     "do": "expect_text",
+     "text": "Review",
+     "timeout": 1000
+    }
+   ]
+  },
+  {
+   "id": "F02",
+   "name": "Focus: click every control that does not start a run (census)",
+   "page": "focus-direct",
+   "tags": [
+    "census"
+   ],
+   "expect": "tabs, shortcuts, full screen, add task and send message all respond",
+   "actions": [
+    {
+     "do": "goto",
+     "path": "/t/{{ticket2_id}}"
+    },
+    {
+     "do": "wait",
+     "ms": 1200
+    },
+    {
+     "do": "click_all_census",
+     "page": "focus-direct"
+    }
+   ]
+  }
+ ],
+ "census_skip": [
+  "\\|Continue$",
+  "Start fresh"
+ ]
+}

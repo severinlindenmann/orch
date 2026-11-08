@@ -35,7 +35,7 @@ def r1(e):
         who = e.orchj(n, "relay", "whoami")
         check(who["id"] == i[n], f"whoami {who}")
         check((e.ws(n) / ".agents/skills/orch-relay/SKILL.md").is_file(), f"{n}: skill missing")
-        check("<!-- orch:addon:relay -->" in (e.ws(n) / "AGENTS.md").read_text(), f"{n}: AGENTS block")
+        check("orch-relay" in (e.ws(n) / ".orch/harness/AGENTS.orch.md").read_text(), f"{n}: orch block")
     rules = e.rel.admin.call("GET", "/admin/api/rules").json()["rules"]
     mine = [r for r in rules if r["from"] == i["Pilatus"] and r["to"] == i["Reports"]]
     check(mine and all(mine[0][k] for k in ("text", "files", "delegate", "start")), f"rules {rules}")
@@ -78,7 +78,7 @@ def r2(e):
     out = e.orchj("Reports", "relay", "download", fil[0]["id"])
     got = Path(out["path"]).read_bytes()
     check(hashlib.sha256(got).hexdigest() == hashlib.sha256(f.read_bytes()).hexdigest() == fil[0]["body"]["sha256"], "sha256 differs")
-    check(".orch/inbox/files" in out["path"], f"download path {out['path']}")
+    check("/received/" in out["path"], f"download path {out['path']}")
 
 
 @scenario("R3")
@@ -140,24 +140,29 @@ def r5(e):
 
 
 def _agent_runs(log: Path) -> int:
-    return log.read_text().count("start ") if log.exists() else 0
+    import re
+    return len(re.findall(r"^end \d+$", log.read_text(), re.M)) if log.exists() else 0  # one end line per finished run
 
 
-def _scheduler_on(e, ws):
-    """R6-R8 need the scheduler add-on in this workspace; A5 turns it on too, but the R group runs alone as well."""
-    e.sh(["orch", "addon", "add", "scheduler", "--yes"], cwd=e.ws(ws), check_rc=True, timeout=600)
+def _automation_on(e, ws):
+    """R6-R8 need the automation add-on in this workspace; A5 turns it on too, but the R group runs alone as well."""
+    e.sh(["orch", "addon", "add", "automation", "--yes"], cwd=e.ws(ws), check_rc=True, timeout=600)
 
 
 def _sched_once(e, ws):
-    rc, out, err = e.sh(["orch", "scheduler", "run", "--once"], cwd=e.ws(ws), timeout=120)
-    check(rc == 0, f"scheduler run --once: {err or out}")
+    rc, out, err = e.sh(["orch", "automation", "run", "--once"], cwd=e.ws(ws), timeout=120)
+    check(rc == 0, f"automation run --once: {err or out}")
+    for _ in range(40):  # core starts the agent detached: wait until no run holds a ticket any more
+        if not list((e.ws(ws) / ".orch/run/tickets").glob("*.json")):
+            break
+        time.sleep(0.5)
 
 
 @scenario("R6")
 def r6(e):
     """delegate: nothing runs until the human allows once; then one ticket (no double) and the agent starts."""
     e.ensure_addons()
-    _scheduler_on(e, "Reports")
+    _automation_on(e, "Reports")
     i = ids(e)
     log = _fake_agent(e, e.ws("Reports"))
     before = len(tickets(e, "Reports"))
@@ -166,7 +171,9 @@ def r6(e):
     check(it and it[-1]["allowed"] is False, f"delegate should wait for the human: {it}")
     mid = it[-1]["id"]
     _sched_once(e, "Reports")
-    check(_agent_runs(log) == 0 and len(tickets(e, "Reports")) == before, "scheduler acted before the human allowed")
+    asking = [t for t in tickets(e, "Reports") if (t.get("ext", {}).get("relay") or {}).get("allow_message") == mid]
+    check(len(asking) == 1 and asking[0]["status"] == "waiting", f"one waiting allow-question ticket expected: {asking}")
+    check(_agent_runs(log) == 0 and len(tickets(e, "Reports")) == before + 1, "automation acted before the human allowed")
     e.orch("Reports", "relay", "allow", mid, "--once")
     allow = [m for m in inbox(e, "Pilatus") if m["type"] == "allow"]
     check(allow and allow[-1]["reply_to"] == mid, f"allow message back to Pilatus: {allow}")
@@ -175,7 +182,8 @@ def r6(e):
     check(_agent_runs(log) == 1, f"agent runs: {_agent_runs(log)}")
     check(len(tickets(e, "Reports")) - before == len(new), f"unrelated tickets appeared: {[t['title'] for t in tickets(e, 'Reports')]}")
     check(len(new) == 1, f"DOUBLE TICKET: {len(new)} tickets for one delegate: {[(t['id'], t['title']) for t in new]}")
-    check([c["text"] for c in new[0]["checklist"]] == ["step one"], "checklist not copied")
+    check(new[0]["id"] == asking[0]["id"], "the allow-question ticket is the one that runs")
+    check([c["text"].endswith(": step one") and c["text"].startswith("From ") for c in new[0]["checklist"]] == [True], f"checklist not copied: {new[0]['checklist']}")
     _sched_once(e, "Reports")
     check(_agent_runs(log) == 1, "once-allow was used twice")
 
@@ -184,7 +192,7 @@ def r6(e):
 def r7(e):
     """start weekly-report: allow --permanent; next start with the token runs without asking; admin allows list."""
     e.ensure_addons()
-    _scheduler_on(e, "Reports")
+    _automation_on(e, "Reports")
     i = ids(e)
     log = _fake_agent(e, e.ws("Reports"))
     base = _agent_runs(log)
@@ -211,13 +219,13 @@ def r7(e):
 def r8(e):
     """start with a wrong token, or with another key's token: not run, waits for the human."""
     e.ensure_addons()
-    _scheduler_on(e, "Reports")
+    _automation_on(e, "Reports")
     i = ids(e)
     if not (e.ws("Pilatus") / ".orch/secrets/allows.json").exists():
         r7(e)
     # nothing else may be due in Reports, so any agent start below comes from the bad-token messages
     due = [t["id"] for t in tickets(e, "Reports") if t["status"] in ("open", "active", "waiting")
-           and (((t.get("ext") or {}).get("scheduler") or {}).get("recurring") or (t.get("waiting_on") or {}).get("kind") == "time")]
+           and (((t.get("ext") or {}).get("automation") or {}).get("recurring") or (t.get("waiting_on") or {}).get("kind") == "time")]
     check(not due, f"Reports has scheduled tickets left from earlier scenarios: {due}")
     log = _fake_agent(e, e.ws("Reports"))
     allows = json.loads((e.ws("Pilatus") / ".orch/secrets/allows.json").read_text())
@@ -229,13 +237,13 @@ def r8(e):
         check(items and items[0]["allowed"] is False, f"{key} with bad token must not be allowed: {items}")
     _sched_once(e, "Reports")
     ran = log.read_text()
-    runs = sorted(p.name for p in (e.ws("Reports") / ".orch/addons/scheduler/logs").glob("*.log"))
+    runs = sorted(p.name for p in (e.ws("Reports") / ".orch/run/logs").glob("*.log"))
     check(_agent_runs(log) == 0, f"agent ran for a message with a bad token: fake agent log {ran!r}; run logs {runs}")
 
 
 @scenario("R9")
 def r9(e):
-    """Webhook once: ticket waits on it, curl wakes the scheduler's agent; second call -> 410."""
+    """Webhook once: ticket waits on it, curl wakes the automation's agent; second call -> 410."""
     e.ensure_addons()
     ids(e)
     ws = e.ws("Pilatus")
@@ -249,9 +257,9 @@ def r9(e):
     check(r.status == 202, f"webhook call {r}")
     check(http("POST", url, None, b"x").status == 410, "second call must be 410")
     _sched_once(e, "Pilatus")
-    check(_agent_runs(log) == 1, f"scheduler did not wake the agent: {_agent_runs(log)}")
+    check(_agent_runs(log) == 1, f"automation did not wake the agent: {_agent_runs(log)}")
     d = tload(ws, t)
-    check(any("Scheduler started" in h["text"] for h in d["history"]), "no history entry")
+    check(any("Automation started" in h["text"] for h in d["history"]), "no history entry")
 
 
 @scenario("R10")
@@ -327,7 +335,7 @@ def r13(e):
 
 @scenario("R15")
 def r15(e):
-    """Phone paired with Pilatus writes; Pilatus answers it (relay send ph_ + ask --phone), refresh lists the phone;
+    """Phone paired with Pilatus writes (the text becomes a ticket); Pilatus answers it (relay send ph_ + ask --phone), refresh lists the phone;
     Home (not paired with that phone) cannot reach it and is told what to do."""
     from scenarios_misc import pair, phone
 
@@ -339,13 +347,17 @@ def r15(e):
     d = json.loads((e.ws("Pilatus") / ".agents/skills/orch-relay/workspaces.json").read_text())
     check(ph[0] in [p["id"] for p in d.get("phones", [])], f"workspaces.json phones: {d.get('phones')}")
     _, out, _ = e.orch("Pilatus", "relay", "inbox")
-    check("can you answer my phone" in out and f"orch relay send {ph[0]}" in out, f"inbox: {out}")
+    # a text from the phone becomes a ticket (the inbox says which); the text is the ticket's content
+    check("Message from R15 iPhone" in out and "new ticket" in out, f"inbox: {out}")
+    made = [t for t in tickets(e, "Pilatus") if "can you answer my phone" in json.dumps(t)]
+    check(len(made) == 1, f"the phone text did not become exactly one ticket: {[t.get('title') for t in tickets(e, 'Pilatus')]}")
     e.orch("Pilatus", "relay", "send", ph[0], "yes, I can answer your phone")
     e.orch("Pilatus", "relay", "send", "R15 iPhone", "by name too")
     t = e.orchj("Pilatus", "ticket", "new", "R15 phone question")["id"]
     e.orch("Pilatus", "ask", t, "Ship it?", "--option", "yes", "--option", "no", "--phone")
     got = [x["message"]["body"]["text"] for x in phone(e, ph, "GET", "/v1/phone/messages").json()["items"]]
-    check(got[:3] == ["by name too", "yes, I can answer your phone", "can you answer my phone"], f"phone messages: {got}")
+    # ask --phone also sends the ticket snapshot as a quiet note (mobile chat, V2-M1)
+    check(got[:5] == ["Waiting for your answer", "by name too", "yes, I can answer your phone", "Got it: can you answer my phone", "can you answer my phone"], f"phone messages: {got}")
     qs = [q for q in phone(e, ph, "GET", "/v1/phone/questions").json()["items"] if q["message"].get("ticket") == t]
     check(len(qs) == 1, f"phone questions: {qs}")
     # Home is not on this phone's list: refused with what to do, and its directory lists no such phone
@@ -356,3 +368,99 @@ def r15(e):
     check(ph[0] not in [p["id"] for p in d.get("phones", [])], "Home lists a phone it may not reach")
     check(not [x for x in phone(e, ph, "GET", "/v1/phone/messages").json()["items"] if x["message"]["body"]["text"] == "hi"], "Home reached the phone")
     return "showing the reply in the iPhone app: mobile lane (GET /v1/phone/messages, text push)"
+
+
+@scenario("R16", local_only=True)
+def r16(e):
+    """Subscriber: admin creates it; pull; live stream sees a new event; signed push to a local receiver; rotate stops
+    the old token; delete."""
+    import hmac
+    import threading
+    import urllib.request
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from lib import free_port
+
+    wid = e.connect_relay("Pilatus")[0]
+    ad = e.rel.admin
+    got: list[tuple[dict, bytes]] = []
+    arrived = threading.Event()
+
+    class Recv(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            got.append(({k.lower(): v for k, v in self.headers.items()}, body))
+            arrived.set()
+            self.send_response(204)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    port = free_port(e.used_ports)
+    srv = HTTPServer(("127.0.0.1", port), Recv)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    e.cleanup.append(srv.shutdown)
+
+    def update(text, kind="result"):
+        m = e.msg(wid, "phones", "text", {"text": text, "update": {"kind": kind, "title": "R16 export"}}, ticket="t_r16sub")
+        r = e.rapi("Pilatus", "POST", "/v1/messages", m)
+        check(r.status == 201, f"post update: {r}")
+        return m["id"]
+
+    # create (admin API): results on, push to the local receiver
+    r = ad.call("POST", "/admin/api/subscribers", {"name": "R16 bot", "workspaces": [wid],
+                                                    "push_url": f"http://127.0.0.1:{port}/hook"})
+    check(r.status == 201, f"create subscriber: {r}")
+    j = r.json()
+    sid, tok, secret = j["subscriber"]["id"], j["token"], j["push_secret"]
+    e.cleanup.append(lambda: ad.call("DELETE", f"/admin/api/subscribers/{sid}"))
+    check(tok.startswith("sub_") and secret.startswith("whsec_") and j["link"].endswith(f"/v1/sub/{tok}"), f"create: {j}")
+    sub = e.rel.url + f"/v1/sub/{tok}"
+
+    # pull
+    first = update("R16 first result")
+    r = http("GET", sub + "/events")
+    check(r.status == 200 and first in [i["id"] for i in r.json()["items"]], f"pull: {r}")
+    r = http("GET", e.rel.url + "/v1/sub/-/events", {"Authorization": f"Bearer {tok}"})
+    check(r.status == 200 and r.json()["items"][-1]["text"] == "R16 first result", f"pull with Bearer: {r}")
+
+    # push of the first event, signed as relay-api.md says: v1=hex HMAC-SHA256(secret, ts + "." + body)
+    check(arrived.wait(15), "no push within 15 s")
+    h, body = got[0]
+    ts = h["x-orch-timestamp"]
+    want = "v1=" + hmac.new(secret.encode(), ts.encode() + b"." + body, "sha256").hexdigest()
+    check(hmac.compare_digest(h["x-orch-signature"], want), "push signature does not verify")
+    check(abs(time.time() - int(ts)) < 300 and h["x-orch-event-id"] == first == json.loads(body)["id"], f"push headers: {h}")
+
+    # live stream (SSE): a new event arrives
+    resp = urllib.request.urlopen(sub + "/stream", timeout=15)
+    check(resp.status == 200 and resp.headers["content-type"].startswith("text/event-stream"), "stream did not open")
+    second = update("R16 second result")
+    frame: dict[str, str] = {}
+    while "data" not in frame:
+        raw = resp.readline()
+        check(raw != b"", "the stream ended before an event")
+        line = raw.decode().rstrip("\r\n")
+        if ":" in line and not line.startswith(":"):
+            k, _, v = line.partition(":")
+            frame[k] = v.lstrip()
+    ev = json.loads(frame["data"])
+    check(frame.get("id") == second and frame.get("event") == "update" and ev["text"] == "R16 second result", f"stream: {frame}")
+
+    # rotate: the old token stops working, the open stream ends, the new one works
+    r = ad.call("POST", f"/admin/api/subscribers/{sid}/token")
+    check(r.status == 200 and r.json()["token"] != tok, f"rotate: {r}")
+    new = r.json()["token"]
+    check(http("GET", sub + "/events").status == 401, "old token still works after rotate")
+    try:
+        rest = resp.read()
+    except OSError as x:
+        raise Fail(f"stream not closed after rotate: {x}") from None
+    check(b"R16" not in rest, f"the stream sent more after rotate: {rest[:200]!r}")
+    check(http("GET", e.rel.url + f"/v1/sub/{new}/events").status == 200, "new token refused")
+
+    # delete
+    check(ad.call("DELETE", f"/admin/api/subscribers/{sid}").status in (200, 204), "delete")
+    check(http("GET", e.rel.url + f"/v1/sub/{new}/events").status == 401, "token works after delete")
+    check(sid not in [s["id"] for s in ad.call("GET", "/admin/api/subscribers").json()["items"]], "still listed after delete")

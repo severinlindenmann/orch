@@ -4,7 +4,7 @@ use crate::error::*;
 use crate::state::AppState;
 use crate::store::{self, msg_from_row, msg_json, MSG_COLS};
 use crate::util::*;
-use crate::{auth, shared};
+use crate::{auth, groups, shared};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -19,6 +19,10 @@ pub fn router(app: AppState) -> Router {
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route(
+            "/",
+            get(|| async { axum::response::Redirect::to("/admin") }),
+        )
+        .route(
             "/admin",
             get(|| async { Html(include_str!("../web/portal.html")) }),
         )
@@ -31,7 +35,35 @@ pub fn router(app: AppState) -> Router {
                 )
             }),
         )
+        .route(
+            "/admin/kit.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("../web/kit.js"),
+                )
+            }),
+        )
+        .route(
+            "/admin/look.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("../web/look-bundle.js"),
+                )
+            }),
+        )
+        .route(
+            "/admin/look.css",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+                    include_str!("../web/look.css"),
+                )
+            }),
+        )
         .merge(crate::api::icon_routes())
+        .merge(crate::subs::admin_router())
         .route("/admin/api/workspaces", get(list_ws).post(add_ws))
         .route(
             "/admin/api/workspaces/:id",
@@ -45,6 +77,11 @@ pub fn router(app: AppState) -> Router {
         .route(
             "/admin/api/workspaces/:id/profile/reject",
             post(reject_profile),
+        )
+        .route("/admin/api/groups", get(list_groups).post(add_group))
+        .route(
+            "/admin/api/groups/:id",
+            axum::routing::patch(edit_group).delete(del_group),
         )
         .route("/admin/api/rules", get(get_rules).put(put_rules))
         .route("/admin/api/messages", get(messages))
@@ -95,9 +132,15 @@ fn parse_description(v: &Value) -> Res<String> {
     store::valid_description(v.as_str().unwrap_or("")).map_err(invalid)
 }
 
-pub fn prompt(public: &str, ws: &str, token: &str) -> String {
+pub fn prompt(public: &str, ws: &str, token: &str, described: bool) -> String {
+    // The admin already typed a description: do not ask the agent to describe itself.
+    let describe = if described {
+        ""
+    } else {
+        "\nThen describe this workspace in one sentence and 2-4 tags: orch relay profile --description \"...\" --tags a,b"
+    };
     format!(
-        "Connect this workspace to orch-relay. Run in the project folder:\n  orch addon add relay --yes\n  orch relay connect {public} --workspace {ws} --token {token}\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL {public}/onboarding.sh | sh -s -- --workspace {ws} --token {token}\n  Windows: & ([scriptblock]::Create((irm {public}/onboarding.ps1))) -Workspace {ws} -Token {token}\nThen describe this workspace in one sentence and 2-4 tags: orch relay profile --description \"...\" --tags a,b"
+        "Connect this workspace to orch-relay. Run in the project folder:\n  orch addon add relay --yes\n  orch relay connect {public} --workspace {ws} --token {token}\nIf orch is not installed yet:\n  macOS/Linux: curl -fsSL {public}/onboarding.sh | sh -s -- --workspace {ws} --token {token}\n  Windows: & ([scriptblock]::Create((irm {public}/onboarding.ps1))) -Workspace {ws} -Token {token}{describe}"
     )
 }
 
@@ -121,6 +164,8 @@ async fn list_ws(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> 
         )?;
         w["unread"] = n.into();
         w["pending"] = store::pending(&c, w["id"].as_str().unwrap());
+        crate::look::add_to(&c, w, true);
+        w["group"] = groups::group_of(&c, w["id"].as_str().unwrap()).into();
     }
     Ok(Json(json!({"items": items, "next": null})))
 }
@@ -144,17 +189,46 @@ async fn add_ws(
         }
     })?;
     let desc = parse_description(&v["description"])?;
+    let lk = crate::look::parse(&v)?;
     let id = rand_id("ws_", 10);
     let token = rand_token("orn_", 32);
-    app.db.lock().unwrap().execute(
+    let mut c = app.db.lock().unwrap();
+    // One transaction: a bad group (or a taken new group name) creates nothing.
+    let tx = c.transaction()?;
+    let grp = match (v.get("group"), v.get("new_group")) {
+        (Some(g), None) if !g.is_null() => {
+            let g = g.as_str().unwrap_or("");
+            if !groups::exists(&tx, g) {
+                return Err(invalid("No such group."));
+            }
+            Some(g.to_string())
+        }
+        (None, Some(n)) if !n.is_null() => Some(
+            groups::create(&tx, &json!({"name": n}))?["id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        ),
+        (None, None) => None,
+        _ => return Err(invalid("Send either `group` or `new_group`, not both.")),
+    };
+    tx.execute(
         "INSERT INTO workspaces(id,name,description,tags,token_hash,created_at,description_by,tags_by) VALUES(?1,?2,?3,?4,?5,?6,'admin','admin')",
         params![id, name, desc, serde_json::to_string(&tags).unwrap(), token_hash(&token), now()],
     )?;
-    let p = prompt(&app.cfg.public_url, &id, &token);
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({"id": id, "token": token, "prompt": p})),
-    ))
+    crate::look::apply_new(&tx, &id, &lk)?;
+    let mut out = json!({"id": id, "token": token, "group": null});
+    if let Some(g) = &grp {
+        let affected = groups::join(&tx, &id, g)?;
+        store::bump_and_hint(&tx, &app.key, &affected)?;
+        out["group"] = g.clone().into();
+        out["shared"] = groups::gives(&tx, g)?;
+    }
+    tx.commit()?;
+    drop(c);
+    app.notify.notify_waiters();
+    out["prompt"] = prompt(&app.cfg.public_url, &id, &token, !desc.is_empty()).into();
+    Ok((StatusCode::CREATED, Json(out)))
 }
 
 async fn edit_ws(
@@ -165,10 +239,25 @@ async fn edit_ws(
 ) -> Res<StatusCode> {
     guard(&app, &h)?;
     let v = parse_body(&body)?;
-    let c = app.db.lock().unwrap();
+    let mut guard_db = app.db.lock().unwrap();
+    // One transaction: a refused look (409) or any other error stores nothing from this body.
+    let c = guard_db.transaction()?;
     if !store::ws_exists(&c, &id) {
         return Err(not_found("No such workspace."));
     }
+    // Look first: a refused or bad look stores nothing from this body.
+    let lk = crate::look::parse(&v)?;
+    if !lk.is_empty() {
+        crate::look::admin_allowed(&c, &id)?;
+    }
+    let new_group = match v.get("group") {
+        None => None,
+        Some(g) => match g.as_str() {
+            Some(g) if groups::exists(&c, g) => Some(g.to_string()),
+            _ => return Err(invalid("No such group.")),
+        },
+    };
+    crate::look::apply(&c, "workspaces", &id, &lk, "admin")?;
     if let Some(n) = v.get("name") {
         let n = n.as_str().unwrap_or("").trim();
         if n.is_empty() {
@@ -189,9 +278,15 @@ async fn edit_ws(
             params![id, serde_json::to_string(&t).unwrap()],
         )?;
     }
-    let rel = store::related(&c, &id);
+    let mut rel = store::related(&c, &id);
+    if let Some(g) = new_group {
+        if groups::group_of(&c, &id).as_deref() != Some(g.as_str()) {
+            rel.extend(groups::join(&c, &id, &g)?);
+        }
+    }
     store::bump_and_hint(&c, &app.key, &rel)?;
-    drop(c);
+    c.commit()?;
+    drop(guard_db);
     app.notify.notify_waiters();
     Ok(StatusCode::OK)
 }
@@ -281,7 +376,12 @@ async fn new_token(
     if n == 0 {
         return Err(not_found("No such workspace."));
     }
-    let p = prompt(&app.cfg.public_url, &id, &token);
+    let described: bool = app.db.lock().unwrap().query_row(
+        "SELECT description_by='admin' AND description<>'' FROM workspaces WHERE id=?1",
+        [&id],
+        |r| r.get(0),
+    )?;
+    let p = prompt(&app.cfg.public_url, &id, &token, described);
     Ok(Json(json!({"token": token, "prompt": p})))
 }
 
@@ -303,6 +403,7 @@ async fn del_ws(
         "DELETE FROM workspaces WHERE id=?1",
         "DELETE FROM rules WHERE from_id=?1 OR to_id=?1",
         "DELETE FROM assign WHERE ws=?1",
+        "DELETE FROM ws_group WHERE ws=?1",
         "DELETE FROM webhooks WHERE workspace=?1",
     ] {
         c.execute(sql, [&id])?;
@@ -322,6 +423,61 @@ async fn del_ws(
         }
     }
     store::bump_and_hint(&c, &app.key, &rel)?;
+    drop(c);
+    app.notify.notify_waiters();
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------- groups ----------
+
+async fn list_groups(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {
+    guard(&app, &h)?;
+    let c = app.db.lock().unwrap();
+    Ok(Json(groups::list(&c)?))
+}
+
+async fn add_group(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    body: Bytes,
+) -> Res<(StatusCode, Json<Value>)> {
+    guard(&app, &h)?;
+    let v = parse_body(&body)?;
+    let c = app.db.lock().unwrap();
+    Ok((StatusCode::CREATED, Json(groups::create(&c, &v)?)))
+}
+
+async fn edit_group(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Res<Json<Value>> {
+    guard(&app, &h)?;
+    let v = parse_body(&body)?;
+    let mut c = app.db.lock().unwrap();
+    let tx = c.transaction()?;
+    let (card, affected) = groups::edit(&tx, &id, &v)?;
+    if !affected.is_empty() {
+        store::bump_and_hint(&tx, &app.key, &affected)?;
+    }
+    tx.commit()?;
+    drop(c);
+    app.notify.notify_waiters();
+    Ok(Json(card))
+}
+
+async fn del_group(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Res<StatusCode> {
+    guard(&app, &h)?;
+    let c = app.db.lock().unwrap();
+    let affected = groups::delete(&c, &id)?;
+    if !affected.is_empty() {
+        store::bump_and_hint(&c, &app.key, &affected)?;
+    }
     drop(c);
     app.notify.notify_waiters();
     Ok(StatusCode::NO_CONTENT)
@@ -569,7 +725,19 @@ async fn put_shared(
         }
     };
     let c = app.db.lock().unwrap();
+    let is_new: bool = c.query_row(
+        &format!(
+            "SELECT NOT EXISTS(SELECT 1 FROM {} WHERE name=?1)",
+            shared::table(&kind)
+        ),
+        [&name],
+        |r| r.get(0),
+    )?;
     let ver = shared::put_item(&c, &app.key, &kind, &name, &value)?;
+    // A new tool goes to the members of every group whose defaults include its kind (an update changes no one's access).
+    if is_new {
+        groups::grant_new_item(&c, &kind, &name)?;
+    }
     let affected = shared::assigned_ws(&c, &kind, &name);
     store::bump_and_hint(&c, &app.key, &affected)?;
     drop(c);
@@ -658,21 +826,33 @@ async fn get_voice(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>
     guard(&app, &h)?;
     let c = app.db.lock().unwrap();
     Ok(Json(
-        json!({"deepgram": crate::transcribe::status(&c, &app.key)}),
+        json!({"deepgram": crate::transcribe::status(&c, &app.key), "tts_enabled": crate::speech::enabled(&c)}),
     ))
 }
 
 async fn put_voice(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<Json<Value>> {
     guard(&app, &h)?;
     let v = parse_body(&body)?;
+    // `tts_enabled` alone switches reading aloud on or off; `deepgram_key` sets the key.
+    let switch = v["tts_enabled"].as_bool();
+    if v.get("tts_enabled").is_some() && switch.is_none() {
+        return Err(invalid("`tts_enabled` must be true or false."));
+    }
     let k = v["deepgram_key"].as_str().unwrap_or("").trim();
-    if k.len() < 8 || k.len() > 200 || !k.chars().all(|c| c.is_ascii_graphic()) {
+    if !(switch.is_some() && v.get("deepgram_key").is_none())
+        && (k.len() < 8 || k.len() > 200 || !k.chars().all(|c| c.is_ascii_graphic()))
+    {
         return Err(invalid("`deepgram_key` must be the Deepgram API key."));
     }
     let c = app.db.lock().unwrap();
-    crate::transcribe::set_key(&c, &app.key, k)?;
+    if v.get("deepgram_key").is_some() || switch.is_none() {
+        crate::transcribe::set_key(&c, &app.key, k)?;
+    }
+    if let Some(on) = switch {
+        crate::speech::set_enabled(&c, on)?;
+    }
     Ok(Json(
-        json!({"deepgram": crate::transcribe::status(&c, &app.key)}),
+        json!({"deepgram": crate::transcribe::status(&c, &app.key), "tts_enabled": crate::speech::enabled(&c)}),
     ))
 }
 

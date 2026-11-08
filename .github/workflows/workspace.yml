@@ -1,29 +1,48 @@
 name: workspace
-on: workflow_call
+on:
+  workflow_call:
+    inputs:
+      full:
+        description: "also run macOS (push to develop/main, PRs into main, manual runs)"
+        type: boolean
+        default: false
+      windows:
+        description: "also run Windows (unit tests + standard-user install); manual runs only, Windows is tested locally on winvm"
+        type: boolean
+        default: false
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ fromJSON(inputs.windows && (inputs.full && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest","windows-latest"]') || (inputs.full && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]')) }}
     runs-on: ${{ matrix.os }}
+    # The suite takes 3-6 min; a hung test must not hold the runner for GitHub's 6 h default.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: workspace
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run pytest -q
+      # -n auto: the runners have 4 vCPU (pytest-xdist is a dev dependency; the suite is xdist-safe, #237)
+      - run: uv run pytest -q -n auto
+        if: runner.os != 'Windows'
+      # Windows: a test that hangs is stopped after 120 s with every thread's stack, so the log names it.
+      - run: uv run --with pytest-timeout pytest -q -n auto --timeout 120 --timeout-method thread
+        if: runner.os == 'Windows'
       - name: Installed wheel smoke (orch init, junction on Windows)
         shell: bash
         run: |
           uv build --wheel -o "$RUNNER_TEMP/dist"
           uv tool install --reinstall "$RUNNER_TEMP"/dist/orch_workspace-*.whl
           d="$RUNNER_TEMP/smoke"; mkdir -p "$d"; cd "$d"
-          orch init
+          ORCH_AGENT=claude orch init  # no agent is installed on the runner; this one links its skills folder
           orch ticket new "smoke" --json
           test -f .agents/skills/orch/SKILL.md
           test -f .claude/skills/orch/SKILL.md
@@ -32,5 +51,18 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $item = Get-Item "$env:RUNNER_TEMP\smoke\.claude\skills" -Force
-          if ($item.LinkType -ne "Junction") { throw "expected a junction, got $($item.LinkType)" }
+          # Since #215 .claude\skills is a plain folder with one link per skill (a copy where links are refused)
+          $item = Get-Item "$env:RUNNER_TEMP\smoke\.claude\skills\orch" -Force
+          if ($item.LinkType -ne "Junction" -and -not (Test-Path "$env:RUNNER_TEMP\smoke\.claude\skills\orch\.orch-copy")) {
+            throw "expected .claude\skills\orch to be a junction, got '$($item.LinkType)'"
+          }
+  windows-standard-user:
+    if: inputs.windows
+    # The README's Windows install as a standard user (no admin), no git, default execution
+    # policy, from this commit's GitHub zip; then init, a ticket, an add-on and an update (e2e/windows/).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install and first steps as a standard user
+        shell: powershell
+        run: .\e2e\windows\run-as-standard-user.ps1 -Ref "${{ github.event.pull_request.head.sha || github.sha }}"

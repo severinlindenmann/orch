@@ -1,5 +1,12 @@
 import SwiftUI
 
+/// Reserve the same trailing space for agent text and memo bubbles.
+enum ChatBubbleLayout {
+    static func agentTrailingSpace(for typeSize: DynamicTypeSize) -> CGFloat {
+        typeSize.isAccessibilitySize ? 8 : 32
+    }
+}
+
 struct OrbitMark: View {
     var body: some View {
         GeometryReader { proxy in
@@ -37,7 +44,7 @@ struct PrimaryButtonStyle: ButtonStyle {
         configuration.label.themeFont(14, .semibold)
             .frame(maxWidth: .infinity, minHeight: 48)
             .foregroundStyle(muted || !enabled ? Theme.text.opacity(0.75) : Theme.onBrand)
-            .background(muted || !enabled ? Theme.surface3 : Theme.brand, in: RoundedRectangle(cornerRadius: 8))
+            .background(muted || !enabled ? Theme.surface3 : Theme.brand, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
             .opacity(configuration.isPressed ? 0.8 : 1)
             .contentShape(Rectangle())
     }
@@ -56,8 +63,8 @@ struct SecondaryButtonStyle: ButtonStyle {
             .frame(maxWidth: .infinity, minHeight: 46)
             .foregroundStyle(Theme.text)
             .background(configuration.isPressed ? Theme.surface3 : Theme.surface2,
-                        in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.borderStrong))
+                        in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(Theme.borderStrong))
             .contentShape(Rectangle())
     }
 }
@@ -85,7 +92,7 @@ struct WideButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.foregroundStyle(color)
             .frame(maxWidth: .infinity, minHeight: 48)
-            .overlay { if bordered { RoundedRectangle(cornerRadius: 8).stroke(Theme.borderStrong) } }
+            .overlay { if bordered { RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(Theme.borderStrong) } }
             .contentShape(Rectangle())
             .opacity(configuration.isPressed ? 0.6 : 1)
     }
@@ -96,8 +103,8 @@ extension View {
     func skeleton(_ loading: Bool) -> some View { modifier(DelayedSkeleton(loading: loading)) }
     func orchCard(border: Color = Theme.border, padding: CGFloat = 16) -> some View {
         self.padding(padding).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(border))
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(border))
     }
 }
 
@@ -161,4 +168,53 @@ struct ModelMessage: View {
                 .transition(.opacity)
         }
     }
+}
+
+struct DayDivider: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text).themeFont(13).foregroundStyle(Theme.muted).padding(.vertical, 12).frame(maxWidth: .infinity)
+    }
+}
+
+struct JumpToLatestButton: View {
+    let count: Int
+    var body: some View {
+        VStack(spacing: 0) {
+            Image(systemName: "arrow.down").themeFont(18)
+            if count > 0 { Text("\(count)").themeFont(11, .semibold) }
+        }.frame(minWidth: 44, minHeight: 44).foregroundStyle(Theme.brand)
+            .background(Theme.surface3, in: Circle()).accessibilityLabel(count > 0 ? "Jump to latest, \(count) unread" : "Jump to latest")
+            .accessibilityIdentifier("jump-latest")
+    }
+}
+
+struct StatusLine: View {
+    let text: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(text).themeFont(13)
+            if reduceMotion { dots(phase: 0) }
+            else { TimelineView(.animation(minimumInterval: 0.4)) { context in dots(phase: Int(context.date.timeIntervalSinceReferenceDate * 2.5) % 3) } }
+            Spacer(minLength: 0)
+        }.foregroundStyle(Theme.muted).padding(.horizontal, 16).padding(.vertical, 7).background(Theme.surface)
+            .accessibilityElement(children: .ignore).accessibilityLabel(text)
+    }
+    private func dots(phase: Int) -> some View {
+        HStack(spacing: 3) { ForEach(0..<3) { index in Circle().frame(width: 3, height: 3).opacity(reduceMotion || phase == index ? 1 : 0.3) } }.accessibilityHidden(true)
+    }
+}
+
+struct PresenceDot: View {
+    var body: some View { Circle().fill(Theme.brand).frame(width: 6, height: 6).accessibilityHidden(true) }
+}
+
+
+/// Voice note, memo and recording timer text: two-digit minutes and seconds ("00:01", "01:30").
+func clockText(_ seconds: Double) -> String {
+    let n = seconds.isFinite ? max(0, Int(seconds)) : 0
+    return String(format: "%02d:%02d", n / 60, n % 60)
 }

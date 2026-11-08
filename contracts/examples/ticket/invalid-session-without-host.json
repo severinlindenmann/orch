@@ -1,0 +1,27 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_r4c9pz",
+  "title": "Q3 invoice export for finance",
+  "status": "active",
+  "parent": "t_k2m7wq",
+  "created_at": "2026-11-05T08:10:00Z",
+  "updated_at": "2026-11-05T08:10:00Z",
+  "revision": 1,
+  "checklist": [],
+  "refs": [],
+  "questions": [],
+  "history": [
+    {
+      "at": "2026-11-05T08:10:00Z",
+      "by": "agent:claude",
+      "text": "Created under t_k2m7wq"
+    }
+  ],
+  "sessions": [
+    {
+      "agent": "claude",
+      "id": "7f3c2a9e",
+      "last_used": "2026-11-05T19:40:00Z"
+    }
+  ]
+}

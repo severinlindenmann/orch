@@ -1,0 +1,7 @@
+[workspace]
+agent = "my-agent"
+code = "MEC"
+
+[agents.my-agent]
+adapter = "generic"
+command = "my-agent --prompt {prompt}"

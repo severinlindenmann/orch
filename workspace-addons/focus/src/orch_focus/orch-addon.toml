@@ -1,0 +1,28 @@
+# workspace-addons/focus/src/orch_focus/orch-addon.toml
+schema = "orch.addon/1"
+orch_api = 1
+name = "focus"
+version = "0.1.0"
+recommended = true                          # orch init --recommended turns it on
+description = "A live page for one ticket: watch the agent work, answer its questions, send it a message."
+run = "orch_focus"                          # orch focus <args>  ->  python -m orch_focus <args>
+skill = "skills/orch-focus"
+agents_block = "skills/orch-focus/AGENTS-block.md"
+background = true                           # orch focus start|stop|status --json (orch start / orch stop)
+runs_agents = true                          # starts and stops runs only through `orch run start|send|stop`
+ticket_ext = "ext.schema.json"             # byte-identical copy of contracts/addons/focus/ext.schema.json
+needs = true                                # orch focus needs --json
+
+[dashboard]
+label = "Focus"
+icon = "bolt"
+order = 20
+
+[page]
+path = "/"
+label = "Open Focus"
+
+[[ticket_view]]
+field = "page"
+label = "Focus page"
+format = "open-page"

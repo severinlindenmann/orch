@@ -81,6 +81,7 @@ async function relayAdd(name, description, tags) {
   await page.fill('input[name=description]', description);
   await page.fill('input[name=tags]', tags);
   await page.click('button[type=submit]');
+  await page.click('summary:has-text("Show what will be copied")');
   await page.waitForSelector('#install-prompt');
   return parse(await page.inputValue('#install-prompt'), 'relay');
 }
@@ -120,8 +121,7 @@ try {
     // pairs that allow nothing are folded away: open every fold first
     await page.evaluate(() => document.querySelectorAll('details.pair-group').forEach(d => { d.open = true; }));
     const pair = page.locator('.pair', { has: page.locator('h3', { hasText: 'Walk Pilatus → Walk Reports' }) });
-    for (const k of ['Messages', 'Files'])
-      await pair.locator('label.pair-toggle', { hasText: k }).locator('input').check();
+    await pair.locator('label.pair-toggle', { hasText: 'Send messages and files' }).locator('input').check();
     await page.click('button:has-text("Save")');
     await page.waitForSelector('#toast:not([hidden])');
   });
@@ -160,14 +160,14 @@ try {
     must(`orch check add ${tid} "Check the totals"`, d);
     must(`orch check done ${tid} c1 --evidence '{"type":"command","ref":"pytest -q"}'`, d);
     must(`orch ask ${tid} "Which format?" --option CSV --option XLSX --recommend CSV`, d);
-    must(`orch link add ${tid} --type jira --url https://example.com/browse/WALK-1 --title "WALK-1"`, d);
-    must(`orch link add ${tid} --type file --url file:///tmp/walk.txt --title "notes"`, d);
+    must(`orch ref add ${tid} https://example.com/browse/WALK-1 --title "WALK-1"`, d);
+    must(`orch ref add ${tid} https://notes.example.com/walk --title "notes"`, d);
     must(`orch log ${tid} "Started the walkthrough"`, d);
     return tid;
   });
   const port = 18000 + Math.floor(Math.random() * 900);
   await step('dashboard-list', 'Dashboard: start it and open the ticket list', async () => {
-    dash = spawn('orch', ['dashboard', 'serve', '--port', String(port)], { cwd: dirs.Pilatus, env, stdio: 'ignore' });
+    dash = spawn('orch', ['dashboard', 'serve', '--port', String(port)], { cwd: dirs.Pilatus, env, stdio: 'ignore', detached: true });
     for (let i = 0; i < 40; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/`)).ok) break; } catch {} await new Promise(r => setTimeout(r, 250)); }
     await page.goto(`http://127.0.0.1:${port}/#tickets`);
     await page.waitForSelector('a.card');
@@ -176,14 +176,14 @@ try {
     await page.click('a.card');
     await page.waitForSelector('text=Which format?');
   });
-  await step('dashboard-no-tab', 'Dashboard: no Schedule tab while the scheduler add-on is off', async () => {
-    if (await page.locator('a[href="#addon/scheduler"]').count()) throw new Error('scheduler tab without the add-on');
+  await step('dashboard-no-tab', 'Dashboard: no Automation tab while the automation add-on is off', async () => {
+    if (await page.locator('a[href="#addon/automation"]').count()) throw new Error('automation tab without the add-on');
   });
-  await step('dashboard-scheduler', 'Dashboard: turn the scheduler on (orch addon add scheduler), repeat the ticket, open the Schedule tab', async () => {
-    must('orch addon add scheduler --yes', dirs.Pilatus);
-    must(`orch scheduler repeat ${tid} "0 7 * * 1"`, dirs.Pilatus);
-    await page.reload(); await page.waitForSelector('a[href="#addon/scheduler"]');
-    await page.click('a[href="#addon/scheduler"]');
+  await step('dashboard-automation', 'Dashboard: turn automation on (orch addon add automation), repeat the ticket, open the Automation tab', async () => {
+    must('orch addon add automation --yes', dirs.Pilatus);
+    must(`orch automation repeat ${tid} "0 7 * * 1"`, dirs.Pilatus);
+    await page.reload(); await page.waitForSelector('a[href="#addon/automation"]');
+    await page.click('a[href="#addon/automation"]');
     await page.waitForSelector('text=Next runs');
   });
   await step('dashboard-inbox', 'Dashboard: inbox view', async () => {
@@ -301,7 +301,7 @@ try {
   console.error('fatal:', scrub(e.message));
   results.push({ n: ++n, name: 'fatal', text: 'Setup or run aborted', status: 'fail', note: scrub(e.message).slice(0, 300), file: '' });
 } finally {
-  if (dash) dash.kill();
+  if (dash) { try { process.kill(-dash.pid, 'SIGKILL'); } catch {} }  // the server is a child of orch: end the group
   // ---------- cleanup: delete every "Walk ..." workspace on both servers (removes its files and apps) ----------
   for (const [base, tok] of [[PUB_ADMIN, PT], [REL_ADMIN, RT]]) {
     const r = await adminApi(base, tok, 'GET', '/workspaces?limit=100');

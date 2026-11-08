@@ -1,0 +1,433 @@
+import Foundation
+import Observation
+import SwiftUI
+import WebKit
+
+// Logic behind the artifact viewer and the comment pins (views: ArtifactViewer.swift, ArtifactSurfaces.swift, CommentPins.swift).
+
+/// Something the viewer can open: a published page or app, a picture or a file from the relay, an uploaded blob.
+struct ArtifactItem: Identifiable, Equatable, Sendable {
+    /// What the viewer does with it.
+    enum Kind: Equatable, Sendable { case html, pdf, image, file, link }
+
+    var id: String
+    var title: String
+    /// Stable per artifact across revisions (`a_...`) and this revision; feedback needs both (older workspaces send none).
+    var artifactId: String?
+    var rev: String?
+    var kind: Kind
+    var url: URL?
+    var blobId: String?
+    var name: String?
+    var mime: String?
+    /// The topic that feedback is sent to. Feedback needs a topic (never General).
+    var conversation: ConversationID?
+
+    /// Looks good / Comment need the artifact id and revision and a topic to send them to.
+    var canGiveFeedback: Bool {
+        guard artifactId != nil, rev != nil, kind != .link else { return false }
+        if case .topic = conversation { return true } else { return false }
+    }
+
+    /// A ticket attachment (html, image, file, link, pr, commit).
+    init(_ a: TicketSnapshot.Attachment, in conversation: ConversationID? = nil) {
+        id = a.id; title = a.label ?? a.name ?? "Preview"; artifactId = a.artifactId; rev = a.rev
+        url = a.url.flatMap(URL.init(string:)); blobId = a.blobId; name = a.name; self.conversation = conversation
+        mime = a.name.map(MediaPrep.mime(forFileName:))
+        switch a.kind {
+        case "html": kind = .html
+        case "image": kind = .image
+        case "file": kind = Self.isPDF(name: a.name, mime: nil) ? .pdf : .file
+        default: kind = .link
+        }
+    }
+
+    /// An image or file in a message (a photo sent from the phone, a proof file of an update).
+    init(_ a: MessageAttachment, in conversation: ConversationID? = nil) {
+        id = a.blobId; title = a.name; blobId = a.blobId; name = a.name; mime = a.mime; self.conversation = conversation
+        kind = a.kind == .image ? .image : (Self.isPDF(name: a.name, mime: a.mime) ? .pdf : .file)
+    }
+
+    init(id: String, title: String, kind: Kind, url: URL? = nil, blobId: String? = nil, name: String? = nil, mime: String? = nil,
+         artifactId: String? = nil, rev: String? = nil, conversation: ConversationID? = nil) {
+        self.id = id; self.title = title; self.kind = kind; self.url = url; self.blobId = blobId; self.name = name; self.mime = mime
+        self.artifactId = artifactId; self.rev = rev; self.conversation = conversation
+    }
+
+    /// Types shown in the app (QuickLook): they cannot run script or render web content. Everything else is only shared / opened in Files.
+    static let previewAllowed: Set<String> = ["pdf", "png", "jpg", "jpeg", "heic", "gif", "txt", "csv", "md", "json", "m4a", "mp3", "mp4", "mov"]
+    /// The name the file is written under, and whether it may be previewed: decided on the sanitized name (cleaning can cut the extension).
+    static func previewName(_ name: String) -> (safe: String, previewable: Bool) {
+        let safe = Outbox.safeFileName(name)
+        return (safe, canPreview(fileName: safe))
+    }
+    static func canPreview(fileName: String) -> Bool { previewAllowed.contains((fileName as NSString).pathExtension.lowercased()) }
+
+    static func isPDF(name: String?, mime: String?) -> Bool {
+        mime == "application/pdf" || (name?.lowercased().hasSuffix(".pdf") ?? false)
+    }
+
+    /// The address to open for a link item: only http/https with a host (an agent-sent tel:, sms:, javascript: or app scheme is never opened).
+    var safeLinkURL: URL? { SafeLink.url(url?.absoluteString) }
+
+    /// "Web page preview · v2".
+    var subtitle: String {
+        let k: String
+        switch kind { case .html: k = "Web page preview"; case .pdf: k = "PDF"; case .image: k = "Picture"; case .file: k = "File"; case .link: k = "Link" }
+        guard let rev else { return k }
+        return "\(k) · \(rev.count > 8 ? String(rev.prefix(7)) : rev)"
+    }
+}
+
+// MARK: Pins
+
+/// One comment on the artifact. `anchor` is what goes to the workspace; `place` is only for drawing the pin again on this phone.
+struct PinDraftItem: Identifiable, Equatable, Sendable {
+    /// Where the pin is drawn, as fractions of the document (html: width and page height), the page (pdf) or the picture (image).
+    struct Place: Equatable, Sendable { var x: Double; var y: Double; var page: Int? = nil }
+    var n: Int
+    var anchor: Anchor
+    var place: Place
+    var text: String = ""
+    var voiceFile: URL? = nil
+    var transcript: String? = nil
+    var id: Int { n }
+    /// A pin needs a written or spoken comment.
+    var isComplete: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || voiceFile != nil }
+}
+
+/// The open comment session of one viewer: pins in order (numbered from 1), the pin being edited, and the message they become.
+@MainActor @Observable
+final class PinStore {
+    private(set) var pins: [PinDraftItem] = []
+    /// The pin in the editor: a new one (not in `pins` yet) or an existing one.
+    var editing: PinDraftItem?
+    var isEditingNew = false
+    /// Set by the open surface: starts a pin in the middle of what is on screen (the VoiceOver / no-tap way to comment).
+    @ObservationIgnored var addAtCenter: (@MainActor () -> Void)?
+
+    var count: Int { pins.count }
+
+    /// A tap at `anchor`/`place` opens the editor for a new pin.
+    func beginPin(anchor: Anchor, place: PinDraftItem.Place) {
+        editing = PinDraftItem(n: (pins.map(\.n).max() ?? 0) + 1, anchor: anchor, place: place); isEditingNew = true
+    }
+    func edit(_ n: Int) { if let p = pins.first(where: { $0.n == n }) { editing = p; isEditingNew = false } }
+    func cancelEdit() { editing = nil; isEditingNew = false }
+    /// Saves the editor's pin; refuses an empty one (returns false).
+    @discardableResult
+    func saveEdit() -> Bool {
+        guard var p = editing, p.isComplete else { return false }
+        p.text = p.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let i = pins.firstIndex(where: { $0.n == p.n }) { pins[i] = p } else { pins.append(p) }
+        editing = nil; isEditingNew = false
+        return true
+    }
+    func remove(_ n: Int) { pins.removeAll { $0.n == n }; renumber(); editing = nil; isEditingNew = false }
+    func reset() { pins = []; editing = nil; isEditingNew = false }
+
+    /// Keeps the numbers 1...count after a delete, in order.
+    private func renumber() { for i in pins.indices { pins[i].n = i + 1 } }
+
+    /// "Send comments (3)": changes with every pin; nil when there is none (use `approveDraft` for Looks good).
+    func changesDraft(for item: ArtifactItem) -> DraftFeedback? {
+        guard let id = item.artifactId, let rev = item.rev, !pins.isEmpty else { return nil }
+        return DraftFeedback(artifactId: id, artifactRev: rev, verdict: .changes,
+                             pins: pins.map { DraftPin(n: $0.n, anchor: $0.anchor, text: $0.text.isEmpty ? nil : $0.text, voiceFile: $0.voiceFile, transcript: $0.transcript) })
+    }
+    /// "Looks good": approve, no pins.
+    static func approveDraft(for item: ArtifactItem) -> DraftFeedback? {
+        guard let id = item.artifactId, let rev = item.rev else { return nil }
+        return DraftFeedback(artifactId: id, artifactRev: rev, verdict: .approve, pins: [])
+    }
+}
+
+// MARK: Anchors (contracts/relay-api.md "feedback")
+
+enum AnchorMaker {
+    /// Fractions of 0...1, clamped, from the top-left.
+    static func fraction(_ v: Double) -> Double { min(1, max(0, v)) }
+
+    static func pdf(page: Int, x: Double, y: Double) -> Anchor { Anchor(type: .pdf, page: page, x: fraction(x), y: fraction(y)) }
+    static func image(x: Double, y: Double) -> Anchor { Anchor(type: .image, x: fraction(x), y: fraction(y)) }
+    /// A selector and/or a quote, the scroll offset in px and the viewport width.
+    static func html(selector: String?, quote: String?, offset: Int, viewportW: Int) -> Anchor? {
+        let s = selector.flatMap { $0.isEmpty ? nil : String($0.prefix(500)) }
+        let q = quote.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160)) }.flatMap { $0.isEmpty ? nil : $0 }
+        guard s != nil || q != nil else { return nil }
+        return Anchor(type: .html, selector: s, quote: q, offset: max(0, offset), viewportW: max(0, viewportW))
+    }
+
+    /// What the injected script posts when a tap lands on the page: {selector, quote, offset, viewportW, fx, fy}.
+    static func html(fromScript body: Any) -> (anchor: Anchor, place: PinDraftItem.Place)? {
+        guard let d = body as? [String: Any], d["kind"] as? String == "place",
+              let a = html(selector: d["selector"] as? String, quote: d["quote"] as? String,
+                           offset: (d["offset"] as? NSNumber)?.intValue ?? 0, viewportW: (d["viewportW"] as? NSNumber)?.intValue ?? 0),
+              let fx = (d["fx"] as? NSNumber)?.doubleValue, let fy = (d["fy"] as? NSNumber)?.doubleValue else { return nil }
+        return (a, .init(x: fraction(fx), y: fraction(fy)))
+    }
+}
+
+/// The user script injected into every html artifact. In comment mode a tap (finger moved < 8 px, page not scrolled) posts the
+/// anchor to the `orchPin` handler; a drag scrolls as usual. Pins are drawn inside the page (they scroll with it).
+enum AnchorScript {
+    static let handler = "orchPin"
+    static let source = #"""
+    (function () {
+      if (window.__orch) return;
+      var mode = false, down = null, pins = [];
+      var layer = document.createElement('div');
+      layer.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;';
+      function post(m) { window.webkit.messageHandlers.orchPin.postMessage(m); }
+      function ready(f) { if (document.body) f(); else document.addEventListener('DOMContentLoaded', f); }
+      function esc(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/[^a-zA-Z0-9_-]/g, '\\$&'); }
+      function selectorOf(el) {
+        var parts = [];
+        while (el && el.nodeType === 1 && el !== document.documentElement && parts.length < 8) {
+          if (el.id) { parts.unshift('#' + esc(el.id)); break; }
+          var tag = el.tagName.toLowerCase(), i = 1, s = el;
+          while ((s = s.previousElementSibling)) if (s.tagName === el.tagName) i++;
+          parts.unshift(tag + ':nth-of-type(' + i + ')');
+          el = el.parentElement;
+        }
+        return parts.join(' > ');
+      }
+      function quoteOf(el) {
+        var t = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+        return t.slice(0, 160);
+      }
+      function docW() { return Math.max(document.documentElement.scrollWidth, 1); }
+      function docH() { return Math.max(document.documentElement.scrollHeight, 1); }
+      function draw() {
+        layer.innerHTML = '';
+        pins.forEach(function (p) {
+          var b = document.createElement('button');
+          b.textContent = String(p.n);
+          b.setAttribute('data-orch-pin', String(p.n));
+          b.setAttribute('aria-label', 'Edit comment ' + p.n);
+          b.style.cssText = 'position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:2px solid #06231c;background:#2fc6a3;color:#06231c;font:700 14px -apple-system,sans-serif;padding:0;left:' + (p.x * docW()) + 'px;top:' + (p.y * docH()) + 'px;';
+          b.addEventListener('click', function (e) { if (!trusted(e)) return; e.preventDefault(); e.stopPropagation(); post({ kind: 'edit', n: p.n }); }, true);
+          layer.appendChild(b);
+        });
+      }
+      // Events made by the page's own scripts are not trusted: only a finger counts (tests set __orchTest in this isolated world).
+      function trusted(e) { return e.isTrusted || window.__orchTest === true; }
+      document.addEventListener('pointerdown', function (e) {
+        if (!trusted(e) || !mode || e.target.closest('[data-orch-pin]')) return;
+        down = { x: e.clientX, y: e.clientY, sy: window.scrollY, sx: window.scrollX };
+      }, true);
+      document.addEventListener('pointercancel', function () { down = null; }, true);
+      document.addEventListener('pointerup', function (e) {
+        if (!trusted(e) || !mode || !down) return;
+        var d = down; down = null;
+        if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 8 || Math.abs(window.scrollY - d.sy) > 3 || Math.abs(window.scrollX - d.sx) > 3) return;
+        var el = document.elementFromPoint(e.clientX, e.clientY) || document.body;
+        post({ kind: 'place', selector: selectorOf(el), quote: quoteOf(el), offset: Math.round(window.scrollY), viewportW: Math.round(window.innerWidth),
+               fx: (e.clientX + window.scrollX) / docW(), fy: (e.clientY + window.scrollY) / docH() });
+      }, true);
+      document.addEventListener('click', function (e) { if (mode && !e.target.closest('[data-orch-pin]')) { e.preventDefault(); e.stopPropagation(); } }, true);
+      function placeAt(x, y) {
+        var el = document.elementFromPoint(x, y) || document.body;
+        post({ kind: 'place', selector: selectorOf(el), quote: quoteOf(el), offset: Math.round(window.scrollY), viewportW: Math.round(window.innerWidth),
+               fx: (x + window.scrollX) / docW(), fy: (y + window.scrollY) / docH() });
+      }
+      window.__orch = {
+        placeCenter: function () { placeAt(window.innerWidth / 2, window.innerHeight / 2); },
+        setMode: function (on) { mode = !!on; },
+        setPins: function (list) { pins = list || []; ready(function () { if (!layer.parentNode) document.body.appendChild(layer); draw(); }); },
+        scrollTo: function (y) { window.scrollTo(0, y); }
+      };
+    })();
+    """#
+
+    /// All pin script runs in this world: the page's own scripts cannot see or call it.
+    @MainActor static var world: WKContentWorld { .defaultClient }
+    static func setMode(_ on: Bool) -> String { "window.__orch && window.__orch.setMode(\(on));" }
+    static func setPins(_ pins: [PinDraftItem]) -> String {
+        let items = pins.map { "{n:\($0.n),x:\($0.place.x),y:\($0.place.y)}" }.joined(separator: ",")
+        return "window.__orch && window.__orch.setPins([\(items)]);"
+    }
+}
+
+/// Everything a viewer may not load: no web address at all (a published page works from the decrypted bytes only).
+enum NetworkBlock {
+    static let identifier = "orch-no-network"
+    /// Everything is blocked, then the page's own scheme (and data:/blob:, which never touch the network) is let through again:
+    /// no rule names a resource type, so every type is covered, "other" (preconnect, ping, beacon, ...) included.
+    static let rules = #"""
+    [{"trigger":{"url-filter":".*"},"action":{"type":"block"}},
+     {"trigger":{"url-filter":"^orch-page:"},"action":{"type":"ignore-previous-rules"}},
+     {"trigger":{"url-filter":"^data:"},"action":{"type":"ignore-previous-rules"}},
+     {"trigger":{"url-filter":"^blob:"},"action":{"type":"ignore-previous-rules"}}]
+    """#
+    /// The custom scheme the viewer serves decrypted pages from.
+    static let scheme = "orch-page"
+    /// Sent with every page file: nothing but the local files, no network from script.
+static let csp = "default-src orch-page: data: blob: 'unsafe-inline'; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; form-action 'none'; base-uri 'none'"
+    /// Types a page may use. Anything else is served as `application/octet-stream`: nothing the web view could render as a document.
+    static let allowedTypes: Set<String> = [
+        "text/html", "application/xhtml+xml", "text/xml", "application/xml", "image/svg+xml",
+        "text/css", "text/javascript", "application/javascript", "application/json",
+        "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/x-icon", "image/vnd.microsoft.icon",
+        "font/woff", "font/woff2", "font/ttf", "font/otf", "application/font-woff", "application/pdf"]
+    /// Types WebKit renders as markup: connection hints are removed from all of them.
+    static let markupTypes: Set<String> = ["text/html", "application/xhtml+xml", "text/xml", "application/xml", "image/svg+xml"]
+    private static let textTypes: Set<String> = markupTypes.union(["text/css", "text/javascript", "application/javascript", "application/json"])
+    /// What the scheme handler sends for a file: the one place that decides type and bytes (allowlist, UTF-8 check, hint strip).
+    static func serve(type declared: String, data: Data) -> (type: String, data: Data) {
+        let base = declared.split(separator: ";").first.map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? ""
+        guard allowedTypes.contains(base) else { return ("application/octet-stream", data) }
+        if textTypes.contains(base), String(data: data, encoding: .utf8) == nil { return ("application/octet-stream", data) }
+        // Only the normalized type leaves here (never the publisher's parameters); text is always declared UTF-8, the encoding that was checked.
+        guard textTypes.contains(base) else { return (base, data) }
+        guard markupTypes.contains(base) else { return (base + "; charset=utf-8", data) }
+        guard let stripped = stripHints(from: data) else { return ("text/plain; charset=utf-8", data) }   // still changing: never rendered as markup
+        return (base + "; charset=utf-8", stripped)
+    }
+    @MainActor static let hintWorld = WKContentWorld.world(name: "orch-hints")
+    /// Runs at document start in an isolated world (the page cannot reach or change it; the DOM is shared): DNS prefetch forced off on every
+    /// such meta, connection hints removed now and whenever the page adds one. A backstop: the server-side strip and the rule list come first.
+    static let noHints = """
+    (function () {
+      var hint = /(^|\\s)(preconnect|dns-prefetch|prefetch|preload|prerender|modulepreload)(\\s|$)/i;
+      function clean() {
+        try { document.querySelectorAll('link[rel]').forEach(function (l) { if (hint.test(l.getAttribute('rel') || '')) l.remove(); }); } catch (e) {}
+      }
+      function meta() {
+        try {
+          var found = false;
+          document.querySelectorAll('meta[http-equiv]').forEach(function (m) {
+            if ((m.getAttribute('http-equiv') || '').toLowerCase() !== 'x-dns-prefetch-control') return;
+            found = true;
+            if (m.getAttribute('content') !== 'off') m.setAttribute('content', 'off');
+          });
+          if (found) return;
+          var m = document.createElement('meta'); m.setAttribute('http-equiv', 'x-dns-prefetch-control'); m.setAttribute('content', 'off');
+          (document.head || document.documentElement).appendChild(m);
+        } catch (e) {}
+      }
+      new MutationObserver(function () { meta(); clean(); }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['rel', 'content', 'http-equiv'] });
+      meta(); clean();
+    })();
+    """
+    /// Removes connection hints (`<link rel=preconnect|dns-prefetch|prefetch|prerender>`) and `x-dns-prefetch-control` metas. A removed tag becomes one
+    /// space (neighbours can never join into a new tag) and the patterns run again until nothing changes. nil = still changing after
+    /// `maxPasses`: the caller serves the file as plain text. A first line of defence only; the rule list, CSP and type allowlist are the others.
+    static let maxPasses = 5
+    static func stripHints(from data: Data, passes: Int = maxPasses) -> Data? {
+        guard var html = String(data: data, encoding: .utf8) else { return data }
+        let hint = "(?:preconnect|dns-prefetch|prefetch|prerender)"
+        let patterns = [
+            #"<link\b[^>]*\brel\s*=\s*(?:"[^"]*\b\#(hint)\b[^"]*"|'[^']*\b\#(hint)\b[^']*'|\#(hint)\b)[^>]*>"#,
+            #"<meta\b[^>]*\bhttp-equiv\s*=\s*["']?\s*x-dns-prefetch-control\b[^>]*>"#,
+        ].compactMap { try? NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
+        // Declarative shadow roots are made open: a closed root hides its links from the click listener.
+        guard patterns.count == 2, let shadow = try? NSRegularExpression(pattern: #"\b(shadowroot(?:mode)?)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)"#, options: [.caseInsensitive]) else { return nil }
+        for _ in 0..<passes {
+            let before = html
+            for expression in patterns {
+                html = expression.stringByReplacingMatches(in: html, range: NSRange(html.startIndex..., in: html), withTemplate: " ")
+            }
+            html = shadow.stringByReplacingMatches(in: html, range: NSRange(html.startIndex..., in: html), withTemplate: "$1=\"open\"")
+            if html == before { return html == String(decoding: data, as: UTF8.self) ? data : Data(html.utf8) }
+        }
+        return nil
+    }
+    /// Activating a link makes WebKit connect to its host before the navigation policy can cancel it. Isolated world: a tap, or any click that
+    /// reaches the window, on a link to anything but the page's own scheme is prevented. (`#fragment` links stay: they resolve to orch-page:.)
+    static let linkGuard = """
+    (function () {
+      function target(n) {
+        if (!n || n.nodeType !== 1) return null;
+        var name = n.localName;
+        if (name !== 'a' && name !== 'area') return null;
+        var raw = n.getAttribute('href'); if (raw === null) raw = n.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+        if (raw === null) return null;
+        try { return new URL(raw, document.baseURI).protocol; } catch (e) { return 'bad:'; }
+      }
+      window.addEventListener('click', function (e) {
+        var p = e.composedPath();
+        for (var i = 0; i < p.length; i++) { var s = target(p[i]); if (s !== null) { if (s !== 'orch-page:') e.preventDefault(); return; } }
+      }, true);
+    })();
+    """
+    /// Page world: `element.click()` and `dispatchEvent(click)` never activate a link to another scheme (detached anchors and closed shadow
+    /// roots included: no listener could see those). Non-writable wrappers; the originals are captured at document start.
+    static let linkClickGuard = """
+    (function () {
+      // Everything the guard reads is captured now, before any page script can shadow it; it is only ever called through `apply`.
+      var apply = Reflect.apply, URLc = URL, getNS = Element.prototype.getAttributeNS;
+      function getter(proto, name) { return Object.getOwnPropertyDescriptor(proto, name).get; }
+      var protocol = getter(URL.prototype, 'protocol');
+      var nodeType = getter(Node.prototype, 'nodeType'), baseURI = getter(Node.prototype, 'baseURI'), eventType = getter(Event.prototype, 'type');
+      var click = HTMLElement.prototype.click, dispatch = EventTarget.prototype.dispatchEvent, attach = Element.prototype.attachShadow;
+      var parentNode = getter(Node.prototype, 'parentNode'), localName = getter(Element.prototype, 'localName');
+      var slotE = getter(Element.prototype, 'assignedSlot'), slotT = getter(Text.prototype, 'assignedSlot'), host = getter(ShadowRoot.prototype, 'host');
+      // The event path's parent: assigned slot, else parent node; a shadow root continues at its host. Every element on it is checked.
+      function up(n) {
+        var t = apply(nodeType, n, []), s = null;
+        if (t === 1) s = apply(slotE, n, []); else if (t === 3) s = apply(slotT, n, []);
+        if (s) return s;
+        if (t === 11) { try { return apply(host, n, []); } catch (e) { return null; } }
+        return apply(parentNode, n, []);
+      }
+      function external(el) {
+        try { apply(nodeType, el, []); } catch (e) { return false; }   // not a Node (window ...): cannot be inside a link
+        try {
+          for (var n = el, i = 0; n && i < 10000; n = up(n), i++) {
+            if (apply(nodeType, n, []) !== 1) continue;
+            var name = apply(localName, n, []);
+            if (name !== 'a' && name !== 'area') continue;
+            var raw = apply(getNS, n, [null, 'href']); if (raw === null) raw = apply(getNS, n, ['http://www.w3.org/1999/xlink', 'href']);
+            if (raw === null) continue;
+            if (apply(protocol, new URLc(raw, apply(baseURI, document, [])), []) !== 'orch-page:') return true;
+          }
+          return !!n;   // still on the path after the step cap: fail closed
+        } catch (e) { return true; }
+      }
+      function lock(proto, name, value) { Object.defineProperty(proto, name, { value: value, writable: false, configurable: false }); }
+      lock(HTMLElement.prototype, 'click', function () { if (external(this)) return; return apply(click, this, []); });
+      lock(EventTarget.prototype, 'dispatchEvent', function (ev) {
+        var kind; try { kind = apply(eventType, ev, []); } catch (e) { kind = null; }
+        if (kind === 'click' && external(this)) return false;
+        return apply(dispatch, this, [ev]);
+      });
+      // Declarative shadow roots created from a string (setHTMLUnsafe / parseHTMLUnsafe) are made open, like attachShadow's.
+      var replace = String.prototype.replace, str = String, declarative = /(shadowroot(?:mode)?)\\s*=\\s*("[^"]*"|'[^']*'|[^\\s>]+)/gi;
+      function opened(html) { return apply(replace, str(html), [declarative, '$1="open"']); }
+      [[Element.prototype, 'setHTMLUnsafe'], [window.ShadowRoot && ShadowRoot.prototype, 'setHTMLUnsafe'], [Document, 'parseHTMLUnsafe']].forEach(function (pair) {
+        var target = pair[0], name = pair[1];
+        if (!target || typeof target[name] !== 'function') return;
+        var original = target[name];
+        lock(target, name, function (html, options) { return apply(original, this, [opened(html), options]); });
+      });
+      // A closed shadow root hides its links from the click listener: every root is made open.
+      lock(Element.prototype, 'attachShadow', function (init) {
+        return apply(attach, this, [{ mode: 'open', delegatesFocus: !!(init && init.delegatesFocus) }]);
+      });
+    })();
+    """
+    /// Runs at document start in every frame, in the page's world: WebRTC (not covered by the rule list) becomes a throwing stub
+    /// that cannot be deleted or replaced. The CSP does not stop an `about:blank` iframe (a fresh realm); the stub holds there because
+    /// this user script is injected into every frame, and a test reads it from such a frame.
+    static let noWebRTC = """
+    (function () {
+      ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel', 'RTCSessionDescription', 'RTCIceCandidate'].forEach(function (name) {
+        try {
+          Object.defineProperty(window, name, { value: function () { throw new TypeError('Not available'); }, writable: false, configurable: false, enumerable: false });
+        } catch (e) {}
+      });
+    })();
+    """
+}
+
+/// Where the viewer gets its bytes. The default goes to the network; a test or demo host puts its own in the environment.
+struct ArtifactLoader: Sendable {
+    var publish: @Sendable (PublishLink) async throws -> PublishContent = { try await PublishFetcher().load($0) }
+    /// A blob by id; nil = use the paired relay (`AppModel.blob`).
+    var blob: (@Sendable (String) async -> Data?)? = nil
+    static let live = ArtifactLoader()
+}
+extension EnvironmentValues {
+    @Entry var artifactLoader = ArtifactLoader.live
+}

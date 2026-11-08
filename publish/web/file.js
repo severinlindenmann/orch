@@ -308,8 +308,26 @@ function zipStore(files) {
   return new Blob(parts.concat(central, [new Uint8Array(e.buffer)]), { type: "application/zip" });
 }
 
+// The sender's note (crypto.md): optional, text only, one line, at most 280 characters. Anything else is ignored.
+const NOTE_MAX = 280;
+function cleanNote(header) {
+  const n = header && header.note;
+  if (typeof n !== "string") return "";
+  return Array.from(n.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim()).slice(0, NOTE_MAX).join("");
+}
+
+// "until Thu 19 Nov" in the viewer's own time zone (locale and tz are for tests); "" without an expiry.
+function expiryLabel(iso, locale, tz) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const o = { weekday: "short", day: "numeric", month: "short" };
+  if (tz) o.timeZone = tz;
+  return "until " + d.toLocaleDateString(locale, o).replace(",", "");
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { decryptBlob, b64urlToBytes, FAIL, unbundle, BROKEN, BUNDLE_TYPE, previewKind, highlight, renderMarkdown, parseCsv, esc, crc32 };
+  module.exports = { decryptBlob, b64urlToBytes, FAIL, unbundle, BROKEN, BUNDLE_TYPE, previewKind, highlight, renderMarkdown, parseCsv, esc, crc32, cleanNote, expiryLabel, NOTE_MAX };
 }
 
 if (typeof document !== "undefined") {
@@ -358,11 +376,6 @@ if (typeof document !== "undefined") {
     function size(n) {
       return n < 1024 ? n + (n === 1 ? " byte" : " bytes") : n < 1048576 ? (n / 1024).toFixed(1).replace(/\.0$/, "") + " KB" : (n / 1048576).toFixed(1).replace(/\.0$/, "") + " MB";
     }
-    function left(iso) {
-      if (!iso) return "";
-      const d = Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
-      return isNaN(d) ? "" : d <= 1 ? "Last day" : d + " days left";
-    }
     function el(tag, cls, text) {
       const e = document.createElement(tag);
       if (cls) e.className = cls;
@@ -373,7 +386,7 @@ if (typeof document !== "undefined") {
       const b = el("button", cls || "");
       b.type = "button";
       b.innerHTML = ICONS[icon];
-      b.appendChild(document.createTextNode(text));
+      b.appendChild(el("span", "lbl", text));
       return b;
     }
     function blobUrl(bytes, type) {
@@ -425,18 +438,35 @@ if (typeof document !== "undefined") {
       });
       return f;
     }
-    function fullButton(pane) {
-      const b = button("full", "Full screen", "small quiet");
+    // Full screen of the viewer: the browser's own full screen where there is one (not on iPhone), else a fixed layer.
+    function fullControl(pane) {
+      const b = button("full", "Full screen", "pf-btn icon");
       b.id = "fullscreen";
+      b.title = "Full screen (F)";
       b.setAttribute("aria-pressed", "false");
-      const toggle = function (on) {
+      b.setAttribute("aria-label", "Full screen");
+      const mark = function (on) {
         pane.classList.toggle("full", on);
         document.body.classList.toggle("no-scroll", on);
         b.setAttribute("aria-pressed", String(on));
-        b.lastChild.textContent = on ? "Exit full screen" : "Full screen";
+        b.setAttribute("aria-label", on ? "Leave full screen" : "Full screen");
       };
-      b.addEventListener("click", function () { toggle(!pane.classList.contains("full")); });
-      document.addEventListener("keydown", function (e) { if (e.key === "Escape" && pane.classList.contains("full")) toggle(false); });
+      const set = async function (on) {
+        if (on) {
+          try { await pane.requestFullscreen(); } catch (e) { /* no element full screen here: the fixed layer is enough */ }
+          mark(true);
+        } else {
+          if (document.fullscreenElement) { try { await document.exitFullscreen(); } catch (e) { /* already out */ } }
+          mark(false);
+        }
+      };
+      document.addEventListener("fullscreenchange", function () { if (!document.fullscreenElement) mark(false); });
+      b.addEventListener("click", function () { set(!pane.classList.contains("full")); });
+      document.addEventListener("keydown", function (e) {
+        if (e.metaKey || e.ctrlKey || e.altKey || (e.target.closest && e.target.closest("input,textarea,select"))) return;
+        if (e.key === "Escape" && pane.classList.contains("full")) { set(false); b.focus(); }
+        else if (e.key === "f" || e.key === "F") set(!pane.classList.contains("full"));
+      });
       return b;
     }
     function codeView(text, ext) {
@@ -453,52 +483,52 @@ if (typeof document !== "undefined") {
       return { node: wrap, lines: lines.length };
     }
 
-    // Builds the preview pane. Returns the pane, or null when this kind has no preview.
-    function preview(r, k, name) {
+    // Builds the viewer. Returns the pane, or null when this kind has no preview. info(text) fills the small
+    // detail at the right of the footer (pages, pixels, lines ...).
+    function preview(r, k, name, info) {
       const c = r.content;
-      const pane = el("section", "preview-pane");
+      const pane = el("section", "pf-viewer");
       pane.id = "preview";
+      pane.setAttribute("aria-label", "Preview of " + name);
       if (k.kind === "image" || k.kind === "svg") {
         const box = el("div", "media-box");
         const img = el("img");
         img.alt = name;
         img.src = blobUrl(c, MIME[k.ext] || "image/png");
         box.appendChild(img);
-        const foot = bar("foot", name, k.kind === "svg" ? "SVG image" : "", [fullButton(pane)]);
-        foot.querySelector(".bar-text").insertBefore(el("span", "green-dot"), foot.querySelector(".bar-text").firstChild);
         img.addEventListener("load", function () {
-          if (k.kind === "image") foot.querySelector(".bar-text").appendChild(el("span", "dim", " · " + img.naturalWidth + " × " + img.naturalHeight));
+          info(k.kind === "svg" ? "SVG image" : img.naturalWidth + " × " + img.naturalHeight);
         });
         pane.classList.add("media");
-        pane.append(box, foot);
+        pane.append(box);
       } else if (k.kind === "pdf" && String.fromCharCode.apply(null, c.subarray(0, 5)) === "%PDF-") { // else: download card
         const f = document.createElement("iframe");
         f.title = name;
         f.src = blobUrl(c, "application/pdf");
         const head = new TextDecoder("latin1").decode(c.subarray(0, Math.min(c.length, 4194304)));
         const pages = (head.match(/\/Type\s*\/Page(?![s\w])/g) || []).length;
+        if (pages) info(pages + (pages === 1 ? " page" : " pages"));
         pane.classList.add("doc");
-        pane.append(bar("head", name, pages ? pages + (pages === 1 ? " page" : " pages") : "PDF", [fullButton(pane)]), f);
+        pane.append(f);
       } else if (k.kind === "video" || k.kind === "audio") {
         const v = el(k.kind);
         v.controls = true;
         v.preload = "metadata";
         v.src = blobUrl(c, MIME[k.ext]);
-        const foot = bar("foot", name, "", []);
         v.addEventListener("loadedmetadata", function () {
           const s = Math.round(v.duration);
-          if (isFinite(s)) foot.querySelector(".bar-text").appendChild(el("span", "dim", " · " + Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0")));
+          if (isFinite(s)) info(Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"));
         });
         const box = el("div", "media-box");
         box.appendChild(v);
         pane.classList.add(k.kind === "video" ? "media" : "sound");
-        pane.append(box, foot);
+        pane.append(box);
       } else if (k.kind === "markdown") {
         const t = decodeText(c);
         const d = el("article", "md");
         d.innerHTML = renderMarkdown(t.text);
-        pane.append(bar("head", name, "Markdown", [copyButton("Copy", () => t.text)]), d);
-        if (t.cut) pane.appendChild(bar("foot", "", "Showing the first 1 MB. Download the file to see all of it."));
+        pane.append(bar("head", "", "Markdown", [copyButton("Copy", () => t.text)]), d);
+        if (t.cut) info("first 1 MB");
       } else if (k.kind === "csv" || k.kind === "tsv") {
         const t = decodeText(c);
         const p = parseCsv(t.text, k.kind === "tsv" ? "\t" : ",", CSV_ROWS + 1);
@@ -513,11 +543,10 @@ if (typeof document !== "undefined") {
           table.appendChild(tr);
         });
         wrap.appendChild(table);
-        const chip = el("span", "chip", cols + (cols === 1 ? " column" : " columns"));
         const n = Math.max(rows.length - 1, 0);
         const more = p.more || t.cut;
-        pane.append(bar("head", name, "", [chip]), wrap,
-          bar("foot", "", more ? "first " + n + " rows" : n + (n === 1 ? " row" : " rows"), more ? [el("span", "dim", "Download for all rows")] : []));
+        info((more ? "first " + n + " rows" : n + (n === 1 ? " row" : " rows")) + " · " + cols + (cols === 1 ? " column" : " columns"));
+        pane.append(wrap);
       } else if (k.kind === "json" || k.kind === "code") {
         const t = decodeText(c);
         let text = t.text;
@@ -525,13 +554,13 @@ if (typeof document !== "undefined") {
           try { text = JSON.stringify(JSON.parse(text), null, 2); } catch (e) { /* show as it is */ }
         }
         const v = codeView(text, k.ext);
-        pane.append(bar("head", name, LANG[k.ext] || "Text", [copyButton("Copy", () => text)]), v.node,
-          bar("foot", "", (t.cut ? "first " : "") + v.lines + (v.lines === 1 ? " line" : " lines") + " · UTF-8"));
+        info((t.cut ? "first " : "") + v.lines + (v.lines === 1 ? " line" : " lines"));
+        pane.append(bar("head", "", LANG[k.ext] || "Text", [copyButton("Copy", () => text)]), v.node);
       } else if (k.kind === "html" || k.kind === "bundle") {
         const pkg = k.kind === "html" ? { entry: "index.html", files: [{ path: "index.html", type: "text/html", bytes: c }] } : r.bundle;
         const chip = el("span", "chip", k.kind === "html" ? "Web page" : "Website · " + pkg.files.length + (pkg.files.length === 1 ? " file" : " files"));
         const pages = pkg.files.map((x) => x.path).filter((p) => /\.html?$/i.test(p));
-        const tools = [chip, fullButton(pane)];
+        const tools = [chip];
         let frame = htmlFrame(pkg, name);
         if (pages.length > 1) { // several pages: a small switcher, the first page by name (or index.html) is shown
           const pick = el("select", "page-pick");
@@ -562,7 +591,7 @@ if (typeof document !== "undefined") {
       return pane;
     }
 
-    function download(r, done) {
+    function download(r, status) {
       const name = String(r.header.name || "file").replace(/[\\/]/g, "_");
       const isBundle = !!r.bundle;
       const url = URL.createObjectURL(isBundle ? zipStore(r.bundle.files) : new Blob([r.content], { type: "application/octet-stream" }));
@@ -573,48 +602,67 @@ if (typeof document !== "undefined") {
       l.click();
       l.remove();
       setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-      done.textContent = "Downloaded. Look in your Downloads folder.";
+      status.textContent = "Downloaded. Look in your Downloads folder.";
     }
 
+    // The page (draft-v3 public-file): one slim header line, the note on one small line, the viewer filling the
+    // rest of the height, a tiny footer. No inline styles or scripts (CSP).
     function render(r, k, expires) {
       const name = String(r.header.name || "File");
-      const done = el("p", "download-note");
-      done.setAttribute("role", "status");
-      const dl = button("down", r.bundle ? "Download files" : "Download", "quiet");
+      const status = el("span", "", "Only people with this link can open the file.");
+      status.id = "file-status";
+      status.setAttribute("role", "status");
+      const infoEl = el("span", "pf-info");
+      const dl = button("down", r.bundle ? "Download files" : "Download", "pf-btn");
       dl.id = "download";
-      dl.addEventListener("click", function () { download(r, done); });
-      const page = el("div", "file-page");
-      const head = el("header", "file-header");
-      const brand = document.querySelector(".public-brand .brand").cloneNode(true);
-      const heading = el("div", "file-heading");
-      heading.append(el("h1", "", name), el("p", "", ["Shared with you", size(r.content.length), left(expires)].filter(Boolean).join(" · ")));
-      const actions = el("div", "file-actions");
-      actions.append(dl, copyButton("Copy link", () => location.href));
-      head.append(brand, heading, actions);
+      dl.setAttribute("aria-label", r.bundle ? "Download files" : "Download");
+      dl.addEventListener("click", function () { download(r, status); });
+      const copy = copyButton("Copy link", () => location.href);
+      copy.classList.add("pf-btn");
+      copy.id = "copy-link";
+      copy.setAttribute("aria-label", "Copy link");
+
+      const page = el("div", "pf");
+      const head = el("header", "pf-head");
+      const logo = el("a", "pf-logo");
+      logo.href = "/";
+      logo.setAttribute("aria-label", "orch");
+      logo.appendChild(document.querySelector(".public-brand .brand svg").cloneNode(true));
+      const title = el("div", "pf-title");
+      title.append(el("h1", "", name), el("span", "pf-meta", [size(r.content.length), expiryLabel(expires)].filter(Boolean).join(" · ")));
+      const actions = el("div", "pf-actions");
+      actions.append(dl, copy);
+      head.append(logo, title, actions);
       page.appendChild(head);
-      const pane = preview(r, k, name);
+
+      const note = cleanNote(r.header);
+      if (note) {
+        const d = el("details", "pf-note");
+        d.appendChild(el("summary", "", note));
+        page.appendChild(d);
+      }
+
+      const pane = preview(r, k, name, function (t) { infoEl.textContent = t; });
       if (pane) {
+        actions.appendChild(fullControl(pane));
         page.appendChild(pane);
       } else {
         const ext = (name.split(".").pop() || "").toLowerCase();
         const what = OTHER[ext] || (name.indexOf(".") > 0 ? ext.toUpperCase() + " file" : "File");
-        const card = el("section", "card other-card");
+        const box = el("section", "pf-viewer pf-other");
+        const card = el("div", "card other-card");
         const ic = el("div", "file-icon");
         ic.innerHTML = ICONS.file;
         const big = button("down", "Download file", "primary");
-        big.addEventListener("click", function () { download(r, done); });
+        big.addEventListener("click", function () { download(r, status); });
         card.append(ic, el("h2", "", name), el("p", "", what + " · " + size(r.content.length)), el("p", "no-preview", "No preview for " + (OTHER[ext] ? what.replace(/ file$/, "") + " files" : "this kind of file") + " yet"), big);
-        page.appendChild(card);
+        box.appendChild(card);
+        page.appendChild(box);
       }
-      page.appendChild(done);
-      const foot = el("footer", "privacy");
-      foot.innerHTML = ICONS.lock;
-      foot.appendChild(document.createTextNode("Only people with this link can open the file."));
-      page.appendChild(foot);
-      document.querySelector(".public-brand").hidden = true;
-      document.querySelector(".public-card").hidden = true;
+      page.appendChild(el("footer", "pf-foot")).append(status, infoEl);
       document.title = name + " · orch";
-      document.querySelector("main").appendChild(page);
+      document.body.className = "pf-body";
+      document.querySelector(".shell").replaceWith(page);
     }
 
     async function main() {
@@ -632,6 +680,7 @@ if (typeof document !== "undefined") {
         return show("lock", "This browser can’t open the file", "Open the link in an up-to-date browser, over a secure (https) address.");
       }
       const id = location.pathname.split("/").filter(Boolean)[1];
+      if (globalThis.OrchLook) globalThis.OrchLook.fileHeader(id);
       let res;
       try {
         res = await fetch("/f/" + encodeURIComponent(id) + "/blob", { cache: "no-store" });

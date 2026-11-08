@@ -51,12 +51,16 @@ class E:
         self.env = {k: v for k, v in self.env.items() if v != ""}
         self.ws_dir = tmp / "ws"
         self.orch_home = Path(self.env["ORCH_HOME"])
+        self.bins: dict = {}
 
     # -- running things --
     def sh(self, cmd, cwd=None, input=None, env=None, timeout=300, check_rc=False):
         if isinstance(input, str):
             input = input.encode()
-        p = subprocess.run(cmd, cwd=cwd or self.tmp, env={**self.env, **(env or {})}, input=input,
+        # no input: stdin is /dev/null, never the runner's own stdin (a pipe that stays open would make a command
+        # that reads its input, such as a hook's `orch run event`, wait for it)
+        io = {"input": input} if input is not None else {"stdin": subprocess.DEVNULL}
+        p = subprocess.run(cmd, cwd=cwd or self.tmp, env={**self.env, **(env or {})}, **io,
                            capture_output=True, timeout=timeout)
         out, err = p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace")
         if check_rc and p.returncode != 0:
@@ -104,14 +108,16 @@ class E:
         return self.sh(["orch", "addon", "add", str(name), "--yes", *flags], cwd=self.path_of(ws), timeout=600)
 
     def sched_config(self, ws, agent_line: str, interval: int = 2, inbox_every: int | None = None):
-        """Write the [scheduler] table of .orch/config.toml (agent_line is a TOML line `agent = ...`)."""
+        """Write the [automation] table of .orch/config.toml (agent_line is a TOML line `agent = ...`)."""
         p = self.path_of(ws) / ".orch" / "config.toml"
         extra = f"inbox_every = {inbox_every}\n" if inbox_every else ""
-        p.write_text(f"[scheduler]\n{agent_line}\ninterval = {interval}\n{extra}")
+        cmd = agent_line.split("=", 1)[1].strip()  # the agent is core's [workspace] agent now (generic adapter)
+        p.write_text(f'[workspace]\nagent = "e2eagent"\n\n[agents.e2eagent]\nadapter = "generic"\ncommand = {cmd}\n\n'
+                     f"[automation]\ninterval = {interval}\n{extra}")
 
     def ensure_addons(self):
         if not self._addons:
-            for a in ("dashboard", "scheduler"):
+            for a in ("dashboard", "automation"):
                 rc, out, err = self.addon_add(self.ws("Pilatus"), a)
                 if rc != 0:
                     raise Fail(f"addon add {a}: {(err or out)[-200:]}")
@@ -227,17 +233,20 @@ def main() -> int:
     ap.add_argument("--repo", required=True)
     ap.add_argument("--bins", default="")
     a = ap.parse_args()
-    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc  # noqa: F401,E401
+    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3, scenarios_sim, scenarios_look  # noqa: F401,E401
 
     if a.what == "all":
-        ids = list(REGISTRY)
+        ids = [k for k in REGISTRY if k != "V3-SIM"]  # V3-SIM is a long-lived harness, only by name
     else:  # comma list; a single letter (W, A, P, R, M, F) selects the group
         ids = []
         for w in a.what.split(","):
-            ids += [k for k in REGISTRY if k[0] == w] if len(w) == 1 else [w]
+            if w in ("V2", "V3"):  # every v2 / v3 scenario (V2-*, V3-*)
+                ids += [k for k in REGISTRY if k.startswith(w + "-") and k != "V3-SIM"]
+            else:
+                ids += [k for k in REGISTRY if k[0] == w] if len(w) == 1 else [w]
     # run order: W A P R M F  (A0 before A4/A5)
     order = {"W": 0, "A": 1, "P": 2, "R": 3, "M": 4, "F": 5}
-    ids = sorted(ids, key=lambda s: (order.get(s[0], 9), int("".join(c for c in s[1:] if c.isdigit()) or 0)))
+    ids = sorted(ids, key=lambda s: (order.get(s[0], 9), int("".join(c for c in s[1:] if c.isdigit()) or 0), s))
     for s in ids:
         if s not in REGISTRY:
             print(f"unknown scenario {s}; known: {', '.join(sorted(REGISTRY))}")
@@ -247,6 +256,7 @@ def main() -> int:
     tmp, repo = Path(a.tmp), Path(a.repo)
     run_id = tmp.name.rsplit("-", 1)[-1].lower()
     e = E(a.mode, tmp, repo, run_id)
+    e.bins = json.loads(a.bins) if a.bins else {}
     out_dir = repo / "e2e" / "out" / time.strftime("%Y%m%d-%H%M%S")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_md = out_dir / "results.md"
@@ -259,7 +269,7 @@ def main() -> int:
         if r.returncode:
             print("orch install failed:", r.stderr[-400:])
             return 1
-        needs_servers = any(s[0] in "PRMF" for s in ids)
+        needs_servers = any(s[0] in "PRMF" or (s in lib.V2_NEEDS_SERVERS or s.startswith(("V3-", "LOOK-"))) for s in ids)
         if needs_servers:
             if a.mode == "local":
                 bins = json.loads(a.bins)
@@ -268,9 +278,9 @@ def main() -> int:
                 e.pub, e.rel = live_servers(e)
                 if e.pub is None:
                     for s in ids:
-                        if s[0] in "PRMF":
+                        if s[0] in "PRMF" or (s in lib.V2_NEEDS_SERVERS or s.startswith(("V3-", "LOOK-"))):
                             print(f"{s:<5} SKIP  live servers are not up")
-                    ids = [s for s in ids if s[0] not in "PRMF"]
+                    ids = [s for s in ids if not (s[0] in "PRMF" or (s in lib.V2_NEEDS_SERVERS or s.startswith(("V3-", "LOOK-"))))]
         res = run_scenarios(e, ids, out_md)
     finally:
         for fn in reversed(e.cleanup):
@@ -278,7 +288,7 @@ def main() -> int:
                 fn()
             except Exception:  # noqa: BLE001
                 pass
-        stop_scheduler(e)
+        stop_automation(e)
         for pid in e.pids:
             try:
                 os.kill(pid, signal.SIGTERM)
@@ -290,6 +300,10 @@ def main() -> int:
                 os.kill(pid, signal.SIGKILL)
             except OSError:
                 pass
+    leaked = leaked_servers(tmp)
+    if leaked:
+        print(f"LEAK: {len(leaked)} add-on server(s) still running in {tmp}; ended: {leaked}")
+        res["LEAK"] = "FAIL"
     n = {k: sum(1 for v in res.values() if v == k) for k in ("PASS", "FAIL", "SKIP")}
     summary = f"\nSUMMARY {a.mode}: {n['PASS']} pass, {n['FAIL']} fail, {n['SKIP']} skip"
     print(summary)
@@ -299,9 +313,29 @@ def main() -> int:
     return 1 if n["FAIL"] else 0
 
 
-def stop_scheduler(e: E) -> None:
+def leaked_servers(tmp: Path) -> list[int]:
+    """Add-on servers (orch_dashboard, orch_focus ...) whose folder is under this run's temp root; they are ended here."""
+    out = subprocess.run(["ps", "-axo", "pid,command"], capture_output=True, text=True).stdout
+    found = []
+    for ln in out.splitlines():
+        pid_s, _, cmd = ln.strip().partition(" ")
+        if " -m orch_" not in cmd or not pid_s.isdigit():
+            continue
+        lsof = subprocess.run([shutil.which("lsof") or "/usr/sbin/lsof", "-a", "-d", "cwd", "-p", pid_s, "-Fn"], capture_output=True, text=True).stdout
+        cwd = next((x[1:] for x in lsof.splitlines() if x.startswith("n")), "")
+        if cwd and (cwd == str(tmp) or cwd.startswith(str(tmp) + os.sep)):
+            found.append(int(pid_s))
+    for pid in found:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    return found
+
+
+def stop_automation(e: E) -> None:
     for wsd in (e.ws_dir.glob("*") if e.ws_dir.exists() else []):
-        pidf = wsd / ".orch" / "addons" / "scheduler" / "scheduler.pid"
+        pidf = wsd / ".orch" / "addons" / "automation" / "automation.pid"
         if pidf.exists():
             try:
                 os.kill(int(pidf.read_text().strip()), signal.SIGTERM)

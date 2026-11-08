@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/addons/focus/ext.schema.json",
+  "title": "orch focus ticket data: ext.focus",
+  "description": "Owned by the focus add-on (its ticket_ext; the add-on ships a byte-identical copy). The core never reads it. Written once by Focus when it starts a run for the ticket, so the ticket page can show an 'Open live page' row (ticket_view format open-page: [page] path + '/' + page).",
+  "type": "object",
+  "properties": {
+    "page": { "type": "string", "pattern": "^t/t_[a-z0-9]{6,16}$", "description": "Path of the ticket's live page on Focus's own page: t/<ticket id>." }
+  },
+  "additionalProperties": false
+}

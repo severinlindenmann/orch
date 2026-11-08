@@ -11,7 +11,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker
 
-from agentlib import run_agent, save_transcript, scheduler_agent_line, scheduler_once
+from agentlib import run_agent, save_transcript, automation_agent_line, automation_once
 from lib import Fail, check, http, scenario
 from scenarios_misc import phone
 from scenarios_pub import link_parts, opf1_decrypt
@@ -127,12 +127,12 @@ def tree_hash(ws: Path) -> dict:
     return out
 
 
-def setup_scheduler(e, name: str, tool: str, interval: int = 10) -> Path:
+def setup_automation(e, name: str, tool: str, interval: int = 10) -> Path:
     ws = e.ws(name)
-    if not (ws / ".agents/skills/orch-scheduler").exists():
-        rc, out, err = e.addon_add(ws, "scheduler")
-        check(rc == 0, f"addon add scheduler: {(err or out)[-200:]}")
-    e.sched_config(ws, scheduler_agent_line(e, tool), interval, 5)
+    if not (ws / ".agents/skills/orch-automation").exists():
+        rc, out, err = e.addon_add(ws, "automation")
+        check(rc == 0, f"addon add automation: {(err or out)[-200:]}")
+    e.sched_config(ws, automation_agent_line(e, tool), interval, 5)
     return ws
 
 
@@ -171,7 +171,7 @@ def agent_ticket_task(e, sid: str, ws_name: str, tool: str, git: bool) -> str:
     t = max(new, key=lambda x: len(x["checklist"]))
     validate(e, t)
     ev = evidence_ok(t, 1)
-    want = "agent:claude-code" if tool == "claude" else "agent:codex"
+    want = "agent:claude" if tool == "claude" else "agent:codex"
     check(want in by(t), f"history has no {want}: {sorted(by(t))}")
     work = rename_done(e, ws)
     return f"{ev}; status {t['status']}; {work}; {run.secs:.0f}s"
@@ -214,14 +214,14 @@ def ag_r12(e):
     return f"repo intact; noted in a ticket: {noted}; said so in the answer: {asked}; {run.secs:.0f}s"
 
 
-# ---- W5 / M2: question on the phone, scheduler resumes the agent ----------------------------------------
+# ---- W5 / M2: question on the phone, automation resumes the agent ----------------------------------------
 
 
 @scenario("AG-W5", slow=True)
 def ag_w5(e):
-    """W5/M2: the agent asks with --phone and stops; the phone answers through the relay; the scheduler resumes the agent."""
+    """W5/M2: the agent asks with --phone and stops; the phone answers through the relay; automation resumes the agent."""
     ids = e.relay_all()
-    ws = setup_scheduler(e, "Pilatus", "claude")
+    ws = setup_automation(e, "Pilatus", "claude")
     ph = pair_phone(e, [ids["Pilatus"]])
     before = {t["id"] for t in tickets(ws)}
     prompt = ("Our weekly export has to run on one fixed day and I cannot decide right now. Please track this as a ticket, "
@@ -241,28 +241,28 @@ def ag_w5(e):
     check(pm["id"] and "friday" in json.dumps(pm["body"]).lower() or "monday" in json.dumps(pm["body"]).lower(), f"question body {pm['body']}")
     a = phone(e, ph, "POST", "/v1/phone/answer", {"question_message_id": pm["id"], "answer": "Monday"})
     check(a.status == 201, f"phone answer: {a}")
-    scheduler_once(e, ws, "AG-W5")
+    automation_once(e, ws, "AG-W5")
     d = tload(ws, t["id"])
     save_transcript(e, "AG-W5", "\n## final ticket\n" + json.dumps(d, indent=1), append=True)
     q = d["questions"][0]
     check(q.get("answer", "").lower() == "monday" and q.get("via") == "phone", f"question after answer: {q}")
     check((ws / "schedule.txt").exists() and "monday" in (ws / "schedule.txt").read_text().lower(),
           f"the resumed agent did not write schedule.txt with the answer: {(ws / 'schedule.txt').exists()}")
-    check(any(h["by"] == "agent:scheduler" for h in d["history"]), "no scheduler history entry")
+    check(any(h["by"] == "agent:automation" for h in d["history"]), "no automation history entry")
     validate(e, d)
-    return f"question via phone, resumed by scheduler, status {d['status']}; {run.secs:.0f}s asking"
+    return f"question via phone, resumed by automation, status {d['status']}; {run.secs:.0f}s asking"
 
 
-# ---- R6: delegate to Reports, human allows, scheduler starts claude ---------------------------------------
+# ---- R6: delegate to Reports, human allows, automation starts claude ---------------------------------------
 
 
 @scenario("AG-R6", slow=True)
 def ag_r6(e):
-    """R6/R14: Pilatus agent delegates by workspaces.json; Reports agent does not allow itself; human allows; scheduler runs claude."""
+    """R6/R14: Pilatus agent delegates by workspaces.json; Reports agent does not allow itself; human allows; automation runs claude."""
     ids = e.relay_all()
     for n in ("Pilatus", "Reports"):
         e.orch(n, "relay", "refresh")
-    wsp, wsr = e.ws("Pilatus"), setup_scheduler(e, "Reports", "claude")
+    wsp, wsr = e.ws("Pilatus"), setup_automation(e, "Reports", "claude")
     wj = json.loads((wsp / ".agents/skills/orch-relay/workspaces.json").read_text())
     check(any(w["id"] == ids["Reports"] for w in wj["workspaces"]), "Reports is not in Pilatus workspaces.json after refresh")
     prompt = ("Please hand the job 'Write the weekly report draft for week 45' to the workspace that is responsible for reports, "
@@ -285,19 +285,23 @@ def ag_r6(e):
     inbox = e.orchj("Reports", "relay", "inbox")
     dele = [m for m in inbox if m["type"] == "delegate" and m["id"] == mine[0]["id"]]
     check(dele and dele[0]["allowed"] is False, f"delegate should still wait for the human: {inbox}")
-    # the human allows once; the scheduler starts claude on the new ticket
+    # the human allows once; automation starts claude on the new ticket
     e.orch("Reports", "relay", "allow", mine[0]["id"], "--once")
-    scheduler_once(e, wsr, "AG-R6-3-scheduler")
+    automation_once(e, wsr, "AG-R6-3-automation")
     new = new_tickets(wsr, before_r)
     check(len(new) == 1, f"expected one new ticket in Reports, got {[t['title'] for t in new]}")
     t = new[0]
     validate(e, t)
-    logs = sorted((wsr / ".orch/addons/scheduler/logs").glob(f"{t['id']}-*.log"))
-    check(logs and "exit 0" in logs[-1].read_text(), f"no finished scheduler run for {t['id']}")
+    logs = sorted((wsr / ".orch/run/logs").glob(f"{t['id']}-*.log"))
+    check(logs and logs[-1].read_text().strip(), f"no automation run log for {t['id']}")
+    rc, out, err = e.sh(["orch", "run", "status", t["id"], "--json"], cwd=wsr)
+    check(rc == 0 and not json.loads(out).get("running"), f"the run on {t['id']} did not finish: {out or err}")
+    worked = {b for b in by(t) if not b.startswith(("agent:automation", "agent:relay"))}
+    check(worked, f"the agent wrote nothing on {t['id']}: {sorted(by(t))}")
     allow_back = [m for m in e.orchj("Pilatus", "relay", "inbox") if m["type"] == "allow"]
     check(allow_back, "no allow message back to Pilatus")
     ran = "agent:claude-code" in by(t)
-    return (f"delegate found by workspaces.json, not self-allowed (told human: {told}), allow once -> ticket {t['id']} run by scheduler; "
+    return (f"delegate found by workspaces.json, not self-allowed (told human: {told}), allow once -> ticket {t['id']} run by automation; "
             f"agent wrote history: {ran}; report-w45.md: {(wsr / 'report-w45.md').exists()}")
 
 
@@ -306,51 +310,55 @@ def ag_r6(e):
 
 @scenario("AG-A45", slow=True)
 def ag_a45(e):
-    """A4 + A5: orch wait --until in 2 min and a cron every 2 min, both started by the scheduler with codex in Reports."""
-    ws = setup_scheduler(e, "Reports", "codex", interval=10)
+    """A4 + A5: orch wait --until in 2 min and a cron every 2 min, both started by automation with codex in Reports."""
+    ws = setup_automation(e, "Reports", "codex", interval=10)
     t4 = e.orchj(ws, "ticket", "new", "A4: create the file wake-proof.txt in the project root containing the word awake, then set this ticket to done")["id"]
     until = (datetime.now(UTC) + timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     e.orch(ws, "wait", t4, "--until", until)
     t5 = e.orchj(ws, "ticket", "new", "A5: append one line to runs.log in the project root: the word run and the current UTC time from `date -u`. "
                  "Do nothing else. This ticket repeats, so leave its status as it is")["id"]
-    e.orch(ws, "scheduler", "repeat", t5, "*/2 * * * *")
-    rc, out, err = e.sh(["orch", "scheduler", "start"], cwd=ws)
-    check(rc == 0, f"scheduler start: {err or out}")
+    e.orch(ws, "automation", "repeat", t5, "*/2 * * * *")
+    rc, out, err = e.sh(["orch", "automation", "start"], cwd=ws)
+    check(rc == 0, f"automation start: {err or out}")
+    def started(t):  # automation writes one history entry per run it started
+        return [h for h in tload(ws, t)["history"] if h["by"] == "agent:automation" and "started an agent run" in h["text"]]
+
+    def running(t):
+        rc, out, err = e.sh(["orch", "run", "status", t, "--json"], cwd=ws)
+        return rc != 0 or json.loads(out).get("running")
+
     try:
-        def logs(t):
-            return sorted((ws / ".orch/addons/scheduler/logs").glob(f"{t}-*.log"))
         end = time.time() + 600
         while time.time() < end:
-            l4, l5 = logs(t4), logs(t5)
-            if any("# end" in p.read_text() for p in l4) and sum("# end" in p.read_text() for p in l5) >= 2:
+            if started(t4) and not running(t4) and len(started(t5)) >= 2 and not running(t5):
                 break
             time.sleep(10)
         time.sleep(5)
     finally:
-        e.sh(["orch", "scheduler", "stop"], cwd=ws)
-        # keep the scheduler logs in the transcript
-        body = "".join(f"\n### {p.name}\n{p.read_text(errors='replace')[-4000:]}\n" for p in sorted((ws / ".orch/addons/scheduler/logs").glob("*.log")))
-        save_transcript(e, "AG-A45", f"# codex runs started by the scheduler in Reports\n{body}")
+        e.sh(["orch", "automation", "stop"], cwd=ws)
+        # keep the run logs (written by core) in the transcript
+        body = "".join(f"\n### {p.name}\n{p.read_text(errors='replace')[-4000:]}\n" for p in sorted((ws / ".orch/run/logs").glob("*.log")))
+        save_transcript(e, "AG-A45", f"# codex runs started by automation in Reports\n{body}")
     d4, d5 = tload(ws, t4), tload(ws, t5)
-    l4, l5 = logs(t4), logs(t5)
-    check(l4 and all("exit 0" in p.read_text() for p in l4 if "# end" in p.read_text()) and any("# end" in p.read_text() for p in l4), "A4: no finished run log")
+    check(started(t4) and not running(t4), "A4: no finished run")
     check(not d4.get("waiting_on"), f"A4: waiting_on not cleared: {d4.get('waiting_on')}")
-    check(any(h["by"] == "agent:scheduler" for h in d4["history"]), "A4: no scheduler history entry")
     check((ws / "wake-proof.txt").exists() and "awake" in (ws / "wake-proof.txt").read_text().lower(), "A4: wake-proof.txt missing")
-    done5 = [p for p in l5 if "# end" in p.read_text()]
-    check(len(done5) >= 2, f"A5: {len(done5)} finished runs in 10 min, wanted 2")
+    n5 = len(started(t5))
+    check(n5 >= 2 and not running(t5), f"A5: {n5} runs started in 10 min, wanted 2")
     runs = [ln for ln in (ws / "runs.log").read_text().splitlines() if ln.strip()] if (ws / "runs.log").exists() else []
     check(len(runs) >= 2, f"A5: runs.log has {len(runs)} lines")
+    # no overlap: each run of t5 has its own log (logs/<tid>-<run>.log, written from start to end); sorted by when
+    # it was made, a run's log is never made before the previous run's last write (2 s slack for the wrapper)
     spans = []
-    for p in done5:
-        txt = p.read_text()
-        s = re.search(r"# start (\S+)", txt).group(1)
-        en = re.search(r"# end (\S+)", txt).group(1)
-        spans.append((s, en))
+    for p in (ws / ".orch/run/logs").glob(f"{t5}-*.log"):
+        st = p.stat()
+        spans.append((getattr(st, "st_birthtime", st.st_ctime), st.st_mtime, p.name))
     spans.sort()
-    check(all(spans[i][1] <= spans[i + 1][0] for i in range(len(spans) - 1)), f"A5: runs overlapped {spans}")
+    check(len(spans) >= 2, f"A5: {len(spans)} run logs for {t5}, wanted 2")
+    for (_, prev_end, prev), (start, _, cur) in zip(spans, spans[1:]):
+        check(start >= prev_end - 2, f"A5: {cur} started {prev_end - start:.0f} s before {prev} ended (runs overlap)")
     validate(e, d5)
-    return (f"A4 done ({d4['status']}, by {sorted(by(d4))}); A5 {len(done5)} runs, runs.log {len(runs)} lines, "
+    return (f"A4 done ({d4['status']}, by {sorted(by(d4))}); A5 {n5} runs, runs.log {len(runs)} lines, "
             f"ticket status {d5['status']}")
 
 
@@ -394,8 +402,8 @@ def ag_f1(e):
     e.cleanup.append(publish_cleanup_dir(e, ws, env))
     e.creds[("rel", "Fresh")] = (rj["id"], rj["token"])
     e.creds[("pub", "Fresh")] = (pj["id"], pj["token"])
-    sh("orch", "addon", "add", "scheduler", "--yes", timeout=600)
-    (ws / ".orch/config.toml").write_text(f"[scheduler]\n{scheduler_agent_line(e, 'claude')}\ninterval = 10\ninbox_every = 5\n")
+    sh("orch", "addon", "add", "automation", "--yes", timeout=600)
+    (ws / ".orch/config.toml").write_text(f"[automation]\n{automation_agent_line(e, 'claude')}\ninterval = 10\ninbox_every = 5\n")
     ph = pair_phone(e, [rj["id"]])
     # agent phase 1
     prompt = ("I need the weekly status report published. Track the work as a ticket. Write report.md (title, three short bullet "
@@ -413,7 +421,7 @@ def ag_f1(e):
     pm = phone_question(e, ph, t["id"])
     a = phone(e, ph, "POST", "/v1/phone/answer", {"question_message_id": pm["id"], "answer": "yes"})
     check(a.status == 201, f"phone answer: {a}")
-    scheduler_once(e, ws, "AG-F1", timeout=480, env_over=env)
+    automation_once(e, ws, "AG-F1", timeout=480, env_over=env)
     d = tload(ws, t["id"])
     validate(e, d)
     check(d["questions"][0].get("via") == "phone", f"answer via {d['questions'][0].get('via')}")

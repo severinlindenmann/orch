@@ -1,13 +1,13 @@
-"""Skill folders and AGENTS.md blocks (contracts/local-files.md)."""
+"""Skill folders and the orch block: kept under .orch/harness/ and linked from where agents look (harness.py)."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
 import os
-import re
 import shutil
-import sys
 from pathlib import Path
 
+from orch import harness
 from orch.errors import Refused
 
 BLOCK_FILE = "AGENTS-block.md"
@@ -18,8 +18,9 @@ GITIGNORE_LINES = [
     ".orch/inbox/",
     ".orch/inbox-seen.json",
     ".orch/addons/",
+    ".orch/run/",
+    ".orch/tickets/*/evidence/",
 ]
-GITIGNORE_HEADER = "# orch (local only)"
 
 
 def packaged_skills_dir() -> Path:
@@ -32,85 +33,49 @@ def packaged_skills_dir() -> Path:
 
 
 def check_inside(root: Path, dest: Path) -> None:
-    """Refuse when .agents, .agents/skills or dest is a link pointing outside the project."""
-    base = root.resolve()
-    for p in (root / ".agents", root / ".agents" / "skills", dest):
-        if _is_link(p) or p.exists():
-            try:
-                p.resolve().relative_to(base)
-            except ValueError:
-                raise Refused(f"{p} points outside this project; orch will not write there.") from None
+    """Refuse when .orch/harness (or dest) is a link or points outside the project."""
+    inside_h = harness.harness_dir(root).absolute() in Path(os.path.abspath(dest)).parents
+    harness.check_harness(root, dest if inside_h else None)
+    if not harness._inside(root, dest):  # e.g. .agents/skills/<name> linked out of the project
+        raise Refused(f"{dest} points outside this project; orch will not write there.")
+
+
+def harness_skill(root: Path, name: str) -> Path:
+    return harness.harness_dir(root) / "skills" / name
 
 
 def install_skill(root: Path, name: str, source: Path) -> None:
-    """Copy a skill folder to .agents/skills/<name>/ (replaced whole, minus the AGENTS block file)."""
-    dest = root / ".agents" / "skills" / name
+    """Copy a skill folder to .orch/harness/skills/<name>/ (replaced whole, minus the block file); the
+    links come from apply_agent_files. Files an add-on wrote into the folder (relay's workspaces.json) stay."""
+    dest = harness_skill(root, name)
     check_inside(root, dest)
-    if dest.exists():
+    keep = {}
+    if dest.is_dir():
+        for f in dest.iterdir():
+            if f.is_file() and f.name not in {p.name for p in source.iterdir()} and not harness.is_link(f):
+                keep[f.name] = f.read_bytes()
         shutil.rmtree(dest)
-    shutil.copytree(source, dest, ignore=shutil.ignore_patterns(*BLOCK_FILES))
+    shutil.copytree(source, dest, ignore=shutil.ignore_patterns(*BLOCK_FILES, "description.toml"))
+    for fn, data in keep.items():
+        (dest / fn).write_bytes(data)
 
 
 def remove_skill(root: Path, name: str) -> None:
-    dest = root / ".agents" / "skills" / name
+    dest = harness_skill(root, name)
     check_inside(root, dest)
-    if dest.is_dir() and not _is_link(dest):
+    for where in _skill_places(root):
+        harness.unlink_skill(root, where, name)
+    if dest.is_dir() and not harness.is_link(dest):
         shutil.rmtree(dest)
 
 
-def _markers(name: str, addon: bool) -> tuple[str, str]:
-    if addon:
-        return f"<!-- orch:addon:{name} -->", f"<!-- /orch:addon:{name} -->"
-    return f"<!-- orch:begin {name} -->", f"<!-- orch:end {name} -->"
-
-
-def _block_re(name: str, addon: bool = False) -> re.Pattern:
-    b, e = _markers(name, addon)
-    return re.compile(rf"{re.escape(b)}\n.*?{re.escape(e)}\n?", re.S)
-
-
-_MARKER_RE = re.compile(r"[ \t]*<!--\s*/?orch:[^>]*-->[ \t]*\n?")
-_MARKER_START = re.compile(r"<!--\s*/?orch:")
-
-
 def set_block(root: Path, name: str, body: str, addon: bool = False) -> None:
-    """Add or replace the block for `name` in AGENTS.md; text outside the block is untouched.
-    addon=True uses the add-on markers <!-- orch:addon:<name> --> ... <!-- /orch:addon:<name> -->."""
-    path = root / "AGENTS.md"
-    text = path.read_text(encoding="utf-8") if path.exists() else ""
-    while True:  # the markers are ours; strip until stable so pieces cannot join into a marker
-        new = _MARKER_RE.sub("", body)
-        if new == body:
-            break
-        body = new
-    if _MARKER_START.search(body):
-        raise Refused("An AGENTS.md block cannot contain orch markers (<!-- orch:... -->).")
-    body = body.strip()
-    b, e = _markers(name, addon)
-    block = f"{b}\n{body}\n{e}\n"
-    rx = _block_re(name, addon)
-    if rx.search(text):
-        text = rx.sub(lambda _m: block, text, count=1)
-        # repair files an older version nested or duplicated: no other marker of this name may stay
-        head, sep, tail = text.partition(block)
-        stray = re.compile(rf"(?:{re.escape(b)}|{re.escape(e)})\n?")
-        text = stray.sub("", head) + sep + stray.sub("", tail)
-    else:
-        if text and not text.endswith("\n"):
-            text += "\n"
-        if text:
-            text += "\n"
-        text += block
-    path.write_text(text, encoding="utf-8", newline="\n")
+    """The block of `name` (core, or an add-on with addon=True) goes to .orch/harness; AGENTS.md is not touched."""
+    harness.set_block(root, name, body, addon)
 
 
 def remove_block(root: Path, name: str, addon: bool = False) -> None:
-    path = root / "AGENTS.md"
-    if not path.exists():
-        return
-    text = path.read_text(encoding="utf-8")
-    new = _block_re(name, addon).sub("", text).rstrip("\n")
-    path.write_text(new + "\n" if new else "", encoding="utf-8", newline="\n")
+    harness.remove_block(root, name, addon)
 
 
 def read_block(source: Path, name: str, block_file: Path | None = None) -> str:
@@ -123,84 +88,142 @@ def read_block(source: Path, name: str, block_file: Path | None = None) -> str:
     return f"## {name}\nRead `.agents/skills/{name}/SKILL.md`."
 
 
-def _link(link: Path, target: Path, rel: str) -> None:
-    """Directory link: symlink (macOS/Linux) or junction (Windows, no admin needed)."""
-    link.parent.mkdir(parents=True, exist_ok=True)
-    if sys.platform == "win32":
-        import _winapi
-
-        _winapi.CreateJunction(str(target.resolve()), str(link))
-    else:
-        os.symlink(rel, link, target_is_directory=True)
-
-
 def _is_link(p: Path) -> bool:
-    if p.is_symlink():
-        return True
-    if sys.platform == "win32":
-        try:
-            return bool(os.lstat(p).st_file_attributes & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
-        except (OSError, AttributeError):
-            return False
-    return False
+    return harness.is_link(p)
 
 
 def _unlink_dir(p: Path) -> None:
-    if sys.platform == "win32":
+    if os.name == "nt":
         os.rmdir(p)  # removes a junction without touching its target
     else:
         p.unlink()
 
 
-def link_claude_skills(root: Path) -> None:
-    """.claude/skills -> ../.agents/skills. If .claude/skills is a real folder, link each skill inside it."""
-    agents = root / ".agents" / "skills"
-    agents.mkdir(parents=True, exist_ok=True)
-    cl = root / ".claude" / "skills"
-    if _is_link(cl):
-        return
-    if not cl.exists():
-        _link(cl, agents, os.path.join("..", ".agents", "skills"))
-        return
-    for sk in sorted(p for p in agents.iterdir() if p.is_dir()):
-        dest = cl / sk.name
-        if dest.exists() or _is_link(dest):
-            continue
-        _link(dest, sk, os.path.join("..", "..", ".agents", "skills", sk.name))
+def _skills_link_paths() -> list[str]:
+    from orch import adapters
+
+    out = []
+    for n in adapters.builtin_names():
+        w = (adapters.load(n).get("files") or {}).get("skills_link")
+        if w and w not in out:
+            out.append(w)
+    return out
+
+
+def detected_agents(root: Path) -> list[str]:
+    """Built-in agents this machine or folder uses: found on the PATH, running us, or chosen here."""
+    from orch import adapters, config
+
+    names = {r["name"] for r in adapters.detect() if r["found"]}
+    for n in (adapters.detect_env(os.environ), config.agent_name(root)):
+        if n:
+            names.add(n)
+    return [n for n in adapters.builtin_names() if n in names]
+
+
+def _skill_places(root: Path) -> list[str]:
+    """Where agents look for skills: .agents/skills always, plus the folder of every detected agent."""
+    from orch import adapters
+
+    out = [".agents/skills"]
+    for n in detected_agents(root):
+        w = (adapters.load(n).get("files") or {}).get("skills_link")
+        if w and w not in out:
+            out.append(w)
+    return out
+
+
+def apply_agent_files(root: Path) -> list[str]:
+    """Make the harness visible: link every skill in .orch/harness/skills from the places agents look,
+    write the local instruction file of each detected agent, list all of it in .git/info/exclude.
+    Nothing here is a tracked file. Returns the labels of the agents it prepared files for."""
+    from orch import adapters
+
+    places = _skill_places(root)
+    harness.protect_local(root, _exclude_lines(root))  # first, so a refused link cannot leave secrets visible
+    sk = harness.harness_dir(root) / "skills"
+    names = _harness_skill_names(root)
+    refused = None  # one refused link must not stop the others or the local instruction file
+    for where in places:
+        for n in names:
+            harness.check_harness(root, sk / n)
+            try:
+                harness.link_skill(root, where, n)
+            except Refused as e:
+                refused = refused or e
+    for sh in _shared_skills(root):  # skills the relay delivered (not orch*): visible to every detected agent
+        for where in places[1:]:
+            try:
+                harness.link_skill(root, where, sh.name, sh)
+            except Refused as e:
+                refused = refused or e
+    harness.sync_copies(root, places)
+    done, local = [], []
+    for n in detected_agents(root):
+        a = adapters.load(n)
+        f = a.get("files") or {}
+        for fn, line in (f.get("instructions_link") or {}).items():
+            if harness.write_local_file(root, fn, line):
+                local.append(fn)
+        if f.get("skills_link") or f.get("instructions_link"):
+            done.append(a["label"])
+    if refused:
+        raise refused
+    return done
+
+
+def _shared_skills(root: Path) -> list[Path]:
+    base = root / ".agents" / "skills"
+    if not base.is_dir() or harness.is_link(base):
+        return []
+    out = []
+    for p in sorted(base.iterdir()):
+        if p.is_dir() and not harness.is_link(p) and (p / ".orch-shared").exists():
+            if harness.safe_skill_name(p.name):
+                out.append(p)
+            else:
+                harness.skip_note(f"the shared skill folder {p.name!r}")
+    return out
+
+
+def _harness_skill_names(root: Path) -> list[str]:
+    sk = harness.harness_dir(root) / "skills"
+    names = sorted(p.name for p in sk.iterdir() if p.is_dir()) if sk.is_dir() else []
+    ok = [n for n in names if harness.safe_skill_name(n)]
+    for n in names:
+        if n not in ok:
+            harness.skip_note(f"the skill folder {n!r}")
+    return ok
+
+
+def _exclude_lines(root: Path) -> list[str]:
+    """Root-relative patterns of the links and local instruction files orch makes here."""
+    from orch import adapters
+
+    names = [harness.glob_escape(n) for n in _harness_skill_names(root)]
+    lines = [
+        f".agents/skills/{n}" for n in names
+    ]  # exact names: a user's own `orchestrator` skill stays visible
+    for n in detected_agents(root):
+        f = adapters.load(n).get("files") or {}
+        lines += [fn for fn in (f.get("instructions_link") or {}) if ".local." in fn]
+        if f.get("skills_link"):
+            lines += [f"{f['skills_link']}/{s}" for s in names]
+    for sh in _shared_skills(root):
+        en = harness.glob_escape(sh.name)
+        lines += [f".agents/skills/{en}/", *[f"{w}/{en}" for w in _skill_places(root)[1:]]]
+    return list(dict.fromkeys(lines))
 
 
 def unlink_skill(root: Path, name: str) -> None:
-    """Remove a per-skill link inside a real .claude/skills folder (the whole-folder link needs no change)."""
-    cl = root / ".claude" / "skills"
-    if _is_link(cl):
-        return
-    dest = cl / name
-    if _is_link(dest):
-        _unlink_dir(dest)
-
-
-def ensure_claude_md(root: Path) -> None:
-    path = root / "CLAUDE.md"
-    text = path.read_text(encoding="utf-8") if path.exists() else ""
-    if any(line.strip() == "@AGENTS.md" for line in text.splitlines()):
-        return
-    if text and not text.endswith("\n"):
-        text += "\n"
-    path.write_text(text + "@AGENTS.md\n", encoding="utf-8", newline="\n")
+    for where in _skill_places(root):
+        harness.unlink_skill(root, where, name)
 
 
 def ensure_gitignore(root: Path) -> None:
-    path = root / ".gitignore"
-    text = path.read_text(encoding="utf-8") if path.exists() else ""
-    have = {line.strip() for line in text.splitlines()}
-    missing = [x for x in GITIGNORE_LINES if x not in have]
-    if not missing:
-        return
-    if text and not text.endswith("\n"):
-        text += "\n"
-    if GITIGNORE_HEADER not in have:
-        text += ("\n" if text else "") + GITIGNORE_HEADER + "\n"
-    path.write_text(text + "\n".join(missing) + "\n", encoding="utf-8", newline="\n")
+    """The local-only lines (secrets, inbox, run files, ...) stay out of git: .orch/.gitignore and
+    .git/info/exclude, never the team's .gitignore. Refuses when neither can be written."""
+    harness.protect_local(root, _exclude_lines(root))
 
 
 def front_matter_name(skill_dir: Path) -> str:

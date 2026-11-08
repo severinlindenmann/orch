@@ -1,0 +1,168 @@
+{
+  "schema": "orch.agent-adapters/1",
+  "note": "Built in: workspace/src/orch/agents.json. A user entry in .orch/config.toml [agents.<name>] picks one of these with adapter = \"<name>\".",
+  "adapters": {
+    "claude": {
+      "label": "Claude",
+      "detect": {
+        "binary": "claude",
+        "env_any": [
+          "CLAUDECODE",
+          "CLAUDE_CODE_ENTRYPOINT"
+        ]
+      },
+      "prompt_via": "arg",
+      "oneshot": {
+        "fresh": [
+          "claude",
+          "-p",
+          "--session-id",
+          "{new_session}",
+          "--permission-mode",
+          "acceptEdits",
+          "--",
+          "{prompt}"
+        ],
+        "resume": [
+          "claude",
+          "-p",
+          "--resume",
+          "{session}",
+          "--permission-mode",
+          "acceptEdits",
+          "--",
+          "{prompt}"
+        ],
+        "stream_args": [
+          "--output-format",
+          "stream-json",
+          "--verbose"
+        ],
+        "allow_args": [
+          "--allowedTools",
+          "{allow}"
+        ]
+      },
+      "live": {
+        "fresh": [
+          "claude",
+          "--session-id",
+          "{new_session}",
+          "--permission-mode",
+          "acceptEdits",
+          "--settings",
+          "{orch_hooks_file}"
+        ],
+        "resume": [
+          "claude",
+          "--resume",
+          "{session}",
+          "--permission-mode",
+          "acceptEdits",
+          "--settings",
+          "{orch_hooks_file}"
+        ],
+        "send": "bracketed-paste+Enter",
+        "interrupt_keys": [
+          "Escape"
+        ],
+        "idle_signal": "hook:Stop",
+        "attention_signal": "hook:Notification",
+        "events": "claude-transcript/1"
+      },
+      "hooks": {
+        "SessionStart": "orch run event --kind session",
+        "Stop": "orch run event --kind idle",
+        "Notification": "orch run event --kind attention"
+      },
+      "session": {
+        "id": "chosen-by-orch",
+        "hand_started": "hook:SessionStart"
+      },
+      "capabilities": {
+        "resume": true,
+        "choose_session_id": true,
+        "interactive_tmux": true,
+        "hooks": true,
+        "stream": true,
+        "permission_retry": true,
+        "subagents": true,
+        "usage": true
+      },
+      "files": {
+        "instructions_link": {
+          "CLAUDE.md": "@AGENTS.md"
+        },
+        "skills_link": ".claude/skills"
+      }
+    },
+    "codex": {
+      "label": "Codex",
+      "detect": {
+        "binary": "codex",
+        "env_prefix": "CODEX_"
+      },
+      "prompt_via": "arg",
+      "oneshot": {
+        "fresh": [
+          "codex",
+          "exec",
+          "--json",
+          "--",
+          "{prompt}"
+        ],
+        "resume": [
+          "codex",
+          "exec",
+          "resume",
+          "--json",
+          "{session}",
+          "--",
+          "{prompt}"
+        ]
+      },
+      "live": null,
+      "hooks": null,
+      "session": {
+        "id": "from-output",
+        "parse": "codex-exec-json/1"
+      },
+      "files": {
+        "instructions": "AGENTS.md"
+      }
+    },
+    "generic": {
+      "label": "{name}",
+      "detect": null,
+      "prompt_via": "arg",
+      "oneshot": {
+        "fresh": "{command}",
+        "resume": null
+      },
+      "live": {
+        "fresh": "{interactive}",
+        "send": "bracketed-paste+Enter",
+        "interrupt_keys": [],
+        "idle_signal": "orch:run-done",
+        "events": null
+      },
+      "hooks": null,
+      "session": {
+        "id": "none"
+      },
+      "capabilities": {
+        "resume": false,
+        "choose_session_id": false,
+        "interactive_tmux": false,
+        "hooks": false,
+        "stream": false,
+        "permission_retry": false,
+        "subagents": false,
+        "usage": false
+      },
+      "files": {
+        "instructions": "AGENTS.md"
+      }
+    }
+  }
+}

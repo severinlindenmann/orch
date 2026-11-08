@@ -79,7 +79,7 @@ async fn phone_pair_once_workspaces_and_signout() {
             &p,
             "POST",
             "/v1/phone/send",
-            Some(json!({"to": b.id, "text": "x"}))
+            Some(json!({"client_id": "506c7836-7437-445a-9d9b-d89cfa9280b1", "to": b.id, "text": "x"}))
         )
         .await
         .0,
@@ -90,7 +90,7 @@ async fn phone_pair_once_workspaces_and_signout() {
             &p,
             "POST",
             "/v1/phone/send",
-            Some(json!({"to": a.id, "text": "Book the train", "ticket": null})),
+            Some(json!({"client_id": "16d0f8ca-8ef5-4fe0-85f9-a49c4b36b2f0", "to": a.id, "text": "Book the train", "ticket": null})),
         )
         .await;
     assert_eq!(s, 201, "{v}");
@@ -166,7 +166,7 @@ async fn phone_question_push_answer_first_wins() {
             &p,
             "POST",
             "/v1/phone/answer",
-            Some(json!({"question_message_id": qid, "answer": "TIMESTAMP"})),
+            Some(json!({"client_id": "89844c7d-c056-4358-96fa-0029ddda285e", "question_message_id": qid, "answer": "TIMESTAMP"})),
         )
         .await;
     assert_eq!(s, 201, "{v}");
@@ -175,7 +175,7 @@ async fn phone_question_push_answer_first_wins() {
             &p2,
             "POST",
             "/v1/phone/answer",
-            Some(json!({"question_message_id": qid, "answer": "DATE"})),
+            Some(json!({"client_id": "caff3c95-72c7-41aa-9eaf-dfbdf8c28d86", "question_message_id": qid, "answer": "DATE"})),
         )
         .await;
     assert_eq!((s, v["error"].as_str()), (409, Some("already_answered")));
@@ -204,7 +204,7 @@ async fn phone_question_push_answer_first_wins() {
             &p,
             "POST",
             "/v1/phone/answer",
-            Some(json!({"question_message_id": bq, "answer": "x"}))
+            Some(json!({"client_id": "13ef7789-cc8e-4925-8274-ff257cda9365", "question_message_id": bq, "answer": "x"}))
         )
         .await
         .0,
@@ -262,7 +262,7 @@ async fn phone_send_validates_ticket() {
                 &p,
                 "POST",
                 "/v1/phone/send",
-                Some(json!({"to": a.id, "text": "x", "ticket": bad})),
+                Some(json!({"client_id": "ae0fc0e2-1274-4189-8a8a-81ede0473a22", "to": a.id, "text": "x", "ticket": bad})),
             )
             .await;
         assert_eq!((s, v["error"].as_str()), (422, Some("invalid")), "{bad}");
@@ -272,7 +272,7 @@ async fn phone_send_validates_ticket() {
             &p,
             "POST",
             "/v1/phone/send",
-            Some(json!({"to": a.id, "text": "x", "ticket": "t_abc123"}))
+            Some(json!({"client_id": "ee0e9b92-1964-4cdd-91ae-0ba7baea9b67", "to": a.id, "text": "x", "ticket": "t_abc123"}))
         )
         .await
         .0,
@@ -323,7 +323,7 @@ async fn phone_reply_paired_workspace_can_send_to_its_phone() {
             &p,
             "POST",
             "/v1/phone/send",
-            Some(json!({"to": a.id, "text": "can you answer my phone"})),
+            Some(json!({"client_id": "e630af20-fef5-4bd5-a526-3a3c376a94c3", "to": a.id, "text": "can you answer my phone"})),
         )
         .await;
     assert_eq!(s, 201);
@@ -422,7 +422,7 @@ async fn phone_reply_question_to_one_phone() {
             &p2,
             "POST",
             "/v1/phone/answer",
-            Some(json!({"question_message_id": qid, "answer": "no"})),
+            Some(json!({"client_id": "e4b43c69-d851-43ff-88e6-f1f92aee9dfd", "question_message_id": qid, "answer": "no"})),
         )
         .await;
     assert_eq!(s, 404);
@@ -431,7 +431,7 @@ async fn phone_reply_question_to_one_phone() {
             &p1,
             "POST",
             "/v1/phone/answer",
-            Some(json!({"question_message_id": qid, "answer": "yes"})),
+            Some(json!({"client_id": "261a3f6e-b052-4009-9ff1-17f42c53e689", "question_message_id": qid, "answer": "yes"})),
         )
         .await;
     assert_eq!(s, 201);
@@ -701,4 +701,266 @@ async fn phone_list_with_a_workspace_twice_shows_everything_once() {
             .len(),
         1
     );
+}
+
+async fn upd(
+    t: &T,
+    from: &Ws,
+    to: &str,
+    ticket: &str,
+    kind: &str,
+    title: Option<&str>,
+    text: &str,
+) -> (u16, serde_json::Value) {
+    let mut u = json!({"kind": kind});
+    if let Some(t) = title {
+        u["title"] = t.into();
+    }
+    let m = json!({"schema": "orch.msg/1", "id": mid(), "from": from.id, "to": to, "type": "text",
+        "created_at": "2026-11-05T10:00:00Z", "ticket": ticket, "body": {"text": text, "update": u}});
+    t.call(from, "POST", "/v1/messages", Some(m)).await
+}
+
+async fn push_on(t: &T, p: &(String, String)) {
+    t.phone(
+        p,
+        "POST",
+        "/v1/phone/push",
+        Some(json!({"apns_token": "abcdef0123", "sandbox": true})),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn phone_updates_push_only_result_question_failure_stopped() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    push_on(&t, &p).await;
+    for k in ["ack", "working", "note"] {
+        assert_eq!(
+            upd(&t, &a, &p.0, "t_aaaaaa", k, Some("Invoice"), "x")
+                .await
+                .0,
+            201
+        );
+    }
+    assert_eq!(t.push.sent.lock().unwrap().len(), 0, "quiet kinds");
+    assert_eq!(
+        upd(
+            &t,
+            &a,
+            &p.0,
+            "t_aaaaaa",
+            "result",
+            Some("Invoice export"),
+            "Done.\nmore"
+        )
+        .await
+        .0,
+        201
+    );
+    {
+        let sent = t.push.sent.lock().unwrap();
+        assert_eq!(sent.len(), 1, "quiet kinds did not use up the budget");
+        assert_eq!(sent[0].2["aps"]["alert"]["body"], "Invoice export: Done.");
+    }
+    // a plain text keeps today's rule (second push within 10 s is over the budget, still stored)
+    assert_eq!(ws_text(&t, &a, &p.0, "hello").await.0, 201);
+    assert_eq!(t.push.sent.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn phone_updates_grouped_per_ticket_and_one_ticket_paged() {
+    let t = start().await;
+    let (a, b) = (t.add_ws("A").await, t.add_ws("B").await);
+    let p = t.pair_phone(&[&a, &b]).await;
+    ws_text(&t, &a, &p.0, "plain, not an update").await;
+    let mut ids = vec![];
+    for (i, k) in ["ack", "working", "result"].iter().enumerate() {
+        let (s, v) = upd(&t, &a, &p.0, "t_aaaaaa", k, Some("One"), &format!("n{i}")).await;
+        assert_eq!(s, 201);
+        ids.push(v["id"].as_str().unwrap().to_string());
+    }
+    upd(&t, &a, "phones", "t_bbbbbb", "ack", None, "got it").await;
+    upd(
+        &t,
+        &b,
+        &p.0,
+        "t_aaaaaa",
+        "note",
+        None,
+        "same ticket id, other ws",
+    )
+    .await;
+    let (s, g) = t.phone(&p, "GET", "/v1/phone/updates", None).await;
+    assert_eq!(s, 200, "{g}");
+    let items = g["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3, "one per (workspace, ticket)");
+    assert_eq!(g["next"], json!(null));
+    assert_eq!(items[0]["workspace"], json!(b.id));
+    assert_eq!(items[0]["workspace_name"], "B");
+    assert_eq!(items[2]["id"], json!(ids[2]), "newest of A/t_aaaaaa");
+    assert_eq!(items[2]["kind"], "result");
+    assert_eq!(items[2]["title"], "One");
+    assert_eq!(items[1]["title"], json!(null));
+    // title falls back to the newest update that has one
+    upd(&t, &a, &p.0, "t_cccccc", "ack", Some("Older title"), "a").await;
+    upd(&t, &a, &p.0, "t_cccccc", "result", None, "b").await;
+    let (_, g2) = t.phone(&p, "GET", "/v1/phone/updates", None).await;
+    assert_eq!(g2["items"][0]["kind"], "result");
+    assert_eq!(g2["items"][0]["title"], "Older title");
+    // narrowed by workspace
+    let (_, g) = t
+        .phone(
+            &p,
+            "GET",
+            &format!("/v1/phone/updates?workspace={}", b.id),
+            None,
+        )
+        .await;
+    assert_eq!(g["items"].as_array().unwrap().len(), 1);
+    // one ticket, paged 2 + 1
+    let base = format!(
+        "/v1/phone/updates?workspace={}&ticket=t_aaaaaa&limit=2",
+        a.id
+    );
+    let (_, p1) = t.phone(&p, "GET", &base, None).await;
+    let i1: Vec<_> = p1["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["id"].clone())
+        .collect();
+    assert_eq!(i1, vec![json!(ids[2]), json!(ids[1])]);
+    assert_eq!(p1["next"], json!(ids[1]));
+    let (_, p2) = t
+        .phone(&p, "GET", &format!("{base}&after={}", ids[1]), None)
+        .await;
+    assert_eq!(p2["items"].as_array().unwrap().len(), 1);
+    assert_eq!(p2["items"][0]["id"], json!(ids[0]));
+    assert_eq!(p2["items"][0]["reply_to"], json!(null));
+    assert_eq!(p2["next"], json!(null));
+    // errors
+    let (s, _) = t
+        .phone(&p, "GET", "/v1/phone/updates?ticket=t_aaaaaa", None)
+        .await;
+    assert_eq!(s, 422, "ticket without workspace");
+    let (s, _) = t
+        .phone(&p, "GET", &format!("{base}&after=m_doesnotexist0000"), None)
+        .await;
+    assert_eq!(s, 422, "after not in the view");
+    // an `after` from another ticket is not in this view either
+    let (_, o) = t
+        .phone(
+            &p,
+            "GET",
+            &format!("/v1/phone/updates?workspace={}&ticket=t_bbbbbb", a.id),
+            None,
+        )
+        .await;
+    let other = o["items"][0]["id"].as_str().unwrap().to_string();
+    let (s, _) = t
+        .phone(&p, "GET", &format!("{base}&after={other}"), None)
+        .await;
+    assert_eq!(s, 422);
+}
+
+#[tokio::test]
+async fn phone_updates_hide_unlisted_workspaces_like_unknown_ones() {
+    let t = start().await;
+    let (a, b) = (t.add_ws("A").await, t.add_ws("B").await);
+    let p = t.pair_phone(&[&a]).await;
+    upd(&t, &a, &p.0, "t_aaaaaa", "result", Some("T"), "x").await;
+    let q = format!("/v1/phone/updates?workspace={}&ticket=t_aaaaaa", b.id);
+    let unknown = "/v1/phone/updates?workspace=ws_unknown0000&ticket=t_aaaaaa";
+    let (s1, v1) = t.phone(&p, "GET", &q, None).await;
+    let (s2, v2) = t.phone(&p, "GET", unknown, None).await;
+    assert_eq!((s1, &v1), (200, &json!({"items": [], "next": null})));
+    assert_eq!((s2, v2), (200, v1));
+    // removed from the list at read time: disappears at once
+    let (s, _) = t
+        .admin_json(
+            "PATCH",
+            &format!("/admin/api/phones/{}", p.0),
+            Some(json!({"workspaces": [b.id]})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    let (_, g) = t.phone(&p, "GET", "/v1/phone/updates", None).await;
+    assert_eq!(g["items"], json!([]));
+    // no token, no view
+    let r = t
+        .http
+        .get(format!("{}/v1/phone/updates", t.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401);
+}
+
+#[tokio::test]
+async fn phone_updates_title_rule_is_enforced() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    let nfd = "Cafe\u{301}"; // not NFC
+    for bad in [
+        nfd,
+        "   ",
+        "two\nlines",
+        "zero\u{200b}width",
+        "bidi\u{202e}x",
+        "zalgo\u{301}\u{302}\u{303}",
+        "x\u{fe0f}",
+    ] {
+        let (s, v) = upd(&t, &a, &p.0, "t_aaaaaa", "note", Some(bad), "x").await;
+        assert_eq!(s, 422, "{bad:?}: {v}");
+    }
+    let long = "x".repeat(121);
+    assert_eq!(
+        upd(&t, &a, &p.0, "t_aaaaaa", "note", Some(&long), "x")
+            .await
+            .0,
+        422
+    );
+    assert_eq!(
+        upd(
+            &t,
+            &a,
+            &p.0,
+            "t_aaaaaa",
+            "note",
+            Some("Caf\u{e9} Rechnung \u{1f4c4}"),
+            "x"
+        )
+        .await
+        .0,
+        201
+    );
+}
+
+#[tokio::test]
+async fn phone_updates_scan_is_capped_per_request() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    let (s, old) = upd(&t, &a, &p.0, "t_aaaaaa", "result", Some("Old"), "old").await;
+    assert_eq!(s, 201);
+    let (_, newer) = upd(&t, &a, &p.0, "t_aaaaaa", "note", Some("Old"), "newer").await;
+    for i in 0..2100 {
+        assert_eq!(ws_text(&t, &a, &p.0, &format!("n{i}")).await.0, 201);
+    }
+    // the two updates lie beyond 2000 newer rows: the request stops at the cap instead of walking them
+    let (s, g) = t.phone(&p, "GET", "/v1/phone/updates", None).await;
+    assert_eq!((s, &g["items"]), (200, &json!([])));
+    // `after` is resolved in SQL: the page after `newer` is found without walking the newer rows
+    let q = format!(
+        "/v1/phone/updates?workspace={}&ticket=t_aaaaaa&after={}",
+        a.id,
+        newer["id"].as_str().unwrap()
+    );
+    let (s, v) = t.phone(&p, "GET", &q, None).await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["items"][0]["id"], old["id"]);
 }

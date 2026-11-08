@@ -1,0 +1,20 @@
+{
+  "schema": "orch.run/1",
+  "ticket": "t_r4c9pz",
+  "run": "r_8f2k1m",
+  "by": "focus",
+  "agent": "claude",
+  "mode": "live",
+  "tmux": { "socket": "orch-3f9a2c", "session": "t_r4c9pz" },
+  "pid": 48211,
+  "pid_started": "2026-11-05T09:00:02Z",
+  "agent_pid": 48230,
+  "agent_pid_started": "2026-11-05T09:00:03Z",
+  "live": { "state": "idle", "since": "2026-11-05T09:20:40Z" },
+  "started_at": "2026-11-05T09:00:02Z",
+  "renewed_at": "2026-11-05T09:20:40Z",
+  "pending": false,
+  "stop_requested": null,
+  "seen_revision": 15,
+  "reason": "Answer to q2"
+}

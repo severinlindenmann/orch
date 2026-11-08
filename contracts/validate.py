@@ -1,18 +1,23 @@
-"""Check every contract example (tickets incl. ext.scheduler, messages, workspaces, add-on manifests and views)
-and the publish crypto vector.
+"""Check every contract example (tickets incl. ext.automation, run records, pending input, Needs you rows,
+agent adapters and their config entries, messages, workspaces, add-on manifests and views), the publish
+crypto vectors, the workspace look (look.json, look/icons, vectors/look-v1.json), and the phone API v3 (every /v1/phone example in review/relay-api.examples.json against
+phone-api.schema.json, plus vectors/phone-v3-v1.json). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py
 """
 import base64
+import hashlib
 import json
 import re
 import struct
 import sys
 import tomllib
+import types
 import unicodedata
 from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker
+from referencing import Registry, Resource
 
 HERE = Path(__file__).parent
 fails = []
@@ -64,13 +69,57 @@ V = {
     "workspaces": validator("workspaces"),
     "addon-manifest": validator("addon-manifest"),
     "addon-view": validator("addon-view"),
+    "run": validator("run"),
+    "run-pending": validator("run-pending"),
+    "needs": validator("needs"),
+    "agent-adapter": validator("agent-adapter"),
+    "run-event": validator("addons/focus/run-event"),
+    "automation-ext": validator("addons/automation/ext"),
+    "focus-ext": validator("addons/focus/ext"),
 }
+# The [workspace] agent + [agents.<name>] part of .orch/config.toml: a $def of agent-adapter.schema.json.
+_adapters = json.loads((HERE / "agent-adapter.schema.json").read_text())
+V["agent-config"] = Draft202012Validator(
+    {"$ref": "#/$defs/user_config", "$defs": _adapters["$defs"]}, format_checker=FormatChecker()
+)
+# Core schemas never name an add-on or an agent tool (provider agnostic, core works alone). Older core files that
+# predate this rule (message, workspaces, addon-manifest's reserved names) are not listed here.
+CORE_CLEAN = ["ticket", "run", "run-pending", "needs", "agent-adapter"]
+TOOL_NAMES = re.compile(r"scheduler|automation|focus|relay|dashboard|publish|claude|codex", re.I)
 # Add-on ext schemas, keyed by ext name. A ticket's ext.<name> is checked with it (as the CLI does for installed add-ons).
-EXT = {"scheduler": validator("addons/scheduler.ext")}
+EXT = {"automation": V["automation-ext"], "focus": V["focus-ext"]}
+
+
+SESSION_ARG = re.compile(r"^(\{session\}|--[a-z][a-z0-9-]*=\{session\})$")
+
+
+def argv_errors(doc):
+    """Order rules of agent-adapter.schema.json $defs/argv that JSON Schema cannot express
+    (adapters.py checks the same):
+    {prompt} is a whole item after a '--' item; {session} is a whole item or --flag={session}."""
+    out = []
+    for name, a in (doc.get("adapters") or {}).items():
+        for mode in ("oneshot", "live"):
+            for key, argv in (a.get(mode) or {}).items():
+                if not isinstance(argv, list):
+                    continue
+                for i, item in enumerate(argv):
+                    where = f"{name}.{mode}.{key}[{i}]"
+                    if "{prompt}" in item and (item != "{prompt}" or "--" not in argv[:i]):
+                        out.append(f"{where}: {{prompt}} must be a whole item after '--'")
+                    if "{session}" in item and not SESSION_ARG.match(item):
+                        out.append(f"{where}: {{session}} must be a whole item or --flag={{session}}")
+    return [types.SimpleNamespace(message=m) for m in out]
 
 
 def errors(kind, doc):
+    if kind == "run-event":  # an example file is a list of events (one log)
+        if not isinstance(doc, list) or not doc:
+            return [types.SimpleNamespace(message="needs a non-empty list of events")]
+        return [e for ev in doc for e in V[kind].iter_errors(ev)]
     errs = list(V[kind].iter_errors(doc))
+    if kind == "agent-adapter" and not errs:
+        errs += argv_errors(doc)
     if kind == "ticket" and isinstance(doc.get("ext"), dict):
         for name, data in doc["ext"].items():
             if name in EXT:
@@ -89,13 +138,22 @@ def check(kind, doc, want_ok, label):
 
 
 for kind in V:
-    for f in sorted((HERE / "examples" / kind).glob("*.*")):
+    files = sorted((HERE / "examples" / kind).glob("*.*"))
+    for f in files:
         check(kind, load(f), f.name.startswith("valid-"), f"examples/{kind}/{f.name}")
+    for prefix in ("valid-", "invalid-"):
+        if not any(f.name.startswith(prefix) for f in files):
+            fails.append(f"examples/{kind}: needs at least one {prefix}* example")
+
+for name in CORE_CLEAN:
+    hit = TOOL_NAMES.search((HERE / f"{name}.schema.json").read_text())
+    if hit:
+        fails.append(f"{name}.schema.json names an add-on or agent tool: {hit.group(0)!r}")
 
 review = HERE / "review"
 check("ticket", json.loads((review / "ticket.example.json").read_text()), True, "review/ticket")
 check("workspaces", json.loads((review / "workspaces.example.json").read_text()), True, "review/workspaces")
-check("addon-manifest", load(review / "scheduler.orch-addon.toml"), True, "review/scheduler.orch-addon")
+check("addon-manifest", load(review / "automation.orch-addon.toml"), True, "review/automation.orch-addon")
 check("addon-view", load(review / "scheduler.view.example.json"), True, "review/scheduler.view")
 for i, m in enumerate(json.loads((review / "message.examples.json").read_text())):
     check("message", m, True, f"review/message[{i}]")
@@ -120,12 +178,16 @@ def decrypt(key_b64, blob):
 
 vec = json.loads((HERE / "vectors" / "publish-blob-v1.json").read_text())
 g = vec["good"]
-try:
-    h, body = decrypt(g["key_b64url"], bytes.fromhex(g["blob_hex"]))
-    if body.decode() != g["content_utf8"]:
-        fails.append("vector good: content differs")
-except Exception as e:  # noqa: BLE001
-    fails.append(f"vector good: {e!r}")
+for gname in ("good", "good_with_note"):
+    g = vec[gname]
+    try:
+        h, body = decrypt(g["key_b64url"], bytes.fromhex(g["blob_hex"]))
+        if body.decode() != g["content_utf8"]:
+            fails.append(f"vector {gname}: content differs")
+        if json.dumps(h, ensure_ascii=False, separators=(",", ":")) != g["header_json"]:
+            fails.append(f"vector {gname}: header differs")
+    except Exception as e:  # noqa: BLE001
+        fails.append(f"vector {gname}: {e!r}")
 for case in vec["must_fail"]:
     try:
         decrypt(case["key_b64url"], bytes.fromhex(case["blob_hex"]))
@@ -173,6 +235,390 @@ for case in bvec["must_fail"]:
         fails.append(f"bundle vector {case['name']}: unpacked but must fail")
     except Exception:  # noqa: BLE001
         pass
+
+# clean_untrusted (SA-14): reference rules of vectors/clean-untrusted-v1.json;
+# workspace/src/orch/text.py must give the same outputs. Order matters: drop invisible characters FIRST
+# (so they cannot split a comment marker), then remove comments until nothing changes, then an open "<!--" tail.
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
+_OPEN_TAIL = re.compile(r"<!--.*\Z", re.S)
+# Default_Ignorable_Code_Point (Unicode DerivedCoreProperties), dropped whatever their category.
+_DROP = (
+    {0x00AD, 0x034F, 0x061C, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x3164, 0xFEFF, 0xFFA0}
+    | set(range(0x180B, 0x1810))
+    | set(range(0x200B, 0x2010))
+    | set(range(0x202A, 0x202F))
+    | set(range(0x2060, 0x2070))
+    | set(range(0xFE00, 0xFE10))
+    | set(range(0xFFF0, 0xFFF9))
+    | set(range(0x1BCA0, 0x1BCA4))
+    | set(range(0x1D173, 0x1D17B))
+    | set(range(0xE0000, 0xE1000))
+    | {0x2800}  # braille blank: looks empty, not ignorable
+)
+
+
+def clean_untrusted(text, limit=2000):
+    text = unicodedata.normalize("NFC", text).replace("\u2028", "\n").replace("\u2029", "\n")
+    text = "".join(
+        ch
+        for ch in text
+        if ch in "\n\t" or (unicodedata.category(ch) not in ("Cc", "Cf", "Cn", "Cs") and ord(ch) not in _DROP)
+    )
+    while True:
+        cut = _COMMENT.sub("", text)
+        if cut == text:
+            break
+        text = cut
+    return _OPEN_TAIL.sub("", text)[:limit]
+
+
+cvec = json.loads((HERE / "vectors" / "clean-untrusted-v1.json").read_text())
+if len(cvec["cases"]) < 3:
+    fails.append("clean-untrusted vector: needs at least three cases")
+for case in cvec["cases"]:
+    if clean_untrusted(case["in"]) != case["out"]:
+        fails.append(f"clean-untrusted vector {case['name']}: output differs")
+
+# ticket_view (mobile chat): schema + the 16 KB cap on body.ticket_view as compact UTF-8 JSON.
+# The relay (relay/tests/ticket_view.rs) and the workspace (workspace/tests/test_ticket_view.py) replay the same cases.
+tvec = json.loads((HERE / "vectors" / "ticket-view-v1.json").read_text())
+for case in tvec["cases"]:
+    m = case["message"]
+    view = m["body"].get("ticket_view")
+    big = view is not None and len(json.dumps(view, separators=(",", ":"), ensure_ascii=False).encode()) > tvec["cap_bytes"]
+    ok = not errors("message", m) and not big
+    if ok != case["ok"]:
+        fails.append(f"ticket-view vector {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
+
+
+# Ticket keys: reference rule for the code suggested from a folder name (workspace/src/orch/config.py
+# suggest_code gives the same) and the key pattern of ticket.schema.json.
+def suggest_code(name):
+    """Initials of the words (up to 4); one word gives its first 3 characters. ASCII letters and digits only,
+    uppercase; fewer than 2 characters are filled up with W, S (empty name -> WS)."""
+    words = re.findall(r"[A-Za-z0-9]+", unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode())
+    code = ("".join(w[0] for w in words[:4]) if len(words) > 1 else (words[0][:3] if words else "")).upper()
+    return (code + "WS")[:2] if len(code) < 2 else code
+
+
+kvec = json.loads((HERE / "vectors" / "ticket-key-v1.json").read_text())
+_ts = json.loads((HERE / "ticket.schema.json").read_text())["$defs"]
+_KEY, _CODE = re.compile(_ts["key"]["pattern"]), re.compile(_ts["code"]["pattern"])
+for name, want in kvec["suggest"]:
+    got = suggest_code(name)
+    if got != want or not _CODE.match(got):
+        fails.append(f"ticket-key vector suggest {name!r}: got {got!r}, want {want!r}")
+for k in kvec["valid_keys"]:
+    if not _KEY.match(k):
+        fails.append(f"ticket-key vector: {k!r} must be a valid key")
+for k in kvec["invalid_keys"]:
+    if _KEY.match(k):
+        fails.append(f"ticket-key vector: {k!r} must be refused")
+
+
+# Phone API v3 (relay-api.md, Phone API): request/response bodies in phone-api.schema.json, which points into
+# message.schema.json. Every /v1/phone example and the phone-v3 vector are checked against it.
+_msg_schema = _expand(json.loads((HERE / "message.schema.json").read_text()))
+_phone_schema = _expand(json.loads((HERE / "phone-api.schema.json").read_text()))
+_look_schema = json.loads((HERE / "look.schema.json").read_text())
+_reg = Registry().with_resources(
+    [(s["$id"], Resource.from_contents(s)) for s in (_msg_schema, _phone_schema, _look_schema)]
+)
+
+
+def phone_errors(defname, doc):
+    v = Draft202012Validator({"$ref": f"{_phone_schema['$id']}#/$defs/{defname}"}, registry=_reg, format_checker=FormatChecker())
+    return list(v.iter_errors(doc))
+
+
+# (method, path regex, request $def or None, {status: response $def}); error statuses use $defs/error.
+PHONE_ROUTES = [
+    ("POST", r"/v1/phone/send", "send_request", {201: "send_response", 200: "send_response"}),
+    ("POST", r"/v1/phone/answer", "answer_request", {201: "answer_response", 200: "answer_response"}),
+    ("POST", r"/v1/phone/blobs", None, {201: "blob_response"}),
+    ("GET", r"/v1/phone/messages(\?.*)?", None, {200: "messages_response"}),
+    ("GET", r"/v1/phone/workspaces", None, {200: "workspaces_response"}),
+    ("PATCH", r"/v1/phone/workspaces/ws_[a-z0-9]{10}", "workspace_patch_request", {200: "workspace_item"}),
+    ("GET", r"/v1/phone/settings", None, {200: "settings"}),
+    ("PATCH", r"/v1/phone/settings", "settings_patch_request", {200: "settings"}),
+    ("POST", r"/v1/phone/invitations/redeem", "redeem_request", {200: "redeem_response"}),
+    ("POST", r"/v1/phone/transcribe(\?.*)?", None, {200: "transcribe_response"}),
+]
+NEW_PHONE_PATHS = ["/v1/phone/blobs", "/v1/phone/speech/", "/v1/phone/settings", "/v1/phone/invitations/redeem"]
+_seen_new = set()
+for i, ex in enumerate(json.loads((review / "relay-api.examples.json").read_text())):
+    req, resp = ex["request"], ex["response"]
+    for np in NEW_PHONE_PATHS:
+        if req["path"].startswith(np):
+            _seen_new.add(np)
+    for method, rx, reqdef, respdefs in PHONE_ROUTES:
+        if req["method"] != method or not re.fullmatch(rx, req["path"]):
+            continue
+        label = f"review/relay-api[{i}] {method} {req['path']} {resp['status']}"
+        if reqdef and req["body"] is not None:
+            for e in phone_errors(reqdef, req["body"])[:1]:
+                if resp["status"] < 400 or resp["status"] in (409, 410, 404):
+                    fails.append(f"{label}: request: {e.message}")
+        if resp["status"] >= 400:
+            for e in phone_errors("error", resp["body"])[:1]:
+                fails.append(f"{label}: error body: {e.message}")
+        elif resp["status"] in respdefs:
+            for e in phone_errors(respdefs[resp["status"]], resp["body"])[:1]:
+                fails.append(f"{label}: response: {e.message}")
+for np in NEW_PHONE_PATHS:
+    if np not in _seen_new:
+        fails.append(f"review/relay-api: needs an example for {np}")
+
+pvec = json.loads((HERE / "vectors" / "phone-v3-v1.json").read_text())
+
+
+def build_phone_text(phone, req):
+    """Reference: the text message the relay stores for POST /v1/phone/send (without id and created_at)."""
+    m = {"schema": "orch.msg/1", "from": phone, "to": req["to"], "type": "text"}
+    if req.get("ticket"):
+        m["ticket"] = req["ticket"]
+    if req.get("reply_to"):
+        m["reply_to"] = req["reply_to"]
+    body = {"client_id": req["client_id"]} if "client_id" in req else {}
+    if req.get("general") is True:
+        body["general"] = True
+    for k in ("text", "attachments", "voice", "location", "feedback"):
+        if k in req:
+            body[k] = req[k]
+    m["body"] = body
+    return m
+
+
+for case in pvec["send"]:
+    ok = not phone_errors("send_request", case["request"])
+    if ok != case["ok"]:
+        fails.append(f"phone-v3 vector send {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
+    if case["ok"]:
+        built = build_phone_text(pvec["phone"], case["request"])
+        if built != case.get("built"):
+            fails.append(f"phone-v3 vector send {case['name']}: built message differs")
+        stored = {**built, "id": "m_0000000000000001", "created_at": "2026-11-06T20:00:00Z"}
+        for e in errors("message", stored)[:1]:
+            fails.append(f"phone-v3 vector send {case['name']}: built message invalid: {e.message}")
+for sect, defname in (("answer", "answer_request"), ("settings_patch", "settings_patch_request"), ("workspace_patch", "workspace_patch_request")):
+    for case in pvec[sect]:
+        if (not phone_errors(defname, case["request"])) != case["ok"]:
+            fails.append(f"phone-v3 vector {sect} {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
+
+
+# Mobile mode (relay-api.md, Mobile mode).
+mmvec = json.loads((HERE / "vectors" / "mobile-mode-v1.json").read_text())
+for case in mmvec["heartbeat"]:
+    if (not phone_errors("heartbeat_request", case["request"])) != case["ok"]:
+        fails.append(f"mobile-mode vector heartbeat {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
+    if case["ok"] and phone_errors("heartbeat_response", {"mobile_mode": case["stored"]}):
+        fails.append(f"mobile-mode vector heartbeat {case['name']}: stored value invalid")
+for case in mmvec["control"]:
+    if (not phone_errors("control_request", case["request"])) != case["ok"]:
+        fails.append(f"mobile-mode vector control {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
+    if case["ok"]:
+        body = {"control": case["request"]["control"]}
+        if "client_id" in case["request"]:
+            body["client_id"] = case["request"]["client_id"]
+        built = {"schema": "orch.msg/1", "from": mmvec["phone"], "to": case["request"]["to"], "type": "control", "body": body}
+        if built != case["built"]:
+            fails.append(f"mobile-mode vector control {case['name']}: built message differs")
+        stored = {**built, "id": "m_0000000000000001", "created_at": "2026-11-07T20:00:00Z"}
+        for e in errors("message", stored)[:1]:
+            fails.append(f"mobile-mode vector control {case['name']}: built message invalid: {e.message}")
+
+def speech_text(body, limit):
+    """Reference (relay-api.md, Speech): summary else text; URLs -> 'link'; drop * ` #; one space per whitespace run;
+    longer than limit: cut after the last . ! ? that is followed by a space within the limit, else before the last
+    space within the limit, else hard at the limit."""
+    src = (body.get("speak") or {}).get("summary") or body["text"]
+    src = re.sub(r"https?://\S+", "link", src)
+    src = re.sub(r"[*`#]", "", src)
+    src = re.sub(r"\s+", " ", src).strip()
+    if len(src) <= limit:
+        return src
+    ends = [i for i in range(limit) if src[i] in ".!?" and src[i + 1] == " "]
+    if ends:
+        return src[: ends[-1] + 1]
+    spaces = [i for i in range(limit + 1) if src[i] == " "]
+    return src[: spaces[-1]] if spaces else src[:limit]
+
+
+for case in pvec["speech_text"]:
+    got = speech_text(case["body"], pvec["speech_max_chars"])
+    if got != case["spoken"]:
+        fails.append(f"phone-v3 vector speech_text {case['name']}: got {got!r}")
+for case in pvec["general_updates"]:
+    if (not errors("message", case["message"])) != case["ok"]:
+        fails.append(f"phone-v3 vector general_updates {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
+for case in pvec["artifact_ids"]:
+    got = "a_" + hashlib.sha256(f"{case['source']}\n{case['ref']}".encode()).hexdigest()[:12]
+    if got != case["id"] or not re.fullmatch(_msg_schema["$defs"]["artifact_id"]["pattern"], got):
+        fails.append(f"phone-v3 vector artifact_ids {case['ref']}: got {got}")
+
+# Subscriber events and push signatures (relay-api.md, Subscribers).
+import hmac as _hmac
+
+_sub_v = validator("subscriber-event")
+svec = json.loads((HERE / "vectors" / "subscriber-v1.json").read_text())
+for ev in svec["valid_events"]:
+    for e in _sub_v.iter_errors(ev):
+        fails.append(f"subscriber vector {ev['id']}: {e.message}")
+for case in svec["invalid_events"]:
+    if not list(_sub_v.iter_errors(case["event"])):
+        fails.append(f"subscriber vector invalid {case['name']}: accepted")
+for case in svec["signatures"]:
+    mac = _hmac.new(case["secret"].encode(), f"{case['timestamp']}.{case['body']}".encode(), hashlib.sha256).hexdigest()
+    if "v1=" + mac != case["signature"]:
+        fails.append(f"subscriber vector signature {case['name']}: got v1={mac}")
+
+
+# Workspace look (look.md): allowlists in look.json, drawings in look/icons/, schema enums, vectors/look-v1.json.
+look = json.loads((HERE / "look.json").read_text())
+LOOK_ICONS = [i["id"] for i in look["icons"]]
+LOOK_COLORS = [c["id"] for c in look["colors"]]
+_cats = {c["id"] for c in look["categories"]}
+if len(LOOK_ICONS) != 100 or len(set(LOOK_ICONS)) != 100:
+    fails.append(f"look.json: needs 100 unique icon ids, has {len(set(LOOK_ICONS))}")
+if len(LOOK_COLORS) != 12 or len(set(LOOK_COLORS)) != 12:
+    fails.append("look.json: needs 12 unique colour tokens")
+_svg_ok = re.compile(r'^<svg xmlns="http://www\.w3\.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">(<(path|circle|rect|line|polyline|polygon|ellipse)( (d|cx|cy|r|rx|ry|x|y|x1|y1|x2|y2|width|height|points|fill)="[-0-9a-zA-Z. ,]*")+/>)+</svg>\n$')
+for i in look["icons"]:
+    if not re.fullmatch(r"[a-z][a-z0-9-]{1,23}", i["id"]) or i["category"] not in _cats or not i["label"]:
+        fails.append(f"look.json icon {i['id']}: bad id, category or label")
+    f = HERE / "look" / "icons" / f"{i['id']}.svg"
+    if not f.is_file() or not _svg_ok.match(f.read_text()):
+        fails.append(f"look/icons/{i['id']}.svg: missing, or not a plain 24px line drawing (shapes and numbers only)")
+_extra = {f.stem for f in (HERE / "look" / "icons").glob("*")} - set(LOOK_ICONS)
+if _extra:
+    fails.append(f"look/icons: files without an id in look.json: {sorted(_extra)}")
+
+
+def _lum(hx):
+    c = [int(hx[k:k + 2], 16) / 255 for k in (1, 3, 5)]
+    c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+
+def _contrast(a, b):
+    x, y = sorted((_lum(a), _lum(b)), reverse=True)
+    return (x + 0.05) / (y + 0.05)
+
+
+def _mix(fg, bg, alpha):
+    f = [int(fg[k:k + 2], 16) for k in (1, 3, 5)]
+    g = [int(bg[k:k + 2], 16) for k in (1, 3, 5)]
+    return "#" + "".join(f"{round(g[k] + (f[k] - g[k]) * alpha):02x}" for k in range(3))
+
+
+for c in look["colors"]:
+    for tone, key in (("dark", "tint_dark"), ("light", "tint_light")):
+        hx, t = c[tone], look["badge"][key]
+        if not re.fullmatch(r"#[0-9a-f]{6}", hx) or _contrast(hx, _mix(hx, t["surface"], t["alpha"])) < 4.5:
+            fails.append(f"look.json colour {c['id']} {tone}: not #rrggbb or below 4.5:1 on its badge background")
+if _look_schema["$defs"]["icon"]["oneOf"][0]["enum"] != LOOK_ICONS or _look_schema["$defs"]["color"]["oneOf"][0]["enum"] != LOOK_COLORS:
+    fails.append("look.schema.json: icon/color enums differ from look.json")
+
+
+def look_errors(defname, doc):
+    v = Draft202012Validator({"$ref": f"{_look_schema['$id']}#/$defs/{defname}"}, registry=_reg)
+    return list(v.iter_errors(doc))
+
+
+def look_clean(name):
+    return unicodedata.normalize("NFC", name).strip()
+
+
+def look_default_color(name):
+    h = 5381
+    for b in look_clean(name).encode("utf-8"):
+        h = (h * 33 + b) & 0xFFFFFFFF
+    return h, LOOK_COLORS[h % len(LOOK_COLORS)]
+
+
+def look_letter(name):
+    for ch in look_clean(name):
+        if unicodedata.category(ch)[0] in "LN":
+            up = ch.upper()
+            return up if len(up) == 1 else ch
+    return "?"
+
+
+def look_me_patch(stored, body, service):
+    """PATCH /v1/me with look fields on relay or publish: (status, record after)."""
+    if not isinstance(body, dict) or look_errors("me_look_patch" if service == "relay" else "publish_me_patch", body):
+        return 422, stored
+    after = {**stored, **body}
+    if "icon" in body or "color" in body:
+        after["look_by"] = "workspace"
+    return 200, after
+
+
+def look_meta(rec):
+    return {"workspace": {k: rec[k] for k in ("name", "icon", "color")} if rec["show_on_shared_pages"] else None}
+
+
+def look_local_set(local, caller, req):
+    """orch look set / the dashboard: (ok, local after). An agent never overrides the person's pick."""
+    if look_errors("admin_look_patch", req) or not req or (caller == "agent" and local["set_by"] == "human"):
+        return False, local
+    return True, {**local, **req, "set_by": caller}
+
+
+def look_admin_patch(stored, body):
+    """The look part of PATCH /admin/api/workspaces/<id>: (status, record after)."""
+    part = {k: v for k, v in body.items() if k in ("icon", "color")}
+    if not part:
+        return 200, stored
+    if look_errors("admin_look_patch", part):
+        return 422, stored
+    if stored["look_by"] == "workspace":
+        return 409, stored
+    return 200, {**stored, **part, "look_by": "admin"}
+
+
+def look_render(name, icon, color):
+    return {"icon": icon if icon in LOOK_ICONS else None,
+            "color": color if color in LOOK_COLORS else look_default_color(name)[1], "letter": look_letter(name)}
+
+
+def look_connect(local, remote):
+    """On connect: (value written to .orch/config.toml or None, PATCH /v1/me body)."""
+    if local["icon"] is None and local["color"] is None and remote["look_by"] == "admin":
+        adopted = {"icon": remote["icon"], "color": remote["color"]}
+        return {**adopted, "set_by": "human"}, adopted
+    return None, {"icon": local["icon"], "color": local["color"]}
+
+
+lvec = json.loads((HERE / "vectors" / "look-v1.json").read_text())
+for case in lvec["default"]:
+    if look_default_color(case["name"]) != (case["djb2_32"], case["color"]) or look_letter(case["name"]) != case["letter"]:
+        fails.append(f"look vector default {case['name']!r}: got {look_default_color(case['name'])} {look_letter(case['name'])!r}")
+for case in lvec["me_patch"]:
+    if look_me_patch(case["stored"], case["body"], case["service"]) != (case["status"], case["after"]):
+        fails.append(f"look vector me_patch {case['name']}: got {look_me_patch(case['stored'], case['body'], case['service'])}")
+for case in lvec["admin_patch"]:
+    if look_admin_patch(case["stored"], case["body"]) != (case["status"], case["after"]):
+        fails.append(f"look vector admin_patch {case['name']}: got {look_admin_patch(case['stored'], case['body'])}")
+for case in lvec["meta"]:
+    if look_meta(case["record"]) != case["meta"] or look_errors("file_meta", case["meta"]):
+        fails.append(f"look vector meta {case['name']}: got {look_meta(case['record'])}")
+for case in lvec["shared_pages_set"]:
+    ok = case["caller"] == "human" and isinstance(case["request"], bool)
+    if (ok, case["request"] if ok else case["local"]) != (case["ok"], case["after"]):
+        fails.append(f"look vector shared_pages_set {case['name']}: expected the core to {'allow' if case['ok'] else 'refuse'} it")
+for case in lvec["local_set"]:
+    if look_local_set(case["local"], case["caller"], case["request"]) != (case["ok"], case["after"]):
+        fails.append(f"look vector local_set {case['name']}: got {look_local_set(case['local'], case['caller'], case['request'])}")
+for case in lvec["render"]:
+    got = look_render(case["name"], None if case.get("missing") else case["icon"], None if case.get("missing") else case["color"])
+    if got != case["shown"]:
+        fails.append(f"look vector render {case['why']}: got {got}")
+for case in lvec["connect"]:
+    if look_connect(case["local"], case["remote"]) != (case["write_local"], case["send"]):
+        fails.append(f"look vector connect {case['name']}: got {look_connect(case['local'], case['remote'])}")
+if not {200, 422}.issubset({c["status"] for c in lvec["me_patch"]}) or 409 not in {c["status"] for c in lvec["admin_patch"]}:
+    fails.append("look vectors: need 200 and 422 me_patch cases and a 409 admin_patch case")
 
 if fails:
     print("\n".join("FAIL " + f for f in fails))

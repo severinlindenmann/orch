@@ -1,0 +1,35 @@
+{
+  "description": "publish file blob v1 (crypto.md). 'good' must decrypt to header + content; every 'must_fail' case must be refused.",
+  "good": {
+    "key_b64url": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "url_fragment": "#k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "iv_hex": "6465666768696a6b6c6d6e6f",
+    "aad_utf8": "OPF1",
+    "header_json": "{\"name\":\"hello.txt\",\"type\":\"text/plain\",\"size\":12}",
+    "content_utf8": "hello, orch\n",
+    "blob_hex": "4f5046316465666768696a6b6c6d6e6f481bde5402cb38ff53077dd2f80d0f912ead287ef318d15e85a5d5389e819f6ae08c38b46362f765949d5a13df31a3b57e79a2d61237294d969dc3facfeed7e96086250823963b31518024da08b767f0cfaf",
+    "blob_len": 98
+  },
+  "good_with_note": {
+    "key_b64url": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "url_fragment": "#k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "iv_hex": "6465666768696a6b6c6d6e6f",
+    "aad_utf8": "OPF1",
+    "header_json": "{\"name\":\"hello.txt\",\"type\":\"text/plain\",\"size\":12,\"note\":\"Here is the file we talked about. \u2014 Anna\"}",
+    "content_utf8": "hello, orch\n",
+    "blob_hex": "4f5046316465666768696a6b6c6d6e6f481bde0002cb38ff53077dd2f80d0f912ead287ef318d15e85a5d5389e819f6ae08c38b46362f765949d5a13df31a3b57e79a2d6126663469585c9f4d5a3edef7ae9fb67a56b4f6dee4f8b2a7def119101586b55cbaee8a2ff9054ab0e6760716cf1065e2a23d61f9187b6a0ce61d7c40244f27ca9738747f48d4ae6b897a40779bf1ff67f85",
+    "blob_len": 150
+  },
+  "must_fail": [
+    {
+      "name": "wrong key",
+      "key_b64url": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE",
+      "blob_hex": "4f5046316465666768696a6b6c6d6e6f481bde5402cb38ff53077dd2f80d0f912ead287ef318d15e85a5d5389e819f6ae08c38b46362f765949d5a13df31a3b57e79a2d61237294d969dc3facfeed7e96086250823963b31518024da08b767f0cfaf"
+    },
+    {
+      "name": "truncated (last tag byte missing)",
+      "key_b64url": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "blob_hex": "4f5046316465666768696a6b6c6d6e6f481bde5402cb38ff53077dd2f80d0f912ead287ef318d15e85a5d5389e819f6ae08c38b46362f765949d5a13df31a3b57e79a2d61237294d969dc3facfeed7e96086250823963b31518024da08b767f0cf"
+    }
+  ]
+}

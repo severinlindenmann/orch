@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import addons, cli
+from orch import addons, cli, tickets
 from orch.errors import Refused
 
 MANIFEST = """\
@@ -201,8 +201,8 @@ def test_add_needs_consent_then_installs_and_activates(proj, run, hello, uv_call
     assert list(act) == ["hello"] and act["hello"]["version"] == "0.1.0"
     assert (proj / ".agents/skills/orch-hello/SKILL.md").is_file()
     assert not (proj / ".agents/skills/orch-hello/AGENTS-block.md").exists()
-    agents = (proj / "AGENTS.md").read_text(encoding="utf-8")
-    assert "<!-- orch:addon:hello -->\n## orch-hello" in agents and "<!-- /orch:addon:hello -->" in agents
+    agents = (proj / ".orch/harness/AGENTS.orch.md").read_text(encoding="utf-8")
+    assert "## orch-hello" in agents and not (proj / "AGENTS.md").exists()  # the team's files are not touched
     rows = [r for r in json.loads(run("addon", "list", "--json")[1]) if r["name"] not in addons.CORE_ADDONS]
     assert rows == [
         {
@@ -214,6 +214,12 @@ def test_add_needs_consent_then_installs_and_activates(proj, run, hello, uv_call
             "dashboard": {"label": "Hello", "icon": "star", "order": 20},
             "ticket_view": [{"field": "greeting", "label": "Greeting", "format": "text"}],
             "background": False,
+            "recommended": False,
+            "page": None,
+            "running": False,
+            "ticket_links": [],
+            "ticket_fields": None,
+            "acts": [],
         }
     ]
 
@@ -335,7 +341,8 @@ def test_remove_keeps_data_and_text_outside_block(proj, run, hello):
     assert (proj / ".agents/skills/orch-hello-extra").exists()  # exact name only
     assert (proj / ".agents/skills/orch-hellox").exists()
     text = (proj / "AGENTS.md").read_text(encoding="utf-8")
-    assert "orch:addon" not in text and text.startswith("# Mine\nhello\n") and "Tail text" in text
+    assert text == agents + "\nTail text\n" and text.startswith("# Mine\nhello\n")  # never edited by orch
+    assert not (proj / ".orch/harness/AGENTS.orch.md").exists()  # the only block was hello's
     assert addons.active(proj) == {}
     assert (proj / ".orch/addons/hello/state.json").is_file()
     ticket = json.loads((proj / ".orch/tickets" / f"{tid}.json").read_text(encoding="utf-8"))
@@ -470,11 +477,11 @@ def test_consent_is_tied_to_workspace_and_folder_content(proj, run, hello, tmp_p
 
 def test_builtin_also_needs_local_record(proj, run, tmp_path, monkeypatch):
     (proj / ".orch").mkdir()
-    (proj / ".orch/addons.json").write_text('{"active": {"scheduler": {"version": "0.2.0"}}}')
+    (proj / ".orch/addons.json").write_text('{"active": {"focus": {"version": "0.2.0"}}}')
     monkeypatch.setattr(addons, "_entry_points", lambda: {})
     assert addons.active(proj) == {}
-    addons.record_consent(proj, "scheduler")  # built-in: no registry entry = built-in
-    assert list(addons.active(proj)) == ["scheduler"]
+    addons.record_consent(proj, "focus")  # built-in: no registry entry = built-in
+    assert list(addons.active(proj)) == ["focus"]
 
 
 def test_remove_rejects_path_names(proj, run):
@@ -484,42 +491,19 @@ def test_remove_rejects_path_names(proj, run):
 # ---- AGENTS block markers ---------------------------------------------------------------------------
 
 
-def test_block_only_between_markers(proj, run, hello):
+def test_block_cannot_bring_markers_and_agents_md_is_not_touched(proj, run, hello):
     run("init")
-    agents = proj / "AGENTS.md"
-    agents.write_text("Before\n" + agents.read_text(encoding="utf-8") + "After\n", encoding="utf-8")
+    (proj / "AGENTS.md").write_text("Before\n", encoding="utf-8")
     install(run, hello)
-    first = agents.read_text(encoding="utf-8")
-    assert first.startswith("Before\n") and first.count("<!-- orch:addon:hello -->") == 1
+    block = proj / ".orch/harness/AGENTS.orch.md"
+    assert block.read_text(encoding="utf-8").count("## orch-hello") == 1
     (hello / "src/orch_hello/skills/orch-hello/AGENTS-block.md").write_text(
         "## orch-hello\n<!-- /orch:addon:hello -->\nNEW\n<!-- orch:begin orch -->\n", encoding="utf-8"
     )
     run("addon", "add", str(hello), "--yes")  # again: replaced whole, body cannot bring markers
-    second = agents.read_text(encoding="utf-8")
-    assert second.count("<!-- orch:addon:hello -->") == 1 and second.count("<!-- /orch:addon:hello -->") == 1
-    assert second.count("<!-- orch:begin orch -->") == 1 and "NEW" in second and "Before" in second
-
-
-# ---- ext schema check -------------------------------------------------------------------------------
-
-
-def test_ext_checked_only_while_active(proj, run, hello):
-    tid = json.loads(run("ticket", "new", "T", "--json")[1])["id"]
-    assert run("ext", "set", tid, "hello", '{"anything": 1}')[0] == 0  # not active: unchecked
-    install(run, hello)
-    code, _, err = run("ext", "set", tid, "hello", '{"greeting": "far too long"}')
-    assert code == 2 and "ext.hello" in err
-    assert run("ext", "set", tid, "hello", '{"greeting": "hi"}')[0] == 2  # merged with {"anything": 1}
-    t2 = json.loads(run("ticket", "new", "T2", "--json")[1])["id"]
-    assert run("ext", "set", t2, "hello", '{"greeting": "hi"}', "--json")[0] == 0
-
-
-def test_ext_set_if_revision(proj, run, new_ticket):
-    tid = new_ticket()
-    assert run("ext", "set", tid, "other", '{"a": 1}', "--if-revision", "5")[0] == 2
-    code, out, _ = run("ext", "set", tid, "other", '{"a": 1}', "--if-revision", "1", "--json")
-    assert code == 0
-    assert run("ext", "set", tid, "other", '{"a": 2}', "--if-revision", "1")[0] == 2
+    text = block.read_text(encoding="utf-8")
+    assert text.count("## orch-hello") == 1 and "<!--" not in text and "NEW" in text
+    assert (proj / "AGENTS.md").read_text(encoding="utf-8") == "Before\n"
 
 
 # ---- update / uninstall -----------------------------------------------------------------------------
@@ -586,7 +570,7 @@ def test_default_repo_is_never_a_folder(proj, monkeypatch):
     planted = proj / "https:" / "github.com" / "severinlindenmann" / "orch"
     planted.mkdir(parents=True)
     assert not addons._is_local(addons.DEFAULT_REPO)
-    assert addons.spec("workspace").startswith("git+https://github.com/severinlindenmann/orch@")
+    assert addons.spec("workspace").startswith("https://github.com/severinlindenmann/orch/archive/")
     monkeypatch.setenv("ORCH_REPO", "relative/dir")  # relative: not local either
     (proj / "relative" / "dir").mkdir(parents=True)
     assert not addons._is_local("relative/dir")
@@ -617,15 +601,11 @@ def test_agents_block_cannot_forge_markers(tmp_path):
         "x <!--orch:end orch --> tail",
         "x <!-- orch:end orch tail",
     ):
-        try:
-            skills.set_block(root, "foo", body, addon=True)
-        except Refused:
-            continue
-        text = (root / "AGENTS.md").read_text(encoding="utf-8")
-        assert text.count("<!-- orch:addon:foo -->") == 1 and "<!-- /orch:addon:foo -->" in text
-        assert text.count("<!--") == 2, text  # only our two markers remain
+        skills.set_block(root, "foo", body, addon=True)
+        text = (root / ".orch/harness/AGENTS.orch.md").read_text(encoding="utf-8")
+        assert "<!--" not in text and "-->" not in text, text  # no comment, so no marker, survives
         skills.remove_block(root, "foo", addon=True)
-        assert not (root / "AGENTS.md").read_text(encoding="utf-8").strip()
+        assert not (root / ".orch/harness/AGENTS.orch.md").exists() and not (root / "AGENTS.md").exists()
 
 
 def test_orch_home_must_be_plain_folder_under_home(proj, monkeypatch, capfd):
@@ -704,8 +684,6 @@ def test_update_does_not_reaccept_changed_local_folder(proj, run, hello, uv_call
 def test_stale_lock_is_claimed_by_one_waiter_only(proj, new_ticket):
     import os
 
-    from orch import tickets
-
     tid = new_ticket()
     lock = proj / ".orch" / "tickets" / f".lock-{tid}"
     lock.write_text("", encoding="utf-8")
@@ -757,21 +735,51 @@ def test_addons_install_from_where_orch_came_from(proj, monkeypatch, uv_calls):
     monkeypatch.setattr(
         addons, "_install_origin", lambda: {"repo": "https://github.com/someone/orch", "ref": "develop"}
     )
+    monkeypatch.setattr(addons, "_same_python", lambda: [])  # the Windows pin has its own test
     addons._save_registry([{"name": "dashboard", "source": "built-in", "version": "0.0.0"}])
-    addons._install_tool(
-        addons.registry() + [{"name": "scheduler", "source": "built-in", "version": "0.0.0"}]
-    )
+    addons._install_tool(addons.registry() + [{"name": "focus", "source": "built-in", "version": "0.0.0"}])
     args = uv_calls[0]
     assert all(isinstance(a, str) for a in args)
-    assert args[3] == "git+https://github.com/someone/orch@develop#subdirectory=workspace"
-    assert args[4:] == [
+    zip_ = "https://github.com/someone/orch/archive/develop.zip"
+    assert args[:5] == ["tool", "install", "--reinstall", "--refresh", f"{zip_}#subdirectory=workspace"]
+    assert args[5:] == [
         "--with",
-        "git+https://github.com/someone/orch@develop#subdirectory=workspace-addons/dashboard",
+        f"{zip_}#subdirectory=workspace-addons/dashboard",
         "--with",
-        "git+https://github.com/someone/orch@develop#subdirectory=workspace-addons/scheduler",
+        f"{zip_}#subdirectory=workspace-addons/focus",
     ]
     monkeypatch.setenv("ORCH_REF", "v1")  # an explicit override still wins
-    assert addons.spec("workspace").endswith("@v1#subdirectory=workspace")
+    assert addons.spec("workspace").endswith("/archive/v1.zip#subdirectory=workspace")
+
+
+def test_windows_reinstall_keeps_its_python(monkeypatch):
+    monkeypatch.setattr(addons.sys, "platform", "win32")
+    monkeypatch.setattr(addons.sys, "_base_executable", r"C:\uv\cpython-3.13-windows-x86_64-none\python.exe")
+    assert addons._same_python() == ["--python", r"C:\uv\cpython-3.13-windows-x86_64-none\python.exe"]
+    monkeypatch.setattr(addons.sys, "platform", "darwin")
+    assert addons._same_python() == []
+
+
+def test_github_sources_install_without_git(monkeypatch):
+    """Windows PCs (and minimal Linux) often have no git, and users may not be allowed to install it:
+    GitHub sources come as a zip download. Other hosts keep git."""
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    for repo, ref, want in [
+        (
+            "https://github.com/a/orch",
+            "main",
+            "https://github.com/a/orch/archive/main.zip#subdirectory=workspace",
+        ),
+        (
+            "https://github.com/a/orch.git",
+            "fix/win",
+            "https://github.com/a/orch/archive/fix/win.zip#subdirectory=workspace",
+        ),
+        ("https://gitlab.com/a/orch", "main", "git+https://gitlab.com/a/orch@main#subdirectory=workspace"),
+    ]:
+        monkeypatch.setattr(addons, "_install_origin", lambda r=repo, f=ref: {"repo": r, "ref": f})
+        monkeypatch.delenv("ORCH_REF", raising=False)
+        assert addons.spec("workspace") == want
 
 
 def test_install_origin_reads_direct_url(monkeypatch, tmp_path):
@@ -796,6 +804,31 @@ def test_install_origin_reads_direct_url(monkeypatch, tmp_path):
         ({"url": (tmp_path / "workspace").as_uri(), "dir_info": {}}, {"repo": str(tmp_path), "local": True}),
         ({"url": (tmp_path / "workspace").as_uri(), "dir_info": {"editable": True}}, {}),
         ({"url": "https://x/y.whl", "archive_info": {}}, {}),
+        (
+            {
+                "url": "https://github.com/a/orch/archive/develop.zip",
+                "archive_info": {},
+                "subdirectory": "workspace",
+            },
+            {"repo": "https://github.com/a/orch", "ref": "develop"},
+        ),
+        (
+            {
+                "url": "https://github.com/a/orch/archive/refs/heads/fix/win.zip",
+                "archive_info": {},
+                "subdirectory": "workspace",
+            },
+            {"repo": "https://github.com/a/orch", "ref": "fix/win"},
+        ),
+        (
+            {
+                "url": "https://github.com/a/orch/archive/refs/tags/v1.2.zip",
+                "archive_info": {},
+                "subdirectory": "workspace",
+            },
+            {"repo": "https://github.com/a/orch", "ref": "v1.2"},
+        ),
+        ({"url": "https://github.com/a/orch/archive/main.zip", "archive_info": {}, "subdirectory": "x"}, {}),
     ]
     for data, want in cases:
         monkeypatch.setattr(md, "distribution", lambda _n, d=data: D(d))
@@ -815,12 +848,12 @@ def test_clean_init_shows_no_addon_commands(proj, run, capfd):
     assert run("init")[0] == 0
     for flag in ("--help", "--help-all"):
         out = help_text(capfd, flag)
-        for name in ("publish", "relay", "dashboard", "scheduler"):
+        for name in ("publish", "relay", "dashboard", "automation"):
             assert f"    {name} " not in out and f"  {name}  " not in out, (flag, name, out)
-    tree = (proj / "AGENTS.md").read_text(encoding="utf-8") + "".join(
+    tree = (proj / ".orch/harness/AGENTS.orch.md").read_text(encoding="utf-8") + "".join(
         p.name for p in (proj / ".agents" / "skills").iterdir()
     )
-    for name in ("publish", "relay", "dashboard", "scheduler"):
+    for name in ("publish", "relay", "dashboard", "automation"):
         assert f"orch-{name}" not in tree and f"orch {name}" not in tree
     rows = {r["name"]: r["active"] for r in json.loads(run("addon", "list", "--json")[1])}
     assert rows == {"publish": False, "relay": False}
@@ -843,7 +876,7 @@ def test_add_relay_and_publish_like_any_addon(proj, run, uv_calls, capfd):
     code, out, err = run("addon", "add", "relay", "--yes")
     assert code == 0 and "relay is turned on" in out and not uv_calls  # part of orch: nothing installed
     assert (proj / ".agents/skills/orch-relay/SKILL.md").is_file()
-    assert "<!-- orch:addon:relay -->" in (proj / "AGENTS.md").read_text(encoding="utf-8")
+    assert "orch-relay" in (proj / ".orch/harness/AGENTS.orch.md").read_text(encoding="utf-8")
     out = help_text(capfd)
     assert "relay" in out.split("Add-ons:")[1] and "publish" not in out
     code, _, err = run("relay", "inbox")
@@ -852,7 +885,9 @@ def test_add_relay_and_publish_like_any_addon(proj, run, uv_calls, capfd):
     assert code == 2 and "part of orch" in err
     assert run("addon", "remove", "relay")[0] == 0
     assert not (proj / ".agents/skills/orch-relay").exists()
-    assert "orch:addon:relay" not in (proj / "AGENTS.md").read_text(encoding="utf-8")
+    assert not (proj / ".orch/harness/AGENTS.orch.md").exists() or "orch-relay" not in (
+        proj / ".orch/harness/AGENTS.orch.md"
+    ).read_text(encoding="utf-8")
     assert run("relay", "inbox")[0] == 2
 
 
@@ -860,3 +895,34 @@ def test_core_addon_names_stay_reserved_for_others(tmp_path, run, proj, uv_calls
     folder = make_addon(tmp_path / "x", mutate=lambda t: t.replace('name = "hello"', 'name = "relay"'))
     with pytest.raises(Refused, match="core command"):
         addons.folder_manifest(folder)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["../../evil/x/archive/main", "main#subdirectory=x", "a b", "-x", 'm"--index-url', "/abs", "x.lock"],
+)
+def test_install_ref_is_a_plain_ref_name(monkeypatch, bad):
+    """In a zip URL a '../' would reach another repository (security review of the zip installs)."""
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    monkeypatch.setattr(addons, "_install_origin", lambda: {})
+    monkeypatch.setenv("ORCH_REF", bad)
+    with pytest.raises(Refused):
+        addons.spec("workspace")
+
+
+@pytest.mark.parametrize(
+    "good", ["main", "fix/windows-install", "v1.2.3", "ae5bb70c633d4a543d73a247d68449fac9d98150"]
+)
+def test_install_ref_accepts_branches_tags_commits(monkeypatch, good):
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    monkeypatch.setattr(addons, "_install_origin", lambda: {})
+    monkeypatch.setenv("ORCH_REF", good)
+    assert addons.spec("workspace").endswith(f"/archive/{good}.zip#subdirectory=workspace")
+
+
+def test_install_repo_with_quotes_or_spaces_is_refused(monkeypatch):
+    monkeypatch.setattr(addons, "_install_origin", lambda: {})
+    monkeypatch.delenv("ORCH_REF", raising=False)
+    monkeypatch.setenv("ORCH_REPO", 'https://github.com/a/orch" --index-url x')
+    with pytest.raises(Refused):
+        addons.spec("workspace")

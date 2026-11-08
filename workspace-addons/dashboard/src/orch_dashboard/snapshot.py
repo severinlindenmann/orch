@@ -22,22 +22,22 @@ def _inline_json(obj) -> str:
 def render_snapshot(root: Path, with_addons: bool = False, orch_bin: str | None = None) -> str:
     """Return the snapshot as one HTML string (css, js, logo and data inline)."""
     orch_bin = orch_bin or os.environ.get("ORCH_BIN") or None
-    state = load_state(root, include_inbox=False, orch_bin=orch_bin, with_addons=with_addons)
+    state = load_state(root, orch_bin=orch_bin, with_addons=with_addons)
     if with_addons:  # the user asked: add-on tabs go along, each with one pulled view
         puller = ViewPuller(root, orch_bin)
         state["views"] = {a["name"]: puller.pull(a["name"]) for a in state["addons"] if a["dashboard"]}
     html = web_file("index.html").decode()
-    css = web_file("tokens.css").decode() + "\n" + web_file("style.css").decode()
-    js = web_file("blocks.js").decode() + "\n" + web_file("app.js").decode()
     logo = base64.b64encode(web_file("logo.svg")).decode()
     html = html.replace('src="logo.svg"', f'src="data:image/svg+xml;base64,{logo}"')
     icon = base64.b64encode(web_file("favicon.svg")).decode()
     html = html.replace('href="favicon.svg"', f'href="data:image/svg+xml;base64,{icon}"')
     html = html.replace('<link rel="apple-touch-icon" href="apple-touch-icon.png">\n', "")
-    html = html.replace('<link rel="stylesheet" href="tokens.css">', "")
-    html = html.replace('<link rel="stylesheet" href="style.css">', f"<style>{css}</style>")
-    html = html.replace('<script src="blocks.js"></script>\n<script src="app.js"></script>',
-                        f"<script>window.ORCH_SNAPSHOT={_inline_json(state)};</script><script>{js}</script>")
+    html = re.sub(r'<link rel="stylesheet" href="([\w./-]+)">',
+                  lambda m: f"<style>{web_file(m.group(1)).decode()}</style>", html)
+    data = f"<script>window.ORCH_SNAPSHOT={_inline_json(state)};</script>"
+    html = html.replace('<script src="blocks.js">', data + '<script src="blocks.js">', 1)
+    html = re.sub(r'<script src="([\w./-]+)"></script>',
+                  lambda m: f"<script>{web_file(m.group(1)).decode()}</script>", html)
     return html
 
 

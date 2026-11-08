@@ -1,0 +1,33 @@
+# Ticket links, add-on fields and the refresh act (drafts-v7-links pages 2, 4, 6).
+schema = "orch.addon/1"
+orch_api = 1
+name = "github"
+version = "0.1.0"
+description = "Pull requests and issues on tickets."
+run = "orch_github"
+skill = "skills/orch-github"
+ticket_ext = "ticket-fields.schema.json"
+
+[[ticket_links]]
+kind = "github-pr"
+label = "Pull request"
+icon = "git-pull-request"
+match = "https://github.com/*/*/pull/*"
+statuses = ["open", "review", "merged", "closed"]
+
+[[ticket_links]]
+kind = "github-issue"
+label = "Issue"
+icon = "circle-dot"
+match = ["https://github.com/*/*/issues/*"]
+statuses = ["open", "closed"]
+
+[ticket_fields]
+section = "GitHub"
+schema = "ticket-fields.schema.json"
+show_on_card = ["pr_status"]
+
+[acts.refresh]
+summary = "Update link titles and status"
+who = "anyone"
+writes = ["refs", "ext.github"]

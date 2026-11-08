@@ -1,0 +1,14 @@
+# A match pattern is an http(s) address.
+schema = "orch.addon/1"
+orch_api = 1
+name = "files"
+version = "0.1.0"
+description = "Local files."
+run = "orch_files"
+skill = "skills/orch-files"
+
+[[ticket_links]]
+kind = "local-file"
+label = "File"
+icon = "file"
+match = "file:///*"

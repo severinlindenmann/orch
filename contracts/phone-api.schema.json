@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/phone-api.schema.json",
+  "title": "orch relay phone API v3: request and response bodies",
+  "description": "Shapes of the phone routes in relay-api.md (Phone API). One $def per body; contracts/validate.py checks every /v1/phone example in review/relay-api.examples.json and vectors/phone-v3-v1.json against them. Unknown request fields are kept (common.md); response fields are never left out (null instead).",
+  "$defs": {
+    "machine_name": {
+      "description": "Display name of a computer in Mobile mode. Same character rule as update.title and the PATCH /v1/me description (relay-api.md): one line, NFC, only letters, marks, numbers, punctuation, symbols and spaces, not only spaces, no control/format/line/paragraph separators (bidi overrides, zero-width), no Default_Ignorable_Code_Point characters, at most 2 combining marks in a row. 1 to 60 characters.",
+      "type": "string", "minLength": 1, "maxLength": 60,
+      "pattern": "^[\\p{Zs}]*[\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}][\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}\\p{Zs}]*$",
+      "not": { "anyOf": [{ "pattern": "[\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u3164\ufe00-\ufe0f\uffa0\udb40\udd00-\udb40\uddef]" }, { "pattern": "[\\p{M}][\\p{M}][\\p{M}]" }] }
+    },
+    "mobile_mode": {
+      "description": "Mobile mode of a workspace (relay-api.md, Mobile mode). Phones always see all four fields.",
+      "type": "object", "required": ["on", "since", "ends_at", "machine"], "additionalProperties": false,
+      "properties": {
+        "on": { "type": "boolean" },
+        "since": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+        "ends_at": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+        "machine": { "oneOf": [{ "$ref": "#/$defs/machine_name" }, { "type": "null" }] }
+      },
+      "allOf": [
+        { "if": { "properties": { "on": { "const": true } } }, "then": { "properties": { "since": { "type": "string" }, "ends_at": { "type": "string" }, "machine": { "type": "string" } } }, "else": { "properties": { "since": { "type": "null" }, "ends_at": { "type": "null" }, "machine": { "type": "null" } } } }
+      ]
+    },
+    "heartbeat_request": {
+      "description": "POST /v1/heartbeat (workspace auth). on=true: since, ends_at, machine required, no ended. on=false: since/ends_at/machine null or left out, optional ended.",
+      "type": "object", "required": ["mobile_mode"],
+      "properties": {
+        "mobile_mode": {
+          "type": "object", "required": ["on"],
+          "properties": {
+            "on": { "type": "boolean" },
+            "since": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+            "ends_at": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+            "machine": { "oneOf": [{ "$ref": "#/$defs/machine_name" }, { "type": "null" }] },
+            "ended": { "enum": ["off", "lease", "restart"] }
+          },
+          "allOf": [
+            { "if": { "properties": { "on": { "const": true } } },
+              "then": { "required": ["since", "ends_at", "machine"], "properties": { "since": { "type": "string" }, "ends_at": { "type": "string" }, "machine": { "type": "string" } }, "not": { "required": ["ended"] } },
+              "else": { "properties": { "since": { "type": "null" }, "ends_at": { "type": "null" }, "machine": { "type": "null" } } } }
+          ]
+        }
+      }
+    },
+    "heartbeat_response": {
+      "type": "object", "required": ["mobile_mode"], "additionalProperties": false,
+      "properties": { "mobile_mode": { "$ref": "#/$defs/mobile_mode" } }
+    },
+    "control_request": {
+      "type": "object", "required": ["to", "control"],
+      "properties": {
+        "to": { "$ref": "#/$defs/ws_id" },
+        "control": { "enum": ["mobile_mode_off"] },
+        "client_id": { "$ref": "#/$defs/client_id" }
+      }
+    },
+    "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "msg_id": { "type": "string", "pattern": "^m_[a-z0-9]{16}$" },
+    "ws_id": { "type": "string", "pattern": "^ws_[a-z0-9]{10}$" },
+    "client_id": { "$ref": "message.schema.json#/$defs/client_id" },
+    "error": {
+      "type": "object", "required": ["error", "message"],
+      "properties": { "error": { "type": "string", "pattern": "^[a-z_]+$" }, "message": { "type": "string", "minLength": 1 } }
+    },
+
+    "send_request": {
+      "type": "object", "required": ["to"],
+      "anyOf": [{ "required": ["text"] }, { "required": ["attachments"] }, { "required": ["voice"] }, { "required": ["location"] }, { "required": ["feedback"] }],
+      "properties": {
+        "to": { "$ref": "#/$defs/ws_id" },
+        "client_id": { "$ref": "#/$defs/client_id" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
+        "ticket": { "oneOf": [{ "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" }, { "type": "null" }] },
+        "general": { "type": "boolean" },
+        "reply_to": { "oneOf": [{ "$ref": "#/$defs/msg_id" }, { "type": "null" }] },
+        "attachments": { "$ref": "message.schema.json#/$defs/text/properties/attachments" },
+        "voice": { "$ref": "message.schema.json#/$defs/text/properties/voice" },
+        "location": { "$ref": "message.schema.json#/$defs/text/properties/location" },
+        "feedback": { "$ref": "message.schema.json#/$defs/feedback" }
+      },
+      "allOf": [
+        { "if": { "required": ["general"], "properties": { "general": { "const": true } } }, "then": { "not": { "required": ["ticket"], "properties": { "ticket": { "type": "string" } } } } },
+        { "if": { "required": ["feedback"] }, "then": { "required": ["ticket"], "properties": { "ticket": { "type": "string" } } } }
+      ]
+    },
+    "send_response": {
+      "type": "object", "required": ["id"], "additionalProperties": false,
+      "properties": { "id": { "$ref": "#/$defs/msg_id" }, "client_id": { "oneOf": [{ "$ref": "#/$defs/client_id" }, { "type": "null" }] }, "duplicate": { "const": true } }
+    },
+
+    "answer_request": {
+      "type": "object", "required": ["question_message_id", "answer"],
+      "properties": {
+        "question_message_id": { "$ref": "#/$defs/msg_id" },
+        "answer": { "type": "string", "minLength": 1 },
+        "client_id": { "$ref": "#/$defs/client_id" }
+      }
+    },
+    "answer_response": { "$ref": "#/$defs/send_response" },
+
+    "blob_response": {
+      "type": "object", "required": ["blob_id", "size", "sha256"], "additionalProperties": false,
+      "properties": {
+        "blob_id": { "type": "string", "pattern": "^b_[a-z0-9]{16}$" },
+        "size": { "type": "integer", "minimum": 1, "maximum": 26214400 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+
+    "message_item": {
+      "type": "object", "required": ["message", "workspace_name", "delivered_at", "client_id"],
+      "properties": {
+        "message": { "$ref": "message.schema.json", "description": "With ticket: a topic text. Without ticket: General (workspace texts carry body.general true; an ack/working update there, with reply_to = the phone's General text, is the Started/Working receipt)." },
+        "workspace_name": { "type": "string" },
+        "delivered_at": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }], "description": "The phone's own texts: when the receiving workspace acked it (POST /v1/inbox/ack), else null. Always null on workspace texts." },
+        "client_id": { "oneOf": [{ "$ref": "#/$defs/client_id" }, { "type": "null" }], "description": "The phone's own texts: body.client_id. Null on workspace texts." }
+      }
+    },
+    "messages_response": {
+      "type": "object", "required": ["items", "next"],
+      "properties": { "items": { "type": "array", "items": { "$ref": "#/$defs/message_item" } }, "next": { "type": ["string", "null"] } }
+    },
+
+    "muted_until": { "oneOf": [{ "$ref": "#/$defs/time" }, { "const": "forever" }, { "type": "null" }] },
+    "workspace_item": {
+      "type": "object", "required": ["id", "name", "description", "tags", "online", "last_seen", "open_questions", "muted_until", "icon", "color"],
+      "properties": {
+        "id": { "$ref": "#/$defs/ws_id" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "online": { "type": "boolean" },
+        "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+        "open_questions": { "type": "integer", "minimum": 0 },
+        "muted_until": { "$ref": "#/$defs/muted_until" },
+        "icon": { "type": ["string", "null"], "description": "look.md: an id; unknown ids fall back to the letter (read shape, not the allowlist)" },
+        "color": { "type": ["string", "null"], "description": "look.md: a token; unknown tokens fall back to Automatic (read shape, not the allowlist)" }
+      }
+    },
+    "workspaces_response": {
+      "type": "object", "required": ["items", "next"],
+      "properties": { "items": { "type": "array", "items": { "$ref": "#/$defs/workspace_item" } }, "next": { "type": ["string", "null"] } }
+    },
+    "workspace_patch_request": {
+      "type": "object", "required": ["muted_until"],
+      "properties": { "muted_until": { "$ref": "#/$defs/muted_until" } }
+    },
+
+    "settings": {
+      "type": "object", "required": ["speak", "swiss_german", "tts_cap_usd", "tts_used_usd_month"], "additionalProperties": false,
+      "properties": {
+        "speak": { "enum": ["auto", "always", "never"] },
+        "swiss_german": { "type": "boolean" },
+        "tts_cap_usd": { "type": "number", "minimum": 0, "maximum": 100 },
+        "tts_used_usd_month": { "type": "number", "minimum": 0 }
+      }
+    },
+    "settings_patch_request": {
+      "type": "object", "anyOf": [{ "required": ["speak"] }, { "required": ["swiss_german"] }, { "required": ["tts_cap_usd"] }],
+      "properties": {
+        "speak": { "enum": ["auto", "always", "never"] },
+        "swiss_german": { "type": "boolean" },
+        "tts_cap_usd": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+
+    "redeem_request": {
+      "description": "At most 10 calls a minute per phone (429 rate_limited).",
+      "type": "object", "required": ["code"],
+      "properties": { "code": { "type": "string", "pattern": "^pc_[A-Za-z0-9_-]{22}$" } }
+    },
+    "redeem_response": {
+      "type": "object", "required": ["workspaces"], "additionalProperties": false,
+      "properties": {
+        "workspaces": {
+          "type": "array", "minItems": 1,
+          "items": { "type": "object", "required": ["id", "name"], "properties": { "id": { "$ref": "#/$defs/ws_id" }, "name": { "type": "string" } } }
+        }
+      }
+    },
+
+    "transcribe_response": {
+      "type": "object", "required": ["text", "language", "duration"],
+      "properties": { "text": { "type": "string" }, "language": { "$ref": "message.schema.json#/$defs/lang" }, "duration": { "type": "number", "minimum": 0 } }
+    }
+  }
+}

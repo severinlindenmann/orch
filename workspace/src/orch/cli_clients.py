@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from orch import net, publish, relay, templates, tickets
 from orch.errors import Refused
+from orch.text import clean_untrusted
 
 
 def _size(n: int) -> str:
@@ -83,6 +85,13 @@ def add_parsers(sub, common) -> None:
     life.add_argument("--permanent", action="store_true")
     x = pub.add_parser("file", parents=[common, life], help="encrypt and share a file or a page folder")
     x.add_argument("path")
+    x.add_argument("--note", help="a short message for the person who opens the link (up to 280 characters)")
+    x.add_argument(
+        "--replace", metavar="ID", help="swap the content of this file (f_...), the link stays the same"
+    )
+    x = pub.add_parser("extend", parents=[common], help="keep a shared file longer (same link)")
+    x.add_argument("id")
+    x.add_argument("--days", type=int, required=True, help="from today, 1-90 (never shorter than now)")
     x = pub.add_parser("app", parents=[common, life], help="deploy a folder that has app.toml")
     x.add_argument("folder")
     g = x.add_mutually_exclusive_group()
@@ -94,8 +103,9 @@ def add_parsers(sub, common) -> None:
     x.add_argument("folder")
     x.add_argument("--store", choices=templates.STORES, default="none")
     pub.add_parser("list", parents=[common], help="list shared files and apps")
+    pub.add_parser("view", parents=[common], help="the Shared tab of the dashboard (read-only, no keys)")
     for n in ("restart", "stop"):
-        x = pub.add_parser(n, parents=[common])
+        x = pub.add_parser(n, parents=[common], help=f"{n} a deployed app")
         x.add_argument("name")
     x = pub.add_parser("delete", parents=[common], help="delete a file (f_...) or an app (name)")
     x.add_argument("id")
@@ -109,10 +119,17 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--token", required=True)
     rel.add_parser("whoami", parents=[common], help="show who you are and which phones are paired")
     rel.add_parser("status", parents=[common], help="is this folder connected to a relay (no network)")
+    rel.add_parser("view", parents=[common], help="the Relay tab of the dashboard (read-only, no network)")
+    _add_mobile(rel, common)
     _add_profile(rel)
     x = rel.add_parser("inbox", parents=[common], help="pull new messages")
     x.add_argument("--wait", type=int, default=0, help="wait up to N seconds (max 30)")
-    x = rel.add_parser("done", parents=[common], help="mark a message as processed, before acting")
+    x.add_argument("--since", type=int, help="add-ons: list every arrival after this number (marks nothing)")
+    x = rel.add_parser("outbox", parents=[common], help="messages saved but not sent yet")
+    x.add_argument("--resend", action="store_true", help="try to send them now")
+    x = rel.add_parser(
+        "done", parents=[common], help="mark a message as handled (and get the ticket of an allowed task)"
+    )
     x.add_argument("id")
     t = argparse.ArgumentParser(add_help=False)
     t.add_argument("--ticket")
@@ -120,6 +137,15 @@ def add_parsers(sub, common) -> None:
     x.add_argument("workspace")
     x.add_argument("text", nargs="?", default="")
     x.add_argument("--file")
+    x.add_argument("--update", choices=relay.UPDATE_KINDS, help="mark the text as a work update of --ticket")
+    x.add_argument("--reply-to", help="id of the message this answers")
+    x.add_argument("--speak", action="store_true", help="a phone can read this out loud (long answers)")
+    x.add_argument("--summary", help="what to read out instead of the whole text (with --speak)")
+    x = rel.add_parser(
+        "topic", parents=[common], help="turn a phone message (from General) into a ticket of its own"
+    )
+    x.add_argument("--from", dest="message", required=True, help="id of the phone message")
+    x.add_argument("title")
     x = rel.add_parser("delegate", parents=[common, t], help="hand a task to another workspace")
     x.add_argument("workspace")
     x.add_argument("title")
@@ -137,13 +163,15 @@ def add_parsers(sub, common) -> None:
     rel.add_parser("refresh", parents=[common], help="update settings and the workspace list")
     x = rel.add_parser("download", parents=[common], help="save the file of a file message")
     x.add_argument("id")
-    w = rel.add_parser("webhook", help="incoming webhooks").add_subparsers(dest="wsub", required=True)
-    x = w.add_parser("new", parents=[common, t])
+    w = rel.add_parser("webhook", help="addresses that turn outside calls into messages").add_subparsers(
+        dest="wsub", required=True
+    )
+    x = w.add_parser("new", parents=[common, t], help="make a webhook address (shown once)")
     g = x.add_mutually_exclusive_group(required=True)
     g.add_argument("--once", action="store_true")
     g.add_argument("--permanent", action="store_true")
-    w.add_parser("list", parents=[common])
-    x = w.add_parser("delete", parents=[common])
+    w.add_parser("list", parents=[common], help="list webhooks")
+    x = w.add_parser("delete", parents=[common], help="delete a webhook")
     x.add_argument("id")
 
 
@@ -172,14 +200,24 @@ def run_publish(args, root: Path, out) -> None:
         )
     elif sub == "file":
         with net.working(f"Encrypting and uploading {Path(args.path).name}"):
-            r = publish.share_file(root, Path(args.path), args.days, args.permanent)
+            r = publish.share_file(root, Path(args.path), args.days, args.permanent, args.note, args.replace)
         out(
             args,
             r,
-            f"Shared {r['name']} ({_size(r['size'])}), {_exp(r['expires_at'])}. Open this link:\n{r['link']}"
+            f"{'Replaced' if args.replace else 'Shared'} {r['name']} ({_size(r['size'])}), "
+            f"{_exp(r['expires_at'])}. Open this link:\n{r['link']}"
             + (f"\nFiles: {', '.join(r['files'])}" if r.get("files") else "")
             + (f"\nLeft out (look like secrets): {', '.join(r['skipped'])}" if r.get("skipped") else ""),
         )
+    elif sub == "extend":
+        r = publish.extend(root, args.id, args.days)
+        out(args, r, f"{r.get('name') or args.id} now {_exp(r['expires_at'])}. Same link.")
+    elif sub == "view":
+        v = publish.view(root)
+        rows = [
+            f"{i['title']}  {i['subtitle']}" for b in v["blocks"] if b["type"] == "list" for i in b["items"]
+        ]
+        out(args, v, "\n".join(rows) or "Nothing shared yet.")
     elif sub == "app":
         pub = True if args.public else False if args.private else None
         with net.working(f"Deploying {Path(args.folder).name}"):
@@ -222,12 +260,63 @@ def run_publish(args, root: Path, out) -> None:
         out(args, {"ok": True, "deleted": args.id}, f"Deleted the {kind} {args.id}.")
 
 
+def _add_mobile(rel, common) -> None:
+    mob = rel.add_parser(
+        "mobile",
+        parents=[common],
+        help="Mobile mode: questions also go to the phone, this computer stays awake",
+    ).add_subparsers(dest="mobile", required=True)
+    x = mob.add_parser("on", parents=[common], help="turn Mobile mode on")
+    x.add_argument(
+        "--hours", type=int, help="switch off by itself after 4, 8, 12 or 24 hours (default: the saved one)"
+    )
+    mob.add_parser("off", parents=[common], help="turn Mobile mode off")
+    mob.add_parser("status", parents=[common], help="is Mobile mode on, until when")
+    x = mob.add_parser("hours", parents=[common], help="save how long Mobile mode stays on by default")
+    x.add_argument("hours", type=int)
+    mob.add_parser("ack", parents=[common], help="dismiss the 'Mobile mode ended' notice")
+    mob.add_parser("keeper", parents=[common], help=argparse.SUPPRESS)
+
+
+def _mobile_line(st: dict) -> str:
+    if not st["on"]:
+        return (st.get("ended") or {}).get("text") or "Mobile mode is off."
+    awake = "" if st["awake"] != "could_not_keep_awake" else " Could not keep this computer awake."
+    return f"Mobile mode is on since {st['since']}, ends {st['ends_at']}.{awake}"
+
+
+def run_mobile(args, root: Path, out) -> None:
+    from orch import mobile_mode as mm
+
+    sub = args.mobile
+    if sub == "keeper":
+        mm.run_keeper(root)
+        return
+    if sub == "on":
+        st = mm.turn_on(root, args.hours)
+    elif sub == "off":
+        st = mm.turn_off(root)
+    elif sub == "hours":
+        mm.set_default_hours(root, args.hours)
+        st = mm.status(root)
+    elif sub == "ack":
+        mm.acknowledge_ended(root)
+        st = mm.status(root)
+    else:
+        st = mm.status(root)
+    out(args, st, _mobile_line(st))
+
+
 def run_relay(args, root: Path, out) -> None:
     sub = args.sub
     args._root = root
     if sub == "profile":
         return _run_profile(args, relay, out)
+    if sub == "mobile":
+        return run_mobile(args, root, out)
     t = getattr(args, "ticket", None)
+    if sub not in ("connect", "status", "outbox", "view"):
+        _resend_waiting(root)
     if sub == "connect":
         who, line = relay.connect(root, args.url, args.workspace, args.token)
         out(
@@ -247,6 +336,12 @@ def run_relay(args, root: Path, out) -> None:
             st,
             f"Connected to {_host(st['url'])}." if st["configured"] else "Not connected to a relay.",
         )
+    elif sub == "view":
+        from orch import relay_view
+
+        v = relay_view.view(root)
+        rows = [f"{i['title']}  {i['subtitle']}" for b in v["blocks"] for i in b["items"]]
+        out(args, v, "\n".join([v.get("notice", ""), *rows]).strip())
     elif sub == "whoami":
         w = relay.whoami(root)
         n = w["phones"]
@@ -260,6 +355,30 @@ def run_relay(args, root: Path, out) -> None:
                 else "No phones paired yet. Pair one in the admin page."
             ),
         )
+    elif sub == "outbox":
+        res = relay.resend_outbox(root) if args.resend else None
+        left = relay.outbox_list(root)
+        lines = [f"{m['id']}  to {relay.name_of(root, m['to'])}  {m['type']}" for m in left]
+        for d in (res or {}).get("dropped", []):
+            lines.append(f"Not sent, the relay refused {d['id']}: {d['reason']}")
+        if res and res["sent"]:
+            lines.insert(0, f"Sent {len(res['sent'])} waiting message{'s' if len(res['sent']) != 1 else ''}.")
+        if left and (res or {}).get("problem"):
+            lines.append(f"Not sent: {res['problem']} These go out once this is fixed.")
+        elif left:
+            lines.append("These go out with the next orch relay command.")
+        out(args, {"waiting": left, **(res or {})}, "\n".join(lines) or "Nothing is waiting to be sent.")
+    elif sub == "inbox" and args.since is not None:
+        r = relay.since(root, args.since, args.wait)
+        if r.get("warning"):
+            print(
+                f"Could not check the relay just now, showing what is saved here. {r['warning']}",
+                file=sys.stderr,
+            )
+        lines = [
+            f"{i['seq']}  {i['type']} from {relay.name_of(root, i['from'])}  [{i['id']}]" for i in r["items"]
+        ]
+        out(args, r, "\n".join(lines) or "Nothing new since then.")
     elif sub == "inbox":
         items = relay.inbox(root, args.wait)
         data = [
@@ -287,19 +406,27 @@ def run_relay(args, root: Path, out) -> None:
             txt += f" Ticket: {r['ticket']}"
         out(args, r, txt)
     elif sub == "send":
+        if args.file and (args.update or args.reply_to or args.speak):
+            raise Refused("--update, --reply-to and --speak go with a text, not a file.")
+        if args.summary and not args.speak:
+            raise Refused("--summary goes with --speak.")
         if args.file:
             m = relay.send_file(root, args.workspace, Path(args.file), args.text or None, t)
         elif args.text:
-            m = relay.send_text(root, args.workspace, args.text, t)
+            speak = relay.speak_hint(root, t, args.text, args.summary) if args.speak else None
+            m = relay.send_text(root, args.workspace, args.text, t, args.update, args.reply_to, speak=speak)
         else:
             raise Refused("Nothing to send. Give a text or --file.")
-        out(args, m, f"Message sent to {relay.name_of(root, m['to'])}.")
+        out(args, m, _sent_line(root, m, "Message sent to {}."))
+    elif sub == "topic":
+        r = relay.topic(root, args.message, args.title, tickets.current_actor())
+        out(args, r, f"Started {r['key'] or r['ticket']} ({r['ticket']}). The phone shows it as a topic now.")
     elif sub == "delegate":
         m = relay.send_delegate(root, args.workspace, args.title, args.text, args.check, t)
-        out(args, m, f"Task handed to {relay.name_of(root, m['to'])}. It starts once they allow it.")
+        out(args, m, _sent_line(root, m, "Task handed to {}. It starts once they allow it."))
     elif sub == "start":
         m = relay.send_start(root, args.workspace, args.key, args.text, t)
-        out(args, m, f"Start request sent to {relay.name_of(root, m['to'])}.")
+        out(args, m, _sent_line(root, m, "Start request sent to {}."))
     elif sub == "allow":
         msg = relay.load_message(root, args.id)
         b = msg.get("body", {})
@@ -330,6 +457,30 @@ def run_relay(args, root: Path, out) -> None:
             out(args, {"ok": True}, f"Deleted webhook {args.id}.")
 
 
+NOT_SENT = "Not sent yet - the relay can't be reached. It goes out with the next orch relay command."
+
+
+def _sent_line(root: Path, m: dict, ok: str) -> str:
+    if m.get("sent") is False and m.get("problem"):
+        return f"Not sent: {m['problem']} The message is kept and goes out once this is fixed."
+    return NOT_SENT if m.get("sent") is False else ok.format(relay.name_of(root, m["to"]))
+
+
+def _resend_waiting(root: Path) -> None:
+    """Every orch relay command first sends what waits in .orch/outbox/ (never fails the command)."""
+    try:
+        net.load_service(root, "relay")
+        res = relay.resend_outbox(root)
+    except (Refused, OSError):
+        return
+    for d in res["dropped"]:
+        print(
+            f"A saved message could not be sent and was removed: {d['reason']} [{d['id']}]", file=sys.stderr
+        )
+    if res.get("problem"):
+        print(f"Saved messages are waiting: {res['problem']}", file=sys.stderr)
+
+
 def _inbox_line(i: dict, root: Path) -> str:
     m, b = i["message"], i["message"].get("body", {})
     kind = {
@@ -348,16 +499,23 @@ def _inbox_line(i: dict, root: Path) -> str:
     if i["note"]:
         return f"{head}: {i['note']}{tail}"
     reply = f' - reply: orch relay send {m["from"]} "<text>"' if m["from"].startswith("ph_") else ""
+
+    def c(v, n=2000):
+        return clean_untrusted(str(v or ""), n)
+
+    def file_line():
+        said = f": {c(b.get('text'), 500)}" if b.get("text") else ""
+        name = f"{c(b.get('name'), 200)} ({_size(b.get('size') or 0)})"
+        return f"{name}{said} - save it with: orch relay download {m['id']}"
+
     detail = {
-        "text": lambda: b.get("text", "") + reply,
-        "file": lambda: (
-            f"{b.get('name')} ({_size(b.get('size') or 0)}) - save it with: orch relay download {m['id']}"
-        ),
-        "question": lambda: b.get("text", ""),
-        "delegate": lambda: b.get("title", ""),
-        "start": lambda: f"{b.get('key')}: {b.get('text', '')}",
+        "text": lambda: c(b.get("text")) + reply,
+        "file": file_line,
+        "question": lambda: c(b.get("text")),
+        "delegate": lambda: c(b.get("title"), 200),
+        "start": lambda: f"{c(b.get('key'), 48)}: {c(b.get('text'))}",
         "refresh-hint": lambda: "new settings are waiting - run: orch relay refresh",
-        "webhook": lambda: b.get("payload", "")[:200],
+        "webhook": lambda: c(b.get("payload"), 200),
     }.get(m["type"], lambda: "")()
     if m["type"] in ("delegate", "start"):
         al = i["allowed"]
@@ -366,9 +524,13 @@ def _inbox_line(i: dict, root: Path) -> str:
     return f"{head}: {detail}{tail}".replace(": " + tail, tail)
 
 
-def send_phone_question(root: Path, tid: str, q: dict) -> None:
+def send_phone_question(
+    root: Path, tid: str, q: dict, previews: list[str] | None = None, scope: str | None = None
+) -> None:
     try:
-        relay.send_question(root, tickets.load(root, tid), q)
+        m = relay.send_question(root, tickets.load(root, tid), q, previews, scope)
+        if m.get("sent") is False:
+            raise Refused(m.get("problem") or NOT_SENT)
     except Refused as e:
         raise Refused(
             f"The question is saved on the ticket, but it could not be sent to the phones. {e}"

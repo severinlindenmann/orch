@@ -1,0 +1,1027 @@
+{
+ "name": "phone-v3-v1",
+ "description": "Phone app v3 (relay-api.md, Phone API). send: POST /v1/phone/send bodies (phone-api.schema.json send_request); ok=true cases also give `built`, the text message the relay stores (message.schema.json; the relay adds id and created_at, from = the calling phone ph_iphone0001), ok=false = 422 invalid. answer, settings_patch, workspace_patch: request bodies, ok=false = 422. speech_text: the text GET /v1/phone/speech speaks for a text body (relay-api.md, Speech); an empty result means GET /v1/phone/speech answers 404. general_updates: whole messages (message.schema.json), ok=false = 422 invalid. artifact_ids: ticket_view attachment ids (message.schema.json). Replayed by contracts/validate.py; the relay (R1, R2) and the workspace relay add-on (WS) replay the parts they build.",
+ "phone": "ph_iphone0001",
+ "send": [
+  {
+   "name": "text-in-general",
+   "ok": true,
+   "why": "",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "text": "Kannst du die Zahlen von gestern prüfen?",
+    "general": true
+   },
+   "built": {
+    "schema": "orch.msg/1",
+    "from": "ph_iphone0001",
+    "to": "ws_pilatus001",
+    "type": "text",
+    "body": {
+     "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+     "general": true,
+     "text": "Kannst du die Zahlen von gestern prüfen?"
+    }
+   }
+  },
+  {
+   "name": "new-topic-photo",
+   "ok": true,
+   "why": "",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "0b7a4c1e-9d2f-4e6a-8b3c-5d6e7f809a1b",
+    "text": "Bitte diese Offerte ablegen.",
+    "attachments": [
+     {
+      "blob_id": "b_ph0ne1mage000001",
+      "kind": "image",
+      "name": "IMG_2041.jpg",
+      "size": 482113,
+      "mime": "image/jpeg"
+     },
+     {
+      "blob_id": "b_ph0nef1le0000002",
+      "kind": "file",
+      "name": "Offerte.pdf",
+      "size": 1048576,
+      "mime": "application/pdf"
+     }
+    ]
+   },
+   "built": {
+    "schema": "orch.msg/1",
+    "from": "ph_iphone0001",
+    "to": "ws_pilatus001",
+    "type": "text",
+    "body": {
+     "client_id": "0b7a4c1e-9d2f-4e6a-8b3c-5d6e7f809a1b",
+     "text": "Bitte diese Offerte ablegen.",
+     "attachments": [
+      {
+       "blob_id": "b_ph0ne1mage000001",
+       "kind": "image",
+       "name": "IMG_2041.jpg",
+       "size": 482113,
+       "mime": "image/jpeg"
+      },
+      {
+       "blob_id": "b_ph0nef1le0000002",
+       "kind": "file",
+       "name": "Offerte.pdf",
+       "size": 1048576,
+       "mime": "application/pdf"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "photo-only-in-topic",
+   "ok": true,
+   "why": "",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "ticket": "t_q3sum1",
+    "attachments": [
+     {
+      "blob_id": "b_ph0ne1mage000001",
+      "kind": "image",
+      "name": "IMG_2041.jpg",
+      "size": 482113,
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   "built": {
+    "schema": "orch.msg/1",
+    "from": "ph_iphone0001",
+    "to": "ws_pilatus001",
+    "type": "text",
+    "ticket": "t_q3sum1",
+    "body": {
+     "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+     "attachments": [
+      {
+       "blob_id": "b_ph0ne1mage000001",
+       "kind": "image",
+       "name": "IMG_2041.jpg",
+       "size": 482113,
+       "mime": "image/jpeg"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "voice-memo-reply",
+   "ok": true,
+   "why": "",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "ticket": "t_q3sum1",
+    "reply_to": "m_r3s8t1u6v2w9x4y7",
+    "voice": {
+     "blob_id": "b_ph0nev0ice000003",
+     "transcript": "Mach die Grafik bitte etwas grösser.",
+     "lang": "de-CH",
+     "lang_source": "setting"
+    }
+   },
+   "built": {
+    "schema": "orch.msg/1",
+    "from": "ph_iphone0001",
+    "to": "ws_pilatus001",
+    "type": "text",
+    "ticket": "t_q3sum1",
+    "reply_to": "m_r3s8t1u6v2w9x4y7",
+    "body": {
+     "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+     "voice": {
+      "blob_id": "b_ph0nev0ice000003",
+      "transcript": "Mach die Grafik bitte etwas grösser.",
+      "lang": "de-CH",
+      "lang_source": "setting"
+     }
+    }
+   }
+  },
+  {
+   "name": "location-only",
+   "ok": true,
+   "why": "",
+   "request": {
+    "to": "ws_home000001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "location": {
+     "lat": 47.0502,
+     "lon": 8.3093,
+     "label": "Luzern Bahnhof",
+     "accuracy_m": 12
+    }
+   },
+   "built": {
+    "schema": "orch.msg/1",
+    "from": "ph_iphone0001",
+    "to": "ws_home000001",
+    "type": "text",
+    "body": {
+     "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+     "location": {
+      "lat": 47.0502,
+      "lon": 8.3093,
+      "label": "Luzern Bahnhof",
+      "accuracy_m": 12
+     }
+    }
+   }
+  },
+  {
+   "name": "feedback-html-pins",
+   "ok": true,
+   "why": "",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "ticket": "t_q3sum1",
+    "feedback": {
+     "artifact_id": "a_ee3652384f1b",
+     "artifact_rev": "f_0123456789abcdef",
+     "verdict": "changes",
+     "pins": [
+      {
+       "n": 1,
+       "anchor": {
+        "type": "html",
+        "selector": "#chart-q3",
+        "quote": "Umsatz Q3",
+        "offset": 640,
+        "viewport_w": 390
+       },
+       "text": "Bigger, please."
+      },
+      {
+       "n": 2,
+       "anchor": {
+        "type": "html",
+        "quote": "Ausblick"
+       },
+       "voice_blob_id": "b_ph0nev0ice000004",
+       "transcript": "Den Ausblick kürzer."
+      }
+     ]
+    }
+   },
+   "built": {
+    "schema": "orch.msg/1",
+    "from": "ph_iphone0001",
+    "to": "ws_pilatus001",
+    "type": "text",
+    "ticket": "t_q3sum1",
+    "body": {
+     "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+     "feedback": {
+      "artifact_id": "a_ee3652384f1b",
+      "artifact_rev": "f_0123456789abcdef",
+      "verdict": "changes",
+      "pins": [
+       {
+        "n": 1,
+        "anchor": {
+         "type": "html",
+         "selector": "#chart-q3",
+         "quote": "Umsatz Q3",
+         "offset": 640,
+         "viewport_w": 390
+        },
+        "text": "Bigger, please."
+       },
+       {
+        "n": 2,
+        "anchor": {
+         "type": "html",
+         "quote": "Ausblick"
+        },
+        "voice_blob_id": "b_ph0nev0ice000004",
+        "transcript": "Den Ausblick kürzer."
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "feedback-pdf-pin",
+   "ok": true,
+   "why": "",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "ticket": "t_q3sum1",
+    "feedback": {
+     "artifact_id": "a_74db4d487faf",
+     "artifact_rev": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+     "verdict": "changes",
+     "pins": [
+      {
+       "n": 1,
+       "anchor": {
+        "type": "pdf",
+        "page": 2,
+        "x": 0.42,
+        "y": 0.18
+       },
+       "text": "Wrong total here."
+      }
+     ]
+    }
+   },
+   "built": {
+    "schema": "orch.msg/1",
+    "from": "ph_iphone0001",
+    "to": "ws_pilatus001",
+    "type": "text",
+    "ticket": "t_q3sum1",
+    "body": {
+     "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+     "feedback": {
+      "artifact_id": "a_74db4d487faf",
+      "artifact_rev": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+      "verdict": "changes",
+      "pins": [
+       {
+        "n": 1,
+        "anchor": {
+         "type": "pdf",
+         "page": 2,
+         "x": 0.42,
+         "y": 0.18
+        },
+        "text": "Wrong total here."
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "feedback-looks-good",
+   "ok": true,
+   "why": "",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "ticket": "t_q3sum1",
+    "text": "Looks good",
+    "feedback": {
+     "artifact_id": "a_9b27f17f5357",
+     "artifact_rev": "9fceb02d0ae598e95dc970b74767f19372d61af8",
+     "verdict": "approve",
+     "pins": []
+    }
+   },
+   "built": {
+    "schema": "orch.msg/1",
+    "from": "ph_iphone0001",
+    "to": "ws_pilatus001",
+    "type": "text",
+    "ticket": "t_q3sum1",
+    "body": {
+     "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+     "text": "Looks good",
+     "feedback": {
+      "artifact_id": "a_9b27f17f5357",
+      "artifact_rev": "9fceb02d0ae598e95dc970b74767f19372d61af8",
+      "verdict": "approve",
+      "pins": []
+     }
+    }
+   }
+  },
+  {
+   "name": "ticket-null-is-new-topic",
+   "ok": true,
+   "why": "",
+   "request": {
+    "to": "ws_home000001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "text": "Book the train to Lucerne for Friday",
+    "ticket": null,
+    "reply_to": null
+   },
+   "built": {
+    "schema": "orch.msg/1",
+    "from": "ph_iphone0001",
+    "to": "ws_home000001",
+    "type": "text",
+    "body": {
+     "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+     "text": "Book the train to Lucerne for Friday"
+    }
+   }
+  },
+  {
+   "name": "uppercase-uuid",
+   "ok": true,
+   "why": "",
+   "request": {
+    "to": "ws_home000001",
+    "client_id": "6F1C2A9E-3B7D-4C8E-9A10-2B3C4D5E6F70",
+    "text": "Hi"
+   },
+   "built": {
+    "schema": "orch.msg/1",
+    "from": "ph_iphone0001",
+    "to": "ws_home000001",
+    "type": "text",
+    "body": {
+     "client_id": "6F1C2A9E-3B7D-4C8E-9A10-2B3C4D5E6F70",
+     "text": "Hi"
+    }
+   }
+  },
+  {
+   "name": "no-client-id",
+   "ok": true,
+   "why": "client_id is optional (app before v3); no dedupe",
+   "request": {
+    "to": "ws_pilatus001",
+    "text": "Hi"
+   },
+   "built": {
+    "schema": "orch.msg/1",
+    "from": "ph_iphone0001",
+    "to": "ws_pilatus001",
+    "type": "text",
+    "body": {
+     "text": "Hi"
+    }
+   }
+  },
+  {
+   "name": "bad-client-id",
+   "ok": false,
+   "why": "client_id is a UUID",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "abc",
+    "text": "Hi"
+   }
+  },
+  {
+   "name": "nothing-to-send",
+   "ok": false,
+   "why": "needs text, attachments, voice, location or feedback",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70"
+   }
+  },
+  {
+   "name": "empty-text-only",
+   "ok": false,
+   "why": "text is 1..20000 characters",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "text": ""
+   }
+  },
+  {
+   "name": "general-with-ticket",
+   "ok": false,
+   "why": "General has no ticket",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "text": "Hi",
+    "general": true,
+    "ticket": "t_q3sum1"
+   }
+  },
+  {
+   "name": "feedback-without-ticket",
+   "ok": false,
+   "why": "feedback belongs to a ticket",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "feedback": {
+     "artifact_id": "a_9b27f17f5357",
+     "artifact_rev": "9fceb02d0ae598e95dc970b74767f19372d61af8",
+     "verdict": "approve",
+     "pins": []
+    }
+   }
+  },
+  {
+   "name": "changes-without-pins",
+   "ok": false,
+   "why": "changes needs at least one pin",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "ticket": "t_q3sum1",
+    "feedback": {
+     "artifact_id": "a_9b27f17f5357",
+     "artifact_rev": "9fceb02d0ae598e95dc970b74767f19372d61af8",
+     "verdict": "changes",
+     "pins": []
+    }
+   }
+  },
+  {
+   "name": "pin-without-comment",
+   "ok": false,
+   "why": "a pin needs text or voice_blob_id",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "ticket": "t_q3sum1",
+    "feedback": {
+     "artifact_id": "a_74db4d487faf",
+     "artifact_rev": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+     "verdict": "changes",
+     "pins": [
+      {
+       "n": 1,
+       "anchor": {
+        "type": "pdf",
+        "page": 1,
+        "x": 0.5,
+        "y": 0.5
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "pdf-pin-without-page",
+   "ok": false,
+   "why": "pdf anchor needs page, x, y",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "ticket": "t_q3sum1",
+    "feedback": {
+     "artifact_id": "a_74db4d487faf",
+     "artifact_rev": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+     "verdict": "changes",
+     "pins": [
+      {
+       "n": 1,
+       "anchor": {
+        "type": "pdf",
+        "x": 0.5,
+        "y": 0.5
+       },
+       "text": "x"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "html-pin-without-selector-or-quote",
+   "ok": false,
+   "why": "html anchor needs selector or quote",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "ticket": "t_q3sum1",
+    "feedback": {
+     "artifact_id": "a_ee3652384f1b",
+     "artifact_rev": "f_0123456789abcdef",
+     "verdict": "changes",
+     "pins": [
+      {
+       "n": 1,
+       "anchor": {
+        "type": "html",
+        "offset": 10
+       },
+       "text": "x"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "image-pin-out-of-range",
+   "ok": false,
+   "why": "x/y are fractions 0..1",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "ticket": "t_q3sum1",
+    "feedback": {
+     "artifact_id": "a_74db4d487faf",
+     "artifact_rev": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+     "verdict": "changes",
+     "pins": [
+      {
+       "n": 1,
+       "anchor": {
+        "type": "image",
+        "x": 1.4,
+        "y": 0.5
+       },
+       "text": "x"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "attachment-too-big",
+   "ok": false,
+   "why": "phone uploads are at most 25 MB",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "attachments": [
+     {
+      "blob_id": "b_ph0nef1le0000002",
+      "kind": "file",
+      "name": "Offerte.pdf",
+      "size": 26214401,
+      "mime": "application/pdf"
+     }
+    ]
+   }
+  },
+  {
+   "name": "attachment-kind-video",
+   "ok": false,
+   "why": "kinds: image, file, voice",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "attachments": [
+     {
+      "blob_id": "b_ph0ne1mage000001",
+      "kind": "video",
+      "name": "IMG_2041.jpg",
+      "size": 482113,
+      "mime": "image/jpeg"
+     }
+    ]
+   }
+  },
+  {
+   "name": "voice-bad-lang-source",
+   "ok": false,
+   "why": "lang_source: detected, setting, corrected",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "voice": {
+     "blob_id": "b_ph0nev0ice000003",
+     "transcript": "Mach die Grafik bitte etwas grösser.",
+     "lang": "de-CH",
+     "lang_source": "guess"
+    }
+   }
+  },
+  {
+   "name": "location-out-of-range",
+   "ok": false,
+   "why": "lat -90..90",
+   "request": {
+    "to": "ws_pilatus001",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "location": {
+     "lat": 91,
+     "lon": 8
+    }
+   }
+  },
+  {
+   "name": "to-a-phone",
+   "ok": false,
+   "why": "phones send to workspaces only",
+   "request": {
+    "to": "ph_iphone0002",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70",
+    "text": "Hi"
+   }
+  }
+ ],
+ "answer": [
+  {
+   "name": "with-client-id",
+   "ok": true,
+   "request": {
+    "question_message_id": "m_q1date0ts0000001",
+    "answer": "TIMESTAMP",
+    "client_id": "6f1c2a9e-3b7d-4c8e-9a10-2b3c4d5e6f70"
+   }
+  },
+  {
+   "name": "without-client-id",
+   "ok": true,
+   "request": {
+    "question_message_id": "m_q1date0ts0000001",
+    "answer": "TIMESTAMP"
+   },
+   "why": "client_id is optional (app before v3); no dedupe"
+  }
+ ],
+ "settings_patch": [
+  {
+   "name": "speak-always",
+   "ok": true,
+   "request": {
+    "speak": "always"
+   }
+  },
+  {
+   "name": "swiss-and-cap",
+   "ok": true,
+   "request": {
+    "swiss_german": true,
+    "tts_cap_usd": 25
+   }
+  },
+  {
+   "name": "cap-zero",
+   "ok": true,
+   "request": {
+    "tts_cap_usd": 0
+   }
+  },
+  {
+   "name": "empty",
+   "ok": false,
+   "request": {}
+  },
+  {
+   "name": "cap-over-100",
+   "ok": false,
+   "request": {
+    "tts_cap_usd": 150
+   }
+  },
+  {
+   "name": "speak-bad",
+   "ok": false,
+   "request": {
+    "speak": "sometimes"
+   }
+  },
+  {
+   "name": "only-unknown-field",
+   "ok": false,
+   "request": {
+    "tts_used_usd_month": 0
+   }
+  },
+  {
+   "name": "unknown-field-kept",
+   "ok": true,
+   "request": {
+    "speak": "never",
+    "theme": "dark"
+   }
+  }
+ ],
+ "workspace_patch": [
+  {
+   "name": "one-hour",
+   "ok": true,
+   "request": {
+    "muted_until": "2026-11-06T22:00:00Z"
+   }
+  },
+  {
+   "name": "forever",
+   "ok": true,
+   "request": {
+    "muted_until": "forever"
+   }
+  },
+  {
+   "name": "unmute",
+   "ok": true,
+   "request": {
+    "muted_until": null
+   }
+  },
+  {
+   "name": "missing",
+   "ok": false,
+   "request": {}
+  },
+  {
+   "name": "not-utc",
+   "ok": false,
+   "request": {
+    "muted_until": "2026-11-06T23:00:00+01:00"
+   }
+  },
+  {
+   "name": "word",
+   "ok": false,
+   "request": {
+    "muted_until": "tomorrow"
+   }
+  }
+ ],
+ "speech_max_chars": 900,
+ "speech_text": [
+  {
+   "name": "text",
+   "body": {
+    "text": "Q3 summary is ready.",
+    "speak": {
+     "lang": "en"
+    }
+   },
+   "spoken": "Q3 summary is ready."
+  },
+  {
+   "name": "summary-wins",
+   "body": {
+    "text": "A very long result ...",
+    "speak": {
+     "lang": "de",
+     "summary": "Der Bericht ist fertig."
+    }
+   },
+   "spoken": "Der Bericht ist fertig."
+  },
+  {
+   "name": "markdown-and-url",
+   "body": {
+    "text": "**Done.** See `report.md`\n\n# Next\nhttps://example.ch/x?y=1 for details.",
+    "speak": {
+     "lang": "en"
+    }
+   },
+   "spoken": "Done. See report.md Next link for details."
+  },
+  {
+   "name": "cut-at-sentence",
+   "body": {
+    "text": "Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. ",
+    "speak": {
+     "lang": "de"
+    }
+   },
+   "spoken": "Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft. Die Zahlen sind geprüft."
+  },
+  {
+   "name": "cut-at-word",
+   "body": {
+    "text": "wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort "
+   },
+   "spoken": "wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort"
+  },
+  {
+   "name": "decimal-not-a-sentence-end",
+   "body": {
+    "text": "Version 2.5 ist da! xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "spoken": "Version 2.5 ist da!"
+  },
+  {
+   "name": "empty-after-cleaning",
+   "body": {
+    "text": "** ``` #",
+    "speak": {
+     "lang": "en"
+    }
+   },
+   "spoken": ""
+  }
+ ],
+ "artifact_ids": [
+  {
+   "source": "pr",
+   "ref": "https://github.com/acme/pilatus/pull/42",
+   "id": "a_9b27f17f5357"
+  },
+  {
+   "source": "file",
+   "ref": "reports/q3-summary.pdf",
+   "id": "a_74db4d487faf"
+  },
+  {
+   "source": "link",
+   "ref": "https://docs.example.ch/deck",
+   "id": "a_4bdc193f5d93"
+  },
+  {
+   "source": "url",
+   "ref": "https://pages.example.ch/f/f_0123456789abcdef",
+   "id": "a_ee3652384f1b"
+  },
+  {
+   "source": "commit",
+   "ref": "9fceb02d0ae598e95dc970b74767f19372d61af8",
+   "id": "a_b77e8c387339"
+  }
+ ],
+ "general_updates": [
+  {
+   "name": "general-ack",
+   "ok": true,
+   "why": "Started receipt in General",
+   "message": {
+    "schema": "orch.msg/1",
+    "created_at": "2026-11-06T19:58:05Z",
+    "from": "ws_pilatus001",
+    "to": "ph_iphone0001",
+    "type": "text",
+    "id": "m_g3n3ralack000001",
+    "reply_to": "m_g3n3ral0000000a1",
+    "body": {
+     "text": "Got it",
+     "general": true,
+     "update": {
+      "kind": "ack"
+     }
+    }
+   }
+  },
+  {
+   "name": "general-working",
+   "ok": true,
+   "why": "Working receipt in General",
+   "message": {
+    "schema": "orch.msg/1",
+    "created_at": "2026-11-06T19:58:05Z",
+    "from": "ws_pilatus001",
+    "to": "ph_iphone0001",
+    "type": "text",
+    "id": "m_g3n3ralw0rk00001",
+    "reply_to": "m_g3n3ral0000000a1",
+    "body": {
+     "text": "Looking at it",
+     "general": true,
+     "update": {
+      "kind": "working"
+     }
+    }
+   }
+  },
+  {
+   "name": "general-result",
+   "ok": false,
+   "why": "only ack and working in General",
+   "message": {
+    "schema": "orch.msg/1",
+    "created_at": "2026-11-06T19:58:05Z",
+    "from": "ws_pilatus001",
+    "to": "ph_iphone0001",
+    "type": "text",
+    "id": "m_g3n3ralbad000002",
+    "reply_to": "m_g3n3ral0000000a1",
+    "body": {
+     "text": "Done",
+     "general": true,
+     "update": {
+      "kind": "result"
+     }
+    }
+   }
+  },
+  {
+   "name": "general-ack-no-reply-to",
+   "ok": false,
+   "why": "reply_to = the phone's General text",
+   "message": {
+    "schema": "orch.msg/1",
+    "created_at": "2026-11-06T19:58:05Z",
+    "from": "ws_pilatus001",
+    "to": "ph_iphone0001",
+    "type": "text",
+    "id": "m_g3n3ralbad000003",
+    "body": {
+     "text": "Got it",
+     "general": true,
+     "update": {
+      "kind": "ack"
+     }
+    }
+   }
+  },
+  {
+   "name": "general-ack-with-ticket",
+   "ok": false,
+   "why": "General has no ticket",
+   "message": {
+    "schema": "orch.msg/1",
+    "created_at": "2026-11-06T19:58:05Z",
+    "from": "ws_pilatus001",
+    "to": "ph_iphone0001",
+    "type": "text",
+    "id": "m_g3n3ralbad000005",
+    "reply_to": "m_g3n3ral0000000a1",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Got it",
+     "general": true,
+     "update": {
+      "kind": "ack"
+     }
+    }
+   }
+  },
+  {
+   "name": "general-with-ticket-view",
+   "ok": false,
+   "why": "no ticket_view in General",
+   "message": {
+    "schema": "orch.msg/1",
+    "created_at": "2026-11-06T19:58:05Z",
+    "from": "ws_pilatus001",
+    "to": "ph_iphone0001",
+    "type": "text",
+    "id": "m_g3n3ralbad000006",
+    "reply_to": "m_g3n3ral0000000a1",
+    "body": {
+     "text": "Got it",
+     "general": true,
+     "update": {
+      "kind": "ack"
+     },
+     "ticket_view": {
+      "title": "T",
+      "status": "open",
+      "running": false,
+      "checklist": [],
+      "done": 0,
+      "total": 0,
+      "history_tail": [],
+      "attachments": []
+     }
+    }
+   }
+  },
+  {
+   "name": "topic-ack-without-reply-to-still-valid",
+   "ok": true,
+   "why": "existing acks stay valid",
+   "message": {
+    "schema": "orch.msg/1",
+    "created_at": "2026-11-06T19:58:05Z",
+    "from": "ws_pilatus001",
+    "to": "ph_iphone0001",
+    "type": "text",
+    "id": "m_t0p1cack00000001",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "On it",
+     "update": {
+      "kind": "ack"
+     }
+    }
+   }
+  }
+ ]
+}

@@ -270,6 +270,52 @@ fn files_vector_decrypts_with_rust_aes_gcm() {
 }
 
 #[tokio::test]
+async fn files_note_vector_decrypts_and_the_server_stores_it_opaque() {
+    use aes_gcm::aead::{Aead, KeyInit, Payload};
+    use aes_gcm::{Aes256Gcm, Nonce};
+    use base64::Engine;
+    let v: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../contracts/vectors/publish-blob-v1.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let g = &v["good_with_note"];
+    let key = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(g["key_b64url"].as_str().unwrap())
+        .unwrap();
+    let blob: Vec<u8> = (0..g["blob_hex"].as_str().unwrap().len() / 2)
+        .map(|i| {
+            u8::from_str_radix(&g["blob_hex"].as_str().unwrap()[2 * i..2 * i + 2], 16).unwrap()
+        })
+        .collect();
+    let plain = Aes256Gcm::new_from_slice(&key)
+        .unwrap()
+        .decrypt(
+            Nonce::from_slice(&blob[4..16]),
+            Payload {
+                msg: &blob[16..],
+                aad: b"OPF1",
+            },
+        )
+        .unwrap();
+    let n = u32::from_be_bytes(plain[0..4].try_into().unwrap()) as usize;
+    assert_eq!(
+        &plain[4..4 + n],
+        g["header_json"].as_str().unwrap().as_bytes()
+    );
+    assert!(g["header_json"].as_str().unwrap().contains("\"note\""));
+    // the server accepts the blob like any other and never sees the note
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let r = t.api(&ws, "POST", "/v1/files", blob.clone()).await;
+    assert_eq!(r.status, 201);
+    assert!(!String::from_utf8_lossy(&blob).contains("Anna"));
+}
+
+#[tokio::test]
 async fn files_page_csp_allows_previews_but_no_inline_or_eval() {
     let t = setup();
     let ws = t.workspace("A", basic_rights()).await;
@@ -342,4 +388,196 @@ async fn favicons_on_public_and_admin() {
     assert!(portal.contains("rel=\"icon\" href=\"/_/favicon.svg\""));
     let nf = call(&t.public, "GET", "/nope", &[], vec![]).await.text();
     assert!(nf.contains("rel=\"apple-touch-icon\""));
+}
+
+fn expire_all(t: &T) {
+    t.st.db
+        .lock()
+        .unwrap()
+        .execute("UPDATE files SET expires_at='2000-01-01T00:00:00Z'", [])
+        .unwrap();
+}
+
+#[tokio::test]
+async fn replace_keeps_id_and_expiry_and_swaps_blob() {
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let j = t
+        .api(&ws, "POST", "/v1/files?days=3", vector_blob())
+        .await
+        .json();
+    let id = j["id"].as_str().unwrap().to_string();
+    let mut nb = b"OPF1".to_vec();
+    nb.resize(80, 7);
+    let r = t
+        .api(&ws, "PUT", &format!("/v1/files/{id}"), nb.clone())
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    assert_eq!(r.json()["id"], id.as_str());
+    assert_eq!(r.json()["expires_at"], j["expires_at"]);
+    let b = call(&t.public, "GET", &format!("/f/{id}/blob"), &[], vec![]).await;
+    assert_eq!(b.body, nb);
+    let l = t.api(&ws, "GET", "/v1/files", vec![]).await.json();
+    assert_eq!(l["items"][0]["size"], 80);
+    // same OPF1 check
+    let bad = t
+        .api(&ws, "PUT", &format!("/v1/files/{id}"), vec![1u8; 64])
+        .await;
+    assert_eq!(bad.status, 422);
+    assert_eq!(
+        call(&t.public, "GET", &format!("/f/{id}/blob"), &[], vec![])
+            .await
+            .body,
+        nb
+    );
+}
+
+#[tokio::test]
+async fn replace_only_by_owner_and_never_revives_expired() {
+    let t = setup();
+    let a = t.workspace("A", basic_rights()).await;
+    let b = t.workspace("B", basic_rights()).await;
+    let id = t.api(&a, "POST", "/v1/files", vector_blob()).await.json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let uri = format!("/v1/files/{id}");
+    assert_eq!(t.api(&b, "PUT", &uri, vector_blob()).await.status, 404);
+    assert_eq!(
+        t.api(&b, "PATCH", &uri, br#"{"days":5}"#.to_vec())
+            .await
+            .status,
+        404
+    );
+    expire_all(&t);
+    assert_eq!(t.api(&a, "PUT", &uri, vector_blob()).await.status, 410);
+    assert_eq!(
+        t.api(&a, "PATCH", &uri, br#"{"days":5}"#.to_vec())
+            .await
+            .status,
+        410
+    );
+}
+
+#[tokio::test]
+async fn replace_too_large_is_413() {
+    let t = setup_with(|c| c.max_file_mb = 0);
+    let ws = t.workspace("A", basic_rights()).await;
+    let id = t.api(&ws, "POST", "/v1/files", vector_blob()).await.json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut big = b"OPF1".to_vec();
+    big.resize(64 * 1024 + 37, 1);
+    let r = t.api(&ws, "PUT", &format!("/v1/files/{id}"), big).await;
+    assert_eq!(r.status, 413);
+}
+
+#[tokio::test]
+async fn extend_sets_new_expiry_and_checks_days() {
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let j = t
+        .api(&ws, "POST", "/v1/files?days=1", vector_blob())
+        .await
+        .json();
+    let id = j["id"].as_str().unwrap();
+    let uri = format!("/v1/files/{id}");
+    let r = t.api(&ws, "PATCH", &uri, br#"{"days":30}"#.to_vec()).await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    assert!(r.json()["expires_at"].as_str().unwrap() > j["expires_at"].as_str().unwrap());
+    // never shortens
+    let r2 = t.api(&ws, "PATCH", &uri, br#"{"days":2}"#.to_vec()).await;
+    assert_eq!(r2.json()["expires_at"], r.json()["expires_at"]);
+    for body in [&br#"{"days":0}"#[..], br#"{"days":91}"#, b"{}", b"nope"] {
+        assert_eq!(t.api(&ws, "PATCH", &uri, body.to_vec()).await.status, 422);
+    }
+    let l = t.api(&ws, "GET", "/v1/files", vec![]).await.json();
+    assert_eq!(l["items"][0]["expires_at"], r.json()["expires_at"]);
+}
+
+#[tokio::test]
+async fn patch_needs_files_right_and_has_small_body_limit() {
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let id = t.api(&ws, "POST", "/v1/files", vector_blob()).await.json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let uri = format!("/v1/files/{id}");
+    // PATCH keeps axum's default 2 MB body limit
+    let mut big = br#"{"days":5,"x":""#.to_vec();
+    big.resize(3 * 1024 * 1024, b'a');
+    big.extend_from_slice(b"\"}");
+    assert_eq!(t.api(&ws, "PATCH", &uri, big).await.status, 413);
+    // a workspace whose files right was removed may not extend
+    t.st.db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE workspaces SET rights=REPLACE(rights,'\"files\":true','\"files\":false')",
+            [],
+        )
+        .unwrap();
+    let r = t.api(&ws, "PATCH", &uri, br#"{"days":5}"#.to_vec()).await;
+    assert_eq!(r.status, 403, "{}", r.text());
+}
+
+#[tokio::test]
+async fn replace_leaves_no_temp_files() {
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let id = t.api(&ws, "POST", "/v1/files", vector_blob()).await.json()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    t.api(&ws, "PUT", &format!("/v1/files/{id}"), vector_blob())
+        .await;
+    let n = std::fs::read_dir(t.dir.path().join("files"))
+        .unwrap()
+        .count();
+    assert_eq!(n, 1);
+}
+
+#[tokio::test]
+async fn files_original_size_upload_replace_and_lists() {
+    let blob = vector_blob();
+    let len = blob.len() as i64;
+    for (query, expected) in [
+        ("?size=12".to_string(), 12),
+        (String::new(), len),
+        (format!("?size={}", len + 1), len),
+        ("?size=-1".to_string(), len),
+        ("?size=0".to_string(), 0),
+        (format!("?size={len}"), len),
+    ] {
+        let t = setup();
+        let ws = t.workspace("A", basic_rights()).await;
+        let uploaded = t
+            .api(&ws, "POST", &format!("/v1/files{query}"), blob.clone())
+            .await;
+        assert_eq!(uploaded.status, 201);
+        let uploaded = uploaded.json();
+        assert_eq!(uploaded["size"], expected);
+        let id = uploaded["id"].as_str().unwrap();
+        for method in ["POST", "PUT"] {
+            if method == "PUT" {
+                // First change the stored size so replacement must update it again.
+                t.api(&ws, "PUT", &format!("/v1/files/{id}?size=1"), blob.clone())
+                    .await;
+                let replaced = t
+                    .api(&ws, "PUT", &format!("/v1/files/{id}{query}"), blob.clone())
+                    .await;
+                assert_eq!(replaced.status, 200);
+                assert_eq!(replaced.json()["size"], expected);
+            }
+            let list = t.api(&ws, "GET", "/v1/files", vec![]).await.json();
+            assert_eq!(list["items"][0]["size"], expected);
+            let admin = t
+                .adm("GET", "/admin/api/files", serde_json::Value::Null)
+                .await
+                .json();
+            assert_eq!(admin["items"][0]["size"], expected);
+        }
+    }
 }

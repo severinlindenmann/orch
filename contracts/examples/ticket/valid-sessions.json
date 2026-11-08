@@ -1,0 +1,10 @@
+{
+  "schema": "orch.ticket/1", "id": "t_q3exp1", "title": "Q3 expense summary", "status": "active",
+  "created_at": "2026-11-03T08:00:00Z", "updated_at": "2026-11-05T19:40:00Z", "revision": 9, "parent": null,
+  "sessions": [
+    { "agent": "claude", "id": "7f3c2a9e-1b4d-4c6e-9a21-5d0e8f7b3c11", "host": "severin-mac", "last_used": "2026-11-05T19:40:00Z" },
+    { "agent": "codex", "id": "019a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8", "host": "vps-pilot", "last_used": "2026-11-03T08:05:00Z" }
+  ],
+  "checklist": [], "refs": [], "questions": [],
+  "history": [ { "at": "2026-11-03T08:00:00Z", "by": "human:severin", "via": "cli", "text": "Created" } ]
+}

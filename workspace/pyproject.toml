@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "orch: tickets with evidence, skills and add-ons for any agent tool"
 requires-python = ">=3.11"
 license = { text = "PolyForm-Noncommercial-1.0.0" }
-dependencies = ["cryptography>=42", "jsonschema>=4"]
+dependencies = ["cryptography>=42", "jsonschema>=4", "truststore>=0.10; sys_platform == 'win32'"]
 
 [project.scripts]
 orch = "orch.cli:main"
@@ -14,13 +14,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/orch"]
+packages = ["src/orch", "src/orch_ui"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "skills" = "orch/skills"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "jsonschema>=4", "rfc3339-validator"]
+dev = ["pytest>=8", "pytest-xdist>=3", "ruff>=0.6", "jsonschema>=4", "rfc3339-validator"]
 
 [tool.ruff]
 extend-exclude = ["src/orch/templates"]

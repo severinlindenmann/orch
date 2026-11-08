@@ -17,16 +17,20 @@ blob[-16:]   = GCM tag, 16 bytes (128 bit)
 AAD          = the 4 bytes "OPF1"
 plaintext    = u32 big-endian header length N | header JSON, N bytes UTF-8 | file bytes
 header JSON  = {"name": "report.pdf", "type": "application/pdf", "size": 12345}
+               optional "note": "<plain text, 1-280 characters>"   (the sender's note)
 ```
 
 - WebCrypto, Python `AESGCM.decrypt(iv, blob[16:], aad)` and Rust `aes-gcm` all take ciphertext and tag joined (`blob[16:]`), as above.
 - Reader rules: magic must be `OPF1`; blob at least 32 bytes; decrypt and check the tag **before** using any byte;
   then `1 <= N <= 65536`, header is valid UTF-8 JSON, and `size` equals the bytes left after the header. Any failure = "wrong key or broken file".
+- `note` (optional, v2): one line from the sender, at most 280 characters, shown by the browser as **text** (`textContent`, never HTML). Readers ignore
+  a missing, empty or non-string `note`, and a longer one is cut at 280 characters. It sits inside the ciphertext, so the server never sees it. Old readers ignore the unknown
+  field. Vector: `good_with_note`.
 - The file name is inside the ciphertext, so the server and the admin see only id, size and expiry.
 - Link: `https://publish.severin.io/f/<id>#k=<key as base64url, no padding, 43 chars>`. Browsers never send the `#` part to the server.
 - The browser page fetches `/f/<id>/blob`, decrypts with WebCrypto (`importKey("raw")` + `decrypt({name: "AES-GCM", iv, additionalData, tagLength: 128})`), then offers the download.
 - Cap: 100 MB = 100 × 1024 × 1024 bytes of **file content** (env `PUBLISH_MAX_FILE_MB`, default 100). The server accepts blobs up to cap + 64 KiB + 36 bytes (header + overhead). One-shot GCM in memory is fine at this size.
-- Test vectors: `vectors/publish-blob-v1.json` (one good blob, plus `wrong key` and `truncated` cases that must fail). Python, Rust (tests only) and the browser JS must all pass them.
+- Test vectors: `vectors/publish-blob-v1.json` (one good blob, one good blob with a `note`, plus `wrong key` and `truncated` cases that must fail). Python, Rust (tests only) and the browser JS must all pass them.
 - Apps are **not** encrypted.
 - Folder bundle (`orch publish file <folder>`, a small site of html + css + js + json): the OPF1 header has
   `"type": "application/vnd.orch.bundle"` and `"name": "<folder name>"`; the file bytes are a bundle:

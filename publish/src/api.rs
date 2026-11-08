@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 #[derive(Deserialize, Default)]
 pub struct Q {
     pub days: Option<i64>,
+    pub size: Option<i64>,
     pub permanent: Option<String>,
     pub new_token: Option<String>,
     pub limit: Option<usize>,
@@ -56,6 +57,7 @@ fn who_json(st: &State, w: &Workspace) -> Value {
     json!({
         "id": w.id, "name": w.name, "description": w.description, "tags": w.tags, "rights": w.rights,
         "pending": db::Pending::json(&w.pending),
+        "icon": w.icon, "color": w.color, "look_by": w.look_by, "show_on_shared_pages": w.show_on_shared_pages,
         "max_file_mb": st.cfg.max_file_mb, "default_days": st.cfg.default_days, "max_days": st.cfg.max_days,
     })
 }
@@ -79,6 +81,18 @@ pub async fn me_patch(
     body: Bytes,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
     let w = auth(&st, &h)?;
+    if let Ok(v) = serde_json::from_slice::<Value>(&body) {
+        if crate::look::is_look_body(&v) {
+            // Icon, colour and the shared-pages switch: applied at once, not pending (contracts/look.md).
+            let p = crate::look::parse_me(&v)?;
+            let mut c = st.db.lock().unwrap();
+            let tx = c.transaction()?;
+            crate::look::apply(&tx, &w.id, &p, "workspace")?;
+            tx.commit()?;
+            let fresh = db::get_workspace(&c, &w.id)?.ok_or_else(ApiError::unauthorized)?;
+            return Ok((StatusCode::OK, Json(who_json(&st, &fresh))));
+        }
+    }
     let b: MeBody = serde_json::from_slice(&body).map_err(|_| {
         ApiError::invalid(
             "The body must be JSON like {\"description\": \"...\", \"tags\": [\"a\"]}.",
@@ -145,7 +159,7 @@ pub async fn files_post(
                 st.cfg.max_file_mb
             ))
         })?;
-    let v = files::upload(&st, &w, bytes, expires)?;
+    let v = files::upload(&st, &w, bytes, expires, q.size)?;
     Ok((StatusCode::CREATED, Json(v)).into_response())
 }
 
@@ -198,6 +212,47 @@ pub async fn files_delete(
         }
         _ => Err(ApiError::not_found("No such file.")),
     }
+}
+
+pub async fn files_patch(
+    St(st): St<State>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> ApiResult<Json<Value>> {
+    let w = auth(&st, &h)?;
+    if !w.rights.files {
+        return Err(ApiError::forbidden("This workspace may not upload files."));
+    }
+    let b: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    let days = b
+        .get("days")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| ApiError::invalid("Send {\"days\": N}."))?;
+    Ok(Json(files::extend(&st, &w, &id, days)?))
+}
+
+pub async fn files_put(
+    St(st): St<State>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<Q>,
+    body: Body,
+) -> ApiResult<Json<Value>> {
+    let w = auth(&st, &h)?;
+    if !w.rights.files {
+        return Err(ApiError::forbidden("This workspace may not upload files."));
+    }
+    files::own_live(&st, &w, &id)?;
+    let bytes: Bytes = axum::body::to_bytes(body, st.cfg.max_blob_bytes())
+        .await
+        .map_err(|_| {
+            ApiError::too_large(format!(
+                "The file is larger than {} MB.",
+                st.cfg.max_file_mb
+            ))
+        })?;
+    Ok(Json(files::replace(&st, &w, &id, bytes, q.size)?))
 }
 
 pub async fn apps_put(

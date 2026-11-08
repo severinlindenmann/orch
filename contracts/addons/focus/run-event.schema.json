@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/addons/focus/run-event.schema.json",
+  "title": "orch run event v1 (one line of an add-on's run event log, orch.run.event/1)",
+  "description": "One live-board event of an agent run, the same for every agent. Two producers: (1) ticket changes, for every agent (data.source = ticket: task.start, task.done, ask, from the ticket revisions the agent writes through the CLI); (2) an optional adapter normaliser named by the adapter's live.events (data.source = adapter: run.state, tool.*, helper.*, usage, denial). A board must work from producer (1) alone. text is plain words for people; commands are redacted (secrets, tokens, .orch/secrets) before they are written. Unknown kinds are skipped by readers; unknown data fields are kept.",
+  "type": "object",
+  "required": ["v", "at", "run", "ticket", "agent", "kind", "text", "data"],
+  "properties": {
+    "v": { "const": 1 },
+    "at": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "run": { "type": "string", "pattern": "^r_[a-z0-9_]{2,32}$" },
+    "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" },
+    "agent": { "type": "string", "pattern": "^(main|h_[0-9]{1,4})$", "description": "main = the agent; h_<n> = one of its helpers (subagents)." },
+    "kind": { "enum": ["run.state", "task.start", "task.done", "ask", "tool.start", "tool.end", "helper.start", "helper.end", "usage", "denial"] },
+    "text": { "type": "string", "maxLength": 500, "description": "Plain text (shown with textContent)." },
+    "data": {
+      "type": "object", "required": ["source"],
+      "properties": { "source": { "enum": ["ticket", "adapter"] } }
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "kind": { "enum": ["task.start", "task.done", "ask"] } } },
+      "then": { "properties": { "data": { "properties": { "source": { "const": "ticket" } } } } } },
+    { "if": { "properties": { "kind": { "const": "task.start" } } }, "then": { "properties": { "data": { "required": ["check"], "properties": { "check": { "pattern": "^c[0-9]{1,4}$" } } } } } },
+    { "if": { "properties": { "kind": { "const": "task.done" } } }, "then": { "properties": { "data": { "required": ["check"], "properties": { "check": { "pattern": "^c[0-9]{1,4}$" } } } } } },
+    { "if": { "properties": { "kind": { "const": "ask" } } }, "then": { "properties": { "data": { "required": ["q"], "properties": { "q": { "pattern": "^q[0-9]{1,4}$" } } } } } },
+    { "if": { "properties": { "kind": { "const": "run.state" } } },
+      "then": { "properties": { "data": { "required": ["state"], "properties": { "state": { "enum": ["starting", "working", "waiting_you", "idle", "done", "failed"] } } } } } },
+    { "if": { "properties": { "kind": { "enum": ["tool.start", "tool.end", "helper.start", "helper.end"] } } },
+      "then": { "properties": { "data": { "required": ["id"], "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 100 }, "ok": { "type": "boolean" }, "ms": { "type": "integer", "minimum": 0 } } } } } },
+    { "if": { "properties": { "kind": { "const": "usage" } } },
+      "then": { "properties": { "data": { "required": ["used"], "properties": { "used": { "type": "number", "minimum": 0, "maximum": 1 }, "window": { "type": "string", "maxLength": 32 }, "status": { "enum": ["ok", "warning", "limited"] } } } } } },
+    { "if": { "properties": { "kind": { "const": "denial" } } },
+      "then": { "properties": { "data": { "required": ["tool"], "properties": { "tool": { "type": "string", "minLength": 1, "maxLength": 64 } } } } } }
+  ]
+}

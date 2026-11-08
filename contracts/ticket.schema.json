@@ -2,23 +2,24 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://orch.severin.io/contracts/ticket.schema.json",
   "title": "orch ticket v1",
-  "description": "One ticket = one file .orch/tickets/<id>.json. Writers must produce valid tickets. Unknown fields are allowed everywhere (top level and nested) and every reader/writer keeps them unchanged. The core knows no add-on: add-on data lives only under ext.<add-on name> and is checked by that add-on's own schema (addon-manifest.md, ticket_ext). type and wake_at are gone: wait until a time with waiting_on {kind: time, until}; recurrence is ext.scheduler (addons/scheduler.ext.schema.json).",
+  "description": "One ticket = one file .orch/tickets/<id>.json. Writers must produce valid tickets. Unknown fields are allowed everywhere (top level and nested) and every reader/writer keeps them unchanged. Every field added after the first release is optional, so older tickets stay valid. The core knows no add-on: add-on data lives only under ext.<add-on name> and is checked by that add-on's own schema (addon-manifest.md, ticket_ext). type and wake_at are gone: wait until a time with waiting_on {kind: time, until}; recurrence is add-on data under ext.",
   "type": "object",
-  "required": ["schema", "id", "title", "status", "created_at", "updated_at", "checklist", "links", "questions", "history"],
+  "required": ["schema", "id", "title", "status", "created_at", "updated_at", "checklist", "refs", "questions", "history"],
   "properties": {
     "schema": { "const": "orch.ticket/1" },
     "id": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "Random, e.g. t_7k3f9q. Same as the file name." },
+    "key": { "$ref": "#/$defs/key", "description": "Optional. Short display key for people, e.g. DM1-12: the workspace code ([workspace] code in .orch/config.toml) at creation, '-', and a number from the workspace counter (.orch/ticket-counter.json) that is never reused. Set once at creation and never rewritten (a new code changes only later keys). The id stays the identity everywhere; every command that takes an id also takes the key, any case. Tickets made before keys have none." },
     "title": { "type": "string", "minLength": 1, "maxLength": 200 },
-    "status": { "enum": ["open", "active", "waiting", "done", "dropped"] },
+    "status": { "enum": ["open", "active", "waiting", "ready", "review", "done", "dropped"] },
     "created_at": { "$ref": "#/$defs/time" },
     "updated_at": { "$ref": "#/$defs/time" },
     "checklist": { "type": "array", "items": { "$ref": "#/$defs/check" } },
-    "links": { "type": "array", "items": { "$ref": "#/$defs/link" } },
+    "refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
     "questions": { "type": "array", "items": { "$ref": "#/$defs/question" } },
     "history": { "type": "array", "items": { "$ref": "#/$defs/history" } },
     "revision": { "type": "integer", "minimum": 0, "description": "+1 on every write. `orch ticket patch --if-revision N` is refused when it changed (no lost updates between agents and add-ons). Missing = 0." },
     "waiting_on": {
-      "description": "Generic waiting. The core records it and never promises that something wakes the ticket (an add-on such as the scheduler may). kind time needs until; the other kinds need ref.",
+      "description": "Generic waiting. The core records it and never promises that something wakes the ticket (an add-on may). kind time needs until; the other kinds need ref.",
       "oneOf": [
         { "type": "null" },
         {
@@ -40,18 +41,33 @@
       "description": "One key per add-on (its manifest name) or tool. Each owner decides its own shape; an installed add-on's ticket_ext schema checks its key on every write. Others never change a key they do not own.",
       "propertyNames": { "pattern": "^[a-z][a-z0-9-]{0,31}$" },
       "additionalProperties": { "type": "object" }
+    },
+    "owner": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The person who owns the ticket, free text (a name), e.g. 'Severin'. Not a login." },
+    "due": { "type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "Optional. Due day, YYYY-MM-DD, no time and no zone." },
+    "note": { "type": "string", "maxLength": 2000, "description": "Optional. Free note from people, shown on the ticket. Plain text." },
+    "summary": { "type": "string", "maxLength": 200, "description": "Optional. Where things stand, one or two plain sentences, kept current by whoever works on it. Used to start a fresh agent session." },
+    "parent": { "oneOf": [{ "$ref": "#/$defs/tid" }, { "type": "null" }], "description": "Optional. Id of the parent ticket (sub-tickets). Set at creation. Children are not stored on the parent: they are found by reading every ticket's parent." },
+    "sessions": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/session" },
+      "description": "Optional. Agent sessions that worked on this ticket, one entry per agent and machine (host). A new run resumes the entry whose agent and host match; otherwise it starts fresh. No age limit. The gitignored run record (run.schema.json) holds only the claim."
     }
   },
   "$defs": {
     "time": { "type": "string", "format": "date-time", "pattern": "Z$", "description": "RFC 3339, UTC, ends with Z." },
-    "who": { "type": "string", "pattern": "^(agent|human):[A-Za-z0-9_.@ -]{1,64}$", "description": "agent:<tool> (agent:claude-code, agent:codex) or human:<name>" },
+    "who": { "type": "string", "pattern": "^(agent|human):[A-Za-z0-9_.@ -]{1,64}$", "description": "agent:<adapter name> (e.g. agent:my-agent) or human:<name>. Add-ons that write log as agent:<add-on name>." },
     "evidence": {
       "type": "object",
       "required": ["type", "ref"],
       "properties": {
         "type": { "enum": ["pr", "commit", "file", "url", "command", "note"] },
-        "ref": { "type": "string", "minLength": 1, "description": "PR URL, commit hash, file path, URL, the command line, or the note text" },
-        "text": { "type": "string", "description": "Optional short result, e.g. '42 passed'" }
+        "ref": { "type": "string", "minLength": 1, "description": "PR URL, commit hash, file path (a copied file lives in the gitignored .orch/tickets/<id>/evidence/), URL, the command line, or the note text" },
+        "text": { "type": "string", "description": "Optional short result, e.g. '42 passed'" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Optional short name shown instead of ref." },
+        "role": { "enum": ["result", "check", "support"], "description": "Optional. result = what was asked for; check = proof it works; support = anything else." },
+        "at": { "$ref": "#/$defs/time" },
+        "by": { "$ref": "#/$defs/who" }
       }
     },
     "check": {
@@ -61,20 +77,205 @@
         "id": { "type": "string", "pattern": "^c[0-9]{1,4}$" },
         "text": { "type": "string", "minLength": 1 },
         "done": { "type": "boolean" },
-        "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } }
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } },
+        "state": { "const": "doing", "description": "Optional. 'doing' = someone works on this item now (by, at say who and since when). Absent = not started or done (see done)." },
+        "by": { "$ref": "#/$defs/who" },
+        "at": { "$ref": "#/$defs/time" }
       },
       "if": { "properties": { "done": { "const": true } } },
       "then": { "properties": { "evidence": { "minItems": 1 } } },
       "description": "Evidence-based: done=true needs at least one evidence entry."
     },
-    "link": {
+    "ref": {
       "type": "object",
-      "required": ["type", "url"],
+      "required": [
+        "kind",
+        "at",
+        "by"
+      ],
       "properties": {
-        "type": { "type": "string", "pattern": "^[a-z0-9-]{1,32}$", "description": "Any tool: github, jira, teams, file, publish, ticket, ..." },
-        "url": { "type": "string", "minLength": 1 },
-        "title": { "type": "string" }
-      }
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,31}(?::[a-z0-9][a-z0-9-]{0,31})?$"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "A web address.",
+          "pattern": "^https?://"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200,
+          "description": "Empty: the short address is shown."
+        },
+        "status": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9 -]{0,23}$",
+          "description": "Set only by the add-on that owns kind (refresh act); shown only while it is on."
+        },
+        "thumb": {
+          "type": "string",
+          "pattern": "^artifacts/[A-Za-z0-9_.-]{1,100}$",
+          "description": "A picture in the ticket's artifacts folder (add-on with preview = 'thumb')."
+        },
+        "at": {
+          "$ref": "#/$defs/time"
+        },
+        "by": {
+          "$ref": "#/$defs/who"
+        },
+        "ticket": {
+          "$ref": "#/$defs/tid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^(?!/|.*\\\\|.*\\u0000|(?:.*\\/)?\\.\\.(?:/|$)|\\.orch(?:/|$)|\\.git(?:/|$)|[A-Za-z]:).+"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "ticket"
+            }
+          },
+          "required": [
+            "ticket"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "title"
+                ]
+              },
+              {
+                "required": [
+                  "status"
+                ]
+              },
+              {
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "required": [
+                  "name"
+                ]
+              },
+              {
+                "required": [
+                  "path"
+                ]
+              },
+              {
+                "required": [
+                  "local"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "artifact"
+            }
+          },
+          "required": [
+            "ticket",
+            "name"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "title"
+                ]
+              },
+              {
+                "required": [
+                  "status"
+                ]
+              },
+              {
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "required": [
+                  "path"
+                ]
+              },
+              {
+                "required": [
+                  "local"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "file"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "required": [
+                  "ticket"
+                ]
+              },
+              {
+                "required": [
+                  "local"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "kind": {
+              "not": {
+                "enum": [
+                  "ticket",
+                  "artifact",
+                  "file"
+                ]
+              }
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      ]
     },
     "question": {
       "type": "object",
@@ -86,16 +287,35 @@
         "recommended": { "type": ["string", "null"] },
         "answer": { "type": ["string", "null"] },
         "answered_by": { "oneOf": [{ "$ref": "#/$defs/who" }, { "type": "null" }] },
-        "via": { "enum": ["cli", "phone", "relay", null] }
+        "via": { "oneOf": [{ "$ref": "#/$defs/token" }, { "type": "null" }], "description": "Where the answer came from (free word, e.g. cli, web, phone). null while unanswered." },
+        "kind": {
+          "type": "string",
+          "pattern": "^(plain|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$",
+          "default": "plain",
+          "description": "Optional. plain (default) or <add-on>:<name>; the add-on with that prefix acts on the answer. The core only records it."
+        },
+        "action": { "type": "object", "description": "Optional, opaque to the core: data the asking add-on needs to act on the answer." },
+        "check": { "type": "string", "pattern": "^c[0-9]{1,4}$", "description": "Optional. The checklist item this question belongs to." }
       }
     },
     "history": {
       "type": "object",
       "required": ["at", "by", "text"],
+      "properties": { "at": { "$ref": "#/$defs/time" }, "by": { "$ref": "#/$defs/who" }, "text": { "type": "string", "minLength": 1 }, "via": { "$ref": "#/$defs/token", "description": "Optional. Surface the change came from (free word)." } }
+    },
+    "tid": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" },
+    "code": { "type": "string", "pattern": "^[A-Z0-9]{2,4}$", "description": "Workspace code: 2-4 uppercase letters or digits, e.g. DM1, MEC." },
+    "key": { "type": "string", "pattern": "^[A-Z0-9]{2,4}-[1-9][0-9]{0,8}$", "description": "<code>-<n>, n from 1, e.g. DM1-12." },
+    "token": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,15}$", "description": "A short free word (a-z, 0-9, -) naming the surface or channel, e.g. cli, web, phone. The core never lists the allowed values." },
+    "agent_name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "description": "An agent adapter name: a key of agents.json or a [agents.<name>] table in .orch/config.toml." },
+    "session": {
+      "type": "object",
+      "required": ["agent", "id", "host", "last_used"],
       "properties": {
-        "at": { "$ref": "#/$defs/time" },
-        "by": { "$ref": "#/$defs/who" },
-        "text": { "type": "string", "minLength": 1 }
+        "agent": { "$ref": "#/$defs/agent_name" },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$", "description": "The agent tool's own session id. Never starts with '-' (it is passed as a command argument)." },
+        "host": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$", "description": "Host name of the machine where the session lives; resume only on the same host." },
+        "last_used": { "$ref": "#/$defs/time" }
       }
     }
   }

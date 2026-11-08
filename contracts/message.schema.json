@@ -10,14 +10,20 @@
     "id": { "type": "string", "pattern": "^m_[a-z0-9]{16}$" },
     "from": { "$ref": "#/$defs/address" },
     "to": { "$ref": "#/$defs/address" },
-    "type": { "enum": ["text", "file", "question", "answer", "delegate", "start", "allow", "refresh-hint", "webhook"] },
+    "type": { "enum": ["text", "file", "question", "answer", "delegate", "start", "allow", "refresh-hint", "webhook", "control"] },
     "created_at": { "type": "string", "format": "date-time", "pattern": "Z$" },
     "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "Ticket in the workspace that owns the thread: question and answer = the asking workspace (the relay copies it from reply_to); text/file/delegate/start = the sender's; phone send and webhook = the receiving workspace's." },
+    "key": { "type": "string", "pattern": "^[A-Z0-9]{2,4}-[1-9][0-9]{0,8}$", "description": "Optional display key of `ticket` (ticket.schema.json key, e.g. DM1-12), set by the workspace that owns that ticket on text/file/question/delegate/start. The relay copies it with `ticket` onto answers and shows it to phones next to `ticket`. For people only; `ticket` stays the reference." },
     "reply_to": { "type": "string", "pattern": "^m_[a-z0-9]{16}$" },
     "body": { "type": "object" }
   },
   "allOf": [
     { "if": { "properties": { "type": { "const": "text" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/text" } } } },
+    { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["update"], "not": { "required": ["general"], "properties": { "general": { "const": true } } } } } }, "then": { "required": ["ticket"] } },
+    { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["update", "general"], "properties": { "general": { "const": true } } } } }, "then": { "required": ["reply_to"], "properties": { "body": { "not": { "required": ["ticket_view"] }, "properties": { "update": { "properties": { "kind": { "enum": ["ack", "working"] } } } } } } } },
+    { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["general"], "properties": { "general": { "const": true } } } } }, "then": { "not": { "required": ["ticket"] } } },
+    { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["feedback"] } } }, "then": { "required": ["ticket"] } },
+    { "if": { "properties": { "type": { "const": "control" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/control" } } } },
     { "if": { "properties": { "type": { "const": "file" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/file" } } } },
     { "if": { "properties": { "type": { "const": "question" } } }, "then": { "required": ["ticket"], "properties": { "body": { "$ref": "#/$defs/question" } } } },
     { "if": { "properties": { "type": { "const": "answer" } } }, "then": { "required": ["ticket", "reply_to"], "properties": { "body": { "$ref": "#/$defs/answer" } } } },
@@ -28,14 +34,203 @@
     { "if": { "properties": { "type": { "const": "webhook" } } }, "then": { "properties": { "from": { "pattern": "^webhook:wh_" }, "body": { "$ref": "#/$defs/webhook" } } } }
   ],
   "$defs": {
+    "control": {
+      "description": "A request from a phone to its workspace, made only by the relay (POST /v1/phone/control). mobile_mode_off = turn Mobile mode off (relay-api.md, Mobile mode).",
+      "type": "object", "required": ["control"],
+      "properties": { "control": { "enum": ["mobile_mode_off"] }, "client_id": { "$ref": "#/$defs/client_id" } }
+    },
+    "client_id": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", "description": "A UUID the phone picks once per outgoing message and keeps on every retry; the relay dedupes on (phone, client_id) and compares it exactly." },
+    "blob_id": { "type": "string", "pattern": "^b_[a-z0-9]{16}$" },
+    "artifact_id": { "type": "string", "pattern": "^a_[0-9a-f]{12}$" },
+    "rev": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$" },
+    "lang": { "type": "string", "pattern": "^[a-z]{2}(-[A-Z]{2})?$", "description": "Language tag: de, en, de-CH, ..." },
+    "feedback": {
+      "type": "object", "additionalProperties": false, "required": ["artifact_id", "artifact_rev", "verdict", "pins"],
+      "description": "Feedback on one artifact revision of the message's ticket (ticket_view attachment id + rev). approve = \"Looks good\" (pins may be empty); changes = at least one pin. Never an approval to publish: that is always a question answer.",
+      "properties": {
+        "artifact_id": { "$ref": "#/$defs/artifact_id" },
+        "artifact_rev": { "$ref": "#/$defs/rev" },
+        "verdict": { "enum": ["approve", "changes"] },
+        "pins": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/pin" } }
+      },
+      "if": { "properties": { "verdict": { "const": "changes" } } },
+      "then": { "properties": { "pins": { "minItems": 1 } } }
+    },
+    "pin": {
+      "type": "object", "additionalProperties": false, "required": ["n", "anchor"],
+      "anyOf": [{ "required": ["text"] }, { "required": ["voice_blob_id"] }],
+      "description": "One comment pin: its number as shown (1, 2, ...), where it sits, and a typed and/or spoken comment.",
+      "properties": {
+        "n": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "anchor": { "$ref": "#/$defs/anchor" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "voice_blob_id": { "$ref": "#/$defs/blob_id", "description": "A phone upload (voice comment); the receiving workspace may read it like an attachment." },
+        "transcript": { "type": "string", "maxLength": 2000 }
+      }
+    },
+    "anchor": {
+      "type": "object", "additionalProperties": false, "required": ["type"],
+      "description": "Where a pin sits. html: CSS selector and/or quoted text of the element, plus the vertical scroll offset in CSS px at viewport width viewport_w. pdf: page (from 1) and x/y. image: x/y. x and y are fractions 0..1 of the page or image width and height, from the top-left corner.",
+      "properties": {
+        "type": { "enum": ["html", "pdf", "image"] },
+        "selector": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "quote": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "offset": { "type": "integer", "minimum": 0 },
+        "viewport_w": { "type": "integer", "minimum": 1 },
+        "page": { "type": "integer", "minimum": 1 },
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "html" } } }, "then": { "anyOf": [{ "required": ["selector"] }, { "required": ["quote"] }], "not": { "anyOf": [{ "required": ["page"] }, { "required": ["x"] }, { "required": ["y"] }] } } },
+        { "if": { "properties": { "type": { "const": "pdf" } } }, "then": { "required": ["page", "x", "y"] } },
+        { "if": { "properties": { "type": { "const": "image" } } }, "then": { "required": ["x", "y"], "not": { "required": ["page"] } } }
+      ]
+    },
     "address": {
       "type": "string",
-      "pattern": "^(ws_[a-z0-9]{10}|ph_[a-z0-9]{10}|phones|admin|webhook:wh_[a-z0-9]{10})$",
-      "description": "ws_ = workspace, ph_ = phone, phones = every phone allowed to reach the sending workspace, admin = relay admin, webhook:wh_ = an incoming webhook."
+      "pattern": "^(ws_[a-z0-9]{10}|ph_[a-z0-9]{10}|sub_[a-z0-9]{10}|phones|admin|webhook:wh_[a-z0-9]{10})$",
+      "description": "ws_ = workspace, ph_ = phone, phones = every phone allowed to reach the sending workspace, admin = relay admin, webhook:wh_ = an incoming webhook, sub_ = a subscriber (another system; only as the sender of an answer, relay-api.md Subscribers)."
     },
     "text": {
-      "type": "object", "required": ["text"],
-      "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 20000 } }
+      "type": "object",
+      "anyOf": [{ "required": ["text"] }, { "required": ["attachments"] }, { "required": ["voice"] }, { "required": ["location"] }, { "required": ["feedback"] }],
+      "description": "A text needs at least one of text, attachments, voice, location, feedback. Only the relay sets client_id, attachments, voice, location and feedback (on the text it builds for POST /v1/phone/send); a workspace message with any of them is refused (422 invalid).",
+      "properties": {
+        "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
+        "client_id": { "$ref": "#/$defs/client_id" },
+        "general": { "type": "boolean", "description": "true = the workspace's General conversation (no ticket; a text with general true must not carry ticket). Its only update kinds are ack and working, with reply_to = the phone's General text (the Started / Working receipt, relay-api.md). Rule (relay-api.md, General vs topics): a workspace text without ticket is General whether or not general is set; a phone text without ticket and without general is a pending new topic until an ack with reply_to = its id names the ticket. The relay never rewrites stored texts." },
+        "speak": {
+          "type": "object", "additionalProperties": false, "required": ["lang"],
+          "description": "Workspace texts only: worth hearing. The phone may fetch audio for it (GET /v1/phone/speech/<message id>). Spoken text = summary if set, else text (relay-api.md, Speech).",
+          "properties": {
+            "lang": { "enum": ["de", "en"] },
+            "summary": { "type": "string", "minLength": 1, "maxLength": 600 }
+          }
+        },
+        "attachments": {
+          "type": "array", "minItems": 1, "maxItems": 10,
+          "description": "Phone uploads (POST /v1/phone/blobs) sent with this text. The receiving workspace may read each blob with GET /v1/blobs/<blob_id>.",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["blob_id", "kind", "name", "size", "mime"],
+            "properties": {
+              "blob_id": { "$ref": "#/$defs/blob_id" },
+              "kind": { "enum": ["image", "file", "voice"], "description": "As the phone says, unchecked; a display hint only." },
+              "name": { "type": "string", "minLength": 1, "maxLength": 255, "description": "As the phone says, unchecked. The workspace cleans it before using it as a file name (no / or \\, no leading dots, no control characters)." },
+              "size": { "type": "integer", "minimum": 1, "maximum": 26214400 },
+              "mime": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.+-]{0,63}/[a-z0-9][a-z0-9.+-]{0,63}$", "description": "As the phone says, unchecked (the relay serves every blob as application/octet-stream); a hint only, never trusted." },
+              "duration": { "type": "number", "minimum": 0, "maximum": 3600, "description": "Seconds, voice only." }
+            }
+          }
+        },
+        "voice": {
+          "type": "object", "additionalProperties": false, "required": ["blob_id", "transcript", "lang", "lang_source"],
+          "description": "The text is a voice memo: the recording (a phone upload) and what was said. The agent works from transcript; text, if set, is what the person typed next to it.",
+          "properties": {
+            "blob_id": { "$ref": "#/$defs/blob_id" },
+            "transcript": { "type": "string", "maxLength": 20000, "description": "Empty when nothing could be transcribed." },
+            "lang": { "$ref": "#/$defs/lang" },
+            "lang_source": { "enum": ["detected", "setting", "corrected"], "description": "detected = by the transcriber; setting = the phone's language setting (Swiss German); corrected = the person picked it in the long-press menu." }
+          }
+        },
+        "location": {
+          "type": "object", "additionalProperties": false, "required": ["lat", "lon"],
+          "description": "A current location, sent once (not live).",
+          "properties": {
+            "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+            "lon": { "type": "number", "minimum": -180, "maximum": 180 },
+            "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "accuracy_m": { "type": "number", "minimum": 0 }
+          }
+        },
+        "feedback": { "$ref": "#/$defs/feedback" },
+        "update": {
+          "type": "object", "required": ["kind"], "additionalProperties": false,
+          "properties": {
+            "kind": { "enum": ["ack", "working", "note", "result", "question", "failure", "stopped"], "description": "What this text says about the ticket's work. The relay pushes only result, question, failure and stopped; the others are stored and listed, never pushed (relay-api.md, Push). An ack or working text about a phone text carries reply_to = that phone text's id (the phone shows it as Started); the ack that starts a new topic carries the new ticket (and key)." },
+            "title": {
+              "type": "string", "minLength": 1, "maxLength": 120,
+              "pattern": "^[\\p{Zs}]*[\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}][\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}\\p{Zs}]*$",
+              "not": { "anyOf": [{ "pattern": "[\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u3164\ufe00-\ufe0f\uffa0\udb40\udd00-\udb40\uddef]" }, { "pattern": "[\\p{M}][\\p{M}][\\p{M}]" }] },
+              "description": "Optional short ticket title for the phone. Same character rule as the PATCH /v1/me description (relay-api.md): one line, NFC, only letters, marks, numbers, punctuation, symbols and spaces (Unicode L, M, N, P, S, Zs), not only spaces, no control/format/line/paragraph separators, no Default_Ignorable_Code_Point characters, at most 2 combining marks in a row. The relay refuses a text that breaks it (422 invalid); NFC is checked by the relay."
+            }
+          },
+          "description": "Optional. A work update about the message's ticket. Old clients ignore it and show the text as before."
+        },
+        "ticket_view": { "$ref": "#/$defs/ticket_view" }
+      },
+      "if": { "required": ["ticket_view"] }, "then": { "required": ["update"] }
+    },
+    "ticket_view": {
+      "type": "object", "additionalProperties": false,
+      "required": ["title", "status", "running", "checklist", "done", "total", "history_tail", "attachments"],
+      "description": "Optional, only next to body.update: a snapshot of the ticket for the phone's ticket chat (title, tasks, the last history lines, proof and references). Written by the sending workspace; the relay stores it with the text, never interprets it, and refuses a text whose ticket_view is over 16384 bytes as compact UTF-8 JSON (422 invalid). The newest one of a ticket wins. Plain text everywhere, never HTML; secrets are removed by the workspace before sending.",
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "status": { "enum": ["open", "active", "waiting", "ready", "review", "done", "dropped"] },
+        "agent": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The agent working on it now or last, as a display name (e.g. Claude)." },
+        "summary": { "type": "string", "maxLength": 200 },
+        "running": { "type": "boolean", "description": "An agent runs on the ticket now (the phone says \"Goes in after this step\"), else \"Saved for the next run\"." },
+        "checklist": {
+          "type": "array", "maxItems": 200,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["text", "done"],
+            "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 500 }, "done": { "type": "boolean" } }
+          }
+        },
+        "done": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 },
+        "history_tail": {
+          "type": "array", "maxItems": 30, "description": "The ticket's last history lines (at most 30), oldest first, in plain words.",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["at", "who", "role", "text"],
+            "properties": {
+              "at": { "type": "string", "format": "date-time", "pattern": "Z$" },
+              "who": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Display name: the person's name or the agent's (e.g. Claude)." },
+              "role": { "enum": ["agent", "person"] },
+              "text": { "type": "string", "minLength": 1, "maxLength": 1000 }
+            }
+          }
+        },
+        "refs": {
+          "type": "array", "maxItems": 50,
+          "description": "Shared ticket references. Ticket titles and status are read when sent. Local computer references are never sent.",
+          "items": {
+            "type": "object", "required": ["kind"], "additionalProperties": false,
+            "properties": {
+              "kind": {"type": "string"}, "url": {"type": "string"},
+              "ticket": {"type": "string", "pattern": "^t_[a-z0-9]{6,16}$"},
+              "name": {"type": "string"}, "path": {"type": "string"},
+              "line": {"type": "integer", "minimum": 1},
+              "title": {"type": "string"}, "status": {"type": "string"}
+            }
+          }
+        },
+        "attachments": {
+          "type": "array", "maxItems": 50, "description": "Newest first. image/file: proof files the agent marked as result or check, uploaded with POST /v1/blobs (fetched by the phone with GET /v1/phone/blobs/<blob_id>). link: proof URLs and ticket references (ticket references carry label, icon, mono and status when known). html: a published page or app (the phone opens it in its viewer). pr / commit: a pull request or a commit (title, url, status). Every url kind (link, html, pr, commit) needs url and no blob_id; image/file need blob_id, name, size and no url. id + rev name the artifact for feedback (body.feedback).",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["kind", "title", "at"],
+            "properties": {
+              "kind": { "enum": ["image", "file", "link", "html", "pr", "commit"] },
+              "id": { "$ref": "#/$defs/artifact_id", "description": "Stable per artifact across revisions: a_ + the first 12 hex characters of sha256(\"<source>\\n<ref>\") (UTF-8), where source/ref = the evidence type and ref, or \"link\" and the url for ticket references (vectors/phone-v3-v1.json, artifact_ids). Optional for older workspaces; feedback needs it." },
+              "rev": { "$ref": "#/$defs/rev", "description": "This revision of the artifact: the blob's sha256 for image/file, the commit sha for commit and pr (head), the publish id or deploy rev for html, else any short word that changes when the content changes." },
+              "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "url": { "type": "string", "minLength": 1, "maxLength": 2000, "pattern": "^https?://" },
+              "blob_id": { "type": "string", "pattern": "^b_[a-z0-9]{16}$" },
+              "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+              "size": { "type": "integer", "minimum": 0, "maximum": 104857600 },
+              "at": { "type": "string", "format": "date-time", "pattern": "Z$" },
+              "label": { "type": "string", "minLength": 1, "maxLength": 60, "description": "Optional, url kinds only: what the link is (\"GitHub · Pull request\", \"Figma\", \"Link\"), from workspace/src/orch/refs.py." },
+              "icon": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$", "description": "Optional, url kinds only: the site or link-type icon key (github, figma, youtube, link, ...); an unknown key shows the mono tile." },
+              "mono": { "type": "string", "minLength": 1, "maxLength": 3, "description": "Optional, url kinds only: the letters on the tile (GH, Fg)." },
+              "status": { "type": "string", "pattern": "^[a-z0-9][a-z0-9 -]{0,23}$", "description": "Optional, url kinds only: the add-on's status of the link (open, merged, unlisted); for pr the PR state (open, draft, merged, closed)." }
+            },
+            "if": { "properties": { "kind": { "enum": ["image", "file"] } } },
+            "then": { "required": ["blob_id", "name", "size"], "not": { "required": ["url"] } },
+            "else": { "required": ["url"], "not": { "required": ["blob_id"] } }
+          }
+        }
+      }
     },
     "file": {
       "type": "object", "required": ["blob_id", "name", "size", "sha256"],
@@ -55,7 +250,13 @@
         "title": { "type": "string", "description": "Ticket title, for the phone card" },
         "text": { "type": "string", "minLength": 1 },
         "options": { "type": "array", "items": { "type": "string" } },
-        "recommended": { "type": ["string", "null"] }
+        "recommended": { "type": ["string", "null"] },
+        "previews": {
+          "type": "object", "maxProperties": 10,
+          "additionalProperties": { "$ref": "#/$defs/artifact_id" },
+          "description": "Optional: option -> the ticket_view attachment id the phone shows next to that option (A/B choices, approve with a preview). Keys are options of this question; others are ignored."
+        },
+        "scope": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Optional, permission questions (options Once / Always / No): what Always covers, in plain words, e.g. \"sending to anna@pilatus.ch\". The phone shows \"Always allow <scope>\"." }
       }
     },
     "answer": {
@@ -63,7 +264,8 @@
       "properties": {
         "question_id": { "type": "string", "pattern": "^q[0-9]{1,4}$" },
         "answer": { "type": "string", "minLength": 1 },
-        "answered_by": { "type": "string", "pattern": "^(agent|human):.{1,64}$" }
+        "answered_by": { "type": "string", "pattern": "^(agent|human):.{1,64}$" },
+        "client_id": { "$ref": "#/$defs/client_id", "description": "Set by the relay on phone answers (POST /v1/phone/answer)." }
       }
     },
     "delegate": {

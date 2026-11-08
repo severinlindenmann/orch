@@ -38,13 +38,25 @@ def b64u_decode(text: str) -> bytes:
 # ---- OPF1 blob (crypto.md section 1) ------------------------------------------------------------
 
 
-def encrypt(content: bytes, name: str, mime: str, key: bytes | None = None, iv: bytes | None = None):
-    """Returns (blob, key). plaintext = u32 BE header length | header JSON | file bytes."""
+NOTE_MAX = 280
+
+
+def encrypt(
+    content: bytes,
+    name: str,
+    mime: str,
+    key: bytes | None = None,
+    iv: bytes | None = None,
+    note: str | None = None,
+):
+    """Returns (blob, key). plaintext = u32 BE header length | header JSON | file bytes.
+    `note` (optional, crypto.md) travels inside the ciphertext; the server never sees it."""
     key = key or os.urandom(32)
     iv = iv or os.urandom(12)
-    header = json.dumps(
-        {"name": name, "type": mime, "size": len(content)}, ensure_ascii=False, separators=(",", ":")
-    ).encode()
+    head = {"name": name, "type": mime, "size": len(content)}
+    if note:
+        head["note"] = note
+    header = json.dumps(head, ensure_ascii=False, separators=(",", ":")).encode()
     plain = struct.pack(">I", len(header)) + header + content
     return MAGIC + iv + AESGCM(key).encrypt(iv, plain, MAGIC), key
 
@@ -89,7 +101,12 @@ def _api(root: Path, method: str, path: str, body=None):
 
 
 def whoami(root: Path) -> dict:
-    return _api(root, "GET", "/v1/whoami")
+    who = _api(root, "GET", "/v1/whoami")
+    from orch import skillrender
+
+    skillrender.remember_rights(root, who)  # the skill lists what this workspace may share
+    skillrender.refresh_skills(root)
+    return who
 
 
 def profile(root: Path, description: str | None, tags: list[str] | None) -> dict:
@@ -178,7 +195,40 @@ def bundle(folder: Path, report: dict | None = None) -> bytes:
     return struct.pack(">I", len(raw)) + raw + b"".join(datas)
 
 
-def share_file(root: Path, path: Path, days: int | None, permanent: bool) -> dict:
+def _note(note: str | None) -> str | None:
+    note = " ".join((note or "").split())
+    if len(note) > NOTE_MAX:
+        raise Refused(f"The note is longer than {NOTE_MAX} characters.")
+    return note or None
+
+
+def _file_id(ident: str) -> str:
+    if not re.fullmatch(r"f_[a-z0-9]+", ident):
+        raise Refused("A file id looks like f_8c2kq0z4m1x7b3na. Find it with: orch publish list")
+    return ident
+
+
+def share_file(
+    root: Path,
+    path: Path,
+    days: int | None,
+    permanent: bool,
+    note: str | None = None,
+    replace: str | None = None,
+) -> dict:
+    note = _note(note)
+    key = None
+    if replace:
+        _file_id(replace)
+        if days is not None or permanent:
+            raise Refused("A replaced file keeps its expiry. Use orch publish extend to change it.")
+        k = net.read_json(_keys_path(root), {}).get(replace)
+        if not k:
+            raise Refused(
+                f"Can't replace {replace}: its key is only kept on the computer that shared it. "
+                "Share the file again instead: orch publish file <path>"
+            )
+        key = b64u_decode(k)
     if path.is_dir():
         shown: dict = {}
         content, mime = bundle(path, shown), BUNDLE_TYPE
@@ -191,10 +241,15 @@ def share_file(root: Path, path: Path, days: int | None, permanent: bool) -> dic
     else:
         content = path.read_bytes()
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    q = _life(days, permanent)
     name = path.resolve().name if path.is_dir() else path.name
-    blob, key = encrypt(content, name, mime)
-    res = _api(root, "POST", "/v1/files" + (f"?{q}" if q else ""), blob)
+    if replace:
+        # same key, so the link keeps working; a fresh random IV for the new content
+        blob, key = encrypt(content, name, mime, key=key, note=note)
+        res = _api(root, "PUT", f"/v1/files/{replace}?size={len(content)}", blob)
+    else:
+        q = _life(days, permanent)
+        blob, key = encrypt(content, name, mime, note=note)
+        res = _api(root, "POST", "/v1/files" + (f"?{q}&" if q else "?") + f"size={len(content)}", blob)
     k = b64u(key)
     keys = net.read_json(_keys_path(root), {})
     keys[res["id"]] = k
@@ -209,8 +264,32 @@ def share_file(root: Path, path: Path, days: int | None, permanent: bool) -> dic
     return res
 
 
+def extend(root: Path, ident: str, days: int) -> dict:
+    """PATCH /v1/files/<id> {days}. The link stays the same; an expired file is never revived."""
+    _file_id(ident)
+    try:
+        res = _api(root, "PATCH", f"/v1/files/{ident}", {"days": days})
+    except Refused as e:
+        if getattr(e, "status", None) == 410:
+            raise Refused("This link has expired.") from None
+        raise
+    res["name"] = net.read_json(_names_path(root), {}).get(ident)
+    return res
+
+
+def _all_files(root: Path) -> list:
+    files, after = [], None
+    for _ in range(1000):  # a hard stop: 100 000 files
+        page = _api(root, "GET", "/v1/files?limit=100" + (f"&after={after}" if after else ""))
+        files += net.items(page)
+        after = page.get("next") if isinstance(page, dict) else None
+        if not after:
+            break
+    return files
+
+
 def list_all(root: Path) -> dict:
-    files = net.items(_api(root, "GET", "/v1/files?limit=100"))
+    files = _all_files(root)
     keys = net.read_json(_keys_path(root), {})
     names = net.read_json(_names_path(root), {})
     for f in files:
@@ -224,6 +303,58 @@ def list_all(root: Path) -> dict:
         if not a.get("public") and a["name"] in tokens:
             a["link"] = f"{a['url']}/?token={tokens[a['name']]}"
     return {"files": files, "apps": apps}
+
+
+def _plain(text: str, limit: int = 200) -> str:
+    """Text for a view block: no < or >, 1-200 characters."""
+    t = " ".join(str(text).replace("<", "").replace(">", "").split())[:limit]
+    return t or "(unnamed)"
+
+
+def view(root: Path) -> dict:
+    """`orch publish view --json` (addon-view.schema.json): read-only, links without any key."""
+    import datetime as dt
+
+    from orch.cli_clients import _exp, _size
+
+    r = list_all(root)
+    base = _cfg(root)["url"]
+    cap = 50
+    files = [
+        {
+            "title": _plain(f.get("name") or "(unnamed file)"),
+            "subtitle": _plain(f"{_size(f['size'])} · {_exp(f['expires_at'])}"),
+            **({"link": f"{base}/f/{f['id']}"} if base.startswith("https://") else {}),
+        }
+        for f in r["files"]
+    ]
+    apps = [
+        {
+            "title": _plain(a["name"]),
+            "subtitle": _plain(
+                f"{a['status']}, {'public' if a['public'] else 'private'}, {_exp(a['expires_at'])}"
+            ),
+            **({"link": a["url"]} if str(a.get("url", "")).startswith("https://") else {}),
+        }
+        for a in r["apps"]
+    ]
+    blocks: list = [
+        {"type": "stat", "label": "Files", "value": len(files)},
+        {"type": "stat", "label": "Apps", "value": len(apps)},
+    ]
+    if files:
+        blocks.append(
+            {"type": "list", "title": "Files", "items": files[:cap], "more": max(0, len(files) - cap)}
+        )
+    if apps:
+        blocks.append({"type": "list", "title": "Apps", "items": apps[:cap], "more": max(0, len(apps) - cap)})
+    return {
+        "schema": "orch.addon-view/1",
+        "generated_at": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "notice": "To copy, extend or delete a link, ask your agent.",
+        "notice_tone": "neutral",
+        "blocks": blocks,
+    }
 
 
 def delete(root: Path, ident: str) -> str:

@@ -18,6 +18,7 @@ from pathlib import Path
 
 
 REGISTRY: dict[str, dict] = {}
+V2_NEEDS_SERVERS = {"V2-P6", "V2-M1"}  # v2 scenarios that start the local relay/publish servers
 
 
 def scenario(sid: str, slow: bool = False, local_only: bool = False):
@@ -204,16 +205,37 @@ def start_local(e, tmp: Path, bins: dict, used: set[int]) -> tuple[Server, Serve
     (tmp / "relay-master.key").write_bytes(os.urandom(32))
     rel_env = {**env, "ORCH_RELAY_DATA_DIR": str(rd), "ORCH_RELAY_MASTER_KEY_FILE": str(tmp / "relay-master.key"),
                "ORCH_RELAY_LISTEN": f"127.0.0.1:{rp}", "ORCH_RELAY_ADMIN_LISTEN": f"127.0.0.1:{ra}",
-               "ORCH_RELAY_ADMIN_TOKEN": tok_r, "ORCH_RELAY_PUBLIC_ORIGIN": f"http://127.0.0.1:{rp}"}
+               "ORCH_RELAY_ADMIN_TOKEN": tok_r, "ORCH_RELAY_PUBLIC_ORIGIN": f"http://127.0.0.1:{rp}",
+               "ORCH_RELAY_TEST_PUSH_LOOPBACK": "1"}  # subscriber push to a scenario's own receiver (R16)
     rlog = open(tmp / "relay.log", "w")
     rproc = subprocess.Popen([bins["relay"]], env=rel_env, stdout=rlog, stderr=rlog, cwd=tmp)
     e.pids.append(rproc.pid)
     pub = Server("publish", f"http://127.0.0.1:{pp}", f"http://127.0.0.1:{pa}", Admin(f"http://127.0.0.1:{pa}", tok_p), pproc, pd)
     rel = Server("relay", f"http://127.0.0.1:{rp}", f"http://127.0.0.1:{ra}", Admin(f"http://127.0.0.1:{ra}", tok_r), rproc, rd)
+    rel.env = rel_env  # kept so a harness can stop and restart the relay (V3-SIM)
     for s in (pub, rel):
         if not wait_http(s.url + "/health"):
             raise Fail(f"{s.name} did not start; see {tmp}/{s.name}.log")
     return pub, rel
+
+
+def kill_group(p: subprocess.Popen) -> None:
+    """End a process started with start_new_session=True and everything it started (orch runs add-ons as children)."""
+    import signal
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(p.pid, sig)
+        except OSError:
+            return
+        try:
+            p.wait(5)
+            break
+        except subprocess.TimeoutExpired:
+            pass
+    try:
+        os.killpg(p.pid, signal.SIGKILL)  # anything left in the group after the parent went
+    except OSError:
+        pass
 
 
 # ---- text helpers ----------------------------------------------------------------------------------

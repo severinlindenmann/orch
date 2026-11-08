@@ -6,6 +6,7 @@ pub mod config;
 pub mod db;
 pub mod err;
 pub mod files;
+pub mod look;
 pub mod runner;
 pub mod sweep;
 pub mod util;
@@ -62,7 +63,12 @@ pub fn public_router(st: State) -> Router {
             "/v1/files",
             post(api::files_post).get(api::files_list).layer(big),
         )
-        .route("/v1/files/:id", axum::routing::delete(api::files_delete))
+        .route(
+            "/v1/files/:id",
+            axum::routing::delete(api::files_delete)
+                .patch(api::files_patch)
+                .put(axum::handler::Handler::layer(api::files_put, big)),
+        )
         .route("/v1/apps", get(api::apps_list))
         .route(
             "/v1/apps/:name",
@@ -74,12 +80,15 @@ pub fn public_router(st: State) -> Router {
         .route("/v1/apps/:name/stop", post(api::apps_stop))
         .route("/f/:id", get(files::page))
         .route("/f/:id/blob", get(files::blob))
+        .route("/f/:id/meta", get(files::meta))
         .route("/a/:name", any(apps::serve_root))
         .route("/a/:name/", any(apps::serve_root))
         .route("/a/:name/*rest", any(apps::serve))
         .route("/onboarding.sh", get(web::onboarding_sh))
         .route("/onboarding.ps1", get(web::onboarding_ps1))
         .route("/_/file.js", get(web::file_js))
+        .route("/_/look.js", get(web::look_js))
+        .route("/_/look-data.js", get(web::look_data_js))
         .route("/_/style.css", get(web::style_css))
         .route("/_/frame.html", get(web::frame_html))
         .route("/_/frame.js", get(web::frame_js))

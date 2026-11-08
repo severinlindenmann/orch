@@ -1,0 +1,1 @@
+[ { "v": 1, "at": "2026-11-05T09:11:59Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "main", "kind": "run.state", "text": "Busy", "data": { "state": "busy", "source": "adapter" } } ]

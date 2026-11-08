@@ -96,3 +96,51 @@ else:
 """)
     script.chmod(0o755)
     return script
+
+
+# orch_ui lives in the workspace package; in this add-on's own test env it is found by path.
+sys.path.insert(0, str(HERE.parents[2] / "workspace" / "src"))
+
+
+@pytest.fixture
+def act_orch(tmp_path):
+    """A fake `orch` that records its argv (one JSON line per call in calls.jsonl) and answers per mode.txt:
+    ok | conflict | refuse."""
+    d = tmp_path / "actorch"
+    d.mkdir()
+    (d / "mode.txt").write_text("ok")
+    script = d / "orch"
+    script.write_text(f"""#!{sys.executable}
+import json, pathlib, sys
+d = pathlib.Path(__file__).parent
+a = sys.argv[1:]
+with open(d / "calls.jsonl", "a") as f:
+    f.write(json.dumps(a) + "\\n")
+if a[:2] in (["addon", "list"], ["run", "status"]) or a[:1] in (["needs"], ["status"], ["agents"], ["ticket"]) and a[1:2] == ["list"]:
+    sys.exit(2)
+mode = (d / "mode.txt").read_text().strip()
+if mode == "conflict":
+    print(json.dumps({{"error": "Title was changed by agent:claude at 10:00.", "revision": 7, "changed_by": "agent:claude",
+                       "current": "x"}}))
+    sys.stderr.write("Refused: Title was changed by agent:claude at 10:00.\\n")
+    sys.exit(2)
+if mode == "refuse":
+    print(json.dumps({{"error": "Nope, not allowed."}}))
+    sys.stderr.write("Refused: Nope, not allowed.\\n")
+    sys.exit(2)
+print(json.dumps({{"ok": True}}))
+""")
+    script.chmod(0o755)
+    return script
+
+
+@pytest.fixture
+def act_server(ws, act_orch):
+    import threading
+
+    from orch_dashboard.server import make_server
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+    srv.server_close()

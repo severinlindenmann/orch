@@ -9,6 +9,11 @@ const OrchBlocks = (() => {
   const TICKET = /^t_[a-z0-9]{6,16}$/;
   const HTTPS = /^https:\/\/[^\s<>"'`]+$/;
   const arr = v => Array.isArray(v) ? v : [];
+  const ADDON = /^addon:([a-z][a-z0-9-]{1,31})(\/[A-Za-z0-9_./-]{0,100})?$/;
+  const OWN = /^addon:(?![/\\])(?!.*\.\.)([A-Za-z0-9_./?=&%-]{0,300})$/;   // a page of the add-on whose view this is
+  const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/;
+  let opts = {};   // {addonUrl(name) -> local page address or null}, set per render()
+  const VERB = /^[a-z][a-z-]{0,20}$/;
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -27,6 +32,22 @@ const OrchBlocks = (() => {
   // Wrap `child` in a link when `link` is a ticket id or an https URL; otherwise return it as is.
   function linked(cls, link, child) {
     const l = typeof link === 'string' ? link : '';
+    const own = opts.self ? OWN.exec(l) : null;
+    const am = own ? [l, opts.self, own[1] ? '/' + own[1] : ''] : ADDON.exec(l);
+    if (am && !am[2]?.includes('..')) {
+      // `addon:<name>/<path>`: that add-on's own page when it runs here, else a Start button (the page starts it).
+      const base = typeof opts.addonUrl === 'function' ? opts.addonUrl(am[1]) : null;
+      const inApp = typeof base === 'string' && LOCAL.test(base) && typeof opts.inApp === 'function' ? opts.inApp(am[1]) : null;
+      if (inApp) { const a = el('a', cls); a.href = inApp(am[2] || '/'); a.append(...child); return a; }  // the add-on's page inside this app
+      if (typeof base === 'string' && LOCAL.test(base)) {
+        const a = el('a', cls); a.href = base.replace(/\/$/, '') + (am[2] || '/'); a.target = '_blank'; a.rel = 'noopener noreferrer'; a.append(...child);
+        a.append(el('span', 'sr-only', ' (opens in a new tab)'));
+        return a;
+      }
+      const b = el('button', cls + ' btn outline sm'); b.type = 'button'; b.dataset.action = 'start'; b.append(...child);
+      b.append(el('span', '', ' · Start ' + am[1]));
+      return b;
+    }
     if (TICKET.test(l)) { const a = el('a', cls); a.href = '#ticket/' + encodeURIComponent(l); a.append(...child); return a; }
     if (HTTPS.test(l)) {
       const a = el('a', cls); a.href = l; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.append(...child);
@@ -60,6 +81,79 @@ const OrchBlocks = (() => {
     return td;
   }
 
+  // An action is only drawn when it is the one generic add-on op with a plain verb and a ticket id as target.
+  // The page (not this file) turns the data attributes into a request: the DOM carries no code.
+  function actionAttrs(node, a, label) {
+    const args = a && a.args, ok = a && a.op === 'addon.act' && args && VERB.test(String(args.verb)) && TICKET.test(String(args.target));
+    if (!ok) return false;
+    node.dataset.addonAct = 'true'; node.dataset.verb = String(args.verb); node.dataset.target = String(args.target);
+    if (label) node.dataset.label = label;
+    return true;
+  }
+  // "Send a message" (a list row): a visible button on the row. The DOM carries only the peer id (checked here).
+  const PEER = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+  function sendButton(it) {
+    const a = arr(it.actions).find(x => x && x.action && x.action.op === 'message.send' && x.action.args && PEER.test(String(x.action.args.workspace)));
+    if (!a) return null;
+    const b = el('button', 'btn outline sm send-msg', a.label || 'Send a message'); b.type = 'button';
+    b.dataset.sendTo = String(a.action.args.workspace); b.dataset.who = String(it.title || '');
+    b.setAttribute('aria-label', (a.label || 'Send a message') + ' to ' + String(it.title || ''));
+    return b;
+  }
+  function toggleEl(t) {
+    const b = el('button', 'switch'); b.type = 'button';
+    b.setAttribute('role', 'switch'); b.setAttribute('aria-checked', t.on ? 'true' : 'false'); b.setAttribute('aria-label', String(t.label));
+    return actionAttrs(b, t.action, t.label) ? b : null;
+  }
+  function detailList(rows) {
+    const dl = el('dl', 'acc-detail');
+    for (const r of rows) {
+      const d = el('div'), dt = el('dt', '', r.label), dd = el('dd', r.tone ? 't-' + tone(r.tone) : '');
+      if (arr(r.lines).length) arr(r.lines).forEach(l => dd.append(el('p', 'acc-line', l)));
+      else dd.append(String(r.value ?? ''));  // Copy only exists for the value that is shown
+      if (r.copy && r.value && !arr(r.lines).length) {
+        const c = el('button', 'btn ghost xs', 'Copy'); c.type = 'button'; c.dataset.copy = String(r.value);
+        c.setAttribute('aria-label', 'Copy ' + r.label); dd.append(' ', c);
+      }
+      d.append(dt, dd); dl.append(d);
+    }
+    return dl;
+  }
+  function ticketLinks(items) {
+    const box = el('div', 'acc-tickets');
+    for (const t of items) {
+      const a = el('a', 'acc-ticket'); a.href = '#ticket/' + encodeURIComponent(t.id);
+      a.append(el('span', 'li-title', t.title));
+      if (t.key) a.append(el('span', 'mono', t.key));
+      if (t.status) a.append(chip(t.status));
+      box.append(a);
+    }
+    return box;
+  }
+  function accordionItem(it, key) {
+    const li = el('li', 'acc-li'), sw = it.toggle ? toggleEl(it.toggle) : null;
+    const sendBtn = sendButton(it);
+    const buttons = arr(it.actions).filter(a => !(a && a.action && a.action.op === 'message.send')).map(a => {
+      const b = el('button', 'btn outline sm' + (a.tone === 'bad' ? ' danger' : ''), a.label); b.type = 'button';
+      if (a.confirm) b.dataset.confirm = String(a.confirm);
+      return actionAttrs(b, a.action, a.label) ? b : null;
+    }).filter(Boolean);
+    const expandable = arr(it.detail).length || arr(it.tickets).length || buttons.length;
+    const finish = () => { if (sendBtn) li.append(sendBtn); if (sw) li.append(sw); return li; };
+    const main = el('span', 'li-main'); main.append(el('span', 'li-title', it.title));
+    if (it.subtitle) main.append(el('small', 'li-sub', it.subtitle));
+    if (arr(it.chips).length) { const c = el('span', 'tags'); c.append(...it.chips.map(chip)); main.append(c); }
+    if (!expandable) { const row = el('div', 'li-row grow'); row.append(toneDot(it.tone), main); li.append(row); return finish(); }
+    const d = el('details', 'acc grow'); d.dataset.key = key;
+    const sum = el('summary', 'li-row'); sum.append(el('span', 'chev'), toneDot(it.tone), main);
+    const panel = el('div', 'acc-panel');
+    if (arr(it.detail).length) panel.append(detailList(it.detail));
+    if (arr(it.tickets).length) panel.append(ticketLinks(it.tickets));
+    if (buttons.length) { const row = el('div', 'row acc-actions'); row.append(...buttons); panel.append(row); }
+    d.append(sum, panel); li.append(d);
+    return finish();
+  }
+
   const draw = {
     stat(b) {
       const d = el('div', 'stat t-' + tone(b.tone));
@@ -70,14 +164,17 @@ const OrchBlocks = (() => {
       const s = el('section', 'blk'); s.append(el('h2', 'blk-title', b.title));
       const ul = el('ul', 'blk-list');
       if (!arr(b.items).length) ul.append(el('li', 'blk-none', 'Nothing here.'));
-      for (const it of arr(b.items)) {
+      arr(b.items).forEach((it, n) => {
+        if (arr(it.detail).length || arr(it.tickets).length || arr(it.actions).length || it.toggle) {
+          ul.append(accordionItem(it, 'acc-' + String(b.title).slice(0, 30) + '-' + n)); return;
+        }
         const body = el('span', 'li-main'); body.append(el('span', 'li-title', it.title));
         if (it.subtitle) body.append(el('small', 'li-sub', it.subtitle));
         if (arr(it.chips).length) { const c = el('span', 'tags'); c.append(...it.chips.map(chip)); body.append(c); }
         const li = el('li'), row = linked('li-row t-' + tone(it.tone), it.link, [toneDot(it.tone), body]);
         if (row.tagName === 'A') row.append(icon('chevron', 'go'));
         li.append(row); ul.append(li);
-      }
+      });
       s.append(ul);
       if (b.more > 0) s.append(el('p', 'blk-more', `+${b.more} more`));
       return s;
@@ -91,7 +188,11 @@ const OrchBlocks = (() => {
         const head = el('div', 'day-head'); head.append(el('span', '', d.toLocaleDateString('en-GB', {weekday: 'short'})), el('b', '', d.getDate()));
         li.append(head);
         for (const it of arr(day.items)) {
-          const a = linked('run t-' + tone(it.tone), it.link, [el('time', '', it.time || ''), el('span', '', it.title)]);
+          // A frequent repeat is one item per day: "Every 5 min" in place of the time, a muted note below.
+          const when = it.every ? el('time', 'every', it.every) : el('time', '', it.time || '');
+          const parts = [when, el('span', '', it.title)];
+          if (it.note) parts.push(el('small', 'run-note', it.note));
+          const a = linked('run t-' + tone(it.tone) + (it.every ? ' repeat' : ''), it.link, parts);
           li.append(a);
         }
         strip.append(li);
@@ -141,7 +242,8 @@ const OrchBlocks = (() => {
   };
 
   // Stats sit together in one row; everything else follows in order. Unknown types are skipped.
-  function render(blocks) {
+  function render(blocks, options) {
+    opts = options || {};
     const root = document.createDocumentFragment();
     let stats = null;
     for (const b of arr(blocks)) {

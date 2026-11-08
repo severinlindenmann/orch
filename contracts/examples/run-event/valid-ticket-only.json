@@ -1,0 +1,5 @@
+[
+  { "v": 1, "at": "2026-11-05T09:12:05Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "main", "kind": "task.start", "text": "Export button", "data": { "check": "c2", "source": "ticket" } },
+  { "v": 1, "at": "2026-11-05T09:16:40Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "main", "kind": "task.done", "text": "Export button", "data": { "check": "c2", "evidence": "48 passed", "source": "ticket" } },
+  { "v": 1, "at": "2026-11-05T09:17:02Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "main", "kind": "ask", "text": "CHF or EUR?", "data": { "q": "q3", "source": "ticket" } }
+]

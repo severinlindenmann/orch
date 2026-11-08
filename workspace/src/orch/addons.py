@@ -11,6 +11,7 @@ AGENTS block, tab and background process. Leftover files or ext data never activ
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import importlib.util
 import json
@@ -25,7 +26,7 @@ import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import skills
+from orch import fields, skillrender, skills, term
 from orch.errors import Refused
 
 DEFAULT_REPO = "https://github.com/severinlindenmann/orch"
@@ -36,22 +37,27 @@ PATH_RE = re.compile(r"^(?!/)(?!.*\.\.)[A-Za-z0-9_./-]{1,200}$")
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 # Names an add-on may never take: core commands (same list as contracts/addon-manifest.schema.json).
 RESERVED = frozenset(
-    "orch core ticket check log ask answer link ext wait addon addons update init publish relay config help "
-    "version view".split()
+    "orch core ticket check log ask answer ref ext wait addon addons update init publish relay config help "
+    "version view start stop status run needs agents".split()
 )
 ICONS = frozenset(
     "clock calendar inbox list chart bell book globe link check star box chat folder user bolt".split()
 )
-FORMATS = frozenset({"text", "time", "cron-human", "chips", "yes-no"})
+FORMATS = frozenset({"text", "time", "cron-human", "chips", "yes-no", "open-page"})
+GITIGNORE_RE = re.compile(r"(?!/)(?![A-Za-z]:)(?!.*\.\.)(?!.*\\)[A-Za-z0-9_./* -]{1,200}")
+PAGE_PATH_RE = re.compile(r"/[A-Za-z0-9_./-]{0,200}")
 TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
-    "ticket_view".split()
+    "ticket_view recommended gitignore runs_agents requires needs page "
+    "ticket_links ticket_fields acts".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
 # off until `orch addon add <name>`; their commands are parsed by the core CLI. No other add-on may take
 # these names (they stay in RESERVED).
 CORE_ADDONS = ("publish", "relay")
+# Separate packages that ship in this repo's workspace-addons/ and are installed on `orch addon add <name>`.
+SHIPPED_ADDONS = ("automation", "dashboard", "focus")
 
 
 # ---------------------------------------------------------------- sources
@@ -70,6 +76,9 @@ def _install_origin() -> dict:
     url, sub = d.get("url"), d.get("subdirectory") or ""
     if not isinstance(url, str):
         return {}
+    if isinstance(d.get("archive_info"), dict) and sub == "workspace":
+        m = _GITHUB_ZIP.match(url)
+        return {"repo": m["repo"], "ref": m["ref"]} if m else {}
     vcs = d.get("vcs_info")
     if isinstance(vcs, dict) and vcs.get("vcs") == "git" and sub == "workspace":
         out = {"repo": url}
@@ -91,8 +100,16 @@ def repo() -> str:
     return os.environ.get("ORCH_REPO") or _install_origin().get("repo") or DEFAULT_REPO
 
 
+_REF_OK = re.compile(r"[A-Za-z0-9._/-]+")
+
+
 def ref() -> str:
-    return os.environ.get("ORCH_REF") or _install_origin().get("ref") or "main"
+    """The branch, tag or commit to install. Checked like a git ref name: in a zip URL a '../' or '#' could
+    point at another repository or folder (git+ took it as a revision only)."""
+    r = os.environ.get("ORCH_REF") or _install_origin().get("ref") or "main"
+    if not _REF_OK.fullmatch(r) or ".." in r or r.startswith(("-", "/")) or r.endswith((".lock", "/")):
+        raise Refused(f"'{r}' is not a branch, tag or commit name orch can install from (check ORCH_REF).")
+    return r
 
 
 def _is_local(r: str) -> bool:
@@ -105,11 +122,23 @@ def _is_local(r: str) -> bool:
     return bool(o.get("local")) and r == o["repo"] and Path(r).is_dir()
 
 
+# A GitHub source zip (what spec() installs), as uv records it: .../archive/[refs/heads/|refs/tags/]<ref>.zip
+_GITHUB_ZIP = re.compile(
+    r"^(?P<repo>https://github\.com/[^/]+/[^/]+)/archive/(?:refs/(?:heads|tags)/)?(?P<ref>.+)\.zip$"
+)
+
+
 def spec(subdir: str) -> str:
+    """What uv installs. GitHub sources come as a zip download, so no git is needed: Windows PCs often have
+    none, and their users may not be allowed to install it. Other hosts keep git."""
     r = repo()
     if _is_local(r):
         return str((Path(r) / subdir).resolve())
     r = r.removesuffix(".git")
+    if any(c.isspace() or c in "\"'#?" for c in r):
+        raise Refused(f"'{r}' is not a repository address orch can install from (check ORCH_REPO).")
+    if r.startswith("https://github.com/"):
+        return f"{r}/archive/{ref()}.zip#subdirectory={subdir}"
     return f"git+{r}@{ref()}#subdirectory={subdir}"
 
 
@@ -171,11 +200,43 @@ def registry() -> list[dict]:
         data = json.loads(registry_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
+    if not isinstance(data, list):
+        return []
     return [
         e
         for e in data
         if isinstance(e, dict) and isinstance(e.get("name"), str) and isinstance(e.get("source"), str)
     ]
+
+
+def _missing_source(e: dict) -> str | None:
+    """Why this entry can not be installed any more (None = it can)."""
+    if e["source"] == "built-in":
+        local = _is_local(repo()) and not (Path(repo()) / "workspace-addons" / e["name"]).is_dir()
+        return "it no longer ships with orch" if local else None
+    return None if Path(e["source"]).is_dir() else f"its folder {e['source']} is gone"
+
+
+def _no_longer_ships(e: dict) -> bool:
+    """A built-in add-on this orch version does not ship (an older install registered it, e.g. 'scheduler').
+    orch update drops it from the registry instead of failing on a folder the repository no longer has."""
+    if e["source"] != "built-in":
+        return False
+    if _is_local(repo()):
+        return not (Path(repo()) / "workspace-addons" / e["name"]).is_dir()
+    return e["name"] not in SHIPPED_ADDONS
+
+
+def _current_registry() -> list[dict]:
+    """The registry without built-ins that no longer ship; saved back when one was dropped."""
+    reg = registry()
+    keep = [e for e in reg if not _no_longer_ships(e)]
+    for e in reg:
+        if e not in keep:
+            print(f"Add-on {e['name']} removed: it no longer ships with orch.")
+    if len(keep) < len(reg):
+        _save_registry(keep)
+    return keep
 
 
 def _save_registry(entries: list[dict]) -> None:
@@ -216,11 +277,75 @@ def run_uv(args: list[str]) -> None:
         raise Refused(f"uv failed: {(r.stderr or r.stdout).strip()[-600:]}")
 
 
-def _install_tool(entries: list[dict]) -> None:
-    args = ["tool", "install", "--reinstall", spec("workspace")]
+def _same_python() -> list[str]:
+    """On Windows a reinstall keeps the Python orch runs on. On Windows on ARM the installer chose an x64
+    Python (cryptography has no ARM64 Windows wheel); uv's own pick would try to compile it and fail."""
+    base = getattr(sys, "_base_executable", None)
+    return ["--python", base] if sys.platform == "win32" and base else []
+
+
+def _tool_args(entries: list[dict]) -> list[str]:
+    """uv arguments that install orch with these add-ons in one uv tool env. An entry that can not be
+    installed any more is left out with a note (it stays in the registry), so one stale entry never blocks
+    the rest."""
+    # --refresh: a branch zip has the same URL after every push, so never take it from uv's cache
+    args = ["tool", "install", "--reinstall", "--refresh", *_same_python(), spec("workspace")]
     for e in entries:
+        why = _missing_source(e)
+        if why:
+            n = e["name"]
+            print(
+                f"Note: add-on {n} was left out: {why}. Remove it: orch addon uninstall {n}", file=sys.stderr
+            )
+            continue
         args += ["--with", _entry_spec(e)]
-    run_uv(args)
+    return args
+
+
+def _install_tool(entries: list[dict]) -> None:
+    run_uv(_tool_args(entries))
+
+
+def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: Path, done: str) -> bool:
+    """Reinstall orch with these add-ons, then (if `save`) store them as the registry and run the orch
+    commands in `then` with the new code. Returns False when that happens later: on Windows orch can not
+    replace its own files while it runs, so a finisher does it once this command has exited (winfinish.py).
+    """
+    from orch import winfinish
+
+    if not winfinish.needed():
+        _install_tool(entries)
+        if save:
+            _save_registry(entries)
+        for t in then:
+            reexec(t)
+        return True
+    if winfinish.pending(home()):
+        raise Refused(
+            "An add-on install or update is still finishing in the background. "
+            f"Try again in a minute. Log: {winfinish.log_path(home())}"
+        )
+    uv = _which_uv()
+    if not uv:
+        raise Refused("uv is not installed. Run the orch install script first.")
+    reg = None
+    if save:
+        reg = (registry_path(), json.dumps(sorted(entries, key=lambda e: e["name"]), indent=2))
+    try:
+        log = winfinish.start(home(), [uv, *_tool_args(entries)], then, root, done, reg)
+    except winfinish.Busy:
+        raise Refused(
+            "An add-on install or update is still finishing in the background. "
+            f"Try again in a minute. Log: {winfinish.log_path(home())}"
+        ) from None
+    except RuntimeError as e:
+        raise Refused(f"Could not finish the install: {e}. Reinstall orch with the install script.") from e
+    print(
+        f"Windows can not replace orch while it runs, so this finishes in the background once this command "
+        f"has ended: {done}.\nWait about a minute before the next orch command (orch is being replaced "
+        f"meanwhile). Then check with: orch addon list   Log: {log}"
+    )
+    return False
 
 
 # ---------------------------------------------------------------- manifest
@@ -272,6 +397,94 @@ def _remote_ref(node) -> bool:
     return False
 
 
+def _ext_schema(base: Path, rel, key: str) -> dict:
+    f = _inside(base, rel, key, "file")
+    if f.stat().st_size > EXT_SCHEMA_MAX:
+        raise _bad(f"{key} is larger than 32 KB")
+    try:
+        schema = json.loads(f.read_text(encoding="utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        raise _bad(f"{key} is not JSON") from None
+    if not isinstance(schema, dict) or _remote_ref(schema):
+        raise _bad(f"{key} must be a JSON Schema object without remote $ref")
+    return schema
+
+
+REF_KIND_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}(?::[a-z0-9][a-z0-9-]{0,31})?")
+LINK_ICON_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+LINK_STATUS_RE = re.compile(r"[a-z0-9][a-z0-9 -]{0,23}")
+LINK_MATCH_RE = re.compile(r"https?://[^\s<>\"'`]{1,300}")
+FIELD_KEY_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def _ticket_links_fields_acts(base: Path, m: dict) -> None:
+    """[[ticket_links]] (reference types), [ticket_fields] (ticket fields) and [acts] (what
+    `orch <name> act <verb>` offers; core knows only `refresh`)."""
+    tl = m.setdefault("ticket_links", [])
+    if not isinstance(tl, list) or len(tl) > 16:
+        raise _bad("ticket_links has at most 16 reference types")
+    kinds = set()
+    for k in tl:
+        match = k.get("match") if isinstance(k, dict) else None
+        if isinstance(match, str):
+            match = [match]
+        ok = (
+            isinstance(k, dict)
+            and not set(k) - {"kind", "label", "icon", "match", "statuses", "preview"}
+            and isinstance(k.get("kind"), str)
+            and REF_KIND_RE.fullmatch(k["kind"])
+            and k["kind"] not in ("url", "ticket", "artifact", "file")
+            and k["kind"] not in kinds
+            and _text_ok(k.get("label"), 24)
+            and isinstance(k.get("icon"), str)
+            and LINK_ICON_RE.fullmatch(k["icon"])
+            and isinstance(match, list)
+            and 0 < len(match) <= 8
+            and all(isinstance(x, str) and LINK_MATCH_RE.fullmatch(x) for x in match)
+            and isinstance(k.setdefault("statuses", []), list)
+            and len(k["statuses"]) <= 12
+            and all(isinstance(x, str) and LINK_STATUS_RE.fullmatch(x) for x in k["statuses"])
+            and k.get("preview") in (None, "thumb")
+        )
+        if not ok:
+            raise _bad("a [[ticket_links]] entry needs kind, label, icon and match (https:// pattern)")
+        kinds.add(k["kind"])
+        k["match"] = match
+    tf = m.get("ticket_fields")
+    if tf is not None:
+        ok = (
+            isinstance(tf, dict)
+            and not set(tf) - {"section", "schema", "show_on_card"}
+            and _text_ok(tf.get("section"), 24)
+            and isinstance(tf.setdefault("show_on_card", []), list)
+            and len(tf["show_on_card"]) <= 3
+            and all(isinstance(x, str) and FIELD_KEY_RE.fullmatch(x) for x in tf["show_on_card"])
+        )
+        if not ok:
+            raise _bad("[ticket_fields] has section, schema and show_on_card (at most 3 fields)")
+        tf.setdefault("schema", m.get("ticket_ext"))
+        if not isinstance(tf["schema"], str):
+            raise _bad("[ticket_fields] needs a schema (or ticket_ext)")
+        if "ticket_ext" in m and tf["schema"] != m["ticket_ext"]:
+            raise _bad("[ticket_fields] schema and ticket_ext must be the same file")
+        _ext_schema(base, tf["schema"], "ticket_fields schema")
+    acts = m.setdefault("acts", {})
+    if not isinstance(acts, dict) or len(acts) > 16:
+        raise _bad("[acts] has at most 16 entries")
+    for verb, a in acts.items():
+        ok = (
+            re.fullmatch(r"[a-z][a-z-]{0,20}", verb)
+            and isinstance(a, dict)
+            and not set(a) - {"summary", "who", "writes"}
+            and _text_ok(a.get("summary"), 80)
+            and a.setdefault("who", "anyone") in ("anyone", "people")
+            and isinstance(a.setdefault("writes", []), list)
+            and all(x == "refs" or x == f"ext.{m.get('name')}" for x in a["writes"])
+        )
+        if not ok:
+            raise _bad(f"[acts.{verb}] has summary, who (anyone or people) and writes (refs, ext.<name>)")
+
+
 def parse_manifest(file: Path, core: bool = False) -> dict:
     """Validate orch-addon.toml (addon-manifest.schema.json) and the paths it names. Never runs add-on code.
     Returns the manifest plus `dir` (its folder). Refused when anything is off."""
@@ -304,15 +517,8 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
     m["agents_block"] = block
     _inside(base, block, "agents_block", "file")
     if "ticket_ext" in m:
-        f = _inside(base, m["ticket_ext"], "ticket_ext", "file")
-        if f.stat().st_size > EXT_SCHEMA_MAX:
-            raise _bad("ticket_ext is larger than 32 KB")
-        try:
-            schema = json.loads(f.read_text(encoding="utf-8"))
-        except (ValueError, UnicodeDecodeError):
-            raise _bad("ticket_ext is not JSON") from None
-        if not isinstance(schema, dict) or _remote_ref(schema):
-            raise _bad("ticket_ext must be a JSON Schema object without remote $ref")
+        _ext_schema(base, m["ticket_ext"], "ticket_ext")
+    _ticket_links_fields_acts(base, m)
     bg = m.get("background", False)
     if not isinstance(bg, bool):
         raise _bad("background is true or false")
@@ -343,6 +549,41 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         ):
             raise _bad("a [[ticket_view]] row needs field, label and format")
     m["ticket_view"] = tv
+    for key in ("recommended", "runs_agents", "needs"):
+        if not isinstance(m.setdefault(key, False), bool):
+            raise _bad(f"{key} is true or false")
+    gi = m.setdefault("gitignore", [])
+    ok_gi = (
+        isinstance(gi, list)
+        and len(gi) <= 16
+        and all(isinstance(x, str) and GITIGNORE_RE.fullmatch(x) for x in gi)
+    )
+    if not ok_gi:
+        raise _bad("gitignore lines are relative paths inside the workspace (at most 16)")
+    rq = m.setdefault("requires", [])
+    if (
+        not isinstance(rq, list)
+        or len(rq) > 8
+        or len(set(map(str, rq))) != len(rq)
+        or not all(isinstance(x, str) and NAME_RE.match(x) for x in rq)
+    ):
+        raise _bad("requires is a list of add-on names")
+    pg = m.get("page")
+    if pg is not None:
+        if (
+            not isinstance(pg, dict)
+            or set(pg) - {"path", "label"}
+            or not isinstance(pg.get("path"), str)
+            or not PAGE_PATH_RE.fullmatch(pg["path"])
+            or ".." in pg["path"]
+            or pg["path"].startswith("//")
+            or ("label" in pg and not _text_ok(pg["label"], 24))
+        ):
+            raise _bad("[page] has a path that starts with / (and an optional label)")
+        if not bg:
+            raise _bad("[page] needs background = true")
+    if any(r["format"] == "open-page" for r in tv) and pg is None:
+        raise _bad("an open-page row needs a [page]")
     m["dir"] = base
     return m
 
@@ -373,6 +614,30 @@ def _manifest_file(module: str) -> Path | None:
 def core_manifests() -> dict[str, dict]:
     base = Path(__file__).resolve().parent / "builtin"
     return {n: parse_manifest(base / n / MANIFEST, core=True) for n in CORE_ADDONS}
+
+
+def shipped_recommended(fetch: bool = True) -> dict[str, dict]:
+    """Manifests of the shipped add-ons that are not installed yet and say recommended = true.
+    From the local source folder when there is one; else (fetch=True) the manifest is previewed from the
+    repo (one small download each), and with fetch=False the answer is empty."""
+    have = set(discover())
+    local = _is_local(repo())
+    out = {}
+    for name in SHIPPED_ADDONS:
+        if name in have:
+            continue
+        try:
+            if local:
+                m = folder_manifest(Path(repo()) / "workspace-addons" / name)
+            elif fetch:
+                m = preview_builtin(name)
+            else:
+                continue
+        except Refused:
+            continue
+        if m.get("recommended"):
+            out[name] = m
+    return out
 
 
 def discover() -> dict[str, dict]:
@@ -470,8 +735,8 @@ def folder_hash(folder: Path) -> str:
     return h.hexdigest()
 
 
-def _record_for(root: Path, name: str, wid: str) -> dict:
-    src = next((e["source"] for e in registry() if e["name"] == name), "built-in")
+def _record_for(root: Path, name: str, wid: str, reg: list[dict] | None = None) -> dict:
+    src = next((e["source"] for e in (registry() if reg is None else reg) if e["name"] == name), "built-in")
     rec = {
         "workspace_id": wid,
         "workspace": str(root.resolve()),
@@ -484,10 +749,11 @@ def _record_for(root: Path, name: str, wid: str) -> dict:
     return rec
 
 
-def record_consent(root: Path, name: str) -> None:
-    """The user turned `name` on in this workspace, on THIS machine (not from a file that arrived by git)."""
+def record_consent(root: Path, name: str, reg: list[dict] | None = None) -> None:
+    """The user turned `name` on in this workspace, on THIS machine (not from a file that arrived by git).
+    reg: the add-on list as it will be once a pending install is done (default: as it is now)."""
     wid = workspace_id(root, create=True)
-    rec = _record_for(root, name, wid)
+    rec = _record_for(root, name, wid, reg)
     # replace this workspace's record; prune records of workspaces that no longer exist
     keep = [
         e
@@ -516,13 +782,15 @@ def consented(root: Path, name: str) -> bool:
     wid = workspace_id(root)
     if wid is None:
         return False
-    rec = next((e for e in _consents() if e.get("workspace_id") == wid and e.get("name") == name), None)
-    if rec is None:
-        return False
-    try:
-        return rec == _record_for(root, name, wid)
-    except OSError:
-        return False
+    for rec in _consents():
+        if rec.get("workspace_id") != wid or rec.get("name") != name:
+            continue
+        try:
+            if rec == _record_for(root, rec["name"], wid):
+                return True
+        except OSError:
+            return False
+    return False
 
 
 def listed(root: Path) -> dict[str, dict]:
@@ -570,15 +838,31 @@ def not_on_message(root: Path, name: str) -> str:
 def active_ext_schema(root: Path, name: str) -> dict | None:
     """The ticket_ext schema of an ACTIVE add-on, else None."""
     m = active_manifests(root).get(name)
-    if not m or "ticket_ext" not in m:
+    rel = m and (m.get("ticket_ext") or (m.get("ticket_fields") or {}).get("schema"))
+    if not rel:
         return None
-    return json.loads((m["dir"] / m["ticket_ext"]).read_text(encoding="utf-8"))
+    return json.loads((m["dir"] / rel).read_text(encoding="utf-8"))
+
+
+def _running_here(root: Path) -> set[str]:
+    from orch import services  # services imports addons
+
+    here = root.resolve()
+    out = set()
+    for e in services.running():
+        try:
+            if Path(e["workspace"]).resolve() == here:
+                out.add(e["addon"])
+        except (OSError, KeyError, TypeError):
+            continue
+    return out
 
 
 def listing(root: Path) -> list[dict]:
     """`orch addon list --json`: the one source the dashboard uses."""
     act = active(root)
     reg = {e["name"]: e for e in registry()}
+    up = _running_here(root)
     out = []
     for name, m in sorted(discover().items()):
         src = reg.get(name, {}).get("source", "built-in")
@@ -592,6 +876,12 @@ def listing(root: Path) -> list[dict]:
                 "dashboard": m.get("dashboard"),
                 "ticket_view": m["ticket_view"],
                 "background": m["background"],
+                "recommended": m["recommended"],
+                "page": m.get("page"),
+                "running": name in up,
+                "ticket_links": [dict(x) for x in m["ticket_links"]],
+                "ticket_fields": fields.section(m),
+                "acts": sorted(m["acts"]),
             }
         )
     return out
@@ -616,7 +906,67 @@ def dispatch(root: Path, name: str, argv: list[str]) -> int:
         raise Refused(f"The {name} add-on is turned on here but is not installed. Run: orch addon add {name}")
     env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin()}
     # -P: the folder we run in is never put on the import path (a planted module there cannot take over)
-    return subprocess.run([sys.executable, "-P", "-m", m["run"], *argv], cwd=root, env=env).returncode
+    cmd = [sys.executable, "-P", "-m", m["run"], *argv]
+    if argv[:2] == ["act", "refresh"] and "refresh" in m.get("acts", {}):
+        return _refresh(root, name, cmd, env, argv)
+    return subprocess.run(cmd, cwd=root, env=env).returncode
+
+
+def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) -> int:
+    """`orch <name> act refresh [--by X] [--json] -- <ticket>`: the add-on looks its references up and prints
+    ONE JSON object `{ticket, refs: [{url, title?, status?, thumb?}], ext?: {<name>: {...}}, say?}`; core
+    merges it into the ticket (tickets.merge_refresh) and says what changed.
+    The add-on never writes the ticket itself."""
+    from orch import refs, tickets
+
+    rest = argv[argv.index("--") + 1 :] if "--" in argv else []
+    if len(rest) != 1:
+        raise Refused(f"Say which ticket: orch {name} act refresh -- <ticket>")
+    tid = tickets.resolve(root, rest[0])
+    by = tickets.current_actor(argv[argv.index("--by") + 1] if "--by" in argv[:-1] else None)
+    act = discover()[name]["acts"]["refresh"]
+    # like cli_config._actor: an agent tool in the environment counts as an agent whatever --by says
+    if act["who"] == "people" and (tickets.agent_tool() or not by.startswith("human:")):
+        raise Refused(
+            f"Only a person runs the {name} refresh. Ask the user to click Refresh on the ticket page."
+        )
+    # stderr stays out of the answer (a chatty add-on must not break --json)
+    r = subprocess.run(
+        cmd, cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8"
+    )
+    if r.returncode != 0:
+        sys.stdout.write(r.stdout)
+        return r.returncode
+    try:
+        out = json.loads(r.stdout)
+    except ValueError:
+        raise Refused(f"The {name} add-on answered something orch cannot read.") from None
+    if isinstance(out, dict) and out.get("ticket") and tickets.resolve(root, str(out["ticket"])) != tid:
+        raise Refused(f"The {name} add-on answered for another ticket.")
+    writes = act["writes"] or ["refs", f"ext.{name}"]  # what the manifest says the refresh may change
+    if isinstance(out, dict):
+        out = {
+            **out,
+            "refs": out.get("refs") if "refs" in writes else [],
+            "ext": out.get("ext") if f"ext.{name}" in writes else {},
+        }
+    t, changes = tickets.merge_refresh(root, tid, name, out, by, active_ext_schema(root, name))
+    say = out.get("say") if isinstance(out.get("say"), str) else ""
+    say = refs.one_line(say, 300)
+    key = t.get("key") or t["id"]
+    if "--json" in argv:
+        print(json.dumps({"ticket": t["id"], "key": key, "changes": changes, "say": say}, ensure_ascii=False))
+        return 0
+    if not changes:
+        print(f"{key}  {say or 'Nothing to update.'}")
+        return 0
+    for c in changes:
+        old, new = (refs.one_line("-" if x in (None, "") else x, 120) for x in (c["old"], c["new"]))
+        what = f"{refs.one_line(c['name'])}  {c['field']}" if c["what"] == "link" else c["field"]
+        print(f"{key}  {what}: {old} → {new}")
+    if say:
+        print(say)
+    return 0
 
 
 def help_lines(root: Path) -> list[str]:
@@ -635,9 +985,11 @@ def consent_text(m: dict, local: bool) -> str:
     if local:
         lines.append("Source: local folder (not checked by orch). It runs code on this computer.")
     lines.append(f"Adds the command: orch {m['name']}")
-    lines.append(f"Adds a skill and an entry in AGENTS.md: orch-{m['name']}")
-    if "ticket_ext" in m:
+    lines.append(f"Adds a skill and an entry in the local orch instructions: orch-{m['name']}")
+    if "ticket_ext" in m or m.get("ticket_fields"):
         lines.append(f"Stores data on tickets under: ext.{m['name']}")
+    if m.get("ticket_links"):
+        lines.append("Knows these references: " + ", ".join(k["label"] for k in m["ticket_links"]))
     if m.get("dashboard"):
         lines.append(f"Adds a dashboard tab: {m['dashboard']['label']}")
     if m["background"]:
@@ -650,8 +1002,10 @@ def _confirm(m: dict, local: bool, yes: bool) -> None:
     if yes:
         print(text)
         return
-    if not sys.stdin.isatty():
-        raise Refused(f"{text}\nTo continue run it again with --yes.")
+    if not term.is_terminal(sys.stdin):
+        err = Refused(f"{text}\n\nTo add it, run it again with --yes.")
+        err.confirm = True
+        raise err
     sys.stderr.write(text + "\nAdd it? [y/N] ")
     sys.stderr.flush()
     if sys.stdin.readline().strip().lower() not in ("y", "yes"):
@@ -689,7 +1043,8 @@ def preview_builtin(name: str) -> dict:
 def reexec(args: list[str]) -> None:
     """Run the freshly installed orch for the project step (this process still runs the old code).
     Tests replace this with an in-process call."""
-    r = subprocess.run([sys.executable, "-P", "-m", "orch", *args], text=True)
+    r = subprocess.run([sys.executable, "-P", "-m", "orch", *args], text=True, stdout=subprocess.PIPE)
+    sys.stdout.write(r.stdout)  # through our stdout, so a caller that redirects it (init --json) stays clean
     if r.returncode != 0:
         raise Refused("The project step failed (see above).")
 
@@ -702,6 +1057,7 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
         _activate(root, source)
         return
     if source in CORE_ADDONS:  # part of orch: nothing to install
+        _check_requires(root, core_manifests()[source])
         _confirm(core_manifests()[source], False, yes)
         record_consent(root, source)
         _activate(root, source)
@@ -713,6 +1069,7 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
         if not (folder / "pyproject.toml").is_file():
             raise Refused(f"{folder} is not an add-on folder (no pyproject.toml).")
         m = folder_manifest(folder)
+        _check_requires(root, m)
         _confirm(m, True, yes)
         entry = {"name": m["name"], "source": str(folder), "version": m["version"]}
     else:
@@ -724,6 +1081,7 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
             entry = known
             m = discover().get(name)
             if m:
+                _check_requires(root, m)
                 _confirm(m, known["source"] != "built-in", yes)
         else:
             base = Path(repo()) / "workspace-addons" / name if _is_local(repo()) else None
@@ -731,31 +1089,50 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
                 if not base.is_dir():
                     raise Refused(f"There is no built-in add-on '{name}'.")
                 m = folder_manifest(base)
+                _check_requires(root, m)
                 _confirm(m, False, yes)
             elif yes:
                 m = None
-            elif not sys.stdin.isatty():
-                raise Refused(f"Installing the built-in add-on {name}: run it again with --yes.")
+            elif not term.is_terminal(sys.stdin):
+                err = Refused(f"To install the built-in add-on {name}, run it again with --yes.")
+                err.confirm = True
+                raise err
             else:
                 m = preview_builtin(name)
                 _confirm(m, False, False)
             entry = {"name": name, "source": "built-in", "version": m["version"] if m else "0.0.0"}
-    if entry not in reg:
-        _install_tool([e for e in reg if e["name"] != entry["name"]] + [entry])
-        _save_registry([e for e in reg if e["name"] != entry["name"]] + [entry])
+    then = [["addon", "add", entry["name"], "--project-only"]]
+    if entry not in reg or entry["name"] not in discover():  # new, changed, or its package is gone
+        new = [e for e in reg if e["name"] != entry["name"]] + [entry]
+        # before the install: its follow-up step (now, or in the Windows finisher) needs the consent. If the
+        # install fails, the record does not match the unchanged registry, so it turns nothing on.
+        record_consent(root, entry["name"], new)
+        _reinstall(new, save=True, then=then, root=root, done=f"{entry['name']} installed and turned on")
+        return
     record_consent(root, entry["name"])
-    reexec(["addon", "add", entry["name"], "--project-only"])
+    reexec(then[0])
+
+
+def _check_requires(root: Path, m: dict) -> None:
+    missing = [r for r in m.get("requires", []) if r not in active(root)]
+    if missing:
+        raise Refused(
+            f"{m['name']} needs {', '.join(missing)} to be on first. Turn it on: orch addon add {missing[0]}"
+        )
 
 
 def _activate(root: Path, name: str) -> None:
     m = discover().get(name)
     if m is None:
         raise Refused(f"The add-on '{name}' is not installed or its {MANIFEST} is not valid.")
+    _check_requires(root, m)
     _apply_project(root, m)
+    _set_gitignore(root, name, m["gitignore"])
     a = listed(root)
     prev = a.get(name, {})
     a[name] = {"version": m["version"], "activated_at": prev.get("activated_at") or _now()}
     _save_active(root, a)
+    skillrender.refresh_skills(root)
 
 
 def _now() -> str:
@@ -768,15 +1145,45 @@ def _apply_project(root: Path, m: dict) -> None:
     skills.install_skill(root, f"orch-{name}", skill)
     body = skills.read_block(skill, f"orch-{name}", base / m["agents_block"])
     skills.set_block(root, name, body, addon=True)
-    skills.link_claude_skills(root)
+    skillrender.render_installed(root, name, skill)
+    skills.apply_agent_files(root)
+
+
+_ORCH_STATE = {"tickets", "config.toml", "addons.json", "ticket-counter.json"}  # the team's workspace state
+
+
+def _check_ignore_line(name: str, ln: str) -> None:
+    """Allowlist: the first folder or file name of the line is literal (no glob characters), so a line can
+    name a place but never sweep across the workspace; and nothing may hide .orch or the team's ticket files
+    (compared without case, as on macOS and Windows, and without surrounding spaces)."""
+    bad = Refused(
+        f"The add-on '{name}' asks to hide '{ln}' from git. That is not allowed; nothing was changed."
+    )
+    parts = [p for p in ln.strip().strip("/").split("/") if p not in ("", ".")]
+    if not parts or any(c in parts[0] for c in "*?[]\\{}") or parts[0].strip() != parts[0]:
+        raise bad
+    if parts[0].lower().strip() == ".orch":
+        seg = parts[1].lower().strip() if len(parts) > 1 else ""
+        if not seg or any(
+            fnmatch.fnmatchcase(state, seg) for state in _ORCH_STATE
+        ):  # a glob that can hit one
+            raise bad
+
+
+def _set_gitignore(root: Path, name: str, lines: list[str]) -> None:
+    """The add-on's lines live in their own block of .git/info/exclude (local; the team's .gitignore stays
+    untouched); no lines = block removed."""
+    from orch import harness
+
+    for ln in lines:
+        _check_ignore_line(name, ln)
+    lines = [ln.strip() for ln in lines]
+    harness.exclude_set(root, f"addon-{name}", lines)
 
 
 def _remove_skill_folders(root: Path, name: str) -> None:
     """Exactly orch-<name>: never a neighbour such as orch-<name>-x (another add-on or the user's skill)."""
-    d = root / ".agents" / "skills" / f"orch-{name}"
-    if d.exists() or d.is_symlink():
-        skills.unlink_skill(root, d.name)
-        skills.remove_skill(root, d.name)
+    skills.remove_skill(root, f"orch-{name}")
 
 
 def remove(root: Path, name: str, purge: bool = False) -> None:
@@ -794,12 +1201,14 @@ def remove(root: Path, name: str, purge: bool = False) -> None:
         if r.returncode != 0:
             print(f"Note: '{name} stop' did not finish cleanly; the process ends by itself.", file=sys.stderr)
     _remove_skill_folders(root, name)
+    _set_gitignore(root, name, [])
     skills.remove_block(root, name, addon=True)
     del a[name]
     _save_active(root, a)
     drop_consent(root, name)
     if purge:
         _purge(root, name)
+    skillrender.refresh_skills(root)
 
 
 def _safe_addons_dir(root: Path) -> Path:
@@ -873,21 +1282,33 @@ def uninstall(root: Path, name: str) -> None:
     if name not in [e["name"] for e in reg]:
         raise Refused(f"The add-on '{name}' is not installed.")
     rest = [e for e in reg if e["name"] != name]
-    _install_tool(rest)
-    _save_registry(rest)
+    _reinstall(rest, save=True, then=[], root=root, done=f"{name} removed from this computer")
 
 
 # ---------------------------------------------------------------- update
 
 
-def update(root: Path, project_only: bool = False) -> list[str]:
-    """Reinstall orch + every installed add-on together, then refresh this project's skills and blocks."""
+def update(root: Path, project_only: bool = False, after_install: bool = False) -> list[str]:
+    """Reinstall orch + every installed add-on together, then refresh this project's skills and blocks.
+    after_install: the install script just put a bare orch in place; put the registered add-ons back."""
+    if after_install:
+        reg = _current_registry()
+        if reg:
+            names = ", ".join(e["name"] for e in reg)
+            if _reinstall(reg, save=True, then=[], root=root, done=f"add-ons installed again: {names}"):
+                print("Add-ons installed again: " + names)
+        return []
     if not project_only:
-        _install_tool(registry())
-        reexec(["update", "--project-only"])
+        _reinstall(
+            _current_registry(),
+            save=False,
+            then=[["update", "--project-only"]],
+            root=root,
+            done="orch updated",
+        )
         return []
     done = []
-    if (root / ".agents" / "skills" / "orch").is_dir():
+    if (root / ".orch" / "harness" / "skills" / "orch").is_dir():
         from orch.init import init
 
         init(root)

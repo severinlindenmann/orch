@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import socket
+import ssl
 import sys
 import time
 import urllib.error
@@ -12,15 +14,36 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from orch import term
 from orch.errors import Refused
 
 RETRY_DELAYS = (1, 2, 4)  # seconds; connection-level failures only
+
+
+@functools.cache
+def _tls() -> ssl.SSLContext | None:
+    """Windows: let Windows check the server's certificate (truststore). Python alone only knows the root
+    certificates already in the Windows store, and a fresh PC fetches missing ones only when Windows itself
+    checks: the first connection to a relay then failed with "unable to get local issuer certificate".
+    Other systems keep Python's default (None)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import truststore
+    except ImportError:  # a broken install: fail closed, in plain words (never fall back to a weaker check)
+        msg = "orch can't check web certificates here: a part of orch is missing. Install orch again."
+        err = Refused(msg)
+        err.status, err.blocked = None, True  # no answer; trying again will not help until it is fixed
+        raise err from None
+    return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
 
 def _safe_to_retry(req, exc) -> bool:
     """Retry only when the request cannot have been processed. Never replay a POST that may have arrived."""
     replayable = req.get_method() in ("GET", "HEAD") or req.full_url.split("?")[0].endswith("/v1/messages")
     reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return False  # the certificate is wrong: the same answer every time
     if isinstance(reason, (ConnectionRefusedError, socket.gaierror)):
         return True  # the connection was never established
     if isinstance(exc, urllib.error.URLError) and isinstance(reason, TimeoutError):
@@ -28,12 +51,12 @@ def _safe_to_retry(req, exc) -> bool:
     return replayable and isinstance(reason, (ConnectionError, TimeoutError, OSError))
 
 
-def _send(req, timeout):
+def _send(req, timeout, limit=None):
     """urlopen with up to 3 retries (1/2/4 s) on connection-level failures, never after a response."""
     delays = list(RETRY_DELAYS)
     while True:
         try:
-            r = urllib.request.urlopen(req, timeout=timeout)
+            r = urllib.request.urlopen(req, timeout=timeout, context=_tls())
         except urllib.error.HTTPError:
             raise  # a response arrived: never retry (no duplicate POSTs)
         except (urllib.error.URLError, TimeoutError, OSError) as e:
@@ -42,7 +65,14 @@ def _send(req, timeout):
             time.sleep(delays.pop(0))
             continue
         with r:
-            return r.status, r.read()
+            if limit is None:
+                return r.status, r.read()
+            raw = r.read(limit + 1)  # never buffers more than limit + 1 bytes
+            if len(raw) > limit:
+                err = Refused("The answer is bigger than allowed.")
+                err.status = 413
+                raise err
+            return r.status, raw
 
 
 def call(
@@ -51,6 +81,7 @@ def call(
     headers: dict | None = None,
     body: bytes | dict | None = None,
     timeout: float = 120,
+    limit: int | None = None,
 ) -> tuple[int, bytes]:
     """One request. Returns (status, body bytes). A 4xx/5xx becomes Refused with the server's message."""
     hdrs = dict(headers or {})
@@ -63,7 +94,7 @@ def call(
         hdrs.setdefault("Content-Type", "application/octet-stream")
     req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
     try:
-        return _send(req, timeout)
+        return _send(req, timeout, limit)
     except urllib.error.HTTPError as e:
         raw = e.read()
         msg, out = f"The server answered {e.code}.", ""
@@ -73,11 +104,23 @@ def call(
             out = obj.get("output") or ""
         except (ValueError, AttributeError):
             pass
-        raise Refused(msg + (f"\n{out}" if out else "")) from None
-    except (urllib.error.URLError, TimeoutError, OSError):
-        raise Refused(
-            f"Can't reach {urllib.parse.urlsplit(url).netloc} right now. Check your internet and try again."
-        ) from None
+        err = Refused(msg + (f"\n{out}" if out else ""))
+        err.status = e.code  # callers decide what is worth a retry
+        raise err from None
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        host = urllib.parse.urlsplit(url).netloc
+        reason = e.reason if isinstance(e, urllib.error.URLError) else e  # as _safe_to_retry
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            # not the internet: the server is not who it says it is (or its certificate is broken)
+            err = Refused(
+                f"The server's security certificate is not valid for {host}. orch did not connect. "
+                "Check the address, or ask whoever runs that server."
+            )
+            err.status, err.blocked = None, True  # no answer; trying again will not help until fixed
+            raise err from None
+        err = Refused(f"Can't reach {host} right now. Check your internet and try again.")
+        err.status = None  # no answer at all
+        raise err from None
 
 
 def call_json(method: str, url: str, headers: dict | None = None, body=None, timeout: float = 120):
@@ -110,12 +153,43 @@ def secrets_dir(root: Path) -> Path:
 
 
 def write_atomic(path: Path, data: bytes, private: bool = False) -> None:
+    if private:  # fail closed: a private file is only stored when git is told to leave it alone
+        from orch import harness, skills
+
+        for anc in path.parents:
+            if anc.name.lower() == ".orch":
+                skills.ensure_gitignore(anc.parent)
+                harness.check_private_path(anc.parent, path)
+                break
+        else:
+            raise skills.Refused(f"{path} is not inside .orch; orch will not store private files there.")
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600 if private else 0o644)
-    with os.fdopen(fd, "wb") as f:
-        f.write(data)
-    os.replace(tmp, path)
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )  # never follows a link
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.chmod(tmp, 0o600 if private else 0o644)
+        os.replace(tmp, path)  # replaces a planted link, does not write through it
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def replace_private(src: Path, dst: Path) -> None:
+    """os.replace into a private place (.orch/secrets): git must ignore the exact destination first."""
+    from orch import harness
+
+    for anc in dst.parents:
+        if anc.name.lower() == ".orch":
+            harness.check_private_path(anc.parent, dst)
+            break
+    else:
+        raise Refused(f"{dst} is not inside .orch; orch will not store private files there.")
+    os.replace(src, dst)
 
 
 def write_json(path: Path, obj, private: bool = False) -> None:
@@ -147,7 +221,7 @@ def auth_headers(cfg: dict) -> dict:
 def connect_service(root: Path, name: str, skill: str, url: str, workspace: str, token: str, prefix: str):
     """Shared part of `orch publish|relay connect`: init if needed, check token, save."""
     from orch import init as init_mod
-    from orch import skills
+    from orch import look, skillrender, skills
 
     url = clean_url(url)
     if not token.startswith(prefix):
@@ -158,6 +232,10 @@ def connect_service(root: Path, name: str, skill: str, url: str, workspace: str,
     _, who = call_json("GET", url + "/v1/whoami", hdrs, timeout=30)
     write_json(secrets_dir(root) / f"{name}.json", {"url": url, "workspace": workspace, "token": token}, True)
     skills.ensure_gitignore(root)  # the skill and AGENTS block come from `orch addon add <name>`
+    if name == "publish":
+        skillrender.remember_rights(root, who)
+    skillrender.refresh_skills(root)
+    look.on_connect(root, name, who)
     return who
 
 
@@ -201,7 +279,7 @@ def working(text: str):
 
     @contextlib.contextmanager
     def _cm():
-        shown = sys.stderr.isatty()
+        shown = term.is_terminal(sys.stderr)
         if shown:
             print(text + "...", end="", file=sys.stderr, flush=True)
         try:

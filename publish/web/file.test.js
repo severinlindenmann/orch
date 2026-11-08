@@ -2,7 +2,8 @@ const test = require("node:test");
 const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
-const { decryptBlob, FAIL } = require("./file.js");
+const P = require("./file.js");
+const { decryptBlob, FAIL } = P;
 
 const v = JSON.parse(fs.readFileSync(path.join(__dirname, "../../contracts/vectors/publish-blob-v1.json"), "utf8"));
 const hex = (h) => Uint8Array.from(Buffer.from(h, "hex"));
@@ -11,6 +12,30 @@ test("good vector decrypts to header and content", async () => {
   const r = await decryptBlob(hex(v.good.blob_hex), v.good.key_b64url);
   assert.strictEqual(JSON.stringify(r.header), v.good.header_json);
   assert.strictEqual(Buffer.from(r.content).toString("utf8"), v.good.content_utf8);
+});
+
+test("good_with_note vector decrypts and carries the note", async () => {
+  const g = v.good_with_note;
+  const r = await decryptBlob(hex(g.blob_hex), g.key_b64url);
+  assert.strictEqual(JSON.stringify(r.header), g.header_json);
+  assert.strictEqual(Buffer.from(r.content).toString("utf8"), g.content_utf8);
+  assert.strictEqual(P.cleanNote(r.header), "Here is the file we talked about. — Anna");
+});
+
+test("cleanNote: text only, one line, 280 characters, anything else ignored", () => {
+  assert.strictEqual(P.cleanNote({}), "");
+  assert.strictEqual(P.cleanNote({ note: 5 }), "");
+  assert.strictEqual(P.cleanNote({ note: ["x"] }), "");
+  assert.strictEqual(P.cleanNote({ note: "  a\n\tb \u0000 c  " }), "a b c");
+  assert.strictEqual(P.cleanNote({ note: "x".repeat(400) }).length, 280);
+  assert.strictEqual(P.cleanNote({ note: "<img src=x onerror=alert(1)>" }), "<img src=x onerror=alert(1)>"); // shown with textContent, never as HTML
+});
+
+test("expiryLabel: a date in the viewer's zone, empty without an expiry", () => {
+  assert.strictEqual(P.expiryLabel("2026-11-19T12:00:00Z", "en-GB", "UTC"), "until Thu 19 Nov");
+  assert.strictEqual(P.expiryLabel("2026-11-19T23:30:00Z", "en-GB", "Asia/Tokyo"), "until Fri 20 Nov");
+  assert.strictEqual(P.expiryLabel(null), "");
+  assert.strictEqual(P.expiryLabel("garbage"), "");
 });
 
 for (const c of v.must_fail) {
@@ -36,7 +61,6 @@ test("flipped ciphertext byte fails the tag", async () => {
 });
 
 // ---- previews ----
-const P = require("./file.js");
 const bv = JSON.parse(fs.readFileSync(path.join(__dirname, "../../contracts/vectors/publish-bundle-v1.json"), "utf8"));
 
 test("bundle vector unpacks to its files", () => {

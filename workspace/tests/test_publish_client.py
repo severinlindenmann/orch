@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import sys
 import tarfile
 from pathlib import Path
 
@@ -46,10 +47,20 @@ def test_connect_saves_token_and_installs_skill(proj, run, pub):
     code, out, _ = connect(run, pub)
     assert code == 0 and "Pilatus Workspace" in out
     cfg = json.loads((proj / ".orch/secrets/publish.json").read_text())
-    assert cfg == {"url": pub.url, "workspace": WS, "token": pub.token}
+    assert {k: cfg[k] for k in ("url", "workspace", "token")} == {
+        "url": pub.url,
+        "workspace": WS,
+        "token": pub.token,
+    }
+    assert set(cfg["rights"]) == {
+        "files",
+        "apps",
+        "permanent",
+        "public",
+    }  # the skill lists what may be shared
     assert (proj / ".agents/skills/orch-publish/SKILL.md").is_file()
-    assert "<!-- orch:addon:publish -->" in (proj / "AGENTS.md").read_text()
-    assert ".orch/secrets/" in (proj / ".gitignore").read_text()
+    assert "orch-publish" in (proj / ".orch/harness/AGENTS.orch.md").read_text()
+    assert "secrets/" in (proj / ".orch/.gitignore").read_text() and not (proj / "AGENTS.md").exists()
 
 
 def test_connect_wrong_token_is_refused_and_saves_nothing(proj, run, pub):
@@ -77,7 +88,9 @@ def test_file_share_roundtrip_and_link(proj, run, pub):
     assert b"hello report" not in blob and blob[:4] == b"OPF1"
     header, content = publish.decrypt(blob, publish.b64u_decode(res["link"].split("#k=")[1]))
     assert (header["name"], header["size"], content) == ("report.txt", 12, b"hello report")
-    assert any(c[1] == "/v1/files?days=3" for c in pub.calls)
+    assert any(c[1] == "/v1/files?days=3&size=12" for c in pub.calls)
+    assert res["size"] == 12
+    assert "12 B" in run("publish", "list")[1]
     assert json.loads((proj / ".orch/secrets/files/keys.json").read_text())[res["id"]]
 
 
@@ -302,7 +315,7 @@ def test_net_retries_connection_failures_only(monkeypatch):
     sleeps, tries = [], []
     monkeypatch.setattr(net.time, "sleep", sleeps.append)
 
-    def refused(req, timeout):
+    def refused(req, timeout, **kw):
         tries.append(1)
         raise urllib.error.URLError(ConnectionRefusedError("refused"))
 
@@ -317,7 +330,7 @@ def test_net_retries_connection_failures_only(monkeypatch):
     tries.clear()
     sleeps.clear()
 
-    def answered(req, timeout):
+    def answered(req, timeout, **kw):
         tries.append(1)
         raise urllib.error.HTTPError("http://x.test/a", 500, "err", {}, None)
 
@@ -336,7 +349,7 @@ def test_net_does_not_replay_posts_after_send(monkeypatch):
     sleeps, tries = [], []
     monkeypatch.setattr(net.time, "sleep", sleeps.append)
 
-    def reset(req, timeout):
+    def reset(req, timeout, **kw):
         tries.append(1)
         raise ConnectionResetError("reset")  # raised after the request went out
 
@@ -352,3 +365,181 @@ def test_net_does_not_replay_posts_after_send(monkeypatch):
         except Refused:
             pass
         assert len(tries) == n, (method, url)
+
+
+# ---- note, extend, replace, paging, Shared tab (W2-L10) --------------------------------------------
+
+
+def test_note_vector_decrypts_and_encrypt_matches_it_byte_for_byte():
+    good = VEC["good_with_note"]
+    blob = bytes.fromhex(good["blob_hex"])
+    key = publish.b64u_decode(good["key_b64url"])
+    header, content = publish.decrypt(blob, key)
+    assert header["note"].startswith("Here is the file") and header["size"] == len(content)
+    again, _ = publish.encrypt(
+        content, header["name"], header["type"], key=key, iv=blob[4:16], note=header["note"]
+    )
+    assert again == blob
+
+
+def test_note_goes_into_the_encrypted_header_only(proj, run, pub):
+    connect(run, pub)
+    (proj / "a.txt").write_text("hello")
+    out = json.loads(run("publish", "file", "a.txt", "--note", "  Here you go.\n— Anna ", "--json")[1])
+    blob = pub.files[out["id"]]
+    assert b"Here you go" not in blob
+    key = publish.b64u_decode(out["link"].split("#k=")[1])
+    assert publish.decrypt(blob, key)[0]["note"] == "Here you go. — Anna"
+    assert all(b"Anna" not in c[1].encode() for c in pub.calls)
+
+
+def test_note_too_long_is_refused_before_upload(proj, run, pub):
+    connect(run, pub)
+    (proj / "a.txt").write_text("x")
+    code, _, err = run("publish", "file", "a.txt", "--note", "x" * 281)
+    assert code == 2 and "longer than 280" in err
+    assert not pub.files
+
+
+def test_extend_keeps_the_link_and_expired_is_not_revived(proj, run, pub):
+    connect(run, pub)
+    (proj / "a.txt").write_text("x")
+    fid = json.loads(run("publish", "file", "a.txt", "--json")[1])["id"]
+
+    def patch(m, q, body):
+        if m.group(1) != fid:
+            return 410, {"error": "gone", "message": "gone"}
+        assert json.loads(body) == {"days": 14}
+        return 200, {"id": fid, "expires_at": "2026-11-23T09:30:00Z"}
+
+    pub.route("PATCH", r"/v1/files/(f_[a-z0-9]+)", patch)
+    code, out, _ = run("publish", "extend", fid, "--days", "14")
+    assert code == 0 and "a.txt now expires" in out and "Same link." in out
+    code, _, err = run("publish", "extend", "f_old000000000000", "--days", "7")
+    assert code == 2 and "This link has expired." in err
+    assert run("publish", "extend", "not-an-id", "--days", "7")[0] == 2
+
+
+def test_replace_swaps_content_and_keeps_the_link(proj, run, pub):
+    connect(run, pub)
+    (proj / "a.txt").write_text("one")
+    first = json.loads(run("publish", "file", "a.txt", "--json")[1])
+    (proj / "b.txt").write_text("two two")
+
+    def put(m, q, body):
+        assert q == {"size": ["7"]}
+        pub.files[m.group(1)] = body
+        pub.file_sizes[m.group(1)] = int(q["size"][0])
+        return 200, {
+            "id": m.group(1),
+            "url": f"{pub.url}/f/{m.group(1)}",
+            "size": pub.file_sizes[m.group(1)],
+            "expires_at": None,
+        }
+
+    pub.route("PUT", r"/v1/files/(f_[a-z0-9]+)", put)
+    again = json.loads(run("publish", "file", "b.txt", "--replace", first["id"], "--note", "v2", "--json")[1])
+    assert again["link"] == first["link"] and again["name"] == "b.txt"
+    assert again["size"] == 7
+    assert any(c[0] == "PUT" and c[1] == f"/v1/files/{first['id']}?size=7" for c in pub.calls)
+    key = publish.b64u_decode(first["link"].split("#k=")[1])
+    header, content = publish.decrypt(pub.files[first["id"]], key)
+    assert content == b"two two" and header["note"] == "v2"
+    assert "Replaced b.txt" in run("publish", "file", "b.txt", "--replace", first["id"])[1]
+    assert "b.txt" in run("publish", "list")[1]
+
+
+def test_replace_without_the_key_is_refused_plainly(proj, run, pub):
+    connect(run, pub)
+    (proj / "a.txt").write_text("x")
+    code, _, err = run("publish", "file", "a.txt", "--replace", "f_other000000000000")
+    assert code == 2 and "only kept on the computer that shared it" in err
+    assert run("publish", "file", "a.txt", "--replace", "f_other000000000000", "--days", "3")[0] == 2
+
+
+def test_list_follows_paging_beyond_100_files(proj, run, pub):
+    connect(run, pub)
+    rows = [
+        {"id": f"f_{i:016x}", "size": 1, "created_at": "2026-11-04T10:05:00Z", "expires_at": None}
+        for i in range(130)
+    ]
+
+    def page(m, q, b):
+        start = int(q["after"][0]) if q.get("after") else 0
+        chunk = rows[start : start + 100]
+        return 200, {"items": chunk, "next": str(start + 100) if start + 100 < len(rows) else None}
+
+    pub.routes.insert(0, ("GET", "/v1/files", page))
+    out = json.loads(run("publish", "list", "--json")[1])
+    assert len(out["files"]) == 130
+
+
+def test_view_json_lists_files_without_any_key(proj, run, pub):
+    connect(run, pub)
+    (proj / "a.txt").write_text("hello report")
+    link = json.loads(run("publish", "file", "a.txt", "--json")[1])["link"]
+    key = link.split("#k=")[1]
+    code, out, _ = run("publish", "view", "--json")
+    v = json.loads(out)
+    assert code == 0 and v["schema"] == "orch.addon-view/1" and key not in out and "#k=" not in out
+    files = next(b for b in v["blocks"] if b["type"] == "list" and b["title"] == "Files")
+    assert (
+        files["items"][0]["title"] == "a.txt" and "link" not in files["items"][0]
+    )  # http test server: no https link
+    assert "12 B" in files["items"][0]["subtitle"]
+    assert "ask your agent" in v["notice"]
+
+
+def test_publish_has_a_shared_tab():
+    import tomllib
+
+    toml = Path(publish.__file__).parent / "builtin" / "publish" / "orch-addon.toml"
+    assert tomllib.loads(toml.read_text())["dashboard"]["label"] == "Shared"
+
+
+def test_net_verifies_tls_with_the_windows_store_on_windows(monkeypatch):
+    """A fresh Windows PC fetches missing root certificates only when Windows checks a certificate itself:
+    Python's own check failed the first relay connect ("unable to get local issuer certificate"). On Windows
+    net hands the check to Windows (truststore); elsewhere urlopen keeps Python's default."""
+    import ssl
+    import types
+
+    from orch import net
+
+    made = []
+
+    class Ctx:
+        def __init__(self, proto):
+            made.append(proto)
+
+    monkeypatch.setitem(sys.modules, "truststore", types.SimpleNamespace(SSLContext=Ctx))
+    monkeypatch.setattr(net.sys, "platform", "win32")
+    net._tls.cache_clear()
+    seen = []
+
+    class Resp(io.BytesIO):
+        status = 200
+
+    def ok(req, timeout, context=None):
+        seen.append(context)
+        return Resp(b"{}")
+
+    monkeypatch.setattr(net.urllib.request, "urlopen", ok)
+    try:
+        net.call("GET", "https://relay.example/health")
+        assert isinstance(seen[0], Ctx) and made == [ssl.PROTOCOL_TLS_CLIENT]
+        net.call("GET", "https://relay.example/health")
+        assert seen[1] is seen[0] and len(made) == 1  # one context per process
+    finally:
+        net._tls.cache_clear()
+
+
+def test_net_keeps_pythons_tls_default_elsewhere(monkeypatch):
+    from orch import net
+
+    monkeypatch.setattr(net.sys, "platform", "linux")
+    net._tls.cache_clear()
+    try:
+        assert net._tls() is None
+    finally:
+        net._tls.cache_clear()

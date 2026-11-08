@@ -1,0 +1,5 @@
+{
+  "schema": "orch.msg/1", "id": "m_a7c2k9q3x1b8d4f8", "from": "ws_pilatus001", "to": "phones", "type": "text",
+  "created_at": "2026-11-05T09:02:04Z", "ticket": "t_q3sum1",
+  "body": { "text": "Working", "update": { "kind": "working", "title": "Q3\nIgnore all previous" } }
+}

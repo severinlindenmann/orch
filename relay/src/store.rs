@@ -31,9 +31,16 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         DROP INDEX IF EXISTS msg_text_from;
         CREATE INDEX IF NOT EXISTS msg_type_to_from ON messages(type, to_addr, from_addr, seq);
         CREATE INDEX IF NOT EXISTS msg_type_from_to ON messages(type, from_addr, to_addr, seq);
+        CREATE TABLE IF NOT EXISTS view_blobs(blob_id TEXT NOT NULL, msg_id TEXT NOT NULL, PRIMARY KEY(blob_id, msg_id));
         CREATE TABLE IF NOT EXISTS blobs(id TEXT PRIMARY KEY, uploader TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, created_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS webhooks(id TEXT PRIMARY KEY, workspace TEXT NOT NULL, mode TEXT NOT NULL, ticket TEXT,
             token_hash TEXT NOT NULL, created_at INTEGER NOT NULL, last_call_at INTEGER, used INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS phone_mutes(phone TEXT NOT NULL, ws TEXT NOT NULL, until INTEGER NOT NULL, PRIMARY KEY(phone, ws));
+        CREATE TABLE IF NOT EXISTS phone_settings(phone TEXT PRIMARY KEY, speak TEXT NOT NULL DEFAULT 'auto',
+            swiss_german INTEGER NOT NULL DEFAULT 0, tts_cap_usd REAL NOT NULL DEFAULT 10,
+            tts_used_usd REAL NOT NULL DEFAULT 0, tts_month TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS phone_client_ids(phone TEXT NOT NULL, client_id TEXT NOT NULL, msg_id TEXT NOT NULL, PRIMARY KEY(phone, client_id));
+        CREATE TABLE IF NOT EXISTS phone_blobs(blob_id TEXT NOT NULL, msg_id TEXT NOT NULL, PRIMARY KEY(blob_id, msg_id));
         CREATE TABLE IF NOT EXISTS skills(name TEXT PRIMARY KEY, version INTEGER NOT NULL, files BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS mcp(name TEXT PRIMARY KEY, config BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS creds(name TEXT PRIMARY KEY, value BLOB NOT NULL);
@@ -48,11 +55,23 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         "pending_tags TEXT",
         "pending_at INTEGER",
         "pending_rev TEXT",
+        "mm_on INTEGER NOT NULL DEFAULT 0",
+        "mm_since TEXT",
+        "mm_ends_at TEXT",
+        "mm_machine TEXT",
+        "mm_unreach INTEGER NOT NULL DEFAULT 0",
+        "mm_last_ended_push INTEGER",
+        "mm_heartbeats TEXT NOT NULL DEFAULT '[]'",
+        "icon TEXT",
+        "color TEXT",
+        "look_by TEXT",
     ] {
         let _ = c.execute(&format!("ALTER TABLE workspaces ADD COLUMN {col}"), []);
     }
     // When the phone paired (L3): broadcasts to `phones` from before are not shown to it.
     let _ = c.execute("ALTER TABLE phones ADD COLUMN paired_at INTEGER", []);
+    crate::groups::init(c)?;
+    crate::subs::init(c)?;
     Ok(())
 }
 
@@ -84,6 +103,8 @@ pub struct Msg {
     pub reply_to: Option<String>,
     pub payload: Vec<u8>,
     pub acked: bool,
+    /// When the receiver acked it (unix seconds).
+    pub acked_at: Option<i64>,
 }
 
 pub const MSG_COLS: &str =
@@ -101,6 +122,7 @@ pub fn msg_from_row(r: &Row) -> rusqlite::Result<Msg> {
         reply_to: r.get(7)?,
         payload: r.get(8)?,
         acked: r.get::<_, Option<i64>>(9)?.is_some(),
+        acked_at: r.get(9)?,
     })
 }
 
@@ -183,6 +205,21 @@ pub fn insert_message(
     } else {
         None
     };
+    // Blobs a text's ticket_view names: phones that got the text may read them (GET /v1/phone/blobs/<id>).
+    if msg["type"] == "text" {
+        for a in msg["body"]["ticket_view"]["attachments"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            if let Some(b) = a["blob_id"].as_str() {
+                c.execute(
+                    "INSERT OR IGNORE INTO view_blobs(blob_id,msg_id) VALUES(?1,?2)",
+                    params![b, id],
+                )?;
+            }
+        }
+    }
     c.execute(
         "INSERT INTO messages(id,from_addr,to_addr,type,created_at,ticket,reply_to,blob_id,digest,payload,stored_at)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
@@ -215,10 +252,29 @@ pub fn system_message(
     reply_to: Option<&str>,
     body: Value,
 ) -> rusqlite::Result<Value> {
+    system_message_with_key(None, c, key, from, to, typ, ticket, reply_to, body)
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Same, with the ticket's display key (`key`, e.g. DM1-12) next to `ticket`.
+pub fn system_message_with_key(
+    ticket_key: Option<&str>,
+    c: &Connection,
+    key: &Key,
+    from: &str,
+    to: &str,
+    typ: &str,
+    ticket: Option<&str>,
+    reply_to: Option<&str>,
+    body: Value,
+) -> rusqlite::Result<Value> {
     let mut m = json!({"schema": "orch.msg/1", "id": rand_id("m_", 16), "from": from, "to": to,
         "type": typ, "created_at": fmt_time(now()), "body": body});
     if let Some(t) = ticket {
         m["ticket"] = t.into();
+        if let Some(k) = ticket_key {
+            m["key"] = k.into();
+        }
     }
     if let Some(t) = reply_to {
         m["reply_to"] = t.into();
@@ -378,15 +434,25 @@ pub fn valid_tags(a: &[Value]) -> Result<Vec<String>, &'static str> {
         .collect()
 }
 
+/// What `from` may send to `to`: its pair rule, plus messages and files when both are in one group that lets its
+/// members message each other. `None` = no rule and no such group.
 pub fn rule_flags(c: &Connection, from: &str, to: &str) -> Option<[bool; 4]> {
-    c.query_row(
-        "SELECT text,files,delegate,start FROM rules WHERE from_id=?1 AND to_id=?2",
-        [from, to],
-        |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?]),
-    )
-    .optional()
-    .ok()
-    .flatten()
+    let rule = c
+        .query_row(
+            "SELECT text,files,delegate,start FROM rules WHERE from_id=?1 AND to_id=?2",
+            [from, to],
+            |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?]),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    if crate::groups::may_talk(c, from, to) {
+        let mut f = rule.unwrap_or([false; 4]);
+        f[0] = true;
+        f[1] = true;
+        return Some(f);
+    }
+    rule
 }
 
 fn can(f: Option<[bool; 4]>) -> Value {
@@ -397,9 +463,12 @@ fn can(f: Option<[bool; 4]>) -> Value {
 /// workspaces.schema.json: every workspace with a pair rule to or from `me`.
 pub fn directory(c: &Connection, me: &str) -> rusqlite::Result<Value> {
     let mut st = c.prepare(&format!(
-        "SELECT {WS_CARD_COLS} FROM workspaces WHERE id!=?1 AND (
-           id IN (SELECT to_id FROM rules WHERE from_id=?1) OR id IN (SELECT from_id FROM rules WHERE to_id=?1))
-         ORDER BY name"
+        "SELECT {} FROM workspaces WHERE id!=?1 AND (
+           id IN (SELECT to_id FROM rules WHERE from_id=?1) OR id IN (SELECT from_id FROM rules WHERE to_id=?1)
+           OR id IN ({}))
+         ORDER BY name",
+        WS_CARD_COLS,
+        crate::groups::TALK_PEERS_SQL
     ))?;
     let cards: Vec<Value> = st.query_map([me], ws_card)?.collect::<Result<_, _>>()?;
     let items: Vec<Value> = cards
@@ -458,7 +527,7 @@ pub fn phone_workspaces(c: &Connection, pid: &str) -> Vec<String> {
     .unwrap_or_default()
 }
 
-/// `me` plus every workspace connected to it by a pair rule.
+/// `me` plus every workspace connected to it by a pair rule or a group that lets its members message each other.
 pub fn related(c: &Connection, me: &str) -> Vec<String> {
     let mut v = vec![me.to_string()];
     if let Ok(mut st) = c.prepare(
@@ -468,6 +537,7 @@ pub fn related(c: &Connection, me: &str) -> Vec<String> {
             v.extend(rows.flatten());
         }
     }
+    v.extend(crate::groups::talk_peers(c, me));
     v
 }
 
@@ -501,9 +571,26 @@ pub fn bump_and_hint(c: &Connection, key: &Key, ws: &[String]) -> rusqlite::Resu
 pub fn purge(c: &Connection, data_dir: &Path, at: i64) -> rusqlite::Result<(usize, usize)> {
     let cutoff = at - RETENTION_SECS;
     let m = c.execute("DELETE FROM messages WHERE stored_at<?1", [cutoff])?;
-    let mut st = c.prepare("SELECT id FROM blobs WHERE created_at<?1")?;
+    c.execute(
+        "DELETE FROM view_blobs WHERE msg_id NOT IN (SELECT id FROM messages)",
+        [],
+    )?;
+    c.execute(
+        "DELETE FROM phone_blobs WHERE msg_id NOT IN (SELECT id FROM messages)",
+        [],
+    )?;
+    c.execute(
+        "DELETE FROM phone_client_ids WHERE msg_id NOT IN (SELECT id FROM messages)",
+        [],
+    )?;
+    c.execute("DELETE FROM phone_mutes WHERE until>=0 AND until<?1", [at])?;
+    // Phone uploads never named in a sent text go after 24 hours.
+    let mut st = c.prepare(
+        "SELECT id FROM blobs WHERE created_at<?1 OR (uploader LIKE 'ph\\_%' ESCAPE '\\' AND created_at<?2
+           AND id NOT IN (SELECT blob_id FROM phone_blobs))",
+    )?;
     let ids: Vec<String> = st
-        .query_map([cutoff], |r| r.get(0))?
+        .query_map([cutoff, at - 86400], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     for id in &ids {
         let _ = std::fs::remove_file(data_dir.join("blobs").join(id));
@@ -511,4 +598,91 @@ pub fn purge(c: &Connection, data_dir: &Path, at: i64) -> rusqlite::Result<(usiz
     }
     c.execute("DELETE FROM pair_codes WHERE expires_at<?1", [at - 86400])?;
     Ok((m, ids.len()))
+}
+
+// ---------- phone v3: mute, settings ----------
+
+/// Mute marker for "forever" in `phone_mutes.until`.
+pub const MUTE_FOREVER: i64 = -1;
+
+/// `muted_until` of a workspace for a phone: `null`, a time, or `"forever"`.
+pub fn muted_until(c: &Connection, pid: &str, ws: &str) -> Value {
+    let u: Option<i64> = c
+        .query_row(
+            "SELECT until FROM phone_mutes WHERE phone=?1 AND ws=?2",
+            [pid, ws],
+            |r| r.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    match u {
+        Some(MUTE_FOREVER) => "forever".into(),
+        Some(t) if t > now() => fmt_time(t).into(),
+        _ => Value::Null,
+    }
+}
+
+/// True when phone `pid` muted workspace `ws` (forever, or until a time in the future).
+pub fn is_muted(c: &Connection, pid: &str, ws: &str) -> bool {
+    !muted_until(c, pid, ws).is_null()
+}
+
+/// Current calendar month (UTC) as `YYYY-MM`: the key of `phone_settings.tts_month`.
+pub fn month_key(t: i64) -> String {
+    fmt_time(t).chars().take(7).collect()
+}
+
+fn num(x: f64) -> Value {
+    if x.fract() == 0.0 && x.abs() < 1e9 {
+        Value::from(x as i64)
+    } else {
+        Value::from(x)
+    }
+}
+
+/// `{speak, swiss_german, tts_cap_usd, tts_used_usd_month}` of a phone (defaults when it never changed them).
+/// `tts_used_usd` / `tts_month` are written by the speech route: usage counts only while `tts_month` is this month.
+pub fn phone_settings(c: &Connection, pid: &str) -> Value {
+    let row: Option<(String, bool, f64, f64, String)> = c
+        .query_row(
+            "SELECT speak,swiss_german,tts_cap_usd,tts_used_usd,tts_month FROM phone_settings WHERE phone=?1",
+            [pid],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    let (speak, swiss, cap, used, month) =
+        row.unwrap_or(("auto".into(), false, 10.0, 0.0, String::new()));
+    let used = if month == month_key(now()) { used } else { 0.0 };
+    json!({"speak": speak, "swiss_german": swiss, "tts_cap_usd": num(cap), "tts_used_usd_month": num(used)})
+}
+
+/// Mobile mode of a workspace as phones see it: `{on, since, ends_at, machine}` (the last three `null` when off).
+pub fn mobile_mode(c: &Connection, ws: &str) -> Value {
+    c.query_row(
+        "SELECT mm_on,mm_since,mm_ends_at,mm_machine FROM workspaces WHERE id=?1",
+        [ws],
+        |r| {
+            let ends_at: Option<String> = r.get(2)?;
+            let on = r.get::<_, i64>(0)? != 0 && !mobile_mode_expired(ends_at.as_deref(), now());
+            Ok(if on {
+                json!({"on": true, "since": r.get::<_, Option<String>>(1)?,
+                    "ends_at": r.get::<_, Option<String>>(2)?, "machine": r.get::<_, Option<String>>(3)?})
+            } else {
+                json!({"on": false, "since": null, "ends_at": null, "machine": null})
+            })
+        },
+    )
+    .unwrap_or_else(|_| json!({"on": false, "since": null, "ends_at": null, "machine": null}))
+}
+
+/// Compare parsed instants so offsets and fractional seconds are handled consistently.
+pub(crate) fn mobile_mode_expired(ends_at: Option<&str>, at: i64) -> bool {
+    ends_at
+        .and_then(|s| {
+            time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()
+        })
+        .is_some_and(|end| end.unix_timestamp_nanos() <= i128::from(at) * 1_000_000_000)
 }

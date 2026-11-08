@@ -484,6 +484,7 @@ async fn public_root_and_unknown_pages_are_branded_dark_pages() {
     assert_eq!(r.status(), 200);
     let body = r.text().await.unwrap();
     assert!(body.contains("This page isn’t available") && !body.to_lowercase().contains("relay"));
+    assert!(body.contains("Private connections, shared work."));
     let r = t.http.get(format!("{}/nope", t.base)).send().await.unwrap();
     assert_eq!(r.status(), 404);
     assert!(r.text().await.unwrap().contains("isn’t available"));
@@ -591,6 +592,41 @@ fn portal_blur_validation_skips_submit_button() {
 }
 
 #[test]
+fn portal_narrow_network_uses_connections_list() {
+    let css = include_str!("../web/style.css");
+    let narrow = css
+        .split("@media(max-width:599px){")
+        .skip(1)
+        .filter_map(|block| block.split("}}").next())
+        .find(|block| block.contains(".network{display:none}"))
+        .expect("hide the network diagram inside the narrow-screen media rule");
+    assert!(narrow.contains(".network-legend{display:none}"));
+    assert!(narrow.contains(".mobile-connections{display:block"));
+    assert!(css.contains(".mobile-connections{display:none}"));
+}
+
+#[test]
+fn portal_network_map_draws_one_edge_per_pair() {
+    let page = include_str!("../web/portal.html");
+    let css = include_str!("../web/style.css");
+    // Rules are grouped per workspace pair; both directions share one line and one chip.
+    assert!(page.contains("function networkPairs()"));
+    assert!(page.contains("marker-start"));
+    // Phones have their own lane; the map lays out to the real width and the focus ring follows the node shape.
+    assert!(page.contains("'PHONES'") || page.contains("\"PHONES\"") || page.contains(">PHONES<"));
+    assert!(page.contains("ResizeObserver"));
+    assert!(css.contains(".focus-ring"));
+    // Many workspaces get the ring map instead of the list-only fallback.
+    assert!(!page.contains("compact=workspaces.length>9"));
+}
+
+#[test]
+fn portal_has_no_inline_styles() {
+    let page = include_str!("../web/portal.html");
+    assert!(!page.to_lowercase().contains("style="));
+}
+
+#[test]
 fn portal_has_no_technical_details_fold() {
     let page = include_str!("../web/portal.html");
     assert!(!page.to_lowercase().contains("technical details"));
@@ -633,4 +669,83 @@ async fn relay_icons_on_public_and_admin() {
         .await
         .unwrap()
         .contains(r#"href="/favicon.svg""#));
+}
+
+#[tokio::test]
+async fn labels_prompt_skips_describe_line_when_admin_described() {
+    let t = start().await;
+    let (_, v) = t
+        .admin_json(
+            "POST",
+            "/admin/api/workspaces",
+            Some(json!({"name": "D", "description": "Jobs", "tags": []})),
+        )
+        .await;
+    assert!(!v["prompt"]
+        .as_str()
+        .unwrap()
+        .contains("describe this workspace"));
+    let id = v["id"].as_str().unwrap();
+    let (_, v) = t
+        .admin_json("POST", &format!("/admin/api/workspaces/{id}/token"), None)
+        .await;
+    assert!(!v["prompt"]
+        .as_str()
+        .unwrap()
+        .contains("describe this workspace"));
+}
+
+#[tokio::test]
+async fn admin_kit_served() {
+    let t = start().await;
+    let r = t
+        .http
+        .get(format!("{}/admin/kit.js", t.admin))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(
+        r.headers()["content-type"],
+        "text/javascript; charset=utf-8"
+    );
+    let js = r.text().await.unwrap();
+    assert!(js.contains("window.icon") && js.contains("window.orch"));
+    let r = t
+        .http
+        .get(format!("{}/admin/style.css", t.admin))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert!(r.text().await.unwrap().contains("#a78bfa"));
+}
+
+#[test]
+fn portal_has_no_agent_view() {
+    let page = include_str!("../web/portal.html");
+    assert!(!page.contains("'terminal'") && !page.contains("What your agent sees"));
+}
+
+#[test]
+fn not_available_is_visitor_page() {
+    let page = include_str!("../web/not-available.html");
+    assert!(page.contains("This page isn’t available"));
+    assert!(!page.contains("admin-shell") && !page.contains("sidebar"));
+    assert!(
+        !page.to_lowercase().contains("relay"),
+        "the visitor page must not say what the server is"
+    );
+}
+
+#[tokio::test]
+async fn admin_root_goes_to_the_portal() {
+    let t = start().await;
+    let c = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let r = c.get(format!("{}/", t.admin)).send().await.unwrap();
+    assert!(r.status().is_redirection());
+    assert_eq!(r.headers()["location"], "/admin");
 }
