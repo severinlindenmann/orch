@@ -754,6 +754,10 @@ def send(root: Path, tid: str, by: str, text: str, kind: str = "message") -> dic
         return {"id": item["id"], "delivered": 0, "state": "none"}
     n = deliver(root, tid) if rec.get("mode") == "live" else 0
     rec = runs.read(root, tid) or rec
+    if not n and rec.get("mode") == "live" and rec.get("submit"):
+        # the wrapper's watcher typed the notice between our queueing and our deliver(): a notice is out and
+        # not yet taken, and the agent reads everything waiting when it takes it, so this input is sent too
+        n = 1
     return {"id": item["id"], "delivered": n, "state": (rec.get("live") or {}).get("state", rec["mode"])}
 
 
