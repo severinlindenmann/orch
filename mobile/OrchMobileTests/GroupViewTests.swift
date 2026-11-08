@@ -30,6 +30,61 @@ final class GroupViewTests: XCTestCase {
         XCTAssertEqual(GroupRoomRules.rows(data).map(\.title), ["Pay car tax 2027"])
         XCTAssertEqual(GroupRoomRules.rows(data, closed: true).map(\.title), ["Pay car tax 2026"])
     }
+    func testHistoryRowsAreNewestFirst() throws {
+        let original = try XCTUnwrap(GroupMock.messages(now: now).first { $0.message.body.groupEvent?.kind == "closed" })
+        let messages = ["2026-01-01T00:00:00Z", "2026-03-01T00:00:00Z", "2026-02-01T00:00:00Z"].enumerated().map { index, at in
+            var body = original.message.body
+            body.group = GroupInfo(id: "grp_t_history\(index)", host: GroupMock.finance, title: "History", members: body.group!.members, seq: 1)
+            return PhoneMessage(message: TextMessage(id: "history-\(index)", from: GroupMock.finance, to: "phones", type: "text", createdAt: at,
+                ticket: "t_history\(index)", body: body), workspaceName: "Finance")
+        }
+        XCTAssertEqual(GroupRoomRules.rows(snapshot(messages), closed: true).map(\.key.id),
+                       ["grp_t_history1", "grp_t_history2", "grp_t_history0"])
+    }
+
+    func testOpenTargetRequiresPairingAndLocalTicketAndUsesLocalKey() throws {
+        let task = GroupTask(delegate: "d", ws: GroupMock.home, ticket: "t_local", key: "FORGED-99", title: "Host title", status: "working")
+        let paired = [Workspace(id: GroupMock.home, name: "Home", description: nil, tags: [], online: true, lastSeen: nil, openQuestions: 0)]
+        let ticket = Ticket(id: "local", workspace: GroupMock.home, workspaceName: "Home", ticket: "t_local", title: "Local", text: "",
+                            status: .working, kind: "working", at: "0", question: nil, key: "HOME-7")
+        let update = TicketUpdate(id: "update", workspace: GroupMock.home, workspaceName: "Home", ticket: "t_local", kind: "working",
+                                  title: "Local update", text: "", replyTo: nil, at: "0", key: "HOME-8")
+        let target = try XCTUnwrap(GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [ticket], updates: []))
+        XCTAssertEqual(target.workspace, GroupMock.home)
+        XCTAssertEqual(target.ticket, "t_local")
+        XCTAssertEqual(target.label, "HOME-7")
+        XCTAssertEqual(GroupRoomRules.taskHeading(target: target), "HOME-7 · Local")
+        XCTAssertEqual(GroupRoomRules.taskHeading(target: GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [], updates: [update])), "HOME-8 · Local update")
+        XCTAssertNil(GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [], updates: []))
+        XCTAssertNil(GroupRoomRules.openTarget(task: task, workspaces: [], tickets: [ticket], updates: [update]))
+        XCTAssertEqual(GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [], updates: [update])?.label, "HOME-8")
+        var noKey = update
+        noKey.key = nil
+        XCTAssertEqual(GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [], updates: [noKey])?.label, "ticket")
+        let wrongWorkspace = GroupTask(delegate: "d", ws: GroupMock.finance, ticket: "t_local", status: "working")
+        let finance = Workspace(id: GroupMock.finance, name: "Finance", description: nil, tags: [], online: true, lastSeen: nil, openQuestions: 0)
+        XCTAssertNil(GroupRoomRules.openTarget(task: wrongWorkspace, workspaces: [finance], tickets: [ticket], updates: [update]))
+    }
+
+    func testTaskHeadingUsesOnlyLocalTargetKeyAndTitle() {
+        XCTAssertNil(GroupRoomRules.taskHeading(target: nil))
+        XCTAssertEqual(GroupRoomRules.taskHeading(target: (GroupMock.home, "t", "HOME-7", "Local title")), "HOME-7 · Local title")
+        XCTAssertEqual(GroupRoomRules.taskHeading(target: (GroupMock.home, "t", "HOME-7", nil)), "HOME-7")
+    }
+
+    func testRowIDSeparatesHyphenatedHostAndID() throws {
+        let g = try XCTUnwrap(snapshot(GroupMock.messages(now: now)).groups.first)
+        func row(host: String, id: String) -> String {
+            GroupListRow.rowID(PhoneGroup(key: GroupKey(host: host, id: id), title: g.title, members: g.members,
+                hostName: g.hostName, names: g.names, externals: g.externals, ticketKey: g.ticketKey, ticket: g.ticket,
+                messages: g.messages, closed: g.closed, startedHere: g.startedHere, gaps: g.gaps, tasks: g.tasks))
+        }
+        XCTAssertNotEqual(row(host: "a\u{0600}", id: "\u{0301}-z"), row(host: "a\u{0600}-\u{0301}", id: "z"))
+        XCTAssertEqual(row(host: "a-b", id: "c"), "group-3-a-b-c")
+        XCTAssertEqual(row(host: "a", id: "b-c"), "group-1-a-b-c")
+        XCTAssertNotEqual(row(host: "a-b", id: "c"), row(host: "a", id: "b-c"))
+    }
+
     func testTaskLabels() {
         let labels = ["waiting_start": "Waiting for Home to start", "waiting_approval": "Waiting for approval", "queued": "Queued",
                       "working": "Working", "done": "Done", "failed": "Failed", "denied": "No"]
@@ -40,6 +95,24 @@ final class GroupViewTests: XCTestCase {
         let event = try XCTUnwrap(group.messages.compactMap(\.event).first { $0.kind == "approval_needed" })
         let question = GroupMock.question(at: ISO8601DateFormatter().string(from: now))
         XCTAssertEqual(GroupStore.approvalCard(for: event, in: group, questions: [question]), .buttons(question))
+    }
+
+    func testApprovalScopeUsesSanitizedPairedHostName() throws {
+        var names = GroupMock.names
+        names[GroupMock.finance] = "  Fin\u{200B}ance  "
+        let data = GroupStore.build(messages: GroupMock.messages(now: now).sorted { $0.message.createdAt > $1.message.createdAt },
+                                   workspaces: names, ownPhoneId: "ph_iphone0001", ownMessageIds: [])
+        let group = try XCTUnwrap(data.groups.first { !$0.closed })
+        XCTAssertEqual(group.hostName, "Finance")
+        let event = try XCTUnwrap(group.messages.compactMap(\.event).first { $0.kind == "approval_needed" })
+        let question = GroupMock.question(at: "now")
+        XCTAssertEqual(GroupStore.approvalCard(for: event, in: group, questions: [question]), .buttons(question))
+        let q = question.message
+        var body = q.body
+        body.scope = "tasks from Fin\u{200B}ance"
+        let spoofed = Question(message: QuestionMessage(schema: q.schema, id: q.id, from: q.from, to: q.to, type: q.type,
+            createdAt: q.createdAt, ticket: q.ticket, body: body), workspaceName: question.workspaceName)
+        XCTAssertEqual(GroupStore.approvalCard(for: event, in: group, questions: [spoofed]), .answerInWorkspace("Bank"))
     }
 
     func testExternalMemberPresentationUsesProvenanceAndTransport() throws {
