@@ -11,7 +11,7 @@ const chatGroupMembers = (rows, tasks) => chatObjects(rows).filter(m => !m.left_
 function chatHostedGroup(g) {
   const ticket = ticketOf(g.ticket), members = chatGroupMembers(g.members, g.tasks), host = members.find(m => m.host);
   const nameOf = ws => clean(members.find(m => m.ws === ws)?.name);
-  const talk = array(ticket?.history).filter(e => e && typeof e.text === 'string' && ['rel' + 'ay', 'dashboard'].includes(e.via)).map((e, i) => {
+  const talk = array(ticket?.history).filter(e => e && typeof e.text === 'string' && e.in_chat === true).map((e, i) => {
     const mine = String(e.by || '').startsWith('human:'), who = name(e.by);
     return {id:'h-' + i + '-' + (e.at || ''), at:e.at, by:mine ? 'you' : who, name:mine ? 'You' : /helper$/.test(who) ? who : who + ' helper', text:e.text};
   });

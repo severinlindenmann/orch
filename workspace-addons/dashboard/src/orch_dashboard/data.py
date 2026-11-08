@@ -139,10 +139,21 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
             if not isinstance(t.get(k), list):
                 t[k] = []
         _mark_missing_proofs(root, t)
+        _mark_chat_history(t)
         tickets.append(t)
     add_artifact_marks(tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
     return tickets, skipped
+
+
+CHAT_VIA = ("relay", "dashboard")  # history entries written by the group chat (other workspaces, this dashboard)
+
+
+def _mark_chat_history(t: dict) -> None:
+    """`in_chat: true` on the history entries that are group-chat talk, so the Chat page needs no source names."""
+    for e in t["history"]:
+        if isinstance(e, dict) and e.get("via") in CHAT_VIA:
+            e["in_chat"] = True
 
 
 def add_artifact_marks(tickets: list[dict]) -> None:

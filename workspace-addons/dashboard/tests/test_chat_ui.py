@@ -1,5 +1,6 @@
 """Chat + Groups page contracts (pages/chat.js, chat.css): feature-detected groups, no VPN names, safe DOM, 44 px targets."""
 
+import json
 import re
 
 from tests import webjs
@@ -44,3 +45,20 @@ def test_css_is_scoped_small_screens_and_touch_targets():
     assert "@media" in CSS and "prefers-reduced-motion" in CSS
     selectors = re.findall(r"(?m)^([^{@}/]+)\{", CSS)
     assert selectors and all(s.strip().startswith(".chat-page") for s in selectors)
+
+
+def test_group_talk_is_marked_by_the_data_layer(ws):
+    from orch_dashboard.data import load_tickets
+
+    tdir = ws / ".orch" / "tickets"
+    path = next(tdir.glob("t_weekly01.json"))
+    t = json.loads(path.read_text())
+    t["history"] = [
+        {"at": "2026-11-08T10:00:00+01:00", "by": "agent:Home", "text": "hi", "via": "relay"},
+        {"at": "2026-11-08T10:01:00+01:00", "by": "human:me", "text": "yo", "via": "dashboard"},
+        {"at": "2026-11-08T10:02:00+01:00", "by": "agent:x", "text": "note", "via": "cli"},
+    ]
+    path.write_text(json.dumps(t))
+    got = next(x for x in load_tickets(ws)[0] if x["id"] == "t_weekly01")["history"]
+    assert [bool(e.get("in_chat")) for e in got] == [True, True, False]
+    assert "in_chat === true" in JS and "rel' + 'ay" not in JS
