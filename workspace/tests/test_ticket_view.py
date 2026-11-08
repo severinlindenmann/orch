@@ -424,3 +424,13 @@ def test_without_mobile_mode_an_unfollowed_ticket_sends_nothing(proj, run, new_t
     _review(proj, tid)
     n = len(conn.sent)
     assert phone_view.sync(proj) == [] and len(conn.sent) == n
+
+
+def test_a_child_of_a_phone_ticket_pushes_its_result_without_mobile_mode(proj, run, new_ticket, conn):
+    parent = new_ticket("From the phone")
+    tickets.ext_set(proj, parent, "relay", json.dumps({"origin": "phone", "from": "ph_x"}), "human:t")
+    child = json.loads(run("ticket", "new", "Part of it", "--parent", parent, "--json")[1])["id"]
+    phone_view.sync(proj)
+    _review(proj, child)
+    assert child in phone_view.sync(proj)
+    assert conn.sent[-1]["body"]["update"]["kind"] == "result" and conn.sent[-1]["ticket"] == child

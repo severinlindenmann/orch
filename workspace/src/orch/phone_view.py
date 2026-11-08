@@ -445,8 +445,9 @@ def sync(root: Path, now: float | None = None) -> list[str]:
     """Snapshots for followed tickets whose tasks, status or running agent changed, at most one per ticket
     every DEBOUNCE seconds (a change in between waits for the next pull). Quiet (kind note, never pushed),
     except when the ticket just moved to Review or Done: then a pushed `result` (fb11), unless the agent sent
-    one itself (remember() then already saw the new status). In Mobile mode a ticket nobody follows yet that
-    moves to Review or Done also sends its result to the phones. Returns the ticket ids sent."""
+    one itself (remember() then already saw the new status). A ticket nobody follows yet that moves to Review
+    or Done sends its result to the phones too, in Mobile mode or when it (or a parent) came from the phone.
+    Returns the ticket ids sent."""
     from orch import mobile_mode, relay
 
     now = time.time() if now is None else now
@@ -473,7 +474,12 @@ def sync(root: Path, now: float | None = None) -> list[str]:
         for t in tickets.list_all(root):
             tid, prev = t["id"], seen.get(t["id"])
             seen[tid] = t.get("status")
-            if on and tid not in state["tickets"] and tid not in sent and _just_finished(prev, t):
+            if (
+                tid not in state["tickets"]
+                and tid not in sent
+                and _just_finished(prev, t)
+                and (on or mobile_mode.from_phone(root, tid))
+            ):
                 with contextlib.suppress(Refused):
                     relay.send_text(root, "phones", result_text(t), tid, "result")
                     sent.append(tid)
