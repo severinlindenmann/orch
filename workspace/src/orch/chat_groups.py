@@ -37,6 +37,17 @@ from orch.text import clean_untrusted
 MAX_MEMBERS = 8
 TEXT_MAX = 4000
 BUF_MAX = 50  # group messages kept per group while an earlier one is missing
+BUF_TIMEOUT_S = 600  # a quiet group: skip a gap after 10 minutes
+BUF_BYTES_MAX = 256 * 1024  # bytes of buffered (reduced) messages per group
+MAX_OPEN_GROUPS_PER_HOST = 20
+CREATED_PER_HOUR = 5
+ALLOW_OPTIONS = ["once", "always", "no"]  # wire values; the UI shows "Allow once / Always / No" (G11)
+LEGACY_WORDS = {"allow once": "once", "once": "once", "always": "always", "ignore": "no", "no": "no"}
+ALLOW_MAP = {
+    "once": {"allow_mode": "once", "approved_mode": "once"},
+    "always": {"allow_mode": "permanent", "approved_mode": "always"},
+    "no": {"status": "denied"},
+}
 TITLE_MAX = 120
 CARD_MAX = 4096
 CARD_CHECKLIST = 20
@@ -124,10 +135,16 @@ def quiet(m: dict) -> bool:
     )
 
 
-def message_errors(m: dict) -> list[str]:
+def message_errors(m: dict, ctx: dict | None = None) -> list[str]:
     """Rules JSON Schema cannot express (chat-groups.md, G1-G8), for a message in either direction."""
+    ctx = ctx or {}
     b, out = m.get("body") or {}, []
     g = b.get("group")
+    if m.get("type") == "question" and b.get("allow_question") is True and b.get("options") != ALLOW_OPTIONS:
+        out.append("a permission (allow) question has the wire options once, always, no")
+    ge0 = b.get("group_event")
+    if isinstance(ge0, dict) and "mode" in ge0 and ge0["mode"] not in ("once", "always"):
+        out.append("group_event.mode is once or always")
     if not isinstance(g, dict):
         return out
     host, frm, to = g.get("host"), m.get("from"), m.get("to")
@@ -147,6 +164,14 @@ def message_errors(m: dict) -> list[str]:
         if m.get("type") == "question" and b.get("question_kind") != "info":
             out.append("a host question to a member must be question_kind info")
         o = b.get("origin")
+        hs0 = ctx.get("host_state") or {}
+        if (
+            isinstance(o, dict)
+            and str(o.get("from")).startswith("ph_")
+            and "paired_phones" in hs0
+            and o["from"] not in hs0["paired_phones"]
+        ):
+            out.append("origin.from is a ph_ only for a phone paired to this host workspace")
         if b.get("by") == "you":
             if b.get("via") == "phone" and not (isinstance(o, dict) and o.get("from") == b.get("phone")):
                 out.append("by you via phone: origin.from must be that phone")
@@ -221,9 +246,20 @@ def receive_errors(m: dict, ctx: dict) -> list[str]:
     b, out = m.get("body") or {}, []
     g = b.get("group") if isinstance(b.get("group"), dict) else None
     if g:
-        known = (ctx.get("known_groups") or {}).get(g.get("id"))
-        if known is not None and known != g.get("host"):
-            out.append("group key is (host, id): this id belongs to another host")
+        if ctx.get("receiver_role") in ("member", "phone") and m.get("from") != g.get("host"):
+            out.append("at a member or phone, from != group.host is always dropped")
+        if m.get("from") == g.get("host") and store_key(m, ctx)[1] == "new":
+            # any group creation counts: an explicit `created` or the first message seen from the host
+            if ctx.get("open_groups_of_host", 0) >= MAX_OPEN_GROUPS_PER_HOST:
+                out.append("dropped: this host already has 20 open groups here")
+            if ctx.get("created_last_hour", 0) >= CREATED_PER_HOUR:
+                out.append("dropped: this host is over 5 new groups an hour")
+        # (host, id) is the key: an id held under another host is a different group, never a conflict
+        o = b.get("origin")
+        if isinstance(o, dict) and [g.get("host"), g.get("id"), o.get("id")] in [
+            list(x) for x in ctx.get("seen_origins", [])
+        ]:
+            out.append("duplicate: this (host, group.id, origin.id) was already stored")
     hs = ctx.get("host_state")
     if g and hs is not None and m.get("from") != g.get("host"):
         frm = m.get("from")
@@ -246,6 +282,84 @@ def receive_errors(m: dict, ctx: dict) -> list[str]:
                 if rn < ro or (ro == 4 and t.get("status") != old):
                     out.append(f"task status may not go from {old} to {t.get('status')}")
     return out
+
+
+def parse_allow_answer(text) -> str | None:
+    """The wire value is exact lowercase once|always|no. Old wording is read trimmed, whitespace collapsed,
+    case-insensitive ("Allow once", "Always", "Ignore", "No"). Anything else is not an allow answer."""
+    if text in ALLOW_OPTIONS:
+        return text
+    return LEGACY_WORDS.get(" ".join(str(text).split()).casefold())
+
+
+def card_kind(q: dict) -> str:
+    """The phone's approval card: buttons only for a marked question with exactly the wire options."""
+    return (
+        "buttons"
+        if q.get("allow_question") is True and q.get("options") == ALLOW_OPTIONS
+        else "answer_in_bank"
+    )
+
+
+def store_key(m: dict, ctx: dict) -> tuple[list, str]:
+    """A receiver stores a group under [host, id]; never a conflict between hosts."""
+    g = m["body"]["group"]
+    key = [g["host"], g["id"]]
+    return key, ("existing" if key in [[k["host"], k["id"]] for k in ctx.get("known_groups", [])] else "new")
+
+
+def _applied(od: dict, seq: int) -> int:
+    ap = od.get("applied_seq")
+    if ap is None:
+        ap = (od["from_seq"] if od.get("from_seq") is not None else seq) - 1
+    return ap
+
+
+def order_step(m: dict, ctx: dict) -> str | None:
+    """Stateful checks run in group.seq order (G12): apply | buffer | skip_gap_and_apply | late_show_no_state."""
+    seq, od = ((m.get("body") or {}).get("group") or {}).get("seq"), ctx.get("order")
+    if seq is None or od is None:
+        return None
+    ap = _applied(od, seq)
+    if seq <= ap:
+        return "late_show_no_state"
+    if seq == ap + 1:
+        return "apply"
+    buffered = od.get("buffered", [])
+    if len(buffered) >= BUF_MAX or (buffered and od.get("oldest_age_s", 0) >= BUF_TIMEOUT_S):
+        return "skip_gap_and_apply"
+    return "buffer"
+
+
+def applied_after(m: dict, ctx: dict) -> int:
+    od, seq = ctx["order"], m["body"]["group"]["seq"]
+    out = order_step(m, ctx)
+    if out == "apply":
+        return seq
+    if out == "skip_gap_and_apply":
+        have = sorted(set(od.get("buffered", [])) | {seq})
+        cur = have[0]
+        for x in have[1:]:
+            if x == cur + 1:
+                cur = x
+            else:
+                break
+        return cur
+    return _applied(od, seq)
+
+
+def shown_as(m: dict, ctx: dict) -> str | None:
+    """ "You" only for a host copy by you whose origin is the host's dashboard or a phone of the viewer's account."""
+    b = m.get("body") or {}
+    if b.get("by") != "you":
+        return None
+    g = b.get("group") or {}
+    if m.get("from") != g.get("host"):
+        return "Other phone"
+    o = b.get("origin") or {}
+    return (
+        "You" if o.get("from") == "dashboard" or o.get("from") in ctx.get("own_phones", []) else "Other phone"
+    )
 
 
 def phone_joins_group(m: dict, ctx: dict) -> bool:

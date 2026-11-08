@@ -13,7 +13,7 @@ VECTORS = sorted((CONTRACTS / "vectors" / "chat-groups").glob("*.json"))
 
 def errors(case):
     m, ctx = case["message"], case.get("context") or {}
-    return cg.message_errors(m) + cg.receive_errors(m, ctx)
+    return cg.message_errors(m, ctx) + cg.receive_errors(m, ctx)
 
 
 @pytest.mark.parametrize("f", VECTORS, ids=lambda f: f.stem)
@@ -25,8 +25,29 @@ def test_vector(f):
     else:
         assert errs, f"{f.name} should be refused"
     exp = case.get("expect") or {}
+    m, ctx = case["message"], case.get("context") or {}
     if "group_text" in exp:
-        assert cg.phone_joins_group(case["message"], case.get("context") or {}) is exp["group_text"]
+        assert cg.phone_joins_group(m, ctx) is exp["group_text"]
+    if "shown_as" in exp:
+        assert cg.shown_as(m, ctx) == exp["shown_as"]
+    if "order" in exp:
+        assert cg.order_step(m, ctx) == exp["order"]
+    if "applied_after" in exp:
+        assert cg.applied_after(m, ctx) == exp["applied_after"]
+    if "stored_as" in exp:
+        assert cg.store_key(m, ctx) == (exp["stored_as"], exp.get("store", "new"))
+    if "card" in exp:
+        assert cg.card_kind(m["body"]) == exp["card"]
+    for ans, want in (exp.get("parse") or {}).items():
+        assert cg.parse_allow_answer(ans) == want
+    if "map" in exp:
+        mp = exp["map"]
+        assert cg.ALLOW_MAP[cg.parse_allow_answer(mp["answer"])] == {
+            k: v for k, v in mp.items() if k != "answer"
+        }
+        ge = m["body"].get("group_event") or {}
+        if ge.get("kind") == "approved":
+            assert ge.get("mode") == mp["approved_mode"]
 
 
 def test_there_are_vectors():
