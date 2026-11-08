@@ -416,6 +416,22 @@ def detect() -> list[dict]:
     return out
 
 
+RUN_ENV = ("ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET", "ORCH_VIA")
+
+
+def human_environ(environ: Mapping[str, str]) -> dict:
+    """environ without anything that says "an agent is running": every tool's detect variables and the run's
+    ORCH_AGENT/RUN/TICKET/VIA. Used for what a person (a page click) or orch itself (a restart) starts, so
+    orch never counts it as the agent's. Add-ons call this one helper (no copies that drift apart)."""
+    names, prefixes = set(RUN_ENV), []
+    for a in _registry().values():
+        d = a.get("detect") or {}
+        names.update(d.get("env_any") or [])
+        if d.get("env_prefix"):
+            prefixes.append(d["env_prefix"])
+    return {k: v for k, v in environ.items() if k not in names and not k.startswith(tuple(prefixes))}
+
+
 def detect_env(environ: Mapping[str, str]) -> str | None:
     """The agent tool a process runs under, from its environment (ORCH_AGENT first), else None."""
     if environ.get("ORCH_AGENT"):

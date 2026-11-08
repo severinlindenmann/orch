@@ -132,6 +132,11 @@ def live_alive(root: Path) -> list[dict]:
     ]
 
 
+def _crowded(root: Path) -> bool:
+    """So many live sessions are open that idle ones on finished tickets should make room."""
+    return len(live_all(root)) >= MAX_LIVE
+
+
 def _full(root: Path) -> bool:
     return len(live_alive(root)) >= MAX_LIVE or len(live_all(root)) >= MAX_LIVE + HARD_EXTRA
 
@@ -334,15 +339,44 @@ def event(
     return deliver(root, tid)
 
 
-def pass_answer(root: Path, tid: str, q: dict, by: str) -> None:
-    """A person answered while an agent works on the ticket: the answer goes to it like a message
-    (live: pasted when it is idle). An agent's own answer, or no run, sends nothing."""
+def pass_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
+    """A person answered. An agent works on the ticket: the answer goes to it like a message (live: pasted
+    when it is idle). None works on it: the agent that asked is started again on the ticket (its own session
+    resumed when there is one) once no question of it is open any more, so nobody has to press Continue.
+    An agent's own answer, or an add-on's question, starts nothing. Returns the start result, if any."""
     if by.startswith("agent:"):
-        return
+        return None
     rec = runs.read(root, tid)
-    if not rec or runs.state(rec) != "alive":
-        return
-    send(root, tid, by, f"Answer to your question {q['id']} ({q['text']}): {q['answer']}", "answer")
+    if rec and runs.state(rec) == "alive":
+        send(root, tid, by, f"Answer to your question {q['id']} ({q['text']}): {q['answer']}", "answer")
+        return None
+    return resume_after_answer(root, tid, q, by)
+
+
+def _asker(ticket: dict, qid: str) -> str | None:
+    """The agent name that asked qid (the exact line `orch ask` writes), else None."""
+    for h in ticket.get("history") or []:
+        who = str(h.get("by", ""))
+        if who.startswith("agent:") and re.fullmatch(rf"Asked {re.escape(qid)}, waiting", str(h.get("text"))):
+            return who.partition(":")[2]
+    return None
+
+
+def resume_after_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
+    ticket = tickets.load(root, tid)
+    asker = _asker(ticket, q["id"]) if q.get("kind") in (None, "plain") else None
+    if not asker or ticket.get("status") in ("done", "dropped") or tickets._open_questions(ticket):
+        return None  # tickets.answer left it Ready (not Working): nobody works on it
+    try:
+        adapters.load(asker, root)
+    except Refused:
+        asker = None  # not a registry name (e.g. an add-on's agent:<name>): the folder's agent goes on
+    try:
+        return runs.start(root, tid, by, agent=asker)
+    except Refused as e:  # no agent set, sessions full (queued), ...: the answer is saved either way
+        with contextlib.suppress(Exception):
+            tickets.log(root, tid, f"The agent could not be started again after the answer: {e}", "orch")
+        return None
 
 
 def send(root: Path, tid: str, by: str, text: str, kind: str = "message") -> dict:
@@ -405,6 +439,7 @@ def _close(root: Path, rec: dict, interrupt: bool) -> None:
         if runs._running(pid, started):
             runs.kill_tree(pid)
     runs.release(root, tid, run)
+    runs.settle(root, tid, f"agent:{rec.get('agent')}", ignore_input=True)  # what waits stays queued
     (runs.run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
 
 
@@ -453,7 +488,9 @@ def cleanup(root: Path) -> list[str]:
             idle = time.time() - runs._parse(live["since"])
         except (KeyError, ValueError):
             continue
-        short = live.get("state") == "idle" and _finished(root, tid)  # attention keeps the full limit
+        # A finished ticket's idle session closes early only when the sessions are full; else it stays warm
+        # the full hour, so Continue on a Review ticket keeps its session (fb4). Attention keeps the hour.
+        short = live.get("state") == "idle" and _finished(root, tid) and _crowded(root)
         lim = min(limit, FINISHED_IDLE_SECONDS) if short else limit
         if (idle > lim or _done_for(root, tid, limit)) and _claim_close(root, rec, short and idle <= limit):
             try:

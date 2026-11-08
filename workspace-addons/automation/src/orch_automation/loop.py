@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -24,9 +25,12 @@ def scheduled(t: dict) -> bool:
     rec = ((t.get("ext") or {}).get("automation") or {}).get("recurring") is True
     return t.get("status") in OPEN or (rec and t.get("status") == "done")
 FAST_FAIL_SECONDS = 10
+QUEUED_TRIES = 3  # starts that failed for one waiting input before it is left for a person
 KIND = "automation:failure"
 KINDS = (KIND,)
 TRY_AGAIN, LEAVE = "Try again", "Leave it"
+PHONE_RE = re.compile(r"ph_[A-Za-z0-9_-]{1,64}")
+GENERAL_NOTE = "General conversation"  # `orch relay inbox` note of a phone text in General
 BUSY_TEXT = "More work arrived for this ticket: read the newest note on it."
 
 
@@ -58,13 +62,15 @@ class Scheduler:
         sdir(root)
 
     # -- starting -----------------------------------------------------------
-    def start_run(self, tid: str, reason: str, now: datetime, note: str | None = None) -> str:
-        """Returns "started", "pending" or "failed". Never starts a second agent: core refuses it."""
+    def start_run(self, tid: str, reason: str, now: datetime, note: str | None = None, phone: bool = False) -> str:
+        """Returns "started", "pending" or "failed". Never starts a second agent: core refuses it.
+        phone: a person on the phone asked for it, so core picks the mode (a live session stays up an hour
+        and can be opened); scheduled and machine runs go one step at a time."""
         if note:
             orchcli.log(self.root, tid, note)
         t = orchcli.ticket(self.root, tid)
         res = orchcli.run_start(self.root, tid, BUSY_TEXT if note else f"Automation asked for another run ({reason}).",
-                                self.agent_of(t))
+                                self.agent_of(t), mode=None if phone else "oneshot")
         if res["result"] == "started":
             orchcli.log(self.root, tid, f"Automation started an agent run ({reason}).")
             starts = (load_state(self.root).get(tid, {}).get("starts") or [])[-49:]
@@ -171,9 +177,78 @@ class Scheduler:
                 continue
             if not orchcli.set_ext(self.root, t, phone_started=True):
                 continue  # the ticket changed: look again next pass
-            if self.start_run(t["id"], "a text from your phone", now) == "started":
+            if self.start_run(t["id"], "a text from your phone", now, phone=True) == "started":
                 started.append(t["id"])
         return started
+
+    def queued_input(self, now: datetime, skip: list[str] | None = None) -> list[str]:
+        """INVARIANT 1: only the automation host starts runs for queued input; the run wrapper never does.
+        INVARIANT 2: only human-authored pending input (owner, phone, dashboard; never agent:*) starts a run,
+        once per item. Core lists only those (`orch run status` human_pending_ids), so an agent that queues
+        input for itself or another ticket never starts anything here.
+
+        A Ready ticket with such input and no run gets one run. The ids are saved before the start (never twice
+        after a crash); a start that definitely failed gives them back, at most QUEUED_TRIES times per id. The
+        saved set is only the ids still waiting (no cap that could forget one). Same gates as the other starts:
+        a ticket switched off here (paused) is left alone, and a ticket started this pass is skipped."""
+        started: list[str] = []
+        skip = list(skip or [])
+        for t in read_tickets(self.root):
+            tid = t["id"]
+            self._give_back_after_holder(tid)
+            if tid in skip or t.get("status") != "ready" or not self.may_start(t):
+                continue
+            st = orchcli.run_status(self.root, tid)
+            if not st or st.get("running") is not False:
+                continue
+            ids = [i for i in st.get("human_pending_ids") or [] if isinstance(i, str)]
+            mine = load_state(self.root).get(tid, {})
+            tries = {k: v for k, v in (mine.get("queued_tries") or {}).items() if k in ids and isinstance(v, int)}
+            done = [i for i in mine.get("queued_started") or [] if i in ids]  # only what still waits
+            new = [i for i in ids if i not in done and tries.get(i, 0) < QUEUED_TRIES]  # capped ids never again
+            if not new:
+                update_state(self.root, tid, queued_started=done, queued_tries=tries)
+                continue
+            update_state(self.root, tid, queued_started=done + new, queued_tries=tries)  # first: never twice
+            res = self.start_run(tid, "input was waiting for it", now, phone=True)
+            if res == "started":
+                started.append(tid)
+                continue
+            if res == "pending":  # a run holds the ticket after all: it reads the input. The ids stay marked
+                held = sorted(set(mine.get("queued_held") or []) | set(new))  # and wait for that run to end
+                update_state(self.root, tid, queued_held=held)
+                continue
+            # anything else (failed, refused, unknown) gives the ids back and counts one try per id
+            reached = []
+            for i in new:
+                tries[i] = tries.get(i, 0) + 1
+                if tries[i] == QUEUED_TRIES:  # this try moved it from cap-1 to cap: said exactly once
+                    reached.append(i)
+            update_state(self.root, tid, queued_started=done, queued_tries=tries)
+            if reached:
+                orchcli.log(self.root, tid, f"Input waiting on this ticket could not start an agent after "
+                                            f"{QUEUED_TRIES} tries. It stays queued; start the agent by hand.")
+                self.fail(tid, f"the agent could not be started for the waiting input ({QUEUED_TRIES} tries)")
+        return started
+
+    def _give_back_after_holder(self, tid: str) -> None:
+        """Ids marked while another run held the ticket ("pending"): once that run has ended, those it did not
+        read (still in human_pending_ids) may start one run again. Unknown status changes nothing (next pass)."""
+        mine = load_state(self.root).get(tid, {})
+        held = [i for i in mine.get("queued_held") or [] if isinstance(i, str)]
+        if not held:
+            return
+        st = orchcli.run_status(self.root, tid)
+        if not st or st.get("running") is not False:
+            return  # unknown, or the holder still runs
+        waiting = set(st.get("human_pending_ids") or [])
+        back = [i for i in held if i in waiting]
+        done = [i for i in mine.get("queued_started") or [] if i not in back]
+        update_state(self.root, tid, queued_started=done, queued_held=[])
+
+    def may_start(self, t: dict) -> bool:
+        """The gates every start from this loop respects: a ticket switched off here is left alone."""
+        return ((t.get("ext") or {}).get("automation") or {}).get("paused") is not True
 
     # -- pass ---------------------------------------------------------------
     def tick(self, now: datetime) -> list[str]:
@@ -182,6 +257,7 @@ class Scheduler:
         self.check_watch()
         started: list[str] = self.act_on_answers(now)
         started += self.phone_tickets(now)
+        started += self.queued_input(now, skip=started)
         state = load_state(self.root)
         for t in read_tickets(self.root):
             tid = t["id"]
@@ -225,6 +301,8 @@ class Scheduler:
         self.wake.clear()
         if self._inbox_due(now, force):
             started += self.inbox(now)
+            # a new phone text made its ticket in this inbox pass: start it now, not one interval later (fb6)
+            started += [t for t in self.phone_tickets(now) if t not in started]
         return started
 
     # -- relay inbox --------------------------------------------------------
@@ -261,21 +339,28 @@ class Scheduler:
             note = outside_prompt(kind, text) if text else None
             return tid if self.start_run(tid, f"relay {kind} {mid}", now, note) == "started" else None
         if kind == "answer" and m.get("applied") is True:
-            # `orch relay inbox` already applied the answer (ticket is active again); resume it once.
+            # `orch relay inbox` already applied the answer, and core resumed the agent (orch answer does);
+            # a run is started here only when none runs (an answer core could not pass on).
             tid = m.get("ticket")
-            if not isinstance(tid, str):
+            if not isinstance(tid, str) or orchcli.run_running(self.root, tid) is not False:
                 return None
             asked = orchcli.ticket(self.root, tid)
             if any(q.get("id") == body.get("question_id") and q.get("kind") in KINDS
                    for q in (asked or {}).get("questions") or []):
                 return None  # act_on_answers handles our own failure question
-            return tid if self.start_run(tid, f"relay answer {mid}", now) == "started" else None
+            # only a person on the phone waits for a live session; a peer workspace or a subscriber does not
+            phone = str(m.get("from", "")).startswith("ph_")
+            return tid if self.start_run(tid, f"relay answer {mid}", now, phone=phone) == "started" else None
         if kind == "text" and str(m.get("from", "")).startswith("ph_") and isinstance(m.get("ticket"), str):
-            # a follow-up text: the relay queued it for the running agent; only an idle ticket needs a run
-            tid = m["ticket"]
-            if not str(m.get("note", "")).startswith("added to") or orchcli.run_running(self.root, tid) is not False:
+            # a follow-up text (or one in General): the relay queued it for the agent; only an idle ticket needs a run
+            tid, note = m["ticket"], str(m.get("note", ""))
+            general = note == GENERAL_NOTE
+            if not (note.startswith("added to") or general) or orchcli.run_running(self.root, tid) is not False:
                 return None
-            return tid if self.start_run(tid, f"phone text {mid}", now) == "started" else None
+            hint = (f"A phone text in the General conversation is waiting for you. Answer it: "
+                    f'orch relay send {m["from"]} "<your answer>" --ticket {tid}') \
+                if general and PHONE_RE.fullmatch(str(m["from"])) else None
+            return tid if self.start_run(tid, f"phone text {mid}", now, hint, phone=True) == "started" else None
         if kind == "webhook":
             wid = body.get("webhook_id")
             for t in read_tickets(self.root):
