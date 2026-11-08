@@ -404,3 +404,14 @@ def test_no_waiting_for_your_answer_wording_left():
     for f in list(WEBDIR.glob("*.js")) + list((WEBDIR.parent.parent.parent.parent / "focus/src/orch_focus/web").glob("*.js")):
         text = f.read_text().lower()
         assert "waiting for your answer" not in text and "waiting on you" not in text, f.name
+
+
+def test_no_bare_waiting_status_label_left():
+    """5A/10A: the status word for a waiting ticket is "Needs you" everywhere (ids like 'waiting' stay)."""
+    import re
+
+    for f in list(WEBDIR.glob("*.js")) + list((WEBDIR.parent.parent.parent.parent / "focus/src/orch_focus/web").glob("*.js")):
+        text = f.read_text()
+        assert not re.search(r"""['"]Waiting['"]""", text), f.name  # a bare "Waiting" label
+        assert not re.search(r"""\bstatus\s*=\s*['"]waiting['"]""", text), f.name  # "Agent · waiting"
+        assert not re.search(r"""\bwaiting:\s*['"]waiting['"]""", text, re.I), f.name
