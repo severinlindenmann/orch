@@ -80,11 +80,15 @@ def ext_unset(root: Path, t: dict, by: str | None = None) -> bool:
 AGENT_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 
 
-def run_start(root: Path, tid: str, text: str | None = None, agent: str | None = None, by: str | None = None) -> dict:
+def run_start(root: Path, tid: str, text: str | None = None, agent: str | None = None, by: str | None = None,
+              mode: str | None = "oneshot") -> dict:
     """`orch run start <tid> --by agent:automation`: all of resume / fresh / busy is decided inside core.
+    mode None lets core choose (a live session the person can open when the machine can).
     Returns {"result": "started", "run", "log"} | {"result": "pending"} (ticket busy, text queued)
     | {"result": "failed", "reason": plain words}."""
-    cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--mode", "oneshot", "--json", "--by", by or BY]
+    cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--json", "--by", by or BY]
+    if mode:
+        cmd += ["--mode", mode]
     if agent and AGENT_RE.match(agent):  # only a name; core refuses one it does not know
         cmd += ["--agent", agent]
     if text:

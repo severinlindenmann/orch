@@ -151,3 +151,30 @@ def test_follow_up_text_on_an_idle_ticket_starts_a_run(ws):
     (ws / "inbox.json").write_text(json.dumps([{"id": "m_6", "type": "text", "from": "ph_abc", "ticket": "t_ph000005",
                                                  "applied": True, "note": "added to t_ph000005", "body": {"text": "more"}}]))
     assert Scheduler(ws).tick(T(8)) == ["t_ph000005"] and runs_started(ws) == ["t_ph000005"]
+
+
+def test_a_phone_ticket_made_by_the_inbox_pass_starts_in_the_same_pass(ws, monkeypatch):
+    """fb6: the inbox pass makes the ticket of a new phone text; its run starts in that pass, not one
+    interval (60 s) later on the next pass."""
+    from conftest import runs_started
+
+    def inbox(self, now):
+        phone_ticket(ws, "t_ph000010")  # what `orch relay inbox` does for a new phone text
+        return []
+
+    monkeypatch.setattr(Scheduler, "inbox", inbox)
+    relay_on(ws)
+    s = Scheduler(ws)
+    s.wake.set()  # the listener saw the text arrive
+    assert s.tick(T(8)) == ["t_ph000010"] and runs_started(ws) == ["t_ph000010"]
+
+
+def test_runs_for_the_phone_are_not_forced_to_one_step(ws):
+    """fb4: a run the phone asked for may open a live session (core decides), so it stays up for an hour
+    and can be opened with `orch run attach`; a scheduled (cron) run stays one step at a time."""
+    from conftest import calls
+
+    phone_ticket(ws, "t_ph000011")
+    Scheduler(ws).tick(T(8))
+    start = next(c["args"] for c in calls(ws) if c["args"][:2] == ["run", "start"])
+    assert "--mode" not in start

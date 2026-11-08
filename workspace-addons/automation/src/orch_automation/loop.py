@@ -58,13 +58,15 @@ class Scheduler:
         sdir(root)
 
     # -- starting -----------------------------------------------------------
-    def start_run(self, tid: str, reason: str, now: datetime, note: str | None = None) -> str:
-        """Returns "started", "pending" or "failed". Never starts a second agent: core refuses it."""
+    def start_run(self, tid: str, reason: str, now: datetime, note: str | None = None, phone: bool = False) -> str:
+        """Returns "started", "pending" or "failed". Never starts a second agent: core refuses it.
+        phone: a person on the phone asked for it, so core picks the mode (a live session stays up an hour
+        and can be opened); scheduled and machine runs go one step at a time."""
         if note:
             orchcli.log(self.root, tid, note)
         t = orchcli.ticket(self.root, tid)
         res = orchcli.run_start(self.root, tid, BUSY_TEXT if note else f"Automation asked for another run ({reason}).",
-                                self.agent_of(t))
+                                self.agent_of(t), mode=None if phone else "oneshot")
         if res["result"] == "started":
             orchcli.log(self.root, tid, f"Automation started an agent run ({reason}).")
             starts = (load_state(self.root).get(tid, {}).get("starts") or [])[-49:]
@@ -171,7 +173,7 @@ class Scheduler:
                 continue
             if not orchcli.set_ext(self.root, t, phone_started=True):
                 continue  # the ticket changed: look again next pass
-            if self.start_run(t["id"], "a text from your phone", now) == "started":
+            if self.start_run(t["id"], "a text from your phone", now, phone=True) == "started":
                 started.append(t["id"])
         return started
 
@@ -225,6 +227,8 @@ class Scheduler:
         self.wake.clear()
         if self._inbox_due(now, force):
             started += self.inbox(now)
+            # a new phone text made its ticket in this inbox pass: start it now, not one interval later (fb6)
+            started += [t for t in self.phone_tickets(now) if t not in started]
         return started
 
     # -- relay inbox --------------------------------------------------------
@@ -261,21 +265,22 @@ class Scheduler:
             note = outside_prompt(kind, text) if text else None
             return tid if self.start_run(tid, f"relay {kind} {mid}", now, note) == "started" else None
         if kind == "answer" and m.get("applied") is True:
-            # `orch relay inbox` already applied the answer (ticket is active again); resume it once.
+            # `orch relay inbox` already applied the answer, and core resumed the agent (orch answer does);
+            # a run is started here only when none runs (an answer core could not pass on).
             tid = m.get("ticket")
-            if not isinstance(tid, str):
+            if not isinstance(tid, str) or orchcli.run_running(self.root, tid) is not False:
                 return None
             asked = orchcli.ticket(self.root, tid)
             if any(q.get("id") == body.get("question_id") and q.get("kind") in KINDS
                    for q in (asked or {}).get("questions") or []):
                 return None  # act_on_answers handles our own failure question
-            return tid if self.start_run(tid, f"relay answer {mid}", now) == "started" else None
+            return tid if self.start_run(tid, f"relay answer {mid}", now, phone=True) == "started" else None
         if kind == "text" and str(m.get("from", "")).startswith("ph_") and isinstance(m.get("ticket"), str):
             # a follow-up text: the relay queued it for the running agent; only an idle ticket needs a run
             tid = m["ticket"]
             if not str(m.get("note", "")).startswith("added to") or orchcli.run_running(self.root, tid) is not False:
                 return None
-            return tid if self.start_run(tid, f"phone text {mid}", now) == "started" else None
+            return tid if self.start_run(tid, f"phone text {mid}", now, phone=True) == "started" else None
         if kind == "webhook":
             wid = body.get("webhook_id")
             for t in read_tickets(self.root):

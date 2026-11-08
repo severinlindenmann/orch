@@ -126,6 +126,7 @@ def test_leave_it_runs_nothing_but_is_recorded(ws):
 def test_one_answer_leads_to_exactly_one_run(ws):
     """review-49-50 F1: an answer from the relay is applied by the CLI; the loop starts one run, then not again."""
     add_ticket(ws, "t_ask00001", status="active")
+    (ws / "ended-t_ask00001").write_text("")  # no run holds it (core could not pass the answer on)
     (ws / ".orch/secrets").mkdir(parents=True)
     (ws / ".orch/secrets/relay.json").write_text("{}")
     (ws / "inbox.json").write_text(json.dumps([{"id": "m_1", "type": "answer", "ticket": "t_ask00001", "applied": True,
