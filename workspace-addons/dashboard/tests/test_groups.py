@@ -17,7 +17,12 @@ LIST = {
             "seq": 7,
             "closed": False,
             "members": [
-                {"ws": "ws_fin0000001", "name": "Finance", "host": True, "look": {"icon": "bank", "color": "teal"}},
+                {
+                    "ws": "ws_fin0000001",
+                    "name": "Finance",
+                    "host": True,
+                    "look": {"icon": "bank", "color": "teal"},
+                },
                 {"ws": "ws_hom0000001", "name": "Home", "seen": 6, "token": "SECRET"},
             ],
             "tasks": [{"delegate": "m_x", "ws": "ws_hom0000001", "status": "working", "secret": "no"}],
@@ -32,7 +37,16 @@ LIST = {
             "left": False,
             "members": [],
             "card": {"title": "Pay"},
-            "log": [{"id": "m_1", "seq": 3, "text": "hi " + "x" * 900, "shown": "Finance (person)", "authority": False, "evil": 1}],
+            "log": [
+                {
+                    "id": "m_1",
+                    "seq": 3,
+                    "text": "hi " + "x" * 900,
+                    "shown": "Finance (person)",
+                    "authority": False,
+                    "evil": 1,
+                }
+            ],
         }
     ],
 }
@@ -60,7 +74,12 @@ def test_groups_are_read_trimmed_and_only_on_the_live_page(ws, tmp_path):
     g = load_groups(ws, str(orch))
     h = g["hosted"][0]
     assert h["id"] == "grp_t_abcdef" and h["members"][1] == {
-        "ws": "ws_hom0000001", "name": "Home", "look": None, "host": False, "left_at": None, "seen": 6,
+        "ws": "ws_hom0000001",
+        "name": "Home",
+        "look": None,
+        "host": False,
+        "left_at": None,
+        "seen": 6,
     }
     assert h["tasks"] == [{"delegate": "m_x", "ws": "ws_hom0000001", "status": "working"}]
     item = g["joined"][0]["log"][0]
@@ -89,11 +108,22 @@ def test_group_ops_run_orch_with_exact_argv(act_server, act_orch):
     for op, args in bad:
         assert post(act_server, {"op": op, "args": args})[0] == 400, (op, args)
     assert acts(act_orch) == []
-    assert post(act_server, {"op": "group.say", "args": {"ticket": "t_abcdef", "text": "--dashboard x"}})[0] == 200
-    assert post(act_server, {"op": "group.add", "args": {"ticket": "t_abcdef", "workspace": "ws_1"}})[0] == 200
-    assert post(act_server, {"op": "group.remove", "args": {"ticket": "t_abcdef", "workspace": "ws_1"}})[0] == 200
+    assert (
+        post(act_server, {"op": "group.say", "args": {"ticket": "t_abcdef", "text": "--dashboard x"}})[0]
+        == 200
+    )
+    assert (
+        post(act_server, {"op": "group.add", "args": {"ticket": "t_abcdef", "workspace": "ws_1"}})[0] == 200
+    )
+    assert (
+        post(act_server, {"op": "group.remove", "args": {"ticket": "t_abcdef", "workspace": "ws_1"}})[0]
+        == 200
+    )
     say, add, rm = acts(act_orch)[-3:]
-    assert say[:5] == ["relay", "group", "say", "t_abcdef", "--dashboard"] and say[-2:] == ["--", "--dashboard x"]
+    assert say[:5] == ["relay", "group", "say", "t_abcdef", "--dashboard"] and say[-2:] == [
+        "--",
+        "--dashboard x",
+    ]
     assert add[:5] == ["relay", "group", "add", "t_abcdef", "ws_1"]
     assert rm[:5] == ["relay", "group", "remove", "t_abcdef", "ws_1"]
     json.dumps(say)
