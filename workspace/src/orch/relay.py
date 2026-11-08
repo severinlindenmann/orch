@@ -1239,6 +1239,9 @@ def _continue(
         if mid in r.get("messages", []):
             return
         r["messages"] = [*r.get("messages", []), mid][-50:]
+        r["phone"] = (
+            True  # the owner wrote to it from a phone: its questions go there too (mobile_mode.from_phone)
+        )
         tickets.add_history(t, by, text, "phone")
         t["waiting_on"] = None
         if general:

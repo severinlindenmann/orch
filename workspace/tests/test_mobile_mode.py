@@ -459,7 +459,10 @@ def test_question_to_phone_continued_ticket_and_broken_parent(on_state, monkeypa
     _connect(on_state)
     cont = tickets.create(on_state, "Dashboard ticket the phone wrote to", "human:sev")["id"]
     assert not mm.question_to_phone(on_state, cont)
+    # a peer workspace's message (relay._ticket_for) only fills messages: not from the phone
     tickets.apply_op(on_state, cont, lambda tk: tk.setdefault("ext", {}).update(relay={"messages": ["m_1"]}))
+    assert not mm.question_to_phone(on_state, cont)
+    tickets.apply_op(on_state, cont, lambda tk: tk["ext"]["relay"].update(phone=True))
     assert mm.question_to_phone(on_state, cont)
     bad = tickets.create(on_state, "Broken parent", "human:sev")["id"]
     for parent in (["t_x"], 7):

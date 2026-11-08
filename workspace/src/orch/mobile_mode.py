@@ -219,7 +219,7 @@ PARENT_DEPTH = 20  # a parent chain longer than this is not followed further
 
 def from_phone(root: Path, tid: str | None) -> bool:
     """True when this ticket or one of its parents was started from a phone (ext.relay.origin = phone) or got
-    a phone text (ext.relay.messages). A broken parent field ends the walk as False."""
+    a phone text (ext.relay.phone). A broken parent field ends the walk as False."""
     from orch import tickets
 
     seen: set[str] = set()
@@ -230,8 +230,9 @@ def from_phone(root: Path, tid: str | None) -> bool:
         except (Refused, OSError, ValueError):
             return False
         r = (t.get("ext") or {}).get("relay")
-        # started from a phone, or the owner wrote to it from the phone (a continued dashboard ticket)
-        if isinstance(r, dict) and (r.get("origin") == "phone" or r.get("messages")):
+        # started from a phone, or the owner wrote to it from a phone (relay._continue, ph_ senders only);
+        # never ext.relay.messages: peer workspace messages land there too
+        if isinstance(r, dict) and (r.get("origin") == "phone" or r.get("phone") is True):
             return True
         tid = t.get("parent")
     return False
