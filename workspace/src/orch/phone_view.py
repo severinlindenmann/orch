@@ -413,7 +413,11 @@ def remember(root: Path, tid: str, to: str) -> None:
         sig = _tasks_sig(tickets.load(root, tid), root)
     except (Refused, ValueError, KeyError, OSError):
         return
-    state["tickets"][tid] = {"to": to, "sig": sig, "at": time.time()}
+    try:
+        status = tickets.load(root, tid).get("status")
+    except (Refused, ValueError, KeyError, OSError):
+        status = None
+    state["tickets"][tid] = {"to": to, "sig": sig, "at": time.time(), "status": status}
     if to.startswith("ph_"):  # this phone has a chat for the ticket now: sync_open skips it
         state.setdefault("synced", {}).setdefault(to, [])
         if tid not in state["synced"][to]:
@@ -421,15 +425,34 @@ def remember(root: Path, tid: str, to: str) -> None:
     save_state(root, state)
 
 
+FINISHED = ("review", "done")
+
+
+def result_text(ticket: dict) -> str:
+    """The pushed "it is finished" text: the title, then where things stand."""
+    word = "Ready for your review" if ticket.get("status") == "review" else "Done"
+    text = f"{word}: {_clip(ticket.get('title', ''), 120)}"
+    if ticket.get("summary"):
+        text += f"\n{_clip(ticket['summary'], 400)}"
+    return text
+
+
+def _just_finished(prev, ticket: dict) -> bool:
+    return prev is not None and prev not in FINISHED and ticket.get("status") in FINISHED
+
+
 def sync(root: Path, now: float | None = None) -> list[str]:
-    """Quiet snapshots (kind note, never pushed) for followed tickets whose tasks changed, at most
-    one per ticket every DEBOUNCE seconds (a change in between waits for the next pull).
-    Returns the ticket ids sent."""
-    from orch import relay
+    """Snapshots for followed tickets whose tasks, status or running agent changed, at most one per ticket
+    every DEBOUNCE seconds (a change in between waits for the next pull). Quiet (kind note, never pushed),
+    except when the ticket just moved to Review or Done: then a pushed `result` (fb11), unless the agent sent
+    one itself (remember() then already saw the new status). In Mobile mode a ticket nobody follows yet that
+    moves to Review or Done also sends its result to the phones. Returns the ticket ids sent."""
+    from orch import mobile_mode, relay
 
     now = time.time() if now is None else now
     sent = []
-    for tid, rec in list(load_state(root)["tickets"].items()):
+    state = load_state(root)
+    for tid, rec in list(state["tickets"].items()):
         try:
             ticket = tickets.load(root, tid)
         except (Refused, ValueError, KeyError, OSError):
@@ -438,8 +461,24 @@ def sync(root: Path, now: float | None = None) -> list[str]:
             continue
         done, total = tickets.checks_done(ticket)
         with contextlib.suppress(Refused):
-            relay.send_text(root, rec["to"], f"Tasks: {done} of {total} done", tid, "note", view=True)
+            if _just_finished(rec.get("status"), ticket):
+                relay.send_text(root, rec["to"], result_text(ticket), tid, "result")
+            else:
+                relay.send_text(root, rec["to"], f"Tasks: {done} of {total} done", tid, "note", view=True)
             sent.append(tid)
+    with contextlib.suppress(Refused, OSError, ValueError):
+        on = mobile_mode.routes_to_phone(root)
+        state = load_state(root)  # send_text -> remember() wrote it meanwhile
+        seen = state.setdefault("status", {})
+        for t in tickets.list_all(root):
+            tid, prev = t["id"], seen.get(t["id"])
+            seen[tid] = t.get("status")
+            if on and tid not in state["tickets"] and tid not in sent and _just_finished(prev, t):
+                with contextlib.suppress(Refused):
+                    relay.send_text(root, "phones", result_text(t), tid, "result")
+                    sent.append(tid)
+                    state = {**load_state(root), "status": seen}
+        save_state(root, {**load_state(root), "status": seen})
     return sent
 
 
