@@ -2,13 +2,18 @@ import SwiftUI
 
 enum GroupRoomRules {
     static func isReviewNote(_ message: GroupMessage) -> Bool {
-        message.message.message.type == "text" &&
+        guard let task = message.task, message.sender == .member(task.ws) else { return false }
+        return message.message.message.type == "text" &&
         message.message.message.body.update?.kind == "working" &&
         message.task?.status == "working" && message.text.hasPrefix("Ready for review in ")
     }
 
     static func reviewNote(task: GroupTask, group: PhoneGroup) -> String? {
-        guard group.messages.contains(where: { $0.task?.delegate == task.delegate && isReviewNote($0) }) else { return nil }
+        guard group.tasks[task.delegate]?.status == "working",
+              group.messages.contains(where: {
+                  $0.sender == .member(task.ws) && $0.task?.ws == task.ws &&
+                  $0.task?.delegate == task.delegate && isReviewNote($0)
+              }) else { return nil }
         return "Ready for review in \(group.name(of: task.ws))"
     }
 

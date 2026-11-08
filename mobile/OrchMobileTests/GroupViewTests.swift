@@ -10,13 +10,15 @@ final class GroupViewTests: XCTestCase {
     func testReviewNoteIsOncePerTaskAndUsesResolvedName() throws {
         let original = GroupMock.messages(now: now)
         let source = try XCTUnwrap(original.first { $0.message.body.task?.ws == GroupMock.home })
-        func update(_ seq: Int, text: String, status: String = "working", kind: String = "working") -> PhoneMessage {
+        func update(_ seq: Int, text: String, status: String = "working", kind: String = "working",
+                    by: String = GroupMock.home, ws: String = GroupMock.home) -> PhoneMessage {
             var body = source.message.body
             body.text = text
             body.update = TextUpdate(kind: kind)
             body.group?.seq = seq
-            body.origin = GroupOrigin(id: "review-\(seq)", from: GroupMock.home, at: "now")
-            body.task = GroupTask(delegate: "d_home", ws: GroupMock.home, status: status)
+            body.by = by
+            body.origin = GroupOrigin(id: "review-\(seq)", from: by, at: "now")
+            body.task = GroupTask(delegate: "d_home", ws: ws, status: status)
             return PhoneMessage(message: TextMessage(id: "review-\(seq)", from: GroupMock.finance, to: "phones",
                 type: "text", createdAt: ISO8601DateFormatter().string(from: now.addingTimeInterval(Double(seq))),
                 ticket: GroupMock.ticket, body: body), workspaceName: "Finance")
@@ -34,6 +36,27 @@ final class GroupViewTests: XCTestCase {
         XCTAssertTrue(group.messages.filter(GroupRoomRules.isReviewNote).allSatisfy(\.quiet))
         XCTAssertEqual(group.messages.filter(GroupRoomRules.isReviewNote).count, 2)
         XCTAssertNil(GroupRoomRules.reviewNote(task: try XCTUnwrap(group.tasks["d_bank"]), group: group))
+        for sender in [GroupMock.bank, GroupMock.finance] {
+            let otherData = snapshot(original + [update(9, text: "Ready for review in X", by: sender,
+                                                        ws: sender == GroupMock.bank ? sender : GroupMock.home),
+                                                 update(10, text: "Still working")])
+            XCTAssertTrue(otherData.dropped.isEmpty)
+            let other = try XCTUnwrap(GroupRoomRules.rows(otherData).first)
+            XCTAssertNil(GroupRoomRules.reviewNote(task: try XCTUnwrap(other.tasks["d_home"]), group: other))
+            if sender == GroupMock.finance {
+                XCTAssertFalse(GroupRoomRules.isReviewNote(try XCTUnwrap(other.messages.first { $0.id == "review-9" })))
+            }
+        }
+        for status in ["done", "failed"] {
+            let finishedData = snapshot(original + [update(9, text: "Ready for review in X"),
+                                                    update(10, text: "Finished", status: status)])
+            XCTAssertTrue(finishedData.dropped.isEmpty)
+            let finished = try XCTUnwrap(GroupRoomRules.rows(finishedData).first)
+            XCTAssertEqual(finished.tasks["d_home"]?.status, status)
+            XCTAssertNil(GroupRoomRules.reviewNote(task: try XCTUnwrap(finished.tasks["d_home"]), group: finished))
+            // Even a stale card argument must use the current task status.
+            XCTAssertNil(GroupRoomRules.reviewNote(task: task, group: finished))
+        }
         for (status, kind) in [("done", "working"), ("working", "note")] {
             let other = try XCTUnwrap(GroupRoomRules.rows(snapshot(original + [update(9,
                 text: "Ready for review in X", status: status, kind: kind)])).first)
