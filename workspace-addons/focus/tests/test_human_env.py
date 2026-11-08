@@ -26,16 +26,14 @@ def test_orch_calls_leave_the_agent_variables_out(monkeypatch, tmp_path):
     assert got["KEEP_ME"] == "yes" and got["ORCH_VIA"] == "focus" and got["ORCH_BIN"] == "/bin/orch"
 
 
-def test_without_orchs_list_the_fixed_list_still_leaves_the_agent_out(monkeypatch, tmp_path):
-    """Delta review: an import or adapter error never fails open."""
+def test_without_orchs_list_the_action_is_refused(monkeypatch, tmp_path):
+    """Delta review: an import or adapter error never fails open: the action is refused instead."""
     import orch.adapters
+    import pytest
 
     def broken(environ):
         raise RuntimeError("agents.json: bad")
 
     monkeypatch.setattr(orch.adapters, "human_environ", broken)
-    monkeypatch.setenv("CLAUDECODE", "1")
-    monkeypatch.setenv("CODEX_HOME", "/x")
-    monkeypatch.setenv("ORCH_RUN", "r_abcdefgh")
-    env = actions.human_env(Path(tmp_path), "/bin/orch")
-    assert not {"CLAUDECODE", "CODEX_HOME", "ORCH_RUN"} & set(env) and env["ORCH_VIA"] == "focus"
+    with pytest.raises(actions.Unavailable):
+        actions.human_env(Path(tmp_path), "/bin/orch")

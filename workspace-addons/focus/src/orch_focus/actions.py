@@ -166,18 +166,15 @@ def build_argv(op, args) -> list[str]:
     return [*words, *flags, "--by", BY.get(op) or actor(), "--json", *(["--", *tail] if tail else [])]
 
 
-# Used only when orch's own list can not be read (orch.adapters.human_environ is the one source).
-_AGENT_NAMES = ("ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET", "ORCH_VIA", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
-_AGENT_PREFIXES = ("CODEX_",)
-
-
 def _without_agent(environ) -> dict:
+    """environ without the agent tools' variables, from orch's one list (orch.adapters.human_environ). When
+    that list can not be read, the action is refused: it never runs with an agent's variables (fail closed)."""
     try:
         from orch.adapters import human_environ
 
         return human_environ(environ)
-    except Exception:  # noqa: BLE001 - an old orch or a bad adapter file: still never fail open
-        return {k: v for k, v in environ.items() if k not in _AGENT_NAMES and not k.startswith(_AGENT_PREFIXES)}
+    except Exception:  # noqa: BLE001 - an old orch or a bad adapter file
+        raise Unavailable("orch could not check who is acting here. Update orch and try again.") from None
 
 
 def human_env(root: Path, orch_bin: str) -> dict:
