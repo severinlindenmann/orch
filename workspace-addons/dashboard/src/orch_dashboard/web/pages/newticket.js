@@ -82,7 +82,7 @@ function ticketForm(t) {
     }
     submit.disabled = creationUnresolved;
     if (!result.ok) {
-      error.textContent = result.text + (result.status === 409 ? ' Reload the ticket before trying again.' : '');
+      error.textContent = window.DashHelpers.scrubText(result.text);
       reload.hidden = !(t && result.status === 409);
       if (created) { inputs.text.disabled = true; submit.textContent = 'Save details'; if (plain) plain.hidden = true; }
       return;

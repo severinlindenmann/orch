@@ -231,7 +231,7 @@ function fieldSections(t) {
 }
 async function saveAddonField(t, addon, field, value) {
   const result = await act('ticket.field', {ticket:t.id, addon, field, value:String(value), if_revision:t.revision});
-  if (!result.ok) window.orch.toast(result.text + (result.status === 409 ? ' Reload the page and try again.' : ''), 'error');
+  if (!result.ok) window.orch.toast(changeError(result), 'error');
 }
 function startAddonField(control) {
   const t = ticketOf(control.dataset.ticket), host = control.parentElement;
@@ -544,11 +544,14 @@ function ticketHistoryDay(at, now = new Date()) {
 }
 function ticketHistoryPanel(t) {
   const groups = new Map();
+  const views = new Map(window.DashHelpers.historyView(array(t.history), t.checklist, state.me).map(v => [v.entry, v]));
   for (const entry of ticketHistoryEntries(t)) {
+    const view = views.get(entry);
+    if (!view) continue;
     const day = ticketHistoryDay(entry.at);
     if (!groups.has(day)) groups.set(day, []);
     groups.get(day).push(h('div', {className:'ticket-event'}, entry.via === 'phone' ? phoneEntry(t.id, entry) : null,
-      h('p', {}, [ticketActor(entry.by), clean(window.DashHelpers.historyLine(entry, t.checklist))].filter(Boolean).join(' · ')), h('time', {className:'meta', datetime:entry.at}, time(entry.at))));
+      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · ')), h('time', {className:'meta', datetime:entry.at}, time(entry.at))));
   }
   const controls = snapshot ? null : h('div', {className:'ticket-history-filters'}, ['All', 'People', 'Agent'].map(label => ticketButton(label, 'outline', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':ticketHistoryActor === label})),
     ticketButton('Show technical steps', 'ghost', () => { ticketHistoryTechnical = !ticketHistoryTechnical; render(); }, {role:'switch', 'aria-checked':ticketHistoryTechnical}));
@@ -580,12 +583,10 @@ function ticketPhone(q) {
 async function ticketSendChanges(t, note) {
   const text = String(note || '').trim();
   if (snapshot || !text) return false;
-  const added = await act('check.add', {ticket:t.id, text:'Change: ' + text});
-  if (!added.ok) { window.orch.toast(added.text, 'error'); return false; }
-  const fresh = ticketOf(t.id) || t;
-  const moved = await act('ticket.patch', {ticket:t.id, data:{status:'active'}, if_revision:fresh.revision});
-  window.orch.toast(moved.ok ? 'Changes sent' : moved.text, moved.ok ? 'ok' : 'error');
-  return moved.ok;
+  // One call: the ticket is Ready and the note is queued as your own input; an agent run starts from it.
+  const sent = await act('ticket.changes', {ticket:t.id, text});
+  window.orch.toast(sent.ok ? 'Changes sent' : changeError(sent), sent.ok ? 'ok' : 'error');
+  return sent.ok;
 }
 function ticketChangesEditor(t) {
   const host = h('div', {'data-key':'ticket-changes-' + t.id});
@@ -618,7 +619,7 @@ function ticketParts(t, children) {
       const title = input.value.trim(); if (!title || send.disabled) return;
       send.disabled = true;
       const result = await act('ticket.new', {title, parent:t.id});
-      if (result.ok) window.orch.close(d); else { send.disabled = false; window.orch.toast(result.text, 'error'); }
+      if (result.ok) window.orch.close(d); else { send.disabled = false; window.orch.toast(changeError(result), 'error'); }
     });
     input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } };
     actions.append(send); d.append(input, actions); window.orch.open(d); input.focus();
@@ -651,9 +652,10 @@ function detail(t) {
   const fresh = !total && !sessions.length && !run?.running && ['open', 'ready'].includes(t.status);
   let next = null;
   if (t.status !== 'done') {
-    if (openQuestions.length) next = ticketQuestion(t, openQuestions[0], true);
-    else if (t.status === 'review') next = h('section', {className:'card next-step'}, h('p', {className:'meta'}, 'Next step · Your review'), h('h2', {}, agent + ' finished. Check the result:'), ticketArtifactPreview(t),
-      snapshot ? null : h('div', {className:'row ticket-review-actions'}, ticketButton('Looks good — mark Done', 'primary', () => moveTicket(t.id, 'done')), ticketChangesEditor(t)));
+    // Review buttons are there whenever the status is Review, even with an open question: the question comes first.
+    const review = t.status === 'review' ? h('section', {className:'card next-step'}, h('p', {className:'meta'}, 'Next step · Your review'), h('h2', {}, agent + ' finished. Check the result:'), ticketArtifactPreview(t),
+      snapshot ? null : h('div', {className:'row ticket-review-actions'}, ticketButton('Looks good — mark Done', 'primary', () => moveTicket(t.id, 'done')), ticketChangesEditor(t))) : null;
+    if (openQuestions.length || review) next = [openQuestions.length ? ticketQuestion(t, openQuestions[0], true) : null, review];
     else if (fresh) next = h('section', {className:'card next-step'}, h('p', {className:'meta'}, 'Next step'), h('h2', {}, 'Ready to work on ' + clean(t.title) + '?'), snapshot ? null : ticketButton('Start agent', 'primary', () => act('run.start', {ticket:t.id})));
   }
   const menu = snapshot ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon', 'aria-label':'More ticket actions'}, iconEl('more')),
@@ -666,7 +668,7 @@ function detail(t) {
     h('div', {className:'columns ticket-columns'}, h('div', {className:'stack ticket-main'}, next,
       !fresh && !['done', 'review'].includes(t.status) ? agentBar(t) : null,
       snapshot ? null : h('div', {className:'tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label]) => ticketButton(label, 'ghost', () => selectTicketTab(t.id, id), {id:'ticket-tab-' + id, role:'tab', 'aria-selected':selected === id, 'aria-controls':'ticket-panel-' + id}))),
-      panel('overview', [t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null, !parent && !t.parent ? ticketParts(t, children) : null, tasksCard('overview-tasks'), addonRows(t), ticketLinks(t)]),
+      panel('overview', [t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null, children.length || (!parent && !t.parent) ? ticketParts(t, children) : null, tasksCard('overview-tasks'), addonRows(t), ticketLinks(t)]),
       panel('tasks', tasksCard('tasks')),
       panel('questions', [(snapshot || selected === 'questions') ? openQuestions.slice(t.status === 'done' ? 0 : 1).map(q => ticketQuestion(t, q)) : null, openQuestions.length <= (t.status === 'done' ? 0 : 1) ? emptyRow('No other open questions') : null, answered.length ? h('section', {}, h('h2', {}, 'Earlier answers'), answered) : null]),
       panel('artifacts', artifactsPanel(t)), panel('history', ticketHistoryPanel(t))),
@@ -690,8 +692,9 @@ function inlineField(t, field) {
   return host;
 }
 async function saveField(t, field, value) {
-  const result = await act('ticket.edit', {ticket:t.id, [field]:value, if_revision:t.revision});
-  if (!result.ok) window.orch.toast(result.text + (result.status === 409 ? ' Reload the page and try again.' : ''), 'error');
+  const same = o => String(o?.[field] ?? '') === String(t[field] ?? '');
+  const result = await actRetry('ticket.edit', () => ({ticket:t.id, [field]:value, if_revision:(ticketOf(t.id) || t).revision}), () => same(ticketOf(t.id)));
+  if (!result.ok) window.orch.toast(changeError(result), 'error');
 }
 function startInline(control) {
   const t = ticketOf(control.dataset.ticket), field = control.dataset.field, host = control.parentElement;

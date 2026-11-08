@@ -15,6 +15,13 @@ from urllib.parse import urlsplit
 
 from . import look, mobile, phone_delivery
 
+
+def _me() -> str:
+    from .actions import actor  # actions imports this module
+
+    return actor()
+
+
 STATUS_ORDER = ["open", "ready", "active", "waiting", "review", "done", "dropped"]
 _NAME = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
 ICONS = (
@@ -60,10 +67,34 @@ def _json_files(folder: Path):
     return sorted(p for p in folder.glob("*.json") if p.is_file() and not p.is_symlink())
 
 
+# Slow-changing read-only answers (the add-on list is asked 2-3 times per page poll): kept 10 s, and dropped
+# whenever the page makes a change (actions.run_op calls forget_static), so a reply never shows old settings.
+STATIC_TTL = 10.0
+_STATIC_CMDS = (("addon", "list"), ("agents",))
+_STATIC: dict[tuple, tuple[float, object]] = {}
+
+
+def forget_static() -> None:
+    _STATIC.clear()
+
+
 def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float = 5.0):
     """Run `$ORCH_BIN <args>` in the workspace and return its parsed stdout JSON, or None on any failure."""
     if not orch_bin:
         return None
+    if any(tuple(args[: len(c)]) == c for c in _STATIC_CMDS):
+        key = (orch_bin, str(root), tuple(args))
+        hit = _STATIC.get(key)
+        if hit and time.monotonic() - hit[0] < STATIC_TTL:
+            return hit[1]
+        out = _run_orch(orch_bin, args, root, timeout)
+        if out is not None:
+            _STATIC[key] = (time.monotonic(), out)
+        return out
+    return _run_orch(orch_bin, args, root, timeout)
+
+
+def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
     try:
         r = subprocess.run(
             [orch_bin, *args],
@@ -482,7 +513,11 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
 
     try:  # read-only look: the entry `orch share on` writes (a link is never followed)
         f = root / "AGENTS.md"
-        share = f.is_file() and not f.is_symlink() and "<!-- orch:begin share -->" in f.read_text(encoding="utf-8")
+        share = (
+            f.is_file()
+            and not f.is_symlink()
+            and "<!-- orch:begin share -->" in f.read_text(encoding="utf-8")
+        )
     except (OSError, ValueError):
         share = False
     return {
@@ -619,6 +654,7 @@ def load_state(
         "workspace": root.name,
         "who": actor().removeprefix("human:"),
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "me": _me() if with_settings else None,  # who "You" is in a history line (the live page only)
         "tickets": tickets,
         "skipped": skipped,
         "addons": addons,
