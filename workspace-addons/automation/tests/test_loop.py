@@ -316,6 +316,8 @@ def test_a_failed_start_gives_the_input_back_at_most_three_times(ws):
         (ws / ".orch/tickets/t_queue005.json").write_text(json.dumps(t))
         Scheduler(ws).tick(T(8, m))
     assert runs_started(ws).count("t_queue005") == 3
+    t = json.loads((ws / ".orch/tickets/t_queue005.json").read_text())
+    assert sum("could not start an agent after 3 tries" in str(h.get("text")) for h in t["history"]) == 1
     (ws / "noagent").unlink()
     (ws / "pending-t_queue005").write_text(json.dumps(["p_answer0005", "p_answer0006"]))
     assert Scheduler(ws).tick(T(9)) == ["t_queue005"]  # a new item still starts
@@ -344,3 +346,31 @@ def test_a_ticket_started_this_pass_or_switched_off_is_skipped(ws):
     (ws / "pending-t_queue008").write_text(json.dumps(["p_b0000002"]))
     assert s.queued_input(T(8), skip=["t_queue008"]) == []  # already started this pass
     assert runs_started(ws) == []
+
+
+def test_a_start_with_an_unknown_result_gives_the_ids_back(ws, monkeypatch):
+    from orch_automation import orchcli
+
+    monkeypatch.setattr(orchcli, "run_start", lambda *a, **k: {"result": "blocked"})
+    add_ticket(ws, "t_queue009", status="ready")
+    (ws / "ended-t_queue009").write_text("")
+    (ws / "pending-t_queue009").write_text(json.dumps(["p_c0000001"]))
+    Scheduler(ws).tick(T(8))
+    from orch_automation.runner import load_state
+
+    st = load_state(ws)["t_queue009"]
+    assert st["queued_started"] == [] and st["queued_tries"] == {"p_c0000001": 1}
+
+
+def test_orch_json_is_read_from_stdout_only(ws, tmp_path, monkeypatch):
+    """Delta-8 (6): warnings on stderr never break the JSON."""
+    import stat
+    import sys
+
+    from orch_automation import orchcli
+
+    f = tmp_path / "orch-noisy"
+    f.write_text(f"#!{sys.executable}\nimport sys\nprint('orch: a warning', file=sys.stderr)\nprint('{{\"ok\": true}}')\n")
+    f.chmod(f.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("ORCH_BIN", str(f))
+    assert orchcli.call(ws, "run", "status", "t_x", by=False) == {"ok": True}

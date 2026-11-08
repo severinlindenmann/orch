@@ -324,16 +324,25 @@ def undelivered(root: Path, tid: str) -> list[dict]:
     return [i for i in _pending_read(root, tid) if not i.get("delivered_at")]
 
 
+def _human_author(by, via, kind) -> bool:
+    """An ALLOWLIST (also for older lines without the field): a person's answer or message, by human:<name> or
+    from the phone. Everything else (agent:*, orch itself, a background host, an event or a start request)
+    is not a person's input."""
+    if kind not in ("answer", "message", "text"):
+        return False
+    return str(by).startswith("human:") or via == "phone"
+
+
 def human_waiting(root: Path, tid: str) -> list[dict]:
-    """Undelivered input a person wrote (owner, phone, dashboard), never an agent's (agent:*, or written from
+    """Undelivered input a person wrote (owner, phone, a page), never an agent's (agent:*, or written from
     inside an agent) and never a run's own start prompt or slot request. Only this may start a run."""
     out = []
     for i in undelivered(root, tid):
         if i.get("via") in ("start", "slots"):
             continue
         human = i.get("human")
-        if human is None:  # an item from before the field: by its author
-            human = str(i.get("by", "")).startswith("human:") or i.get("via") == "phone"
+        if human is None:  # an item from before the field: the same allowlist
+            human = _human_author(i.get("by", ""), i.get("via"), i.get("kind"))
         if human is True:
             out.append(i)
     return out
@@ -370,7 +379,7 @@ def _pending_add_locked(
         "by": by,
         "kind": kind,
         "text": text,
-        "human": not tool and not str(by).startswith("agent:"),  # a person's input (owner, phone, dashboard)
+        "human": not tool and _human_author(by, via, kind),
     }
     if via:
         item["via"] = via
