@@ -1085,13 +1085,13 @@ def wrap(
                 tickets.log(root, tid, said + "started it again fresh.", "orch")
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session, resumed = p["argv"], p["stdin"], p["session"], False
-            flags = {}
+            flags.clear()
             rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc, watch, flags)
         elif resumed and rc != 0 and adapters.session_missing(name, out, root):
             # only "that session does not exist" starts fresh; the input of this turn goes in with it
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
-            flags = {}
+            flags.clear()
             rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc, watch, flags)
         if flags.get("hung"):  # the last try hung too: no further try; this turn's input waits for the next
             again = [i["id"] for i in turn_items if i.get("via") != "start"]  # a start prompt is made anew
