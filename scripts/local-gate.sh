@@ -8,9 +8,10 @@
 set -u
 export ORCH_HOME_STRICT=1   # an untrusted ORCH_HOME is an error, never a silent fallback to the real ~/.orch-tool
 ROOT=$(git rev-parse --show-toplevel) || exit 2; cd "$ROOT" || exit 2
-HEAVY=${HEAVY:-$HOME/orch-dev/state/v2-plan-2026-11-05/build/heavy.sh}; LANE=${LANE:-local-gate}; BASE=${BASE:-origin/develop}
-export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH"  # cargo on this Mac
-export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$HOME/orch-dev/.cargo-target-v2}
+REAL_HOME=${REAL_HOME:-$HOME}   # gate-isolated.sh runs with a throwaway HOME; tools live under the real one
+HEAVY=${HEAVY:-$REAL_HOME/orch-dev/state/v2-plan-2026-11-05/build/heavy.sh}; LANE=${LANE:-local-gate}; BASE=${BASE:-origin/develop}
+export PATH="/opt/homebrew/opt/rustup/bin:$REAL_HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH"  # cargo on this Mac
+export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$REAL_HOME/orch-dev/.cargo-target-v2}
 files=$(git diff --name-only "$BASE"...HEAD; git diff --name-only HEAD)   # committed + uncommitted
 [ -n "$files" ] || { echo "local-gate: PASS (nothing changed vs $BASE)"; exit 0; }
 has() { printf '%s\n' "$files" | grep -Eq "$1"; }
