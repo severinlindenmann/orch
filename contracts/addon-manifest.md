@@ -24,7 +24,7 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `agents_block` | block body for .orch/harness/AGENTS.orch.md (default `<skill>/AGENTS-block.md`) |
 | `ticket_ext` | Local JSON Schema for `ext.<name>` (no remote `$ref`, ≤ 32 KB) |
 | `background` | `true` = has a long-running process; must implement `orch <name> start\|stop\|status --json` (Background, below) |
-| `[dashboard]` | `label` (≤ 16 chars), `icon` (fixed set in the schema), `order`: the add-on has a tab filled by `orch <name> view --json` |
+| `[dashboard]` | `label` (≤ 24 chars), `icon` (fixed set in the schema), `order`, optional `panel` (`repeats`, `links` or `phone`: an extra native card the dashboard draws on the tab): the add-on has a tab filled by `orch <name> view --json` |
 | `[[ticket_view]]` | Ticket detail rows from `ext.<name>`: `field`, `label`, `format` = `text` · `time` · `cron-human` · `chips` · `yes-no` · `open-page` (an "Open" button to `[page]` `path` + `/` + the value; needs `[page]`) |
 | `recommended` | `true` = `orch init --recommended` turns it on (the core names no add-on; it reads this key) |
 | `gitignore` | Lines kept out of git (own block of `.git/info/exclude`, never the team `.gitignore`), added by `orch addon add`, removed by `orch addon remove`: relative paths inside the workspace, no leading `/`, no `..`, no `\`, no drive letter |
@@ -75,7 +75,7 @@ The package stays in the tool env (other workspaces may use it); `orch addon uni
 
 `orch addon list --json`: a JSON list with one entry per installed add-on (active or not), sorted by name:
 `[{"name", "version", "description", "source": "built-in"|"local", "active": bool,
-"dashboard": {label, icon, order} | null, "ticket_view": [{field, label, format}], "background": bool}]` — the one source the
+"dashboard": {label, icon, order, panel} | null, "ticket_view": [{field, label, format}], "background": bool}]` — the one source the
 dashboard uses (it shows the entries with `active: true`).
 
 `orch update` updates orch **and every installed add-on together** (one `uv tool install --reinstall` with all of them),

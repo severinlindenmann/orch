@@ -41,3 +41,15 @@
 .sw-item{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:8px;color:var(--text);text-decoration:none}
 a.sw-item:hover{background:var(--surface-2)}.sw-item.off{color:var(--text-muted)}
 .ws-item-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sw-tick{color:var(--brand)}.sw-hint{padding:6px 8px 2px}
+
+/* v3-pages: switcher + mobile mode */
+.workspace.ws-switch{min-height:44px}
+.sw-menu{max-height:70vh;overflow:auto}
+.sw-menu .sw-item{width:100%;min-height:64px;border:0;background:transparent;font:inherit;text-align:left;cursor:pointer}
+.sw-menu .sw-item:hover,.sw-menu .sw-item:focus-visible{background:var(--surface-2)}
+.ws-switch:focus-visible,.sw-menu .sw-item:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+.sw-menu .sw-item[aria-current=true]{background:var(--brand-soft)}
+.sw-item-details{min-width:0;display:grid;gap:2px}
+.sw-item-status{display:grid;gap:2px;justify-items:end;flex:none;font-size:12px}
+.sw-current,.sw-needs{color:var(--text)}
+.sw-item-status .meta{font-size:12px}

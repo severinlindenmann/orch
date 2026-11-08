@@ -231,7 +231,11 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 .fx-more>div{position:absolute;right:0;top:44px;z-index:30;width:232px;padding:16px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:12px;box-shadow:var(--lift-shadow)}
 .fx-more .btn{width:100%;justify-content:flex-start;margin:4px 0}
 .fx-phone{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)}
-.fx-phone input{accent-color:var(--brand);width:28px;height:24px}
+.fx-phone input{appearance:none;-webkit-appearance:none;position:relative;width:36px;height:20px;margin:0;border:0;border-radius:99px;background:var(--surface-3,#2a2f38);flex:none;cursor:pointer}
+.fx-phone input:after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--text);transition:transform .15s}
+.fx-phone input:checked{background:var(--brand)}
+.fx-phone input:checked:after{transform:translateX(16px);background:var(--on-brand,#06231b)}
+.fx-phone input:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .fx-rail{padding:24px 16px;gap:24px}
 .fx-rail .eyebrow{padding:0;text-transform:none;letter-spacing:0;font-size:13px;margin-bottom:24px}
 .fx-task{padding:12px 0;gap:10px;color:var(--text);margin-bottom:8px}
@@ -323,3 +327,18 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 .fx-help,.fx-help-card{animation:none}
 .fx-help{top:52px;bottom:0;z-index:5}
 .fx-help-grid kbd{height:auto;min-height:24px;padding:3px 8px;font:12px var(--font-ui)}
+
+/* Focus QA: compact tasks and phone controls follow the draft on small screens. */
+.fx .eyebrow,.fx-pt-k,.fx-pv-cap{text-transform:none;letter-spacing:normal}
+.fx-mobile-tasks{display:none}
+.fx-picker .fx-top{justify-content:space-between}
+.fx-receipt{display:inline-flex;margin-top:12px;vertical-align:middle}
+.fx-add>summary{list-style:none}
+.fx-add>summary::-webkit-details-marker{display:none}
+@media(max-width:720px){
+ .fx-mobile-tasks{display:block;text-align:left;padding:12px 20px;background:var(--surface);color:var(--text-muted);border:0;border-bottom:1px solid var(--border);font:inherit;cursor:pointer}
+ .fx-top>.fx-tools{display:contents}
+ .fx-phone{order:2;flex-basis:100%;min-height:40px}
+ .fx-more,.fx-help-btn,.fx-exit{order:3}
+ .fx-exit .opt{display:none}
+}

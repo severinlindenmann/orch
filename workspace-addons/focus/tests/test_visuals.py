@@ -33,8 +33,8 @@ def test_started_and_question_delivery_survive_view(server, ws, started):
     assert view["ticket"]["started"] is started
     assert view["ticket"]["questions"][0]["sent_to_phone"] is True
     assert "sent_to_phone" not in view["ticket"]["questions"][1]
-    assert "capabilities" not in view  # no unsupported phone switch
-    rows = json.loads(req(server, "GET", "/api/tickets")[1])
+    assert view["capabilities"]["phone_mode"] is False  # unavailable relay stays hidden
+    rows = json.loads(req(server, "GET", "/api/tickets")[1])["tickets"]
     assert rows[0]["started"] is started
 
 
