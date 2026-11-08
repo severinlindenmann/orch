@@ -255,3 +255,45 @@ def test_sessions_of_normal_tickets_are_not_cut(proj, new_ticket):
     tid = new_ticket()
     tickets.record_session(proj, tid, "fake", "sess-2", runs.host())
     assert tickets.sessions_for(tickets.load(proj, tid), "fake", runs.host()) == "sess-2"
+
+
+# ---------------------------------------------------------------- the helper's role is enforced in code
+
+
+def test_helper_role_is_denied_in_code(proj, run, new_ticket, monkeypatch):
+    gid = tickets.ensure_general(proj, "phone:Marco")
+    tid = new_ticket("Pay car tax")
+    qid = json.loads(run("ask", tid, "Mind?", "--option", "Yes", "--option", "No", "--json", "--by", "human:t")[1])["id"]
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("ORCH_TICKET", gid)
+    assert chat.is_helper(proj)
+    denied = [
+        ("answer", tid, qid, "Yes"),  # a question is the person's to answer
+        ("run", "start", tid),  # no other runs
+        ("run", "stop", tid),
+        ("ticket", "status", tid, "done"),  # no closing, dropping, finishing
+        ("ticket", "status", tid, "dropped"),
+        ("ticket", "patch", tid, '{"status": "done"}', "--if-revision", "1"),
+        ("ticket", "edit", gid, "--title", "x"),  # the Chat ticket itself
+        ("ticket", "set", gid, "chat.session_day", "x"),
+        ("ext", "set", gid, "chat", '{"session_day": "2020-01-01"}'),
+        ("ext", "unset", gid, "chat"),
+        ("relay", "allow", "m_doesnotmatter0001", "--once"),
+    ]
+    for argv in denied:
+        code, _, err = run(*argv)
+        assert code == 2, (argv, err)
+    assert tickets.load(proj, tid)["status"] != "done"
+    # what it may do: make tickets, notes, read the Chat ticket
+    assert run("ticket", "new", "Follow up", "--json")[0] == 0
+    assert run("log", tid, "note from the helper")[0] == 0
+    assert run("ticket", "show", gid)[0] == 0
+
+
+def test_a_normal_ticket_run_is_not_the_helper(proj, run, new_ticket, monkeypatch):
+    tickets.ensure_general(proj, "x")
+    tid = new_ticket("Report")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("ORCH_TICKET", tid)
+    assert not chat.is_helper(proj)
+    assert run("ticket", "status", tid, "review")[0] == 0

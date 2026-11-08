@@ -343,3 +343,44 @@ def helper_prompt(root: Path, ticket: dict, items: list[dict], news: str) -> str
     if news:
         out.append("New since you last looked:\n" + news)
     return "\n\n".join(out)[:12000]
+
+
+# ---------------------------------------------------------------- the helper's role (enforced here, not in the prompt)
+
+HELPER_DENIED_WORDS = frozenset(
+    {"sign", "approve", "publish", "close", "drop", "delete", "remove", "verdict", "allow", "take-over"}
+)
+HELPER_ID_COMMANDS = frozenset({"ticket", "ext", "check", "ref"})  # read-only subs are allowed on the Chat ticket
+HELPER_READ_SUBS = frozenset({"show", "tree", "list", "artifacts", "artifacts-dir"})
+
+
+def is_helper(root: Path) -> bool:
+    """An agent whose run is the Chat ticket's (ORCH_TICKET in its environment = the General id)."""
+    import os
+
+    gid = tickets.general_id(root)
+    return bool(gid and tickets.agent_tool() and os.environ.get("ORCH_TICKET") == gid)
+
+
+def guard(root: Path, args) -> None:
+    """The helper may make tickets, notes and answers to the person; it never signs, approves, publishes, closes,
+    drops, deletes, answers a question (permission or not: that is the person's), starts or stops another run, or
+    changes the Chat ticket itself (general flag, ext.chat, sessions, status). Refused with Refused (exit 2)."""
+    if not is_helper(root):
+        return
+    cmd, sub = getattr(args, "cmd", None), getattr(args, "sub", None)
+    words = {str(cmd), str(sub)}
+    if words & HELPER_DENIED_WORDS:
+        raise Refused("The Chat helper cannot sign, approve, publish, close, drop or delete. Ask the person.")
+    if cmd == "answer":
+        raise Refused("The Chat helper does not answer questions: they are the person's to answer.")
+    if cmd == "run" and sub in ("start", "stop"):
+        raise Refused("The Chat helper does not start or stop other runs. Make a ticket instead.")
+    gid = tickets.general_id(root)
+    target = getattr(args, "id", None)
+    if cmd in HELPER_ID_COMMANDS and target == gid and sub not in HELPER_READ_SUBS:
+        raise Refused("The Chat conversation itself is not changed by the helper.")
+    if cmd == "ticket" and sub == "status" and getattr(args, "status", None) in ("done", "dropped", "review"):
+        raise Refused("The Chat helper does not finish or drop tickets. Ask the person.")
+    if cmd == "ticket" and sub == "patch" and '"status"' in str(getattr(args, "data", "")):
+        raise Refused("The Chat helper does not change a ticket's status.")

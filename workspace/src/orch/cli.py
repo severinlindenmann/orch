@@ -493,6 +493,10 @@ def run(args: argparse.Namespace) -> None:
     root = _find_root()
     by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
     cmd, sub = args.cmd, getattr(args, "sub", None)
+    if cmd not in ("init", "update"):
+        from orch import chat
+
+        chat.guard(root, args)  # the Chat helper's role is enforced here
 
     if cmd == "init":
         root = Path.cwd()
