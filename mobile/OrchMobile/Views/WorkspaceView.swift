@@ -15,7 +15,7 @@ struct WorkspaceView: View {
     }
 
     private func activeGroups(_ topics: [TopicSummary]) -> [(status: TopicStatus, topics: [TopicSummary])] {
-        [TopicStatus.waitingOnYou, .working, .review, .backlog].compactMap { status in
+        [TopicStatus.waitingOnYou, .working, .paused, .review, .backlog].compactMap { status in
             let group = topics.filter { $0.isStarting ? status == .working : $0.status == status }
             return group.isEmpty ? nil : (status, group)
         }
@@ -23,7 +23,7 @@ struct WorkspaceView: View {
 
     /// Finished topics by outcome, built once per render (empty groups left out).
     private func doneGroups(_ topics: [TopicSummary]) -> [(status: TopicStatus, topics: [TopicSummary])] {
-        [TopicStatus.done, .stopped, .didntWork].compactMap { status in
+        [TopicStatus.done, .dropped, .stopped, .didntWork].compactMap { status in
             let group = topics.filter { !$0.isStarting && $0.status == status }
             return group.isEmpty ? nil : (status, group)
         }
@@ -170,14 +170,14 @@ struct WorkspaceView: View {
     private func subtitle(_ topic: TopicSummary) -> String {
         if topic.isStarting { return "Getting started…" }
         let day = ShellTime.day(topic.lastAt)
-        let finished = [TopicStatus.done, .stopped, .didntWork].contains(topic.status)
+        let finished = [TopicStatus.done, .dropped, .stopped, .didntWork].contains(topic.status)
         return topic.status.chip + (finished && !day.isEmpty ? " · " + day : "")
     }
     private func symbol(_ status: TopicStatus) -> String {
-        switch status { case .working, .waitingOnYou: "clock"; case .review: "eye"; case .backlog: "circle"; case .done: "checkmark"; case .stopped: "stop.fill"; case .didntWork: "exclamationmark.triangle" }
+        switch status { case .working, .waitingOnYou: "clock"; case .review: "eye"; case .paused: "pause.circle"; case .backlog: "circle"; case .done: "checkmark"; case .dropped: "xmark"; case .stopped: "stop.fill"; case .didntWork: "exclamationmark.triangle" }
     }
     private func color(_ status: TopicStatus) -> Color {
-        switch status { case .waitingOnYou: Theme.warn; case .stopped: Theme.muted; case .didntWork: Theme.danger; default: Theme.brand }
+        switch status { case .waitingOnYou: Theme.warn; case .paused, .dropped, .stopped: Theme.muted; case .didntWork: Theme.danger; default: Theme.brand }
     }
     private var emptyState: some View {
         VStack(spacing: 14) {
