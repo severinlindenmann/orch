@@ -138,11 +138,11 @@ struct Composer: View {
                 text = draft; discard()
             }
             .onChange(of: model.answerTick) { _, _ in
-                if let q = reply?.answering, !Self.isOpen(q, in: model) { reply = nil; restoreDraft() }
+                if let q = reply?.answering, !Self.isOpen(q, in: model) { endAnsweringClosed() }
             }
             // Answered on the dashboard or another phone: the question leaves the open list, answering mode ends.
             .onChange(of: model.questions.map(\.id)) { _, _ in
-                if let q = reply?.answering, !Self.isOpen(q, in: model) { reply = nil; restoreDraft() }
+                if let q = reply?.answering, !Self.isOpen(q, in: model) { endAnsweringClosed() }
             }
             .onChange(of: recorder?.error) { _, value in if let value { error = value; micError = true; collect() } }
             .onDisappear { holding = false; holdTask?.cancel(); hintTask?.cancel(); discard() }
@@ -249,7 +249,7 @@ struct Composer: View {
             if let q = reply?.answering {
                 // Closed meanwhile (answered here, elsewhere, or an option is being sent): keep what was typed, say why.
                 if !Self.isOpen(q, in: model) || model.pendingAnswers[q.id] != nil {
-                    savedDraft = nil; reply = nil; error = "This question is already answered."; return
+                    endAnsweringClosed(sending: model.pendingAnswers[q.id] != nil); return
                 }
                 await model.answer(q, with: String(String.UnicodeScalarView(trimmedText.unicodeScalars.prefix(2000))))
                 if model.answers[q.id] == nil && model.queuedAnswers[q.id] == nil {
@@ -267,6 +267,18 @@ struct Composer: View {
     /// A free-text answer goes only to a question that is still open: listed by the relay and not answered on this phone.
     static func isOpen(_ q: Question, in model: AppModel) -> Bool {
         model.answers[q.id] == nil && model.questions.contains { $0.id == q.id }
+    }
+    /// The one way answering mode ends because the question closed (answered here, on the dashboard or another phone, or an
+    /// option is being sent). Typed answer text is never dropped or silently re-targeted: with text, it stays in the field,
+    /// the chip goes and the person is told why (the next Send is then a plain message they can see coming); without text
+    /// the conversation draft comes back.
+    private func endAnsweringClosed(sending: Bool = false) {
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            reply = nil; restoreDraft()
+        } else {
+            savedDraft = nil; reply = nil
+            error = sending ? "Your chosen answer is being sent." : "This question is already answered."
+        }
     }
     private func restoreDraft() {
         guard let savedDraft else { return }
