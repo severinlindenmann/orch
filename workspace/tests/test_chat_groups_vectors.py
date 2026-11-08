@@ -78,7 +78,7 @@ def test_a_huge_forward_jump_is_one_gap_skip():
     ctx = {"order": {"applied_seq": 10, "buffered": []}}
     jump = {"body": {"group": {"seq": 10 + cg.SEQ_JUMP + 1}}}
     assert (
-        cg.order_step(jump, ctx) == "skip_gap_and_apply" and cg.applied_after(jump, ctx) == 11 + cg.SEQ_JUMP
+        cg.order_step(jump, ctx) == "skip_jump_and_apply" and cg.applied_after(jump, ctx) == 11 + cg.SEQ_JUMP
     )
     near = {"body": {"group": {"seq": 10 + cg.SEQ_JUMP}}}
     assert cg.order_step(near, ctx) == "buffer"
