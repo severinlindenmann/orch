@@ -109,6 +109,8 @@ def clean_refs(root: Path, refs) -> list[dict]:
     """Cards of a message: tickets (by key or id, found here), references (safe http(s) links) and files
     (a path inside the workspace, never a secret). Anything else is dropped."""
     out: list[dict] = []
+    helper = is_helper(root)  # who adds the card decides the file rule it keeps for life (added_by)
+    by = "helper" if helper else "person"
     for r in refs if isinstance(refs, list) else []:
         if not isinstance(r, dict) or r.get("kind") not in REF_KINDS or len(out) >= 10:
             continue
@@ -122,6 +124,7 @@ def clean_refs(root: Path, refs) -> list[dict]:
                         "id": t["id"],
                         "key": t.get("key"),
                         "title": phone_view._clip(t.get("title", ""), 120),
+                        "added_by": by,
                     }
                 )
         elif kind == "reference":
@@ -132,16 +135,18 @@ def clean_refs(root: Path, refs) -> list[dict]:
                         "kind": "reference",
                         "url": url,
                         "title": phone_view._clip(str(r.get("title") or url), 120),
+                        "added_by": by,
                     }
                 )
         else:
-            p = (helper_safe_file if is_helper(root) else safe_file)(root, str(r.get("path") or ""))
+            p = (helper_safe_file if helper else safe_file)(root, str(r.get("path") or ""))
             if p:
                 out.append(
                     {
                         "kind": "file",
                         "path": p,
                         "title": phone_view._clip(str(r.get("title") or Path(p).name), 120),
+                        "added_by": by,
                     }
                 )
     return out
@@ -199,20 +204,55 @@ def helper_safe_file(root: Path, rel_path: str) -> str | None:
     return safe_file(root, norm)
 
 
-def read_file(root: Path, rel_path: str, max_bytes: int = 5_000_000) -> bytes | None:
-    """The bytes of a file card, for whoever serves it: checked now (safe_file), then opened without following
-    links (safefile.open_file_ref). None = not allowed."""
+def file_rule(added_by):
+    """The file rule a card keeps: a card a person added keeps the person rule; anything else (the helper's, or
+    a card without the mark) gets the strict helper rule."""
+    return safe_file if added_by == "person" else helper_safe_file
+
+
+def read_file(
+    root: Path, rel_path: str, max_bytes: int = 5_000_000, added_by: str | None = None
+) -> bytes | None:
+    """The bytes of a file card, for whoever serves it. added_by is the card's mark ("person" keeps the person
+    rule, anything else the strict helper rule). None = not allowed."""
     from orch import safefile
 
-    p = helper_safe_file(root, rel_path)  # strict: it is what a viewer may be handed
+    p = file_rule(added_by)(root, rel_path)
     if not p:
         return None
+    if added_by == "person":
+        return _read_resolved(root, p, max_bytes)
     try:
         # open_file_ref (safefile._read_parts) opens every folder without following links, then fstat()s the file:
         # regular file and st_nlink == 1, same dev/ino as lstat; anything else is None
         return safefile.open_file_ref(root, p, max_bytes)
     except Exception:  # noqa: BLE001 - TooLarge, OSError, anything: a card that cannot be read is no card
         return None
+
+
+def _read_resolved(root: Path, rel: str, max_bytes: int) -> bytes | None:
+    """A person's card: safe_file already resolved the real path inside the workspace (outside .orch, .git and the
+    secret names), so open that path without following a last link and check what was opened."""
+    import os
+    import stat
+
+    real = root.resolve() / rel
+    try:
+        before = real.lstat()
+        fd = os.open(real, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        same = (st.st_dev, st.st_ino) == (before.st_dev, before.st_ino)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or not same or st.st_size > max_bytes:
+            return None
+        with os.fdopen(fd, "rb", closefd=False) as f:
+            return f.read(max_bytes + 1)[:max_bytes]
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
 
 
 def refs_in_text(root: Path, text: str) -> list[dict]:
@@ -287,7 +327,7 @@ def read_day(root: Path, day: str) -> dict:
                 r
                 for r in m["refs"]
                 if isinstance(r, dict)
-                and (r.get("kind") != "file" or helper_safe_file(root, str(r.get("path", ""))))
+                and (r.get("kind") != "file" or file_rule(r.get("added_by"))(root, str(r.get("path", ""))))
             ]
             m = {**m, "refs": ok}
         msgs.append(m)
@@ -499,8 +539,12 @@ def _check_ref_add(root: Path, args, no: Refused) -> None:
     except Refused:
         raise no from None
     if d.get("url") and d["kind"] not in ("ticket", "artifact", "file"):
-        return  # a web reference
+        if re.match(r"https?://", str(d["url"]), re.I):
+            return  # a web reference, http(s) only
+        raise no
     if d["kind"] == "ticket":
+        if d.get("ticket") == tickets.general_id(root):
+            raise no  # the Chat ticket is hidden: no reference to it
         return
     if d["kind"] == "file" and not d.get("local") and helper_safe_file(root, d["path"]):
         return
