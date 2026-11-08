@@ -6,7 +6,15 @@
   else root.DashHelpers = api;
 })(typeof self !== 'undefined' ? self : this, function () {
   const arr = v => Array.isArray(v) ? v : [];
-  const STATUS_WORD = {open: 'Not started', ready: 'Ready to start', active: 'Working', waiting: 'Needs you', review: 'Ready for review', done: 'Done', dropped: 'Dropped'};
+  const STATUS_WORD = {open: 'Not started', ready: 'Not started', active: 'Working', waiting: 'Needs you', review: 'Ready for review', done: 'Done', dropped: 'Dropped'};
+  /* The ONE source of status words and order (board columns, Home, ticket page, Move to, history, lists).
+     Lifecycle order. "ready" is the same place as "open" (no separate word); "waiting" shows as "Needs you". */
+  const STATUS_ORDER = ['open', 'active', 'waiting', 'review', 'done'];
+  const statusWord = status => STATUS_WORD[status] || 'Not started';
+  const columnOf = status => status === 'ready' ? 'open' : status;
+  const STATUS_CHOICES = STATUS_ORDER.map(s => [s, STATUS_WORD[s]]);
+  // "Move to" offers four places; Waiting is decided by the agent.
+  const MOVE_CHOICES = STATUS_CHOICES.filter(([s]) => s !== 'waiting');
   const FIELD_WORD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary',
     status: 'the status'};
 
@@ -307,5 +315,5 @@
   const needsYou = n => n + (n === 1 ? ' needs you' : ' need you');  // same words as the phone
   const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
 
-  return {needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });
