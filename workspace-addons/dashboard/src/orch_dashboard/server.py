@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 from . import actions, reffiles, ticketfiles
-from .data import load_addons, load_links, load_services, load_state
+from .data import load_addons, load_chat_day, load_chat_days, load_links, load_services, load_state
 from .events import Revisions
 from .views import ViewPuller
 
@@ -216,6 +216,15 @@ class Handler(BaseHTTPRequestHandler):
                 json.dumps(load_state(self.root, orch_bin=self.orch_bin, with_settings=True)).encode(),
                 "application/json",
             )
+        if path == "/api/chat/days":  # History: the days that have texts, newest first
+            d = load_chat_days(self.root, self.orch_bin)
+            return self._send(200, json.dumps(d if d is not None else []).encode(), "application/json")
+        m = re.fullmatch(r"/api/chat/day/(\d{4}-\d{2}-\d{2})", path)
+        if m:  # one day, read only
+            d = load_chat_day(self.root, self.orch_bin, m.group(1))
+            if d is None:
+                return self._send(404, b"not found", "text/plain")
+            return self._send(200, json.dumps(d).encode(), "application/json")
         m = re.fullmatch(r"/api/artifacts/(t_[a-z0-9]{6,16})", path)
         if m:  # the file list of one ticket (orch lists them); no file content here
             return self._send(

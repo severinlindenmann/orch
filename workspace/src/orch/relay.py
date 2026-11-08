@@ -418,13 +418,19 @@ def _own_key(root: Path, tid: str) -> str | None:
 
 
 def _message(
-    root: Path, to: str, type_: str, body: dict, ticket: str | None = None, reply_to: str | None = None
+    root: Path,
+    to: str,
+    type_: str,
+    body: dict,
+    ticket: str | None = None,
+    reply_to: str | None = None,
+    mid: str | None = None,
 ) -> dict:
     """Save the exact bytes first, then post. When the relay can't be reached the file stays in
     .orch/outbox/ and the result carries sent=False: the next orch relay command sends the same bytes."""
     msg = {
         "schema": "orch.msg/1",
-        "id": new_id(),
+        "id": mid or new_id(),
         "from": _cfg(root)["workspace"],
         "to": to,
         "type": type_,
@@ -595,12 +601,19 @@ def send_text(
     view: bool | None = None,
     general: bool = False,
     speak: dict | None = None,
+    refs: list[dict] | None = None,
+    sender: str | None = None,
+    via: str | None = None,
+    mid: str | None = None,
 ) -> dict:
     """view: add the ticket snapshot for the phone (body.ticket_view); default for result, failure,
     stopped and question updates to a phone. A snapshot the relay refuses never blocks the text:
     it goes again without one. general (or a General ticket): the text goes to the General conversation
-    (body.general, no ticket, only the ack and working updates). speak: body.speak."""
-    from orch import phone_view
+    (body.general, no ticket, only the ack and working updates). speak: body.speak.
+    Chat texts carry body.by / via / day (chat-groups.md section 1): by = this workspace (its helper)
+    unless sender is "you" (the person, from the dashboard), via = helper for an agent, else dashboard.
+    refs: cards for the History (local only, never on the wire)."""
+    from orch import chat, phone_view
 
     body: dict = {"text": text}
     to = resolve(root, target)
@@ -610,6 +623,11 @@ def send_text(
     if general:
         ticket = None
         body["general"] = True
+        body["day"] = chat.day_key(root)
+        if not update:
+            actor = tickets.current_actor()
+            body["by"] = "you" if sender == "you" else _cfg(root)["workspace"]
+            body["via"] = via or ("helper" if actor.startswith("agent:") else "dashboard")
     if speak:
         body["speak"] = speak
     if update:
@@ -627,18 +645,21 @@ def send_text(
         view = to_phone and update in phone_view.SEND_KINDS
     if update and ticket and view and (tv := phone_view.view_for(root, ticket)):
         try:
-            msg = _message(root, to, "text", {**body, "ticket_view": tv}, ticket, reply_to)
+            msg = _message(root, to, "text", {**body, "ticket_view": tv}, ticket, reply_to, mid)
         except Refused:
-            msg = _message(root, to, "text", body, ticket, reply_to)
+            msg = _message(root, to, "text", body, ticket, reply_to, mid)
     else:
-        msg = _message(root, to, "text", body, ticket, reply_to)
+        msg = _message(root, to, "text", body, ticket, reply_to, mid)
     if update and ticket and to_phone:
         phone_view.remember(root, ticket, to)
-    if general and not update:
+    if general and not update and not sender == "you":
         # a real text to the General conversation: kept in its history: the dashboard shows both ways
         try:
             gid = tickets.ensure_general(root, tickets.current_actor())
             tickets.apply_op(root, gid, lambda t: tickets.add_history(t, tickets.current_actor(), text))
+            chat.record(
+                root, msg["id"], body["by"], body["via"], text, msg["created_at"], reply_to, refs=refs
+            )
         except (Refused, OSError):
             pass  # the text is sent; a missing history line never fails the send
     return msg
@@ -1234,6 +1255,29 @@ def send_working(root: Path) -> list[str]:
     return sent
 
 
+def frm_of(root: Path, mid: str, who: str) -> str:
+    """The sender id of a stored phone message (for the answer command), else the word phones."""
+    with contextlib.suppress(Refused, OSError, ValueError):
+        return str(load_message(root, mid)["from"])
+    return "phones"
+
+
+def _chat_record(root: Path, mid: str, body: dict) -> None:
+    """A phone text in Chat goes to its day file (History). Never fails the intake."""
+    from orch import chat
+
+    spoken = body.get("voice", {}).get("transcript", "") if isinstance(body.get("voice"), dict) else ""
+    text = str(body.get("text") or spoken or "")
+    if not text.strip():
+        return
+    with contextlib.suppress(Refused, OSError, ValueError):
+        frm = frm_of(root, mid, "")
+        if re.fullmatch(r"ph_[a-z0-9]{10}", frm):
+            chat.record(root, mid, "you", "phone", text, phone=frm)
+        elif re.fullmatch(r"ws_[a-z0-9]{10}", frm):  # never "you": only a paired phone speaks as the person
+            chat.record(root, mid, frm, "workspace", text)
+
+
 def _continue(
     root: Path,
     tid: str,
@@ -1252,7 +1296,14 @@ def _continue(
         return
     text = _describe(root, tid, mid, who, body, final)
     if general:
-        text += f'\n(Phone message {mid}. To make a ticket of it: orch relay topic --from {mid} "<title>")'
+        text += (
+            f'\n(Phone message {mid}. To make a ticket of it: orch relay topic --from {mid} "<title>". '
+            f'To answer in Chat: orch relay send {frm_of(root, mid, who)} "<answer>" '
+            f"--ticket {tid} --reply-to {mid}. "
+            "You are this workspace's helper: you may make tickets, notes and answers, never sign, approve, "
+            "close or delete anything.)"
+        )
+        _chat_record(root, mid, body)
     runs.pending_add(root, tid, who, "message", text, "phone", "p_" + mid[2:], phone=frm)
 
     def op(t):

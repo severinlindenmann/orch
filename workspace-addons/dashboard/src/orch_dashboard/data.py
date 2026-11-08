@@ -205,6 +205,25 @@ def load_general(root: Path) -> dict | None:
     return None
 
 
+def load_chat(root: Path, orch_bin: str | None) -> dict | None:
+    """`orch chat status --json`: {helper, ticket, day, messages, activity, days, running}. None = not readable."""
+    d = run_orch(orch_bin, ["chat", "status", "--json"], root)
+    return d if isinstance(d, dict) else None
+
+
+def load_chat_days(root: Path, orch_bin: str | None) -> list | None:
+    d = run_orch(orch_bin, ["chat", "days", "--json"], root)
+    return d if isinstance(d, list) else None
+
+
+def load_chat_day(root: Path, orch_bin: str | None, day: str) -> dict | None:
+    """One day of History, read only (`orch chat day <day> --json`)."""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        return None
+    d = run_orch(orch_bin, ["chat", "day", day, "--json"], root)
+    return d if isinstance(d, dict) else None
+
+
 def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
     """Active add-ons that have a dashboard tab and/or ticket rows, from `orch addon list --json`, by `order`."""
     raw = run_orch(orch_bin, ["addon", "list", "--json"], root) if raw is None else raw
@@ -603,6 +622,8 @@ def load_state(
         "skipped": skipped,
         "addons": addons,
         "general": load_general(root) if with_addons else None,  # snapshots carry no phone chat
+        # Chat (former General): helper name, today's texts with cards, the strip counts, the History list.
+        "chat": load_chat(root, orch_bin) if with_addons else None,
         "needs": needs if isinstance(needs, list) else [],
         "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
         "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},

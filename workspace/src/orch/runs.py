@@ -662,6 +662,16 @@ def _description_plan(ticket: dict) -> list[str]:
     return []
 
 
+def _done_when_plan(ticket: dict) -> list[str]:
+    if not ticket.get("done_when") or ticket.get("checklist"):
+        return []
+    return [
+        "The person described what should be true when it is done: "
+        f"{_clip(ticket['done_when'], 2000)}. Turn this into checks with `orch check add` "
+        "(one check per thing that must be true), then start."
+    ]
+
+
 def fresh_prompt(ticket: dict, items: list[dict]) -> str:
     tid = ticket["id"]
     out = [
@@ -674,6 +684,7 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]
+    out[1:1] = _done_when_plan(ticket)
     if ticket.get("note"):  # what the person asked for, in their words (not only in `orch ticket show`)
         out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")
     if ticket.get("summary"):
@@ -713,6 +724,7 @@ def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str
         parts.append("New input:\n" + _items_text(items))
     if not parts:
         parts.append(f"Continue orch ticket {tid}: {_clip(ticket.get('title', ''), 200)}.")
+    parts.extend(_done_when_plan(ticket))
     return "\n\n".join(parts)[:12000]
 
 
@@ -731,6 +743,11 @@ def plan(
     """Resume or fresh, decided here once: resume only when the adapter can, this ticket has a session for
     this agent on this machine, and --fresh is not set."""
     ticket = tickets.load(root, tid)
+    if ticket.get("general") is True:
+        from orch import chat
+
+        chat.cut_session(root, tid)  # 04:00: a session of an earlier Chat day is not resumed
+        ticket = tickets.load(root, tid)
     name = agent or adapters.chosen(root)
     a = adapters.load(name, root)
     items = undelivered(root, tid) if items is None else items
@@ -764,7 +781,12 @@ def plan(
         new_session = str(uuid.uuid4()) if a["capabilities"]["choose_session_id"] else None
         text = prompt
         if text is None:
-            text = fresh_prompt(ticket, items)
+            if ticket.get("general") is True:
+                from orch import chat
+
+                text = chat.helper_prompt(root, ticket, items, _items_text(items) if items else "")
+            else:
+                text = fresh_prompt(ticket, items)
             if not (a.get("files") or {}).get("instructions_link"):  # this agent does not read the local file
                 from orch import harness
 
