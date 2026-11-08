@@ -710,3 +710,16 @@ def test_footer_shows_the_relay_connection():
     assert call("footerState", {"settings": {"addons": []}}, False) == "Local workspace"
     assert call("footerState", on, True) == "Shared copy"
     assert "NetBird" not in (WEB / "helpers.js").read_text()
+
+
+@node
+@pytest.mark.parametrize("status,word", [
+    ("open", "Not started"), ("ready", "Not started"), ("active", "Working"),
+    ("waiting", "Needs you"), ("review", "Ready for review"),
+    ("done", "Done"), ("dropped", "Dropped"),
+])
+@pytest.mark.parametrize("started", [None, False, True, 1])
+def test_status_words_started(status, word, started):
+    expected = "Paused" if status in ("open", "ready") and started is True else word
+    assert call("statusWord", status, started) == expected
+    assert call("columnOf", "ready") == "open"

@@ -34,7 +34,7 @@ OPEN_STATUSES = tuple(s for s in STATUS_WORDS if s not in ("done", "dropped"))
 REVIEW_MESSAGE = "Moved to Review, not Done. A person marks a ticket Done."
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
-PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "summary")
+PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "done_when", "summary")
 VIA_RE = re.compile(r"^[a-z][a-z0-9-]{1,15}$")
 KIND_RE = re.compile(r"^(plain|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$")
 DOING_STALE_SECONDS = 2 * 3600
@@ -401,6 +401,7 @@ _FIELD_WORDS = {
     "owner": "owner",
     "due": "due date",
     "note": "note",
+    "done_when": "done criteria",
     "summary": "summary",
     "status": "status",
     "waiting_on": "wait",
@@ -517,7 +518,7 @@ def create(
     }
     if parent is not None:
         ticket["parent"] = parent
-    for k, v in fields.items():  # owner, due, note: part of the one "Created" line
+    for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
         ticket["ext"] = ext
@@ -575,11 +576,13 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
 
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     def op(ticket):
+        was_started = ticket.get("started") is True
+        ticket["started"] = True
         w = ticket.get("waiting_on") or {}
         if ticket["status"] not in ("open", "ready", "review") and not (
             ticket["status"] == "waiting" and w.get("start") is True
         ):  # a start that was waiting for a sign-in (wait_for_start) is Working again
-            return NO_WRITE
+            return NO_WRITE if was_started else None
         ticket["status"] = "active"
         ticket["waiting_on"] = None
         add_history(ticket, by, f"{agent_label} started")
@@ -660,6 +663,8 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
         if ticket.get("general") is True:
             raise Refused("The Chat is not a ticket: it is never finished, dropped or reopened.")
         target, actor = _finish_status(root, ticket, status, by)
+        if target in ("open", "ready") and not actor.startswith("agent:"):
+            ticket.pop("started", None)
         if target != "waiting":
             ticket["waiting_on"] = None
         elif isinstance(ticket.get("waiting_on"), dict):
@@ -672,20 +677,22 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
     return apply_op(root, tid, op)[0]
 
 
-# ---------------------------------------------------------------- plain fields (owner, due, note, summary)
+# ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
 
 
 def clean_field(key: str, value):
-    """Validate owner, due, note or summary (None or empty clears it); returns the value to store."""
+    """Validate a plain field (None or empty clears it); returns the value to store."""
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
     if not isinstance(value, str):
         raise Refused(f"{key} must be text.")
-    v = value.strip()
+    v = value if key in ("note", "done_when") else value.strip()
     if key == "owner" and len(v) > 64:
         raise Refused("An owner is at most 64 characters.")
     if key == "note" and len(v) > 2000:
         raise Refused("A note is at most 2000 characters.")
+    if key == "done_when" and len(v) > 2000:
+        raise Refused("The done criteria are at most 2000 characters.")
     if key == "summary" and len(v) > 200:
         raise Refused("A summary is at most 200 characters.")
     if key == "due":
@@ -714,7 +721,7 @@ def edit(
     fields: dict | None = None,
     if_revision: int | None = None,
 ) -> dict:
-    """Rename and/or set owner, due, note (`fields`)."""
+    """Rename and/or set owner, due, note, done_when (`fields`)."""
     if title is not None:
         title = title.strip()
         if not title or len(title) > 200:
@@ -1348,7 +1355,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         t = obj["title"]
         if not isinstance(t, str) or not t.strip() or len(t.strip()) > 200:
             raise Refused("A title needs 1 to 200 characters.")
-    for k in ("owner", "due", "note", "summary"):
+    for k in ("owner", "due", "note", "done_when", "summary"):
         if k in obj:
             clean_field(k, obj[k])
     w = obj.get("waiting_on")
@@ -1366,7 +1373,9 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         actor = by
         if "status" in obj:
             status, actor = _finish_status(root, ticket, status, by)
-        for k in ("owner", "due", "note", "summary"):
+            if status in ("open", "ready") and not actor.startswith("agent:"):
+                ticket.pop("started", None)
+        for k in ("owner", "due", "note", "done_when", "summary"):
             if k in obj:
                 _set_field(ticket, k, obj[k])
         if "waiting_on" in obj:

@@ -44,6 +44,14 @@ def _status(proj, tid):
     return tickets.load(proj, tid)["status"]
 
 
+def _status_soon(proj, tid, want, timeout=10.0):
+    """The wrapper settles the ticket right after it releases the claim: wait for that moment, not a race."""
+    end = time.monotonic() + timeout
+    while _status(proj, tid) != want and time.monotonic() < end:
+        time.sleep(0.05)
+    return _status(proj, tid)
+
+
 def _texts(proj, tid):
     return [h["text"] for h in tickets.load(proj, tid)["history"]]
 
@@ -57,7 +65,7 @@ def test_a_run_that_ends_without_finishing_leaves_the_ticket_ready_not_working(p
     assert run("run", "start", tid)[0] == 0
     assert _status(proj, tid) == "active"
     _wait(proj, tid)
-    assert _status(proj, tid) == "ready"  # nobody works on it now: not "Working"
+    assert _status_soon(proj, tid, "ready") == "ready"  # nobody works on it now: not "Working"
     assert any("agent stopped" in t for t in _texts(proj, tid))
 
 
@@ -77,7 +85,7 @@ def test_stop_leaves_the_ticket_ready(proj, run, gen, one_step):
     _wait(proj, tid, gone=False)
     assert run("run", "stop", tid)[0] == 0
     _wait(proj, tid)
-    assert _status(proj, tid) == "ready"
+    assert _status_soon(proj, tid, "ready") == "ready"
 
 
 def test_a_working_ticket_with_no_agent_is_settled_by_the_next_status_check(proj, run):
@@ -342,15 +350,18 @@ def test_only_human_pending_input_is_offered_to_start_a_run(proj, run, monkeypat
     system = (("orch", "message"), ("agent:automation", "event"), ("human:t", "event"), ("watch", "text"))
     for by, kind in system:
         assert runs.pending_add(proj, tid, by, kind, "system note")["human"] is False  # system writers
-    for by in ("orch", "automation:loop", "agent:relay"):  # the word "phone" alone never makes it a person's
+    # the word "phone" alone never makes it a person's: only the relay's phone id does
+    names = ("orch", "automation:loop", "agent:relay", "watch", "", "automation", "Pilatus", "iPhone")
+    for by in names:
         assert runs.pending_add(proj, tid, by, "message", "relayed", via="phone")["human"] is False
+    assert runs.pending_add(proj, tid, "human:", "message", "empty name")["human"] is False
     forged = runs.pending_add(proj, tid, "agent:claude", "message", "x")
     items = runs._pending_read(proj, tid)
     next(i for i in items if i["id"] == forged["id"])["human"] = True  # a flag set by hand is not trusted
     runs._pending_write(proj, tid, items)
     assert runs.human_waiting(proj, tid) == []
     human = runs.pending_add(proj, tid, "human:owner", "answer", "Blue")
-    phone = runs.pending_add(proj, tid, "iPhone", "message", "and dessert", via="phone")
+    phone = runs.pending_add(proj, tid, "iPhone", "message", "and dessert", via="phone", phone="ph_abc123")
     assert [i["id"] for i in runs.human_waiting(proj, tid)] == [human["id"], phone["id"]]
     code, out, _ = run("run", "status", tid, "--json")
     assert json.loads(out)["human_pending_ids"] == [human["id"], phone["id"]]

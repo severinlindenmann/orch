@@ -81,7 +81,10 @@ def test_claim_working(proj, new_ticket, status):
         assert after["status"] == "active"
         assert after["history"][-1]["text"].endswith(" started")
         assert after["history"][-1]["by"] == "agent:generic"
-    else:
+    else:  # a claim that changes no status only remembers that the ticket was started
+        assert after.pop("started") is True
+        for k in ("revision", "updated_at"):
+            after.pop(k, None), before.pop(k, None)
         assert after == before
 
 

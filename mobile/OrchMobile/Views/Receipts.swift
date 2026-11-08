@@ -9,9 +9,15 @@ struct ReceiptView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 6) { stamp; recovery }
-            VStack(alignment: .trailing, spacing: 0) { stamp; recovery }
+        VStack(alignment: .trailing, spacing: 6) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { stamp; recovery }
+                VStack(alignment: .trailing, spacing: 0) { stamp; recovery }
+            }
+            if case .queued = receipt, let note {
+                Text(note).foregroundStyle(Theme.warn).accessibilityIdentifier("receipt-wait")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .themeFont(13).foregroundStyle(Theme.muted)
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -20,7 +26,6 @@ struct ReceiptView: View {
     private var stamp: some View {
         HStack(spacing: 5) {
             Text(time)
-            if let note { Text(note).foregroundStyle(Theme.warn).accessibilityIdentifier("receipt-wait") }
             Group {
                 switch receipt {
                 case .queued:

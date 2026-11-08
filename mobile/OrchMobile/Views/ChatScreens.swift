@@ -11,6 +11,41 @@ struct StartedChip: Identifiable, Equatable {
 
 /// Pure rules of the conversation screen (unit-tested).
 enum ConversationRules {
+    /// The General "<ws> is working…" line ends this long after the last ack/working, even with no new message.
+    static let generalWorkingTimeout: TimeInterval = 600   // 10 min, the group-chat contract (#294 §1)
+
+    /// General shows "<ws> is working…" while the last item is this phone's text with a Working receipt, for at most `timeout`
+    /// after the last ack/working. A later workspace text ends it (it becomes the last item). General carries no result, failure or
+    /// stopped update and no ticket_view (contracts/relay-api.md: only ack and working), so no run-end signal can reach it; the
+    /// timeout is what ends a run that stopped without answering.
+    static func generalWorking(_ items: [ConvItem], now: Date, timeout: TimeInterval = generalWorkingTimeout) -> Bool {
+        guard let last = items.last, last.side == .me, last.receipt == .started else { return false }
+        guard let since = last.workingSince.flatMap(date) else { return true }
+        return now.timeIntervalSince(since) < timeout
+    }
+
+    /// General: a "Working" receipt ends (plain ✓✓) once the workspace answered after it, or `timeout` after the last
+    /// ack/working — the same rule and constant as `generalWorking`, so the label and the line always agree.
+    static func endingGeneralReceipts(_ items: [ConvItem], now: Date, timeout: TimeInterval = generalWorkingTimeout) -> [ConvItem] {
+        let lastReply = items.lastIndex { $0.side == .them } ?? -1
+        return items.enumerated().map { i, item in
+            guard item.side == .me, item.receipt == .started else { return item }
+            let timedOut = item.workingSince.flatMap(date).map { now.timeIntervalSince($0) >= timeout } ?? false
+            guard i < lastReply || timedOut else { return item }
+            var ended = item
+            ended.receipt = .delivered
+            return ended
+        }
+    }
+
+    static func date(_ iso: String) -> Date? {
+        let s = String(iso.prefix(while: { $0 != "~" }))
+        let f = ISO8601DateFormatter()
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.date(from: s)
+    }
+
     /// An open question is stale once the workspace has moved on: a later result/failure/stopped line exists.
     static func isStale(index: Int, in items: [ConvItem]) -> Bool {
         let q = items[index]
@@ -69,7 +104,13 @@ struct ConversationView: View {
     @State private var scrolledQuestion: String?
     @State private var seenIncoming: Set<String> = []
     private var resolved: ConversationID { model.resolve(id) }
-    private var items: [ConvItem] { model.conversationItems(resolved) }
+    /// One clock for the General "Working" receipt and the "is working…" line, so both end together.
+    @State private var now = Date()
+    private var items: [ConvItem] {
+        let all = model.conversationItems(resolved)
+        if case .general = resolved { return ConversationRules.endingGeneralReceipts(all, now: now) }
+        return all
+    }
     private var workspaceName: String { model.workspace(resolved.workspace)?.name ?? "Workspace" }
     private var ticket: Ticket? { model.tickets.first { $0.workspace == resolved.workspace && $0.ticket == resolved.ticket && resolved.ticket != nil } }
     private var title: String {
@@ -79,9 +120,9 @@ struct ConversationView: View {
         case .topic: ticket.map { [$0.key, $0.displayTitle].compactMap { $0 }.joined(separator: " · ") } ?? "Topic"
         }
     }
-    private func working(_ items: [ConvItem]) -> Bool {
+    private func working(_ items: [ConvItem], now: Date) -> Bool {
         if let ticket { return TopicStatus(ticket) == .working }
-        if case .general = resolved { return items.last?.side == .me && items.last?.receipt == .started }
+        if case .general = resolved { return ConversationRules.generalWorking(items, now: now) }
         return false
     }
     private func unread(_ items: [ConvItem]) -> Int { items.filter { $0.incoming && !seenIncoming.contains($0.id) }.count }
@@ -91,7 +132,16 @@ struct ConversationView: View {
         VStack(spacing: 0) {
             if model.speech.isActive { MiniPlayer() }
             OfflineBanner()
-            if let ticket { summary(ticket) }
+            if let ticket {
+                summary(ticket)
+                HStack {
+                    Text("Chat").themeFont(17, .semibold)
+                    Spacer()
+                    if let answered = ConversationRules.answeredText(in: items) {
+                        Text(answered).themeFont(13).foregroundStyle(Theme.muted)
+                    }
+                }.padding(.horizontal, 16).padding(.vertical, 12)
+            }
             messages(items)
         }
             // Keep the message area dark without letting it paint the status-bar safe area.
@@ -117,12 +167,19 @@ struct ConversationView: View {
             .tint(Theme.brand)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
-                    if working(items) { StatusLine("\(workspaceName) is working…") }
+                    if working(items, now: now) { StatusLine("\(workspaceName) is working…") }
                     Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(running: ticket?.view?.running, finished: ticket.map { [.done, .dropped, .stopped, .didntWork].contains(TopicStatus($0)) } ?? false), reply: $reply, )
                 }
             }
             .sheet(isPresented: $tasksShown) { tasksSheet }
             .fullScreenCover(item: $viewing) { ArtifactViewer(item: $0) }
+            // the clock: the General receipt and line also end by the timeout without a new message
+            .task {
+                while !Task.isCancelled {
+                    now = Date()
+                    try? await Task.sleep(for: .seconds(15))
+                }
+            }
     }
     @ViewBuilder private var presence: some View {
         if case .starting = resolved { Text("Getting started…").themeFont(13).foregroundStyle(Theme.muted) }
@@ -142,7 +199,12 @@ struct ConversationView: View {
     private func summary(_ ticket: Ticket) -> some View {
         Button { tasksShown = true } label: {
             HStack {
-                Text(ConversationRules.summaryText(done: ticket.view?.doneCount ?? 0, total: ticket.view?.totalCount ?? 0, status: TopicStatus(ticket).label))
+                if [.waitingOnYou, .review].contains(TopicStatus(ticket)) {
+                    TicketStatusChip(status: TopicStatus(ticket))
+                }
+                if !([.waitingOnYou, .review].contains(TopicStatus(ticket)) && (ticket.view?.totalCount ?? 0) == 0) {
+                    Text(ConversationRules.summaryText(done: ticket.view?.doneCount ?? 0, total: ticket.view?.totalCount ?? 0, status: TopicStatus(ticket).label))
+                }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.down")
             }.themeFont(13).foregroundStyle(Theme.muted).padding(.horizontal, 18).frame(minHeight: 44)
@@ -195,7 +257,7 @@ struct ConversationView: View {
     private func messages(_ items: [ConvItem]) -> some View {
         let language = LanguageLabel.conversationLanguage(items)
         let rows = rows(items)
-        let waiting = Dictionary(model.outbox.items.compactMap { o in ThrottleNote.text(for: o).map { (o.clientId, $0) } }, uniquingKeysWith: { a, _ in a })
+        let waiting = Dictionary(model.outbox.items.compactMap { o in QueuedNote.text(for: o).map { (o.clientId, $0) } }, uniquingKeysWith: { a, _ in a })
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 8) {
@@ -261,7 +323,7 @@ struct ConversationView: View {
             let stale = ConversationRules.isStale(index: index, in: items)
             QuestionCard(item: item, conversationId: resolved, onReply: { question in
                 reply = ReplyPreview(messageId: question.id, title: "Answering \(workspaceName)", quote: question.message.body.text)
-            }, onOpenArtifact: openArtifact, isStale: stale)
+            }, onOpenArtifact: openArtifact, isStale: stale, position: ConversationRules.openPosition(of: item.id, in: items))
         } else if item.side == .me && item.voice != nil {
             OwnVoiceBubble(item: item, conversationLanguage: language, onRetry: retry, onDiscard: discard, onReply: replyHere, waitNote: wait)
         } else if item.side == .them && item.canPlay && item.speak != nil {
@@ -277,7 +339,7 @@ struct ConversationView: View {
             Image(systemName: "bubble.left.and.bubble.right").themeFont(32).foregroundStyle(Theme.brand)
             if case .general = resolved {
                 Text("Say hello to \(workspaceName)").themeFont(20, .semibold)
-                Text("Anything you write here goes to General.").themeFont(15).foregroundStyle(Theme.muted)
+                Text("Anything you write here goes to Chat.").themeFont(15).foregroundStyle(Theme.muted)
             } else { Text("Nothing here yet").themeFont(17).foregroundStyle(Theme.muted) }
         }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 48)
     }
@@ -303,5 +365,15 @@ struct ConversationView: View {
         if Calendar.current.isDateInToday(date) { return "Today" }
         if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
         return ConversationFormat.day.string(from: date)
+    }
+}
+
+struct TicketStatusChip: View {
+    let status: TopicStatus
+    private var color: Color { status == .waitingOnYou ? Theme.warn : status == .review ? Theme.brand : Theme.muted }
+    var body: some View {
+        Text(status.label).themeFont(13, .medium).foregroundStyle(color)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(color.opacity(0.16), in: Capsule())
     }
 }

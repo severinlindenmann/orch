@@ -1279,7 +1279,16 @@ def _chat_record(root: Path, mid: str, body: dict) -> None:
 
 
 def _continue(
-    root: Path, tid: str, mid: str, who: str, by: str, body: dict, general: bool, final: bool = False
+    root: Path,
+    tid: str,
+    mid: str,
+    who: str,
+    by: str,
+    body: dict,
+    general: bool,
+    final: bool = False,
+    *,
+    frm: str | None = None,
 ) -> None:
     """A phone text into an existing ticket (or the General ticket): queue it for the running agent, then
     record it. Same message id twice = once."""
@@ -1295,7 +1304,7 @@ def _continue(
             "close or delete anything.)"
         )
         _chat_record(root, mid, body)
-    runs.pending_add(root, tid, who, "message", text, "phone", "p_" + mid[2:])
+    runs.pending_add(root, tid, who, "message", text, "phone", "p_" + mid[2:], phone=frm)
 
     def op(t):
         r = t.setdefault("ext", {}).setdefault("relay", {})
@@ -1335,13 +1344,13 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
         return f"added to {tid}", tid
     if tid is None and general:
         tid = tickets.ensure_general(root, by)
-        _continue(root, tid, mid, who, by, body, True, final)
+        _continue(root, tid, mid, who, by, body, True, final, frm=frm)
         _working_add(root, mid, frm, tid, True, "item")
         _ack_once(root, mid, frm, tid, True, "Got it")
         return "General conversation", tid
     if tid is None and msg.get("ticket") and _ticket_exists(root, msg["ticket"]):
         tid = msg["ticket"]
-        _continue(root, tid, mid, who, by, body, False, final)
+        _continue(root, tid, mid, who, by, body, False, final, frm=frm)
         _working_add(root, mid, frm, tid, False, "item")
         _ack_once(root, mid, frm, tid, False, "Got it")
         return f"added to {tid}", tid
