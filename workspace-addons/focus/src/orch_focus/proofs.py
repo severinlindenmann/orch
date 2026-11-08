@@ -37,11 +37,12 @@ NOPE = (404, b"not found", "text/plain", {})
 # sent with every answer of this endpoint; the page and the PDF may be framed by Focus itself
 SANDBOX = "default-src 'none'; img-src 'self'; sandbox; frame-ancestors 'self'"
 # A page and the files it loads: scripts and styles from its own folder or inline, pictures and fonts too, but no
-# network calls, no forms, no links out of the sandbox. `sandbox allow-scripts` has no allow-same-origin: the page
+# network calls, no forms, no frames. Not guaranteed: the page can still navigate its own frame (location, link,
+# meta refresh) to a web address and put data in the URL; CSP has no navigate-to. Hence the UI wording. `sandbox allow-scripts` has no allow-same-origin: the page
 # gets an opaque origin, so it cannot read Focus, its API or its storage, also when opened in a tab of its own.
 PAGE = (
     "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-    "img-src 'self' data:; font-src 'self' data:; media-src 'self'; connect-src 'none'; form-action 'none'; "
+    "img-src 'self' data:; font-src 'self' data:; media-src 'self'; connect-src 'none'; form-action 'none'; frame-src 'none'; "
     "base-uri 'none'; sandbox allow-scripts; frame-ancestors 'self'"
 )
 # what a page may load from its folder (no JSON/text: nothing to fetch with, and no way to read a stray file)

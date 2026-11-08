@@ -155,7 +155,12 @@ def test_page_loads_its_css_js_and_picture(server, ev):
         assert h["Cross-Origin-Resource-Policy"] == "cross-origin"
         csp = h["Content-Security-Policy"]
         assert "sandbox allow-scripts" in csp and "allow-same-origin" not in csp
-        assert "connect-src 'none'" in csp and "form-action 'none'" in csp and "script-src 'self'" in csp
+        assert csp == (
+            "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; font-src 'self' data:; media-src 'self'; connect-src 'none'; "
+            "form-action 'none'; frame-src 'none'; base-uri 'none'; sandbox allow-scripts; "
+            "frame-ancestors 'self'"
+        )
         assert len([k for k in h if k.lower() == "content-security-policy"]) == 1
     # the way a browser resolves a relative link from the page's URL
     from urllib.parse import urljoin
