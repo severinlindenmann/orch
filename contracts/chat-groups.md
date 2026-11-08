@@ -226,8 +226,12 @@ person clicks "Share with group" on an artifact. Nothing is shared automatically
   real path (symlinks resolved). All text fields (`text`, `answer`, `summary`, `question`, `checklist`, `title`,
   `group.title`, `share.title`, file names) go through `phone_view.redact` (existing: keys, tokens, passwords →
   `[hidden]`). A text file or PDF (its extracted text) that contains a secret pattern is **refused, not redacted**
-  ("This file looks like it holds a password, so it was not shared"). **Images are not scanned**: an image is shared
-  only after a person's click.
+  ("This file looks like it holds a password, so it was not shared"). Only a real secret match (content, or a key/
+  `.env`/token file name) says "password": a file in a hidden or `secrets` folder (in the workspace or anywhere else,
+  also through a link) is refused with "Files in hidden or secrets folders are not shared". A locked PDF or a PDF
+  stream that can't be read (a text filter other than FlateDecode, or broken) is "We couldn't check this file ..." —
+  the person may share it anyway after the human confirm (its content is still scanned), an agent never.
+  **Images are not scanned**: an image is shared only after a person's click.
 
 **Members never get write access to the host ticket.** No message type changes it from outside: a member can only
 answer a question the host sent it (relay-checked `reply_to`), report its own task, and talk. Everything it sends is

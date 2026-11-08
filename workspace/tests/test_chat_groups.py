@@ -772,6 +772,89 @@ def test_secret_folder_and_symlink_are_refused(proj, run, rel, host):
     assert not rel.blobs
 
 
+def _pdf(stream: bytes | None = None, filt: bytes = b"/FlateDecode") -> bytes:
+    """A tiny one-page PDF; `stream` = the page content (inflated with zlib when filt is FlateDecode)."""
+    import zlib
+
+    head = b"%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+    head += b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
+    if stream is None:
+        return head + b"3 0 obj << /Type /Page /Parent 2 0 R >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n"
+    raw = zlib.compress(stream) if filt == b"/FlateDecode" else stream
+    head += b"3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n"
+    head += b"4 0 obj << /Length %d /Filter %s >>\nstream\n" % (len(raw), filt)
+    return head + raw + b"\nendstream\nendobj\ntrailer << /Root 1 0 R >>\n%%EOF\n"
+
+
+def test_clean_pdfs_are_shared_and_only_a_real_match_says_password(proj, run, rel, host, tmp_path):
+    # a hidden folder INSIDE the workspace stays a hard no (test_artifacts_exception...)
+    """P4.7 (final e2e 8 Nov): a clean tiny PDF in a hidden folder outside the workspace (the e2e run folder
+    ~/.orch-test-e2e-*) was refused as "holds a password"; only a secret pattern may say that."""
+    run("relay", "group", "add", host, HOME)
+    text = _pdf(b"BT /F1 12 Tf 72 712 Td (Lunch menu: soup and bread) Tj ET")
+    assert cg.check_file(text, "menu.pdf") == "application/pdf"
+    assert cg.check_file(_pdf(), "empty.pdf") == "application/pdf"  # no text at all: nothing to hide
+    img = _pdf(b"\xff\xd8\xff\xe0" + b"\x00" * 40, b"/DCTDecode")  # a picture stream: not a text filter
+    assert cg.check_file(img, "scan.pdf") == "application/pdf"
+    with pytest.raises(cg.Refused, match="looks like it holds a password"):
+        cg.check_file(_pdf(b"BT (password = hunter2hunter2) Tj ET"), "x.pdf")
+    for bad in (_pdf(b'<~87cURD]i,"Ebo80~>', b"/ASCII85Decode"), _pdf(b"not zlib at all", b"[/FlateDecode]")):
+        with pytest.raises(cg.Unchecked, match="couldn't check this file") as e:
+            cg.check_file(bad, "x.pdf")
+        assert "password" not in str(e.value).replace("for passwords", "")
+        assert cg.check_file(bad, "x.pdf", allow_unchecked=True) == "application/pdf"
+    # the e2e case: a clean PDF the person picked from a hidden folder outside the workspace is a hard
+    # no with the folder line (never "password", never "share anyway"); the same PDF in a plain folder shares
+    away = tmp_path.parent / f"{tmp_path.name}_out"  # proj is tmp_path: this is outside the workspace
+    out = away / ".orch-test-e2e-ab12"
+    out.mkdir(parents=True)
+    (away / "plain").mkdir()
+    menu = b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\n%%EOF\n"
+    for n, data in (("lunch-menu.pdf", menu), ("m.pdf", text)):
+        (out / n).write_bytes(data)
+        for extra in ([], ["--unchecked-ok"]):
+            blobs = len(rel.blobs)
+            code, _, err = run("relay", "group", "share", host, str(out / n), "--click", *extra)
+            assert code != 0 and "hidden or secrets folders" in err and "password" not in err, err
+            assert len(rel.blobs) == blobs
+        (away / "plain" / n).write_bytes(data)
+        rel.sent.clear()
+        code, _, err = run("relay", "group", "share", host, str(away / "plain" / n), "--click")
+        assert code == 0, err
+        assert sent(rel, type="file")
+    # outside the workspace, a real secret is refused with the password line, even with the OK
+    (away / "plain" / "n.txt").write_text("password=hunter2\n")
+    code, _, err = run(
+        "relay", "group", "share", host, str(away / "plain" / "n.txt"), "--click", "--unchecked-ok"
+    )
+    assert code != 0 and "looks like it holds a password" in err
+    # a secrets folder, a credential folder, or a link into a hidden folder: the same hard no
+    (away / "secrets").mkdir()
+    (away / "secrets" / "a.txt").write_text("words")
+    ssh = away / ".ssh"
+    ssh.mkdir()
+    (ssh / "m.pdf").write_bytes(text)
+    (proj / "via-ssh.pdf").symlink_to(ssh / "m.pdf")
+    (proj / "via-hidden.pdf").symlink_to(out / "m.pdf")
+    (away / "plain" / "to-hidden.pdf").symlink_to(out / "m.pdf")  # outside, but through a link
+    for f in (
+        away / "secrets" / "a.txt",
+        ssh / "m.pdf",
+        proj / "via-ssh.pdf",
+        proj / "via-hidden.pdf",
+        away / "plain" / "to-hidden.pdf",
+    ):
+        blobs = len(rel.blobs)
+        code, _, err = run("relay", "group", "share", host, str(f), "--click", "--unchecked-ok")
+        assert code != 0 and "hidden or secrets folders" in err and "password" not in err, (f, err)
+        assert len(rel.blobs) == blobs
+    (away / "plain" / "id_rsa").write_text("x")
+    code, _, err = run(
+        "relay", "group", "share", host, str(away / "plain" / "id_rsa"), "--click", "--unchecked-ok"
+    )
+    assert code != 0 and "looks like it holds a password" in err
+
+
 def test_image_needs_a_click_and_size_and_count_limits(proj, run, rel, host):
     run("relay", "group", "add", host, HOME)
     png = proj / "a.png"
@@ -928,6 +1011,9 @@ def test_member_delegate_needs_the_persons_allow_then_reports(proj, run, rel, me
     wa = [m for m in sent(rel, to=FIN) if m["body"].get("task")][0]
     qp = sent(rel, to="phones", type="question")[0]
     assert qp["body"]["options"] == ["once", "always", "no"] and qp["body"]["scope"] == "tasks from Finance"
+    assert (
+        qp["body"]["allow_question"] is True and qp["ticket"] == allow_t["id"]
+    )  # contract 3.5: the phone's card
     assert "group" not in qp["body"]
     assert qp["body"]["group_ref"] == {"host": FIN, "id": "grp_t_fin14a"}  # contract 3.2: not body.group
     assert (
@@ -1640,7 +1726,7 @@ def test_secrets_folder_is_matched_without_case_or_trailing_dots(proj, run, rel,
         pytest.skip("this system can't make that folder name")
     (d / "key.txt").write_text("harmless words")
     code, _, err = run("relay", "group", "share", host, str(d / "key.txt"))
-    assert code != 0 and "password" in err
+    assert code != 0 and "hidden or secrets folders" in err and "password" not in err
     assert not rel.blobs
 
 
@@ -1977,11 +2063,13 @@ def test_ticket_artifacts_are_shareable_and_a_hidden_folder_is_not_called_a_pass
         "relay", "group", "share", host, str(f)
     )  # an agent never reads .orch: plain, no "password"
     assert code != 0  # an agent never reads .orch: the exception is a person's click only
-    # a secret-looking name or a hidden folder inside it is still refused, with the password line
+    # a hidden folder inside it is still refused, with the plain folder line (not "password": no secret seen)
     (adir / ".ssh").mkdir()
     (adir / ".ssh" / "a.txt").write_text("words")
-    code, _, err = run("relay", "group", "share", host, str(adir / ".ssh" / "a.txt"), "--click")
-    assert code != 0 and "password" in err
+    code, _, err = run(
+        "relay", "group", "share", host, str(adir / ".ssh" / "a.txt"), "--click", "--unchecked-ok"
+    )
+    assert code != 0 and "hidden or secrets folders" in err and "password" not in err
 
 
 def test_unreadable_file_is_not_called_a_password_and_needs_the_persons_ok(proj, run, rel, host, monkeypatch):
