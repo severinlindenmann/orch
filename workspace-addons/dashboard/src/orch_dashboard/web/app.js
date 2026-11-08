@@ -533,7 +533,7 @@
     const line = window.DashHelpers.agentLine(t, state.runs?.[t.id], Date.now(), liveLink);
     // an open question is answered in the banner only: the bar then just says the agent is waiting
     const answering = line.primary.op === 'answer';
-    if (answering) line.status = 'waiting';
+    if (answering) line.status = 'needs you';
     const action = (item, primary) => {
       const attrs = {className:primary ? 'btn sm ' + (['working', 'starting', 'background'].includes(line.state) ? 'outline' : 'primary') : 'menu-item', role:primary ? null : 'menuitem', 'data-key':primary ? 'agent-primary' : 'agent-' + item.label};
       if (item.op === 'open') return /^#open\//.test(item.url) ? h('a', {...attrs, href:item.url}, item.label) : null;

@@ -23,7 +23,7 @@
     for (const kid of kids.flat()) if (kid != null) el.append(kid);
     return el;
   }
-  const STATUS_WORD = {open: 'To do', active: 'Doing', waiting: 'Waiting', done: 'Done', dropped: 'Dropped'};
+  const STATUS_WORD = {open: 'To do', active: 'Doing', waiting: 'Needs you', done: 'Done', dropped: 'Dropped'};
   const toast = (text, kind) => (window.orch ? window.orch.toast(text, kind) : null);
   const proof = window.FocusProof.create({h, ic, P, TID, toast});
 
