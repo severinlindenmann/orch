@@ -414,4 +414,4 @@ def test_no_bare_waiting_status_label_left():
         text = f.read_text()
         assert not re.search(r"""['"]Waiting['"]""", text), f.name  # a bare "Waiting" label
         assert not re.search(r"""\bstatus\s*=\s*['"]waiting['"]""", text), f.name  # "Agent · waiting"
-        assert not re.search(r"""\bwaiting:\s*['"]waiting['"]""", text, re.I), f.name
+        assert not re.search(r"""\bwaiting:\s*['"]waiting['"]""", text, re.IGNORECASE), f.name
