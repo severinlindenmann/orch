@@ -20,6 +20,33 @@
 
   /* One plain line for a history entry. The common words the CLI writes become sentences; anything else is shown as
      written (the caller still strips ids). */
+  /* The one place a raw actor id inside a line ("agent:<name>", "human:<name>") becomes the name a person reads. */
+  function plainNames(text) {
+    return String(text ?? '').replace(/\b(?:agent|human):([A-Za-z0-9_.@-]+)/g, (_, n) => n.charAt(0).toUpperCase() + n.slice(1));
+  }
+
+  /* A task finished by the agent is written twice (orch's own "Check c1 done" and the agent's own note): both read
+     "Finished a task: ...". Within two minutes the longer of two equal-or-prefix lines stays, once. Original order kept. */
+  function dedupeHistory(entries, checklist) {
+    const list = Array.isArray(entries) ? entries : [], drop = new Set(), last = [];
+    const order = list.map((e, i) => [e, i]).sort((a, b) => (Date.parse(a[0] && a[0].at) || 0) - (Date.parse(b[0] && b[0].at) || 0) || a[1] - b[1]);
+    for (const [e] of order) {
+      const line = historyLine(e, checklist), at = Date.parse(e && e.at) || 0;
+      const dup = last.find(p => Math.abs(at - p.at) <= 120000 && (p.line === line || line.startsWith(p.line + ':') || p.line.startsWith(line + ':')));
+      if (!dup) { last.push({e, line, at}); continue; }
+      if (line.length > dup.line.length) { drop.add(dup.e); Object.assign(dup, {e, line, at}); } else drop.add(e);
+    }
+    return list.filter(e => !drop.has(e));
+  }
+
+  /* The sidebar footer: the relay add-on's saved connection (the same fact Settings shows as "Connected"). */
+  function footerState(state, snapshot) {
+    if (snapshot) return 'Shared copy';
+    const relay = ((state && state.settings && state.settings.addons) || []).find(a => a && a.name === 'relay' && a.active && a.detail);
+    if (!relay) return 'Local workspace';
+    return relay.detail.connected ? 'Connected' : 'Not connected yet';
+  }
+
   function historyLine(entry, checklist) {
     const text = String((entry && entry.text) ?? '').trim();
     let m;
@@ -45,7 +72,7 @@
     if (/^Check c\d+ done/i.test(text) || /^(Checked|Done)\b.*\bc\d+/.test(text) || /^Task .* done/i.test(text)) return 'Finished a task';
     if (/^Added task|^Added check/i.test(text)) return 'Added a task';
     if (/^Linked|^Link added/i.test(text)) return 'Added a reference';
-    return text;
+    return plainNames(text);
   }
 
   /* The answer that is already there for a question (someone else was first). Null when it is still open. */
@@ -159,6 +186,8 @@
       return {state: 'resume', agent, status: 'last worked ' + (Number.isNaN(when) ? 'earlier' : span(nowMs - when) === 'just now' ? 'just now' : span(nowMs - when) + ' ago'),
         primary: start('Continue'), items: [fresh]};
     }
+    // a ticket already waiting for the person's check has no run to start: no Start button
+    if (t.status === 'review') return {state: 'new', agent, status: 'ready for you to check', primary: null, items: []};
     return {state: 'new', agent, status: 'not started yet', primary: start('Start'), items: []};
   }
 
@@ -166,7 +195,7 @@
   function plainWhy(why, label) {
     const w = String(why || '');
     if (/wants a login|log in to|login method/i.test(w)) return (label || 'The agent') + ' needs you to sign in';
-    return w.replace(/\s*(Open the live session[^:]*:\s*)?orch run attach\s+\S+/gi, '').replace(/\s+/g, ' ').trim().replace(/[.:]$/, '');
+    return plainNames(w).replace(/\s*(Open the live session[^:]*:\s*)?orch run attach\s+\S+/gi, '').replace(/\s+/g, ' ').trim().replace(/[.:]$/, '');
   }
 
   /* One line of the question a ticket waits on (the first open one), for under its title; '' when none. */
@@ -315,5 +344,5 @@
   const needsYou = n => n + (n === 1 ? ' needs you' : ' need you');  // same words as the phone
   const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
 
-  return {STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {plainNames, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

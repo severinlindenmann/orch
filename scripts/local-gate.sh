@@ -6,6 +6,7 @@
 #   8-15 min behind other lanes' cargo and Simulator runs). Last line: "local-gate: PASS (...)" or "local-gate: FAIL (...)".
 # Env: HEAVY (default the v2 build heavy.sh), LANE (tag for the lock, default local-gate), BASE (default origin/develop).
 set -u
+export ORCH_HOME_STRICT=1   # an untrusted ORCH_HOME is an error, never a silent fallback to the real ~/.orch-tool
 ROOT=$(git rev-parse --show-toplevel) || exit 2; cd "$ROOT" || exit 2
 HEAVY=${HEAVY:-$HOME/orch-dev/state/v2-plan-2026-11-05/build/heavy.sh}; LANE=${LANE:-local-gate}; BASE=${BASE:-origin/develop}
 export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH"  # cargo on this Mac

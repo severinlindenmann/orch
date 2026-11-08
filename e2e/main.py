@@ -44,6 +44,7 @@ class E:
             "TERM": "dumb", "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR", ""),
             "UV_TOOL_DIR": str(tmp / "uvtools"), "UV_TOOL_BIN_DIR": str(self.bin),
             "ORCH_REPO": str(repo), "ORCH_HOME": os.environ.get("E2E_ORCH_HOME") or str(tmp / "orch-tool"),
+            "ORCH_HOME_STRICT": "1",
             "GIT_AUTHOR_NAME": "e2e", "GIT_AUTHOR_EMAIL": "e2e@example.invalid",
             "GIT_COMMITTER_NAME": "e2e", "GIT_COMMITTER_EMAIL": "e2e@example.invalid",
             "GIT_CONFIG_GLOBAL": str(self.home / ".gitconfig"), "GIT_TERMINAL_PROMPT": "0",

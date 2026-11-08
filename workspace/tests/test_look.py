@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import config, look, net
+from orch import addons, config, look, net
 from orch.errors import Refused
 
 C = Path(__file__).resolve().parents[2] / "contracts"
@@ -146,7 +146,7 @@ def test_status_json_has_look(ws, run):
 
 
 def test_cli_shared_pages(ws, run, monkeypatch, tmp_path):
-    monkeypatch.setenv("ORCH_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("ORCH_HOME", str(addons.real_home() / "home"))
     code, out, _ = run("look", "shared-pages", "--json")
     assert code == 0 and json.loads(out) == {"on": True}  # on by default
     code, out, _ = run("look", "shared-pages", "off", "--by", "human:owner", "--json")
