@@ -19,3 +19,10 @@ def test_feed_shows_names_not_actor_ids():
 
     js = (Path(__file__).resolve().parents[1] / "src" / "orch_focus" / "web" / "focus.js").read_text()
     assert r"/\b(?:agent|human):([A-Za-z0-9_.@-]+)/g" in js
+
+
+def test_feed_tool_lines_use_plain_names_too():
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "src" / "orch_focus" / "web" / "focus.js").read_text()
+    assert "text: plainNames(e.text)" in js and "return plainNames(text);" in js

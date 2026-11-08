@@ -677,3 +677,30 @@ def test_ui2_small_bugs_in_markup_and_css():
 def test_history_line_shows_names_not_actor_ids():
     line = call("historyLine", {"text": "agent:claude finished the work and moved it to Review"}, [])
     assert line == "Claude finished the work and moved it to Review"
+
+
+@node
+def test_plain_names_and_history_dedupe():
+    assert call("plainNames", "agent:claude finished it, human:Mia agreed") == "Claude finished it, Mia agreed"
+    at = "2026-11-08T08:00:00Z"
+    entries = [
+        {"at": at, "by": "agent:claude", "text": "Check c1 done"},
+        {"at": "2026-11-08T08:00:20Z", "by": "agent:claude", "text": "Finished a task: Write the export"},
+        {"at": "2026-11-08T09:30:00Z", "by": "agent:claude", "text": "Finished a task: Write the export"},
+    ]
+    kept = call("dedupeHistory", entries, [{"id": "c1", "text": "Write the export"}])
+    assert [e["at"] for e in kept] == ["2026-11-08T08:00:00Z", "2026-11-08T09:30:00Z"]
+    assert len(kept) == 2
+    src = (WEB / "app.js").read_text() + (WEB / "blocks.js").read_text()
+    assert src.count("plainNames") >= 2 and src.count("dedupeHistory") >= 2
+
+
+@node
+def test_footer_shows_the_relay_connection():
+    on = {"settings": {"addons": [{"name": "relay", "active": True, "detail": {"connected": True}}]}}
+    assert call("footerState", on, False) == "Connected"
+    off = {"settings": {"addons": [{"name": "relay", "active": True, "detail": {"connected": False}}]}}
+    assert call("footerState", off, False) == "Not connected yet"
+    assert call("footerState", {"settings": {"addons": []}}, False) == "Local workspace"
+    assert call("footerState", on, True) == "Shared copy"
+    assert "NetBird" not in (WEB / "helpers.js").read_text()
