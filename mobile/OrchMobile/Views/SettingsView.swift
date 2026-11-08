@@ -18,7 +18,6 @@ struct SettingsView: View {
     @AppStorage("workspaceAliasRevision") private var aliasRevision = 0
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var details = false
     @State private var addWorkspace = false
     @State private var confirmSignOut = false
     @State private var signingOut = false
@@ -38,34 +37,25 @@ struct SettingsView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    Text("Your connection, in one place.").themeFont(13).foregroundStyle(Theme.muted)
                     ModelMessage()
-                    section("CONNECTION") {
-                        DisclosureGroup(isExpanded: $details) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Server: \(model.relayHost)")
-                                Text("This phone: \(model.phoneName)")
-                                Text("Access is managed by whoever invited you.")
-                            }.themeFont(13).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
-                        } label: {
-                            HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Your workspace server").themeFont(17)
-                                    Text(statusText).themeFont(13).foregroundStyle(statusColor)
-                                }
-                                Spacer(minLength: 0)
-                                Text("Details").themeFont(15).foregroundStyle(Theme.muted)
-                            }.frame(minHeight: 44)
-                        }.tint(Theme.muted).padding(16)
-                    }
-                    section("YOUR WORKSPACES · \(model.workspaceSummaries.count)") {
+                    section("WORKSPACES") {
                         VStack(spacing: 0) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Your computer").themeFont(17)
+                                    if model.connection != .ok { Text(statusText).themeFont(13).foregroundStyle(statusColor) }
+                                }
+                                Spacer()
+                                Circle().fill(statusColor).frame(width: 8, height: 8)
+                            }.padding(16).accessibilityLabel(statusText)
+                            ShellDivider()
                             ForEach(model.workspaceSummaries) { summary in
                                 NavigationLink { WorkspaceSettingsView(workspaceId: summary.id) } label: {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 8) {
+                                    HStack(spacing: 12) {
+                                        WorkspaceBadge(name: WorkspaceAlias.name(for: summary.workspace), icon: summary.workspace.icon, color: summary.workspace.color, size: 42)
+                                        VStack(alignment: .leading, spacing: 6) {
                                             Text(WorkspaceAlias.name(for: summary.workspace)).themeFont(17)
-                                            PresenceLine(lastSeen: summary.workspace.lastSeen)
+                                            Text("Your computer · Connected").themeFont(13).foregroundStyle(Theme.muted)
                                         }
                                         Spacer(); ShellChevron()
                                     }.padding(16).frame(minHeight: 64).contentShape(Rectangle())
@@ -76,6 +66,33 @@ struct SettingsView: View {
                                 HStack { Text("Add workspace"); Spacer(); Image(systemName: "plus") }.themeFont(17)
                                     .foregroundStyle(Theme.brand).padding(.horizontal, 16).frame(minHeight: 52).contentShape(Rectangle())
                             }.buttonStyle(PressStyle()).accessibilityIdentifier("add-workspace")
+                        }
+                    }
+                    section("PREFERENCES") {
+                        VStack(spacing: 0) {
+                            Toggle(isOn: Binding(get: { model.notificationsEnabled }, set: { enabled in
+                                model.notificationsEnabled = enabled
+                                if enabled {
+                                    requestingPermission = true
+                                    Task { model.notificationsEnabled = await PushPermission.request(); requestingPermission = false }
+                                }
+                            })) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Notifications").themeFont(17)
+                                    Text("Questions and finished work").themeFont(13).foregroundStyle(Theme.muted)
+                                }
+                            }.tint(Theme.brand).padding(16).disabled(requestingPermission)
+                            ShellDivider()
+                            NavigationLink { VoiceSettingsView() } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "mic").themeFont(20)
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Voice").themeFont(17)
+                                        Text("Voice and languages").themeFont(13).foregroundStyle(Theme.muted)
+                                    }
+                                    Spacer(); ShellChevron()
+                                }.padding(16).frame(minHeight: 52).contentShape(Rectangle())
+                            }.buttonStyle(PressStyle()).accessibilityIdentifier("voice-settings")
                         }
                     }
                     section("CHATS") {
@@ -91,27 +108,17 @@ struct SettingsView: View {
                                 }.buttonStyle(PressStyle()).accessibilityIdentifier("auto-archive-days")
                                     .accessibilityLabel("Archive after").accessibilityValue("\(model.archive.autoDays) days")
                             }
-                            Text("Only finished (Done) chats with no new message move to Archived. Chats waiting for you, in Review, and General never do. A new message brings a chat back.")
+                            Text("Only finished (Done) chats with no new message move to Archived. Chats waiting for you, in Review, and Chat never do. A new message brings a chat back.")
                                 .themeFont(13).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                                 .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 16)
                         }
                     }
-                    section("PREFERENCES") {
-                        VStack(spacing: 0) {
-                            NavigationLink { VoiceSettingsView() } label: {
-                                HStack { Text("Voice"); Spacer(); ShellChevron() }.themeFont(17).padding(16).frame(minHeight: 52).contentShape(Rectangle())
-                            }.buttonStyle(PressStyle()).accessibilityIdentifier("voice-settings")
-                            ShellDivider().padding(.leading, 16)
-                            Toggle("Notify me when I'm needed", isOn: Binding(get: { model.notificationsEnabled }, set: { enabled in
-                                model.notificationsEnabled = enabled
-                                if enabled {
-                                    requestingPermission = true
-                                    Task { model.notificationsEnabled = await PushPermission.request(); requestingPermission = false }
-                                }
-                            })).themeFont(17).tint(Theme.brand).padding(16).disabled(requestingPermission)
-                        }
-                    }
-                    Button("Sign out") { confirmSignOut = true }.buttonStyle(WideButtonStyle(color: Theme.danger, bordered: true))
+                    Text("Tickets started from your phone send answers here, even with Mobile mode off.")
+                        .themeFont(13).foregroundStyle(Theme.muted)
+                    Button { confirmSignOut = true } label: {
+                        Text("Sign out").themeFont(17).foregroundStyle(Theme.danger).padding(.horizontal, 12)
+                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).contentShape(Rectangle())
+                    }.buttonStyle(PressStyle()).accessibilityLabel("Sign out")
                     if confirmSignOut {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Disconnect this phone? You will need a new invitation to connect again.").themeFont(13)
@@ -136,7 +143,7 @@ struct SettingsView: View {
                 else { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("signout-card", anchor: .bottom) } }
             }
         }.background(Theme.bg.ignoresSafeArea()).foregroundStyle(Theme.text)
-            .navigationTitle("Settings").navigationBarTitleDisplayMode(.large).toolbar(.visible, for: .navigationBar)
+            .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
             .sheet(isPresented: $addWorkspace) { AddWorkspaceView().presentationDetents([.medium, .large]) }
     }
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -247,7 +254,6 @@ struct AutoArchiveDaysView: View {
 
 struct VoiceSettingsView: View {
     @Environment(AppModel.self) private var model
-    @State private var budget = false
     @State private var saving = false
     var body: some View {
         ScrollView {
@@ -256,18 +262,14 @@ struct VoiceSettingsView: View {
                 ModelMessage()
                 VStack(alignment: .leading, spacing: 10) {
                     Eyebrow(text: "VOICE REPLIES")
-                    VStack(spacing: 0) {
+                    Picker("Voice replies", selection: Binding(get: { model.settings.speak }, set: { update(SettingsPatch(speak: $0)) })) {
                         ForEach(PhoneSettings.Speak.allCases, id: \.self) { option in
-                            Button { update(SettingsPatch(speak: option)) } label: {
-                                HStack {
-                                    Text(option == .auto ? "Auto (long answers)" : option == .always ? "Always" : "Never")
-                                    Spacer()
-                                    if model.settings.speak == option { Image(systemName: "checkmark").foregroundStyle(Theme.brand) }
-                                }.themeFont(17).padding(16).frame(minHeight: 48).contentShape(Rectangle())
-                            }.buttonStyle(PressStyle()).accessibilityAddTraits(model.settings.speak == option ? .isSelected : []).accessibilityIdentifier("speak-\(option.rawValue)")
-                            if option != .never { ShellDivider().padding(.leading, 16) }
+                            Text(option == .auto ? "Auto (long answers)" : option == .always ? "Always" : "Never")
+                                .tag(option).accessibilityIdentifier("speak-\(option.rawValue)")
                         }
-                    }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).disabled(saving)
+                    }.pickerStyle(.menu).tint(Theme.text).themeFont(17).padding(16)
+                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                        .disabled(saving).accessibilityIdentifier("voice-replies-menu")
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     Eyebrow(text: "LISTENING & SPEECH")
@@ -276,26 +278,20 @@ struct VoiceSettingsView: View {
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     Eyebrow(text: "VOICE BUDGET")
-                    Button { budget = true } label: {
-                        HStack(spacing: 8) {
-                            Text("Monthly limit for voice replies")
-                            Spacer(minLength: 4)
-                            Text(String(format: "$%.0f", model.settings.ttsCapUsd)).foregroundStyle(Theme.muted)
-                            ShellChevron()
-                        }.themeFont(17).padding(16).frame(minHeight: 48).contentShape(Rectangle())
-                    }.buttonStyle(PressStyle()).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).disabled(saving)
+                    Picker("Monthly limit", selection: Binding(get: { model.settings.ttsCapUsd }, set: { update(SettingsPatch(ttsCapUsd: $0)) })) {
+                        ForEach([0, 5, 10, 20, 50], id: \.self) { amount in
+                            Text("$\(amount)").tag(Double(amount))
+                        }
+                    }.pickerStyle(.menu).tint(Theme.text).themeFont(17).padding(16)
+                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                        .disabled(saving).accessibilityIdentifier("voice-limit-menu")
                     Text(String(format: "Used this month $%.2f · left $%.2f", model.settings.ttsUsedUsdMonth, model.settings.ttsLeftUsd))
                         .themeFont(13).foregroundStyle(Theme.muted)
                 }
             }.padding(16)
         }.background(Theme.bg.ignoresSafeArea()).foregroundStyle(Theme.text)
             .navigationTitle("Voice").navigationBarTitleDisplayMode(.inline)
-            .confirmationDialog("Monthly limit for voice replies", isPresented: $budget, titleVisibility: .visible) {
-                ForEach([0, 5, 10, 20, 50], id: \.self) { amount in
-                    Button("$\(amount)") { update(SettingsPatch(ttsCapUsd: Double(amount))) }
-                }
-                Button("Cancel", role: .cancel) {}
-            }
+
     }
     private func update(_ patch: SettingsPatch) {
         saving = true

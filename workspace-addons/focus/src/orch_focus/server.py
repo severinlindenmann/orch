@@ -23,6 +23,20 @@ from .permissions import Permissions
 from .revisions import Revisions
 from .tail import Tail
 
+
+def agent_label(claim: dict | None, agents: list[dict] | None) -> str:
+    """Resolve the adapter's display label, including tickets without a claim."""
+    claim, agents = claim or {}, agents or []
+    match = next((a for a in agents if a.get("name") == claim.get("agent")), {})
+    chosen = next((a for a in agents if a.get("chosen")), {})
+    first = agents[0] if agents else {}
+    raw = str(claim.get("label") or match.get("label") or claim.get("agent")
+              or chosen.get("label") or chosen.get("name")
+              or first.get("label") or first.get("name") or "Agent")
+    raw = re.sub(r"^(agent|human):", "", raw)
+    return raw[:1].upper() + raw[1:]
+
+
 DEFAULT_PORT = 8430
 MAX_BODY = 16384
 TID_RE = re.compile(r"t_[a-z0-9]{6,16}")
@@ -222,8 +236,7 @@ class Tracker:
                 events = tr["events"]
             board = tr["board"].snapshot() if tr else Board().snapshot()
         if tr:
-            last = self.last_agent.get(tid, (None, None))[0]
-            label = str(claim.get("agent") or last or "The agent").capitalize()
+            label = agent_label(claim, self.agents())
             if self.perms.sync(
                 tid, claim, bool(status.get("running")), tr["run"], board["denials"], ticket, label
             ):
@@ -260,11 +273,7 @@ class Tracker:
             state = "stopped"
         agent = claim.get("agent") or "agent"
         agents = agents or []
-        label = (claim.get("label")
-                 or next((a.get("label") for a in agents if a.get("name") == claim.get("agent")), None)
-                 or (str(claim["agent"])[:1].upper() + str(claim["agent"])[1:] if claim.get("agent") else None)
-                 or next((a.get("label") for a in agents if a.get("chosen")), None)
-                 or "agent")
+        label = agent_label(claim, agents)
         return {
             "ticket": {
                 "id": ticket.get("id"), "key": ticket.get("key"), "title": ticket.get("title"),

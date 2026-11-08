@@ -26,7 +26,6 @@ def scheduled(t: dict) -> bool:
     return t.get("status") in OPEN or (rec and t.get("status") == "done")
 FAST_FAIL_SECONDS = 10
 QUEUED_TRIES = 3  # starts that failed for one waiting input before it is left for a person
-QUEUED_PENDING_SECONDS = 30 * 60  # input a busy run has not read after this is said once on the ticket
 KIND = "automation:failure"
 KINDS = (KIND,)
 TRY_AGAIN, LEAVE = "Try again", "Leave it"
@@ -196,7 +195,7 @@ class Scheduler:
         skip = list(skip or [])
         for t in [*read_tickets(self.root), *self.chat_stub()]:
             tid = t["id"]
-            self._pending_too_long(tid, now)
+            self._give_back_after_holder(tid)
             if tid in skip or t.get("status") != "ready" or not self.may_start(t):
                 continue
             st = orchcli.run_status(self.root, tid)
@@ -216,10 +215,8 @@ class Scheduler:
                 started.append(tid)
                 continue
             if res == "pending":  # a run holds the ticket after all: it reads the input. The ids stay marked
-                since = dict(mine.get("queued_pending_since") or {})  # (no new start each pass) but are timed
-                for i in new:
-                    since.setdefault(i, fmt(now))
-                update_state(self.root, tid, queued_pending_since=since)
+                held = sorted(set(mine.get("queued_held") or []) | set(new))  # and wait for that run to end
+                update_state(self.root, tid, queued_held=held)
                 continue
             # anything else (failed, refused, unknown) gives the ids back and counts one try per id
             reached = []
@@ -245,25 +242,20 @@ class Scheduler:
         ext = {"automation": {"paused": True}} if st.get("paused") is True else {}
         return [{"id": gid, "status": "ready", "ext": ext, "chat": True}]
 
-    def _pending_too_long(self, tid: str, now: datetime) -> None:
-        """Input a busy run should have read but has not after QUEUED_PENDING_SECONDS: said once on the ticket."""
+    def _give_back_after_holder(self, tid: str) -> None:
+        """Ids marked while another run held the ticket ("pending"): once that run has ended, those it did not
+        read (still in human_pending_ids) may start one run again. Unknown status changes nothing (next pass)."""
         mine = load_state(self.root).get(tid, {})
-        since = {k: v for k, v in (mine.get("queued_pending_since") or {}).items() if isinstance(v, str)}
-        if not since:
+        held = [i for i in mine.get("queued_held") or [] if isinstance(i, str)]
+        if not held:
             return
         st = orchcli.run_status(self.root, tid)
-        waiting = set((st or {}).get("human_pending_ids") or []) if st and st.get("running") is False else None
-        old = [i for i, at in since.items() if (p := parse(at)) and (now - p).total_seconds() >= QUEUED_PENDING_SECONDS]
-        if waiting is not None:  # the run that held it is gone: what it did not read may start one run again
-            back = [i for i in since if i in waiting]
-            done = [i for i in mine.get("queued_started") or [] if i not in back]
-            update_state(self.root, tid, queued_started=done, queued_pending_since={})
-            return
-        if old:
-            orchcli.log(self.root, tid, "Input on this ticket has waited 30 minutes for the agent that holds it. "
-                                        "Open the ticket to check on the agent.")
-            since = {i: at for i, at in since.items() if i not in old}
-        update_state(self.root, tid, queued_pending_since=since)
+        if not st or st.get("running") is not False:
+            return  # unknown, or the holder still runs
+        waiting = set(st.get("human_pending_ids") or [])
+        back = [i for i in held if i in waiting]
+        done = [i for i in mine.get("queued_started") or [] if i not in back]
+        update_state(self.root, tid, queued_started=done, queued_held=[])
 
     def may_start(self, t: dict) -> bool:
         """The gates every start from this loop respects: a ticket switched off here is left alone."""

@@ -64,6 +64,7 @@ struct QuestionBody: Codable, Sendable, Equatable {
     var previews: [String: String]? = nil
     /// Permission questions: what "Always" covers, shown as "Always allow <scope>".
     var scope: String? = nil
+    var allowQuestion: Bool? = nil // allow_question via JSONCoding
 }
 
 struct QuestionMessage: Codable, Sendable, Equatable {
@@ -79,20 +80,48 @@ struct QuestionMessage: Codable, Sendable, Equatable {
     var key: String? = nil
 }
 
+enum AnswerWord: String, Equatable {
+    case once, always, no
+
+    static func parse(_ value: String) -> AnswerWord? {
+        if let wire = AnswerWord(rawValue: value) { return wire }
+        let old = value.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ").lowercased()
+        switch old {
+        case "allow once": return .once
+        case "always": return .always
+        case "ignore", "no": return .no
+        default: return nil
+        }
+    }
+    var allowMode: String? { self == .no ? nil : self == .always ? "permanent" : "once" }
+    /// approved events use once|always, while allow messages use once|permanent.
+    var approvedMode: String? { self == .no ? nil : rawValue }
+}
+
 struct Question: Codable, Sendable, Equatable, Identifiable {
     let message: QuestionMessage
     let workspaceName: String
     var id: String { message.id }
-    /// A `relay:allow` question: a workspace handed over a task that is not allowed yet (SA-12). Answered like any question.
-    var isAllow: Bool { message.body.options.contains("Once") && message.body.options.contains("Always") }
-    /// Button wording; the raw option is what gets sent. "Always allow <scope>" when the workspace named a scope.
+    /// Compatibility for existing Chat cards; group cards must use isGroupAllow.
+    var isLegacyAllow: Bool {
+        guard message.body.allowQuestion == nil else { return false }
+        let options = message.body.options.map { $0.lowercased() }
+        return (options.contains("once") || options.contains("allow once")) && options.contains("always")
+    }
+    var isGroupAllow: Bool {
+        message.body.allowQuestion == true && message.body.options.count == 3 &&
+            Set(message.body.options) == Set(["once", "always", "no"])
+    }
+    var isAllow: Bool { isGroupAllow || isLegacyAllow }
+    /// Labels never change the raw option sent to the relay.
     func label(_ option: String) -> String {
         guard isAllow else { return option }
-        switch option {
-        case "Once": return "Allow once"
-        case "Always": return message.body.scope.map { "Always allow \($0)" } ?? "Always"
-        case "No": return "Ignore"
-        default: return option
+        if option == "Once" { return "Allow once" } // Existing Chat option.
+        switch AnswerWord.parse(option) {
+        case .once: return "Allow once"
+        case .always: return message.body.scope.map { "Always allow \($0)" } ?? "Always"
+        case .no: return "No"
+        case nil: return option
         }
     }
     /// The attachment id previewed next to an option, if any.
@@ -123,6 +152,11 @@ struct TextBody: Codable, Sendable, Equatable {
     /// Set on the phone's own texts (the UUID of the outbox item).
     var clientId: String? = nil
     var general: Bool? = nil
+    // Incoming Chat metadata; never included in a phone send.
+    var by: String? = nil
+    var via: String? = nil
+    var phone: String? = nil
+    var day: String? = nil
     /// Workspace texts worth hearing (GET /v1/phone/speech/<id>).
     var speak: SpeakHint? = nil
     var attachments: [MessageAttachment] = []
@@ -130,26 +164,51 @@ struct TextBody: Codable, Sendable, Equatable {
     var location: LocationShare? = nil
     var feedback: Feedback? = nil
     var ticketView: TicketSnapshot? = nil
+    var group: GroupInfo? = nil
+    var groupEvent: GroupEvent? = nil
+    var origin: GroupOrigin? = nil
+    var echoOf: String? = nil
+    var toPerson: Bool? = nil
+    var task: GroupTask? = nil
+    var sharedFiles: [String]? = nil
 
     init(text: String = "", update: TextUpdate? = nil, clientId: String? = nil, general: Bool? = nil, speak: SpeakHint? = nil,
          attachments: [MessageAttachment] = [], voice: VoiceMemo? = nil, location: LocationShare? = nil, feedback: Feedback? = nil,
-         ticketView: TicketSnapshot? = nil) {
+         ticketView: TicketSnapshot? = nil,
+         group: GroupInfo? = nil, groupEvent: GroupEvent? = nil, by: String? = nil, via: String? = nil, phone: String? = nil,
+         origin: GroupOrigin? = nil, echoOf: String? = nil, toPerson: Bool? = nil, task: GroupTask? = nil, sharedFiles: [String]? = nil) {
         self.text = text; self.update = update; self.clientId = clientId; self.general = general; self.speak = speak
         self.attachments = attachments; self.voice = voice; self.location = location; self.feedback = feedback; self.ticketView = ticketView
+        self.group = group; self.groupEvent = groupEvent; self.by = by; self.via = via; self.phone = phone
+        self.origin = origin; self.echoOf = echoOf; self.toPerson = toPerson; self.task = task; self.sharedFiles = sharedFiles
     }
-    private enum CodingKeys: String, CodingKey { case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView }
+    private enum CodingKeys: String, CodingKey {
+        case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView
+        case group, groupEvent, by, via, phone, day, origin, echoOf, toPerson, task, sharedFiles
+    }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         update = try? c.decodeIfPresent(TextUpdate.self, forKey: .update)
         clientId = try? c.decodeIfPresent(String.self, forKey: .clientId)
         general = try? c.decodeIfPresent(Bool.self, forKey: .general)
+        by = try? c.decodeIfPresent(String.self, forKey: .by)
+        via = try? c.decodeIfPresent(String.self, forKey: .via)
+        phone = try? c.decodeIfPresent(String.self, forKey: .phone)
+        day = try? c.decodeIfPresent(String.self, forKey: .day)
         speak = try? c.decodeIfPresent(SpeakHint.self, forKey: .speak)
         attachments = (try? c.decodeIfPresent([MessageAttachment].self, forKey: .attachments)) ?? []
         voice = try? c.decodeIfPresent(VoiceMemo.self, forKey: .voice)
         location = try? c.decodeIfPresent(LocationShare.self, forKey: .location)
         feedback = try? c.decodeIfPresent(Feedback.self, forKey: .feedback)
         ticketView = try? c.decodeIfPresent(TicketSnapshot.self, forKey: .ticketView)
+        group = try? c.decodeIfPresent(GroupInfo.self, forKey: .group)
+        groupEvent = try? c.decodeIfPresent(GroupEvent.self, forKey: .groupEvent)
+        origin = try? c.decodeIfPresent(GroupOrigin.self, forKey: .origin)
+        echoOf = try? c.decodeIfPresent(String.self, forKey: .echoOf)
+        toPerson = try? c.decodeIfPresent(Bool.self, forKey: .toPerson)
+        task = try? c.decodeIfPresent(GroupTask.self, forKey: .task)
+        sharedFiles = try? c.decodeIfPresent([String].self, forKey: .sharedFiles)
     }
     func encode(to e: Encoder) throws {
         var c = e.container(keyedBy: CodingKeys.self)

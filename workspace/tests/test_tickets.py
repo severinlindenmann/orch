@@ -366,3 +366,41 @@ def test_cli_shows_plain_history_but_stores_the_machine_text(proj, run, new_tick
     assert read(proj, tid)["history"][-1]["text"] == "Edited due, owner"
     code, out, _ = run("log", tid, "Edited by hand")
     assert code == 0 and "Edited by hand" in out
+
+
+@pytest.mark.parametrize("method", ["set_status", "patch"])
+@pytest.mark.parametrize("target", ["open", "ready"])
+@pytest.mark.parametrize(
+    "actor,env_agent,cleared",
+    [
+        ("human:me", None, True),
+        ("agent:test", None, False),
+        ("human:me", "codex", False),
+    ],
+)
+def test_started_reset_only_by_person(
+    proj, new_ticket, monkeypatch, method, target, actor, env_agent, cleared
+):
+    monkeypatch.setattr(tickets, "agent_tool", lambda: env_agent)
+    tid = new_ticket()
+    tickets.mark_working(proj, tid, "agent:test", "Test")
+    if method == "set_status":
+        result = tickets.set_status(proj, tid, target, actor)
+    else:
+        result = tickets.patch(
+            proj, tid, tickets.load(proj, tid)["revision"], json.dumps({"status": target}), actor
+        )
+    assert ("started" not in result) if cleared else result["started"] is True
+
+
+def test_started_guard_writes_once_without_history(proj, new_ticket):
+    tid = new_ticket()
+    tickets.set_status(proj, tid, "waiting", "human:me")
+    before = tickets.load(proj, tid)
+    tickets.mark_working(proj, tid, "agent:test", "Test")
+    first = tickets.load(proj, tid)
+    assert first["started"] is True
+    assert first["status"] == "waiting"
+    assert first["history"] == before["history"]
+    tickets.mark_working(proj, tid, "agent:test", "Test")
+    assert tickets.load(proj, tid) == first

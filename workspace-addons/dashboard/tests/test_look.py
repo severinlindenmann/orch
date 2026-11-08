@@ -214,3 +214,27 @@ def test_node_tests():
         [node, "--test", str(HERE / "look.test.js")], capture_output=True, text=True, check=False
     )
     assert r.returncode == 0, r.stdout[-800:] + r.stderr[-400:]
+
+
+def test_workspace_needs_are_local_and_cached(ws, tmp_path, monkeypatch):
+    from orch_dashboard import data
+    other = tmp_path / 'Other'
+    (other / '.orch').mkdir(parents=True)
+    outside = tmp_path / 'Outside'
+    (outside / '.orch').mkdir(parents=True)
+    seen = []
+    def run(binary, args, root, timeout=5):
+        if args[0] == 'look':
+            return {'icon': 'house'}
+        if args[0] == 'status':
+            return [{"workspace": str(p), "name": p.name} for p in (ws, other, tmp_path / 'Missing')]
+        assert args == ['needs', '--json'] and timeout == 3
+        seen.append(root)
+        return [{}, {}] if root == ws else None
+    monkeypatch.setattr(data, 'run_orch', run)
+    look.forget(ws)
+    rows = look.load_look(ws, 'orch')['workspaces']
+    assert [r['needs'] for r in rows] == [2, None, None]
+    assert seen == [ws, other]
+    look.load_look(ws, 'orch')
+    assert seen == [ws, other]

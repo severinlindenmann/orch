@@ -17,10 +17,11 @@ final class AppModel {
     private(set) var pairedWorkspaces: [WorkspaceRef] = []
 
     // Data
-    private(set) var workspaces: [Workspace] = []
+    private(set) var workspaces: [Workspace] = [] { didSet { rebuildGroups() } }
     private(set) var questions: [Question] = []
     /// Texts between this phone and its workspaces, newest first.
-    private(set) var messages: [PhoneMessage] = []
+    private(set) var messages: [PhoneMessage] = [] { didSet { rebuildGroups() } }
+    private(set) var groups = GroupSnapshot(groups: [], dropped: [])
     /// Newest work update per ticket (`GET /v1/phone/updates`).
     private(set) var updates: [TicketUpdate] = []
     /// question message id -> the answer this phone sent
@@ -310,11 +311,35 @@ final class AppModel {
         }
         outbox.reconcile(with: messages)
     }
+    private var firstSeen: [String: Date] = [:]
+    private var arrival: [String: Int] = [:]
+    private var arrivalCounter = 0
+
+    private func rebuildGroups() {
+        let names = Dictionary(workspaces.map { ($0.id, $0.displayName) }, uniquingKeysWith: { first, _ in first })
+        let snapshot = GroupStore.build(messages: messages, workspaces: names, ownPhoneId: credentials?.phoneId ?? "",
+                                        ownMessageIds: Set(messages.filter(\.fromPhone).map(\.id)), receivedAt: firstSeen, arrival: arrival)
+        #if DEBUG
+        for drop in snapshot.dropped where !groups.dropped.contains(drop) {
+            print("group drop \(drop.rule) \(drop.messageId)")
+        }
+        #endif
+        if groups != snapshot { groups = snapshot }
+    }
+
     private func merge(_ items: [PhoneMessage]) {
+        for m in items.reversed() where arrival[m.id] == nil {
+            arrival[m.id] = arrivalCounter
+            arrivalCounter += 1
+            firstSeen[m.id] = Date()
+        }
         var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
         for m in items { byId[m.id] = m }          // newer data (delivered_at) replaces the old copy
         let merged = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
         if merged != messages { messages = merged }
+        let retained = Set(messages.map(\.id))
+        arrival = arrival.filter { retained.contains($0.key) }
+        firstSeen = firstSeen.filter { retained.contains($0.key) }
     }
     /// client_ids of messages the relay stored (first tick) that `/messages` has not listed yet.
     private func unlistedSentClientIds() -> Set<String> {
@@ -387,6 +412,21 @@ final class AppModel {
     /// invalid draft. A text for a topic of the relay add-on resolves later via `ConversationBuilder.resolve`.
     @discardableResult
     func send(_ draft: MessageDraft, to target: SendTarget) async throws -> OutboxItem {
+        var draft = draft
+        if let replyTo = draft.replyTo, isGroupCopy(replyTo) { draft.replyTo = nil }
+        return try await sendInternal(draft, to: target)
+    }
+
+    func isGroupCopy(_ id: String) -> Bool {
+        groups.groups.contains { group in
+            group.messages.contains {
+                $0.id == id && $0.message.message.from == group.key.host && $0.message.message.to == "phones"
+            }
+        }
+    }
+
+    /// Group sends explicitly opt into fan-out; plain sends strip group-copy quotes first.
+    func sendInternal(_ draft: MessageDraft, to target: SendTarget) async throws -> OutboxItem {
         let item = try outbox.enqueue(draft, to: target)
         await flushOutbox()
         if let now = outbox.item(clientId: item.clientId) { return now }

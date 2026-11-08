@@ -11,6 +11,7 @@
     "key": { "$ref": "#/$defs/key", "description": "Optional. Short display key for people, e.g. DM1-12: the workspace code ([workspace] code in .orch/config.toml) at creation, '-', and a number from the workspace counter (.orch/ticket-counter.json) that is never reused. Set once at creation and never rewritten (a new code changes only later keys). The id stays the identity everywhere; every command that takes an id also takes the key, any case. Tickets made before keys have none." },
     "title": { "type": "string", "minLength": 1, "maxLength": 200 },
     "status": { "enum": ["open", "active", "waiting", "ready", "review", "done", "dropped"] },
+    "started": { "type": "boolean", "description": "The ticket was started by an agent at least once; cleared only when a person moves it to open or ready." },
     "created_at": { "$ref": "#/$defs/time" },
     "updated_at": { "$ref": "#/$defs/time" },
     "checklist": { "type": "array", "items": { "$ref": "#/$defs/check" } },
@@ -45,6 +46,7 @@
     "owner": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The person who owns the ticket, free text (a name), e.g. 'Severin'. Not a login." },
     "due": { "type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "Optional. Due day, YYYY-MM-DD, no time and no zone." },
     "note": { "type": "string", "maxLength": 2000, "description": "Optional. Free note from people, shown on the ticket. Plain text." },
+    "done_when": { "type": "string", "maxLength": 2000, "description": "Optional. What people want to be true when the ticket is done. Plain text." },
     "summary": { "type": "string", "maxLength": 200, "description": "Optional. Where things stand, one or two plain sentences, kept current by whoever works on it. Used to start a fresh agent session." },
     "parent": { "oneOf": [{ "$ref": "#/$defs/tid" }, { "type": "null" }], "description": "Optional. Id of the parent ticket (sub-tickets). Set at creation. Children are not stored on the parent: they are found by reading every ticket's parent." },
     "sessions": {

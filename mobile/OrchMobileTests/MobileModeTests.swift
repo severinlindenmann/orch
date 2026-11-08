@@ -14,26 +14,31 @@ final class MobileModeTests: XCTestCase {
     }
     func testOnlineShowsTurnOff() {
         let s = MobileModeBannerState.of(ws(on: true, lastSeen: "2026-11-07T14:39:00Z"), now: now, calendar: cal)
-        XCTAssertEqual(s?.text, "Acme PC is in Mobile mode")
+        XCTAssertEqual(s?.text, "Acme PC · Mobile mode on")
         XCTAssertEqual(s?.canTurnOff, true)
     }
     func testSilentComputerSaysSinceWhen() {
         let s = MobileModeBannerState.of(ws(on: true, lastSeen: "2026-11-07T14:31:00Z"), now: now, calendar: cal)
-        XCTAssertEqual(s?.text, "Can't reach Acme PC since 14:31. Your answers wait until it is back.")
+        XCTAssertEqual(s?.text, "Acme PC · Can't reach since 14:31")
         XCTAssertEqual(s?.canTurnOff, false)
     }
     func testMutedPhoneSaysMutedBut() {
         let s = MobileModeBannerState.of(ws(on: true, lastSeen: "2026-11-07T14:39:00Z", muted: "forever"), now: now, calendar: cal)
-        XCTAssertEqual(s?.text, "Muted, but Acme PC is in Mobile mode")
+        XCTAssertEqual(s?.text, "Acme PC · Mobile mode muted")
     }
     func testMissingMachineFallsBackToWorkspaceName() {
         let s = MobileModeBannerState.of(ws(on: true, machine: nil, lastSeen: "2026-11-07T14:39:00Z"), now: now, calendar: cal)
-        XCTAssertEqual(s?.text, "Acme is in Mobile mode")
+        XCTAssertEqual(s?.text, "Acme · Mobile mode on")
     }
     func testDecodesTheRelayShape() throws {
         let json = #"{"id":"ws_a","name":"A","description":"","tags":[],"online":true,"last_seen":null,"open_questions":0,"muted_until":null,"mobile_mode":{"on":true,"since":"2026-11-07T14:02:00Z","ends_at":"2026-11-08T02:02:00Z","machine":"Acme PC"}}"#
         let w = try JSONCoding.decoder.decode(Workspace.self, from: Data(json.utf8))
         XCTAssertEqual(w.mobileMode?.machine, "Acme PC")
         XCTAssertEqual(w.mobileMode?.on, true)
+    }
+
+    func testOnBannerIsTintedAndOthersDiffer() {
+        XCTAssertNotEqual(MobileModeBannerState.on(pc: "A").background, MobileModeBannerState.muted(pc: "A").background)
+        XCTAssertNotEqual(MobileModeBannerState.on(pc: "A").background, MobileModeBannerState.unreachable(pc: "A", since: nil).background)
     }
 }

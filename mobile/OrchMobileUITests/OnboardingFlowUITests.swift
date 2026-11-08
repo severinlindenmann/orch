@@ -144,6 +144,7 @@ final class OnboardingFlowUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock"]
         app.launch()
+        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
         app.buttons["Paste invitation link"].tap()
         let field = app.textFields["invite-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
@@ -162,6 +163,7 @@ final class OnboardingFlowUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock"]
         app.launch()
+        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
         app.buttons["Paste invitation link"].tap()
         let field = app.textFields["invite-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))

@@ -15,10 +15,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import runfiles
-from .data import run_orch
+from .data import publish_connected, run_orch
 from .look import LOOK_OPS
 from .look import forget as look_forget
-from .mobile import MOBILE_OPS
+from .mobile import MOBILE_OPS, MOBILE_REQUIRED_ADDONS
 
 MAX_TEXT = 2000
 TID = re.compile(r"t_[a-z0-9]{6,16}")
@@ -57,7 +57,7 @@ AGENT = re.compile(r"[a-z][a-z0-9-]{1,31}")
 MAX_COMMAND = 500
 MAX_TASK = 500
 PERMISSIONS = ("ask", "auto", "full")
-PATCH_KEYS = ("title", "status", "owner", "due", "note", "summary")
+PATCH_KEYS = ("title", "status", "owner", "due", "note", "done_when", "summary")
 STATUSES = ("open", "ready", "active", "waiting", "review", "done")
 
 
@@ -121,15 +121,22 @@ def _answer(a):
 
 
 def _ticket_new(a):
-    _only(a, ("title", "parent", "owner", "due", "note"))
+    _only(a, ("title", "parent", "owner", "due", "note", "done_when"))
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
-    for k in ("owner", "due", "note"):
+    for k in ("owner", "due", "note", "done_when"):
         if a.get(k):
             v = _text(a[k], k)
             if k == "due" and not DAY.fullmatch(v):
                 raise BadRequest("The due day must look like 2026-11-30.")
-            flags.append(f"--{k}={v}")
+            flags.append(f"--{k.replace('_', '-')}={v}")
     return ["ticket", "new"], flags, [_text(a.get("title"), "title")]
+
+
+def _ticket_paste(a):
+    _only(a, ("text", "parent"))
+    text = _text(a.get("text"))
+    title = next(line.strip() for line in text.splitlines() if line.strip())[:80]
+    return _ticket_new({"title": title, "note": text, "parent": a.get("parent")})
 
 
 def _ticket_patch(a):
@@ -143,7 +150,7 @@ def _ticket_patch(a):
         if k == "due" and not (isinstance(v, str) and DAY.fullmatch(v)):
             raise BadRequest("The due day must look like 2026-11-30.")
         if k not in ("status", "due"):
-            _text(v, k, empty=k in ("owner", "note"))
+            _text(v, k, empty=k in ("owner", "note", "done_when"))
     rev = _rev(a.get("if_revision"), required=True)
     return (
         ["ticket", "patch", _tid(a.get("ticket"))],
@@ -153,14 +160,14 @@ def _ticket_patch(a):
 
 
 def _ticket_edit(a):
-    _only(a, ("ticket", "title", "owner", "due", "note", "if_revision"))
+    _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "if_revision"))
     flags = []
-    for k in ("title", "owner", "due", "note"):
+    for k in ("title", "owner", "due", "note", "done_when"):
         if k in a:
             v = _text(a[k], k, empty=k != "title")
             if k == "due" and not DAY.fullmatch(v):
                 raise BadRequest("The due day must look like 2026-11-30.")
-            flags.append(f"--{k}={v}")
+            flags.append(f"--{k.replace('_', '-')}={v}")
     if not flags:
         raise BadRequest("Nothing to change.")
     rev = _rev(a.get("if_revision"))
@@ -266,13 +273,19 @@ def _addon_start(a):
 def _addon_act(a):
     """ONE generic op for an add-on's own verbs: `orch <addon> act <verb> -- <target>`. The add-on name is checked
     against `orch addon list` in run_op (it must be on here); the dashboard code never names one."""
-    _only(a, ("addon", "verb", "target"))
+    _only(a, ("addon", "verb", "target", "value"))
     addon, verb = a.get("addon"), a.get("verb")
     if not (isinstance(addon, str) and ADDON.fullmatch(addon) and addon not in RESERVED):
         raise BadRequest("That is not an add-on.")
     if not (isinstance(verb, str) and VERB.fullmatch(verb)):
         raise BadRequest("That action is not available.")
-    return [addon, "act", verb], [], [_tid(a.get("target"))]
+    flags = []
+    if "value" in a:
+        value = _text(a["value"], "time")
+        if verb != "repeat" or len(value) > 200:
+            raise BadRequest("Only repeat takes a time, at most 200 characters.")
+        flags.append(f"--value={value}")
+    return [addon, "act", verb], flags, [_tid(a.get("target"))]
 
 
 def _agent_name(v) -> str:
@@ -351,10 +364,23 @@ def _addon_set(a):
     return (["addon", "add", name], ["--yes"], []) if a["on"] else (["addon", "remove", name], [], [])
 
 
+def _link(a, extend=False):
+    _only(a, ("id", "days") if extend else ("id",))
+    fid = a.get("id")
+    if not isinstance(fid, str) or not re.fullmatch(r"f_[a-z0-9]+", fid):
+        raise BadRequest("That is not a shared file id.")
+    if extend and (type(a.get("days")) is not int or not 1 <= a["days"] <= 90):
+        raise BadRequest("Choose a whole number of days from 1 to 90.")
+    return ["publish", "extend" if extend else "delete", fid], (["--days", str(a["days"])] if extend else []), []
+
+
 # op -> function(args) -> (words incl. ids, flags, free text after "--")
 OPS = {
+    "link.extend": lambda a: _link(a, True),
+    "link.stop": _link,
     "answer": _answer,
     "ticket.new": _ticket_new,
+    "ticket.paste": _ticket_paste,
     "ticket.patch": _ticket_patch,
     "ticket.edit": _ticket_edit,
     "log": _log,
@@ -428,7 +454,7 @@ def _agent_exists(root: Path, orch_bin: str, name: str) -> bool:
 
 def _audit(root: Path, op: str, args: dict) -> None:
     """One line per settings change in .orch/run/dashboard/actions.log (local, gitignored): who, what, the exact command."""
-    keep = {k: v for k, v in args.items() if k in ("name", "command", "prompt_via", "on", "mode")}
+    keep = {k: v for k, v in args.items() if k in ("name", "command", "prompt_via", "on", "mode", "id", "days")}
     line = json.dumps(
         {
             "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -481,6 +507,10 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
     argv = build_argv(op, args)
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
+    if op in ("link.extend", "link.stop") and not publish_connected(root, orch_bin):
+        raise BadRequest("Sharing is not set up here.")
+    if op in MOBILE_REQUIRED_ADDONS and not _addon_is_on(root, orch_bin, MOBILE_REQUIRED_ADDONS[op]):
+        raise BadRequest("That add-on is not on in this workspace.")
     if op in ("addon.act", "ticket.field") and not _addon_is_on(root, orch_bin, args["addon"]):
         raise BadRequest("That add-on is not on in this workspace.")
     if op == "addon.set" and not _addon_known(root, orch_bin, args["name"]):
@@ -520,7 +550,7 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
     if r.returncode == 0:
         if op.startswith("look."):
             look_forget(root)
-        if op in ("config.agent.add", "addon.set", "config.agent", "config.permissions", "workflow.set", "share.set"):
+        if op in ("link.extend", "link.stop", "config.agent.add", "addon.set", "config.agent", "config.permissions", "workflow.set", "share.set"):
             _audit(root, op, args)
         return 200, "", out if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None

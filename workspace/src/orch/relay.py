@@ -174,10 +174,10 @@ def _break_stale(lock: Path) -> bool:
 
 
 @contextlib.contextmanager
-def locked(root: Path, wait: float = 10.0):
-    """`.orch/relay.lock`: one writer of the inbox files at a time (O_EXCL, works on every OS). Not reentrant.
+def locked(root: Path, wait: float = 10.0, name: str = "relay.lock"):
+    """`.orch/<name>` (relay.lock): one writer of the inbox files at a time (O_EXCL, any OS). Not reentrant.
     Only the owner removes it again (a token in the file), so a slow holder never frees a successor's lock."""
-    lock = root / ".orch" / "relay.lock"
+    lock = root / ".orch" / name
     lock.parent.mkdir(parents=True, exist_ok=True)
     token = secrets.token_hex(8).encode()
     end = time.monotonic() + wait
@@ -425,6 +425,7 @@ def _message(
     ticket: str | None = None,
     reply_to: str | None = None,
     mid: str | None = None,
+    created_at: str | None = None,
 ) -> dict:
     """Save the exact bytes first, then post. When the relay can't be reached the file stays in
     .orch/outbox/ and the result carries sent=False: the next orch relay command sends the same bytes."""
@@ -434,7 +435,7 @@ def _message(
         "from": _cfg(root)["workspace"],
         "to": to,
         "type": type_,
-        "created_at": tickets.now(),
+        "created_at": created_at or tickets.now(),
         "body": body,
     }
     if ticket:
@@ -684,9 +685,24 @@ def send_file(root: Path, target: str, path: Path, text: str | None, ticket: str
 
 
 def send_delegate(
-    root: Path, target: str, title: str, text: str, checklist: list[str], ticket: str | None
+    root: Path,
+    target: str,
+    title: str,
+    text: str,
+    checklist: list[str],
+    ticket: str | None,
+    group: bool = False,
 ) -> dict:
     to = resolve(root, target)
+    if group and ticket and to.startswith("ws_") and not tickets.is_general(root, ticket):
+        # only when asked for (--group): the ticket's group opens and its card is shared with the workspace
+        # (chat-groups.md); a workspace that can't join gets the plain delegate, and is not left a member
+        from orch import chat_groups
+
+        try:
+            return chat_groups.delegate(root, ticket, to, title, text, checklist)
+        except Refused:
+            pass  # any group-setup refusal: the task still goes, as a plain delegate
     body: dict = {"title": title, "text": text}
     if checklist:
         body["checklist"] = checklist
@@ -785,10 +801,22 @@ def _answer_asked(root: Path, msg: dict) -> tuple[dict | None, str]:
         return None, f"ignored: {frm} was not asked"
     if b.get("question_id") != asked["question_id"]:
         return None, "ignored: answer is for another question"
+    if asked.get("group"):  # a question we asked a group member: only a current member of an open group
+        from orch import chat_groups
+
+        if not msg_group(msg):
+            return None, "ignored: an answer to a group question carries body.group"
+
+        if why := chat_groups.answer_allowed(root, asked, frm):
+            return None, why
     return asked, ""
 
 
-def _answer_by(msg: dict) -> tuple[str, str]:
+def msg_group(msg: dict) -> bool:
+    return isinstance(msg.get("body"), dict) and isinstance(msg["body"].get("group"), dict)
+
+
+def _answer_by(msg: dict, asked: dict | None = None) -> tuple[str, str]:
     frm, b = str(msg.get("from", "")), msg.get("body", {})
     by = b.get("answered_by")
     if isinstance(by, str):  # untrusted: it is pasted to the agent as "From <by>: ..."
@@ -796,7 +824,9 @@ def _answer_by(msg: dict) -> tuple[str, str]:
     # Only a phone is a person. A subscriber or another workspace is another system: always agent:, never
     # human: (a person's answer starts the agent again; a peer must not decide that by its own label).
     ok_prefix = "human:" if frm.startswith("ph_") else "agent:"
-    if not (isinstance(by, str) and by.startswith(ok_prefix)):
+    if not (isinstance(by, str) and by.startswith(ok_prefix)) or (
+        asked is not None and asked.get("group") and not frm.startswith("ph_")
+    ):  # we asked a group member: recorded by its id from the asked record, whatever the answer says
         by = f"human:{frm}" if frm.startswith("ph_") else f"agent:{frm}"
     via = "phone" if frm.startswith("ph_") else "subscriber" if frm.startswith("sub_") else "relay"
     return by, via
@@ -807,13 +837,18 @@ def _applied_ticket(root: Path, msg: dict) -> str | None:
     asked, _ = _answer_asked(root, msg)
     if not asked:
         return None
-    by, via = _answer_by(msg)
+    by, via = _answer_by(msg, asked)
     try:
         q = next(
             x for x in tickets.load(root, asked["ticket"])["questions"] if x["id"] == asked["question_id"]
         )
     except (Refused, StopIteration, ValueError, KeyError):
         return None
+    if (
+        asked.get("group")
+        and q.get("answer") != clean_untrusted(str(msg.get("body", {}).get("answer")), 2000).strip()
+    ):
+        return None  # a second, different answer from a member is not the first one again
     return (
         asked["ticket"]
         if q.get("answer") is not None and q.get("answered_by") == by and q.get("via") == via
@@ -826,7 +861,7 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     asked, why = _answer_asked(root, msg)
     if not asked:
         return why, None
-    by, via = _answer_by(msg)
+    by, via = _answer_by(msg, asked)
     try:
         t, q = tickets.answer(
             root,
@@ -839,6 +874,10 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     except Refused as e:
         if _applied_ticket(root, msg):  # a crash after the write, before "seen": same answer, nothing to redo
             return f"answered {asked['question_id']} on {asked['ticket']} (via {via})", asked["ticket"]
+        if asked.get("group"):
+            from orch import chat_groups
+
+            chat_groups.note_answer_kept(root, asked, msg)  # a later answer is kept as a note
         return f"not applied to {asked['ticket']}: {e}", None
     _to_waiting_agent(root, t["id"], q, by)
     return f"answered {asked['question_id']} on {asked['ticket']} (via {via})", asked["ticket"]
@@ -941,13 +980,6 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
 # ---- phone texts and the allow question (SA-01, SA-12, UX-02) -----------------------------------
 
 ALLOW_OPTIONS = ("Allow once", "Always", "Ignore")
-_ALLOW_WORDS = {
-    "allow once": "once",
-    "once": "once",
-    "always": "permanent",
-    "ignore": "ignore",
-    "no": "ignore",
-}
 
 
 def _by_relay(frm: str) -> str:
@@ -1281,7 +1313,16 @@ def _chat_record(root: Path, mid: str, body: dict) -> None:
 
 
 def _continue(
-    root: Path, tid: str, mid: str, who: str, by: str, body: dict, general: bool, final: bool = False
+    root: Path,
+    tid: str,
+    mid: str,
+    who: str,
+    by: str,
+    body: dict,
+    general: bool,
+    final: bool = False,
+    *,
+    frm: str | None = None,
 ) -> None:
     """A phone text into an existing ticket (or the General ticket): queue it for the running agent, then
     record it. Same message id twice = once."""
@@ -1299,7 +1340,7 @@ def _continue(
             "close or delete anything.)"
         )
         _chat_record(root, mid, body)
-    runs.pending_add(root, tid, who, "message", text, "phone", "p_" + mid[2:])
+    runs.pending_add(root, tid, who, "message", text, "phone", "p_" + mid[2:], phone=frm)
 
     def op(t):
         r = t.setdefault("ext", {}).setdefault("relay", {})
@@ -1339,15 +1380,20 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
         return f"added to {tid}", tid
     if tid is None and general:
         tid = tickets.ensure_general(root, by)
-        _continue(root, tid, mid, who, by, body, True, final)
+        _continue(root, tid, mid, who, by, body, True, final, frm=frm)
         _working_add(root, mid, frm, tid, True, "item")
         _ack_once(root, mid, frm, tid, True, "Got it")
         return "General conversation", tid
     if tid is None and msg.get("ticket") and _ticket_exists(root, msg["ticket"]):
         tid = msg["ticket"]
-        _continue(root, tid, mid, who, by, body, False, final)
+        _continue(root, tid, mid, who, by, body, False, final, frm=frm)
         _working_add(root, mid, frm, tid, False, "item")
         _ack_once(root, mid, frm, tid, False, "Got it")
+        from orch import chat_groups
+
+        with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
+            if chat_groups.phone_text(root, tid, msg):  # G8: only a reply to a group copy joins the group
+                return f"added to {tid} and the group", tid
         return f"added to {tid}", tid
     if tid is None:
         spoken = body.get("voice", {}).get("transcript", "") if isinstance(body.get("voice"), dict) else ""
@@ -1417,7 +1463,7 @@ def _allow_ticket(root: Path, mid: str) -> str | None:
     return None
 
 
-def _ensure_allow_question(root: Path, msg: dict) -> str:
+def _ensure_allow_question(root: Path, msg: dict, notify: bool = True) -> str:
     """A delegate/start without an allow becomes a waiting ticket with the relay:allow question, once."""
     if (tid := _allow_ticket(root, msg["id"])) is not None:
         return tid
@@ -1436,8 +1482,27 @@ def _ensure_allow_question(root: Path, msg: dict) -> str:
         "key": b.get("key") if msg["type"] == "start" else None,
     }
     text = f"{peer} wants {me or 'this workspace'} to: {task}. Allow it?"
-    tickets.ask(root, tid, text, list(ALLOW_OPTIONS), None, by, kind="relay:allow", action=json.dumps(action))
+    grouped = msg_group(msg) and msg["type"] == "delegate"
+    options = ["once", "always", "no"] if grouped else list(ALLOW_OPTIONS)  # G11 wire words
+    _, q = tickets.ask(root, tid, text, options, None, by, kind="relay:allow", action=json.dumps(action))
+    if (
+        grouped and notify
+    ):  # a task from a group: the host hears "waiting for approval", our phones the question
+        _group_waiting(root, msg, tid)
     return tid
+
+
+def _group_waiting(root: Path, msg: dict, tid: str) -> None:
+    """The group side of a new allow question (host: waiting_approval; phones: the question). Never inside
+    relay.lock. Safe to call twice: the group side records the allow ticket and sends once."""
+    if not (msg_group(msg) and msg.get("type") == "delegate" and tid):
+        return
+    from orch import chat_groups
+
+    with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError, StopIteration):
+        t = tickets.load(root, tid)
+        q = next(x for x in t["questions"] if x.get("kind") == "relay:allow")
+        chat_groups.waiting_approval(root, msg, tid, q["id"])
 
 
 def _drop_note(root: Path, mid: str, note: str) -> None:
@@ -1454,7 +1519,8 @@ def _person(answered_by) -> str:
 
 def apply_allow_answers(root: Path) -> list[str]:
     """Apply each answered relay:allow question once (any surface answered it). Returns notes."""
-    notes = []
+    notes: list[str] = []
+    denied: list[str] = []
     with locked(root):
         for t in tickets.list_all(root):
             r = t.get("ext", {}).get("relay", {})
@@ -1467,7 +1533,11 @@ def apply_allow_answers(root: Path) -> list[str]:
             )
             if q is None or r.get("allow_applied") == q["id"]:
                 continue
-            choice = _ALLOW_WORDS.get(str(q["answer"]).strip().casefold())
+            from orch import chat_groups
+
+            choice = {"once": "once", "always": "permanent", "no": "ignore"}.get(
+                chat_groups.parse_allow_answer(q["answer"])
+            )
             if choice is None:
                 if r.get("allow_note") != q["id"]:
                     ans = clean_untrusted(str(q["answer"]), 100)
@@ -1490,6 +1560,7 @@ def apply_allow_answers(root: Path) -> list[str]:
                 q.get("answered_by") or "unknown",
             )
             if choice == "ignore":
+                denied.append(mid)  # told to the group after relay.lock is released
                 _drop_note(root, mid, f"ignored by {who} ({via})")
                 if mid not in seen(root):
                     _mark_seen(root, mid)
@@ -1511,6 +1582,8 @@ def apply_allow_answers(root: Path) -> list[str]:
 
             tickets.apply_op(root, t["id"], op)
             notes.append(label)
+    for mid in denied:  # outside relay.lock
+        _group_denied(root, mid)
     return notes
 
 
@@ -1519,6 +1592,15 @@ def _allow_history(root: Path, msg: dict) -> str | None:
         if g.get("message_id") == msg["id"] and g.get("by"):
             return f"Allowed by {g['by']} ({g.get('via') or 'cli'})"
     return None
+
+
+def sync_groups(root: Path) -> None:
+    """Group chats (chat-groups.md): host - ticket card and `closed`; member - task reports and `seen`.
+    Best effort, like sync_phone_views: a relay that is down never blocks an inbox call."""
+    from orch import chat_groups
+
+    with contextlib.suppress(Refused, OSError, ValueError, KeyError, TypeError):
+        chat_groups.sync(root)
 
 
 def sync_phone_views(root: Path) -> None:
@@ -1569,12 +1651,18 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
     with contextlib.suppress(Refused):
         apply_allow_answers(root)
     sync_phone_views(root)
+    sync_groups(root)
     _, arrival = _pull(root, wait)
     d = root / ".orch" / "inbox"
     pending = []
     for f in d.glob("m_*.json"):  # everything saved and not yet seen, also from earlier pulls
         m = net.read_json(f, None)
-        if isinstance(m, dict) and m.get("id") == f.stem and f.stem not in seen(root):
+        if (
+            isinstance(m, dict)
+            and m.get("id") == f.stem
+            and f.stem not in seen(root)
+            and f"{m.get('from')}/{f.stem}" not in seen(root)
+        ):
             pending.append(m)
     out = []
     for m in sorted(
@@ -1586,15 +1674,34 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
         note, auto, applied = "", False, None
         try:
             typ = m.get("type")
-            if typ in ("answer", "allow"):
+            gres = _group_step(root, m)
+            if gres is not None and gres.get("handled"):
+                note, applied, auto = gres["note"], gres.get("applied"), bool(gres.get("auto"))
+                if auto:
+                    with locked(root):  # keyed by sender too: a refused forgery can't use up a real id
+                        _mark_seen(root, f"{m.get('from')}/{m['id']}")
+                else:
+                    out.append(
+                        {"message": m, "note": note, "auto": False, "applied": applied, "allowed": None}
+                    )
+                    continue
+            elif typ in ("answer", "allow"):
+                after = None  # group hooks run after relay.lock is released (lock order: relay, never inside)
                 with locked(root):
                     if m["id"] not in seen(root):  # another reader may have handled it meanwhile
                         if typ == "answer":
                             note, applied = _apply_answer(root, m)
+                            if applied and msg_group(m):
+                                after = "answer"
                         else:
                             note = _store_allow(root, m)
+                            after = "allow"
                         auto = True
                         _mark_seen(root, m["id"])  # last
+                if after == "answer":
+                    _group_after_answer(root, m, applied)
+                elif after == "allow":
+                    _group_allow(root, m)
             elif _is_mobile_off(m):
                 note, auto = _handle_mobile_off(root, m), True
             elif typ == "text" and str(m.get("from", "")).startswith("ph_"):
@@ -1629,7 +1736,8 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                 continue
             elif typ in ("delegate", "start") and not _allowed_or_made(root, m):
                 with locked(root):
-                    applied = _ensure_allow_question(root, m)
+                    applied = _ensure_allow_question(root, m, notify=False)
+                _group_waiting(root, m, applied)  # after relay.lock is released
                 note = f"waiting for your answer on {applied}"
                 auto = True
             if not auto and (
@@ -1650,6 +1758,58 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
     return out
 
 
+def _group_step(root: Path, m: dict) -> dict | None:
+    """The group rules before the normal ones: None (not a group message, or an answer or delegate the normal
+    rules go on with), or {"handled", "auto", "note", "applied"}. An allow that carries body.group is dropped
+    (the host matches an allow by reply_to, never by group content: G10)."""
+    from orch import chat_groups
+
+    if m.get("type") == "allow" and msg_group(m):
+        with locked(root):
+            _mark_seen(root, f"{m.get('from')}/{m['id']}")
+        return {
+            "handled": True,
+            "auto": True,
+            "note": "dropped: an allow never comes from group content",
+            "applied": None,
+        }
+    if not chat_groups.is_group_message(m):
+        return None
+    try:
+        res = chat_groups.receive(root, m)
+    except Transient:
+        raise
+    except (Refused, OSError, KeyError, TypeError, ValueError) as e:
+        return {
+            "handled": True,
+            "auto": True,
+            "note": f"dropped: {clean_untrusted(str(e), 200)}",
+            "applied": None,
+        }
+    return None if res is None or res.get("pass") else res
+
+
+def _group_denied(root: Path, mid: str) -> None:
+    from orch import chat_groups
+
+    with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
+        chat_groups.denied(root, mid)
+
+
+def _group_after_answer(root: Path, m: dict, ticket: str | None) -> None:
+    from orch import chat_groups
+
+    with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
+        chat_groups.after_answer(root, m, ticket)
+
+
+def _group_allow(root: Path, m: dict) -> None:
+    from orch import chat_groups
+
+    with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
+        chat_groups.on_allow(root, m)
+
+
 def since(root: Path, seq: int, wait: int = 0) -> dict:
     """Every arrival after `seq`, seen or not: {"next", "items": [{seq, id, type, from, at, seen, applied,
     allowed}]}. Pulls (waiting up to `wait` s when nothing newer is journaled) but marks nothing seen.
@@ -1658,6 +1818,7 @@ def since(root: Path, seq: int, wait: int = 0) -> dict:
     with contextlib.suppress(Refused):
         apply_allow_answers(root)
     sync_phone_views(root)
+    sync_groups(root)
     try:
         _pull(root, 0 if [e for e in _read_arrivals(root) if e["seq"] > seq] else wait)
     except Refused as e:  # best effort: the journal on disk is still true
@@ -1773,6 +1934,11 @@ def _ticket_for(root: Path, msg: dict) -> str:
     ext = {"from": msg["from"], "message": msg["id"]}
     if msg["type"] == "start":
         ext["start_key"] = b["key"]
+    if msg["type"] == "delegate":
+        from orch import chat_groups
+
+        if link := chat_groups.task_link(root, msg):
+            ext["group_task"] = link  # sync reports its status to the group's host
     tickets.ext_set(root, tid, "relay", json.dumps(ext), by)  # last: `done` finds the ticket by this
     return tid
 

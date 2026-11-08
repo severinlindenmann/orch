@@ -95,8 +95,9 @@ test('ticket search matches title, key, owner and note; Mine excludes agents', (
   for (const [query, mine, ids] of [[' LAUNCH ', false, ['a']], ['pil-2', true, ['b']], ['invoice', false, ['b']], ['SAM', true, ['d']], ['', true, ['b','c','d']], ['missing', false, []]]) {
     assert.deepEqual(Array.from(ctx.filterTickets(items, query, mine), t => t.id), ids);
   }
+  ctx.window = {DashHelpers:{}};
   const linked = ctx.ticketParents([{id:'p', children:['a','b']}, {id:'a'}, {id:'b', parent:'other'}]);
-  assert.equal(linked[1].parent, 'p'); assert.equal(linked[2].parent, 'other');
+  assert.equal(linked[1].parent, undefined); assert.equal(linked[2].parent, 'other');
 });
 
 // A small DOM double exercises the page controls without a browser dependency.

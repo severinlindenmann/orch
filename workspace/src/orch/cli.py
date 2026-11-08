@@ -146,6 +146,8 @@ def _show(t: dict, root: Path | None = None) -> str:
         out.append("  ".join(extra))
     if t.get("note"):
         out.append(f"Note: {t['note']}")
+    if t.get("done_when"):
+        out.append(f"Done when: {t['done_when']}")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
         out.append(f"Part of: {p['title']} ({p['id']})" if p else f"Part of: {t['parent']} (parent missing)")
@@ -307,6 +309,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--owner", help="who owns it (a name)")
     x.add_argument("--due", metavar="YYYY-MM-DD", help="due day")
     x.add_argument("--note", help="a free note")
+    x.add_argument("--done-when", help="what should be true when it is done")
     x.add_argument(
         "--ext",
         action="append",
@@ -330,6 +333,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--owner", help="who owns it (a name; empty clears)")
     x.add_argument("--due", metavar="YYYY-MM-DD", help="due day (empty clears)")
     x.add_argument("--note", help="a free note (empty clears)")
+    x.add_argument("--done-when", help="what should be true when it is done (empty clears)")
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     x = t.add_parser("set", parents=[common], help="set an add-on field, e.g. marketing.budget 2400")
     x.add_argument("id")
@@ -352,7 +356,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("id")
     x.add_argument(
         "data",
-        help='JSON object: title, status, waiting_on, owner, due, note, summary, e.g. \'{"title": "New"}\'',
+        help='JSON object: status, waiting_on, owner, due, note, done_when, e.g. \'{"title": "New"}\'',
     )
     x.add_argument("--if-revision", type=int, required=True, metavar="N")
 
@@ -493,10 +497,9 @@ def run(args: argparse.Namespace) -> None:
     root = _find_root()
     by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
     cmd, sub = args.cmd, getattr(args, "sub", None)
-    if cmd != "init":
-        from orch import chat
+    from orch import chat
 
-        chat.guard(root, args)  # the Chat helper's role is enforced here
+    chat.guard(root, args)  # the Chat helper's role is enforced here (every command, init too)
 
     if cmd == "init":
         root = Path.cwd()
@@ -539,7 +542,7 @@ def run(args: argparse.Namespace) -> None:
             by(),
             args.parent,
             tickets.parse_ext_args(args.ext, lambda a: addons.active_ext_schema(root, a)),
-            {k: getattr(args, k) for k in ("owner", "due", "note") if getattr(args, k)},
+            {k: getattr(args, k) for k in ("owner", "due", "note", "done_when") if getattr(args, k)},
         )
         part = f" (part of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -593,9 +596,10 @@ def run(args: argparse.Namespace) -> None:
             else f"{t['title']} - {tickets.STATUS_WORDS[t['status']]}",
         )
     elif cmd == "ticket" and sub == "edit":
-        fields = {k: getattr(args, k) for k in ("owner", "due", "note") if getattr(args, k) is not None}
+        keys = ("owner", "due", "note", "done_when")
+        fields = {k: getattr(args, k) for k in keys if getattr(args, k) is not None}
         if args.title is None and not fields:
-            raise Refused("Say what to change: --title, --owner, --due or --note.")
+            raise Refused("Say what to change: --title, --owner, --due, --note or --done-when.")
         t = tickets.edit(root, args.id, args.title, by(), fields, args.if_revision)
         _out(args, t, f"Saved (revision {t['revision']}).")
     elif cmd == "ticket" and sub == "set":

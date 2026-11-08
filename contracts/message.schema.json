@@ -168,6 +168,7 @@
       "properties": {
         "title": { "type": "string", "minLength": 1, "maxLength": 200 },
         "status": { "enum": ["open", "active", "waiting", "ready", "review", "done", "dropped"] },
+        "started": { "type": "boolean", "description": "The ticket was started by an agent at least once; with status open/ready the phone says \"Paused\", else \"Not started\"." },
         "agent": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The agent working on it now or last, as a display name (e.g. Claude)." },
         "summary": { "type": "string", "maxLength": 200 },
         "running": { "type": "boolean", "description": "An agent runs on the ticket now (the phone says \"Goes in after this step\"), else \"Saved for the next run\"." },

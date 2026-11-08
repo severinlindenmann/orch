@@ -48,7 +48,13 @@ struct ArtifactViewer: View {
                 .accessibilityLabel("Close")
                 .accessibilityIdentifier("artifact-close")
             }
-            Text(item.subtitle).themeFont(14).foregroundStyle(Theme.muted)
+            HStack(spacing: 8) {
+                Text(item.subtitle).themeFont(14).foregroundStyle(Theme.muted)
+                if let conversation = item.conversation, let id = conversation.ticket,
+                   let ticket = model.ticket(conversation.workspace, id) {
+                    TicketStatusChip(status: TopicStatus(ticket))
+                }
+            }
             if commentMode {
                 Text("Tap the preview to add a comment").themeFont(14).foregroundStyle(Theme.muted)
                 if !store.pins.isEmpty { PinChipRow(store: store) }
@@ -82,14 +88,13 @@ struct ArtifactViewer: View {
             }
             if item.canGiveFeedback {
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 24) { bottomButtons }
-                    VStack(spacing: 0) { bottomButtons }
+                    HStack(spacing: 10) { bottomButtons }
+                    VStack(spacing: 10) { bottomButtons }
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(Theme.surface)
-                .buttonStyle(ArtifactTextButtonStyle())
+                .buttonStyle(ArtifactActionButtonStyle())
                 .disabled(sending)
             }
             if let sendError { Text(sendError).themeFont(14).foregroundStyle(Theme.muted) }
@@ -125,10 +130,12 @@ struct ArtifactViewer: View {
             Button("Send comments (\(store.count))") { send(store.changesDraft(for: item)) }
                 .disabled(store.count == 0)
                 .accessibilityIdentifier("artifact-send-comments")
+                .buttonStyle(ArtifactActionButtonStyle(primary: true))
         } else {
             Button { send(PinStore.approveDraft(for: item)) } label: {
-                Label("Looks good", systemImage: "hand.thumbsup")
+                Label("Looks good", systemImage: "checkmark")
             }.disabled(!canApprove).accessibilityIdentifier("artifact-looks-good")
+                .buttonStyle(ArtifactActionButtonStyle(primary: true))
             if canComment {
                 Button("Comment") { commentMode = true; sendError = nil }
                     .accessibilityIdentifier("artifact-comment")
@@ -265,5 +272,20 @@ private struct ArtifactTextButtonStyle: ButtonStyle {
             .padding(.horizontal, 12).frame(minHeight: 44)
             .foregroundStyle(enabled ? Theme.brand : Theme.muted)
             .opacity(configuration.isPressed ? 0.65 : 1)
+    }
+}
+
+struct ArtifactActionButtonStyle: ButtonStyle {
+    var primary = false
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.themeFont(16, .semibold)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 12).frame(maxWidth: .infinity, minHeight: 50)
+            .foregroundStyle(primary ? Theme.onBrand : Theme.text)
+            .background(primary ? Theme.brand : Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(primary ? Color.clear : Theme.border))
+            .opacity(!enabled ? 0.45 : configuration.isPressed ? 0.65 : 1)
     }
 }

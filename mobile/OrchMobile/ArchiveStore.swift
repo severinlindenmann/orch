@@ -72,7 +72,7 @@ extension ArchiveStore {
         let gKey = ReadState.key(summary.general.id)
         let generalArchived = isArchived(key: gKey, status: nil, lastAt: summary.general.lastAt, muted: muted, now: now)
         if generalArchived {
-            archived.append(ArchivedChat(id: summary.general.id, workspaceId: ws, title: "General", status: nil, lastAt: summary.general.lastAt, byHand: true))
+            archived.append(ArchivedChat(id: summary.general.id, workspaceId: ws, title: "Chat", status: nil, lastAt: summary.general.lastAt, byHand: true))
         }
         return (shown, !generalArchived, archived.sorted { ($0.lastAt ?? "") > ($1.lastAt ?? "") })
     }

@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import look, mobile
+from . import look, mobile, phone_delivery
 
 STATUS_ORDER = ["open", "ready", "active", "waiting", "review", "done", "dropped"]
 _NAME = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
@@ -141,8 +141,19 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         _mark_missing_proofs(root, t)
         mobile.mark_chat_history(t)
         tickets.append(t)
+    phone_delivery.mark(root, tickets)
     add_artifact_marks(tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
+    by_id = {t["id"]: t for t in tickets}
+    for t in tickets:
+        t.update(children=[], parts_done=0, parts_total=0)
+    for t in tickets:
+        parent = t.get("parent")
+        if isinstance(parent, str) and parent in by_id:
+            p = by_id[parent]
+            p["children"].append(t["id"])
+            p["parts_total"] += 1
+            p["parts_done"] += int(t["status"] == "done")
     return tickets, skipped
 
 
@@ -544,6 +555,26 @@ def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool
     return {i: _RUNS[(str(root), i)][1] for i in ids if _RUNS[(str(root), i)][1]}
 
 
+def add_warmth(root: Path, tickets: list[dict], statuses: dict) -> None:
+    """Count down from live.since, as idle cleanup does; heartbeats do not reset it."""
+    try:
+        from orch.config import live_idle_minutes
+    except ImportError:
+        return
+    limit, now = live_idle_minutes(root) * 60, time.time()
+    for t in tickets:
+        t.pop("warmth", None)
+        status = statuses.get(t["id"]) or {}
+        rec = status.get("claim") or {}
+        if status.get("running") is not True or rec.get("mode") != "live":
+            continue
+        try:
+            since = datetime.fromisoformat(rec["live"]["since"]).timestamp()
+        except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
+            continue
+        t["warmth"] = {"seconds_left": max(0, int(limit - (now - since)))}
+
+
 def load_state(
     root: Path,
     orch_bin: str | None = None,
@@ -552,6 +583,8 @@ def load_state(
     with_settings: bool = False,
 ) -> dict:
     """with_addons=False (snapshots by default): no add-on tabs, no ticket rows, `ext` dropped from tickets."""
+    from .actions import actor
+
     tickets, skipped = load_tickets(root, orch_bin)
     raw = run_orch(orch_bin, ["addon", "list", "--json"], root)
     addons = load_addons(root, orch_bin, raw) if with_addons else []
@@ -584,6 +617,7 @@ def load_state(
     needs = run_orch(orch_bin, ["needs", "--json"], root) if with_addons else None
     state = {
         "workspace": root.name,
+        "who": actor().removeprefix("human:"),
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "tickets": tickets,
         "skipped": skipped,
@@ -594,13 +628,53 @@ def load_state(
         "needs": needs if isinstance(needs, list) else [],
         "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
         "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},
+        "groups": mobile.load_groups(root, orch_bin) if with_addons else None,  # group chats; snapshots carry none
         "mobile_mode": mobile.load_mobile(root, orch_bin) if with_settings else None,  # the live page only, never a snapshot
         "look": look.load_look(root, orch_bin, fresh) if with_settings else None,  # the live page only, never a snapshot
         "settings": load_settings(root, orch_bin)
         if with_settings
         else None,  # only the live local server: it holds the folder path
     }
+    add_warmth(root, tickets, state["runs"])
     state["rev"] = hashlib.sha1(
         json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()
     ).hexdigest()[:12]
     return state
+
+
+def publish_connected(root: Path, orch_bin: str | None) -> bool:
+    rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    if not isinstance(rows, list) or not any(
+        isinstance(r, dict) and r.get("name") == "publish" and r.get("active") is True for r in rows
+    ):
+        return False
+    who = run_orch(orch_bin, ["publish", "whoami", "--json"], root)
+    return isinstance(who, dict) and isinstance(who.get("id"), str) and bool(who["id"]) and "error" not in who
+
+
+def load_links(root: Path, orch_bin: str | None) -> dict:
+    if not publish_connected(root, orch_bin):
+        return {"links": []}
+    raw = run_orch(orch_bin, ["publish", "list", "--json"], root)
+    files = raw.get("files", []) if isinstance(raw, dict) else []
+    links = []
+    for f in files if isinstance(files, list) else []:
+        if not isinstance(f, dict) or not isinstance(f.get("id"), str) or not re.fullmatch(r"f_[a-z0-9]+", f["id"]):
+            continue
+        expires = f.get("expires_at")
+        try:
+            when = datetime.fromisoformat(expires)
+            expired = (when if when.tzinfo else when.replace(tzinfo=UTC)) <= datetime.now(UTC)
+        except (ValueError, TypeError, AttributeError):
+            expired = False
+        key, url = f.get("key"), f.get("url")
+        ok = (
+            isinstance(key, str)
+            and re.fullmatch(r"[A-Za-z0-9_-]{16,128}", key)
+            and isinstance(url, str)
+            and re.fullmatch(r"https://[A-Za-z0-9.:\[\]-]+/[!-~]*", url.split("#", 1)[0])
+        )
+        link = url.split("#", 1)[0] + "#k=" + key if ok else None
+        links.append({"id": f["id"], "name": f.get("name"), "size": f.get("size"),
+                      "expires_at": expires, "expired": expired, "link": link, "copy": link is not None})
+    return {"links": links}
