@@ -1,8 +1,8 @@
 {
-  "why": "G12: a member joined with member_added.from_seq 5: initial applied_seq = from_seq - 1, so seq 5 applies at once.",
+  "why": "G12: from_seq is display only and never used for applied_seq. Member added with from_seq 5, first message seen is seq 7: initial applied_seq = 7 - 1, so it applies (from_seq 5 would have buffered it).",
   "message": {
     "schema": "orch.msg/1",
-    "id": "m_624f30bfd20c45b9",
+    "id": "m_150835b9917aa719",
     "from": "ws_fin0000001",
     "to": "ws_ban0000001",
     "type": "text",
@@ -41,12 +41,12 @@
             }
           }
         ],
-        "seq": 5
+        "seq": 7
       },
       "by": "ws_hom0000001",
       "via": "helper",
       "origin": {
-        "id": "m_ord0000000000051",
+        "id": "m_ord0000000000057",
         "from": "ws_hom0000001",
         "at": "2026-11-08T10:06:00Z"
       }
@@ -61,6 +61,6 @@
   },
   "expect": {
     "order": "apply",
-    "applied_after": 5
+    "applied_after": 7
   }
 }

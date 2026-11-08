@@ -1,5 +1,5 @@
 {
-  "why": "A plain text first seen from a host under both caps creates the group (section 2).",
+  "why": "A plain text first seen from a host under both caps creates the group (section 2). (An old receive time outside the hour does not count.)",
   "message": {
     "schema": "orch.msg/1",
     "id": "m_379e0eb0742c4adf",
@@ -54,6 +54,12 @@
   },
   "context": {
     "open_groups_of_host": 19,
-    "created_last_hour": 4
+    "now_s": 10000,
+    "creations_recv_s": [
+      1000,
+      2000,
+      9000,
+      9500
+    ]
   }
 }
