@@ -218,3 +218,40 @@ def test_started_line_never_has_an_empty_id(ws):
     Scheduler(ws).tick(T(8))
     texts = [h["text"] for h in json.loads((ws / ".orch/tickets/t_general3.json").read_text())["history"]]
     assert not any("()" in t or "(phone text )" in t for t in texts)
+
+
+def queue_answer(ws, tid, delivered=False, human=True, iid="p_1"):
+    d = ws / ".orch/run/pending"
+    d.mkdir(parents=True, exist_ok=True)
+    item = {"id": iid, "at": "2026-11-04T08:00:00Z", "by": "human:lume", "kind": "answer", "text": "Week 45", "human": human}
+    if delivered:
+        item["delivered_at"] = "2026-11-04T08:00:05Z"
+    with open(d / f"{tid}.jsonl", "a") as f:
+        f.write(json.dumps(item) + "\n")
+
+
+def test_dashboard_answer_on_phone_ticket_without_run_starts_one_run(ws):
+    from conftest import runs_started
+
+    add_ticket(ws, "t_ph000005", status="active", created_at="2026-11-04T07:50:00Z",
+               ext={"relay": {"origin": "phone"}, "automation": {"phone_started": True}})
+    (ws / "ended-t_ph000005").write_text("")  # the first run is over
+    queue_answer(ws, "t_ph000005")
+    s = Scheduler(ws)
+    assert s.tick(T(8)) == ["t_ph000005"]
+    assert s.tick(T(8, 1)) == [] and Scheduler(ws).tick(T(8, 2)) == []  # once, also after a restart
+    assert runs_started(ws) == ["t_ph000005"]
+
+
+def test_answer_with_a_live_run_or_already_delivered_starts_nothing(ws):
+    from conftest import runs_started
+
+    add_ticket(ws, "t_ph000006", status="active")  # a run is alive: the notice is typed into it
+    queue_answer(ws, "t_ph000006")
+    add_ticket(ws, "t_ph000007", status="active")
+    (ws / "ended-t_ph000007").write_text("")
+    queue_answer(ws, "t_ph000007", delivered=True)
+    add_ticket(ws, "t_ph000008", status="active")
+    (ws / "ended-t_ph000008").write_text("")
+    queue_answer(ws, "t_ph000008", human=False)
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []

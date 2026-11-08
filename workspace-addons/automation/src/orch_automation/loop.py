@@ -261,6 +261,42 @@ class Scheduler:
         """The gates every start from this loop respects: a ticket switched off here is left alone."""
         return ((t.get("ext") or {}).get("automation") or {}).get("paused") is not True
 
+    def queued_answers(self, now: datetime, skip: list[str]) -> list[str]:
+        """A person's answer is queued (undelivered) for a ticket nobody works on: one run resumes it. This is
+        how a dashboard answer wakes an agent that has stopped, also on phone-started tickets. The id of the
+        item is saved first, so the same answer never starts a second run."""
+        pdir = self.root / ".orch" / "run" / "pending"
+        started = []
+        try:
+            files = sorted(pdir.glob("t_*.jsonl"))
+        except OSError:
+            return started
+        for f in files:
+            tid = f.stem
+            if tid in skip or not orchcli.ID_RE.match(tid):
+                continue
+            item = None
+            try:
+                for line in f.read_text().splitlines():
+                    try:
+                        it = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(it, dict) and it.get("kind") == "answer" and it.get("human") is True \
+                            and not it.get("delivered_at") and isinstance(it.get("id"), str):
+                        item = it
+            except OSError:
+                continue
+            if not item or load_state(self.root).get(tid, {}).get("answer_run") == item["id"]:
+                continue
+            t = orchcli.ticket(self.root, tid)
+            if not t or t["status"] not in OPEN or orchcli.run_running(self.root, tid) is not False:
+                continue
+            update_state(self.root, tid, answer_run=item["id"])
+            if self.start_run(tid, "you answered a question", now) == "started":
+                started.append(tid)
+        return started
+
     # -- pass ---------------------------------------------------------------
     def tick(self, now: datetime) -> list[str]:
         """One pass. Returns the ticket ids a run was started for."""
@@ -268,6 +304,7 @@ class Scheduler:
         self.check_watch()
         started: list[str] = self.act_on_answers(now)
         started += self.phone_tickets(now)
+        started += self.queued_answers(now, started)
         started += self.queued_input(now, skip=started)
         state = load_state(self.root)
         for t in read_tickets(self.root):
