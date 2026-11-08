@@ -6,7 +6,7 @@ function changeUnavailable() {
   return true;
 }
 function changeError(result) {
-  return result.status === 0 ? "Can't reach orch. Your change was not sent." : result.text;
+  return result.status === 0 ? "Can't reach orch. Your change was not sent." : window.DashHelpers.scrubText(result.text);
 }
 function ticketTitle(t) {
   return h('div', {className:'row ticket-title'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, typeof t.key === 'string' ? h('span', {className:'meta mono'}, t.key + ' ') : null, clean(t.title))), statusChip(t));

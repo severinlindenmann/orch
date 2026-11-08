@@ -75,6 +75,63 @@
     return plainNames(text);
   }
 
+  /* Plain words for a failure or notice: never a raw ticket id, an internal actor name (agent:/human:) or a UTC time.
+     A conflict ("was changed by agent:<name> at 12:08") becomes "<Name> just changed this ticket - updated." */
+  function titleCase(n) { return String(n || '').replace(/[_.-]+/g, ' ').trim().replace(/^./, c => c.toUpperCase()); }
+  function scrubText(text) {
+    const raw = String(text ?? '');
+    const m = /\bchanged by (?:(agent|human):)?([A-Za-z0-9_.@ -]*?)(?: at \d{1,2}:\d{2})?\s*\.?(?:\s|$)/.exec(raw);
+    if (/\bwas changed by\b/.test(raw) && m) return (m[2] && m[1] !== 'human' ? titleCase(m[2]) : 'Someone') + ' just changed this ticket — updated.';
+    return plainNames(raw)
+      .replace(/\s+(?:at|since|on)\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:UTC|Z))?/g, '')
+      .replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z?/g, '')
+      .replace(/\bt_[A-Za-z0-9]+\b/g, 'this ticket')
+      .replace(/\s*Reload the page and try again\./g, '')
+      .replace(/\s{2,}/g, ' ').trim();
+  }
+
+  /* Who a history line is about: "You" for the current person, the display name otherwise. */
+  function historyWho(by, me) {
+    const b = String(by || '');
+    if (me && b === me) return 'You';
+    return titleCase(b.replace(/^(?:agent|human):/, '')) || 'Someone';
+  }
+  /* The history of a ticket as plain rows {entry, who, line, sentence}. Person actions on the status or fields become one
+     sentence ("You asked for changes: <note>"); the "Change: <note>" task that went with it is folded into that sentence. */
+  function historyView(entries, checklist, me) {
+    const list = dedupeHistory(entries, checklist), out = [];
+    const noteFor = (entry) => {
+      const at = Date.parse(entry && entry.at) || 0;
+      for (const e of list) {
+        const m = /^Added check (c\d+)$/.exec(String((e && e.text) || '').trim());
+        const c = m && (Array.isArray(checklist) ? checklist : []).find(x => x && x.id === m[1]);
+        if (c && /^Change: /.test(c.text || '') && Math.abs((Date.parse(e.at) || 0) - at) <= 120000) return {entry: e, note: c.text.slice(8)};
+      }
+      return null;
+    };
+    const hidden = new Set();
+    for (const e of list) {
+      const text = String((e && e.text) || '').trim(), by = String((e && e.by) || '');
+      const who = historyWho(by, me);
+      let sentence = null, m;
+      if (by.startsWith('human:')) {
+        if ((m = /^(?:Patched status \(status|Status) (\w+) -> (\w+)\)?$/.exec(text))) {
+          if (m[1] === 'review' && m[2] === 'active') {
+            const n = noteFor(e);
+            if (n) hidden.add(n.entry);
+            sentence = who + ' asked for changes' + (n && n.note ? ': ' + n.note : '');
+          } else if (m[2] === 'done') sentence = who + ' marked it Done';
+          else sentence = who + ' moved it to ' + (STATUS_WORD[m[2]] || m[2]);
+        } else if ((m = /^Patched ([a-z_, ]+?)(?: \(status \w+ -> (\w+)\))?$/.exec(text))) {
+          const parts = m[1].split(/,\s*/).map(f => FIELD_WORD[f.trim()] || f.trim());
+          sentence = who + ' changed ' + (parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0]) + (m[2] ? ' and moved it to ' + (STATUS_WORD[m[2]] || m[2]) : '');
+        }
+      }
+      out.push({entry: e, who, line: historyLine(e, checklist), sentence});
+    }
+    return out.filter(r => !hidden.has(r.entry));
+  }
+
   /* The answer that is already there for a question (someone else was first). Null when it is still open. */
   function winningAnswer(tickets, ticketId, questionId) {
     const t = arr(tickets).find(x => x && x.id === ticketId);
@@ -344,5 +401,5 @@
   const needsYou = n => n + (n === 1 ? ' needs you' : ' need you');  // same words as the phone
   const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
 
-  return {plainNames, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

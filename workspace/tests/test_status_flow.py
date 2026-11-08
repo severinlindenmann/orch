@@ -1,3 +1,4 @@
+import json
 import os
 
 import pytest
@@ -163,3 +164,42 @@ def test_status_history_uses_resolved_actor(proj, run, new_ticket, monkeypatch, 
     assert code == 0, err
     history = tickets.load(proj, tid)["history"][len(before["history"]) :]
     assert history and all(h["by"] == "agent:generic" for h in history)
+
+
+@pytest.mark.parametrize("target", ["review", "done"])
+@pytest.mark.parametrize(
+    "path", ["set_status", "patch", "cli_status", "cli_patch", "cli_by_human_in_agent_env"]
+)
+def test_agent_never_finishes_with_open_question(proj, run, new_ticket, monkeypatch, path, target):
+    """e2e dry run 8 Nov: the agent's own open question blocks every way to Review/Done (one guard)."""
+    tid = new_ticket()
+    tickets.ask(proj, tid, "Which colour?", [], None, "agent:generic")
+    before = tickets.load(proj, tid)
+    rev = str(before["revision"])
+    if path == "cli_by_human_in_agent_env":  # --by cannot talk the guard out of it
+        monkeypatch.setenv("ORCH_AGENT", "generic")
+    if path == "set_status":
+        with pytest.raises(Refused, match="Not done"):
+            tickets.set_status(proj, tid, target, "agent:generic")
+        code = 2
+    elif path == "patch":
+        with pytest.raises(Refused, match="Not done"):
+            tickets.patch(proj, tid, before["revision"], json.dumps({"status": target}), "agent:generic")
+        code = 2
+    elif path == "cli_status":
+        code = run("ticket", "status", tid, target, "--by", "agent:generic")[0]
+    elif path == "cli_patch":
+        code = run(
+            "ticket",
+            "patch",
+            tid,
+            "--if-revision",
+            rev,
+            json.dumps({"status": target}),
+            "--by",
+            "agent:generic",
+        )[0]
+    else:
+        code = run("ticket", "status", tid, target, "--by", "human:lume")[0]
+    assert code == 2
+    assert tickets.load(proj, tid) == before

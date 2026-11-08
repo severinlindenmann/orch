@@ -15,6 +15,13 @@ from urllib.parse import urlsplit
 
 from . import look, mobile
 
+
+def _me() -> str:
+    from .actions import actor  # actions imports this module
+
+    return actor()
+
+
 STATUS_ORDER = ["open", "ready", "active", "waiting", "review", "done", "dropped"]
 _NAME = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
 ICONS = (
@@ -565,6 +572,7 @@ def load_state(
     state = {
         "workspace": root.name,
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "me": _me() if with_settings else None,  # who "You" is in a history line (the live page only)
         "tickets": tickets,
         "skipped": skipped,
         "addons": addons,

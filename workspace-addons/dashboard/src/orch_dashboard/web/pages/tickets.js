@@ -121,11 +121,11 @@ async function moveTicket(id, status) {
   const t = ticketOf(id), lock = 'status-' + id;
   if (!t || t.status === status || snapshot || locks.has(lock) || changeUnavailable()) return;
   locks.add(lock);
-  const result = await act('ticket.patch', {ticket:t.id, data:{status}, if_revision:t.revision});
+  const result = await actRetry('ticket.patch', () => ({ticket:t.id, data:{status}, if_revision:(ticketOf(id) || t).revision}), () => { const now = ticketOf(id); return !!now && now.status === t.status; });
   locks.delete(lock);
   render();
   const label = STATUS_CHOICES.find(([value]) => value === status)?.[1] || status;
-  window.orch.toast(result.ok ? 'Moved to ' + label : changeError(result) + (result.status === 409 ? ' Reload the page and try again.' : ''), result.ok ? 'ok' : 'error');
+  window.orch.toast(result.ok ? 'Moved to ' + label : changeError(result), result.ok ? 'ok' : 'error');
 }
 function list() {
   const visible = filteredTickets(), rows = window.DashHelpers.treeRows(visible);

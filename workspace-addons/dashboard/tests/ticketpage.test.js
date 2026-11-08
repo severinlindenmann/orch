@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
 const helpers = require('../src/orch_dashboard/web/helpers.js');
 function context(extra = {}) {
-  const ctx = {array:v => Array.isArray(v) ? v : [], h:(tag, attrs, ...children) => ({tag, attrs, children}), iconEl:name => name, window:{DashHelpers:helpers, orch:{toast(){}}}, snapshot:false, ...extra};
+  const ctx = {array:v => Array.isArray(v) ? v : [], h:(tag, attrs, ...children) => ({tag, attrs, children}), iconEl:name => name, window:{DashHelpers:helpers, orch:{toast(){}}}, snapshot:false, changeError:r => r.text, actRetry:(op, args) => ctx.act(op, args()), ...extra};
   vm.createContext(ctx);
   vm.runInContext(source.slice(source.indexOf('// These three icons'), source.indexOf('// Ticket page:')), ctx);
   vm.runInContext(source.slice(source.indexOf('// Ticket-only controls'), source.indexOf('function detail(t)')), ctx);
@@ -73,4 +73,23 @@ test('change failures stop before status; snapshot never submits notes', async (
   c.snapshot = true;
   assert.equal(await c.ticketSendChanges({id:'t_test'}, 'Fix this'), false);
   assert.deepEqual(calls, ['check.add']);
+});
+
+test('the review buttons show whenever the status is Review, an open question first', () => {
+  const h = (tag, attrs = {}, ...children) => { const n = {tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false)}; n.append = (...c) => n.children.push(...c); n.dataset = {}; n.setAttribute = () => {}; n.addEventListener = () => {}; n.classList = {add(){}, remove(){}}; return n; };
+  const ctx = {window:{DashHelpers:helpers, orch:{}}, document:{addEventListener(){}}, addEventListener(){}, h, locks:new Set(),
+    array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => String(v || '').replace(/^(human|agent):/, ''),
+    el:(tag, cls, text) => h(tag, {className:cls}, text), fragment:(...children) => h('fragment', {}, children),
+    card:(key, title, suffix, children) => h('section', {'data-key':key}, title, suffix, children), emptyRow:text => h('p', {}, text),
+    questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
+    statusChip:() => h('span', {}, 'Ready for review'), chip:text => h('span', {}, text), href:id => '#ticket/' + id, MOVE_CHOICES:[], moveTicket(){}, button:label => h('button', {}, label), locksX:0, loadArtifacts(){}, ticketArtifactPreview:() => null, agentBar:() => null,
+    surface:v => v, inlineField:() => null, ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
+    linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, ticketStepper:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
+    fetch:() => new Promise(() => {})};
+  vm.createContext(ctx); vm.runInContext(source, ctx);
+  const text = JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[{id:'q1', text:'Which colour?', options:[]}]}));
+  assert.match(text, /Looks good/);
+  assert.match(text, /Ask for changes/);
+  assert.ok(text.indexOf('Which colour?') < text.indexOf('Looks good'), 'the question comes first');
+  assert.match(JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]})), /Looks good/);
 });
