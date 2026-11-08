@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 from . import actions, reffiles, ticketfiles
-from .data import load_addons, load_chat_day, load_chat_days, load_services, load_state
+from .data import load_addons, load_chat_day, load_chat_days, load_links, load_services, load_state
 from .events import Revisions
 from .views import ViewPuller
 
@@ -208,6 +208,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 code, body, ctype, {"Content-Disposition": "inline"}, csp="default-src 'none'; sandbox"
             )
+        if path == "/api/links":
+            return self._send(200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json")
         if path == "/api/state":
             return self._send(
                 200,

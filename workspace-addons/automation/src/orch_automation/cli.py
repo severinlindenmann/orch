@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import sys
 from datetime import UTC, datetime
@@ -70,18 +71,21 @@ def describe(root: Path) -> list[dict]:
 
 
 def repeat(root: Path, tid: str, phrase: str | None, off: bool, agent: str | None = None, tz: str | None = None,
-           each_run: bool = False) -> dict:
+           each_run: bool = False, by: str | None = None) -> dict:
     want = tid.strip().upper()  # the ticket id, or its key (DM1-12, any case)
     t = next((x for x in orchcli.tickets(root) if x["id"] == tid or str(x.get("key") or "").upper() == want), None)
     if t is None:
         raise Refused(f"There is no ticket {tid}.")
     tid = t["id"]
     if off:
-        if not orchcli.set_ext(root, t, remove=("each_run",), recurring=False):
+        if not orchcli.set_ext(root, t, remove=("each_run",), by=by, recurring=False):
             raise Refused("The ticket changed or the change was not accepted. Try again.")
         return {"ticket": tid, "recurring": False}
     if not phrase:
         raise Refused(f"Say when. For example: {plain.EXAMPLES}.")
+    daily = re.fullmatch(r"every day at ([0-9]{1,2})(?::([0-9]{2}))?", phrase.strip().lower())
+    if daily:
+        phrase = f"daily {int(daily[1]):02d}:{daily[2] or '00'}"
     zone_name = tz or plain.workspace_tz(root) or plain.local_tz_name()
     try:
         plan = plain.Plan(cron=phrase) if valid(phrase) else plain.parse(phrase, zone_name)
@@ -90,7 +94,7 @@ def repeat(root: Path, tid: str, phrase: str | None, off: bool, agent: str | Non
     if plan.until:  # a one-off is a core wait
         if each_run:
             raise Refused("Each run as its own ticket is only for repeats.")
-        if orchcli.call(root, "wait", tid, "--until", plan.until) is None:
+        if orchcli.call(root, "wait", tid, "--until", plan.until, by=by or True) is None:
             raise Refused("The wait was not accepted. Try again.")
         return {"ticket": tid, "recurring": False, "until": plan.until}
     if plain.zone(zone_name) is None:
@@ -104,7 +108,7 @@ def repeat(root: Path, tid: str, phrase: str | None, off: bool, agent: str | Non
         changes["agent"] = agent
     if each_run:
         changes["each_run"] = "sub-ticket"
-    if not orchcli.set_ext(root, t, remove=() if each_run else ("each_run",), **changes):
+    if not orchcli.set_ext(root, t, remove=() if each_run else ("each_run",), by=by, **changes):
         raise Refused("The ticket changed or the change was not accepted. Try again.")
     return {"ticket": tid, **changes}
 
@@ -130,7 +134,8 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--tz", help="time zone of the times (default: this computer's, e.g. Europe/Zurich)")
     rp.add_argument("--each-run", choices=("sub-ticket",), help="give every run its own sub-ticket (daily or slower)")
     rp.add_argument("--off", action="store_true")
-    ac = sub.add_parser("act", parents=[common], help="what the dashboard buttons do: on, off, toggle, run, delete")
+    ac = sub.add_parser("act", parents=[common], help="what the dashboard buttons do: on, off, toggle, run, delete, repeat, copy")
+    ac.add_argument("--value", help="when to repeat, in plain words")
     ac.add_argument("verb", choices=actions.VERBS)
     ac.add_argument("target", help="ticket id")
     ac.add_argument("--by", help="who pressed the button (recorded on the ticket); the add-on act contract")
@@ -199,7 +204,7 @@ def _run(args, root: Path) -> int:
         print(json.dumps(build(root)))
     elif args.cmd == "act":
         try:
-            res = actions.act(root, args.verb, args.target, args.by)
+            res = actions.act(root, args.verb, args.target, args.by, args.value)
         except actions.Bad as e:
             raise Refused(str(e)) from None
         out(res, res["text"])
