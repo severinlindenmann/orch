@@ -648,18 +648,19 @@ function detail(t) {
       panel('questions', [(snapshot || selected === 'questions') ? openQuestions.map(q => ticketQuestion(t, q)) : null, !openQuestions.length ? emptyRow('No open questions') : null, answered.length ? h('section', {}, h('h2', {}, 'Earlier answers'), answered) : null]),
       panel('artifacts', artifactsPanel(t)), panel('history', ticketHistoryPanel(t))),
     h('div', {className:'stack ticket-side'}, h('aside', {className:'card ticket-aside'}, h('div', {className:'card-h'}, h('h2', {}, 'Details')),
-      h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Agent', agent), field('Created', date(t.created_at)), field('Updated', t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : ''))), linksCard(t), fieldSections(t)))));
+      h('dl', {className:'ticket-details ed-list'}, field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Done when', inlineField(t, 'done_when')), field('Agent', agent), field('Created', date(t.created_at)), field('Updated', t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : ''))), linksCard(t), fieldSections(t)))));
 }
 
-const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note'};
+const MULTILINE = ['note', 'done_when'];
+const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note', done_when:'Say what should be true when it is done'};
 // A value on the ticket page: a plain click turns it into a field; Enter or leaving it saves, Esc cancels.
 function inlineField(t, field) {
   const raw = t[field] == null ? '' : String(t[field]);
   const shown = field === 'due' ? date(raw) : field === 'owner' ? name(raw) : clean(raw);
-  if (snapshot) return el('span', field === 'note' ? 'ed-ro preserve-lines' : 'ed-ro', shown || (field === 'title' ? '' : FIELD_HINT[field]));
+  if (snapshot) return el('span', MULTILINE.includes(field) ? 'ed-ro preserve-lines' : 'ed-ro', shown || (field === 'title' ? '' : FIELD_HINT[field]));
   const host = el('span', 'inline-host');
   host.dataset.key = 'inline-' + field + '-' + t.id;
-  const node = el('button', 'ed' + (shown ? '' : ' empty-v') + (field === 'note' ? ' preserve-lines' : '') + (field === 'title' ? ' ed-title' : ''), shown || FIELD_HINT[field]);
+  const node = el('button', 'ed' + (shown ? '' : ' empty-v') + (MULTILINE.includes(field) ? ' preserve-lines' : '') + (field === 'title' ? ' ed-title' : ''), shown || FIELD_HINT[field]);
   Object.assign(node, {type:'button', title:'Click to change'});
   Object.assign(node.dataset, {action:'inline', field, ticket:t.id});
   host.append(node);
@@ -680,25 +681,25 @@ function startInline(control) {
     pickDate(control, before, async value => { if (value !== null && value !== before) await saveField(t, 'due', value); locks.delete(key); render(); });
     return;
   }
-  const input = el(field === 'note' ? 'textarea' : 'input', 'input inline-input');
-  if (field === 'note') input.rows = 3; else input.type = 'text';
+  const input = el(MULTILINE.includes(field) ? 'textarea' : 'input', 'input inline-input');
+  if (MULTILINE.includes(field)) input.rows = 3; else input.type = 'text';
   if (field === 'title') input.maxLength = 200;
   input.value = before;
   input.setAttribute('aria-label', capitalise(field));
   locks.add(key);
-  host.replaceChildren(input, el('span', 'hint', field === 'note' ? 'Enter saves · Shift+Enter new line · Esc cancels' : 'Enter saves · Esc cancels'));
+  host.replaceChildren(input, el('span', 'hint', MULTILINE.includes(field) ? 'Enter saves · Shift+Enter new line · Esc cancels' : 'Enter saves · Esc cancels'));
   input.focus();
   let done = false;
   const finish = async save => {
     if (done) return;
     done = true;
-    const value = input.value.trim();
+    const value = MULTILINE.includes(field) ? input.value : input.value.trim();
     if (save && value !== before && !(field === 'title' && !value)) await saveField(t, field, value);
     locks.delete(key);
     render();
   };
   input.addEventListener('keydown', event => {
-    if (event.key === 'Enter' && !(field === 'note' && event.shiftKey)) { event.preventDefault(); finish(true); }
+    if (event.key === 'Enter' && !(MULTILINE.includes(field) && event.shiftKey)) { event.preventDefault(); finish(true); }
     else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
   });
   input.addEventListener('blur', () => finish(true));

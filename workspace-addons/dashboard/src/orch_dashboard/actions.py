@@ -57,7 +57,7 @@ AGENT = re.compile(r"[a-z][a-z0-9-]{1,31}")
 MAX_COMMAND = 500
 MAX_TASK = 500
 PERMISSIONS = ("ask", "auto", "full")
-PATCH_KEYS = ("title", "status", "owner", "due", "note", "summary")
+PATCH_KEYS = ("title", "status", "owner", "due", "note", "done_when", "summary")
 STATUSES = ("open", "ready", "active", "waiting", "review", "done")
 
 
@@ -121,14 +121,14 @@ def _answer(a):
 
 
 def _ticket_new(a):
-    _only(a, ("title", "parent", "owner", "due", "note"))
+    _only(a, ("title", "parent", "owner", "due", "note", "done_when"))
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
-    for k in ("owner", "due", "note"):
+    for k in ("owner", "due", "note", "done_when"):
         if a.get(k):
             v = _text(a[k], k)
             if k == "due" and not DAY.fullmatch(v):
                 raise BadRequest("The due day must look like 2026-11-30.")
-            flags.append(f"--{k}={v}")
+            flags.append(f"--{k.replace('_', '-')}={v}")
     return ["ticket", "new"], flags, [_text(a.get("title"), "title")]
 
 
@@ -143,7 +143,7 @@ def _ticket_patch(a):
         if k == "due" and not (isinstance(v, str) and DAY.fullmatch(v)):
             raise BadRequest("The due day must look like 2026-11-30.")
         if k not in ("status", "due"):
-            _text(v, k, empty=k in ("owner", "note"))
+            _text(v, k, empty=k in ("owner", "note", "done_when"))
     rev = _rev(a.get("if_revision"), required=True)
     return (
         ["ticket", "patch", _tid(a.get("ticket"))],
@@ -153,14 +153,14 @@ def _ticket_patch(a):
 
 
 def _ticket_edit(a):
-    _only(a, ("ticket", "title", "owner", "due", "note", "if_revision"))
+    _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "if_revision"))
     flags = []
-    for k in ("title", "owner", "due", "note"):
+    for k in ("title", "owner", "due", "note", "done_when"):
         if k in a:
             v = _text(a[k], k, empty=k != "title")
             if k == "due" and not DAY.fullmatch(v):
                 raise BadRequest("The due day must look like 2026-11-30.")
-            flags.append(f"--{k}={v}")
+            flags.append(f"--{k.replace('_', '-')}={v}")
     if not flags:
         raise BadRequest("Nothing to change.")
     rev = _rev(a.get("if_revision"))

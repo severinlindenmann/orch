@@ -16,11 +16,15 @@ function ticketForm(t) {
     optionalFields = el('div', 'form-fields');
     options.append(el('summary', '', 'More options'), optionalFields); fields.append(options);
   }
-  for (const field of (t ? ['owner', 'due', 'note'] : ['owner', 'due'])) {
-    const label = el('label', '', field.charAt(0).toUpperCase() + field.slice(1) + (field === 'title' ? '' : ' (optional)'));
-    const input = el(field === 'note' ? 'textarea' : 'input', 'input');
+  for (const field of (t ? ['owner', 'due', 'note', 'done_when'] : ['owner', 'due', 'done_when'])) {
+    const label = el('label', '', field === 'done_when' ? 'What should be true when it is done?' : field.charAt(0).toUpperCase() + field.slice(1) + (field === 'title' ? '' : ' (optional)'));
+    const input = el(['note', 'done_when'].includes(field) ? 'textarea' : 'input', 'input');
     input.name = field; input.id = 'field-' + serial + '-' + field;
-    if (field !== 'note') input.type = 'text';
+    if (!['note', 'done_when'].includes(field)) input.type = 'text';
+    if (field === 'done_when') {
+      input.rows = 4; input.maxLength = 2000;
+      input.placeholder = 'Optional. Say it in your own words, the agent turns it into tasks.';
+    }
     if (field === 'due') {
       input.readOnly = true; input.placeholder = 'Pick a day';
       input.addEventListener('click', () => pickDate(input, input.value, v => { if (v !== null) input.value = v; }));
@@ -50,9 +54,9 @@ function ticketForm(t) {
     if (!t) inputs.text.setCustomValidity(inputs.text.value.trim() ? '' : 'What needs doing?');
     if (!form.reportValidity() || submit.disabled || creationUnresolved) return;
     submit.disabled = true; error.textContent = ''; reload.hidden = true;
-    const values = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.value.trim()]));
+    const values = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, key === 'done_when' ? input.value : input.value.trim()]));
     let result;
-    if (t) result = await act('ticket.edit', {ticket:t.id, owner:values.owner, due:values.due, note:values.note, if_revision:t.revision});
+    if (t) result = await act('ticket.edit', {ticket:t.id, owner:values.owner, due:values.due, note:values.note, done_when:values.done_when, if_revision:t.revision});
     else {
       const fullText = inputs.text.value;
       values.title = fullText.split(/\r?\n/).map(line => line.trim()).find(Boolean).slice(0, 200);
@@ -60,7 +64,7 @@ function ticketForm(t) {
       if (!created) {
         const previous = new Set(tickets().map(t => t.id));
         // m1-api: switch to the paste action when it lands
-        result = await act('ticket.new', {title:values.title, ...Object.fromEntries(['owner', 'due', 'note'].filter(k => values[k]).map(k => [k, values[k]]))});  // one write, one history line
+        result = await act('ticket.new', {title:values.title, ...Object.fromEntries(['owner', 'due', 'note', 'done_when'].filter(k => values[k]).map(k => [k, values[k]]))});  // one write, one history line
         if (result.ok) {
           created = tickets().filter(t => t.title === values.title && !previous.has(t.id)).sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0))[0];
           if (!created) {

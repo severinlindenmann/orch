@@ -44,6 +44,14 @@ def _status(proj, tid):
     return tickets.load(proj, tid)["status"]
 
 
+def _status_soon(proj, tid, want, timeout=10.0):
+    """The wrapper settles the ticket right after it releases the claim: wait for that moment, not a race."""
+    end = time.monotonic() + timeout
+    while _status(proj, tid) != want and time.monotonic() < end:
+        time.sleep(0.05)
+    return _status(proj, tid)
+
+
 def _texts(proj, tid):
     return [h["text"] for h in tickets.load(proj, tid)["history"]]
 
@@ -57,7 +65,7 @@ def test_a_run_that_ends_without_finishing_leaves_the_ticket_ready_not_working(p
     assert run("run", "start", tid)[0] == 0
     assert _status(proj, tid) == "active"
     _wait(proj, tid)
-    assert _status(proj, tid) == "ready"  # nobody works on it now: not "Working"
+    assert _status_soon(proj, tid, "ready") == "ready"  # nobody works on it now: not "Working"
     assert any("agent stopped" in t for t in _texts(proj, tid))
 
 
@@ -77,7 +85,7 @@ def test_stop_leaves_the_ticket_ready(proj, run, gen, one_step):
     _wait(proj, tid, gone=False)
     assert run("run", "stop", tid)[0] == 0
     _wait(proj, tid)
-    assert _status(proj, tid) == "ready"
+    assert _status_soon(proj, tid, "ready") == "ready"
 
 
 def test_a_working_ticket_with_no_agent_is_settled_by_the_next_status_check(proj, run):
