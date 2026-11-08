@@ -134,7 +134,7 @@ function board() {
     const rows = window.DashHelpers.treeRows(mine), roots = rows.filter(r => !r.depth);
     const cap = status === 'done' && !boardMore.has('done') ? 3 : roots.length;
     const branch = row => h('div', {className:'board-family', 'data-key':'family-' + row.ticket.id}, boardCard(row.ticket, row.depth > 0),
-      rows.filter(child => child.depth === row.depth + 1 && child.ticket.parent === row.ticket.id).map(branch));
+      rows.filter(child => child.depth === row.depth + 1 && [row.ticket.id, row.ticket.key].includes(child.ticket.parent)).map(branch));
     return h('section', {className:'kanban-col', 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + mine.length},
       h('div', {className:'col-head'}, h('h2', {className:'grow'}, label), h('span', {className:'status-count'}, String(mine.length))), h('p', {className:'meta column-hint'}, COLUMN_HINT[status]),
       roots.slice(0, cap).map(branch), !mine.length ? h('p', {className:'meta board-none'}, 'Nothing here') : null,

@@ -62,3 +62,11 @@ test('other person lines are plain sentences', () => {
   assert.equal(v('Patched title, owner'), 'You changed the title and the owner');
   assert.equal(H.historyView([entry('agent:claude', 'Status active -> review')], [], 'human:lume')[0].sentence, null);
 });
+test('parts group under their parent whether `parent` holds the id or the key', () => {
+  const mk = (id, key, parent) => ({id, key, parent, title: id, created_at: '2026-11-08T10:00:0' + id.slice(-1) + 'Z', status: 'open'});
+  for (const ref of ['t_p1', 'PIL-2']) {
+    const rows = H.treeRows([mk('t_c1', 'PIL-10', ref), mk('t_p1', 'PIL-2', null), mk('t_c2', 'PIL-11', ref)]);
+    assert.deepEqual(rows.map(r => [r.ticket.key, r.depth, r.children]), [['PIL-2', 0, 2], ['PIL-10', 1, 0], ['PIL-11', 1, 0]]);
+    assert.equal(rows[1].parentMissing, false);
+  }
+});

@@ -39,13 +39,12 @@ test('warmth and phone are feature detected', () => {
   assert.match(JSON.stringify(c.ticketPhone({sent_to_phone:true})), /Also sent to your phone/);
   assert.match(JSON.stringify(c.ticketPhone({delivered:true})), /Delivered to your phone/);
 });
-test('empty change notes send nothing; notes save before status changes', async () => {
+test('empty change notes send nothing; one call sends the note and the status', async () => {
   const calls = [], c = context({act:async (op, args) => { calls.push([op, args]); return {ok:true}; }, ticketOf:() => ({revision:3})});
   assert.equal(await c.ticketSendChanges({id:'t_one'}, '  '), false);
   assert.equal(calls.length, 0);
   assert.equal(await c.ticketSendChanges({id:'t_one'}, 'Fix the date'), true);
-  assert.equal(calls[0][0], 'check.add'); assert.equal(calls[0][1].text, 'Change: Fix the date');
-  assert.equal(calls[1][0], 'ticket.patch'); assert.equal(calls[1][1].data.status, 'active'); assert.equal(calls[1][1].if_revision, 3);
+  assert.equal(JSON.stringify(calls), JSON.stringify([['ticket.changes', {ticket:'t_one', text:'Fix the date'}]])); // no separate patch to Working
 });
 test('classic script loads before state and snapshot detail stays read-only inside its wrapper', () => {
   const h = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false)});
@@ -66,13 +65,13 @@ test('classic script loads before state and snapshot detail stays read-only insi
     walk(tree);
   }
 });
-test('change failures stop before status; snapshot never submits notes', async () => {
+test('a failed change request shows a plain error; snapshot never submits notes', async () => {
   const calls = [], c = context({act:async op => { calls.push(op); return {ok:false, text:'Failed'}; }});
   assert.equal(await c.ticketSendChanges({id:'t_test'}, 'Fix this'), false);
-  assert.deepEqual(calls, ['check.add']);
+  assert.deepEqual(calls, ['ticket.changes']);
   c.snapshot = true;
   assert.equal(await c.ticketSendChanges({id:'t_test'}, 'Fix this'), false);
-  assert.deepEqual(calls, ['check.add']);
+  assert.deepEqual(calls, ['ticket.changes']);
 });
 
 test('the review buttons show whenever the status is Review, an open question first', () => {

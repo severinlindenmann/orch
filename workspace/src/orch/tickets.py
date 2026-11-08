@@ -575,6 +575,40 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
     return status, by
 
 
+def ask_for_changes(root: Path, tid: str, text: str, by: str) -> dict:
+    """A person sends a Review ticket back with a note, in ONE step: the note becomes a task, the ticket is Ready
+    (Working only when a run claims it) and the note is queued as the person's own input, so the automation host
+    starts exactly one run for it (a person's pending input is what starts runs; #287)."""
+    if not by.startswith("human:") or agent_tool():
+        raise Refused("Only a person can ask for changes.")
+    note = (text or "").strip()
+    if not note:
+        raise Refused("Say what should change.")
+    if len(note) > 2000:
+        raise Refused("A note for changes is at most 2000 characters.")
+
+    def op(ticket):
+        if ticket["status"] != "review":
+            raise Refused("This ticket is not waiting for your review.")
+        ticket["checklist"].append(
+            {
+                "id": _next_id(ticket["checklist"], "c"),
+                "text": "Change: " + note,
+                "done": False,
+                "evidence": [],
+            }
+        )
+        ticket["status"] = "ready"
+        ticket["waiting_on"] = None
+        add_history(ticket, by, "Asked for changes: " + note[:200])
+
+    t = apply_op(root, tid, op)[0]
+    from orch import runs  # runs imports tickets
+
+    runs.pending_add(root, tid, by, "message", note, _env_via())
+    return t
+
+
 def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
     def op(ticket):
         was_started = ticket.get("started") is True

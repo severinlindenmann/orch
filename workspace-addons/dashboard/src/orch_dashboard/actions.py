@@ -152,6 +152,12 @@ def _ticket_patch(a):
     )
 
 
+def _ticket_changes(a):
+    """Ask for changes on a ticket in Review: ONE call sets it Ready and queues the note as the person's input."""
+    _only(a, ("ticket", "text"))
+    return ["ticket", "changes"], [], [_tid(a.get("ticket")), _text(a.get("text"), "note")]
+
+
 def _ticket_edit(a):
     _only(a, ("ticket", "title", "owner", "due", "note", "done_when", "if_revision"))
     flags = []
@@ -356,6 +362,7 @@ OPS = {
     "answer": _answer,
     "ticket.new": _ticket_new,
     "ticket.patch": _ticket_patch,
+    "ticket.changes": _ticket_changes,
     "ticket.edit": _ticket_edit,
     "log": _log,
     "chat.say": _chat_say,

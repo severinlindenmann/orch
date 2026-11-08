@@ -115,6 +115,12 @@
       const who = historyWho(by, me);
       let sentence = null, m;
       if (by.startsWith('human:')) {
+        if ((m = /^Asked for changes(?:: ([\s\S]*))?$/.exec(text))) {
+          const n = noteFor(e);
+          if (n) hidden.add(n.entry);
+          const note = m[1] || (n && n.note) || '';
+          sentence = who + ' asked for changes' + (note ? ': ' + note : '');
+        } else
         if ((m = /^(?:Patched status \(status|Status) (\w+) -> (\w+)\)?$/.exec(text))) {
           if (m[1] === 'review' && m[2] === 'active') {
             const n = noteFor(e);
@@ -302,10 +308,13 @@
      missing is shown as a top-level ticket. Input order is kept. */
   function treeRows(tickets) {
     const all = arr(tickets), byId = new Map(all.map(t => [t.id, t]));
+    const byKey = new Map(all.filter(t => t.key).map(t => [String(t.key).toLowerCase(), t.id]));
+    // `parent` is a ticket id, but real data may carry the key ("PIL-2"): both name the same parent
+    const pid = t => t.parent && (byId.has(t.parent) ? t.parent : byKey.get(String(t.parent).toLowerCase())) || null;
     const kids = new Map();
-    for (const t of all) if (t.parent && byId.has(t.parent) && t.parent !== t.id) {
-      if (!kids.has(t.parent)) kids.set(t.parent, []);
-      kids.get(t.parent).push(t);
+    for (const t of all) if (pid(t) && pid(t) !== t.id) {
+      if (!kids.has(pid(t))) kids.set(pid(t), []);
+      kids.get(pid(t)).push(t);
     }
     // Children in the order they were made (the order of the work), not the order the page lists tickets.
     const made = t => Date.parse(t.created_at) || 0;
@@ -316,10 +325,10 @@
       seen.add(t.id);
       const ch = kids.get(t.id) || [];
       const done = ch.filter(c => c.status === 'done').length;
-      out.push({ticket: t, depth, children: ch.length, done, parentMissing: !!t.parent && !byId.has(t.parent), late: depth > 0 && idx >= 3});
+      out.push({ticket: t, depth, children: ch.length, done, parentMissing: !!t.parent && !pid(t), late: depth > 0 && idx >= 3});
       ch.forEach((c, i) => walk(c, depth + 1, i));
     };
-    for (const t of all) if (!t.parent || !byId.has(t.parent) || t.parent === t.id) walk(t, 0, 0);
+    for (const t of all) if (!pid(t) || pid(t) === t.id) walk(t, 0, 0);
     for (const t of all) walk(t, 0, 0);  // a parent cycle still shows its tickets
     return out;
   }

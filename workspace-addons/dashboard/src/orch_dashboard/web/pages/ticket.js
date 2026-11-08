@@ -583,11 +583,10 @@ function ticketPhone(q) {
 async function ticketSendChanges(t, note) {
   const text = String(note || '').trim();
   if (snapshot || !text) return false;
-  const added = await act('check.add', {ticket:t.id, text:'Change: ' + text});
-  if (!added.ok) { window.orch.toast(changeError(added), 'error'); return false; }
-  const moved = await actRetry('ticket.patch', () => ({ticket:t.id, data:{status:'active'}, if_revision:(ticketOf(t.id) || t).revision}), () => ticketOf(t.id)?.status === 'review');
-  window.orch.toast(moved.ok ? 'Changes sent' : changeError(moved), moved.ok ? 'ok' : 'error');
-  return moved.ok;
+  // One call: the ticket is Ready and the note is queued as your own input; an agent run starts from it.
+  const sent = await act('ticket.changes', {ticket:t.id, text});
+  window.orch.toast(sent.ok ? 'Changes sent' : changeError(sent), sent.ok ? 'ok' : 'error');
+  return sent.ok;
 }
 function ticketChangesEditor(t) {
   const host = h('div', {'data-key':'ticket-changes-' + t.id});
@@ -669,7 +668,7 @@ function detail(t) {
     h('div', {className:'columns ticket-columns'}, h('div', {className:'stack ticket-main'}, next,
       !fresh && !['done', 'review'].includes(t.status) ? agentBar(t) : null,
       snapshot ? null : h('div', {className:'tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label]) => ticketButton(label, 'ghost', () => selectTicketTab(t.id, id), {id:'ticket-tab-' + id, role:'tab', 'aria-selected':selected === id, 'aria-controls':'ticket-panel-' + id}))),
-      panel('overview', [t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null, !parent && !t.parent ? ticketParts(t, children) : null, tasksCard('overview-tasks'), addonRows(t), ticketLinks(t)]),
+      panel('overview', [t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null, children.length || (!parent && !t.parent) ? ticketParts(t, children) : null, tasksCard('overview-tasks'), addonRows(t), ticketLinks(t)]),
       panel('tasks', tasksCard('tasks')),
       panel('questions', [(snapshot || selected === 'questions') ? openQuestions.slice(t.status === 'done' ? 0 : 1).map(q => ticketQuestion(t, q)) : null, openQuestions.length <= (t.status === 'done' ? 0 : 1) ? emptyRow('No other open questions') : null, answered.length ? h('section', {}, h('h2', {}, 'Earlier answers'), answered) : null]),
       panel('artifacts', artifactsPanel(t)), panel('history', ticketHistoryPanel(t))),

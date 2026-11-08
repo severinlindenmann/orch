@@ -752,3 +752,13 @@ def test_share_state_is_read_from_agents_md_only(ws):
     assert load_settings(ws, None)["share"] is False
     (ws / "AGENTS.md").write_text("# Team\n<!-- orch:begin share -->\nx\n<!-- orch:end share -->\n", encoding="utf-8")
     assert load_settings(ws, None)["share"] is True
+
+
+def test_ask_for_changes_is_one_op_with_only_a_ticket_and_a_note():
+    argv = actions.build_argv("ticket.changes", {"ticket": "t_abcdef", "text": "Make it blue"})
+    assert argv[-3:] == ["--", "t_abcdef", "Make it blue"] or argv[-2:] == ["t_abcdef", "Make it blue"]
+    assert "changes" in argv and "patch" not in argv
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("ticket.changes", {"ticket": "t_abcdef", "text": " "})
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("ticket.changes", {"ticket": "t_abcdef", "text": "x", "status": "active"})

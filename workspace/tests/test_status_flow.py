@@ -203,3 +203,31 @@ def test_agent_never_finishes_with_open_question(proj, run, new_ticket, monkeypa
         code = run("ticket", "status", tid, target, "--by", "human:lume")[0]
     assert code == 2
     assert tickets.load(proj, tid) == before
+
+
+def test_ask_for_changes_is_ready_with_one_human_pending_item(proj, run, new_ticket):
+    """P1.7: one call -> Ready (never Working without a run) + the note queued as a person's input, which is
+    exactly what the automation host starts one run for (queued_input: Ready + human_pending_ids + no run)."""
+    tid = new_ticket()
+    tickets.set_status(proj, tid, "review", "human:lume")
+    t = tickets.ask_for_changes(proj, tid, "Make the header blue", "human:lume")
+    assert t["status"] == "ready" and t["waiting_on"] is None
+    assert any(c["text"] == "Change: Make the header blue" for c in t["checklist"])
+    pending = runs.undelivered(proj, tid)
+    assert len(pending) == 1 and pending[0]["by"] == "human:lume" and pending[0]["kind"] == "message"
+    assert pending[0]["via"] == "dashboard" or pending[0]["via"] == "cli"
+    code, out, err = run("run", "status", tid, "--json")
+    assert code == 0 and len(json.loads(out)["human_pending_ids"]) == 1
+    assert json.loads(out)["running"] is False
+
+
+def test_ask_for_changes_refusals(proj, new_ticket, monkeypatch):
+    tid = new_ticket()
+    with pytest.raises(Refused, match="not waiting"):
+        tickets.ask_for_changes(proj, tid, "x", "human:lume")  # not in Review
+    tickets.set_status(proj, tid, "review", "human:lume")
+    with pytest.raises(Refused, match="Only a person"):
+        tickets.ask_for_changes(proj, tid, "x", "agent:generic")
+    with pytest.raises(Refused, match="Say what"):
+        tickets.ask_for_changes(proj, tid, "  ", "human:lume")
+    assert tickets.load(proj, tid)["status"] == "review" and not runs.undelivered(proj, tid)
