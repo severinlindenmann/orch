@@ -67,7 +67,7 @@ final class TicketTests: XCTestCase {
         XCTAssertEqual(t("stopped").stateLine, "Stopped")
         XCTAssertTrue(t("failure", "No access").stateLine.hasPrefix("Did not work"))
         let q = MockRelayTestsFixtures.question
-        XCTAssertEqual(TicketBuilder.build(updates: [], questions: [q], answers: [:])[0].stateLine, "Waiting for your answer")
+        XCTAssertEqual(TicketBuilder.build(updates: [], questions: [q], answers: [:])[0].stateLine, "Needs you")
     }
 
     func testTextBodyReadsUpdateKind() throws {

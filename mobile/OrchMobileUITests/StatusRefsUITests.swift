@@ -21,15 +21,19 @@ final class StatusRefsUITests: XCTestCase {
     func testWorkspaceGroupsByStatusAndDoneIsCollapsed() {
         let app = launch("ws_pilatus001")
         XCTAssertTrue(app.buttons["general-ws_pilatus001"].waitForExistence(timeout: 20), "General is pinned")
-        XCTAssertTrue(app.staticTexts["Waiting"].waitForExistence(timeout: 10), "the topic with an open question is under Waiting")
+        XCTAssertTrue(app.staticTexts["Needs you"].waitForExistence(timeout: 10), "the topic with an open question is under Needs you")
         XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_7k3f9q"].exists)
-        XCTAssertFalse(app.staticTexts["Backlog"].exists && app.staticTexts["Review"].exists, "empty groups are hidden")
+        XCTAssertFalse(app.staticTexts["Not started"].exists && app.staticTexts["Ready for review"].exists, "empty groups are hidden")
         let done = app.buttons["done-toggle"]
         XCTAssertTrue(done.exists)
         XCTAssertFalse(app.buttons["ticket-ws_pilatus001|t_q3sum1"].exists, "Done is collapsed")
         shot(app, "1-workspace-groups")
         done.tap()
-        XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_q3sum1"].waitForExistence(timeout: 5))
+        let q3 = app.buttons["ticket-ws_pilatus001|t_q3sum1"]
+        XCTAssertTrue(q3.waitForExistence(timeout: 5))
+        app.reveal(q3)
+        XCTAssertFalse(app.staticTexts["Done"].exists, "Done is shown once: the toggle, no second header above the rows")
+        XCTAssertLessThan(done.frame.minY, q3.frame.minY, "the finished chat sits under the toggle")
         shot(app, "2-workspace-done-open")
     }
 

@@ -349,7 +349,7 @@ final class ConversationTests: XCTestCase {
         XCTAssertEqual(ConversationBuilder.items(.general(workspace: ws), d).map(\.id), ["m_g", "m_w"])
         XCTAssertEqual(ConversationBuilder.items(.topic(workspace: ws, ticket: "t_q3sum1"), d).map(\.id), ["m_t"])
         let s = ConversationBuilder.topics(workspace: ws, d, read: ReadState())
-        XCTAssertEqual(s.count, 1); XCTAssertTrue(s[0].isStarting); XCTAssertEqual(s[0].lastLine, "Starting topic…")
+        XCTAssertEqual(s.count, 1); XCTAssertTrue(s[0].isStarting); XCTAssertEqual(s[0].lastLine, "Getting started…")
         // the ack names the ticket -> the text moves into that topic
         d.messages.append(text("m_ack", from: ws, to: me, at: "2026-11-06T10:02:30Z", ticket: "t_new0001", body: TextBody(text: "Got it", update: TextUpdate(kind: "ack", title: "New")), replyTo: "m_n"))
         XCTAssertEqual(ConversationBuilder.items(.topic(workspace: ws, ticket: "t_new0001"), d).map(\.id), ["m_n"])
@@ -387,7 +387,7 @@ final class ConversationTests: XCTestCase {
         d.speak = .never; XCTAssertFalse(ConversationBuilder.items(t[0].id, d)[0].canPlay)
         var r = ReadState(); r.markRead(ReadState.key(t[0].id), upTo: "2026-11-06T10:05:00Z")
         XCTAssertEqual(ConversationBuilder.topics(workspace: ws, d, read: r)[0].unread, 0)
-        XCTAssertEqual(TopicStatus.allCases.map(\.label), ["Working", "Waiting", "Review", "Backlog", "Done", "Stopped", "Didn't work"])
+        XCTAssertEqual(TopicStatus.allCases.map(\.label), ["Working", "Needs you", "Ready for review", "Not started", "Done", "Stopped", "Didn't work"])
     }
     func testLanguageLabelOnlyWhenDifferent() {
         XCTAssertNil(LanguageLabel.label(memo: "de-CH", conversation: "de-CH")); XCTAssertEqual(LanguageLabel.label(memo: "en", conversation: "de-CH"), "EN")

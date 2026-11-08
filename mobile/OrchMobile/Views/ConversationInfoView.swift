@@ -33,7 +33,7 @@ struct ConversationInfoView: View {
 
     private var title: String {
         if case .general = conversation { return "General - \(workspaceName)" }
-        let name = topic?.title ?? ticket?.displayTitle ?? "Starting topic…"
+        let name = topic?.title ?? ticket?.displayTitle ?? "Getting started…"
         if let key = topic?.key ?? ticket?.key { return "\(key) · \(name)" }
         return name
     }

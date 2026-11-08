@@ -19,7 +19,7 @@ struct QuestionCard: View {
                     Image(systemName: "lock").themeFont(13).foregroundStyle(isStale ? Theme.muted : Theme.warn)
                         .accessibilityLabel("Permission")
                 } else {
-                    Text("Waiting on you").themeFont(13, .semibold).foregroundStyle(isStale ? Theme.muted : Theme.warn)
+                    Text("Needs you").themeFont(13, .semibold).foregroundStyle(isStale ? Theme.muted : Theme.warn)
                 }
                 Text(q.message.body.text).themeFont(17).fixedSize(horizontal: false, vertical: true)
                 if isStale {

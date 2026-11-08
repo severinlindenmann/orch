@@ -7,6 +7,9 @@
 
 # Round 5
 - Grouped workspace topics by Working / Waiting / Review / Backlog with Done collapsed; renamed Links to References with URL, ticket, artifact and plain file-path rows. Added static `statuses-references.html` review screens.
+- Workspace screen shows Done only once (owner 2A): the "Done (n)" toggle with the finished chats directly under it, no second "Done" header (and none for Stopped / Didn't work; the row chip says which).
+- Words (owner 6A): groups and chips read Needs you / Working / Ready for review / Not started / Done (n), in that order; starting chip "Getting started…". "Waiting on you", "Waiting for your answer", "Check this", "Backlog" and "Review" are gone from the phone.
+- Wording (owner 5A/10A): "Needs you" replaces "Waiting on you" / "Waiting for your answer" (filter chip, status chip, question label); chat list count reads "1 needs you" / "2 need you".
 - Removed all bottom-tab rendering, styles, badges and reserved space; Chats is the only root.
 - Added a matching 44 pt Settings gear at top-left; Settings pushes and Back returns to Chats.
 - Removed asleep banners; headers and workspace rows share five-minute online and dated last-seen presence.
