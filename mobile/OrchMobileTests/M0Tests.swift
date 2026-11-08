@@ -370,6 +370,41 @@ final class ConversationTests: XCTestCase {
         let items = ConversationBuilder.items(.general(workspace: ws), d)
         XCTAssertEqual(items.count, 1, "a General receipt is ticks, not a bubble"); XCTAssertEqual(items[0].receipt, .started); XCTAssertEqual(items[0].receipt?.ticks, 2)
     }
+    /// Owner 8 Nov (IMG_6624): "Working ✓✓" on the owner's text ends once the workspace says the work stopped.
+    func testWorkingReceiptEndsOnResultOrSnapshotWithoutARun() {
+        let topic = ConversationID.topic(workspace: ws, ticket: "t_dem2")
+        func receipt(_ d: ConversationInputs) -> Receipt? { ConversationBuilder.items(topic, d).first { $0.id == "m_p" }?.receipt }
+        var d = ConversationInputs()
+        d.messages = [text("m_p", from: me, to: ws, at: "2026-11-08T08:00:00Z", ticket: "t_dem2", body: TextBody(text: "make a test ticket"), delivered: "2026-11-08T08:00:01Z"),
+                      text("m_w", from: ws, to: me, at: "2026-11-08T08:00:10Z", ticket: "t_dem2", body: TextBody(text: "Working on it", update: TextUpdate(kind: "working")), replyTo: "m_p")]
+        XCTAssertEqual(receipt(d), .started)
+        // a quiet snapshot that says no agent runs any more (status ready): the receipt is plain ticks again
+        var ended = d
+        ended.messages.append(text("m_n", from: ws, to: me, at: "2026-11-08T08:05:00Z", ticket: "t_dem2",
+                                   body: TextBody(text: "Tasks: 0 of 2 done", update: TextUpdate(kind: "note"), ticketView: TicketSnapshot(status: "ready", running: false))))
+        XCTAssertEqual(receipt(ended), .delivered); XCTAssertEqual(receipt(ended)?.ticks, 2)
+        // a snapshot while the agent still runs keeps it
+        var running = d
+        running.messages.append(text("m_n", from: ws, to: me, at: "2026-11-08T08:05:00Z", ticket: "t_dem2",
+                                     body: TextBody(text: "Tasks: 1 of 2 done", update: TextUpdate(kind: "note"), ticketView: TicketSnapshot(status: "active", running: true))))
+        XCTAssertEqual(receipt(running), .started)
+        // the pushed result on review ends it too
+        var result = d
+        result.messages.append(text("m_r", from: ws, to: me, at: "2026-11-08T08:06:00Z", ticket: "t_dem2",
+                                    body: TextBody(text: "Ready for your review: Test ticket", update: TextUpdate(kind: "result"), ticketView: TicketSnapshot(status: "review", running: false))))
+        XCTAssertEqual(receipt(result), .delivered)
+        XCTAssertTrue(ConversationBuilder.items(topic, result).contains { $0.id == "m_r" && $0.side == .them }, "the result shows in the ticket chat")
+        // a later pick-up of the same text (a new run) shows Working again
+        result.messages.append(text("m_w2", from: ws, to: me, at: "2026-11-08T08:07:00Z", ticket: "t_dem2", body: TextBody(text: "Working on it", update: TextUpdate(kind: "working")), replyTo: "m_p"))
+        XCTAssertEqual(receipt(result), .started)
+        // a text in a new topic (ticket named only by the ack) ends the same way
+        var fresh = ConversationInputs()
+        fresh.messages = [text("m_p", from: me, to: ws, at: "2026-11-08T08:00:00Z", body: TextBody(text: "new"), delivered: "2026-11-08T08:00:01Z"),
+                          text("m_a", from: ws, to: me, at: "2026-11-08T08:00:05Z", ticket: "t_dem2", body: TextBody(text: "Got it", update: TextUpdate(kind: "ack")), replyTo: "m_p"),
+                          text("m_n", from: ws, to: me, at: "2026-11-08T08:09:00Z", ticket: "t_dem2",
+                               body: TextBody(text: "Tasks", update: TextUpdate(kind: "note"), ticketView: TicketSnapshot(status: "ready", running: false)))]
+        XCTAssertEqual(receipt(fresh), .delivered)
+    }
     func testSentItemInOutboxIsNotShownTwice() {
         var d = ConversationInputs()
         d.outbox = [OutboxItem(clientId: "c1", phone: me, kind: .send, workspace: ws, createdAt: "2026-11-06T10:00:00Z", general: true, text: "x", sentMessageId: "m_a")]

@@ -177,7 +177,11 @@ extension ReadState {
 enum ConversationBuilder {
     struct Index {
         var ticketOfPhoneText: [String: String] = [:]     // phone text id -> ticket named by an ack
-        var started: Set<String> = []                      // phone text ids with an ack / working reply
+        /// phone text id -> time of its latest ack / working reply ("Working" receipt)
+        var startedAt: [String: String] = [:]
+        /// "<workspace>|<ticket>" -> time of the latest message that says no agent works on it now: a result, failure or
+        /// stopped update, or a snapshot with running false. A "Working" receipt older than that is over (owner 8 Nov, IMG_6624).
+        var endedAt: [String: String] = [:]
     }
 
     private static func isReceipt(_ m: TextMessage) -> Bool {
@@ -187,12 +191,30 @@ enum ConversationBuilder {
 
     static func index(_ d: ConversationInputs) -> Index {
         var ix = Index()
-        for pm in d.messages where !pm.fromPhone && isReceipt(pm.message) {
-            guard let r = pm.message.replyTo else { continue }
-            ix.started.insert(r)
-            if let t = pm.message.ticket, pm.message.body.update?.kind == "ack" { ix.ticketOfPhoneText[r] = t }
+        for pm in d.messages where !pm.fromPhone {
+            let m = pm.message
+            if let t = m.ticket, ends(m) {
+                let k = "\(pm.workspaceId)|\(t)"
+                if m.createdAt > (ix.endedAt[k] ?? "") { ix.endedAt[k] = m.createdAt }
+            }
+            guard isReceipt(m), let r = m.replyTo else { continue }
+            if m.createdAt > (ix.startedAt[r] ?? "") { ix.startedAt[r] = m.createdAt }
+            if let t = m.ticket, m.body.update?.kind == "ack" { ix.ticketOfPhoneText[r] = t }
         }
         return ix
+    }
+
+    /// A workspace message that says no agent works on its ticket now.
+    static func ends(_ m: TextMessage) -> Bool {
+        if let k = m.body.update?.kind, ["result", "failure", "stopped"].contains(k) { return true }
+        return m.body.ticketView?.running == false
+    }
+
+    /// The "Working" receipt of this phone text: acked or picked up, and nothing on its ticket said the work stopped since.
+    static func isWorking(_ pm: PhoneMessage, _ ix: Index) -> Bool {
+        guard let at = ix.startedAt[pm.id] else { return false }
+        guard let t = pm.message.ticket ?? ix.ticketOfPhoneText[pm.id], let end = ix.endedAt["\(pm.workspaceId)|\(t)"] else { return true }
+        return at > end
     }
 
     private static func pendingKey(_ pm: PhoneMessage) -> String { pm.clientId ?? pm.message.body.clientId ?? pm.id }
@@ -214,7 +236,8 @@ enum ConversationBuilder {
     }
 
     private static func receipt(_ pm: PhoneMessage, _ ix: Index) -> Receipt {
-        if ix.started.contains(pm.id) { return .started }
+        if isWorking(pm, ix) { return .started }
+        if ix.startedAt[pm.id] != nil { return .delivered }   // picked up, and the work on it has ended since
         return pm.deliveredAt != nil ? .delivered : .sent
     }
 
