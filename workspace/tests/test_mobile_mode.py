@@ -383,3 +383,71 @@ def test_conditional_off_leaves_ended_state_unchanged(on_state, beats):
     count = len(beats)
     assert mm.turn_off(on_state, "phone", if_since=since, by="ph_aaaaaaaaaa") == ended
     assert len(beats) == count
+
+
+# ---- questions on phone-started tickets reach the phone (owner 8 Nov, fb7) ----------------------
+
+
+def _connect(root):
+    net.write_json(
+        net.secrets_dir(root) / "relay.json", {"url": "http://x", "workspace": "ws_a", "token": "orn_x"}
+    )
+
+
+def _phone_ticket(root, title="From the phone", parent=None):
+    from orch import tickets
+
+    t = tickets.create(root, title, "human:ph_aaaaaaaaaa", parent=parent)
+    tickets.apply_op(root, t["id"], lambda tk: tk.setdefault("ext", {}).update(relay={"origin": "phone"}))
+    return t["id"]
+
+
+def test_question_to_phone_for_phone_tickets_without_mobile_mode(on_state, monkeypatch):
+    from orch import tickets
+
+    monkeypatch.delenv("ORCH_TICKET", raising=False)
+    phone = _phone_ticket(on_state)
+    child = tickets.create(on_state, "Made by the agent", "agent:claude", parent=phone)["id"]
+    plain = tickets.create(on_state, "Dashboard ticket", "human:sev")["id"]
+    assert not mm.question_to_phone(on_state, phone)  # relay not connected: never
+    _connect(on_state)
+    assert mm.question_to_phone(on_state, phone)
+    assert mm.question_to_phone(on_state, child)  # a parent came from the phone
+    assert not mm.question_to_phone(on_state, plain)  # quiet: every question is pushed
+    # the agent of a phone ticket made a new ticket without a parent: its run ticket counts
+    assert mm.question_to_phone(on_state, plain, run_ticket=phone)
+    assert not mm.question_to_phone(on_state, plain, run_ticket="t_missing")
+    mm.turn_on(on_state, 4)
+    assert mm.question_to_phone(on_state, plain)  # Mobile mode: every question
+
+
+def test_question_to_phone_needs_relay_addon(on_state, monkeypatch):
+    from orch import addons
+
+    phone = _phone_ticket(on_state)
+    _connect(on_state)
+    monkeypatch.setattr(addons, "active", lambda root: [])
+    assert not mm.question_to_phone(on_state, phone)
+
+
+def test_cli_ask_sends_phone_ticket_questions_to_the_phone(on_state, run, monkeypatch):
+    from orch import cli_clients, tickets
+
+    sent = []
+    monkeypatch.setattr(
+        cli_clients, "send_phone_question", lambda root, tid, q, *a: sent.append((tid, q["id"]))
+    )
+    monkeypatch.delenv("ORCH_TICKET", raising=False)
+    _connect(on_state)
+    phone = _phone_ticket(on_state)
+    plain = tickets.create(on_state, "Dashboard ticket", "human:sev")["id"]
+    other = tickets.create(on_state, "Second", "human:sev")["id"]
+    assert (
+        run("ask", phone, "Which colour?", "--option", "Blue", "--option", "Red", "--by", "agent:claude")[0]
+        == 0
+    )
+    assert run("ask", plain, "Which day?", "--option", "Mon", "--by", "agent:claude")[0] == 0
+    assert [s[0] for s in sent] == [phone]
+    monkeypatch.setenv("ORCH_TICKET", phone)  # the phone ticket's agent asks on a ticket it made
+    assert run("ask", other, "Which size?", "--option", "S", "--by", "agent:claude")[0] == 0
+    assert [s[0] for s in sent] == [phone, other]

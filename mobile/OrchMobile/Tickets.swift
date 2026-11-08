@@ -86,6 +86,9 @@ enum TicketBuilder {
             // The ticket's own status (when the snapshot carries a known one) decides, whatever the note's kind: an agent's
             // "done" arrives as review, a person's Done as done. The update kind only decides for old snapshots without a status (failure and stopped keep their own sign when the ticket is done).
             if let own = Ticket.Status(ticketStatus: u.ticketView?.status) { st = own }
+            // "active" without a running agent (an answer on the dashboard moved it on, nobody started a run): the
+            // snapshot says no agent runs, so the phone never claims "Claude is working" (owner 8 Nov, IMG_6626).
+            if st == .working, u.ticketView?.running == false { st = .backlog }
             byKey[key] = Ticket(id: key, workspace: u.workspace, workspaceName: u.workspaceName, ticket: u.ticket,
                                 title: u.ticketView?.title ?? u.title ?? u.text, text: u.text, status: st, kind: u.kind, at: u.at, question: nil,
                                 key: u.key, view: u.ticketView)
