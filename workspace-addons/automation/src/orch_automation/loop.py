@@ -371,7 +371,7 @@ class Scheduler:
             hint = (f"A phone text in the General conversation is waiting for you. Answer it: "
                     f'orch relay send {m["from"]} "<your answer>" --ticket {tid}') \
                 if general and PHONE_RE.fullmatch(str(m["from"])) else None
-            return tid if self.start_run(tid, f"phone text {mid}", now, hint, phone=True) == "started" else None
+            return tid if self.start_run(tid, f"phone text{' ' + mid if mid else ''}", now, hint, phone=True) == "started" else None
         if kind == "webhook":
             wid = body.get("webhook_id")
             for t in read_tickets(self.root):

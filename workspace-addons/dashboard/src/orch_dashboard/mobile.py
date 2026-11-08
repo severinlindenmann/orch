@@ -307,14 +307,9 @@ def load_groups(root: Path, orch_bin: str | None) -> dict | None:
     return {"hosted": hosted, "joined": joined}
 
 
-CHAT_VIA = (
-    "relay",
-    "dashboard",
-)  # history entries written by the group chat (other workspaces, this dashboard)
-
-
 def mark_chat_history(t: dict) -> None:
-    """`in_chat: true` on the history entries that are group-chat talk, so the Chat page needs no source names."""
+    """`in_chat: true` on the history entries the core wrote as real Chat/group messages (`chat_message: true`),
+    so the Chat page shows messages only: never run, task, status or instruction rows."""
     for e in t["history"]:
-        if isinstance(e, dict) and e.get("via") in CHAT_VIA:
+        if isinstance(e, dict) and e.get("chat_message") is True:
             e["in_chat"] = True
