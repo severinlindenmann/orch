@@ -576,9 +576,9 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
 
 
 def ask_for_changes(root: Path, tid: str, text: str, by: str) -> dict:
-    """A person sends a Review ticket back with a note, in ONE step: the note becomes a task, the ticket is Ready
-    (Working only when a run claims it) and the note is queued as the person's own input, so the automation host
-    starts exactly one run for it (a person's pending input is what starts runs; #287)."""
+    """A person sends a Review ticket back with a note, in ONE step: the note becomes a task, the ticket is
+    Ready (Working only when a run claims it) and the note is queued as the person's own input, so the
+    automation host starts exactly one run for it (a person's pending input is what starts runs; #287)."""
     if not by.startswith("human:") or agent_tool():
         raise Refused("Only a person can ask for changes.")
     note = (text or "").strip()
