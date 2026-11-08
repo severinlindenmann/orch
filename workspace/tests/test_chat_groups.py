@@ -853,6 +853,17 @@ def test_group_text_is_framed_as_outside_data(proj, run, rel, grp):
     assert relay.allows(proj)["given"] == [] and relay.allows(proj)["received"] == []
 
 
+def test_group_talk_in_the_host_ticket_carries_the_chat_flag_and_other_lines_do_not(proj, run, rel, grp):
+    host, gid, d = grp
+    run("relay", "inbox")
+    rel.inbox.append(group_msg(HOME, gid, host, MEMBERS, {"text": "hello group"}, id=mid("g11")))
+    run("relay", "inbox")
+    hist = tickets.load(proj, gid[4:])["history"]
+    talk = [e for e in hist if e["text"].startswith("Group: hello group")]
+    assert talk and all(e["chat_message"] is True for e in talk)
+    assert all(e["chat_message"] is False for e in hist if not e["text"].startswith("Group"))
+
+
 # ---- member side -------------------------------------------------------------------------------------------
 
 FIN = "ws_fin0000001"

@@ -516,7 +516,13 @@ def create(
         "refs": [],
         "questions": [],
         "history": [
-            {"at": t, "by": by, "via": _env_via(), "text": "Created" + (f" under {parent}" if parent else "")}
+            {
+                "at": t,
+                "by": by,
+                "via": _env_via(),
+                "text": "Created" + (f" under {parent}" if parent else ""),
+                "chat_message": False,
+            }
         ],
     }
     if parent is not None:
