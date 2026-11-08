@@ -24,7 +24,7 @@ struct ChatHistoryView: View {
                                     Image(systemName: "clock")
                                     VStack(alignment: .leading, spacing: 6) {
                                         Text(ChatDay.label(forDay: day.day, today: today)).themeFont(17, .semibold)
-                                        Text("\(day.items.count) messages · \(day.items.first?.preview ?? "")")
+                                        Text("\(day.items.count) \(day.items.count == 1 ? "message" : "messages") · \(day.items.first?.preview ?? "")")
                                             .themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
                                     }
                                 }.padding(.vertical, 8)
