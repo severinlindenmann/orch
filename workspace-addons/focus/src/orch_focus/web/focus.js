@@ -2,6 +2,12 @@
    through POST /api/act (the fixed op table). All text is set with textContent, never innerHTML. */
 (function () {
   'use strict';
+/* The line under the message box. While a question waits for the person, "after this step" is wrong: point to the answer. */
+function hintText(v, running, asking) {
+  if (asking) return 'Answer the question — Claude continues right after.';
+  if (v.generic && !(running && v.live)) return 'Saved for the next run.';
+  return running ? 'Goes in after this step.' : '';
+}
   const root = document.getElementById('fx');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const ic = (n, s = 16) => (window.icon ? window.icon(n, s) : '');
@@ -147,7 +153,7 @@
     els.attachBtn.hidden = !(running && v.live);
     els.sub.textContent = running ? (v.live ? 'live session' : 'one run') : (v.state === 'done' ? 'done' : v.run.run ? 'last run ended' : 'not started');
     els.msg.placeholder = 'Message ' + els.agent.textContent + '…';
-    els.hintNote.textContent = v.generic && !(running && v.live) ? 'Saved for the next run.' : (running ? 'Goes in after this step.' : '');
+    els.hintNote.textContent = hintText(v, running, asking);
     els.railNote.textContent = v.generic ? 'This agent shows its tasks and questions as it ticks them off.' : '';
     renderTasks(v);
     renderHelpers(v);

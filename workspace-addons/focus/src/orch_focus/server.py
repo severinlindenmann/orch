@@ -473,7 +473,7 @@ class Handler(BaseHTTPRequestHandler):
         view = self.tracker.view(tid) if isinstance(tid, str) and TID_RE.fullmatch(tid) else None
         note = None
         if body.get("op") == "run.send":
-            note = chat.note(extra, bool(view and view["run"]["running"]), bool(view and view["live"]))
+            note = chat.note(extra, bool(view and view["run"]["running"]), bool(view and view["live"]), any(q.get("answer") is None for q in view["ticket"].get("questions", [])) if view else False)
         self._json(200, {"result": extra, "view": view, "note": note})
 
 
