@@ -2084,3 +2084,41 @@ def test_unchecked_kinds_are_told_apart_by_an_attribute():
     with pytest.raises(cg.Unchecked) as e:
         cg.check_file(b"%PDF-1.4 /Encrypt 1 0 R", "a.pdf")
     assert e.value.image is False
+
+
+def test_click_shared_artifact_must_really_be_in_the_artifacts_folder(proj, run, rel, host, tmp_path):
+    run("relay", "group", "add", host, HOME)
+    adir = proj / ".orch" / "tickets" / host / "artifacts"
+    adir.mkdir(parents=True)
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    (docs / "x.pdf").write_bytes(pdf_bytes())
+    (adir / "link.pdf").symlink_to(docs / "x.pdf")  # an ordinary file elsewhere, not hidden
+    rel.sent.clear()
+    code, _, err = run("relay", "group", "share", host, str(adir / "link.pdf"), "--click")
+    assert code != 0 and "link" in err and not sent(rel, type="file")
+    # the same file named directly (not through artifacts) is the person's own choice and still works
+    assert run("relay", "group", "share", host, str(docs / "x.pdf"), "--click")[0] == 0
+    # the artifacts folder itself being a link is refused too
+    t2 = proj / ".orch" / "tickets" / "t_other00001"
+    t2.mkdir(parents=True)
+    (t2 / "artifacts").symlink_to(docs)
+    code, _, err = run("relay", "group", "share", host, str(t2 / "artifacts" / "x.pdf"), "--click")
+    assert code != 0 and "link" in err
+
+
+def test_card_kind_fails_closed_without_members_and_agrees_on_odd_values():
+    q = {
+        "allow_question": True,
+        "options": list(cg.ALLOW_OPTIONS),
+        "group_ref": {"host": " WS_A ", "id": "GRP_T_X"},
+    }
+    shown = {"host": "ws_a", "id": "grp_t_x"}
+    assert cg.card_kind(q, shown, "ws_m", ["ws_m"]) == "buttons"
+    assert cg.card_kind(q, shown, "ws_m", None) == "answer_in_bank"  # members unknown
+    assert cg.card_kind(q, shown, "ws_x", ["ws_m"]) == "answer_in_bank"
+    odd = {**q, "group_ref": {"host": 5, "id": "grp_t_x"}}
+    assert (
+        cg._ref_key(odd["group_ref"]) is None
+        and cg.card_kind(odd, shown, "ws_m", ["ws_m"]) == "answer_in_bank"
+    )

@@ -337,7 +337,7 @@ def _ref_key(ref) -> tuple[str, str] | None:
         or not isinstance(ref.get("id"), str)
     ):
         return None
-    return ref["host"].strip().lower(), ref["id"].strip().lower()
+    return ref["host"].strip().lower(), ref["id"].strip().lower()  # non-strings: None, same as validate.py
 
 
 def card_kind(
@@ -352,7 +352,7 @@ def card_kind(
         ref = _ref_key(q.get("group_ref"))
         if ref is None or ref != _ref_key(shown_in):
             return "answer_in_bank"
-        if members is not None and sender not in members:
+        if not isinstance(members, (list, tuple, set)) or sender not in members:  # unknown: no buttons
             return "answer_in_bank"
     return "buttons"
 
@@ -527,6 +527,32 @@ def secret_path(path: Path, root: Path | None = None, artifacts_ok: bool = False
     return False
 
 
+def _artifact_contained(path: Path, real: Path, root: Path) -> None:
+    """A path named inside `<root>/.orch/tickets/<id>/artifacts/` must really be there: the folder is no link
+    and the resolved file stays under it (a link to an ordinary file elsewhere is refused)."""
+    top = Path(os.path.abspath(root))
+    try:
+        parts = Path(os.path.abspath(path)).relative_to(top).parts
+    except ValueError:
+        try:
+            parts = Path(os.path.abspath(path)).relative_to(Path(root).resolve()).parts
+            top = Path(root).resolve()
+        except ValueError:
+            return
+    if not (len(parts) >= 5 and parts[:2] == (".orch", "tickets") and parts[3] == "artifacts"):
+        return
+    folder = top.joinpath(*parts[:4])
+    real_folder = folder.resolve()
+    if (
+        real_folder != Path(os.path.abspath(folder)).resolve()
+        or folder.is_symlink()
+        or not str(real).startswith(str(real_folder) + os.sep)
+    ):
+        raise Refused(LINKED)
+    if any(top.joinpath(*parts[:i]).is_symlink() for i in range(1, 5)):
+        raise Refused(LINKED)
+
+
 def read_shared(path: Path, root: Path, confined: bool) -> bytes:
     """The bytes of a file to share. An agent's share (confined) stays in this workspace and goes through
     safefile.open_file_ref: the RELATIVE parts are checked for secrets and hidden folders, then each folder is
@@ -551,6 +577,7 @@ def read_shared(path: Path, root: Path, confined: bool) -> bytes:
             raise Refused(f"{path} can't be shared (not a plain file of this workspace).")
         return data
     real = path.resolve()
+    _artifact_contained(path, real, root)
     if secret_path(path, root, artifacts_ok=True):  # a person's click: ticket artifacts are open
         raise Refused(LOOKS_LIKE_SECRET)
     try:

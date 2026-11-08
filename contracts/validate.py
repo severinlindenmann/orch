@@ -808,11 +808,16 @@ def cg_card(q, ctx, sender=None):
         return "answer_in_bank"
     shown = (ctx or {}).get("shown_in_group")
     if shown is not None:
-        key = lambda r: (str(r.get("host", "")).strip().lower(), str(r.get("id", "")).strip().lower()) if isinstance(r, dict) else None
-        if key(q.get("group_ref")) is None or key(q.get("group_ref")) != key(shown):  # the card belongs to one group only
+
+        def key(r):  # same as chat_groups._ref_key: non-strings are invalid (None); stripped, lower-cased
+            if not (isinstance(r, dict) and isinstance(r.get("host"), str) and isinstance(r.get("id"), str)):
+                return None
+            return r["host"].strip().lower(), r["id"].strip().lower()
+
+        if key(q.get("group_ref")) is None or key(q.get("group_ref")) != key(shown):  # one group only
             return "answer_in_bank"
         members = (ctx or {}).get("group_members")
-        if members is not None and sender not in members:  # the asker must belong to the group it is shown in
+        if not isinstance(members, list) or sender not in members:  # unknown members: no buttons
             return "answer_in_bank"
     return "buttons"
 
