@@ -635,12 +635,11 @@ def test_claude_idle_notice_lets_input_in_but_a_permission_notice_never_does(
     run("run", "send", tid, "Also October")  # goes in at once (idle)
     _until(lambda: _notices(typed, tid) == 3, what="sent while idle")
     assert "Also October" in _take(run, tid, proj)
-    rec = runs.read(proj, tid)
-    rec["live"]["state"] = "idle"
-    runs._write(proj, rec)
-    runs.pending_add(proj, tid, "human:anna", "message", "Not into the dialog")
+    # a permission dialog opens while the agent works, then input arrives: it waits (the wrapper's watcher
+    # also types a notice only for an idle agent with no dialog on screen)
     _notice(proj, r["run"], {"message": "Claude needs your permission to use Write"})
-    time.sleep(0.5)
+    runs.pending_add(proj, tid, "human:anna", "message", "Not into the dialog")
+    time.sleep(1.0)
     assert _notices(typed, tid) == 3
     assert runs.read(proj, tid)["live"]["state"] == "attention"
     # an idle notice while a dialog may be open (attention) changes nothing; after Stop it lets input in
