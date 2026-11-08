@@ -104,3 +104,16 @@ def load_mobile(root: Path, orch_bin: str | None) -> dict | None:
         "machine": s(d.get("machine"), 60),
         "ended": ended,
     }
+
+
+CHAT_VIA = (
+    "relay",
+    "dashboard",
+)  # history entries written by the group chat (other workspaces, this dashboard)
+
+
+def mark_chat_history(t: dict) -> None:
+    """`in_chat: true` on the history entries that are group-chat talk, so the Chat page needs no source names."""
+    for e in t["history"]:
+        if isinstance(e, dict) and e.get("via") in CHAT_VIA:
+            e["in_chat"] = True
