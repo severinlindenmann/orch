@@ -111,9 +111,22 @@ async fn ticket_view_vector_cases_stored_or_refused() {
         .iter()
         .map(|i| &i["ticket_view"])
         .collect();
-    assert_eq!(stored.len(), 3, "full, minimal and at-cap are stored");
-    assert_eq!(stored[2]["title"], "Q3 summary for the board");
-    assert_eq!(stored[2]["history_tail"][1]["role"], "person");
+    assert_eq!(
+        stored.len(),
+        4,
+        "full, minimal, at-cap and ready-started are stored"
+    );
+    let big = stored
+        .iter()
+        .find(|v| {
+            v["title"] == "Q3 summary for the board" && v["history_tail"][1]["role"] == "person"
+        })
+        .expect("the at-cap view is stored unchanged");
+    assert_eq!(big["history_tail"][1]["role"], "person");
+    assert!(
+        stored.iter().any(|v| v["started"] == true),
+        "started is kept for the phone"
+    );
 }
 
 #[tokio::test]
