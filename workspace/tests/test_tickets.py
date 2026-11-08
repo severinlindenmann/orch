@@ -370,11 +370,14 @@ def test_cli_shows_plain_history_but_stores_the_machine_text(proj, run, new_tick
 
 @pytest.mark.parametrize("method", ["set_status", "patch"])
 @pytest.mark.parametrize("target", ["open", "ready"])
-@pytest.mark.parametrize("actor,env_agent,cleared", [
-    ("human:me", None, True),
-    ("agent:test", None, False),
-    ("human:me", "codex", False),
-])
+@pytest.mark.parametrize(
+    "actor,env_agent,cleared",
+    [
+        ("human:me", None, True),
+        ("agent:test", None, False),
+        ("human:me", "codex", False),
+    ],
+)
 def test_started_reset_only_by_person(
     proj, new_ticket, monkeypatch, method, target, actor, env_agent, cleared
 ):
@@ -384,8 +387,9 @@ def test_started_reset_only_by_person(
     if method == "set_status":
         result = tickets.set_status(proj, tid, target, actor)
     else:
-        result = tickets.patch(proj, tid, tickets.load(proj, tid)["revision"],
-                               json.dumps({"status": target}), actor)
+        result = tickets.patch(
+            proj, tid, tickets.load(proj, tid)["revision"], json.dumps({"status": target}), actor
+        )
     assert ("started" not in result) if cleared else result["started"] is True
 
 
