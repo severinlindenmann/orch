@@ -546,8 +546,9 @@ def test_light_cap_refusal_backoff_and_no_rearm_of_good_phones(proj, run, new_ti
         _bump(proj, tid, title="Again " + tid)
     assert phone_view.sync_light(proj, now=2000) == [] and len(calls) == 1, "first refusal ends the pass"
     assert phone_view.sync_light(proj, now=2010) == [] and len(calls) == 1, "backing off"
-    assert phone_view.sync_light(proj, now=2040) == [] and len(calls) == 2
-    assert phone_view.sync_light(proj, now=2100) == [] and len(calls) == 2, "longer wait now"
+    assert phone_view.sync_light(proj, now=2020) == [] and len(calls) == 2
+    assert phone_view.sync_light(proj, now=2040) == [] and len(calls) == 2, "longer wait now"
+    assert phone_view.load_state(proj)["light_phone"][PHONE]["retry"] <= 2020 + 120, "never an hour"
     conn.routes.remove(("POST", "/v1/messages", refuse))
     assert len(phone_view.sync_light(proj, now=2200)) == 2  # recovered: sent (capped), nothing twice
     del post
@@ -567,3 +568,87 @@ def test_light_state_is_pruned_and_unpaired_phones_are_forgotten(proj, run, new_
     phone_view.update_state(proj, lambda st: st["synced"][PHONE].remove(kept))
     phone_view.sync_light(proj, now=1200)
     assert phone_view.load_state(proj)["light"] == {}
+
+
+def _second_phone(proj, conn, ph):
+    entry = {"id": ph, "name": "iPad", "online": True, "last_seen": None}
+    conn.snapshot["workspaces"]["phones"].append(entry)
+    d = proj / ".agents" / "skills" / "orch-relay" / "workspaces.json"
+    data = json.loads(d.read_text())
+    data["phones"].append({"id": ph, "name": "iPad"})
+    d.write_text(json.dumps(data))
+
+
+def test_dashboard_ticket_listed_while_phone_backed_off_still_gets_light_updates(proj, run, new_ticket, conn):
+    """PIL-34 (8 Nov): the relay refused light updates for a while (backoff grew to an hour); a ticket made
+    on the dashboard then reached the phone's list through sync_open, but its status changes never followed.
+    Any message the relay takes for the phone ends that phone's backoff."""
+    phone_view.update_state(proj, lambda st: st.setdefault("light_phone", {}).update(
+        {PHONE: {"fails": 4, "retry": time.time() + 3600}}))  # fmt: skip
+    tid = new_ticket("Plan the spring fair")
+    assert tid in phone_view.sync_open(proj), "the phone lists it (full view)"
+    st = phone_view.load_state(proj)
+    assert tid in st["synced"][PHONE] and PHONE not in st["light_phone"]
+    _bump(proj, tid, status="waiting", started=True)
+    assert phone_view.sync_light(proj, now=time.time() + 10) == [(PHONE, tid)]
+    tv = conn.sent[-1]["body"]["ticket_view"]
+    assert tv["light"] is True and tv["status"] == "waiting" and tv["started"] is True
+
+
+def test_ticket_sent_to_all_phones_is_listed_and_gets_light_updates(proj, run, new_ticket, conn):
+    tid = new_ticket("Asked on the dashboard")
+    phone_view.update_state(proj, lambda st: st.setdefault("synced", {}).setdefault(PHONE, []))
+    code, _, err = run("relay", "send", "phones", "Indoor or outdoor?", "--ticket", tid, "--update", "result")
+    assert code == 0, err
+    assert tid in phone_view.load_state(proj)["synced"][PHONE], "a broadcast lists it on every paired phone"
+    _bump(proj, tid, status="review")
+    assert phone_view.sync_light(proj, now=time.time() + 10) == [(PHONE, tid)]
+
+
+def test_a_refusing_phone_does_not_stop_the_other_phones(proj, run, new_ticket, conn):
+    other = "ph_zother0002"
+    _second_phone(proj, conn, other)
+    tid = new_ticket("Two phones")
+    _list(proj, tid)
+    _list(proj, tid, other)
+    phone_view.sync_light(proj, now=1000)
+
+    def refuse_first(m, q, body):
+        return 422, {"error": "invalid", "message": "no"}
+
+    real = next(fn for m, rx, fn in conn.routes if rx == "/v1/messages")
+
+    def route(m, q, body):
+        return refuse_first(m, q, body) if json.loads(body)["to"] == PHONE else real(m, q, body)
+
+    conn.routes.insert(0, ("POST", "/v1/messages", route))
+    _bump(proj, tid, status="waiting")
+    assert phone_view.sync_light(proj, now=1100) == [(other, tid)]
+    assert PHONE in phone_view.load_state(proj)["light_phone"]
+
+
+def test_full_and_light_views_fall_back_to_the_note(proj, run, new_ticket, conn):
+    tid = new_ticket("Plan the spring fair")
+    _bump(proj, tid, note="Ask me one question: indoor or outdoor.")
+    t = tickets.load(proj, tid)
+    full = phone_view.build(proj, t, [])
+    assert full["summary"] == "Ask me one question: indoor or outdoor."
+    assert_valid(full)
+    assert phone_view.light_view(proj, t)["summary"] == full["summary"]
+    _bump(proj, tid, summary="Indoor plan ready")
+    assert phone_view.build(proj, tickets.load(proj, tid), [])["summary"] == "Indoor plan ready"
+
+
+def test_phone_paired_later_gets_light_updates_for_dashboard_tickets(proj, run, new_ticket, conn):
+    """The supervisor's case: the old phone stays paired, a new phone is paired later; a dashboard ticket's
+    status changes reach BOTH phones, never only the first one."""
+    tid = new_ticket("Plan the spring fair")
+    phone_view.sync_open(proj)  # listed on the first phone
+    new = "ph_newphone002"
+    _second_phone(proj, conn, new)
+    assert tid in phone_view.sync_open(proj), "the new phone pulls its list: the ticket is listed there too"
+    st = phone_view.load_state(proj)
+    assert tid in st["synced"][PHONE] and tid in st["synced"][new]
+    _bump(proj, tid, status="waiting", started=True)
+    got = phone_view.sync_light(proj, now=time.time() + 10)
+    assert sorted(got) == sorted([(PHONE, tid), (new, tid)])
