@@ -16,6 +16,8 @@ def _snapshot_real_tool_home():
     out = {}
     if base.exists():
         for p in (base, *base.rglob("*")):
+            if p.name.startswith(".fallback-trace.log"):  # the one-line trace of a fallback: allowed
+                continue
             try:
                 out[str(p)] = p.stat().st_mtime_ns
             except OSError:

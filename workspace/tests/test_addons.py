@@ -636,20 +636,22 @@ def test_orch_home_must_be_plain_folder_under_home(proj, monkeypatch, capfd):
 def test_strict_untrusted_orch_home_is_an_error_and_writes_nothing(proj, run, monkeypatch):
     h = addons.real_home()
     real = h / ".orch-tool"
-    real_before = real.exists()
     (h / "repo" / ".git").mkdir(parents=True)  # a temp home inside a git repo
     for bad in (h / "repo" / "home", proj / "inside-cwd"):
         monkeypatch.setenv("ORCH_HOME", str(bad))
         monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+        seen = sorted(real.rglob("*")) if real.exists() else None
         with pytest.raises(Refused, match="ORCH_HOME_STRICT"):
             addons.home()
         code, out, err = run("addon", "list")
         assert code != 0 and "ORCH_HOME_STRICT" in err and str(bad) in err
-        assert real.exists() == real_before and not bad.exists()
+        assert (sorted(real.rglob("*")) if real.exists() else None) == seen and not bad.exists()
         # without the switch the old fallback stays (a note, then the real folder)
         monkeypatch.delenv("ORCH_HOME_STRICT")
         assert addons.home() == real
-    assert not real.exists()  # home() only reads; nothing created in the faked real home
+    assert {p.name for p in real.rglob("*")} <= {
+        ".fallback-trace.log"
+    }  # only the fallback trace (non-strict)
 
 
 def test_strict_cwd_above_the_home_is_an_error(proj, monkeypatch):
@@ -680,6 +682,67 @@ def test_trusted_orch_home_never_touches_the_real_tool_folder(proj, run, monkeyp
     assert services.status() == []
     assert not (h / ".orch-tool").exists()
     assert (ok / "addons.json").exists()
+
+
+def _trace_lines(h):
+    f = h / ".orch-tool" / ".fallback-trace.log"
+    return [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines()] if f.exists() else []
+
+
+def test_fallback_trace_unset_has_the_fields_and_no_secrets(proj, monkeypatch):
+    h = addons.real_home()
+    monkeypatch.delenv("ORCH_HOME")
+    monkeypatch.setattr(sys, "argv", ["orch", "x", "orn_secret123", "ghp_abc", "sk-zzz", "ok"])
+    assert addons.home() == h / ".orch-tool"
+    (line,) = _trace_lines(h)
+    assert set(line) == {"time", "pid", "ppid", "argv", "cwd", "reason"}
+    assert line["reason"] == "unset" and line["pid"] == os.getpid() and line["cwd"] == os.getcwd()
+    assert line["argv"] == "orch x ok" and "secret" not in json.dumps(line)
+    mode = (h / ".orch-tool" / ".fallback-trace.log").stat().st_mode & 0o777
+    assert mode == 0o600
+    monkeypatch.setattr(sys, "argv", ["x" * 500])
+    addons.home()
+    assert len(_trace_lines(h)[-1]["argv"]) == 300
+
+
+def test_fallback_trace_untrusted_gets_its_reason_and_strict_writes_nothing(proj, monkeypatch):
+    h = addons.real_home()
+    monkeypatch.delenv("ORCH_HOME_STRICT")
+    monkeypatch.setenv("ORCH_HOME", str(proj / "inside"))
+    addons.home()
+    monkeypatch.setenv("ORCH_HOME", str(h.parent / "elsewhere"))
+    addons.home()
+    assert [x["reason"] for x in _trace_lines(h)] == ["untrusted:cwd", "untrusted:outside-home"]
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    with pytest.raises(Refused):
+        addons.home()
+    assert len(_trace_lines(h)) == 2
+    monkeypatch.setenv("ORCH_HOME", str(h / "ok"))  # trusted: no line either
+    addons.home()
+    assert len(_trace_lines(h)) == 2
+
+
+def test_fallback_trace_rotates_over_256kb(proj, monkeypatch):
+    h = addons.real_home()
+    monkeypatch.delenv("ORCH_HOME")
+    d = h / ".orch-tool"
+    d.mkdir()
+    (d / ".fallback-trace.log").write_text("x" * (256 * 1024 + 1), encoding="utf-8")
+    addons.home()
+    assert (d / ".fallback-trace.log.1").stat().st_size == 256 * 1024 + 1
+    assert len(_trace_lines(h)) == 1
+
+
+def test_fallback_trace_does_not_follow_a_symlink(proj, monkeypatch):
+    h = addons.real_home()
+    monkeypatch.delenv("ORCH_HOME")
+    d = h / ".orch-tool"
+    d.mkdir()
+    target = h / "victim.txt"
+    target.write_text("keep", encoding="utf-8")
+    (d / ".fallback-trace.log").symlink_to(target)
+    assert addons.home() == d  # still works
+    assert target.read_text(encoding="utf-8") == "keep"
 
 
 def test_strict_trusted_orch_home_works(proj, monkeypatch):
