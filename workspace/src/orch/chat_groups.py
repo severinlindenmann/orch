@@ -536,6 +536,12 @@ def _pdf_text(data: bytes) -> str:
                 if d.eof:
                     break
                 chunk = d.unconsumed_tail
+            if not d.eof:
+                tail = d.flush()  # what the decompressor still holds
+                total += len(tail)
+                if total > INFLATE_MAX:
+                    raise Refused("This file is too large once it is opened, so it was not shared")
+                out.append(tail.decode("latin-1"))
         except zlib.error:
             continue
     return "\n".join(out)
@@ -1071,7 +1077,6 @@ def _publish(
         g["seq"] += 1
         seq = g["seq"]
         g["origins"][origin_id] = {"seq": seq, "at": at}
-        g["origins"] = dict(list(g["origins"].items())[-ORIGINS_KEEP:])
         # intent record: with the seq saved first, a crash before the sends is replayed by `sync` with the
         # origin id, seq, time, member list and recipients as they were, so the retry is byte-identical
         snap = {"gw": _wire(g), "recipients": list(_active(g) if recipients is None else recipients)}
@@ -1089,6 +1094,7 @@ def _publish(
             "members": members,
             "recipients": recipients,
         }
+        _trim_origins(g)
         _persist(root)
     by, via, phone = _by_via(origin_from, host, via)
     text = phone_view.redact(text)[:TEXT_MAX]
@@ -1133,9 +1139,19 @@ def _publish(
         root, "phones", "text", pb, g["ticket"], fanout_id(host, origin_id, "phones"), at=at, errors=errors
     ):
         _remember_copy(g, msg["id"])
-    g["msgs"] += 1
+    if not prev:
+        g["msgs"] += 1  # a replay is not a new message
     g.get("pending", {}).pop(origin_id, None)
     return seq
+
+
+def _trim_origins(g: dict) -> None:
+    """Keep the newest ORIGINS_KEEP origins, and never one a pending intent still needs (its replay must
+    find the same seq and time)."""
+    if len(g["origins"]) > ORIGINS_KEEP:
+        keep = set(g.get("pending", {}))
+        items = list(g["origins"].items())
+        g["origins"] = {k: v for i, (k, v) in enumerate(items) if i >= len(items) - ORIGINS_KEEP or k in keep}
 
 
 def replay_pending(root: Path, g: dict) -> None:
@@ -1362,15 +1378,13 @@ def _publish_file(
 ) -> None:
     host = g["host"]
     prev = g["origins"].get(oid)
+    # what can fail comes first; only then the number, the origin and the intent are written together
     if prev:  # the same origin again (a retry or a replay): same seq and time, nothing new is numbered
-        seq, at = prev["seq"], prev["at"]
+        at = prev["at"]
     else:
         if g["seq"] >= SEQ_MAX:
             raise Refused("This group has used up its message numbers.")
         at = tickets.now()
-        g["seq"] += 1
-        seq = g["seq"]
-        g["origins"][oid] = {"seq": seq, "at": at}
     snap = snap or {"gw": _wire(g), "recipients": list(_active(g))}
     share = {"kind": "image" if mime.startswith("image/") else "file", "title": ttl, "mime": mime}
     if view is None and not only:
@@ -1391,11 +1405,17 @@ def _publish_file(
         )
         view["attachments"] = atts
         phone_view.fit(view)
-    if not prev:  # intent record, saved before anything is sent (G12)
+    if prev:
+        seq = prev["seq"]
+    else:  # the number, the origin and its intent, written together and saved before any send (G12)
+        g["seq"] += 1
+        seq = g["seq"]
+        g["origins"][oid] = {"seq": seq, "at": at}
         g.setdefault("pending", {})[oid] = {
             "kind": "file", "origin_from": origin_from, "blob_id": blob_id, "name": name, "size": size,
             "sha": sha, "mime": mime, "ttl": ttl, "only": only, "snap": snap, "view": view,
         }  # fmt: skip
+        _trim_origins(g)
         _persist(root)
     by, via, _ = _by_via(origin_from, host)
     gw = {**snap["gw"], "seq": seq}
@@ -1430,7 +1450,8 @@ def _publish_file(
             root, "phones", "text", pb, g["ticket"], fanout_id(host, oid, "phones"), at=at, errors=errors
         ):
             _remember_copy(g, msg["id"])
-    g["msgs"] += 1
+    if not prev:
+        g["msgs"] += 1  # a replay is not a new message
     g.get("pending", {}).pop(oid, None)
 
 

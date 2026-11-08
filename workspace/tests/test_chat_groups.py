@@ -1806,3 +1806,90 @@ def test_sync_and_an_answer_at_the_same_time_lose_nothing(proj, run, rel, grp):
     assert not errs
     assert tickets.load(proj, host)["questions"][0]["answer"] == "thread answer"
     assert [m for m in gout(rel) if m["body"]["text"] == "thread answer"]  # the group saw the answer
+
+
+# ---- third delta (8 Nov) ---------------------------------------------------------------------------------
+
+
+def test_a_failing_view_leaves_no_origin_without_its_intent(proj, run, rel, host, monkeypatch):
+    from orch import phone_view
+
+    run("relay", "group", "add", host, HOME)
+    f = proj / "a.txt"
+    f.write_text("fine words")
+    path = proj / ".orch/secrets/groups.json"
+    before = json.loads(path.read_text())["hosted"]["grp_" + host]
+
+    def boom(*a, **k):
+        raise OSError("disk")
+
+    monkeypatch.setattr(phone_view, "view_for", boom)
+    with pytest.raises(OSError):
+        cg.share_file(proj, host, f, "A file")
+    g = json.loads(path.read_text())["hosted"]["grp_" + host]
+    assert (
+        g["seq"] == before["seq"] and g["origins"].keys() == before["origins"].keys() and not g.get("pending")
+    )
+
+
+def test_origins_in_a_pending_intent_are_never_evicted_and_replays_are_not_counted(proj, run, rel, host):
+    run("relay", "group", "add", host, HOME)
+    with cg._state(proj) as st:
+        g = st["hosted"]["grp_" + host]
+        g["origins"] = {
+            f"m_old{i:012d}": {"seq": 1, "at": "2026-11-08T10:00:00Z"} for i in range(cg.ORIGINS_KEEP)
+        }
+        g["pending"] = {"m_old000000000000": {"kind": "x"}}
+        g["origins"]["m_new000000000000"] = {"seq": 2, "at": "2026-11-08T10:00:01Z"}
+        cg._trim_origins(g)
+        assert "m_old000000000000" in g["origins"] and len(g["origins"]) == cg.ORIGINS_KEEP + 1
+        g["pending"] = {}
+    before = cg._load(proj)["hosted"]["grp_" + host]["msgs"]
+    cg.say(proj, host, "counted once")
+    assert cg._load(proj)["hosted"]["grp_" + host]["msgs"] == before + 1
+
+
+def test_pdf_flush_tail_is_scanned_within_the_cap():
+    import zlib
+
+    c = zlib.compressobj()
+    body = c.compress(b"password = supersecretvalue1234") + c.flush(zlib.Z_SYNC_FLUSH)
+    pdf = b"%PDF-1.4\nstream\n" + body + b"\nendstream\n%%EOF"
+    with pytest.raises(cg.Refused, match="password"):
+        cg.check_file(pdf, "x.pdf")
+
+
+def test_real_ids_and_times_pass_the_member_side_shapes(proj, run, rel, host):
+    for _ in range(200):
+        assert cg.GID_RE.fullmatch("grp_" + tickets.new_id(proj))
+    assert cg.TIME_RE.fullmatch(tickets.now())
+    run("relay", "group", "add", host, HOME)
+    for m in rel.sent:
+        assert cg.TIME_RE.fullmatch(m["created_at"]) and cg.GID_RE.fullmatch(m["body"]["group"]["id"])
+        assert cg._clean_wire(m["body"]["group"]) is not None
+        assert cg.WS_RE.fullmatch(m["body"]["by"])
+
+
+def test_ordinary_allow_answers_with_the_old_words_still_work(proj, run, rel):
+    from orch import relay as relay_mod
+
+    rel.snapshot["workspaces"]["workspaces"] = [entry(FIN, "Finance", "bank", "teal")]
+    run("relay", "connect", rel.url, "--workspace", WS, "--token", rel.token)
+    for n, (word, mode) in enumerate([("Allow once", "once"), ("Always", "permanent"), ("Ignore", None)]):
+        d = {"schema": "orch.msg/1", "id": mid(f"plain{n}"), "from": FIN, "to": WS, "type": "delegate",
+             "created_at": "2026-11-08T10:03:00Z", "body": {"title": f"Plain {n}", "text": "x"}}  # fmt: skip
+        inbox(run, rel, d)
+        t = next(t for t in tickets.list_all(proj) if t["questions"] and f"Plain {n}" in t["title"])
+        assert t["questions"][0]["options"] == [
+            "Allow once",
+            "Always",
+            "Ignore",
+        ]  # not a group: the old words
+        rel.sent.clear()
+        run("answer", t["id"], "q1", word, "--via", "cli")
+        relay_mod.apply_allow_answers(proj)
+        allows = sent(rel, to=FIN, type="allow")
+        if mode:
+            assert allows and allows[0]["body"]["mode"] == mode
+        else:
+            assert not allows
