@@ -957,7 +957,7 @@ def _drop_member_quietly(root: Path, tid: str, ws: str) -> None:
 
 
 def _history(root: Path, tid: str, by: str, text: str, chat: bool = False) -> None:
-    """chat=True only for what a person or a member said in the group: the Chat shows those lines and no others."""
+    """chat=True only for what a person or a member said in the group."""
     with contextlib.suppress(Refused, OSError):
         tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "relay", chat=chat))
 

@@ -437,7 +437,7 @@ def test_general_conversation_is_in_the_state_but_never_a_ticket(ws):
         "questions": [],
         "history": [
             {"at": "2026-11-06T10:00:00Z", "by": "x", "via": "cli", "text": "Created"},
-            {"at": "2026-11-06T10:05:00Z", "by": "human:anna", "via": "phone", "text": "From Anna: hello"},
+            {"at": "2026-11-06T10:05:00Z", "by": "human:anna", "via": "phone", "text": "From Anna: hello", "chat_message": True},
         ],
     }
     (t / "t_general01.json").write_text(json.dumps(g))
