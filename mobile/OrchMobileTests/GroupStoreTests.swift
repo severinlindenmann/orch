@@ -37,6 +37,53 @@ final class GroupStoreTests: XCTestCase {
     private func group(_ messages: [PhoneMessage]) throws -> PhoneGroup { try XCTUnwrap(build(messages).groups.first) }
 
     func testPhoneVectors() throws {
+        for suffix in ["matches", "mismatch-answer-in-bank", "missing-answer-in-bank"] {
+            let name = "valid-allow-question-group-ref-" + suffix
+            let object = try vectorObject(name)
+            let q = Question(message: try JSONCoding.decoder.decode(QuestionMessage.self,
+                from: JSONSerialization.data(withJSONObject: try XCTUnwrap(object["message"]))), workspaceName: "Bank")
+            let context = try XCTUnwrap(object["context"] as? [String: Any])
+            let shown = try JSONCoding.decoder.decode(GroupRef.self,
+                from: JSONSerialization.data(withJSONObject: try XCTUnwrap(context["shown_in_group"])))
+            let base = try group([vector("valid-member-added-from-seq")])
+            let g = PhoneGroup(key: GroupKey(host: shown.host, id: shown.id), title: base.title,
+                members: base.members, hostName: base.hostName, names: base.names, externals: base.externals,
+                ticketKey: base.ticketKey, ticket: base.ticket, messages: base.messages, closed: false,
+                startedHere: base.startedHere, gaps: base.gaps,
+                tasks: ["d": GroupTask(delegate: "d", ws: bank, ticket: q.message.ticket,
+                    status: "waiting_approval", questionMessage: q.id)])
+            let event = GroupEvent(kind: "approval_needed", ws: bank, delegate: "d", questionMessage: q.id)
+            XCTAssertEqual(GroupStore.approvalCard(for: event, in: g, questions: [q]),
+                           suffix == "matches" ? .buttons(q) : .answerInWorkspace("Bank"), name)
+            XCTAssertEqual(q.message.body.groupRef,
+                           suffix == "missing-answer-in-bank" ? nil : GroupRef(host: finance, id: "grp_t_fin14a"), name)
+        }
+
+        // The review vector is member -> host. Wrap its body in the host's phone copy.
+        let review = try vector("valid-member-review-note")
+        let task = try XCTUnwrap(review.message.body.task)
+        let working = message("working", seq: 1) {
+            $0.task = task; $0.by = self.home; $0.update = TextUpdate(kind: "working")
+        }
+        let copy = message("review", seq: 2) {
+            $0 = review.message.body
+            $0.group?.seq = 2
+            $0.origin = GroupOrigin(id: review.id, from: self.home, at: review.message.createdAt)
+        }
+        let reviewed = build([working, copy])
+        XCTAssertTrue(reviewed.dropped.isEmpty)
+        let reviewedGroup = try XCTUnwrap(reviewed.groups.first)
+        XCTAssertEqual(reviewedGroup.tasks[task.delegate]?.status, "working")
+        let note = try XCTUnwrap(reviewedGroup.messages.last)
+        XCTAssertTrue(GroupRoomRules.isReviewNote(note))
+        XCTAssertTrue(note.quiet)
+        XCTAssertFalse(GroupRoomRules.isReviewNote(try XCTUnwrap(reviewedGroup.messages.first)))
+        XCTAssertEqual(GroupRoomRules.reviewNote(task: task, group: reviewedGroup), "Ready for review in Home")
+        let renamed = GroupStore.build(messages: [copy, working], workspaces: [finance: "Finance", home: "My Home"],
+                                       ownPhoneId: phone, ownMessageIds: [])
+        XCTAssertEqual(GroupRoomRules.reviewNote(task: task, group: try XCTUnwrap(renamed.groups.first)),
+                       "Ready for review in My Home")
+
         for name in ["valid-chat-helper-text", "valid-phone-text-optin-reply", "valid-phone-text-no-optin-stays-private"] {
             let m = try vector(name)
             XCTAssertNil(m.message.body.group, name)
@@ -372,12 +419,21 @@ final class GroupStoreTests: XCTestCase {
                       scope: String? = "Tasks from FINANCE", ticket: String? = "t_bank") -> Question {
             Question(message: QuestionMessage(schema: "orch.msg/1", id: id, from: from ?? bank, to: "phones", type: "question",
                 createdAt: "10", ticket: ticket, body: QuestionBody(questionId: "relay:allow", title: nil, text: "Allow?",
-                options: options, recommended: nil, scope: scope, allowQuestion: true)), workspaceName: "Bank")
+                options: options, recommended: nil, scope: scope, allowQuestion: true, groupRef: GroupRef(host: finance, id: "grp_t_fin14a"))), workspaceName: "Bank")
         }
         func card(_ questions: [Question], event e: GroupEvent? = nil) -> ApprovalCard {
             GroupStore.approvalCard(for: e ?? event, in: g, questions: questions)
         }
         XCTAssertEqual(card([question()]), .buttons(question()))
+        for ref in [nil, GroupRef(host: home, id: g.key.id), GroupRef(host: finance, id: "grp_other")] {
+            let original = question().message
+            var body = original.body
+            body.groupRef = ref
+            let mismatched = Question(message: QuestionMessage(schema: original.schema, id: original.id,
+                from: original.from, to: original.to, type: original.type, createdAt: original.createdAt,
+                ticket: original.ticket, body: body), workspaceName: "Bank")
+            XCTAssertEqual(card([mismatched]), .answerInWorkspace("Bank"))
+        }
         XCTAssertEqual(GroupStore.approvalCard(for: event, in: g, questions: [question()], late: true), .closed)
         let closed = try group([message("group") {
             $0.group = GroupInfo(id: "grp_t_fin14a", host: self.finance, title: "Tax", members: g.members, seq: 1)
@@ -978,7 +1034,12 @@ final class GroupStoreTests: XCTestCase {
         var g = try group([vector("valid-member-added-from-seq")])
         for name in ["valid-allow-question-wire-options", "valid-allow-question-old-wording-answer-in-bank", "invalid-allow-question-ui-words-on-wire"] {
             let object = try vectorObject(name)
-            let q = Question(message: try JSONCoding.decoder.decode(QuestionMessage.self, from: JSONSerialization.data(withJSONObject: try XCTUnwrap(object["message"]))), workspaceName: "Bank")
+            // These older option vectors predate group_ref; supply the matching binding for this options test.
+            var wire = try XCTUnwrap(object["message"] as? [String: Any])
+            var body = try XCTUnwrap(wire["body"] as? [String: Any])
+            body["group_ref"] = ["host": g.key.host, "id": g.key.id]
+            wire["body"] = body
+            let q = Question(message: try JSONCoding.decoder.decode(QuestionMessage.self, from: JSONSerialization.data(withJSONObject: wire)), workspaceName: "Bank")
             g = PhoneGroup(key: g.key, title: g.title, members: g.members, hostName: g.hostName, names: g.names,
                 externals: g.externals, ticketKey: g.ticketKey, ticket: g.ticket, messages: g.messages, closed: false,
                 startedHere: g.startedHere, gaps: g.gaps,

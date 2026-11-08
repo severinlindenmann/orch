@@ -103,7 +103,7 @@ struct GroupRoomView: View {
                           conversationLanguage: "en", workspaceName: senderName(message.sender, group: group),
                           quotedText: nil, onRetry: nil, onDiscard: nil, onOpenArtifact: { _ in })
         }
-        if let task = message.task { GroupTaskView(task: group.tasks[task.delegate] ?? task, group: group) }
+        if let task = message.task, GroupRoomRules.showsTaskCard(message, group: group) { GroupTaskView(task: group.tasks[task.delegate] ?? task, group: group) }
         ForEach(message.ticketView?.attachments.filter { message.sharedFiles.contains($0.blobId ?? "") } ?? []) { attachment in
             Button {
                 viewer = ArtifactItem(attachment, in: .topic(workspace: key.host, ticket: group.ticket ?? ""))
@@ -176,6 +176,9 @@ struct GroupTaskView: View {
             }
             (group.isExternal(task.ws) ? Text(GroupRoomRules.taskLabel(task.status, name: name)).italic().foregroundColor(Theme.muted) : Text(GroupRoomRules.taskLabel(task.status, name: name))).themeFont(13).foregroundStyle(Theme.brand)
                 .padding(.horizontal, 8).padding(.vertical, 3).background(Theme.brand.opacity(0.15), in: Capsule())
+            if let note = GroupRoomRules.reviewNote(task: task, group: group) {
+                Text(note).themeFont(13).foregroundStyle(Theme.muted)
+            }
             if let target {
                 NavigationLink(value: ChatRoute.ticket(workspace: target.workspace, ticket: target.ticket)) {
                     Text("Open \(target.label) ›").themeFont(15).foregroundStyle(Theme.brand).frame(minHeight: 44)
