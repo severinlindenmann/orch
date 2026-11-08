@@ -45,7 +45,8 @@
     if (/^Check c\d+ done/i.test(text) || /^(Checked|Done)\b.*\bc\d+/.test(text) || /^Task .* done/i.test(text)) return 'Finished a task';
     if (/^Added task|^Added check/i.test(text)) return 'Added a task';
     if (/^Linked|^Link added/i.test(text)) return 'Added a reference';
-    return text;
+    // a raw actor id inside a line becomes its name, like name() in app.js
+    return text.replace(/\b(?:agent|human):([A-Za-z0-9_.@-]+)/g, (_, n) => n.charAt(0).toUpperCase() + n.slice(1));
   }
 
   /* The answer that is already there for a question (someone else was first). Null when it is still open. */
@@ -159,6 +160,8 @@
       return {state: 'resume', agent, status: 'last worked ' + (Number.isNaN(when) ? 'earlier' : span(nowMs - when) === 'just now' ? 'just now' : span(nowMs - when) + ' ago'),
         primary: start('Continue'), items: [fresh]};
     }
+    // a ticket already waiting for the person's check has no run to start: no Start button
+    if (t.status === 'review') return {state: 'new', agent, status: 'ready for you to check', primary: null, items: []};
     return {state: 'new', agent, status: 'not started yet', primary: start('Start'), items: []};
   }
 

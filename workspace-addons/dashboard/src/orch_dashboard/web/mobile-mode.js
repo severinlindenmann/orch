@@ -36,8 +36,8 @@
       const warn = mm.awake === 'could_not_keep_awake';
       const parts = warn
         ? [node('b', {}, 'Mobile mode is on.'), ' Could not keep this computer awake. Mobile mode may stop when it sleeps.']
-        : [node('b', {}, 'Mobile mode is on'), node('span', {className: 'meta'},
-            ' · questions also go to your phone · computer stays awake' + (mm.since ? ' · since ' + hm(mm.since) : '') + (mm.ends_at ? ' · ends at ' + hm(mm.ends_at) : ''))];
+        : [node('b', {}, 'Mobile mode is on'), node('span', {className: 'meta mm-desc'}, ' · questions also go to your phone · computer stays awake'),
+            node('span', {className: 'meta mm-when'}, (mm.since ? ' · since ' + hm(mm.since) : '') + (mm.ends_at ? ' · ends at ' + hm(mm.ends_at) : ''))];
       bar.className = 'mm-bar banner live' + (warn ? ' attn' : '');
       bar.setAttribute('data-testid', 'mobile-mode-bar');
       bar.append(node('span', {className: 'mm-pulse', 'aria-hidden': 'true'}), node('div', {className: 'grow'}, ...parts),

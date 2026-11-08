@@ -11,8 +11,9 @@
 .form-fields{display:grid;gap:12px;margin-top:16px}
 .form-fields label{display:grid;gap:4px}
 .preserve-lines{white-space:pre-wrap}
-.addon-rows{display:grid;grid-template-columns:minmax(80px,1fr) minmax(0,3fr);gap:8px 16px}
+.addon-rows{display:grid;grid-template-columns:minmax(80px,1fr) minmax(0,3fr);gap:8px 16px}.addon-rows .addon-page{grid-column:1/-1;margin:0}
 .addon-loading{height:56px}
+.loading-home{display:grid;gap:16px}.lh-title{height:32px;width:40%}.lh-card{height:96px}
 .chips,.tags,.stats{display:flex;gap:8px;flex-wrap:wrap}
 #addon-blocks{display:grid;gap:12px}
 .blk-title,.blk-more,.blk-none{padding:12px}
@@ -323,6 +324,9 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .mm-chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted)}
 .mm-hours{display:flex;gap:6px;flex-wrap:wrap}
 @media(max-width:720px){.mm-toggle{margin-left:0}.mm-bar{padding:10px 12px}}
+/* one line down to 480px: the description gives way (ellipsis), the times never wrap; below 480px two clean lines */
+.mm-bar.live{flex-wrap:nowrap}.mm-bar.live .grow{display:flex;gap:.4em;min-width:0;white-space:nowrap}.mm-bar.live .grow b{flex:none}.mm-bar.live .mm-desc{min-width:0;overflow:hidden;text-overflow:ellipsis}.mm-bar.live .mm-when{flex:none}.mm-bar.live .btn{flex:none}
+@media(max-width:480px){.mm-bar.live{flex-wrap:wrap}.mm-bar.live .grow{flex-wrap:wrap;white-space:normal;flex-basis:calc(100% - 24px)}.mm-bar.live .mm-desc{flex:1 0 100%;overflow:visible;order:2}.mm-bar.live .mm-when{order:1}}
 .mm-hours .btn.ghost:hover{background:transparent;border-color:var(--text-muted)}
 .mm-hours .btn[aria-checked=true]{cursor:default}
 .consent-details{margin:8px 0}.consent-details summary{cursor:pointer;color:var(--text-muted)}
@@ -343,3 +347,7 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .ticket-row:hover{background:var(--surface-2)}
 .ticket-row .status-menu,.ticket-row .activity a{position:relative;z-index:1}
 .ticket-row:has(.menu[open]){z-index:5}
+
+/* the sidebar colour and the modal dim layer fill the viewport, not the first 800 px of a tall page */
+@media(min-width:721px){.shell{background:linear-gradient(to right,var(--sidebar) 231px,var(--border) 231px 232px,transparent 232px)}}
+body:has(dialog[open]:modal){overflow:hidden}
