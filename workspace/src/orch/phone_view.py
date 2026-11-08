@@ -75,6 +75,36 @@ def _is_image(data: bytes, name: str) -> bool:
     return any(data.startswith(magic) and ext in exts for magic, exts in _IMAGE_KINDS.items())
 
 
+PNG_MAX_CHUNKS = 10000  # a bounded walk: more chunks than this = can not be checked
+
+
+def _image_clean(data: bytes) -> bool:
+    """True when an image has nowhere to hide text the scan can not read: no compressed PNG text or
+    profile chunks (zTXt, iTXt, iCCP) and nothing after its end (PNG IEND, JPEG last EOI, GIF trailer,
+    WebP RIFF size). Anything odd is False (fail closed)."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        pos = 8
+        for _ in range(PNG_MAX_CHUNKS):
+            if pos + 8 > len(data):
+                return False  # no IEND
+            length = int.from_bytes(data[pos : pos + 4], "big")
+            kind = data[pos + 4 : pos + 8]
+            end = pos + 12 + length  # length, type, data, crc
+            if end > len(data) or kind in (b"zTXt", b"iTXt", b"iCCP"):
+                return False
+            if kind == b"IEND":
+                return end == len(data)
+            pos = end
+        return False
+    if data.startswith(b"\xff\xd8\xff"):
+        return data.endswith(b"\xff\xd9")  # nothing after the last EOI
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return data.endswith(b"\x3b")
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return int.from_bytes(data[4:8], "little") + 8 == len(data)
+    return False
+
+
 def _has_secret(data: bytes) -> bool:
     text = data.decode(errors="ignore")
     return any(rx.search(text) for rx in _SECRET_PATTERNS) or bool(_SECRET_KV.search(text))
@@ -99,7 +129,10 @@ def _scan(data: bytes, name: str) -> str:
             if "\x00" in text:
                 return "unknown"
             return "secret" if _has_secret(text.encode()) else "ok"
-    if not _is_image(data, name):
+    if _is_image(data, name):
+        if not _image_clean(data):  # compressed text chunks or data after the end: can not be checked
+            return "unknown"
+    else:
         try:
             data.decode("utf-8")
         except UnicodeDecodeError:

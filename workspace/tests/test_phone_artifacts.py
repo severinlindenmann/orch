@@ -15,6 +15,18 @@ def artifact(proj, tid, name, data=b"artifact bytes"):
     return path
 
 
+def _chunk(kind: bytes, body: bytes) -> bytes:
+    import zlib
+
+    return len(body).to_bytes(4, "big") + kind + body + zlib.crc32(kind + body).to_bytes(4, "big")
+
+
+def png(*chunks: bytes, tail: bytes = b"") -> bytes:
+    """A well-formed PNG: signature, IHDR, the given chunks, IEND, then `tail` (bytes after the end)."""
+    ihdr = _chunk(b"IHDR", (1).to_bytes(4, "big") * 2 + bytes([8, 2, 0, 0, 0]))
+    return b"\x89PNG\r\n\x1a\n" + ihdr + b"".join(chunks) + _chunk(b"IEND", b"") + tail
+
+
 def test_question_artifact_reaches_phone(proj, run, new_ticket, conn):  # noqa: F811
     tid = new_ticket("Choose a shortlist")
     artifact(proj, tid, "shortlist.md")
@@ -249,7 +261,7 @@ def test_listing_is_reused_and_bounded(proj, new_ticket, conn, monkeypatch):  # 
         ("sheet.xlsx", b"PK\x03\x04\x14\x00\x06\x00\x08\x00\x00\x00!\x00\xff\xfe", False, "can't be checked"),
         ("notes.txt", "token = sk-test-ABCDEFGHIJKLMNOPQRSTUV\n".encode("utf-16"), False, "password or key"),
         ("clean.txt", "nothing secret here\n".encode("utf-16"), True, None),
-        ("photo.png", b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\xff\xfe\x00", True, None),
+        ("photo.png", png(), True, None),
     ],
 )
 def test_files_that_can_not_be_checked_are_not_sent(proj, run, new_ticket, conn, name, data, sent, said):  # noqa: F811
@@ -299,7 +311,7 @@ def test_two_artifacts_with_the_same_content_are_sent_once(proj, run, new_ticket
         # a real png that hides a key in a text chunk: its raw bytes are still scanned
         (
             "shot.png",
-            b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0ctEXtpassword=hunter2hunter2\xff\xfe",
+            png(_chunk(b"tEXt", b"Comment\x00password=hunter2hunter2")),
             False,
             "password or key",
         ),
@@ -345,3 +357,50 @@ def test_pdf_zip_and_ole_files_are_never_sent_even_when_ascii(proj, run, new_tic
         h["text"] for h in tickets.load(proj, tid)["history"] if "was not sent to the phone" in h["text"]
     ]
     assert len(lines) == 1 and "can't be checked" in lines[0]
+
+
+@pytest.mark.parametrize(
+    "name,data",
+    [
+        ("z.png", png(_chunk(b"zTXt", b"Comment\x00\x00x\x9c+.N.J-\x01\x00\x07\xfb\x02\x9c"))),
+        ("i.png", png(_chunk(b"iTXt", b"Comment\x00\x01\x00\x00\x00x\x9c+.N.J-\x01\x00"))),
+        ("icc.png", png(_chunk(b"iCCP", b"icc\x00\x00x\x9c\x03\x00\x00\x00\x00\x01"))),
+        ("tail.png", png(tail=b"password=hunter2 hidden after the end")),
+        ("broken.png", b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\xff\xfe\x00"),  # no IEND
+        ("tail.jpg", b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\xff\xd9" + b"more after EOI"),
+        ("tail.gif", b"GIF89a\x01\x00\x01\x00\x00\x00\x00;" + b"more after trailer"),
+        ("size.webp", b"RIFF" + (100).to_bytes(4, "little") + b"WEBPVP8 " + b"\x00" * 8),
+    ],
+)
+def test_images_with_hidden_or_trailing_data_fail_closed(proj, run, new_ticket, conn, name, data):  # noqa: F811
+    tid = new_ticket("Hidden")
+    artifact(proj, tid, name, data)
+    assert run("ask", tid, f"See artifacts/{name}")[0] == 0
+    assert phone_view.view_for(proj, tid)["attachments"] == []
+    lines = [
+        h["text"] for h in tickets.load(proj, tid)["history"] if "was not sent to the phone" in h["text"]
+    ]
+    assert len(lines) == 1 and "can't be checked" in lines[0]
+
+
+@pytest.mark.parametrize(
+    "name,data",
+    [
+        ("ok.png", png()),
+        ("ok.jpg", b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\xff\xd9"),
+        ("ok.gif", b"GIF89a\x01\x00\x01\x00\x00\x00\x00;"),
+        ("ok.webp", b"RIFF" + (12).to_bytes(4, "little") + b"WEBPVP8 " + b"\x00" * 4),
+    ],
+)
+def test_well_formed_images_are_sent(proj, run, new_ticket, conn, name, data):  # noqa: F811
+    tid = new_ticket("Images")
+    artifact(proj, tid, name, data)
+    assert run("ask", tid, f"See artifacts/{name}")[0] == 0
+    assert len(phone_view.view_for(proj, tid)["attachments"]) == 1
+
+
+def test_the_png_chunk_walk_is_bounded(monkeypatch):
+    monkeypatch.setattr(phone_view, "PNG_MAX_CHUNKS", 3)
+    many = png(*[_chunk(b"tEXt", b"a\x00b")] * 5)
+    assert phone_view._image_clean(many) is False
+    assert phone_view._image_clean(png()) is True
