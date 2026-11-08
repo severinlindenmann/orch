@@ -456,3 +456,28 @@ def test_view_started_signature_preserves_old_hash():
     assert phone_view._tasks_sig(ticket) == old
     ticket["started"] = True
     assert phone_view._tasks_sig(ticket) != old
+
+
+def test_light_update_for_a_listed_ticket_on_status_change(proj, run, new_ticket, conn):
+    tid = new_ticket("Made on the dashboard")
+    other = new_ticket("Never listed")
+    phone_view.update_state(proj, lambda st: st.setdefault("synced", {}).setdefault(PHONE, []).append(tid))  # listed earlier
+    assert phone_view.sync_light(proj, now=1000) == [], "first look: only the baseline"
+    tickets.apply_op(proj, tid, lambda t: t.update(status="waiting", summary="Needs your answer"))
+    tickets.apply_op(proj, other, lambda t: t.update(status="waiting"))
+    assert phone_view.sync_light(proj, now=1001) == [], "debounced"
+    assert phone_view.sync_light(proj, now=1100) == [(PHONE, tid)]
+    m = conn.sent[-1]
+    assert m["ticket"] == tid and m["body"]["update"]["kind"] == "note"
+    tv = m["body"]["ticket_view"]
+    assert tv["light"] is True and tv["status"] == "waiting" and tv["summary"] == "Needs your answer"
+    assert not {"checklist", "history_tail", "attachments", "refs"} & set(tv), "nothing the phone must keep is sent"
+    assert_light_valid(tv)
+    assert all(x["ticket"] != other for x in conn.sent), "never listed: no update"
+    n = len(conn.sent)
+    assert phone_view.sync_light(proj, now=1200) == [] and len(conn.sent) == n, "once per change"
+
+
+def assert_light_valid(view):
+    errs = [f"{list(e.path)}: {e.message}" for e in view_validator().iter_errors(view)]
+    assert not errs, errs
