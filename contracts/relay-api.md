@@ -159,7 +159,8 @@ upload of this phone (else `404 not_found`), and an attachment's `size` must equ
 workspace **must** set `reply_to` on the ack (and on `working`) for a phone text; for topic updates the relay does not
 check it (older acks without `reply_to` stay valid), in General the schema does; the ack of a new topic carries the new
 `ticket` and its `key`, which moves the phone's text into that topic. Started ends (back to ✓✓) when a later text on that
-ticket is a `result`, `failure` or `stopped` update or carries a `ticket_view` with `running: false`; a later `ack`/`working`
+ticket is a `result`, `failure`, `stopped` or `question` update, a question, or carries a `ticket_view` with `running: false`
+or `status: "waiting"`; a later `ack`/`working`
 for the same text starts it again. **In General** the same receipts work without a
 ticket: a workspace text with `body.general: true`, no `ticket`, `reply_to` = the phone's General text and `body.update.kind`
 `ack` or `working` (only those two; no `title` needed, no `ticket_view`). These are stored and listed in

@@ -404,3 +404,18 @@ def test_the_wrapper_errors_go_to_the_run_log_not_nowhere(proj, new_ticket, run,
     assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     assert seen["stderr"] not in (subprocess.DEVNULL, subprocess.STDOUT, None)
     assert seen["stderr"].mode == "ab" and list((proj / ".orch" / "run" / "logs").glob(f"{tid}-*.log"))
+
+
+def test_claim_started_survives_stop_and_second_claim(proj, new_ticket, run):
+    tid = new_ticket()
+    first = runs.claim(proj, tid, "agent:test", "claude", pid=os.getpid())
+    assert tickets.load(proj, tid)["started"] is True
+    code, out, err = run("ticket", "show", tid, "--json")
+    assert code == 0, err
+    assert json.loads(out)["started"] is True
+    runs.release(proj, tid, first["run"])
+    tickets.agent_stopped(proj, tid, "agent:test")
+    assert tickets.load(proj, tid)["started"] is True
+    second = runs.claim(proj, tid, "agent:test", "claude", pid=os.getpid())
+    assert tickets.load(proj, tid)["started"] is True
+    runs.release(proj, tid, second["run"])

@@ -700,6 +700,8 @@ def run(args: argparse.Namespace) -> None:
         )
     elif cmd == "answer":
         who = by()
+        if tickets.agent_tool():  # an agent counts as an agent whatever --by says (as for finishing)
+            who = "agent:" + str(tickets.agent_tool())
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
         t, q = tickets.answer(root, args.id, args.question, args.answer, who, args.via)

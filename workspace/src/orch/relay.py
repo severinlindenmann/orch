@@ -798,13 +798,10 @@ def _answer_by(msg: dict, asked: dict | None = None) -> tuple[str, str]:
     by = b.get("answered_by")
     if isinstance(by, str):  # untrusted: it is pasted to the agent as "From <by>: ..."
         by = " ".join(clean_untrusted(by, 100).split())
-    # A subscriber is another system: always agent:, never a person.
-    ok_prefix = (
-        "human:" if frm.startswith("ph_") else "agent:" if frm.startswith("sub_") else ("human:", "agent:")
-    )
-    if not (isinstance(by, str) and by.startswith(ok_prefix)) or (
-        asked is not None and asked.get("group") and not frm.startswith("ph_")
-    ):  # we asked a group member: a peer is never a person here, whatever the answer says (G4/G10)
+    # Only a phone is a person. A subscriber or another workspace is another system: always agent:, never
+    # human: (a person's answer starts the agent again; a peer must not decide that by its own label).
+    ok_prefix = "human:" if frm.startswith("ph_") else "agent:"
+    if not (isinstance(by, str) and by.startswith(ok_prefix)):
         by = f"human:{frm}" if frm.startswith("ph_") else f"agent:{frm}"
     via = "phone" if frm.startswith("ph_") else "subscriber" if frm.startswith("sub_") else "relay"
     return by, via
@@ -1279,7 +1276,16 @@ def send_working(root: Path) -> list[str]:
 
 
 def _continue(
-    root: Path, tid: str, mid: str, who: str, by: str, body: dict, general: bool, final: bool = False
+    root: Path,
+    tid: str,
+    mid: str,
+    who: str,
+    by: str,
+    body: dict,
+    general: bool,
+    final: bool = False,
+    *,
+    frm: str | None = None,
 ) -> None:
     """A phone text into an existing ticket (or the General ticket): queue it for the running agent, then
     record it. Same message id twice = once."""
@@ -1288,7 +1294,7 @@ def _continue(
     text = _describe(root, tid, mid, who, body, final)
     if general:
         text += f'\n(Phone message {mid}. To make a ticket of it: orch relay topic --from {mid} "<title>")'
-    runs.pending_add(root, tid, who, "message", text, "phone", "p_" + mid[2:])
+    runs.pending_add(root, tid, who, "message", text, "phone", "p_" + mid[2:], phone=frm)
 
     def op(t):
         r = t.setdefault("ext", {}).setdefault("relay", {})
@@ -1328,13 +1334,13 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
         return f"added to {tid}", tid
     if tid is None and general:
         tid = tickets.ensure_general(root, by)
-        _continue(root, tid, mid, who, by, body, True, final)
+        _continue(root, tid, mid, who, by, body, True, final, frm=frm)
         _working_add(root, mid, frm, tid, True, "item")
         _ack_once(root, mid, frm, tid, True, "Got it")
         return "General conversation", tid
     if tid is None and msg.get("ticket") and _ticket_exists(root, msg["ticket"]):
         tid = msg["ticket"]
-        _continue(root, tid, mid, who, by, body, False, final)
+        _continue(root, tid, mid, who, by, body, False, final, frm=frm)
         _working_add(root, mid, frm, tid, False, "item")
         _ack_once(root, mid, frm, tid, False, "Got it")
         from orch import chat_groups

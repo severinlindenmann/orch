@@ -190,7 +190,7 @@ def test_answer_from_phone_updates_ticket(proj, run, new_ticket, rel):
     t = json.loads(run("ticket", "show", tid, "--json")[1])
     qq = t["questions"][0]
     assert (qq["answer"], qq["answered_by"], qq["via"]) == ("TIMESTAMP", "human:severin", "phone")
-    assert t["status"] == "active" and t["waiting_on"] is None
+    assert t["status"] == "ready" and t["waiting_on"] is None  # no agent runs: Ready, not Working
     assert "m_answer0000000001" in json.loads((proj / ".orch/inbox-seen.json").read_text())
 
 

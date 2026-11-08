@@ -354,6 +354,26 @@ def session_mode(name: str, root: Path | None = None) -> str:
     return load(name, root)["session"]["id"]
 
 
+def transcript_exists(
+    name: str, sid: str, root: Path, environ: Mapping[str, str] | None = None
+) -> bool | None:
+    """Has the tool saved the conversation of session `sid` for this folder (adapter session.transcript)?
+    None = cannot tell (nothing declared, or the tool has no folder for this workspace at all, e.g. a path it
+    names differently): orch then trusts the recorded id. False = the folder is there but not this session:
+    resuming it would only fail with "no conversation found"."""
+    t = (load(name, root).get("session") or {}).get("transcript")
+    if not t or not SESSION_RE.match(sid or ""):
+        return None
+    env = os.environ if environ is None else environ
+    base = Path(env.get(t.get("dir_env") or "", "") or Path(env.get("HOME") or Path.home()) / t["home"])
+    folder = re.sub(r"[^A-Za-z0-9]", "-", str(root.resolve()))
+    parts = [folder if k == "{folder}" else k.replace("{session}", sid) for k in t["path"]]
+    f = base.joinpath(*parts)
+    if not f.parent.is_dir():
+        return None
+    return f.is_file()
+
+
 def session_missing(name: str, output: str, root: Path | None = None) -> bool:
     """True when the output says the resumed session does not exist (the only case for starting fresh)."""
     pat = load(name, root)["session"].get("missing")
@@ -414,6 +434,22 @@ def detect() -> list[dict]:
             }
         )
     return out
+
+
+RUN_ENV = ("ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET", "ORCH_VIA")
+
+
+def human_environ(environ: Mapping[str, str]) -> dict:
+    """environ without anything that says "an agent is running": every tool's detect variables and the run's
+    ORCH_AGENT/RUN/TICKET/VIA. Used for what a person (a page click) or orch itself (a restart) starts, so
+    orch never counts it as the agent's. Add-ons call this one helper (no copies that drift apart)."""
+    names, prefixes = set(RUN_ENV), []
+    for a in _registry().values():
+        d = a.get("detect") or {}
+        names.update(d.get("env_any") or [])
+        if d.get("env_prefix"):
+            prefixes.append(d["env_prefix"])
+    return {k: v for k, v in environ.items() if k not in names and not k.startswith(tuple(prefixes))}
 
 
 def detect_env(environ: Mapping[str, str]) -> str | None:

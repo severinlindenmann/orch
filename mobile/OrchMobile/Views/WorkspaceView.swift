@@ -14,8 +14,19 @@ struct WorkspaceView: View {
         summary.map { model.split($0).topics } ?? []
     }
 
+    static let activeOrder: [TopicStatus] = [.waitingOnYou, .review, .working, .paused, .backlog]
+
+    static func helperStatus(name: String, anyWorking: Bool, hasMessages: Bool) -> String? {
+        if anyWorking { return "\(name) is working" }
+        return hasMessages ? "\(name) is ready" : nil
+    }
+
+    private var runningCount: Int {
+        summary?.topics.filter { $0.status == .working && !$0.isStarting }.count ?? 0
+    }
+
     private func activeGroups(_ topics: [TopicSummary]) -> [(status: TopicStatus, topics: [TopicSummary])] {
-        [TopicStatus.waitingOnYou, .working, .paused, .review, .backlog].compactMap { status in
+        Self.activeOrder.compactMap { status in
             let group = topics.filter { $0.isStarting ? status == .working : $0.status == status }
             return group.isEmpty ? nil : (status, group)
         }
@@ -38,12 +49,18 @@ struct WorkspaceView: View {
                 ModelMessage()
                 MobileModeBanner(workspaceId: workspaceId)
                 if parts?.general ?? true { generalCard }
+                NowLine(running: runningCount, newCount: summary?.topics.reduce(0) { $0 + $1.unread } ?? 0, scoped: true)
             }.listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
             if topics.isEmpty { emptyState.listRowBackground(Color.clear).listRowSeparator(.hidden) }
             ForEach(activeGroups(topics), id: \.status) { group in
                 Section {
                     ForEach(group.topics) { topic in topicRow(topic) }
-                } header: { Text(group.status.label).themeFont(13, .semibold).foregroundStyle(Theme.muted) }
+                } header: {
+                    Label("\(group.status.label) · \(group.topics.count)", systemImage: symbol(group.status))
+                        .themeFont(13, .semibold)
+                        .foregroundStyle(group.status == .waitingOnYou ? Theme.warn : Theme.muted)
+                        .textCase(nil)
+                }
             }
             if !finished.isEmpty {
                 Section {
@@ -129,10 +146,15 @@ struct WorkspaceView: View {
                 WorkspaceBadge(name: name, icon: summary?.workspace.icon, color: summary?.workspace.color, size: 50)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 5) {
-                        Text("General").themeFont(17, .semibold)
+                        Text("Chat").themeFont(17, .semibold)
                         Image(systemName: "bubble.right").themeFont(12).foregroundStyle(Theme.muted).accessibilityHidden(true)
                     }
-                    Text("Talk to \(name)").themeFont(15).foregroundStyle(Theme.muted)
+                    let preview = summary?.general.lastLine ?? ""
+                    Text(preview.isEmpty ? "Talk to \(name)" : preview)
+                        .themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
+                    if let status = Self.helperStatus(name: name, anyWorking: runningCount > 0, hasMessages: summary?.general.lastAt != nil) {
+                        Text(status).themeFont(13).foregroundStyle(Theme.brand)
+                    }
                 }
                 Spacer(minLength: 4)
                 ShellBadge(count: summary?.general.unread ?? 0)
@@ -174,7 +196,7 @@ struct WorkspaceView: View {
         return topic.status.chip + (finished && !day.isEmpty ? " · " + day : "")
     }
     private func symbol(_ status: TopicStatus) -> String {
-        switch status { case .working, .waitingOnYou: "clock"; case .review: "eye"; case .paused: "pause.circle"; case .backlog: "circle"; case .done: "checkmark"; case .dropped: "xmark"; case .stopped: "stop.fill"; case .didntWork: "exclamationmark.triangle" }
+        switch status { case .waitingOnYou: "bubble.left"; case .working: "clock"; case .review: "eye"; case .paused: "pause.circle"; case .backlog: "circle"; case .done: "checkmark"; case .dropped: "xmark"; case .stopped: "stop.fill"; case .didntWork: "exclamationmark.triangle" }
     }
     private func color(_ status: TopicStatus) -> Color {
         switch status { case .waitingOnYou: Theme.warn; case .paused, .dropped, .stopped: Theme.muted; case .didntWork: Theme.danger; default: Theme.brand }
