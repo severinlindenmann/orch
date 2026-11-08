@@ -581,7 +581,7 @@ def test_ticket_screens_use_plain_wording_and_one_chip():
     assert "No tickets are being worked on." in src and "No agent is working right now" not in src
     assert "plainWhy(question" in src  # Needs-you rows carry no command text
     assert "seconds + ' s ago'" not in src  # one calm time format
-    assert "'Not chosen yet'" not in src.split("const agent = sessions.length")[1].split("\n")[0]
+    assert "'Not chosen yet'" not in src.split("const agent = window.DashHelpers.agentLine")[1].split("\n")[0]
     assert "Ideas to plan" in src and "Finished work" in src
     assert "hideStatus" not in src and "'Needs you'" in src  # 10A: short board chip; 7A: no chip beside the banner
 
@@ -634,6 +634,8 @@ def test_one_label_per_status_single_sourced():
     src = webjs.all_js()
     for word in ("Ready to start", "Backlog"):
         assert word not in src and word not in (WEB / "helpers.js").read_text()
+    # Lifecycle step names are separate from status labels.
+    src = src.split("function ticketStepState")[0] + src.split("function ticketStepper")[1]
     for pair in ("open:'Not started'", "active:'Working'", "review:'Ready for review'", "done:'Done'"):
         assert pair not in src.replace(" ", "")
     words = node_value("STATUS_WORD")
@@ -658,7 +660,8 @@ def test_review_ticket_without_run_offers_no_start():
     assert w["primary"] is None and w["items"] == [] and "Start" not in w["status"]
     assert call("agentLine", {"id": "t_a", "status": "active"}, None, 0, None)["primary"]["label"] == "Start"
     src = webjs.all_js()
-    assert "line.primary?.op" in src and "!line.primary ? null" in src
+    assert "line.primary && !['answer', 'open'].includes(line.primary.op)" in src
+    assert "!['done', 'review'].includes(t.status) ? agentBar(t) : null" in src
 
 
 def test_ui2_small_bugs_in_markup_and_css():
