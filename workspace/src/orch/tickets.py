@@ -660,6 +660,8 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
 
     def op(ticket):
+        if ticket.get("general") is True:
+            raise Refused("The Chat is not a ticket: it is never finished, dropped or reopened.")
         target, actor = _finish_status(root, ticket, status, by)
         if target in ("open", "ready") and not actor.startswith("agent:"):
             ticket.pop("started", None)
@@ -1341,6 +1343,11 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         raise Refused('A patch is a JSON object, e.g. \'{"title": "New"}\'.') from None
     if not isinstance(obj, dict) or not obj:
         raise Refused("A patch is a JSON object with at least one field.")
+    if "status" in obj:
+        from orch import chat
+
+        if chat.is_helper(root):
+            raise Refused("The Chat helper does not change a ticket's status.")
     bad = sorted(set(obj) - set(PATCH_FIELDS))
     if bad:
         raise Refused(f"A patch can change only: {', '.join(PATCH_FIELDS)} (not {bad[0]}).")

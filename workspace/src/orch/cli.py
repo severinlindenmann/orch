@@ -13,6 +13,7 @@ from orch import (
     __version__,
     addons,
     cli_addons,
+    cli_chat,
     cli_clients,
     cli_config,
     cli_look,
@@ -234,7 +235,7 @@ def _visible(root: Path, t: dict) -> dict:
     return {**t, "ext": {k: v for k, v in ext.items() if k in on}}
 
 
-_PLACEHOLDERS = {"run", "agents", "config", "share"}  # hidden until built
+_PLACEHOLDERS = {"run", "agents", "config", "share", "chat"}  # hidden until built
 ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
@@ -451,6 +452,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_needs.add_parsers(sub, common)
     cli_config.add_parsers(sub, common)
     cli_look.add_parsers(sub, common)
+    cli_chat.add_parsers(sub, common)
     p.formatter_class = argparse.RawDescriptionHelpFormatter
     notes = []
     if addon_lines:
@@ -495,6 +497,9 @@ def run(args: argparse.Namespace) -> None:
     root = _find_root()
     by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
     cmd, sub = args.cmd, getattr(args, "sub", None)
+    from orch import chat
+
+    chat.guard(root, args)  # the Chat helper's role is enforced here (every command, init too)
 
     if cmd == "init":
         root = Path.cwd()
@@ -528,7 +533,7 @@ def run(args: argparse.Namespace) -> None:
         pass
     elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
         pass
-    elif cli_look.dispatch(args, root):
+    elif cli_chat.dispatch(args, root) or cli_look.dispatch(args, root):
         pass
     elif cmd == "ticket" and sub == "new":
         t = tickets.create(
