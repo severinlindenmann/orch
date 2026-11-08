@@ -161,6 +161,23 @@ def safe_file(root: Path, rel_path: str) -> str | None:
     """A file card names a file inside the workspace (real path, links resolved); secrets are never one."""
     if not rel_path or "\x00" in rel_path:
         return None
+    import posixpath
+    from pathlib import PureWindowsPath
+
+    from orch import safefile
+
+    rel_path = rel_path.replace("\\", "/")
+    if Path(rel_path).is_absolute() or PureWindowsPath(rel_path).drive or rel_path.startswith("~"):
+        return None
+    norm = posixpath.normpath(rel_path)
+    if (
+        norm in (".", "..")
+        or norm.startswith("../")
+        or ".." in norm.split("/")
+        or not safefile.file_ref_ok(root, norm)
+    ):
+        return None  # no part a link (a symlinked folder), nothing under .orch or .git
+    rel_path = norm
     try:
         base = root.resolve()
         real = (base / rel_path).resolve()
@@ -180,32 +197,15 @@ def safe_file(root: Path, rel_path: str) -> str | None:
 def read_file(root: Path, rel_path: str, max_bytes: int = 5_000_000) -> bytes | None:
     """The bytes of a file card, for whoever serves it: checked now (safe_file), then opened without following
     links (safefile.open_file_ref). None = not allowed."""
-    import os
-    import stat
+    from orch import safefile
 
     p = safe_file(root, rel_path)
     if not p:
         return None
-    real = root.resolve() / p
     try:
-        before = real.lstat()
-        fd = os.open(real, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
-    except OSError:
+        return safefile.open_file_ref(root, p, max_bytes)
+    except safefile.TooLarge:
         return None
-    try:
-        st = os.fstat(fd)  # what was opened is what was checked: one regular file, one name
-        if (
-            not stat.S_ISREG(st.st_mode)
-            or st.st_nlink != 1
-            or (st.st_dev, st.st_ino) != (before.st_dev, before.st_ino)
-        ):
-            return None
-        if st.st_size > max_bytes:
-            return None
-        with os.fdopen(fd, "rb", closefd=False) as f:
-            return f.read(max_bytes + 1)[:max_bytes]
-    finally:
-        os.close(fd)
 
 
 def refs_in_text(root: Path, text: str) -> list[dict]:
@@ -471,29 +471,26 @@ def is_helper(root: Path) -> bool:
     return bool(gid and tickets.agent_tool() and os.environ.get("ORCH_TICKET") == gid)
 
 
-_REF_KINDS = (None, "link", "file", "pr", "commit", "html", "ticket")
-
-
 def _check_ref_add(root: Path, args, no: Refused) -> None:
-    """A reference the helper adds is a web link, a ticket, or a safe file inside the workspace: nothing else."""
-    target, kind = str(getattr(args, "target", "") or ""), getattr(args, "kind", None)
-    if kind not in _REF_KINDS:
-        raise no
-    if phone_view.safe_url(target):
-        return
+    """A reference the helper adds is normalised exactly as `orch ref add` does (refs.detect), then must be a web
+    link, a ticket, or a project file safe_file accepts (inside the workspace, not local/absolute): nothing else."""
+    from orch import refs
+
     try:
-        if tickets._ID_RE.fullmatch(str(tickets.resolve(root, target))):
-            return
+        d = refs.detect(
+            root,
+            "",
+            str(getattr(args, "target", "") or ""),
+            getattr(args, "kind", None),
+            getattr(args, "title", None),
+        )
     except Refused:
-        pass
-    if (
-        kind in (None, "file")
-        and not target.startswith(("/", "~"))
-        and ".." not in target.split("/")
-        and safe_file(root, target)
-    ):
-        return
-    raise no
+        raise no from None
+    if d["kind"] == "file":
+        if d.get("local") or not safe_file(root, d["path"]):
+            raise no
+    elif d["kind"] == "artifact":
+        raise no
 
 
 def guard(root: Path, args) -> None:

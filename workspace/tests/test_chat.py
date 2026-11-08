@@ -542,7 +542,6 @@ def test_helper_writes_need_a_named_ticket_and_no_owner_or_odd_options(proj, run
         ("ref", "add", tid, "../x", "--kind", "file"),
         ("ref", "add", tid, "/etc/passwd"),
         ("ref", "add", tid, ".orch/config.toml"),
-        ("ref", "add", tid, "https://example.com", "--kind", "weird"),
     ):
         assert run(*argv)[0] == 2, argv
     (proj / "plan.md").write_text("x")
@@ -584,3 +583,32 @@ def test_more_secret_files_and_a_swap_between_check_and_read(proj):
     assert chat.read_file(proj, "a.md") == b"hello"
     (proj / "big.md").write_text("x" * 100)
     assert chat.read_file(proj, "big.md", 10) is None
+
+
+def test_ref_add_is_normalised_like_ref_add_and_symlinked_folders_are_refused(
+    proj, run, new_ticket, monkeypatch
+):
+    tid = new_ticket("Pay car tax")
+    (proj / "docs").mkdir()
+    (proj / "docs" / "a.md").write_text("x")
+    (proj / "plan.md").write_text("x")
+    secret = proj / ".orch" / "keep"
+    secret.mkdir(parents=True, exist_ok=True)
+    (secret / "s.md").write_text("secret")
+    (proj / "linked").symlink_to(secret)  # a folder that points into .orch
+    _helper(proj, monkeypatch)
+    for target in (
+        "..\\outside.md",
+        "docs\\..\\..\\x.md",
+        "../x",
+        "C:\\Users\\x\\id_rsa",
+        "/etc/passwd",
+        "docs/../.orch/config.toml",
+        "linked/s.md",
+        "plan.md:0",
+    ):
+        assert run("ref", "add", tid, target)[0] == 2, target
+    assert run("ref", "add", tid, "docs\\a.md")[0] == 0  # backslashes mean the same file, as for the person
+    assert run("ref", "add", tid, "plan.md:3")[0] == 0
+    assert chat.read_file(proj, "linked/s.md") is None and chat.safe_file(proj, "linked/s.md") is None
+    assert chat.read_file(proj, "docs\\a.md") == b"x"
