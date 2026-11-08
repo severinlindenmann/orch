@@ -85,11 +85,15 @@ def ext_unset(root: Path, t: dict, by: str | None = None) -> bool:
 AGENT_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 
 
-def run_start(root: Path, tid: str, text: str | None = None, agent: str | None = None, by: str | None = None) -> dict:
+def run_start(root: Path, tid: str, text: str | None = None, agent: str | None = None, by: str | None = None,
+              mode: str | None = "oneshot") -> dict:
     """`orch run start <tid> --by agent:automation`: all of resume / fresh / busy is decided inside core.
+    mode None lets core choose (a live session the person can open when the machine can).
     Returns {"result": "started", "run", "log"} | {"result": "pending"} (ticket busy, text queued)
     | {"result": "failed", "reason": plain words}."""
-    cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--mode", "oneshot", "--json", "--by", by or BY]
+    cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--json", "--by", by or BY]
+    if mode:
+        cmd += ["--mode", mode]
     if agent and AGENT_RE.match(agent):  # only a name; core refuses one it does not know
         cmd += ["--agent", agent]
     if text:
@@ -110,6 +114,12 @@ def run_start(root: Path, tid: str, text: str | None = None, agent: str | None =
     if "No agent found" in reason:
         reason = "No agent set: orch config set workspace.agent <name>"
     return {"result": "failed", "reason": reason[:300]}
+
+
+def run_status(root: Path, tid: str) -> dict | None:
+    """`orch run status <tid> --json`: running, pending_ids (input waiting for a run). None = could not find out."""
+    data = call(root, "run", "status", tid, by=False)
+    return data if isinstance(data, dict) else None
 
 
 def run_running(root: Path, tid: str) -> bool | None:

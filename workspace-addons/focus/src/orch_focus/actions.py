@@ -166,13 +166,38 @@ def build_argv(op, args) -> list[str]:
     return [*words, *flags, "--by", BY.get(op) or actor(), "--json", *(["--", *tail] if tail else [])]
 
 
+def _without_agent(environ) -> dict:
+    """environ without the agent tools' variables, from orch's one list (orch.adapters.human_environ). When
+    that list can not be read, the action is refused: it never runs with an agent's variables (fail closed)."""
+    try:
+        from orch.adapters import human_environ
+
+        return human_environ(environ)
+    except Exception as e:  # noqa: BLE001 - an old orch or a bad adapter file
+        import sys
+        import traceback
+
+        print("orch could not check who is acting here:", file=sys.stderr)  # the full text: server side only
+        traceback.print_exc(file=sys.stderr)
+        fn = getattr(e, "filename", None)
+        where = Path(fn).name if isinstance(fn, str) and fn else ""  # never a full path or file content
+        why = e.__class__.__name__ + (f" in {where}" if where else "")
+        raise Unavailable(f"orch could not check who is acting here ({why}). Fix that and try again.") from None
+
+
+def human_env(root: Path, orch_bin: str) -> dict:
+    """Page actions are the person's actions, even if an agent launched the server: the agent tools' own
+    variables (and ORCH_AGENT/RUN/TICKET) are left out, or orch would count the click as the agent's."""
+    return {**_without_agent(os.environ), "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "focus"}
+
+
 def orch(root: Path, orch_bin: str | None, argv: list[str], timeout: int = 60) -> tuple[int, str, str]:
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
     try:
         r = subprocess.run(
             [orch_bin, *argv], check=False, cwd=root, capture_output=True, text=True, timeout=timeout,
-            stdin=subprocess.DEVNULL, env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "focus"},
+            stdin=subprocess.DEVNULL, env=human_env(root, orch_bin),
         )  # fmt: skip
     except subprocess.TimeoutExpired:
         return 124, "", "That took too long. Please try again."

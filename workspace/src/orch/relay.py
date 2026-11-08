@@ -770,10 +770,9 @@ def _answer_by(msg: dict) -> tuple[str, str]:
     by = b.get("answered_by")
     if isinstance(by, str):  # untrusted: it is pasted to the agent as "From <by>: ..."
         by = " ".join(clean_untrusted(by, 100).split())
-    # A subscriber is another system: always agent:, never a person.
-    ok_prefix = (
-        "human:" if frm.startswith("ph_") else "agent:" if frm.startswith("sub_") else ("human:", "agent:")
-    )
+    # Only a phone is a person. A subscriber or another workspace is another system: always agent:, never
+    # human: (a person's answer starts the agent again; a peer must not decide that by its own label).
+    ok_prefix = "human:" if frm.startswith("ph_") else "agent:"
     if not (isinstance(by, str) and by.startswith(ok_prefix)):
         by = f"human:{frm}" if frm.startswith("ph_") else f"agent:{frm}"
     via = "phone" if frm.startswith("ph_") else "subscriber" if frm.startswith("sub_") else "relay"

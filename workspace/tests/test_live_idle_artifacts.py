@@ -205,10 +205,19 @@ def test_working_or_waiting_tickets_still_count(proj, run, status):
     "status,age,shut",
     [("review", 11, True), ("review", 5, False), ("active", 11, False), ("waiting", 11, False)],
 )
-def test_review_session_closes_after_ten_minutes(proj, run, closed, status, age, shut):
+def test_review_session_closes_after_ten_minutes_when_sessions_are_full(proj, run, closed, status, age, shut):
+    for _ in range(runs_live.MAX_LIVE - 1):
+        _live(proj, run, "working", 1)
     tid = _live(proj, run, "idle", age)
     tickets.set_status(proj, tid, status, "human:t")
     assert runs_live.cleanup(proj) == ([tid] if shut else [])
+
+
+def test_review_session_stays_warm_the_hour_when_there_is_room(proj, run, closed):
+    """fb4: Continue on a Review ticket keeps its session an hour, unless the sessions are full."""
+    tid = _live(proj, run, "idle", 30)
+    tickets.set_status(proj, tid, "review", "human:t")
+    assert runs_live.cleanup(proj) == []
 
 
 def test_a_working_session_on_a_review_ticket_still_counts(proj, run):
