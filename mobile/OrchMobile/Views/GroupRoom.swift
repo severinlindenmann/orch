@@ -168,14 +168,17 @@ struct GroupTaskView: View {
     let group: PhoneGroup
     var body: some View {
         let name = group.name(of: task.ws)
+        let target = GroupRoomRules.openTarget(task: task, workspaces: model.workspaces, tickets: model.tickets, updates: model.updates)
         VStack(alignment: .leading, spacing: 10) {
             HStack { GroupMemberBadge(group: group, ws: task.ws, size: 32); group.memberText(task.ws, prefix: "Task for ").themeFont(13).foregroundStyle(Theme.muted) }
-            Text([task.key, task.title].compactMap { $0 }.joined(separator: " · ")).themeFont(17, .semibold)
+            if let heading = GroupRoomRules.taskHeading(target: target) {
+                Text(heading).themeFont(17, .semibold)
+            }
             (group.isExternal(task.ws) ? Text(GroupRoomRules.taskLabel(task.status, name: name)).italic().foregroundColor(Theme.muted) : Text(GroupRoomRules.taskLabel(task.status, name: name))).themeFont(13).foregroundStyle(Theme.brand)
                 .padding(.horizontal, 8).padding(.vertical, 3).background(Theme.brand.opacity(0.15), in: Capsule())
-            if model.workspaces.contains(where: { $0.id == task.ws }), let ticket = task.ticket {
-                NavigationLink(value: ChatRoute.ticket(workspace: task.ws, ticket: ticket)) {
-                    Text("Open \(task.key ?? "ticket") ›").themeFont(15).foregroundStyle(Theme.brand).frame(minHeight: 44)
+            if let target {
+                NavigationLink(value: ChatRoute.ticket(workspace: target.workspace, ticket: target.ticket)) {
+                    Text("Open \(target.label) ›").themeFont(15).foregroundStyle(Theme.brand).frame(minHeight: 44)
                 }
             }
         }.padding(12).frame(maxWidth: .infinity, alignment: .leading)

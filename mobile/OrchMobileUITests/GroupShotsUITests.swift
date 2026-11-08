@@ -26,7 +26,7 @@ final class GroupShotsUITests: XCTestCase {
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-fakeVoice", "YES", "-mockGroups", "YES"]
         app.launch()
         XCTAssertTrue(element(app, "chat-search").waitForExistence(timeout: 15))
-        let row = reveal(app, "group-grp_t_cartax2027")
+        let row = reveal(app, "group-13-ws_finance001-grp_t_cartax2027")
         XCTAssertTrue(row.waitForExistence(timeout: 15))
         try shot(app, "list")
         row.tap()
@@ -41,7 +41,7 @@ final class GroupShotsUITests: XCTestCase {
         app.buttons["Done"].tap()
         app.buttons["group-back"].tap()
         reveal(app, "group-history").tap()
-        XCTAssertTrue(element(app, "group-grp_t_cartax2026").waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "group-13-ws_finance001-grp_t_cartax2026").waitForExistence(timeout: 10))
         try shot(app, "history")
     }
 }

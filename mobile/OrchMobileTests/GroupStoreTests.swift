@@ -94,6 +94,8 @@ final class GroupStoreTests: XCTestCase {
         for input in [[first, second], [second, first]] {
             let snapshot = build(input)
             XCTAssertEqual(Set(snapshot.groups.map(\.key)), [GroupKey(host: finance, id: "grp_t_fin14a"), GroupKey(host: home, id: "grp_t_fin14a")])
+            XCTAssertEqual(Set(snapshot.groups.map(\.id)), Set(snapshot.groups.map(\.key)))
+            XCTAssertEqual(Set(snapshot.groups.map { GroupListRow.rowID($0) }).count, 2)
             XCTAssertTrue(snapshot.dropped.isEmpty)
             XCTAssertEqual(snapshot.groups.first { $0.key.host == finance }?.closed, true)
             XCTAssertEqual(snapshot.groups.first { $0.key.host == home }?.tasks["d"]?.status, "working")
@@ -361,14 +363,15 @@ final class GroupStoreTests: XCTestCase {
 
     func testApprovalRequiresTheOpenMemberQuestionAndEveryCondition() throws {
         let g = try group([message("group") {
+            $0.task = GroupTask(delegate: "d", ws: self.bank, ticket: "t_bank", status: "waiting_approval", questionMessage: "q")
             $0.group = GroupInfo(id: "grp_t_fin14a", host: self.finance, title: "Tax",
                                 members: self.members + [GroupMember(ws: self.bank, name: "You")], seq: 1)
         }])
         let event = GroupEvent(kind: "approval_needed", ws: bank, delegate: "d", questionMessage: "q")
         func question(id: String = "q", from: String? = nil, options: [String] = ["once", "always", "no"],
-                      scope: String? = "Tasks from FINANCE") -> Question {
+                      scope: String? = "Tasks from FINANCE", ticket: String? = "t_bank") -> Question {
             Question(message: QuestionMessage(schema: "orch.msg/1", id: id, from: from ?? bank, to: "phones", type: "question",
-                createdAt: "10", ticket: nil, body: QuestionBody(questionId: "relay:allow", title: nil, text: "Allow?",
+                createdAt: "10", ticket: ticket, body: QuestionBody(questionId: "relay:allow", title: nil, text: "Allow?",
                 options: options, recommended: nil, scope: scope, allowQuestion: true)), workspaceName: "Bank")
         }
         func card(_ questions: [Question], event e: GroupEvent? = nil) -> ApprovalCard {
@@ -395,6 +398,35 @@ final class GroupStoreTests: XCTestCase {
                   question(scope: "Tasks from Finance Office"), question(scope: "Allow tasks from Finance")] {
             XCTAssertEqual(card([q]), .answerInWorkspace("Bank"))
         }
+        XCTAssertEqual(card([question(ticket: "wrong")]), .answerInWorkspace("Bank"))
+        XCTAssertEqual(card([question(ticket: nil)]), .answerInWorkspace("Bank"))
+        XCTAssertEqual(card([question(scope: "tasks  from Finance")]), .answerInWorkspace("Bank"))
+        for task in [
+            GroupTask(delegate: "wrong", ws: bank, ticket: "t_bank", status: "waiting_approval", questionMessage: "q"),
+            GroupTask(delegate: "", ws: bank, ticket: "t_bank", status: "waiting_approval", questionMessage: "q"),
+            GroupTask(delegate: "d", ws: home, ticket: "t_bank", status: "waiting_approval", questionMessage: "q"),
+            GroupTask(delegate: "d", ws: "", ticket: "t_bank", status: "waiting_approval", questionMessage: "q"),
+            GroupTask(delegate: "d", ws: bank, ticket: "t_bank", status: "waiting_approval"),
+            GroupTask(delegate: "d", ws: bank, ticket: "t_bank", status: "waiting_approval", questionMessage: "wrong"),
+            GroupTask(delegate: "d", ws: bank, status: "waiting_approval", questionMessage: "q"),
+            GroupTask(delegate: "d", ws: bank, ticket: "wrong", status: "waiting_approval", questionMessage: "q")
+        ] {
+            let altered = PhoneGroup(key: g.key, title: g.title, members: g.members, hostName: g.hostName, names: g.names,
+                externals: g.externals, ticketKey: g.ticketKey, ticket: g.ticket, messages: g.messages, closed: false,
+                startedHere: g.startedHere, gaps: g.gaps, tasks: ["d": task])
+            XCTAssertEqual(GroupStore.approvalCard(for: event, in: altered, questions: [question()]), .answerInWorkspace("Bank"))
+        }
+        for incomplete in [
+            GroupEvent(kind: "approval_needed", ws: bank, delegate: "d"),
+            GroupEvent(kind: "approval_needed", ws: bank, questionMessage: "q"),
+            GroupEvent(kind: "approval_needed", delegate: "d", questionMessage: "q")
+        ] {
+            XCTAssertEqual(card([question()], event: incomplete), .answerInWorkspace(g.name(of: incomplete.ws ?? "")))
+        }
+
+        XCTAssertEqual(card([question()], event: GroupEvent(kind: "approval_needed", ws: bank, delegate: "wrong", questionMessage: "q")), .answerInWorkspace("Bank"))
+        XCTAssertEqual(card([question(id: "other")], event: GroupEvent(kind: "approval_needed", ws: bank, delegate: "d", questionMessage: "other")), .answerInWorkspace("Bank"))
+        XCTAssertEqual(card([question(from: home)], event: GroupEvent(kind: "approval_needed", ws: home, delegate: "d", questionMessage: "q")), .answerInWorkspace("Home"))
         let trimmed = question(scope: "  tasks FROM Finance \n")
         XCTAssertEqual(card([trimmed]), .buttons(trimmed))
         XCTAssertEqual(card([question()], event: GroupEvent(kind: "created", ws: bank, questionMessage: "q")),
@@ -599,6 +631,80 @@ final class GroupStoreTests: XCTestCase {
         XCTAssertEqual(order.gaps.count, 50)
         XCTAssertEqual(order.gaps.first, 20_001..<22_000)
         XCTAssertEqual(order.gaps.last, 118_001..<120_000)
+    }
+
+    func testBufferSkipsOnlyOnThe51stWaitingMessage() {
+        let now = Date(timeIntervalSince1970: 10)
+        var order = GroupOrder(appliedSeq: 1)
+        for seq in 3...51 {
+            XCTAssertEqual(order.receive(seq: seq, receivedAt: now, now: now), .buffer)
+        }
+        XCTAssertEqual(order.buffered.count, 49)
+        XCTAssertEqual(order.receive(seq: 52, receivedAt: now, now: now), .buffer)
+        XCTAssertEqual(order.buffered.count, 50)
+        XCTAssertEqual(order.appliedSeq, 1)
+        XCTAssertTrue(order.gaps.isEmpty)
+        XCTAssertEqual(order.receive(seq: 53, receivedAt: now, now: now), .skipGapAndApply)
+        XCTAssertEqual(order.appliedSeq, 53)
+        XCTAssertEqual(order.gaps, [2..<3])
+        XCTAssertTrue(order.buffered.isEmpty)
+    }
+
+    func testHistoryCapKeepsNewest50ClosedGroupsAndAllOpenGroups() {
+        for tiedDates in [false, true] {
+            var times: [String: Date] = [:]
+            let input = (0..<62).map { index in
+                let id = "history-\(index)"
+                times[id] = Date(timeIntervalSince1970: Double(index * 3601))
+                return message(id, at: tiedDates ? "same" : String(format: "%03d", index), ticket: "t_\(index)") {
+                    $0.group = GroupInfo(id: "grp_t_\(index)", host: self.finance, title: "History", members: self.members, seq: 1)
+                    // Oldest and newest open groups both survive.
+                    if index > 0 && index < 61 { $0.groupEvent = GroupEvent(kind: "closed") }
+                }
+            }
+            let snapshot = build(input, receivedAt: times)
+            XCTAssertTrue(snapshot.dropped.isEmpty)
+            XCTAssertEqual(snapshot.groups.filter(\.closed).count, 50)
+            XCTAssertEqual(Set(snapshot.groups.filter(\.closed).map(\.key.id)), Set((11...60).map { "grp_t_\($0)" }))
+            XCTAssertEqual(Set(snapshot.groups.filter { !$0.closed }.map(\.key.id)), ["grp_t_0", "grp_t_61"])
+        }
+    }
+
+    func testHistoryCapIgnoresSpoofedAndPostCloseMessages() {
+        var times: [String: Date] = [:]
+        var arrival: [String: Int] = [:]
+        let input = (0..<52).map { index in
+            let id = "history-\(index)"
+            times[id] = Date(timeIntervalSince1970: Double(index * 3601))
+            arrival[id] = index
+            return message(id, at: index == 0 ? "zzz" : "9999-01-01", ticket: "t_\(index)") {
+                $0.group = GroupInfo(id: "grp_t_\(index)", host: self.finance, title: "History", members: self.members, seq: 1)
+                $0.groupEvent = GroupEvent(kind: "closed")
+            }
+        }
+        let expected = Set((2..<52).map { "grp_t_\($0)" })
+        let spoof = message("spoof", from: home, ticket: "t_1") {
+            $0.group = GroupInfo(id: "grp_t_1", host: self.finance, title: "History", members: self.members, seq: 2)
+        }
+        let postClose = message("post-close", seq: nil, ticket: "t_1") {
+            $0.group = GroupInfo(id: "grp_t_1", host: self.finance, title: "History", members: self.members)
+        }
+        let repeatedClose = message("repeated-close", ticket: "t_1") {
+            $0.group = GroupInfo(id: "grp_t_1", host: self.finance, title: "History", members: self.members, seq: 2)
+            $0.groupEvent = GroupEvent(kind: "closed")
+        }
+        for extra in [spoof, postClose, repeatedClose] {
+            arrival[extra.id] = 1000
+            times[extra.id] = Date(timeIntervalSince1970: 52 * 3601)
+            for explicitArrival in [false, true] {
+                let snapshot = build(input + [extra], receivedAt: times, arrival: explicitArrival ? arrival : [:])
+                XCTAssertEqual(Set(snapshot.groups.map(\.key.id)), expected, extra.id)
+                if extra.id == spoof.id { XCTAssertTrue(snapshot.dropped.contains { $0.messageId == spoof.id }) }
+            }
+        }
+        // A known arrival outranks every missing arrival, regardless of input position.
+        let partial = build(input, receivedAt: times, arrival: ["history-0": 0])
+        XCTAssertEqual(Set(partial.groups.map(\.key.id)), Set(([0] + Array(3..<52)).map { "grp_t_\($0)" }))
     }
 
     func testOrderVectors() throws {
@@ -863,17 +969,21 @@ final class GroupStoreTests: XCTestCase {
         XCTAssertTrue(receivedBuild(twenty.dropLast() + [creation(19, at: 68400, close: true), creation(20, at: 72000)]).dropped.isEmpty)
         let retained = (0..<101).map { creation($0, at: $0 * 3601, close: true) }
         let snapshot = receivedBuild(retained)
-        XCTAssertEqual(snapshot.groups.count, 101)
+        XCTAssertEqual(snapshot.groups.count, 50)
         XCTAssertTrue(snapshot.groups.allSatisfy(\.closed))
         XCTAssertTrue(snapshot.dropped.isEmpty)
     }
 
     func testAllowVectorsAndMapping() throws {
-        let g = try group([vector("valid-member-added-from-seq")])
+        var g = try group([vector("valid-member-added-from-seq")])
         for name in ["valid-allow-question-wire-options", "valid-allow-question-old-wording-answer-in-bank", "invalid-allow-question-ui-words-on-wire"] {
             let object = try vectorObject(name)
             let q = Question(message: try JSONCoding.decoder.decode(QuestionMessage.self, from: JSONSerialization.data(withJSONObject: try XCTUnwrap(object["message"]))), workspaceName: "Bank")
-            let event = GroupEvent(kind: "approval_needed", ws: bank, questionMessage: q.id)
+            g = PhoneGroup(key: g.key, title: g.title, members: g.members, hostName: g.hostName, names: g.names,
+                externals: g.externals, ticketKey: g.ticketKey, ticket: g.ticket, messages: g.messages, closed: false,
+                startedHere: g.startedHere, gaps: g.gaps,
+                tasks: ["d": GroupTask(delegate: "d", ws: bank, ticket: q.message.ticket, status: "waiting_approval", questionMessage: q.id)])
+            let event = GroupEvent(kind: "approval_needed", ws: bank, delegate: "d", questionMessage: q.id)
             let isWire = name == "valid-allow-question-wire-options"
             XCTAssertEqual(q.isGroupAllow, isWire)
             XCTAssertEqual(GroupStore.approvalCard(for: event, in: g, questions: [q]), isWire ? .buttons(q) : .answerInWorkspace("Bank"))
