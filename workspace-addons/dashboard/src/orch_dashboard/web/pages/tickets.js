@@ -8,10 +8,33 @@ function filterTickets(items, query, mine, me = '') {
   return items.filter(t => (!mine || (me ? String(t.owner || '') === me : !String(t.owner || '').startsWith('agent:'))) &&
     (!needle || [t.title, t.key, t.owner, t.note].some(value => String(value || '').toLowerCase().includes(needle))));
 }
+function boardChildren(all, t) {
+  return window.DashHelpers.childrenOf ? window.DashHelpers.childrenOf(all, t) : all.filter(child => child.id !== t.id && child.parent && (child.parent === t.id || child.parent === t.key));
+}
+function boardParent(all, t) {
+  return window.DashHelpers.parentOf ? window.DashHelpers.parentOf(all, t) : all.find(parent => parent.id !== t.id && t.parent && (parent.id === t.parent || parent.key === t.parent));
+}
 function ticketParents(items) {
-  const parents = new Map();
-  for (const t of items) for (const id of Array.isArray(t.children) ? t.children : []) if (!parents.has(id) && id !== t.id) parents.set(id, t.id);
-  return items.map(t => t.parent || !parents.has(t.id) ? t : {...t, parent:parents.get(t.id)});
+  return items.map(t => {
+    const parent = boardParent(items, t);
+    return parent ? {...t, parent:parent.id} : t;
+  });
+}
+function ticketGroups(items) {
+  const groups = [['waiting', 'Needs you'], ['active', 'Working'], ['open', 'Not started'], ['review', 'Ready for review'], ['done', 'Done']].map(([status, title]) => ({status, title, tickets:[]}));
+  for (const t of items) {
+    const column = window.DashHelpers.columnOf(shown(t).status);
+    const status = questions(t).length || column === 'waiting' ? 'waiting' : column;
+    groups.find(group => group.status === status)?.tickets.push(t);
+  }
+  return groups;
+}
+function boardParentLine(t) {
+  const parent = boardParent(tickets(), t);
+  return parent ? h('p', {className:'meta board-parent'}, h('a', {href:href(parent.id)}, 'Part of ' + clean(parent.title))) : null;
+}
+function ticketAttentionChip(t) {
+  return questions(t).length && shown(t).status !== 'done' ? chip('Needs you', 'attn') : statusChip(t);
 }
 function filteredTickets() { return filterTickets(ticketParents(tickets()), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : ''); }
 function ticketFilters() {
@@ -78,7 +101,7 @@ function treeBranch(rows, index) {
     h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, typeof t.key === 'string' ? h('span', {className:'meta mono'}, t.key + ' ') : null, clean(t.title))), ticketNext(t),
       row.children ? h('p', {className:'meta'}, row.done + ' of ' + row.children + ' parts done') : null,
       row.parentMissing ? parentLine(t) : null),
-    h('div', {className:'row ticket-meta'}, statusChip(t), tasks.length ? h('span', {className:'meta'}, tasks.filter(task => task.done).length + '/' + tasks.length) : null,
+    h('div', {className:'row ticket-meta'}, ticketAttentionChip(t), tasks.length ? h('span', {className:'meta'}, tasks.filter(task => task.done).length + '/' + tasks.length) : null,
       name(t.owner) ? h('span', {className:'avatar', title:name(t.owner), 'aria-label':name(t.owner)}, initials(t.owner)) : null,
       t.due ? h('span', {className:'meta'}, date(t.due)) : null, ticketMenu(t, 'tree')));
   node.style.marginLeft = Math.min(row.depth, 6) * 20 + 'px';
@@ -91,13 +114,15 @@ const viewToggle = () => h('div', {className:'board-tools row', 'data-key':'boar
   h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
 function boardCard(t, nested = false) {
   const tasks = array(t.checklist), done = tasks.filter(task => task.done).length;
-  const parts = ticketParents(tickets()).filter(child => child.parent === t.id);
+  const parts = boardChildren(tickets(), t);
   return h('article', {className:'card ticket-card' + (nested ? ' board-child' : ''), draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
     h('div', {className:'row'}, h('span', {className:'mono key grow'}, typeof t.key === 'string' ? t.key : ''),
       snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'btn ghost icon sm move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card', STATUS_CHOICES)))),
-    h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), statusChip(t),
-    !nested ? parentLine(t) : null,
-    parts.length ? h('p', {className:'meta'}, parts.filter(c => c.status === 'done').length + ' of ' + parts.length + ' parts done') : null,
+    h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), ticketAttentionChip(t),
+    !nested ? boardParentLine(t) : null,
+    parts.length ? h('div', {className:'board-parts'},
+      h('p', {className:'meta'}, 'Parts · ' + parts.filter(c => c.status === 'done').length + ' of ' + parts.length + ' done'),
+      parts.map(part => h('a', {className:'board-part', href:href(part.id)}, h('span', {className:'mono'}, part.key || ''), h('span', {className:'part-title'}, clean(part.title)), ticketAttentionChip(part)))) : null,
     ticketNext(t), h('div', {className:'owner-line'}, name(t.owner) ? h('span', {className:'avatar', title:name(t.owner), 'aria-label':name(t.owner)}, initials(t.owner)) : null, t.due ? h('span', {className:'due'}, date(t.due)) : null),
     tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done, 'aria-label':'Tasks done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, done + '/' + tasks.length)) : null);
 }
@@ -128,17 +153,18 @@ async function moveTicket(id, status) {
   window.orch.toast(result.ok ? 'Moved to ' + label : changeError(result) + (result.status === 409 ? ' Reload the page and try again.' : ''), result.ok ? 'ok' : 'error');
 }
 function list() {
-  const visible = filteredTickets(), rows = window.DashHelpers.treeRows(visible);
+  const visible = filteredTickets();
   const top = [heading('Tickets'), viewToggle()];
   if (!visible.length && (ticketSearch || ticketMine)) return fragment(top, h('div', {className:'card card-row'}, h('p', {className:'grow'}, 'No tickets match.'), button('Clear', 'outline sm', clearTicketFilters)));
   if (ticketView === 'board' && tickets().length) return fragment(top, board());
-  return fragment(top, !tickets().length ? card('empty', 'Tickets', '', firstTicket()) : STATUS_CHOICES.map(([status, title]) => {
-    const group = rows.map((row, i) => ({row, i})).filter(({row}) => row.depth === 0 && window.DashHelpers.columnOf(shown(row.ticket).status) === status);
+  return fragment(top, !tickets().length ? card('empty', 'Tickets', '', firstTicket()) : ticketGroups(visible).map(({status, title, tickets:items}) => {
+    const rows = window.DashHelpers.treeRows(items);
+    const group = rows.map((row, i) => ({row, i})).filter(({row}) => row.depth === 0);
     if (!group.length) return null;
     const body = group.map(({i}) => treeBranch(rows, i));
-    if (status !== 'done') return card('group-' + status, title, group.length, body);
+    if (status !== 'done') return card('group-' + status, title, items.length, body);
     const open = expanded.has(status);
-    return h('section', {className:'card', 'data-key':'group-' + status}, h('button', {type:'button', className:'card-h card-toggle', 'data-action':'group', 'data-group':status, 'aria-expanded':open, 'aria-controls':'group-' + status}, iconEl('down'), h('span', {}, 'Show finished (' + group.length + ')')), h('div', {id:'group-' + status, hidden:!open}, body));
+    return h('section', {className:'card', 'data-key':'group-' + status}, h('button', {type:'button', className:'card-h card-toggle', 'data-action':'group', 'data-group':status, 'aria-expanded':open, 'aria-controls':'group-' + status}, iconEl('down'), h('span', {}, 'Done (' + items.length + ')')), h('div', {id:'group-' + status, hidden:!open}, body));
   }));
 }
 function ticketNotFound() {
