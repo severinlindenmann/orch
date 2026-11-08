@@ -981,7 +981,8 @@ def test_member_stores_group_texts_as_outside_data(proj, run, rel, member):
     )
     inbox(run, rel, ev)
     old = from_host("text", {"text": "before"}, seq=3, id=mid("old"), i="old")
-    assert "before this workspace joined" in inbox(run, rel, old)[0]["note"]
+    inbox(run, rel, old)  # below the first seq seen: shown as late, no state
+    assert _joined(proj)["log"][-1]["late"] is True
     you = from_host(
         "text",
         {
@@ -1516,3 +1517,61 @@ def test_host_seq_never_passes_the_bound(proj, run, rel, grp):
     st["hosted"][gid]["seq"] = 2**40  # damaged file: clamped when read
     path.write_text(json.dumps(st))
     assert cg._load(proj)["hosted"][gid]["seq"] == cg.SEQ_MAX
+
+
+def test_a_peers_created_at_is_display_only(proj, run, rel, member, monkeypatch):
+    clock = [1_000.0]
+    monkeypatch.setattr(cg, "_now_epoch", lambda: clock[0])
+    inbox(run, rel, _added(1))
+    far = from_host("text", {"text": "from the far future"}, seq=3, id=mid("fut"))
+    far["created_at"] = "2099-01-01T00:00:00Z"
+    inbox(run, rel, far)
+    ancient = from_host("text", {"text": "ancient"}, seq=2, id=mid("anc"))
+    ancient["created_at"] = "1999-01-01T00:00:00Z"
+    inbox(run, rel, ancient)
+    j = _joined(proj)
+    assert [x["seq"] for x in j["log"]] == [1, 2, 3] and not any(x.get("late") for x in j["log"])
+    # a gap with a far-future created_at is not flushed early: only our own clock counts
+    gap = from_host("text", {"text": "gap"}, seq=5, id=mid("gap5"))
+    gap["created_at"] = "2099-01-01T00:00:00Z"
+    inbox(run, rel, gap)
+    clock[0] += 60
+    run("relay", "inbox")
+    assert _joined(proj)["buf"].keys() == {"5"}
+    clock[0] += cg.BUF_TIMEOUT_S
+    run("relay", "inbox")
+    assert _joined(proj)["buf"] == {}
+
+
+def test_spread_created_at_does_not_evade_the_creation_cap(proj, run, rel, member, monkeypatch):
+    monkeypatch.setattr(cg, "_now_epoch", lambda: 70_000.0)
+    for i in range(cg.CREATED_PER_HOUR):
+        m = _new_group_msg(i)
+        m["created_at"] = f"2020-01-0{i + 1}T00:00:00Z"
+        inbox(run, rel, m)
+    m = _new_group_msg(60)
+    m["created_at"] = "2031-01-01T00:00:00Z"
+    assert "5 new groups an hour" in inbox(run, rel, m)[0]["note"]
+
+
+def test_a_huge_jump_when_first_seen_and_group_wide_without_seq(proj, run, rel, member):
+    first = from_host("text", {"text": "first seen is 40"}, seq=40, id=mid("f40"))
+    inbox(run, rel, first)
+    assert _joined(proj)["next_seq"] == 41 and _joined(proj)["buf"] == {}  # applied at once, not buffered
+    # a group-wide host message without seq is refused outright (and would change no state)
+    noseq = from_host("text", {"text": "no number"}, id=mid("nos"))
+    assert "needs group.seq" in inbox(run, rel, noseq)[0]["note"]
+
+
+@pytest.mark.parametrize("folder", ["SECRETS", "Secrets", "secrets.", "secrets "])
+def test_secrets_folder_is_matched_without_case_or_trailing_dots(proj, run, rel, host, folder):
+    run("relay", "group", "add", host, HOME)
+    d = proj / folder
+    try:
+        d.mkdir()
+    except OSError:
+        pytest.skip("this system can't make that folder name")
+    (d / "key.txt").write_text("harmless words")
+    code, _, err = run("relay", "group", "share", host, str(d / "key.txt"))
+    assert code != 0 and "password" in err
+    assert not rel.blobs

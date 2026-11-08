@@ -332,9 +332,7 @@ def store_key(m: dict, ctx: dict) -> tuple[list, str]:
 
 def _applied(od: dict, seq: int) -> int:
     ap = od.get("applied_seq")
-    if ap is None:
-        ap = (od["from_seq"] if od.get("from_seq") is not None else seq) - 1
-    return ap
+    return seq - 1 if ap is None else ap  # never from_seq: the first seq seen starts the order
 
 
 def order_step(m: dict, ctx: dict) -> str | None:
@@ -445,8 +443,10 @@ def _secret_parts(parts: tuple[str, ...] | list[str]) -> bool:
     """The folder and file rules on path parts: a `secrets` folder, any hidden folder (agent config, keys,
     .orch, .git), .env*, key and token files."""
     dirs = list(parts[:-1])
-    if any(x == "secrets" or (x.startswith(".") and x not in (".", "..")) for x in dirs):
-        return True
+    for x in dirs:
+        n = x.rstrip(". ").lower()  # Secrets, SECRETS and "secrets." are the same folder on macOS and Windows
+        if n == "secrets" or (x.startswith(".") and x not in (".", "..")):
+            return True
     return bool(_SECRET_PATH.search(parts[-1])) if parts else True
 
 
@@ -1797,12 +1797,15 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
         j["from_seq"] = int(ev.get("from_seq") or seq or 1)
     if j["from_seq"] is None and seq is not None:
         j["from_seq"] = seq
-    if seq is not None and j["from_seq"] is not None and seq < j["from_seq"]:
-        return _drop(st, m, "before this workspace joined")
     if seq is None:
-        return _member_apply(st, j, m, me)
+        # targeted (delegate, question, card) is fine; a group-wide message without seq changes no state
+        return _member_apply(st, j, m, me, late=not targeted(m))
     # group-wide: the stateful checks (closed, left, card) run in seq order (G12)
-    nxt = j.get("next_seq") or j["from_seq"]
+    if j.get("next_seq") is None:
+        j["next_seq"] = (
+            seq  # the first seq seen starts the order (applied_seq = seq - 1); from_seq is display only
+        )
+    nxt = j["next_seq"]
     buf = j.setdefault("buf", {})
     if seq < nxt:  # late: shown, but it changes no state
         return _member_apply(st, j, m, me, late=True)
