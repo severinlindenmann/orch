@@ -533,7 +533,7 @@ def test_general_never_leaves_its_status_by_any_path(proj, conn, run):
     gid = _general(proj, conn, run)
     before = tickets.load(proj, gid)["status"]
     for by in ("agent:claude", "human:me"):
-        for status in ("done", "review", "dropped", "ready"):
+        for status in ("done", "review", "dropped", "active", "open"):
             with pytest.raises(Refused):
                 tickets.set_status(proj, gid, status, by)  # `orch done` and set_status
     rev = tickets.load(proj, gid)["revision"]
@@ -571,3 +571,27 @@ def test_helper_prompt_and_skill_stay_inside_orch(proj):
     for text in (prompt, skill):
         assert "only use orch tools and the files in this workspace" in text
         assert "connectors" in text
+
+
+def test_general_may_still_wait_or_be_ready(proj, conn, run):
+    gid = _general(proj, conn, run)
+    for status in ("waiting", "ready"):
+        assert tickets.set_status(proj, gid, status, "human:me")["status"] == status
+
+
+def test_an_inbound_phone_text_in_general_carries_the_chat_flag(proj, run, conn):
+    gid = _general(proj, conn, run, "hi from phone")
+    hist = tickets.load(proj, gid)["history"]
+    assert [e["text"] for e in hist if e.get("chat_message") is True] == [
+        "From Marco's iPhone: hi from phone"
+    ]
+    assert "orch relay send" not in str([e["text"] for e in hist])  # no agent instruction row in History
+
+
+def test_an_agent_cannot_pass_a_note_off_as_a_chat_message_by_env_via(proj, conn, run, monkeypatch):
+    gid = _general(proj, conn, run)
+    monkeypatch.setenv("ORCH_VIA", "phone")
+    tickets.apply_op(proj, gid, lambda t: tickets.add_history(t, "agent:x", "sneaky note"))
+    assert not [
+        e for e in tickets.load(proj, gid)["history"] if e["text"] == "sneaky note" and e.get("chat_message")
+    ]

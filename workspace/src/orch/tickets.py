@@ -460,7 +460,7 @@ def _env_via() -> str:
 
 
 def add_history(ticket: dict, by: str, text: str, via: str | None = None, chat: bool = False) -> None:
-    """chat=True marks a real Chat/group message (`chat_message: true`): the only history lines the Chat shows."""
+    """chat=True marks a real Chat or group message (`chat_message: true`): the only lines the Chat shows."""
     entry = {"at": now(), "by": by, "via": via or _env_via(), "text": text}
     if chat:
         entry["chat_message"] = True
@@ -565,10 +565,19 @@ def _check_not_too_early(root: Path, ticket: dict) -> None:
 
 
 GENERAL_REFUSAL = "The Chat is not a ticket: it is never finished, dropped or reopened."
+GENERAL_REFUSED = (
+    "open",
+    "review",
+    "done",
+    "dropped",
+    "active",
+)  # finish, reopen, Working; waiting and ready stay
 
 
 def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str, str]:
-    if ticket.get("general") is True:  # the ONE status guard: nobody (agent, person, wrapper) moves the Chat ticket
+    if (
+        ticket.get("general") is True and status in GENERAL_REFUSED
+    ):  # the ONE status guard (agent, person, wrapper)
         raise Refused(GENERAL_REFUSAL)
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
         by = "agent:" + str(agent_tool())
@@ -1286,7 +1295,8 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
             else:
                 ticket["waiting_on"] = None
                 if ticket["status"] == "waiting":  # Working only while an agent runs; else Ready to go on
-                    ticket["status"] = "active" if runs.running(root, tid) else "ready"
+                    chat = ticket.get("general") is True  # the Chat ticket is never Working
+                    ticket["status"] = "ready" if chat or not runs.running(root, tid) else "active"
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
         return q
 
