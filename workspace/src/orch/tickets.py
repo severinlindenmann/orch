@@ -14,6 +14,7 @@ import secrets
 import sys
 import tempfile
 import time
+import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -1141,32 +1142,38 @@ def ext_unset(
     return apply_op(root, tid, op, if_revision=if_revision)[0]
 
 
-_SECRET_FOLDER_RE = re.compile(r"\.orch[/\\]+secrets", re.I)
+_SECRET_FOLDER_RE = re.compile(r"\.orch[/\\]+secrets|\borch secrets\b|\bsecrets folder\b", re.I)
 _SECRET_WORD = (
-    r"(?:passwords?|passcodes?|passphrases?|api[\s_-]?keys?|(?:access|auth|bearer|secret|login|api)[\s_-]?tokens?"
-    r"|private[\s_-]?keys?|credentials?|login details)"
+    r"(?:passwords?|passcodes?|passphrases?|passwort|passw\u00f6rter|kennwort|zugangsdaten|api[\s_-]?keys?"
+    r"|(?:access|auth|bearer|login|api)[\s_-]?tokens?|tokens?|secrets?|private[\s_-]?keys?"
+    r"|api[\s_-]?schl\u00fcssel|schl\u00fcssel|credentials?|login details)"
 )
-_SECRET_ASK_RE = re.compile(
-    r"\b(?:give|send|paste|provide|enter|type|share|tell|upload|supply|attach|what(?:'s| is)|need|your|the)\b"
-    r"[^.?!\n]{0,40}?\b" + _SECRET_WORD + r"\b",
-    re.I,
+_HAND_OVER = (
+    r"(?:give|send|paste|provide|enter|type|share|tell|upload|supply|attach|what(?:'s| is)"
+    r"|gib|schick\w*|sende\w*|teile\w*|nenne\w*|eingeben)"
 )
+_SECRET_ASK_RE = re.compile(r"\b" + _HAND_OVER + r"\b[^.?!\n]{0,40}?\b" + _SECRET_WORD + r"\b", re.I)
+_PAT_ASK_RE = re.compile(r"\b" + _HAND_OVER + r"\b[^.?!\n]{0,40}?\bPAT\b", re.I)
+_INVISIBLE_RE = re.compile("[\u200b-\u200f\u2060\ufeff\u00ad]")
+_LABEL_KEYS = ("label", "title", "text", "prompt", "message", "description")
 
 
-def _strings(value) -> list[str]:
-    """Every text inside an add-on action (labels the person may see)."""
+def _labels(value, key: str = "") -> list[str]:
+    """The texts of an add-on action a person may read: its label-like fields, at any depth."""
     if isinstance(value, str):
-        return [value]
+        return [value] if key.lower() in _LABEL_KEYS else []
     if isinstance(value, dict):
-        return [x for v in value.values() for x in _strings(v)]
+        return [x for k, v in value.items() for x in _labels(v, str(k))]
     if isinstance(value, list):
-        return [x for v in value for x in _strings(v)]
+        return [x for v in value for x in _labels(v, key)]
     return []
 
 
 def _asks_for_secret(text: str) -> bool:
-    """Light guard for `orch ask`: the secrets folder, or asking a person to hand over a credential."""
-    return bool(_SECRET_FOLDER_RE.search(text) or _SECRET_ASK_RE.search(text))
+    """Light guard for `orch ask` (defence in depth; the skill text is the real control): the secrets
+    folder, or asking a person to hand over a credential."""
+    text = _INVISIBLE_RE.sub("", unicodedata.normalize("NFKC", text))
+    return bool(_SECRET_FOLDER_RE.search(text) or _SECRET_ASK_RE.search(text) or _PAT_ASK_RE.search(text))
 
 
 def ask(
@@ -1195,8 +1202,12 @@ def ask(
         if not isinstance(act, dict):
             raise Refused("--action must be a JSON object.")
 
-    for part in (text, *options, *([recommended] if recommended else []), *_strings(act)):
+    for part in (text, *options, *([recommended] if recommended else []), *_labels(act)):
         if _asks_for_secret(part):
+            with contextlib.suppress(Exception):  # the attempt stays visible in the history
+                apply_op(
+                    root, tid, lambda t: add_history(t, by, "A question was refused: it asked for a secret.")
+                )
             raise Refused(
                 "A question must never ask for a password, token, API key or other credential, "
                 "and never mention the secrets folder. Ask whether access is set up instead "

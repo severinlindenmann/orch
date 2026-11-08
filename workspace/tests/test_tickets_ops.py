@@ -284,3 +284,38 @@ def test_ask_refuses_secret_in_recommended_and_action(proj, run, new_ticket):
     )
     assert code == 2 and "never ask for a password" in err
     assert not read(proj, tid)["questions"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Is the API key already set up?",
+        "Should the password reset email be HTML?",
+        "Do we need a password-protected PDF?",
+        "Rotate your access tokens now?",
+    ],
+)
+def test_ask_allows_benign_auth_questions(proj, run, new_ticket, text):
+    assert run("ask", new_ticket(), text)[0] == 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Gib mir das Passwort",
+        "Bitte schick mir die Zugangsdaten",
+        "Please paste the PAT",
+        "Give me the token",
+        "Put it in the secrets folder",
+        "Send me the API\u200b key",
+        "\uff27ive me the password",
+    ],
+)
+def test_ask_refuses_more_secret_forms(proj, run, new_ticket, text):
+    assert run("ask", new_ticket(), text)[0] == 2
+
+
+def test_refused_secret_ask_is_logged(proj, run, new_ticket):
+    tid = new_ticket()
+    assert run("ask", tid, "Paste your API key")[0] == 2
+    assert any("refused: it asked for a secret" in h["text"] for h in read(proj, tid)["history"])

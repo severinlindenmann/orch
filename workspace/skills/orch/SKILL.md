@@ -60,10 +60,10 @@ explicitly asks for a file in the project. Proof can point at them: `orch check 
     orch ask <id> "<question>" --check <c>        # tie it to a step
 
 Write the question for a person who has not seen your work, in plain words:
-- Say what you need to know and why it matters. Use names (the task, the document), never internal ids like `c1` or `q1`, and never folder or file paths such as `docs/` or `.orch/...`.
+- Say what you need to know and why it matters. Use names (the task, the document), never internal ids like `c1` or `q1`, and never folder or file paths such as `docs/` or `.orch/...` (a path is fine only inside a quoted error message).
 - Offer short answer options a person can click. Keep the question to one sentence or two.
 - NEVER ask the person to provide, paste or type a password, token, API key or any other credential, neither in the question nor as an option (not even "and credentials in .orch/secrets/ if needed"). `orch ask` refuses such questions.
-- If you need access you do not have: ask only "Is access to <the service> set up for this workspace?" or offer the option "I will set it up myself". Say in the ticket summary what access is missing. Credentials reach a workspace only the safe way: a person or the admin puts them in `.orch/secrets/` (ignored by git), or shares them with the workspace so they are installed for you. You never receive them in an answer.
+- If you need access you do not have: ask only "Is access to <the service> set up for this workspace?" or offer the option "I will set it up myself", and say in the ticket summary what is missing. A person sets access up outside the chat (credentials live in `.orch/secrets/`, ignored by git); you never receive them in an answer.
 
 The ticket now waits. Then stop; do not treat silence as an answer. When the answer is in `orch ticket show <id>`,
 set the ticket active again and follow it. A person answers with `orch answer <id> q1 "<answer>"`. See everything that
