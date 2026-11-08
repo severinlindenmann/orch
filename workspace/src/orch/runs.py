@@ -337,19 +337,16 @@ def undelivered(root: Path, tid: str) -> list[dict]:
     return [i for i in _pending_read(root, tid) if not i.get("delivered_at")]
 
 
-def _human_author(by, via, kind) -> bool:
-    """An ALLOWLIST (also for older lines without the field): a person's answer or message, by human:<name> or
-    from the phone. Everything else (agent:*, orch itself, a background host, an event or a start request)
-    is not a person's input."""
+def _human_author(by, via, kind, phone=None) -> bool:
+    """An ALLOWLIST (also for older lines without the field): a person's answer or message, by human:<name>,
+    or a phone text that carries the sender's phone id (only the relay's phone-text path stores it). A bare
+    name, an empty by, orch, a host, an agent, an event or a start request is never a person's input."""
     if kind not in ("answer", "message", "text"):
         return False
-    by = str(by)
-    if by.startswith("human:"):
+    by = str(by or "")
+    if by.startswith("human:") and len(by) > len("human:"):
         return True
-    # from the phone: only with a person as the author (the phone's name or its ph_ id), never orch itself,
-    # a host or an agent that passes the word on
-    system = by == "orch" or by.startswith(("agent:", "automation:", "system:"))
-    return via == "phone" and not system and (by.startswith("ph_") or ":" not in by)
+    return via == "phone" and isinstance(phone, str) and PHONE_ID_RE.fullmatch(phone) is not None
 
 
 def human_waiting(root: Path, tid: str) -> list[dict]:
@@ -360,7 +357,7 @@ def human_waiting(root: Path, tid: str) -> list[dict]:
         if i.get("via") in ("start", "slots"):
             continue
         # the stored flag is never trusted alone: the allowlist is checked again (older lines have no flag)
-        rule = _human_author(i.get("by", ""), i.get("via"), i.get("kind"))
+        rule = _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone"))
         if rule and i.get("human") in (True, None):
             out.append(i)
     return out
@@ -375,8 +372,19 @@ def _drop_start_prompts_locked(root: Path, tid: str) -> None:
         _pending_write(root, tid, keep)
 
 
+PHONE_ID_RE = re.compile(r"ph_[A-Za-z0-9_-]{1,64}")
+
+
 def _pending_add_locked(
-    root: Path, tid: str, by: str, kind: str, text: str, via: str | None, pid: str | None
+    root: Path,
+    tid: str,
+    by: str,
+    kind: str,
+    text: str,
+    via: str | None,
+    pid: str | None,
+    *,
+    phone: str | None = None,
 ) -> dict:
     if kind not in PENDING_KINDS:
         raise Refused(f"Input kind must be one of: {', '.join(PENDING_KINDS)}.")
@@ -397,8 +405,10 @@ def _pending_add_locked(
         "by": by,
         "kind": kind,
         "text": text,
-        "human": not tool and _human_author(by, via, kind),
     }
+    if phone is not None and not tool and PHONE_ID_RE.fullmatch(str(phone)):
+        item["phone"] = phone  # the relay's phone-text path: the sender's phone id
+    item["human"] = not tool and _human_author(by, via, kind, item.get("phone"))
     if via:
         item["via"] = via
     _pending_write(root, tid, items + [item])
@@ -413,10 +423,13 @@ def pending_add(
     text: str,
     via: str | None = None,
     pid: str | None = None,
+    *,
+    phone: str | None = None,
 ) -> dict:
-    """Queue input for a ticket (under the ticket's run lock) and flag a running claim."""
+    """Queue input for a ticket (under the ticket's run lock) and flag a running claim. phone: the sender's
+    phone id, passed only by the relay's phone-text path."""
     with locked(root, tid):
-        item = _pending_add_locked(root, tid, by, kind, text, via, pid)
+        item = _pending_add_locked(root, tid, by, kind, text, via, pid, phone=phone)
         rec = read(root, tid)
         if rec and not rec.get("pending"):
             rec["pending"] = True
