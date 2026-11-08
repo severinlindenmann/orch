@@ -310,7 +310,7 @@
   function addonRows(ticket) {
     const rows = addons().flatMap(a => array(a.ticket_view).map(r => [r, (ticket.ext || {})[a.name], a.name]))
       .map(([r, ext, addon]) => [r, ext && typeof ext === 'object' ? (r.format === 'open-page' ? addonLink(addon, ext[r.field], r.label, r.label) : addonValue(r, ext[r.field])) : '']).filter(([, v]) => v);
-    return rows.length ? h('dl', {className:'addon-rows'}, rows.map(([r, v]) => [h('dt', {}, r.label), h('dd', {}, v)])) : null;
+    return rows.length ? h('dl', {className:'addon-rows'}, rows.map(([r, v]) => r.format === 'open-page' ? h('dd', {className:'addon-page'}, v) : [h('dt', {}, r.label), h('dd', {}, v)])) : null;
   }
   // ---- Ticket links and add-on fields. Each web link carries `view` from the core's one link module (orch/refs.py):
   // label, icon key, monogram, title, status (only while its add-on is on) and the Artifacts group. Fields come typed
@@ -537,7 +537,7 @@
     const liveLink = liveLinkFor(t);
     const line = window.DashHelpers.agentLine(t, state.runs?.[t.id], Date.now(), liveLink);
     // an open question is answered in the banner only: the bar then just says the agent is waiting
-    const answering = line.primary.op === 'answer';
+    const answering = line.primary?.op === 'answer';
     if (answering) line.status = 'needs you';
     const action = (item, primary) => {
       const attrs = {className:primary ? 'btn sm ' + (['working', 'starting', 'background'].includes(line.state) ? 'outline' : 'primary') : 'menu-item', role:primary ? null : 'menuitem', 'data-key':primary ? 'agent-primary' : 'agent-' + item.label};
@@ -546,7 +546,7 @@
     };
     return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'}, h('span', {className:'dot ' + ({working:'working', starting:'starting', background:'bg', needs:'needs', stuck:'needs', failed:'error', stopped:'stopped'}[line.state] || 'idle')}),
       h('span', {className:'ab-text grow'}, h('strong', {}, name(line.agent)), h('span', {className:'muted'}, ' · ' + clean(line.status))),
-      h('span', {className:'ab-actions'}, !activeTicket(t) && liveLink && !snapshot && line.primary.op !== 'open' ? h('a', {className:'btn outline sm', href:liveLink.url, 'data-key':'agent-open-done'}, 'Open ' + liveLink.label) : null, answering ? null : action(line.primary, true), line.items.length ? h('details', {className:'menu', 'data-key':'agent-menu'}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More agent actions'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, line.items.map(item => action(item, false)))) : null));
+      h('span', {className:'ab-actions'}, !activeTicket(t) && liveLink && !snapshot && line.primary?.op !== 'open' ? h('a', {className:'btn outline sm', href:liveLink.url, 'data-key':'agent-open-done'}, 'Open ' + liveLink.label) : null, answering || !line.primary ? null : action(line.primary, true), line.items.length ? h('details', {className:'menu', 'data-key':'agent-menu'}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More agent actions'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, line.items.map(item => action(item, false)))) : null));
   }
   const surface = via => clean(via === 'cli' ? 'terminal' : via);
   function proofLabel(ev) {

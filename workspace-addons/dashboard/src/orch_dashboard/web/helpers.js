@@ -159,6 +159,8 @@
       return {state: 'resume', agent, status: 'last worked ' + (Number.isNaN(when) ? 'earlier' : span(nowMs - when) === 'just now' ? 'just now' : span(nowMs - when) + ' ago'),
         primary: start('Continue'), items: [fresh]};
     }
+    // a ticket already waiting for the person's check has no run to start: no Start button
+    if (t.status === 'review') return {state: 'new', agent, status: 'ready for you to check', primary: null, items: []};
     return {state: 'new', agent, status: 'not started yet', primary: start('Start'), items: []};
   }
 

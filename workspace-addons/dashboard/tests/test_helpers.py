@@ -647,3 +647,27 @@ def test_home_row_is_one_link_and_the_review_chip_shows_once():
     assert ".ticket-row .status-menu" in css  # Move to stays clickable above the row link
     assert "'Ready for your review'" not in src
     assert "['head', 'board'].includes(where)" in src
+
+
+@node
+def test_review_ticket_without_run_offers_no_start():
+    w = call("agentLine", {"id": "t_a", "status": "review"}, None, 0, None)
+    assert w["primary"] is None and w["items"] == [] and "Start" not in w["status"]
+    assert call("agentLine", {"id": "t_a", "status": "active"}, None, 0, None)["primary"]["label"] == "Start"
+    src = (WEB / "app.js").read_text()
+    assert "line.primary?.op" in src and "!line.primary ? null" in src
+
+
+def test_ui2_small_bugs_in_markup_and_css():
+    app = (WEB / "app.js").read_text()
+    css = (WEB / "style.css").read_text()
+    mm = (WEB / "mobile-mode.js").read_text()
+    html = (WEB / "index.html").read_text()
+    # 3: an open-page row is the link alone, not "Focus page | Focus page"
+    assert "r.format === 'open-page' ? h('dd', {className:'addon-page'}, v)" in app
+    # 2: the sidebar colour and the modal dim layer fill the viewport
+    assert "background:linear-gradient(to right,var(--sidebar)" in css and "body:has(dialog[open]:modal){overflow:hidden}" in css
+    # 4: the end time never wraps off alone at 720; two lines only below 480
+    assert "mm-when" in mm and ".mm-bar.live{flex-wrap:nowrap}" in css and "@media(max-width:480px){.mm-bar.live{flex-wrap:wrap}" in css
+    # 6: a skeleton is in the page before the first data arrives
+    assert 'class="loading-home"' in html and 'aria-busy="true"' in html
