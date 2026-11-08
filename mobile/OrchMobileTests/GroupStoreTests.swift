@@ -130,9 +130,11 @@ final class GroupStoreTests: XCTestCase {
 
     func testNamesUsePairedNamesAndSanitizeUnpairedNames() throws {
         let outsider = "ws_outsider"
-        for (supplied, expected) in [("You", "Workspace"), ("You\u{200B}", "Workspace"), ("Ｙou", "Workspace"),
-                                     (" YOU ", "Workspace"), ("Other phone", "Workspace"),
-                                     ("\u{200B}", "Workspace"), ("  yOu \n", "Workspace"), ("  ", "Workspace"), ("Guest", "Guest")] {
+        for (supplied, expected) in [("You", "You"), ("Υou", "Υou"), ("You\u{FE0F}", "You"),
+                                     ("You\u{3164}", "You"), ("\u{2800}", "Workspace"), ("Yo\u{200B}u", "You"),
+                                     ("Ｙou", "You"), ("Other phone", "Other phone"),
+                                     ("\u{FFA0}", "Workspace"), ("  ", "Workspace"), ("Guest", "Guest"),
+                                     (String(repeating: "a", count: 100), String(repeating: "a", count: 39) + "…")] {
             let m = message("text") {
                 $0.by = outsider
                 $0.group = GroupInfo(id: "grp_t_fin14a", host: self.finance, title: "Tax",
@@ -140,16 +142,39 @@ final class GroupStoreTests: XCTestCase {
                               GroupMember(ws: self.home, name: "You"), GroupMember(ws: outsider, name: supplied)], seq: 1)
             }
             let g = try group([m])
-            XCTAssertEqual(g.names, [finance: "Finance", home: "Home", outsider: expected])
+            XCTAssertEqual(g.names, [finance: "Finance", home: "Home", outsider: expected + " · via Finance"])
             XCTAssertEqual(g.name(of: home), "Home")
-            XCTAssertEqual(g.lastLine, "\(expected): text")
+            XCTAssertEqual(g.lastLine, "\(expected) · via Finance: text")
+            XCTAssertNotEqual(g.name(of: outsider), "You")
+            XCTAssertEqual(g.messages.first?.sender, .member(outsider))
+            XCTAssertEqual(g.externals, [outsider])
+            XCTAssertTrue(g.isExternal(outsider))
+            XCTAssertFalse(g.isExternal(home))
+            XCTAssertFalse(g.isExternal(finance))
         }
         let paired = message("paired") { $0.by = self.home }
-        for name in ["", "  You ", " \n"] {
+        for (name, expected) in [("", "Workspace"), ("  You ", "You"), (" \n", "Workspace")] {
             let snapshot = GroupStore.build(messages: [paired], workspaces: [finance: "Finance", home: name],
                                             ownPhoneId: phone, ownMessageIds: [])
-            XCTAssertEqual(snapshot.groups.first?.lastLine, "Workspace: paired")
+            XCTAssertEqual(snapshot.groups.first?.lastLine, "\(expected): paired")
+            XCTAssertEqual(snapshot.groups.first?.messages.first?.sender, .member(home))
         }
+    }
+
+    func testSanitizeNamesAndTitle() throws {
+        XCTAssertEqual(GroupStore.sanitize("  Ｆinance  Team  "), "Finance Team")
+        XCTAssertEqual(GroupStore.sanitize("A\u{0000}\u{200B}\u{2028}\u{2029}\u{E000}\u{0378}B"), "AB")
+        XCTAssertEqual(GroupStore.sanitize("\u{2800}\u{3164}\u{FFA0}\u{FE0F}"), "Workspace")
+        XCTAssertEqual(GroupStore.sanitize(String(repeating: "a", count: 40)).count, 40)
+        XCTAssertEqual(GroupStore.sanitize(String(repeating: "a", count: 100)).count, 40)
+        let m = message("title") {
+            $0.group = GroupInfo(id: "grp_t_fin14a", host: self.finance, title: "  Ｔax\u{200B}  ", members: self.members, seq: 1)
+        }
+        let g = try XCTUnwrap(GroupStore.build(messages: [m], workspaces: [finance: "  Ｆinance\u{FE0F} ", home: "\u{2800}"],
+                                             ownPhoneId: phone, ownMessageIds: []).groups.first)
+        XCTAssertEqual(g.title, "Tax")
+        XCTAssertEqual(g.hostName, "Finance")
+        XCTAssertEqual(g.name(of: home), "Workspace")
     }
 
     func testGroupRequiresMatchingNonNilTicket() {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GroupRoomView: View {
     let key: GroupKey
+    @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var model
     @State private var members = false
     @State private var details = false
@@ -26,7 +27,7 @@ struct GroupRoomView: View {
                             }
                             TimelineView(.periodic(from: .now, by: 30)) { context in
                                 ForEach(GroupRoomRules.thinking(group: group, now: context.date), id: \.self) { ws in
-                                    Text("\(group.name(of: ws)) helper is thinking…").themeFont(13).foregroundStyle(Theme.muted)
+                                    group.memberText(ws, suffix: " helper is thinking…").themeFont(13).foregroundStyle(Theme.muted)
                                 }
                             }
                         }.padding(16)
@@ -45,28 +46,34 @@ struct GroupRoomView: View {
                 }
             } else { Text("This group is not on this phone.").foregroundStyle(Theme.muted) }
         }.background(Theme.bg).foregroundStyle(Theme.text).navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
             .fullScreenCover(item: $viewer) { ArtifactViewer(item: $0) }
     }
 
     private func header(_ group: PhoneGroup) -> some View {
         HStack(spacing: 12) {
-            Button { members = true } label: {
-                HStack(spacing: 12) {
-                    GroupBadges(group: group)
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left").frame(width: 44, height: 44)
+                    .background(Theme.surface2, in: Circle())
+            }.accessibilityLabel("Back").accessibilityIdentifier("group-back")
+            GroupBadges(group: group)
+            VStack(alignment: .leading, spacing: 6) {
+                Button { members = true } label: {
                     Text(group.title).themeFont(17, .semibold).multilineTextAlignment(.leading)
-                }
-            }.buttonStyle(PressStyle()).accessibilityIdentifier("group-members")
-            Spacer(minLength: 0)
-            Button { members = true } label: { Image(systemName: "info.circle").frame(width: 44, height: 44) }.accessibilityLabel("Members")
-        }.padding(.horizontal, 16).padding(.bottom, 8)
-            .overlay(alignment: .bottom) { Theme.border.frame(height: 1) }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+                }.accessibilityIdentifier("group-members")
                 if let ticket = group.ticket {
                     NavigationLink(value: ChatRoute.ticket(workspace: key.host, ticket: ticket)) {
                         Text("From ticket \(group.ticketKey ?? "") ›").themeFont(13).foregroundStyle(Theme.brand)
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 8)
+                    }
                 }
-            }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            Button { members = true } label: {
+                Image(systemName: "info.circle").frame(width: 44, height: 44)
+                    .background(Theme.surface2, in: Circle())
+            }.accessibilityLabel("Members")
+        }.buttonStyle(PressStyle()).padding(.horizontal, 12).padding(.vertical, 12)
+            .overlay(alignment: .bottom) { Theme.border.frame(height: 1) }
     }
 
     @ViewBuilder private func messageView(_ message: GroupMessage, previous: GroupMessage?, group: PhoneGroup) -> some View {
@@ -74,15 +81,20 @@ struct GroupRoomView: View {
             if event.kind == "approval_needed" { GroupApprovalView(event: event, group: group, late: message.late) }
             else {
                 let text = GroupRoomRules.eventText(event, group: group)
-                if !text.isEmpty { pill(text) }
+                if !text.isEmpty { pill(text, external: group.isExternal(event.ws ?? "")) }
             }
         }
         if !message.quiet && !message.text.isEmpty && message.event == nil {
             let mine = isMine(message.sender)
             if !mine && (previous?.sender != message.sender || previous?.event != nil || previous?.quiet == true) {
                 HStack(spacing: 6) {
-                    WorkspaceBadge(name: senderName(message.sender, group: group), size: 24)
-                    Text("\(senderName(message.sender, group: group)) helper").themeFont(13).foregroundStyle(Theme.muted)
+                    switch message.sender {
+                    case .host(let ws), .member(let ws), .person(let ws):
+                        GroupMemberBadge(group: group, ws: ws, size: 24)
+                        group.memberText(ws, suffix: " helper").themeFont(13).foregroundStyle(Theme.muted)
+                    default:
+                        Text(senderName(message.sender, group: group)).themeFont(13).foregroundStyle(Theme.muted)
+                    }
                 }
             }
             MessageBubble(item: ConvItem(id: message.id, at: message.at, side: mine ? .me : .them,
@@ -120,8 +132,8 @@ struct GroupRoomView: View {
         default: "Other phone"
         }
     }
-    private func pill(_ text: String) -> some View {
-        Text(text).themeFont(13).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+    private func pill(_ text: String, external: Bool = false) -> some View {
+        (external ? Text(text).italic() : Text(text)).themeFont(13).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
             .padding(.horizontal, 12).padding(.vertical, 8).background(Theme.surface2, in: Capsule())
             .frame(maxWidth: .infinity)
     }
@@ -131,7 +143,9 @@ struct GroupRoomView: View {
         } else {
             let target: SendTarget? = GroupStore.replyTarget(in: group) == nil ? nil : group.ticket.map { .topic(workspace: key.host, ticket: $0) }
             VStack(spacing: 0) {
-                Text("To: " + group.members.map { group.name(of: $0.ws) }.joined(separator: ", "))
+                group.members.enumerated().reduce(Text("To: ")) { text, entry in
+                    text + Text(entry.offset == 0 ? "" : ", ") + group.memberText(entry.element.ws)
+                }
                     .themeFont(13).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20)
                 Composer(target: target, placeholder: "Message the group", reply: $reply, groupKey: key,
                          unavailableText: "Waiting for the first group message")
@@ -155,9 +169,9 @@ struct GroupTaskView: View {
     var body: some View {
         let name = group.name(of: task.ws)
         VStack(alignment: .leading, spacing: 10) {
-            HStack { WorkspaceBadge(name: name, size: 32); Text("Task for \(name)").themeFont(13).foregroundStyle(Theme.muted) }
+            HStack { GroupMemberBadge(group: group, ws: task.ws, size: 32); group.memberText(task.ws, prefix: "Task for ").themeFont(13).foregroundStyle(Theme.muted) }
             Text([task.key, task.title].compactMap { $0 }.joined(separator: " · ")).themeFont(17, .semibold)
-            Text(GroupRoomRules.taskLabel(task.status, name: name)).themeFont(13).foregroundStyle(Theme.brand)
+            (group.isExternal(task.ws) ? Text(GroupRoomRules.taskLabel(task.status, name: name)).italic().foregroundColor(Theme.muted) : Text(GroupRoomRules.taskLabel(task.status, name: name))).themeFont(13).foregroundStyle(Theme.brand)
                 .padding(.horizontal, 8).padding(.vertical, 3).background(Theme.brand.opacity(0.15), in: Capsule())
             if model.workspaces.contains(where: { $0.id == task.ws }), let ticket = task.ticket {
                 NavigationLink(value: ChatRoute.ticket(workspace: task.ws, ticket: ticket)) {
@@ -183,9 +197,9 @@ struct GroupApprovalView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let result { Text(GroupRoomRules.eventText(result, group: group)).themeFont(15) }
+            if let result { (group.isExternal(result.ws ?? "") ? Text(GroupRoomRules.eventText(result, group: group)).italic().foregroundColor(Theme.muted) : Text(GroupRoomRules.eventText(result, group: group))).themeFont(15) }
             else if let questionId = event.questionMessage, let answer = model.answers[questionId] {
-                Text(answer.lowercased() == "no" ? "You said no to \(group.name(of: event.ws ?? ""))" : "You allowed \(group.name(of: event.ws ?? "")) \(answer.lowercased() == "always" ? "always" : "once")").themeFont(15)
+                group.memberText(event.ws ?? "", prefix: answer.lowercased() == "no" ? "You said no to " : "You allowed ", suffix: answer.lowercased() == "no" ? "" : " \(answer.lowercased() == "always" ? "always" : "once")").themeFont(15)
             } else {
                 switch GroupStore.approvalCard(for: event, in: group, questions: model.questions, late: late) {
                 case .buttons(let question):
@@ -203,7 +217,7 @@ struct GroupApprovalView: View {
                             }
                         }
                     }
-                case .answerInWorkspace(let name): Text("Answer in \(name)").themeFont(15)
+                case .answerInWorkspace: group.memberText(event.ws ?? "", prefix: "Answer in ").themeFont(15)
                 case .closed: Text("Answered").themeFont(15)
                 }
             }
@@ -230,8 +244,8 @@ struct GroupMembersView: View {
                             ForEach(group.members, id: \.ws) { member in
                                 Divider()
                                 HStack(spacing: 12) {
-                                    WorkspaceBadge(name: group.name(of: member.ws), icon: member.look?.icon, color: member.look?.color, size: 34, id: member.ws)
-                                    Text(member.ws == key.host ? "\(group.name(of: member.ws)) · started the group from \(group.ticketKey ?? "")" : group.name(of: member.ws)).themeFont(15)
+                                    GroupMemberBadge(group: group, ws: member.ws, size: 34)
+                                    group.memberText(member.ws, suffix: member.ws == key.host ? " · started the group from \(group.ticketKey ?? "")" : "").themeFont(15)
                                 }
                             }
                         }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))

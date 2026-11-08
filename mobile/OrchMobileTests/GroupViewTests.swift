@@ -42,6 +42,26 @@ final class GroupViewTests: XCTestCase {
         XCTAssertEqual(GroupStore.approvalCard(for: event, in: group, questions: [question]), .buttons(question))
     }
 
+    func testExternalMemberPresentationUsesProvenanceAndTransport() throws {
+        let data = GroupStore.build(messages: GroupMock.messages(now: now), workspaces: [GroupMock.finance: "Finance"],
+                                    ownPhoneId: "ph_iphone0001", ownMessageIds: [])
+        let group = try XCTUnwrap(GroupRoomRules.rows(data).first)
+        XCTAssertTrue(group.isExternal(GroupMock.home))
+        XCTAssertEqual(group.name(of: GroupMock.home), "Home · via Finance")
+        let left = GroupEvent(kind: "member_left", ws: GroupMock.home, name: "You")
+        XCTAssertEqual(GroupRoomRules.eventText(left, group: group), "Home · via Finance left this group")
+        XCTAssertEqual(GroupRoomRules.eventText(GroupEvent(kind: "approved", ws: GroupMock.home, mode: "once"), group: group),
+                       "You allowed Home · via Finance once")
+        let badge = GroupRoomRules.badgeName(group: group, ws: GroupMock.home)
+        XCTAssertNotEqual(badge, group.name(of: GroupMock.home))
+        let paired = try XCTUnwrap(GroupRoomRules.rows(snapshot(GroupMock.messages(now: now))).first)
+        XCTAssertEqual(GroupRoomRules.badgeName(group: paired, ws: GroupMock.home), "Home")
+        for message in group.messages where message.sender == .member(GroupMock.home) && !message.quiet {
+            let item = try XCTUnwrap(GroupRoomRules.readItems(group).first { $0.id == message.id })
+            if case .theirs = item.kind {} else { XCTFail("External member must remain incoming") }
+        }
+    }
+
     @MainActor func testGroupSendUsesNewestHostCopy() async throws {
         let defaults = UserDefaults.standard
         let previous = defaults.object(forKey: "mockGroups")

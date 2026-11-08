@@ -1,6 +1,13 @@
 import SwiftUI
 
 enum GroupRoomRules {
+    static func badgeName(group: PhoneGroup, ws: String) -> String {
+        guard group.isExternal(ws) else { return group.name(of: ws) }
+        let hash = Look.djb2(ws)
+        let letter = UnicodeScalar(65 + hash % 26)!
+        return String(letter) + String(hash, radix: 16)
+    }
+
     static func rows(_ snapshot: GroupSnapshot, closed: Bool = false) -> [PhoneGroup] {
         snapshot.groups.filter { $0.closed == closed }.sorted { ($0.messages.last?.at ?? "") > ($1.messages.last?.at ?? "") }
     }
@@ -59,7 +66,7 @@ enum GroupRoomRules {
         switch event.kind {
         case "created": return "Group started from ticket \(group.ticketKey ?? "") · \(group.title)"
         case "member_added": return "\(group.hostName) helper added \(name) to this group"
-        case "member_left": return "\(event.name ?? name) left this group"
+        case "member_left": return "\(name) left this group"
         case "approved": return "You allowed \(name) \(event.mode == "always" ? "always" : "once")"
         case "denied": return "You said no to \(name)"
         case "closed": return "This group is done"
@@ -88,7 +95,7 @@ struct GroupBadges: View {
         HStack(spacing: 3) {
             ZStack(alignment: .topLeading) {
                 ForEach(Array(group.members.prefix(3).enumerated()), id: \.element.ws) { index, member in
-                    WorkspaceBadge(name: group.name(of: member.ws), icon: member.look?.icon, color: member.look?.color, size: 28, id: member.ws)
+                    GroupMemberBadge(group: group, ws: member.ws, size: 28)
                         .offset(x: CGFloat(index * 16), y: CGFloat(index * 10))
                 }
             }.frame(width: 60, height: 48)
@@ -106,7 +113,7 @@ struct GroupListRow: View {
                 GroupBadges(group: group)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(group.title).themeFont(17, .semibold)
-                    Text(group.lastLine ?? "Group started").themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
+                    lastLine.themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
                     KeyTag(key: group.ticketKey)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 VStack(spacing: 8) {
@@ -116,6 +123,16 @@ struct GroupListRow: View {
             }.padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
         }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("group-\(group.key.id)")
     }
+
+    private var lastLine: Text {
+        guard let message = group.messages.last(where: { !$0.quiet && $0.event == nil && !$0.text.isEmpty }) else { return Text("Group started") }
+        switch message.sender {
+        case .host(let ws), .member(let ws), .person(let ws):
+            return group.memberText(ws) + Text(": " + message.text)
+        default: return Text(group.lastLine ?? "Group started")
+        }
+    }
+
 }
 
 struct GroupsSection: View {
@@ -144,5 +161,25 @@ struct GroupHistoryView: View {
                 ForEach(groups, id: \.key) { GroupListRow(group: $0) }
             }.padding(16)
         }.background(Theme.bg).navigationTitle("History").navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// External identity never inherits the host's choice of icon or color.
+struct GroupMemberBadge: View {
+    let group: PhoneGroup
+    let ws: String
+    var size: CGFloat = 28
+    var body: some View {
+        let look = group.members.first { $0.ws == ws }?.look
+        WorkspaceBadge(name: GroupRoomRules.badgeName(group: group, ws: ws),
+                       icon: group.isExternal(ws) ? nil : look?.icon,
+                       color: group.isExternal(ws) ? nil : look?.color, size: size, id: ws)
+    }
+}
+
+extension PhoneGroup {
+    func memberText(_ ws: String, prefix: String = "", suffix: String = "") -> Text {
+        let text = Text(prefix + name(of: ws) + suffix)
+        return isExternal(ws) ? text.italic().foregroundColor(Theme.muted) : text
     }
 }

@@ -39,7 +39,7 @@ final class GroupShotsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["You · owner"].waitForExistence(timeout: 10))
         try shot(app, "members")
         app.buttons["Done"].tap()
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["group-back"].tap()
         reveal(app, "group-history").tap()
         XCTAssertTrue(element(app, "group-grp_t_cartax2026").waitForExistence(timeout: 10))
         try shot(app, "history")

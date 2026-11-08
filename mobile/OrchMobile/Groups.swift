@@ -65,6 +65,7 @@ struct PhoneGroup: Identifiable, Equatable {
     let members: [GroupMember]
     let hostName: String
     let names: [String: String]
+    let externals: Set<String>
     let ticketKey: String?
     let ticket: String?
     let messages: [GroupMessage]
@@ -74,6 +75,8 @@ struct PhoneGroup: Identifiable, Equatable {
     var hasGaps: Bool { !gaps.isEmpty }
     let tasks: [String: GroupTask]
     var appliedSeq: Int? = nil
+
+    func isExternal(_ ws: String) -> Bool { externals.contains(ws) }
 
     func name(of ws: String) -> String { names[ws] ?? "Workspace" }
 
@@ -194,6 +197,21 @@ struct GroupCaps {
 
 /// Phone receive rules only. Host-only delegate ownership and push-budget checks need host state we do not have.
 enum GroupStore {
+    /// Normalize each name before adding the phone's provenance label.
+    static func sanitize(_ s: String) -> String {
+        let scalars = s.precomposedStringWithCompatibilityMapping.unicodeScalars.filter { scalar in
+            guard !scalar.properties.isDefaultIgnorableCodePoint,
+                  ![0x2800, 0x3164, 0xFFA0].contains(scalar.value) else { return false }
+            switch scalar.properties.generalCategory {
+            case .control, .format, .lineSeparator, .paragraphSeparator, .privateUse, .unassigned: return false
+            default: return true
+            }
+        }
+        let name = String(String.UnicodeScalarView(scalars)).split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        if name.isEmpty { return "Workspace" }
+        return name.count > 40 ? String(name.prefix(39)) + "…" : name
+    }
+
     private static let ranks = ["waiting_start": 0, "waiting_approval": 1, "queued": 2, "working": 3,
                                 "done": 4, "failed": 4, "denied": 4]
 
@@ -350,15 +368,13 @@ enum GroupStore {
         let groups = keys.compactMap { key -> PhoneGroup? in
             guard let heldMessages = held[key], !heldMessages.isEmpty,
                   let newest = latest[key], let info = newest.message.body.group else { return nil }
+            let hostName = sanitize(workspaces[key.host] ?? "Workspace")
+            let externals = Set(info.members.filter { $0.ws != key.host && workspaces[$0.ws] == nil }.map(\.ws))
             let names = Dictionary(uniqueKeysWithValues: info.members.map { member in
-                let name = (workspaces[member.ws] ?? member.name).trimmingCharacters(in: .whitespacesAndNewlines)
-                let normalized = String(String.UnicodeScalarView(name.precomposedStringWithCompatibilityMapping
-                    .unicodeScalars.filter { $0.properties.generalCategory != .format }))
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
-                return (member.ws, ["", "you", "other phone"].contains(normalized) ? "Workspace" : name)
+                let name = sanitize(workspaces[member.ws] ?? member.name)
+                return (member.ws, externals.contains(member.ws) ? "\(name) · via \(hostName)" : name)
             })
-            return PhoneGroup(key: key, title: info.title, members: info.members, hostName: workspaces[key.host] ?? key.host, names: names,
+            return PhoneGroup(key: key, title: sanitize(info.title), members: info.members, hostName: hostName, names: names, externals: externals,
                 ticketKey: newest.message.key, ticket: newest.message.ticket, messages: order(heldMessages),
                 closed: closed.contains(key), startedHere: heldMessages.contains { !$0.late && $0.event?.kind == "created" },
                 gaps: orders[key]?.gaps ?? [], tasks: tasks[key] ?? [:], appliedSeq: orders[key]?.appliedSeq)

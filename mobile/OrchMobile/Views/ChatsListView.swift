@@ -46,7 +46,7 @@ struct ChatsListView: View {
                     case .newChat: NewTopicScreen(workspaceId: nil)
                     case .newTopic(let ws): NewTopicScreen(workspaceId: ws)
                     }
-                }.toolbar(.visible, for: .navigationBar)
+                }.toolbar({ if case .group = route { return Visibility.hidden }; return Visibility.visible }(), for: .navigationBar)
             }
             .sheet(item: $sheet, onDismiss: {
                 if let next = pendingSheet { pendingSheet = nil; sheet = next }
