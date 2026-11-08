@@ -652,6 +652,8 @@ def send_text(
         try:
             msg = _message(root, to, "text", {**body, "ticket_view": tv}, ticket, reply_to, mid)
         except Refused:
+            if isinstance(view, dict):  # a light update without its view says nothing: refused means refused
+                raise
             msg = _message(root, to, "text", body, ticket, reply_to, mid)
     else:
         msg = _message(root, to, "text", body, ticket, reply_to, mid)

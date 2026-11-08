@@ -238,13 +238,12 @@
 
   /* The cause of a failed agent start in plain words ("the agent program was not found"), from waiting_on.ref. */
   function plainStartReason(ref) {
-    let s = String(ref || '').replace(/^The agent could not be started:\s*/i, '').trim();
+    const s = String(ref || '');
     const missing = /No such file or directory:?\s*'([^']+)'/i.exec(s) || /\[Errno 2\][^']*'([^']+)'/.exec(s);
-    if (missing) return 'the ' + missing[1].split(/[\\/]/).pop() + ' program was not found';
+    const program = missing && missing[1].split(/[\\/]/).pop();
+    if (program && /^[A-Za-z0-9._-]{1,40}$/.test(program)) return 'the ' + program + ' program was not found';
     if (/Errno 13|Permission denied/i.test(s)) return 'it is not allowed to run';
-    s = s.replace(/\[Errno \d+\]\s*/g, '').replace(/['"]/g, '').replace(/\s+/g, ' ').trim().replace(/[.:]$/, '');
-    if (!s || /^The agent did not start$/i.test(s)) return 'it did not start';
-    return s.length > 100 ? s.slice(0, 99) + '…' : s.charAt(0).toLowerCase() + s.slice(1);
+    return 'it did not start';  // anything else (paths, commands, tokens) is never shown
   }
 
   /* {agent, reason, text} when the ticket waits because the agent could not be started (waiting_on.start), else null. */

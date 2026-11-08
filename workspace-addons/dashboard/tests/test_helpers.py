@@ -747,3 +747,18 @@ def test_failed_agent_start_is_plain_with_a_retry():
     assert call("startFailure", t, None, settings) is None
     assert call("plainStartReason", "The agent did not start") == "it did not start"
     assert call("plainStartReason", "[Errno 13] Permission denied: '/x/claude'") == "it is not allowed to run"
+
+
+@node
+def test_start_reason_never_shows_paths_commands_or_secrets():
+    r = lambda ref: call("plainStartReason", ref)
+    assert r("The agent could not be started: [Errno 2] No such file or directory: '/usr/local/bin/claude'") == (
+        "the claude program was not found"
+    )
+    assert r("[Errno 2] No such file or directory: '/x/a b; rm -rf /'") == "it did not start"
+    for raw in (
+        "boom: ghp_abcdefghijklmnopqrstuvwxyz0123 at /Users/me/secret/dir",
+        "claude --token sk-live-abcdefabcdefabcdef exited 1",
+        "",
+    ):
+        assert r(raw) == "it did not start"

@@ -681,7 +681,7 @@ def remember(root: Path, tid: str, to: str) -> None:
 
     def put(state):
         state["tickets"][tid] = {"to": to, "sig": sig, "at": time.time(), "status": status}
-        _set_light_baseline(state, ticket, time.time())
+        _set_light_baseline(state, ticket, to, time.time())
         if to.startswith("ph_"):  # this phone has a chat for the ticket now: sync_open skips it
             state.setdefault("synced", {}).setdefault(to, [])
             if tid not in state["synced"][to]:
@@ -712,7 +712,7 @@ def light_view(root: Path, ticket: dict) -> dict:
     agent, running = _agent(root, ticket)
     view: dict = {
         "light": True,
-        "title": _clip(ticket.get("title", ""), 200) or "Ticket",
+        "title": _clip(redact(ticket.get("title", "")), 200) or "Ticket",
         "status": ticket.get("status", "open"),
         "running": running,
     }
@@ -728,61 +728,87 @@ def light_view(root: Path, ticket: dict) -> dict:
     return view
 
 
-def _set_light_baseline(state: dict, ticket: dict, now: float) -> None:
-    state.setdefault("light", {})[ticket["id"]] = {"sig": _light_sig(ticket), "at": now}
+LIGHT_MAX = 20  # light sends per pull
+LIGHT_BACKOFF = (30, 120, 600, 3600)  # seconds before a refused phone is tried again (then the last one)
+
+
+def _set_light_baseline(state: dict, ticket: dict, ph: str | None, now: float) -> None:
+    """The phone got a full view of this ticket now: what it carried is the baseline for light updates."""
+    if ph and ph.startswith("ph_"):
+        state.setdefault("light", {}).setdefault(ticket["id"], {})[ph] = {
+            "sig": _light_sig(ticket),
+            "at": now,
+        }
 
 
 def sync_light(root: Path, now: float | None = None) -> list[tuple[str, str]]:
-    """Every ticket a phone already lists (a ticket_view went to it before) gets a LIGHT quiet update when its
-    status, title, summary, started or waiting flag changes: kind note, never pushed, no question content.
-    Tickets
-    the phone never listed get nothing. Returns (phone, ticket id) pairs sent."""
+    """Every ticket a phone already lists (a full ticket_view went to that phone) gets a LIGHT quiet update
+    when its status, title, summary, started or waiting flag changes: kind note, never pushed, no question
+    content. State is per phone. At most LIGHT_MAX sends per pull; the first refusal ends the pass and
+    backs that phone off (growing wait); phones that were unpaired are forgotten.
+    Returns (phone, ticket id) pairs."""
     from orch import relay
 
     now = time.time() if now is None else now
+    paired = {
+        p["id"] for p in relay._read_dir(root).get("phones", []) if str(p.get("id", "")).startswith("ph_")
+    }
     all_ = {t["id"]: t for t in tickets.list_all(root)}
     due: list[tuple[str, str, dict, str]] = []
 
     def claim(state):
         light = state.setdefault("light", {})
-        listed = {tid: [] for tid in state.get("tickets", {})}
-        for ph, ids in state.get("synced", {}).items():
-            for tid in ids:
-                listed.setdefault(tid, []).append(ph)
-        for tid, phs in listed.items():
+        listed = {(tid, ph) for ph, ids in state.get("synced", {}).items() for tid in ids if ph in paired}
+        for tid in [k for k in light if k not in all_]:  # deleted tickets
+            del light[tid]
+        for tid in list(light):  # no longer listed to a paired phone
+            for ph in [x for x in light[tid] if (tid, x) not in listed]:
+                del light[tid][ph]
+            if not light[tid]:
+                del light[tid]
+        backoff = state.setdefault("light_phone", {})
+        for ph in [x for x in backoff if x not in paired]:
+            del backoff[ph]
+        for tid, ph in sorted(listed):
             t = all_.get(tid)
-            if t is None:
+            if t is None or len(due) >= LIGHT_MAX or now < backoff.get(ph, {}).get("retry", 0):
                 continue
-            sig, rec = _light_sig(t), light.get(tid)
+            sig, rec = _light_sig(t), light.setdefault(tid, {}).get(ph)
             if rec is None:  # first sight: what the listing carried is the baseline
-                light[tid] = {"sig": sig, "at": now}
-                continue
-            if rec.get("sig") == sig or now - rec.get("at", 0) < LIGHT_DEBOUNCE:
-                continue
-            tracked = state["tickets"].get(tid, {}).get("to")
-            targets = phs or ([tracked] if tracked and tracked.startswith("ph_") else [])
-            if not targets and tracked == "phones":
-                targets = ["phones"]
-            for ph in targets:
+                light[tid][ph] = {"sig": sig, "at": now}
+            elif (
+                rec.get("sig") != sig
+                and now - rec.get("at", 0) >= LIGHT_DEBOUNCE
+                and now >= rec.get("retry", 0)
+            ):
                 due.append((ph, tid, t, rec.get("sig")))
-            rec.update(sig=sig, at=now)
+                rec.update(sig=sig, at=now)
 
     update_state(root, claim)
-    sent = []
-    for ph, tid, t, before in due:
+    sent: list[tuple[str, str]] = []
+    for i, (ph, tid, t, _before) in enumerate(due):
         try:
             relay.send_text(
                 root, ph, f"Status: {t.get('status', 'open')}", tid, "note", view=light_view(root, t)
             )
             sent.append((ph, tid))
-        except Refused:  # not sent: the next pull tries again
+            if ph in (load_state(root).get("light_phone") or {}):  # recovered: forget the backoff
+                update_state(root, lambda st, ph=ph: st.get("light_phone", {}).pop(ph, None))
+            continue
+        except Refused:
+            pass
 
-            def undo(st, tid=tid, before=before):
-                if tid in st.get("light", {}):
-                    st["light"][tid].update(sig=before, at=0)
+        def undo(st, bad=ph, rest=due[i:]):
+            for ph2, tid2, _t, before2 in rest:  # unsent ones go again later (no new sig, so nothing is lost)
+                if rec := st.get("light", {}).get(tid2, {}).get(ph2):
+                    rec.update(sig=before2, at=0)
+            b = st.setdefault("light_phone", {}).setdefault(bad, {})
+            b["fails"] = b.get("fails", 0) + 1
+            b["retry"] = now + LIGHT_BACKOFF[min(b["fails"], len(LIGHT_BACKOFF)) - 1]
 
-            with contextlib.suppress(Refused):
-                update_state(root, undo)
+        with contextlib.suppress(Refused):
+            update_state(root, undo)
+        break  # like sync_open: the relay is away or refuses; the next pull tries again
     return sent
 
 
@@ -928,7 +954,7 @@ def sync_open(root: Path, now: float | None = None) -> list[str]:
                 if tid not in got:
                     got.append(tid)
                     got.sort()
-                    _set_light_baseline(st, t, time.time())
+                    _set_light_baseline(st, t, ph, time.time())
 
             update_state(root, mark)
             if t["id"] not in sent:
