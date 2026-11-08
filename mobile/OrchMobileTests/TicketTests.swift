@@ -59,6 +59,30 @@ final class TicketTests: XCTestCase {
         XCTAssertNotEqual(TopicStatus(TicketBuilder.build(updates: [u(false)], questions: [], answers: [:])[0]), .working)
     }
 
+    /// #287: "ready" = an agent stopped or nobody started one; never Working, whatever the update kind says.
+    func testReadyWithoutARunIsNotStarted() {
+        for kind in ["note", "ack", "working"] {
+            let u = TicketUpdate(id: "m_n", workspace: "ws_a", workspaceName: "A", ticket: "t_1", kind: kind, title: "T", text: "x",
+                                 replyTo: nil, at: "2026-11-08T08:00:00Z", ticketView: TicketSnapshot(title: "T", status: "ready", running: false))
+            let t = TicketBuilder.build(updates: [u], questions: [], answers: [:])[0]
+            XCTAssertEqual(t.status, .backlog, kind); XCTAssertEqual(t.stateLine, "Not started")
+            XCTAssertEqual(TopicStatus(t).chip, "Not started"); XCTAssertNotEqual(TopicStatus(t), .working)
+        }
+    }
+
+    /// #287: the workspace pushes a `result` when a followed ticket moves to Review or Done (phone tickets, Mobile mode).
+    func testPushedResultOnReviewOrDoneMovesTheTopic() {
+        func u(_ id: String, _ kind: String, _ status: String, _ running: Bool, _ at: String) -> TicketUpdate {
+            TicketUpdate(id: id, workspace: "ws_a", workspaceName: "A", ticket: "t_1", kind: kind, title: "Pizza page", text: "x",
+                         replyTo: nil, at: at, ticketView: TicketSnapshot(title: "Pizza page", status: status, running: running))
+        }
+        let working = u("m_1", "note", "active", true, "2026-11-08T08:00:00Z")
+        let review = TicketBuilder.build(updates: [working, u("m_2", "result", "review", false, "2026-11-08T08:10:00Z")], questions: [], answers: [:])[0]
+        XCTAssertEqual(review.status, .review); XCTAssertEqual(TopicStatus(review).chip, "Ready for review"); XCTAssertEqual(review.stateLine, "Ready for review")
+        let done = TicketBuilder.build(updates: [working, u("m_3", "result", "done", false, "2026-11-08T08:20:00Z")], questions: [], answers: [:])[0]
+        XCTAssertEqual(done.status, .done); XCTAssertEqual(TopicStatus(done).label, "Done")
+    }
+
     func testFailureAndStoppedAreDoneWithOwnSign() {
         func t(_ k: String) -> Ticket {
             TicketBuilder.build(updates: [TicketUpdate(id: "m", workspace: "ws_a", workspaceName: "A", ticket: "t_1", kind: k, title: "X", text: "x", replyTo: nil, at: "2026-11-05T10:00:00Z")],

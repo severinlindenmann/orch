@@ -371,6 +371,12 @@ def name_of(root: Path, ws_id: str) -> str:
     return {"phones": "the phones", "admin": "the admin"}.get(ws_id, ws_id)
 
 
+def _shown_name(root: Path, ws_id: str, fallback: str) -> str:
+    """A name to read, never a raw workspace id (name_of falls back to the id when the list lacks it)."""
+    n = clean_untrusted(name_of(root, ws_id), 100)
+    return fallback if not n or n == ws_id else n
+
+
 def _unreachable(e: Refused) -> bool:
     """No answer, a server error (5xx), too many requests (429) or a timeout (408): keep and retry.
     Only a clear 4xx from the relay means it will never take this message."""
@@ -1360,8 +1366,8 @@ def _ensure_allow_question(root: Path, msg: dict) -> str:
     """A delegate/start without an allow becomes a waiting ticket with the relay:allow question, once."""
     if (tid := _allow_ticket(root, msg["id"])) is not None:
         return tid
-    peer = clean_untrusted(name_of(root, msg["from"]), 100) or msg["from"]
-    me = clean_untrusted(name_of(root, _cfg(root)["workspace"]), 100)
+    peer = _shown_name(root, msg["from"], "another workspace")
+    me = _shown_name(root, _cfg(root)["workspace"], "")
     task, by = _task_of(msg), _by_relay(msg["from"])
     t = tickets.create(root, f"{peer} wants to: {task}"[:200], by)
     tid = t["id"]

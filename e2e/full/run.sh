@@ -49,7 +49,7 @@ CLAUDE_BIN=""; for c in "$REAL_HOME/.local/bin/claude" /opt/homebrew/bin/claude 
 EXTRA_PATH="$ROOT/tools"
 for c in uv node git python3 tmux; do p=$(command -v "$c" 2>/dev/null || true); [ -n "$p" ] && EXTRA_PATH="$EXTRA_PATH:$(dirname "$p")"; done
 
-env -i HOME="$ROOT/home" PATH="$(dirname "$(command -v uv)"):$(dirname "$(command -v node)"):/usr/bin:/bin" USER=e2e LANG=en_US.UTF-8 TERM=dumb \
+env -i HOME="$ROOT/home" PATH="$(dirname "$(command -v uv)"):$(dirname "$(command -v node)"):/usr/bin:/bin" USER=e2e LANG=en_US.UTF-8 TERM=dumb ORCH_HOME_STRICT=1 \
   E2E_CLAUDE_TOKEN="${E2E_CLAUDE_TOKEN:-}" E2E_PATH_EXTRA="$EXTRA_PATH" E2E_ORCH_HOME="$OHOME" E2E_REAL_HOME="$REAL_HOME" \
   UV_CACHE_DIR="${UV_CACHE_DIR:-$REAL_HOME/.cache/uv}" CARGO_TARGET_DIR="$CARGO_TARGET_DIR" \
   uv run --no-project --quiet --with cryptography --with jsonschema --with rfc3339-validator \

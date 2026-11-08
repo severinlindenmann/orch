@@ -3,6 +3,7 @@
 # SIM_RUN_DIR=$dir ORCH_E2E_UDID=<udid> e2e/sim-run.sh build|test <test names...>|stop
 # Build/test print shell commands for the lead to run through heavy.sh.
 set -euo pipefail
+export ORCH_HOME_STRICT=1   # (run.sh also sets it inside its env -i)
 repo=$(cd "$(dirname "$0")/.." && pwd)
 action=${1:-}; [ "$#" -eq 0 ] || shift
 case "$action" in

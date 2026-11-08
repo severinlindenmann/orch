@@ -1,12 +1,119 @@
+import hashlib
 import json
 import os
+import sys
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from orch import addons, cli, winfinish
 
+_REAL_HOME_FN = addons.real_home  # the true one, before any test fakes it
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
+
+
+def _snapshot_real_tool_home():
+    """{path: (size, sha256, mtime_ns)} of the real ~/.orch-tool (read only), without the fallback trace; and
+    the trace lines. A path that can not be read maps to None."""
+    base = _REAL_HOME_FN() / ".orch-tool"
+    files, trace = {}, []
+    if base.exists():
+        for p in (base, *base.rglob("*")):
+            try:
+                if p.name.startswith(".fallback-trace.log"):
+                    if p.name == ".fallback-trace.log" and not p.is_symlink():
+                        trace = p.read_text(encoding="utf-8", errors="replace").splitlines()
+                    continue
+                if p.is_dir() and not p.is_symlink():
+                    files[str(p)] = "dir"  # a folder's mtime moves when the trace file is made or rotated
+                    continue
+                st = p.stat()
+                digest = hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
+                files[str(p)] = (st.st_size, digest, st.st_mtime_ns)
+            except OSError:
+                files[str(p)] = None
+    return files, trace
+
+
+_REAL_AT_START, _TRACE_AT_START = _snapshot_real_tool_home()
+_PYTEST_TMP = Path(tempfile.gettempdir()).resolve()
+
+
+def _ours(line: dict) -> bool:
+    """A trace line written by this pytest session or its children: it has our pid or ppid (workers and
+    controller register theirs in the session folder), or ran in a pytest temp folder."""
+    pids = set()
+    reg = os.environ.get("ORCH_TEST_SESSION_PIDS")
+    if reg and Path(reg).exists():
+        pids = {int(x) for x in Path(reg).read_text().split()}
+    cwd = str(line.get("cwd", ""))
+    return (
+        line.get("pid") in pids
+        or line.get("ppid") in pids
+        or ("/pytest-of-" in cwd and cwd.startswith(str(_PYTEST_TMP)))
+    )
+
+
+def pytest_configure(config):
+    reg = os.environ.get("ORCH_TEST_SESSION_PIDS")
+    if not reg:  # the controller (or a plain run) makes the registry; xdist workers inherit the variable
+        fd, reg = tempfile.mkstemp(prefix="orch-test-pids-")
+        os.close(fd)
+        os.environ["ORCH_TEST_SESSION_PIDS"] = reg
+    with open(reg, "a") as f:
+        f.write(f"{os.getpid()}\n")
+
+
+@pytest.fixture(autouse=True)
+def _strict_orch_home(monkeypatch, tmp_path_factory):
+    """Every test: a faked real home with its own ORCH_HOME (a test that never asked for `proj` used to write
+    the real ~/.orch-tool/addons.json: ORCH_HOME unset = real folder); untrusted ORCH_HOME = error."""
+    fake = tmp_path_factory.mktemp("realhome")
+    monkeypatch.setattr(addons, "real_home", lambda: fake)
+    monkeypatch.setenv("ORCH_HOME", str(fake / "toolhome"))
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Read-only guard, run by the controller only. The real ~/.orch-tool must look the same after the run:
+    any file that changed fails the session (the message says: content changed, or only touched). New fallback
+    trace lines are printed; they fail the session when they come from this session's own processes, and only
+    warn when a foreign process wrote them."""
+    if hasattr(session.config, "workerinput"):
+        return
+    files, trace = _snapshot_real_tool_home()
+    bad = False
+    for k in sorted(set(files) | set(_REAL_AT_START)):
+        before, after = _REAL_AT_START.get(k), files.get(k)
+        if before != after:
+            kind = (
+                "content changed"
+                if (before and after and before[:2] != after[:2])
+                else "only touched or (re)created/removed"
+            )
+            print(f"\nREAL ~/.orch-tool CHANGED: {k}: {kind}", file=sys.stderr)
+            bad = True
+    new = [x for x in trace if x not in _TRACE_AT_START]
+    for raw in new:
+        try:
+            line = json.loads(raw)
+        except ValueError:
+            line = {}
+        ours = _ours(line)
+        print(
+            f"\nREAL ~/.orch-tool fallback trace ({'THIS SESSION' if ours else 'foreign process'}): {raw}",
+            file=sys.stderr,
+        )
+        bad = bad or ours
+    if bad:
+        session.exitstatus = 1
+    reg = os.environ.get("ORCH_TEST_SESSION_PIDS")
+    if reg and os.path.basename(reg).startswith("orch-test-pids-"):
+        try:
+            os.unlink(reg)  # exact path made in pytest_configure
+        except OSError:
+            pass
 
 
 @pytest.fixture
@@ -33,6 +140,22 @@ def proj(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runs_live, "resume_after_answer", lambda *a, **k: None)
     return tmp_path
+
+
+@pytest.fixture
+def subprocess_home(proj, monkeypatch):
+    """For tests that start `orch` as a child process: it cannot see the faked real_home, so ORCH_HOME must
+    be a folder the child trusts too: a fresh one under ~/.orch-test (never ~/.orch-tool), removed by path."""
+    import shutil
+    import tempfile
+
+    base = _REAL_HOME_FN() / ".orch-test"
+    base.mkdir(exist_ok=True)
+    d = Path(tempfile.mkdtemp(prefix="pytest-", dir=base))
+    monkeypatch.setattr(addons, "real_home", _REAL_HOME_FN)
+    monkeypatch.setenv("ORCH_HOME", str(d))
+    yield d
+    shutil.rmtree(d, ignore_errors=True)
 
 
 @pytest.fixture

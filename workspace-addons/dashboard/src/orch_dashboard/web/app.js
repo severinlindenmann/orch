@@ -145,7 +145,7 @@
     const action = snapshot
       ? (t ? h('a', {className:'btn outline sm', href:href(t.id)}, 'Open') : null)
       : h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id}, choice.label);
-    return h('div', {className:'card-row', 'data-key':'need-' + row.id, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null}, h('span', {className:'need-icon ' + (row.tone === 'bad' ? 'bad' : row.tone === 'warn' ? 'warn' : 'muted')}, iconEl(row.tone === 'bad' ? 'stop' : row.tone === 'warn' ? 'shield' : 'note')), h('div', {className:'grow'}, h('h3', {}, clean(window.DashHelpers.plainWhy(row.text, by || 'The agent') || row.text)), h('p', {className:'meta'}, meta)), h('time', {datetime:row.since || ''}, age(row.since)), action);
+    return h('div', {className:'card-row', 'data-key':'need-' + row.id, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null}, h('span', {className:'need-icon ' + (row.tone === 'bad' ? 'bad' : row.tone === 'warn' ? 'warn' : 'muted')}, iconEl(row.tone === 'bad' ? 'stop' : row.tone === 'warn' ? 'shield' : 'note')), h('div', {className:'grow'}, h('h3', {}, clean(window.DashHelpers.plainWhy(row.text, by || 'The agent') || window.DashHelpers.plainNames(row.text))), h('p', {className:'meta'}, meta)), h('time', {datetime:row.since || ''}, age(row.since)), action);
   }
   function home() {
     const needs = needsList();
@@ -157,7 +157,7 @@
     const current = sorted(tickets().filter(activeTicket));
     const oldest = needs.map(n => parse(n.since)).filter(Boolean).sort((a, b) => a - b)[0];
     const newest = needs.slice().sort((a, b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-    const history = tickets().flatMap(t => array(t.history).map(entry => ({entry, title:t.title, checklist:t.checklist}))).sort((a, b) => (Date.parse(b.entry.at) || 0) - (Date.parse(a.entry.at) || 0)).slice(0, 5);
+    const history = tickets().flatMap(t => window.DashHelpers.dedupeHistory(array(t.history), t.checklist).map(entry => ({entry, title:t.title, checklist:t.checklist}))).sort((a, b) => (Date.parse(b.entry.at) || 0) - (Date.parse(a.entry.at) || 0)).slice(0, 5);
     const stopped = array(state.services).some(s => s.running === false);
     const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;
     const agents = rows.slice(0, 5).map(row => h('div', {className:'card-row', 'data-key':'agent-' + row.agent + '-' + row.ticket}, h('span', {className:'dot ' + (row.state === 'stuck' ? 'needs' : row.state)}), h('div', {className:'grow'}, h('h3', {}, capitalise(name(row.agent) || 'Agent') + ' · ' + ({working:'working', starting:'getting started', needs:'needs you', stuck:'may be stuck', idle:'idle'}[row.state])), h('p', {className:'meta'}, row.state === 'idle' ? 'Last worked ' + window.DashHelpers.ago(row.since, Date.now()) : [clean(ticketOf(row.ticket)?.title), age(row.since)].filter(Boolean).join(' · ')))));
@@ -310,7 +310,7 @@
   function addonRows(ticket) {
     const rows = addons().flatMap(a => array(a.ticket_view).map(r => [r, (ticket.ext || {})[a.name], a.name]))
       .map(([r, ext, addon]) => [r, ext && typeof ext === 'object' ? (r.format === 'open-page' ? addonLink(addon, ext[r.field], r.label, r.label) : addonValue(r, ext[r.field])) : '']).filter(([, v]) => v);
-    return rows.length ? h('dl', {className:'addon-rows'}, rows.map(([r, v]) => [h('dt', {}, r.label), h('dd', {}, v)])) : null;
+    return rows.length ? h('dl', {className:'addon-rows'}, rows.map(([r, v]) => r.format === 'open-page' ? h('dd', {className:'addon-page'}, v) : [h('dt', {}, r.label), h('dd', {}, v)])) : null;
   }
   // ---- Ticket links and add-on fields. Each web link carries `view` from the core's one link module (orch/refs.py):
   // label, icon key, monogram, title, status (only while its add-on is on) and the Artifacts group. Fields come typed
@@ -537,7 +537,7 @@
     const liveLink = liveLinkFor(t);
     const line = window.DashHelpers.agentLine(t, state.runs?.[t.id], Date.now(), liveLink);
     // an open question is answered in the banner only: the bar then just says the agent is waiting
-    const answering = line.primary.op === 'answer';
+    const answering = line.primary?.op === 'answer';
     if (answering) line.status = 'needs you';
     const action = (item, primary) => {
       const attrs = {className:primary ? 'btn sm ' + (['working', 'starting', 'background'].includes(line.state) ? 'outline' : 'primary') : 'menu-item', role:primary ? null : 'menuitem', 'data-key':primary ? 'agent-primary' : 'agent-' + item.label};
@@ -546,7 +546,7 @@
     };
     return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'}, h('span', {className:'dot ' + ({working:'working', starting:'starting', background:'bg', needs:'needs', stuck:'needs', failed:'error', stopped:'stopped'}[line.state] || 'idle')}),
       h('span', {className:'ab-text grow'}, h('strong', {}, name(line.agent)), h('span', {className:'muted'}, ' · ' + clean(line.status))),
-      h('span', {className:'ab-actions'}, !activeTicket(t) && liveLink && !snapshot && line.primary.op !== 'open' ? h('a', {className:'btn outline sm', href:liveLink.url, 'data-key':'agent-open-done'}, 'Open ' + liveLink.label) : null, answering ? null : action(line.primary, true), line.items.length ? h('details', {className:'menu', 'data-key':'agent-menu'}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More agent actions'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, line.items.map(item => action(item, false)))) : null));
+      h('span', {className:'ab-actions'}, !activeTicket(t) && liveLink && !snapshot && line.primary?.op !== 'open' ? h('a', {className:'btn outline sm', href:liveLink.url, 'data-key':'agent-open-done'}, 'Open ' + liveLink.label) : null, answering || !line.primary ? null : action(line.primary, true), line.items.length ? h('details', {className:'menu', 'data-key':'agent-menu'}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More agent actions'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, line.items.map(item => action(item, false)))) : null));
   }
   const surface = via => clean(via === 'cli' ? 'terminal' : via);
   function proofLabel(ev) {
@@ -712,7 +712,7 @@
     const qs = openQuestions.map(q => snapshot
       ? card('question-' + q.id, clean(q.text), '', h('div', {className:'card-row'}, h('div', {className:'grow'}, h('p', {className:'muted'}, 'Waiting for an answer'), h('div', {className:'row'}, array(q.options).map(o => chip(clean(o), o === q.recommended ? 'attn' : ''))))))
       : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
-    const history = array(t.history).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => { const rich = entry.via === 'phone' ? phoneEntry(t.id, entry) : null; return h('div', {className:'card-row'}, rich ? h('div', {className:'grow'}, rich, h('p', {className:'meta'}, [name(entry.by), surface(entry.via)].filter(Boolean).join(' · '))) : h('p', {className:'grow'}, [clean(window.DashHelpers.historyLine(entry, t.checklist)), name(entry.by), surface(entry.via)].filter(Boolean).join(' · ')), h('time', {datetime:entry.at || ''}, age(entry.at))); });
+    const history = window.DashHelpers.dedupeHistory(array(t.history), t.checklist).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).map(entry => { const rich = entry.via === 'phone' ? phoneEntry(t.id, entry) : null; return h('div', {className:'card-row'}, rich ? h('div', {className:'grow'}, rich, h('p', {className:'meta'}, [name(entry.by), surface(entry.via)].filter(Boolean).join(' · '))) : h('p', {className:'grow'}, [clean(window.DashHelpers.historyLine(entry, t.checklist)), name(entry.by), surface(entry.via)].filter(Boolean).join(' · ')), h('time', {datetime:entry.at || ''}, age(entry.at))); });
     const field = (label, value, cls = '') => h('div', {}, h('dt', {}, label), h('dd', {className:cls}, value));
     const total = array(t.checklist).length, done = array(t.checklist).filter(task => task.done).length;
     const tasksCard = key => card(key, total && done === total ? 'All done' : 'Tasks', done + ' of ' + total + (total && done === total ? '' : ' done'), [total ? taskRows(t) : emptyRow('No tasks yet.'), addTaskRow(t, key)]);
@@ -1098,7 +1098,7 @@
     const activeKey = nodeKey(active);
     const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'general' ? 'General' : r.kind === 'tickets' ? 'Tickets' : 'Home';
     document.getElementById('workspace-name').textContent = clean(state.workspace || 'Workspace');
-    document.getElementById('workspace-mode').textContent = snapshot ? 'Shared copy' : 'Local workspace';
+    document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
     const crumb = document.getElementById('crumb');
     if (r.kind === 'ticket') {
       const tk = ticketOf(r.id);
