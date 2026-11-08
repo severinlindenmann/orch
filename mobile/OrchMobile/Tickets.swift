@@ -83,22 +83,25 @@ enum TicketBuilder {
         var byKey: [String: Ticket] = [:]
         for u in updates {
             let key = "\(u.workspace)|\(u.ticket)"
+            let statusView = u.ticketView?.overlaid(on: byKey[key]?.view)
+            let view = statusView ?? byKey[key]?.view
+            let text = u.ticketView?.light == true && u.text.isEmpty ? (byKey[key]?.text ?? u.text) : u.text
             var st = status(forKind: u.kind)
             if st == .needsYou { st = .working }   // only a real open question counts (below)
             // The ticket's own status (when the snapshot carries a known one) decides, whatever the note's kind: an agent's
             // "done" arrives as review, a person's Done as done. The update kind only decides for old snapshots without a status (failure and stopped keep their own sign when the ticket is done).
-            if let own = Ticket.Status(ticketStatus: u.ticketView?.status) { st = own }
+            if let own = Ticket.Status(ticketStatus: statusView?.status) { st = own }
             // "active" without a running agent (an answer on the dashboard moved it on, nobody started a run): the
             // snapshot says no agent runs, so the phone never claims "Claude is working" (owner 8 Nov, IMG_6626).
-            if st == .working, u.ticketView?.running == false { st = .backlog }
+            if st == .working, statusView?.running == false { st = .backlog }
             // A ticket that was started and is now idle is Paused.
-            if let view = u.ticketView, view.started == true,
+            if let view = statusView, view.started == true,
                view.status == "ready" || view.status == "open" || (view.status == "active" && view.running == false) {
                 st = .paused
             }
             byKey[key] = Ticket(id: key, workspace: u.workspace, workspaceName: u.workspaceName, ticket: u.ticket,
-                                title: u.ticketView?.title ?? u.title ?? u.text, text: u.text, status: st, kind: u.kind, at: u.at, question: nil,
-                                key: u.key, view: u.ticketView)
+                                title: view?.title ?? u.title ?? u.text, text: text, status: st, kind: u.kind, at: u.at, question: nil,
+                                key: u.key, view: view)
         }
         for q in questions where answers[q.id] == nil {
             let m = q.message

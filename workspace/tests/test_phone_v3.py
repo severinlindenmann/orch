@@ -862,3 +862,34 @@ def test_a_phone_text_into_a_ticket_is_a_persons_input_with_its_phone_id(proj, r
     (item,) = [i for i in runs.undelivered(proj, tid) if "dessert" in i["text"]]
     assert item["via"] == "phone" and item["phone"].startswith("ph_") and item["human"] is True
     assert runs.human_waiting(proj, tid) == [item]
+
+
+def test_phone_free_text_answer_to_a_question_with_options_is_applied(proj, run, new_ticket, conn):
+    """ "Write your own": an answer that is not one of the options is stored as written (cleaned), not refused,
+    and the ticket goes on like after an option (no agent runs: Ready)."""
+    tid = new_ticket()
+    run("ask", tid, "DATE or TIMESTAMP?", "--option", "DATE", "--option", "TIMESTAMP", "--phone")
+    q = conn.sent[0]
+    conn.inbox.append(
+        {
+            "schema": "orch.msg/1",
+            "id": "m_answer0000000042",
+            "from": PHONE,
+            "to": WS,
+            "type": "answer",
+            "created_at": "2026-11-06T10:00:00Z",
+            "ticket": tid,
+            "reply_to": q["id"],
+            "body": {
+                "question_id": "q1",
+                "answer": "Neither,<!-- x --> use a‮ UNIX epoch",
+                "answered_by": "human:severin",
+            },
+        }
+    )
+    code, out, err = run("relay", "inbox")
+    assert code == 0 and "answered q1" in out, (out, err)
+    t = json.loads(run("ticket", "show", tid, "--json")[1])
+    qq = t["questions"][0]
+    assert qq["answer"] == "Neither, use a UNIX epoch" and qq["via"] == "phone"
+    assert t["status"] == "ready" and t["waiting_on"] is None

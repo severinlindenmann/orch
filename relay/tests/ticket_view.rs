@@ -80,7 +80,10 @@ async fn ticket_view_vector_cases_stored_or_refused() {
         m["id"] = mid().into();
         m["from"] = a.id.clone().into();
         // the vector's blob ids become real uploads of A with the same size (ids keep their length)
-        if let Some(atts) = m["body"]["ticket_view"]["attachments"].as_array_mut() {
+        if let Some(atts) = m["body"]["ticket_view"]
+            .get_mut("attachments")
+            .and_then(|a| a.as_array_mut())
+        {
             for att in atts.iter_mut() {
                 if let (Some(_), Some(n)) = (att["blob_id"].as_str(), att["size"].as_u64()) {
                     att["blob_id"] = upload(&t, &a, vec![7u8; n as usize]).await.into();
@@ -113,8 +116,14 @@ async fn ticket_view_vector_cases_stored_or_refused() {
         .collect();
     assert_eq!(
         stored.len(),
-        4,
-        "full, minimal, at-cap and ready-started are stored"
+        6,
+        "full, minimal, at-cap, ready-started and the two light views are stored"
+    );
+    assert!(
+        stored
+            .iter()
+            .any(|v| v["light"] == true && v.get("attachments").is_none()),
+        "a light view is stored as sent, without placeholders"
     );
     let big = stored
         .iter()

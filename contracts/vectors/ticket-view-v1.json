@@ -1989,6 +1989,118 @@
      }
     }
    }
+  },
+  {
+   "name": "light",
+   "ok": true,
+   "why": "",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000099",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-08T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Status: waiting",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "light": true,
+      "title": "Q3 summary for the board",
+      "status": "waiting",
+      "started": true,
+      "running": false,
+      "agent": "Claude",
+      "summary": "Waiting for your answer.",
+      "updated_at": "2026-11-08T09:41:00Z"
+     }
+    }
+   }
+  },
+  {
+   "name": "light-minimal",
+   "ok": true,
+   "why": "",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000099",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-08T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Status: waiting",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "light": true,
+      "title": "Q3 summary",
+      "status": "open",
+      "running": false
+     }
+    }
+   }
+  },
+  {
+   "name": "no-light-flag-needs-full",
+   "ok": false,
+   "why": "without light:true the full fields stay required",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000099",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-08T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Status: waiting",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3",
+      "status": "open",
+      "running": false
+     }
+    }
+   }
+  },
+  {
+   "name": "light-unknown-field",
+   "ok": false,
+   "why": "additionalProperties false",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000099",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-08T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Status: waiting",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "light": true,
+      "title": "Q3",
+      "status": "open",
+      "running": false,
+      "questions": []
+     }
+    }
+   }
   }
  ]
 }

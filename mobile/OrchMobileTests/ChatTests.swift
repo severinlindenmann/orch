@@ -3,6 +3,53 @@ import XCTest
 
 @MainActor
 final class ChatTests: XCTestCase {
+    func testAllowQuestionRejectsFreeTextAnswer() async {
+        defer { cleanup() }
+        let model = await pairedOffline()
+        let q = MockRelay.allowQuestion
+        await model.answer(q, with: "hello")
+        XCTAssertNil(model.answers[q.id])
+        XCTAssertFalse(model.outbox.items.contains { $0.kind == .answer })
+    }
+
+    /// Answered on the dashboard or another phone = gone from the relay's open list: no free-text answer goes to it.
+    func testFreeTextAnswerOnlyToOpenQuestion() async {
+        defer { cleanup() }
+        Keychain.delete(); UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "mockFail")
+        let model = AppModel(useMock: true)
+        model.openSampleInvite(); await model.connect(phoneName: "Test phone"); await model.finishSetup(allowNotifications: false)
+        let closed = Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_closed00000001", from: "ws_a", to: "phones", type: "question",
+                                                       createdAt: "2026-11-05T10:00:00Z", ticket: "t_weeks",
+                                                       body: QuestionBody(questionId: "q_closed", title: nil, text: "Which week?",
+                                                                          options: ["Week 44"], recommended: nil)), workspaceName: "W")
+        XCTAssertFalse(Composer.isOpen(closed, in: model))
+        await model.refresh()
+        guard let open = model.questions.first(where: { !$0.isAllow }) else { return XCTFail("mock has an open question") }
+        XCTAssertTrue(Composer.isOpen(open, in: model))
+        await model.answer(open, with: "Week 46, please")
+        XCTAssertFalse(Composer.isOpen(open, in: model))
+    }
+
+    func testWriteOwnIsOnlyShownForNonAllowQuestionsWithOptions() {
+        func question(options: [String]) -> Question {
+            Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_weeks", from: "ws_a", to: "phones", type: "question",
+                                              createdAt: "2026-11-05T10:00:00Z", ticket: "t_weeks",
+                                              body: QuestionBody(questionId: "q_weeks", title: "Schedule", text: "Which week?",
+                                                                 options: options, recommended: nil)), workspaceName: "W")
+        }
+        XCTAssertTrue(ConversationRules.showsWriteOwn(question(options: ["Week 44", "Week 45"])))
+        XCTAssertFalse(ConversationRules.showsWriteOwn(MockRelay.allowQuestion))
+        XCTAssertFalse(ConversationRules.showsWriteOwn(question(options: [])))
+    }
+
+    func testReplyPreviewTracksAnsweringQuestion() {
+        let q = MockRelayTestsFixtures.question
+        let answer = ReplyPreview(messageId: q.id, title: "Answer:", quote: q.message.body.text, answering: q)
+        XCTAssertEqual(answer.answering?.id, q.id)
+        XCTAssertEqual(answer, ReplyPreview(messageId: q.id, title: "Answer:", quote: q.message.body.text, answering: q))
+        XCTAssertNotEqual(answer, ReplyPreview(messageId: q.id, title: "Answer:", quote: q.message.body.text))
+    }
+
     private func data(_ m: MockRelay, answers: [String: String] = [:], outbox: [QueuedText] = []) async throws -> ChatData {
         let u = try await m.updates(), q = try await m.questions()
         return ChatData(workspaces: try await m.workspaces(), messages: try await m.messages(),

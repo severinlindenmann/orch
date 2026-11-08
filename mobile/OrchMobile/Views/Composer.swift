@@ -1,7 +1,17 @@
 import SwiftUI
 import AVFoundation
 
-struct ReplyPreview: Equatable { let messageId: String; let title: String; let quote: String }
+struct ReplyPreview: Equatable {
+    let messageId: String
+    let title: String
+    let quote: String
+    var answering: Question? = nil
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.messageId == rhs.messageId && lhs.title == rhs.title && lhs.quote == rhs.quote
+            && lhs.answering?.id == rhs.answering?.id
+    }
+}
 
 struct Composer: View {
     let target: SendTarget?
@@ -20,6 +30,7 @@ struct Composer: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @FocusState private var focused: Bool
     @State private var text = ""
+    @State private var savedDraft: String?
     @State private var error: String?
     @State private var micError = false
     @State private var attaching = false
@@ -53,7 +64,7 @@ struct Composer: View {
         self.target = target; self.placeholder = placeholder; self.note = note; self.autoFocus = autoFocus
         _reply = reply; self.onSent = onSent
     }
-    private var showMic: Bool { !locked && segments.isEmpty && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var showMic: Bool { reply?.answering == nil && !locked && segments.isEmpty && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var recording: Bool { recorder?.isRecording == true }
     private var hasAudio: Bool { recording || starting || !segments.isEmpty }
     private var duration: Double { segments.reduce(0) { $0 + $1.duration } + (recorder?.finished.reduce(0) { $0 + $1.duration } ?? 0) + (recorder?.elapsed ?? 0) }
@@ -63,7 +74,7 @@ struct Composer: View {
             if let error {
                 HStack {
                     Text(error).themeFont(13).foregroundStyle(Theme.danger).accessibilityIdentifier("composer-error")
-                    if micError { Button("Try again") { Task { await startRecording(lock: true) } }.themeFont(13, .semibold).frame(minHeight: 44).accessibilityIdentifier("composer-retry") }
+                    if micError && reply?.answering == nil { Button("Try again") { Task { await startRecording(lock: true) } }.themeFont(13, .semibold).frame(minHeight: 44).accessibilityIdentifier("composer-retry") }
                 }
             }
             if let reply {
@@ -79,7 +90,7 @@ struct Composer: View {
             }
             if hint { Text("Hold to record").themeFont(13).foregroundStyle(Theme.muted) }
             ZStack(alignment: .bottomTrailing) {
-                if hasAudio || busy && !segments.isEmpty { recordingRow } else { composeRow }
+                if reply?.answering == nil && (hasAudio || busy && !segments.isEmpty) { recordingRow } else { composeRow }
                 // Keep the gesture's view alive when the bar switches to recording.
                 mic.opacity(showMic ? 1 : 0).allowsHitTesting(showMic)
                     .accessibilityHidden(!showMic)
@@ -91,8 +102,11 @@ struct Composer: View {
                         }
                     }
             }
+            if reply?.answering != nil, text.unicodeScalars.count > 1800 {
+                Text("\(text.unicodeScalars.count)/2000").themeFont(13).foregroundStyle(Theme.muted)
+            }
             if target == nil { Text(unavailableText).themeFont(13).foregroundStyle(Theme.muted) }
-            else if let note, !hasAudio { Text(note).themeFont(13).foregroundStyle(Theme.muted).accessibilityIdentifier("composer-note") }
+            else if let note, !hasAudio, reply?.answering == nil { Text(note).themeFont(13).foregroundStyle(Theme.muted).accessibilityIdentifier("composer-note") }
         }.padding(.horizontal, 8).padding(.vertical, 8)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous))
             .padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 4)
@@ -102,8 +116,34 @@ struct Composer: View {
             .sensoryFeedback(.success, trigger: success).sensoryFeedback(.warning, trigger: cancellation)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: hasAudio)
             .task { text = target.flatMap { Self.drafts[draftKey($0)] } ?? ""; if autoFocus && target != nil { focused = true } }
-            .onChange(of: text) { _, value in if let target { Self.drafts[draftKey(target)] = value } }
-            .onChange(of: target) { _, new in text = new.flatMap { Self.drafts[draftKey($0)] } ?? ""; discard() }
+            .onChange(of: reply?.answering?.id) { _, id in
+                if id != nil {
+                    if savedDraft == nil { savedDraft = text }
+                    text = ""
+                    holding = false; holdTask?.cancel(); hintTask?.cancel(); hint = false
+                    if recording || starting { discard() }
+                    attaching = false; focused = true
+                } else {
+                    restoreDraft()
+                }
+            }
+            .onChange(of: text) { _, value in
+                if reply?.answering == nil, savedDraft == nil, let target { Self.drafts[draftKey(target)] = value }
+            }
+            .onChange(of: target) { _, new in
+                let draft = new.flatMap { Self.drafts[draftKey($0)] } ?? ""
+                if reply?.answering != nil {
+                    savedDraft = draft; reply = nil; restoreDraft()
+                }
+                text = draft; discard()
+            }
+            .onChange(of: model.answerTick) { _, _ in
+                if let q = reply?.answering, !Self.isOpen(q, in: model) { endAnsweringClosed() }
+            }
+            // Answered on the dashboard or another phone: the question leaves the open list, answering mode ends.
+            .onChange(of: model.questions.map(\.id)) { _, _ in
+                if let q = reply?.answering, !Self.isOpen(q, in: model) { endAnsweringClosed() }
+            }
             .onChange(of: recorder?.error) { _, value in if let value { error = value; micError = true; collect() } }
             .onDisappear { holding = false; holdTask?.cancel(); hintTask?.cancel(); discard() }
             .sheet(isPresented: $attaching) {
@@ -113,7 +153,7 @@ struct Composer: View {
     }
     private var composeRow: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            control("plus", "Attach", "composer-attach") { focused = false; attaching = true }.disabled(target == nil || busy)
+            control("plus", "Attach", "composer-attach") { focused = false; attaching = true }.disabled(target == nil || busy || reply?.answering != nil)
             TextField(target == nil ? unavailableText : placeholder, text: $text, axis: .vertical)
                 .themeFont(17).lineLimit(1...5).padding(.horizontal, 12).padding(.vertical, 10)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.xl - 8, style: .continuous))
@@ -201,17 +241,53 @@ struct Composer: View {
     }
     private func sendText() async {
         guard let target, !busy else { return }
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return }
         busy = true; error = nil; micError = false
         defer { busy = false }
         do {
-            try await dispatch(MessageDraft(text: text, replyTo: reply?.messageId), to: target)
-            text = ""; Self.drafts[draftKey(target)] = nil; reply = nil; success += 1; onSent?()
+            if let q = reply?.answering {
+                // Closed meanwhile (answered here, elsewhere, or an option is being sent): keep what was typed, say why.
+                if !Self.isOpen(q, in: model) || model.pendingAnswers[q.id] != nil {
+                    endAnsweringClosed(sending: model.pendingAnswers[q.id] != nil); return
+                }
+                await model.answer(q, with: String(String.UnicodeScalarView(trimmedText.unicodeScalars.prefix(2000))))
+                if model.answers[q.id] == nil && model.queuedAnswers[q.id] == nil {
+                    error = "Your answer was not sent. Try again."
+                    return
+                }
+                if reply?.answering?.id == q.id { reply = nil; restoreDraft() }
+            } else {
+                try await dispatch(MessageDraft(text: text, replyTo: reply?.messageId), to: target)
+                text = ""; Self.drafts[draftKey(target)] = nil; reply = nil
+            }
+            success += 1; onSent?()
         } catch { self.error = error.localizedDescription }
+    }
+    /// A free-text answer goes only to a question that is still open: listed by the relay and not answered on this phone.
+    static func isOpen(_ q: Question, in model: AppModel) -> Bool {
+        model.answers[q.id] == nil && model.questions.contains { $0.id == q.id }
+    }
+    /// The one way answering mode ends because the question closed (answered here, on the dashboard or another phone, or an
+    /// option is being sent). Typed answer text is never dropped or silently re-targeted: with text, it stays in the field,
+    /// the chip goes and the person is told why (the next Send is then a plain message they can see coming); without text
+    /// the conversation draft comes back.
+    private func endAnsweringClosed(sending: Bool = false) {
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            reply = nil; restoreDraft()
+        } else {
+            savedDraft = nil; reply = nil
+            error = sending ? "Your chosen answer is being sent." : "This question is already answered."
+        }
+    }
+    private func restoreDraft() {
+        guard let savedDraft else { return }
+        text = savedDraft; self.savedDraft = nil
     }
     /// A photo, file or place from the "+" sheet: goes through the outbox like any message; the picker's temp files are removed after.
     private func sendMedia(_ selection: MediaSelection) async {
         defer { selection.cleanUp() }
-        guard let target else { return }
+        guard let target, reply?.answering == nil else { return }
         let draft: MessageDraft
         switch selection {
         case .files(let files, let caption): draft = MessageDraft(text: caption, files: files, replyTo: reply?.messageId)
@@ -221,7 +297,7 @@ struct Composer: View {
         catch { self.error = error.localizedDescription; micError = false }
     }
     private func startRecording(lock: Bool) async {
-        guard target != nil, !recording, !starting, !busy else { return }
+        guard reply?.answering == nil, target != nil, !recording, !starting, !busy else { return }
         stopPlayback(); error = nil; micError = false; starting = true; locked = lock
         let generation = UUID(); recordingGeneration = generation
         let r = model.makeVoiceRecorder(); recorder = r
@@ -239,7 +315,7 @@ struct Composer: View {
         locked = true
     }
     private func sendRecording() async {
-        guard let target, !busy else { return }
+        guard reply?.answering == nil, let target, !busy else { return }
         collect()
         guard segments.reduce(0, { $0 + $1.duration }) >= 1 else {
             discard()   // too short to be a memo: say so instead of dropping it silently (the same hint as a plain tap)
@@ -267,7 +343,7 @@ struct Composer: View {
         segments = []; locked = false
     }
     private func toggleAccessibleRecording() {
-        guard target != nil, !busy else { return }
+        guard reply?.answering == nil, target != nil, !busy else { return }
         Task { if recording { await sendRecording() } else { await startRecording(lock: true) } }
     }
     private func stopPlayback() { playbackTask?.cancel(); player?.stop(); player = nil; playing = false; playhead = 0 }

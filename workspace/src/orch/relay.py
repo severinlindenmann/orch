@@ -599,7 +599,7 @@ def send_text(
     ticket: str | None = None,
     update: str | None = None,
     reply_to: str | None = None,
-    view: bool | None = None,
+    view: bool | dict | None = None,
     general: bool = False,
     speak: dict | None = None,
     refs: list[dict] | None = None,
@@ -644,14 +644,20 @@ def send_text(
     to_phone = to == "phones" or to.startswith("ph_")
     if view is None:
         view = to_phone and update in phone_view.SEND_KINDS
-    if update and ticket and view and (tv := phone_view.view_for(root, ticket)):
+    if isinstance(view, dict):  # a ready (light) snapshot
+        tv = view
+    else:
+        tv = view and update and ticket and phone_view.view_for(root, ticket)
+    if update and ticket and tv:
         try:
             msg = _message(root, to, "text", {**body, "ticket_view": tv}, ticket, reply_to, mid)
         except Refused:
+            if isinstance(view, dict):  # a light update without its view says nothing: refused means refused
+                raise
             msg = _message(root, to, "text", body, ticket, reply_to, mid)
     else:
         msg = _message(root, to, "text", body, ticket, reply_to, mid)
-    if update and ticket and to_phone:
+    if update and ticket and to_phone and not isinstance(view, dict):  # a light update follows nothing new
         phone_view.remember(root, ticket, to)
     if general and not update and not sender == "you":
         # a real text to the General conversation: kept in its history: the dashboard shows both ways
@@ -1610,6 +1616,7 @@ def sync_phone_views(root: Path) -> None:
     with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
         phone_view.sync_open(root)
         phone_view.sync(root)
+        phone_view.sync_light(root)
     with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
         send_working(root)
 

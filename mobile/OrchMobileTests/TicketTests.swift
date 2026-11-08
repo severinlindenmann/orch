@@ -2,6 +2,100 @@ import XCTest
 @testable import OrchMobile
 
 final class TicketTests: XCTestCase {
+    private func lightViewUpdate(_ id: String, view: TicketSnapshot?, text: String = "") -> TicketUpdate {
+        TicketUpdate(id: id, workspace: "ws_a", workspaceName: "A", ticket: "t_1", kind: "note", title: nil,
+                     text: text, replyTo: nil, at: "2026-11-08T10:00:00Z", ticketView: view)
+    }
+
+    func testLightViewPreservesFullDetails() throws {
+        let full = TicketSnapshot(title: "Fix login", status: "active", agent: "Agent", summary: "A",
+                                  checklist: [.init(text: "First", done: true), .init(text: "Second")],
+                                  running: true, started: true, attachments: [.init(blobId: "b1", name: "proof.txt")],
+                                  historyTail: [.init(text: "Started")], refs: [.init(rawKind: "ticket", ticket: "t_2")])
+        let light = TicketSnapshot(status: "waiting", summary: "B", light: true)
+        let ticket = try XCTUnwrap(TicketBuilder.build(updates: [lightViewUpdate("1", view: full), lightViewUpdate("2", view: light)],
+                                                     questions: [], answers: [:]).first)
+        let view = try XCTUnwrap(ticket.view)
+        XCTAssertEqual(view.status, "waiting")
+        XCTAssertEqual(view.summary, "B")
+        XCTAssertEqual(view.checklist.count, 2)
+        XCTAssertEqual(view.attachments.count, 1)
+        XCTAssertEqual(view.checklist, full.checklist)
+        XCTAssertEqual(view.attachments, full.attachments)
+        XCTAssertEqual(view.refs, full.refs)
+        XCTAssertEqual(view.historyTail, full.historyTail)
+        XCTAssertEqual(view.done, full.done)
+        XCTAssertEqual(view.total, full.total)
+        XCTAssertEqual(view.agent, full.agent)
+        XCTAssertEqual(view.running, true)
+        XCTAssertEqual(view.started, true)
+        XCTAssertNil(view.light)
+        XCTAssertEqual(ticket.status, Ticket.Status(ticketStatus: "waiting"))
+    }
+
+    func testDashboardTicketWithOnlyLightViews() throws {
+        let initial = lightViewUpdate("1", view: TicketSnapshot(title: "Fix login", status: "ready", started: false, light: true))
+        let first = try XCTUnwrap(TicketBuilder.build(updates: [initial], questions: [], answers: [:]).first)
+        XCTAssertEqual(first.status, .backlog)
+        XCTAssertEqual(first.displayTitle, "Fix login")
+        let started = lightViewUpdate("2", view: TicketSnapshot(status: "ready", started: true, light: true))
+        let second = try XCTUnwrap(TicketBuilder.build(updates: [initial, started], questions: [], answers: [:]).first)
+        XCTAssertEqual(second.status, .paused)
+        XCTAssertEqual(second.displayTitle, "Fix login")
+    }
+
+    func testEmptyLightUpdateKeepsPreviousText() throws {
+        let first = lightViewUpdate("1", view: TicketSnapshot(title: "Fix login"), text: "Investigating the login failure")
+        let next = lightViewUpdate("2", view: TicketSnapshot(status: "waiting", light: true))
+        let ticket = try XCTUnwrap(TicketBuilder.build(updates: [first, next], questions: [], answers: [:]).first)
+        XCTAssertEqual(ticket.text, first.text)
+    }
+
+    func testNonLightViewReplacesWholeSnapshot() throws {
+        let old = TicketSnapshot(title: "Old", summary: "A", checklist: [.init(text: "First"), .init(text: "Second")])
+        for light: Bool? in [nil, false] {
+            let new = TicketSnapshot(title: "New", checklist: [.init(text: "Replacement")], light: light)
+            let ticket = try XCTUnwrap(TicketBuilder.build(updates: [lightViewUpdate("1", view: old), lightViewUpdate("2", view: new)],
+                                                         questions: [], answers: [:]).first)
+            XCTAssertEqual(ticket.view, new)
+            XCTAssertEqual(ticket.view?.checklist, new.checklist)
+        }
+    }
+
+    func testUpdateWithoutViewKeepsPreviousSnapshot() throws {
+        let view = TicketSnapshot(title: "Fix login", status: "ready", started: true)
+        let ticket = try XCTUnwrap(TicketBuilder.build(updates: [lightViewUpdate("1", view: view), lightViewUpdate("2", view: nil, text: "Latest note")],
+                                                     questions: [], answers: [:]).first)
+        XCTAssertEqual(ticket.view, view)
+        XCTAssertEqual(ticket.status, .working)
+        XCTAssertEqual(ticket.text, "Latest note")
+    }
+
+    func testFailureWithoutViewUsesUpdateKind() throws {
+        let view = TicketSnapshot(title: "Fix login", status: "active", running: true)
+        let failure = TicketUpdate(id: "2", workspace: "ws_a", workspaceName: "A", ticket: "t_1", kind: "failure",
+                                   title: nil, text: "Failed", replyTo: nil, at: "2026-11-08T10:01:00Z")
+        let ticket = try XCTUnwrap(TicketBuilder.build(updates: [lightViewUpdate("1", view: view), failure],
+                                                     questions: [], answers: [:]).first)
+        XCTAssertEqual(ticket.status, .done)
+        XCTAssertEqual(ticket.kind, "failure")
+        XCTAssertEqual(ticket.view, view)
+        XCTAssertEqual(ticket.title, view.title)
+    }
+
+    func testEmptyLightViewFieldsKeepBase() {
+        let base = TicketSnapshot(title: "Fix login", status: "active", agent: "Agent", summary: "Investigating")
+        for empty in ["", " \t\n"] {
+            let light = TicketSnapshot(title: empty, status: empty, agent: empty, summary: empty, light: true)
+            XCTAssertEqual(light.overlaid(on: base), base)
+        }
+    }
+
+    func testLightViewDecodes() throws {
+        let view = try JSONCoding.decoder.decode(TicketSnapshot.self, from: Data(#"{"title":"x","light":true}"#.utf8))
+        XCTAssertEqual(view.light, true)
+    }
+
     func testUpdatesDecodeFromContractExample() async throws {
         let ex = try Example.find("GET", "/v1/phone/updates")
         StubProtocol.handler = { _ in (ex.status, ex.responseData) }
@@ -180,6 +274,15 @@ final class TicketModelTests: XCTestCase {
         XCTAssertEqual(count(model, .needsYou), 2); XCTAssertEqual(count(model, .working), 1); XCTAssertEqual(count(model, .done), 1)
         await model.answer(model.questions[0], with: "TIMESTAMP")
         XCTAssertEqual(count(model, .needsYou), 1)
+    }
+
+    func testFreeTextAnswerOutsideOptionsIsRecorded() async throws {
+        let model = await ready()
+        let q = try XCTUnwrap(model.questions.first { !$0.isAllow && !$0.message.body.options.isEmpty })
+        let answer = "Week 46, please"
+        XCTAssertFalse(q.message.body.options.contains(answer))
+        await model.answer(q, with: answer)
+        XCTAssertEqual(model.answers[q.id], answer)
     }
 
     func testNewTopicGetsAGotItAndReplyKeepsTheTicket() async {
