@@ -462,7 +462,7 @@ def test_run_hooks_only_for_the_chat_ticket_and_the_helpers_own_run(proj, run, n
     from types import SimpleNamespace
 
     chat.guard(proj, SimpleNamespace(cmd="run", sub="release", ticket=gid, run="r_helper0001", json=False))
-    chat.guard(proj, SimpleNamespace(cmd="run", sub="event", ticket=None, run=None, kind="stop", json=False))
+    chat.guard(proj, SimpleNamespace(cmd="run", sub="event", ticket=None, run=None, kind="idle", json=False))
 
 
 def test_helper_relay_send_is_plain_text_to_a_paired_phone_with_safe_cards(proj, run, conn, monkeypatch):
@@ -524,3 +524,63 @@ def test_chat_id_works_for_the_host_even_though_chat_is_a_hidden_command(proj, r
     assert run("chat", "id", "--json")[0] == 0
     with pytest.raises(SystemExit):
         run("--help-all")
+
+
+# ---------------------------------------------------------------- third review round
+
+
+def test_helper_writes_need_a_named_ticket_and_no_owner_or_odd_options(proj, run, new_ticket, monkeypatch):
+    tid = new_ticket("Pay car tax")
+    gid = _helper(proj, monkeypatch)
+    for argv in (
+        ("ticket", "new", "T", "--owner", "someone"),
+        ("ticket", "new", "T", "--parent", gid),
+        ("init",),  # init is guarded too
+        ("run", "claim", gid, "--agent", "evil"),
+        ("run", "claim", gid, "--session", "s1"),
+        ("ref", "add", tid, "file:~/.ssh/id_rsa", "--kind", "file"),
+        ("ref", "add", tid, "../x", "--kind", "file"),
+        ("ref", "add", tid, "/etc/passwd"),
+        ("ref", "add", tid, ".orch/config.toml"),
+        ("ref", "add", tid, "https://example.com", "--kind", "weird"),
+    ):
+        assert run(*argv)[0] == 2, argv
+    (proj / "plan.md").write_text("x")
+    assert (
+        run("ref", "add", tid, "plan.md")[0] == 0 and run("ref", "add", tid, "https://example.com/p")[0] == 0
+    )
+    from types import SimpleNamespace
+
+    with pytest.raises(Refused):  # a write with no ticket named
+        chat.guard(proj, SimpleNamespace(cmd="log", sub=None, id=None, text="x", json=False))
+    chat.guard(
+        proj,
+        SimpleNamespace(
+            cmd="run", sub="event", ticket=None, run=None, kind="idle", session_id=None, json=False
+        ),
+    )
+    with pytest.raises(Refused):  # 0 is a given value, not "unset"
+        chat.guard(proj, SimpleNamespace(cmd="status", sub=None, json=False, pid=0))
+
+
+def test_relay_topic_makes_a_ticket_and_is_not_a_read(proj):
+    assert chat.HELPER_COMMANDS[("relay", "topic")][0] == "plain"
+
+
+def test_more_secret_files_and_a_swap_between_check_and_read(proj):
+    for rel in (
+        "db.sqlite-wal",
+        "db.sqlite-shm",
+        "db.sqlite-journal",
+        "terraform.tfstate",
+        "terraform.tfstate.backup",
+        ".bash_history",
+        "cfg/auth.json",
+    ):
+        (proj / rel).parent.mkdir(parents=True, exist_ok=True)
+        (proj / rel).write_text("x")
+        assert chat.safe_file(proj, rel) is None, rel
+    (proj / "a.md").write_text("hello")
+    assert chat.read_file(proj, "a.md") == b"hello"
+    (proj / "big.md").write_text("x" * 100)
+    assert chat.read_file(proj, "big.md", 10) is None

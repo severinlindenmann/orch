@@ -28,8 +28,8 @@ REF_KINDS = ("ticket", "reference", "file")
 # a file card names a file inside the workspace; never under .orch/ or .git/, never a key, token or login file
 _NOT_FILES = re.compile(
     r"(^|/)(\.orch|\.git|\.ssh|\.gnupg|\.aws|\.kube|\.docker|secrets)(/|$)"
-    r"|(^|/)(\.env[^/]*|\.npmrc|\.netrc|\.pypirc|\.git-credentials|\.pgpass|\.htpasswd|id_(rsa|dsa|ecdsa|ed25519)[^/]*)$"
-    r"|\.(pem|key|p8|p12|pfx|jks|kdbx|sqlite3?|db)(\.[^/]*)?$|token|credential|secret|password",
+    r"|(^|/)(\.env[^/]*|\.npmrc|\.netrc|\.pypirc|\.git-credentials|\.pgpass|\.htpasswd|\.bash_history|\.zsh_history|auth\.json|terraform\.tfstate[^/]*|id_(rsa|dsa|ecdsa|ed25519)[^/]*)$"
+    r"|\.(pem|key|p8|p12|pfx|jks|kdbx|sqlite3?|db)([.-][^/]*)?$|token|credential|secret|password",
     re.I,
 )
 
@@ -180,10 +180,32 @@ def safe_file(root: Path, rel_path: str) -> str | None:
 def read_file(root: Path, rel_path: str, max_bytes: int = 5_000_000) -> bytes | None:
     """The bytes of a file card, for whoever serves it: checked now (safe_file), then opened without following
     links (safefile.open_file_ref). None = not allowed."""
-    from orch import safefile
+    import os
+    import stat
 
     p = safe_file(root, rel_path)
-    return safefile.open_file_ref(root, p, max_bytes) if p else None
+    if not p:
+        return None
+    real = root.resolve() / p
+    try:
+        before = real.lstat()
+        fd = os.open(real, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)  # what was opened is what was checked: one regular file, one name
+        if (
+            not stat.S_ISREG(st.st_mode)
+            or st.st_nlink != 1
+            or (st.st_dev, st.st_ino) != (before.st_dev, before.st_ino)
+        ):
+            return None
+        if st.st_size > max_bytes:
+            return None
+        with os.fdopen(fd, "rb", closefd=False) as f:
+            return f.read(max_bytes + 1)[:max_bytes]
+    finally:
+        os.close(fd)
 
 
 def refs_in_text(root: Path, text: str) -> list[dict]:
@@ -408,7 +430,7 @@ def helper_prompt(root: Path, ticket: dict, items: list[dict], news: str) -> str
 # `--fresh`, `--file`, `--update` are in no list. kind: "write" targets must not be the Chat ticket, "read" may be,
 # "run" (the wrapper's hooks) must be the Chat ticket and, when given, the helper's own run (ORCH_RUN).
 HELPER_COMMANDS = {
-    ("ticket", "new"): ("write", {"title", "parent", "owner", "due", "note"}, ("parent",)),
+    ("ticket", "new"): ("write", {"title", "parent", "due", "note"}, ("parent",)),
     ("ticket", "show"): ("read", {"id"}, ("id",)),
     ("ticket", "list"): ("read", {"status", "all"}, ()),
     ("ticket", "tree"): ("read", {"id"}, ("id",)),
@@ -421,14 +443,14 @@ HELPER_COMMANDS = {
         {"workspace", "text", "reply_to", "ticket", "summary", "speak", "ref"},
         ("ticket",),
     ),
-    ("relay", "topic"): ("read", {"message", "title"}, ()),
+    ("relay", "topic"): ("plain", {"message", "title"}, ()),  # makes a ticket from a phone text; no target
     ("chat", "status"): ("read", set(), ()),
     ("chat", "days"): ("read", set(), ()),
     ("chat", "day"): ("read", {"day"}, ()),
     ("chat", "id"): ("read", set(), ()),
     ("needs", None): ("read", set(), ()),
     ("status", None): ("read", set(), ()),
-    ("run", "claim"): ("run", {"ticket", "agent", "session", "pid", "text"}, ("ticket",)),
+    ("run", "claim"): ("run", {"ticket", "agent", "pid"}, ("ticket",)),
     ("run", "release"): ("run", {"ticket", "run"}, ("ticket",)),
     ("run", "done"): ("run", {"ticket", "run"}, ("ticket",)),
     ("run", "status"): ("run", {"ticket"}, ("ticket",)),
@@ -449,6 +471,31 @@ def is_helper(root: Path) -> bool:
     return bool(gid and tickets.agent_tool() and os.environ.get("ORCH_TICKET") == gid)
 
 
+_REF_KINDS = (None, "link", "file", "pr", "commit", "html", "ticket")
+
+
+def _check_ref_add(root: Path, args, no: Refused) -> None:
+    """A reference the helper adds is a web link, a ticket, or a safe file inside the workspace: nothing else."""
+    target, kind = str(getattr(args, "target", "") or ""), getattr(args, "kind", None)
+    if kind not in _REF_KINDS:
+        raise no
+    if phone_view.safe_url(target):
+        return
+    try:
+        if tickets._ID_RE.fullmatch(str(tickets.resolve(root, target))):
+            return
+    except Refused:
+        pass
+    if (
+        kind in (None, "file")
+        and not target.startswith(("/", "~"))
+        and ".." not in target.split("/")
+        and safe_file(root, target)
+    ):
+        return
+    raise no
+
+
 def guard(root: Path, args) -> None:
     """The helper makes tickets, notes and answers to the person. It never signs, approves, publishes, closes,
     drops, deletes, answers a question, starts or stops another run, or changes the Chat ticket (general flag,
@@ -465,16 +512,20 @@ def guard(root: Path, args) -> None:
     if entry is None:
         raise no
     kind, allowed, targets = entry
-    used = {k for k, v in vars(args).items() if k not in _NO_DEST and v not in (None, False, "", [], ())}
+    used = {
+        k
+        for k, v in vars(args).items()
+        if k not in _NO_DEST and v is not None and v is not False and v != "" and v != [] and v != ()
+    }  # 0 counts as given
     if used - allowed or getattr(args, "wsub", None) is not None:
         raise no
     gid = tickets.general_id(root)
     for f in targets:
         v = getattr(args, f, None)
         if not v:
-            if kind == "run" and f == "ticket":
-                continue  # the hook's default is ORCH_TICKET = the Chat ticket
-            continue
+            if kind == "write" and f == "id":
+                raise no  # a write names its ticket; there is no default that could be the Chat ticket
+            continue  # run hooks: the default is ORCH_TICKET = the Chat ticket; parent/ticket: none given
         try:
             rid = tickets.resolve(root, v)
         except Refused:
@@ -485,6 +536,20 @@ def guard(root: Path, args) -> None:
             raise no
     if kind == "run" and getattr(args, "run", None) not in (None, os.environ.get("ORCH_RUN")):
         raise no  # only the helper's own run
+    if (cmd, sub) == ("run", "claim") and getattr(args, "agent", None) not in (
+        None,
+        os.environ.get("ORCH_AGENT"),
+    ):
+        raise no
+    if (cmd, sub) == ("run", "event") and getattr(args, "kind", None) not in (
+        "session",
+        "idle",
+        "working",
+        "attention",
+    ):
+        raise no
+    if (cmd, sub) == ("ref", "add"):
+        _check_ref_add(root, args, no)
     if kind == "relay":
         to = str(getattr(args, "workspace", ""))
         try:
