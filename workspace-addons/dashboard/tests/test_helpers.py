@@ -364,7 +364,7 @@ def test_an_agent_that_is_starting_is_a_starting_row_not_idle_or_lost():
 def test_ticket_rows_use_one_status_chip_and_inline_next_step():
     src = webjs.all_js()
     tree = src[src.index("function treeBranch") : src.index("let ticketView")]
-    assert tree.count("statusChip(t)") == 1
+    assert tree.count("ticketAttentionChip(t)") == 1  # the one chip: Needs you (yellow) or the status word
     assert "ticketNext(t)" in tree and "ticketMenu(t, 'tree')" in tree
     assert "activity(t," not in tree
 
@@ -581,7 +581,7 @@ def test_ticket_screens_use_plain_wording_and_one_chip():
     assert "No tickets are being worked on." in src and "No agent is working right now" not in src
     assert "plainWhy(question" in src  # Needs-you rows carry no command text
     assert "seconds + ' s ago'" not in src  # one calm time format
-    assert "'Not chosen yet'" not in src.split("const agent = window.DashHelpers.agentLine")[1].split("\n")[0]
+    assert "'Not chosen yet'" not in src.split("const agent = window.DashHelpers.agentLabel")[1].split("\n")[0]  # one label source
     assert "Ideas to plan" in src and "Finished work" in src
     assert "hideStatus" not in src and "'Needs you'" in src  # 10A: short board chip; 7A: no chip beside the banner
 

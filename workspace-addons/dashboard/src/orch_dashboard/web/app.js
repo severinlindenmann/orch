@@ -86,7 +86,7 @@ const starting = new Set();
 // The one chip of a ticket: what the agent or the person has to do now ('' when nothing).
 function activityInfo(t) {
   const run = state.runs?.[t.id], live = run?.claim?.live;
-  const agent = run?.claim?.label || array(state.settings?.agents).find(a => a.name === run?.claim?.agent)?.label || capitalise(run?.claim?.agent || array(state.settings?.agents).find(a => a.chosen)?.label || 'agent');
+  const agent = window.DashHelpers.agentLabel(state.settings, run?.claim);
   const getting = starting.has(t.id) || live?.state === 'starting';
   const busy = getting || (run?.running && !['idle', 'attention'].includes(live?.state));
   const text = getting ? 'Getting started…' : questions(t).length || live?.state === 'attention' ? 'Needs you' : t.status === 'review' ? 'Ready for review' : busy ? agent + ' is working' : '';
