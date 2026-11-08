@@ -14,7 +14,7 @@ function context(items, extra = {}) {
     needsList:() => [], state:{}, starting:new Set(), sorted:v => v, STATUS_CHOICES:helpers.STATUS_CHOICES,
     heading:(...text) => h('h1', {}, text), now:() => new Date(), parse:() => null, capitalise:v => v,
     emptyRow:text => h('p', {}, text), card:(key,title,count,body) => h('section', {}, title,count,body),
-    activeTicket:() => true, ...extra});
+    activeTicket:() => true, ticketAttentionChip:() => null, ...extra});
   for (const file of ['home', 'tickets']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/' + file + '.js'), 'utf8'), c);
   return c;
 }
@@ -61,4 +61,32 @@ test('home renders one need card per ticket with question count and yellow chip'
   assert.equal(nodes(home, n => n.attrs?.className === 'chip attn').length, 1);
   needs.shift();
   assert.match(JSON.stringify(c.home()), /Second\?/);
+});
+
+// Real /api/state shape from the test network (sanitized): `children` is a list of ids, `parent` an id.
+test('parts on the real /api/state shape: list nests parts under the parent whatever their status', () => {
+  const real = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/state-pilatus-parts.json'), 'utf8'));
+  const items = real.tickets, [parent] = items.filter(t => t.key === 'PIL-2');
+  assert.deepEqual(parent.children, ['t_1wis33', 't_fhm1w4']);
+  assert.deepEqual(helpers.childrenOf(items, parent).map(t => t.key).sort(), ['PIL-10', 'PIL-11']);
+  assert.equal(helpers.parentOf(items, items.find(t => t.key === 'PIL-10')).key, 'PIL-2');
+  const c = context(items, {state:real});
+  const groups = c.ticketGroups(c.ticketParents(items));
+  const waiting = groups.find(g => g.status === 'waiting'), open = groups.find(g => g.status === 'open');
+  assert.equal([...waiting.tickets.map(t => t.key)].sort().join(), 'PIL-10,PIL-11,PIL-2');
+  assert.ok(!open.tickets.some(t => t.key === 'PIL-10'));
+  const rows = helpers.treeRows(waiting.tickets);
+  assert.equal(rows.find(r => r.ticket.key === 'PIL-2').children, 2);
+  assert.equal(rows.filter(r => /PIL-1[01]/.test(r.ticket.key)).map(r => r.depth).join(), '1,1');
+});
+
+test('Copy/Repeat capability is read from the real state.addons shape (active add-ons only, no active field)', () => {
+  const real = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/state-pilatus-parts.json'), 'utf8'));
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
+  const line = src.split('\n').find(l => l.startsWith('const repeatsAddon'));
+  const c = vm.createContext({addons:() => real.addons});
+  vm.runInContext(line, c);
+  assert.equal(vm.runInContext('repeatsAddon()', c), 'automation');
+  c.addons = () => [{name:'focus', dashboard:{panel:null}}];
+  assert.equal(vm.runInContext('repeatsAddon()', c), null);
 });

@@ -299,11 +299,13 @@ function repeatsCard() {
       h('button', {type:'button', className:'btn primary', 'data-native':'repeat'}, '+ Repeat a ticket'),
       h('button', {type:'button', className:'btn outline', 'data-native':'copy'}, 'Copy a ticket')));
 }
-function repeatsDialog(verb) {
+// The add-on that declares the `repeats` panel (state.addons lists only active add-ons, with no `active` field); null when off (then no Copy/Repeat shows on a ticket).
+const repeatsAddon = () => addons().find(a => a.dashboard?.panel === 'repeats')?.name || null;
+function repeatsDialog(verb, only = null, addonName = null) {
   if (snapshot) return;
   const {d, actions} = dialog(verb === 'repeat' ? 'Repeat a ticket' : 'Copy a ticket', 'dialog');
   const ticket = h('select', {className:'input', name:'ticket'});
-  tickets().filter(t => !['done', 'dropped'].includes(t.status)).forEach(t => ticket.append(new Option(t.title || t.id, t.id)));
+  tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status)).forEach(t => ticket.append(new Option(t.title || t.id, t.id)));
   const preset = h('select', {className:'input', name:'repeat'});
   repeatPresets.forEach(value => preset.append(new Option(capitalise(value).replace('monday', 'Monday'), value)));
   const fields = h('div', {className:'form-fields'}, h('label', {}, 'Ticket', ticket),
@@ -312,13 +314,13 @@ function repeatsDialog(verb) {
   const save = button(verb === 'repeat' ? 'Save' : 'Copy ticket', 'primary', async () => {
     if (save.disabled || !ticket.value) return;
     save.disabled = true;
-    const args = {addon:route().id, verb, target:ticket.value};
+    const args = {addon:addonName || route().id, verb, target:ticket.value};
     if (verb === 'repeat') args.value = preset.value;
     const result = await act('addon.act', args);
     window.orch.toast(result.ok ? (verb === 'repeat' ? 'Repeat saved.' : 'Ticket copied.') : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
     save.disabled = false;
     if (result.ok) await window.orch.close(d);
-    await loadAddon(route().id);
+    if (route().kind === 'addon') await loadAddon(route().id);
   });
   save.disabled = !ticket.options.length;
   actions.append(save); d.append(fields, actions); window.orch.open(d);
@@ -375,4 +377,14 @@ function bindAddonControls(host) {
   host.querySelectorAll('[data-native]').forEach(control => {
     control.onclick = () => ['repeat', 'copy'].includes(control.dataset.native) ? repeatsDialog(control.dataset.native) : sharedLinkAction(control);
   });
+}
+
+// Copy a ticket in one click and open the copy; the copy is the ticket that was not there before.
+async function copyTicket(t) {
+  const addon = repeatsAddon(), known = new Set(tickets().map(x => x.id));
+  if (!addon || snapshot) return;
+  const result = await act('addon.act', {addon, verb:'copy', target:t.id});
+  const made = result.ok ? tickets().find(x => !known.has(x.id)) : null;
+  window.orch.toast(result.ok ? 'Ticket copied.' : changeError(result), result.ok ? 'ok' : 'error');
+  if (made) location.hash = href(made.id);
 }

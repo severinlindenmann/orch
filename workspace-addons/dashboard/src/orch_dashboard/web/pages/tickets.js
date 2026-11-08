@@ -22,11 +22,11 @@ function ticketParents(items) {
 }
 function ticketGroups(items) {
   const groups = [['waiting', 'Needs you'], ['active', 'Working'], ['open', 'Not started'], ['review', 'Ready for review'], ['done', 'Done']].map(([status, title]) => ({status, title, tickets:[]}));
-  for (const t of items) {
-    const column = window.DashHelpers.columnOf(shown(t).status);
-    const status = questions(t).length || column === 'waiting' ? 'waiting' : column;
-    groups.find(group => group.status === status)?.tickets.push(t);
-  }
+  const byId = new Map(items.map(t => [t.id, t]));
+  const own = t => { const column = window.DashHelpers.columnOf(shown(t).status); return questions(t).length || column === 'waiting' ? 'waiting' : column; };
+  // A part sits under its parent in the parent's group, whatever its own status is (its status chip still says it).
+  const rootOf = t => { const seen = new Set(); while (t && byId.has(t.parent) && !seen.has(t.id)) { seen.add(t.id); t = byId.get(t.parent); } return t; };
+  for (const t of items) groups.find(group => group.status === own(rootOf(t)))?.tickets.push(t);
   return groups;
 }
 function boardParentLine(t) {

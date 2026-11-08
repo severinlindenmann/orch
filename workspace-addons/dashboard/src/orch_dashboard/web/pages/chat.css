@@ -4,6 +4,7 @@
 .chat-page [hidden]{display:none!important}
 .chat-page h1,.chat-page h2,.chat-page p{margin:0}
 .chat-page h1{font-size:16px;font-weight:600;flex:1;overflow-wrap:anywhere}
+.chat-page .chat-list-title{display:none;font-size:18px;flex:none}
 .chat-page h2{font-size:13px;font-weight:600}
 .chat-page button,.chat-page input,.chat-page textarea{font:inherit;color:inherit}
 .chat-page button,.chat-page summary{cursor:pointer}
@@ -114,6 +115,7 @@
 .chat-page .chat-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @keyframes chat-pulse{to{opacity:.25;transform:translateY(-2px)}}
 @media(max-width:800px){
+  .chat-page .chat-list-title{display:block;padding:14px 12px 4px}
   .chat-page{grid-template-columns:minmax(0,1fr)}
   .chat-page.chat-list-open .chat-main{display:none}
   .chat-page.chat-thread-open .chat-list{display:none}
