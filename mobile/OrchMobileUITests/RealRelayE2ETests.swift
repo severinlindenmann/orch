@@ -109,6 +109,7 @@ final class RealRelayE2ETests: XCTestCase {
     // MARK: 0 pair
     func test00PairWithTheInvitationLink() {
         let app = launch(reset: true)
+        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
         must(app, app.buttons["Paste invitation link"], "paste button", timeout: 20)
         shot("00-onboarding")
         app.buttons["Paste invitation link"].tap()
@@ -374,6 +375,7 @@ final class RealRelayE2ETests: XCTestCase {
         el(app, "settings-button").tap()
         must(app, el(app, "voice-settings"), "Voice settings row"); el(app, "voice-settings").tap()
         sleep(1); shot("83-voice-settings")
+        app.buttons["voice-replies-menu"].tap()
         if app.buttons["speak-always"].waitForExistence(timeout: 5) { app.buttons["speak-always"].tap() }
         let sw = app.switches.firstMatch
         if sw.waitForExistence(timeout: 3) { sw.tap() }
@@ -394,6 +396,7 @@ final class RealRelayE2ETests: XCTestCase {
         el(app, "mute-Off").tap(); sleep(2)
         back(app)
         el(app, "add-workspace").tap()
+        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
         must(app, app.buttons["Paste invitation link"], "Paste invitation link"); app.buttons["Paste invitation link"].tap()
         let f = app.textFields["invite-field"]
         must(app, f, "invite field"); f.tap(); f.typeText(link)

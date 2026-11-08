@@ -23,11 +23,16 @@ final class OwnerTF1SettingsUITests: XCTestCase {
         voice.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5)).tap()
 
         XCTAssertTrue(app.navigationBars["Voice"].waitForExistence(timeout: 5))
-        for mode in ["auto", "always", "never"] {
-            XCTAssertTrue(app.buttons["speak-\(mode)"].exists)
+        let replies = app.buttons["voice-replies-menu"]
+        XCTAssertTrue(replies.waitForExistence(timeout: 5))
+        for mode in ["always", "never", "auto"] {
+            replies.tap()
+            let option = app.buttons["speak-\(mode)"]
+            XCTAssertTrue(option.waitForExistence(timeout: 5))
+            option.tap()
         }
         XCTAssertTrue(app.switches["I speak Swiss German"].exists)
-        let limit = app.buttons.containing(.staticText, identifier: "Monthly limit for voice replies").firstMatch
+        let limit = app.buttons["voice-limit-menu"]
         for _ in 0..<4 {
             if limit.isHittable { break }
             app.swipeUp()
@@ -35,5 +40,6 @@ final class OwnerTF1SettingsUITests: XCTestCase {
         XCTAssertTrue(limit.isHittable)
         limit.tap()
         XCTAssertTrue(app.buttons["$10"].waitForExistence(timeout: 5))
+        app.buttons["$10"].tap()
     }
 }

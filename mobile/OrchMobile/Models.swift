@@ -152,6 +152,11 @@ struct TextBody: Codable, Sendable, Equatable {
     /// Set on the phone's own texts (the UUID of the outbox item).
     var clientId: String? = nil
     var general: Bool? = nil
+    // Incoming Chat metadata; never included in a phone send.
+    var by: String? = nil
+    var via: String? = nil
+    var phone: String? = nil
+    var day: String? = nil
     /// Workspace texts worth hearing (GET /v1/phone/speech/<id>).
     var speak: SpeakHint? = nil
     var attachments: [MessageAttachment] = []
@@ -161,9 +166,6 @@ struct TextBody: Codable, Sendable, Equatable {
     var ticketView: TicketSnapshot? = nil
     var group: GroupInfo? = nil
     var groupEvent: GroupEvent? = nil
-    var by: String? = nil
-    var via: String? = nil
-    var phone: String? = nil
     var origin: GroupOrigin? = nil
     var echoOf: String? = nil
     var toPerson: Bool? = nil
@@ -182,7 +184,7 @@ struct TextBody: Codable, Sendable, Equatable {
     }
     private enum CodingKeys: String, CodingKey {
         case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView
-        case group, groupEvent, by, via, phone, origin, echoOf, toPerson, task, sharedFiles
+        case group, groupEvent, by, via, phone, day, origin, echoOf, toPerson, task, sharedFiles
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -190,6 +192,10 @@ struct TextBody: Codable, Sendable, Equatable {
         update = try? c.decodeIfPresent(TextUpdate.self, forKey: .update)
         clientId = try? c.decodeIfPresent(String.self, forKey: .clientId)
         general = try? c.decodeIfPresent(Bool.self, forKey: .general)
+        by = try? c.decodeIfPresent(String.self, forKey: .by)
+        via = try? c.decodeIfPresent(String.self, forKey: .via)
+        phone = try? c.decodeIfPresent(String.self, forKey: .phone)
+        day = try? c.decodeIfPresent(String.self, forKey: .day)
         speak = try? c.decodeIfPresent(SpeakHint.self, forKey: .speak)
         attachments = (try? c.decodeIfPresent([MessageAttachment].self, forKey: .attachments)) ?? []
         voice = try? c.decodeIfPresent(VoiceMemo.self, forKey: .voice)
@@ -198,9 +204,6 @@ struct TextBody: Codable, Sendable, Equatable {
         ticketView = try? c.decodeIfPresent(TicketSnapshot.self, forKey: .ticketView)
         group = try? c.decodeIfPresent(GroupInfo.self, forKey: .group)
         groupEvent = try? c.decodeIfPresent(GroupEvent.self, forKey: .groupEvent)
-        by = try? c.decodeIfPresent(String.self, forKey: .by)
-        via = try? c.decodeIfPresent(String.self, forKey: .via)
-        phone = try? c.decodeIfPresent(String.self, forKey: .phone)
         origin = try? c.decodeIfPresent(GroupOrigin.self, forKey: .origin)
         echoOf = try? c.decodeIfPresent(String.self, forKey: .echoOf)
         toPerson = try? c.decodeIfPresent(Bool.self, forKey: .toPerson)
