@@ -129,6 +129,10 @@ def _break_dead(lock: Path) -> bool:
             mine.unlink()
 
 
+# link() errors that mean "this file system has no hard links" (vfat, exFAT, SMB, FUSE, Windows): plain create
+_NO_LINK_ERRNOS = {errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errno.EINVAL, errno.ENOSYS}
+
+
 def _create_lock(lock: Path) -> None:
     """Create the lock with our token already in it: written to a private temp file first, then linked into
     place (atomic, refuses an existing lock). A process stopped half-way never leaves an EMPTY lock behind,
@@ -147,7 +151,8 @@ def _create_lock(lock: Path) -> None:
                 return  # NFS may report EEXIST for a link that did succeed: it is our lock
             raise
         except OSError as e:
-            if e.errno not in (errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV):
+            no_links = e.errno in _NO_LINK_ERRNOS or getattr(e, "winerror", None) in (1, 50)
+            if not no_links:
                 raise  # e.g. Windows "delete pending" (EACCES): the lock is busy, the caller waits
             # no hard links on this file system: the plain create + write below
     finally:

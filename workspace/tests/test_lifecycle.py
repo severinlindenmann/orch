@@ -470,7 +470,8 @@ def test_an_undo_in_the_status_branch_only_undoes_its_own_claim(proj, run, monke
 
 
 def test_a_run_lock_falls_back_without_hard_links_and_is_private(proj, monkeypatch):
-    """#318 review: link() says EPERM/ENOTSUP/EXDEV where hard links are missing: plain create, mode 0600."""
+    """#318 review: link() says EPERM/ENOTSUP/EXDEV/EINVAL/ENOSYS (or Windows error 1/50) where hard links are
+    missing: plain create, mode 0600. Any other error (EACCES: Windows delete pending) still means busy."""
     import errno
     import stat as st
 
@@ -478,10 +479,12 @@ def test_a_run_lock_falls_back_without_hard_links_and_is_private(proj, monkeypat
 
     lock = proj / ".orch/run/tickets/t_lockbb.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
-    for code in (errno.EPERM, errno.ENOTSUP, errno.EXDEV):
+    windows = OSError(errno.EIO, "not supported")
+    windows.winerror = 50  # ERROR_NOT_SUPPORTED (FAT/exFAT/SMB)
+    for code in (errno.EPERM, errno.ENOTSUP, errno.EXDEV, errno.EINVAL, errno.ENOSYS, windows):
 
         def no_links(*a, code=code, **k):
-            raise OSError(code, "no hard links")
+            raise code if isinstance(code, OSError) else OSError(code, "no hard links")
 
         monkeypatch.setattr(runs.os, "link", no_links)
         runs._create_lock(lock)
@@ -505,3 +508,17 @@ def test_an_nfs_eexist_on_our_own_lock_counts_as_taken(proj, monkeypatch):
     lock.write_text("someone else")
     with pytest.raises(FileExistsError):
         runs._create_lock(lock)
+
+
+def test_a_link_error_that_means_busy_is_not_a_fallback(proj, monkeypatch):
+    import errno
+
+    def busy(*a, **k):
+        raise PermissionError(errno.EACCES, "delete pending")
+
+    monkeypatch.setattr(runs.os, "link", busy)
+    lock = proj / ".orch/run/tickets/t_lockdd.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with pytest.raises(PermissionError):
+        runs._create_lock(lock)
+    assert not lock.exists()
