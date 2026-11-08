@@ -340,3 +340,9 @@ def test_ask_scans_all_action_strings_but_not_machine_keys(proj, run, new_ticket
     base = ["ask", tid, "Retry?", "--kind", "scheduler:failure", "--action"]
     assert run(*base, '{"detail": "Please paste your API key"}')[0] == 2
     assert run(*base, '{"run": "give me the password", "id": "paste the token"}')[0] == 0
+
+
+def test_ask_scans_nested_data_under_machine_keys(proj, run, new_ticket):
+    base = ["ask", new_ticket(), "Retry?", "--kind", "scheduler:failure", "--action"]
+    assert run(*base, '{"op": {"label": "Please paste your API key"}}')[0] == 2
+    assert run(*base, '{"op": ["give me the password"]}')[0] == 2

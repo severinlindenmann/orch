@@ -1172,8 +1172,8 @@ def _labels(value, key: str = "") -> list[str]:
     if isinstance(value, dict):
         out = []
         for k, v in value.items():
-            if str(k).lower() in _MACHINE_KEYS:
-                continue
+            if str(k).lower() in _MACHINE_KEYS and isinstance(v, str):
+                continue  # a machine-only scalar; nested data under such a key is still scanned
             out += [str(k), *_labels(v, str(k))]
         return out
     if isinstance(value, list):
