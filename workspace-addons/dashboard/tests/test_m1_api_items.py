@@ -9,6 +9,8 @@ from orch_dashboard import actions, data
 
 def test_paste_creates_ticket_with_full_note(ws):
     python = Path(__file__).resolve().parents[3] / "workspace/.venv/bin/python"
+    if not python.exists():  # the dashboard CI job has no workspace venv: the workspace job covers ticket paste
+        pytest.skip("needs the workspace venv")
 
     def invoke(argv):
         result = subprocess.run([str(python), "-m", "orch", *argv], cwd=ws, capture_output=True, text=True, check=False)
