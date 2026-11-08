@@ -359,6 +359,13 @@ def test_an_agent_that_is_starting_is_a_starting_row_not_idle_or_lost():
     assert [(r["agent"], r["state"], r["ticket"]) for r in rows] == [("claude", "starting", "t_a")]
 
 
+def test_ticket_row_chip_has_no_note_under_it_so_it_lines_up_with_move_to():
+    """4A follow-up: "just now" goes under the title (meta line); the row's chip stands alone beside Move to."""
+    src = (WEB / "app.js").read_text()
+    assert "activity(t, 'row')" in src and "where === 'row' ? '' : activityNote(t)" in src
+    assert "snapshot ? '' : activityNote(t)]" in src  # the note joins the row's subtitle line
+
+
 def test_home_counts_a_starting_ticket_and_the_sidebar_badge_has_words():
     src = (WEB / "app.js").read_text()
     assert "agent starting" in src and "Getting started…" in src
@@ -457,7 +464,7 @@ def test_first_run_note_is_not_shown_as_an_answer():
     "status,word",
     [
         ("open", "Not started"),
-        ("ready", "Ready to start"),
+        ("ready", "Not started"),
         ("active", "Working"),
         ("waiting", "Needs you"),
         ("review", "Ready for review"),
@@ -524,10 +531,7 @@ def test_the_move_to_control_is_a_visible_labelled_button():
     src = (WEB / "app.js").read_text()
     assert "status-sum-icon" not in src
     assert "'Move to'" in src
-    choices = src.split("const MOVE_CHOICES = ")[1].split("];")[0]
-    assert [w for w in ("Not started", "Working", "Ready for review", "Done") if w in choices] == [
-        "Not started", "Working", "Ready for review", "Done"
-    ]
+    assert [w for _, w in node_value("MOVE_CHOICES")] == ["Not started", "Working", "Ready for review", "Done"]
     assert "Backlog" not in src
 
 
@@ -605,9 +609,41 @@ def test_needs_you_count_words_match_the_phone(n, want):
     assert call("needsYou", n) == want
 
 
-def test_groups_are_in_the_phone_order_and_old_phrases_are_gone():
+def test_groups_follow_the_lifecycle_and_old_phrases_are_gone():
     src = (WEB / "app.js").read_text()
-    choices = src.split("const STATUS_CHOICES = ")[1].split("];")[0]
-    order = [w for w in ("Needs you", "Working", "Ready for review", "Not started", "Done") if w in choices]
-    assert order == sorted(order, key=choices.index) and len(order) == 5
+    assert [w for _, w in node_value("STATUS_CHOICES")] == [
+        "Not started", "Working", "Needs you", "Ready for review", "Done"
+    ]
     assert "question needs you" not in src and "questions need you" not in src
+
+
+def node_value(name):
+    out = subprocess.run(
+        ["node", "-e", f"console.log(JSON.stringify(require(process.argv[1]).{name}))", str(WEB / "helpers.js")],
+        capture_output=True, text=True, check=True,
+    )
+    return json.loads(out.stdout)
+
+
+@node
+def test_one_label_per_status_single_sourced():
+    """fb12: every label site reads the words from helpers.js; no second map of status words in app.js."""
+    src = (WEB / "app.js").read_text()
+    for word in ("Ready to start", "Backlog"):
+        assert word not in src and word not in (WEB / "helpers.js").read_text()
+    for pair in ("open:'Not started'", "active:'Working'", "review:'Ready for review'", "done:'Done'"):
+        assert pair not in src.replace(" ", "")
+    words = node_value("STATUS_WORD")
+    assert words["ready"] == words["open"] == "Not started" and words["waiting"] == "Needs you"
+    assert all(w in src for w in ("DashHelpers.statusWord", "DashHelpers.STATUS_CHOICES", "DashHelpers.MOVE_CHOICES"))
+    assert [s for s, _ in node_value("STATUS_CHOICES")] == node_value("STATUS_ORDER")
+    assert call("columnOf", "ready") == "open" and call("columnOf", "review") == "review"
+
+
+def test_home_row_is_one_link_and_the_review_chip_shows_once():
+    src = (WEB / "app.js").read_text()
+    css = (WEB / "style.css").read_text()
+    assert ".ticket-row h3 a::after" in css and "position:absolute;inset:0" in css
+    assert ".ticket-row .status-menu" in css  # Move to stays clickable above the row link
+    assert "'Ready for your review'" not in src
+    assert "['head', 'board'].includes(where)" in src

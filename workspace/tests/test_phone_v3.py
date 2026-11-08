@@ -107,6 +107,19 @@ def test_agent_reply_from_general_has_no_ticket_and_only_ack_working(proj, run, 
     check_sent_valid(conn)
 
 
+def test_text_sent_to_general_is_kept_in_the_general_history(proj, run, conn):
+    from orch import tickets
+
+    conn.inbox.append(msg(GEN, {"text": "hi", "general": True}))
+    run("relay", "inbox")
+    gid = tickets.general_id(proj)
+    assert run("relay", "send", PHONE, "Hallo!", "--ticket", gid)[0] == 0
+    texts = [h["text"] for h in tickets.load(proj, gid)["history"]]
+    assert texts[-1] == "Hallo!" and any("hi" in x for x in texts[:-1])
+    # the acks and "working" updates are not conversation
+    assert not any(x in ("Got it", "Working on it") for x in texts)
+
+
 def test_new_topic_is_acked_with_ticket_and_key(proj, run, conn):
     conn.inbox.append(msg(M1, {"text": "Offerte ablegen"}))
     run("relay", "inbox")
