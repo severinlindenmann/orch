@@ -139,3 +139,57 @@ def test_run_now_without_a_schedule_writes_no_ext(ws):
     add_ticket(ws, "t_plain001")
     act(ws, "run", "t_plain001")
     assert ext(ws, "t_plain001") is None
+
+
+def test_repeat_button_sets_schedule_and_actor(ws):
+    add_ticket(ws, 't_plain001')
+    result = act(ws, 'repeat', 't_plain001', by='human:tester', value='every day at 9')
+    assert result['ticket'] == 't_plain001'
+    assert ext(ws, 't_plain001')['cron'] == '0 9 * * *'
+    assert [c['by'] for c in calls(ws) if c['args'][:2] == ['ext', 'set']] == ['human:tester']
+
+
+def test_copy_button_uses_safe_new_and_log(ws, monkeypatch):
+    from orch_automation import orchcli
+    original = {"id": 't_plain001', "title": '--title', "note": '--note', "owner": 'Sam', "parent": 't_parent1', "status": 'done'}
+    monkeypatch.setattr(orchcli, 'tickets', lambda root: [original])
+    writes = []
+    def call(root, *args, **kw):
+        writes.append((args, kw))
+        return {'id': 't_new0001', 'title': original['title']} if args[:2] == ('ticket', 'new') else {}
+    monkeypatch.setattr(orchcli, 'call', call)
+    assert act(ws, 'copy', original['id'], by='human:tester')['ticket'] == 't_new0001'
+    assert writes[0][0][:5] == ('ticket', 'new', '--owner=Sam', '--note=--note', '--parent=t_parent1')
+    assert writes[0][0][-2:] == ('--', '--title')
+    assert writes[1][0][-2:] == ('--', 'Copy of t_plain001')
+
+
+def test_repeat_cli_value_is_required_and_success_is_json(ws, capsys):
+    add_ticket(ws, 't_plain001')
+    assert main(['--dir', str(ws), 'act', 'repeat', '--json', '--', 't_plain001']) == 2
+    assert 'Say when' in json.loads(capsys.readouterr().out)['error']
+    assert main(['--dir', str(ws), 'act', 'repeat', '--value=every day at 9', '--json', '--', 't_plain001']) == 0
+    assert json.loads(capsys.readouterr().out)['text'] == 'Schedule saved.'
+
+
+def test_copy_creates_an_open_ticket_through_core_cli(ws, tmp_path, monkeypatch):
+    pytest.importorskip("cryptography", reason="real core CLI needs cryptography")
+    import sys
+    from pathlib import Path
+
+    from orch_automation import orchcli
+    core = Path(__file__).resolve().parents[3] / 'workspace' / 'src'
+    wrapper = tmp_path / 'core-orch'
+    wrapper.write_text(f'#!{sys.executable}\nimport sys\nsys.path.insert(0, {str(core)!r})\nfrom orch.cli import main\nmain()\n')
+    wrapper.chmod(0o755)
+    monkeypatch.setenv('ORCH_BIN', str(wrapper))
+    parent = orchcli.call(ws, 'ticket', 'new', '--', 'Parent')
+    assert parent and parent['id']
+    source = orchcli.call(ws, 'ticket', 'new', '--owner=Sam', '--note=Original note', f"--parent={parent['id']}", '--', '--Original title')
+    assert source and source['id']
+    result = act(ws, 'copy', source['id'], by='human:tester')
+    copied = orchcli.ticket(ws, result['ticket'])
+    assert copied['id'] != source['id'] and copied['status'] == 'open'
+    assert {k: copied[k] for k in ('title', 'note', 'owner', 'parent')} == {k: source[k] for k in ('title', 'note', 'owner', 'parent')}
+    assert copied['history'][1]['text'] == f"Copy of {source['id']}"
+    assert all(row['by'] == 'human:tester' for row in copied['history'])

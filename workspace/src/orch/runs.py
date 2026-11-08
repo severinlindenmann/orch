@@ -14,6 +14,7 @@ without a pid is "maybe stale" after the lease (30 min) with no orch write and i
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 import re
@@ -128,6 +129,40 @@ def _break_dead(lock: Path) -> bool:
             mine.unlink()
 
 
+# link() errors that mean "this file system has no hard links" (vfat, exFAT, SMB, FUSE, Windows): plain create
+_NO_LINK_ERRNOS = {errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errno.EINVAL, errno.ENOSYS}
+
+
+def _create_lock(lock: Path) -> None:
+    """Create the lock with our token already in it: written to a private temp file first, then linked into
+    place (atomic, refuses an existing lock). A process stopped half-way never leaves an EMPTY lock behind,
+    which nobody could tell apart from a live writer for LOCK_STALE_SECONDS. Without hard links: the plain
+    O_EXCL create and write, as before."""
+    tmp = lock.with_name(f".{lock.name}.{secrets.token_hex(4)}.new")
+    try:
+        fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(procs.own_token())
+        try:
+            os.link(tmp, lock)
+            return
+        except FileExistsError:
+            if _lock_text(lock) == procs.own_token():
+                return  # NFS may report EEXIST for a link that did succeed: it is our lock
+            raise
+        except OSError as e:
+            no_links = e.errno in _NO_LINK_ERRNOS or getattr(e, "winerror", None) in (1, 50)
+            if not no_links:
+                raise  # e.g. Windows "delete pending" (EACCES): the lock is busy, the caller waits
+            # no hard links on this file system: the plain create + write below
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+    fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(procs.own_token())
+
+
 _held: set[Path] = set()  # run locks this process holds right now
 _terminating = False  # the SIGTERM handler is running: it interrupted whatever else this process was doing
 
@@ -137,17 +172,16 @@ def locked(root: Path, tid: str):
     """The per-ticket run lock. Free when its holder is verifiably dead, or old with no holder named."""
     lock = run_dir(root) / "tickets" / f"{tid}.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
-    if _terminating and lock in _held:
-        # The signal arrived while this very process was inside the lock; the interrupted code never continues
-        # (the handler ends the process), so waiting for it would only time out and leave the claim behind.
+    if _terminating and (lock in _held or _lock_text(lock) == procs.own_token()):
+        # The signal arrived while this very process was inside the lock (or had just taken it); the
+        # interrupted code never continues (the handler ends the process), so waiting for it would only time
+        # out and leave the claim behind.
         yield
         return
     end = time.monotonic() + 10
     while True:
         try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(fd, "w") as f:
-                f.write(procs.own_token())
+            _create_lock(lock)
             break
         except (
             FileExistsError,
@@ -668,6 +702,13 @@ def _items_text(items: list[dict]) -> str:
     return "\n".join(f"- {i['by']}: {_clip(i['text'], 1500)}" for i in items)
 
 
+def _description_plan(ticket: dict) -> list[str]:
+    """A description longer than a title needs a plan before work starts."""
+    if not ticket.get("checklist") and len((ticket.get("note") or "").strip()) > 200:
+        return ["Read the description, write a plan, split it into tasks with orch check add, then start."]
+    return []
+
+
 def _done_when_plan(ticket: dict) -> list[str]:
     if not ticket.get("done_when") or ticket.get("checklist"):
         return []
@@ -695,6 +736,7 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
         out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")
     if ticket.get("summary"):
         out.append(f"Where things stand: {_clip(ticket['summary'], 1500)}")
+    out.extend(_description_plan(ticket))
     todo = [c for c in ticket.get("checklist") or [] if not c.get("done")]
     if todo:
         out.append(
@@ -720,7 +762,9 @@ def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str
         if h.get("by") == f"agent:{agent}":
             continue
         news.append(f"- {h.get('by', '?')}: {_clip(h.get('text', ''), 300)}")
-    parts = []
+    parts = _description_plan(ticket)
+    if parts:
+        parts.append(f"The person's description: {ticket['note']}")
     if news:
         parts.append("New on the ticket since last time:\n" + "\n".join(news[-10:]))
     if items:

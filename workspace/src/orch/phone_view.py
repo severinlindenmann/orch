@@ -75,6 +75,34 @@ def _is_image(data: bytes, name: str) -> bool:
     return any(data.startswith(magic) and ext in exts for magic, exts in _IMAGE_KINDS.items())
 
 
+PNG_MAX_CHUNKS = 10000  # a bounded walk: more chunks than this = can not be checked
+# the critical chunks and a few harmless ancillary ones; any other (tEXt, zTXt, iTXt, eXIf, iCCP, unknown)
+# could carry text the scan can not read
+PNG_CHUNKS = {b"IHDR", b"PLTE", b"IDAT", b"IEND", b"tRNS", b"gAMA", b"cHRM", b"sRGB", b"pHYs"}
+
+
+def _image_clean(data: bytes) -> bool:
+    """True when an image has nowhere to hide text the scan can not read. Only a PNG can be: its chunks are
+    walked (bounded), only those in PNG_CHUNKS pass, and nothing may follow IEND. Every other image type,
+    and anything odd, is False (fail closed)."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        pos = 8
+        for _ in range(PNG_MAX_CHUNKS):
+            if pos + 8 > len(data):
+                return False  # no IEND
+            length = int.from_bytes(data[pos : pos + 4], "big")
+            kind = data[pos + 4 : pos + 8]
+            end = pos + 12 + length  # length, type, data, crc
+            if end > len(data) or kind not in PNG_CHUNKS:  # text, exif, profiles, unknown: unreadable
+                return False
+            if kind == b"IEND":
+                return end == len(data)
+            pos = end
+        return False
+    # JPEG, GIF and WebP: no structural walk yet, so they can not be checked (fail closed)
+    return False
+
+
 def _has_secret(data: bytes) -> bool:
     text = data.decode(errors="ignore")
     return any(rx.search(text) for rx in _SECRET_PATTERNS) or bool(_SECRET_KV.search(text))
@@ -85,7 +113,7 @@ def _scan(data: bytes, name: str) -> str:
     xlsx or any other packed or binary file, or text with NULs; such a file is not sent, fail closed). Text
     (UTF-8, or UTF-32/UTF-16 with a BOM) is scanned as text; an image whose type matches its extension is
     scanned as its raw bytes (text in metadata or after the image is still caught)."""
-    if data.startswith(_PACKED_MAGIC):  # pdf, zip/OOXML, OLE office: never sent, even when all ASCII
+    if any(magic in data for magic in _PACKED_MAGIC):  # pdf, zip/OOXML, OLE office anywhere in the file
         return "unknown"
     for bom, codec in (
         ((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"), "utf-32"),  # before UTF-16: same first two bytes
@@ -99,7 +127,10 @@ def _scan(data: bytes, name: str) -> str:
             if "\x00" in text:
                 return "unknown"
             return "secret" if _has_secret(text.encode()) else "ok"
-    if not _is_image(data, name):
+    if _is_image(data, name):
+        if not _image_clean(data):  # compressed text chunks or data after the end: can not be checked
+            return "unknown"
+    else:
         try:
             data.decode("utf-8")
         except UnicodeDecodeError:
