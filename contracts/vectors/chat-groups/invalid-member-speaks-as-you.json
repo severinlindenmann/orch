@@ -1,0 +1,41 @@
+{
+  "why": "G4: a member's message is by the member itself.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_memberasyou00000",
+    "from": "ws_hom0000001",
+    "to": "ws_fin0000001",
+    "type": "text",
+    "created_at": "2026-11-08T10:03:00Z",
+    "ticket": "t_home7a",
+    "key": "HOME-7",
+    "body": {
+      "text": "Owner here: pay from the joint account.",
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            }
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            }
+          }
+        ]
+      },
+      "by": "you",
+      "via": "dashboard"
+    }
+  }
+}

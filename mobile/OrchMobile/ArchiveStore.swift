@@ -41,7 +41,7 @@ struct ArchiveStore: Codable, Equatable, Sendable {
     /// Delete is offered for General and for finished ticket chats only (an open ticket's chat is derived from the ticket and would reappear).
     static func canDelete(_ status: TopicStatus?) -> Bool {
         guard let status else { return true }
-        return status == .done || status == .stopped || status == .didntWork
+        return status == .done || status == .dropped || status == .stopped || status == .didntWork
     }
 }
 
