@@ -206,7 +206,7 @@ const OrchBlocks = (() => {
       for (const it of arr(b.items)) {
         const d = parseDate(it.at);
         const when = el('time', '', d ? dayLabel(d) + ' ' + hm(d) : ''); if (d) when.dateTime = it.at;
-        const li = el('li', 'tl t-' + tone(it.tone)), body = linked('tl-text', it.link, [el('span', '', it.text)]);
+        const li = el('li', 'tl t-' + tone(it.tone)), body = linked('tl-text', it.link, [el('span', '', typeof window !== 'undefined' && window.DashHelpers ? window.DashHelpers.plainNames(it.text) : it.text)]);
         li.append(toneDot(it.tone), body, when); ol.append(li);
       }
       s.append(ol);

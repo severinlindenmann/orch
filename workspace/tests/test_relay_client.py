@@ -1641,3 +1641,12 @@ def test_relay_tab_refreshes_when_settings_are_waiting(proj, run, rel):
     (proj / ".orch/inbox/m_refresh000000011.json").write_text(json.dumps(m))
     text = json.dumps(relay_view.view(proj))
     assert "Nobody yet" not in text and "Reports" in text
+
+
+def test_shown_name_is_never_a_raw_workspace_id(monkeypatch):
+    from orch import relay
+
+    monkeypatch.setattr(relay, "_directory", lambda root: [{"id": "ws_a1", "name": "Pilatus"}])
+    assert relay._shown_name(None, "ws_a1", "another workspace") == "Pilatus"
+    assert relay._shown_name(None, "ws_u5k5wqp2a5", "another workspace") == "another workspace"
+    assert relay._shown_name(None, "ws_u5k5wqp2a5", "") == ""
