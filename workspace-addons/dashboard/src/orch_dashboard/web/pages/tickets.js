@@ -101,7 +101,7 @@ function boardCard(t, nested = false) {
     ticketNext(t), h('div', {className:'owner-line'}, name(t.owner) ? h('span', {className:'avatar', title:name(t.owner), 'aria-label':name(t.owner)}, initials(t.owner)) : null, t.due ? h('span', {className:'due'}, date(t.due)) : null),
     tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done, 'aria-label':'Tasks done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, done + '/' + tasks.length)) : null);
 }
-const COLUMN_HINT = {open:'Ideas to plan', active:'Claude is on it', waiting:'A question for you', review:'Ready for your look', done:'Finished work'};
+const COLUMN_HINT = {open:'Ideas to plan', active:'The agent is on it', waiting:'A question for you', review:'Ready for your look', done:'Finished work'};
 function board() {
   const visible = sorted(filteredTickets());
   const cols = STATUS_CHOICES.map(([status, label]) => {
