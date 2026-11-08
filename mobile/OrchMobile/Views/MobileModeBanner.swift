@@ -61,14 +61,15 @@ struct MobileModeBanner: View {
         ForEach(items, id: \.0) { id, state in
             HStack(spacing: 10) {
                 Image(systemName: "bolt.horizontal.circle").foregroundStyle(Theme.brand).accessibilityHidden(true)
-                (Text(state.text) + (state.canTurnOff ? Text(" · ") : Text(""))).themeFont(14).foregroundStyle(Theme.text)
+                // No separator after the text: a long computer name wrapped " ·" onto its own line (owner IMG_6626).
+                Text(state.text).themeFont(14).foregroundStyle(Theme.text)
+                    .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
                 if state.canTurnOff {
                     Button { Task { await model.turnOffMobileMode(id) } } label: {
                         Text("Turn off").themeFont(14, .semibold).foregroundStyle(Theme.brand)
                             .frame(minHeight: 44).contentShape(Rectangle())
                     }.buttonStyle(PressStyle()).accessibilityIdentifier("mobile-mode-off-\(id)")
                 }
-                Spacer(minLength: 0)
             }.padding(.horizontal, 12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
                 .accessibilityElement(children: .contain).accessibilityIdentifier("mobile-mode-banner-\(id)")
