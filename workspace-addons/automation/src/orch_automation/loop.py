@@ -187,7 +187,7 @@ class Scheduler:
         once per item. Core lists only those (`orch run status` human_pending_ids), so an agent that queues
         input for itself or another ticket never starts anything here.
 
-        A Ready ticket with such input and no run gets one run. The ids are saved before the start (never twice
+        A Ready ticket (or one waiting on another open question) with such input and no run gets one run. The ids are saved before the start (never twice
         after a crash); a start that definitely failed gives them back, at most QUEUED_TRIES times per id. The
         saved set is only the ids still waiting (no cap that could forget one). Same gates as the other starts:
         a ticket switched off here (paused) is left alone, and a ticket started this pass is skipped."""
@@ -196,7 +196,11 @@ class Scheduler:
         for t in [*read_tickets(self.root), *self.chat_stub()]:
             tid = t["id"]
             self._give_back_after_holder(tid)
-            if tid in skip or t.get("status") != "ready" or not self.may_start(t):
+            if tid in skip or not self.may_start(t) or not (
+                    t.get("status") == "ready"
+                    # a person answered one of several open questions: the ticket keeps waiting (on the next one),
+                    # but the answer still resumes the agent (it is queued and no run exists to read it)
+                    or (t.get("status") == "waiting" and (t.get("waiting_on") or {}).get("kind") == "question")):
                 continue
             st = orchcli.run_status(self.root, tid)
             if not st or st.get("running") is not False:
