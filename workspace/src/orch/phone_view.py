@@ -56,9 +56,33 @@ HIDDEN = "[hidden]"
 _TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
 
 
+_IMAGE_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")
+
+
 def _has_secret(data: bytes) -> bool:
     text = data.decode(errors="ignore")
     return any(rx.search(text) for rx in _SECRET_PATTERNS) or bool(_SECRET_KV.search(text))
+
+
+def _scan(data: bytes) -> str:
+    """One of ok, secret (looks like a password or key) or unknown (can not be checked: a PDF, zip, docx,
+    xlsx or any other packed or binary file; such a file is not sent, fail closed). Text (UTF-8, or UTF-16
+    with a BOM) is scanned as text; png, jpeg, gif and webp images are scanned as their bytes."""
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            text = data.decode("utf-16")
+        except UnicodeDecodeError:
+            return "unknown"
+        return "secret" if _has_secret(text.encode()) else "ok"
+    image = data.startswith(_IMAGE_MAGIC) or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+    if not image:
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            return "unknown"
+        if b"\x00" in data:
+            return "unknown"
+    return "secret" if _has_secret(data) else "ok"
 
 
 def redact(text: str) -> str:
@@ -401,34 +425,39 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
         aid = artifact_id("file", f".orch/tickets/{tid}/artifacts/{name}")
         if any(a["id"] == aid for a in out):
             continue
-        try:
-            data = safefile.read_ticket_file(root, tid, "artifacts", name, tickets.MAX_PROOF_BYTES)
+        room = min(tickets.MAX_PROOF_BYTES, ARTIFACT_BYTES - artifact_bytes)
+        if room <= 0:
+            break
+        try:  # safefile checks the size on the open file (fstat) before it reads: too big = never loaded
+            data = safefile.read_ticket_file(root, tid, "artifacts", name, room)
         except safefile.TooLarge:
             continue
         if data is None:
             continue
         sha = hashlib.sha256(data).hexdigest()
-        if _has_secret(data):
+        verdict = _scan(data)
+        if verdict != "ok":
+            why = (
+                "it looks like it holds a password or key"
+                if verdict == "secret"
+                else "it can't be checked for passwords"
+            )
             if state is not None:
                 skipped = state.setdefault("secret_skipped", [])
                 key = f"{name}:{sha}"
                 if key not in skipped:
                     with contextlib.suppress(Exception):
-                        tickets.log(
-                            root,
-                            tid,
-                            f"{name} was not sent to the phone: it looks like it holds a password or key.",
-                            "orch",
-                        )
+                        tickets.log(root, tid, f"{name} was not sent to the phone: {why}.", "orch")
                     skipped.append(key)
                     del skipped[:-200]
             continue
-        if sha in evidence_hashes or artifact_bytes + len(data) > ARTIFACT_BYTES:
+        if sha in evidence_hashes:  # the same content is already in the view (evidence or an artifact)
             continue
         b = _upload(root, data, state) if upload and state is not None else None
         if not b:
             continue
         artifact_bytes += len(data)
+        evidence_hashes.add(sha)  # artifacts among themselves too
         at = mtimes.get(name)
         artifact_entries.append(
             {

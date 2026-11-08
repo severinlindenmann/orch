@@ -235,3 +235,59 @@ def test_listing_is_reused_and_bounded(proj, new_ticket, conn, monkeypatch):  # 
     assert phone_view.attachments(proj, ticket, {"blobs": {}}) == []
     assert calls == [tid]
     assert not conn.blobs
+
+
+@pytest.mark.parametrize(
+    "name,data,sent,said",
+    [
+        (
+            "offer.pdf",
+            b"%PDF-1.7\n1 0 obj << /Filter /FlateDecode >> stream\n\x78\x9c\xff\xfe\x00\x01",
+            False,
+            "can't be checked",
+        ),
+        ("sheet.xlsx", b"PK\x03\x04\x14\x00\x06\x00\x08\x00\x00\x00!\x00\xff\xfe", False, "can't be checked"),
+        ("notes.txt", "token = sk-test-ABCDEFGHIJKLMNOPQRSTUV\n".encode("utf-16"), False, "password or key"),
+        ("clean.txt", "nothing secret here\n".encode("utf-16"), True, None),
+        ("photo.png", b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\xff\xfe\x00", True, None),
+    ],
+)
+def test_files_that_can_not_be_checked_are_not_sent(proj, run, new_ticket, conn, name, data, sent, said):  # noqa: F811
+    """Delta #309: the scan reads text (UTF-8, UTF-16 with BOM); packed or binary files fail closed."""
+    tid = new_ticket("Files")
+    artifact(proj, tid, name, data)
+    assert run("ask", tid, f"See artifacts/{name}")[0] == 0
+    phone_view.view_for(proj, tid)
+    view = phone_view.view_for(proj, tid)
+    assert bool(view["attachments"]) is sent
+    lines = [
+        h["text"] for h in tickets.load(proj, tid)["history"] if "was not sent to the phone" in h["text"]
+    ]
+    assert len(lines) == (0 if said is None else 1) and all(said in ln for ln in lines)
+
+
+def test_a_file_over_the_cap_is_never_loaded(proj, run, new_ticket, conn, monkeypatch):  # noqa: F811
+    from orch import safefile
+
+    monkeypatch.setattr(phone_view, "ARTIFACT_BYTES", 100)
+    asked = []
+    real = safefile.read_ticket_file
+
+    def spy(root, tid, folder, name, max_bytes):
+        asked.append(max_bytes)
+        return real(root, tid, folder, name, max_bytes)
+
+    monkeypatch.setattr(safefile, "read_ticket_file", spy)
+    tid = new_ticket("Big")
+    artifact(proj, tid, "big.txt", b"x" * 500)
+    assert run("ask", tid, "See artifacts/big.txt")[0] == 0
+    assert phone_view.view_for(proj, tid)["attachments"] == []
+    assert asked == [100]  # the reader got the room left; it checks the open file's size before reading
+
+
+def test_two_artifacts_with_the_same_content_are_sent_once(proj, run, new_ticket, conn):  # noqa: F811
+    tid = new_ticket("Twins")
+    artifact(proj, tid, "first.md", b"same")
+    artifact(proj, tid, "second.md", b"same")
+    assert run("ask", tid, "See artifacts/first.md and artifacts/second.md")[0] == 0
+    assert len(phone_view.view_for(proj, tid)["attachments"]) == 1
