@@ -247,7 +247,7 @@ def test_history_says_where_a_change_came_from(proj, run, monkeypatch):
             ["Give me the real CRM export URL (and credentials in .orch/secrets/ if needed)"],
         ),
         ("Please paste your API key", []),
-        ("What is the admin password?", ["Skip"]),
+        ("What's the admin password?", ["Skip"]),
         ("Send me the access token for the CRM", []),
         ("Is the key in .ORCH\\Secrets\\x?", []),
     ],
@@ -339,10 +339,30 @@ def test_ask_scans_all_action_strings_but_not_machine_keys(proj, run, new_ticket
     tid = new_ticket()
     base = ["ask", tid, "Retry?", "--kind", "scheduler:failure", "--action"]
     assert run(*base, '{"detail": "Please paste your API key"}')[0] == 2
-    assert run(*base, '{"run": "give me the password", "id": "paste the token"}')[0] == 0
+    assert run(*base, '{"run": "give-me-the-password", "id": "paste-the-token"}')[0] == 0
 
 
 def test_ask_scans_nested_data_under_machine_keys(proj, run, new_ticket):
     base = ["ask", new_ticket(), "Retry?", "--kind", "scheduler:failure", "--action"]
     assert run(*base, '{"op": {"label": "Please paste your API key"}}')[0] == 2
     assert run(*base, '{"op": ["give me the password"]}')[0] == 2
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Should I send the password reset email?",
+        "Can you share the password-protected PDF?",
+        "Tell me whether to rotate the tokens.",
+        "What is the token expiry policy?",
+        "Which type of token should we use?",
+    ],
+)
+def test_ask_allows_more_benign_auth_questions(proj, run, new_ticket, text):
+    assert run("ask", new_ticket(), text)[0] == 0
+
+
+def test_ask_refuses_curly_apostrophe_and_natural_language_machine_key(proj, run, new_ticket):
+    assert run("ask", new_ticket(), "What\u2019s your password?")[0] == 2
+    base = ["ask", new_ticket(), "Retry?", "--kind", "scheduler:failure", "--action"]
+    assert run(*base, '{"key": "paste your API key"}')[0] == 2

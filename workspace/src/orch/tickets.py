@@ -1147,14 +1147,17 @@ _SECRET_WORD = (
     r"(?:passwords?|passcodes?|passphrases?|passwort|passw\u00f6rter|kennwort|zugangsdaten|api[\s_-]?keys?"
     r"|(?:access|auth|bearer|login|api)[\s_-]?tokens?|tokens?|secrets?|private[\s_-]?keys?"
     r"|api[\s_-]?schl\u00fcssel|schl\u00fcssel|credentials?|login details)"
+    r"(?![\s-]*(?:reset|protected|rotat|expir|set up))"
 )
+_GAP = r"(?:(?!rotat|expir|reset|protect|whether|set up)[^.?!\n]){0,40}?"
 _HAND_OVER = (
-    r"(?:give|send|paste|provide|enter|type|share|tell|upload|supply|attach|what(?:'s| is)"
+    r"(?:give|send|paste|provide|enter|share|tell|upload|supply|attach|what's"
     r"|gib|schick\w*|sende\w*|teile\w*|nenne\w*|eingeben)"
 )
-_SECRET_ASK_RE = re.compile(r"\b" + _HAND_OVER + r"\b[^.?!\n]{0,40}?\b" + _SECRET_WORD + r"\b", re.I)
-_PAT_ASK_RE = re.compile(r"\b" + _HAND_OVER + r"\b[^.?!\n]{0,40}?\bPAT\b", re.I)
+_SECRET_ASK_RE = re.compile(r"\b" + _HAND_OVER + r"\b" + _GAP + r"\b" + _SECRET_WORD + r"\b", re.I)
+_PAT_ASK_RE = re.compile(r"\b" + _HAND_OVER + r"\b" + _GAP + r"\bPAT\b", re.I)
 _INVISIBLE_RE = re.compile("[\u200b-\u200f\u2060\ufeff\u00ad]")
+_MACHINE_VALUE_RE = re.compile(r"[A-Za-z0-9_.:-]{1,80}")
 _MACHINE_KEYS = {"op", "run", "peer", "key", "id", "tid", "ticket"}
 _REQUEST_RES = (
     re.compile(r"\bneed\s+(?:your|you to give|you to send)\b[^.?!\n]{0,20}?\b" + _SECRET_WORD + r"\b", re.I),
@@ -1172,8 +1175,8 @@ def _labels(value, key: str = "") -> list[str]:
     if isinstance(value, dict):
         out = []
         for k, v in value.items():
-            if str(k).lower() in _MACHINE_KEYS and isinstance(v, str):
-                continue  # a machine-only scalar; nested data under such a key is still scanned
+            if str(k).lower() in _MACHINE_KEYS and isinstance(v, str) and _MACHINE_VALUE_RE.fullmatch(v):
+                continue  # a machine-only token; natural language and nested data are still scanned
             out += [str(k), *_labels(v, str(k))]
         return out
     if isinstance(value, list):
@@ -1184,7 +1187,7 @@ def _labels(value, key: str = "") -> list[str]:
 def _asks_for_secret(text: str) -> bool:
     """Light guard for `orch ask` (defence in depth; the skill text is the real control): the secrets
     folder, or asking a person to hand over a credential."""
-    text = _INVISIBLE_RE.sub("", unicodedata.normalize("NFKC", text))
+    text = _INVISIBLE_RE.sub("", unicodedata.normalize("NFKC", text)).replace("\u2019", "'")
     return bool(
         _SECRET_FOLDER_RE.search(text)
         or _SECRET_ASK_RE.search(text)
