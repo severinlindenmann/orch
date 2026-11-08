@@ -514,7 +514,7 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
         return {"released": True, "pending": waiting}
 
 
-# A Working ticket with no run gets this long for its agent to start. A start (also orch's own restart) writes
+# A Working ticket with no run gets this long for its agent to start. A start writes
 # its claim within seconds: Python start-up plus at most the 10 s run-lock wait, before tmux or the agent tool
 # start at all (they run under the claim). 120 s is far above that worst case.
 ORPHAN_GRACE_SECONDS = 120
@@ -544,116 +544,22 @@ def settle(root: Path, tid: str, by: str, say: bool = True, ignore_input: bool =
     return False
 
 
-# RESTART MARKS (pending item field "restarted").
-# INVARIANT: restart marks are set and cleared only by the ending run's own wrapper
-# (wrap_live -> restart_for_input, here) and by the settle_orphan status pass. No CLI flag,
-# env variable or argument reachable by an agent can set or clear them; the agent's environment
-# carries no restart trigger (the restart is an ordinary `orch run start` with a clean
-# environment). tests/test_lifecycle.py checks that nothing else in orch names the field.
-def restart_for_input(root: Path, tid: str, name: str, by: str) -> bool:
-    """A live session ended while a person's answer or message still waited to go in: start the next run
-    (same resume path as Continue), so it does not sit there with nobody to read it. Once per waiting item:
-    an agent that ends again at once is not started over and over. The start runs as its own process (this
-    may be the ending session's own pane, which a new live start replaces)."""
-    ids: set[str] = set()
-    try:
-        return _restart_for_input(root, tid, name, by, ids)
-    except Exception:  # noqa: BLE001 - lock timeout, full disk, a bad file: no restart, never an escape
-        if ids:
-            with contextlib.suppress(Exception):
-                clear_restarted(root, tid, ids)
-        return False
-
-
-def _restart_for_input(root: Path, tid: str, name: str, by: str, ids: set[str]) -> bool:
-    argv = procs.orch_python_argv("run", "start", tid, "--agent", name, "--by", by)
-    env = adapters.human_environ(os.environ)  # not the ended run's own call
-    with locked(root, tid):
-        if read(root, tid):
-            return False  # a run holds it already
-        all_ = _pending_read(root, tid)
-        ids.update(
-            i["id"]
-            for i in all_
-            if not i.get("delivered_at") and i.get("via") != "start" and not i.get("restarted")
-        )
-        if not ids:
-            return False  # nothing new waits: each item restarts the agent once at most
-        for i in all_:
-            if i["id"] in ids:
-                i["restarted"] = tickets.now()
-        _pending_write(root, tid, all_)
-    proc = _spawn_detached(root, argv, env)
-    if proc is not None and _claimed_soon(root, tid, proc):
-        return True
-    # the start was refused, died or did not claim in time: this wrapper clears its own marks right here
-    clear_restarted(root, tid, ids)
-    ids.clear()
-    return False
-
-
-RESTART_WAIT_SECONDS = 20
-
-
-def _claimed_soon(root: Path, tid: str, proc) -> bool:
-    """Wait (bounded) until the started `orch run start` holds the ticket. False when it ended without a claim
-    or did not claim within RESTART_WAIT_SECONDS. (A live start may close this ending session meanwhile; then
-    the claim is there already.)"""
-    end = time.monotonic() + RESTART_WAIT_SECONDS
-    while time.monotonic() < end:
-        if read(root, tid):
-            return True
-        if proc.poll() is not None:  # it ended: one last look (it may have claimed right before)
-            return read(root, tid) is not None
-        time.sleep(0.1)
-    return read(root, tid) is not None
-
-
-def clear_restarted(root: Path, tid: str, ids: set[str]) -> None:
-    """Restart marks owner only (see RESTART MARKS above): those items may start the agent another time."""
-    if not ids:
-        return
-    with locked(root, tid):
-        all_ = _pending_read(root, tid)
-        for i in all_:
-            if i["id"] in ids:
-                i.pop("restarted", None)
-        _pending_write(root, tid, all_)
-
-
-def _spawn_detached(root: Path, argv: list[str], env: dict):
-    kw: dict = {"start_new_session": True} if os.name != "nt" else {"creationflags": 0x00000200 | 0x00000008}
-    try:
-        return subprocess.Popen(
-            argv,
-            cwd=root,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env=env,
-            **kw,
-        )
-    except OSError:
-        return None
+# QUEUED INPUT: only the automation host starts runs for queued input; the run wrapper never starts runs.
+# A run that ends leaves what still waits in the pending file (never deleted) and the ticket Ready.
 
 
 def settle_orphan(root: Path, tid: str, at: float | None = None) -> bool:
-    """`orch run status` (the dashboard asks every few seconds): a ticket Working for a while with no run on
-    it (a phone text or a person moved it, and no agent came) is Ready again."""
+    """`orch run status` (the dashboard asks every few seconds): a ticket Working longer than the grace with
+    no run on it (a phone text or a person moved it, a start that never came) is Ready again. Input that waits
+    stays queued for the next start."""
     at = time.time() if at is None else at
-    with contextlib.suppress(Refused, OSError, ValueError, KeyError):
+    with contextlib.suppress(Exception):
         t = tickets.load(root, tid)
         if t.get("status") != "active" or running(root, tid):
             return False
-        waiting = undelivered(root, tid)
-        stuck = [
-            i for i in waiting if i.get("restarted") and at - _parse(i["restarted"]) >= ORPHAN_GRACE_SECONDS
-        ]
-        if len(stuck) != len(waiting) or at - _parse(t["updated_at"]) < ORPHAN_GRACE_SECONDS:
-            return False  # input waits for a run (or a restart is under way): not an orphan
-        if stuck:  # a restart that never came (its process died before it started): try another time
-            clear_restarted(root, tid, {i["id"] for i in stuck})
-        return settle(root, tid, "orch", ignore_input=bool(stuck))
+        if at - _parse(t["updated_at"]) < ORPHAN_GRACE_SECONDS:
+            return False
+        return settle(root, tid, "orch", ignore_input=True)
     return False
 
 
@@ -1071,7 +977,8 @@ def wrap(
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, f"The agent stopped with an error: {why}", f"agent:{name}")
         if release(root, tid, run, keep_if_pending=turns <= MAX_DRAIN_TURNS)["released"]:
-            settle(root, tid, f"agent:{name}")  # ended without finishing or asking: not Working any more
+            # ended without finishing or asking: not Working any more (anything still waiting stays queued)
+            settle(root, tid, f"agent:{name}", ignore_input=True)
             return 0 if rc == 0 else rc
         with contextlib.suppress(Exception):
             tickets.resume_after_start_wait(root, tid, f"agent:{name}")  # the extra turn is work again
@@ -1120,14 +1027,8 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         with contextlib.suppress(Exception):
             tickets.log(root, tid, said, f"agent:{name}")
     release(root, tid, run)  # input still waiting stays in the pending file for the next start
-    restarting = False
-    try:
-        # it ended by itself (not our Stop): an answer or message still waiting starts the next run
-        restarting = said is not None and restart_for_input(root, tid, name, rec.get("by") or f"agent:{name}")
-    finally:
-        if not restarting:  # (else the next run is on its way: no Working -> Ready -> Working flicker)
-            # no agent will read what waits now: Ready (it stays queued for the next start), never Working
-            settle(root, tid, f"agent:{name}", say=said is None, ignore_input=True)
+    # no agent reads what waits now: Ready, the input stays queued (the automation host may start the next)
+    settle(root, tid, f"agent:{name}", say=said is None, ignore_input=True)
     (run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
     with contextlib.suppress(Exception):
         from orch import runs_live

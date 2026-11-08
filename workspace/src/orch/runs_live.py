@@ -439,7 +439,7 @@ def _close(root: Path, rec: dict, interrupt: bool) -> None:
         if runs._running(pid, started):
             runs.kill_tree(pid)
     runs.release(root, tid, run)
-    runs.settle(root, tid, f"agent:{rec.get('agent')}")
+    runs.settle(root, tid, f"agent:{rec.get('agent')}", ignore_input=True)  # what waits stays queued
     (runs.run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
 
 
