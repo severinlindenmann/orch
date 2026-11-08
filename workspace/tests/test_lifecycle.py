@@ -204,3 +204,16 @@ def test_an_agent_cannot_finish_while_new_input_waits_for_it(proj, run):
         tickets.set_status(proj, tid, "review", "agent:fake")
     tickets.set_status(proj, tid, "done", "human:t")  # a person still can
     assert _status(proj, tid) == "done"
+
+
+def test_an_answer_given_in_the_dashboard_resumes_the_agent(proj, run, gen, one_step):
+    """testnet: the dashboard answers through `orch answer ... --via dashboard --by human:<who> --json`."""
+    log = gen()
+    tid = _new(run)
+    qid = _ask(run, tid, "Which day?", "Monday", "Friday")
+    argv = ["answer", tid, qid, "Friday", "--via", "dashboard", "--by", "human:dashboard", "--json"]
+    code, _, err = run(*argv)
+    assert code == 0, err
+    assert runs.read(proj, tid) is not None
+    _wait(proj, tid)
+    assert "Answered q1: Friday" in log.read_text(encoding="utf-8")
