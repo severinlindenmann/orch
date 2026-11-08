@@ -630,6 +630,8 @@ function ticketQuestion(t, q, next = false) {
     h('div', {className:'meta ticket-eyeline'}, (next ? 'Next step · ' : '') + clean(q.title || 'Your answer'), ticketPhone(q)),
     h('h2', {}, clean(q.text)), snapshot ? h('p', {className:'meta'}, 'Waiting for an answer') : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
 }
+// "PIL-2 · Title": the key says which ticket, the title what it is.
+const partName = p => (typeof p.key === 'string' && p.key ? p.key + ' · ' : '') + clean(p.title);
 function ticketParts(t, children) {
   const add = snapshot ? null : ticketButton('+ Add a part', 'ghost add-row', () => {
     const {d, actions} = dialog('What is this part about?');
@@ -678,9 +680,10 @@ function detail(t) {
     else if (fresh) next = h('section', {className:'card next-step'}, h('p', {className:'meta'}, 'Next step'), h('h2', {}, 'Ready to work on ' + clean(t.title) + '?'), snapshot ? null : ticketButton('Start agent', 'primary', () => act('run.start', {ticket:t.id})));
   }
   const menu = snapshot ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon', 'aria-label':'More ticket actions'}, iconEl('more')),
-    h('div', {className:'menu-pop', role:'menu'}, t.status === 'done' ? ticketButton('Reopen', 'menu-item', () => moveTicket(t.id, 'active'), {role:'menuitem'}) : MOVE_CHOICES.map(([status, label]) => ticketButton(label, 'menu-item', () => moveTicket(t.id, status), {role:'menuitem', 'data-key':'ticket-move-' + status}))));
+    h('div', {className:'menu-pop', role:'menu'}, t.status === 'done' ? ticketButton('Reopen', 'menu-item', () => moveTicket(t.id, 'active'), {role:'menuitem'}) : MOVE_CHOICES.map(([status, label]) => ticketButton(label, 'menu-item', () => moveTicket(t.id, status), {role:'menuitem', 'data-key':'ticket-move-' + status})),
+      repeatsAddon() ? [ticketButton('Copy ticket', 'menu-item', () => copyTicket(t), {role:'menuitem', 'data-key':'ticket-copy'}), ticketButton('Repeat…', 'menu-item', () => repeatsDialog('repeat', t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id}, h('header', {className:'stack ticket-heading'},
-    parent ? h('a', {href:href(parent.id), className:'muted'}, 'Part of ' + clean(parent.title)) : null,
+    parent ? h('a', {href:href(parent.id), className:'muted'}, 'Part of ' + partName(parent)) : null,
     typeof t.key === 'string' ? h('span', {className:'meta'}, t.key) : null,
     h('div', {className:'row'}, h('h1', {className:'grow'}, inlineField(t, 'title')), openQuestions.length && t.status !== 'done' ? chip('Needs you', 'attn') : statusChip(t), !snapshot && openQuestions.length && t.status !== 'done' ? ticketButton('Answer', 'primary', focusTicketAnswer) : null, menu),
     ticketStepper(t, run), ticketDoneLine(t)),
@@ -692,7 +695,7 @@ function detail(t) {
       panel('questions', [(snapshot || selected === 'questions') ? openQuestions.slice(t.status === 'done' ? 0 : 1).map(q => ticketQuestion(t, q)) : null, openQuestions.length <= (t.status === 'done' ? 0 : 1) ? emptyRow('No other open questions') : null, answered.length ? h('section', {}, h('h2', {}, 'Earlier answers'), answered) : null]),
       panel('artifacts', artifactsPanel(t)), panel('history', ticketHistoryPanel(t))),
     h('div', {className:'stack ticket-side'}, h('aside', {className:'card ticket-aside'}, h('div', {className:'card-h'}, h('h2', {}, 'Details')),
-      h('dl', {className:'ticket-details ed-list'}, field('Part of', parent ? h('a', {href:href(parent.id)}, clean(parent.title)) : h('span', {className:'muted'}, 'No parent ticket')), field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Done when', inlineField(t, 'done_when')), field('Agent', agent), field('Created', date(t.created_at)), field('Updated', t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : ''))), linksCard(t), fieldSections(t)))));
+      h('dl', {className:'ticket-details ed-list'}, field('Part of', parent ? h('a', {href:href(parent.id)}, partName(parent)) : h('span', {className:'muted'}, 'No parent ticket')), field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Done when', inlineField(t, 'done_when')), field('Agent', agent), field('Created', date(t.created_at)), field('Updated', t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : ''))), linksCard(t), fieldSections(t)))));
 }
 
 const MULTILINE = ['note', 'done_when'];

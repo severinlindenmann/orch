@@ -84,13 +84,32 @@ test('the review buttons show whenever the status is Review, an open question fi
     statusChip:() => h('span', {}, 'Ready for review'), chip:text => h('span', {}, text), href:id => '#ticket/' + id, MOVE_CHOICES:[], moveTicket(){}, button:label => h('button', {}, label), locksX:0, loadArtifacts(){}, ticketArtifactPreview:() => null, agentBar:() => null,
     surface:v => v, inlineField:() => null, ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
     linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, ticketStepper:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
-    fetch:() => new Promise(() => {})};
+    repeatsAddon:() => null, fetch:() => new Promise(() => {})};
   vm.createContext(ctx); vm.runInContext(source, ctx);
   const text = JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[{id:'q1', text:'Which colour?', options:[]}]}));
   assert.match(text, /Looks good/);
   assert.match(text, /Ask for changes/);
   assert.ok(text.indexOf('Which colour?') < text.indexOf('Looks good'), 'the question comes first');
   assert.match(JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]})), /Looks good/);
+});
+test('Copy ticket and Repeat show in the ticket menu only when the repeats add-on is on', () => {
+  const h = (tag, attrs = {}, ...children) => { const n = {tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false)}; n.append = (...c) => n.children.push(...c); n.dataset = {}; n.setAttribute = () => {}; n.addEventListener = () => {}; n.classList = {add(){}, remove(){}}; return n; };
+  const ctx = {window:{DashHelpers:helpers, orch:{}}, document:{addEventListener(){}}, addEventListener(){}, h, locks:new Set(),
+    array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => String(v || '').replace(/^(human|agent):/, ''),
+    el:(tag, cls, text) => h(tag, {className:cls}, text), fragment:(...children) => h('fragment', {}, children),
+    card:(key, title, suffix, children) => h('section', {'data-key':key}, title, suffix, children), emptyRow:text => h('p', {}, text),
+    questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
+    statusChip:() => h('span', {}, 'Ready for review'), chip:text => h('span', {}, text), href:id => '#ticket/' + id, MOVE_CHOICES:[], moveTicket(){}, button:label => h('button', {}, label), locksX:0, loadArtifacts(){}, ticketArtifactPreview:() => null, agentBar:() => null,
+    surface:v => v, inlineField:() => null, ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
+    linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, ticketStepper:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
+    repeatsAddon:() => null, fetch:() => new Promise(() => {})};
+  vm.createContext(ctx); vm.runInContext(source, ctx);
+  const t = {id:'t_test', title:'Test', status:'open', questions:[]};
+  assert.doesNotMatch(JSON.stringify(ctx.detail(t)), /Copy ticket|Repeat…/);
+  ctx.repeatsAddon = () => 'automation';
+  const on = JSON.stringify(ctx.detail(t));
+  assert.match(on, /Copy ticket/);
+  assert.match(on, /Repeat…/);
 });
 
 test('parts resolve parent fields, case-insensitive keys and legacy arrays once', () => {
@@ -126,7 +145,7 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
   const t = {id:'t_parent', title:'Plan', status:'waiting', questions:[{id:'q1',text:'First?'},{id:'q2',text:'Second?'}]};
   let scrolled = false, focused = false;
-  const ctx = {window:{DashHelpers:helpers}, document:{addEventListener(){}}, addEventListener(){}, h,
+  const ctx = {repeatsAddon:() => null, window:{DashHelpers:helpers}, document:{addEventListener(){}}, addEventListener(){}, h,
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '',
     el:(tag, cls, text) => h(tag,{className:cls},text), fragment:(...kids) => h('fragment',{},kids),
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),

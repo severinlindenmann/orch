@@ -24,11 +24,11 @@ def test_settings_navigation_and_cards():
 def test_repeat_uses_only_presets_and_open_tickets():
     src = webjs.all_js()
     assert "['every day at 9', 'every weekday at 9', 'every monday at 9', 'every hour']" in src
-    assert "tickets().filter(t => !['done', 'dropped'].includes(t.status))" in src
-    assert "{addon:route().id, verb, target:ticket.value}" in src
+    assert "tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status))" in src
+    assert "{addon:addonName || route().id, verb, target:ticket.value}" in src
     assert "if (verb === 'repeat') args.value = preset.value;" in src
     assert "await act('addon.act', args)" in src
-    assert "await loadAddon(route().id)" in src
+    assert "if (route().kind === 'addon') await loadAddon(route().id)" in src
 
 
 def test_shared_links_are_optional_and_use_plain_actions():

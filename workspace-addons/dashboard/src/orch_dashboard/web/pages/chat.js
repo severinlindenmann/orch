@@ -31,7 +31,8 @@ function chatJoinedGroup(g) {
 }
 const chatGroups = () => [...chatObjects(state?.groups?.hosted).map(chatHostedGroup), ...chatObjects(state?.groups?.joined).map(chatJoinedGroup)];
 const chatGroup = () => chatGroups().find(g => g.id === chatUi.open);
-const chatWorkspace = () => clean(state?.workspace) || 'Workspace';
+// The name people see: look name when the switcher has one, else the workspace name with a capital.
+const chatWorkspace = () => { const n = clean(state?.look?.workspaces?.find(w => w.here)?.name || state?.workspace) || 'Workspace'; return n.charAt(0).toUpperCase() + n.slice(1); };
 const chatHost = g => clean(chatObjects(g.members).find(m => m.ws === g.host)?.name || g.host_name) || chatWorkspace();
 const chatCount = n => Math.max(0, Number(n) || 0);
 const chatText = (tag, cls, text) => h(tag, {className:cls}, clean(text));
@@ -73,7 +74,7 @@ function chatList() {
   const groups = chatGroups(), query = chatUi.search.toLowerCase();
   const rows = [chatListRow(null), ...groups.filter(g => !g.done && !g.closed).map(chatListRow)];
   rows.forEach(row => { row.hidden = !row.textContent.toLowerCase().includes(query); });
-  return h('aside', {className:'chat-list', 'aria-label':'Chats', 'data-key':'chat-list'}, chatSearch(), rows[0],
+  return h('aside', {className:'chat-list', 'aria-label':'Chats', 'data-key':'chat-list'}, h('h1', {className:'chat-list-title', 'data-key':'chat-list-title'}, 'Chat · ', chatWorkspace()), chatSearch(), rows[0],
     groups.length || chatGroup() ? h('h2', {}, 'Groups') : null, rows.slice(1),
     rows.every(row => row.hidden) ? chatText('p', 'chat-muted', 'No chats match.') : null,
     groups.length ? chatButton('Done groups → History', 'history', {className:'chat-button chat-list-footer'}) : null);
