@@ -83,9 +83,31 @@ def test_stop_leaves_the_ticket_ready(proj, run, gen, one_step):
     tid = _new(run)
     run("run", "start", tid)
     _wait(proj, tid, gone=False)
-    assert run("run", "stop", tid)[0] == 0
+    code, _, err = run("run", "stop", tid)
+    assert code == 0, err
     _wait(proj, tid)
     assert _status_soon(proj, tid, "ready") == "ready"
+
+
+def test_a_run_lock_is_never_empty(proj, monkeypatch):
+    """A stop could hit the wrapper between creating its run lock and writing its name into it; that empty
+    lock looked like a live writer for 30 s and the stop gave up ("busy"). The lock is now linked into place
+    with the name already in it."""
+    from orch import procs
+
+    lock = proj / ".orch/run/tickets/t_lockaa.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    runs._create_lock(lock)
+    assert lock.read_text() == procs.own_token()
+    lock.unlink()
+
+    def stopped_half_way(*a, **k):
+        raise KeyboardInterrupt  # the process is stopped after the temp file, before the link
+
+    monkeypatch.setattr(runs.os, "link", stopped_half_way)
+    with pytest.raises(KeyboardInterrupt):
+        runs._create_lock(lock)
+    assert not lock.exists() and not list(lock.parent.glob(".*.new"))
 
 
 def test_a_working_ticket_with_no_agent_is_settled_by_the_next_status_check(proj, run):
@@ -445,3 +467,58 @@ def test_an_undo_in_the_status_branch_only_undoes_its_own_claim(proj, run, monke
     phone_view.sync(proj)
     st = phone_view.load_state(proj)
     assert st["status"][tid] == "review" and st["claims"][tid] == "someone-else"
+
+
+def test_a_run_lock_falls_back_without_hard_links_and_is_private(proj, monkeypatch):
+    """#318 review: link() says EPERM/ENOTSUP/EXDEV/EINVAL/ENOSYS (or Windows error 1/50) where hard links are
+    missing: plain create, mode 0600. Any other error (EACCES: Windows delete pending) still means busy."""
+    import errno
+    import stat as st
+
+    from orch import procs
+
+    lock = proj / ".orch/run/tickets/t_lockbb.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    windows = OSError(errno.EIO, "not supported")
+    windows.winerror = 50  # ERROR_NOT_SUPPORTED (FAT/exFAT/SMB)
+    for code in (errno.EPERM, errno.ENOTSUP, errno.EXDEV, errno.EINVAL, errno.ENOSYS, windows):
+
+        def no_links(*a, code=code, **k):
+            raise code if isinstance(code, OSError) else OSError(code, "no hard links")
+
+        monkeypatch.setattr(runs.os, "link", no_links)
+        runs._create_lock(lock)
+        assert lock.read_text() == procs.own_token()
+        assert st.S_IMODE(lock.stat().st_mode) == 0o600
+        lock.unlink()
+
+
+def test_an_nfs_eexist_on_our_own_lock_counts_as_taken(proj, monkeypatch):
+    """#318 review: NFS may report EEXIST for a link that did succeed; the lock holding our token is ours."""
+    real = runs.os.link
+
+    def link_then_eexist(src, dst, *a, **k):
+        real(src, dst)
+        raise FileExistsError(17, "File exists")
+
+    monkeypatch.setattr(runs.os, "link", link_then_eexist)
+    lock = proj / ".orch/run/tickets/t_lockcc.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    runs._create_lock(lock)  # no error: it is ours
+    lock.write_text("someone else")
+    with pytest.raises(FileExistsError):
+        runs._create_lock(lock)
+
+
+def test_a_link_error_that_means_busy_is_not_a_fallback(proj, monkeypatch):
+    import errno
+
+    def busy(*a, **k):
+        raise PermissionError(errno.EACCES, "delete pending")
+
+    monkeypatch.setattr(runs.os, "link", busy)
+    lock = proj / ".orch/run/tickets/t_lockdd.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with pytest.raises(PermissionError):
+        runs._create_lock(lock)
+    assert not lock.exists()
