@@ -1139,9 +1139,8 @@ def _publish(
         root, "phones", "text", pb, g["ticket"], fanout_id(host, origin_id, "phones"), at=at, errors=errors
     ):
         _remember_copy(g, msg["id"])
-    if not prev:
-        g["msgs"] += 1  # a replay is not a new message
-    g.get("pending", {}).pop(origin_id, None)
+    if g.get("pending", {}).pop(origin_id, None) is not None:
+        g["msgs"] += 1  # counted when the intent completes (also after a crash), never twice
     return seq
 
 
@@ -1450,9 +1449,8 @@ def _publish_file(
             root, "phones", "text", pb, g["ticket"], fanout_id(host, oid, "phones"), at=at, errors=errors
         ):
             _remember_copy(g, msg["id"])
-    if not prev:
-        g["msgs"] += 1  # a replay is not a new message
-    g.get("pending", {}).pop(oid, None)
+    if g.get("pending", {}).pop(oid, None) is not None:
+        g["msgs"] += 1  # counted when the intent completes (also after a crash), never twice
 
 
 # ---- host: what members and phones send ----------------------------------------------------------------

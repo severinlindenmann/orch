@@ -1626,7 +1626,7 @@ def test_file_publish_is_idempotent_and_replays_the_same_bytes(proj, run, rel, g
         cg.share_file(proj, host, f, "A file")
     g = json.loads(path.read_text())["hosted"][gid]
     assert len(g["pending"]) == 1 and next(iter(g["pending"].values()))["kind"] == "file"
-    seq_before = g["seq"]
+    seq_before, msgs_before = g["seq"], g["msgs"]
     monkeypatch.setattr(cg, "_send", real)
     # a workspace joins after the crash: the replay must not include it, and must not renumber
     rel.snapshot["workspaces"]["workspaces"].append(entry("ws_late000001", "Late", "house", "amber"))
@@ -1637,7 +1637,10 @@ def test_file_publish_is_idempotent_and_replays_the_same_bytes(proj, run, rel, g
     assert {m["to"] for m in files} == {HOME, BANK}
     assert {m["body"]["group"]["seq"] for m in files} == {seq_before}
     assert all(w["ws"] != "ws_late000001" for m in files for w in m["body"]["group"]["members"])
-    assert json.loads(path.read_text())["hosted"][gid]["pending"] == {}
+    done = json.loads(path.read_text())["hosted"][gid]
+    assert (
+        done["pending"] == {} and done["msgs"] == msgs_before + 1
+    )  # counted once, when the intent completed
 
 
 def test_delegate_after_send_never_falls_back_and_unsent_is_never_recorded(proj, run, rel, host, monkeypatch):
