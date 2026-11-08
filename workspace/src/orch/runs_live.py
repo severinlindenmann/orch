@@ -312,6 +312,8 @@ def deliver(root: Path, tid: str, stop=None) -> int:
         rec = runs.read(root, tid)
         if not rec or rec.get("mode") != "live" or (rec.get("live") or {}).get("state") != "idle":
             return 0
+        if not rec.get("up"):  # fail closed: the tool never said it is up (a hook or `orch run done`)
+            return 0
         if rec.get("closing"):  # an idle close is under way: the item waits for the next start
             return 0
         items = runs.undelivered(root, tid)
@@ -379,7 +381,9 @@ def _log_submit(root: Path, tid: str, run: str, what: str) -> None:
 
 
 # for a tool whose adapter names no dialog of its own
-_GENERIC_DIALOG = r"Do you want|\(y/n\)|^\s*❯\s*\d|Do you trust the files in this folder"
+_GENERIC_DIALOG = (
+    r"Do you want|\(y/n\)|^\s*❯\s*\d|\btrust\b[^\n]*\?|Do you trust|Trust (this|the) (folder|files|workspace)"
+)
 _BOTTOM_DIALOG = re.compile(r"Esc to cancel", re.IGNORECASE)  # counts only in the bottom rows
 
 
