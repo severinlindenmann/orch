@@ -11,6 +11,10 @@ struct StartedChip: Identifiable, Equatable {
 
 /// Pure rules of the conversation screen (unit-tested).
 enum ConversationRules {
+    static func showsWriteOwn(_ q: Question) -> Bool {
+        !q.isAllow && !q.message.body.options.isEmpty
+    }
+
     /// The General "<ws> is working…" line ends this long after the last ack/working, even with no new message.
     static let generalWorkingTimeout: TimeInterval = 600   // 10 min, the group-chat contract (#294 §1)
 
@@ -128,6 +132,12 @@ struct ConversationView: View {
         return model.workspace(resolved.workspace).map { WorkspaceAlias.name(for: $0) } ?? "Workspace"
     }
     private var ticket: Ticket? { model.tickets.first { $0.workspace == resolved.workspace && $0.ticket == resolved.ticket && resolved.ticket != nil } }
+    private var topicSummary: String? {
+        guard historyDay == nil, case .topic = resolved,
+              let summary = ticket?.view?.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !summary.isEmpty else { return nil }
+        return summary
+    }
     private var title: String {
         switch resolved {
         case .general: historyDay.map { ChatDay.label(forDay: $0, today: today) + " · read only" } ?? "Chat"
@@ -300,6 +310,13 @@ struct ConversationView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 8) {
+                    if let topicSummary {
+                        NavigationLink(value: ChatRoute.info(workspace: resolved.workspace, ticket: resolved.ticket)) {
+                            Text(topicSummary).themeFont(15).foregroundStyle(Theme.muted).lineLimit(3)
+                                .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(14).background(Theme.surface2, in: RoundedRectangle(cornerRadius: 12))
+                        }.buttonStyle(PressStyle()).accessibilityIdentifier("topic-summary")
+                    }
                     if isGeneral && historyDay == nil && !items.isEmpty && !ChatDay.split(allItems, today: today).past.isEmpty {
                         VStack(spacing: 6) {
                             Text("New day").themeFont(13, .medium)
@@ -378,6 +395,8 @@ struct ConversationView: View {
             let stale = ConversationRules.isStale(index: index, in: items)
             QuestionCard(item: item, conversationId: resolved, onReply: { question in
                 reply = ReplyPreview(messageId: question.id, title: "Answering \(workspaceName)", quote: question.message.body.text)
+            }, onWriteOwn: { q in
+                reply = ReplyPreview(messageId: q.id, title: "Answer:", quote: q.message.body.text, answering: q)
             }, onOpenArtifact: openArtifact, isStale: stale, position: ConversationRules.openPosition(of: item.id, in: items))
         } else if item.side == .me && item.voice != nil {
             OwnVoiceBubble(item: item, conversationLanguage: language, onRetry: historyDay == nil ? retry : {}, onDiscard: historyDay == nil ? discard : {}, onReply: historyDay == nil ? replyHere : nil, waitNote: wait)
@@ -389,14 +408,19 @@ struct ConversationView: View {
                           onRetry: historyDay == nil ? retry : nil, onDiscard: historyDay == nil ? discard : nil, onOpenArtifact: openArtifact, onReply: historyDay == nil ? replyHere : nil, waitNote: wait)
         }
     }
-    private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "bubble.left.and.bubble.right").themeFont(32).foregroundStyle(Theme.brand)
-            if case .general = resolved {
-                Text("Say hello to \(workspaceName) helper").themeFont(20, .semibold)
-                Text("Talk with \(workspaceName) helper here.").themeFont(15).foregroundStyle(Theme.muted)
-            } else { Text("Nothing here yet").themeFont(17).foregroundStyle(Theme.muted) }
-        }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 48)
+    @ViewBuilder private var emptyState: some View {
+        if topicSummary != nil {
+            Text("Updates and results show up in this chat.").themeFont(13).foregroundStyle(Theme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8)
+        } else {
+            VStack(spacing: 12) {
+                Image(systemName: "bubble.left.and.bubble.right").themeFont(32).foregroundStyle(Theme.brand)
+                if case .general = resolved {
+                    Text("Say hello to \(workspaceName) helper").themeFont(20, .semibold)
+                    Text("Talk with \(workspaceName) helper here.").themeFont(15).foregroundStyle(Theme.muted)
+                } else { Text("Nothing here yet").themeFont(17).foregroundStyle(Theme.muted) }
+            }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 48)
+        }
     }
     /// The open conversation is read: new incoming messages are marked read while it is on screen, even when scrolled up
     /// (only the jump button's own count waits until the bottom was seen).

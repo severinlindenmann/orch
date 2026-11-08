@@ -402,10 +402,11 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
     var historyTail: [Line] = []
     /// What the ticket points at (web addresses, other tickets, files it produced, project files). Unknown kinds are left out.
     var refs: [TicketRef] = []
+    var light: Bool? = nil
 
     init(title: String? = nil, status: String? = nil, agent: String? = nil, summary: String? = nil, checklist: [Task] = [],
-         running: Bool? = nil, started: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = [], refs: [TicketRef] = []) {
-        self.refs = refs
+         running: Bool? = nil, started: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = [], refs: [TicketRef] = [], light: Bool? = nil) {
+        self.refs = refs; self.light = light
         self.title = title; self.status = status; self.agent = agent; self.summary = summary; self.checklist = checklist
         self.done = checklist.filter(\.done).count; self.total = checklist.count
         self.running = running; self.started = started; self.attachments = attachments; self.historyTail = historyTail
@@ -424,8 +425,26 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         attachments = (try? c.decodeIfPresent([Attachment].self, forKey: .attachments)) ?? []
         historyTail = (try? c.decodeIfPresent([Line].self, forKey: .historyTail)) ?? []
         refs = TicketRef.decodeList(c, forKey: .refs)
+        light = try? c.decodeIfPresent(Bool.self, forKey: .light)
     }
-    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, running, started, attachments, historyTail, refs }
+    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, running, started, attachments, historyTail, refs, light }
+    /// Quiet light views update only the fields they carry, preserving the full ticket details.
+    func overlaid(on base: TicketSnapshot?) -> TicketSnapshot {
+        guard light == true, var result = base else { return self }
+        func nonempty(_ value: String?) -> String? {
+            guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return value
+        }
+        result.title = nonempty(title) ?? result.title
+        result.status = nonempty(status) ?? result.status
+        result.agent = nonempty(agent) ?? result.agent
+        result.summary = nonempty(summary) ?? result.summary
+        result.running = running ?? result.running
+        result.started = started ?? result.started
+        result.light = nil
+        return result
+    }
+
     var doneCount: Int { done ?? checklist.filter(\.done).count }
     var totalCount: Int { total ?? checklist.count }
 }

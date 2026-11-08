@@ -372,6 +372,7 @@ final class AppModel {
     var hasOlderMessages: Bool { messagesNext != nil }
 
     func answer(_ q: Question, with option: String) async {
+        if q.isAllow && !q.message.body.options.contains(option) { return }
         let me = credentials?.phoneId
         outbox.enqueueAnswer(question: q, answer: option)
         let events = await outbox.flush(using: client)
