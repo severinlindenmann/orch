@@ -164,7 +164,14 @@ def test_send_to_an_idle_agent_goes_in_at_once(proj, run, lab):
     _generic_live(proj)
     tid = _ticket(run)
     run("run", "start", tid)
-    _until(lambda: runs.read(proj, tid)["live"]["state"] == "idle" and len(_lines(lab, "input")) == 1)
+    # deliver() needs the tool "up" and idle: wait for both, not only the idle state (a CI race, 8 Nov)
+    _until(
+        lambda: (
+            (r := runs.read(proj, tid))["live"]["state"] == "idle"
+            and r.get("up")
+            and len(_lines(lab, "input")) == 1
+        )
+    )
     code, out, _ = run("run", "send", tid, "Also October")
     assert out.strip() == "Sent."
     _until(lambda: len(_lines(lab, "input")) == 2)
