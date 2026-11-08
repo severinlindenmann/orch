@@ -380,7 +380,16 @@ def test_a_lock_that_refuses_with_permission_error_is_waited_for_then_taken(proj
             raise PermissionError(13, "delete pending")
         return real(path, flags, *a, **k)
 
+    real_link = os.link
+
+    def fake_link(src, dst, *a, **k):  # the lock is linked into place (never empty): same refusal there
+        if str(dst).endswith(".lock") and left[0]:
+            left[0] -= 1
+            raise PermissionError(13, "delete pending")
+        return real_link(src, dst, *a, **k)
+
     monkeypatch.setattr(runs.os, "open", fake_open)
+    monkeypatch.setattr(runs.os, "link", fake_link)
     with runs.locked(proj, tid):
         pass
     assert left[0] == 0

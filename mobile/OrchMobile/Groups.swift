@@ -365,7 +365,20 @@ enum GroupStore {
             orders[key]!.flush(now: now)
             release(key)
         }
-        let groups = keys.compactMap { key -> PhoneGroup? in
+        // Only validated messages held through the accepted close can rank history.
+        // Unknown arrivals stay below known arrivals, using a group-local floor.
+        var lastArrival: [GroupKey: Int] = [:]
+        for key in keys where closed.contains(key) {
+            for (index, message) in (held[key] ?? []).enumerated() {
+                lastArrival[key] = max(lastArrival[key] ?? Int.min, arrival[message.id] ?? (-1 - index))
+                if !message.late && message.event?.kind == "closed" { break }
+            }
+        }
+        let retainedClosed = Set(keys.enumerated().filter { closed.contains($0.element) }.sorted {
+            let a = lastArrival[$0.element] ?? -1, b = lastArrival[$1.element] ?? -1
+            return a == b ? $0.offset > $1.offset : a > b
+        }.prefix(50).map(\.element))
+        let groups = keys.filter { !closed.contains($0) || retainedClosed.contains($0) }.compactMap { key -> PhoneGroup? in
             guard let heldMessages = held[key], !heldMessages.isEmpty,
                   let newest = latest[key], let info = newest.message.body.group else { return nil }
             let hostName = sanitize(workspaces[key.host] ?? "Workspace")
@@ -416,8 +429,12 @@ enum GroupStore {
     static func approvalCard(for event: GroupEvent, in group: PhoneGroup, questions: [Question], late: Bool = false) -> ApprovalCard {
         guard !group.closed, !late else { return .closed }
         if event.kind == "approval_needed", let ws = event.ws, group.members.contains(where: { $0.ws == ws }),
+           let delegate = event.delegate, let task = group.tasks[delegate], task.delegate == event.delegate, task.ws == event.ws,
+           task.questionMessage != nil, task.questionMessage == event.questionMessage,
+           task.ticket != nil,
            let q = questions.first(where: {
                $0.id == event.questionMessage && $0.message.from == ws && $0.isGroupAllow &&
+               ($0.message.ticket != nil && task.ticket == $0.message.ticket) &&
                $0.message.body.scope?.trimmingCharacters(in: .whitespacesAndNewlines)
                    .caseInsensitiveCompare("tasks from \(group.hostName)") == .orderedSame
            }) {

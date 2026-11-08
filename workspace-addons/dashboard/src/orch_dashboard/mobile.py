@@ -65,6 +65,28 @@ def _relay_send(a):
     return ["relay", "send", peer], [], [acts._text(a.get("text"), "message")]
 
 
+def _message_id(v):
+    if not isinstance(v, str) or not re.fullmatch(r"m_[a-z0-9]{16}", v):
+        raise _bad("That is not a message id.")
+    return v
+
+
+def _relay_reply(a):
+    acts = _actions()
+    acts._only(a, ("to", "message", "text"))
+    words, flags, tail = _relay_send({"workspace": a.get("to"), "text": a.get("text")})
+    return words, [*flags, "--reply-to", _message_id(a.get("message"))], tail
+
+
+def _relay_topic(a):
+    acts = _actions()
+    acts._only(a, ("message", "title"))
+    return ["relay", "topic"], ["--from", _message_id(a.get("message"))], [acts._text(a.get("title"), "title")]
+
+
+MOBILE_REQUIRED_ADDONS = {"relay.reply": "relay", "relay.topic": "relay"}
+
+
 def _group_ticket(a):
     acts = _actions()
     return acts._tid(a.get("ticket"))
@@ -109,6 +131,8 @@ MOBILE_OPS = {
     "group.say": _group_say,
     "group.add": _group_member("add"),
     "group.remove": _group_member("remove"),
+    "relay.reply": _relay_reply,
+    "relay.topic": _relay_topic,
     "mobile.set": _mobile_set,
     "mobile.hours": _mobile_hours,
     "mobile.ack": _mobile_ack,

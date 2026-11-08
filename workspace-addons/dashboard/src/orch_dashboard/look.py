@@ -97,10 +97,20 @@ def _workspaces(root: Path, orch_bin: str | None) -> list[dict]:
         )
         if url and not re.fullmatch(r"http://(127\.0\.0\.1|localhost):[0-9]{1,5}(/[!-~]*)?", url[:200]):
             url = None
+        needs = None
+        path = Path(w["workspace"])
+        try:
+            if path.is_absolute() and path.is_dir() and (path / ".orch").is_dir():
+                items = run_orch(orch_bin, ["needs", "--json"], path, timeout=3.0)
+                if isinstance(items, list):
+                    needs = len(items)
+        except (OSError, ValueError):
+            pass
         icon, color = w.get("icon"), w.get("color")
         out.append(
             {
                 "name": w["name"][:60],
+                "needs": needs,
                 "here": w["workspace"] == here,
                 "url": url[:200] if url else None,
                 "icon": icon if isinstance(icon, str) and ID.fullmatch(icon) else None,
