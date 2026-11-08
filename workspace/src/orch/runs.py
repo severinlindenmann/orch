@@ -399,6 +399,22 @@ def mark_delivered_locked(root: Path, tid: str, ids: list[str]) -> None:
         _write(root, rec)
 
 
+def undeliver(root: Path, tid: str, ids: list[str]) -> None:
+    """The agent never read these (its start hung): they wait again for the next start, not lost."""
+    if not ids:
+        return
+    with locked(root, tid):
+        items = _pending_read(root, tid)
+        for i in items:
+            if i["id"] in ids:
+                i.pop("delivered_at", None)
+        _pending_write(root, tid, items)
+        rec = read(root, tid)
+        if rec is not None:
+            rec["pending"] = True
+            _write(root, rec)
+
+
 def mark_delivered(root: Path, tid: str, ids: list[str]) -> None:
     with locked(root, tid):
         mark_delivered_locked(root, tid, ids)
@@ -1023,6 +1039,8 @@ def wrap(
             argv, stdin, new_session, resumed = p["argv"], p["stdin"], p["session"], False
             flags = {}
             rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc, watch, flags)
+            if flags.get("hung"):  # hung twice: no third try; this turn's input waits for the next start
+                undeliver(root, tid, [i["id"] for i in turn_items])
         elif resumed and rc != 0 and adapters.session_missing(name, out, root):
             # only "that session does not exist" starts fresh; the input of this turn goes in with it
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
@@ -1049,7 +1067,8 @@ def wrap(
                     )
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, f"The agent stopped with an error: {why}", f"agent:{name}")
-        if release(root, tid, run, keep_if_pending=turns <= MAX_DRAIN_TURNS)["released"]:
+        drain = turns <= MAX_DRAIN_TURNS and not flags.get("hung")
+        if release(root, tid, run, keep_if_pending=drain)["released"]:
             settle(root, tid, f"agent:{name}")  # ended without finishing or asking: not Working any more
             return 0 if rc == 0 else rc
         with contextlib.suppress(Exception):

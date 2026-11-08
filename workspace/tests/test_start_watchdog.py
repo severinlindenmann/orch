@@ -13,6 +13,15 @@ import test_run_wrap
 from orch import config, runs, tickets
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="detached wrapper tests use shell stubs")
+
+
+@pytest.fixture(autouse=True)
+def _child_home(request):
+    """The detached wrapper is a child `orch`: it needs an ORCH_HOME it trusts (conftest subprocess_home)."""
+    if "proj" in request.fixturenames:
+        request.getfixturevalue("subprocess_home")
+
+
 _wait = test_run_wrap._wait
 
 
@@ -110,3 +119,16 @@ def test_a_quiet_generic_agent_is_not_stopped(proj, run, monkeypatch, gen):
 
 
 gen = test_run_wrap.gen
+
+
+def test_input_of_a_start_that_hangs_twice_waits_for_the_next_start(proj, run, tmp_path, monkeypatch):
+    """Review #292: when both tries hang, the person's text is not lost: it is undelivered again."""
+    import test_rev292_adversarial as A
+
+    A._always_hangs(tmp_path, monkeypatch, ignore_term=False)
+    monkeypatch.setenv("ORCH_RUN_START_WATCHDOG_SECONDS", "1")
+    tid = _setup(proj, run)
+    runs.pending_add(proj, tid, "human:t", "message", "Also invite Anna")
+    assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
+    _wait(proj, tid, timeout=30)
+    assert [i["text"] for i in runs.undelivered(proj, tid)] == ["Also invite Anna"]
