@@ -352,6 +352,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--until")
     x.add_argument("--on", metavar="KIND:REF")
     x.add_argument("--clear", action="store_true", help="clear waiting_on")
+    x = t.add_parser("changes", parents=[common], help="send a ticket in Review back with a note (a person)")
+    x.add_argument("id")
+    x.add_argument("text")
     x = t.add_parser("patch", parents=[common])
     x.add_argument("id")
     x.add_argument(
@@ -621,6 +624,9 @@ def run(args: argparse.Namespace) -> None:
         d = tickets.artifacts_dir(root, args.id)
         rel = d.relative_to(root).as_posix()
         _out(args, {"path": rel}, rel)
+    elif cmd == "ticket" and sub == "changes":
+        t = tickets.ask_for_changes(root, args.id, args.text, by())
+        _out(args, t, f"{t['title']} - sent back with your note. An agent picks it up.")
     elif cmd == "ticket" and sub == "patch":
         t = tickets.patch(root, args.id, args.if_revision, args.data, by())
         warn = _child_warning(root, t)

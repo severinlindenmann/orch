@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import runfiles
-from .data import publish_connected, run_orch
+from .data import forget_static, publish_connected, run_orch
 from .look import LOOK_OPS
 from .look import forget as look_forget
 from .mobile import MOBILE_OPS, MOBILE_REQUIRED_ADDONS
@@ -157,6 +157,12 @@ def _ticket_patch(a):
         [f"--if-revision={rev}"],
         [json.dumps(data, ensure_ascii=False)],
     )
+
+
+def _ticket_changes(a):
+    """Ask for changes on a ticket in Review: ONE call sets it Ready and queues the note as the person's input."""
+    _only(a, ("ticket", "text"))
+    return ["ticket", "changes"], [], [_tid(a.get("ticket")), _text(a.get("text"), "note")]
 
 
 def _ticket_edit(a):
@@ -382,6 +388,7 @@ OPS = {
     "ticket.new": _ticket_new,
     "ticket.paste": _ticket_paste,
     "ticket.patch": _ticket_patch,
+    "ticket.changes": _ticket_changes,
     "ticket.edit": _ticket_edit,
     "log": _log,
     "chat.say": _chat_say,
@@ -489,7 +496,9 @@ def _without_agent(environ) -> dict:
         fn = getattr(e, "filename", None)
         where = Path(fn).name if isinstance(fn, str) and fn else ""  # never a full path or file content
         why = e.__class__.__name__ + (f" in {where}" if where else "")
-        raise Unavailable(f"orch could not check who is acting here ({why}). Fix that and try again.") from None
+        raise Unavailable(
+            f"orch could not check who is acting here ({why}). Fix that and try again."
+        ) from None
 
 
 def human_env(root: Path, orch_bin: str) -> dict:
@@ -505,6 +514,7 @@ def human_env(root: Path, orch_bin: str) -> dict:
 def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict | None]:
     """Run one op. Returns (http status, plain text, parsed json or None)."""
     argv = build_argv(op, args)
+    forget_static()  # a change may alter what the cached read-only answers say
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
     if op in ("link.extend", "link.stop") and not publish_connected(root, orch_bin):

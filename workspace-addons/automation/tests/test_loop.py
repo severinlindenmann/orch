@@ -460,3 +460,15 @@ def test_an_unknown_status_changes_nothing(ws, monkeypatch):
     monkeypatch.setattr(orchcli, "run_status", lambda root, tid: None)
     assert Scheduler(ws).tick(T(8)) == []
     assert load_state(ws)["t_queue014"]["queued_held"] == ["p_h0000001"]
+
+
+def test_an_answer_and_a_change_note_start_one_run(ws):
+    """Two person items wait on the same Ready ticket (an answer and "ask for changes"): ONE run, both ids
+    marked as started; the next pass starts nothing."""
+    add_ticket(ws, "t_queue009", status="ready")
+    (ws / "ended-t_queue009").write_text("")
+    (ws / "pending-t_queue009").write_text(json.dumps(["p_answer0001", "p_changes001"]))
+    assert Scheduler(ws).tick(T(8)) == ["t_queue009"]
+    assert Scheduler(ws).tick(T(8, 1)) == []
+    starts = [c["args"] for c in calls(ws) if c["args"][:2] == ["run", "start"]]
+    assert len(starts) == 1

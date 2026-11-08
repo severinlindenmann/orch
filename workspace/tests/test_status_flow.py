@@ -1,3 +1,4 @@
+import json
 import os
 
 import pytest
@@ -163,3 +164,119 @@ def test_status_history_uses_resolved_actor(proj, run, new_ticket, monkeypatch, 
     assert code == 0, err
     history = tickets.load(proj, tid)["history"][len(before["history"]) :]
     assert history and all(h["by"] == "agent:generic" for h in history)
+
+
+@pytest.mark.parametrize("target", ["review", "done"])
+@pytest.mark.parametrize(
+    "path", ["set_status", "patch", "cli_status", "cli_patch", "cli_by_human_in_agent_env"]
+)
+def test_agent_never_finishes_with_open_question(proj, run, new_ticket, monkeypatch, path, target):
+    """e2e dry run 8 Nov: the agent's own open question blocks every way to Review/Done (one guard)."""
+    tid = new_ticket()
+    tickets.ask(proj, tid, "Which colour?", [], None, "agent:generic")
+    before = tickets.load(proj, tid)
+    rev = str(before["revision"])
+    if path == "cli_by_human_in_agent_env":  # --by cannot talk the guard out of it
+        monkeypatch.setenv("ORCH_AGENT", "generic")
+    if path == "set_status":
+        with pytest.raises(Refused, match="Not done"):
+            tickets.set_status(proj, tid, target, "agent:generic")
+        code = 2
+    elif path == "patch":
+        with pytest.raises(Refused, match="Not done"):
+            tickets.patch(proj, tid, before["revision"], json.dumps({"status": target}), "agent:generic")
+        code = 2
+    elif path == "cli_status":
+        code = run("ticket", "status", tid, target, "--by", "agent:generic")[0]
+    elif path == "cli_patch":
+        code = run(
+            "ticket",
+            "patch",
+            tid,
+            "--if-revision",
+            rev,
+            json.dumps({"status": target}),
+            "--by",
+            "agent:generic",
+        )[0]
+    else:
+        code = run("ticket", "status", tid, target, "--by", "human:lume")[0]
+    assert code == 2
+    assert tickets.load(proj, tid) == before
+
+
+def test_ask_for_changes_is_ready_with_one_human_pending_item(proj, run, new_ticket):
+    """P1.7: one call -> Ready (never Working without a run) + the note queued as a person's input, which is
+    exactly what the automation host starts one run for (queued_input: Ready + human_pending_ids + no run)."""
+    tid = new_ticket()
+    tickets.set_status(proj, tid, "review", "human:lume")
+    t = tickets.ask_for_changes(proj, tid, "Make the header blue", "human:lume")
+    assert t["status"] == "ready" and t["waiting_on"] is None
+    assert any(c["text"] == "Change: Make the header blue" for c in t["checklist"])
+    pending = runs.undelivered(proj, tid)
+    assert len(pending) == 1 and pending[0]["by"] == "human:lume" and pending[0]["kind"] == "message"
+    assert pending[0]["via"] == "dashboard" or pending[0]["via"] == "cli"
+    code, out, err = run("run", "status", tid, "--json")
+    assert code == 0 and len(json.loads(out)["human_pending_ids"]) == 1
+    assert json.loads(out)["running"] is False
+
+
+def test_ask_for_changes_refusals(proj, new_ticket, monkeypatch):
+    tid = new_ticket()
+    with pytest.raises(Refused, match="not waiting"):
+        tickets.ask_for_changes(proj, tid, "x", "human:lume")  # not in Review
+    tickets.set_status(proj, tid, "review", "human:lume")
+    with pytest.raises(Refused, match="Only a person"):
+        tickets.ask_for_changes(proj, tid, "x", "agent:generic")
+    with pytest.raises(Refused, match="Say what"):
+        tickets.ask_for_changes(proj, tid, "  ", "human:lume")
+    assert tickets.load(proj, tid)["status"] == "review" and not runs.undelivered(proj, tid)
+
+
+def test_ask_for_changes_is_atomic(proj, new_ticket, monkeypatch):
+    """A failed ticket update takes the queued note back; a failed queue leaves the ticket in Review."""
+    tid = new_ticket()
+    tickets.set_status(proj, tid, "review", "human:lume")
+    real = tickets.apply_op
+
+    def boom(*a, **k):
+        raise Refused("disk full")
+
+    monkeypatch.setattr(tickets, "apply_op", boom)
+    with pytest.raises(Refused, match="disk full"):
+        tickets.ask_for_changes(proj, tid, "x", "human:lume")
+    monkeypatch.setattr(tickets, "apply_op", real)
+    assert not runs.undelivered(proj, tid) and tickets.load(proj, tid)["status"] == "review"
+
+    def nope(*a, **k):
+        raise Refused("no queue")
+
+    monkeypatch.setattr(runs, "pending_add", nope)
+    with pytest.raises(Refused, match="no queue"):
+        tickets.ask_for_changes(proj, tid, "x", "human:lume")
+    assert tickets.load(proj, tid)["status"] == "review"
+
+
+def test_ask_for_changes_keeps_an_unrelated_wait_and_takes_dash_notes(proj, run, new_ticket):
+    tid = new_ticket()
+    tickets.wait(proj, tid, None, "external:vendor", "human:lume")
+    tickets.set_status(proj, tid, "review", "human:lume")
+    t = tickets.load(proj, tid)
+    t["waiting_on"] = {"kind": "external", "ref": "vendor"}
+    tickets.save(proj, t)
+    code, out, err = run("ticket", "changes", "--by", "human:lume", tid, "--", "--json")
+    assert code == 0, err
+    t = tickets.load(proj, tid)
+    assert t["status"] == "ready" and t["waiting_on"] == {"kind": "external", "ref": "vendor"}
+    assert runs.undelivered(proj, tid)[0]["text"] == "--json"
+
+
+def test_two_human_items_are_two_ids_for_the_host_but_one_ticket(proj, run, new_ticket):
+    """An answer and a change note both wait: core lists both ids on ONE ticket (the host starts one run per
+    ticket per pass; the automation test covers that)."""
+    tid = new_ticket()
+    runs.pending_add(proj, tid, "human:lume", "answer", "Yes", "dashboard")
+    tickets.set_status(proj, tid, "review", "human:lume")
+    tickets.ask_for_changes(proj, tid, "Blue please", "human:lume")
+    code, out, _ = run("run", "status", tid, "--json")
+    assert code == 0 and len(json.loads(out)["human_pending_ids"]) == 2

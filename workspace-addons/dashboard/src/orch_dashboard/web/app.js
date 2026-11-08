@@ -239,6 +239,24 @@ function render(arrived = new Set()) {
   window.scrollTo(...(changed ? [0, 0] : scroll));
 }
 
+// Every notice goes through one scrub: no raw ids, actor names or UTC times reach a person.
+if (window.orch && !window.orch.__scrubbed) {
+  const rawToast = window.orch.toast.bind(window.orch);
+  window.orch.toast = (text, kind) => rawToast(window.DashHelpers.scrubText(text), kind);
+  window.orch.__scrubbed = true;
+}
+// One automatic retry for a change that raced with someone else (typically the agent that just finished):
+// reload the ticket, and send the same intent again only while it still applies. `args()` is called again for the new revision.
+async function actRetry(op, args, applies) {
+  const first = await act(op, args());
+  if (first.status !== 409 || snapshot) return first;
+  try {
+    const res = await fetch('/api/state', {cache:'no-store'});
+    if (res.ok) accept(await res.json());
+  } catch (_) { return first; }
+  if (!applies()) return first;
+  return act(op, args());
+}
 window.orchAct = (op, args) => act(op, args);
 async function act(op, args) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
