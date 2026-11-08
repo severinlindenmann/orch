@@ -248,10 +248,11 @@ def kill_tree(pid: int, grace: float = 2.0) -> None:
             pass
 
     def gone() -> bool:
-        # Our own child that has ended stays a zombie (and looks alive) until it is reaped: reap it, so we
-        # do not wait out the grace and then SIGKILL a process that is still in its SIGTERM handler.
-        with contextlib.suppress(ChildProcessError, OSError):
-            if os.waitpid(pid, os.WNOHANG)[0] == pid:
+        # Our own child that has ended stays a zombie (and looks alive) until it is reaped. Look without
+        # reaping (WNOWAIT): its owner still reads the real exit status (a reaped Popen reports 0), and we do
+        # not wait out the grace and then SIGKILL a process that is still in its SIGTERM handler.
+        with contextlib.suppress(ChildProcessError, OSError, AttributeError):
+            if os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None:
                 return True
         return not services.pid_alive(pid)
 
@@ -536,6 +537,40 @@ def settle(root: Path, tid: str, by: str, say: bool = True) -> bool:
     with contextlib.suppress(Refused, OSError, ValueError):
         return tickets.agent_stopped(root, tid, by, busy, say)
     return False
+
+
+def restart_for_input(root: Path, tid: str, name: str, by: str) -> bool:
+    """A live session ended while a person's answer or message still waited to go in: start the next run
+    (same resume path as Continue), so it does not sit there with nobody to read it. Once per waiting item:
+    an agent that ends again at once is not started over and over. The start runs as its own process (this
+    may be the ending session's own pane, which a new live start replaces)."""
+    with locked(root, tid):
+        items = [i for i in _pending_read(root, tid) if not i.get("delivered_at") and i.get("via") != "start"]
+        if not items or any(i.get("restarted") for i in items) or read(root, tid):
+            return False
+        all_ = _pending_read(root, tid)
+        for i in all_:
+            if i["id"] in {x["id"] for x in items}:
+                i["restarted"] = tickets.now()
+        _pending_write(root, tid, all_)
+    return _spawn_detached(root, procs.orch_python_argv("run", "start", tid, "--agent", name, "--by", by))
+
+
+def _spawn_detached(root: Path, argv: list[str]) -> bool:
+    kw: dict = {"start_new_session": True} if os.name != "nt" else {"creationflags": 0x00000200 | 0x00000008}
+    try:
+        subprocess.Popen(
+            argv,
+            cwd=root,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=_agent_environ(),
+            **kw,
+        )
+    except OSError:
+        return False
+    return True
 
 
 def settle_orphan(root: Path, tid: str, at: float | None = None) -> bool:
@@ -1015,6 +1050,10 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         with contextlib.suppress(Exception):
             tickets.log(root, tid, said, f"agent:{name}")
     release(root, tid, run)  # input still waiting stays in the pending file for the next start
+    if (
+        said is not None
+    ):  # it ended by itself (not our Stop): an answer or message still waiting starts the next
+        restart_for_input(root, tid, name, rec.get("by") or f"agent:{name}")
     settle(root, tid, f"agent:{name}", say=said is None)  # the end line above already says it
     (run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
     with contextlib.suppress(Exception):
