@@ -164,6 +164,7 @@ def _holder_line(rec: dict, tid: str, root: Path | None = None) -> str:
 def _status(args, root: Path) -> None:
     tid = args.ticket
     tickets.load(root, tid)
+    runs.settle_orphan(root, tid)  # Working with no agent for a while: Ready (status matches reality)
     rec = runs.read(root, tid)
     waiting = len(runs.undelivered(root, tid))
     if not rec:

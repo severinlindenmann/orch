@@ -396,9 +396,12 @@ def view_for(root: Path, tid: str) -> dict | None:
     return build(root, ticket, atts)
 
 
-def _tasks_sig(ticket: dict) -> str:
+def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
+    """What the phone's snapshot depends on: tasks, status and whether an agent runs now (so "<agent> is
+    working" on the phone ends when the agent stops, not only when a task changes)."""
     items = [[c.get("text"), bool(c.get("done"))] for c in ticket.get("checklist") or []]
-    return hashlib.sha256(json.dumps([items, ticket.get("status")]).encode()).hexdigest()[:16]
+    running = _agent(root, ticket)[1] if root is not None else None
+    return hashlib.sha256(json.dumps([items, ticket.get("status"), running]).encode()).hexdigest()[:16]
 
 
 def remember(root: Path, tid: str, to: str) -> None:
@@ -407,7 +410,7 @@ def remember(root: Path, tid: str, to: str) -> None:
         return
     state = load_state(root)
     try:
-        sig = _tasks_sig(tickets.load(root, tid))
+        sig = _tasks_sig(tickets.load(root, tid), root)
     except (Refused, ValueError, KeyError, OSError):
         return
     state["tickets"][tid] = {"to": to, "sig": sig, "at": time.time()}
@@ -431,7 +434,7 @@ def sync(root: Path, now: float | None = None) -> list[str]:
             ticket = tickets.load(root, tid)
         except (Refused, ValueError, KeyError, OSError):
             continue
-        if _tasks_sig(ticket) == rec.get("sig") or now - rec.get("at", 0) < DEBOUNCE:
+        if _tasks_sig(ticket, root) == rec.get("sig") or now - rec.get("at", 0) < DEBOUNCE:
             continue
         done, total = tickets.checks_done(ticket)
         with contextlib.suppress(Refused):

@@ -503,6 +503,39 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
         return {"released": True, "pending": waiting}
 
 
+ORPHAN_GRACE_SECONDS = 120  # a Working ticket with no run gets this long for its agent to start
+
+
+def running(root: Path, tid: str) -> bool:
+    """An agent run holds the ticket now (alive, or quiet but not known to be gone)."""
+    rec = read(root, tid)
+    return bool(rec) and state(rec) != "dead"
+
+
+def settle(root: Path, tid: str, by: str, say: bool = True) -> bool:
+    """A run ended (or never came): a ticket still Working is Ready again, so every surface that shows the
+    ticket status (dashboard, Focus, phone) says what is true. Never touches a ticket a run holds now."""
+    if tickets.is_general(root, tid):
+        return False
+    with contextlib.suppress(Refused, OSError, ValueError):
+        return tickets.agent_stopped(root, tid, by, lambda: running(root, tid), say)
+    return False
+
+
+def settle_orphan(root: Path, tid: str, at: float | None = None) -> bool:
+    """`orch run status` (the dashboard asks every few seconds): a ticket Working for a while with no run on
+    it (a phone text or a person moved it, and no agent came) is Ready again."""
+    at = time.time() if at is None else at
+    with contextlib.suppress(Refused, OSError, ValueError, KeyError):
+        t = tickets.load(root, tid)
+        if t.get("status") != "active" or running(root, tid) or undelivered(root, tid):
+            return False
+        if at - _parse(t["updated_at"]) < ORPHAN_GRACE_SECONDS:
+            return False
+        return settle(root, tid, "orch")
+    return False
+
+
 # ---------------------------------------------------------------- what the agent is told
 
 
@@ -917,6 +950,7 @@ def wrap(
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, f"The agent stopped with an error: {why}", f"agent:{name}")
         if release(root, tid, run, keep_if_pending=turns <= MAX_DRAIN_TURNS)["released"]:
+            settle(root, tid, f"agent:{name}")  # ended without finishing or asking: not Working any more
             return 0 if rc == 0 else rc
         with contextlib.suppress(Exception):
             tickets.resume_after_start_wait(root, tid, f"agent:{name}")  # the extra turn is work again
@@ -957,6 +991,7 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
     if new_session and rc == 0:
         tickets.record_session(root, tid, name, new_session, host())
     now = read(root, tid)
+    said = None
     if now and now["run"] == run and not now.get("stop_requested"):  # a person sees it ended (not our Stop)
         said = "The live session ended."
         if rc > 0:  # a signal (negative rc) is a plain end, not an error
@@ -964,6 +999,7 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
         with contextlib.suppress(Exception):
             tickets.log(root, tid, said, f"agent:{name}")
     release(root, tid, run)  # input still waiting stays in the pending file for the next start
+    settle(root, tid, f"agent:{name}", say=said is None)  # the end line above already says it
     (run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
     with contextlib.suppress(Exception):
         from orch import runs_live
