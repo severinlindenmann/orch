@@ -628,6 +628,13 @@ def send_text(
         msg = _message(root, to, "text", body, ticket, reply_to)
     if update and ticket and to_phone:
         phone_view.remember(root, ticket, to)
+    if general and not update:
+        # a real text to the General conversation: kept in its history: the dashboard shows both ways
+        try:
+            gid = tickets.ensure_general(root, tickets.current_actor())
+            tickets.apply_op(root, gid, lambda t: tickets.add_history(t, tickets.current_actor(), text))
+        except (Refused, OSError):
+            pass  # the text is sent; a missing history line never fails the send
     return msg
 
 
@@ -1239,6 +1246,9 @@ def _continue(
         if mid in r.get("messages", []):
             return
         r["messages"] = [*r.get("messages", []), mid][-50:]
+        r["phone"] = (
+            True  # the owner wrote to it from a phone: its questions go there too (mobile_mode.from_phone)
+        )
         tickets.add_history(t, by, text, "phone")
         t["waiting_on"] = None
         if general:

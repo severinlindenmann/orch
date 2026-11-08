@@ -265,7 +265,7 @@ actor MockRelay: RelayAPI {
             let newKey = "\(to == Self.pilatus ? "PIL" : "RGS")-\(20 + counter)"
             deliverUpdate(workspace: to, ticket: r.ticket ?? newTicket, kind: "ack", title: label, text: "Got it: \(label)", replyTo: id,
                           key: isNewTopic ? newKey : prior?.key,
-                          view: isNewTopic ? TicketSnapshot(title: label, status: "active", agent: "Claude", running: false) : prior?.ticketView)
+                          view: isNewTopic ? TicketSnapshot(title: label, status: "active", agent: "Claude", running: true) : prior?.ticketView)
         }
         return SendReceipt(id: id, clientId: r.clientId)
     }

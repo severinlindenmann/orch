@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -687,7 +688,8 @@ def run(args: argparse.Namespace) -> None:
         )
         if args.phone:
             cli_clients.send_phone_question(root, t["id"], q, args.preview, args.scope)
-        elif mobile_mode.routes_to_phone(root):  # Mobile mode: every question also goes to the phone
+        elif mobile_mode.question_to_phone(root, t["id"], os.environ.get("ORCH_TICKET")):
+            # Mobile mode, or a ticket from the phone (or one its agent made): also to the phone
             with contextlib.suppress(Refused):  # the question is saved either way
                 cli_clients.send_phone_question(root, t["id"], q)
         _out(

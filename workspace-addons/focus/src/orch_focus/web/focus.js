@@ -267,6 +267,7 @@
   }
 
   function renderProof(v) {
+    proof.setPageKey(v.page_key);
     const done = v.ticket.checklist.filter(c => c.done);
     const list = [];
     for (const c of done) for (const ev of c.evidence || []) list.push({c, ev});
