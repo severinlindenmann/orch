@@ -45,7 +45,7 @@ enum GroupRoomRules {
         }
     }
 
-    static func readKey(_ group: PhoneGroup) -> String { "group:\(group.key.host)|\(group.id)" }
+    static func readKey(_ group: PhoneGroup) -> String { "group:\(group.key.host)|\(group.key.id)" }
     static func readItems(_ group: PhoneGroup) -> [ChatItem] {
         group.messages.map { message in
             let incoming: Bool
@@ -101,7 +101,7 @@ struct GroupListRow: View {
     @Environment(AppModel.self) private var model
     let group: PhoneGroup
     var body: some View {
-        NavigationLink(value: ChatRoute.group(host: group.key.host, id: group.id)) {
+        NavigationLink(value: ChatRoute.group(host: group.key.host, id: group.key.id)) {
             HStack(spacing: 12) {
                 GroupBadges(group: group)
                 VStack(alignment: .leading, spacing: 5) {
@@ -114,7 +114,7 @@ struct GroupListRow: View {
                     ShellBadge(count: model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group)))
                 }
             }.padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
-        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("group-\(group.id)")
+        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("group-\(group.key.id)")
     }
 }
 

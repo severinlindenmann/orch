@@ -19,7 +19,7 @@ struct GroupRoomView: View {
                             if !group.startedHere { pill("Earlier messages are in \(group.hostName)") }
                             ForEach(Array(group.messages.enumerated()), id: \.element.id) { index, message in
                                 if let seq = message.seq,
-                                   group.gaps.contains(where: { gap in gap < seq && !(group.messages.prefix(index).contains { ($0.seq ?? 0) > gap }) }) {
+                                   group.gaps.contains(where: { gap in gap.upperBound <= seq && gap.lowerBound > (group.messages.prefix(index).compactMap(\.seq).max() ?? 0) }) {
                                     pill("a message is missing")
                                 }
                                 messageView(message, previous: index > 0 ? group.messages[index - 1] : nil, group: group)
@@ -71,7 +71,7 @@ struct GroupRoomView: View {
 
     @ViewBuilder private func messageView(_ message: GroupMessage, previous: GroupMessage?, group: PhoneGroup) -> some View {
         if let event = message.event {
-            if event.kind == "approval_needed" { GroupApprovalView(event: event, group: group) }
+            if event.kind == "approval_needed" { GroupApprovalView(event: event, group: group, late: message.late) }
             else {
                 let text = GroupRoomRules.eventText(event, group: group)
                 if !text.isEmpty { pill(text) }
@@ -175,6 +175,7 @@ struct GroupApprovalView: View {
     @Environment(AppModel.self) private var model
     let event: GroupEvent
     let group: PhoneGroup
+    var late: Bool = false
     @State private var sending = false
     private var result: GroupEvent? {
         guard let delegate = event.delegate else { return nil }
@@ -186,7 +187,7 @@ struct GroupApprovalView: View {
             else if let questionId = event.questionMessage, let answer = model.answers[questionId] {
                 Text(answer.lowercased() == "no" ? "You said no to \(group.name(of: event.ws ?? ""))" : "You allowed \(group.name(of: event.ws ?? "")) \(answer.lowercased() == "always" ? "always" : "once")").themeFont(15)
             } else {
-                switch GroupStore.approvalCard(for: event, in: group, questions: model.questions) {
+                switch GroupStore.approvalCard(for: event, in: group, questions: model.questions, late: late) {
                 case .buttons(let question):
                     Text(question.message.body.text).themeFont(17, .semibold)
                     if let answer = model.answers[question.id] { Text(answer).themeFont(13).foregroundStyle(Theme.muted) }

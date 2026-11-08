@@ -130,7 +130,9 @@ final class GroupStoreTests: XCTestCase {
 
     func testNamesUsePairedNamesAndSanitizeUnpairedNames() throws {
         let outsider = "ws_outsider"
-        for (supplied, expected) in [("You", "Workspace"), ("  yOu \n", "Workspace"), ("  ", "Workspace"), ("Guest", "Guest")] {
+        for (supplied, expected) in [("You", "Workspace"), ("You\u{200B}", "Workspace"), ("Ｙou", "Workspace"),
+                                     (" YOU ", "Workspace"), ("Other phone", "Workspace"),
+                                     ("\u{200B}", "Workspace"), ("  yOu \n", "Workspace"), ("  ", "Workspace"), ("Guest", "Guest")] {
             let m = message("text") {
                 $0.by = outsider
                 $0.group = GroupInfo(id: "grp_t_fin14a", host: self.finance, title: "Tax",
@@ -348,6 +350,16 @@ final class GroupStoreTests: XCTestCase {
             GroupStore.approvalCard(for: e ?? event, in: g, questions: questions)
         }
         XCTAssertEqual(card([question()]), .buttons(question()))
+        XCTAssertEqual(GroupStore.approvalCard(for: event, in: g, questions: [question()], late: true), .closed)
+        let closed = try group([message("group") {
+            $0.group = GroupInfo(id: "grp_t_fin14a", host: self.finance, title: "Tax", members: g.members, seq: 1)
+        }, message("closed", seq: 2) {
+            $0.group = GroupInfo(id: "grp_t_fin14a", host: self.finance, title: "Tax", members: g.members, seq: 2)
+            $0.groupEvent = GroupEvent(kind: "closed")
+        }])
+        XCTAssertTrue(closed.closed)
+        XCTAssertEqual(GroupStore.approvalCard(for: event, in: closed, questions: [question()]), .closed)
+        XCTAssertEqual(GroupStore.approvalCard(for: event, in: closed, questions: []), .closed)
         let once = question(options: ["Once", "Always", "No"])
         XCTAssertEqual(card([once]), .answerInWorkspace("Bank"))
         let wire = question(options: ["once", "always", "no"])

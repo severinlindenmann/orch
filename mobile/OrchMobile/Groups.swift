@@ -60,7 +60,7 @@ struct GroupMessage: Identifiable, Equatable {
 }
 struct PhoneGroup: Identifiable, Equatable {
     let key: GroupKey
-    var id: String { key.id }
+    var id: GroupKey { key }
     let title: String
     let members: [GroupMember]
     let hostName: String
@@ -352,7 +352,11 @@ enum GroupStore {
                   let newest = latest[key], let info = newest.message.body.group else { return nil }
             let names = Dictionary(uniqueKeysWithValues: info.members.map { member in
                 let name = (workspaces[member.ws] ?? member.name).trimmingCharacters(in: .whitespacesAndNewlines)
-                return (member.ws, name.isEmpty || name.lowercased() == "you" ? "Workspace" : name)
+                let normalized = String(String.UnicodeScalarView(name.precomposedStringWithCompatibilityMapping
+                    .unicodeScalars.filter { $0.properties.generalCategory != .format }))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
+                return (member.ws, ["", "you", "other phone"].contains(normalized) ? "Workspace" : name)
             })
             return PhoneGroup(key: key, title: info.title, members: info.members, hostName: workspaces[key.host] ?? key.host, names: names,
                 ticketKey: newest.message.key, ticket: newest.message.ticket, messages: order(heldMessages),
@@ -393,7 +397,8 @@ enum GroupStore {
         return group.messages.last { $0.message.message.from == group.key.host && $0.message.message.to == "phones" }?.id
     }
 
-    static func approvalCard(for event: GroupEvent, in group: PhoneGroup, questions: [Question]) -> ApprovalCard {
+    static func approvalCard(for event: GroupEvent, in group: PhoneGroup, questions: [Question], late: Bool = false) -> ApprovalCard {
+        guard !group.closed, !late else { return .closed }
         if event.kind == "approval_needed", let ws = event.ws, group.members.contains(where: { $0.ws == ws }),
            let q = questions.first(where: {
                $0.id == event.questionMessage && $0.message.from == ws && $0.isGroupAllow &&
