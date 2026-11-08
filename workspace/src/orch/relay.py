@@ -1271,8 +1271,11 @@ def _chat_record(root: Path, mid: str, body: dict) -> None:
     if not text.strip():
         return
     with contextlib.suppress(Refused, OSError, ValueError):
-        phone = frm_of(root, mid, "")
-        chat.record(root, mid, "you", "phone", text, phone=phone if phone.startswith("ph_") else None)
+        frm = frm_of(root, mid, "")
+        if re.fullmatch(r"ph_[a-z0-9]{10}", frm):
+            chat.record(root, mid, "you", "phone", text, phone=frm)
+        elif re.fullmatch(r"ws_[a-z0-9]{10}", frm):  # never "you": only a paired phone speaks as the person
+            chat.record(root, mid, frm, "workspace", text)
 
 
 def _continue(

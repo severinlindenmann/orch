@@ -10,10 +10,9 @@ from orch.errors import Refused
 
 
 def add_parsers(sub, common) -> None:
-    s = sub.add_parser("chat", help="the Chat with your phones (one helper per workspace)").add_subparsers(
-        dest="sub", required=True
-    )
+    s = sub.add_parser("chat", help="the Chat with your phones").add_subparsers(dest="sub", required=True)
     s.add_parser("status", parents=[common], help="today's texts, the activity strip, past days")
+    s.add_parser("id", parents=[common], help="the Chat ticket (for the automation host)")
     s.add_parser("days", parents=[common], help="History: the days that have texts, newest first")
     x = s.add_parser("day", parents=[common], help="one past or present day, read only")
     x.add_argument("day", help="YYYY-MM-DD")
@@ -32,6 +31,9 @@ def dispatch(args, root: Path) -> bool:
         d = chat.status(root)
         a = d["activity"]
         _out(args, d, f"{d['helper']}: {len(d['messages'])} texts today, {a['phone_today']} from your phone.")
+    elif args.sub == "id":
+        d = chat.chat_id(root)
+        _out(args, d, d["ticket"] or "No Chat yet.")
     elif args.sub == "days":
         d = chat.days(root)
         _out(args, d, "\n".join(f"{x['day']}  {x['count']}  {x['last']}" for x in d) or "No earlier days.")

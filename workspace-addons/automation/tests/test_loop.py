@@ -306,6 +306,14 @@ def test_a_text_in_chat_starts_the_helper_once(ws):
     assert Scheduler(ws).tick(T(8, 4)) == []
 
 
+def test_a_paused_chat_starts_no_helper(ws):
+    (ws / "chat-ticket").write_text("t_chat0002")
+    (ws / "chat-paused").write_text("")
+    (ws / "pending-t_chat0002").write_text(json.dumps(["p_phone00001"]))
+    (ws / "ended-t_chat0002").write_text("")
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
+
+
 def test_queued_input_on_a_running_or_not_ready_ticket_starts_nothing(ws):
     add_ticket(ws, "t_queue002", status="ready")  # a run holds it (no ended- file)
     (ws / "pending-t_queue002").write_text(json.dumps(["p_x00000001"]))

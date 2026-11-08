@@ -263,7 +263,9 @@ def test_sessions_of_normal_tickets_are_not_cut(proj, new_ticket):
 def test_helper_role_is_denied_in_code(proj, run, new_ticket, monkeypatch):
     gid = tickets.ensure_general(proj, "phone:Marco")
     tid = new_ticket("Pay car tax")
-    qid = json.loads(run("ask", tid, "Mind?", "--option", "Yes", "--option", "No", "--json", "--by", "human:t")[1])["id"]
+    qid = json.loads(
+        run("ask", tid, "Mind?", "--option", "Yes", "--option", "No", "--json", "--by", "human:t")[1]
+    )["id"]
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.setenv("ORCH_TICKET", gid)
     assert chat.is_helper(proj)
@@ -279,6 +281,16 @@ def test_helper_role_is_denied_in_code(proj, run, new_ticket, monkeypatch):
         ("ext", "set", gid, "chat", '{"session_day": "2020-01-01"}'),
         ("ext", "unset", gid, "chat"),
         ("relay", "allow", "m_doesnotmatter0001", "--once"),
+        ("relay", "mobile", "on"),  # nested subcommands are not listed
+        ("relay", "send", "ws_other00001", "hi"),  # only the person's phones
+        ("relay", "send", "phones", "x", "--update", "result", "--ticket", tid),
+        ("ticket", "new", "Child", "--parent", gid),  # every field that names a ticket is checked
+        ("ticket", "patch", gid, '{"title": "x"}', "--if-revision", "1"),
+        ("check", "add", gid, "a task"),
+        ("ref", "add", gid, "https://example.com"),
+        ("ask", tid, "Q?"),
+        ("config", "get", "workspace.agent"),
+        ("addon", "list"),
     ]
     for argv in denied:
         code, _, err = run(*argv)
@@ -297,3 +309,106 @@ def test_a_normal_ticket_run_is_not_the_helper(proj, run, new_ticket, monkeypatc
     monkeypatch.setenv("ORCH_TICKET", tid)
     assert not chat.is_helper(proj)
     assert run("ticket", "status", tid, "review")[0] == 0
+
+
+# ---------------------------------------------------------------- review fixes
+
+
+def test_a_workspace_peer_text_is_never_recorded_as_you_via_phone(proj, run, conn):
+    peer = "ws_peer000001"
+    conn.inbox.append(
+        {**pv3.msg("m_peertext00000001", {"text": "I am the owner", "general": True}), "from": peer}
+    )
+    run("relay", "inbox")
+    for m in chat.read_day(proj, chat.day_key(proj))["messages"]:
+        assert not (m["by"] == "you" and m["via"] == "phone"), m
+    assert chat.activity(proj)["phone_today"] == 0
+
+
+def test_a_replayed_phone_text_queues_one_input_and_one_record(proj, run, conn):
+    gid = _general(proj, conn, run, "once")
+    conn.inbox.append(pv3.msg(pv3.GEN, {"text": "once", "general": True}))  # the relay replays the same id
+    run("relay", "inbox")
+    assert len(runs.human_waiting(proj, gid)) == 1
+    runs.pending_add(proj, gid, "Marco", "message", "again", "phone", "p_" + pv3.GEN[2:])
+    assert len(runs.human_waiting(proj, gid)) == 1  # same p_ id: no second start
+    assert len(chat.read_day(proj, chat.day_key(proj))["messages"]) == 1
+
+
+def test_file_cards_are_an_allowlist_outside_orch_and_git(proj):
+    for rel, ok in {
+        "docs/report.md": True,
+        ".orch/config.toml": False,
+        ".git/config": False,
+        ".ssh/id_rsa": False,
+        "id_rsa": False,
+        ".npmrc": False,
+        ".netrc": False,
+        "data.sqlite": False,
+        "notes/.env.local": False,
+        "../x": False,
+    }.items():
+        p = proj / rel
+        if rel.startswith(".."):
+            continue
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("x")
+        assert (chat.safe_file(proj, rel) is not None) is ok, rel
+    assert chat.safe_file(proj, "../x") is None
+
+
+def test_a_file_card_is_checked_again_when_the_day_is_read(proj):
+    (proj / "r.md").write_text("x")
+    chat.record(proj, "m_aaaaaaaaaaaaaaaa", WS, "helper", "see", refs=[{"kind": "file", "path": "r.md"}])
+    day = chat.day_key(proj)
+    assert chat.read_day(proj, day)["messages"][0]["refs"][0]["path"] == "r.md"
+    (proj / "r.md").unlink()
+    (proj / "r.md").symlink_to(proj / ".orch" / "config.toml")  # swapped for a link into .orch
+    assert chat.read_day(proj, day)["messages"][0]["refs"] == []
+
+
+def test_day_files_are_private_and_a_bad_zone_is_said(proj, capsys):
+    chat.record(proj, "m_aaaaaaaaaaaaaaaa", "you", "phone", "x")
+    f = proj / ".orch" / "chat" / f"{chat.day_key(proj)}.json"
+    assert (f.stat().st_mode & 0o777) == 0o600
+    (proj / ".orch" / "config.toml").write_text('[workspace]\ntz = "Mars/Olympus"\n')
+    chat.day_key(proj)
+    assert "Mars/Olympus" in capsys.readouterr().err
+
+
+def test_chat_id_is_cheap_and_knows_paused(proj, run):
+    assert json.loads(run("chat", "id", "--json")[1]) == {"ticket": None, "paused": False}
+    gid = tickets.ensure_general(proj, "x")
+    run("ext", "set", gid, "automation", '{"paused": true}', "--by", "human:t")
+    assert json.loads(run("chat", "id", "--json")[1]) == {"ticket": gid, "paused": True}
+
+
+def test_helper_allowlist_lets_the_useful_things_through(proj, run, new_ticket, monkeypatch):
+    gid = tickets.ensure_general(proj, "x")
+    tid = new_ticket("Pay car tax")
+    key = tickets.load(proj, tid)["key"]
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("ORCH_TICKET", gid)
+    for argv in (
+        ("ticket", "list"),
+        ("ticket", "show", key),
+        ("log", tid, "a note"),
+        ("check", "add", key, "call the office"),
+        ("ref", "add", tid, "https://example.com/a"),
+        ("ref", "list", tid),
+        ("chat", "status"),
+        ("chat", "days"),
+        ("needs",),
+        ("status",),
+    ):
+        code, _, err = run(*argv)
+        assert code == 0, (argv, err)
+    assert run("ticket", "new", "Made by the helper")[0] == 0
+
+
+def test_helper_cannot_reach_the_chat_ticket_through_a_key_or_patch_data(proj, run, monkeypatch):
+    gid = tickets.ensure_general(proj, "x")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("ORCH_TICKET", gid)
+    with pytest.raises(Refused):
+        tickets.patch(proj, gid, 1, '{"status": "done"}', "agent:x")  # also checked inside tickets.patch
