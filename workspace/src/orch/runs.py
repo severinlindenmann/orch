@@ -28,7 +28,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, procs, services, tickets
+from orch import adapters, procs, runhooks, services, tickets
 from orch.errors import Refused
 from orch.procs import pid_started, same_start
 
@@ -588,6 +588,7 @@ def claim(
         if any(not i.get("delivered_at") for i in _pending_read(root, tid)):
             rec["pending"] = True
         _write(root, rec)
+    runhooks.fire("run_start", root=root, tid=tid, run=rec["run"], by=by)
     try:
         label = adapters.load(agent, root)["label"]
     except Refused:
@@ -636,7 +637,8 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
         _delete(root, tid)
         for leftover in (f"env-{rec['run']}.json", f"prompt-{rec['run']}.txt", f"hooks-{rec['run']}.json"):
             (run_dir(root) / leftover).unlink(missing_ok=True)  # files made for this run only
-        return {"released": True, "pending": waiting}
+    runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])  # after the lock is released
+    return {"released": True, "pending": waiting}
 
 
 # A Working ticket with no run gets this long for its agent to start. A start writes
