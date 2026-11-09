@@ -346,5 +346,6 @@ def test_orch_block_is_five_numbered_rules():
     numbered = [x for x in block.splitlines() if re.match(r"[1-5]\. ", x)]
     assert len(numbered) == 5
     assert "orch ticket new" in numbered[0] and "orch check add" in numbered[1]
-    assert "orch check done" in numbered[2] and "orch ask" in numbered[3] and "orch ticket summary" in numbered[4]
+    assert "orch check done" in numbered[2] and "orch ask" in numbered[3]
+    assert "orch ticket summary" in numbered[4]
     assert "There are no signing or planning gates" in block
