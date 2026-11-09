@@ -30,34 +30,46 @@ from orch import harness
 from orch.errors import Refused
 
 TIMEOUT = 5
-_OURS = re.compile(r" -m orch work-check --hook [a-z][a-z0-9-]*(?: 2>/dev/null \|\| true)?$")
+_OURS = re.compile(r" (?:-I )?(?:-P )?-m orch work-check --hook [a-z][a-z0-9-]*(?: 2>/dev/null \|\| true)?$")
 _BAD = set('"%$`!\n\r\0')
 
 
-def hook_command(tool: str) -> str:
-    """The hook command for `tool` (an adapter name); ValueError for an unsafe interpreter path."""
+def hook_argv(tool: str) -> list[str]:
+    """The hook as an argv: the ONE place that says how it starts (the check below runs the same prefix).
+    `-I -P`: isolated, no cwd on sys.path; orch needs Python 3.11+, which knows `-P`. ValueError for an
+    interpreter path no shell can carry safely."""
     exe = sys.executable.replace("\\", "/")
     if not exe or _BAD & set(exe):
         raise ValueError("the Python path has a character a hook command cannot carry safely")
-    return f'"{exe}" -I -m orch work-check --hook {tool}'
+    return [exe, "-I", "-P", "-m", "orch", "work-check", "--hook", tool]
 
 
-def can_import(root: Path) -> bool:
-    """The exact interpreter and flags of the hook can import orch (not so for pip --user or PYTHONPATH)."""
+def hook_command(tool: str) -> str:
+    """The hook command for `tool` (an adapter name): the argv, the interpreter double-quoted."""
+    argv = hook_argv(tool)
+    return " ".join([f'"{argv[0]}"', *argv[1:]])
+
+
+def can_import(root: Path | None) -> bool:
+    """The hook's interpreter and flags (same argv up to `work-check`) can import orch (not so for a pip
+    --user or PYTHONPATH install)."""
     try:
-        r = subprocess.run(
-            [
-                sys.executable,
-                "-I",
-                "-P",
-                "-m",
-                "orch",
-                "--version",
-            ]  # -I implies -P on 3.11+: same as the hook, cwd=root, capture_output=True, timeout=30
-        )
-    except (OSError, subprocess.SubprocessError):
+        argv = hook_argv("x")[:-3] + ["--version"]
+        r = subprocess.run(argv, cwd=root, capture_output=True, timeout=30)
+    except (ValueError, OSError, subprocess.SubprocessError):
         return False
     return r.returncode == 0
+
+
+_IMPORT_OK: dict = {}
+
+
+def can_import_cached() -> bool:
+    """can_import once per process and interpreter (the reminder hooks of a run are gated on it)."""
+    key = sys.executable
+    if key not in _IMPORT_OK:
+        _IMPORT_OK[key] = can_import(None)
+    return _IMPORT_OK[key]
 
 
 def tools(root: Path) -> list[tuple[str, dict]]:
@@ -130,7 +142,7 @@ def _ensure_one(root: Path, rel: str, tool: str, events: list[str]) -> str | Non
         return f"{rel} is a link: orch left it as it is."
     if path.exists() and not path.is_file():
         return f"{rel} is not a regular file: orch left it as it is."
-    if harness._tracked(root, rel):
+    if harness.is_tracked(root, rel):
         return f"{rel} is part of your team's files (tracked by git): {left}"
     try:
         command = hook_command(tool)
@@ -170,11 +182,18 @@ def _ensure_one(root: Path, rel: str, tool: str, events: list[str]) -> str | Non
     return None
 
 
+def ensure_each(root: Path) -> list[tuple[str, str, str | None]]:
+    """(tool name, settings file, warning or None) for every detected tool that has reminder hooks."""
+    return [
+        (
+            name,
+            a["reminder"]["settings_file"],
+            _ensure_one(root, a["reminder"]["settings_file"], name, list(a["reminder_hooks"])),
+        )
+        for name, a in tools(root)
+    ]
+
+
 def ensure(root: Path) -> list[str]:
     """Put the hooks in place for every detected tool that has them; returns the warning lines."""
-    out = []
-    for name, a in tools(root):
-        w = _ensure_one(root, a["reminder"]["settings_file"], name, list(a["reminder_hooks"]))
-        if w:
-            out.append(w)
-    return out
+    return [w for _, _, w in ensure_each(root) if w]

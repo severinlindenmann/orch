@@ -68,7 +68,7 @@ class _Stop(Exception):
     """A cap or the deadline: the answer is silence."""
 
 
-_GIT_EXE: list = []
+_GIT_EXE: list = []  # git's path, found once per process (the hook has a single root)
 
 
 def _tool_skips() -> tuple[tuple[str, ...], tuple[str, ...]]:

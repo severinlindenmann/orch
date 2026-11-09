@@ -987,7 +987,7 @@ def test_reminder_settings_command_is_double_quoted_and_shell_neutral(monkeypatc
 
     monkeypatch.setattr(sys, "executable", "/tmp/a b/py")
     cmd = reminder_settings.hook_command("claude")
-    assert cmd == '"/tmp/a b/py" -I -m orch work-check --hook claude'
+    assert cmd == '"/tmp/a b/py" -I -P -m orch work-check --hook claude'
     assert "2>" not in cmd and "||" not in cmd  # no bash-only tricks: works under cmd too
 
 
@@ -1083,3 +1083,41 @@ def test_reminder_settings_retries_once_when_the_tool_wrote_meanwhile(proj, monk
     assert reminder_settings.ensure(proj) == []
     doc = json.loads(f.read_text(encoding="utf-8"))
     assert doc["permissions"] == {"allow": ["x"]} and "hooks" in doc  # the tool's key survived
+
+
+def test_can_import_runs_the_hook_argv_with_cwd_capture_and_timeout(proj, monkeypatch):
+    import subprocess
+
+    from orch import reminder_settings
+
+    seen = {}
+
+    def fake(argv, **kw):
+        seen.update(argv=argv, **kw)
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(reminder_settings.subprocess, "run", fake)
+    assert reminder_settings.can_import(proj) is True
+    hook = reminder_settings.hook_argv("claude")
+    assert seen["argv"][:5] == hook[:5] == [hook[0], "-I", "-P", "-m", "orch"]  # the hook's own start
+    assert seen["argv"][5:] == ["--version"]
+    assert seen["cwd"] == proj and seen["capture_output"] is True and seen["timeout"] > 0
+    monkeypatch.setattr(
+        reminder_settings.subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 1, b"", b"")
+    )
+    assert reminder_settings.can_import(proj) is False
+
+
+def test_reminder_hooks_of_a_run_need_the_import_check(monkeypatch):
+    from orch import reminder_settings
+
+    monkeypatch.setattr(reminder_settings, "_IMPORT_OK", {})
+    calls = []
+    monkeypatch.setattr(reminder_settings, "can_import", lambda root: calls.append(1) or False)
+    assert adapters.reminder_doc("claude") is None and adapters.hooks_doc("claude", "r_1")["hooks"]["Stop"]
+    v = {"prompt": "p", "new_session": "0" * 8 + "-0000-0000-0000-" + "0" * 12}
+    argv = adapters.render("claude", "fresh", "oneshot", v)
+    assert "--settings" not in argv and len(calls) == 1  # cached: asked once
+    assert all(
+        len(g) == 1 for g in adapters.hooks_doc("claude", "r_1")["hooks"].values()
+    )  # no reminder group

@@ -24,18 +24,15 @@ def init(root: Path, code: str | None = None) -> list[str]:
     skills.set_block(root, "orch", skills.read_block(src, "orch"))
     linked = skills.apply_agent_files(root)
     # the reminder hooks, merged into the agent tool's local settings (only for a tool that has them)
-    warns = reminder_settings.ensure(root)
-    reminded = reminder_settings.settings_files(root)
+    reminders = reminder_settings.ensure_each(root)
     lines = [
         "Skill       .agents/skills/orch/SKILL.md (local; not part of your team's files)",
     ]
     if linked:
         lines.append("Linked for: " + ", ".join(linked))
-    lines += warns
-    if reminded and not warns:
-        lines.append(
-            f"Reminder    {', '.join(reminded)} (local; your agent is reminded of work with no ticket)"
-        )
+    for name, rel, warn in reminders:
+        label = adapters.load(name)["label"]
+        lines.append(warn or f"Reminder    {rel} (local; {label} is reminded of work with no ticket)")
     lines += [
         "Local only  orch files stay out of git (.git/info/exclude)",
         "Tickets     .orch/tickets/",

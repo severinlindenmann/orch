@@ -274,6 +274,8 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
         command = reminder_settings.hook_command(name)
     except ValueError:
         return None  # an interpreter path no shell can carry safely: no reminder hooks, the run goes on
+    if not reminder_settings.can_import_cached():
+        return None  # the hook's own `python -I` cannot import orch: no reminder hooks, the run goes on
     return {
         "hooks": {
             event: [
