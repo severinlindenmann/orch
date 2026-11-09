@@ -1,0 +1,382 @@
+{
+ "v": 1,
+ "about": "proposal.md reference cases (proposal_step, checkup_allowed in validate.py).",
+ "steps": [
+  {
+   "name": "accept tested",
+   "proof": "ok",
+   "current_version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "proposal": {
+    "status": "tested",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "passed",
+    "applied_after": null
+   },
+   "action": "accept",
+   "result": "accepted"
+  },
+  {
+   "name": "accept without proof",
+   "proof": "missing",
+   "current_version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "proposal": {
+    "status": "tested",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "passed",
+    "applied_after": null
+   },
+   "action": "accept",
+   "result": "not_allowed"
+  },
+  {
+   "name": "accept untested",
+   "proof": "ok",
+   "current_version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "proposal": {
+    "status": "proposed",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "not_run",
+    "applied_after": null
+   },
+   "action": "accept",
+   "result": "not_tested"
+  },
+  {
+   "name": "accept with failed tests",
+   "proof": "ok",
+   "current_version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "proposal": {
+    "status": "tested",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "failed",
+    "applied_after": null
+   },
+   "action": "accept",
+   "result": "not_tested"
+  },
+  {
+   "name": "accept after the skill changed",
+   "proof": "ok",
+   "current_version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "proposal": {
+    "status": "tested",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "passed",
+    "applied_after": null
+   },
+   "action": "accept",
+   "result": "stale"
+  },
+  {
+   "name": "accept admin skill refused",
+   "proof": "ok",
+   "current_version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "proposal": {
+    "status": "tested",
+    "target": {
+     "source": "admin",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "passed",
+    "applied_after": null
+   },
+   "action": "accept",
+   "result": "admin_only"
+  },
+  {
+   "name": "send admin skill to admin",
+   "proof": "ok",
+   "current_version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "proposal": {
+    "status": "tested",
+    "target": {
+     "source": "admin",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "passed",
+    "applied_after": null
+   },
+   "action": "send_to_admin",
+   "result": "sent_to_admin"
+  },
+  {
+   "name": "send own skill to admin",
+   "proof": "ok",
+   "current_version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "proposal": {
+    "status": "tested",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "passed",
+    "applied_after": null
+   },
+   "action": "send_to_admin",
+   "result": "conflict"
+  },
+  {
+   "name": "rollback",
+   "proof": "ok",
+   "current_version": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+   "proposal": {
+    "status": "accepted",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "passed",
+    "applied_after": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   },
+   "action": "rollback",
+   "result": "rolled_back"
+  },
+  {
+   "name": "rollback after another change",
+   "proof": "ok",
+   "current_version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "proposal": {
+    "status": "accepted",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "passed",
+    "applied_after": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   },
+   "action": "rollback",
+   "result": "conflict"
+  },
+  {
+   "name": "rollback expired proof",
+   "proof": "expired",
+   "current_version": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+   "proposal": {
+    "status": "accepted",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "passed",
+    "applied_after": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   },
+   "action": "rollback",
+   "result": "not_allowed"
+  },
+  {
+   "name": "reject",
+   "proof": "ok",
+   "current_version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "proposal": {
+    "status": "proposed",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "not_run",
+    "applied_after": null
+   },
+   "action": "reject",
+   "result": "rejected"
+  },
+  {
+   "name": "tests passed",
+   "proof": "ok",
+   "current_version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "proposal": {
+    "status": "proposed",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "running",
+    "applied_after": null
+   },
+   "action": "tests_done",
+   "tests": "passed",
+   "result": "tested"
+  },
+  {
+   "name": "tests failed stays proposed",
+   "proof": "ok",
+   "current_version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "proposal": {
+    "status": "proposed",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "running",
+    "applied_after": null
+   },
+   "action": "tests_done",
+   "tests": "failed",
+   "result": "proposed"
+  },
+  {
+   "name": "skill changed while open",
+   "proof": "ok",
+   "current_version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "proposal": {
+    "status": "tested",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "passed",
+    "applied_after": null
+   },
+   "action": "skill_changed",
+   "result": "stale"
+  }
+ ],
+ "checkup_commands": [
+  {
+   "argv": [
+    "record",
+    "query",
+    "--json"
+   ],
+   "allowed": true
+  },
+  {
+   "argv": [
+    "record",
+    "counts",
+    "--json"
+   ],
+   "allowed": true
+  },
+  {
+   "argv": [
+    "record",
+    "propose",
+    "--json"
+   ],
+   "allowed": true
+  },
+  {
+   "argv": [
+    "ticket",
+    "show",
+    "t_x"
+   ],
+   "allowed": true
+  },
+  {
+   "argv": [
+    "conn",
+    "list"
+   ],
+   "allowed": true
+  },
+  {
+   "argv": [
+    "log",
+    "t_x",
+    "note"
+   ],
+   "allowed": true
+  },
+  {
+   "argv": [
+    "secret",
+    "env",
+    "p",
+    "--",
+    "x"
+   ],
+   "allowed": false
+  },
+  {
+   "argv": [
+    "secret",
+    "list"
+   ],
+   "allowed": false
+  },
+  {
+   "argv": [
+    "secret",
+    "get",
+    "p",
+    "k"
+   ],
+   "allowed": false
+  },
+  {
+   "argv": [
+    "job",
+    "run",
+    "--",
+    "curl"
+   ],
+   "allowed": false
+  },
+  {
+   "argv": [
+    "run",
+    "start",
+    "t_x"
+   ],
+   "allowed": false
+  },
+  {
+   "argv": [
+    "conn",
+    "allow",
+    "slack",
+    "--all"
+   ],
+   "allowed": false
+  },
+  {
+   "argv": [
+    "record",
+    "delete-detail",
+    "t_x"
+   ],
+   "allowed": false
+  },
+  {
+   "argv": [
+    "ticket",
+    "patch",
+    "t_x"
+   ],
+   "allowed": false
+  },
+  {
+   "argv": [
+    "relay",
+    "send"
+   ],
+   "allowed": false
+  },
+  {
+   "argv": [
+    "unknown-cmd"
+   ],
+   "allowed": false
+  },
+  {
+   "argv": [],
+   "allowed": false
+  }
+ ]
+}

@@ -4,7 +4,7 @@
   "title": "orch human proof v1 (hp1): proof that a person clicked on the local page (invariant H1)",
   "description": "See human-proof.md. The proof string is hp1.<base64url payload>.<base64url HMAC-SHA256>, passed as the first stdin line with --proof-stdin.",
   "$defs": {
-    "op": { "enum": ["run.takeover", "run.type", "run.release", "focus.settings", "insights.settings", "record.delete_detail", "secret.add", "secret.remove", "secret.profile", "conn.allow", "checkup.accept", "checkup.rollback", "checkup.send_to_admin"] },
+    "op": { "enum": ["run.takeover", "run.type", "run.release", "focus.settings", "insights.settings", "record.delete_detail", "secret.add", "secret.remove", "secret.profile", "conn.allow", "checkup.accept", "checkup.rollback", "checkup.send_to_admin", "checkup.reject"] },
     "payload": {
       "type": "object", "required": ["op", "target", "by", "iat", "exp", "nonce"], "additionalProperties": false,
       "properties": {

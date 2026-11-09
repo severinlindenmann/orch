@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/proposal.schema.json",
+  "title": "orch check-up proposal v1 (orch.proposal/1, .orch/record/proposals/<id>.json)",
+  "description": "A change the check-up suggests (fix a skill, a new skill, ask the admin about a key or connection). See proposal.md. Nothing changes until a person accepts with a proof (human-proof.md).",
+  "type": "object",
+  "required": ["schema", "id", "created_at", "checkup", "kind", "title", "plain", "likely", "evidence", "target", "change", "tests", "status", "decided", "applied"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "orch.proposal/1" },
+    "id": { "type": "string", "pattern": "^pr_[a-z0-9]{8,16}$" },
+    "created_at": { "$ref": "#/$defs/time" },
+    "checkup": { "type": "object", "required": ["ticket", "run"], "additionalProperties": false, "properties": {
+      "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" }, "run": { "type": "string", "pattern": "^r_[a-z0-9_]{6,32}$" }
+    } },
+    "kind": { "enum": ["skill.fix", "skill.new", "key.ask_admin", "connection.fix", "note"] },
+    "title": { "$ref": "#/$defs/line" },
+    "plain": { "type": "string", "minLength": 1, "maxLength": 1000, "pattern": "^[^\\u0000-\\u0008\\u000b-\\u001f\\u007f]*$", "description": "The change in plain words, shown on Accept." },
+    "likely": { "type": "boolean", "description": "true = a guess about a cause the broker cannot see (\"likely lacks the refund right\"); shown as \"likely\"." },
+    "evidence": { "type": "array", "maxItems": 20, "items": { "type": "object", "required": ["ticket"], "additionalProperties": false, "properties": {
+      "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" }, "run": { "type": "string", "pattern": "^r_[a-z0-9_]{6,32}$" }, "event": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,160}$" }
+    } } },
+    "target": { "type": "object", "required": ["kind", "name", "source", "version"], "additionalProperties": false, "properties": {
+      "kind": { "enum": ["skill", "connection", "key"] },
+      "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+      "source": { "enum": ["harness", "admin", "workspace", "builtin", "marketplace", "new"] },
+      "version": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/version" }], "description": "Content hash the proposal was made against (inventory.md); null for a new skill." }
+    } },
+    "change": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["files"], "additionalProperties": false, "properties": {
+      "files": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "type": "object", "required": ["path", "before", "after"], "additionalProperties": false, "properties": {
+        "path": { "type": "string", "maxLength": 200, "pattern": "^(?![/\\\\.])(?!.*(^|/)\\.\\.?(/|$))(?!.*\\\\)[A-Za-z0-9_./ -]+$", "description": "Inside the skill folder; no dot files, no .., no backslash." },
+        "before": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }], "description": "sha256 of the file now; null = new file." },
+        "after": { "oneOf": [{ "type": "null" }, { "type": "string", "maxLength": 65536 }], "description": "New text; null = delete the file." }
+      } } }
+    } }], "description": "Only skill.fix and skill.new carry files; never a key, a connection config or anything outside the skill folder." },
+    "tests": { "type": "object", "required": ["state", "cases", "ran_at"], "additionalProperties": false, "properties": {
+      "state": { "enum": ["not_run", "running", "passed", "failed", "error"] },
+      "cases": { "type": "array", "maxItems": 20, "items": { "type": "object", "required": ["ticket", "result"], "additionalProperties": false, "properties": {
+        "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" }, "result": { "enum": ["better", "same", "worse", "error"] }
+      } } },
+      "ran_at": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/time" }] }
+    } },
+    "status": { "enum": ["proposed", "tested", "accepted", "rejected", "sent_to_admin", "rolled_back", "stale"] },
+    "decided": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["by", "at", "op"], "additionalProperties": false, "properties": {
+      "by": { "type": "string", "pattern": "^human:[^\\u0000-\\u001f]{1,58}$" }, "at": { "$ref": "#/$defs/time" },
+      "op": { "enum": ["checkup.accept", "checkup.rollback", "checkup.send_to_admin", "checkup.reject"] }
+    } }] },
+    "applied": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["version_before", "version_after", "at"], "additionalProperties": false, "properties": {
+      "version_before": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/version" }] }, "version_after": { "$ref": "#/$defs/version" }, "at": { "$ref": "#/$defs/time" }
+    } }] }
+  },
+  "allOf": [
+    { "if": { "properties": { "kind": { "enum": ["skill.fix", "skill.new"] } } }, "then": { "properties": { "change": { "type": "object" }, "target": { "properties": { "kind": { "const": "skill" } } } } }, "else": { "properties": { "change": { "type": "null" } } } },
+    { "if": { "properties": { "kind": { "const": "skill.new" } } }, "then": { "properties": { "target": { "properties": { "source": { "const": "new" }, "version": { "type": "null" } } } } } },
+    { "if": { "properties": { "status": { "enum": ["accepted", "rolled_back"] } } }, "then": { "properties": { "decided": { "type": "object" }, "applied": { "type": "object" } } } }
+  ],
+  "$defs": {
+    "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "version": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "line": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" }
+  }
+}

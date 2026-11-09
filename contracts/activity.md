@@ -112,7 +112,7 @@ Vectors `retention` fix the order.
 - `orch record query [--ticket T] [--run R] [--kind K]… [--from <time>] [--to <time>] [--limit N] [--after <cursor>] --json`
   → a page `{"items": [event…], "next": "<cursor>" | null}` (cli-answer.schema.json `page`), newest first, limit 1–500
   (default 100). `--detail <id> --run R` → one detail file.
-- `orch record counts --json` → counts.md. `orch record delete-detail <ticket> --json` → `{"deleted": n}` (person only).
+- `orch record counts --json` → counts.md. `orch record propose` → proposal.md (check-up runs only). `orch record delete-detail <ticket> --json` → `{"deleted": n}` (person only).
 - Refused (exit 2, `{"error", "code"}`) for `delete-detail` without a valid proof (human-proof.md), for a ticket that does not exist, and when the
   record folder is unsafe (symlink).
 

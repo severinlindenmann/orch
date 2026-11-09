@@ -47,6 +47,7 @@
       "description": "Optional, live runs only."
     },
     "log": { "type": "string", "pattern": "^\\.orch/run/logs/[A-Za-z0-9_.-]{1,120}$", "description": "Optional. Log file of a oneshot run, relative to the workspace root." },
+    "profile": { "const": "checkup", "description": "Optional. Set by the core for a Workspace check-up run (proposal.md): read-only command allowlist, no keys, no connections; excluded from counts and later check-ups." },
     "takeover": {
       "type": "object", "required": ["by", "from", "since", "last_input_at", "expires_at"], "additionalProperties": false,
       "properties": {

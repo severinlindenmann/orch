@@ -1,0 +1,35 @@
+{
+ "schema": "orch.proposal/1",
+ "id": "pr_7k2m9x4q",
+ "created_at": "2026-11-16T07:05:00Z",
+ "checkup": {
+  "ticket": "t_chk001",
+  "run": "r_chk00001"
+ },
+ "kind": "key.ask_admin",
+ "title": "stripe-key likely lacks the refund right",
+ "plain": "The skill will tell the agent to write dates as 2026-11-16, because 3 tickets were sent back for mixed date formats.",
+ "likely": true,
+ "evidence": [
+  {
+   "ticket": "t_inv7c2",
+   "run": "r_8k2m01",
+   "event": "toolu_01ABcd"
+  }
+ ],
+ "target": {
+  "kind": "key",
+  "name": "stripe-key",
+  "source": "admin",
+  "version": null
+ },
+ "change": null,
+ "tests": {
+  "state": "not_run",
+  "cases": [],
+  "ran_at": null
+ },
+ "status": "proposed",
+ "decided": null,
+ "applied": null
+}

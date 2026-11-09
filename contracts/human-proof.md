@@ -68,7 +68,7 @@ the file or the CLI without a proof (safe direction, as for `workspace.permissio
 | `record.delete_detail` | `orch record delete-detail <ticket>` (ticket page) | ticket | proof |
 | `secret.add`, `secret.remove`, `secret.profile` | key store and profile changes, incl. `allow_get = true` | key or profile name | proof (+ settings record for `allow_get`) |
 | `conn.allow` | `orch conn allow <name> …` (Allow in Used tab / Insights) | connection name | proof |
-| `checkup.accept`, `checkup.rollback`, `checkup.send_to_admin` | proposal buttons (proposal.md) | proposal id | proof |
+| `checkup.accept`, `checkup.rollback`, `checkup.send_to_admin`, `checkup.reject` | proposal buttons (proposal.md) | proposal id | proof |
 | relay admin switch / lock | `/admin/api/policy`, `PATCH /admin/api/workspaces/<id>` | – | the relay's own admin auth (`X-Orch-Admin`, private network only, relay-api.md); never a workspace token |
 
 ## Honest limit (Level 1, owner decision R1)

@@ -990,6 +990,59 @@ def kind_human():
         _expect(f"human effective {c['name']}", hp_effective(c), c["effective"])
 
 
+
+# --- proposals (proposal.md) -----------------------------------------------------------------------------------------
+CHECKUP_ALLOWED = {("record", "query"), ("record", "tail"), ("record", "counts"), ("record", "propose"), ("ticket", "list"),
+                   ("ticket", "show"), ("conn", "list"), ("log", None), ("check", None)}
+
+
+def checkup_allowed(argv):
+    """argv after 'orch'. P1: only the enumerated read commands; anything else is refused."""
+    if not argv:
+        return False
+    cmd, sub = argv[0], (argv[1] if len(argv) > 1 and not argv[1].startswith("-") else None)
+    return (cmd, sub) in CHECKUP_ALLOWED or ((cmd, None) in CHECKUP_ALLOWED and cmd in ("log", "check"))
+
+
+def proposal_step(c):
+    """One decision on a proposal -> new status or a refusal code."""
+    p, act = c["proposal"], c["action"]
+    if act in ("accept", "rollback", "send_to_admin", "reject") and c.get("proof") != "ok":
+        return "not_allowed"
+    st = p["status"]
+    if act == "skill_changed":
+        return "stale" if st in ("proposed", "tested") else st
+    if act == "tests_done":
+        return "tested" if st == "proposed" and c["tests"] == "passed" else st
+    if act == "reject":
+        return "rejected" if st in ("proposed", "tested") else "conflict"
+    if act == "send_to_admin":
+        return "sent_to_admin" if st == "tested" and p["target"]["source"] == "admin" else "conflict"
+    if act == "accept":
+        if p["target"]["source"] == "admin":
+            return "admin_only"
+        if st != "tested" or p["tests"] != "passed":
+            return "not_tested"
+        if c["current_version"] != p["target"]["version"]:
+            return "stale"
+        return "accepted"
+    if act == "rollback":
+        if st != "accepted":
+            return "conflict"
+        return "rolled_back" if c["current_version"] == p["applied_after"] else "conflict"
+    return "invalid"
+
+
+def kind_proposal():
+    v = _w("proposal")
+    _examples("proposal", lambda d: _msgs(v, d))
+    vec = _vec("proposal-v1.json")
+    for c in vec["steps"]:
+        _expect(f"proposal steps {c['name']}", proposal_step(c), c["result"])
+    for c in vec["checkup_commands"]:
+        _expect(f"proposal checkup_commands {' '.join(c['argv'])}", checkup_allowed(c["argv"]), c["allowed"])
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
     "activity": kind_activity,
@@ -1001,6 +1054,7 @@ KINDS = {
     "screen": kind_screen,
     "counts": kind_counts,
     "human": kind_human,
+    "proposal": kind_proposal,
 }
 
 
