@@ -177,6 +177,7 @@ function accept(next) {
 function route() {
   const hash = location.hash || '#home';
   if (hash === '#settings' && !snapshot && state?.settings) return {kind:'settings', hash};
+  if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
     if (hash.startsWith('#ticket/')) return {kind:'ticket', id:decodeURIComponent(hash.slice(8)), hash};

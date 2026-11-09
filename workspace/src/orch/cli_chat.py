@@ -22,6 +22,7 @@ def add_parsers(sub, common) -> None:
     x = s.add_parser("make-ticket", parents=[common], help="make a ticket from a Chat proposal")
     x.add_argument("message_id")
     x.add_argument("--title")
+    _add_dm_parsers(s, common)
 
 
 def _out(args, data, text: str) -> None:
@@ -57,5 +58,31 @@ def dispatch(args, root: Path) -> bool:
             args, r, "Sent." if r["sent"] else "Saved. It reaches your phone once the workspace is connected."
         )
     else:
+        return _dispatch_dm(args, root)
+    return True
+
+
+# Workspace DMs stay outside HELPER_COMMANDS: the helper is default-denied.
+def _add_dm_parsers(sub, common):
+    sub.add_parser("contacts", parents=[common], help="workspace contacts")
+    p = sub.add_parser("thread", parents=[common], help="messages with a workspace")
+    p.add_argument("workspace")
+    p = sub.add_parser("send", parents=[common], help="send a workspace a message")
+    p.add_argument("workspace")
+    p.add_argument("text")
+
+
+def _dispatch_dm(args, root):
+    if args.sub == "contacts":
+        data = chat.contacts(root)
+        text = "\n".join(f"{c['ws']}  {c['name']}" for c in data) or "No contacts."
+    elif args.sub == "thread":
+        data = chat.dm_thread(root, args.workspace)
+        text = "\n".join(f"{m['by']}: {m['text']}" for m in data["messages"]) or "No messages."
+    elif args.sub == "send":
+        data = chat.dm_send(root, args.workspace, args.text, getattr(args, "by", None))
+        text = {"sending": "Sending…", "delivered": "Delivered.", "failed": "Not sent."}[data["state"]]
+    else:
         return False
+    _out(args, data, text)
     return True

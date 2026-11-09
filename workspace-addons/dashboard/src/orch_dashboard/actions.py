@@ -577,3 +577,18 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
         msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
     conflict = isinstance(out, dict) and "revision" in out and "changed_by" in out
     return (409 if conflict else 422), str(msg)[:500], out if conflict else None
+
+
+# Workspace direct messages: a separate operation from phone/group chat.
+def _chat_send_ws(a):
+    _only(a, ("workspace", "text"))
+    ws = a.get("workspace")
+    if not isinstance(ws, str) or not re.fullmatch(r"ws_[a-z0-9]{10}", ws):
+        raise BadRequest("That is not a workspace.")
+    text = _text(a.get("text"))
+    if len(text) > 2000:
+        raise BadRequest("A message has 1 to 2000 characters.")
+    return ["chat", "send", ws], [], [text]
+
+
+OPS["chat.send_ws"] = _chat_send_ws
