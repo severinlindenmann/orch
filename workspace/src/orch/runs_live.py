@@ -290,60 +290,45 @@ HOLD_WORDS = {
     "unreadable": "Waiting: the agent's window cannot be read right now.",
 }
 _PROMPT_GLYPH = re.compile(r"^\s*[>\u276f\u203a]\s?")
-_ANSI = re.compile(r"\x1b\[([0-9;:]*)([A-Za-z])")
+_ANSI = re.compile(r"\x1b\[([0-9;:?]*)([A-Za-z])")
+# INVARIANT (fb18, third review): orch types its notice only into a prompt box PROVEN empty: no characters at
+# all, or exactly the tool's own hint style as captured from a real Claude Code (tests/fixtures/claude_prompt:
+# `ESC[2m` text `ESC[0m` on the default colour, cursor on the first character). Any other colour, attribute,
+# unknown or colon escape, or doubt holds. There is no colour guessing (no grey bands).
+_HINT_PLAIN = {"39", "0", "", "22"}  # codes around a hint that change nothing visible
 
 
-def _grey(params: list[int]) -> bool:
-    """A foreground colour a tool uses for its grey hint text (256-colour greys, or a truecolour grey)."""
-    if params[:1] == [5] and len(params) >= 2:
-        return params[1] in (8, 102, 145, 243, 244, 245, 246, 247) or 232 <= params[1] <= 250
-    if params[:1] == [2] and len(params) >= 4:
-        r, g, b = params[1:4]
-        return max(r, g, b) - min(r, g, b) <= 8 and max(r, g, b) <= 170
-    return False
-
-
-def _dim_flags(raw_row: str) -> list[tuple[str, bool]]:
-    """(character, drawn dim) for every character of a row with its colour codes. Dim: SGR 2 on its own, or a
-    grey foreground. The `2` inside `38;2;r;g;b` / `48;2;...` is a colour value, never "dim"."""
-    out: list[tuple[str, bool]] = []
-    dim = grey = False
+def _is_hint(raw_row: str) -> bool | None:
+    """True: every visible character of the row is drawn in the hint style, nothing else. False: some visible
+    character is not. None: an escape other than the exact hint style (any doubt)."""
+    dim = False
     pos = 0
+    seen = False
     for m in _ANSI.finditer(raw_row):
-        out += [(c, dim or grey) for c in raw_row[pos : m.start()]]
+        for c in raw_row[pos : m.start()]:
+            if c.strip():
+                seen = True
+                if not dim:
+                    return False
         pos = m.end()
         if m.group(2) != "m":
-            continue
-        try:
-            codes = [int(x) if x else 0 for x in m.group(1).replace(":", ";").split(";")] or [0]
-        except ValueError:
-            continue
-        i = 0
-        while i < len(codes):
-            c = codes[i]
-            if c == 0:
-                dim = grey = False
-            elif c == 22:
-                dim = False
-            elif c == 2:
-                dim = True
-            elif c in (38, 48):
-                kind = codes[i + 1 : i + 2]
-                n = 4 if kind == [2] else 2 if kind == [5] else 0
-                if c == 38:
-                    grey = _grey(codes[i + 1 : i + 1 + n])
-                i += n
-            elif c == 39:
-                grey = False
-            i += 1
-    out += [(c, dim or grey) for c in raw_row[pos:]]
-    return out
+            return None
+        if m.group(1) == "2":
+            dim = True
+        elif m.group(1) in ("0", "", "22"):
+            dim = False
+        elif m.group(1) != "39":
+            return None
+    for c in raw_row[pos:]:
+        if c.strip():
+            seen = True
+            if not dim:
+                return False
+    return seen or False
 
 
 def _box_text(pane: str, cy: int, cx: int | None, raw: str | None = None) -> str:
-    """What is in the prompt box ("" only when it is certainly empty). Fail closed: the box counts as empty
-    when it has no characters, or when EVERY visible character of its body is drawn dim or grey AND the
-    cursor sits on the first one (the tool's own suggestion). Anything else, or any doubt, is text."""
+    """What is in the prompt box ("" only when it is PROVEN empty, see the invariant above)."""
     lines = pane.split("\n")
     a, b = _box_rows(lines, cy)
     rows = [_PROMPT_GLYPH.sub("", ln, count=1).strip() for ln in lines[a:b]]
@@ -354,25 +339,25 @@ def _box_text(pane: str, cy: int, cx: int | None, raw: str | None = None) -> str
         return text
     rl = raw.split("\n")
     plain = [_ANSI.sub("", ln) for ln in rl]
-    if len(plain) != len(lines):
+    if len(plain) != len(lines) or _box_rows(plain, cy) != (a, b):
         return text
-    ra, rb = _box_rows(plain, cy)
-    if (ra, rb) != (a, b):
+    body = [
+        ln for ln, p in zip(rl[a:b], plain[a:b], strict=True) if _PROMPT_GLYPH.sub("", p, count=1).strip()
+    ]
+    if len(body) != 1:
         return text
-    seen = 0
-    for ln in rl[ra:rb]:
-        flags = _dim_flags(ln)
-        head = _PROMPT_GLYPH.match("".join(c for c, _ in flags))
-        for c, dim in flags[head.end() if head else 0 :]:
-            if c.strip():
-                seen += 1
-                if not dim:
-                    return text
-    first = next((ln for ln in lines[a:b] if _PROMPT_GLYPH.sub("", ln, count=1).strip()), "")
+    row = body[0]
+    glyph = re.match(r"^((?:\x1b\[[0-9;]*m)*)(\s*[>\u276f\u203a]\s?)", row)
+    if not glyph:
+        return text
+    tail = row[glyph.end() :]
+    if _is_hint(tail) is not True:
+        return text
+    first = plain[a:b][[i for i, r in enumerate(rows) if r][0]]
     head = _PROMPT_GLYPH.match(first)
     after = first[head.end() :] if head else first
     start = (head.end() if head else 0) + len(after) - len(after.lstrip())
-    return "" if seen and len([r for r in rows if r]) == 1 and cx == start else text
+    return "" if cx == start else text
 
 
 def _hold_reason(root: Path, tid: str, dialog: str | None) -> str | None:
@@ -421,13 +406,14 @@ def _note_hold(root: Path, tid: str, rec: dict, why: str | None) -> None:
 
 
 def _client_idle(root: Path, tid: str) -> float:
-    """Seconds since a person last pressed a key in tmux (the client's own clock); 0 when unknown: orch
-    leaves copy mode only for a person who has not touched the keyboard (a person still scrolling reads)."""
-    r = tmux(root, "display-message", "-p", "-t", target(tid), "#{client_activity}", timeout=QUICK)
+    """Seconds since ANY client attached to the session last pressed a key (the newest one counts); 0 when
+    unknown or nobody is attached: orch leaves copy mode only for a pane nobody has touched for a while."""
+    r = tmux(root, "list-clients", "-t", target(tid), "-F", "#{client_activity}", timeout=QUICK)
     try:
-        return max(0.0, time.time() - float(r.stdout.split()[0])) if r.returncode == 0 else 0.0
-    except (ValueError, IndexError):
+        newest = max(float(x) for x in r.stdout.split())
+    except ValueError:
         return 0.0
+    return max(0.0, time.time() - newest) if r.returncode == 0 else 0.0
 
 
 def _type_line(root: Path, tid: str, line: str, timeout: float = 20) -> bool:

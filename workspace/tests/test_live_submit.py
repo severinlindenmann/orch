@@ -683,7 +683,16 @@ def test_no_second_notice_into_a_prompt_a_person_is_typing_in(proj, run, monkeyp
     assert sent[2:] == []
 
 
-SGRS = ["\x1b[38;2;220;220;220m", "\x1b[48;2;10;10;10m", "\x1b[38;5;15m", "\x1b[1m"]
+SGRS = [
+    "\x1b[38;2;0;0;0m",
+    "\x1b[38;5;236m",
+    "\x1b[38:2::9:9:9m",
+    "\x1b[58;2;1;2;3m",
+    "\x1b[38;2;220;220;220m",
+    "\x1b[48;2;10;10;10m",
+    "\x1b[38;5;15m",
+    "\x1b[1m",
+]
 
 
 @pytest.mark.parametrize("sgr", SGRS)
@@ -750,7 +759,7 @@ def _held(proj, run, monkeypatch, box="", mode="0", cx=2, raw=None):
     rec["up"] = True
     runs._write(proj, rec)
     sent = []
-    screen = {"box": box, "mode": mode, "cx": cx, "raw": raw, "activity": None}
+    screen = {"box": box, "mode": mode, "cx": cx, "raw": raw, "activity": []}
 
     def fake(root, *a, **k):
         if a[0] == "send-keys":
@@ -760,9 +769,9 @@ def _held(proj, run, monkeypatch, box="", mode="0", cx=2, raw=None):
             if "-e" in a and screen["raw"] is not None:
                 pane = screen["raw"]
             return subprocess.CompletedProcess(a, 0, pane, "")
+        if a[0] == "list-clients":
+            return subprocess.CompletedProcess(a, 0, "".join(f"{x}\n" for x in screen["activity"]), "")
         if a[0] == "display-message":
-            if a[-1] == "#{client_activity}":
-                return subprocess.CompletedProcess(a, 0, f"{screen['activity'] or ''}\n", "")
             return subprocess.CompletedProcess(a, 0, f"{screen['mode']} 49 {screen['cx']}\n", "")
         return subprocess.CompletedProcess(a, 0, "", "")
 
@@ -812,9 +821,57 @@ def test_a_scrolled_up_pane_says_so_and_orch_leaves_copy_mode_after_half_a_minut
     assert rec["hold"]["why"] == "scrolled" and "scrolled up" in runs_live.line(rec, proj)
     rec["hold"]["since"] = runs._iso(time.time() - runs_live.COPY_MODE_CANCEL_SECONDS - 1)
     runs._write(proj, rec)
-    screen["activity"] = time.time() - 5  # a person is still scrolling: left alone
+    now = time.time()
+    screen["activity"] = [now - 60, now - 5]  # one client idle, another still scrolling: left alone
     assert runs_live.deliver(proj, tid) == 0 and sent == []
-    screen["activity"] = time.time() - 60  # no key for a minute: orch leaves copy mode
+    screen["activity"] = [now - 60, now - 90]  # no key from anyone for a minute: orch leaves copy mode
     assert runs_live.deliver(proj, tid) == 0 and sent == ["cancel"]  # tmux send-keys -X cancel
     screen["mode"] = "0"
     assert runs_live.deliver(proj, tid) == 1 and sent[-2:] == [runs_live.notice_line(tid, False), "Enter"]
+
+
+# ---------------------------------------------------------------- real Claude Code captures (fixtures)
+
+FIX = __import__("pathlib").Path(__file__).parent / "fixtures" / "claude_prompt"
+
+
+def _real(name, monkeypatch, proj, run):
+    """The pane of a real Claude Code v2.1.319 (`tmux capture-pane -e -p`, cursor from display-message)."""
+    raw = (FIX / f"{name}.raw").read_text(encoding="utf-8")
+    cx, cy = (FIX / f"{name}.cursor").read_text().split()
+    tid, rn, sent, screen = _held(proj, run, monkeypatch, raw=raw, cx=int(cx))
+    plain = runs_live._ANSI.sub("", raw)
+    screen["box"] = None
+    orig = runs_live.tmux
+
+    def fake(root, *a, **k):
+        if a[0] == "capture-pane":
+            return subprocess.CompletedProcess(a, 0, raw if "-e" in a else plain, "")
+        if a[0] == "display-message" and a[-1].startswith("#{pane_in_mode}"):
+            return subprocess.CompletedProcess(a, 0, f"0 {cy} {cx}\n", "")
+        return orig(root, *a, **k)
+
+    monkeypatch.setattr(runs_live, "tmux", fake)
+    return tid
+
+
+def test_real_claude_empty_and_hint_prompts_take_the_notice(proj, run, monkeypatch):
+    """The placeholder of a real Claude Code is `ESC[2m` text `ESC[0m` with the cursor on its first character:
+    the one style orch accepts as empty. (A real after-turn suggestion could not be produced here: this build
+    shows none in a child session; the placeholder is the tool's hint style, a suggestion should match.
+    If it differs, orch holds and says so: never types.)"""
+    for name in ("placeholder", "after-turn"):
+        tid = _real(name, monkeypatch, proj, run)
+        assert runs_live._hold_reason(proj, tid, None) is None, name
+
+
+def test_real_claude_typed_text_is_held_even_with_the_cursor_at_home(proj, run, monkeypatch):
+    for name in ("typed", "typed-home"):
+        tid = _real(name, monkeypatch, proj, run)
+        assert runs_live._hold_reason(proj, tid, None) == "text", name
+
+
+def test_typing_the_notice_does_not_mark_the_input_delivered(proj, run, monkeypatch):
+    """The retype and the stale count depend on it: only the agent's own read marks input delivered."""
+    tid, rn, item, sent, screen = _stuck(proj, run, monkeypatch)
+    assert [i["id"] for i in runs.undelivered(proj, tid)] == [item["id"]]
