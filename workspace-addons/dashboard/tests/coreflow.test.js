@@ -152,3 +152,42 @@ test('loading is keyed and busy; connection notice offers retry and details', ()
   connection.children[1].click(); assert.deepEqual(calls, ['refresh']);
   ctx.connectionNotice(connection, true); assert.match(connection.children[0].children[0], /Showing the last update/);
 });
+// fb1: a status change shows at once (card moves, notice with Undo), a failed save puts the card back.
+const moveSource = source.slice(source.indexOf('const movePending'), source.indexOf('function list()'));
+function moveContext(actRetry) {
+  const toasts = [];
+  const ctx = {snapshot:false, locks:new Set(), state:{tickets:[{id:'t1', status:'review', revision:3}]}, renders:0, toasts, actRetry,
+    STATUS_CHOICES:[['active', 'Working'], ['done', 'Done']], matchMedia:() => ({matches:true}), setTimeout,
+    changeUnavailable:() => false, changeError:r => r.text, render:() => { ctx.renders++; },
+    h:(tag, attrs) => { const n = {tag, attrs, listeners:{}, addEventListener(t, f) { n.listeners[t] = f; }, remove() { n.removed = true; }}; return n; },
+    document:{querySelectorAll:() => []}};
+  ctx.ticketOf = id => ctx.state.tickets.find(t => t.id === id);
+  ctx.window = {orch:{toast:(text, kind) => { const item = {text, kind, remove() { item.removed = true; }, querySelector:() => ({before(n) { item.undo = n; }})}; toasts.push(item); return item; }}};
+  vm.createContext(ctx); vm.runInContext(moveSource, ctx); return ctx;
+}
+test('status change is optimistic with an Undo notice, before the server answers', async () => {
+  let resolve;
+  const ctx = moveContext(() => new Promise(r => { resolve = r; }));
+  const run = ctx.moveTicket('t1', 'done');
+  assert.equal(ctx.state.tickets[0].status, 'done');
+  assert.equal(ctx.toasts[0].text, 'Moved to Done');
+  assert.ok(ctx.toasts[0].undo);
+  resolve({ok:true});
+  await run;
+  assert.equal(ctx.state.tickets[0].status, 'done');
+  assert.equal(ctx.locks.size, 0);
+});
+test('a failed status save restores the card and says so', async () => {
+  const ctx = moveContext(async () => ({ok:false, status:500, text:'Could not save'}));
+  await ctx.moveTicket('t1', 'done');
+  assert.equal(ctx.state.tickets[0].status, 'review');
+  assert.equal(ctx.toasts.at(-1).kind, 'error');
+  assert.equal(ctx.toasts[0].removed, true);
+});
+test('Undo moves the ticket back', async () => {
+  const ctx = moveContext(async () => ({ok:true}));
+  await ctx.moveTicket('t1', 'done');
+  await ctx.toasts[0].undo.listeners.click();
+  await new Promise(r => setTimeout(r, 10));
+  assert.equal(ctx.state.tickets[0].status, 'review');
+});

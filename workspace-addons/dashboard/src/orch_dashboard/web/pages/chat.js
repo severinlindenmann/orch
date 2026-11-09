@@ -188,7 +188,7 @@ function chatComposer(g) {
     h('form', {className:'chat-compose', 'data-key':'form-' + id},
       g ? chatButton('+', 'menu', {'aria-label':'Add to conversation', 'aria-haspopup':'menu', 'aria-expanded':String(chatUi.menu), 'aria-controls':'chat-compose-menu'}) : null,
       h('textarea', {rows:1, className:'chat-draft', 'data-key':'draft-' + id, 'data-chat-input':'draft', 'data-thread':id, 'aria-label':g ? 'Message the group' : 'Message ' + chatWorkspace(), placeholder:g ? 'Message the group' : 'Message ' + chatWorkspace()}, draft),
-      h('button', {type:'submit', className:'chat-button chat-primary', 'data-key':'send', disabled:sending || !draft.trim()}, sending ? 'Sending…' : 'Send')),
+      h('button', {type:'submit', className:'chat-button chat-primary', 'data-key':'send', disabled:sending || !draft.trim(), 'data-state':sending ? 'sending' : draft.trim() ? 'ready' : 'empty'}, sending ? h('span', {className:'spinner', 'aria-hidden':'true'}) : iconEl('send'), sending ? 'Sending' : 'Send')),
     h('div', {className:'chat-context'}, g ? 'Everyone in this group sees what you write here · ' : 'Context cleared daily at 04:00 · ',
       h('details', {'data-key':'context-details'}, h('summary', {}, 'Details'), h('p', {}, g ? "Members see the group's messages from when they joined. They do not see the rest of the " + chatHost(g) + ' ticket.' : "Every night at 04:00 the helper starts fresh. Today's messages move to History; nothing is deleted."))));
 }
