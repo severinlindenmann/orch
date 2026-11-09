@@ -10,7 +10,8 @@
         "fresh": ["claude", "-p", "--session-id", "{new_session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--", "{prompt}"],
         "resume": ["claude", "-p", "--resume", "{session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--", "{prompt}"],
         "stream_args": ["--output-format", "stream-json", "--verbose"],
-        "allow_args": ["--allowedTools", "{allow}"]
+        "allow_args": ["--allowedTools", "{allow}"],
+        "settings_args": ["--settings", "{reminder_json}"]
       },
       "live": {
         "fresh": ["claude", "--session-id", "{new_session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--settings", "{orch_hooks_file}"],
@@ -38,6 +39,8 @@
         "full": ["--dangerously-skip-permissions"]
       },
       "hooks": { "SessionStart": "orch run event --kind session", "Stop": "orch run event --kind idle", "Notification": "orch run event --kind attention", "UserPromptSubmit": "orch run event --kind working" },
+      "reminder_hooks": { "SessionStart": "orch work-check --hook claude", "UserPromptSubmit": "orch work-check --hook claude" },
+      "reminder": { "settings_file": ".claude/settings.local.json", "skip": [".claude", ".agents", "CLAUDE.local.md"], "input": { "event": "hook_event_name", "cwd": "cwd", "default_event": "UserPromptSubmit" }, "output": { "hookSpecificOutput": { "hookEventName": "{event}", "additionalContext": "{line}" } } },
       "session": { "id": "chosen-by-orch", "hand_started": "hook:SessionStart", "missing": "No conversation found with session ID", "transcript": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "path": ["projects", "{folder}", "{session}.jsonl"] } },
       "mcp_settings": [
         { "file": "{home}/.claude.json", "format": "json", "path": ["mcpServers"] },

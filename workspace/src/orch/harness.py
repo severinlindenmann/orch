@@ -325,6 +325,9 @@ def _hardened(cwd: Path):
     return safegit.hardened(cwd)
 
 
+is_tracked = _tracked  # public: other modules ask whether git tracks a file
+
+
 def _in_git_repo(root: Path) -> bool:
     """True inside a git work tree, False when there is none. Any other git failure (dubious ownership, a broken
     index, ...) refuses: an unknown state is never treated as "no repo"."""

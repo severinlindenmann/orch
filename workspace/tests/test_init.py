@@ -864,3 +864,260 @@ def test_without_git_a_fresh_copy_is_ours(proj, monkeypatch, tmp_path_factory):
     assert harness._is_ours_copy(dest, proj) is True
     (proj / ".git").mkdir()  # a repo that cannot be checked: never ours
     assert harness._is_ours_copy(dest, proj) is False
+
+
+# ---------------------------------------------------------------- reminder_settings (work-check hooks)
+
+
+def _local_settings(proj):
+    import json
+
+    return json.loads((proj / ".claude/settings.local.json").read_text(encoding="utf-8"))
+
+
+def _ours(doc, event):
+    return [
+        h for g in doc["hooks"][event] for h in g["hooks"] if "orch work-check --hook claude" in h["command"]
+    ]
+
+
+def test_reminder_settings_created_with_both_hooks(proj, run):
+    code, out, _ = run("init")
+    assert code == 0 and "Reminder" in out
+    doc = _local_settings(proj)
+    for event in ("SessionStart", "UserPromptSubmit"):
+        (h,) = _ours(doc, event)
+        assert h["type"] == "command" and h["timeout"] == 5
+        assert h["command"].startswith(sys.executable.replace(" ", "\\ ")) or sys.executable in h["command"]
+    if sys.platform != "win32":
+        assert ((proj / ".claude/settings.local.json").stat().st_mode & 0o777) == 0o600
+
+
+def test_reminder_settings_merge_keeps_other_keys_and_mode(proj, run):
+    import json
+
+    (proj / ".claude").mkdir()
+    f = proj / ".claude/settings.local.json"
+    mine = {
+        "permissions": {"allow": ["Bash(ls:*)"]},
+        "hooks": {
+            "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "echo mine"}]}],
+            "Stop": [{"hooks": [{"type": "command", "command": "echo stop"}]}],
+        },
+        "env": {"A": "b"},
+    }
+    f.write_text(json.dumps(mine), encoding="utf-8")
+    os.chmod(f, 0o640)
+    assert run("init")[0] == 0
+    doc = _local_settings(proj)
+    assert doc["permissions"] == mine["permissions"] and doc["env"] == mine["env"]
+    assert doc["hooks"]["Stop"] == mine["hooks"]["Stop"]
+    assert doc["hooks"]["UserPromptSubmit"][0] == mine["hooks"]["UserPromptSubmit"][0]
+    assert len(_ours(doc, "UserPromptSubmit")) == 1 and len(_ours(doc, "SessionStart")) == 1
+    if sys.platform != "win32":
+        assert (f.stat().st_mode & 0o777) == 0o640
+
+
+def test_reminder_settings_idempotent(proj, run):
+    run("init")
+    first = (proj / ".claude/settings.local.json").read_bytes()
+    run("init")
+    run("init")
+    assert (proj / ".claude/settings.local.json").read_bytes() == first
+    doc = _local_settings(proj)
+    assert len(_ours(doc, "UserPromptSubmit")) == 1
+
+
+def test_reminder_settings_refreshes_an_old_path(proj, run):
+    import json
+
+    from orch import reminder_settings
+
+    (proj / ".claude").mkdir()
+    old = {
+        "hooks": {
+            "SessionStart": [
+                {"hooks": [{"type": "command", "command": "/old/py -P -m orch work-check --hook claude"}]}
+            ]
+        }
+    }
+    (proj / ".claude/settings.local.json").write_text(json.dumps(old), encoding="utf-8")
+    run("init")
+    (h,) = _ours(_local_settings(proj), "SessionStart")
+    assert h["command"] == reminder_settings.hook_command("claude")
+
+
+@pytest.mark.parametrize(
+    "text", ["{not json", "[1, 2]", '{"hooks": []}', '{"hooks": {"Stop": 1, "UserPromptSubmit": "x"}}']
+)
+def test_reminder_settings_malformed_left_untouched_with_one_warning(proj, run, text):
+    (proj / ".claude").mkdir()
+    f = proj / ".claude/settings.local.json"
+    f.write_text(text, encoding="utf-8")
+    code, out, _ = run("init")
+    assert code == 0 and f.read_text(encoding="utf-8") == text
+    assert out.count("left it as it is") == 1
+
+
+def test_reminder_settings_not_written_without_claude(proj, run, monkeypatch):
+    monkeypatch.setattr(adapters, "detect", lambda: [])
+    run("init")
+    assert not (proj / ".claude").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink")
+def test_reminder_settings_link_is_not_written_through(proj, run, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("outside") / "s.json"
+    outside.write_text("{}", encoding="utf-8")
+    (proj / ".claude").mkdir()
+    os.symlink(outside, proj / ".claude/settings.local.json")
+    code, out, _ = run("init")
+    assert code == 0 and outside.read_text(encoding="utf-8") == "{}" and "left it as it is" in out
+
+
+def test_reminder_settings_in_git_exclude(proj, run):
+    _git_repo(proj)
+    run("init")
+    assert ".claude/settings.local.json" in (proj / ".git/info/exclude").read_text(encoding="utf-8")
+    assert ".claude/settings.local.json" not in _git(proj, "status", "--porcelain")
+
+
+def test_reminder_settings_command_is_double_quoted_and_shell_neutral(monkeypatch):
+    from orch import reminder_settings
+
+    monkeypatch.setattr(sys, "executable", "/tmp/a b/py")
+    cmd = reminder_settings.hook_command("claude")
+    assert cmd == '"/tmp/a b/py" -I -P -m orch work-check --hook claude'
+    assert "2>" not in cmd and "||" not in cmd  # no bash-only tricks: works under cmd too
+
+
+@pytest.mark.parametrize("bad", ['/tmp/a"b/py', "/tmp/a$b/py", "/tmp/a`b/py", "C:/x%PATH%/py", "/tmp/a!b/py"])
+def test_reminder_settings_refuses_unsafe_interpreter_path(proj, run, monkeypatch, bad):
+    from orch import reminder_settings
+
+    monkeypatch.setattr(sys, "executable", bad)
+    with pytest.raises(ValueError):
+        reminder_settings.hook_command("claude")
+    assert reminder_settings.ensure(proj)  # a warning, nothing written
+    assert not (proj / ".claude/settings.local.json").exists()
+    assert adapters.reminder_doc("claude") is None
+
+
+def test_reminder_settings_warns_when_orch_cannot_be_imported_with_dash_I(proj, monkeypatch):
+    from orch import reminder_settings
+
+    monkeypatch.setattr(reminder_settings, "can_import", lambda root: False)
+    (w,) = reminder_settings.ensure(proj)
+    assert "could not start orch" in w and not (proj / ".claude/settings.local.json").exists()
+
+
+def test_reminder_settings_the_written_command_really_starts_orch(proj, run):
+    import subprocess
+
+    run("init")
+    cmd = _ours(_local_settings(proj), "UserPromptSubmit")[0]["command"]
+    r = subprocess.run(cmd, shell=True, cwd=proj, input="", capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and r.stderr == ""  # the hook always exits 0, quietly
+
+
+def test_reminder_settings_matches_only_its_own_command_shape():
+    from orch import reminder_settings
+
+    ours = [
+        '"/x/py" -I -m orch work-check --hook claude',
+        "/old/py -P -m orch work-check --hook claude 2>/dev/null || true",
+    ]
+    theirs = [
+        "echo orch work-check --hook claude",
+        "my-tool -m orch work-check --hook claude --extra",
+        "echo hi",
+    ]
+    assert all(reminder_settings._ours({"type": "command", "command": c}) for c in ours)
+    assert not any(reminder_settings._ours({"type": "command", "command": c}) for c in theirs)
+
+
+def test_reminder_settings_command_uses_forward_slashes(monkeypatch):
+    from orch import reminder_settings
+
+    monkeypatch.setattr(sys, "executable", "C:\\Program Files\\Python\\python.exe")
+    cmd = reminder_settings.hook_command("claude")
+    assert "\\" not in cmd and "C:/Program Files/Python/python.exe" in cmd
+
+
+def test_reminder_settings_tracked_file_is_left_alone(proj, run):
+    _git_repo(proj)
+    (proj / ".claude").mkdir()
+    f = proj / ".claude/settings.local.json"
+    f.write_text('{"env": {"A": "b"}}', encoding="utf-8")
+    _git(proj, "add", "-f", ".claude/settings.local.json")
+    code, out, _ = run("init")
+    assert code == 0 and f.read_text(encoding="utf-8") == '{"env": {"A": "b"}}'
+    assert out.count("left it as it is") == 1 and "tracked" in out
+
+
+def test_reminder_settings_deeply_nested_json_does_not_crash(proj, run):
+    (proj / ".claude").mkdir()
+    f = proj / ".claude/settings.local.json"
+    f.write_text("[" * 100000, encoding="utf-8")
+    code, out, _ = run("init")
+    assert code == 0 and f.read_text(encoding="utf-8") == "[" * 100000 and "left it as it is" in out
+
+
+def test_reminder_settings_retries_once_when_the_tool_wrote_meanwhile(proj, monkeypatch):
+    import json
+
+    from orch import reminder_settings
+
+    (proj / ".claude").mkdir()
+    f = proj / ".claude/settings.local.json"
+    f.write_text('{"a": 1}', encoding="utf-8")
+    real, calls = reminder_settings._sig, []
+
+    def sig(path):
+        calls.append(1)
+        if len(calls) == 2:  # between the read and the write the tool adds a key
+            path.write_text('{"a": 1, "permissions": {"allow": ["x"]}}', encoding="utf-8")
+        return real(path)
+
+    monkeypatch.setattr(reminder_settings, "_sig", sig)
+    assert reminder_settings.ensure(proj) == []
+    doc = json.loads(f.read_text(encoding="utf-8"))
+    assert doc["permissions"] == {"allow": ["x"]} and "hooks" in doc  # the tool's key survived
+
+
+def test_can_import_runs_the_hook_argv_with_cwd_capture_and_timeout(proj, monkeypatch):
+    import subprocess
+
+    from orch import reminder_settings
+
+    seen = {}
+
+    def fake(argv, **kw):
+        seen.update(argv=argv, **kw)
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(reminder_settings.subprocess, "run", fake)
+    assert reminder_settings.can_import(proj) is True
+    hook = reminder_settings.hook_argv("claude")
+    assert seen["argv"][:5] == hook[:5] == [hook[0], "-I", "-P", "-m", "orch"]  # the hook's own start
+    assert seen["argv"][5:] == ["--version"]
+    assert seen["cwd"] == proj and seen["capture_output"] is True and seen["timeout"] > 0
+    monkeypatch.setattr(
+        reminder_settings.subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 1, b"", b"")
+    )
+    assert reminder_settings.can_import(proj) is False
+
+
+def test_reminder_hooks_of_a_run_need_the_import_check(monkeypatch):
+    from orch import reminder_settings
+
+    monkeypatch.setattr(reminder_settings, "_IMPORT_OK", {})
+    calls = []
+    monkeypatch.setattr(reminder_settings, "can_import", lambda root: calls.append(1) or False)
+    assert adapters.reminder_doc("claude") is None and adapters.hooks_doc("claude", "r_1")["hooks"]["Stop"]
+    v = {"prompt": "p", "new_session": "0" * 8 + "-0000-0000-0000-" + "0" * 12}
+    argv = adapters.render("claude", "fresh", "oneshot", v)
+    assert "--settings" not in argv and len(calls) == 1  # cached: asked once
+    assert all(
+        len(g) == 1 for g in adapters.hooks_doc("claude", "r_1")["hooks"].values()
+    )  # no reminder group
